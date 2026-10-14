@@ -209,7 +209,14 @@ internal/tui/model_test.go — TestModelFitsTheStack
 **Commit:** `feat(tui): type to filter the /settings key list`
 Depends on item 2.
 
-## 8. /settings: filter display, zero matches, legends, paste
+## 8. /settings: filter display, zero matches, legends, paste — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the filtered legend is composed by settingsFilterLegend in settings.go: filterLegend's shared composition, then the backspace verb (`⌫ reset` / `⌫ remove`) moves to `⌦` just behind the `⌫ trim` that took its key. It stays in settings.go, and listsurface.go's filterLegend is unchanged, because /settings is the only pane with a backspace verb that delete takes over. The four key-list hint constants are now built as listFilterEntry + listLegendJoin + the old text.
+NOTES (2026-10-14): at zero matches settingsBody keeps the description region with settingsDescLines+1 blank lines (it used to return "" whenever no row was selected), so the header stays under the title. A pane with no rows at all (noSettingsRow) still has no header.
+NOTES (2026-10-14): TestSettingsPasteIsSwallowedWithNoFieldOpen is recast and renamed TestSettingsPasteLandsInTheFilterWhileBrowsing: a paste while browsing goes to the filter and moves the highlight to the first match, and a paste into the armed reset is still swallowed. TestSettingsFilterMatchesKeyPathAndSectionHeading's "qwen" case now expects 1 display row (the zero-match row).
+NOTES (2026-10-14): added two paneFixtures entries ("settings key list, filtered" and "settings key list, zero matches"), so the height-query sweep and the render-once test also run with the filter set.
+NOTES (2026-10-14): also ran the other e2e tests that open /settings (TestE2EHostileWrapsUnderItsOwnIndent, TestE2EWidthSurvivesAColourSchemeSwitch, TestE2ESmoke*, TestE2EPopup*) and cmd/apogee's marker and docs tests. All pass: the e2e settingsHint substring is still inside the longer legend. Only the t16 golden moved (its legend line).
+NOTES (2026-10-14): layout.md and docs/layout/settings-screen-layout.md still show the old /settings legends; item 10 owns those docs.
 
 **What:**
 **Goal:** `/settings` shows its filter as `Settings · filter: mo▌` on the title row (caret only while browsing; text without caret during the value field, armed reset and `Save to:`; hidden during the enum sub-list and the text editor); zero matches paint one faint row `no setting matches "zzz"` with a blank description header and the legend `⌫ trim · esc close`; a paste while browsing lands in the filter folded to one line. Legends, exactly:

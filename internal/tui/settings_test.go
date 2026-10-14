@@ -3331,19 +3331,43 @@ func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
 	}
 }
 
-// With no field open the pane still SWALLOWS a paste, exactly as it swallows every key it does not act
-// on: the box it would otherwise land in is one the human cannot read past a full-height pane.
-func TestSettingsPasteIsSwallowedWithNoFieldOpen(t *testing.T) {
+// With no field open a paste is TYPING while the key list is browsed — it lands in the filter, folded
+// onto one line, and re-seats the highlight as a keystroke does (ADR 0053 amend-1014) — and is
+// SWALLOWED in a step with no field (the armed reset), exactly as that step swallows every key it does
+// not act on. Neither reaches the chat box behind the pane: the human cannot read past a full-height
+// pane to the draft it would land in.
+func TestSettingsPasteLandsInTheFilterWhileBrowsing(t *testing.T) {
 	t.Parallel()
-	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
+	m, _ := settingsEditModel(t, []SettingRow{settingsIntRow(), settingsStringRow()}, &settingsWriteLog{})
+	m.input.SetValue("keep")
 
-	m = step(t, m, tea.PasteMsg{Content: "stray"})
+	browsing := step(t, m, tea.PasteMsg{Content: "endp\noint"})
 
-	if got := m.input.Value(); got != "" {
-		t.Errorf("the chat box behind the pane took the paste: %q", got)
+	if got := browsing.settings.filter.value(); got != "endp oint" {
+		t.Errorf("filter = %q, want the paste folded onto one line (%q)", got, "endp oint")
 	}
-	if m.settings.kind != settingsKeyList {
-		t.Errorf("pane = %+v, want the key list untouched", m.settings)
+	if browsing.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list", browsing.settings)
+	}
+	if got := browsing.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste over the pane", got)
+	}
+
+	filtered := step(t, m, tea.PasteMsg{Content: "endpoint"})
+	if row, ok := filtered.settingsSelectedRow(filtered.settingRows()); !ok || row.Path != "endpoint" {
+		t.Errorf("highlight on %q (ok=%v) after the paste, want the first match %q", row.Path, ok, "endpoint")
+	}
+
+	armed := pressSettings(t, m, keyDown(), keyDelete())
+	if armed.settings.kind != settingsResetArmed {
+		t.Fatalf("pane = %+v, want the reset armed", armed.settings)
+	}
+	armed = step(t, armed, tea.PasteMsg{Content: "stray"})
+	if got := armed.settings.filter.value(); got != "" {
+		t.Errorf("a paste into the armed reset reached the filter: %q", got)
+	}
+	if armed.settings.kind != settingsResetArmed || armed.input.Value() != "keep" {
+		t.Errorf("pane = %+v, draft = %q; want the reset still armed and the draft untouched", armed.settings, armed.input.Value())
 	}
 }
 
@@ -4789,7 +4813,7 @@ func TestSettingsFilterMatchesKeyPathAndSectionHeading(t *testing.T) {
 		{"interf", []int{2, 3}, []string{"Interface"}, 3},
 		{"Upstream", []int{0, 1}, []string{"Upstream"}, 3},
 		{"e", []int{0, 1, 2, 3}, []string{"Upstream", "Interface"}, 7},
-		{"qwen", nil, nil, 0},
+		{"qwen", nil, nil, 1}, // no key: only the zero-match row (TestSettingsZeroMatchPaintsOneFaintRow)
 	}
 	for _, c := range cases {
 		t.Run(c.filter, func(t *testing.T) {
@@ -4991,5 +5015,204 @@ func TestSettingsEscClosesWithAFilterSet(t *testing.T) {
 	}
 	if reopened := openSettingsPane(t, m); reopened.settings.filter.value() != "" {
 		t.Errorf("a reopened pane carries the filter %q", reopened.settings.filter.value())
+	}
+}
+
+// The key list's legend follows the filter's state, per row kind: led by "type to filter" while it
+// is empty; with text typed "type to filter" drops, "⌫ trim" takes backspace and the row's backspace
+// verb moves to ⌦ just behind it; and at zero matches only the trim and esc stay.
+func TestSettingsLegendFollowsTheFilterState(t *testing.T) {
+	t.Parallel()
+	const zero = "⌫ trim · esc close"
+	cases := []struct {
+		name   string
+		row    SettingRow
+		filter string
+		empty  string
+		set    string
+	}{
+		{"key row", settingsStringRow(), "endp",
+			"type to filter · ↑/↓ select · ⏎ edit · ⌫ reset · esc close",
+			"↑/↓ select · ⏎ edit · ⌫ trim · ⌦ reset · esc close"},
+		{"server row", settingsServerRow(), "serv",
+			"type to filter · ↑/↓ select · ⏎ edit · esc close",
+			"↑/↓ select · ⏎ edit · ⌫ trim · esc close"},
+		{"proposed rule", settingsRuleRow("npm ci", domain.AllowRuleProject, SettingRuleProposed), "npm",
+			"type to filter · ↑/↓ select · ⏎ adopt · ⌫ remove · esc close",
+			"↑/↓ select · ⏎ adopt · ⌫ trim · ⌦ remove · esc close"},
+		{"rule in force", settingsRuleRow("go test", domain.AllowRuleProject, SettingRuleAdopted), "go",
+			"type to filter · ↑/↓ select · ⌫ remove · esc close",
+			"↑/↓ select · ⌫ trim · ⌦ remove · esc close"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			rows := []SettingRow{c.row}
+			m := settingsRuleModel(t, &rows, fakeConfigHost{}, &settingsWriteLog{})
+
+			for _, state := range []struct {
+				name, typed, want string
+			}{
+				{"empty", "", c.empty},
+				{"set", c.filter, c.set},
+				{"zero matches", "zzz", zero},
+			} {
+				typed := typeSetting(t, m, state.typed)
+				if got := typed.settingsPaneHint(typed.settingRows()); got != state.want {
+					t.Errorf("%s filter: legend = %q, want %q", state.name, got, state.want)
+				}
+				if pane := strip(typed.renderSettings()); !strings.Contains(pane, state.want) {
+					t.Errorf("%s filter: the pane does not paint the legend %q:\n%s", state.name, state.want, pane)
+				}
+			}
+		})
+	}
+}
+
+// settingsTitleLine is the pane's title row as painted: the first line of the rendered pane that
+// names it, under the top border.
+func settingsTitleLine(m Model) string {
+	for _, line := range strings.Split(strip(m.renderSettings()), "\n") {
+		if strings.Contains(line, settingsTitle) {
+			return line
+		}
+	}
+	return ""
+}
+
+// The filter rides the title row — "Settings · filter: endp▌" — with its caret only while the key
+// list is browsed, as text alone while a step drawn over the list takes the keys (the value field,
+// the armed reset, the save target), and not at all while a step replaces the list it narrows (the
+// enum sub-list, the text editor). An empty filter puts nothing there.
+func TestSettingsTitleRowStatesTheFilterPerStep(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		row    SettingRow
+		filter string
+		open   []tea.KeyPressMsg
+		kind   settingsKind
+		want   string // the title tail; "" for none
+	}{
+		{"key list", settingsStringRow(), "endp", nil, settingsKeyList, "Settings · filter: endp▌"},
+		{"value field", settingsStringRow(), "endp", []tea.KeyPressMsg{keyEnter()}, settingsValueBuffer, "Settings · filter: endp"},
+		{"armed reset", settingsStringRow(), "endp", []tea.KeyPressMsg{keyDelete()}, settingsResetArmed, "Settings · filter: endp"},
+		{"save target", settingsProjectBoolRow(SettingFromGlobal), "skills", []tea.KeyPressMsg{keyEnter()}, settingsSaveTarget, "Settings · filter: skills"},
+		{"enum sub-list", settingsEnumRow(), "spin", []tea.KeyPressMsg{keyEnter()}, settingsEnumList, ""},
+		{"text field", settingsTextRow(), "prompt", []tea.KeyPressMsg{keyEnter()}, settingsTextEditor, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m, _ := settingsEditModel(t, []SettingRow{settingsIntRow(), c.row}, &settingsWriteLog{})
+			if title := settingsTitleLine(m); strings.Contains(title, pickerFilterLead) {
+				t.Errorf("an empty filter put a tail on the title row: %q", title)
+			}
+			m = pressSettings(t, typeSetting(t, m, c.filter), c.open...)
+			if m.settings.kind != c.kind {
+				t.Fatalf("pane = %+v, want the %s open", m.settings, c.name)
+			}
+
+			title := settingsTitleLine(m)
+			switch {
+			case c.want == "" && strings.Contains(title, pickerFilterLead):
+				t.Errorf("the %s shows the filter on its title row: %q", c.name, title)
+			case c.want != "" && !strings.Contains(title, c.want):
+				t.Errorf("title row = %q, want it to carry %q", title, c.want)
+			case c.kind != settingsKeyList && strings.Contains(title, pickerFilterCursor):
+				t.Errorf("the %s draws the filter's caret, where typing does not reach it: %q", c.name, title)
+			}
+		})
+	}
+}
+
+// A filter that matches nothing paints one faint, unselectable row in this pane's noun, keeps the
+// description region blank in its place, and leaves only the trim and esc on the legend.
+func TestSettingsZeroMatchPaintsOneFaintRow(t *testing.T) {
+	t.Parallel()
+	m := openSettingsPane(t, settingsModel(t, settingsFilterRows()))
+	m = typeSetting(t, m, "zzz")
+
+	rows := m.settingRows()
+	d := m.settingsDisplayRows(rows, m.settingsSelection(rows))
+	want := popupRow{`no setting matches "zzz"`}
+	if len(d.rows) != 1 || !reflect.DeepEqual(d.rows[0], want) || d.kinds[0] != popupRowPlain || d.selected != -1 {
+		t.Fatalf("display = %+v, want the one plain, unselected row %q", d, want[0])
+	}
+	if _, ok := d.settingKeyAt(0); ok {
+		t.Error("the zero-match row names a setting row")
+	}
+	body := m.settingsBody(rows)
+	if lines := strings.Split(body, "\n"); len(lines) != settingsDescLines+1 || strings.TrimSpace(body) != "" {
+		t.Errorf("description region = %q, want %d blank lines", body, settingsDescLines+1)
+	}
+	pane := strip(m.renderSettings())
+	for _, want := range []string{`no setting matches "zzz"`, "Settings · filter: zzz▌", "⌫ trim · esc close"} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the pane does not paint %q:\n%s", want, pane)
+		}
+	}
+	if strings.Contains(pane, settingsDescLabel) || strings.Contains(pane, "↑/↓ select") {
+		t.Errorf("the zero-match pane describes a row or offers a verb:\n%s", pane)
+	}
+	if next := step(t, m, keyEnter()); next.settings.kind != settingsKeyList {
+		t.Errorf("⏎ over the zero-match row opened pane = %+v", next.settings)
+	}
+}
+
+// settingsFrameAnchors is where the pane's title row and its description header land in the
+// composed frame, and how many rows the pane claims.
+func settingsFrameAnchors(t *testing.T, m Model) (title, header, height int) {
+	t.Helper()
+	title, header = -1, -1
+	for y, line := range strings.Split(plain(m.View()), "\n") {
+		if title < 0 && strings.Contains(line, settingsTitle) {
+			title = y
+		}
+		if header < 0 && strings.Contains(line, settingsDescLabel) {
+			header = y
+		}
+	}
+	return title, header, m.settingsHeight()
+}
+
+// The first keystroke moves nothing: the filter rides the title row the pane already draws, so the
+// title row, the description header and — while the filtered list still overflows its window — the
+// pane's height all stay where they were. A filter matching nothing keeps the header region under
+// the title too, blank, where its height may then shrink with the list.
+func TestSettingsFilterMovesNeitherTitleNorHeader(t *testing.T) {
+	t.Parallel()
+	m := settingsFrameModel(t, 80, 30, 40)
+	title, header, height := settingsFrameAnchors(t, m)
+	if title < 0 || header < 0 {
+		t.Fatalf("no title row (%d) or header (%d) in the frame:\n%s", title, header, plain(m.View()))
+	}
+
+	for _, typed := range []string{"k", "key-"} {
+		f := typeSetting(t, m, typed)
+		gotTitle, gotHeader, gotHeight := settingsFrameAnchors(t, f)
+		if gotTitle != title || gotHeader != header || gotHeight != height {
+			t.Errorf("filter %q: title row %d, header %d, height %d; want %d, %d, %d — nothing moves while the list overflows",
+				typed, gotTitle, gotHeader, gotHeight, title, header, height)
+		}
+	}
+
+	zero := typeSetting(t, m, "zzz")
+	plainFrame := strings.Split(plain(zero.View()), "\n")
+	zeroTitle := -1
+	for y, line := range plainFrame {
+		if strings.Contains(line, "Settings · filter: zzz") {
+			zeroTitle = y
+			break
+		}
+	}
+	if zeroTitle < 0 {
+		t.Fatalf("no title row carries the filter:\n%s", strings.Join(plainFrame, "\n"))
+	}
+	// The region under the title is as tall as before, all blank, and the zero-match row follows it.
+	note := zeroTitle + (header - title) + settingsDescLines + 1
+	if note >= len(plainFrame) || !strings.Contains(plainFrame[note], `no setting matches "zzz"`) {
+		t.Errorf("the zero-match row is not %d rows under the title — the header region moved:\n%s",
+			note-zeroTitle, strings.Join(plainFrame, "\n"))
 	}
 }

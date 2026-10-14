@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"image/color"
 	"strconv"
 	"strings"
@@ -277,10 +278,14 @@ const settingsAlreadyOnNote = "already on "
 // does — and it has to be read, because they are not the keys every other step of this pane ends on:
 // ⏎ belongs to the VALUE there (it inserts a newline in prose that has lines), so the commit moves to
 // ctrl+s and the abandon stays on esc (ADR 0037 decision 10).
+//
+// The key list's legends are the EMPTY-filter ones, led by "type to filter" as every filtering pane's
+// are (listFilterEntry, ADR 0053 amend-1014 rule 8); what a typed filter does to them is composed, not
+// spelt per state (settingsFilterLegend).
 const (
 	settingsTitle       = "Settings"
-	settingsHint        = "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
-	settingsNoResetHint = "↑/↓ select · ⏎ edit · esc close"
+	settingsHint        = listFilterEntry + listLegendJoin + "↑/↓ select · ⏎ edit · ⌫ reset · esc close"
+	settingsNoResetHint = listFilterEntry + listLegendJoin + "↑/↓ select · ⏎ edit · esc close"
 	settingsEnumHint    = "↑/↓ select · ⏎ set · esc back"
 	settingsBufferHint  = "⏎ save · esc cancel"
 	settingsResetHint   = "⏎ confirm reset · esc cancel"
@@ -291,8 +296,8 @@ const (
 // only an inert project rule, so a rule already in force drops it — and the armed removal's, worded
 // for the act it confirms rather than as a reset.
 const (
-	settingsRuleHint          = "↑/↓ select · ⏎ adopt · ⌫ remove · esc close"
-	settingsRuleInForceHint   = "↑/↓ select · ⌫ remove · esc close"
+	settingsRuleHint          = listFilterEntry + listLegendJoin + "↑/↓ select · ⏎ adopt · ⌫ remove · esc close"
+	settingsRuleInForceHint   = listFilterEntry + listLegendJoin + "↑/↓ select · ⌫ remove · esc close"
 	settingsRuleRemoveArmHint = "⏎ confirm remove · esc cancel"
 )
 
@@ -663,7 +668,8 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // at the top, so the first row that matches again takes it. It is [Model.typeIntoOverlayFilter] for
 // the one list whose selection indexes its FULL rows: the row is read before the edit, through
 // settingsSelection, and the re-seated position is taken back to the full slice through the view's
-// offering. change is the edit — a printable key or backspace (settingsKey).
+// offering. change is the edit — a printable key or backspace (settingsKey), or a paste
+// (settingsPaste).
 //
 // The field is built here, on the first edit that reaches it, with the glyph every filtering pane
 // draws (pickerFilterCursor) — the pane opens and closes as a whole-struct assignment, and a filter
@@ -720,12 +726,18 @@ func (m Model) settingsOwnsInput() bool {
 }
 
 // settingsPaste routes a bracketed paste while the pane owns the keyboard: into the field when one is
-// open, and NOWHERE when none is. The second half is the pane's modality applied to the one edit that
-// does not arrive as a keypress — the pane is full-height, so a paste falling through to the chat box
-// would fill a draft the human cannot see (handleKey's own reason for swallowing every key it does not
-// act on).
+// open, into the key list's FILTER while the list is being browsed — a paste is typing there, folded
+// onto the field's one line and re-seating the highlight as a keystroke does (settingsTypeFilter, ADR
+// 0053 amend-1014) — and NOWHERE in a step with neither (the enum sub-list, the armed reset, the save
+// target). The last half is the pane's modality applied to the one edit that does not arrive as a
+// keypress — the pane is full-height, so a paste falling through to the chat box would fill a draft
+// the human cannot see (handleKey's own reason for swallowing every key it does not act on).
 func (m Model) settingsPaste(msg tea.PasteMsg) (Model, tea.Cmd, bool) {
 	if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
+		return next, cmd, true
+	}
+	if m.settingsOwnsInput() && m.settings.kind == settingsKeyList {
+		next, cmd := m.settingsTypeFilter(m.settingRows(), func(f *lineEditor) tea.Cmd { return f.editMsg(msg) })
 		return next, cmd, true
 	}
 	return m, nil, m.settingsOwnsInput()
@@ -1508,8 +1520,17 @@ func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisp
 		}
 		add(cells, kind, i)
 	}
+	if len(out) == 0 {
+		// The filter matched nothing: one faint, unselectable row says so in this pane's noun (ADR
+		// 0053 amend-1014 rule 7), the listZeroMatchNote every filtering list paints.
+		add(popupRow{fmt.Sprintf(listZeroMatchNote, settingsFilterNoun, stripEscapes(filter))}, popupRowPlain, -1)
+	}
 	return settingsDisplay{rows: out, kinds: kinds, keys: keys, selected: display}
 }
+
+// settingsFilterNoun is what the key list calls one of its rows when a filter matches none of them
+// (listZeroMatchNote): `no setting matches "zzz"`.
+const settingsFilterNoun = "setting"
 
 // settingKeyAt is the SETTING row display row i shows, and whether it shows one at all: a section
 // label and the spacer above it show none. It is the one read of the keys list, so a display index
@@ -1579,7 +1600,9 @@ func (m Model) settingsEditText() string {
 //
 // In the key list the legend is the SELECTED row's: the one row this pane never resets drops the key
 // that would do nothing on it (settingsResetKind), and rows is passed rather than re-derived so the
-// legend is about the row the frame is highlighting.
+// legend is about the row the frame is highlighting. It is then stated for the filter's state
+// (settingsFilterLegend) — the second steps keep their own legends whatever the filter holds, because
+// typing does not reach the filter inside one.
 func (m Model) settingsPaneHint(rows []SettingRow) string {
 	if step, ok := settingsSteps[m.settings.kind]; ok && step.hintOf != nil {
 		return step.hintOf(m)
@@ -1587,17 +1610,62 @@ func (m Model) settingsPaneHint(rows []SettingRow) string {
 	if step, ok := settingsSteps[m.settings.kind]; ok && step.hint != "" {
 		return step.hint
 	}
+	hint := settingsHint
 	row, ok := m.settingsSelectedRow(rows)
 	switch {
 	case ok && row.Kind == SettingRule && row.RuleState.adoptable():
-		return settingsRuleHint
+		hint = settingsRuleHint
 	case ok && row.Kind == SettingRule:
-		return settingsRuleInForceHint
+		hint = settingsRuleInForceHint
 	case ok && !settingsResetKind(row):
-		return settingsNoResetHint
+		hint = settingsNoResetHint
 	}
-	return settingsHint
+	return settingsFilterLegend(hint, m.settings.filter.value(), len(m.settingsFilterView(rows).offering))
 }
+
+// settingsFilterLegend is the key list's legend for the filter's state: every filtering pane's
+// composition (filterLegend — "type to filter" drops, "⌫ trim" stands before the esc entry, and at
+// zero matches only the trim and the esc entry stay), plus the one move only this pane makes. Its
+// legend names a backspace VERB — the reset, or an Allow rule's removal — and with text typed
+// backspace trims instead, so the verb moves to delete (⌦), which arms it whatever the filter holds
+// (settingsKey), and stands just after the trim that took its key:
+//
+//	type to filter · ↑/↓ select · ⏎ edit · ⌫ reset · esc close
+//	↑/↓ select · ⏎ edit · ⌫ trim · ⌦ reset · esc close
+//
+// filterLegend keeps the verb ahead of the trim it inserts before the esc entry, so the verb is met
+// first and re-seated behind the trim. At zero matches filterLegend has already dropped it: there is
+// no row to reset.
+func settingsFilterLegend(hint, filter string, matches int) string {
+	legend := filterLegend(hint, filter, matches)
+	if filter == "" {
+		return legend
+	}
+	entries := strings.Split(legend, listLegendJoin)
+	out := make([]string, 0, len(entries))
+	moved := ""
+	for _, entry := range entries {
+		switch {
+		case entry == listTrimEntry:
+			out = append(out, entry)
+			if moved != "" {
+				out = append(out, moved)
+			}
+		case strings.HasPrefix(entry, settingsBackspaceLead):
+			moved = settingsDeleteLead + strings.TrimPrefix(entry, settingsBackspaceLead)
+		default:
+			out = append(out, entry)
+		}
+	}
+	return strings.Join(out, listLegendJoin)
+}
+
+// The leads of a legend entry naming backspace and delete (⌦): settingsFilterLegend moves the key
+// list's backspace verb to delete once a filter is typed.
+const (
+	settingsBackspaceLead = "⌫ "
+	settingsDeleteLead    = "⌦ "
+)
 
 // settingsResetArmedHint is the armed reset's legend: the removal's wording on an Allow rule's row,
 // the reset's on every other.
@@ -1846,21 +1914,28 @@ func settingsSourceLabel(row SettingRow) string {
 // under the cursor is not that — it would spend one of the two lines saying that there was a third.
 // Truncation is in the painter's own measure (truncateToWidth, ADR 0030).
 //
-// With no row selected there is no header at all: the pane is then showing its own empty-list row
-// (noSettingsRow), and a label over nothing would describe nothing.
+// With no row to show there is no header at all: the pane is then showing its own empty-list row
+// (noSettingsRow), and a label over nothing would describe nothing. A filter that matches nothing is
+// the one exception — the region stays, blank, over the zero-match row.
 func (m Model) settingsBody(rows []SettingRow) string {
 	sel := m.settingsSelection(rows)
-	if sel < 0 {
+	if sel < 0 && (len(rows) == 0 || m.settings.filter.value() == "") {
 		return ""
 	}
-	inner := popupInnerWidth(m.th, m.width)
-	lead := settingsDescLabel + " " + stripEscapes(rows[sel].Desc)
-	lines := wrapText(m.th, strings.TrimRight(lead, " "), inner)
-	if len(lines) > settingsDescLines {
-		// What did not fit is folded back onto the last line the region has and elided there, so the
-		// cut is stated where the text stops rather than by a line the region has not got.
-		rest := strings.Join(lines[settingsDescLines-1:], " ")
-		lines = append(lines[:settingsDescLines-1], truncateToWidth(m.th, rest, inner))
+	// A filter that matched nothing leaves no row to describe, but the region STAYS, blank: it is
+	// where the header sits on the frame before and after, so a keystroke that empties the list and
+	// the one that trims it back move neither the header nor the title above it.
+	var lines []string
+	if sel >= 0 {
+		inner := popupInnerWidth(m.th, m.width)
+		lead := settingsDescLabel + " " + stripEscapes(rows[sel].Desc)
+		lines = wrapText(m.th, strings.TrimRight(lead, " "), inner)
+		if len(lines) > settingsDescLines {
+			// What did not fit is folded back onto the last line the region has and elided there, so
+			// the cut is stated where the text stops rather than by a line the region has not got.
+			rest := strings.Join(lines[settingsDescLines-1:], " ")
+			lines = append(lines[:settingsDescLines-1], truncateToWidth(m.th, rest, inner))
+		}
 	}
 	for len(lines) < settingsDescLines {
 		lines = append(lines, "")
@@ -1960,8 +2035,14 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 	if !seated {
 		return popupSpec{}, settingsDisplay{}, false
 	}
+	// The filter rides the title row (overlayFilterTail), so typing claims no row: with its caret
+	// while browsing, where the next key types into it, and as text alone while a step drawn over
+	// this list — the value buffer, the armed reset, the save target — takes the keys instead. The
+	// two steps that paint for themselves (the enum sub-list, the text editor) replace the list it
+	// narrows and carry no tail.
 	return popupSpec{
 		title:       settingsTitle,
+		titleTail:   overlayFilterTail(m.settings.filter, m.settings.kind == settingsKeyList),
 		body:        body,
 		bodyLead:    settingsDescLabel,
 		maxBodyRows: maxBody,

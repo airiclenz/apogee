@@ -3465,6 +3465,28 @@ func TestSettingsPointerActsOnTheFilteredRows(t *testing.T) {
 	})
 }
 
+// A filter that matches nothing leaves one faint row saying so, and a click on it takes nothing: it
+// names no setting, so the selection, the step and the filter stay as they were, and the click arms
+// no other surface's selection under the pane.
+func TestSettingsClickOnTheZeroMatchRowTakesNothing(t *testing.T) {
+	t.Parallel()
+	m := settingsFrameModel(t, 80, 30, 8)
+	for _, r := range "zzz" {
+		m = step(t, m, keyRune(r))
+	}
+	before := m.settings.selected
+	x, y := frameCell(t, m, `no setting matches "zzz"`)
+
+	m = step(t, m, leftClick(x, y))
+
+	if m.settings.kind != settingsKeyList || m.settings.selected != before || m.settings.filter.value() != "zzz" {
+		t.Errorf("a click on the zero-match row left pane = %+v (filter %q); want it untouched", m.settings, m.settings.filter.value())
+	}
+	if m.sel.active || m.transcriptSel.active {
+		t.Errorf("a click on the pane armed another surface's selection: %+v / %+v", m.sel, m.transcriptSel)
+	}
+}
+
 // settingsTextEditModel is a model with the multi-line field OPEN over the given prose — the state the
 // pointer tests below act in. The prose is the row's own, so what the field is seeded with is what the
 // registry would have handed it.

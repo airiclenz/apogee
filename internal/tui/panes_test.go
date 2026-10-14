@@ -164,6 +164,14 @@ func paneFixtures() []paneFixture {
 			t.Helper()
 			return settingsFrameModel(t, 80, 30, 12)
 		}},
+		{"settings key list, filtered", paneSettings, func(t *testing.T) Model {
+			t.Helper()
+			return typeSetting(t, settingsFrameModel(t, 80, 30, 12), "key-0")
+		}},
+		{"settings key list, zero matches", paneSettings, func(t *testing.T) Model {
+			t.Helper()
+			return typeSetting(t, settingsFrameModel(t, 80, 30, 12), "zzz")
+		}},
 		{"settings enum sub-list", paneSettings, func(t *testing.T) Model {
 			t.Helper()
 			m, _ := settingsEditModel(t, []SettingRow{settingsEnumRow()}, &settingsWriteLog{})
