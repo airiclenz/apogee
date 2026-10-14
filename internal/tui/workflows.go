@@ -447,6 +447,19 @@ func (m Model) workflowsNameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// workflowsPaste lands a bracketed paste where the view's keys would land it (listPaste): in the save
+// row's name field while it is open, folded onto its one line ([lineEditor.editMsg]) as the
+// /sessions rename folds one (sessionBrowserPaste); nowhere otherwise, since the view lists without
+// a filter and no pasted text is one of its verbs. paste is the edit that carries the text into the
+// field. It always claims: the view is modal, and a paste falling through would land in the prompt
+// draft behind it (layout.md: nothing is typed or pasted into the prompt box while a pop-up is up).
+func (m Model) workflowsPaste(paste func(*lineEditor) tea.Cmd) (Model, tea.Cmd, bool) {
+	if !m.workflowsPane.naming {
+		return m, nil, true
+	}
+	return m, m.workflowsPane.nameBuf.edit(paste), true
+}
+
 // saveWorkflowRecipe saves the shown workflow's plan as the recipe skill name. A name a skill of the
 // catalog or a command verb already answers to is refused here — the new `/name` would be shadowed
 // by one or shadow the other; the rest runs off the Update loop: plan.json read, the recipe

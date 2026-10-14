@@ -496,8 +496,8 @@ func (m Model) foldKeyboardEnhancements(msg tea.KeyboardEnhancementsMsg) (tea.Mo
 }
 
 // foldPaste folds one bracketed paste into whichever surface is being typed at: the /settings pane
-// first, then the approval pane's rule field, then an open picker or /sessions browser (listPaste),
-// then the prompt box wherever it is editable.
+// first, then the approval pane's rule field, then an open picker, /sessions browser or /workflows
+// view (listPaste), then the prompt box wherever it is editable.
 //
 // Bracketed paste (default-on in bubbletea v2) is an edit, so it must run the same post-edit
 // refresh a keypress does — without it a multi-line paste renders unwrapped until the next key, the

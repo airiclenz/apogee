@@ -656,6 +656,48 @@ func TestWorkflowsViewCtrlSSavesAFanOutAsARecipe(t *testing.T) {
 	}
 }
 
+// A paste over the /workflows view is claimed: at the list, which has no field to type into, it is
+// dropped, and it never reaches the prompt draft standing behind the pane (layout.md: nothing is
+// typed or pasted into the prompt box while a pop-up is up).
+func TestWorkflowsViewPasteNeverReachesTheDraft(t *testing.T) {
+	t.Parallel()
+	m := workflowsPaneModel(t, workflowsAtList)
+	m.input.SetValue("keep")
+
+	m, cmd := stepCmd(t, m, tea.PasteMsg{Content: "pasted\ntext"})
+
+	if cmd != nil {
+		t.Errorf("a paste over the list dispatched a Cmd; it must be dropped")
+	}
+	if got := m.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste over /workflows", got)
+	}
+	if !m.workflowsPane.open || m.workflowsPane.level != workflowsAtList {
+		t.Errorf("after the paste: open %v, level %d; want the list still up", m.workflowsPane.open, m.workflowsPane.level)
+	}
+}
+
+// While the ^s name row is open a paste is typing into it, folded onto its one line as the
+// /sessions rename folds one, and the prompt draft behind the pane keeps its text.
+func TestWorkflowsViewPasteLandsInTheNameRow(t *testing.T) {
+	t.Parallel()
+	m, _, _ := savePaneModel(t, saveFanOutPlan(), "")
+	m.input.SetValue("keep")
+	m = step(t, m, keyCtrlS())
+	if !m.workflowsPane.naming {
+		t.Fatal("precondition: ^s did not open the name row")
+	}
+
+	m = step(t, m, tea.PasteMsg{Content: "scan\nhandlers"})
+
+	if got, want := m.workflowsPane.nameBuf.value(), "scan handlers"; got != want {
+		t.Errorf("name buffer = %q, want %q", got, want)
+	}
+	if got := m.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste into the name row", got)
+	}
+}
+
 // The name row's buffer sits behind a copyOnWriteField: a Model snapshot taken AFTER the first
 // keystroke into it — once the two copies point at one field — keeps its name while the other copy
 // types a second key.

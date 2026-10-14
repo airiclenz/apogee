@@ -362,13 +362,14 @@ func (m Model) typeIntoOverlayFilter(
 	return cmd
 }
 
-// listPaste routes a bracketed paste while a filtering list pane owns the keyboard — the paste is
-// TYPING there (ADR 0053, 2026-10-14 amendment): into the open pane's filter, folded onto one line,
-// with the highlight re-seated as a keystroke re-seats it. A pane that asks rather than lists (a
-// question kind, pickerOffering.filters) drops it; the /sessions browser routes it by its own
-// sub-step (sessionBrowserPaste). Either way it is CLAIMED, never
-// handed on: the panes are modal, and a paste falling through would fill the prompt draft — or stage
-// an interjection mid-run — behind a pane the human is looking at instead.
+// listPaste routes a bracketed paste while a list pane owns the keyboard — in a filtering one the
+// paste is TYPING there (ADR 0053, 2026-10-14 amendment): into the open pane's filter, folded onto
+// one line, with the highlight re-seated as a keystroke re-seats it. A pane that asks rather than
+// lists (a question kind, pickerOffering.filters) drops it; the /sessions browser routes it by its
+// own sub-step (sessionBrowserPaste), and the /workflows view — which lists without a filter — by
+// its own (workflowsPaste). Either way it is CLAIMED, never handed on: the panes are modal, and a
+// paste falling through would fill the prompt draft — or stage an interjection mid-run — behind a
+// pane the human is looking at instead.
 //
 // Each pane is gated by its own key gate (paneSpecs keyOpen), not by its open flag, so the paste
 // follows exactly the rule the keys follow: an approval or ask raised above a mid-run picker leaves
@@ -385,6 +386,8 @@ func (m Model) listPaste(msg tea.PasteMsg) (Model, tea.Cmd, bool) {
 		}
 		cmd := m.typeIntoOverlayFilter(&m.picker.listSurface, m.pickerOfferingRows(), offering.matched, paste)
 		return m, cmd, true
+	case paneSpecs[paneWorkflows].keyOpen(m):
+		return m.workflowsPaste(paste)
 	}
 	return m, nil, false
 }

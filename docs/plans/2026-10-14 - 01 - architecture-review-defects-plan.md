@@ -259,7 +259,9 @@ NOTES (2026-10-14): the pooled-row and contiguity claims are pinned by one test 
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'Ledger|Delegation|Preempt' ./internal/agent/`
 **Commit:** `fix(agent): book a ledger row for a skipped delegation`
 
-## 13. `/workflows` claims a paste
+## 13. `/workflows` claims a paste — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): consequential edit — internal/tui/prompteditor.go: made necessary by listPaste now routing the /workflows view (foldPaste's doc comment named only the picker and /sessions browser)
 
 **What:**
 **Goal:** a paste while `/workflows` is open never reaches the prompt draft: while the recipe-name field is open it lands there folded to one line; otherwise it is claimed and dropped (`layout.md`: nothing is typed or pasted into the prompt box while a pop-up is up).
