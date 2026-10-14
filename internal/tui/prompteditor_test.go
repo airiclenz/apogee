@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
@@ -549,8 +549,9 @@ func TestPasteCtrlVAttachesAClipboardImage(t *testing.T) {
 	}
 }
 
-// With no image on the clipboard — or bytes that are not one — ctrl+v hands back to the
-// textarea's own text paste, exactly what the key did before images existed.
+// With no image on the clipboard — or bytes that are not one — ctrl+v pastes the clipboard's text
+// through the bracketed paste's edit path: the text lands in the box and the autocomplete overlay
+// is recomputed from it, so a pasted "/comp" opens the command menu as a typed one does.
 func TestPasteCtrlVFallsBackToText(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -563,18 +564,81 @@ func TestPasteCtrlVFallsBackToText(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _, _ := visionModel(t)
 			stubClipboardImage(t, tc.data, tc.err)
+			stubClipboardText(t, "/comp", nil)
 
-			next, cmd := stepCmd(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
-			m, cmd = stepCmd(t, next, cmd())
+			m = stepCtrlVPaste(t, m)
 
-			if reflect.ValueOf(cmd).Pointer() != reflect.ValueOf(textarea.Paste).Pointer() {
-				t.Errorf("fallback Cmd is not textarea.Paste")
+			if got := m.input.Value(); got != "/comp" {
+				t.Errorf("box = %q, want the clipboard text %q", got, "/comp")
+			}
+			if !m.autocomplete.active || m.autocomplete.kind != acCommand {
+				t.Errorf("autocomplete = %+v, want the command menu open on the pasted text", m.autocomplete)
 			}
 			if len(m.images) != 0 {
 				t.Errorf("images = %+v, want none", m.images)
 			}
 		})
 	}
+}
+
+// ctrl+v of clipboard text that names an image file stays text, even on a vision model: only a
+// bracketed paste — a terminal's drag-and-drop — attaches the file a path names.
+func TestPasteCtrlVImagePathTextStaysText(t *testing.T) {
+	m, _, workspace := visionModel(t)
+	path := filepath.Join(workspace, "shot.png")
+	stubClipboardImage(t, nil, present.ErrNoClipboardImage)
+	stubClipboardText(t, path, nil)
+
+	m = stepCtrlVPaste(t, m)
+
+	if got := m.input.Value(); got != path {
+		t.Errorf("box = %q, want the path typed as text", got)
+	}
+	if len(m.images) != 0 {
+		t.Errorf("images = %+v, want none attached from a ctrl+v of text", m.images)
+	}
+}
+
+// A clipboard whose text cannot be read pastes nothing and says nothing.
+func TestPasteCtrlVTextReadErrorPastesNothing(t *testing.T) {
+	m, _, _ := visionModel(t)
+	stubClipboardImage(t, nil, present.ErrNoClipboardImage)
+	stubClipboardText(t, "ignored", errors.New("no clipboard program"))
+
+	next, cmd := stepCmd(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("ctrl+v returned no Cmd, want the clipboard probe")
+	}
+	m, cmd = stepCmd(t, next, cmd())
+	if cmd == nil {
+		t.Fatal("the image probe's fallback returned no Cmd, want the clipboard text read")
+	}
+	if msg := cmd(); msg != nil {
+		t.Errorf("failed text read yielded %#v, want no message", msg)
+	}
+	if got := m.input.Value(); got != "" || m.flash != "" {
+		t.Errorf("box = %q, flash = %q; want nothing pasted and nothing said", got, m.flash)
+	}
+}
+
+// stepCtrlVPaste presses ctrl+v and runs each Cmd it chains — the image probe, then the clipboard
+// text read — through Update, returning the model the pasted text landed in.
+func stepCtrlVPaste(t *testing.T, m Model) Model {
+	t.Helper()
+	next, cmd := stepCmd(t, m, tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("ctrl+v returned no Cmd, want the clipboard probe")
+	}
+	next, cmd = stepCmd(t, next, cmd())
+	if cmd == nil {
+		t.Fatal("the image probe's fallback returned no Cmd, want the clipboard text read")
+	}
+	msg := cmd()
+	if _, ok := msg.(clipboardTextMsg); !ok {
+		t.Fatalf("clipboard text read yielded %#v, want a clipboardTextMsg", msg)
+	}
+	next, _ = stepCmd(t, next, msg)
+	return next
 }
 
 // A clipboard image on a server without `vision: true` is not attached: the status line says why,
@@ -612,6 +676,15 @@ func stubClipboardImage(t *testing.T, data []byte, err error) {
 	saved := readClipboardImage
 	readClipboardImage = func(string) ([]byte, error) { return data, err }
 	t.Cleanup(func() { readClipboardImage = saved })
+}
+
+// stubClipboardText substitutes the clipboard-text seam for the test's length. Tests that use it
+// are not parallel: the seam is package state.
+func stubClipboardText(t *testing.T, text string, err error) {
+	t.Helper()
+	saved := readClipboardText
+	readClipboardText = func() (string, error) { return text, err }
+	t.Cleanup(func() { readClipboardText = saved })
 }
 
 // Backspace on an empty box keeps its order: the newest queued command, then the newest staged

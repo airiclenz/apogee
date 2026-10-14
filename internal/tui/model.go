@@ -1243,9 +1243,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.foldPaste(msg)
 
 	case clipboardImageMsg:
-		// The ctrl+v probe's answer: an image to attach, or the textarea's own text paste
+		// The ctrl+v probe's answer: an image to attach, or a read of the clipboard's text
 		// (clipboard.go).
 		return m.foldClipboardImage(msg)
+
+	case clipboardTextMsg:
+		// The ctrl+v fallback's clipboard text: typed into the box through the bracketed paste's
+		// edit path, so autocomplete and the skill-hint band follow it (clipboard.go).
+		return m.foldClipboardText(msg)
 
 	case ctrlCResetMsg:
 		// The Ctrl+C quit window closed without a second press: this tick is the window's only
@@ -2075,8 +2080,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		// ctrl+v asks the clipboard for an image before it pastes text: the probe runs off the
-		// Update loop and its answer either attaches the image or hands back to the textarea's own
-		// paste (foldClipboardImage).
+		// Update loop and its answer either attaches the image or reads the clipboard's text, which
+		// pastes through the bracketed paste's edit path (foldClipboardImage, foldClipboardText).
 		if msg.String() == "ctrl+v" {
 			return m, clipboardImageCmd(m.opts.Workspace)
 		}

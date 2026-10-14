@@ -274,7 +274,7 @@ NOTES (2026-10-14): consequential edit — internal/tui/prompteditor.go: made ne
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestWorkflows|Paste' ./internal/tui/`
 **Commit:** `fix(tui): keep a paste over /workflows out of the prompt draft`
 
-## 14. A ctrl+v text paste recomputes autocomplete
+## 14. A ctrl+v text paste recomputes autocomplete — ✅ DONE (2026-10-14)
 
 **What:**
 **Goal:** a ctrl+v paste of clipboard text runs the same edit path as a bracketed paste: autocomplete recomputes (a pasted `/comp` opens the command menu) and the skill-hint band is rescheduled.

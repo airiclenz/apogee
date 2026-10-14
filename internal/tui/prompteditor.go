@@ -527,6 +527,18 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if next, cmd, attached := m.attachPastedImage(msg.Content); attached {
 		return next, cmd
 	}
+	return m.pasteIntoBox(msg)
+}
+
+// pasteIntoBox types pasted text into the prompt box and runs the post-edit refresh: the edit path
+// a bracketed paste ([Model.foldPaste]) and a ctrl+v of clipboard text ([Model.foldClipboardText])
+// share, so both recompute the autocomplete overlay and reschedule the skill-hint band. It asks
+// inputEditable itself, because a ctrl+v's text arrives after a clipboard read the box may have
+// stopped being editable during.
+func (m Model) pasteIntoBox(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	if !m.inputEditable() {
+		return m, nil
+	}
 	m.sel = fieldSel{} // the value is about to change; drop the selection before its coords go stale
 	m.dropRecall()     // a paste is an edit: the recalled entry is now the human's own draft
 	m.fitWrapMemo()    // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)

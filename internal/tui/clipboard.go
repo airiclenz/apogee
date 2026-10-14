@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 
@@ -101,8 +100,12 @@ func tmuxClipboardCmd(workspace, text string) tea.Cmd {
 // The image paste: ctrl+v in the prompt asks the clipboard for an IMAGE first (present.Clipboard.ReadImage, through
 // the same exec fence as the copy routes) and pastes its text only when there is none: the image
 // probe is a Cmd, so the program it runs never blocks the Update loop, and its answer
-// (clipboardImageMsg) either attaches the image as a pending one or hands the key back to the
-// textarea's own clipboard paste (textarea.Paste), exactly what ctrl+v did before.
+// (clipboardImageMsg) either attaches the image as a pending one or asks for the clipboard's TEXT
+// (clipboardTextCmd). That text comes back as a clipboardTextMsg of our own and is folded through
+// the same edit path a bracketed paste takes (Model.pasteIntoBox), so the autocomplete overlay and
+// the skill-hint band follow it as they follow a typed key — the widget's own clipboard paste reply
+// is a Msg of the widget package's unexported type, which only foldWidgetMsg could reach, and that
+// fold runs no post-edit refresh.
 
 // readClipboardImage reads an image off the host clipboard, resolving the reader program against
 // workspace (hostClipboard). A package-level variable for writeSystemClipboard's reason: a test
@@ -110,6 +113,31 @@ func tmuxClipboardCmd(workspace, text string) tea.Cmd {
 // when the Cmd is built (clipboardImageCmd), never when it runs.
 var readClipboardImage = func(workspace string) ([]byte, error) {
 	return hostClipboard(workspace).ReadImage()
+}
+
+// readClipboardText reads the host clipboard's text, the ctrl+v fallback when it holds no image.
+// A package-level variable for readClipboardImage's reason, and read the same way: when the Cmd is
+// built (clipboardTextCmd), never when it runs.
+var readClipboardText = clipboard.ReadAll
+
+// clipboardTextMsg is the clipboard text a ctrl+v pastes when the clipboard holds no image.
+type clipboardTextMsg struct {
+	text string
+}
+
+// clipboardTextCmd returns the Cmd that reads the clipboard's text for a ctrl+v that found no
+// image. A read that fails yields no message: the paste pastes nothing and says nothing, as the
+// widget's own clipboard paste did on a clipboard it could not read. The seam is read here, when
+// the Cmd is built, for systemClipboardCmd's reason.
+func clipboardTextCmd() tea.Cmd {
+	read := readClipboardText
+	return func() tea.Msg {
+		text, err := read()
+		if err != nil {
+			return nil
+		}
+		return clipboardTextMsg{text: text}
+	}
 }
 
 // clipboardImageMsg is what the ctrl+v probe found: the bytes a clipboard reader wrote, or the
@@ -132,8 +160,8 @@ func clipboardImageCmd(workspace string) tea.Cmd {
 // foldClipboardImage settles a ctrl+v. Bytes that sniff as an image are attached as the next
 // clipboard-<n>.png pending image — unless the bound server does not accept images, which is
 // said in the status line instead, since the engine would refuse the message they rode. Anything
-// else — no reader, no image, bytes that are not an image — falls back to the textarea's own text
-// paste. A box that stopped being editable while the probe ran takes neither. A reader the exec
+// else — no reader, no image, bytes that are not an image — falls back to the clipboard's text
+// (clipboardTextCmd). A box that stopped being editable while the probe ran takes neither. A reader the exec
 // fence refused, or an image past the read bound, is said in the status line and pastes nothing.
 func (m Model) foldClipboardImage(msg clipboardImageMsg) (tea.Model, tea.Cmd) {
 	if !m.inputEditable() {
@@ -144,7 +172,7 @@ func (m Model) foldClipboardImage(msg clipboardImageMsg) (tea.Model, tea.Cmd) {
 	}
 	mediaType := imageMediaType(msg.data)
 	if msg.err != nil || mediaType == "" {
-		return m, textarea.Paste
+		return m, clipboardTextCmd()
 	}
 	if !m.serverAcceptsImages() {
 		return m, m.showFlash(m.visionRefusal())
@@ -154,6 +182,14 @@ func (m Model) foldClipboardImage(msg clipboardImageMsg) (tea.Model, tea.Cmd) {
 		return m, m.showFlash(err.Error())
 	}
 	return m, nil
+}
+
+// foldClipboardText pastes the clipboard text a ctrl+v read into the prompt box through the
+// bracketed paste's edit path (Model.pasteIntoBox) — never through attachPastedImage: ctrl+v of
+// text that names an image file stays the text the human copied, and only a bracketed paste (a
+// terminal's drag-and-drop) attaches the file it names.
+func (m Model) foldClipboardText(msg clipboardTextMsg) (tea.Model, tea.Cmd) {
+	return m.pasteIntoBox(tea.PasteMsg{Content: msg.text})
 }
 
 // noVisionNote is the flash a clipboard image meets on a server that does not accept images when

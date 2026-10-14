@@ -310,7 +310,8 @@
 // application's OSC52 — each write behind its own injectable package-level seam so a test can
 // watch what a copy actually hands over. It also holds the read the other way: ctrl+v probes the
 // clipboard for an IMAGE (readClipboardImage, a seam of the same kind) before it falls back to the
-// textarea's text paste, and an image it finds becomes a pending image on the prompt editor. mousereassert.go keeps
+// clipboard's text (readClipboardText, another), pasted through the bracketed paste's edit path,
+// and an image it finds becomes a pending image on the prompt editor. mousereassert.go keeps
 // that whole reach ALIVE across a tool run: bubbletea writes the mouse-tracking escapes only when
 // the frame's MouseMode changes, so a tool child that reset tracking on its way out would leave
 // clicks, drags and the wheel dead for the rest of the session — the model re-asserts the
