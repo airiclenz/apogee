@@ -461,6 +461,14 @@ type Options struct {
 	// wants.
 	GlobalConfigOnly bool
 
+	// LiveReread says this resolution re-reads the config files under a running session rather
+	// than starting one: a file still written in a retired shape (`hooks:`, the top-level
+	// endpoint:/api-key:/host-alias:/model: keys) is refused with [ErrRetiredShape] instead of
+	// folded, so the file is never rewritten and no `config.yaml.bak-*` is written. Not
+	// flag-bound: the /settings and file-watcher re-read sets it before ApplyConfig. False ⇒ the
+	// startup pass, the one read that may migrate.
+	LiveReread bool
+
 	// ProjectKeys records which keys the Project config layer contributed to this run, keyed by
 	// registry path: a project-param key the project file states, and a tighten-only list the
 	// project file added entries to that the global file does not carry. Resolution collapses the

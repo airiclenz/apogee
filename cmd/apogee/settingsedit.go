@@ -382,11 +382,17 @@ func appliedValue(row tui.SettingRow) string {
 // The undetermined-startup refusal is held rather than returned, exactly as the TUI's own start-up
 // holds it (root.go): resolution succeeded, it simply could not name a server, and a config being
 // edited towards its first `servers:` entry is in that state by definition.
+//
+// It is NOT the startup pass in one respect: it never migrates. The read is marked LiveReread, so a
+// file saved mid-session in a retired shape (`hooks:`, the top-level `endpoint:` keys) is refused
+// with config.ErrRetiredShape — bytes untouched, no `config.yaml.bak-*` — rather than rewritten out
+// from under the running session; the fold waits for the next startup.
 func (e *externalEdit) projection() (fileProjection, error) {
 	next := config.Options{
 		ConfigDir:       e.opts.ConfigDir,
 		Workspace:       e.opts.Workspace,
 		ServerFlagBound: e.opts.ServerFlagBound,
+		LiveReread:      true,
 	}
 	var notices []string
 	collect := func(notice string) { notices = append(notices, notice) }

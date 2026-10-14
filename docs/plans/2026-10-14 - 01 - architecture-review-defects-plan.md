@@ -108,7 +108,10 @@ cmd/apogee/projectrules_test.go — TestProjectRuleRejectAndAdoptMoveOnlyTheReco
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'ProjectRule|ProjectCmdAdopt|<new test names>' ./cmd/apogee/`
 **Commit:** `fix(project): adopt only rule text the Project config still holds`
 
-## 4. Never migrate the config file on a live re-read
+## 4. Never migrate the config file on a live re-read — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): re-derived from `Options` being declared in internal/config/config.go — the struct and `GlobalConfigOnly` live in internal/config/options.go, where the new `LiveReread` switch sits beside it.
+NOTES (2026-10-14): the config.go comments also named a non-existent `parseConfigFile(…, true)` call as the migrating read (ResolveOptions calls `parseLayeredConfig`); corrected while rewording them.
 
 **What:**
 **Goal:** the `/settings` and file-watcher re-read never rewrites the config file or writes a `config.yaml.bak-*`; a retired shape (`hooks:`, top-level `endpoint:`) saved mid-session is refused with `config.ErrRetiredShape`, as `LoadFileConfig`'s doc states.

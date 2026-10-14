@@ -336,6 +336,53 @@ func TestExternalEditReloadRefusesAConfigItCannotResolve(t *testing.T) {
 	}
 }
 
+// The live re-read never migrates: a file saved mid-session in a retired shape is refused with
+// config.ErrRetiredShape, its bytes are left exactly as the human wrote them, and no backup is
+// written — the fold is the startup pass's alone.
+func TestExternalEditReloadRefusesARetiredShapeWithoutRewriting(t *testing.T) {
+	t.Parallel()
+	const servers = "servers:\n  - name: box\n    endpoint: http://box:1111\n\nserver: box\n"
+	tests := []struct {
+		name  string
+		saved string
+	}{
+		{"a hooks: block", servers + "\nhooks:\n" +
+			"  - name: notify\n" +
+			"    events: [turn-finished]\n" +
+			"    command: [\"notify-send\", \"done\"]\n"},
+		{"a top-level endpoint:", "endpoint: http://box:1111\nmode: plan\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			path := filepath.Join(home, "config.yaml")
+			writeSettingsFixture(t, path, servers)
+			e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
+
+			writeSettingsFixture(t, path, tt.saved)
+			reload, err := e.changed()
+			if !errors.Is(err, config.ErrRetiredShape) {
+				t.Fatalf("changed over %s = (%+v, %v), want config.ErrRetiredShape", tt.name, reload.Applied, err)
+			}
+			got, rerr := os.ReadFile(path)
+			if rerr != nil {
+				t.Fatalf("read config back: %v", rerr)
+			}
+			if string(got) != tt.saved {
+				t.Errorf("the live re-read rewrote the config:\n got: %q\nwant: %q", got, tt.saved)
+			}
+			backups, gerr := filepath.Glob(filepath.Join(home, "config.yaml.bak-*"))
+			if gerr != nil {
+				t.Fatalf("glob backups: %v", gerr)
+			}
+			if len(backups) != 0 {
+				t.Errorf("the live re-read wrote a backup %v; a session never migrates its config", backups)
+			}
+		})
+	}
+}
+
 // A config that resolves but names no startup server is NOT a failure: it is the pre-bound start
 // ADR 0036 answers with a picker, and it is exactly the state a config is in halfway through having
 // its first `servers:` entry added by hand.

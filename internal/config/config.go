@@ -2914,11 +2914,12 @@ func applyFile(o *Options, fc fileConfig) error {
 // A config still written in the retired schema is REFUSED here, before anything is projected: the
 // decoder ignores keys the struct no longer has, so without the sniff a working `endpoint:` would
 // simply stop being read and the session would report no server configured, with nothing pointing
-// at the four lines that ARE the configuration. This reader never writes: it is the live re-read —
-// every `/settings` apply comes through it under a running session — and apogee does not rewrite a
-// config file out from under a session, so the refusal spells the replacement out instead. The one
-// migrating read is `parseConfigFile(…, true)` under ResolveOptions, the startup pass, which
-// performs the one-time fold of ADR 0036 decision 9 and announces it through notify.
+// at the four lines that ARE the configuration. This reader never writes: the /settings applies
+// re-read their block through it under a running session, and apogee does not rewrite a config file
+// out from under a session, so the refusal spells the replacement out instead. The whole-file live
+// re-read (the /settings and file-watcher reload) refuses the same way, through ResolveOptions with
+// opts.LiveReread set. The one migrating read is ResolveOptions' startup pass — LiveReread unset —
+// which performs the one-time fold of ADR 0036 decision 9 and announces it through notify.
 func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify func(string)) (Options, error) {
 	fc, err := parseConfigFile(path, readFile, notify, false)
 	if err != nil {
@@ -3263,16 +3264,18 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 			opts.Workspace = v
 		}
 	}
-	// The one reader that may MIGRATE: this is the startup pass, so a config still written in a
-	// retired shape is folded here and announced through notify. Every live re-read goes through
-	// LoadFileConfig, which refuses rather than rewriting a file a session is running on. The
-	// migration is the global file's alone: the Project config is layered over the migrated global
-	// document (layer.go) and is never rewritten.
+	// The one reader that may MIGRATE — and only as the startup pass: a config still written in a
+	// retired shape is folded here and announced through notify. A live re-read under a running
+	// session (opts.LiveReread — the /settings and file-watcher reload) refuses it with
+	// ErrRetiredShape instead, as LoadFileConfig does, so a file a session is running on is never
+	// rewritten and no backup is written. The migration is the global file's alone: the Project
+	// config is layered over the migrated global document (layer.go) and is never rewritten.
 	projectRoot := ""
 	if !opts.GlobalConfigOnly {
 		projectRoot = resolveProjectRoot(opts.Workspace, notify)
 	}
-	fc, stated, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify, true)
+	fc, stated, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify,
+		!opts.LiveReread)
 	if err != nil {
 		return nil, err
 	}
@@ -3352,7 +3355,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 // the resolved `servers:` entries this session starts on. notify receives resolution's soft notices
 // — a malformed acknowledgement is reported and skipped, never fatal — on stderr, like the other
 // pre-TUI startup lines. The one-time legacy migration announces itself the same way — it is made
-// by the `parseConfigFile(…, true)` call under ResolveOptions, the one migrating read: a file apogee
+// by ResolveOptions' startup pass (opts.LiveReread unset), the one migrating read: a file apogee
 // rewrote on the user's behalf must say so where they will see it.
 //
 // One error is deliberately returned LAST, after every value has been written back:
