@@ -57,8 +57,10 @@ rejected (a Run drain, an interjection Event) are superseded for **depth > 0 onl
 a child names its run (`queued for <name> — …`), and the child's own delivery report is what takes
 it off the band: a message that landed becomes that child's user block inside its run, and one that
 did not becomes a note naming why — `<name> finished before your message landed`, `<name> was
-capped before your message landed`, `<name> was stopped by you before your message landed`, `<name>
-failed before your message landed`, `<name> was cancelled before your message landed`, or `<name>
+capped before your message landed`, `<name> was stopped by you before your message landed` (a stop
+found the child running — the human's stop of that one child, or the cancel of the whole Turn), `<name>
+failed before your message landed`, `<name> was cancelled before your message landed` (the child
+ended cancelled without a stop finding it running), or `<name>
 could not take your message` where the child, still running, refused it at the boundary.
 _Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mechanism shaping the
 model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;

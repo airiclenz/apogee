@@ -277,9 +277,13 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	item := &workflowChild{label: spec.Item.Label}
 	sub.workflowItem = item
 	sub.tools = withFinish(sub.tools, narrowed, tools.NewFinish(spec.Stage.Returns, item.accept))
-	var ending workflow.Ending
+	var (
+		ending  workflow.Ending
+		stopped bool
+	)
 	defer func() {
-		sub.reportUndelivered(sub.turns.index, reapChild(s.children, runID, sub), undeliveredWorkflowReason(ending))
+		sub.reportUndelivered(sub.turns.index, reapChild(s.children, runID, sub),
+			undeliveredWorkflowReason(ending, stopped))
 		_ = sub.Close()
 	}()
 
@@ -289,7 +293,11 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	// Addressable and stoppable while it runs, as a sub_agent child is (ADR 0063, ADR 0086 D4): a
 	// human's stop of one item ends that child as stopped, and the Runner restarts it on resume —
 	// so fold is off: nothing of a stopped item is kept.
-	res, stopped, _, runErr := runChild(ctx, childRun{registry: s.children, runID: runID, sub: sub})
+	var (
+		res    domain.StepResult
+		runErr error
+	)
+	res, stopped, _, runErr = runChild(ctx, childRun{registry: s.children, runID: runID, sub: sub})
 	outcome = sub.workflowOutcome(res, runErr, stopped)
 	outcome.Transcript = sub.conv.Messages()
 	ending = outcome.Ending
@@ -517,14 +525,19 @@ func workflowPhaseBody(callID string, outcome workflow.Outcome, err error) domai
 }
 
 // undeliveredWorkflowReason is why a message queued for an item child never landed, by how the
-// child ended; a child that never ran reads as faulted.
-func undeliveredWorkflowReason(ending workflow.Ending) domain.UndeliveredReason {
-	switch ending {
-	case workflow.EndCompleted:
+// child ended — the delegation rule (undeliveredReason, ADR 0088 D2): a child a stop cut short
+// while it ran (runChild's stopped verdict: the human's stop of the one item or the cancel of the
+// whole Turn) reads as stopped, one that ended stopped without that verdict as cancelled, and a
+// child that never ran as faulted.
+func undeliveredWorkflowReason(ending workflow.Ending, stopped bool) domain.UndeliveredReason {
+	switch {
+	case stopped:
+		return domain.UndeliveredStopped
+	case ending == workflow.EndCompleted:
 		return domain.UndeliveredCompleted
-	case workflow.EndCapped:
+	case ending == workflow.EndCapped:
 		return domain.UndeliveredCapped
-	case workflow.EndStopped:
+	case ending == workflow.EndStopped:
 		return domain.UndeliveredCancelled
 	default:
 		return domain.UndeliveredFaulted

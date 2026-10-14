@@ -221,7 +221,10 @@ NOTES (2026-10-14): the new test runs the script stage in auto mode with a fake 
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestBackground|Rerun' ./internal/agent/`
 **Commit:** `refactor(agent): name the re-run predicate for re-runnable work`
 
-## 11. A human stop of a workflow item reports undelivered messages as stopped
+## 11. A human stop of a workflow item reports undelivered messages as stopped — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): consequential edit — docs/manual/headless.md: made necessary by the reason mapping change (its `child_interjection` row mapped `stopped` to a delegation stopped singly; the `stopped singly` grep is a floor)
+NOTES (2026-10-14): the glossary Interjection note never mapped `cancelled` to the whole Turn; it gains the two readings in parentheses so it states the delegation rule, as layout.md now does
 
 **What:**
 Recast at the regression check (2026-10-14).

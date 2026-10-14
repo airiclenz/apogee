@@ -803,8 +803,8 @@ func TestReadPromptOfARemovedSkillFolderNeverReadsTheWorkspace(t *testing.T) {
 
 // TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped pins the spawner on the child-run
 // lifecycle with fold off: a human's stop of a running item child ends it stopped with no fold
-// requested, and what was queued for it is reported undelivered once, as cancelled — the reason a
-// stopped item reads as (undeliveredWorkflowReason).
+// requested, and what was queued for it is reported undelivered once, as stopped — the reason a
+// delegation the human stopped reads as (undeliveredReason, undeliveredWorkflowReason).
 func TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped(t *testing.T) {
 	t.Parallel()
 
@@ -845,11 +845,41 @@ func TestWorkflowSpawn_AHumanStopOfAnItemChildEndsItStopped(t *testing.T) {
 		}
 	}
 	if len(undelivered) != 1 || undelivered[0].Input.Text != childRunNote ||
-		undelivered[0].Reason != domain.UndeliveredCancelled {
-		t.Errorf("undelivered reports = %+v, want the one queued message, reason cancelled", undelivered)
+		undelivered[0].Reason != domain.UndeliveredStopped {
+		t.Errorf("undelivered reports = %+v, want the one queued message, reason stopped", undelivered)
 	}
 	if _, ok := a.children.lookup(runID); ok {
 		t.Error("the stopped item's child is still addressable")
+	}
+}
+
+// TestUndeliveredWorkflowReason pins why an item child's leftover messages never landed, by how the
+// child ended — the delegation rule (undeliveredReason): a child a stop cut short while it ran reads
+// as stopped, one that ended stopped without that verdict (workflowOutcome's cancelled-status case)
+// as cancelled, and every other ending as itself.
+func TestUndeliveredWorkflowReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		ending  workflow.Ending
+		stopped bool
+		want    domain.UndeliveredReason
+	}{
+		{"a stop cut the running child short", workflow.EndStopped, true, domain.UndeliveredStopped},
+		{"ended stopped without the stop verdict", workflow.EndStopped, false, domain.UndeliveredCancelled},
+		{"completed", workflow.EndCompleted, false, domain.UndeliveredCompleted},
+		{"capped", workflow.EndCapped, false, domain.UndeliveredCapped},
+		{"faulted", workflow.EndFaulted, false, domain.UndeliveredFaulted},
+		{"never ran", "", false, domain.UndeliveredFaulted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := undeliveredWorkflowReason(tt.ending, tt.stopped); got != tt.want {
+				t.Errorf("undeliveredWorkflowReason(%q, %v) = %q, want %q", tt.ending, tt.stopped, got, tt.want)
+			}
+		})
 	}
 }
 

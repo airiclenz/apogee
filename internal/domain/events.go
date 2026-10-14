@@ -360,10 +360,13 @@ const (
 	// UndeliveredFaulted is a child whose run failed before that boundary: a faulted Exchange, a
 	// Run error, or a recovered panic.
 	UndeliveredFaulted UndeliveredReason = "faulted"
-	// UndeliveredCancelled is a child whose run was cancelled before that boundary.
+	// UndeliveredCancelled is a child whose run ended cancelled before that boundary without a
+	// stop finding it running — a delegation the cancel of the whole Turn reached before its child
+	// started (ADR 0088 D2).
 	UndeliveredCancelled UndeliveredReason = "cancelled"
-	// UndeliveredStopped is a child the human stopped singly (Agent.StopChild) before that
-	// boundary; the parent's Turn went on without it.
+	// UndeliveredStopped is a child a stop found running before that boundary: the human's stop of
+	// that one child (Agent.StopChild), after which the parent's Turn went on without it, or the
+	// cancel of the whole Turn, which stops every running child the same way (ADR 0088 D2).
 	UndeliveredStopped UndeliveredReason = "stopped"
 	// UndeliveredRefused is a child still running that refused to commit the message into its
 	// Exchange at the boundary: the message and everything queued behind it never landed.

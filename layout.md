@@ -1480,9 +1480,11 @@ becomes the child's own `❯` block inside its run, at the boundary it actually 
 did not becomes a note at the top level, where the reader finds it on the way out, worded by why it
 did not land — `<name> finished before your message landed` (the child completed first),
 `<name> was capped before your message landed` (a bound cut the run off),
-`<name> was stopped by you before your message landed` (the human's `^x` did),
+`<name> was stopped by you before your message landed` (a stop found the child running — the human's
+`^x` of that one child, or the cancel of the whole Turn),
 `<name> failed before your message landed`,
-`<name> was cancelled before your message landed` (the whole Turn was), or `<name> could not take your message` (the
+`<name> was cancelled before your message landed` (the child ended cancelled without a stop finding
+it running), or `<name> could not take your message` (the
 child, still running, refused it at the boundary). A reason this build does not know, or a record
 written before the reason existed, reads as the first.
 
