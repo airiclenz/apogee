@@ -74,7 +74,10 @@ internal/tui/picker_test.go — TestPickerFilterMatchesTheJoinedRowCells, TestEv
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestPicker|TestListSurface|TestSessionBrowser' ./internal/tui/`
 **Commit:** `feat(tui): filter lists on what a row is named, not its live state`
 
-## 2. Keep the highlight on its row as the filter changes
+## 2. Keep the highlight on its row as the filter changes — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the shared helper is `pickerView.reseatPosition(underlying, held)` — stated over the view, returning a filtered position — so item 7's /settings list, whose selection indexes the full slice, maps it back through `offering`; `typeIntoOverlayFilter` reads the highlighted row via `offeringIndex` before the edit and re-seats after it.
+NOTES (2026-10-14): added `TestPickerFilterKeepsTheHighlightOnItsRow` (mode picker) and `TestSessionBrowserFilterKeepsTheHighlightOnItsSession` beyond the three named tests, to drive the re-seat through both panes' real key paths; all five new tests fail against the old clamp.
 
 **What:**
 **Goal:** in every `listSurface` pane, typing or trimming the filter leaves the highlight on the same underlying row while it still matches, else on the first match; an emptied filter leaves it on that row; ↑/↓ wrap over matches only.

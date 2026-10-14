@@ -38,8 +38,9 @@ import (
 //     third painted row" and "the third model advertised" are different rows, and taking the second
 //     would act on something the human never saw.
 //   - The selection is CLAMPED rather than trusted, on every key, because the rows underneath can
-//     have changed since the last one — and again after a key that moved the FILTER, because the
-//     rows it leaves standing can be fewer than the highlight was pointing at.
+//     have changed since the last one. A key that moved the FILTER RE-SEATS it instead: the
+//     highlight stays on the row it stood on while that row still matches, else takes the first
+//     match (pickerView.reseatPosition) — so typing never walks it off a row the human can still see.
 //   - It is MODAL. Every key it is offered is either one of its own or handed back once
 //     (listVerdict), and the pane swallows what neither of them wanted: no letter is a verb inside
 //     an open list, which is what makes every letter the filter's. A list with NO filter hands its
@@ -144,7 +145,8 @@ func (l listSurface) view(rows []popupRow, matched matchedText) pickerView {
 }
 
 // clampSelection keeps selected inside a row list that moved under the open overlay — a beat carrying
-// a shorter offering, a keystroke that narrowed the filter, a deleted session. n is the count the pane
+// a shorter offering, a deleted session. (A keystroke that edits the filter re-seats the highlight on
+// its row instead, pickerView.reseatPosition.) n is the count the pane
 // PAINTS (for a filtering list, its filtered view), so the highlight can never point past the last row
 // on the screen. An empty list pins the selection at zero (the pane paints no highlight for it —
 // highlight).
@@ -283,9 +285,9 @@ func (l *listCursor) wheel(msg tea.MouseWheelMsg, n int) {
 //
 // The typing keys are asked LAST, of what the cursor handed back, which is what keeps the two
 // contracts one contract: a key the cursor claims means the same thing in every list of the package,
-// and only what no list claims can be a letter of the filter. Both clamps of a keypress — the
-// cursor's, and the one typeIntoOverlayFilter makes against the rows the edited filter leaves —
-// read the SAME rows the caller composed for this keypress.
+// and only what no list claims can be a letter of the filter. Both seatings of a keypress — the
+// cursor's clamp, and the re-seat typeIntoOverlayFilter makes against the rows the edited filter
+// leaves — read the SAME rows the caller composed for this keypress.
 //
 // There is no activation key, deliberately (ratified 2026-08-06): the overlay is modal, so no letter
 // is a verb inside it and every one of them can be the filter's. That is also why esc CLOSES with a
@@ -310,10 +312,11 @@ func (m Model) listKey(
 	return listUnclaimed, nil
 }
 
-// typeIntoOverlayFilter hands one keystroke to a filtering overlay's filter field and re-clamps the
-// highlight to the rows the field leaves standing, returning whatever Cmd the widget asked for. It is
-// the door BOTH overlays that filter type through, so the two answer "what does backspace do to a
-// filter" with the same field rather than each trimming a rune off a string of its own.
+// typeIntoOverlayFilter hands one keystroke to a filtering overlay's filter field and re-seats the
+// highlight on the rows the field leaves standing (pickerView.reseatPosition), returning whatever Cmd
+// the widget asked for. It is the door BOTH overlays that filter type through, so the two answer
+// "what does backspace do to a filter" — and "where does the highlight go when it does" — with the
+// same field and the same rule rather than each keeping a string and a clamp of its own.
 //
 // Only the two keys the surface routes here reach it: a printable keypress and backspace, both
 // landing at the end of the value where the caret stands. Everything else is swallowed whole by the
@@ -331,8 +334,12 @@ func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows [
 	// The Cmd is handed back rather than dropped, as the /settings buffer hands its own back
 	// (settingsBufferKey): a single-line field asks for none today, and swallowing one silently is how
 	// that stops being true unnoticed.
+	//
+	// The highlighted ROW is read before the edit, not its position: the edit moves every position
+	// under it, and the row is what the human is looking at.
+	underlying, held := l.view(rows, matched).offeringIndex(l.selected)
 	cmd := l.filter.edit(func(f *lineEditor) tea.Cmd { return f.editKey(msg) })
-	l.clampSelection(len(l.view(rows, matched).rows))
+	l.selected = l.view(rows, matched).reseatPosition(underlying, held)
 	return cmd
 }
 
@@ -356,6 +363,30 @@ func (v pickerView) offeringIndex(selected int) (int, bool) {
 		return 0, false
 	}
 	return v.offering[selected], true
+}
+
+// reseatPosition is where the highlight stands in this view after the filter changed under it — the
+// ONE answer every filtering list gives (ADR 0053, 2026-10-14 amendment): on the row it stood on
+// before the edit while that row still matches, else on the first match. underlying is that row's
+// place in the FULL list (offeringIndex, read against the view the edit replaced), and held is
+// offeringIndex's ok — false when the old view showed nothing to stand on, so the first match takes
+// the highlight.
+//
+// It is stated over the view rather than over a pane's cursor so that a list whose selection indexes
+// its full rows instead (the /settings key list) re-seats by the same rule: it takes the position
+// back to the full list through offering. An emptied filter needs no case of its own — the identity
+// view carries every row, so the highlight stays on the row it was on. An empty view answers 0, the
+// position clampSelection pins an empty list at.
+func (v pickerView) reseatPosition(underlying int, held bool) int {
+	if !held {
+		return 0
+	}
+	for pos, at := range v.offering {
+		if at == underlying {
+			return pos
+		}
+	}
+	return 0
 }
 
 // filterPopupRows is the filter itself: the rows that survive it, and where each of them sat in the

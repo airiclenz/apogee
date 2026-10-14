@@ -2184,6 +2184,43 @@ func TestPickerFilterNarrowingClampsTheSelection(t *testing.T) {
 	}
 }
 
+// Typing into the picker's filter keeps the highlight on the rung it stood on, and trimming the
+// filter back to nothing leaves it there — the shared surface's re-seat, taken through the picker's
+// real key path rather than a clamp that would keep the position and drop the row.
+func TestPickerFilterKeepsTheHighlightOnItsRow(t *testing.T) {
+	t.Parallel()
+	m, _ := openModePicker(t, domain.ModePlan)
+	m = step(t, m, keyDown())
+	m = step(t, m, keyDown())
+	highlighted := func(m Model) int {
+		at, ok := m.pickerFilteredView().offeringIndex(m.picker.selected)
+		if !ok {
+			return -1
+		}
+		return at
+	}
+	if got := highlighted(m); got != 2 {
+		t.Fatalf("precondition: highlight on rung %d, want the third (allow-edits)", got)
+	}
+
+	for _, r := range "allow" {
+		m = step(t, m, keyRune(r))
+	}
+	if got := highlighted(m); got != 2 {
+		t.Errorf("after %q the highlight is on rung %d, want it to stay on allow-edits (2)", "allow", got)
+	}
+
+	for range "allow" {
+		m = step(t, m, keyBackspace())
+	}
+	if m.picker.filter.value() != "" {
+		t.Fatalf("filter = %q, want it trimmed empty", m.picker.filter.value())
+	}
+	if got := highlighted(m); got != 2 {
+		t.Errorf("with the filter emptied the highlight is on rung %d, want it left on allow-edits (2)", got)
+	}
+}
+
 // A filter matching nothing keeps the pane open with no rows and no highlight, and ⏎ takes nothing —
 // a visible filter over an empty list already says why, and backspace is the way back.
 func TestPickerFilterWithNoMatchesTakesNothing(t *testing.T) {

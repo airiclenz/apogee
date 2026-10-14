@@ -149,9 +149,9 @@ func TestListSurfaceEnterOverAnEmptyListAcceptsNothing(t *testing.T) {
 	}
 }
 
-// A printable key extends the filter and the highlight is re-clamped to the rows the new filter
-// leaves standing — the second clamp of the keypress, and the one that keeps the selection from
-// pointing past the end of a list that just got shorter under it.
+// A printable key extends the filter and the highlight is re-seated on the rows the new filter
+// leaves standing — on its own row while that row matches, else on the first match — which is what
+// keeps the selection from pointing past the end of a list that just got shorter under it.
 func TestListSurfaceTypingNarrowsTheListAndReclampsTheHighlight(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
@@ -168,7 +168,7 @@ func TestListSurfaceTypingNarrowsTheListAndReclampsTheHighlight(t *testing.T) {
 		t.Fatalf("precondition: %q leaves %d rows, want all three", "a", got)
 	}
 
-	// "al" leaves "alpha" alone, so the highlight has to come back from row 2 to row 0.
+	// "al" leaves "alpha" alone: "gamma" no longer matches, so the highlight falls to the first match.
 	if got := pressList(m, &l, keyRune('l'), rows, listWrapsAround); got != listSwallowed {
 		t.Fatalf("verdict = %v, want a printable key to be typed", got)
 	}
@@ -176,16 +176,109 @@ func TestListSurfaceTypingNarrowsTheListAndReclampsTheHighlight(t *testing.T) {
 		t.Fatalf("precondition: %q leaves %d rows, want one", "al", got)
 	}
 	if l.selected != 0 {
-		t.Errorf("selected = %d, want 0 — the highlight is clamped into the narrowed list", l.selected)
+		t.Errorf("selected = %d, want 0 — the highlight falls to the first match of the narrowed list", l.selected)
 	}
 
-	// Backspace is the undo: the wider list comes back and the highlight stays where the clamp left it.
+	// Backspace is the undo: the wider list comes back and the highlight stays on "alpha", the row the
+	// narrower filter left it on.
 	if got := pressList(m, &l, keyBackspace(), rows, listWrapsAround); got != listSwallowed {
 		t.Fatalf("verdict = %v, want backspace to edit the filter", got)
 	}
 	if l.filter.value() != "a" || l.selected != 0 {
 		t.Errorf("filter = %q, selected = %d, want %q with the highlight left alone",
 			l.filter.value(), l.selected, "a")
+	}
+}
+
+// highlightedLabel is the label of the row the surface's highlight stands on in rows, or "" where it
+// stands on nothing — the row the human sees marked, read the way an accept resolves it.
+func highlightedLabel(l listSurface, rows []popupRow) string {
+	at, ok := l.view(rows, matchLeadCell).offeringIndex(l.selected)
+	if !ok {
+		return ""
+	}
+	return rows[at][0]
+}
+
+// Editing the filter keeps the highlight on the ROW it stood on, not on the position: a filter that
+// drops a row ABOVE the highlight moves every position under it, and a clamp that kept the number
+// would slide the highlight onto the next row down — one the human never chose.
+func TestListSurfaceHighlightStaysOnItsRowWhileItMatches(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	rows := listTestRows("apple", "banana", "cherry", "date")
+	l := listSurface{listCursor: listCursor{selected: 2}} // "cherry"
+
+	// "e" drops "banana" above the highlight: "cherry" is now the second painted row, not the third.
+	pressList(m, &l, keyRune('e'), rows, listWrapsAround)
+	if got := len(l.view(rows, matchLeadCell).rows); got != 3 {
+		t.Fatalf("precondition: %q leaves %d rows, want apple, cherry and date", "e", got)
+	}
+	if got := highlightedLabel(l, rows); got != "cherry" {
+		t.Errorf("after %q the highlight is on %q, want it to stay on %q", "e", got, "cherry")
+	}
+
+	// "er" leaves "cherry" alone, and the highlight is still on it.
+	pressList(m, &l, keyRune('r'), rows, listWrapsAround)
+	if got := highlightedLabel(l, rows); got != "cherry" {
+		t.Errorf("after %q the highlight is on %q, want it to stay on %q", "er", got, "cherry")
+	}
+}
+
+// When the edited filter drops the highlighted row itself, the highlight takes the FIRST match —
+// not the row that slid into its old position — and a filter trimmed back from zero matches does the
+// same, since there was no row to stay on.
+func TestListSurfaceHighlightFallsToFirstMatch(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	rows := listTestRows("apple", "banana", "cherry", "date")
+	l := listSurface{listCursor: listCursor{selected: 2}} // "cherry"
+
+	pressList(m, &l, keyRune('a'), rows, listWrapsAround) // apple, banana, date: "cherry" is gone
+	if got := highlightedLabel(l, rows); got != "apple" {
+		t.Errorf("after %q the highlight is on %q, want the first match %q", "a", got, "apple")
+	}
+
+	pressList(m, &l, keyRune('z'), rows, listWrapsAround) // "az" matches nothing
+	if got := len(l.view(rows, matchLeadCell).rows); got != 0 {
+		t.Fatalf("precondition: %q leaves %d rows, want none", "az", got)
+	}
+	if l.selected != 0 {
+		t.Errorf("selected = %d over zero matches, want 0", l.selected)
+	}
+
+	pressList(m, &l, keyBackspace(), rows, listWrapsAround) // back to "a"
+	if got := highlightedLabel(l, rows); got != "apple" {
+		t.Errorf("trimmed back from zero matches, the highlight is on %q, want the first match %q", got, "apple")
+	}
+}
+
+// Trimming the filter to nothing leaves the highlight on the row it was on — the identity view
+// carries every row, so "stays on its row" needs no case of its own — and ↑/↓ under a filter wrap
+// over the MATCHES only, never onto a row the filter hides.
+func TestListSurfaceEmptiedFilterKeepsTheRow(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	rows := listTestRows("apple", "banana", "cherry", "date")
+	l := listSurface{}
+
+	pressList(m, &l, keyRune('e'), rows, listWrapsAround) // apple, cherry, date
+	pressList(m, &l, keyUp(), rows, listWrapsAround)
+	if got := highlightedLabel(l, rows); got != "date" {
+		t.Fatalf("↑ from the first match lands on %q, want the wrap to the last match %q", got, "date")
+	}
+	pressList(m, &l, keyDown(), rows, listWrapsAround)
+	pressList(m, &l, keyDown(), rows, listWrapsAround)
+	if got := highlightedLabel(l, rows); got != "cherry" {
+		t.Fatalf("↓↓ from the last match lands on %q, want %q past the wrap", got, "cherry")
+	}
+
+	pressList(m, &l, keyBackspace(), rows, listWrapsAround)
+	if l.filter.value() != "" {
+		t.Fatalf("filter = %q, want it trimmed empty", l.filter.value())
+	}
+	if got := highlightedLabel(l, rows); got != "cherry" {
+		t.Errorf("with the filter emptied the highlight is on %q, want it left on %q", got, "cherry")
 	}
 }
 

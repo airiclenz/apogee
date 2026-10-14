@@ -1503,6 +1503,44 @@ func TestSessionBrowserLettersTypeRatherThanAct(t *testing.T) {
 	}
 }
 
+// The browser takes the surface's re-seat through its real key path: a filter that drops a row above
+// the highlight keeps the highlight on its session, and trimming the filter empty leaves the
+// highlight where it was.
+func TestSessionBrowserFilterKeepsTheHighlightOnItsSession(t *testing.T) {
+	t.Parallel()
+	m, _ := filterableBrowser(t)
+	highlighted := func(m Model) string {
+		rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
+		meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows)
+		if !ok {
+			return ""
+		}
+		return meta.ID
+	}
+
+	m = step(t, m, keyDown()) // "fix the parser", under "draft the release notes"
+	if got := highlighted(m); got != "parser" {
+		t.Fatalf("precondition: highlight on %q, want %q", got, "parser")
+	}
+
+	m = typeIntoBrowser(t, m, "fi") // drops the notes row above it; "audit the confinement" stays below
+	if got := len(m.sessionBrowserView().metas); got != 2 {
+		t.Fatalf("precondition: %q leaves %d rows, want the parser and audit sessions", "fi", got)
+	}
+	if got := highlighted(m); got != "parser" {
+		t.Errorf("after %q the highlight is on %q, want it to stay on %q", "fi", got, "parser")
+	}
+
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if m.sessionBrowser.filter.value() != "" {
+		t.Fatalf("filter = %q, want it trimmed empty", m.sessionBrowser.filter.value())
+	}
+	if got := highlighted(m); got != "parser" {
+		t.Errorf("with the filter emptied the highlight is on %q, want it left on %q", got, "parser")
+	}
+}
+
 // ⏎ resumes the session the pane SHOWED, not the same index into the unfiltered list — the whole
 // point of resolving every verb through one filtered view. Here the filter leaves the third-newest
 // record standing, so a highlight read against the store would have loaded the newest one.
