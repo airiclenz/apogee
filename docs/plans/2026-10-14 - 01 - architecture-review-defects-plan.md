@@ -161,7 +161,7 @@ NOTES (2026-10-14): consequential edit — docs/manual/configuration.md: made ne
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'OAuth' ./internal/mcp/`
 **Commit:** `fix(mcpauth): treat a client-id change as a missing login`
 
-## 7. Keep a received finish reason and usage when an OpenAI stream ends without `[DONE]`
+## 7. Keep a received finish reason and usage when an OpenAI stream ends without `[DONE]` — ✅ DONE (2026-10-14)
 
 **What:**
 **Goal:** an OpenAI-wire stream that ends at EOF without `[DONE]` finishes with the `finish_reason` and usage it already received (so `length` reaches the loop's FinishLength paths); a bare EOF with no finish reason still reads as `stop`.

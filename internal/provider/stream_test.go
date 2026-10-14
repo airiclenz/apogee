@@ -355,6 +355,33 @@ func TestStream_TerminatesWithoutDone(t *testing.T) {
 	}
 }
 
+// TestStream_KeepsFinishAndUsageWithoutDone pins that the EOF end of a stream carries what the
+// reply already said about itself, as the [DONE] end does: a truncation the server announced
+// (finish_reason "length") must reach the loop's FinishLength paths, and its usage the meter.
+func TestStream_KeepsFinishAndUsageWithoutDone(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"content":"x"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"length"}]}
+
+data: {"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}
+
+`
+	srv := sseServer(body)
+	defer srv.Close()
+
+	deltas := collectStream(NewClient(srv.URL, "m"), Request{})
+	last := deltas[len(deltas)-1]
+	if last.Kind != DeltaDone || last.FinishReason != "length" {
+		t.Fatalf("last delta = %+v, want Done(length)", last)
+	}
+	want := Usage{PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}
+	if last.Usage == nil || *last.Usage != want {
+		t.Errorf("Done usage = %+v, want %+v", last.Usage, want)
+	}
+}
+
 // streamKindsAndCalls splits a drained stream into the delta kinds in arrival order and the
 // tool calls those deltas carried, so a test can assert both the content and the ordering.
 func streamKindsAndCalls(t *testing.T, deltas []Delta) ([]DeltaKind, []ToolCall) {

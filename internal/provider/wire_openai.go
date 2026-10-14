@@ -297,6 +297,18 @@ func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment fu
 		yield(Delta{Kind: DeltaDone, FinishReason: reason, Usage: usage, Model: servedModel, MalformedChunks: malformed})
 	}
 
+	// finishPending ends the stream with what the reply already said about itself: the last
+	// finish_reason a choice carried (stop when none did) and the last usage chunk. Both
+	// ends of a stream take it, so a server that closes without [DONE] after sending
+	// finish_reason "length" still reaches the loop as a truncated reply, not a clean stop.
+	finishPending := func() {
+		reason := pendingFinish
+		if reason == "" {
+			reason = "stop"
+		}
+		finish(reason, pendingUsage)
+	}
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data: ") {
@@ -305,11 +317,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment fu
 		data := strings.TrimPrefix(line, "data: ")
 
 		if data == sseDone {
-			reason := pendingFinish
-			if reason == "" {
-				reason = "stop"
-			}
-			finish(reason, pendingUsage)
+			finishPending()
 			return
 		}
 
@@ -391,7 +399,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment fu
 	}
 
 	// The stream ended without an explicit [DONE] (server closed the connection): flush
-	// every accumulated tool call and emit a terminal Done, as the oracle does. The usage
-	// chunk is not carried on this path, as it never was.
-	finish("stop", nil)
+	// every accumulated tool call and emit a terminal Done, as the oracle does, carrying the
+	// finish reason and usage already received exactly as the [DONE] path does.
+	finishPending()
 }
