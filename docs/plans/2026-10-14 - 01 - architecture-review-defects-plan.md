@@ -192,7 +192,7 @@ NOTES (2026-10-14): the stage whose error ends the run keeps its own status.json
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestBackground' ./internal/agent/`
 **Commit:** `fix(workflow): record a failed phase when a stage errors`
 
-## 9. Stopping a queued workflow says it never started
+## 9. Stopping a queued workflow says it never started — ✅ DONE (2026-10-14)
 
 **What:**
 **Goal:** `StopWorkflow` on a queued (never-started) workflow answers the model that the run was queued, never started, and was dropped and marked stopped — never "its result reaches you when it ends"; a running workflow's stop answer is unchanged.

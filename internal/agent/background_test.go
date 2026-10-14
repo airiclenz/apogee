@@ -370,6 +370,48 @@ func TestBackground_FolderStampsFollowTheAgentClock(t *testing.T) {
 	}
 }
 
+func TestBackground_StoppingAQueuedWorkflowSaysItNeverStarted(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("first", "one"), sweepRecipe("second", "two"))
+	started := make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep one", signalThenWait(started, nil), cancelledScript()).
+		route("sweep two", nil, finishScript("f2", "two is fine"))
+	a := newBackgroundParent(t, cfg, up)
+
+	first := launchBackground(t, a, "first")
+	awaitClosed(t, started, "the first workflow's child")
+	second := launchBackground(t, a, "second")
+	if info := workflowInfo(t, a, second); !info.Queued {
+		t.Fatalf("second = %+v, want it queued behind the first", info)
+	}
+
+	queued := controlCall(a, `{"action":"stop","id":"`+second+`"}`)
+	if queued.IsError || !strings.Contains(queued.Content, second+" was queued and never started") ||
+		!strings.Contains(queued.Content, "marked stopped") || strings.Contains(queued.Content, "reaches you when it ends") {
+		t.Errorf("queued stop = %q (error %v), want it to say the run never started and was dropped", queued.Content, queued.IsError)
+	}
+	running := controlCall(a, `{"action":"stop","id":"`+first+`"}`)
+	if running.IsError || !strings.Contains(running.Content, first+" is stopping") ||
+		!strings.Contains(running.Content, "reaches you when it ends") {
+		t.Errorf("running stop = %q (error %v), want it to promise the result", running.Content, running.IsError)
+	}
+	a.background.waitAll()
+
+	for _, note := range a.background.heldNotes() {
+		if strings.Contains(note, second) || strings.Contains(note, "workflow second") {
+			t.Errorf("held note %q names the queued workflow, which never ran", note)
+		}
+	}
+	if n := up.askedCount("sweep two"); n != 0 {
+		t.Errorf("the stopped queued workflow's child ran %d times, want 0", n)
+	}
+	if phase := workflowInfo(t, a, second).Status.Phase; phase != workflow.PhaseStopped {
+		t.Errorf("the stopped queued workflow is %s, want stopped", phase)
+	}
+}
+
 func TestBackground_StopKeepsTheFinishedItems(t *testing.T) {
 	t.Parallel()
 

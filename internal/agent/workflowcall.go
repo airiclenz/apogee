@@ -957,6 +957,7 @@ const (
 	workflowControlUnknownFormat   = "workflow: no workflow %q in this session; the workflows are: %s"
 	workflowControlStopFailed      = "workflow could not stop %s: %v"
 	workflowControlStopped         = "workflow %s is stopping; its finished items are kept, and its result reaches you when it ends"
+	workflowControlStoppedQueued   = "workflow %s was queued and never started; it was dropped from the line and marked stopped, and no result follows"
 	workflowControlNoItemFormat    = "workflow: no running item %q; the running items are: %s"
 	workflowControlAmbiguousFormat = "workflow: %d running items are named %q; send item as one of their run ids: %s"
 	workflowControlGoneFormat      = "workflow: item %s ended before the message could be queued"
@@ -1038,13 +1039,19 @@ func (a *Agent) workflowStatusResult(callID, id string) domain.ToolResult {
 	return errorToolResult(callID, fmt.Sprintf(workflowControlUnknownFormat, id, workflowIDs(infos)))
 }
 
-// workflowStopResult stops the background workflow id, keeping its finished items (ADR 0088).
+// workflowStopResult stops the background workflow id, keeping its finished items (ADR 0088). A
+// running one's answer promises the result its end delivers; a queued one never started, so its
+// answer says it was dropped and that no result follows.
 func (a *Agent) workflowStopResult(callID, id string) domain.ToolResult {
 	if id == "" {
 		return errorToolResult(callID, workflowControlNeedsID)
 	}
-	if err := a.StopWorkflow(id); err != nil {
+	queued, err := a.stopWorkflow(id)
+	if err != nil {
 		return errorToolResult(callID, fmt.Sprintf(workflowControlStopFailed, id, err))
+	}
+	if queued {
+		return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStoppedQueued, id)}
 	}
 	return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStopped, id)}
 }

@@ -310,21 +310,30 @@ func (m *backgroundManager) storesElsewhere(root string) []keptRun {
 // and its folder marked stopped — unless the folder is already done, a queued RerunFailed's, which
 // stays done. An id this Agent neither runs nor queues is an error.
 func (a *Agent) StopWorkflow(id string) error {
+	_, err := a.stopWorkflow(id)
+	return err
+}
+
+// stopWorkflow is StopWorkflow, also reporting whether the workflow was still queued — dropped from
+// the line before it ever started, so no Runner ran it, no finish note is held for it and no
+// WorkflowPhaseEvent will report its end. The workflow tool's stop answer reads it to tell the model
+// so (workflowStopResult).
+func (a *Agent) stopWorkflow(id string) (queued bool, err error) {
 	m := &a.background
 	m.mu.Lock()
 	run := m.liveLocked(id)
 	if run == nil {
 		m.mu.Unlock()
-		return fmt.Errorf(unknownWorkflowFormat, id)
+		return false, fmt.Errorf(unknownWorkflowFormat, id)
 	}
 	if run.running {
 		run.cancel()
 		m.mu.Unlock()
-		return nil
+		return false, nil
 	}
 	m.dropLocked(run)
 	m.mu.Unlock()
-	return markStopped(run)
+	return true, markStopped(run)
 }
 
 // RerunFailed runs the finished workflow id again, in the background and in its own folder, as a new
