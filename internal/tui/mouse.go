@@ -1456,7 +1456,7 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
 	count := len(m.sessionBrowser.view(rows).rows)
 	if count == 0 {
-		return m, nil, true // the empty-workspace note is prose, not a choice: no row to name
+		return m, nil, true // the empty-workspace note, or the zero-match one, is prose, not a choice: no row to name
 	}
 	if m.clickArmed.holds(paneBrowser, row) {
 		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
@@ -1508,7 +1508,7 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 	}
 	count := m.pickerCount()
 	if count == 0 {
-		return m, nil, true // a filter matching nothing: the pane is up, and it offers no row
+		return m, nil, true // a filter matching nothing: its one row is the zero-match note, prose and not a choice
 	}
 	if m.clickArmed.holds(panePicker, row) {
 		if !m.picker.isArmed() {

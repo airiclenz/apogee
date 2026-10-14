@@ -141,7 +141,14 @@ internal/tui/popup_test.go — TestRenderPopupNarrowTitleKeepsTheElisionCount
 **Commit:** `feat(tui): state a list's filter on its title row`
 Depends on item 2.
 
-## 5. Zero-match row and filter-state legend
+## 5. Zero-match row and filter-state legend — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the surface composes both states — filterLegend(hint, filter, matches, rowSetEntries...) and listContent.statingFilter(filter, noun, matches, rowSetEntries...) in listsurface.go; each pane calls statingFilter last, so the paint and the height query read one composition. The pane states `matches` itself so the /sessions empty-workspace note wins over the zero-match row while the legend still goes to its zero-match form.
+NOTES (2026-10-14): the picker's per-kind noun is a new pickerOffering.noun field (filtering kinds only); /sessions uses sessionBrowserNoun, and its zero-match legend keeps sessionBrowserScopeEntry ("^a this/all"), now a named const that sessionBrowserHint is built from. fork.go needed no change — forkPickerHint is consumed unchanged through the offering table.
+NOTES (2026-10-14): consequential edit — internal/tui/mouse.go: made necessary by the zero-match row (two click-handler comments said a zero-match pane offers no row; the code already claims the click with no row taken).
+NOTES (2026-10-14): TestPickerPaintsTheFilterOnItsTitleRow and TestPickerShortWindowFilterCostsNoRow (item 4's) compared every line under the title, the legend included; they now compare the lines between title and legend and the first asserts the filtered legend — item 4's note that the rewrite "pins no hint" was wrong, so item 5's conditional regression guard applied.
+NOTES (2026-10-14): the click-on-note-row test is named TestPickerAndBrowserZeroMatchRowTakesNoClick so the item's Acceptance regex (TestPicker|…) runs it.
+NOTES (2026-10-14): during a /sessions rename with a filter set the legend still reads the filtered legend ("⌫ trim"), though backspace then edits the rename field — the browser has never changed its legend for rename/confirm, and the plan does not ask for it.
 
 **What:**
 **Goal:** a filtering picker or `/sessions` with no matches paints one faint, unselectable row `no <noun> matches "<filter>"` (filter escape-stripped); clicking it does nothing; the legend reads `type to filter · …` while the filter is empty, drops `type to filter` and inserts `⌫ trim` before the `esc` entry once set, and at zero matches keeps only `⌫ trim`, `/sessions`' `^a` entry and the `esc` entry. A workspace with no sessions keeps its own note.

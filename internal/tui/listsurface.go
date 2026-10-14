@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -59,6 +60,10 @@ import (
 //     a line of their own, so typing takes no row from the list and nothing moves on the first key
 //     (ADR 0053, 2026-10-14 amendment rule 5). A pane with a body of its own — the /settings
 //     sub-list's question — states it as body and takes the same budget→render call (renderList).
+//     So is what the filter's STATE does to the pane (listContent.statingFilter): the legend that
+//     swaps "type to filter" for "⌫ trim" once text is typed, and the one faint row that says a
+//     filter matched nothing (rules 7 and 8) — each pane names only its noun and the keys of its
+//     legend that change the row set.
 //
 // The surface decides nothing about what a key MEANS. Closing an overlay, resuming a session,
 // rebinding a model: those are the pane's own acts with the pane's own consequences, and a
@@ -510,6 +515,64 @@ func overlayFilterTail(filter copyOnWriteField, typing bool) string {
 	return pickerFilterLead + stripEscapes(filter.textWithCaret())
 }
 
+// The legend entries the filter's state adds and takes away (ADR 0053, 2026-10-14 amendment rule
+// 8). listFilterEntry is the one every filtering pane's empty-filter legend LEADS with (pickerHint's
+// reason: the letters announce themselves nowhere else); listTrimEntry is the one that replaces it
+// once text is typed, because with a filter set the key nobody can guess is the way BACK — backspace
+// trims, and esc still closes, filter and all. listCloseEntryLead is how the pane's own esc entry
+// begins, so the trim entry can stand just before it.
+const (
+	listFilterEntry    = "type to filter"
+	listTrimEntry      = "⌫ trim"
+	listCloseEntryLead = "esc "
+	listLegendJoin     = " · "
+)
+
+// listZeroMatchNote is the one row a filtering pane paints when its filter matched nothing (ADR
+// 0053, 2026-10-14 amendment rule 7): "no model matches "zzz"", with the pane's own noun and the
+// human's own keystrokes. An empty pane under a filter would say nothing about WHY it is empty; the
+// row says it in the pane's words, and the legend beside it (filterLegend) names the way back.
+const listZeroMatchNote = `no %s matches "%s"`
+
+// filterLegend is the legend a filtering pane shows for its filter's state, composed from the one it
+// shows with the filter EMPTY (hint) rather than kept per pane per state, so no pane can spell a
+// state the others do not:
+//
+//   - empty filter — hint as it is, "type to filter · …" leading;
+//   - text typed, rows matching — "type to filter" drops and "⌫ trim" stands just before the esc
+//     entry, every other entry kept in its place;
+//   - text typed, NOTHING matching — only "⌫ trim", the pane's rowSetEntries (the keys that change
+//     which rows there are to match — /sessions' "^a this/all") and the esc entry: a verb with no
+//     row to act on is a promise the pane cannot keep.
+//
+// An entry is matched whole, so a rowSetEntries value must be spelt exactly as the hint spells it.
+func filterLegend(hint, filter string, matches int, rowSetEntries ...string) string {
+	if filter == "" {
+		return hint
+	}
+	entries := strings.Split(hint, listLegendJoin)
+	kept := make([]string, 0, len(entries)+1)
+	trimmed := false
+	for _, entry := range entries {
+		if entry == listFilterEntry {
+			continue
+		}
+		isClose := strings.HasPrefix(entry, listCloseEntryLead)
+		if isClose && !trimmed {
+			kept = append(kept, listTrimEntry)
+			trimmed = true
+		}
+		if matches == 0 && !isClose && !containsString(rowSetEntries, entry) {
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if !trimmed {
+		kept = append(kept, listTrimEntry)
+	}
+	return strings.Join(kept, listLegendJoin)
+}
+
 // listContent is everything ONE list overlay says about itself that this module cannot know: its slot
 // in the frame's row allocation, what the box is called, the keys it spells, how many rows it likes
 // to show at once, and — composed for THIS frame — the rows it paints and which of them the highlight
@@ -538,6 +601,27 @@ type listContent struct {
 	rows      []popupRow
 	menuRows  bool
 	selected  int
+}
+
+// statingFilter folds a filtering pane's filter STATE into c, the last step of composing it: the
+// legend for that state (filterLegend, from the empty-filter legend c already carries) and — when the
+// filter matched nothing and the pane composed no row of its own — the one faint, unselectable
+// listZeroMatchNote row, with the highlight off it (−1, the prose convention). filter is the field's
+// value, escape-stripped here because the note is a row and a row reaches the popup module plain.
+//
+// matches is how many rows the filter LEFT, which the pane states rather than this method counting
+// c.rows: a pane whose own empty-state note stands where its rows would (the /sessions browser over a
+// workspace with no sessions) has painted rows and no matches. That note wins — it is a fact about
+// the store, and the more useful one — so the zero-match row joins only an empty row list, while the
+// legend still drops the verbs that would have nothing to act on.
+func (c listContent) statingFilter(filter, noun string, matches int, rowSetEntries ...string) listContent {
+	c.hint = filterLegend(c.hint, filter, matches, rowSetEntries...)
+	if filter == "" || matches > 0 || len(c.rows) > 0 {
+		return c
+	}
+	c.rows = singleCellRows([]string{fmt.Sprintf(listZeroMatchNote, noun, stripEscapes(filter))})
+	c.selected = -1
+	return c
 }
 
 // renderList paints an open list overlay through the shared popup module (renderPopup): a titled,

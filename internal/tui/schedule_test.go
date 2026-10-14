@@ -1220,17 +1220,30 @@ func TestScheduleModeGlossNamesTheScratchDir(t *testing.T) {
 }
 
 // The hint's verb follows the kind: nothing in /schedule's three pickers switches the session, and
-// the stop picker's ⏎ ends something.
+// the stop picker's ⏎ ends something. It keeps following it once a filter is typed — the filtered
+// legend (filterLegend) trades "type to filter" for "⌫ trim" and leaves the verb where it was.
 func TestPickerHintFollowsTheKind(t *testing.T) {
 	t.Parallel()
-	for kind, want := range map[pickerKind]string{
-		pickerModel:        pickerHint,
-		pickerCycle:        "type to filter · ↑/↓ select · ⏎ choose · esc close",
-		pickerScheduleMode: "type to filter · ↑/↓ select · ⏎ choose · esc close",
-		pickerScheduleStop: "type to filter · ↑/↓ select · ⏎ stop · esc close",
+	for kind, want := range map[pickerKind][2]string{
+		pickerModel: {pickerHint, "↑/↓ select · ⏎ switch · ⌫ trim · esc close"},
+		pickerCycle: {
+			"type to filter · ↑/↓ select · ⏎ choose · esc close",
+			"↑/↓ select · ⏎ choose · ⌫ trim · esc close",
+		},
+		pickerScheduleMode: {
+			"type to filter · ↑/↓ select · ⏎ choose · esc close",
+			"↑/↓ select · ⏎ choose · ⌫ trim · esc close",
+		},
+		pickerScheduleStop: {
+			"type to filter · ↑/↓ select · ⏎ stop · esc close",
+			"↑/↓ select · ⏎ stop · ⌫ trim · esc close",
+		},
 	} {
-		if got := pickerHintFor(kind); got != want {
-			t.Errorf("pickerHintFor(%v) = %q, want %q", kind, got, want)
+		if got := pickerHintFor(kind); got != want[0] {
+			t.Errorf("pickerHintFor(%v) = %q, want %q", kind, got, want[0])
+		}
+		if got := filterLegend(pickerHintFor(kind), "1h", 1); got != want[1] {
+			t.Errorf("filtered legend for %v = %q, want %q", kind, got, want[1])
 		}
 	}
 }

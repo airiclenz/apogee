@@ -1616,7 +1616,8 @@ func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
 }
 
 // A filter matching nothing keeps the pane open over no rows: ⏎ takes nothing, no verb has a target,
-// and backspace is the way back. The visible filter over an empty list is the whole message.
+// and backspace is the way back. The one row the pane paints says the filter matched nothing, and
+// neither ↓ nor ⏎ can make it a choice.
 func TestSessionBrowserZeroMatchesTakeNothing(t *testing.T) {
 	t.Parallel()
 	m, host := filterableBrowser(t)
@@ -1625,6 +1626,10 @@ func TestSessionBrowserZeroMatchesTakeNothing(t *testing.T) {
 	if got := len(m.sessionBrowserView().metas); got != 0 {
 		t.Fatalf("rows = %d, want a filter that matches nothing", got)
 	}
+	if c, _ := m.browserListContent(); len(c.rows) != 1 || c.selected != -1 {
+		t.Errorf("painted rows = %v selected %d, want the one zero-match row with no highlight", c.rows, c.selected)
+	}
+	m = step(t, m, keyDown())
 
 	m, cmd := stepCmd(t, m, keyEnter())
 	if cmd != nil {
@@ -1745,7 +1750,8 @@ func browserFilterTitle(filter string, typing bool) string {
 
 // The browser states its filter on its TITLE row, as the picker does, and only while there is one:
 // never a line of its own, so the row block's house blanks are the only blanks either way and the
-// surviving rows open right under the title's. The legend says the verbs are chords now.
+// surviving rows open right under the title's. The legend keeps the chords and trades "type to
+// filter" for "⌫ trim" (ADR 0053, 2026-10-14 amendment rule 8).
 func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
 	t.Parallel()
 	m, _ := filterableBrowser(t)
@@ -1768,8 +1774,12 @@ func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
 			t.Errorf("the pane still paints a row the filter pruned: %q", ln)
 		}
 	}
-	if got := lines[len(lines)-1]; got != sessionBrowserHint {
-		t.Errorf("hint line = %q, want %q", got, sessionBrowserHint)
+	want := "↑/↓ select · ⏎ resume · ^r rename · ^d delete · ^a this/all · ⌫ trim · esc close"
+	if got := lines[len(lines)-1]; got != want {
+		t.Errorf("hint line = %q, want %q", got, want)
+	}
+	if got := unfiltered[len(unfiltered)-1]; got != sessionBrowserHint {
+		t.Errorf("unfiltered hint line = %q, want %q", got, sessionBrowserHint)
 	}
 }
 
@@ -1804,9 +1814,11 @@ func TestSessionBrowserHidesTheFilterCaretWhileTypingGoesElsewhere(t *testing.T)
 	}
 }
 
-// The zero-match pane keeps saying what is being filtered — the title row with the filter on it, no
-// rows and no highlight — rather than falling back on the "no sessions in this workspace" note, which is a fact
-// about the STORE and would be a lie about a list the filter emptied.
+// The zero-match pane keeps saying what is being filtered — the title row with the filter on it, and
+// one unselectable `no session matches "zzz"` row with no highlight — rather than falling back on
+// the "no sessions in this workspace" note, which is a fact about the STORE and would be a lie about
+// a list the filter emptied. Its legend keeps the way back, the scope chord that widens what there is
+// to match, and the way out.
 func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
 	t.Parallel()
 	m, _ := filterableBrowser(t)
@@ -1827,8 +1839,39 @@ func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
 	if got, want := lines[0], browserFilterTitle("zzz", true); got != want {
 		t.Errorf("title row = %q, want %q — the pane still naming itself and its filter", got, want)
 	}
+	if len(lines) < 3 || lines[1] != "" || strings.TrimSpace(lines[2]) != `no session matches "zzz"` {
+		t.Errorf("the pane wants the zero-match row under the row block's blank: %q", lines)
+	}
+	if got, want := lines[len(lines)-1], "^a this/all · ⌫ trim · esc close"; got != want {
+		t.Errorf("hint line = %q, want %q", got, want)
+	}
 	if strings.Contains(m.renderSessionBrowser(), defaultGlyphs.user) {
 		t.Error("a pane with no rows drew a selection marker; there is nothing to highlight")
+	}
+}
+
+// A workspace with no sessions keeps its OWN note under a filter: it says why there is nothing to
+// match, which the zero-match row could not (ADR 0053, 2026-10-14 amendment rule 7). The legend is
+// still the zero-match one — there is no session for ⏎, ^r or ^d to act on, and ^a is what the note
+// itself points at.
+func TestSessionBrowserEmptyWorkspaceNoteWinsOverTheZeroMatchRow(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	storeMeta(host, "elsewhere", "another project entirely", "/ws/b", time.Now(), 0, nil)
+	m := openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, "/ws/a"))
+
+	m = typeIntoBrowser(t, m, "zzz")
+
+	lines := browserPaneLines(t, m)
+	pane := strings.Join(lines, "\n")
+	if !strings.Contains(pane, "no sessions in this workspace") {
+		t.Errorf("the empty-workspace note is gone under a filter: %q", lines)
+	}
+	if strings.Contains(pane, "matches") {
+		t.Errorf("the zero-match row joined the empty-workspace note: %q", lines)
+	}
+	if got, want := lines[len(lines)-1], "^a this/all · ⌫ trim · esc close"; got != want {
+		t.Errorf("hint line = %q, want %q", got, want)
 	}
 }
 

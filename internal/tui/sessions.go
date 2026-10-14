@@ -65,7 +65,20 @@ const maxSessionRows = 8
 // the letters announce themselves nowhere else the way "↑/↓" and "esc" do — and it is the legend
 // that has to say the three verbs are chords now, because the letters they used to be are what the
 // filter is typed with (ratified 2026-08-06).
-const sessionBrowserHint = "type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · ^a this/all · esc close"
+//
+// It is the EMPTY-filter legend; the filtered and zero-match ones are composed from it by the
+// surface (filterLegend, listsurface.go). sessionBrowserScopeEntry is the one verb a zero-match
+// legend keeps beside "⌫ trim" and "esc close", because widening the scope is the other way a filter
+// that matched nothing here can come to match something.
+const (
+	sessionBrowserScopeEntry = "^a this/all"
+	sessionBrowserHint       = "type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · " +
+		sessionBrowserScopeEntry + " · esc close"
+)
+
+// sessionBrowserNoun is what one of the browser's rows is — the word its zero-match row says
+// (listZeroMatchNote).
+const sessionBrowserNoun = "session"
 
 // sessionRenameCaret is the glyph the inline rename edit draws where the next keystroke lands. It is
 // this pane's own rather than the filter's on the title row (pickerFilterCursor): the two are different
@@ -758,7 +771,8 @@ func (m Model) renderSessionBrowserPlaced() (string, popupPlacement) {
 
 // browserListContent is everything the browser says about itself to the shared list surface — its
 // slot, its title, its legend, its taste in rows, and either the filtered session rows or the one
-// line of prose an empty workspace gets. ok is false with the overlay closed, which is what makes
+// line of prose an empty workspace gets — or, when the filter matched nothing, the zero-match row
+// and its legend (listContent.statingFilter). ok is false with the overlay closed, which is what makes
 // both renders above answer with nothing rather than with a pane.
 func (m Model) browserListContent() (listContent, bool) {
 	b := m.sessionBrowser
@@ -780,17 +794,20 @@ func (m Model) browserListContent() (listContent, bool) {
 		rowCap:    maxSessionRows,
 		selected:  -1, // no rows ⇒ no highlight (the popup module's own convention)
 	}
+	matches := 0
 	if len(b.visible(m.opts.Workspace)) == 0 {
 		// An empty WORKSPACE view is a fact about the store, and a row of prose is how the pane states
-		// it. A filter that matched nothing is not the same thing and gets no such row: the visible
-		// filter on the title row over an empty list already says why the pane is empty, and backspace is the way
-		// back (the picker's zero-match pane). Prose is not a choice, so the highlight stays off it.
+		// it. A filter that matched nothing is not the same thing and gets the surface's zero-match row
+		// instead — this note would be a lie about a list the filter emptied — but over an empty
+		// workspace this note wins: it says why there is nothing to match. Prose is not a choice, so the
+		// highlight stays off either.
 		c.rows = singleCellRows([]string{"no sessions in this workspace — press ^a to see all"})
 	} else {
 		c.rows = sessionRows(m.th, b, m.opts.Workspace, time.Now())
 		c.selected = b.highlight(len(c.rows))
+		matches = len(c.rows)
 	}
-	return c, true
+	return c.statingFilter(b.filter.value(), sessionBrowserNoun, matches, sessionBrowserScopeEntry), true
 }
 
 // sessionRows composes the row list the popup module paints: the filtered view's rows (browserView

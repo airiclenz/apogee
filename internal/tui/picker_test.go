@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -2220,8 +2221,8 @@ func TestPickerFilterKeepsTheHighlightOnItsRow(t *testing.T) {
 	}
 }
 
-// A filter matching nothing keeps the pane open with no rows and no highlight, and ⏎ takes nothing —
-// a visible filter over an empty list already says why, and backspace is the way back.
+// A filter matching nothing keeps the pane open with no rows to take and no highlight: the one row it
+// paints is the zero-match note, and neither ↓ nor ⏎ can make it a choice — backspace is the way back.
 func TestPickerFilterWithNoMatchesTakesNothing(t *testing.T) {
 	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
@@ -2237,6 +2238,10 @@ func TestPickerFilterWithNoMatchesTakesNothing(t *testing.T) {
 	if got := m.pickerRows(); len(got) != 0 {
 		t.Errorf("rows = %v, want none", got)
 	}
+	if c, _ := m.pickerListContent(); len(c.rows) != 1 || c.selected != -1 {
+		t.Errorf("painted rows = %v selected %d, want the one zero-match row with no highlight", c.rows, c.selected)
+	}
+	m = step(t, m, keyDown())
 	m, _ = stepCmd(t, m, keyEnter())
 	if !m.picker.open {
 		t.Error("⏎ over zero matches closed the pane; there was nothing to take")
@@ -2432,8 +2437,9 @@ func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
 	}
 }
 
-// Every hint variant LEADS with the filter segment: ↑/↓ and esc are legible from any list, but a
-// filter with no activation key is the one thing a legend has to say out loud.
+// Every hint variant LEADS with the filter segment while the filter is empty: ↑/↓ and esc are
+// legible from any list, but a filter with no activation key is the one thing a legend has to say
+// out loud — until something is typed, when the title row says it and the segment drops.
 func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 	t.Parallel()
 	kinds := []pickerKind{
@@ -2444,6 +2450,62 @@ func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 		if got := pickerHintFor(kind); !strings.HasPrefix(got, "type to filter · ") {
 			t.Errorf("pickerHintFor(%v) = %q, want the leading filter segment", kind, got)
 		}
+		if got := filterLegend(pickerHintFor(kind), "x", 1); strings.Contains(got, "type to filter") {
+			t.Errorf("filtered legend for %v = %q, want the segment gone once a filter is typed", kind, got)
+		}
+	}
+}
+
+// Every kind that filters states its filter's state in its legend and, at zero matches, in one row
+// of its own noun (ADR 0053, 2026-10-14 amendment rules 7 and 8): with the filter empty the legend
+// leads with "type to filter"; once text is typed that segment drops and "⌫ trim" stands before
+// "esc close"; at zero matches only those two stay, over the one unselectable `no <noun> matches`
+// row.
+func TestPickerLegendFollowsTheFilterState(t *testing.T) {
+	t.Parallel()
+	const zeroLegend = "⌫ trim · esc close"
+	cases := []struct {
+		kind     pickerKind
+		noun     string
+		filtered string
+	}{
+		{pickerModel, "model", "↑/↓ select · ⏎ switch · ⌫ trim · esc close"},
+		{pickerServer, "server", "↑/↓ select · ⏎ switch · ⌫ trim · esc close"},
+		{pickerLoad, "profile", "↑/↓ select · ⏎ switch · ⌫ trim · esc close"},
+		{pickerCycle, "cycle", "↑/↓ select · ⏎ choose · ⌫ trim · esc close"},
+		{pickerScheduleMode, "mode", "↑/↓ select · ⏎ choose · ⌫ trim · esc close"},
+		{pickerScheduleStop, "schedule", "↑/↓ select · ⏎ stop · ⌫ trim · esc close"},
+		{pickerEffort, "level", "↑/↓ select · ⏎ choose · ⌫ trim · esc close"},
+		{pickerSubAgentsServer, "server", "↑/↓ select · ⏎ choose · ⌫ trim · esc close"},
+		{pickerMode, "mode", "↑/↓ select · ⏎ choose · ⌫ trim · esc close"},
+		{pickerFork, "prompt", "↑/↓ select · ⏎ fork · ⌫ trim · esc close"},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%d-%s", tc.kind, tc.noun), func(t *testing.T) {
+			t.Parallel()
+			m := newTestModel(t)
+			m.picker = picker{open: true, kind: tc.kind}
+
+			empty, _ := m.pickerListContent()
+			filtered := filterLegend(pickerHintFor(tc.kind), "x", 1)
+			m.picker.filter = typedFilter(m, "qqq-none")
+			zero, _ := m.pickerListContent()
+
+			if empty.hint != pickerHintFor(tc.kind) || !strings.HasPrefix(empty.hint, "type to filter · ") {
+				t.Errorf("empty-filter legend = %q, want %q leading with the filter segment",
+					empty.hint, pickerHintFor(tc.kind))
+			}
+			if filtered != tc.filtered {
+				t.Errorf("filtered legend = %q, want %q", filtered, tc.filtered)
+			}
+			if zero.hint != zeroLegend {
+				t.Errorf("zero-match legend = %q, want %q", zero.hint, zeroLegend)
+			}
+			want := []popupRow{{`no ` + tc.noun + ` matches "qqq-none"`}}
+			if !reflect.DeepEqual(zero.rows, want) || zero.selected != -1 {
+				t.Errorf("zero-match rows = %q selected %d, want %q unselected", zero.rows, zero.selected, want)
+			}
+		})
 	}
 }
 
@@ -2580,9 +2642,14 @@ func TestPickerPaintsTheFilterOnItsTitleRow(t *testing.T) {
 	if got, want := keptLines[0], pickerFilterTitle(kept, "model"); got != want {
 		t.Errorf("title row = %q, want %q — the name, the label, the typed text and the caret", got, want)
 	}
-	if !reflect.DeepEqual(keptLines[1:], unfiltered[1:]) {
+	// Everything between the title and the legend stays put; the legend itself is the one line that
+	// answers to the filter's state (filterLegend).
+	if !reflect.DeepEqual(keptLines[1:len(keptLines)-1], unfiltered[1:len(unfiltered)-1]) {
 		t.Errorf("a filter every row survives moved the pane under its title:\n%q\nwant\n%q",
 			keptLines[1:], unfiltered[1:])
+	}
+	if got, want := keptLines[len(keptLines)-1], filterLegend(pickerHint, "model", 2); got != want {
+		t.Errorf("legend = %q, want the filtered legend %q", got, want)
 	}
 	lines := pickerPaneLines(t, narrowed)
 	if got, want := lines[0], pickerFilterTitle(narrowed, "third"); got != want {
@@ -2594,8 +2661,9 @@ func TestPickerPaintsTheFilterOnItsTitleRow(t *testing.T) {
 }
 
 // A filter matching nothing keeps the pane OPEN and keeps saying what is being filtered: the title
-// row with the filter on it, no rows and no highlight. The visible filter over an empty list is the whole message —
-// there is no "no matches" prose row, and backspace is the way back.
+// row with the filter on it, and in place of the rows one faint, unselectable row saying so in the
+// pane's own noun — `no model matches "zzz"` — with no highlight anywhere. The legend keeps only the
+// way back and the way out (ADR 0053, 2026-10-14 amendment rules 7 and 8).
 func TestPickerZeroMatchesPaintsTheFilterOverNoRows(t *testing.T) {
 	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
@@ -2611,8 +2679,11 @@ func TestPickerZeroMatchesPaintsTheFilterOverNoRows(t *testing.T) {
 	if got, want := lines[0], pickerFilterTitle(m, "zzz"); got != want {
 		t.Errorf("title row = %q, want %q — the pane still naming itself and its filter", got, want)
 	}
-	if got := lines[len(lines)-1]; got != pickerHint {
-		t.Errorf("hint line = %q, want %q", got, pickerHint)
+	if got, want := lines[len(lines)-1], "⌫ trim · esc close"; got != want {
+		t.Errorf("hint line = %q, want %q", got, want)
+	}
+	if len(lines) < 3 || lines[1] != "" || strings.TrimSpace(lines[2]) != `no model matches "zzz"` {
+		t.Errorf("the pane wants the zero-match row under the row block's blank: %q", lines)
 	}
 	for _, ln := range lines {
 		if strings.Contains(ln, "-model") {
@@ -2671,7 +2742,9 @@ func TestPickerShortWindowFilterCostsNoRow(t *testing.T) {
 	if got, want := after[0], pickerFilterTitle(m, "alpha"); got != want {
 		t.Errorf("title row = %q, want %q", got, want)
 	}
-	if !reflect.DeepEqual(after[1:], before[1:]) {
+	// The legend is the one line that answers to the filter's state (filterLegend); every line
+	// between it and the title is the rows the window seated before the first key.
+	if !reflect.DeepEqual(after[1:len(after)-1], before[1:len(before)-1]) {
 		t.Errorf("the filter took a row from the list:\n%q\nwant\n%q", after[1:], before[1:])
 	}
 	granted := m.frameRowPlan(m.openPanes().with(panePicker)).panes[panePicker]

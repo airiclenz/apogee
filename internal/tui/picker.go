@@ -169,6 +169,10 @@ const maxPickerRows = 8
 // letters announce themselves nowhere else the way "↑/↓" and "esc" do. What follows the segment is
 // what differs by kind. The kinds that ask rather than list (pickerOffering.filters) have no filter,
 // so their legends — keyMigrationHint, boundaryConfirmHint — carry no such segment.
+//
+// These are the EMPTY-filter legends. Once text is typed the segment gives way to "⌫ trim", and at
+// zero matches only the trim and the esc entry stay — composed from these by the surface
+// (filterLegend, listsurface.go), never spelt per kind.
 const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 
 // pickerChooseHint and pickerStopHint are the legends for the kinds whose ⏎ answers a question
@@ -217,6 +221,9 @@ type pickerOffering struct {
 	// prunes nothing worth pruning and can only hide an answer. Its keys are the cursor's contract
 	// alone (pickerKey), and its legend carries no "type to filter".
 	filters bool
+	// noun is what one of the kind's rows IS, in the singular — the word the zero-match row says
+	// ("no model matches "zzz"", listZeroMatchNote). Only a kind that filters has one.
+	noun string
 }
 
 // fixedTitle is the title func of a kind whose pane is named by a constant — most of them; the
@@ -248,6 +255,7 @@ func init() {
 			rows:    Model.modelRows,
 			matched: matchLeadCell,
 			filters: true,
+			noun:    "model",
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.bindPickedModel(m.offeredModels()[offered])
 			},
@@ -258,6 +266,7 @@ func init() {
 			rows:    Model.serverRows,
 			matched: matchLeadCell,
 			filters: true,
+			noun:    "server",
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				// The one kind whose list is asked per draw (ServerHost.List): the rows are re-read here
 				// rather than trusted from the frame that drew them, so a `servers:` block that shrank under
@@ -275,6 +284,7 @@ func init() {
 			rows:    Model.launchProfileRows,
 			matched: matchLabelAndGloss,
 			filters: true,
+			noun:    "profile",
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.startProfileLoad(m.picker.profiles[offered].Name)
 			},
@@ -285,6 +295,7 @@ func init() {
 			rows:    func(Model) []popupRow { return cycleRows() },
 			matched: matchLabelAndGloss,
 			filters: true,
+			noun:    "cycle",
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.acceptCycle(scheduleCycles[offered])
 			},
@@ -295,6 +306,7 @@ func init() {
 			rows:    func(m Model) []popupRow { return scheduleModeRows(m.opts.ScheduleAutoBlocked) },
 			matched: matchLabelAndGloss,
 			filters: true,
+			noun:    "mode",
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.acceptScheduleMode(scheduleModes[offered])
 			},
@@ -305,6 +317,7 @@ func init() {
 			rows:    func(m Model) []popupRow { return scheduleStopRows(m.liveSchedules()) },
 			matched: matchLabelAndGloss,
 			filters: true,
+			noun:    "schedule",
 			accept:  Model.acceptScheduleStop,
 		},
 		pickerKeyMigration: {
@@ -320,6 +333,7 @@ func init() {
 			rows:    func(m Model) []popupRow { return effortRows(m.effortSupport()) },
 			matched: matchLabelAndGloss,
 			filters: true,
+			noun:    "level",
 			accept:  Model.acceptEffort,
 		},
 		pickerSubAgentsServer: {
@@ -328,6 +342,7 @@ func init() {
 			rows:    Model.subAgentsServerRows,
 			matched: matchLeadCell,
 			filters: true,
+			noun:    "server",
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				// Re-read for pickerServer's reason and with the same answer: the targets are asked per
 				// draw, so a `servers:` block that shrank under the open overlay costs the accept and nothing
@@ -358,6 +373,7 @@ func init() {
 			rows:    func(m Model) []popupRow { return modeRows(m.th) },
 			matched: matchLabelAndGloss,
 			filters: true,
+			noun:    "mode",
 			accept:  Model.acceptMode,
 		},
 		pickerFork: {
@@ -366,6 +382,7 @@ func init() {
 			rows:    func(m Model) []popupRow { return forkRows(m.transcript.forkPoints()) },
 			matched: matchCells(1), // the prompt's text, never its ordinal
 			filters: true,
+			noun:    "prompt",
 			accept:  Model.acceptFork,
 		},
 		pickerWorkflowBoundary: {
@@ -1406,7 +1423,8 @@ func (m Model) renderPickerPlaced() (string, popupPlacement) {
 
 // pickerListContent is everything the picker says about itself to the shared list surface — its
 // slot, its name with the filter riding it, its legend, its taste in rows, the FILTERED rows and
-// which of them the highlight is on. Typing reaches the filter in every state the open picker has,
+// which of them the highlight is on, with the legend and the zero-match row the filter's state
+// calls for (listContent.statingFilter). Typing reaches the filter in every state the open picker has,
 // so the caret always shows. ok is false with the overlay closed, which is what makes both renders above answer with
 // nothing rather than with a pane.
 func (m Model) pickerListContent() (listContent, bool) {
@@ -1414,7 +1432,7 @@ func (m Model) pickerListContent() (listContent, bool) {
 		return listContent{}, false
 	}
 	rows := m.pickerRows()
-	return listContent{
+	c := listContent{
 		pane:      panePicker,
 		title:     m.pickerTitle(),
 		titleTail: overlayFilterTail(m.picker.filter, true),
@@ -1422,7 +1440,8 @@ func (m Model) pickerListContent() (listContent, bool) {
 		rowCap:    maxPickerRows,
 		rows:      rows,
 		selected:  m.picker.highlight(len(rows)),
-	}, true
+	}
+	return c.statingFilter(m.picker.filter.value(), pickerOfferings[m.picker.kind].noun, len(rows)), true
 }
 
 // pickerTitle names what is being switched — the open kind's [pickerOfferings] title. For the

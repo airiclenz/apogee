@@ -5375,6 +5375,53 @@ func TestPickerClickTakesTheFilteredRow(t *testing.T) {
 	}
 }
 
+// The zero-match row is prose, not a choice (ADR 0053, 2026-10-14 amendment rule 7): two clicks on
+// it — the gesture that takes a row — take nothing, arm nothing and leave the pane up, in the picker
+// and in the /sessions browser alike.
+func TestPickerAndBrowserZeroMatchRowTakesNoClick(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		open func(t *testing.T) Model
+		note string
+		pane framePane
+		up   func(Model) bool
+	}{
+		{"picker", func(t *testing.T) Model {
+			t.Helper()
+			return pickerPaneModel(t, pickerCycle)
+		}, `no cycle matches "zzz"`, panePicker, func(m Model) bool { return m.picker.open && m.picker.kind == pickerCycle }},
+		{"sessions", func(t *testing.T) Model {
+			t.Helper()
+			return browserPaneModel(t, 12)
+		}, `no session matches "zzz"`, paneBrowser, func(m Model) bool { return m.sessionBrowser.open }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := tc.open(t)
+			for _, r := range "zzz" {
+				m = step(t, m, keyRune(r))
+			}
+			x, y := frameCell(t, m, tc.note)
+
+			m, first := stepCmd(t, m, leftClick(x, y))
+			armed := m.clickArmed
+			m, second := stepCmd(t, m, leftClick(x, y))
+
+			if first != nil || second != nil {
+				t.Error("a click on the zero-match row dispatched a Cmd; there is no row to take")
+			}
+			if armed.ok && armed.pane == tc.pane {
+				t.Errorf("the first click armed %+v; prose is not a row to arm", armed)
+			}
+			if !tc.up(m) {
+				t.Fatal("two clicks on the zero-match row closed or advanced the pane")
+			}
+		})
+	}
+}
+
 // The /sessions browser answers the same two clicks, and the second one is acceptBrowser — the very
 // call ⏎ makes (sessions.go), whose loadSession Cmd has to survive the click or the pane closes over
 // a session that never loads.
