@@ -229,6 +229,58 @@ func TestProjectRuleAdoptionReadsWhatTheFileProposes(t *testing.T) {
 	}
 }
 
+// An adoption answers the file as it stands, not as it was offered: a proposed rule an edit took out
+// of the Project config while the pane waited is refused by name and stays unanswered, and a rule
+// the file still holds, answered in the same breath, is adopted all the same.
+func TestProjectRuleAdoptRefusesARuleTheFileNoLongerHolds(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	const keptText = "make lint"
+	kept := apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: keptText, Layer: apogee.AllowRuleProject}
+	writeProjectAllow(t, w.roots.project, projectRuleCommand, keptText)
+	proposed, err := host.ProposedRules()
+	if err != nil {
+		t.Fatalf("ProposedRules: %v", err)
+	}
+	if want := []apogee.AllowRule{echoRule, kept}; !reflect.DeepEqual(proposed, want) {
+		t.Fatalf("ProposedRules = %+v, want %+v", proposed, want)
+	}
+	writeProjectAllow(t, w.roots.project, keptText)
+
+	err = host.AdoptRules(proposed)
+
+	if err == nil || !strings.Contains(err.Error(), "no longer holds the terminal rule `"+projectRuleCommand+"`") {
+		t.Errorf("AdoptRules after the rule left the file = %v, want the refusal naming it", err)
+	}
+	assertRuleRecord(t, w, false, adoption.Proposed)
+	if got := recordedAnswers(t, w.roots.config, w.roots.project, keptText); got[0] != adoption.Adopted {
+		t.Errorf("the rule the file still holds is recorded %q, want %q", got[0], adoption.Adopted)
+	}
+}
+
+// A global config that no longer resolves cannot stop an adoption the Project config backs: the
+// re-check reads the project file alone, so the yes is recorded, and only the settling that would
+// install it reports the broken global file.
+func TestProjectRuleAdoptRecordsAHeldRuleWhenTheGlobalConfigDoesNotResolve(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	writeProjectAllow(t, w.roots.project, projectRuleCommand)
+	if err := os.WriteFile(w.configPath(), []byte("model: [unclosed\n"), 0o600); err != nil {
+		t.Fatalf("break the global config: %v", err)
+	}
+
+	err := host.AdoptRules([]apogee.AllowRule{echoRule})
+
+	if err == nil || !strings.Contains(err.Error(), "the answer is saved") {
+		t.Errorf("AdoptRules over a broken global config = %v, want the settling's error", err)
+	}
+	assertRuleRecord(t, w, true, adoption.Adopted)
+}
+
 // A global rule is the human's own line, live as written: no act here answers for it — adoption is a
 // project rule's question — and nothing is written when one is handed over.
 func TestProjectRuleActsRefuseAGlobalRule(t *testing.T) {

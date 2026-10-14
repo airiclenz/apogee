@@ -23,7 +23,9 @@ import (
 // question each, answered from a shell — after a pull, before a session, or beside a running one,
 // which picks the answer up live through its adoption-store watcher. Nothing here grants anything
 // the file does not already state: an answer pins the exact text the file holds now, as the pane's
-// does, and a teammate's later edit to that text is proposed afresh.
+// does, a yes is re-checked against the file the moment it is given — a rule edited out while the
+// question waited is refused, not adopted — and a teammate's later edit to that text is proposed
+// afresh.
 
 // projectAdoptDeps is what `apogee project adopt` takes from its host rather than deciding for
 // itself: the terminal it asks through and whether stdin is one. The zero value is the production
@@ -99,11 +101,14 @@ func projectAdoptCommand(deps projectAdoptDeps) *cobra.Command {
 }
 
 // projectAdoptTarget is what one `apogee project adopt` asks about: the Project config's path, the
-// rules it proposes, and the record their answers go into.
+// rules it proposes, the record their answers go into, and the Project root and global config path
+// a yes re-reads the file through (projectRulesHeld).
 type projectAdoptTarget struct {
-	path     string
-	proposed []config.AllowRule
-	store    *adoption.Store
+	path        string
+	proposed    []config.AllowRule
+	store       *adoption.Store
+	projectRoot string
+	globalPath  string
 }
 
 // adoptProjectRules is the verb: resolve the config the way a session does, report a Project root
@@ -156,7 +161,13 @@ func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAd
 	if err != nil {
 		return projectAdoptTarget{}, err
 	}
-	return projectAdoptTarget{path: path, proposed: opts.AllowRules.Proposed, store: store}, nil
+	return projectAdoptTarget{
+		path:        path,
+		proposed:    opts.AllowRules.Proposed,
+		store:       store,
+		projectRoot: roots.project,
+		globalPath:  config.FilePath(roots.config),
+	}, nil
 }
 
 // projectAnswer is one reply to a rule's question.
@@ -184,42 +195,74 @@ func parseProjectAnswer(reply string) projectAnswer {
 }
 
 // askProjectRules asks about each proposed rule in file order and records each answer before the
-// next question, so a run ended part-way keeps what was already answered. An unreadable reply ends
-// the questions there, leaving the rest proposed.
+// next question, so a run ended part-way keeps what was already answered. A yes re-reads the
+// Project config first: a rule it no longer holds is refused by name, nothing is recorded for it,
+// and the questions go on. An unreadable reply ends the questions there, leaving the rest proposed.
 func askProjectRules(ctx context.Context, terminal loginTerminal, target projectAdoptTarget) error {
 	out := terminal.out
 	_, _ = fmt.Fprintf(out, "%s proposes %s:\n", target.path, countSummaryOf(len(target.proposed)))
-	var adopted, rejected int
+	var tally projectAnswerTally
 	for _, rule := range target.proposed {
 		_, _ = fmt.Fprintf(out, "  %s `%s` — adopt? [y]es / [n]ot now / [r]eject: ", rule.Kind, rule.Text)
 		reply, err := readAnswer(ctx, terminal)
 		if err != nil {
 			_, _ = fmt.Fprintln(out)
-			reportProjectAnswers(out, adopted, rejected, len(target.proposed))
+			tally.report(out, len(target.proposed))
 			return fmt.Errorf("apogee project adopt: no answer was read, so the rest stay proposed: %w", err)
 		}
 		entry := adoption.Entry{Kind: string(rule.Kind), Text: rule.Text}
 		switch parseProjectAnswer(reply) {
 		case answerAdopt:
-			if err := target.store.Adopt(entry); err != nil {
+			if err := adoptHeldRule(out, target, entry, &tally); err != nil {
 				return err
 			}
-			adopted++
 		case answerReject:
 			if err := target.store.Reject(entry); err != nil {
 				return err
 			}
-			rejected++
+			tally.rejected++
 		}
 	}
-	reportProjectAnswers(out, adopted, rejected, len(target.proposed))
+	tally.report(out, len(target.proposed))
 	return nil
 }
 
-// reportProjectAnswers closes the questions with what they did; every rule not adopted or rejected
-// — answered "not now", or never reached — is still proposed.
-func reportProjectAnswers(out io.Writer, adopted, rejected, asked int) {
-	_, _ = fmt.Fprintf(out, "Adopted %d, rejected %d, left %d proposed.\n", adopted, rejected, asked-adopted-rejected)
+// adoptHeldRule is a yes to entry: adopted when the Project config still holds its exact text, and
+// otherwise refused on out by name with nothing recorded.
+//
+// Errors: a Project config that cannot be re-read, and the store's.
+func adoptHeldRule(out io.Writer, target projectAdoptTarget, entry adoption.Entry, tally *projectAnswerTally) error {
+	held, err := projectRulesHeld(target.globalPath, target.projectRoot)
+	if err != nil {
+		return err
+	}
+	if !held[adoption.Fingerprint(entry)] {
+		_, _ = fmt.Fprintf(out, "  %s no longer holds `%s`, so it was not adopted.\n", target.path, entry.Text)
+		tally.gone++
+		return nil
+	}
+	if err := target.store.Adopt(entry); err != nil {
+		return err
+	}
+	tally.adopted++
+	return nil
+}
+
+// projectAnswerTally counts what the answers did: rules adopted, rules rejected, and rules a yes
+// found gone from the Project config.
+type projectAnswerTally struct {
+	adopted, rejected, gone int
+}
+
+// report closes the questions with what they did; every rule of the asked not adopted, rejected or
+// gone — answered "not now", or never reached — is still proposed.
+func (t projectAnswerTally) report(out io.Writer, asked int) {
+	_, _ = fmt.Fprintf(out, "Adopted %d, rejected %d, left %d proposed", t.adopted, t.rejected,
+		asked-t.adopted-t.rejected-t.gone)
+	if t.gone > 0 {
+		_, _ = fmt.Fprintf(out, ", %d no longer in the file", t.gone)
+	}
+	_, _ = fmt.Fprintln(out, ".")
 }
 
 // countSummaryOf is "1 rule" or "N rules".

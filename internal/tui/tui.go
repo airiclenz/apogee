@@ -413,13 +413,15 @@ type ConfigHost interface {
 	// that one, exactly as it would have.
 	//
 	// The order is the safe one: the file first and the adoption after it, so a failure part-way
-	// leaves a rule PROPOSED — inert — and never an adoption of text no file holds. A rule the list
-	// already holds is adopted and nothing is written. The [SettingsHost.Write] contract otherwise:
+	// leaves a rule PROPOSED — inert — rather than an adoption the write did not back. A rule the
+	// list already holds is adopted and nothing is written. The [SettingsHost.Write] contract otherwise:
 	// synchronous on the keypress, and a failure is REPORTED.
 	AddProjectRule(kind domain.AllowRuleKind, text string) error
 
 	// AdoptRules records the project rules the human accepted — the adoption pane's "adopt" — and
-	// brings them into force. Only the record moves: the Project config already holds them.
+	// brings them into force. Only the record moves, and only for a rule the Project config still
+	// holds, word for word, at the moment of the answer: each one an edit took out since it was
+	// offered is REPORTED by name in the error, and nothing is recorded for it.
 	AdoptRules(rules []domain.AllowRule) error
 
 	// RejectRules records the project rules the human turned down; they stay inert, and are not

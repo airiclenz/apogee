@@ -378,7 +378,9 @@ proposed rules proposed.
 From a shell, `apogee project adopt` asks the same question for each proposed rule, in file order —
 `y` adopts, `r` rejects, `n` or `⏎` leaves it proposed — and records each answer as it is given,
 so you can answer after a pull, before a session, or beside a running one, which picks the answer
-up live. `--workspace` names the folder whose Project root to answer for (the current directory by
+up live. An adoption — here, in the adoption pane or in `/settings` — answers the file as it
+stands at that moment: a rule an edit or a pull took out while its question waited is refused by
+name, and nothing is recorded for it. `--workspace` names the folder whose Project root to answer for (the current directory by
 default). It asks only on a terminal: with nothing proposed it says so and exits, with stdin not a
 terminal it refuses rather than guessing, and a folder with no Project config to answer is refused
 by name.

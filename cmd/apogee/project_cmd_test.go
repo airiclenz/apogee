@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/muesli/cancelreader"
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee/internal/adoption"
@@ -127,6 +129,48 @@ func TestProjectCmdAdoptAnswersEachProposedRule(t *testing.T) {
 	if !strings.Contains(again, "`make lint`") || strings.Contains(again, "`go test`") ||
 		strings.Contains(again, "`npm run build`") {
 		t.Errorf("the second run asked about other than the one proposed rule:\n%s", again)
+	}
+}
+
+// A yes answers the file as it stands when the yes is typed: a rule a teammate's pull took out while
+// its question waited is refused by name and nothing is recorded for it, the next rule is still
+// asked about and adopted, and the closing line counts the rule that was gone.
+func TestProjectCmdAdoptRefusesARuleTheFileNoLongerHolds(t *testing.T) {
+	t.Parallel()
+	home, workspace := projectAdoptRoots(t)
+	rules := []string{"go test", "make lint"}
+	writeProjectAllow(t, workspace, rules...)
+	input := &scriptedInput{scripts: [][]string{{"y"}, {"y"}}}
+	var once sync.Once
+	cmd := newProjectCommandWith(projectAdoptDeps{
+		terminal: loginTerminal{openInput: func() (cancelreader.CancelReader, error) {
+			once.Do(func() { writeProjectAllow(t, workspace, rules[1]) })
+			return input.open()
+		}},
+		isTerminal: func() bool { return true },
+	})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"adopt", "--config", home, "--workspace", workspace})
+
+	err := cmd.ExecuteContext(context.Background())
+
+	if err != nil {
+		t.Fatalf("project adopt: %v\n%s", err, out.String())
+	}
+	want := []adoption.State{adoption.Proposed, adoption.Adopted}
+	got := recordedAnswers(t, home, workspace, rules...)
+	for i := range rules {
+		if got[i] != want[i] {
+			t.Errorf("rule %q is recorded %q, want %q", rules[i], got[i], want[i])
+		}
+	}
+	if !strings.Contains(out.String(), "no longer holds `go test`, so it was not adopted.") {
+		t.Errorf("the refusal does not name the rule the file lost:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Adopted 1, rejected 0, left 0 proposed, 1 no longer in the file.") {
+		t.Errorf("the closing line does not count the rule that was gone:\n%s", out.String())
 	}
 }
 

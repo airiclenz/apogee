@@ -86,7 +86,12 @@ NOTES (2026-10-14): the denial label goes after the shell-hint and fail-fast sto
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'Scratch' ./cmd/apogee/`
 **Commit:** `fix(wire): bind the scratch mount before building the boot tools`
 
-## 3. Adopt only rule text the Project config still holds
+## 3. Adopt only rule text the Project config still holds — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the held texts are read with `config.LoadLayeredConfig("", projectRoot, …)` (project layer only, per the Regression guard) and unioned over Rules ∪ Proposed ∪ Rejected filtered to the project layer; a Project config that is the global file itself (os.SameFile against the global path) holds no project rule, as the layered load treats it.
+NOTES (2026-10-14): a partial batch through `AdoptRules` adopts the held rules and returns one joined refusal per gone rule (plus the settling's error, if any); the CLI prints a per-rule refusal line, continues with the next question, exits 0, and its closing line gains ", N no longer in the file" only when N > 0 (`reportProjectAnswers` became `projectAnswerTally.report`).
+NOTES (2026-10-14): `answerProjectRules`' entry loop was extracted into `projectRuleEntries` so the new `adoptProjectRules` shares it; RejectRules is unchanged (the Goal covers adoption only).
+NOTES (2026-10-14): consequential edit — docs/manual/configuration.md: made necessary by the adoption re-check (user-facing refusal of a rule the file no longer holds); one sentence in the `apogee project adopt` paragraph.
 
 **What:**
 Recast at the regression check (2026-10-14).

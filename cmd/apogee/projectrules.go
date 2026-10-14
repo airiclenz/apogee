@@ -31,10 +31,14 @@ import (
 // that moved them is installed the same way (followReloadedAllowRules), so a hand-edited `allow:`
 // or an `apogee project adopt` in another terminal applies without a restart.
 //
-// The order of the two writes is always the safe one. An adoption is recorded only after the file
-// holds the rule, and dropped before the file loses it, so a failure part-way leaves a rule
-// PROPOSED — inert — and never a recorded yes to text no file holds: such a yes would answer the
-// first teammate's commit that happened to spell it.
+// A recorded yes to text no file holds would answer the first teammate's commit that happened to
+// spell it, so none is written. The order of the two writes keeps apogee's own acts from leaving
+// one: an adoption is recorded only after the file holds the rule, and dropped before the file
+// loses it, so a failure part-way leaves a rule PROPOSED — inert. An adoption of a rule the file
+// already held is re-checked against the file at the moment it is answered (projectRulesHeld): an
+// edit that took the rule out since it was offered refuses the yes, and nothing is recorded for it.
+// The yes is pinned to the exact text it answered (adoption.Fingerprint), so an edit that lands
+// after the re-check proposes its rule afresh rather than inheriting the answer.
 
 // AddProjectRule is the "Always in this project…" answer: the rule into the Project config, its
 // exact text adopted, the effective rules settled.
@@ -42,9 +46,10 @@ func (h configHost) AddProjectRule(kind apogee.AllowRuleKind, text string) error
 	return h.w.addProjectRule(kind, text)
 }
 
-// AdoptRules records the human's adoption of project rules the file already holds, and settles.
+// AdoptRules records the human's adoption of project rules, and settles. A rule the Project config
+// no longer holds is refused by name and nothing is recorded for it; the rest are adopted.
 func (h configHost) AdoptRules(rules []apogee.AllowRule) error {
-	return h.w.answerProjectRules(rules, (*adoption.Store).Adopt)
+	return h.w.adoptProjectRules(rules)
 }
 
 // RejectRules records the human's rejection of project rules, and settles: a rule that was in force
@@ -97,18 +102,103 @@ func (w *rootWiring) addProjectRule(kind apogee.AllowRuleKind, text string) erro
 // Errors: a refusal naming a rule that is not a project rule, the store's errors, and the
 // settling's.
 func (w *rootWiring) answerProjectRules(rules []apogee.AllowRule, answer adoptionAnswer) error {
-	entries := make([]adoption.Entry, 0, len(rules))
-	for _, r := range rules {
-		e, err := projectRuleEntry(r)
-		if err != nil {
-			return err
-		}
-		entries = append(entries, e)
+	entries, err := projectRuleEntries(rules)
+	if err != nil {
+		return err
 	}
 	if err := w.recordAnswer(entries, answer); err != nil {
 		return err
 	}
 	return w.settleAllowRules()
+}
+
+// adoptProjectRules adopts the rules — every one a project rule — the Project config holds at this
+// moment, and settles. Each rule it no longer holds is refused by name, and nothing is recorded
+// for it; the rest are adopted all the same.
+//
+// Errors: a refusal naming a rule that is not a project rule (nothing is recorded then), a
+// Project config that cannot be re-read (nothing is recorded then), one refusal per rule the file
+// no longer holds, the store's errors, and the settling's.
+func (w *rootWiring) adoptProjectRules(rules []apogee.AllowRule) error {
+	entries, err := projectRuleEntries(rules)
+	if err != nil {
+		return err
+	}
+	held, err := projectRulesHeld(w.configPath(), w.roots.project)
+	if err != nil {
+		return err
+	}
+	entries, refused := keepHeldEntries(entries, held)
+	if len(entries) == 0 {
+		return refused
+	}
+	if err := w.recordAnswer(entries, (*adoption.Store).Adopt); err != nil {
+		return errors.Join(refused, err)
+	}
+	return errors.Join(refused, w.settleAllowRules())
+}
+
+// projectRulesHeld is the fingerprint (adoption.Fingerprint) of every rule the Project config of
+// projectRoot holds now — in force, proposed or rejected alike — read from the file the moment it
+// is asked. Only the project file is read: a global config that does not resolve must not stop an
+// answer about a project rule, and no global rule is one. A Project config that is the global file
+// at globalPath itself holds no project rule, as the layered load treats it.
+//
+// Errors: a project layer that resolves to options the loader refuses.
+func projectRulesHeld(globalPath, projectRoot string) (map[string]bool, error) {
+	path := config.ProjectFilePath(projectRoot)
+	if path == "" || isSameFile(path, globalPath) {
+		return nil, nil
+	}
+	resolved, err := config.LoadLayeredConfig("", projectRoot, os.ReadFile, func(string) {})
+	if err != nil {
+		return nil, fmt.Errorf("apogee: the project config could not be re-read: %w", err)
+	}
+	set := resolved.AllowRules
+	held := make(map[string]bool, len(set.Rules)+len(set.Proposed)+len(set.Rejected))
+	for _, list := range [][]config.AllowRule{set.Rules, set.Proposed, set.Rejected} {
+		for _, r := range list {
+			if r.Layer == config.SourceProject {
+				held[adoption.Fingerprint(adoption.Entry{Kind: string(r.Kind), Text: r.Text})] = true
+			}
+		}
+	}
+	return held, nil
+}
+
+// isSameFile reports whether the paths name one existing file; a path that cannot be read names
+// none.
+func isSameFile(path, other string) bool {
+	if other == "" {
+		return false
+	}
+	a, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	b, err := os.Stat(other)
+	return err == nil && os.SameFile(a, b)
+}
+
+// keepHeldEntries is entries cut to those whose fingerprint held holds, in order, with one refusal
+// joined per entry cut — nil when none was.
+func keepHeldEntries(entries []adoption.Entry, held map[string]bool) ([]adoption.Entry, error) {
+	kept := make([]adoption.Entry, 0, len(entries))
+	var refused []error
+	for _, e := range entries {
+		if held[adoption.Fingerprint(e)] {
+			kept = append(kept, e)
+			continue
+		}
+		refused = append(refused, notHeldError(e))
+	}
+	return kept, errors.Join(refused...)
+}
+
+// notHeldError is the refusal of an adoption whose exact text the Project config no longer holds.
+func notHeldError(e adoption.Entry) error {
+	return fmt.Errorf("apogee: the project config no longer holds the %s rule `%s`, so it was not adopted",
+		e.Kind, e.Text)
 }
 
 // removeProjectRule forgets the rule's answer, then takes it out of the Project config, and
@@ -244,6 +334,21 @@ func (w *rootWiring) layeredOptions() (config.Options, error) {
 // workspacesDir is where this run keeps each Project root's adoption record and the Project config
 // writer's lock: `~/.apogee/workspaces`.
 func (w *rootWiring) workspacesDir() string { return config.WorkspacesDir(w.roots.config) }
+
+// projectRuleEntries is the adoption entries the rules pin, in order.
+//
+// Errors: projectRuleEntry's, for the first rule that has one.
+func projectRuleEntries(rules []apogee.AllowRule) ([]adoption.Entry, error) {
+	entries := make([]adoption.Entry, 0, len(rules))
+	for _, r := range rules {
+		e, err := projectRuleEntry(r)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
 
 // projectRuleEntry is the adoption entry a project rule pins.
 //
