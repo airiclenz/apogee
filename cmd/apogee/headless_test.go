@@ -3214,6 +3214,7 @@ func TestHeadlessFormatJSONSuppressesTheNarration(t *testing.T) {
 				EventBase: domain.EventBase{Depth: 1, CallID: "call_2"},
 				Phase:     domain.SubAgentStarted,
 			})
+			sink.Emit(domain.RefClippedEvent{Ref: "@big.txt", Tokens: 32000, Absolute: true})
 		}}
 
 	out, errOut, err := headlessRun(t, stub, "--format", "json", "a prompt")
@@ -3226,14 +3227,14 @@ func TestHeadlessFormatJSONSuppressesTheNarration(t *testing.T) {
 		kind, _ := line["event"].(string)
 		kinds = append(kinds, kind)
 	}
-	for _, want := range []string{"tool_call", "tool_result", "sub_agent_phase"} {
+	for _, want := range []string{"tool_call", "tool_result", "sub_agent_phase", "ref_clipped"} {
 		if !slices.Contains(kinds, want) {
 			t.Fatalf("the stream carries no %s line, so stderr's silence proves nothing:\n%s", want, out)
 		}
 	}
 	for _, line := range strings.Split(errOut, "\n") {
 		if strings.HasPrefix(line, "→ ") || strings.HasPrefix(line, "← ") ||
-			strings.HasPrefix(line, "sub-agent ") {
+			strings.HasPrefix(line, "sub-agent ") || strings.Contains(line, "clipped to") {
 			t.Errorf("the narration was printed as well as streamed: %q\n%s", line, errOut)
 		}
 	}
@@ -3922,6 +3923,31 @@ func TestHeadlessPrintsTheMalformedChunksNotice(t *testing.T) {
 		t.Errorf("stderr carries no malformed-chunk notice reading %q:\n%s", want, errOut)
 	}
 	if strings.Contains(out, "malformed") {
+		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
+	}
+}
+
+// TestHeadlessPrintsTheRefClippedNotice pins the `--format text` line for a reference that entered
+// the conversation clipped to its bound: the event's own Notice sentence on STDERR, beside the
+// prune and malformed-chunk notices, and never on stdout, where a pipeline reads the answer. The
+// reference is the one the user wrote, so an escape sequence in it is stripped before it reaches
+// the terminal. Without the line an unattended run that read a reference only in part would look
+// as though it had read it whole.
+func TestHeadlessPrintsTheRefClippedNotice(t *testing.T) {
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.RefClippedEvent{Ref: "@big\x1b[31m.txt", Tokens: 32000, Absolute: true})
+	}}
+
+	out, errOut, err := headlessRun(t, stub, "explain this repo")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	const want = "@big.txt clipped to 32k tokens — read_file ranges for the rest"
+	if !slices.Contains(strings.Split(errOut, "\n"), want) {
+		t.Errorf("stderr carries no reference-clip notice reading %q:\n%q", want, errOut)
+	}
+	if strings.Contains(out, "clipped") {
 		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
 	}
 }

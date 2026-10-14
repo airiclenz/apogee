@@ -109,6 +109,10 @@ A delegation's own calls are not narrated — its `sub-agent` lines stand in for
 pruning pass mid-run prints `pruned N tool results (~T tokens)` in the same stream, at every
 depth, and a model reply that ended successfully but skipped stream chunks it could not decode
 prints `the reply dropped N malformed stream chunks — text may be missing`, at every depth too.
+An `@file` or attached skill that entered the conversation clipped to its bound prints
+`<ref> clipped to N tokens — read_file ranges for the rest` (or, when its share of the
+context window bound it, `<ref> clipped to N tokens (its share of the context window) —
+read_file ranges for the rest`) in the same stream.
 None of this is the run's outcome: the block described next is still composed after
 the run, from what it reported, in the wording and order it has always had.
 
@@ -201,8 +205,9 @@ thing happened:
 and is exactly the output described above, byte for byte. `--format json` replaces that stdout with
 the **Event lines** — the engine's own event stream rendered one JSON object per line, JSONL, no
 answer and no prose among them. stderr keeps every notice, warning and summary it prints under
-`text`, with one exception: the prune notice and the live narration go quiet, because the `prune`,
-`tool_call`, `tool_result` and `sub_agent_phase` lines on stdout already carry the same facts. The
+`text`, with one exception: the prune and reference-clip notices and the live narration go quiet,
+because the `prune`, `ref_clipped`, `tool_call`, `tool_result` and `sub_agent_phase` lines on
+stdout already carry the same facts. The
 contract is
 [ADR 0075](../../.capcom/knowledge/decisions/adr-0075.md).
 

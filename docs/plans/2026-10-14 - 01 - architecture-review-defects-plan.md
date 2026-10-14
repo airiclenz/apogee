@@ -317,7 +317,9 @@ NOTES (2026-10-14): the new test also `t.Chdir`s to an empty temp dir so no Proj
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'ProbeConfig' ./cmd/apogee/`
 **Commit:** `fix(probe): read the config home APOGEE_CONFIG names`
 
-## 17. Headless narrates `RefClippedEvent`
+## 17. Headless narrates `RefClippedEvent` — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the new test feeds a Ref carrying an escape sequence and pins it stripped, since the Ref is user-written text reaching the terminal.
 
 **What:**
 **Goal:** `apogee headless` prints a `RefClippedEvent`'s `Notice()` to stderr like the prune and malformed-chunks notices, silenced under `--format json`; `docs/manual/headless.md` lists it with them.
