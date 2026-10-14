@@ -101,3 +101,6 @@ title: "apogee's decision records: one Note per record, with each of its section
 - `adr-0097` — The TUI checks for a newer release and names the upgrade command
 - `adr-0098` — The repo owns its release pipeline: two committed skills write the notes, a Go maintainer program publishes
 - `adr-0099` — Double-press gestures disarm only on their reset tick
+- `adr-0100` — The global state home is one ~/.apogee dotdir on every OS
+- `adr-0101` — Regressions are never deferred
+- `adr-0102` — A plan owns an issue through the plan field, never a status

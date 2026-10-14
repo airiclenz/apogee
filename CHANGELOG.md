@@ -91,6 +91,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 - **The TUI `Model`'s size is pinned at 32 KiB by value.** `TestModelFitsTheStack` now fails once `unsafe.Sizeof(Model{})` passes a 32 KiB budget (it allowed up to the compiler's 128 KiB stack ceiling before), and `TestModelHoldsOneTextareaAndNoStyleByValue` walks the `Model`'s by-value type graph and fails on a second `textarea.Model` (only the chat input's may be held by value) or on any `lipgloss.Style` outside the transcript viewport and that one textarea. `internal/tui/doc.go` states both rules and names `copyOnWriteField` as the way to add a text field.
 
+- **The agent guide keeps only what every session needs.** `AGENTS.md` shrinks by a quarter. Three settled conventions it carried become decision records: the single `~/.apogee` home, never XDG (ADR 0100); regressions are never deferred (ADR 0101); and a plan owns an issue through the plan field, never a status (ADR 0102). The one-time clone setup (the global `capcom-log` merge driver, the `.githooks/` commit-msg hook and its trust caveat) moves to a new "Setting up a clone" section in `docs/manual/building.md`, along with why `go.mod` keeps its `retract` block. The test knobs, release channels and drift-test names it repeated now point at the manual.
+
 ## [0.25.2] — 2026-10-13
 
 - **A second `esc` or `⌃c` typed in time always acts.** The double-press stop and quit gestures measured their one-second window when the second press was handled, so a busy apogee that got to it late re-armed the gesture instead of cancelling the run or quitting. The window now closes only when the gesture's own disarm timer is handled, which always comes after a press typed before it fired (ADR 0099).

@@ -248,7 +248,7 @@ func (s readScope) extraRoots(input string) []string {
 // the extra roots happen to be — with ONE exception: a path lexically under a configured root
 // that does not exist yet (missingMountRoot) answers an error wrapping fs.ErrNotExist alone, so
 // each tool renders its own not-found message for a path its host announced, rather than a fence
-// the model would read as a refusal (the announced-path invariant, AGENTS.md).
+// the model would read as a refusal (the announced-path invariant, ADR 0101).
 func (s readScope) resolve(input string) (root, resolved string, err error) {
 	resolved, err = security.ResolveInRoot(input, s.root)
 	if err == nil {

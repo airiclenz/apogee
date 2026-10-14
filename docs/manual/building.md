@@ -56,7 +56,10 @@ No clone at all? `go install github.com/airiclenz/apogee/cmd/apogee@main` builds
 installs straight from the tip of `main` into your Go bin dir; `@latest` installs the
 current release, and `@<sha>` pins a commit. (The retired `v1.x` module versions that
 proxy.golang.org retains immutably are retracted in `go.mod`, so `@latest` no longer
-resolves to them.)
+resolves to them.) The `retract [v1.0.0, v1.8.0]` block was published in the
+self-retracting `v1.8.0` tag, whose only job is that retraction. Go reads a retraction from
+the `go.mod` of the *highest* version, so it could not ride a 0.x tag. Keep the block in
+`go.mod`, and never publish a version above v1.8.0 without it.
 
 **Versions and tags.** The top-level `VERSION` file is the single source of truth for the
 release version — one line, carrying the leading `v` (`vX.Y.Z`); the `dist` step strips
@@ -68,6 +71,36 @@ always a commit of its own and, at a release cut, the *last* one — the `CHANGE
 rollup lands first, so the tree the tag pins already contains it. CI creates the tag and
 nothing more: the GitHub Release on top of it, and every package channel after that, are
 published by `go run ./cmd/release publish` (see [Releasing](#releasing)).
+
+## Setting up a clone
+
+Two pieces of git setup are needed only by a clone you commit from, each done once.
+
+**The capcom merge driver.** Issues live as markdown files under `.capcom/issues/`, and
+`.gitattributes` hands `.capcom/issues/**/*.md` to capcom's `capcom-log` merge driver. Git
+runs a merge driver only once config defines it, so define it once per machine:
+
+```bash
+git config --global merge.capcom-log.name "capcom Log merge"
+git config --global merge.capcom-log.driver "capcom merge-driver %O %A %B %P %S %X %Y"
+```
+
+Always `--global`, never repo-local. `capcom init --merge-driver` prints these lines without
+the flag, but apogee's git tools refuse to run in a repository whose own config defines a
+`merge.*.driver` (`internal/gitexec`, `CommandConfigRefusal`).
+
+**The commit-msg hook.** Hooks live in the tracked `.githooks/` directory, not `.git/hooks/`.
+It holds one hook, `commit-msg`, which refuses any commit message carrying an AI attribution
+line (a `Co-Authored-By` naming an AI, a `Claude-Session:` line, a "Generated with Claude"
+footer). It is the backstop for the no-attribution rule, not the rule itself. Activate it with
+`git config core.hooksPath .githooks`; a fresh clone has not run that, so check
+`git config --get core.hooksPath` before relying on the hook. A clone still pointing at the old
+beads hook directory is repointed by the same command. Activating it is a trust decision: from
+then on every `git commit`, `checkout` and `push` runs this checkout's shell with your full user
+privileges, and apogee fences none of it (`SECURITY.md`, "What counts"). Activate it only in a
+checkout you trust, and in a clone of a fork or of a repository you do not control, read
+`.githooks/` first. A checkout may keep a byte-identical copy of `.githooks/commit-msg` at
+`.git/hooks/commit-msg` as a dormant fallback for when `core.hooksPath` is unset.
 
 ## Testing
 
