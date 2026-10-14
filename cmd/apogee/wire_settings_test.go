@@ -725,7 +725,7 @@ func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 // the session itself moves), so the pane's Description header is the single place the human is told.
 const startupOnlyContract = "takes effect at the next start."
 
-// The five START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
+// The START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
 // that must not refuse either. `ui.inspector` decides whether a wire observer is installed while
 // the provider client is constructed, `response-reserve` is read into the budget the session opens
 // with, `undo-snapshots` decides whether the session's undo store is opened while its id is minted,

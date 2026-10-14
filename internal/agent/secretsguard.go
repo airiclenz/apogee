@@ -177,7 +177,8 @@ func scanStagedSecrets(ctx context.Context, host gitexec.Host, root string, path
 			return nil, err
 		}
 	}
-	diff, err := shadow.git(ctx, "diff", "--cached", "--diff-filter=ACMR", "--no-textconv", "--no-ext-diff", "--no-color")
+	diffArgs := append([]string{"diff"}, gitexec.DiffHardeningArgs...)
+	diff, err := shadow.git(ctx, append(diffArgs, "--cached", "--diff-filter=ACMR", "--no-color")...)
 	if err != nil {
 		return nil, err
 	}

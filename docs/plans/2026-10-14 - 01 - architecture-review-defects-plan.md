@@ -376,7 +376,9 @@ cmd/apogee/wire_firing_test.go — TestFiringConfigLeavesTheDriverSeamsNil, firi
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 ./cmd/release/`
 **Commit:** `test(release): pin the publish steps to their actions`
 
-## 21. Tidy: shared diff hardening in secretsguard, stale test comment
+## 21. Tidy: shared diff hardening in secretsguard, stale test comment — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the hardening flags sit right after the `diff` verb, as `internal/tools/git.go`'s gitReadCall.argv places them; the argv carries the same flags as before, only reordered. No CHANGELOG entry, since the item changes no behaviour (an internal refactor and a test comment).
 
 **What:**
 **Goal:** `internal/agent/secretsguard.go` takes its diff-hardening flags from `gitexec.DiffHardeningArgs`; `TestApplySettingAcceptsTheStartupOnlyKeys`'s comment states no key count.
