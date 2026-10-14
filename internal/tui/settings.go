@@ -145,8 +145,18 @@ type settingsPane struct {
 	// cursor rather than a second surface, and NAMED rather than embedded, because a pane cannot embed
 	// two of anything and because the sub-list does not filter: a cursor is eight bytes where a
 	// filtering surface would have brought a whole text widget with it (ADR 0053 decision 9). The
-	// pane's one field ([lineEditor]) stays the one it already had.
-	sub     listCursor
+	// sub-list adds no field of its own: the pane's two (filter, editor) are the key list's.
+	sub listCursor
+	// filter is what the human has typed into the KEY list: the case-insensitive substring a row's
+	// key path or its section heading must carry for the row to show (settingsRowMatches, ADR 0053
+	// amend-1014). It narrows the list and never re-indexes it — selected still indexes the full row
+	// slice, so every step's target is re-derived exactly as it was, and the one read that turns the
+	// stored index into a row (settingsSelection) re-seats it into the filtered view. Behind a
+	// [copyOnWriteField] for editor's reason; its zero value is the empty, unbuilt field a closing
+	// whole-struct reset leaves, built on the first key that types into it (settingsTypeFilter). It
+	// survives every second step: a step claims its keys first, so nothing typed inside one reaches
+	// it, and no step's exit touches it.
+	filter  copyOnWriteField
 	editor  copyOnWriteField
 	sel     fieldSel
 	failure settingFailure
@@ -453,7 +463,7 @@ func (m *Model) settingsSourceOf(row SettingRow) SettingSource {
 // binary's).
 //
 // The provider is called HERE as well as at render, and deliberately: "is there anything to show"
-// is the one question the answer to which decides whether a modal that swallows every key goes up
+// is the one question the answer to which decides whether a modal that claims every key goes up
 // at all, and asking it at open is what keeps the human from having to press esc to escape an empty
 // pane.
 func (m Model) runSettingsCommand() (tea.Model, tea.Cmd) {
@@ -574,10 +584,12 @@ func init() {
 }
 
 // settingsKey routes a keypress while the pane is open (idle only, the verb's own policy): ↑/↓ move
-// the highlight, wrapping at both ends (the pickerKey idiom), ⏎ opens the selected row's edit idiom,
-// backspace arms its reset and esc closes. Every other key is SWALLOWED, because the pane is modal: a
-// keystroke that fell through to the input box would edit a draft the human cannot see behind a
-// full-height pane.
+// the highlight over the rows the filter leaves, wrapping at both ends (the pickerKey idiom), ⏎
+// opens the selected row's edit idiom, every printable key types into the filter (settingsTypeFilter),
+// backspace trims a set filter and arms the row's reset on an empty one, delete (⌦) arms the reset
+// with or without a filter, and esc closes — filter and all (ADR 0053 amend-1014). Every other key —
+// tab, a ctrl chord — is SWALLOWED, because the pane is modal: a keystroke that fell through to the
+// input box would edit a draft the human cannot see behind a full-height pane.
 //
 // The row count is re-derived and the selection re-clamped on every key rather than once at open,
 // the picker's posture: the provider answers from the binary's live resolution, so the list can
@@ -608,7 +620,12 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.settingsAbandonStep()
 	}
-	switch m.settings.key(msg, n, listWrapsAround) {
+	// The cursor walks the FILTERED view and lands back on the full slice, so ↑/↓ can only stop on a
+	// row the human can see and selected keeps the index every step's target is derived by.
+	view, cursor := m.settingsFilteredCursor(rows)
+	verdict := cursor.key(msg, len(view.offering), listWrapsAround)
+	m.settingsSeatFiltered(view, cursor)
+	switch verdict {
 	case listCloses:
 		// The overlay goes whole — highlight, step, buffer, last refusal — and the session's edit
 		// journal does NOT: it is on the Model, and the ` *` markers it carries describe a session that
@@ -621,14 +638,49 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil // an arrow the cursor spent, or a ⏎ over a list with no rows to open
 	case listUnclaimed:
 	}
-	// backspace is the one key of this pane that no list has — it UNSETS rather than edits — so it is
-	// answered here, out of what the shared contract found no use for. Everything else is swallowed:
-	// this is a full-height modal, and a key falling through it would land in a chat box the human
-	// cannot see (handleKey's own reason one surface down).
-	if msg.String() == "backspace" {
+	// What the shared contract found no use for is the filter's or the reset's. backspace is both: it
+	// trims a filter that holds text and, on an empty one, keeps the meaning it had before the pane
+	// filtered — it UNSETS the row. delete (⌦) arms the reset whatever the filter holds, so a filtered
+	// list keeps a key that resets. A key carrying Text is printable — a chord carries none
+	// (bubbletea's contract) — and types. Everything else is swallowed: this is a full-height modal,
+	// and a key falling through it would land in a chat box the human cannot see (handleKey's own
+	// reason one surface down).
+	switch {
+	case msg.String() == "delete":
 		return m.settingsArmReset(rows)
+	case msg.String() == "backspace" && m.settings.filter.value() == "":
+		return m.settingsArmReset(rows)
+	case msg.String() == "backspace" || msg.Text != "":
+		next, cmd := m.settingsTypeFilter(rows, func(f *lineEditor) tea.Cmd { return f.editKey(msg) })
+		return next, cmd
 	}
 	return m, nil
+}
+
+// settingsTypeFilter hands one edit to the key list's filter and re-seats the highlight by the one
+// rule every filtering list keeps (pickerView.reseatPosition, ADR 0053 amend-1014): on the row it
+// stood on while that row still matches, else on the first match — and, with nothing matching, back
+// at the top, so the first row that matches again takes it. It is [Model.typeIntoOverlayFilter] for
+// the one list whose selection indexes its FULL rows: the row is read before the edit, through
+// settingsSelection, and the re-seated position is taken back to the full slice through the view's
+// offering. change is the edit — a printable key or backspace (settingsKey).
+//
+// The field is built here, on the first edit that reaches it, with the glyph every filtering pane
+// draws (pickerFilterCursor) — the pane opens and closes as a whole-struct assignment, and a filter
+// nobody typed into holds nothing and prunes nothing.
+func (m Model) settingsTypeFilter(rows []SettingRow, change func(*lineEditor) tea.Cmd) (Model, tea.Cmd) {
+	if !m.settings.filter.isBuilt() {
+		m.settings.filter = newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, ""))
+	}
+	underlying := m.settingsSelection(rows)
+	cmd := m.settings.filter.edit(change)
+	view := m.settingsFilterView(rows)
+	at, ok := view.offeringIndex(view.reseatPosition(underlying, underlying >= 0))
+	if !ok {
+		at = 0
+	}
+	m.settings.selected = at
+	return m, cmd
 }
 
 // settingsDeleteSelection is the prompt box's selection delete (handleKey, model.go) in the pane's
@@ -736,7 +788,7 @@ func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 // rows is the list the keypress was clamped against, passed in rather than re-derived, so the row
 // acted on is the row the frame the human pressed ⏎ at was showing.
 func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
-	sel := m.settingsSelection(len(rows))
+	sel := m.settingsSelection(rows)
 	if sel < 0 {
 		return m, nil
 	}
@@ -1126,7 +1178,7 @@ func (m Model) settingsEnumTarget(rows []SettingRow) (SettingRow, bool) {
 	if m.settings.kind != settingsEnumList {
 		return SettingRow{}, false
 	}
-	sel := m.settingsSelection(len(rows))
+	sel := m.settingsSelection(rows)
 	if sel < 0 {
 		return SettingRow{}, false
 	}
@@ -1209,7 +1261,7 @@ func (m Model) settingsCurrentValue(row SettingRow) string {
 // starts from. It exists so the buffer and the reset ask the same question of the same clamp the enum
 // sub-list does, rather than each indexing the slice on its own arithmetic.
 func (m Model) settingsSelectedRow(rows []SettingRow) (SettingRow, bool) {
-	sel := m.settingsSelection(len(rows))
+	sel := m.settingsSelection(rows)
 	if sel < 0 {
 		return SettingRow{}, false
 	}
@@ -1302,13 +1354,74 @@ func settingsResetKind(row SettingRow) bool {
 	return row.Kind != SettingServer
 }
 
-// settingsSelection is which SETTING row is highlighted, clamped to a list of n rows: −1 when there
-// are none, which is renderPopup's own "no highlight" convention. It is this pane's naming of the one
-// clamp every list in the package answers through ([listCursor.highlight], listsurface.go), and the
-// one place the stored index is turned into an index anything may be read by — so a stale selection
-// cannot reach a slice, and it cannot be clamped one way here and another way in a sibling pane.
-func (m Model) settingsSelection(n int) int {
-	return m.settings.highlight(n)
+// settingsSelection is which SETTING row is highlighted, an index into rows: clamped to the list, then
+// re-seated into the rows the filter leaves — the stored row while it matches, else the first match
+// (pickerView.reseatPosition) — and −1 when no row shows, which is renderPopup's own "no highlight"
+// convention. It is this pane's naming of the one clamp every list in the package answers through
+// ([listCursor.highlight], listsurface.go), and the one place the stored index is turned into an
+// index anything may be read by — so a stale selection cannot reach a slice, and it cannot be clamped
+// one way here and another way in a sibling pane.
+//
+// The re-seat is HERE, not only where a key edits the filter, because every reader resolves through
+// this one read — each step's target, the legend, the description header, the painter, a click and
+// the armed reset — and the rows can move under a set filter: a rule removed under one leaves the
+// stored index on whatever row slid into its place, and no frame may then read a row the filter
+// hides.
+func (m Model) settingsSelection(rows []SettingRow) int {
+	sel := m.settings.highlight(len(rows))
+	if sel < 0 || m.settings.filter.value() == "" {
+		return sel
+	}
+	view := m.settingsFilterView(rows)
+	at, ok := view.offeringIndex(view.reseatPosition(sel, true))
+	if !ok {
+		return -1
+	}
+	return at
+}
+
+// settingsRowMatches reports whether one row survives filter: a case-insensitive substring of its
+// MATCHED TEXT, which for a /settings row is what it says it is — its key path, or the section
+// heading it sits under, so a heading match keeps its whole section (ADR 0053 amend-1014). Never its
+// value, its source or its note: those change under the open pane and name no key. The two are
+// matched apart rather than joined, so a filter never spans a path and the heading after it.
+func settingsRowMatches(row SettingRow, filter string) bool {
+	return rowMatchesFilter(popupRow{row.Path}, matchLeadCell, filter) ||
+		rowMatchesFilter(popupRow{row.Section}, matchLeadCell, filter)
+}
+
+// settingsFilterView is the key list's filtered view: for each row the filter leaves, its index in
+// rows, in order — an empty filter is the identity view. Only the view's offering is filled: the key
+// list paints its own display rows (settingsDisplayRows, which interleaves section headings), and
+// what this view is for is the arithmetic every filtering list shares — the re-seat, the walk and
+// the accept target (pickerView).
+func (m Model) settingsFilterView(rows []SettingRow) pickerView {
+	filter := m.settings.filter.value()
+	view := pickerView{offering: make([]int, 0, len(rows))}
+	for i, row := range rows {
+		if settingsRowMatches(row, filter) {
+			view.offering = append(view.offering, i)
+		}
+	}
+	return view
+}
+
+// settingsFilteredCursor is the key list's highlight restated as a cursor over its FILTERED view —
+// the position of the selected row among the rows the filter leaves — with that view beside it, so
+// the keys and the wheel walk only rows the human can see by the package's one cursor
+// ([listCursor.key], [listCursor.wheel]). settingsSeatFiltered takes the walked position back.
+func (m Model) settingsFilteredCursor(rows []SettingRow) (pickerView, listCursor) {
+	view := m.settingsFilterView(rows)
+	sel := m.settingsSelection(rows)
+	return view, listCursor{selected: view.reseatPosition(sel, sel >= 0)}
+}
+
+// settingsSeatFiltered stores a cursor walked over view back as the full-slice index the pane keeps,
+// and leaves the selection where it was when the view shows no row to stand on.
+func (m *Model) settingsSeatFiltered(view pickerView, cursor listCursor) {
+	if at, ok := view.offeringIndex(cursor.selected); ok {
+		m.settings.selected = at
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -1327,8 +1440,11 @@ type settingsDisplay struct {
 	selected int            // index into rows of the selected key row; −1 when nothing is highlighted
 }
 
-// settingsDisplayRows composes the FULL row list the pane paints: a blank spacer and a single-cell
-// header row wherever the section changes, then one four-cell row per key. Rows arrive in the
+// settingsDisplayRows composes the row list the pane paints: a blank spacer and a single-cell
+// header row wherever the section changes, then one four-cell row per key the filter leaves
+// (settingsRowMatches) — every key while it is empty. selected indexes rows, the full slice, and keys
+// carries full-slice indices too, so a click maps back to the row it names whatever the filter
+// hides. Rows arrive in the
 // provider's order, which is the config template's order (ADR 0035), so the pane reads in the order
 // the file does and a key added to the registry appears where it was added.
 //
@@ -1358,7 +1474,14 @@ func (m Model) settingsDisplayRows(rows []SettingRow, selected int) settingsDisp
 	}
 	display := -1
 	section := ""
+	filter := m.settings.filter.value()
 	for i, row := range rows {
+		// A row the filter does not leave is not painted, and its heading only with a row that is:
+		// the heading change is read across the rows SHOWN, so a section with no match draws neither
+		// its label nor the spacer above it.
+		if !settingsRowMatches(row, filter) {
+			continue
+		}
 		if row.Section != "" && row.Section != section {
 			if len(out) > 0 {
 				add(popupRow{""}, popupRowPlain, -1) // the spacer, blank in every column
@@ -1726,7 +1849,7 @@ func settingsSourceLabel(row SettingRow) string {
 // With no row selected there is no header at all: the pane is then showing its own empty-list row
 // (noSettingsRow), and a label over nothing would describe nothing.
 func (m Model) settingsBody(rows []SettingRow) string {
-	sel := m.settingsSelection(len(rows))
+	sel := m.settingsSelection(rows)
 	if sel < 0 {
 		return ""
 	}
@@ -1816,7 +1939,7 @@ func (m Model) settingsHeight() int {
 // naming the row under the pointer — a second derivation drifts the first time a description wraps to
 // a different number of lines than it assumed.
 func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDisplay, bool) {
-	display := m.settingsDisplayRows(rows, m.settingsSelection(len(rows)))
+	display := m.settingsDisplayRows(rows, m.settingsSelection(rows))
 	body := m.settingsBody(rows)
 	hint := m.settingsPaneHint(rows)
 	// The blank over the key legend (popupRowStyle.padBelow) is BOOKED here, in the same arithmetic
@@ -2087,7 +2210,7 @@ func settingsEnumPrompt(row SettingRow) string {
 // settingsGiveWayNote is what the status line says for a settings pane the frame could not seat —
 // under twelve rows, or under a window a long draft has taken the last of. It is the licence
 // layout.md gives every surface that disappears (the band's "N queued" is the other), and here it
-// carries the ONE fact the human cannot do without: the pane is open, it is swallowing every key,
+// carries the ONE fact the human cannot do without: the pane is open, it is claiming every key,
 // and esc is the way out. Without it a short terminal would answer /settings with a frame that
 // looked idle and a keyboard that did nothing.
 const settingsGiveWayNote = "settings — esc close"

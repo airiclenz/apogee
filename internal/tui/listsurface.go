@@ -14,17 +14,19 @@ import (
 // A LIST SURFACE is what the /model | /server picker (picker.go), the /sessions browser
 // (sessions.go), the /settings key list with its two sub-lists (settings.go) and the "/" | "@"
 // dropdown (autocomplete.go) all are underneath their own wording: a modal list of rows with one
-// highlight, a row window the frame grants, and — for the two that filter — a field the human types
+// highlight, a row window the frame grants, and — for the three that filter — a field the human types
 // into. Everything about that is written once here and named at each pane, so a pane's whole
 // remaining job is its ROWS, its ACCEPT and its HINT (ADR 0053).
 //
 // It is TWO values, because the panes are two kinds. [listCursor] is where the highlight stands and
 // the keys that walk it — the whole state a list that does not filter keeps. [listSurface] is that
 // cursor plus the [lineEditor] a filter is typed into, and the keys that type. The split is what let
-// the five lists above adopt the module without adopting a text widget none of them types into: a
-// lineEditor is a textarea, thousands of bytes in a Model copied on every Update, and a surface
-// handed to a pane that never filters would multiply exactly the field this module must not
-// (ADR 0053 decision 9). The two DECISION panes — the approval menu and the ask_user offering —
+// the lists that never filter — the /settings sub-lists, the dropdown — adopt the module without
+// adopting a text widget none of them types into: a lineEditor is a textarea, thousands of bytes in
+// a Model copied on every Update, and a surface handed to a pane that never filters would multiply
+// exactly the field this module must not (ADR 0053 decision 9). The /settings key list filters
+// without a listSurface: its selection indexes its FULL rows, so it holds the cursor and a filter
+// field side by side (settingsPane) and shares the view arithmetic below (pickerView). The two DECISION panes — the approval menu and the ask_user offering —
 // take less again: the cursor's walk and its clamp without its key contract, for the reason its own
 // doc gives.
 //
@@ -37,7 +39,9 @@ import (
 //   - The highlight indexes the FILTERED rows, and every accept is resolved through the filter
 //     (pickerView.offeringIndex) rather than against the list underneath it. With a filter set, "the
 //     third painted row" and "the third model advertised" are different rows, and taking the second
-//     would act on something the human never saw.
+//     would act on something the human never saw. The /settings key list keeps a full-row index
+//     instead and re-seats it into the same view on every read (settingsSelection), which gives
+//     the same guarantee.
 //   - The selection is CLAMPED rather than trusted, on every key, because the rows underneath can
 //     have changed since the last one. A key that moved the FILTER RE-SEATS it instead: the
 //     highlight stays on the row it stood on while that row still matches, else takes the first
@@ -45,8 +49,8 @@ import (
 //   - It is MODAL. Every key it is offered is either one of its own or handed back once
 //     (listVerdict), and the pane swallows what neither of them wanted: no letter is a verb inside
 //     an open list, which is what makes every letter the filter's. A list with NO filter hands its
-//     letters back instead, and the pane says what that means: the /settings key list swallows them
-//     (it is modal too), while the dropdown gives them to the chat box it is completing a token in.
+//     letters back instead, and the pane says what that means: the /settings enum sub-list swallows
+//     them (it is modal too), while the dropdown gives them to the chat box it is completing a token in.
 //     That is a fact about the list OVERLAYS. The two decision panes that borrow the cursor alone
 //     are SOFT-modal — the transcript stays scrollable under the approval prompt, the answer box
 //     stays typeable under the question — so they claim their arrows and leave every other key to
@@ -119,8 +123,9 @@ type listCursor struct {
 }
 
 // listSurface is a list that also FILTERS: the cursor above, plus the field the human narrows the
-// rows with. The picker and the /sessions browser are its two panes; every other list in the package
-// holds the cursor alone. Embedded rather than named, so `m.picker.selected` and `m.picker.filter`
+// rows with. The picker and the /sessions browser are its two panes; the /settings key list filters
+// with a field of its own beside its cursor (settingsPane, for the reason the file head gives), and
+// every other list in the package holds the cursor alone. Embedded rather than named, so `m.picker.selected` and `m.picker.filter`
 // both still read as the pane's own fields, and its zero value is "nothing typed, first row
 // highlighted" — the state `m.picker = picker{}` leaves behind.
 type listSurface struct {
@@ -128,7 +133,7 @@ type listSurface struct {
 	// filter is what the human has typed into the open overlay: the case-insensitive substring every
 	// row's matched text must carry for the row to survive (filterPopupRows, matchedText). It is a [lineEditor] — the package's one text FIELD
 	// (lineeditor.go), so "what does backspace do here" is answered where every other field answers it
-	// — held behind a [copyOnWriteField]: a pointer, so the two filtering panes do not each carry a
+	// — held behind a [copyOnWriteField]: a pointer, so the filtering panes do not each carry a
 	// whole textarea in the value-copied Model, and replaced on every keystroke rather than written
 	// through, so a Model copy keeps the filter it was taken with (ADR 0011).
 	//
@@ -266,9 +271,9 @@ func (l *listCursor) key(msg tea.KeyPressMsg, n int, wrap listWrap) listVerdict 
 // nothing, and a highlight the rows shrank out from under needs no clamp of its own first: a stopping
 // [listCursor.move] cannot leave the range, so the notch lands it on the last row that is still there.
 //
-// settingsWheel (mouse.go) and reportWheel (reportpane.go) stated the clamp rule first and keep their
-// own row arithmetic — they scroll a row WINDOW and a caret rather than a bare cursor — so this is the
-// shared answer for the panes that hold a [listCursor], not for those two.
+// settingsWheel (mouse.go) walks the /settings key list through here too, over a cursor restated on
+// its filtered view (settingsFilteredCursor); its multi-line field and reportWheel (reportpane.go)
+// keep their own arithmetic — they scroll a caret and a row WINDOW rather than a bare cursor.
 //
 // l points into the CALLER's Model exactly as [listCursor.key]'s does and the pointer never outlives
 // the call, so nothing here puts a self-pointer on a Model that is copied on every Update (ADR 0011).
@@ -320,7 +325,8 @@ func (m Model) listKey(
 
 // typeIntoOverlayFilter hands one edit to a filtering overlay's filter field and re-seats the
 // highlight on the rows the field leaves standing (pickerView.reseatPosition), returning whatever Cmd
-// the widget asked for. It is the door BOTH overlays that filter type through, so the two answer
+// the widget asked for. It is the door BOTH listSurface overlays type through (the /settings key list
+// keeps its own, settingsTypeFilter, by the same rule over its full rows), so the two answer
 // "what does backspace do to a filter" — and "where does the highlight go when it does" — with the
 // same field and the same rule rather than each keeping a string and a clamp of its own.
 //

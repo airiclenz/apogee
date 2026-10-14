@@ -186,7 +186,13 @@ internal/tui/lineeditor.go — copyOnWriteField.edit; internal/tui/mouse_test.go
 **Commit:** `fix(tui): a paste over a list lands in its filter, not the prompt draft`
 Depends on item 3. Fixes the defect that a paste over the picker or `/sessions` lands in the prompt draft (contradicting `layout.md`'s "Nothing is typed into the prompt box while a pop-up is up").
 
-## 7. /settings: the filtered key list and its keys
+## 7. /settings: the filtered key list and its keys — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): settingsSelection now takes the rows (was a count) and re-seats the stored full-slice index into the filtered view on every read (the regression guard); settingsFilteredCursor/settingsSeatFiltered walk ↑/↓ and the wheel over that view with the shared listCursor, and settingsTypeFilter mirrors typeIntoOverlayFilter over full rows via pickerView.reseatPosition.
+NOTES (2026-10-14): a filter that matches nothing leaves the highlight at the top (row 0), so trimming back lands on the first match — the picker's behaviour after a zero match.
+NOTES (2026-10-14): recast TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey and renamed it TestSettingsPaneNavigationWrapsAndSwallowsWhatDoesNotType, because the old name is no longer true (letters now filter). The new tests are in settings_test.go and mouse_test.go; settingsapply_test.go needed no change.
+NOTES (2026-10-14): consequential edit — internal/tui/doc.go: made necessary by the /settings key list now filtering (the package map named only two filtering panes and listed the popup fields).
+NOTES (2026-10-14): consequential edit — internal/tui/settingsapply.go: made necessary by delete (⌦) now arming the reset (the file-head and settingsArmReset comments said only backspace arms it).
 
 **What:**
 **Goal:** with `/settings` browsing, printable keys type into a filter over each row's key path and section heading (case-insensitive substring; a heading match keeps its whole section; a section heading and its spacer show while any of its rows show); backspace trims a set filter and arms the reset on an empty one; delete (⌦) arms the reset or rule removal with or without a filter; ↑/↓, ⏎, click and wheel act on the matching rows only; the highlight follows item 2's rule; the filter survives every sub-step and keys inside a sub-step never reach it; `esc` closes and clears it.

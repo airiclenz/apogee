@@ -372,8 +372,8 @@
 // accentTokens, inputContentRect, the region-arbitrating mouse handlers). One level below it,
 // lineeditor.go holds what a text FIELD is — the textarea and that whole caret family — as
 // [lineEditor]: promptEditor embeds it, and every popup-painted surface that is typed into builds a
-// single-line one of its own ([newPopupField] — the /settings value row, the picker's filter and the
-// /sessions browser's, the /sessions rename row), so a caret that moves correctly is written once,
+// single-line one of its own ([newPopupField] — the /settings value row and its key list's filter,
+// the picker's filter and the /sessions browser's, the /sessions rename row), so a caret that moves correctly is written once,
 // "what does backspace do" is answered once, and a config value never inherits the chat box's
 // vocabulary (recall, submit, the "/" and "@" overlays). The string geometry that caret family
 // stands on — where the widget wrapped a line, which rune a cell or a (row, column) names, the
@@ -967,9 +967,10 @@
 // two sub-lists and the "/" | "@" dropdown all ARE underneath their own wording — the [listCursor]
 // value ({selected}) every one of them embeds and the key contract it carries (arrows by a per-pane
 // wrap rule, esc, the ⏎ that lands on a row), which the two soft-modal DECISION panes (approval.go,
-// ask.go) borrow the walk and the clamp of without the contract, the [listSurface] the two that
-// FILTER embed instead
-// (that cursor plus the field typed into it, and the keys that type), the filter that prunes the
+// ask.go) borrow the walk and the clamp of without the contract, the [listSurface] the picker and
+// the browser FILTER through instead
+// (that cursor plus the field typed into it, and the keys that type; the /settings key list filters
+// with its cursor and a field side by side, its selection indexing its full rows), the filter that prunes the
 // rows and maps a highlight back to what it names, and the one budget→render call behind every list
 // pane — a pane's own body block, and the filter stated on its title row (ADR 0053) — and the WHEEL
 // contract is the module's too ([listCursor.wheel], the package's one answer to what a notch does to

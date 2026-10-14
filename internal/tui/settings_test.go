@@ -163,10 +163,10 @@ func TestSettingsCommandWithoutRowsNotesAndOpensNothing(t *testing.T) {
 	}
 }
 
-// ↑/↓ walk the KEYS and wrap at both ends (the pickerKey idiom), and every key the pane does not act
-// on is swallowed: the pane is modal, and the input box behind a full-height pane is a box the human
-// cannot read.
-func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
+// ↑/↓ walk the KEYS and wrap at both ends (the pickerKey idiom); a printable key types into the
+// filter, and every key that neither walks nor types — tab, a ctrl chord — is swallowed: the pane is
+// modal, and the input box behind a full-height pane is a box the human cannot read.
+func TestSettingsPaneNavigationWrapsAndSwallowsWhatDoesNotType(t *testing.T) {
 	t.Parallel()
 	rows := settingsTestRows(4)
 	m := openSettingsPane(t, settingsModel(t, rows))
@@ -184,10 +184,30 @@ func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
 		t.Errorf("↓ selected %d, want 1", m.settings.selected)
 	}
 
-	// A printable key in the key list neither edits the draft nor moves the selection, and ⏎ on a
-	// STRING row opens its edit buffer on the spot — driving no Cmd either way: every one of the
-	// pane's own acts is synchronous.
+	// A printable key types into the filter rather than the draft; tab and a ctrl chord type nothing
+	// and move nothing.
 	m = step(t, m, keyRune('x'))
+	if got := m.settings.filter.value(); got != "x" {
+		t.Errorf("filter after %q = %q, want %q", "x", got, "x")
+	}
+	for _, k := range []tea.KeyPressMsg{keyTab(), keyCtrl('x'), keyCtrlG()} {
+		m = step(t, m, k)
+		if got := m.settings.filter.value(); got != "x" {
+			t.Errorf("after %q the filter = %q, want it untouched (%q)", k.String(), got, "x")
+		}
+		if m.settings.kind != settingsKeyList || !m.settings.open {
+			t.Errorf("after %q pane = %+v, want the key list still open", k.String(), m.settings)
+		}
+	}
+
+	// ⌫ trims the filter back to empty — "x" matched nothing, so the highlight went to the top, where
+	// the first match will be — and ⏎ on a STRING row opens its edit buffer on the spot, driving no
+	// Cmd either way: every one of the pane's own acts is synchronous.
+	m = step(t, m, keyBackspace())
+	if got := m.settings.filter.value(); got != "" || m.settings.selected != 0 {
+		t.Errorf("after ⌫ filter = %q, selected = %d; want an empty filter and the top row", got, m.settings.selected)
+	}
+	m = step(t, m, keyDown())
 	m, cmd := stepCmd(t, m, keyEnter())
 	if v := m.input.Value(); v != "" {
 		t.Errorf("a key reached the input box behind the pane: %q", v)
@@ -4715,5 +4735,261 @@ func TestSettingsPaneRuleEnterAdoptsOnlyAnInertRule(t *testing.T) {
 	}
 	if m.settings.kind != settingsKeyList {
 		t.Errorf("pane = %+v, want the key list — an adoption opens no step", m.settings)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The key list's filter (ADR 0053 amend-1014)
+// ----------------------------------------------------------------------------
+
+// settingsFilterRows is four keys across two sections whose paths a filter tells apart, with values
+// a filter must never read: model.name holds "qwen", which no path or heading carries.
+func settingsFilterRows() []SettingRow {
+	return []SettingRow{
+		{Path: "model.name", Section: "Upstream", Kind: SettingString, Value: "qwen", Editable: true, Desc: "The model."},
+		{Path: "model.port", Section: "Upstream", Kind: SettingInt, Value: "8080", Default: "8080", Editable: true, Desc: "The port."},
+		{Path: "ui.theme", Section: "Interface", Kind: SettingString, Value: "dark", Editable: true, Desc: "The theme."},
+		{Path: "ui.spinner", Section: "Interface", Kind: SettingString, Value: "snake", Editable: true, Desc: "The spinner."},
+	}
+}
+
+// settingsShown is the key list as the pane composes it for this frame: the SETTING rows it paints,
+// by their index in the full row slice, the section headings over them, and how many display rows
+// (keys, headings and spacers) there are in all.
+func settingsShown(m Model) (keys []int, headings []string, displayRows int) {
+	rows := m.settingRows()
+	d := m.settingsDisplayRows(rows, m.settingsSelection(rows))
+	for i, key := range d.keys {
+		switch {
+		case key >= 0:
+			keys = append(keys, key)
+		case d.kinds[i] == popupRowHeading:
+			headings = append(headings, d.rows[i][0])
+		}
+	}
+	return keys, headings, len(d.rows)
+}
+
+// A printable key filters the key list by each row's matched text — its key path, or its section
+// heading, case-insensitively — and never by its value: a heading match keeps its whole section, a
+// section heading shows only while one of its rows does, and the spacer above a heading only where
+// a section above it is shown.
+func TestSettingsFilterMatchesKeyPathAndSectionHeading(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		filter      string
+		keys        []int
+		headings    []string
+		displayRows int
+	}{
+		{"spin", []int{3}, []string{"Interface"}, 2},
+		{"SPIN", []int{3}, []string{"Interface"}, 2},
+		{"model", []int{0, 1}, []string{"Upstream"}, 3},
+		{".n", []int{0}, []string{"Upstream"}, 2},
+		{"interf", []int{2, 3}, []string{"Interface"}, 3},
+		{"Upstream", []int{0, 1}, []string{"Upstream"}, 3},
+		{"e", []int{0, 1, 2, 3}, []string{"Upstream", "Interface"}, 7},
+		{"qwen", nil, nil, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.filter, func(t *testing.T) {
+			t.Parallel()
+			m := openSettingsPane(t, settingsModel(t, settingsFilterRows()))
+
+			m = typeSetting(t, m, c.filter)
+
+			keys, headings, displayRows := settingsShown(m)
+			if !reflect.DeepEqual(keys, c.keys) || !reflect.DeepEqual(headings, c.headings) || displayRows != c.displayRows {
+				t.Errorf("filter %q shows keys %v under %v in %d display rows; want %v under %v in %d",
+					c.filter, keys, headings, displayRows, c.keys, c.headings, c.displayRows)
+			}
+			if got := m.settings.filter.value(); got != c.filter {
+				t.Errorf("filter = %q, want %q", got, c.filter)
+			}
+		})
+	}
+}
+
+// The highlight follows the one rule every filtering list keeps: it stays on its row while that row
+// matches, else takes the first match; ↑/↓ wrap over the matches alone; and it stays put when the
+// filter empties.
+func TestSettingsFilterKeepsTheHighlightAndWalksTheMatches(t *testing.T) {
+	t.Parallel()
+	m := openSettingsPane(t, settingsModel(t, settingsFilterRows()))
+
+	m = typeSetting(t, m, "ui")
+	if m.settings.selected != 2 {
+		t.Fatalf("after %q selected = %d, want the first match (2)", "ui", m.settings.selected)
+	}
+	m = step(t, m, keyDown())
+	if m.settings.selected != 3 {
+		t.Errorf("↓ selected %d, want the next match (3)", m.settings.selected)
+	}
+	m = step(t, m, keyDown())
+	if m.settings.selected != 2 {
+		t.Errorf("↓ from the last match selected %d, want a wrap to the first match (2)", m.settings.selected)
+	}
+	m = pressSettings(t, m, keyUp(), keyRune('.'))
+	if m.settings.selected != 3 {
+		t.Errorf("after ↑ and %q selected = %d, want the highlight kept on its matching row (3)", ".", m.settings.selected)
+	}
+	m = pressSettings(t, m, keyBackspace(), keyBackspace(), keyBackspace())
+	if got := m.settings.filter.value(); got != "" || m.settings.selected != 3 {
+		t.Errorf("after trimming filter = %q, selected = %d; want an empty filter and the highlight kept (3)", got, m.settings.selected)
+	}
+	if keys, _, _ := settingsShown(m); len(keys) != 4 {
+		t.Errorf("an empty filter shows keys %v, want all four", keys)
+	}
+}
+
+// ⌫ trims a filter that holds text and arms nothing; on an empty filter it keeps the meaning it had
+// before the pane filtered — it arms the selected row's reset.
+func TestSettingsBackspaceTrimsTheFilterThenArmsTheReset(t *testing.T) {
+	t.Parallel()
+	m, _ := settingsEditModel(t, settingsFilterRows(), &settingsWriteLog{})
+
+	m = typeSetting(t, m, "name")
+	m = step(t, m, keyBackspace())
+	if got := m.settings.filter.value(); got != "nam" || m.settings.kind != settingsKeyList {
+		t.Fatalf("after ⌫ filter = %q, pane = %+v; want %q trimmed and the key list", got, m.settings, "nam")
+	}
+	m = pressSettings(t, m, keyBackspace(), keyBackspace(), keyBackspace())
+	if got := m.settings.filter.value(); got != "" || m.settings.kind != settingsKeyList {
+		t.Fatalf("after trimming filter = %q, pane = %+v; want it empty and nothing armed", got, m.settings)
+	}
+
+	m = step(t, m, keyBackspace())
+
+	if m.settings.kind != settingsResetArmed || m.settings.selected != 0 {
+		t.Errorf("⌫ on an empty filter left pane = %+v, want model.name's reset armed", m.settings)
+	}
+}
+
+// ⌦ arms the selected row's reset whether or not a filter is set — the key a filtered list resets
+// with — and the reset confirmed under a filter lands on the row the filter showed.
+func TestSettingsDeleteArmsTheResetFilteredAndUnfiltered(t *testing.T) {
+	t.Parallel()
+	t.Run("unfiltered", func(t *testing.T) {
+		t.Parallel()
+		m, _ := settingsEditModel(t, settingsFilterRows(), &settingsWriteLog{})
+
+		m = step(t, m, keyDelete())
+
+		if m.settings.kind != settingsResetArmed || m.settings.selected != 0 {
+			t.Errorf("⌦ left pane = %+v, want model.name's reset armed", m.settings)
+		}
+	})
+	t.Run("filtered", func(t *testing.T) {
+		t.Parallel()
+		log := &settingsWriteLog{}
+		m, _ := settingsEditModel(t, settingsFilterRows(), log)
+
+		m = pressSettings(t, typeSetting(t, m, "theme"), keyDelete())
+		if m.settings.kind != settingsResetArmed || m.settings.filter.value() != "theme" {
+			t.Fatalf("⌦ under a filter left pane = %+v, want ui.theme's reset armed and the filter kept", m.settings)
+		}
+		m = step(t, m, keyEnter())
+
+		if want := []string{"ui.theme"}; !reflect.DeepEqual(log.resets, want) {
+			t.Errorf("resets = %v, want %v", log.resets, want)
+		}
+		if m.settings.kind != settingsKeyList || m.settings.filter.value() != "theme" {
+			t.Errorf("after the reset pane = %+v, want the key list with the filter kept", m.settings)
+		}
+	})
+}
+
+// ⌦ on a filtered rule's row arms its removal and ⏎ removes it. The row that slides into its index
+// is one the filter hides, and no frame after the removal reads it: the highlight re-seats on the
+// next MATCHING row.
+func TestSettingsDeleteRemovesARuleUnderAFilter(t *testing.T) {
+	t.Parallel()
+	goTest := settingsRuleRow("go test", domain.AllowRuleProject, SettingRuleAdopted)
+	goVet := settingsRuleRow("go vet", domain.AllowRuleProject, SettingRuleAdopted)
+	rows := []SettingRow{goTest, settingsRuleRow("make", domain.AllowRuleGlobal, SettingRuleLive), goVet, settingsBoolRow()}
+	var removed []domain.AllowRule
+	host := fakeConfigHost{removeRule: func(r domain.AllowRule) error {
+		removed = append(removed, r)
+		rows = rows[1:] // the live holder, settled: the rule is gone from the rules in force
+		return nil
+	}}
+	m := settingsRuleModel(t, &rows, host, &settingsWriteLog{})
+
+	m = pressSettings(t, typeSetting(t, m, "go "), keyDelete())
+	if m.settings.kind != settingsResetArmed {
+		t.Fatalf("⌦ on a filtered rule left pane = %+v, want its removal armed", m.settings)
+	}
+	m = step(t, m, keyEnter())
+
+	if want := []domain.AllowRule{goTest.Rule}; !reflect.DeepEqual(removed, want) {
+		t.Fatalf("RemoveRule calls = %+v, want %+v", removed, want)
+	}
+	row, ok := m.settingsSelectedRow(m.settingRows())
+	if !ok || row.Path != goVet.Path {
+		t.Errorf("the highlighted row after the removal = %q (%v), want the next match %q", row.Path, ok, goVet.Path)
+	}
+	if body := strip(m.settingsBody(m.settingRows())); !strings.Contains(body, "go vet") {
+		t.Errorf("the description header reads a row the filter hides:\n%s", body)
+	}
+}
+
+// The filter survives every second step: a step claims its keys first, so nothing typed inside one
+// reaches the filter, and backing out of it lands on the key list still filtered.
+func TestSettingsFilterSurvivesEverySubStep(t *testing.T) {
+	t.Parallel()
+	resettable := settingsStringRow()
+	cases := []struct {
+		name   string
+		row    SettingRow
+		filter string
+		open   []tea.KeyPressMsg
+		kind   settingsKind
+	}{
+		{"enum sub-list", settingsEnumRow(), "spin", []tea.KeyPressMsg{keyEnter()}, settingsEnumList},
+		{"value field", settingsStringRow(), "endp", []tea.KeyPressMsg{keyEnter()}, settingsValueBuffer},
+		{"text field", settingsTextRow(), "prompt", []tea.KeyPressMsg{keyEnter()}, settingsTextEditor},
+		{"armed reset", resettable, "endp", []tea.KeyPressMsg{keyDelete()}, settingsResetArmed},
+		{"save target", settingsProjectBoolRow(SettingFromGlobal), "skills", []tea.KeyPressMsg{keyEnter()}, settingsSaveTarget},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			rows := []SettingRow{settingsIntRow(), c.row}
+			m, _ := settingsEditModel(t, rows, &settingsWriteLog{})
+			m = typeSetting(t, m, c.filter)
+
+			m = pressSettings(t, m, c.open...)
+			if m.settings.kind != c.kind {
+				t.Fatalf("pane = %+v, want the %s open", m.settings, c.name)
+			}
+			m = pressSettings(t, m, keyRune('z'), keyBackspace(), keySpace())
+			if got := m.settings.filter.value(); got != c.filter {
+				t.Errorf("inside the %s the filter became %q, want it untouched (%q)", c.name, got, c.filter)
+			}
+			m = step(t, m, keyEsc())
+
+			if m.settings.kind != settingsKeyList || !m.settings.open {
+				t.Fatalf("esc from the %s left pane = %+v, want the key list", c.name, m.settings)
+			}
+			if got := m.settings.filter.value(); got != c.filter || m.settings.selected != 1 {
+				t.Errorf("back on the key list filter = %q, selected = %d; want %q on row 1", got, m.settings.selected, c.filter)
+			}
+		})
+	}
+}
+
+// esc closes the pane with a filter set — filter and all — so the next /settings opens unfiltered.
+func TestSettingsEscClosesWithAFilterSet(t *testing.T) {
+	t.Parallel()
+	m := openSettingsPane(t, settingsModel(t, settingsFilterRows()))
+	m = typeSetting(t, m, "ui")
+
+	m = step(t, m, keyEsc())
+
+	if !reflect.DeepEqual(m.settings, settingsPane{}) {
+		t.Errorf("pane = %+v, want the zero value (closed, no filter)", m.settings)
+	}
+	if reopened := openSettingsPane(t, m); reopened.settings.filter.value() != "" {
+		t.Errorf("a reopened pane carries the filter %q", reopened.settings.filter.value())
 	}
 }

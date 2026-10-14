@@ -3410,6 +3410,61 @@ func TestSettingsWheelWalksTheKeyList(t *testing.T) {
 	}
 }
 
+// Under a filter the pointer acts on the matching rows alone: a click names the shown row it lands
+// on, and the wheel walks the matches, clamping at the first and the last MATCH rather than at the
+// list's own ends.
+func TestSettingsPointerActsOnTheFilteredRows(t *testing.T) {
+	t.Parallel()
+	filtered := func(t *testing.T) Model {
+		t.Helper()
+		m := settingsFrameModel(t, 80, 30, 8)
+		for _, r := range "interf" {
+			m = step(t, m, keyRune(r))
+		}
+		if m.settings.selected != 4 {
+			t.Fatalf("selected = %d after filtering to the Interface section, want its first key (4)", m.settings.selected)
+		}
+		return m
+	}
+	t.Run("click", func(t *testing.T) {
+		t.Parallel()
+		m := filtered(t)
+		if strings.Contains(strip(m.View().Content), "key-01") {
+			t.Fatal("a key the filter hides is still on the frame")
+		}
+		x, y := frameCell(t, m, "key-06")
+
+		m = step(t, m, leftClick(x, y))
+
+		if m.settings.selected != 6 {
+			t.Errorf("selected = %d, want the shown row the pointer was on (6)", m.settings.selected)
+		}
+	})
+	t.Run("wheel", func(t *testing.T) {
+		t.Parallel()
+		m := filtered(t)
+		_, y := frameCell(t, m, "key-04")
+		wheel := func(m Model, button tea.MouseButton) Model {
+			return step(t, m, tea.MouseWheelMsg{X: 10, Y: y, Button: button})
+		}
+
+		m = wheel(m, tea.MouseWheelDown)
+		if m.settings.selected != 5 {
+			t.Fatalf("selected = %d after one notch down, want the next match (5)", m.settings.selected)
+		}
+		m = wheel(wheel(m, tea.MouseWheelUp), tea.MouseWheelUp)
+		if m.settings.selected != 4 {
+			t.Fatalf("selected = %d after rolling past the top, want it clamped at the first match (4)", m.settings.selected)
+		}
+		for range 6 {
+			m = wheel(m, tea.MouseWheelDown)
+		}
+		if m.settings.selected != 7 {
+			t.Errorf("selected = %d after rolling past the end, want it clamped at the last match (7)", m.settings.selected)
+		}
+	})
+}
+
 // settingsTextEditModel is a model with the multi-line field OPEN over the given prose — the state the
 // pointer tests below act in. The prose is the row's own, so what the field is seeded with is what the
 // registry would have handed it.

@@ -1362,7 +1362,8 @@ func (m Model) handleSettingsMotion(msg tea.MouseMotionMsg) (Model, bool) {
 //
 // It CLAMPS at the ends where the keys WRAP, and the difference is the gesture rather than an
 // inconsistency: ↑/↓ walk a list as a cycle, while a wheel is a scroll — rolling past the last key and
-// landing back on the first would move the human somewhere they did not aim. A wheel over a pane that
+// landing back on the first would move the human somewhere they did not aim. Under a filter the ends
+// are the first and last MATCHING keys, the rows ↑/↓ walk too. A wheel over a pane that
 // is asking something (the value sub-list, an armed reset, an open buffer) moves nothing: the step owns
 // the surface until it is answered, as it owns every key.
 func (m Model) settingsWheel(msg tea.MouseWheelMsg) (Model, bool) {
@@ -1392,17 +1393,12 @@ func (m Model) settingsWheel(msg tea.MouseWheelMsg) (Model, bool) {
 	if m.settings.kind != settingsKeyList {
 		return m, true
 	}
-	n := len(m.settingRows())
-	sel := m.settingsSelection(n)
-	if sel < 0 {
-		return m, true // no rows to walk; the pane is showing its own empty-list row
-	}
-	switch msg.Button {
-	case tea.MouseWheelUp:
-		m.settings.selected = clampInt(sel-1, 0, n-1)
-	case tea.MouseWheelDown:
-		m.settings.selected = clampInt(sel+1, 0, n-1)
-	}
+	// The notch walks the rows the filter leaves, by the cursor's own clamp ([listCursor.wheel]), and
+	// lands back on the full slice the pane indexes — so a notch and an ↑ agree on the row, and with
+	// no row showing (an empty list, a filter matching nothing) there is nothing to walk.
+	view, cursor := m.settingsFilteredCursor(m.settingRows())
+	cursor.wheel(msg, len(view.offering))
+	m.settingsSeatFiltered(view, cursor)
 	return m, true
 }
 

@@ -21,8 +21,8 @@ import (
 //
 // Four clusters share the file because they are four faces of one act:
 //
-//   - the ARMED RESET, which is the only commit whose value is "remove the line" — backspace arms it
-//     and ⏎ answers, because deleting from a file a human maintains by hand is not a stray keypress;
+//   - the ARMED RESET, which is the only commit whose value is "remove the line" — backspace on an
+//     empty filter, or delete (⌦) with or without one, arms it and ⏎ answers, because deleting from a file a human maintains by hand is not a stray keypress;
 //   - the WRITE and the LIVE-APPLY ROUTER, which is where a persisted value is turned into an effect:
 //     the renderer-owned keys are applied here (settingsApplyLocal) because there is no engine on
 //     the other side of them, and every other key goes out through the binary's dispatcher, which is
@@ -35,8 +35,8 @@ import (
 //     live apply as a row's ⏎, reached from a click on a card or a large Tools umbrella's header —
 //     and silent, because the card or the folded header itself is the report.
 
-// settingsArmReset arms the selected row's reset-to-default — backspace on a row that HAS something to
-// reset. Arming is deliberately a state and not the act: removing a line from a file the human
+// settingsArmReset arms the selected row's reset-to-default — backspace with the key list's filter
+// empty, or delete (⌦) whatever it holds (settingsKey), on a row that HAS something to reset. Arming is deliberately a state and not the act: removing a line from a file the human
 // maintains by hand is not something a stray keypress does, so the hint line asks
 // (settingsResetHint) and ⏎ answers.
 //
