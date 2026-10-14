@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review for apogee</title>
+<script src="https://cdn.tailwindcss.com/3.4.5"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+</script>
+<style>
+  .seam { stroke-dasharray: 4 4; }
+  .leak { stroke: #dc2626; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; border: 3px solid #0f172a; }
+  .badge { font-size: .68rem; letter-spacing: .07em; text-transform: uppercase; padding: .2rem .6rem; border-radius: 9999px; font-weight: 600; }
+  .b-strong { background: #d1fae5; color: #065f46; }
+  .b-explore { background: #fef3c7; color: #92400e; }
+  .b-spec { background: #e2e8f0; color: #334155; }
+  .tag { font-size: .68rem; padding: .2rem .6rem; border-radius: 9999px; border: 1px solid #cbd5e1; color: #475569; font-family: ui-monospace, monospace; }
+  .panel { border: 1px solid #e7e5e4; border-radius: .6rem; background: #fff; padding: 1rem; min-height: 320px; }
+  .panel h5 { font-size: .65rem; text-transform: uppercase; letter-spacing: .1em; color: #78716c; margin-bottom: .7rem; }
+  pre.mermaid { background: transparent; display: flex; justify-content: center; margin: 0; }
+  .mod { border: 1.5px solid #334155; border-radius: .35rem; padding: .25rem .5rem; font-size: .66rem; text-transform: uppercase; letter-spacing: .06em; background: #fff; }
+  .mod.thin { border-width: 1px; color: #475569; }
+  .mod.red { border-color: #dc2626; color: #b91c1c; background: #fef2f2; }
+  .mod.ghost { border-style: dashed; border-color: #dc2626; color: #dc2626; background: transparent; }
+  .mod.dim { border-color: #475569; color: #cbd5e1; background: rgba(255,255,255,.04); }
+  .chip { font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; padding: .12rem .4rem; border-radius: .25rem; border: 1px solid #94a3b8; color: #334155; background: #f8fafc; white-space: nowrap; }
+  .chip.red { border-color: #dc2626; color: #b91c1c; background: #fef2f2; }
+  .chip.miss { border: 1px dashed #dc2626; color: #dc2626; background: transparent; }
+  .chip.in { border-color: #475569; color: #cbd5e1; background: transparent; }
+  .seamline { border-top: 2px dashed #64748b; }
+  .lbl { font-size: .62rem; text-transform: uppercase; letter-spacing: .09em; color: #78716c; }
+  .files li { overflow-wrap: anywhere; }
+  .cell { font-size: .62rem; text-align: center; padding: .2rem .15rem; border-radius: .2rem; }
+  .ok { background: #ecfdf5; color: #047857; }
+  .no { background: #fef2f2; color: #b91c1c; border: 1px dashed #dc2626; }
+  .hand { background: #fffbeb; color: #92400e; }
+  .arrow { color: #64748b; font-size: .8rem; text-align: center; line-height: 1; }
+  .arrow.red { color: #dc2626; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-14">
+
+<header class="space-y-4">
+  <div class="flex flex-wrap items-baseline justify-between gap-2">
+    <h1 class="font-serif text-4xl tracking-tight">apogee — deepening opportunities</h1>
+    <span class="font-mono text-sm text-slate-500">2026-10-14 · main @ 313f03e3</span>
+  </div>
+  <p class="text-sm text-slate-600">Scope: hot spots since 2026-09-14 —
+    <span class="font-mono">internal/tui</span> (901 file-touches), <span class="font-mono">internal/agent</span> (589),
+    <span class="font-mono">cmd/apogee</span> + <span class="font-mono">internal/config</span> (591),
+    <span class="font-mono">internal/tools</span> · <span class="font-mono">provider</span> · <span class="font-mono">cmd/release</span>.
+    Checked against ADR 0083's standing denials and every plan archived through 2026-10-14.</p>
+  <div class="flex flex-wrap gap-5 items-center text-xs text-slate-600 border-t border-b border-stone-200 py-3">
+    <span class="flex items-center gap-2"><span class="mod thin">module</span> module</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-10 seamline"></span> seam</span>
+    <span class="flex items-center gap-2"><span class="text-red-600 font-bold">⟶</span> leakage / drift</span>
+    <span class="flex items-center gap-2"><span class="mod deep">deep</span> deep module</span>
+    <span class="flex items-center gap-2"><span class="chip miss">missing</span> step a path skips</span>
+    <span class="flex items-center gap-2"><span class="badge b-strong">Strong</span><span class="badge b-explore">Worth exploring</span><span class="badge b-spec">Speculative</span></span>
+  </div>
+  <nav class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1">
+    <a class="hover:underline" href="#c1">1 · A child run's bracket and ending are one module</a>
+    <a class="hover:underline" href="#c2">2 · A delegation's outcome stays typed inside the TUI</a>
+    <a class="hover:underline" href="#c3">3 · Config is read through one source</a>
+    <a class="hover:underline" href="#c4">4 · A question pane is one module</a>
+    <a class="hover:underline" href="#c5">5 · Text walks the pane table; the draft has one edit door</a>
+    <a class="hover:underline" href="#c6">6 · "May an Exchange open?" is asked once</a>
+    <a class="hover:underline" href="#c7">7 · A process run's ending travels typed</a>
+    <a class="hover:underline" href="#c8">8 · A workflow run's ending is settled once</a>
+    <a class="hover:underline" href="#c9">9 · A project-rule act is one module</a>
+    <a class="hover:underline" href="#c10">10 · One pty session module under two adapters</a>
+    <a class="hover:underline" href="#c11">11 · A publish step is one row</a>
+    <a class="hover:underline" href="#c12">12 · One reply accumulator ends every stream</a>
+    <a class="hover:underline" href="#c13">13 · A list row click is one walk</a>
+    <a class="hover:underline" href="#c14">14 · Seating a session is one operation</a>
+    <a class="hover:underline" href="#c15">15 · A key's layer and source are one answer</a>
+    <a class="hover:underline" href="#c16">16 · The event-line vocabulary is a declared table</a>
+    <a class="hover:underline" href="#c17">17 · An MCP server's OAuth binding is one value</a>
+    <a class="hover:underline" href="#c18">18 · A call's route is classified once</a>
+  </nav>
+</header>
+
+<section id="candidates" class="space-y-12">
+
+<!-- ============================================================ 1 -->
+<article id="c1" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">1 · A child run's bracket and ending are one module</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/agent/dispatch.go — runDelegation :889 · skipDelegation :859 · preempt / ceiling / stopQueued / settleCancelled :471–:763</li>
+    <li>internal/agent/workflowspawn.go — Spawn :219 · spawnSubAgent :305 · subAgentEnding :343 · workflowOutcome :459 · undeliveredWorkflowReason :521</li>
+    <li>internal/agent/subagent.go — classifyDelegation :1386 · delegationResult :1511 · delegationSummary :1669 · roundReport :1362</li>
+    <li>internal/agent/children.go — undeliveredReason :982 · internal/agent/childrun.go — childRunStopped :70</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — 3 brackets, ~11 ending switches, 5 vocabularies</h5>
+<pre class="mermaid">
+flowchart LR
+  RD[runDelegation] --> SW
+  SS[spawnSubAgent] --> SW
+  SP[Spawn] --> SW
+  U[5 unstarted kinds<br/>each settles by hand] -.-> SW
+  SW{{~11 switches over<br/>err · stopped · Faulted ·<br/>StepCapped · capHit}}
+  SW --> V1[delegationOutcome]
+  SW --> V2[workflow.Ending]
+  SW -->|stopped vs cancelled| V3[UndeliveredReason]
+  SW --> V4[DelegationOutcome]
+  SW --> V5[result prose]
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class SW,U,V3 leak
+</pre></div>
+    <div class="panel"><h5>After — one bracket, one ending value, projections</h5>
+<pre class="mermaid">
+flowchart LR
+  RD[runDelegation] --> CR
+  SS[spawnSubAgent] --> CR
+  SP[Spawn] --> CR
+  CR[[child run<br/>mint · phases · run ·<br/>classify once]] --> E([ending + bound<br/>incl. never-started])
+  E --> V1[ledger word]
+  E --> V2[workflow.Ending]
+  E --> V3[UndeliveredReason]
+  E --> V4[DelegationOutcome]
+  E --> V5[result head]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class CR deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>One child run is bracketed three times and its ending re-read by ~11 switches; they already disagree — a stopped workflow item's undelivered messages read <em>cancelled</em>, a delegation's <em>stopped</em> — and one of five unstarted kinds books no ledger row.</p>
+    <p><span class="lbl block">Solution</span><span class="font-mono">childrun.go</span> grows from lifecycle into the whole bracket and classifies the end once into one ending value; every vocabulary becomes a projection of it.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>locality: stop/cancel/cap order once</li><li>Ending tested as one table</li><li>Every unstarted kind books a row</li><li>leverage: fourth spawn path inherits it</li><li>Five capHit switches collapse</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">ADR 0083 §3 denied the delegate's <em>runtime state</em> as one value; this extends the 2026-10-01 move of the run protocol into <span class="font-mono">childrun.go</span> instead. Owner call: does a skipped delegation appear in the ledger?</p>
+</article>
+
+<!-- ============================================================ 2 -->
+<article id="c2" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">2 · A delegation's outcome stays typed inside the TUI: worded at paint, never read back</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tui/toolregistry.go — delegationOutcomeVerdict :1143 · delegationOutcomeOf :1080 · proseDelegationOutcome :1093 · copied engine prose :989–995 · delegationStoppedByUser :1003 · delegationNeverStartedVerdict :1016</li>
+    <li>internal/tui/toolleader.go — failedSummary :334 · succeededSummary :357 · endedWithoutReportSummary :374 · stoppedSummary :390</li>
+    <li>internal/tui/transcript.go — entry.neverStarted :2532 · life-stage rule ×3: runview.go:261 · transcript.go:1984 · subagentblock.go:69</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — typed, worded, parsed back</h5>
+<pre class="mermaid">
+flowchart TB
+  E[engine: DelegationOutcome typed] --> W[delegationOutcomeVerdict]
+  W --> T[summary words]
+  T -.parse.-> M[4 matchers · 7 call sites]
+  P[engine prose] -.copied.-> N[3 never-started readers]
+  M --> PA[painters]
+  N --> PA
+  S[life-stage rule ×3] --> PA
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class M,N,S leak
+</pre></div>
+    <div class="panel"><h5>After — kind travels, words only paint</h5>
+<pre class="mermaid">
+flowchart TB
+  E[engine: DelegationOutcome typed] --> D
+  R[replay: record words] --> RP[one parser] --> D
+  D[[delegation outcome<br/>kind · stage · wording]] --> PA[painters]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class D deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>The TUI words a typed outcome and then parses its own words back through four matchers; adding one kind (81ade7aa) took four files, and the ceiling refusal is "never started" to one reader and a failure to another.</p>
+    <p><span class="lbl block">Solution</span>The branch summary carries the outcome kind and one <span class="font-mono">delegationState</span> answers queued / running / reported / never-started; only replay parses words, through one parser.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>New kind: one-file change</li><li>Engine prose no longer copied</li><li>Life-stage rule tested once</li><li>Replay keeps its words</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">ADR 0083 §1 stands: the record keeps rendered verdicts and replay keeps its parser; only the live path stops re-reading itself. Composes with #1 (a not-started reason on <span class="font-mono">DelegationOutcome</span>).</p>
+</article>
+
+<!-- ============================================================ 3 -->
+<article id="c3" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">3 · Config is read through one source bound to (apogee home, Project root)</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">local-substitutable</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/config/config.go — ResolveOptions :3259 · ApplyConfig :3364 · LoadFileConfig :2922</li>
+    <li>internal/config/layer.go — LoadLayeredConfig :90 · resolveProjectRoot :203 · sameConfigFile :294</li>
+    <li>cmd/apogee/wire.go:542 resolveRoots · probeconfig.go:55,78 · settingsedit.go:385 · wire_settings.go:1813 · projectrules.go:240 · wire_live.go:77 · wire_options.go:592</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — 4 read entries, root resolved 3×</h5>
+<pre class="mermaid">
+flowchart LR
+  B[boot: ResolveOptions] --> R1[resolveProjectRoot]
+  W[resolveRoots] --> R2[projectroot.Resolve]
+  PR[apogee probe config] --> R3[probeProjectRoot · cwd<br/>FilePath ignores APOGEE_CONFIG]
+  SE["/settings re-read projection"] --> AC[ApplyConfig<br/>migrates · re-resolves root]
+  FC[fileConfig] --> LF[LoadFileConfig]
+  RU[project rules] --> LL[LoadLayeredConfig]
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class R3,AC leak
+</pre></div>
+    <div class="panel"><h5>After — one source, asked</h5>
+<pre class="mermaid">
+flowchart LR
+  TUI[TUI] --> S
+  HL[headless] --> S
+  DM[daemon] --> S
+  PB[probe] --> S
+  ST[settings · rules] --> S
+  S[[config source<br/>home · Project root · has layer<br/>Startup: the one migrating read<br/>Reread · GlobalOnly<br/>ProjectFile · Adoption · Writer]]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class S deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Each caller must know which read entry migrates, layers or reads env, and three already got it wrong: the live <span class="font-mono">/settings</span> re-read rewrites a retired key mid-session, <span class="font-mono">apogee probe config</span> ignores <span class="font-mono">APOGEE_CONFIG</span>, and the re-read can pick a different Project root than boot.</p>
+    <p><span class="lbl block">Solution</span>One source in <span class="font-mono">internal/config</span>, resolved once from (home, workspace, takes-no-project), owns every read and every project-file location; Drivers, settings, rules and probe only ask it.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Project root resolved once</li><li>Migrate rule has one owner</li><li>Probe follows the home rules</li><li>Re-read tests skip rootWiring</li><li>New Driver: one call</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Not ADR 0083 §5 (boot steps stay per Driver) nor §4 (no ranking ladder moves). Fits ADR 0096 D1/D6.</p>
+</article>
+
+<!-- ============================================================ 4 -->
+<article id="c4" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">4 · A question pane is one module: one claim rung, one armed gate, one close</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tui/panes.go — panePrompt row, key: nil (the only pane without a rung)</li>
+    <li>internal/tui/model.go — handleKey prompt-pane branches :1838–:2003 · finishWorker :2459</li>
+    <li>internal/tui/approval.go :306 :359 :471–477 · ask.go :36 :136–142 · mouse.go :1510 :1572 :1645 · picker.go:1204 · workflow.go:509</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — handleKey, cross-section</h5>
+      <div class="space-y-1">
+        <div class="h-6 border-l-4 border-slate-300 pl-2 text-xs text-slate-500 flex items-center">global keys</div>
+        <div class="h-6 border-l-4 border-red-500 bg-red-50 pl-2 text-xs text-red-700 flex items-center">rule field · :1838</div>
+        <div class="h-6 border-l-4 border-slate-300 pl-2 text-xs text-slate-500 flex items-center">global keys</div>
+        <div class="h-6 border-l-4 border-red-500 bg-red-50 pl-2 text-xs text-red-700 flex items-center">esc: workflow prompt · ask carve-out · :1874</div>
+        <div class="h-6 border-l-4 border-slate-300 pl-2 text-xs text-slate-500 flex items-center">global keys</div>
+        <div class="h-6 border-l-4 border-red-500 bg-red-50 pl-2 text-xs text-red-700 flex items-center">⏎ latched: ask · approval · :1940</div>
+        <div class="h-6 border-l-4 border-slate-300 pl-2 text-xs text-slate-500 flex items-center">PgUp / PgDn</div>
+        <div class="h-6 border-l-4 border-red-500 bg-red-50 pl-2 text-xs text-red-700 flex items-center">handleApprovalKey · :1997</div>
+        <div class="h-6 border-l-4 border-red-500 bg-red-50 pl-2 text-xs text-red-700 flex items-center">askChoiceKey · :2003</div>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-1"><span class="lbl w-full">armed checks</span>
+        <span class="chip red">model :1949</span><span class="chip red">model :1964</span><span class="chip red">approval :359</span><span class="chip red">mouse :1572</span><span class="chip red">mouse :1645</span><span class="chip red">picker :1204</span><span class="chip red">mouse :1510</span></div>
+      <div class="mt-2 flex flex-wrap gap-1"><span class="lbl w-full">closes</span>
+        <span class="chip">reset() ×3</span><span class="chip red">sendApproval hand-clear</span><span class="chip red">submitAnswer hand-clear</span></div>
+    </div>
+    <div class="panel"><h5>After</h5>
+      <div class="space-y-1">
+        <div class="h-6 border-l-4 border-slate-300 pl-2 text-xs text-slate-500 flex items-center">handleKey — global keys only</div>
+      </div>
+      <div class="mt-4 rounded-md deep p-4">
+        <div class="text-xs uppercase tracking-wider mb-3">question pane · panePrompt rung</div>
+        <div class="grid grid-cols-2 gap-2">
+          <span class="chip in">soft-modal claim</span><span class="chip in">declines ctrl+c · ctrl+l · PgUp/PgDn</span>
+          <span class="chip in">one armed gate</span><span class="chip in">answer</span>
+          <span class="chip in">one close: reset · draft · resume</span><span class="chip in">latch on raise</span>
+        </div>
+      </div>
+      <div class="mt-3 text-xs text-slate-500">← panePrompt rung · ← promptPointerClick · ← finishWorker</div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>The prompt row has no key rung, so question keys sit in six branches of the global switch, the armed check repeats at seven sites, and two closes hand-clear fields <span class="font-mono">reset()</span> exists to cover — three latch fixes landed in one week.</p>
+    <p><span class="lbl block">Solution</span>The prompt row gains a soft-modal key claim owned by <span class="font-mono">approval.go</span> and <span class="font-mono">ask.go</span>; accepts ask one armed question; every close goes through one let-go.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Prompt keys on its row</li><li>New payload field: reset covers</li><li>leverage: one gate, seven callers</li><li>Claim testable without handleKey</li></ul></div>
+  </div>
+</article>
+
+<!-- ============================================================ 5 -->
+<article id="c5" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">5 · Text walks the pane table, like keys, clicks and the wheel; the draft has one edit door</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tui/prompteditor.go — foldPaste :514–541 · foldWidgetMsg :583–594</li>
+    <li>internal/tui/listsurface.go:376 listPaste · internal/tui/panes.go paneSpecs · internal/tui/workflows.go:428</li>
+    <li>draft SetValue: ask.go:193 · autocomplete.go:937 :984 · interject.go:349 :582 · recall.go:163</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — gesture columns of the pane table</h5>
+      <div class="grid grid-cols-5 gap-1 text-xs">
+        <div></div><div class="lbl text-center">key</div><div class="lbl text-center">click</div><div class="lbl text-center">wheel</div><div class="lbl text-center">text</div>
+        <div class="font-mono">settings</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell hand">chain</div>
+        <div class="font-mono">rule field</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell hand">chain</div>
+        <div class="font-mono">browser</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell hand">listPaste</div>
+        <div class="font-mono">picker</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell hand">listPaste</div>
+        <div class="font-mono">/workflows</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell no">→ draft</div>
+        <div class="font-mono">prompt</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell hand">3 doors</div>
+      </div>
+      <div class="mt-4 text-xs text-slate-600 space-y-1">
+        <div><span class="chip">foldPaste</span> 4 rungs · <span class="chip">foldWidgetMsg</span> 3 rungs — hand-ordered</div>
+        <div><span class="chip red">ctrl+v paste</span> skips recomputeAutocomplete</div>
+      </div>
+    </div>
+    <div class="panel"><h5>After — one walk, one draft edit</h5>
+      <div class="grid grid-cols-5 gap-1 text-xs">
+        <div></div><div class="lbl text-center">key</div><div class="lbl text-center">click</div><div class="lbl text-center">wheel</div><div class="lbl text-center">text</div>
+        <div class="font-mono">settings</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div>
+        <div class="font-mono">rule field</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div>
+        <div class="font-mono">browser</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div>
+        <div class="font-mono">picker</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div>
+        <div class="font-mono">/workflows</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">swallow</div>
+        <div class="font-mono">prompt</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">walk</div><div class="cell ok">fall-through</div>
+      </div>
+      <div class="mt-4 rounded-md deep p-3 text-xs">
+        <div class="uppercase tracking-wider mb-2">draft edit</div>
+        <div class="flex flex-wrap gap-1"><span class="chip in">clear selection</span><span class="chip in">drop recall</span><span class="chip in">wrap memo</span><span class="chip in">overlay policy</span></div>
+        <div class="mt-2 text-slate-400">← key · paste · clipboard · splice · recall · interjection pop</div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Paste and clipboard replies are the only gestures outside the pane table; two hand chains disagree with the key walk, so a paste over the modal <span class="font-mono">/workflows</span> pane lands in the hidden draft and a ctrl+v paste skips autocomplete.</p>
+    <p><span class="lbl block">Solution</span>Each pane row gets a text answer and one walk routes paste and widget replies; the draft gets one edit operation that owns every after-edit duty.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Paste lives on the pane's row</li><li>Modal swallow enforced by walk</li><li>One sweep test over rows</li><li>locality: one after-edit duty list</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Enforces ADR 0053's 2026-10-14 amendment (paste is typing). The <span class="font-mono">/settings</span> list stays on its own adapter: today's carve-out (<span class="font-mono">listsurface.go:27</span>) holds.</p>
+</article>
+
+<!-- ============================================================ 6 -->
+<article id="c6" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">6 · "May an Exchange open now?" is one refusal asked inside the launch</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tui/model.go — submit :2137 (ladder :2183–2212) · loadHoldNote :2268</li>
+    <li>internal/tui/commandrun.go — launchExchange :120 · runCommand :468 · runContinue :558 · runCompact :592</li>
+    <li>internal/tui/interject.go:686 flushInterjections · engineholds.go canWake · actuation.go:428 · workflows.go:355</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — five openers, four hold subsets</h5>
+<pre class="mermaid">
+flowchart LR
+  A[submit] -->|prebound · load · actuation<br/>upstream · in-Exchange| L
+  B[runCommand] -->|actuation · upstream| L
+  C[runContinue · runCompact] -->|+ load| L
+  D[flushInterjections] -->|load| L
+  E[wake] -->|canWake · no actuation| L
+  L[launchExchange<br/>guards stay the caller's]
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class D,E leak
+</pre></div>
+    <div class="panel"><h5>After — the launch asks once</h5>
+<pre class="mermaid">
+flowchart LR
+  A[submit] --> L
+  B[runCommand] --> L
+  C[runContinue · runCompact] --> L
+  D[flushInterjections] --> L
+  E[wake] --> L
+  L[[launchExchange<br/>engineHolds: refuse? note<br/>then enterRunning]] --> WK[worker]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class L deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Five Exchange openers each ask a different subset of the same holds (6892ffda added the load hold to five sites by hand); a typed message is refused during an actuation, a flush or wake is not.</p>
+    <p><span class="lbl block">Solution</span><span class="font-mono">engineHolds</span> answers one "refuse this Exchange?" question and <span class="font-mono">launchExchange</span> asks it; callers keep only parse and draft handling.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Hold rule stated once</li><li>New opener inherits every hold</li><li>Table test over the hold set</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">ADR 0029 D5 settles the typed case only. Owner call: may a flush or wake open an Exchange mid-actuation? <span class="font-mono">actuation.go:428</span> says yes, <span class="font-mono">submit</span> says no.</p>
+</article>
+
+<!-- ============================================================ 7 -->
+<article id="c7" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">7 · A process run's ending travels typed on the ToolResult; nobody re-parses <span class="font-mono text-xl">[exit code N]</span></h2>
+    <span class="badge b-strong">Strong</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tools/terminal.go — subprocessToolResult :386–436 (marker :430, denial label after it :431–435)</li>
+    <li>internal/tools/console_common.go :255–293 · run_tests.go:459 · diagnostics.go:297</li>
+    <li>internal/tui/toolregistry.go — exitCodeMarker :761 · consoleStatusMarker :769 · internal/agent/recipe.go — exitCodeMarker :111 · scriptOutput :632</li>
+    <li>internal/domain/toolsummary.go — sealed ToolSummary (8 variants, no wire form)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — a typed fact round-trips through prose</h5>
+      <div class="flex flex-col items-center gap-2 text-xs">
+        <div class="mod">SubprocessResult · typed</div>
+        <div class="arrow">↓ written as prose</div>
+        <div class="font-mono text-[11px] bg-stone-100 border border-stone-300 rounded px-2 py-1">…output<br/>[exit code 1]<br/><span class="text-red-600">[blocked by workspace confinement]</span></div>
+        <div class="grid grid-cols-2 gap-6 w-full mt-1">
+          <div class="flex flex-col items-center gap-1"><div class="arrow red">↓ regex …\s*$</div><div class="mod red">TUI slot · miss</div><div class="text-[11px] text-red-700">falls back to first line</div></div>
+          <div class="flex flex-col items-center gap-1"><div class="arrow red">↓ regex, last match</div><div class="mod red">recipe scriptOutput</div><div class="text-[11px] text-red-700">changes if a Reaction rewrites Content</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel"><h5>After — the fact rides the Summary</h5>
+      <div class="flex flex-col items-center gap-2 text-xs">
+        <div class="mod">SubprocessResult · typed</div>
+        <div class="arrow">↓</div>
+        <div class="rounded-md deep p-3 w-full max-w-xs">
+          <div class="uppercase tracking-wider text-[11px] mb-2">ToolResult</div>
+          <div class="flex flex-wrap gap-1"><span class="chip in">Content: prose for the model</span><span class="chip in">Summary: ProcessEnding</span></div>
+          <div class="mt-1 text-[11px] text-slate-400">code · timed out · denial · alive / killed</div>
+        </div>
+        <div class="grid grid-cols-3 gap-2 w-full mt-1 text-center">
+          <div><div class="arrow">↓</div><div class="mod thin">model reads prose</div></div>
+          <div><div class="arrow">↓</div><div class="mod thin">TUI slot</div></div>
+          <div><div class="arrow">↓</div><div class="mod thin">scriptOutput</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Four tools write the exit status as prose and two modules regex it back with rules that disagree, so a confined failure's TUI slot loses its exit code.</p>
+    <p><span class="lbl block">Solution</span>A <span class="font-mono">ProcessEnding</span> variant on the sealed <span class="font-mono">domain.ToolSummary</span>, set where the prose is written; the TUI slot and <span class="font-mono">scriptOutput</span> read it.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Two readers cannot disagree</li><li>Confined failure shows exit code</li><li>Recipe code survives Reaction rewrites</li><li>Prose wording free to change</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">No ADR conflict: ToolSummary has no wire form, so ADR 0083 §1 is untouched. Same move as the 2026-09-30 typed <span class="font-mono">DelegationOutcome</span>.</p>
+</article>
+
+<!-- ============================================================ 8 -->
+<article id="c8" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">8 · A workflow run's ending is settled once, by the library, on every exit</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">local-substitutable</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/workflow/runner.go:329–400 Runner.Run (stage-error exit :363) · internal/workflow/tally.go:41 TallyOfStatus</li>
+    <li>internal/agent/background.go — StopWorkflow :312 · hasBlockedItem :368 · driveBackground :582 · stopAllBackground :609 · markStopped :720</li>
+    <li>internal/agent/workflowcall.go:959 workflowControlStopped</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — four exits, four step lists</h5>
+      <div class="space-y-3 text-xs">
+        <div><div class="font-mono mb-1">Runner.Run · stage error</div><div class="flex flex-wrap gap-1"><span class="chip miss">phase — stays running</span></div></div>
+        <div><div class="font-mono mb-1">driveBackground · done</div><div class="flex flex-wrap gap-1"><span class="chip">finish note</span><span class="chip">phase</span><span class="chip">drop</span></div></div>
+        <div><div class="font-mono mb-1">StopWorkflow · queued</div><div class="flex flex-wrap gap-1"><span class="chip">drop</span><span class="chip red">markStopped: agent writes status.json</span><span class="chip miss">finish note</span><span class="chip miss">phase event</span></div></div>
+        <div><div class="font-mono mb-1">stopAllBackground</div><div class="flex flex-wrap gap-1"><span class="chip">drop</span><span class="chip red">markStopped</span><span class="chip">retire</span></div></div>
+        <div class="pt-2 border-t border-stone-200"><div class="font-mono mb-1">"blocked"</div><div class="flex flex-wrap gap-1"><span class="chip red">hasBlockedItem: all stage kinds</span><span class="chip red">TallyOfStatus: fan-out only</span></div></div>
+      </div>
+    </div>
+    <div class="panel"><h5>After — one end path</h5>
+      <div class="flex flex-col gap-2 text-xs">
+        <div class="flex flex-wrap gap-1"><span class="mod thin">stage error</span><span class="mod thin">done</span><span class="mod thin">stop</span><span class="mod thin">queued stop</span><span class="mod thin">stop all</span></div>
+        <div class="arrow">↓ ↓ ↓ ↓ ↓</div>
+        <div class="rounded-md deep p-4">
+          <div class="uppercase tracking-wider text-[11px] mb-2">workflow run end · Runner / Store</div>
+          <div class="flex flex-wrap gap-1"><span class="chip in">phase written by the library</span><span class="chip in">finish note</span><span class="chip in">phase event</span><span class="chip in">drop</span><span class="chip in">start next</span></div>
+        </div>
+        <div class="mt-2"><span class="chip">"blocked" ← the one tally</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Four exits settle a run four ways: a stage error leaves <span class="font-mono">status.json</span> at <em>running</em> forever, a queued stop never sends the finish note the model was promised, and "blocked" has two rules.</p>
+    <p><span class="lbl block">Solution</span>The workflow library settles every exit and writes its phase; the background manager runs one end path; "blocked" comes from the tally.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>No orphaned running folders</li><li>Promised finish note always arrives</li><li>One phase writer for status.json</li><li>One "blocked" rule</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Fits ADR 0088 (stop keeps finished work) and ADR 0089 D3 (the finish note).</p>
+</article>
+
+<!-- ============================================================ 9 -->
+<article id="c9" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">9 · A project-rule act is one module: one lock, file before record</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">local-substitutable</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>cmd/apogee/projectrules.go:76–139 (ordering comment :34–38) · cmd/apogee/project_cmd.go:186–210</li>
+    <li>internal/config/projectwrite.go:291–322 · internal/adoption/store.go:182–221 (.lock) vs ConfigLockPath :118 (.config.lock)</li>
+    <li>rule types: config.AllowRule · domain.AllowRule · adoption.Entry — 5 converters</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — two packages, two locks, order by convention</h5>
+<pre class="mermaid">
+sequenceDiagram
+  participant P as pane or CLI
+  participant C as cmd projectrules
+  participant F as config · .config.lock
+  participant A as adoption · .lock
+  P->>C: add rule
+  C->>F: AddProjectAllowRule
+  Note over C: "the caller answers next"
+  C->>A: Adopt
+  P->>A: apogee project adopt · no file check
+</pre></div>
+    <div class="panel"><h5>After — one act owns the order</h5>
+<pre class="mermaid">
+sequenceDiagram
+  participant P as pane · CLI · settings
+  participant R as project-rule act
+  P->>R: add · adopt · reject · remove
+  activate R
+  Note over R: one lock
+  R->>R: read file
+  R->>R: write file
+  R->>R: record yes only for text the file holds
+  deactivate R
+  R-->>P: settled
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>ADR 0096's "never a recorded yes to text no file holds" rests on two cmd functions calling two packages in order under two different locks; a stale pane or <span class="font-mono">apogee project adopt</span> never re-checks the file.</p>
+    <p><span class="lbl block">Solution</span>One module in <span class="font-mono">internal/config</span>, beside the writer, owns every rule act under one lock; cmd keeps only kind mapping and settling.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Safety invariant has one owner</li><li>One lock spans both writes</li><li>Partial failure tested in-process</li><li>CLI gets the same guarantee</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Enforces ADR 0096 D4 rather than reopening it.</p>
+</article>
+
+<!-- ============================================================ 10 -->
+<article id="c10" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">10 · One pty session module under tuitest's PTYDriver and demorig's Terminal</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">local-substitutable</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tuitest/pty.go (492 lines) · internal/tuitest/screen.go answerQueue :361 · pty_windows.go</li>
+    <li>cmd/demorig/term.go (661 lines — "tuitest's PTYDriver without the testing.TB" :80) · replyQueue :621 · term_windows.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — the lifecycle, written twice</h5>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="border-2 border-slate-500 rounded-md p-2">
+          <div class="text-[11px] uppercase tracking-wider mb-2">PTYDriver</div>
+          <div class="flex flex-wrap gap-1"><span class="chip">start</span><span class="chip">env</span><span class="chip">size</span><span class="chip">emulator</span><span class="chip">clamp</span><span class="chip">answerQueue</span><span class="chip">out pump</span><span class="chip">answer pump</span><span class="chip">writes</span><span class="chip red">reap: 128+sig</span><span class="chip red">teardown + drain</span><span class="chip miss">EPERM retry</span></div>
+        </div>
+        <div class="border-2 border-slate-500 rounded-md p-2">
+          <div class="text-[11px] uppercase tracking-wider mb-2">demorig Terminal</div>
+          <div class="flex flex-wrap gap-1"><span class="chip">start</span><span class="chip">env</span><span class="chip">size</span><span class="chip">emulator</span><span class="chip">clamp</span><span class="chip">replyQueue</span><span class="chip">out pump</span><span class="chip">reply pump</span><span class="chip">writes</span><span class="chip red">reap: −1</span><span class="chip miss">drain fix</span><span class="chip red">EPERM retry</span></div>
+          <div class="mt-2 text-[11px] text-slate-500">+ sampler · take</div>
+        </div>
+      </div>
+      <div class="mt-3 text-xs text-slate-500">shared today: <span class="font-mono">tuitest.ClampMargins</span> only</div>
+    </div>
+    <div class="panel"><h5>After — two adapters on one deep module</h5>
+      <div class="grid grid-cols-2 gap-3 mb-2">
+        <div class="mod thin text-center">PTYDriver<br/><span class="normal-case text-[10px]">fail on error · cursor tally</span></div>
+        <div class="mod thin text-center">Terminal<br/><span class="normal-case text-[10px]">sampler · Match · take</span></div>
+      </div>
+      <div class="seamline my-2"></div>
+      <div class="rounded-md deep p-4">
+        <div class="uppercase tracking-wider text-[11px] mb-2">pty session</div>
+        <div class="flex flex-wrap gap-1"><span class="chip in">start + EPERM retry</span><span class="chip in">env</span><span class="chip in">emulator + clamp</span><span class="chip in">reply queue</span><span class="chip in">pumps</span><span class="chip in">serialised writes</span><span class="chip in">reap: one exit rule</span><span class="chip in">teardown + drain</span><span class="chip in">locked emulator access</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Eleven pty responsibilities are written twice — <span class="font-mono">answerQueue</span> and <span class="font-mono">replyQueue</span> differ only in names — and the copies drifted three ways: EPERM retry, drain-after-exit, and the exit code of a signal-killed child.</p>
+    <p><span class="lbl block">Solution</span>One non-test pty session module owns the lifecycle and returns errors; PTYDriver keeps the test-failure side, Terminal keeps the sampler and the take.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Two adapters: a real seam</li><li>locality: fixes land once</li><li>One exit-code rule</li><li>demorig gains the drain fix</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">No ADR conflict. <span class="font-mono">internal/console</span>'s pty stays out: it has no emulator and a confinement hook.</p>
+</article>
+
+<!-- ============================================================ 11 -->
+<article id="c11" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">11 · A publish step is one row, not two tables joined by name</h2>
+    <span class="badge b-strong">Strong</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>cmd/release/probes.go:72–79 publishSteps · status.go:124</li>
+    <li>cmd/release/publish.go:92–99 publishActions · publishRun.probe :222–229 (slices.IndexFunc by name) · converge / printPublish :198–217 :286–292</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — joined at runtime</h5>
+      <div class="grid grid-cols-2 gap-6 text-xs font-mono">
+        <div><div class="lbl mb-1">publishSteps</div>
+          <table class="w-full border border-slate-400"><tr class="bg-stone-100"><th class="px-1 text-left">name</th><th class="px-1 text-left">probe</th></tr>
+          <tr><td class="px-1">github</td><td class="px-1">✓</td></tr><tr><td class="px-1">homebrew</td><td class="px-1">✓</td></tr><tr><td class="px-1">scoop</td><td class="px-1">✓</td></tr><tr><td class="px-1">winget</td><td class="px-1">✓</td></tr></table>
+          <div class="mt-1 text-slate-500 not-italic">← status reads this</div></div>
+        <div><div class="lbl mb-1">publishActions</div>
+          <table class="w-full border border-slate-400"><tr class="bg-stone-100"><th class="px-1 text-left">name</th><th class="px-1 text-left">describe · converge · detail</th></tr>
+          <tr><td class="px-1">github</td><td class="px-1">✓</td></tr><tr><td class="px-1">homebrew</td><td class="px-1">✓</td></tr><tr><td class="px-1">scoop</td><td class="px-1">✓</td></tr><tr><td class="px-1 text-red-600">?</td><td class="px-1 text-red-600">missing → −1</td></tr></table>
+          <div class="mt-1 text-slate-500">← publish reads both</div></div>
+      </div>
+      <div class="mt-4 text-xs text-red-700 border-t-2 border-dashed border-red-400 pt-2">IndexFunc by name → −1 → index panic · no test compares the two</div>
+    </div>
+    <div class="panel"><h5>After — one row per channel</h5>
+      <div class="text-xs font-mono"><div class="lbl mb-1">publishSteps</div>
+        <table class="w-full border-2 border-slate-800"><tr class="bg-slate-800 text-slate-100"><th class="px-1 text-left">name</th><th class="px-1 text-left">probe</th><th class="px-1 text-left">describe</th><th class="px-1 text-left">converge</th><th class="px-1 text-left">doneDetail</th></tr>
+        <tr><td class="px-1">github</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr><tr><td class="px-1">homebrew</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr><tr><td class="px-1">scoop</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr><tr><td class="px-1">winget</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr></table>
+        <div class="mt-2 text-slate-500">status ← .probe · publish ← the row</div></div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Status and publish read two tables joined by name; a missing match panics on index −1, a new channel is three edits in two files, and the "one list" comment at <span class="font-mono">probes.go:70</span> is already untrue.</p>
+    <p><span class="lbl block">Solution</span>One <span class="font-mono">publishStep</span> row carries name, probe, describe, converge and doneDetail; status reads only the probe.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Status and publish agree by construction</li><li>Panic path removed</li><li>A channel is one row</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Fits ADR 0098. Step names are a JSON contract with the release skills — they stay as they are.</p>
+</article>
+
+<!-- ============================================================ 12 -->
+<article id="c12" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">12 · One reply accumulator ends every stream; the codecs keep only their dialect</h2>
+    <span class="badge b-explore">Worth exploring</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/provider/wire_openai.go:261–397 parseSSE (finish :285 · EOF :393)</li>
+    <li>internal/provider/wire_anthropic_stream.go:71–436 (EOF :97 · finish :400) · internal/provider/stream.go:433–590 openToolCalls (shared)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — cross-section of two codecs</h5>
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <div class="space-y-1"><div class="lbl">openai</div>
+          <div class="border-l-4 border-slate-400 pl-2 py-1">SSE dialect</div>
+          <div class="border-l-4 border-red-500 bg-red-50 pl-2 py-1 text-red-700">EOF: finish("stop") — drops pending length + usage</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">text cap</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">read-error fault</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">tool-cap error</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">malformed count</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">pending finish · usage</div></div>
+        <div class="space-y-1"><div class="lbl">anthropic</div>
+          <div class="border-l-4 border-slate-400 pl-2 py-1">event dialect</div>
+          <div class="border-l-4 border-slate-500 pl-2 py-1">EOF: keeps pending finish + usage</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">text cap</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">read-error fault</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">tool-cap error</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">malformed count</div>
+          <div class="border-l-4 border-red-500 pl-2 py-1">pending finish · usage</div></div>
+      </div>
+      <div class="mt-2 border-l-4 border-slate-600 pl-2 py-1 text-xs bg-stone-100">openToolCalls — already shared</div>
+    </div>
+    <div class="panel"><h5>After</h5>
+      <div class="grid grid-cols-2 gap-3 text-xs mb-2">
+        <div class="border-l-4 border-slate-400 pl-2 py-2">openai: SSE → text · call · finish · usage</div>
+        <div class="border-l-4 border-slate-400 pl-2 py-2">anthropic: events → text · call · finish · usage</div>
+      </div>
+      <div class="seamline my-2"></div>
+      <div class="rounded-md deep p-4 text-xs">
+        <div class="uppercase tracking-wider text-[11px] mb-2">reply accumulator · under wireCodec.parseSSE</div>
+        <div class="flex flex-wrap gap-1"><span class="chip in">one EOF epilogue</span><span class="chip in">caps</span><span class="chip in">faults</span><span class="chip in">malformed count</span><span class="chip in">pending state</span><span class="chip in">openToolCalls</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Six stream responsibilities are written twice and already drifted: on EOF without <span class="font-mono">[DONE]</span> the openai codec discards a received <em>length</em> finish and its usage, so a truncated reply reads as <em>stop</em> and the loop's FinishLength paths never fire.</p>
+    <p><span class="lbl block">Solution</span>An unexported accumulator inside <span class="font-mono">provider</span> owns caps, pending state, tool calls and every terminal path; the codecs only translate.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>One EOF rule, both wires</li><li>Codec tests: translation only</li><li>Truncated length reaches the loop</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Stays inside the one Client (ADR 0078); stop-reason mapping stays in the codec (ADR 0083 §6); the idle cut stays at the body (ADR 0082). The EOF defect is a one-line fix on its own — don't wait for the deepening.</p>
+</article>
+
+<!-- ============================================================ 13 -->
+<article id="c13" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">13 · A list row click is one walk with per-pane adapters</h2>
+    <span class="badge b-explore">Worth exploring</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tui/mouse.go — handleBrowserClick :1437 · handlePickerClick :1489 · handleAskClick :1553 · handleApprovalClick :1628 · handleDropdownClick :1697</li>
+    <li>internal/tui/workflows.go — handleWorkflowsClick :663</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — one 9-step body, six times</h5>
+<pre class="mermaid">
+flowchart LR
+  PP[pointerPanes walk] --> H1[browser · 9 steps]
+  PP --> H2[picker · 9 steps]
+  PP --> H3[ask · 9 steps]
+  PP --> H4[approval · 9 steps]
+  PP --> H5[dropdown · 9 steps]
+  PP --> H6[workflows · no naming guard]
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class H6 leak
+</pre></div>
+    <div class="panel"><h5>After</h5>
+<pre class="mermaid">
+flowchart LR
+  PP[pointerPanes walk] --> LC[[list click<br/>gate · hit · outside · chrome<br/>armed · latch · seat]]
+  LC --- A1[browser]
+  LC --- A2[picker]
+  LC --- A3[ask]
+  LC --- A4[approval]
+  LC --- A5[dropdown]
+  LC --- A6[workflows]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class LC deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Six click handlers repeat one nine-step body the doc calls "ONE rule… stated here"; <span class="font-mono">/workflows</span> forgot the sub-step guard, so an outside click discards a half-typed recipe name.</p>
+    <p><span class="lbl block">Solution</span>One list-click walk owns the sequence; each pane supplies count, seat, accept, armed, outside and "a sub-step owns the pane".</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Outside rule stated once</li><li>Sub-step guard can't be forgotten</li><li>One click test table</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">ADR 0053 D3 holds: accept stays per pane. Not a re-raise — <span class="font-mono">tui-boxedpane-adapters</span> closed with its smaller shared-click fix never done.</p>
+</article>
+
+<!-- ============================================================ 14 -->
+<article id="c14" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">14 · Seating a session in the view is one operation; /clear is the zero seed</h2>
+    <span class="badge b-explore">Worth exploring</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/tui/model.go:953 replayResumed · internal/tui/sessions.go:622 resumeLoaded · internal/tui/commandrun.go:349 resetSessionView</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — three sites, ~8 fields each</h5>
+<pre class="mermaid">
+flowchart TB
+  A[boot resume<br/>replayResumed] -->|8 fields · r.Currency| M[(Model)]
+  B["/sessions · /fork<br/>resumeLoaded"] -->|8 fields · EffectiveCurrency| M
+  C["/clear · /new<br/>resetSessionView"] -->|8 zeros| M
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class A,B leak
+</pre></div>
+    <div class="panel"><h5>After</h5>
+<pre class="mermaid">
+flowchart TB
+  A[boot resume] -->|record| S
+  B["/sessions · /fork"] -->|record| S
+  C["/clear · /new"] -->|zero| S
+  S[[session seat<br/>every session-owned field<br/>one currency rule]] --> M[(Model)]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class S deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Two resume paths copy the same eight record-to-Model assignments and <span class="font-mono">/clear</span> writes their zeros; currency is already derived two ways, and 9a4aac32 had to touch all three.</p>
+    <p><span class="lbl block">Solution</span>One session-seat operation takes a seed — a record or zero — and owns every session-owned field.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>New session field: one edit</li><li>Currency rule stated once</li><li>Resume / clear parity by construction</li></ul></div>
+  </div>
+</article>
+
+<!-- ============================================================ 15 -->
+<article id="c15" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">15 · A key's layer and source are one config-side answer</h2>
+    <span class="badge b-explore">Worth exploring</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/config/config.go:3183 SourceOf · :3220 overrideSources · layer.go:376 · projectwrite.go:271</li>
+    <li>cmd/apogee/wire_options.go:478 layeredOpts · :631 landed · settingsrows.go:291 :324 · internal/tui/settings.go:436 :455</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — precedence split across two owners</h5>
+      <div class="text-xs space-y-3">
+        <div class="flex items-stretch gap-1 h-10">
+          <div class="flex-1 bg-stone-200 rounded-l flex items-center justify-center">default</div>
+          <div class="flex-1 bg-stone-200 flex items-center justify-center">global</div>
+          <div class="flex-1 bg-amber-100 flex items-center justify-center">project</div>
+          <div class="flex-1 bg-red-100 text-red-700 flex items-center justify-center">env</div>
+          <div class="flex-1 bg-red-100 text-red-700 rounded-r flex items-center justify-center">flag</div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="border border-slate-400 rounded p-2"><div class="lbl mb-1">cmd/apogee</div><span class="chip">layeredOpts</span> <span class="chip">landed</span> <span class="chip">savableToProject</span> <span class="chip">settingSource</span></div>
+          <div class="border border-slate-400 rounded p-2"><div class="lbl mb-1">internal/tui</div><span class="chip red">settingsSourceOf</span> <span class="chip red">settingsOutranksNote</span></div>
+        </div>
+        <div class="border border-slate-400 rounded p-2"><div class="lbl mb-1">internal/config</div><span class="chip">SourceOf</span> <span class="chip">layer.go:376</span> <span class="chip">projectWritableKey</span></div>
+        <div class="text-red-700">5 "who wins" · 3 "may a project write" · update-check exception ×4</div>
+      </div>
+    </div>
+    <div class="panel"><h5>After — config answers, others read</h5>
+      <div class="rounded-md deep p-4 text-xs">
+        <div class="uppercase tracking-wider text-[11px] mb-2">config layers answer · per key</div>
+        <div class="flex flex-wrap gap-1"><span class="chip in">may a project state it</span><span class="chip in">which layer states it</span><span class="chip in">which source wins, overrides included</span></div>
+        <div class="mt-3 flex items-stretch gap-1 h-8 opacity-70">
+          <div class="flex-1 bg-slate-600 rounded-l flex items-center justify-center">default</div><div class="flex-1 bg-slate-600 flex items-center justify-center">global</div><div class="flex-1 bg-slate-600 flex items-center justify-center">project</div><div class="flex-1 bg-slate-600 flex items-center justify-center">env</div><div class="flex-1 bg-slate-600 rounded-r flex items-center justify-center">flag</div>
+        </div>
+      </div>
+      <div class="mt-3 flex gap-2 text-xs"><span class="mod thin">settings host · reads</span><span class="mod thin">settings pane · reads</span></div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Precedence is half-stated in <span class="font-mono">cmd/apogee</span> and half in the TUI; an env-overridden row saved to file comes back marked "file" and only reads right because the TUI re-imposes the mark.</p>
+    <p><span class="lbl block">Solution</span><span class="font-mono">internal/config</span> answers per key: may a project state it, which layer states it, which source wins; the settings host and pane only read.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Precedence spelled once</li><li>Exception lives on its row</li><li>Source marks tested in config</li><li>TUI loses decision logic</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Fits ADR 0096 D7. Not ADR 0083 §2: no live setter changes.</p>
+</article>
+
+<!-- ============================================================ 16 -->
+<article id="c16" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">16 · The event-line vocabulary is a declared table, checked against every Event</h2>
+    <span class="badge b-explore">Worth exploring</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/eventjson/encode.go — kind constants :14–38 · Kinds() :44–70 · encode switch :109–239 (default drop :237)</li>
+    <li>internal/tui/fold_test.go:384 TestFoldEventCoversEveryEventVariant · cmd/apogee/headless.go:267 narrate</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — three restatements, silent default</h5>
+      <div class="flex flex-col gap-2 text-xs">
+        <div class="mod thin">kind constants · 23</div>
+        <div class="mod thin">Kinds() · restates the constants</div>
+        <div class="mod thin">encode switch · restates again</div>
+        <div class="grid grid-cols-2 gap-2 mt-1">
+          <div class="mod thin text-center">excluded on purpose → ok=false</div>
+          <div class="mod red text-center">forgotten variant → ok=false</div>
+        </div>
+        <div class="text-red-700">indistinguishable · UpstreamAttemptEvent shipped without a line (974ccbfa → a23c3362)</div>
+        <div class="mt-2 flex flex-wrap gap-1"><span class="lbl w-full">prune sentence</span><span class="chip red">headless narrate</span><span class="chip red">run/transcript.go:102</span><span class="chip red">tui/transcript.go:2788</span></div>
+      </div>
+    </div>
+    <div class="panel"><h5>After</h5>
+      <div class="rounded-md deep p-4 text-xs">
+        <div class="uppercase tracking-wider text-[11px] mb-2">event-line table</div>
+        <div class="font-mono text-[11px] text-slate-300 space-y-0.5"><div>Event variant → kind</div><div>Event variant → sink-only</div></div>
+      </div>
+      <div class="seamline my-3"></div>
+      <div class="flex flex-col gap-2 text-xs">
+        <div class="mod thin">declared-variant scanner · shared with the TUI's fold guard</div>
+        <div class="mod thin">event.Notice() · one sentence per notice</div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Event lines are a versioned Driver protocol, yet a forgotten Event variant drops silently through the switch's default, indistinguishable from a deliberate exclusion.</p>
+    <p><span class="lbl block">Solution</span><span class="font-mono">eventjson</span> owns one variant → kind / sink-only table, checked by the scanner the TUI already uses; the prune sentence becomes the event's <span class="font-mono">Notice()</span>.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>New Event fails loudly</li><li>Count pin goes away</li><li>One sentence per notice</li></ul></div>
+  </div>
+</article>
+
+<!-- ============================================================ 17 -->
+<article id="c17" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">17 · An MCP server's OAuth binding is one value for login and connect</h2>
+    <span class="badge b-explore">Worth exploring</span><span class="tag">local-substitutable</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>cmd/apogee/mcp_cmd.go:45–124 — loginMCPServer · mcpClientSecret · auth-client default</li>
+    <li>internal/mcp/transport.go:496–529 newOAuthHandler · :593 EndpointClient · internal/mcpauth/handler.go:264–296 refreshRequest</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — two assembly sites, six shared facts</h5>
+<pre class="mermaid">
+flowchart LR
+  L[mcp login] --> LM[loginMCPServer<br/>secret · default · EndpointClient] --> LC[LoginConfig]
+  C[connect] --> NH[newOAuthHandler<br/>secret · default · vetEndpoint] --> HC[HandlerConfig<br/>no ClientID]
+  HC -.stored client id + new secret.-> RF[refreshRequest]
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class HC,RF leak
+</pre></div>
+    <div class="panel"><h5>After</h5>
+<pre class="mermaid">
+flowchart LR
+  B[[OAuth binding<br/>name · vetted endpoint · store<br/>clients · client id · secret]]
+  B --> LC[LoginConfig]
+  B --> HC[HandlerConfig<br/>client-id mismatch = miss]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class B deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>Login and connect each assemble the same six facts with different error sentences, and they drifted: after a <span class="font-mono">client-id:</span> change a refresh sends the stored client id with the new config's secret.</p>
+    <p><span class="lbl block">Solution</span><span class="font-mono">internal/mcp</span> assembles one binding that both configs embed; the handler treats a client-id mismatch as a miss.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>EndpointClient export goes away</li><li>Secret read in one place</li><li>Client-id drift closed</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Contradicts ADR 0095 D1 (the token record is keyed on name + endpoint only), but worth a dated amendment: keying on client id is what closes the mismatched-credential refresh.</p>
+</article>
+
+<!-- ============================================================ 18 -->
+<article id="c18" class="space-y-4">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">18 · A call's route is classified once, after pre-tool-exec, and carried on the slot</h2>
+    <span class="badge b-spec">Speculative</span><span class="tag">in-process</span>
+  </div>
+  <ul class="files font-mono text-sm text-slate-600 space-y-0.5">
+    <li>internal/agent/dispatch.go — partition :77 · run-id mint :401 · preempt :472 · ceiling :497 · resolutionInput :1062 · leaf-group invariant :542–555</li>
+    <li>internal/agent/workflowcall.go:291 offersBackgroundSubAgent · internal/domain/tooledit.go:77 SetTool</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="panel"><h5>Before — ~7 reads of two call values</h5>
+<pre class="mermaid">
+flowchart LR
+  C0[call as emitted] --> P[partition]
+  C0 --> MI[run-id mint]
+  P --> RX{pre-tool-exec<br/>Reaction}
+  RX --> C1[call after Reaction]
+  C1 --> PE[preempt]
+  C1 --> CE[ceiling]
+  C1 --> RS[resolve]
+  classDef leak stroke:#dc2626,color:#b91c1c,fill:#fef2f2;
+  class P,MI leak
+</pre></div>
+    <div class="panel"><h5>After</h5>
+<pre class="mermaid">
+flowchart LR
+  C0[call] --> RX{pre-tool-exec}
+  RX --> CL[[classify route once<br/>leaf · delegation · background<br/>workflow · control]]
+  CL --> SL[slot.route] --> ALL[partition · mint · preempt<br/>ceiling · resolve · run]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class CL deep
+</pre></div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-4 text-sm">
+    <p><span class="lbl block">Problem</span>"Is this a delegation?" is asked ~7 times per call against two call values; an embedder's Go Reaction that <span class="font-mono">SetTool</span>s a pooled <span class="font-mono">sub_agent</span> into a leaf would run that leaf on a pool worker — latent, no in-tree caller does.</p>
+    <p><span class="lbl block">Solution</span>Classify the route once after pre-tool-exec, carry it on the dispatch slot, and partition by it.</p>
+    <div><span class="lbl block">Wins</span><ul class="list-disc ml-4">
+      <li>Torn route reads impossible</li><li>Redirected call lands in its lane</li><li>New engine-run tool: one route</li></ul></div>
+  </div>
+  <p class="text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2">Must keep ADR 0039 D11's emitted-order partition; moving the partition after pre-tool-exec changes when that Moment fires relative to the leaf group — check against ADR 0039 before planning.</p>
+</article>
+
+</section>
+
+<section id="top-recommendation" class="rounded-xl deep p-8 space-y-3">
+  <div class="text-xs uppercase tracking-widest text-emerald-300">Top recommendation</div>
+  <h2 class="font-serif text-3xl"><a class="hover:underline" href="#c1">1 · A child run's bracket and ending are one module</a></h2>
+  <p class="text-slate-300 max-w-3xl">It sits in the most-changed engine files (<span class="font-mono">agent.go</span>, <span class="font-mono">dispatch.go</span>, <span class="font-mono">subagent.go</span>), replaces three brackets and ~11 ending switches with one classified value, closes two drifts already in the tree — and that typed ending is what lets <a class="underline" href="#c2">#2</a> delete the TUI's prose readers.</p>
+</section>
+
+</main>
+</body>
+</html>
