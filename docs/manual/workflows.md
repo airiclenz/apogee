@@ -508,7 +508,9 @@ its id.
   so and opens nothing.
 - `^x` stops the workflow and keeps its finished items.
 - `^r` re-runs its `blocked` and faulted items as a new run of the same finished workflow, in the
-  background and only while the agent is idle; every item that ended `ok` or `partial` is kept.
+  background and only while the agent is idle; every item that ended `ok` or `partial` is kept. A
+  `failed` workflow — one a stage error ended — is resumed the same way, its unreached items run
+  too.
 - `^s` saves a `fan_out`'s workflow as a **recipe**: it asks for a name and writes
   `~/.apogee/skills/<name>/SKILL.md`, whose recipe runs the same stages — the path the items came
   from becomes its `scope` input — and `/<name>` runs it at once. A name a skill or command already

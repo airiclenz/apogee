@@ -1149,8 +1149,9 @@ type Engine interface {
 	StopWorkflow(id string) error
 	// RerunFailed runs the finished workflow id again in the background, in its own folder, as a new
 	// run of the same workflow: every item whose receipt is ok or partial is skipped, so only its
-	// blocked and faulted items run again. A live workflow, an unfinished one, one with nothing
-	// blocked and one whose items no longer lead to its folder are refused. Like StartRecipe's
+	// blocked and faulted items run again. A failed workflow — one a stage error ended — is resumed
+	// the same way, its unreached items run too. A live workflow, an unfinished one, a finished one
+	// with nothing blocked and one whose items no longer lead to its folder are refused. Like StartRecipe's
 	// background launch it reads the engine for the launch-time snapshot, so it is called ONLY at
 	// idle, from a tea.Cmd, under the /bg launch latch (the view's ctrl+r, workflows.go).
 	RerunFailed(id string) error

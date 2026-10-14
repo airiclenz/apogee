@@ -865,8 +865,8 @@ func (e *lateEngine) StopWorkflow(id string) error {
 	return agent.StopWorkflow(id)
 }
 
-// RerunFailed re-runs a finished workflow's failed items on the bound Agent; unbound there is no
-// server for its children to run on, so it is errNoServerBound.
+// RerunFailed re-runs a finished workflow's failed items, or resumes a failed workflow, on the bound
+// Agent; unbound there is no server for its children to run on, so it is errNoServerBound.
 func (e *lateEngine) RerunFailed(id string) error {
 	agent := e.bound()
 	if agent == nil {

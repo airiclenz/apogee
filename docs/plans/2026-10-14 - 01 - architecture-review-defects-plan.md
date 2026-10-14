@@ -174,7 +174,10 @@ NOTES (2026-10-14): consequential edit — docs/manual/configuration.md: made ne
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestStream' ./internal/provider/`
 **Commit:** `fix(provider): keep the finish reason and usage when a stream ends without [DONE]`
 
-## 8. A workflow whose stage errors records phase `failed`
+## 8. A workflow whose stage errors records phase `failed` — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): consequential edit — internal/agent/doc.go: made necessary by RerunFailed now accepting a failed workflow (the package map named only a finished one's re-run).
+NOTES (2026-10-14): the stage whose error ends the run keeps its own status.json phase `running` (only the workflow phase becomes `failed`), as before this item — pre-existing; the Goal names the workflow's phase only.
 
 **What:**
 **Goal:** when `workflow.Runner.Run` returns a stage error, the workflow's recorded phase is `failed` (`workflow.PhaseFailed`) and its items are written, so listings never show it `running`; `RerunFailed` accepts a `failed` workflow and re-runs it from its folder.

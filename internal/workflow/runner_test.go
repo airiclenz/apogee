@@ -1098,3 +1098,60 @@ func TestRunnerEndsASubAgentItemOnItsFirstRun(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerRecordsFailedWhenAStageErrors(t *testing.T) {
+	t.Parallel()
+	spawner := &recordingSpawner{script: func(_ context.Context, spec ItemSpec) (Outcome, error) {
+		return Outcome{Ending: EndCompleted, Receipt: okReceipt(spec.Item.Label)}, nil
+	}}
+	runner := newTestRunner(t, spawner)
+	plan := fanPlan("a")
+	plan.Stages = append(plan.Stages, Stage{Name: "report", Kind: StageMerge, Task: "merge"})
+	opened, err := runner.Open(plan, "")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	dir, err := runner.Store.Dir(opened.ID)
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	// A non-empty directory where the merge's report goes: clearing the stale report fails, so the
+	// merge stage returns an error after the fanout finished.
+	report := filepath.Join(dir, reportName)
+	if err := os.MkdirAll(filepath.Join(report, "keep"), 0o755); err != nil {
+		t.Fatalf("make the report a directory: %v", err)
+	}
+
+	result, err := runner.Run(context.Background(), plan)
+
+	if err == nil {
+		t.Fatal("Run succeeded, want the merge stage's error")
+	}
+	if result.Phase != PhaseFailed {
+		t.Errorf("result phase = %s, want %s", result.Phase, PhaseFailed)
+	}
+	status, readErr := runner.Store.ReadStatus(opened.ID)
+	if readErr != nil {
+		t.Fatalf("ReadStatus: %v", readErr)
+	}
+	if status.Phase != PhaseFailed {
+		t.Errorf("status.json phase = %s, want %s — a listing must never show it running", status.Phase, PhaseFailed)
+	}
+	if result.Listing == "" {
+		t.Fatal("result listing is empty, want items.md written")
+	}
+	if _, statErr := os.Stat(result.Listing); statErr != nil {
+		t.Errorf("items.md: %v, want it written", statErr)
+	}
+
+	if err := os.RemoveAll(report); err != nil {
+		t.Fatalf("clear the report directory: %v", err)
+	}
+	resumed := runPlan(t, runner, context.Background(), plan)
+	if resumed.ID != opened.ID || resumed.Phase != PhaseDone {
+		t.Errorf("re-run = %s (%s), want folder %s done", resumed.ID, resumed.Phase, opened.ID)
+	}
+	if specs := spawner.specsFor("a"); len(specs) != 1 {
+		t.Errorf("item a spawned %d times, want 1 — the failed folder's finished item is kept", len(specs))
+	}
+}

@@ -103,8 +103,8 @@
 // snapshot of the Agent taken at launch (backgroundHost) so the idle-only mutators never race it,
 // their gates and questions waiting in its queue, stopped by StopWorkflow and Close — and by a
 // ClearContext or RestoreSession unless KeepWorkflows kept them across that boundary — a finished
-// one's blocked and faulted items run again by RerunFailed, and carried
-// across a session snapshot as identifiers that ResumeWorkflows starts again; it holds each ended
+// one's blocked and faulted items run again — and a failed one resumed — by RerunFailed, and
+// carried across a session snapshot as identifiers that ResumeWorkflows starts again; it holds each ended
 // one's finish note — one line, or a background sub_agent's lead line and report — until a
 // Driver's drain, the Wake that opens an Exchange on it, or the next opening message takes it (ADR
 // 0089 D3), and a note still held rides the snapshot too.

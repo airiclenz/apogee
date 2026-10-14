@@ -117,7 +117,7 @@ const backgroundCallPrefix = domain.BackgroundWorkflowCallPrefix
 const (
 	unknownWorkflowFormat        = "apogee: no background workflow %q is running or queued"
 	workflowAlreadyRunningFormat = "apogee: workflow %s is already running in the background"
-	rerunUnfinishedFormat        = "apogee: workflow %s has not finished (%s) — a re-run takes the blocked and faulted items of a finished workflow"
+	rerunUnfinishedFormat        = "apogee: workflow %s has not finished (%s) — a re-run takes the blocked and faulted items of a finished workflow, or resumes a failed one"
 	rerunNothingFormat           = "apogee: workflow %s has no blocked or faulted items to re-run"
 	rerunMovedFormat             = "apogee: workflow %s no longer matches its items — launch it afresh"
 )
@@ -331,16 +331,18 @@ func (a *Agent) StopWorkflow(id string) error {
 // run of the same workflow: the Runner skips every fan-out item whose receipt is ok or partial, so
 // only the blocked ones — a child that declared itself blocked, or one whose faults outlasted its
 // retries — run again, and the script and ask stages run afresh as any re-issue of finished work's
-// do (workflow.Runner.Run). It is launched as a resumed one is (resumeBackground) — the plan read
-// back from the folder, a recipe's prompt files and scripts from the recipe skill its status.json
-// names — and waits in line behind another workflow on its server like any background launch. It
-// does not wait for the run: the WorkflowPhaseEvents report it.
+// do (workflow.Runner.Run). A failed workflow — one a stage error ended — is accepted too, and its
+// run resumes it: the items it never reached run as well, and its recorded script and ask stages
+// are replayed, as for any unfinished folder. It is launched as a resumed one is (resumeBackground)
+// — the plan read back from the folder, a recipe's prompt files and scripts from the recipe skill
+// its status.json names — and waits in line behind another workflow on its server like any
+// background launch. It does not wait for the run: the WorkflowPhaseEvents report it.
 //
 // Refused: a workflow this Agent runs or queues, one that has not finished (stopped, or cut off
-// while running — its unfinished items would run too), one with nothing blocked, and one whose items
-// no longer hash to its folder (the workspace moved under a source), which would otherwise run
-// everything in a new folder. Like StartRecipe's background launch it reads the Agent for the
-// launch-time snapshot, so a Driver calls it only at idle.
+// while running — its unfinished items would run too), a finished one with nothing blocked, and one
+// whose items no longer hash to its folder (the workspace moved under a source), which would
+// otherwise run everything in a new folder. Like StartRecipe's background launch it reads the Agent
+// for the launch-time snapshot, so a Driver calls it only at idle.
 func (a *Agent) RerunFailed(id string) error {
 	if a.background.isLive(id) {
 		return fmt.Errorf(workflowAlreadyRunningFormat, id)
@@ -353,10 +355,10 @@ func (a *Agent) RerunFailed(id string) error {
 	if err != nil {
 		return fmt.Errorf("apogee: re-run workflow %s: %w", id, err)
 	}
-	if status.Phase != workflow.PhaseDone {
+	if status.Phase != workflow.PhaseDone && status.Phase != workflow.PhaseFailed {
 		return fmt.Errorf(rerunUnfinishedFormat, id, status.Phase)
 	}
-	if !hasBlockedItem(status) {
+	if status.Phase == workflow.PhaseDone && !hasBlockedItem(status) {
 		return fmt.Errorf(rerunNothingFormat, id)
 	}
 	_, err = a.startBackground(a.folderLaunch(store, id, status.Recipe, true))
@@ -714,15 +716,15 @@ func (a *Agent) backgroundServer(seat delegationSeat) string {
 }
 
 // markStopped writes a queued run's folder as stopped: it never started, so no Runner will. A folder
-// already done — a queued RerunFailed's — is left done: the re-run never started, so the finished
-// run it would have repeated stands, and a later RerunFailed still accepts it. The stamp reads the
-// run's Runner clock (Runner.Now), else time.Now.
+// already done or failed — a queued RerunFailed's — is left as it is: the re-run never started, so
+// the run it would have repeated stands, and a later RerunFailed still accepts it. The stamp reads
+// the run's Runner clock (Runner.Now), else time.Now.
 func markStopped(run *backgroundRun) error {
 	status, err := run.runner.Store.ReadStatus(run.id)
 	if err != nil {
 		return err
 	}
-	if status.Phase == workflow.PhaseDone {
+	if status.Phase == workflow.PhaseDone || status.Phase == workflow.PhaseFailed {
 		return nil
 	}
 	status.Phase = workflow.PhaseStopped

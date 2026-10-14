@@ -325,7 +325,9 @@ type Tally struct {
 // items' receipts, and returns a Result whose Phase is PhaseStopped. Either way the run ends by
 // writing items.md (Store.WriteItems) into the folder. The error is for a run that
 // could not proceed: an invalid plan, an unreadable item source, a store that cannot be written, a
-// folder Admit refused.
+// folder Admit refused. A stage that errors once the folder is running ends the run as failed: its
+// status.json phase PhaseFailed and items.md written, best-effort (failRun), so no listing shows it
+// running.
 func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 	if r.Spawner == nil || r.Store == nil || r.Workspace == nil {
 		return Result{}, errors.New("workflow: runner needs a Spawner, a Store and a Workspace")
@@ -360,7 +362,7 @@ func (r *Runner) Run(ctx context.Context, plan Plan) (Result, error) {
 		}
 		stageResult, err := state.runStage(ctx, plan, index, stageItems, &result)
 		if err != nil {
-			return result, err
+			return result, state.failRun(&result, err)
 		}
 		result.Stages = append(result.Stages, stageResult)
 		if stageResult.Phase == PhaseStopped {
@@ -458,10 +460,10 @@ func (r *Runner) openFolder(plan Plan, folder string) (status RunStatus, found b
 // phase running, its recipe and Updated stamped, written back. prior is a found folder's stages as
 // its last run left them, before the reset (nil for a created folder): the stale guard on an older
 // key scheme's receipt reads them (adoptable). replay reports that the found folder had not
-// finished — stopped, or cut off while running — so its recorded script and ask stages are replayed
-// rather than run again (StageRecord). A re-issue of a workflow that ran to its end still skips its
-// finished items, but runs its scripts and asks its questions afresh: it is a new run of finished
-// work, not the resume of unfinished work.
+// finished — stopped, failed on a stage error, or cut off while running — so its recorded script
+// and ask stages are replayed rather than run again (StageRecord). A re-issue of a workflow that
+// ran to its end still skips its finished items, but runs its scripts and asks its questions
+// afresh: it is a new run of finished work, not the resume of unfinished work.
 func (r *Runner) resetStatus(plan Plan, status RunStatus, found bool) (_ RunStatus, prior []StageStatus, replay bool, err error) {
 	if found {
 		prior, replay = status.Stages, status.Phase != PhaseDone
@@ -1056,6 +1058,17 @@ func (s *runState) notifyStage(stageIndex int, stage Stage, phase Phase, items i
 			RepeatRound: s.status.Stages[stageIndex].Round, Items: items,
 		})
 	}
+}
+
+// failRun ends a run whose stage returned cause: the result and status.json take PhaseFailed and
+// items.md lists what the run reached, each write attempted whatever the other did, since the run
+// is over either way. It returns cause joined with any write error.
+func (s *runState) failRun(result *Result, cause error) error {
+	result.Phase = PhaseFailed
+	phaseErr := s.setWorkflowPhase(PhaseFailed)
+	listing, itemsErr := s.runner.Store.WriteItems(result.ID, *result)
+	result.Listing = listing
+	return errors.Join(cause, phaseErr, itemsErr)
 }
 
 // setWorkflowPhase records the workflow's final phase in status.json.

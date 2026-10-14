@@ -546,6 +546,92 @@ func TestBackground_StoppingAQueuedRerunLeavesTheFolderDone(t *testing.T) {
 	}
 }
 
+// markFailed records the workflow id's folder as failed, as a Run a stage error ended leaves it
+// (workflow.Runner.Run).
+func markFailed(t *testing.T, a *Agent, id string) {
+	t.Helper()
+	store, err := workflow.NewStore(a.ScratchDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	status, err := store.ReadStatus(id)
+	if err != nil {
+		t.Fatalf("ReadStatus(%s): %v", id, err)
+	}
+	status.Phase = workflow.PhaseFailed
+	if err := store.WriteStatus(status); err != nil {
+		t.Fatalf("WriteStatus(%s): %v", id, err)
+	}
+}
+
+func TestBackground_RerunFailedResumesAFailedWorkflow(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("pair", "alpha"))
+	up := (&workflowResponder{}).route("sweep alpha", nil, finishScript("f1", "alpha is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	id := launchBackground(t, a, "pair")
+	a.background.waitAll()
+	markFailed(t, a, id)
+
+	// Nothing is blocked, yet a failed workflow never finished: the re-run resumes it.
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed on a failed workflow: %v", err)
+	}
+	a.background.waitAll()
+
+	if info := workflowInfo(t, a, id); info.Status.Phase != workflow.PhaseDone || itemReceipts(info)["alpha"] != workflow.StatusOK {
+		t.Errorf("after the re-run = %+v, want alpha ok and the workflow done", info)
+	}
+	if n := up.askedCount("sweep alpha"); n != 1 {
+		t.Errorf("alpha ran %d times over both runs, want 1 — its ok receipt is kept", n)
+	}
+	if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 1 {
+		t.Errorf("workflow folders = %v, want the one folder run again", folders)
+	}
+}
+
+func TestBackground_StoppingAQueuedRerunLeavesTheFolderFailed(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), sweepRecipe("pair", "alpha"), sweepRecipe("slow", "hold"))
+	started, release := make(chan struct{}), make(chan struct{})
+	up := (&workflowResponder{}).
+		route("sweep alpha", nil, blockedScript("b1", "alpha is stuck")).
+		route("sweep hold", signalThenWait(started, release), finishScript("f1", "hold is fine"))
+	a := newBackgroundParent(t, cfg, up)
+	id := launchBackground(t, a, "pair")
+	a.background.waitAll()
+	markFailed(t, a, id)
+
+	launchBackground(t, a, "slow")
+	awaitClosed(t, started, "the slow workflow's child")
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed behind a running workflow: %v", err)
+	}
+	if info := workflowInfo(t, a, id); !info.Queued {
+		t.Fatalf("the re-run = %+v, want it queued behind the slow workflow", info)
+	}
+
+	if err := a.StopWorkflow(id); err != nil {
+		t.Fatalf("StopWorkflow(%s): %v", id, err)
+	}
+	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseFailed {
+		t.Errorf("the stopped re-run's folder = %+v, want it still failed and no longer live", info)
+	}
+	close(release)
+	a.background.waitAll()
+
+	up.route("sweep alpha", nil, finishScript("f2", "alpha is fine"))
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed after the queued re-run was stopped: %v", err)
+	}
+	a.background.waitAll()
+	if info := workflowInfo(t, a, id); info.Status.Phase != workflow.PhaseDone || itemReceipts(info)["alpha"] != workflow.StatusOK {
+		t.Errorf("after the second re-run = %+v, want alpha ok and the workflow done", info)
+	}
+}
+
 func TestBackground_CloseStopsEveryWorkflow(t *testing.T) {
 	t.Parallel()
 
