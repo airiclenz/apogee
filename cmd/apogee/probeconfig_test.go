@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/config"
 )
 
 // runProbeConfig executes `apogee probe config` against a hermetic apogee home and returns
@@ -169,6 +171,31 @@ func TestProbeConfigLayersTheProjectConfigOfTheCurrentDirectory(t *testing.T) {
 	}
 	if !strings.Contains(sectionOf(report, "notices"), "ignoring global-only key") {
 		t.Errorf("the ignored global-only key is not under `notices`:\n%s", report)
+	}
+}
+
+// With no --config, the verb reads the home APOGEE_CONFIG names, on the precedence every other
+// verb honours: the report quotes that home's file by its path and carries its unknown key. Serial
+// — t.Setenv and t.Chdir both refuse a parallel test — and driven through newProbeCommand directly,
+// because runProbeConfig always passes --config. The working directory moves to an empty temp dir
+// so no Project config of the checkout is layered over the home's file.
+func TestProbeConfigReadsTheHomeAPOGEECONFIGNames(t *testing.T) {
+	home, path := seedConfigHome(t, "env-named-bogus: 1\n")
+	t.Setenv(config.EnvConfig, home)
+	t.Chdir(t.TempDir())
+
+	cmd := newProbeCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"config"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("probe config: %v\n%s", err, out.String())
+	}
+
+	want := `apogee: config ` + path + `: unknown key "env-named-bogus" at line 1 is ignored`
+	if !strings.Contains(sectionOf(out.String(), "notices"), want) {
+		t.Errorf("notices lack %q — the home APOGEE_CONFIG names was not read:\n%s", want, out.String())
 	}
 }
 

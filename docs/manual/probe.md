@@ -128,7 +128,8 @@ last-column wrap
 config files say?" — `config.yaml` with the Project config of the current directory's Project
 root (`<root>/.apogee/config.yaml`, see [configuration](configuration.md)) layered over it, and
 nothing else: not the flags, `APOGEE_*` variables and host acknowledgement that `apogee probe`
-layers on top. It reads the files the way a **live reload** reads them (the re-read a saved
+layers on top — save `APOGEE_CONFIG`, which names the config home to read when `--config` is not
+given, as it does for every command. It reads the files the way a **live reload** reads them (the re-read a saved
 file triggers), never the way startup does, so it never migrates or rewrites a file it
 describes. The report has three sections: `notices` lists everything the reader announced — an
 unknown key it ignored, spelled exactly as the startup notice spells it, a global-only key the
@@ -141,8 +142,8 @@ may set, the global file's own value where it states one, the built-in default w
 does — spelled the way the files spell it and in the order the starter file presents them. A
 structured block reads as a summary (`servers: 2 servers`), so no `api-key` ever reaches the
 report. When the global file awaits migration the `resolved` section is replaced by `(start
-apogee once to migrate the file, then re-run)`. It takes `--config` only; the Project root is
-the directory you run it in. A global file the reader refuses for any other reason — a
+apogee once to migrate the file, then re-run)`. It takes `--config` only — or, without it, the
+home `APOGEE_CONFIG` names; the Project root is the directory you run it in. A global file the reader refuses for any other reason — a
 malformed one, a value a key rejects — fails the command with the reader's own sentence; a
 project file's defect is a notice, and the report then reads the global file alone.
 

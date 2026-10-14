@@ -32,7 +32,10 @@ const maskedValue = "••••"
 // migration, and — when it does not — the value every key of the registry resolves to from the
 // two files alone, spelled the way the files spell it. Flags, APOGEE_* variables and the host
 // acknowledgement are deliberately NOT layered in: `apogee probe` already reports the resolution a
-// session runs with, and this verb's question is the narrower "what do the files say?".
+// session runs with, and this verb's question is the narrower "what do the files say?". The one
+// exception is APOGEE_CONFIG, because it names WHICH files: the apogee home is found on the
+// precedence every other verb honours — --config over APOGEE_CONFIG over ~/.apogee — or a human
+// whose home the variable sets would be shown a file their sessions never read.
 func probeConfigCommand() *cobra.Command {
 	var configDir string
 
@@ -47,11 +50,18 @@ func probeConfigCommand() *cobra.Command {
 			"the project file's value for a key it may set, the global file's own value where it\n" +
 			"states one, the built-in default where neither does.\n\n" +
 			"It never writes: a file that needs the migration is reported, not rewritten. Flags and\n" +
-			"the APOGEE_* environment are not layered in; `apogee probe` reports those.",
+			"the APOGEE_* environment are not layered in; `apogee probe` reports those. The one\n" +
+			"exception is APOGEE_CONFIG, which names the apogee home to read when --config is not\n" +
+			"given, as it does for every other command.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// The env read is spelled here, as undo.go spells it, because this verb resolves no
+			// session and so never reaches ApplyConfig, where every other command's is done.
+			if configDir == "" {
+				configDir = os.Getenv(config.EnvConfig)
+			}
 			report, err := configReport(config.FilePath(configDir), probeProjectRoot(), os.ReadFile)
 			if err != nil {
 				return err

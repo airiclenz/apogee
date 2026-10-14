@@ -301,7 +301,9 @@ NOTES (2026-10-14): consequential edit — internal/tui/prompteditor.go: made ne
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestWorkflows|Click' ./internal/tui/`
 **Commit:** `fix(tui): ignore clicks on /workflows while a recipe is being named`
 
-## 16. `apogee probe config` honours `APOGEE_CONFIG`
+## 16. `apogee probe config` honours `APOGEE_CONFIG` — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the new test also `t.Chdir`s to an empty temp dir so no Project config of the checkout is layered over the env-named home's file; the `--config` flag's help string is left as-is, matching the identical string on `probe`, `probe context` and `daemon`.
 
 **What:**
 **Goal:** with no `--config`, `apogee probe config` reads and reports the config home named by `APOGEE_CONFIG`, as every other verb does; help text and `docs/manual/probe.md` say so.
