@@ -238,7 +238,9 @@ cmd/apogee/e2e_livestate_test.go — TestE2ELiveStateFollowsTheRunningSession; c
 **Closes:** settings-typing-filter
 Depends on items 5 and 7.
 
-## 9. Drive the filter end to end
+## 9. Drive the filter end to end — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the picker driven is the /schedule cycle picker (the one the popup frames test already reaches under the popups config); TestE2EPickerTypeToFilter also walks ↓ wrapping over the matches and a zero-match row, beyond the Goal's minimum. t16-settings-rows.txt was not regenerated (only TestE2ESettingsTypeToFilter ran under -update to record t16b).
 
 **What:**
 **Goal:** e2e tests drive `/settings` and one picker through the real binary: type a filter, see the title-row filter and the narrowed rows, edit a filtered row, return with the filter intact, trim to empty; a golden frame pins a filtered `/settings` pane.

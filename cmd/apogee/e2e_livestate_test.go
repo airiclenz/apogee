@@ -207,6 +207,99 @@ func TestE2ELiveStateFollowsTheRunningSession(t *testing.T) {
 	}
 }
 
+// The words a filtering list's title row and legend are read for (ADR 0053, 2026-10-14 amendment):
+// listsurface.go's pickerFilterLead and pickerFilterCursor, the title tail's " · " join, the
+// legend entries the filter's state adds and drops (listFilterEntry, listTrimEntry), and settings.go's
+// settingsTitle — restated for the reason the constants above are.
+const (
+	filterTitleJoin  = " · filter: "
+	filterCaret      = "▌"
+	filterEntry      = "type to filter"
+	trimEntry        = "⌫ trim"
+	settingsTitleRow = "Settings"
+
+	// settingsFilter is what the /settings walk types: the key `mode` and the few rows whose path
+	// spells it, so the narrowed list is short enough for its golden to read at a glance and still
+	// keeps the row the walk edits.
+	settingsFilter = "mode"
+	// settingsOtherRow is a row the filter narrows away: the `currency` key the unfiltered pane
+	// paints on its first screen (t16-settings-rows.txt), whose path holds no "mode".
+	settingsOtherRow = "currency"
+)
+
+// TestE2ESettingsTypeToFilter drives the /settings key list's filter through the real binary: the
+// letters typed land on the title row with their caret and narrow the rows, an edit made through a
+// filtered row's sub-list comes back to the same filter, and backspace trims it away one letter at a
+// time until the pane is the unfiltered list again, with the highlight still on the row it edited.
+func TestE2ESettingsTypeToFilter(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "livestate"))
+	drv := tuitest.NewDriver(t, liveStateSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+	openSettings(drv)
+	if _, _, ok := drv.Frame().Find(settingsOtherRow); !ok {
+		t.Fatalf("the unfiltered pane does not paint the %q row:\n%s", settingsOtherRow, drv.Frame())
+	}
+
+	// Typed key by key, as a human types it: the claim is that the letters reach the filter, which a
+	// paste would land in by a route of its own.
+	filtered := settingsTitleRow + filterTitleJoin + settingsFilter + filterCaret
+	drv.Type(settingsFilter)
+	drv.WaitText(filtered)
+	drv.WaitQuiet(settled)
+	frame := drv.Frame()
+	if _, _, ok := frame.Find(settingsOtherRow); ok {
+		t.Errorf("the filter %q still paints the %q row:\n%s", settingsFilter, settingsOtherRow, frame)
+	}
+	assertFilterLegend(t, frame, settingsHint)
+	tuitest.Golden(t, "t16b-settings-filtered", frame, goldenRedactions(sess)...)
+
+	// Edit a filtered row through its sub-list: the list that replaces the key list hides the filter,
+	// and the choice lands the human back on the key list under the filter they left it with.
+	settingsGoDown(t, drv, settingKeyMode)
+	drv.Press(tuitest.Enter)
+	drv.WaitText("(current)")
+	drv.WaitQuiet(settled)
+	if _, _, ok := drv.Frame().Find(filterTitleJoin); ok {
+		t.Errorf("the mode sub-list shows the key list's filter:\n%s", drv.Frame())
+	}
+	paneGoTo(t, drv, planModeValue)
+	drv.Press(tuitest.Enter)
+	drv.WaitGone("(current)")
+	drv.WaitText(filtered)
+	drv.WaitQuiet(settled)
+	if got := settingsValue(t, drv, settingKeyMode); got != planModeValue {
+		t.Errorf("the mode row reads %q after choosing %q under the filter", got, planModeValue)
+	}
+	if _, _, ok := drv.Frame().Find(settingsOtherRow); ok {
+		t.Errorf("back from the edit the filter no longer narrows the rows:\n%s", drv.Frame())
+	}
+
+	// Trim to empty: every backspace takes one letter off the title row, and the last takes the
+	// filter with it — the rows come back, the legend leads with "type to filter" again, and the
+	// highlight stays on the row it was on.
+	trimFilterToEmpty(drv, settingsTitleRow, settingsFilter)
+	drv.WaitText(filterEntry + " · " + settingsHint)
+	drv.WaitQuiet(settled)
+	if got := settingsCursor(drv); !strings.HasPrefix(got, "❯ "+settingKeyMode+" ") {
+		t.Errorf("emptying the filter moved the highlight to %q; want it on %q", got, settingKeyMode)
+	}
+	if _, _, ok := drv.Frame().Find(settingsOtherRow); !ok {
+		t.Errorf("the emptied filter does not paint the %q row again:\n%s", settingsOtherRow, drv.Frame())
+	}
+	closePane(drv, settingsHint)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// planModeValue is the `mode` row's value for the plan rung — the value cell's spelling, not the
+// footer's marker (planMarker).
+const planModeValue = "plan"
+
 // TestE2ELiveStateSaysWhatTheLoaderNoticed is the notice half of a save on disk (apogee-ibd): a key
 // the schema does not spell moves nothing — there is no applied-keys line to put it on — so the
 // transcript carries the loader's own sentence for it, exactly as start-up would have printed it.
@@ -414,6 +507,52 @@ func settingsGoDown(t *testing.T, drv *tuitest.Driver, key string) {
 		}
 	}
 	t.Fatalf("the settings list never highlighted %q (it stopped on %q)", key, settingsCursor(drv))
+}
+
+// paneGoTo walks a short popup list — a /settings value sub-list, a picker — with ↓ until its
+// highlight is on the row naming value. The list wraps, so the walk always terminates.
+func paneGoTo(t *testing.T, drv *tuitest.Driver, value string) {
+	t.Helper()
+
+	// A ceiling on the walk rather than an expectation: the list decides how many rows it has.
+	const maxRows = 20
+
+	for range maxRows {
+		if strings.HasPrefix(paneCursor(drv), "❯ "+value) {
+			return
+		}
+		pressAndRepaint(drv, tuitest.Down)
+	}
+	t.Fatalf("the list never highlighted %q (it stopped on %q)", value, paneCursor(drv))
+}
+
+// assertFilterLegend fails unless frame's legend is the one a filtering list shows with text typed
+// and rows matching: "type to filter" gone, "⌫ trim" offered, and the pane's own verbs (hint) kept.
+func assertFilterLegend(t *testing.T, frame tuitest.Frame, hint string) {
+	t.Helper()
+
+	text := frame.String()
+	if strings.Contains(text, filterEntry) {
+		t.Errorf("a set filter still offers %q:\n%s", filterEntry, frame)
+	}
+	for _, want := range []string{trimEntry, hint} {
+		if !strings.Contains(text, want) {
+			t.Errorf("a set filter's legend does not offer %q:\n%s", want, frame)
+		}
+	}
+}
+
+// trimFilterToEmpty presses backspace once per letter of filter, waiting after each for the title
+// row to carry one letter fewer, and after the last for the filter to leave the title row whole —
+// title is the pane's name, the text the filter rides behind. A backspace pressed before the last
+// one landed would reach an empty filter, which on /settings arms the reset instead.
+func trimFilterToEmpty(drv *tuitest.Driver, title, filter string) {
+	for n := len(filter) - 1; n > 0; n-- {
+		drv.Press(tuitest.Backspace)
+		drv.WaitText(title + filterTitleJoin + filter[:n] + filterCaret)
+	}
+	drv.Press(tuitest.Backspace)
+	drv.WaitGone(title + filterTitleJoin)
 }
 
 // sansSourceMark is a settings row without the source mark ("(global)", "(default)") every row

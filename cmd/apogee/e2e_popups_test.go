@@ -143,6 +143,90 @@ func TestE2EPopupFramesLists(t *testing.T) {
 	}
 }
 
+// The picker filter walk's words: what it types, the cycles the letters keep and the one they drop,
+// and the zero-match row the /schedule cycle picker paints in its noun (picker.go's pickerCycle,
+// listsurface.go's listZeroMatchNote).
+const (
+	pickerFilter      = "hour"
+	pickerKeptRow     = "every hour"
+	pickerKeptLastRow = "every 4 hours"
+	pickerDroppedRow  = "every minute"
+	pickerNoMatchTail = "zz"
+	pickerNoMatchRow  = `no cycle matches "` + pickerFilter + pickerNoMatchTail + `"`
+	pickerChooseHint  = "↑/↓ select · ⏎ choose"
+)
+
+// TestE2EPickerTypeToFilter drives a picker's filter through the real binary, on the /schedule cycle
+// picker the frames test records: the letters typed ride the title row and narrow the rows, ↑/↓ walk
+// the matches alone and wrap over them, a filter that matches nothing says so in one row and offers
+// only the way back, and trimming to empty brings every row and the unfiltered legend back.
+func TestE2EPickerTypeToFilter(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "popups"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+
+	typeSubmit(drv, schedulePrompt)
+	drv.WaitText(pickerTitle)
+	drv.WaitQuiet(settled)
+
+	// Typed key by key: the claim is that the letters reach the filter.
+	drv.Type(pickerFilter)
+	drv.WaitText(pickerTitle + filterTitleJoin + pickerFilter + filterCaret)
+	drv.WaitQuiet(settled)
+	frame := drv.Frame()
+	for _, want := range []string{pickerKeptRow, pickerKeptLastRow} {
+		if _, _, ok := frame.Find(want); !ok {
+			t.Errorf("the filter %q does not keep the %q row:\n%s", pickerFilter, want, frame)
+		}
+	}
+	if _, _, ok := frame.Find(pickerDroppedRow); ok {
+		t.Errorf("the filter %q still paints the %q row:\n%s", pickerFilter, pickerDroppedRow, frame)
+	}
+	assertFilterLegend(t, frame, pickerChooseHint)
+
+	// ↑/↓ walk the matches alone: one ↓ is the last match, and the next wraps to the first.
+	start := paneCursor(drv)
+	if !strings.Contains(start, pickerKeptRow) {
+		t.Fatalf("the highlight sits on %q; want the first match %q", start, pickerKeptRow)
+	}
+	pressAndRepaint(drv, tuitest.Down)
+	if got := paneCursor(drv); !strings.Contains(got, pickerKeptLastRow) {
+		t.Errorf("↓ from the first match highlights %q; want %q", got, pickerKeptLastRow)
+	}
+	pressAndRepaint(drv, tuitest.Down)
+	if got := paneCursor(drv); got != start {
+		t.Errorf("↓ from the last match highlights %q; want it to wrap to %q", got, start)
+	}
+
+	// A filter that matches nothing: one row says so, and the legend keeps only the trim and esc.
+	drv.Type(pickerNoMatchTail)
+	drv.WaitText(pickerNoMatchRow)
+	drv.WaitQuiet(settled)
+	empty := drv.Frame()
+	if _, _, ok := empty.Find(trimEntry + " · esc close"); !ok {
+		t.Errorf("the zero-match legend does not offer %q:\n%s", trimEntry+" · esc close", empty)
+	}
+	if _, _, ok := empty.Find(pickerChooseHint); ok {
+		t.Errorf("the zero-match legend offers a verb with no row to act on:\n%s", empty)
+	}
+
+	// Trim to empty: the rows and the unfiltered legend come back.
+	trimFilterToEmpty(drv, pickerTitle, pickerFilter+pickerNoMatchTail)
+	drv.WaitText(filterEntry + " · " + pickerChooseHint)
+	drv.WaitQuiet(settled)
+	if _, _, ok := drv.Frame().Find(pickerDroppedRow); !ok {
+		t.Errorf("the emptied filter does not paint the %q row again:\n%s", pickerDroppedRow, drv.Frame())
+	}
+	closePane(drv, pickerTitle)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
 // TestE2EPopupClickAsk drives the ask pane with the POINTER, through the bytes a terminal in SGR
 // mouse mode sends (tuitest.Click / tuitest.Release): a click on an offered answer ticks it, and a
 // second click on that same row sends it. It is the one e2e click on this pane family — the
