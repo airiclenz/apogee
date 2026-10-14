@@ -363,7 +363,7 @@ cmd/apogee/wire_firing_test.go — TestFiringConfigLeavesTheDriverSeamsNil, firi
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 ./internal/stubllm/`
 **Commit:** `fix(stubllm): record a mid-reply cut as Cut`
 
-## 20. Pin `cmd/release`'s publish steps to its actions
+## 20. Pin `cmd/release`'s publish steps to its actions — ✅ DONE (2026-10-14)
 
 **What:**
 **Goal:** a test fails whenever `publishSteps` and `publishActions` (`cmd/release`) name different steps or order them differently.

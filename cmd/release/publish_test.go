@@ -347,6 +347,26 @@ func lineIndex(lines []string, prefix string) int {
 	return slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, prefix) })
 }
 
+// TestPublishActionsMatchThePublishSteps pins publishActions to publishSteps: the same step names
+// in the same order. publish looks each action's probe up by name and status probes through
+// publishSteps alone, so a step one list adds, drops or reorders would let status report done
+// what publish never converges, or leave publish without a probe for a step it runs.
+func TestPublishActionsMatchThePublishSteps(t *testing.T) {
+	t.Parallel()
+	stepNames := make([]string, 0, len(publishSteps))
+	for _, step := range publishSteps {
+		stepNames = append(stepNames, step.name)
+	}
+	actionNames := make([]string, 0, len(publishActions))
+	for _, action := range publishActions {
+		actionNames = append(actionNames, action.name)
+	}
+
+	if !slices.Equal(actionNames, stepNames) {
+		t.Errorf("publishActions names %q, want publishSteps' %q", actionNames, stepNames)
+	}
+}
+
 // TestPublishFirstRunConvergesTheTagThenTheRelease pins a first run's order end to end: push
 // HEAD, wait for the CI-made tag, fetch it before resolving it, then fetch the tags, clone, check
 // the tag out, build every archive and create the release — and print every step done.
