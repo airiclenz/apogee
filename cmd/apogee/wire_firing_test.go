@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -564,6 +565,52 @@ func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 					"offers an unattended run's model a seat")
 			}
 		})
+	}
+}
+
+// The seat-choice registry is assembled by the host and copies ReadMounts by value, so it must be
+// built only once the run's scratch mount is bound: one built before would refuse to read back the
+// dir the run announces as writable (the TUI's boot-tools defect, here on the unattended side).
+func TestFiringSeatChoiceToolsReadTheRunsScratchDir(t *testing.T) {
+	t.Parallel()
+
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+		opts:     config.Options{Bypass: true, SubAgentsChoice: config.SubAgentsChoiceModel},
+		entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1},
+		apiKey:   "sk-test",
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     firingBeat,
+		recordID: "2026-10-14T10-30-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	if cfg.Tools == nil || cfg.ScratchDir == "" {
+		t.Fatalf("cfg.Tools nil = %v, cfg.ScratchDir = %q — a `model` Firing with a scratch root "+
+			"carries both", cfg.Tools == nil, cfg.ScratchDir)
+	}
+	note := filepath.Join(cfg.ScratchDir, "note.txt")
+	if err := os.WriteFile(note, []byte("scratch bytes"), 0o600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	tool, ok := cfg.Tools.Lookup("read_file")
+	if !ok {
+		t.Fatal("read_file is missing from the seat-choice registry")
+	}
+	result, err := tool.Execute(context.Background(), apogee.ToolCall{
+		ID:        "c1",
+		Tool:      "read_file",
+		Arguments: []byte(`{"path":` + strconv.Quote(note) + `}`),
+	})
+	if err != nil {
+		t.Fatalf("read_file returned a Go error: %v", err)
+	}
+	if result.IsError || !strings.Contains(result.Content, "scratch bytes") {
+		t.Errorf("read under the announced scratch dir failed: %q — the registry was built "+
+			"before the scratch mount was bound", result.Content)
 	}
 }
 

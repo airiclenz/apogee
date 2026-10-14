@@ -333,7 +333,7 @@ NOTES (2026-10-14): the new test feeds a Ref carrying an escape sequence and pin
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestHeadless.*(Notice|Narrat)' ./cmd/apogee/`
 **Commit:** `fix(headless): narrate a clipped reference`
 
-## 18. `apogee probe context` builds the tool menu a Firing builds
+## 18. `apogee probe context` builds the tool menu a Firing builds — ✅ DONE (2026-10-14)
 
 **What:**
 Recast at the regression check (2026-10-14).

@@ -541,28 +541,45 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	cfg.Namer = newFiringNamer(session, effortDialect, routing.target, in.opts.AutoTitle)
 
 	// And the one thing an unattended run cannot get from the engine: the `run_on` argument on
-	// sub_agent. `sub-agents-choice:` shapes the published schema rather than any Config field (ADR
-	// 0031 — the engine reads no config), so under `model` the roster is assembled HERE, with the
-	// gate on and no MCP tools (a Firing reaches no MCP server, ADR 0034). The gate is read off the
-	// Options every Driver already fills rather than off a firingInputs field of its own, so a
-	// Driver that filled opts cannot silently leave the seat unpublished.
-	//
-	// Under `fixed`, and with the key absent, Tools stays nil byte-for-byte and run.Once's own nil
-	// Asker and Presenter go on shaping the engine's roster exactly as before. That is the guard,
-	// not an optimisation: a registry handed over on the default path would decide the roster from
-	// this Config's delegates rather than from the ones the runner pins.
-	//
-	// Either way a Firing offers no background Workflows (ADR 0089 D1): with no conversation to go
-	// on, a workflow there blocks. So the set built here passes offersBackground false — fan_out
-	// publishes no `background` and the workflow control tool is not offered, whatever
-	// `tools.enabled:` says — exactly as the engine's own roster does on the nil path, where this
-	// Config leaves OffersBackground unset.
-	if in.opts.SubAgentsChoice == config.SubAgentsChoiceModel {
-		const offersBackground = false
-		cfg.Tools = registryWithMCP(in.roots.workspace, cfg, true, offersBackground, nil)
-	}
+	// sub_agent, which firingSeatTools assembles under `sub-agents-choice: model` and leaves nil
+	// otherwise. It is built HERE, after the scratch dir above is bound, because the registry copies
+	// ReadMounts by value: one built earlier would carry a read root that never names the dir this
+	// run announces as writable.
+	cfg.Tools = firingSeatTools(cfg, in.opts, in.roots.workspace)
 
 	return cfg, routing, notices, nil
+}
+
+// firingSeatTools is the tool registry an unattended run hands the engine, or nil. It is the one
+// thing such a run cannot get from the engine: the `run_on` argument on sub_agent.
+// `sub-agents-choice:` shapes the published schema rather than any Config field (ADR 0031 — the
+// engine reads no config), so under `model` the roster is assembled here, with the gate on and no
+// MCP tools (a Firing reaches no MCP server, ADR 0034). The gate is read off the Options every
+// Driver already fills rather than off a firingInputs field of its own, so a Driver that filled
+// opts cannot silently leave the seat unpublished.
+//
+// Under `fixed`, and with the key absent, it returns nil, so Tools stays nil byte-for-byte and
+// run.Once's own nil Asker and Presenter go on shaping the engine's roster exactly as before. That
+// is the guard, not an optimisation: a registry handed over on the default path would decide the
+// roster from this Config's delegates rather than from the ones the runner pins.
+//
+// Either way a Firing offers no background Workflows (ADR 0089 D1): with no conversation to go on,
+// a workflow there blocks. So the set built here passes offersBackground false — fan_out publishes
+// no `background` and the workflow control tool is not offered, whatever `tools.enabled:` says —
+// exactly as the engine's own roster does on the nil path, where this Config leaves
+// OffersBackground unset.
+//
+// Both compositions that build an unattended run's Config call it — firingConfig, and
+// probeContextConfig (probecontext.go), whose estimate is only worth reading if it counts the tool
+// menu a Firing sends — and both call it only once cfg.ReadMounts.Scratch is bound: the registry
+// copies ReadMounts by value, so one built before the scratch mount exists reads nothing under the
+// dir the run announces.
+func firingSeatTools(cfg apogee.Config, opts config.Options, workspace string) *apogee.ToolRegistry {
+	if opts.SubAgentsChoice != config.SubAgentsChoiceModel {
+		return nil
+	}
+	const offersBackground = false
+	return registryWithMCP(workspace, cfg, true, offersBackground, nil)
 }
 
 // firingRouting is where ONE unattended run's delegations go, what its model is told about that far

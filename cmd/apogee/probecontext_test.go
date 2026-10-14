@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
@@ -461,5 +463,76 @@ func TestProbeContextLiveRefusesAServerThatReportsNoUsage(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("a refused live probe printed a report:\n%s", out.String())
+	}
+}
+
+// contextCostToolMenuBytes reads the `tool menu` row off an idle Agent's report.
+func contextCostToolMenuBytes(t *testing.T, cost domain.ContextCost) int {
+	t.Helper()
+	for _, row := range cost.Rows {
+		if row.Name == "tool menu" {
+			return row.Bytes
+		}
+	}
+	t.Fatalf("the report has no tool menu row: %+v", cost.Rows)
+	return 0
+}
+
+// Under `sub-agents-choice: model` a Firing hands its engine a roster whose sub_agent publishes
+// `run_on`, so the menu it sends is longer than the engine's own. The probe promises the number a
+// headless run in the same mode sends (docs/manual/probe.md), so its tool-menu row must count that
+// roster too, byte for byte — and the seat must move the number, or the equality proves nothing.
+func TestProbeContextCountsTheFiringToolMenuUnderSeatChoice(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{
+		Endpoint:       "http://box.example/v1",
+		Model:          "box-model",
+		APIKey:         "sk-test",
+		ParallelAgents: 1,
+	}
+	const mode = domain.ModeAllowEdits
+	probeMenu := func(choice config.SubAgentsChoice) int {
+		t.Helper()
+		opts := config.Options{Bypass: true, SubAgentsChoice: choice, StartupEntry: entry}
+		cfg, err := probeContextConfig(opts, firingRoots(t), mode, probeContextOverlay{})
+		if err != nil {
+			t.Fatalf("probeContextConfig: %v", err)
+		}
+		cost, err := readContextCost(cfg)
+		if err != nil {
+			t.Fatalf("readContextCost: %v", err)
+		}
+		return contextCostToolMenuBytes(t, cost)
+	}
+
+	firing, _, _, err := firingConfig(context.Background(), firingInputs{
+		opts:     config.Options{Bypass: true, SubAgentsChoice: config.SubAgentsChoiceModel},
+		entry:    entry,
+		apiKey:   "sk-test",
+		roots:    firingRoots(t),
+		confiner: platform.NewDenyConfiner(),
+		mode:     mode,
+		beat:     firingBeat,
+		recordID: "2026-10-14T10-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	firing.Approver = denyApprover{}
+	firing.Events = discardEvents{}
+	firingCost, err := readContextCost(firing)
+	if err != nil {
+		t.Fatalf("readContextCost on the Firing: %v", err)
+	}
+	want := contextCostToolMenuBytes(t, firingCost)
+
+	if got := probeMenu(config.SubAgentsChoiceModel); got != want {
+		t.Errorf("probe tool menu under `model` = %d B, want the Firing's %d B — the estimate "+
+			"must count the sub_agent schema with run_on that a headless run sends", got, want)
+	}
+	if fixed := probeMenu(config.SubAgentsChoiceFixed); fixed == want {
+		t.Errorf("probe tool menu under `fixed` = %d B, the same as the seat-choice Firing's — "+
+			"the seat moved nothing, so the equality above asserts nothing", fixed)
 	}
 }
