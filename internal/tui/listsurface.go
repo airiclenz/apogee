@@ -119,7 +119,7 @@ type listCursor struct {
 type listSurface struct {
 	listCursor
 	// filter is what the human has typed into the open overlay: the case-insensitive substring every
-	// row must carry to survive (filterPopupRows). It is a [lineEditor] — the package's one text FIELD
+	// row's matched text must carry for the row to survive (filterPopupRows, matchedText). It is a [lineEditor] — the package's one text FIELD
 	// (lineeditor.go), so "what does backspace do here" is answered where every other field answers it
 	// — held behind a [copyOnWriteField]: a pointer, so the two filtering panes do not each carry a
 	// whole textarea in the value-copied Model, and replaced on every keystroke rather than written
@@ -137,8 +137,10 @@ type listSurface struct {
 // with each survivor's place in the unfiltered list carried beside it. Every consumer of a list —
 // the painter, the count the selection is clamped against, and the accept — goes through this one
 // derivation, which is what makes it impossible for an accept to take a row the pane did not paint.
-func (l listSurface) view(rows []popupRow) pickerView {
-	return filterPopupRows(rows, l.filter.value())
+// matched is the pane's answer to which of a row's cells the filter reads (matchedText); each pane
+// wraps this in a view of its own that supplies it, so no caller has to know it.
+func (l listSurface) view(rows []popupRow, matched matchedText) pickerView {
+	return filterPopupRows(rows, matched, l.filter.value())
 }
 
 // clampSelection keeps selected inside a row list that moved under the open overlay — a beat carrying
@@ -293,16 +295,17 @@ func (m Model) listKey(
 	l *listSurface,
 	msg tea.KeyPressMsg,
 	rows []popupRow,
+	matched matchedText,
 	wrap listWrap,
 ) (listVerdict, tea.Cmd) {
-	if verdict := l.listCursor.key(msg, len(l.view(rows).rows), wrap); verdict != listUnclaimed {
+	if verdict := l.listCursor.key(msg, len(l.view(rows, matched).rows), wrap); verdict != listUnclaimed {
 		return verdict, nil
 	}
 	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
 	// (bubbletea's own contract) — so a chord the cursor had no use for is handed back to the pane
 	// rather than typed into the filter.
 	if msg.String() == "backspace" || msg.Text != "" {
-		return listSwallowed, m.typeIntoOverlayFilter(l, msg, rows)
+		return listSwallowed, m.typeIntoOverlayFilter(l, msg, rows, matched)
 	}
 	return listUnclaimed, nil
 }
@@ -321,7 +324,7 @@ func (m Model) listKey(
 // has typed into holds nothing, paints nothing (overlayFilterLine) and prunes nothing
 // (filterPopupRows' identity view). The glyph is pickerFilterCursor for every surface, which is the
 // caret the shared filter line has always drawn.
-func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows []popupRow) tea.Cmd {
+func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows []popupRow, matched matchedText) tea.Cmd {
 	if !l.filter.isBuilt() {
 		l.filter = newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, ""))
 	}
@@ -329,7 +332,7 @@ func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows [
 	// (settingsBufferKey): a single-line field asks for none today, and swallowing one silently is how
 	// that stops being true unnoticed.
 	cmd := l.filter.edit(func(f *lineEditor) tea.Cmd { return f.editKey(msg) })
-	l.clampSelection(len(l.view(rows).rows))
+	l.clampSelection(len(l.view(rows, matched).rows))
 	return cmd
 }
 
@@ -359,7 +362,7 @@ func (v pickerView) offeringIndex(selected int) (int, bool) {
 // unfiltered list. An EMPTY filter is the IDENTITY view — every row, at its own index — which is
 // what keeps every unfiltered behaviour (the clamp, the wrap, the accept target) exactly what it was
 // before a filter existed.
-func filterPopupRows(rows []popupRow, filter string) pickerView {
+func filterPopupRows(rows []popupRow, matched matchedText, filter string) pickerView {
 	if filter == "" {
 		offering := make([]int, len(rows))
 		for i := range offering {
@@ -369,7 +372,7 @@ func filterPopupRows(rows []popupRow, filter string) pickerView {
 	}
 	view := pickerView{rows: make([]popupRow, 0, len(rows)), offering: make([]int, 0, len(rows))}
 	for i, row := range rows {
-		if !rowMatchesFilter(row, filter) {
+		if !rowMatchesFilter(row, matched, filter) {
 			continue
 		}
 		view.rows = append(view.rows, row)
@@ -379,17 +382,55 @@ func filterPopupRows(rows []popupRow, filter string) pickerView {
 }
 
 // rowMatchesFilter reports whether one row survives filter: a case-insensitive substring test over
-// the row's cells joined with a single space. EVERY cell participates, the marker cells included —
-// filtering on "running" to find the live profiles is a legitimate thing to ask of a profile list —
-// and space is a filter character like any other, because the overlay is modal and space is no verb
-// inside it. Substring rather than prefix, and no ranking of any kind: the filter PRUNES the
-// offering and never reorders it, so no row can jump out from under the highlight mid-keystroke.
-func rowMatchesFilter(row popupRow, filter string) bool {
+// the row's MATCHED TEXT (matchedText) — what the row says it is, never the live state painted beside
+// it. Space is a filter character like any other, because the overlay is modal and space is no verb
+// inside it. Substring rather than prefix, and no ranking of any kind: the filter PRUNES the offering
+// and never reorders it, so no row can jump out from under the highlight mid-keystroke.
+func rowMatchesFilter(row popupRow, matched matchedText, filter string) bool {
 	if filter == "" {
 		return true
 	}
-	return strings.Contains(strings.ToLower(strings.Join(row, " ")), strings.ToLower(filter))
+	return strings.Contains(strings.ToLower(matched(row)), strings.ToLower(filter))
 }
+
+// matchedText is a pane's answer to which part of a row the filter reads: the row's MATCHED TEXT
+// (ADR 0053, 2026-10-14 amendment). It is what the row says it IS — a name, an id, a label and its
+// gloss, a prompt, a title with its qualifiers — and never what it reports about the world: a value,
+// a "· running" or "· current" mark, a context window, a measured summary, an age, a count, a spend.
+// Those change under the open pane and say nothing about which row the human is looking for, so a
+// filter that read them would find "32k" in a model list or "5m" in a session store and narrow to
+// rows nobody named.
+//
+// It is a function of the row rather than a field of it because the panes already compose their
+// rows as cells; each pane names the cells that count (matchCells) and the one matcher above does
+// the rest. Like every function in this package it is looked up by the pane at the call — the
+// picker's per-kind table, the browser's own constant — and never held on the value-copied Model
+// (ADR 0011).
+type matchedText func(row popupRow) string
+
+// matchCells is the matchedText of a pane whose matched text is some of its cells: the named cells,
+// in the order given, joined with a single space — so a filter may span the join between a label and
+// its gloss exactly as the eye reads them. A cell a row does not carry (the effort picker's level
+// rows have no gloss) is skipped rather than read past the row's end.
+func matchCells(cells ...int) matchedText {
+	return func(row popupRow) string {
+		parts := make([]string, 0, len(cells))
+		for _, c := range cells {
+			if c < len(row) && row[c] != "" {
+				parts = append(parts, row[c])
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+}
+
+// The two shapes of matched text the panes share. matchLeadCell is a row whose first cell names it —
+// a model id, a server name, a session title with its qualifiers; matchLabelAndGloss is a row that
+// is a label and the "— …" gloss saying what the label means, both of which a human may type.
+var (
+	matchLeadCell      = matchCells(0)
+	matchLabelAndGloss = matchCells(0, 1)
+)
 
 // ----------------------------------------------------------------------------
 // The filter line, and the one budget→render call behind every list pane

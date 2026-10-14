@@ -204,8 +204,8 @@ type browserView struct {
 // filteredView is the rows this browser shows RIGHT NOW: the workspace view (visible) pruned by the
 // overlay's own filter, composed in that order — the workspace scope decides which records exist for
 // this pane at all and the filter narrows what is left, so ^a widens the very list the typed text
-// narrows. The match is the shared surface's (rowMatchesFilter): a case-insensitive substring of
-// the row's display cells joined with one space, every cell participating.
+// narrows. The match is the shared surface's (rowMatchesFilter) over the browser's matched text
+// (sessionMatchedText): the title cell with its qualifiers, never the age, count or spend beside it.
 //
 // It is derived per frame and per keypress rather than captured at open, the picker's own posture:
 // the store can be re-listed under the open pane (a delete, a rename) and the relative times in the
@@ -218,6 +218,20 @@ func (b sessionBrowser) filteredView(th theme, workspace string, now time.Time) 
 		view.metas = append(view.metas, visible[i])
 	}
 	return view
+}
+
+// sessionMatchedText is the browser's matched text (matchedText): the TITLE cell, which carries the
+// qualifiers that say which session a row is — `· <workspace>` on a foreign record, `· ⟳ <schedule>`
+// on a Firing, `· ⑂ <parent>` on a fork. The age, the message count and the spend after it are what
+// the session has DONE, not what it is called, and change under the open pane; "5m" typed into a
+// session store finds nothing rather than every session touched five minutes ago.
+var sessionMatchedText = matchLeadCell
+
+// view is the browser's filtered view of rows: the shared surface's (listSurface.view) over the
+// browser's own matched text, named on the pane so every read — the key route, the painter, the
+// accept, a click — takes the same projection without having to know it.
+func (b sessionBrowser) view(rows []popupRow) pickerView {
+	return b.listSurface.view(rows, sessionMatchedText)
 }
 
 // unfilteredRows composes one row per session the workspace view holds, BEFORE the filter prunes
@@ -306,7 +320,7 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionConfirmKey(msg)
 	}
 	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
-	verdict, cmd := m.listKey(&m.sessionBrowser.listSurface, msg, rows, listWrapsAround)
+	verdict, cmd := m.listKey(&m.sessionBrowser.listSurface, msg, rows, sessionMatchedText, listWrapsAround)
 	switch verdict {
 	case listCloses:
 		m.sessionBrowser = sessionBrowser{}

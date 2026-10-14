@@ -51,7 +51,10 @@
 - The `/`|`@` autocomplete dropdown (narrowed by the chat token, not a List filter).
 - Approval and ask_user menus (already non-filtering).
 
-## 1. Match a row's matched text, not every cell
+## 1. Match a row's matched text, not every cell — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): mouse.go needed no edit — `sessionBrowser` gained its own `view(rows)` (shadowing the embedded `listSurface.view`) that passes `sessionMatchedText`, so `handleBrowserClick`'s `m.sessionBrowser.view(rows)` call builds unchanged; `picker` gained the same per-kind wrapper, so `pickerFilteredView` is unchanged.
+NOTES (2026-10-14): `TestPickerFilterMatchesTheJoinedRowCells` renamed to `TestPickerFilterMatchesTheRowsMatchedText` (the old name states the superseded rule); the fork kind's projection is `matchCells(1)` inline in the `pickerOfferings` table rather than a named value in fork.go, which the item's Files did not list.
 
 **What:**
 **Goal:** the picker and `/sessions` filter over each row's matched text only; values, marks, stats, ages, counts and spend never decide a match.

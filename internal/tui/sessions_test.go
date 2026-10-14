@@ -1611,6 +1611,45 @@ func TestSessionBrowserZeroMatchesTakeNothing(t *testing.T) {
 	}
 }
 
+// The browser filters on a row's TITLE cell with its qualifiers and on nothing else (ADR 0053,
+// 2026-10-14 amendment): the age, the message count and the spend are what a session has done, not
+// what it is called, so typing them finds nothing — while a foreign record's `· <workspace>`
+// qualifier is part of the title and finds it.
+func TestSessionBrowserFilterReadsTheTitleNotTheStats(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	now := time.Now()
+	recent := session.Meta{
+		ID: "recent", Title: "draft the release notes", Workspace: "/ws/a",
+		UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3,
+		Usage: session.Usage{Calls: 4, PromptTokens: 60000, TotalTokens: 64000},
+	}
+	host.seed(session.Record{Meta: recent})
+	storeMeta(host, "foreign", "another session", "/ws/proj-b", now.Add(-time.Hour), 0, nil)
+	m := openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, "/ws/a"))
+	m = step(t, m, keyCtrl('a'))
+
+	spend := strings.TrimPrefix(sessionSpendCell(recent), "· ")
+	painted := ansi.Strip(m.renderSessionBrowser())
+	for _, stat := range []string{"5m", "3 msgs", spend} {
+		if spend == "" || !strings.Contains(painted, stat) {
+			t.Fatalf("precondition: the pane does not paint %q:\n%s", stat, painted)
+		}
+	}
+
+	for _, stat := range []string{"5m", "3 msgs", spend} {
+		m.sessionBrowser.filter = typedFilter(m, stat)
+		if got := m.sessionBrowserView().metas; len(got) != 0 {
+			t.Errorf("filter %q kept %d rows, want none: an age, a count or a spend is not a title", stat, len(got))
+		}
+	}
+
+	m.sessionBrowser.filter = typedFilter(m, "proj-b")
+	if got := m.sessionBrowserView().metas; len(got) != 1 || got[0].ID != "foreign" {
+		t.Errorf("filter %q kept %+v, want the one foreign record its workspace qualifier names", "proj-b", got)
+	}
+}
+
 // The toggle re-derives the FILTERED view over the other scope rather than the raw one: a filter
 // matching only a foreign session shows nothing here and that session there, and ⏎ then resumes it.
 func TestSessionBrowserToggleRederivesTheFilteredView(t *testing.T) {

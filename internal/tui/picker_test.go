@@ -1823,30 +1823,94 @@ func TestLoadIsNoLongerAVerb(t *testing.T) {
 // The filtered view — one seam for rows, count and accept
 // ----------------------------------------------------------------------------
 
-// The matching rule is a case-insensitive substring test over the row's cells joined with a single
-// space: every cell participates, marker cells included, and a space is a filter character like any
-// other because the overlay is modal and space is no verb inside it.
-func TestPickerFilterMatchesTheJoinedRowCells(t *testing.T) {
+// leadRow is the row of rows whose first cell is lead, or nil when none is — so a matched-text case
+// built from a kind's real row builder fails loudly if the builder stops offering the row it names.
+func leadRow(rows []popupRow, lead string) popupRow {
+	for _, row := range rows {
+		if len(row) > 0 && row[0] == lead {
+			return row
+		}
+	}
+	return nil
+}
+
+// The filter reads each kind's MATCHED TEXT and nothing else (ADR 0053, 2026-10-14 amendment): what a
+// row says it is — an id, a name, a label and its gloss, a prompt — never the windows, marks, summaries
+// or endpoints painted beside it. The match is a case-insensitive substring, and a space is a filter
+// character like any other because the overlay is modal and space is no verb inside it. Every kind is
+// asked through its own pickerOfferings projection, so a kind whose projection drifted fails here.
+func TestPickerFilterMatchesTheRowsMatchedText(t *testing.T) {
 	t.Parallel()
-	row := popupRow{"Qwen3-Coder", "— 32k", "· running"}
+	th := newTheme(scheme.Default())
+	profile := popupRow{"beta", "— ollama", "· 32k", "(:8081)", runningRowCell}
 	tests := []struct {
 		name   string
+		kind   pickerKind
+		row    popupRow
 		filter string
 		want   bool
 	}{
-		{"an empty filter keeps every row", "", true},
-		{"the filter is case-insensitive", "QWEN3", true},
-		{"and so is the row", "coder", true},
-		{"a marker cell is as filterable as any other", "running", true},
-		{"a filter may span the join between two cells", "coder — 32k", true},
-		{"space is a filter character, not a verb", "32k · running", true},
-		{"a substring no cell carries prunes the row", "gemma", false},
+		{"an empty filter keeps every row", pickerModel, popupRow{"Qwen3-Coder", "— 32k"}, "", true},
+		{"the filter is case-insensitive", pickerModel, popupRow{"Qwen3-Coder", "— 32k"}, "QWEN3", true},
+		{"and so is the row", pickerModel, popupRow{"Qwen3-Coder", "— 32k"}, "coder", true},
+		{"a model's window is not its name", pickerModel, popupRow{"Qwen3-Coder", "— 32k"}, "32k", false},
+		{"a server matches by name", pickerServer,
+			popupRow{"remote", "— http://10.0.0.2:8080/v1", currentRowCell, "· ttft 1.8s"}, "remote", true},
+		{"a server's endpoint is not its name", pickerServer,
+			popupRow{"remote", "— http://10.0.0.2:8080/v1", currentRowCell, "· ttft 1.8s"}, "10.0.0.2", false},
+		{"nor is its current mark", pickerServer,
+			popupRow{"remote", "— http://10.0.0.2:8080/v1", currentRowCell, "· ttft 1.8s"}, "current", false},
+		{"nor its measured summary", pickerServer,
+			popupRow{"remote", "— http://10.0.0.2:8080/v1", currentRowCell, "· ttft 1.8s"}, "ttft", false},
+		{"a profile matches by its backend gloss", pickerLoad, profile, "ollama", true},
+		{"a filter may span the join between name and gloss", pickerLoad, profile, "beta — ollama", true},
+		{"the running mark is live state, not a name", pickerLoad, profile, "run", false},
+		{"so is a profile's window", pickerLoad, profile, "32k", false},
+		{"and its port", pickerLoad, profile, "8081", false},
+		{"a cycle matches by its gloss", pickerCycle, leadRow(cycleRows(), "1h"), "hour", true},
+		{"a schedule mode matches by its gloss", pickerScheduleMode,
+			leadRow(scheduleModeRows("closed here"), modeLabel(domain.ModeAuto)), "unattended", true},
+		{"its unavailable mark does not", pickerScheduleMode,
+			leadRow(scheduleModeRows("closed here"), modeLabel(domain.ModeAuto)), "unavailable", false},
+		{"a live schedule matches by its every gloss", pickerScheduleStop,
+			scheduleStopRows([]schedule.Status{{Name: "log watch", Cycle: 15 * time.Minute, Mode: domain.ModeAuto, InFlight: true}})[0],
+			"every 15m", true},
+		{"its mode and running mark do not", pickerScheduleStop,
+			scheduleStopRows([]schedule.Status{{Name: "log watch", Cycle: 15 * time.Minute, Mode: domain.ModeAuto, InFlight: true}})[0],
+			"running", false},
+		{"an effort level matches by itself", pickerEffort,
+			leadRow(effortRows(domain.EffortSupport{Supported: true}), "high"), "hig", true},
+		{"the auto row matches by its gloss", pickerEffort,
+			leadRow(effortRows(domain.EffortSupport{Supported: true}), effortAutoLabel), "drop the override", true},
+		{"a sub-agents target matches by name", pickerSubAgentsServer,
+			popupRow{"gpu-box", "— http://gpu:8080 · fast local 27B", "· ttft 1.8s"}, "gpu-box", true},
+		{"its description and summary do not", pickerSubAgentsServer,
+			popupRow{"gpu-box", "— http://gpu:8080 · fast local 27B", "· ttft 1.8s"}, "fast local", false},
+		{"the sub-agents auto row matches by its label", pickerSubAgentsServer,
+			popupRow{subAgentsAutoLabel, subAgentsAutoDescription}, subAgentsAutoLabel, true},
+		{"a rung matches by its marker", pickerMode,
+			leadRow(modeRows(th), modeMarker(th, domain.ModeAllowEdits)), "allow", true},
+		{"and by its gloss", pickerMode,
+			leadRow(modeRows(th), modeMarker(th, domain.ModeAllowEdits)), "commands still ask", true},
+		{"a fork point matches by its prompt", pickerFork, forkRows([]forkPoint{{text: "fix the parser"}})[0], "parser", true},
+		{"never by its ordinal", pickerFork, forkRows([]forkPoint{{text: "fix the parser"}})[0], "1.", false},
+		{"a key-migration answer by its gloss", pickerKeyMigration, keyMigrationRows("keychain")[0], "keychain", true},
+		{"a sub-agents migration answer by its gloss", pickerSubAgentsMigration,
+			subAgentsMigrationRows([]string{"gpu"})[0], "retired flag", true},
+		{"a boundary answer by its gloss", pickerWorkflowBoundary, boundaryRows()[1], "keep them", true},
+		{"an adoption answer by its label", pickerAdoption, adoptionRows()[2], "reject", true},
+		{"a substring the matched text lacks prunes the row", pickerModel, popupRow{"Qwen3-Coder", "— 32k"}, "gemma", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := rowMatchesFilter(row, tc.filter); got != tc.want {
-				t.Errorf("rowMatchesFilter(%v, %q) = %v, want %v", row, tc.filter, got, tc.want)
+			if tc.row == nil {
+				t.Fatal("precondition: the kind's row builder no longer offers the row this case names")
+			}
+			matched := pickerOfferings[tc.kind].matched
+			if got := rowMatchesFilter(tc.row, matched, tc.filter); got != tc.want {
+				t.Errorf("rowMatchesFilter(%v, %q) = %v over matched text %q, want %v",
+					tc.row, tc.filter, got, matched(tc.row), tc.want)
 			}
 		})
 	}
@@ -2348,7 +2412,7 @@ func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 }
 
 // Every value of the pickerKind enum — pickerModel through the last declared constant — has a row
-// in pickerOfferings with all four answers filled in. The four lookups (pickerTitle, pickerHintFor,
+// in pickerOfferings with all five answers filled in. The four lookups (pickerTitle, pickerHintFor,
 // pickerOfferingRows, acceptPicker) carry no missing-key branch on the strength of this test, so a
 // kind added to the enum without a row would fail here rather than as a nil call on the first ⏎.
 func TestEveryPickerKindHasAnOffering(t *testing.T) {
@@ -2359,9 +2423,11 @@ func TestEveryPickerKindHasAnOffering(t *testing.T) {
 			t.Errorf("pickerOfferings[%v]: no row", kind)
 			continue
 		}
-		if offering.title == nil || offering.hint == "" || offering.rows == nil || offering.accept == nil {
-			t.Errorf("pickerOfferings[%v] = {title:%v hint:%q rows:%v accept:%v}, want every answer filled in",
-				kind, offering.title != nil, offering.hint, offering.rows != nil, offering.accept != nil)
+		if offering.title == nil || offering.hint == "" || offering.rows == nil || offering.matched == nil ||
+			offering.accept == nil {
+			t.Errorf("pickerOfferings[%v] = {title:%v hint:%q rows:%v matched:%v accept:%v}, want every answer filled in",
+				kind, offering.title != nil, offering.hint, offering.rows != nil, offering.matched != nil,
+				offering.accept != nil)
 		}
 	}
 	if got, want := len(pickerOfferings), int(pickerAdoption)+1; got != want {

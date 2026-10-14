@@ -25,7 +25,7 @@ func listTestRows(labels ...string) []popupRow { return singleCellRows(labels) }
 // pressList routes one key through the surface at l and returns the verdict it gave, discarding the
 // Cmd the filter field may have asked for.
 func pressList(m Model, l *listSurface, msg tea.KeyPressMsg, rows []popupRow, wrap listWrap) listVerdict {
-	verdict, _ := m.listKey(l, msg, rows, wrap)
+	verdict, _ := m.listKey(l, msg, rows, matchLeadCell, wrap)
 	return verdict
 }
 
@@ -89,7 +89,7 @@ func TestListSurfaceArrowsAtTheBottomOfAFilteredList(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			l := listSurface{listCursor: listCursor{selected: 1}, filter: typedFilter(m, "alpha")}
-			if got := len(l.view(rows).rows); got != 2 {
+			if got := len(l.view(rows, matchLeadCell).rows); got != 2 {
 				t.Fatalf("precondition: the filter leaves %d rows, want 2", got)
 			}
 
@@ -164,7 +164,7 @@ func TestListSurfaceTypingNarrowsTheListAndReclampsTheHighlight(t *testing.T) {
 	if l.filter.value() != "a" {
 		t.Fatalf("filter = %q, want the key typed into it", l.filter.value())
 	}
-	if got := len(l.view(rows).rows); got != 3 {
+	if got := len(l.view(rows, matchLeadCell).rows); got != 3 {
 		t.Fatalf("precondition: %q leaves %d rows, want all three", "a", got)
 	}
 
@@ -172,7 +172,7 @@ func TestListSurfaceTypingNarrowsTheListAndReclampsTheHighlight(t *testing.T) {
 	if got := pressList(m, &l, keyRune('l'), rows, listWrapsAround); got != listSwallowed {
 		t.Fatalf("verdict = %v, want a printable key to be typed", got)
 	}
-	if got := len(l.view(rows).rows); got != 1 {
+	if got := len(l.view(rows, matchLeadCell).rows); got != 1 {
 		t.Fatalf("precondition: %q leaves %d rows, want one", "al", got)
 	}
 	if l.selected != 0 {
@@ -315,13 +315,13 @@ func TestListSurfaceAcceptResolvesThroughTheFilter(t *testing.T) {
 	rows := listTestRows("first", "second", "third")
 	l := listSurface{filter: typedFilter(m, "d")} // "second" and "third"
 
-	offered, ok := l.view(rows).offeringIndex(l.selected)
+	offered, ok := l.view(rows, matchLeadCell).offeringIndex(l.selected)
 	if !ok || offered != 1 {
 		t.Errorf("offeringIndex(0) = (%d, %v), want the SECOND row of the offering", offered, ok)
 	}
 
 	l.selected = 5 // past the end: nothing to take rather than a wrong row taken
-	if _, ok := l.view(rows).offeringIndex(l.selected); ok {
+	if _, ok := l.view(rows, matchLeadCell).offeringIndex(l.selected); ok {
 		t.Error("offeringIndex named a row for a highlight past the end of the filtered list")
 	}
 }

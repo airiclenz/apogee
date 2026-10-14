@@ -179,23 +179,35 @@ const (
 	pickerStopHint   = "type to filter · ↑/↓ select · ⏎ stop · esc close"
 )
 
+// view is the picker's filtered view of rows: the shared surface's (listSurface.view) over the open
+// kind's matched text (pickerOffering.matched), so the painter, the count and the accept all prune by
+// the same cells without any of them naming which.
+func (p picker) view(rows []popupRow) pickerView {
+	return p.listSurface.view(rows, pickerOfferings[p.kind].matched)
+}
+
 // pickerHintFor names what ⏎ does on the open kind — the legend its [pickerOfferings] row states.
 func pickerHintFor(k pickerKind) string {
 	return pickerOfferings[k].hint
 }
 
 // pickerOffering is everything one [pickerKind] answers for itself: the pane's title, its key
-// legend, the FULL row list before the filter prunes it, and what ⏎ on a row does. rows and accept
+// legend, the FULL row list before the filter prunes it, which of a row's cells the filter reads,
+// and what ⏎ on a row does. rows and accept
 // take the Model rather than closing over it because the rows are DERIVED per frame from the state
 // they describe (the file's opening note), and accept takes the index into that OFFERING — the
 // highlight indexes the filtered rows and is mapped back before it gets here (acceptPicker) — so a
 // kind whose list is asked per draw re-reads it by that index at accept time rather than trusting
 // the frame that drew it.
 type pickerOffering struct {
-	title  func(Model) string
-	hint   string
-	rows   func(Model) []popupRow
-	accept func(Model, int) (tea.Model, tea.Cmd)
+	title func(Model) string
+	hint  string
+	rows  func(Model) []popupRow
+	// matched is the kind's matched text (matchedText, listsurface.go): the cells that say what a row
+	// IS — the id, the name, a label and its gloss, the prompt — and never the window, the marks or
+	// the measured summary painted beside them.
+	matched matchedText
+	accept  func(Model, int) (tea.Model, tea.Cmd)
 }
 
 // fixedTitle is the title func of a kind whose pane is named by a constant — most of them; the
@@ -222,17 +234,19 @@ var pickerOfferings map[pickerKind]pickerOffering
 func init() {
 	pickerOfferings = map[pickerKind]pickerOffering{
 		pickerModel: {
-			title: func(m Model) string { return "switch model — " + hostDisplay(m.opts) },
-			hint:  pickerHint,
-			rows:  Model.modelRows,
+			title:   func(m Model) string { return "switch model — " + hostDisplay(m.opts) },
+			hint:    pickerHint,
+			rows:    Model.modelRows,
+			matched: matchLeadCell,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.bindPickedModel(m.offeredModels()[offered])
 			},
 		},
 		pickerServer: {
-			title: fixedTitle("switch server"),
-			hint:  pickerHint,
-			rows:  Model.serverRows,
+			title:   fixedTitle("switch server"),
+			hint:    pickerHint,
+			rows:    Model.serverRows,
+			matched: matchLeadCell,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				// The one kind whose list is asked per draw (ServerHost.List): the rows are re-read here
 				// rather than trusted from the frame that drew them, so a `servers:` block that shrank under
@@ -245,51 +259,58 @@ func init() {
 			},
 		},
 		pickerLoad: {
-			title: fixedTitle(loadPickerTitle),
-			hint:  pickerHint,
-			rows:  Model.launchProfileRows,
+			title:   fixedTitle(loadPickerTitle),
+			hint:    pickerHint,
+			rows:    Model.launchProfileRows,
+			matched: matchLabelAndGloss,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.startProfileLoad(m.picker.profiles[offered].Name)
 			},
 		},
 		pickerCycle: {
-			title: fixedTitle("schedule — how often"),
-			hint:  pickerChooseHint,
-			rows:  func(Model) []popupRow { return cycleRows() },
+			title:   fixedTitle("schedule — how often"),
+			hint:    pickerChooseHint,
+			rows:    func(Model) []popupRow { return cycleRows() },
+			matched: matchLabelAndGloss,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.acceptCycle(scheduleCycles[offered])
 			},
 		},
 		pickerScheduleMode: {
-			title: fixedTitle("schedule — autonomy mode"),
-			hint:  pickerChooseHint,
-			rows:  func(m Model) []popupRow { return scheduleModeRows(m.opts.ScheduleAutoBlocked) },
+			title:   fixedTitle("schedule — autonomy mode"),
+			hint:    pickerChooseHint,
+			rows:    func(m Model) []popupRow { return scheduleModeRows(m.opts.ScheduleAutoBlocked) },
+			matched: matchLabelAndGloss,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.acceptScheduleMode(scheduleModes[offered])
 			},
 		},
 		pickerScheduleStop: {
-			title:  fixedTitle("stop a schedule"),
-			hint:   pickerStopHint,
-			rows:   func(m Model) []popupRow { return scheduleStopRows(m.liveSchedules()) },
-			accept: Model.acceptScheduleStop,
+			title:   fixedTitle("stop a schedule"),
+			hint:    pickerStopHint,
+			rows:    func(m Model) []popupRow { return scheduleStopRows(m.liveSchedules()) },
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptScheduleStop,
 		},
 		pickerKeyMigration: {
-			title:  Model.keyMigrationTitle,
-			hint:   keyMigrationHint,
-			rows:   func(m Model) []popupRow { return keyMigrationRows(m.opts.KeyMigration.StoreName) },
-			accept: Model.acceptKeyMigration,
+			title:   Model.keyMigrationTitle,
+			hint:    keyMigrationHint,
+			rows:    func(m Model) []popupRow { return keyMigrationRows(m.opts.KeyMigration.StoreName) },
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptKeyMigration,
 		},
 		pickerEffort: {
-			title:  fixedTitle("thinking effort — how hard the model thinks"),
-			hint:   pickerChooseHint,
-			rows:   func(m Model) []popupRow { return effortRows(m.effortSupport()) },
-			accept: Model.acceptEffort,
+			title:   fixedTitle("thinking effort — how hard the model thinks"),
+			hint:    pickerChooseHint,
+			rows:    func(m Model) []popupRow { return effortRows(m.effortSupport()) },
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptEffort,
 		},
 		pickerSubAgentsServer: {
-			title: fixedTitle(subAgentsServerTitle),
-			hint:  pickerChooseHint,
-			rows:  Model.subAgentsServerRows,
+			title:   fixedTitle(subAgentsServerTitle),
+			hint:    pickerChooseHint,
+			rows:    Model.subAgentsServerRows,
+			matched: matchLeadCell,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				// Re-read for pickerServer's reason and with the same answer: the targets are asked per
 				// draw, so a `servers:` block that shrank under the open overlay costs the accept and nothing
@@ -308,34 +329,39 @@ func init() {
 			},
 		},
 		pickerSubAgentsMigration: {
-			title:  Model.subAgentsMigrationTitle,
-			hint:   keyMigrationHint,
-			rows:   func(m Model) []popupRow { return subAgentsMigrationRows(m.opts.SubAgentsMigration) },
-			accept: Model.acceptSubAgentsMigration,
+			title:   Model.subAgentsMigrationTitle,
+			hint:    keyMigrationHint,
+			rows:    func(m Model) []popupRow { return subAgentsMigrationRows(m.opts.SubAgentsMigration) },
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptSubAgentsMigration,
 		},
 		pickerMode: {
-			title:  fixedTitle(modePickerTitle),
-			hint:   pickerChooseHint,
-			rows:   func(m Model) []popupRow { return modeRows(m.th) },
-			accept: Model.acceptMode,
+			title:   fixedTitle(modePickerTitle),
+			hint:    pickerChooseHint,
+			rows:    func(m Model) []popupRow { return modeRows(m.th) },
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptMode,
 		},
 		pickerFork: {
-			title:  fixedTitle(forkPickerTitle),
-			hint:   forkPickerHint,
-			rows:   func(m Model) []popupRow { return forkRows(m.transcript.forkPoints()) },
-			accept: Model.acceptFork,
+			title:   fixedTitle(forkPickerTitle),
+			hint:    forkPickerHint,
+			rows:    func(m Model) []popupRow { return forkRows(m.transcript.forkPoints()) },
+			matched: matchCells(1), // the prompt's text, never its ordinal
+			accept:  Model.acceptFork,
 		},
 		pickerWorkflowBoundary: {
-			title:  fixedTitle(boundaryConfirmTitle),
-			hint:   boundaryConfirmHint,
-			rows:   func(Model) []popupRow { return boundaryRows() },
-			accept: Model.acceptBoundaryRow,
+			title:   fixedTitle(boundaryConfirmTitle),
+			hint:    boundaryConfirmHint,
+			rows:    func(Model) []popupRow { return boundaryRows() },
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptBoundaryRow,
 		},
 		pickerAdoption: {
-			title:  Model.adoptionTitle,
-			hint:   keyMigrationHint,
-			rows:   func(Model) []popupRow { return adoptionRows() },
-			accept: Model.acceptAdoption,
+			title:   Model.adoptionTitle,
+			hint:    keyMigrationHint,
+			rows:    func(Model) []popupRow { return adoptionRows() },
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptAdoption,
 		},
 	}
 }
@@ -1120,7 +1146,7 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return next, cmd
 		}
 	}
-	verdict, cmd := m.listKey(&m.picker.listSurface, msg, m.pickerOfferingRows(), listWrapsAround)
+	verdict, cmd := m.listKey(&m.picker.listSurface, msg, m.pickerOfferingRows(), pickerOfferings[m.picker.kind].matched, listWrapsAround)
 	switch verdict {
 	case listCloses:
 		m.picker = picker{}
