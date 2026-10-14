@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // chatCompletionsPath is the one proxied path whose traffic becomes a Turn. The two discovery
@@ -47,9 +48,11 @@ const timingGrain = 10 * time.Microsecond
 // client) at that address, drive the run, then [Recorder.Close] to write the fixture. Every
 // completed /v1/chat/completions request becomes one Turn, pre-filled with a `when:` matcher
 // over the request's last message, so a recorded script answers a replayed run in the same
-// places even when the ordering shifts. What the upstream answered the two discovery probes
-// with — the model list, the launch facts, or a refusal — lands in the Script's [Discovery]
-// block, so a replay advertises what the recorded server did.
+// places even when the ordering shifts. A streamed reply the upstream drops mid-stream is
+// recorded as the [Cut] it was, after the content runes that arrived, never as a clean ending.
+// What the upstream answered the two discovery probes with — the model list, the launch facts,
+// or a refusal — lands in the Script's [Discovery] block, so a replay advertises what the
+// recorded server did.
 //
 // Recording is an explicit act performed by a human at a command line (`stubllm record`), never
 // something a `go test` run does: a test that silently re-records its own fixture cannot fail.
@@ -283,7 +286,10 @@ func (r *Recorder) capture(reply *http.Response) error {
 	reply.Body = &recordingBody{
 		body: reply.Body,
 		read: entry.write,
-		done: func() { r.finish(entry) },
+		done: func(ended error) {
+			entry.ended = ended
+			r.finish(entry)
+		},
 	}
 	return nil
 }
@@ -399,6 +405,9 @@ type capture struct {
 	pending []byte
 	events  []streamedEvent
 	body    bytes.Buffer
+	// ended is the error the reply body ended on: io.EOF for a body read to its end, nil for one
+	// closed before it was, anything else for a read that failed — see [capture.droppedMidReply].
+	ended error
 	// undecodable is how many of events were not JSON the recorder could read, counted when the
 	// stream is reassembled into its Turn.
 	undecodable int
@@ -412,11 +421,13 @@ type streamedEvent struct {
 
 // recordingBody is the reply body on its way to the client, timestamping every chunk the proxy
 // reads through it. Those times are the only place a fixture's token_delay can come from — SSE
-// events carry no timing of their own — and done fires exactly once, on EOF or on Close.
+// events carry no timing of their own — and done fires exactly once, on the first read error
+// (io.EOF included) or on Close, handed that error or nil so the recorder can tell a reply that
+// ended from one the upstream dropped.
 type recordingBody struct {
 	body io.ReadCloser
 	read func(p []byte, at time.Time)
-	done func()
+	done func(ended error)
 	once sync.Once
 }
 
@@ -426,14 +437,19 @@ func (b *recordingBody) Read(p []byte) (int, error) {
 		b.read(p[:n], time.Now())
 	}
 	if err != nil {
-		b.once.Do(b.done)
+		b.end(err)
 	}
 	return n, err
 }
 
 func (b *recordingBody) Close() error {
-	b.once.Do(b.done)
+	b.end(nil)
 	return b.body.Close()
+}
+
+// end files the reply once, with the error its body ended on — nil when it was closed first.
+func (b *recordingBody) end(ended error) {
+	b.once.Do(func() { b.done(ended) })
 }
 
 // write takes one chunk of reply body. A streamed reply is parsed into events as they complete,
@@ -488,11 +504,35 @@ func (c *capture) turn() Turn {
 		finish = c.fillFromWhole(&turn)
 	}
 
+	// A dropped reply never reached its terminator, so whatever accounting or finish reason was
+	// read on the way carries no meaning a cut can replay — and the Script refuses them beside one.
+	if c.droppedMidReply() {
+		turn.Cut = &Cut{AfterRunes: utf8.RuneCountInString(turn.Text)}
+		turn.Usage = nil
+		return turn
+	}
+
 	// Only a finish_reason the format would not have derived is worth writing down.
 	if finish != "" && finish != turn.finishReason() {
 		turn.FinishReason = finish
 	}
 	return turn
+}
+
+// droppedMidReply reports whether the upstream cut a successful reply off before its end — the
+// fault a [Cut] replays. A body read to EOF ended; one closed before EOF, or failed on
+// context.Canceled, was let go by the client (a provider client cancels and closes the body at
+// `[DONE]`, and an esc mid-stream cancels it); and a stream that carried `[DONE]` had ended
+// whatever its connection did next. Only a 2xx reply qualifies: an http turn never starts a
+// stream, so it has nothing to cut.
+func (c *capture) droppedMidReply() bool {
+	if c.status/100 != 2 || c.ended == nil {
+		return false
+	}
+	if errors.Is(c.ended, io.EOF) || errors.Is(c.ended, context.Canceled) {
+		return false
+	}
+	return !slices.ContainsFunc(c.events, func(event streamedEvent) bool { return event.data == doneSentinel })
 }
 
 // fillFromStream reassembles a streamed reply into the Turn that reproduces it and returns the

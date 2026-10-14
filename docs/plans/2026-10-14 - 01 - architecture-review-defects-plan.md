@@ -349,7 +349,7 @@ cmd/apogee/wire_firing_test.go — TestFiringConfigLeavesTheDriverSeamsNil, firi
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'ProbeContext|Firing' ./cmd/apogee/`
 **Commit:** `fix(probe): estimate the tool menu a Firing sends`
 
-## 19. The stubllm Recorder records a mid-reply cut as `Cut`
+## 19. The stubllm Recorder records a mid-reply cut as `Cut` — ✅ DONE (2026-10-14)
 
 **What:**
 **Goal:** when the recorded upstream drops mid-reply (body ends on a non-EOF error), the `Recorder` writes that Turn with `Cut{AfterRunes: <content runes seen>}`, never as a clean Turn.

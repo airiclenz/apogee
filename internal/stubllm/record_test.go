@@ -3,6 +3,7 @@ package stubllm
 import (
 	"compress/gzip"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -140,6 +141,77 @@ func TestRecorderRecordsAFailureAsAnHTTPTurn(t *testing.T) {
 	}
 	if got.Body != "moved" {
 		t.Errorf("http turn body = %q, want %q", got.Body, "moved")
+	}
+}
+
+// TestRecorderRecordsAMidReplyDropAsACut pins that a fixture keeps the fault it was recorded
+// for: an upstream that drops a streamed reply mid-way is written as a Cut after the content
+// runes that arrived — with no usage or finish_reason, which the Script refuses beside a cut —
+// while a reply that ended, whether read to EOF or let go by a client that stopped at `[DONE]`,
+// is written as the clean Turn it was.
+func TestRecorderRecordsAMidReplyDropAsACut(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		turn  Turn
+		drive func(t *testing.T, proxyURL string)
+		want  *Cut
+	}{
+		{
+			name: "an upstream that drops mid-stream",
+			turn: Turn{Text: "one two three four", ChunkRunes: 3, Cut: &Cut{AfterRunes: 9}},
+			drive: func(t *testing.T, proxyURL string) {
+				postStreamToleratingADrop(t, proxyURL, "rec-model", "hi")
+			},
+			want: &Cut{AfterRunes: 9},
+		},
+		{
+			name: "a stream read to its end",
+			turn: Turn{Text: "one two three four", ChunkRunes: 3, Usage: &Usage{Prompt: 5, Completion: 4}},
+			drive: func(t *testing.T, proxyURL string) {
+				postStreamToleratingADrop(t, proxyURL, "rec-model", "hi")
+			},
+		},
+		{
+			name: "a client that closes the body at [DONE]",
+			turn: Turn{Text: "one two three four", ChunkRunes: 3, Usage: &Usage{Prompt: 5, Completion: 4}},
+			drive: func(t *testing.T, proxyURL string) {
+				observe(t, proxyURL, "rec-model", "hi")
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			origin := New(t, Script{Model: "rec-model", Turns: []Turn{tc.turn}})
+			path := filepath.Join(t.TempDir(), "fixture.yaml")
+			proxy := recorderProxy(t, origin.URL, path)
+
+			tc.drive(t, proxy.URL)
+			if err := proxy.recorder.Close(); err != nil {
+				t.Fatalf("close recorder: %v\n%s", err, read(t, path))
+			}
+			script, err := Load(path)
+			if err != nil {
+				t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+			}
+			if len(script.Turns) != 1 {
+				t.Fatalf("turns = %d, want 1\n%s", len(script.Turns), read(t, path))
+			}
+
+			got := script.Turns[0]
+			if !reflect.DeepEqual(got.Cut, tc.want) {
+				t.Errorf("cut = %+v, want %+v\n%s", got.Cut, tc.want, read(t, path))
+			}
+			if tc.want != nil && (got.Usage != nil || got.FinishReason != "") {
+				t.Errorf("cut turn usage = %+v, finish_reason = %q, want neither", got.Usage, got.FinishReason)
+			}
+			if tc.want == nil && got.Usage == nil {
+				t.Errorf("clean turn lost its usage\n%s", read(t, path))
+			}
+		})
 	}
 }
 
@@ -647,6 +719,29 @@ func getStatusAt(t *testing.T, url string) int {
 		t.Fatalf("read %s: %v", url, err)
 	}
 	return resp.StatusCode
+}
+
+// postStreamToleratingADrop sends one streaming completion request and reads the reply to its
+// end or to the error a dropped connection leaves — the read observe and postTo fail on.
+func postStreamToleratingADrop(t *testing.T, baseURL, model, prompt string) {
+	t.Helper()
+
+	body := fmt.Sprintf(`{"model":%q,"stream":true,"messages":[{"role":"user","content":%q}]}`,
+		model, prompt)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		baseURL+"/v1/chat/completions", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// The drop is the point: the error it leaves is the case under test, not a failure.
+	_, _ = io.Copy(io.Discard, resp.Body)
 }
 
 // recording is a Recorder mounted on a loopback listener: the address a client is pointed at,
