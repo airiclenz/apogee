@@ -829,7 +829,7 @@ func TestSubprocessToolResultFailFastNote(t *testing.T) {
 			ExitCode: -1, FailFast: true}, wantLine: "[exit code -1]"},
 		{name: "a denial kill is not a fail-fast stop, whatever its code", res: subprocess.SubprocessResult{
 			CombinedOutput: "mkdir: /etc/x: Operation not permitted\n", ExitCode: 1, FailFast: true,
-			Confined: true, DenialStopped: true, Box: box}, wantLine: "[exit code 1]\n" + confinementDenialStopLabel(box)},
+			Confined: true, DenialStopped: true, Box: box}, wantLine: confinementDenialStopLabel(box) + "\n[exit code 1]"},
 		{name: "the trap's last line names the stopped command above the marker", res: subprocess.SubprocessResult{
 			CombinedOutput: "ls: cannot access 'x[1]'\n" + platform.FailFastStopPrefix + "ls x[1]\n",
 			ExitCode:       2, FailFast: true},
@@ -842,7 +842,7 @@ func TestSubprocessToolResultFailFastNote(t *testing.T) {
 		{name: "a denial kill never names a stopped command", res: subprocess.SubprocessResult{
 			CombinedOutput: platform.FailFastStopPrefix + "mkdir /etc/x\n", ExitCode: 1, FailFast: true,
 			Confined: true, DenialStopped: true, Box: box},
-			wantLine: "[exit code 1]\n" + confinementDenialStopLabel(box)},
+			wantLine: confinementDenialStopLabel(box) + "\n[exit code 1]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1053,7 +1053,8 @@ func TestTerminal_ConfinementDenialLabelEndToEnd(t *testing.T) {
 // subprocessToolResult: a denial-stopped non-zero result carries confinementDenialStopLabel
 // (and it wins over the weaker "likely" heuristic), while a clean exit stays a success with
 // no label however the watch flagged it — the watch's kill racing a process that already
-// finished must never turn a success into an error.
+// finished must never turn a success into an error. A labelled result still ENDS with its
+// exit-code line, the label above it: the TUI reads the code off the last line.
 func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
 	t.Parallel()
 	box := domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/scratch/s1"}}
@@ -1089,6 +1090,10 @@ func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
 			}
 			if res.IsError != tc.wantErr {
 				t.Errorf("IsError = %v, want %v", res.IsError, tc.wantErr)
+			}
+			marker := fmt.Sprintf("\n[exit code %d]", tc.res.ExitCode)
+			if tc.wantErr && !strings.HasSuffix(res.Content, marker) {
+				t.Errorf("content = %q, want it to end with the exit-code line %q", res.Content, marker)
 			}
 		})
 	}

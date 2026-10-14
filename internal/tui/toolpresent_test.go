@@ -726,6 +726,21 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		wantSummary: "error: exit 1",
 		wantBody:    []string{"fail-fast: the line stopped at `[ -f missing ]`"},
 	}, {
+		// A confined run the sandbox refused carries its confinement label on its own line ABOVE
+		// the marker, so the marker stays the result's last line: the slot reads the code and
+		// the label is body, read beside the output that drew it.
+		name: "a confinement label above the marker still reads as the code",
+		call: domain.ToolCall{ID: "12", Tool: "terminal", Arguments: []byte(`{"command":"mkdir /etc/x"}`)},
+		content: "mkdir: /etc/x: Operation not permitted\n\n" +
+			"[blocked by workspace confinement: an operation was denied, so the command was stopped]\n" +
+			"[exit code 1]",
+		wantSummary: "error: exit 1",
+		wantBody: []string{
+			"mkdir: /etc/x: Operation not permitted",
+			"",
+			"[blocked by workspace confinement: an operation was denied, so the command was stopped]",
+		},
+	}, {
 		// The `cwd:` line the tool opens every run's result with (domain.StripCwdLine) is
 		// written for the model and comes off the body on the failure route too: the row names the
 		// command, and the exit code is still read off the marker beneath it.

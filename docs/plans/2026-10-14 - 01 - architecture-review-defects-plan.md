@@ -55,7 +55,10 @@
 - One shared lock for project-rule add and adopt (a "yes" is keyed to exact text; the re-check in item 3 suffices).
 - The TUI workflow totals fallback counting verify/merge items — capcom `workflow-totals-fallback-kinds` (needs stage kinds carried to the TUI).
 
-## 1. Keep `[exit code N]` the last line of a confined terminal failure
+## 1. Keep `[exit code N]` the last line of a confined terminal failure — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): consequential edit — internal/tools/exec_common.go: made necessary by moving the labels above the exit-code line (the confinementDenialLabel / confinementDenialStopLabel docs said "appended", which no longer describes where they sit)
+NOTES (2026-10-14): the denial label goes after the shell-hint and fail-fast stopped-command lines and directly above the marker; the Console family (renderConsoleTail) already writes the stop label at the top and is unchanged
 
 **What:**
 **Goal:** a terminal result carrying a confinement-denial (or stop) label ends with its `[exit code N…]` line, so the TUI slot reads `error: exit N` (`docs/layout/tool-layout.md`) and the label stays in the body.

@@ -131,8 +131,8 @@ func scrubRuleAnsweredEnv(env []string) []string {
 	return kept
 }
 
-// confinementDenialLabel is the line appended to a FAILED confined result whose output looks
-// like an OS confinement denial. It does not claim WHICH operation was refused: the denial
+// confinementDenialLabel is the line a FAILED confined result whose output looks like an OS
+// confinement denial carries, on its own line above the exit-code line (subprocessToolResult). It does not claim WHICH operation was refused: the denial
 // signature is errno text, and an EPERM from a confined `ps` is no write at all, so the label
 // says only that the sandbox refused an operation and then states the sandbox's rules as facts.
 // The writable roots are one such fact, named by path: when the denied operation WAS a write,
@@ -145,8 +145,8 @@ func confinementDenialLabel(box domain.ConfinementBox) string {
 		"; setuid programs run without their privileges]"
 }
 
-// confinementDenialStopLabel is the line appended when the live kill-on-denial watch stopped
-// the run itself (subprocess.SubprocessResult.DenialStopped, console.Console.DenialStopped): stronger than
+// confinementDenialStopLabel is the line a result carries when the live kill-on-denial watch
+// stopped the run itself (subprocess.SubprocessResult.DenialStopped, console.Console.DenialStopped): stronger than
 // the "likely" label above, because here the harness matched the denial as it streamed and
 // killed the process group, so the model is told plainly that the rest of its script did not
 // run. Like that one it names no operation — the watch matched errno text, not a write — and

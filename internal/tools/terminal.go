@@ -395,9 +395,11 @@ func looksLikeBashism(output string) bool {
 // (failFastStoppedLine) — a timeout, a signalled exit or a denial kill gets neither. An error
 // result the kill-on-denial watch stopped carries confinementDenialStopLabel; any other error
 // result from a CONFINED run whose output looks like an OS denial carries
-// confinementDenialLabel — both best-effort, never forced onto a clean exit, and both still
-// follow on their own line after the exit-code line. Both are rendered from the box the run
-// was fenced by (subprocess.SubprocessResult.Box), so the model reads the writable roots by path.
+// confinementDenialLabel — both best-effort, never forced onto a clean exit, and both on their
+// own line ABOVE the exit-code line, for the reason failFastStoppedLine is: the exit-code line
+// is always the result's last, where the TUI's end-anchored exitCodeMarker reads it. Both are
+// rendered from the box the run was fenced by (subprocess.SubprocessResult.Box), so the model
+// reads the writable roots by path.
 func subprocessToolResult(callID string, res subprocess.SubprocessResult) domain.ToolResult {
 	var b strings.Builder
 	if res.Dir != "" {
@@ -427,13 +429,13 @@ func subprocessToolResult(callID string, res subprocess.SubprocessResult) domain
 		if stoppedAt != "" {
 			fmt.Fprintf(&b, "\n"+failFastStoppedLine, stoppedAt)
 		}
-		fmt.Fprintf(&b, "\n[exit code %d%s]", res.ExitCode, note)
 		switch {
 		case res.DenialStopped:
 			b.WriteString("\n" + confinementDenialStopLabel(res.Box))
 		case res.Confined && platform.LooksLikeConfinementDenial(res.CombinedOutput):
 			b.WriteString("\n" + confinementDenialLabel(res.Box))
 		}
+		fmt.Fprintf(&b, "\n[exit code %d%s]", res.ExitCode, note)
 		return errorResult(callID, b.String())
 	}
 	return okResult(callID, b.String())
