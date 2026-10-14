@@ -1,10 +1,12 @@
 ---
 title: Typing in /settings should filter the settings list to matches; groups stay when one of their rows matches
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-10-14 - 00 - list-filter-contract-plan
 created: 2026-10-13T11:41:49Z
+closed: 2026-10-14T10:55:47Z
+reason: "Resolved by plan 2026-10-14 - 00 - list-filter-contract-plan (archived at b94203cd): /settings type-to-filter over key path and section heading, headings kept while a row matches, filter display, zero-match row, legends and paste."
 ---
 
 Feature idea: when /settings is open, typing should filter the list of settings down to the matches. Category groups stay visible while at least one setting in the group matches the filter.
