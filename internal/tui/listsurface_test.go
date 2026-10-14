@@ -516,24 +516,18 @@ func breathingListModel(t *testing.T, height int, bar bool) Model {
 
 // breathingList is the offering those assertions are made over: a titled, hinted list of ten plain
 // one-cell choices in the picker's own slot, with the picker's own taste for how many of them to show
-// at once. body and its pad are the caller's, because what the upper blank is spent on turns on both:
-// a body that closes with a blank of its own has already drawn it, and one that does not has not.
-func breathingList(body string, pad bool) listContent {
+// at once. body and the title tail are the caller's, because the assertions are about what each of
+// them costs the rows: a body claims lines above the block, a title tail claims none.
+func breathingList(body, titleTail string) listContent {
 	c := listContent{
-		pane:     panePicker,
-		title:    "a list",
-		hint:     "esc close",
-		rowCap:   8,
-		rows:     listTestRows("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"),
-		selected: 0,
-	}
-	if body != "" {
-		c.body, c.bodyPad = body, pad
-		if pad {
-			// What renderFilterListPlaced composes for a list being narrowed: a body block set off by
-			// its own two blanks, the label naming the live line.
-			c.bodyLead = pickerFilterLead
-		}
+		pane:      panePicker,
+		title:     "a list",
+		titleTail: titleTail,
+		body:      body,
+		hint:      "esc close",
+		rowCap:    8,
+		rows:      listTestRows("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"),
+		selected:  0,
 	}
 	return c
 }
@@ -555,22 +549,22 @@ func listPaneLines(t *testing.T, pane string) []string {
 
 // Every list pop-up keeps one blank line between whatever stands above its row block and the block,
 // and one between the block and its key legend (popupSpec.rowPadAbove, popupRowStyle.padBelow) — the
-// house rule renderList books for all four of its panes at once. The upper blank is NOT spent where
-// the line above the block is already one: a body set off by its own lower pad closes it, so a list
-// being narrowed never opens a two-line gap under its filter. A body that books no such pad — the
-// /settings sub-list's question — leaves that line to its own prose, and the pane spends the blank
-// there like a pane with no body at all. And the two are the FIRST lines the pane gives up: on a
+// house rule renderList books for all four of its panes at once. A filter being typed rides the title
+// row (listContent.titleTail) and claims no line, so the list keeps its whole taste and nothing moves
+// on the first key. A body — the /settings sub-list's question — leaves the line under the title to
+// its own prose, and the pane spends the blank under that like a pane with no body at all. And the
+// two are the FIRST lines the pane gives up: on a
 // window that cannot seat a row beside them they are handed back together, because breathing room is
 // not worth a decision.
 func TestRenderListBreathes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name    string
-		height  int
-		body    string
-		bodyPad bool
-		want    []string
+		name      string
+		height    int
+		body      string
+		titleTail string
+		want      []string
 	}{
 		{
 			// 26 rows is the first window that pays for the picker's whole taste and both blanks.
@@ -578,8 +572,9 @@ func TestRenderListBreathes(t *testing.T) {
 			want: []string{"a list", "", "❯ one", "two", "three", "four", "five", "six", "seven", "eight", "", "esc close"},
 		},
 		{
-			name: "a padded body — its own blank is the block's", height: 26, body: pickerFilterLead + "t", bodyPad: true,
-			want: []string{"a list", "", pickerFilterLead + "t", "", "❯ one", "two", "three", "four", "five", "six", "seven", "", "esc close"},
+			// A list being narrowed: the filter on the title row, every row of the taste still seated.
+			name: "a title tail — it claims no line", height: 26, titleTail: pickerFilterLead + "t" + pickerFilterCursor,
+			want: []string{"a list · " + pickerFilterLead + "t" + pickerFilterCursor, "", "❯ one", "two", "three", "four", "five", "six", "seven", "eight", "", "esc close"},
 		},
 		{
 			// The /settings sub-list's shape: a question that pads neither end, so the block draws its
@@ -598,7 +593,7 @@ func TestRenderListBreathes(t *testing.T) {
 			t.Parallel()
 
 			m := breathingListModel(t, tc.height, false)
-			got := listPaneLines(t, m.renderList(breathingList(tc.body, tc.bodyPad)))
+			got := listPaneLines(t, m.renderList(breathingList(tc.body, tc.titleTail)))
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("pane lines =\n%q\nwant\n%q", got, tc.want)
 			}
@@ -612,7 +607,7 @@ func TestRenderListBreathingRowsCarryNoScrollbarCell(t *testing.T) {
 	t.Parallel()
 
 	m := breathingListModel(t, 26, true)
-	lines := listPaneLines(t, m.renderList(breathingList("", false)))
+	lines := listPaneLines(t, m.renderList(breathingList("", "")))
 	if n := len(lines); lines[1] != "" || lines[n-2] != "" {
 		t.Fatalf("the blanks are not at 1 and %d: %q", n-2, lines)
 	}

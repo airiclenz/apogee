@@ -390,7 +390,7 @@ func (m Model) sessionBrowserHeight() int {
 	if !ok {
 		return 0
 	}
-	return m.listHeight(filteredListContent(m.sessionBrowser.filter, c))
+	return m.listHeight(c)
 }
 
 // pickerHeight is the rows renderPicker paints the picker in, answered without painting it
@@ -400,7 +400,7 @@ func (m Model) pickerHeight() int {
 	if !ok {
 		return 0
 	}
-	return m.listHeight(filteredListContent(m.picker.filter, c))
+	return m.listHeight(c)
 }
 
 // autocompleteHeight is the rows renderAutocomplete paints the dropdown in, answered without painting

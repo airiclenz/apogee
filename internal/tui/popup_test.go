@@ -702,6 +702,80 @@ func TestRenderPopupNarrowTitleKeepsTheElisionCount(t *testing.T) {
 	}
 }
 
+// A title row carrying a tail — a list's filter (popupSpec.titleTail) — spends a narrow width in the
+// ratified order (ADR 0053, 2026-10-14 amendment rule 5): the name's tail gives way to an ellipsis
+// first, then the name goes whole, then the hidden-rows count; the filter stays whole, and only a row
+// too narrow for even that shows its caret END behind a leading "…". A tail-less spec keeps the
+// ladder above (TestRenderPopupNarrowTitleKeepsTheElisionCount).
+func TestPopupTitleLineFitsATitleTail(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const (
+		title = "saved sessions  (this workspace)" // 32 cells
+		tail  = "filter: parser▌"                  // 15 cells
+	)
+	full := title + popupTitleTailSeparator + tail // 50 cells
+
+	cases := []struct {
+		name   string
+		inner  int
+		hidden int
+		want   string
+	}{
+		{"room for all of it", 60, 0, full},
+		{"the name's tail gives way first", 40, 0, truncateToWidth(th, title, 22) + popupTitleTailSeparator + tail},
+		{"then the name goes whole", 16, 0, tail},
+		{"the filter's caret end behind an ellipsis", 10, 0, "…: parser▌"},
+		{"the full count beside everything", 80, 3, full + popupGutter + "… (+3 more lines)"},
+		{"the count's wording goes before the name", 60, 3, full + popupGutter + "… +3"},
+		{"the name clips beside the short count", 40, 3,
+			truncateToWidth(th, title, 16) + popupTitleTailSeparator + tail + popupGutter + "… +3"},
+		{"the name gone, the count kept", 21, 3, tail + popupGutter + "… +3"},
+		{"then the count goes", 18, 3, tail},
+		{"a too-narrow row drops the count too", 10, 3, "…: parser▌"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := popupTitleLine(th, title, tail, tc.hidden, tc.inner)
+
+			if got != tc.want {
+				t.Errorf("title row at %d inner cells, %d hidden = %q, want %q", tc.inner, tc.hidden, got, tc.want)
+			}
+			if w := th.measure.Width(got); w > tc.inner {
+				t.Errorf("title row is %d cells, wider than the %d the pane has: %q", w, tc.inner, got)
+			}
+		})
+	}
+}
+
+// A painted pane carrying a title tail keeps the box's every-line-is-exactly-width contract at a
+// width too narrow for the name: the filter is still on the row the frame drew.
+func TestRenderPopupTitleTailOnANarrowPane(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	spec := popupSpec{
+		title:     "fork from which prompt? (the long fork-picker title)",
+		titleTail: "filter: parser▌",
+		rows:      singleCellRows([]string{"one", "two"}),
+		selected:  0,
+		hint:      "esc close",
+		maxRows:   -1,
+	}
+
+	lines := popupLines(renderPopup(th, spec, 30))
+
+	if row := popupInterior(lines[1]); !strings.HasSuffix(row, popupTitleTailSeparator+"filter: parser▌") {
+		t.Errorf("title row = %q, want the clipped name ending in the whole filter", row)
+	}
+	for i, ln := range lines {
+		if w := th.measure.Width(ln); w != 30 {
+			t.Errorf("line %d is %d cells, want the pane's 30: %q", i, w, ln)
+		}
+	}
+}
+
 // A row budget of ZERO shows NO rows — and, exactly like the body budget above it, does not buy
 // silence with the space it saves. A pane whose window granted it no rows had been dropping every
 // choice or entry it held without a word, on the same 12-to-15-row terminal the body's title-row

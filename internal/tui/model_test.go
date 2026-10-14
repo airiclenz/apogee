@@ -6930,8 +6930,8 @@ func TestPaneHeightChangeReachesLayout(t *testing.T) {
 		arrange: func(t *testing.T) Model {
 			t.Helper()
 			m := modelWithOverlayRoomAt(t, 80, 24, testOpts)
-			// Deep enough that pruning to one row outruns the two the filter line and its gap add
-			// back: at four rows the pane happened to draw the same height either way.
+			// Deep enough that pruning to one row is a change of height the transcript clamp has to
+			// see: the filter itself rides the title row and adds no line back.
 			m.hb.models = wireSummaries("alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta")
 			m.picker = picker{open: true, kind: pickerModel}
 			m.layout()

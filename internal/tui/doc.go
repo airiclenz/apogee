@@ -382,7 +382,7 @@
 // inside the popup module cannot use the widget's own View or the real terminal cursor — the module
 // styles rows whole and takes plain cells — so it renders through textWithCaret, a caret glyph AT
 // the offset, and the glyph is the FIELD's own ([lineEditor.caret]) because the surfaces disagree on
-// it (the filter line's ▌, the rename row's and the value row's ▏). The Model stays the
+// it (the title-row filter's ▌, the rename row's and the value row's ▏). The Model stays the
 // coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
 // invitation is DERIVED at paint, never stored: [Model.legend] (runview.go) reads the lifecycle
@@ -971,7 +971,7 @@
 // FILTER embed instead
 // (that cursor plus the field typed into it, and the keys that type), the filter that prunes the
 // rows and maps a highlight back to what it names, and the one budget→render call behind every list
-// pane — a pane's own body block, or the filter line and its two blanks (ADR 0053) — and the WHEEL
+// pane — a pane's own body block, and the filter stated on its title row (ADR 0053) — and the WHEEL
 // contract is the module's too ([listCursor.wheel], the package's one answer to what a notch does to
 // a list overlay), where the clamp at the ends is unconditional however a pane answered [listWrap]
 // for its keys, and the two panes that scroll a row WINDOW or a caret rather than a bare cursor

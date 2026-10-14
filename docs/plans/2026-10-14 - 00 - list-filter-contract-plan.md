@@ -115,7 +115,16 @@ internal/tui/picker_test.go — TestPickerHintsLeadWithTypeToFilter (lists only 
 **Commit:** `feat(tui): question pickers answer, they do not filter`
 Depends on item 1.
 
-## 4. Show the filter on the title row
+## 4. Show the filter on the title row — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): retired popupSpec.bodyPadAbove/bodyPadBelow with popupBodyPad and popupBodyPadLines, and listContent.bodyLead — the filter fold was their only setter, so the item's retirement left them dead.
+NOTES (2026-10-14): the filter producer is overlayFilterTail(filter, typing) and each pane sets listContent.titleTail itself (pickerListContent, browserListContent), so paint and height query read one composition; renderPickerPlaced/renderSessionBrowserPlaced now call renderListPlaced.
+NOTES (2026-10-14): on the title row the hidden-rows count sits after the filter (`<title> · filter: x▌  … +3`); the plan names its priority but not its position.
+NOTES (2026-10-14): TestPickerPaintsTheFilterLineWithBreathingRoom is renamed TestPickerPaintsTheFilterOnItsTitleRow (it pins no hint, so item 5's conditional guard does not apply); TestPickerShortWindowGivesUpRowsBeforeTheFilterLine is recast as TestPickerShortWindowFilterCostsNoRow; TestPickerRoomyWindowKeepsTheRowTasteAndBothSpacers and its longOfferingBeat helper are deleted (no spacers left to pin). TestSessionBrowserPaintsTheFilterLine keeps its name for item 5's reference.
+NOTES (2026-10-14): no mouse_test.go change was needed — TestPickerClickTakesTheFilteredRow, TestBrowserWheelWalksTheFilteredList and TestPickerWheelWalksTheFilteredOffering pass unchanged on the painter's placement.
+NOTES (2026-10-14): consequential edit — internal/tui/model_test.go: made necessary by retiring the filter line (TestPaneHeightChangeReachesLayout comment named its added lines)
+NOTES (2026-10-14): consequential edit — internal/tui/lineeditor_test.go: made necessary by retiring the filter line (a case label named it)
+NOTES (2026-10-14): layout.md and docs/manual still describe the filter line; items 10/11 own those docs.
 
 **What:**
 **Goal:** a filtering pane's filter text renders on its title row as `<title> · filter: <text>▌` only while non-empty, never as a body line; the list keeps every row it had (nothing moves on the first key); the caret shows only while typing reaches the filter (hidden during `/sessions` rename and delete-confirm); a too-narrow title row cuts the title tail first, then drops the hidden-rows count, then shows the filter's caret end behind a leading `…`.

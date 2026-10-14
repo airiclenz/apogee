@@ -170,7 +170,7 @@ func TestEachSurfaceKeepsItsOwnCaretGlyph(t *testing.T) {
 		glyph string
 		want  string
 	}{
-		{"the filter line both filtering overlays paint", pickerFilterCursor, "▌"},
+		{"the title-row filter both filtering overlays paint", pickerFilterCursor, "▌"},
 		{"the /sessions rename row", sessionRenameCaret, "▏"},
 		{"the /settings value row", settingsCaret, "▏"},
 	} {

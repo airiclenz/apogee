@@ -1733,49 +1733,35 @@ func browserPaneLines(t *testing.T, m Model) []string {
 	return out
 }
 
-// The browser paints the picker's own filter line: under the title, one blank line above and one
-// below, and nothing at all while the filter is empty — the two blanks an unfiltered pane still
-// shows are the row block's own house pads, not the filter's. The legend says the verbs are chords now.
+// browserFilterTitle is the title row the browser typed into says: its name, then the filter —
+// with the caret only where typing reaches it (overlayFilterTail).
+func browserFilterTitle(filter string, typing bool) string {
+	title := "saved sessions  (this workspace)" + popupTitleTailSeparator + pickerFilterLead + filter
+	if typing {
+		title += pickerFilterCursor
+	}
+	return title
+}
+
+// The browser states its filter on its TITLE row, as the picker does, and only while there is one:
+// never a line of its own, so the row block's house blanks are the only blanks either way and the
+// surviving rows open right under the title's. The legend says the verbs are chords now.
 func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
 	t.Parallel()
 	m, _ := filterableBrowser(t)
 
 	unfiltered := browserPaneLines(t, m)
-	if n := len(unfiltered); n < 4 || unfiltered[1] != "" || unfiltered[n-2] != "" {
-		t.Fatalf("an unfiltered pane wants the row block's blanks at 1 and %d: %q", n-2, unfiltered)
-	}
-	for i, ln := range unfiltered {
-		if ln == "" && i != 1 && i != len(unfiltered)-2 {
-			t.Errorf("line %d is blank: an unfiltered pane spends no spacer on a line it has not got", i)
-		}
-		if strings.HasPrefix(ln, pickerFilterLead) {
-			t.Errorf("line %d painted a filter line over an empty filter: %q", i, ln)
-		}
-	}
-
 	m = typeIntoBrowser(t, m, "parser")
-
 	lines := browserPaneLines(t, m)
-	at := -1
-	for i, ln := range lines {
-		if strings.HasPrefix(ln, pickerFilterLead) {
-			at = i
-		}
+
+	if got, want := unfiltered[0], "saved sessions  (this workspace)"; got != want {
+		t.Errorf("unfiltered title row = %q, want the name alone %q", got, want)
 	}
-	if at < 0 {
-		t.Fatalf("no filter line in the pane: %q", lines)
+	if got, want := lines[0], browserFilterTitle("parser", true); got != want {
+		t.Errorf("title row = %q, want %q — the name, the label, the typed text and the caret", got, want)
 	}
-	if got, want := lines[at], pickerFilterLead+"parser"+pickerFilterCursor; got != want {
-		t.Errorf("filter line = %q, want %q — the label, the typed text and the cursor", got, want)
-	}
-	if at < 2 || lines[at-1] != "" || !strings.Contains(lines[at-2], "saved sessions") {
-		t.Errorf("the filter line at %d wants a blank line above it and the title above that: %q", at, lines)
-	}
-	if at+1 >= len(lines) || lines[at+1] != "" {
-		t.Errorf("the filter line at %d wants a blank line below it: %q", at, lines)
-	}
-	if at+2 >= len(lines) || !strings.Contains(lines[at+2], "fix the parser") {
-		t.Errorf("the surviving row does not follow the filter line's spacer: %q", lines)
+	if len(lines) < 3 || lines[1] != "" || !strings.Contains(lines[2], "fix the parser") {
+		t.Errorf("the surviving row wants the row block's own blank above it and nothing else: %q", lines)
 	}
 	for _, ln := range lines {
 		if strings.Contains(ln, "release notes") {
@@ -1787,8 +1773,39 @@ func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
 	}
 }
 
-// The zero-match pane keeps saying what is being filtered — title, filter line, no rows and no
-// highlight — rather than falling back on the "no sessions in this workspace" note, which is a fact
+// A rename or a delete-confirm keeps the filter on the title row — the list it narrowed is still the
+// list on screen — but takes its caret: the next keystroke lands in the rename field or answers the
+// confirm, and a caret on the filter would point at the wrong field (ADR 0053, 2026-10-14 amendment
+// rule 5).
+func TestSessionBrowserHidesTheFilterCaretWhileTypingGoesElsewhere(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		chord rune
+	}{
+		{"rename", 'r'},
+		{"delete-confirm", 'd'},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m, _ := filterableBrowser(t)
+			m = typeIntoBrowser(t, m, "parser")
+
+			m = step(t, m, keyCtrl(tc.chord))
+
+			if b := m.sessionBrowser; !b.renaming && !b.confirming {
+				t.Fatalf("precondition: ^%c armed neither a rename nor a confirm", tc.chord)
+			}
+			if got, want := browserPaneLines(t, m)[0], browserFilterTitle("parser", false); got != want {
+				t.Errorf("title row = %q, want %q — the filter kept, its caret gone", got, want)
+			}
+		})
+	}
+}
+
+// The zero-match pane keeps saying what is being filtered — the title row with the filter on it, no
+// rows and no highlight — rather than falling back on the "no sessions in this workspace" note, which is a fact
 // about the STORE and would be a lie about a list the filter emptied.
 func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
 	t.Parallel()
@@ -1797,11 +1814,7 @@ func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
 	m = typeIntoBrowser(t, m, "zzz")
 
 	lines := browserPaneLines(t, m)
-	filtered := false
 	for _, ln := range lines {
-		if strings.HasPrefix(ln, pickerFilterLead) {
-			filtered = true
-		}
 		if strings.Contains(ln, "press ^a to see all") {
 			t.Errorf("the zero-match pane fell back on the empty-workspace note: %q", ln)
 		}
@@ -1811,11 +1824,8 @@ func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
 			}
 		}
 	}
-	if !filtered {
-		t.Errorf("the zero-match pane dropped the filter line: %q", lines)
-	}
-	if !strings.Contains(lines[0], "saved sessions") {
-		t.Errorf("title line = %q, want the pane still naming itself", lines[0])
+	if got, want := lines[0], browserFilterTitle("zzz", true); got != want {
+		t.Errorf("title row = %q, want %q — the pane still naming itself and its filter", got, want)
 	}
 	if strings.Contains(m.renderSessionBrowser(), defaultGlyphs.user) {
 		t.Error("a pane with no rows drew a selection marker; there is nothing to highlight")

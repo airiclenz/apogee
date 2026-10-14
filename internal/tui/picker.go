@@ -1378,16 +1378,14 @@ func (m Model) pickerFilteredView() pickerView {
 // Rendering
 // ----------------------------------------------------------------------------
 
-// renderPicker paints the open picker through the shared list surface (renderFilterListPlaced,
-// listsurface.go):
-// a titled, bordered pane spanning the full window width holding the filter line, the rows and a key
-// legend, the selected row highlighted. It returns "" when the picker is closed, so View treats it
-// exactly like the /sessions browser's slot.
+// renderPicker paints the open picker through the shared list surface (renderListPlaced,
+// listsurface.go): a titled, bordered pane spanning the full window width holding the rows and a key
+// legend, the selected row highlighted, and — while one is typed — the filter on its title row. It
+// returns "" when the picker is closed, so View treats it exactly like the /sessions browser's slot.
 //
 // What this file states is what only this pane knows — its slot in the frame, its name, its legend,
-// its taste in rows and the rows themselves. The filter line, its two blanks, the budget claim all
-// three cost and the trade on a window too short for everything are the surface's
-// (renderFilterListPlaced).
+// its taste in rows and the rows themselves. How the filter is worded (overlayFilterTail) and the
+// trade on a window too short for everything are the surface's.
 func (m Model) renderPicker() string {
 	view, _ := m.renderPickerPlaced()
 	return view
@@ -1402,13 +1400,14 @@ func (m Model) renderPickerPlaced() (string, popupPlacement) {
 	if !ok {
 		return "", popupPlacement{}
 	}
-	view, place, _ := m.renderFilterListPlaced(m.picker.filter, c)
+	view, place, _ := m.renderListPlaced(c)
 	return view, place
 }
 
 // pickerListContent is everything the picker says about itself to the shared list surface — its
-// slot, its name, its legend, its taste in rows, the FILTERED rows and which of them the highlight
-// is on. ok is false with the overlay closed, which is what makes both renders above answer with
+// slot, its name with the filter riding it, its legend, its taste in rows, the FILTERED rows and
+// which of them the highlight is on. Typing reaches the filter in every state the open picker has,
+// so the caret always shows. ok is false with the overlay closed, which is what makes both renders above answer with
 // nothing rather than with a pane.
 func (m Model) pickerListContent() (listContent, bool) {
 	if !m.picker.open {
@@ -1416,12 +1415,13 @@ func (m Model) pickerListContent() (listContent, bool) {
 	}
 	rows := m.pickerRows()
 	return listContent{
-		pane:     panePicker,
-		title:    m.pickerTitle(),
-		hint:     pickerHintFor(m.picker.kind),
-		rowCap:   maxPickerRows,
-		rows:     rows,
-		selected: m.picker.highlight(len(rows)),
+		pane:      panePicker,
+		title:     m.pickerTitle(),
+		titleTail: overlayFilterTail(m.picker.filter, true),
+		hint:      pickerHintFor(m.picker.kind),
+		rowCap:    maxPickerRows,
+		rows:      rows,
+		selected:  m.picker.highlight(len(rows)),
 	}, true
 }
 

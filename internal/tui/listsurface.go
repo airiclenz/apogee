@@ -54,9 +54,10 @@ import (
 //     and each keeps the answer it had. What the WHEEL does at the ends is NOT a parameter: it CLAMPS
 //     in every one of them (listCursor.wheel), because a wheel is a scroll and rolling past the last
 //     row onto the first would move the human somewhere they did not aim (ratified 2026-08-22).
-//   - The filter LINE is the surface's, not the painter's spec. Its label, its caret, its two
-//     blank lines and the budget claim all three cost ride here (renderFilterListPlaced), so a pane cannot
-//     paint a line it did not claim room for. A pane with a body of its own instead — the /settings
+//   - What the filter SAYS is the surface's, not the pane's. Its label, its caret and its stripping
+//     are composed here (overlayFilterTail) and ride the pane's TITLE row (popupSpec.titleTail), never
+//     a line of their own, so typing takes no row from the list and nothing moves on the first key
+//     (ADR 0053, 2026-10-14 amendment rule 5). A pane with a body of its own — the /settings
 //     sub-list's question — states it as body and takes the same budget→render call (renderList).
 //
 // The surface decides nothing about what a key MEANS. Closing an overlay, resuming a session,
@@ -324,9 +325,9 @@ func (m Model) listKey(
 //
 // The field is BUILT here, on the first key that reaches it, rather than at each of the sites that
 // open an overlay: those assign the whole struct at once (`m.picker = picker{}`), and a filter nobody
-// has typed into holds nothing, paints nothing (overlayFilterLine) and prunes nothing
-// (filterPopupRows' identity view). The glyph is pickerFilterCursor for every surface, which is the
-// caret the shared filter line has always drawn.
+// has typed into holds nothing, paints nothing (overlayFilterTail) and prunes nothing
+// (filterPopupRows' identity view). The glyph is pickerFilterCursor for every surface, so every
+// filtering pane's title row draws the same caret.
 func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows []popupRow, matched matchedText) tea.Cmd {
 	if !l.filter.isBuilt() {
 		l.filter = newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, ""))
@@ -464,37 +465,47 @@ var (
 )
 
 // ----------------------------------------------------------------------------
-// The filter line, and the one budget→render call behind every list pane
+// The filter on the title row, and the one budget→render call behind every list pane
 // ----------------------------------------------------------------------------
 
-// pickerFilterLead labels the line the overlay's filter is typed on. It is a LABEL rather than
-// prose, so the pane paints it as one (popupSpec.bodyLead, the /settings header's own idiom): the
-// eye finds the live line by its label and reads the human's own text after it.
+// pickerFilterLead labels the overlay's filter where the title row states it ("saved sessions ·
+// filter: mo▌"): the eye finds the live text by its label and reads the human's own keystrokes after
+// it, rather than taking them for more of the pane's name.
 const pickerFilterLead = "filter: "
 
-// pickerFilterCursor closes that line. A block where the next keystroke will land, because the real
+// pickerFilterCursor closes that text. A block where the next keystroke will land, because the real
 // caret is in the prompt box below and stays there (a popup row has no seat for it — popup.go):
-// without it the line reads as a finished caption rather than as something being typed. U+258C LEFT
+// without it the filter reads as a finished caption rather than as something being typed. U+258C LEFT
 // HALF BLOCK — one cell in either width method, like every other glyph the frame measures (theme.go).
 //
 // It is the glyph the filter FIELD is built with (typeIntoOverlayFilter) rather than a string this
 // file appends, so the caret stands where the caret stands ([lineEditor.textWithCaret]) — and every
-// filtering overlay draws the same one, which is what the shared line has always painted.
+// filtering overlay draws the same one.
 const pickerFilterCursor = "▌"
 
-// overlayFilterLine is what a filtering overlay shows of its filter — "filter: qwen▌" — or nothing
-// at all while the filter is empty, which is what makes the line's presence the fact that filtering
-// is happening. The text is the human's own keystrokes rather than a foreign string, but it reaches
-// the popup module as BODY and that contract takes body escape-stripped (popup.go), so it is
-// stripped here like every other cell a pane composes.
+// overlayFilterTail is what a filtering overlay shows of its filter on its title row
+// (popupSpec.titleTail) — "filter: qwen▌" — or nothing at all while the filter is empty, which is
+// what makes the tail's presence the fact that filtering is happening (ADR 0053, 2026-10-14
+// amendment rule 5). The text is the human's own keystrokes rather than a foreign string, but it
+// reaches the popup module as part of a title and is stripped here like every other cell a pane
+// composes.
 //
-// It is one composer for every overlay that filters, because the line is one line: two panes
-// spelling it themselves would be two places for the label, the cursor and the stripping to drift
-// apart. The cursor arrives INSIDE the text, where the field draws it ([lineEditor.textWithCaret]),
-// so the strip covers it too — harmlessly, since a block glyph is no control character.
-func overlayFilterLine(filter copyOnWriteField) string {
+// typing is whether typing reaches the filter in the pane's current state: the caret shows only
+// then. A /sessions rename or delete-confirm keeps the filter text on screen — the list it narrowed
+// is still the list — but the next keystroke lands in the rename field or answers the confirm, so a
+// caret on the filter would point at the wrong field.
+//
+// It is one composer for every overlay that filters, because the statement is one statement: two
+// panes spelling it themselves would be two places for the label, the cursor and the stripping to
+// drift apart. The cursor arrives INSIDE the text, where the field draws it
+// ([lineEditor.textWithCaret]), so the strip covers it too — harmlessly, since a block glyph is no
+// control character.
+func overlayFilterTail(filter copyOnWriteField, typing bool) string {
 	if filter.value() == "" {
 		return ""
+	}
+	if !typing {
+		return pickerFilterLead + stripEscapes(filter.value())
 	}
 	return pickerFilterLead + stripEscapes(filter.textWithCaret())
 }
@@ -509,28 +520,24 @@ func overlayFilterLine(filter copyOnWriteField) string {
 // pane whose rows are prose (the /sessions browser's empty-workspace note), which is a fact about the
 // rows and so the pane's to state.
 //
-// body is the block between the title and the rows, and a pane either states one of its own — the
+// body is the block between the title and the rows, for a pane that states one of its own — the
 // /settings sub-list's question, which names the key being answered because the list where the human
-// read that name is what the sub-list replaced — or leaves it to [Model.renderFilterListPlaced], which
-// fills all three body fields from the filter being typed. The two cannot both be true of one pane:
-// a filtering list's body IS its filter line.
+// read that name is what the sub-list replaced.
 //
-// bodyPad is whether that body is set off by blanks of its OWN (popupSpec.bodyPadAbove, bodyPadBelow)
-// — true for the live line a filter is typed on, false for the sub-list's question, which is a
-// caption on the pane rather than a line moving under the eye. It is the one thing that decides the
-// row block's upper breathing row too, because a body that pads itself below has already drawn it
-// (renderListPlaced).
+// titleTail is what rides the title row after the name (popupSpec.titleTail): a filtering pane's
+// filter, as overlayFilterTail composes it, and "" for every pane that does not filter or has
+// nothing typed. It is part of the content rather than folded in by the paint so the paint and the
+// height query ([Model.listHeight]) read one composition and cannot disagree.
 type listContent struct {
-	pane     framePane
-	title    string
-	body     string
-	bodyLead string
-	bodyPad  bool
-	hint     string
-	rowCap   int
-	rows     []popupRow
-	menuRows bool
-	selected int
+	pane      framePane
+	title     string
+	titleTail string
+	body      string
+	hint      string
+	rowCap    int
+	rows      []popupRow
+	menuRows  bool
+	selected  int
 }
 
 // renderList paints an open list overlay through the shared popup module (renderPopup): a titled,
@@ -541,21 +548,14 @@ type listContent struct {
 // View treats every list's slot alike.
 //
 // The BODY block is the pane's, and it is BUDGETED rather than merely drawn: the claim is the
-// wrapped body plus whichever blanks it asked to be set off by (popupFloor.body), so the pane paints
-// what it asked the frame for. The claim is also what decides the trade on a window too short for
-// everything — it comes off the top of the grant, so the ROWS shrink and the body stays. That is the
-// right way round for both bodies a list has: the one line the human is actively typing
-// (renderFilterListPlaced) is what says the list is being narrowed, and the /settings sub-list's question
-// is what says which key is being answered — while a list you cannot see all of is still a list. The
-// row demand and the row cap are untouched by any of it: the pane's taste is its taste with a body
-// exactly as without.
+// wrapped body (popupFloor.body), so the pane paints what it asked the frame for. The claim is also
+// what decides the trade on a window too short for everything — it comes off the top of the grant,
+// so the ROWS shrink and the body stays: the /settings sub-list's question is what says which key is
+// being answered, while a list you cannot see all of is still a list. The row demand and the row cap
+// are untouched by any of it: the pane's taste is its taste with a body exactly as without.
 //
-// A body set off by blanks pays for BOTH of them out of its own claim (popupSpec.bodyPadAbove,
-// bodyPadBelow) rather than one pad per neighbouring block. The lower blank has to belong to the body
-// because the row block's pads are spent out of the ROW window — and an offering longer than the
-// pane's taste fills that window by definition, so a pad owned by the rows would be dropped exactly
-// on the roomy terminals where the pane has lines to spare, and dropped by taking a row past the
-// pane's own taste.
+// A filter being typed claims nothing: it rides the title row the pane already draws
+// (listContent.titleTail), so the first keystroke takes no row from the list.
 func (m Model) renderList(c listContent) string {
 	view, _, _ := m.renderListPlaced(c)
 	return view
@@ -595,27 +595,23 @@ func (m Model) listHeight(c listContent) int {
 func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	claim := popupFloor{}
 	if c.body != "" {
-		claim.body = popupBodyLineCount(m.th, c.body, m.width) + popupBodyPadLines(c.bodyPad, c.bodyPad)
+		claim.body = popupBodyLineCount(m.th, c.body, m.width)
 	}
 	// The house blanks around the ROW block (popupSpec.rowPadAbove, popupRowStyle.padBelow): one under
-	// whatever stands above the rows, one over the key legend. The upper one is not asked for where the
-	// line above the block is already blank, and the ONE thing that makes it blank is a body that pads
-	// ITSELF below (bodyPad ⇒ bodyPadBelow) — every list showing a typed filter
-	// (renderFilterListPlaced) — so the two never double into a two-line gap. A body that books no pad
-	// of its own is the /settings sub-list's question, and the line above the rows is then that
-	// question's last line: such a pane spends the blank exactly as a pane with no body at all does,
-	// or the rows read as more of the prose asking about them (the approval menu's shape, approval.go).
-	// The lower blank follows the legend, because a blank above nothing is a blank above the bottom
-	// border.
+	// whatever stands above the rows, one over the key legend. The upper one is spent on every list,
+	// a body or none: under the title, or under the /settings sub-list's question, whose last line
+	// would otherwise read as more of the prose the rows answer (the approval menu's shape,
+	// approval.go). The lower blank follows the legend, because a blank above nothing is a blank above
+	// the bottom border.
 	//
-	// Both are BOOKED here, in the same arithmetic that books the filter's pads above: the demand and
-	// the cap handed to popupBudget are LINES, so a pane asking for its rows alone would draw the two
+	// Both are BOOKED here, beside the body's claim: the demand and the cap handed to popupBudget are
+	// LINES, so a pane asking for its rows alone would draw the two
 	// blanks out of the rows' own window and show one row fewer than its taste on a terminal with the
 	// lines to spare. Reserving that window is NOT this call's business — the painter takes the pads
 	// off the grant before it seats a row, and hands them back at the floor (popupRowLinesAt) — so a
 	// list too tall for its window gives up its breathing room rather than a row of the list.
-	padAbove, padBelow := c.body == "" || !c.bodyPad, c.hint != ""
-	pad := popupRowPadLines(padAbove && len(c.rows) > 0, padBelow)
+	padBelow := c.hint != ""
+	pad := popupRowPadLines(len(c.rows) > 0, padBelow)
 	// The pane's rowCap is the taste; popupBudget is the screen's answer to it, so a long offering on a
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
 	maxBody, shown, seated := m.popupBudget(c.pane, len(c.rows)+pad, c.rowCap+pad, popupChrome, claim)
@@ -627,45 +623,19 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	// window re-centres on the cursor.
 	rowTop, pinTop := m.clickArmed.pin(c.pane, c.selected)
 	return popupSpec{
-		title:        c.title,
-		body:         c.body,
-		bodyLead:     c.bodyLead,
-		maxBodyRows:  maxBody,
-		bodyPadAbove: c.bodyPad,
-		bodyPadBelow: c.bodyPad,
-		rows:         c.rows,
-		menuRows:     c.menuRows,
-		rowPadAbove:  padAbove,
-		rowStyle:     popupRowStyle{padBelow: padBelow},
-		selected:     c.selected,
-		rowTop:       rowTop,
-		pinTop:       pinTop,
-		hint:         c.hint,
-		maxRows:      shown,
-		scrollbar:    m.popupScrollbarOn(),
+		title:       c.title,
+		titleTail:   c.titleTail,
+		body:        c.body,
+		maxBodyRows: maxBody,
+		rows:        c.rows,
+		menuRows:    c.menuRows,
+		rowPadAbove: true,
+		rowStyle:    popupRowStyle{padBelow: padBelow},
+		selected:    c.selected,
+		rowTop:      rowTop,
+		pinTop:      pinTop,
+		hint:        c.hint,
+		maxRows:     shown,
+		scrollbar:   m.popupScrollbarOn(),
 	}, true
-}
-
-// renderFilterListPlaced paints an open FILTERING list overlay: the call above, with the filter line
-// as the pane's body and the painter's own placement beside the view, for the two filtering panes a
-// pointer names rows on (renderListPlaced's doc says what the placement buys). It is the one place
-// the line, its label, its two blanks and the claim for all three are stated (renderList's own doc
-// says what that claim buys), so a pane states its rows and its wording and cannot forget the pads
-// or set them out of step with what it asked the frame for: the line is folded in here rather than
-// by each caller, because a pane's rows and its wording are its own and the line, its label and its
-// pads are the surface's.
-//
-// An empty filter leaves the body block exactly as the pane left it — nothing at all, for both panes
-// that filter — so a list nobody has typed into is the list it was before a filter existed.
-func (m Model) renderFilterListPlaced(filter copyOnWriteField, c listContent) (string, popupPlacement, bool) {
-	return m.renderListPlaced(filteredListContent(filter, c))
-}
-
-// filteredListContent is c with the filter line folded in as its body — the one statement of that fold,
-// read by the paint above and by the height query the frame's clamp asks ([Model.transcriptRows]).
-func filteredListContent(filter copyOnWriteField, c listContent) listContent {
-	if line := overlayFilterLine(filter); line != "" {
-		c.body, c.bodyLead, c.bodyPad = line, pickerFilterLead, true
-	}
-	return c
 }

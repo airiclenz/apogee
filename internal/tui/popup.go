@@ -69,10 +69,7 @@ import (
 //     shape — a `name:` line with its value's own lines indented beneath it — and the blank
 //     separators survive), each segment is word-wrapped to the inner budget,
 //     and the flattened block is capped at spec.maxBodyRows — negative = uncapped, ZERO = no body
-//     rows at all, the same sense maxRows carries. popupSpec.bodyPadAbove/bodyPadBelow set one blank
-//     line above the block and one below it, drawn — like the pad around the row block — out of the
-//     lines the block's OWN budget left over, so the blanks give way before a line of prose does.
-//     Its first line may open with a LABEL
+//     rows at all, the same sense maxRows carries. Its first line may open with a LABEL
 //     (popupSpec.bodyLead) the module paints as a heading, which is the one styled run inside a
 //     block that is otherwise prose. Past a positive cap the last row becomes an explicit faint
 //     "… (+N more lines)" marker counting the hidden lines, so the body never
@@ -254,12 +251,10 @@ const (
 // style: this one opening blank is the one thing of the shape two panes ask for.
 //
 // Either pad (rowPadAbove, popupRowStyle.padBelow) is a HOUSE rule rather than one pane's taste, and
-// it is the BUILDER's to state — the painter draws what it is asked for and defaults neither, the way
-// bodyPadAbove and bodyPadBelow are already the caller's (ADR 0053). Every boxed pane sets
-// rowPadAbove unless the line above its row block is already blank — the /settings pane, whose body
-// closes with one, and any list showing a typed filter (bodyPadBelow) — and sets rowStyle.padBelow
-// whenever it has a hint. No pane's rows sit flush against the prose above them or the key legend
-// below them.
+// it is the BUILDER's to state — the painter draws what it is asked for and defaults neither (ADR
+// 0053). Every boxed pane sets rowPadAbove unless the line above its row block is already blank — the
+// /settings pane, whose body closes with one — and sets rowStyle.padBelow whenever it has a hint. No
+// pane's rows sit flush against the prose above them or the key legend below them.
 //
 // The painter holds the two ends to that: the closing blank is drawn only where there IS a hint under
 // it, and the opening one only where there is a block for it to set off, so a pane with no rows at all
@@ -268,21 +263,13 @@ const (
 // dropped together as the FIRST thing a short pane gives up, before any row (popupRowLines): breathing
 // room rather than a decision.
 //
-// bodyPadAbove and bodyPadBelow are those same blank lines one block up: they set the BODY off what
-// stands above and below it, for a pane whose body is neither a caption nor the thing being decided
-// about but a live line of its own — the picker's filter, the text the human is typing while the rows
-// move under it (picker.go). A line being typed reads as part of the heading when it sits flush
-// against it and as the first row of the list when the rows sit flush under it, so the two blanks
-// together are what make it a line rather than a second title.
-//
-// BOTH ends belong to the body and not one to each neighbour, which is the difference that matters
-// for the budget: the row block's pads are spent out of the ROW window, so a lower blank owned by the
-// rows would be paid for in rows — an offering longer than the pane's taste always fills its window,
-// leaving nothing over, and the pad would vanish exactly where the pane has the most room. Owned
-// here, the pair is drawn out of what the BODY's budget left over (popupBodyPad) — the one line of
-// filter text costs three, and the rows keep their taste — and it is dropped whole rather than by
-// halves, the row block's rule (popupRowLines): a body that keeps one blank and loses the other has
-// moved rather than tightened. The pane still gives up the breathing room before it gives up the text.
+// titleTail is a live statement that rides the title row AFTER the name, set off by
+// popupTitleTailSeparator — the filter a list is being narrowed by ("filter: mo▌", overlayFilterTail,
+// listsurface.go). It is the title row's rather than a line of its own because a line would take a
+// row from the list the moment the first key landed, and the list would move under the eye that was
+// reading it (ADR 0053, 2026-10-14 amendment rule 5). It changes how a too-narrow row is fitted
+// (popupTitleLine): a spec carrying one keeps the tail whole first, so an empty tail leaves every
+// other pane's ladder exactly as it was.
 //
 // rowKinds says what each row IS where that changes how it is painted (popupRowKind) — a section
 // header, a row being edited — parallel to rows, and short or nil for a pane whose rows are all
@@ -322,12 +309,11 @@ const (
 // showing.
 type popupSpec struct {
 	title         string
+	titleTail     string
 	titleInBorder bool
 	body          string
 	bodyLead      string
 	maxBodyRows   int
-	bodyPadAbove  bool
-	bodyPadBelow  bool
 	rows          []popupRow
 	rowKinds      []popupRowKind
 	menuRows      bool
@@ -520,12 +506,7 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 		hidden += hiddenBody
 	}
 
-	title := popupTitleLine(th, popupHeading(spec, len(body), hiddenBody), hidden, inner)
-
-	// The pad the body asks for is added AFTER the two reads above, because both of them are about the
-	// body's own LINES — what it could not show, and whether it is still showing enough of itself to
-	// name the pane — and a blank line is neither prose shown nor prose hidden.
-	body = popupBodyPad(body, spec.bodyPadAbove, spec.bodyPadBelow, spec.maxBodyRows)
+	title := popupTitleLine(th, popupHeading(spec, len(body), hiddenBody), spec.titleTail, hidden, inner)
 
 	lines := make([]string, 0, len(body)+len(block.lines)+2) //nolint:mnd // +2: the optional title and hint rows
 	if title != "" && !spec.titleInBorder {
@@ -571,12 +552,12 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 // popupHeight is how many screen rows renderPopupPlaced would paint spec in at the given TOTAL width,
 // answered without painting it: 0 where the painter draws nothing (a width with no content cell inside
 // the frame), otherwise the two borders plus every content line the composition would emit — the
-// title row, the body block with its pads, the row block and the hint. It is what the frame's
+// title row, the body block, the row block and the hint. It is what the frame's
 // transcript clamp measures an open pane by ([Model.transcriptRows]), so an Update that only has to
 // know how tall a pane is no longer pays for its styling, its column layout and its box.
 //
 // It is the painter's own arithmetic asked for counts rather than lines — the body's elision split
-// (elisionSplit), its pads (popupBodyPad's rule), the row window (popupRowSeat) and the title the
+// (elisionSplit), the row window (popupRowSeat) and the title the
 // two hidden counts decide (popupHeading, popupTitleLine) — so it cannot pick a different window than
 // the paint does. What it still composes is what a count genuinely depends on: the body prose wrapped
 // to the inner width, and a WRAPPING spec's rows wrapped likewise (popupRowBlocks), because only the
@@ -594,15 +575,11 @@ func popupHeight(th theme, spec popupSpec, width int) int {
 	if bodyLines == 0 {
 		hidden += hiddenBody
 	}
-	title := popupTitleLine(th, popupHeading(spec, bodyLines, hiddenBody), hidden, inner)
+	title := popupTitleLine(th, popupHeading(spec, bodyLines, hiddenBody), spec.titleTail, hidden, inner)
 
 	lines := popupBorderRows + rowLines
 	if title != "" && !spec.titleInBorder {
 		lines++
-	}
-	if pad := popupBodyPadLines(spec.bodyPadAbove, spec.bodyPadBelow); pad > 0 && bodyLines > 0 &&
-		(spec.maxBodyRows < 0 || bodyLines+pad <= spec.maxBodyRows) {
-		lines += pad // popupBodyPad's rule: the pads ride only a block the budget still has room for
 	}
 	lines += bodyLines
 	if spec.hint != "" {
@@ -1430,48 +1407,6 @@ func popupBodyLines(th theme, body, lead string, maxBodyRows, inner int, blackFi
 	return out, hidden
 }
 
-// popupBodyPad sets the composed body block one blank line off what stands above and below it, at
-// whichever ends the spec asks for (popupSpec.bodyPadAbove, bodyPadBelow). The blanks are spent LAST
-// and out of what the block's own budget LEFT OVER — the row block's rule (popupRowLines) one block
-// up — so a pane whose body filled its whole grant keeps the text and loses the breathing room: a
-// blank line may never cost a line of the very thing it was drawn to set off. A spec asking for both
-// gets both or neither, for the reason the row block drops its pair together: half a pad moves the
-// block instead of tightening it. An empty block gets no pad at all: there is nothing for a blank
-// line to stand around. The row block one level down keeps its CLOSING blank when it is empty
-// (popupRowPads) — that one stands under a hint rather than around a block.
-func popupBodyPad(body []string, padAbove, padBelow bool, maxBodyRows int) []string {
-	pad := popupBodyPadLines(padAbove, padBelow)
-	if pad == 0 || len(body) == 0 || (maxBodyRows >= 0 && len(body)+pad > maxBodyRows) {
-		return body
-	}
-	out := make([]string, 0, len(body)+pad)
-	if padAbove {
-		out = append(out, "")
-	}
-	out = append(out, body...)
-	if padBelow {
-		out = append(out, "")
-	}
-	return out
-}
-
-// popupBodyPadLines is what popupSpec.bodyPadAbove/bodyPadBelow cost the BODY budget: one line per
-// padded END of the block. It is popupRowPadLines' counterpart on the body side and exists for the
-// same reason — the painter draws the pads and the CALLER has to claim room for them
-// (popupFloor.body, [Model.popupBudget]), and a pane claiming one figure and painting another is the
-// overflow the line accounting exists to prevent. Callers state the same two flags here that they set
-// on their popupSpec.
-func popupBodyPadLines(above, below bool) int {
-	lines := 0
-	if above {
-		lines++
-	}
-	if below {
-		lines++
-	}
-	return lines
-}
-
 // popupBodyLeadLine styles a body line whose front is a LABEL (popupSpec.bodyLead): the label as a
 // heading, the rest of the line as the prose it leads. Both halves carry the pane's own black field,
 // like every other styled run this module composes (skillAccent's argument, theme.go): a style with
@@ -1654,7 +1589,12 @@ func popupHeading(spec popupSpec, bodyLines, hiddenBody int) string {
 // taken against a name the human can still read, and taken knowing there is text behind it. When
 // not even a clipped name survives, the count is the whole row: on a pane that narrow the name is
 // no longer identifying anything anyway.
-func popupTitleLine(th theme, title string, hidden, inner int) string {
+//
+// A spec carrying a title tail (popupSpec.titleTail — a list's filter) reads in a different order,
+// and the "never the number" above holds only for a spec WITHOUT one (ADR 0053, 2026-10-14
+// amendment rule 5): the tail is what the human is typing, so it is the last thing the row gives up.
+// popupTitleWithTail fits that row.
+func popupTitleLine(th theme, title, tail string, hidden, inner int) string {
 	// A title is a NAME, and this row — or the top border it is spliced into — is ONE row. Every
 	// arithmetic decision below counts the title's width as the width of a single line, so a title
 	// carrying "\n" would both falsify that count and paint rows the pane never budgeted for, above
@@ -1663,6 +1603,9 @@ func popupTitleLine(th theme, title string, hidden, inner int) string {
 	// pane's tool name, flattenField), because that is where the reason for the fold is legible —
 	// but no pane has to remember, because a name has no layout to lose.
 	title = flattenField(title)
+	if tail != "" {
+		return popupTitleWithTail(th, title, flattenField(tail), hidden, inner)
+	}
 	if hidden == 0 {
 		return title
 	}
@@ -1677,6 +1620,62 @@ func popupTitleLine(th theme, title string, hidden, inner int) string {
 		}
 	}
 	return title + popupGutter + marker
+}
+
+// popupTitleTailSeparator sets a title tail (popupSpec.titleTail) off the name in front of it —
+// "saved sessions · filter: mo▌" — the "·" the house already joins two facts on one line with.
+const popupTitleTailSeparator = " · "
+
+// popupTitleWithTail composes a title row that carries a tail: "<title> · <tail>", then the
+// elision marker a gutter on where the pane hides rows. Where the row is too narrow for all of it the
+// width is spent in the order the ratified contract reads it in (ADR 0053, 2026-10-14 amendment rule
+// 5): the TAIL first, whole — it is what the human is typing; then the count; then the name. So the
+// marker trades its wording for width first (popupElisionMarkerFitting), the title is clipped to an
+// ellipsis next and dropped with its separator when nothing of it survives, and the count goes after
+// it. A tail wider than the whole row shows its END behind a leading "…" (popupTitleTailEnd), because
+// the end is where the caret stands and where the next keystroke will land.
+func popupTitleWithTail(th theme, title, tail string, hidden, inner int) string {
+	tailW := th.measure.Width(tail)
+	if tailW > inner {
+		return popupTitleTailEnd(th, tail, inner)
+	}
+	if title != "" {
+		lead := th.measure.Width(title) + th.measure.Width(popupTitleTailSeparator)
+		count := popupTitleTailCount(th, hidden, inner-lead-tailW, true)
+		room := inner - th.measure.Width(popupTitleTailSeparator) - tailW - th.measure.Width(count)
+		if clipped := truncateToWidth(th, title, room); clipped != "" {
+			return clipped + popupTitleTailSeparator + tail + count
+		}
+	}
+	return tail + popupTitleTailCount(th, hidden, inner-tailW, false)
+}
+
+// popupTitleTailCount is the elision marker as a title tail's row seats it, gutter included: "" for
+// no hidden rows, else the widest form that fits budget cells — or, where the caller must have SOME
+// count because a name still stands to give way before it (forced), the short form regardless,
+// which the name's clip then pays for. Unforced, a marker that fits nowhere is dropped: the count is
+// the thing a tail's row gives up second.
+func popupTitleTailCount(th theme, hidden, budget int, forced bool) string {
+	if hidden == 0 {
+		return ""
+	}
+	gutter := th.measure.Width(popupGutter)
+	marker := popupElisionMarkerFitting(th, hidden, budget-gutter)
+	if !forced && gutter+th.measure.Width(marker) > budget {
+		return ""
+	}
+	return popupGutter + marker
+}
+
+// popupTitleTailEnd is a tail too wide for the whole row: its last inner−1 cells behind a leading
+// "…", so the caret end of a long filter stays where the eye expects the next keystroke. A row with
+// no room for even one cell beside the ellipsis gets the ellipsis alone, or nothing at all.
+func popupTitleTailEnd(th theme, tail string, inner int) string {
+	if inner <= 0 {
+		return ""
+	}
+	tailW := th.measure.Width(tail)
+	return "…" + th.measure.Cut(tail, tailW-(inner-1), tailW)
 }
 
 // popupRowWindow returns the [start, end) slice of a row list to show at once: the rows whose

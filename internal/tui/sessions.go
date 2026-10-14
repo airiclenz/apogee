@@ -68,7 +68,7 @@ const maxSessionRows = 8
 const sessionBrowserHint = "type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · ^a this/all · esc close"
 
 // sessionRenameCaret is the glyph the inline rename edit draws where the next keystroke lands. It is
-// this pane's own rather than the filter line's above it (pickerFilterCursor): the two are different
+// this pane's own rather than the filter's on the title row (pickerFilterCursor): the two are different
 // fields on the same overlay, and the rename row has always been the narrower bar — U+258F LEFT ONE
 // EIGHTH BLOCK, the glyph the /settings value row later borrowed from it (settingsCaret).
 //
@@ -731,12 +731,9 @@ func (m Model) canResumeWorkflows() bool {
 // row, which has nothing to align and so stays one cell. It returns "" when the browser is closed,
 // so View treats it like the approval-prompt slot.
 //
-// While a filter is being typed the pane grows one line for it, set off by a blank line at each end —
-// the shared list surface's own line, budget and trade (renderFilterListPlaced, listsurface.go): the three
-// lines
-// are the module's BODY block, both blanks are the body's own pads, and the whole claim comes off the
-// top of the frame's grant so a short window gives up ROWS before it gives up the line the human is
-// typing. The row window is likewise the SCREEN's to grant and not the browser's to assume:
+// While a filter is being typed it rides the title row (overlayFilterTail, listsurface.go) — the
+// pane grows no line for it, so the first keystroke moves nothing. The row window is the SCREEN's to
+// grant and not the browser's to assume:
 // maxSessionRows is this overlay's own taste and [Model.popupBudget] cuts it down to what fits above
 // the input box (D2) — on a short terminal that is fewer rows, or none at all, and a window of none
 // is counted onto the title row (popupTitleLine) so a browser showing no sessions can be told apart
@@ -755,7 +752,7 @@ func (m Model) renderSessionBrowserPlaced() (string, popupPlacement) {
 	if !ok {
 		return "", popupPlacement{}
 	}
-	view, place, _ := m.renderFilterListPlaced(m.sessionBrowser.filter, c)
+	view, place, _ := m.renderListPlaced(c)
 	return view, place
 }
 
@@ -772,17 +769,21 @@ func (m Model) browserListContent() (listContent, bool) {
 	if b.allWorkspaces {
 		scope = "all workspaces"
 	}
+	// The filter stays on the title row through a rename or a delete-confirm — the list it narrowed
+	// is still the list on screen — but its caret goes: the next keystroke lands in the rename field
+	// or answers the confirm, not in the filter.
 	c := listContent{
-		pane:     paneBrowser,
-		title:    "saved sessions  (" + scope + ")",
-		hint:     sessionBrowserHint,
-		rowCap:   maxSessionRows,
-		selected: -1, // no rows ⇒ no highlight (the popup module's own convention)
+		pane:      paneBrowser,
+		title:     "saved sessions  (" + scope + ")",
+		titleTail: overlayFilterTail(b.filter, !b.renaming && !b.confirming),
+		hint:      sessionBrowserHint,
+		rowCap:    maxSessionRows,
+		selected:  -1, // no rows ⇒ no highlight (the popup module's own convention)
 	}
 	if len(b.visible(m.opts.Workspace)) == 0 {
 		// An empty WORKSPACE view is a fact about the store, and a row of prose is how the pane states
 		// it. A filter that matched nothing is not the same thing and gets no such row: the visible
-		// filter line over an empty list already says why the pane is empty, and backspace is the way
+		// filter on the title row over an empty list already says why the pane is empty, and backspace is the way
 		// back (the picker's zero-match pane). Prose is not a choice, so the highlight stays off it.
 		c.rows = singleCellRows([]string{"no sessions in this workspace — press ^a to see all"})
 	} else {
