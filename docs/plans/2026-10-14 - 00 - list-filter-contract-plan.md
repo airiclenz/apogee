@@ -165,7 +165,11 @@ internal/tui/sessions_test.go — TestSessionBrowserPaintsTheFilterLine; interna
 **Commit:** `feat(tui): say when a filter matches nothing and legend the filter state`
 Depends on item 4.
 
-## 6. A paste is typing in a filtering list
+## 6. A paste is typing in a filtering list — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the shared build-and-re-seat helper is `typeIntoOverlayFilter` itself, now taking the edit as a `change func(*lineEditor) tea.Cmd` (a keystroke's `editKey` from `listKey`, a paste's `editMsg` from the new `listPaste`), rather than a second helper beside it.
+NOTES (2026-10-14): the picker half of the claimer lives in `listPaste` (listsurface.go), not picker.go, which the item's Files line does not name; the browser half is `sessionBrowserPaste` in sessions.go.
+NOTES (2026-10-14): consequential edit — internal/tui/lineeditor.go: made necessary by typeIntoOverlayFilter now building the field on a paste as well as a keystroke (isBuilt doc comment).
 
 **What:**
 **Goal:** with a filtering picker or `/sessions` open, a bracketed paste lands in the filter folded onto one line and re-seats the highlight by item 2's rule; during a `/sessions` rename it lands in the rename field folded to one line; during delete-confirm and in a question picker it is dropped; it never reaches the prompt draft or a staged interjection while such a pane is open.

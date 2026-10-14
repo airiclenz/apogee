@@ -111,7 +111,8 @@ func newPopupField(shape tea.CursorShape, surface color.Color, glyph, seed strin
 // leaves behind (`m.picker = picker{}`, a field reset to `lineEditor{}`). It is the focus flag
 // because focus is what construction grants and nothing in this package ever takes away: a zero
 // textarea answers "" and drops every key it is handed (its Update returns on !focus), so a surface
-// that builds its field lazily asks this before handing over a keystroke (typeIntoOverlayFilter).
+// that builds its field lazily asks this before handing over a keystroke or a paste
+// (typeIntoOverlayFilter).
 func (e lineEditor) isBuilt() bool {
 	return e.input.Focused()
 }

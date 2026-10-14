@@ -496,7 +496,8 @@ func (m Model) foldKeyboardEnhancements(msg tea.KeyboardEnhancementsMsg) (tea.Mo
 }
 
 // foldPaste folds one bracketed paste into whichever surface is being typed at: the /settings pane
-// first, then the prompt box wherever it is editable.
+// first, then the approval pane's rule field, then an open picker or /sessions browser (listPaste),
+// then the prompt box wherever it is editable.
 //
 // Bracketed paste (default-on in bubbletea v2) is an edit, so it must run the same post-edit
 // refresh a keypress does — without it a multi-line paste renders unwrapped until the next key, the
@@ -508,13 +509,17 @@ func (m Model) foldKeyboardEnhancements(msg tea.KeyboardEnhancementsMsg) (tea.Mo
 //
 // The /settings pane is asked FIRST and for the same reason handleKey asks it first: while it is
 // open it is the surface the human is typing at, and the box below is one they cannot see
-// (settings.go).
+// (settings.go). The filtering lists are asked before the box for the same reason: they are modal,
+// and nothing is typed into the prompt box while a pop-up is up (layout.md).
 func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if next, cmd, claimed := m.settingsPaste(msg); claimed {
 		return next, cmd
 	}
 	if next, cmd, claimed := m.projectRuleMsg(msg); claimed {
 		return next, cmd // the approval pane's rule field is the surface being typed at (approval.go)
+	}
+	if next, cmd, claimed := m.listPaste(msg); claimed {
+		return next, cmd // a filtering list's paste is typing into it, never into the box (listsurface.go)
 	}
 	if !m.inputEditable() {
 		return m, nil

@@ -2509,6 +2509,53 @@ func TestPickerLegendFollowsTheFilterState(t *testing.T) {
 	}
 }
 
+// A bracketed paste over a filtering picker is typing (ADR 0053, 2026-10-14 amendment): it lands in
+// the filter folded onto one line and re-seats the highlight by the filter's own rule — here off
+// plan, which the pasted text prunes, onto the first match. It is pasted before any key, so the
+// filter field is still the unbuilt zero value and has to be built by the paste itself. The prompt
+// draft behind the pane is never touched.
+func TestPickerPasteLandsInTheFilter(t *testing.T) {
+	t.Parallel()
+	m, _ := openModePicker(t, domain.ModePlan)
+	m.input.SetValue("keep")
+
+	m = step(t, m, tea.PasteMsg{Content: "auto\n"})
+
+	if got := m.picker.filter.value(); got != "auto " {
+		t.Errorf("filter = %q, want the paste folded onto one line (%q)", got, "auto ")
+	}
+	if at, ok := m.pickerFilteredView().offeringIndex(m.picker.selected); !ok || at != 3 {
+		t.Errorf("highlight on rung %d (ok=%v), want the first match, auto (3)", at, ok)
+	}
+	if got := m.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste over the picker", got)
+	}
+}
+
+// A pane that asks rather than lists has no filter for a paste to land in, and the paste does not
+// fall through to the prompt draft behind it either: it is dropped, and the pane keeps every answer.
+func TestQuestionPickerPasteIsDropped(t *testing.T) {
+	t.Parallel()
+	m := armOffer(t, offerModel(t, &configWriteLog{path: "/home/x/.apogee/config.yaml"}, "workstation"))
+	if !m.picker.open || m.picker.kind != pickerKeyMigration {
+		t.Fatalf("picker = %+v, want the key migration offer open", m.picker)
+	}
+	m.input.SetValue("keep")
+	offered := len(m.pickerOfferingRows())
+
+	m = step(t, m, tea.PasteMsg{Content: "q\nq"})
+
+	if got := m.picker.filter.value(); got != "" {
+		t.Errorf("filter = %q, want none — a question pane does not filter", got)
+	}
+	if got := m.pickerCount(); got != offered {
+		t.Errorf("pickerCount() = %d, want every one of the %d answers", got, offered)
+	}
+	if got := m.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste over the question pane", got)
+	}
+}
+
 // The panes that ASK rather than list — the workflow-boundary confirm, the key migration offer, the
 // sub-agents migration offer and the adoption pane — have no List filter (ADR 0053, 2026-10-14
 // amendment): a letter they do not bind prunes nothing, backspace edits nothing, and their legend

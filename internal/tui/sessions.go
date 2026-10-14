@@ -416,6 +416,22 @@ func (m Model) sessionBrowserVerb(msg tea.KeyPressMsg, rows []popupRow) (tea.Mod
 	return m, nil
 }
 
+// sessionBrowserPaste lands a bracketed paste where the browser's keys would land it (listPaste):
+// in the rename field while a rename is open, folded onto its one line like the filter
+// ([lineEditor.editMsg]); nowhere during a delete-confirm, whose only answers are y and n and which
+// no pasted text may answer; and in the filter otherwise, re-seating the highlight as a typed key
+// does. paste is the edit that carries the text into a field. It always claims: the browser is modal.
+func (m Model) sessionBrowserPaste(paste func(*lineEditor) tea.Cmd) (Model, tea.Cmd, bool) {
+	switch {
+	case m.sessionBrowser.renaming:
+		return m, m.sessionBrowser.renameBuf.edit(paste), true
+	case m.sessionBrowser.confirming:
+		return m, nil, true
+	}
+	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
+	return m, m.typeIntoOverlayFilter(&m.sessionBrowser.listSurface, rows, sessionMatchedText, paste), true
+}
+
 // sessionConfirmKey resolves an armed delete confirm: y deletes the selected session, n or esc
 // cancels back to the row. Deleting the ACTIVE session first rotates the host so the live
 // conversation keeps saving under a fresh id, and notes that its old file is gone (the

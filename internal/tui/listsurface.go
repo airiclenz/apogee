@@ -135,8 +135,8 @@ type listSurface struct {
 	// Its ZERO value is the empty, unbuilt field a whole-struct reset leaves behind — it answers ""
 	// and drops every key — so the zeroing every close and accept already does still clears the
 	// filter, and no path can carry a stale one into the next open. The real field is built on the
-	// first key that reaches it (typeIntoOverlayFilter) rather than at each of the sites that open an
-	// overlay.
+	// first key or paste that reaches it (typeIntoOverlayFilter) rather than at each of the sites that
+	// open an overlay.
 	filter copyOnWriteField
 }
 
@@ -313,27 +313,34 @@ func (m Model) listKey(
 	// (bubbletea's own contract) — so a chord the cursor had no use for is handed back to the pane
 	// rather than typed into the filter.
 	if msg.String() == "backspace" || msg.Text != "" {
-		return listSwallowed, m.typeIntoOverlayFilter(l, msg, rows, matched)
+		return listSwallowed, m.typeIntoOverlayFilter(l, rows, matched, func(f *lineEditor) tea.Cmd { return f.editKey(msg) })
 	}
 	return listUnclaimed, nil
 }
 
-// typeIntoOverlayFilter hands one keystroke to a filtering overlay's filter field and re-seats the
+// typeIntoOverlayFilter hands one edit to a filtering overlay's filter field and re-seats the
 // highlight on the rows the field leaves standing (pickerView.reseatPosition), returning whatever Cmd
 // the widget asked for. It is the door BOTH overlays that filter type through, so the two answer
 // "what does backspace do to a filter" — and "where does the highlight go when it does" — with the
 // same field and the same rule rather than each keeping a string and a clamp of its own.
 //
-// Only the two keys the surface routes here reach it: a printable keypress and backspace, both
-// landing at the end of the value where the caret stands. Everything else is swallowed whole by the
-// modal above (listKey) — the field is what EDITS, never what decides which keys are the overlay's.
+// change is the edit itself, and only two kinds reach it: a keystroke the surface routes here (a
+// printable keypress or backspace, listKey), and a bracketed paste (listPaste), which the field folds
+// onto its one line ([lineEditor.editMsg]). Both land at the end of the value where the caret stands.
+// Everything else is swallowed whole by the modal above (listKey) — the field is what EDITS, never
+// what decides which keys are the overlay's.
 //
-// The field is BUILT here, on the first key that reaches it, rather than at each of the sites that
+// The field is BUILT here, on the first edit that reaches it, rather than at each of the sites that
 // open an overlay: those assign the whole struct at once (`m.picker = picker{}`), and a filter nobody
 // has typed into holds nothing, paints nothing (overlayFilterTail) and prunes nothing
 // (filterPopupRows' identity view). The glyph is pickerFilterCursor for every surface, so every
 // filtering pane's title row draws the same caret.
-func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows []popupRow, matched matchedText) tea.Cmd {
+func (m Model) typeIntoOverlayFilter(
+	l *listSurface,
+	rows []popupRow,
+	matched matchedText,
+	change func(*lineEditor) tea.Cmd,
+) tea.Cmd {
 	if !l.filter.isBuilt() {
 		l.filter = newCopyOnWriteField(newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, ""))
 	}
@@ -344,9 +351,36 @@ func (m Model) typeIntoOverlayFilter(l *listSurface, msg tea.KeyPressMsg, rows [
 	// The highlighted ROW is read before the edit, not its position: the edit moves every position
 	// under it, and the row is what the human is looking at.
 	underlying, held := l.view(rows, matched).offeringIndex(l.selected)
-	cmd := l.filter.edit(func(f *lineEditor) tea.Cmd { return f.editKey(msg) })
+	cmd := l.filter.edit(change)
 	l.selected = l.view(rows, matched).reseatPosition(underlying, held)
 	return cmd
+}
+
+// listPaste routes a bracketed paste while a filtering list pane owns the keyboard — the paste is
+// TYPING there (ADR 0053, 2026-10-14 amendment): into the open pane's filter, folded onto one line,
+// with the highlight re-seated as a keystroke re-seats it. A pane that asks rather than lists (a
+// question kind, pickerOffering.filters) drops it; the /sessions browser routes it by its own
+// sub-step (sessionBrowserPaste). Either way it is CLAIMED, never
+// handed on: the panes are modal, and a paste falling through would fill the prompt draft — or stage
+// an interjection mid-run — behind a pane the human is looking at instead.
+//
+// Each pane is gated by its own key gate (paneSpecs keyOpen), not by its open flag, so the paste
+// follows exactly the rule the keys follow: an approval or ask raised above a mid-run picker leaves
+// the picker's gate shut, and the paste goes to the surface the keys go to.
+func (m Model) listPaste(msg tea.PasteMsg) (Model, tea.Cmd, bool) {
+	paste := func(f *lineEditor) tea.Cmd { return f.editMsg(msg) }
+	switch {
+	case paneSpecs[paneBrowser].keyOpen(m):
+		return m.sessionBrowserPaste(paste)
+	case paneSpecs[panePicker].keyOpen(m):
+		offering := pickerOfferings[m.picker.kind]
+		if !offering.filters {
+			return m, nil, true // a question pane has no filter to type into
+		}
+		cmd := m.typeIntoOverlayFilter(&m.picker.listSurface, m.pickerOfferingRows(), offering.matched, paste)
+		return m, cmd, true
+	}
+	return m, nil, false
 }
 
 // pickerView is a list's FILTERED view of the rows it was given, and the ONE seam its consumers

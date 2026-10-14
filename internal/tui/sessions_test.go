@@ -1541,6 +1541,82 @@ func TestSessionBrowserFilterKeepsTheHighlightOnItsSession(t *testing.T) {
 	}
 }
 
+// A bracketed paste over the browser is typing into its filter: folded onto one line — the newline
+// becomes the space the matched title carries — and the highlight re-seated off the notes row the
+// filter prunes onto the first match. The prompt draft behind the pane is never touched.
+func TestSessionBrowserPasteLandsInTheFilter(t *testing.T) {
+	t.Parallel()
+	m, _ := filterableBrowser(t)
+	m.input.SetValue("keep")
+
+	m = step(t, m, tea.PasteMsg{Content: "the\nparser"})
+
+	if got := m.sessionBrowser.filter.value(); got != "the parser" {
+		t.Errorf("filter = %q, want the paste folded onto one line (%q)", got, "the parser")
+	}
+	view := m.sessionBrowserView()
+	if len(view.metas) != 1 || view.metas[m.sessionBrowser.selected].ID != "parser" {
+		t.Errorf("filtered view = %v at %d, want the parser session alone, highlighted", view.metas, m.sessionBrowser.selected)
+	}
+	if got := m.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste over the browser", got)
+	}
+}
+
+// During a rename the paste lands in the rename field, folded onto its one line, and the filter
+// behind it is left alone.
+func TestSessionBrowserPasteLandsInTheRename(t *testing.T) {
+	t.Parallel()
+	m, _ := filterableBrowser(t)
+	m.input.SetValue("keep")
+	m = step(t, m, keyCtrl('r'))
+	if !m.sessionBrowser.renaming {
+		t.Fatal("precondition: ^r did not open the rename edit")
+	}
+
+	m = step(t, m, tea.PasteMsg{Content: " v2\nfinal"})
+
+	if got, want := m.sessionBrowser.renameBuf.value(), "draft the release notes v2 final"; got != want {
+		t.Errorf("rename buffer = %q, want %q", got, want)
+	}
+	if got := m.sessionBrowser.filter.value(); got != "" {
+		t.Errorf("filter = %q, want it untouched while the rename takes the paste", got)
+	}
+	if got := m.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste into the rename", got)
+	}
+}
+
+// An armed delete-confirm answers y or n and nothing else: a paste — even one that is just "y" —
+// is dropped, deletes nothing, leaves the confirm armed and never reaches the filter or the draft.
+func TestSessionBrowserPasteDuringConfirmIsDropped(t *testing.T) {
+	t.Parallel()
+	m, host := filterableBrowser(t)
+	m.input.SetValue("keep")
+	m = step(t, m, keyCtrl('d'))
+	if !m.sessionBrowser.confirming {
+		t.Fatal("precondition: ^d did not arm the delete confirm")
+	}
+
+	m, cmd := stepCmd(t, m, tea.PasteMsg{Content: "y"})
+
+	if cmd != nil {
+		t.Errorf("a paste during the confirm dispatched a Cmd; it must be dropped")
+	}
+	if _, ok := host.stored["notes"]; !ok {
+		t.Errorf("the highlighted session was deleted by a paste")
+	}
+	if !m.sessionBrowser.confirming {
+		t.Errorf("the confirm was disarmed by a paste; it must stay armed")
+	}
+	if got := m.sessionBrowser.filter.value(); got != "" {
+		t.Errorf("filter = %q, want nothing typed during the confirm", got)
+	}
+	if got := m.input.Value(); got != "keep" {
+		t.Errorf("prompt draft = %q, want it untouched by a paste during the confirm", got)
+	}
+}
+
 // ⏎ resumes the session the pane SHOWED, not the same index into the unfiltered list — the whole
 // point of resolving every verb through one filtered view. Here the filter leaves the third-newest
 // record standing, so a highlight read against the store would have loaded the newest one.
