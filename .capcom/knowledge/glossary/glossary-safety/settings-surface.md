@@ -31,6 +31,7 @@ schema, homed in `internal/domain` because config and the renderer both name it 
 the other (ADR 0043, 2026-09-20 amendment): resolved by config, carried whole on the renderer's
 Options in the file's own positive polarity, and edited live through its one parser, `UIPrefs.Set`,
 which the registry rows themselves call.
+Typing narrows the pane with the **List filter** — over key paths and section headings, a section staying while any of its rows match — and the filter survives every edit step; with a filter set backspace trims it and **delete** arms the reset (ADR 0053, 2026-10-14 amendment).
 Editing is **hybrid**: simple keys are edited in the pane — a bool toggles, a 3-plus-option key
 opens a selection popup, a string or an int opens a real single-line field on its row (cursor keys
 and mouse), the inline system prompt a multi-line field (⏎ inserts a newline, ctrl+s commits) —

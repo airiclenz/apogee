@@ -3,6 +3,7 @@ title: Typing in /settings should filter the settings list to matches; groups st
 status: open
 type: feature
 priority: 2
+plan: 2026-10-14 - 00 - list-filter-contract-plan
 created: 2026-10-13T11:41:49Z
 ---
 
