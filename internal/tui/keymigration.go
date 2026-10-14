@@ -45,9 +45,12 @@ const (
 	keyMigrationNever
 )
 
-// keyMigrationHint is the legend under the offer. It says "choose" rather than "switch" for the
-// reason /schedule's panes do: taking a row answers a question, it does not move the session.
-const keyMigrationHint = "type to filter · ↑/↓ select · ⏎ choose · esc close"
+// keyMigrationHint is the legend under the offer — and under the sub-agents offer and the adoption
+// pane, which ask the same shape of question. It says "choose" rather than "switch" for the reason
+// /schedule's panes do: taking a row answers a question, it does not move the session. It carries no
+// "type to filter": a question pane has no List filter (pickerOffering.filters), so a letter typed
+// into it does nothing.
+const keyMigrationHint = "↑/↓ select · ⏎ choose · esc close"
 
 // openKeyMigration raises the first offer at construction, before the first frame is painted — the
 // openPrebound seam, and for the same reason: the overlay is STATE, so it has to be set on the
@@ -164,8 +167,8 @@ func (m Model) acceptKeyMigration(choice int) (tea.Model, tea.Cmd) {
 	}
 
 	// The whole overlay is replaced rather than edited, so nothing of the answered pane — the
-	// filter and the latch above all — can survive into the next entry's question, which re-arms from
-	// scratch.
+	// highlight and the latch above all — can survive into the next entry's question, which re-arms
+	// from scratch.
 	m.picker = picker{}
 	if len(rest) > 0 {
 		return m, m.raiseKeyMigration(rest)

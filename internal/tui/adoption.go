@@ -191,8 +191,9 @@ func (m Model) acceptAdoption(choice int) (tea.Model, tea.Cmd) {
 			"rejected %s — it is not offered again until the entry changes", "could not reject %s: %s"))
 	}
 
-	// The whole overlay is replaced rather than edited, so nothing of the answered pane — the filter
-	// and the latch above all — survives into the next rule's question, which re-arms from scratch.
+	// The whole overlay is replaced rather than edited, so nothing of the answered pane — the
+	// highlight and the latch above all — survives into the next rule's question, which re-arms from
+	// scratch.
 	m.picker = picker{}
 	if len(rest) > 0 {
 		return m, m.raiseAdoption(rest)

@@ -92,7 +92,12 @@ internal/tui/listsurface_test.go — TestListSurfaceTypingNarrowsTheListAndRecla
 **Commit:** `feat(tui): keep a filtered list's highlight on its row`
 Depends on item 1.
 
-## 3. Question pickers stop filtering
+## 3. Question pickers stop filtering — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): `pickerOffering.filters` is set `true` on the ten filtering kinds and left at its zero value on the four question kinds; `pickerKey` sends a non-filtering kind's keys straight to `listCursor.key`. The picker's filter view needed no change, because nothing can type into a question kind's filter now (item 6 owns the paste drop).
+NOTES (2026-10-14): internal/tui/commandrun.go is unchanged: the boundary legend already had no `type to filter`, and the file has no filter prose. The stale "ahead of the filter" comment on the boundary pre-check sits in picker.go's `pickerKey` and was fixed there.
+NOTES (2026-10-14): consequential edit — internal/tui/adoption.go and internal/tui/keymigration.go: the "the filter … survives into the next question" comments in `acceptAdoption`/`acceptKeyMigration` now say "the highlight", because these panes no longer have a filter.
+NOTES (2026-10-14): boundary `y`/`n` are still covered by the existing `TestClearWithAWorkflowRunningAsksToStopIt` and `TestForkWithAWorkflowRunningAsksToStopIt`, which pass. The new test fails on all four kinds once the source change is stashed.
 
 **What:**
 Recast at the regression check (2026-10-14).

@@ -164,9 +164,11 @@ const maxPickerRows = 8
 // MOVE this session (/model, /server) — "switch" is the honest verb only where accepting a row
 // re-points the session at something else.
 //
-// Every variant LEADS with "type to filter", because that is the one key nobody can guess: there is
-// no activation key to name (pickerKey — any printable key types) and letters announce themselves
-// nowhere else the way "↑/↓" and "esc" do. What follows the segment is what differs by kind.
+// Every variant on a kind that filters LEADS with "type to filter", because that is the one key
+// nobody can guess: there is no activation key to name (pickerKey — any printable key types) and
+// letters announce themselves nowhere else the way "↑/↓" and "esc" do. What follows the segment is
+// what differs by kind. The kinds that ask rather than list (pickerOffering.filters) have no filter,
+// so their legends — keyMigrationHint, boundaryConfirmHint — carry no such segment.
 const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 
 // pickerChooseHint and pickerStopHint are the legends for the kinds whose ⏎ answers a question
@@ -208,6 +210,13 @@ type pickerOffering struct {
 	// the measured summary painted beside them.
 	matched matchedText
 	accept  func(Model, int) (tea.Model, tea.Cmd)
+	// filters says whether the kind has a List filter at all. A kind that LISTS — models, servers,
+	// profiles, schedules, effort levels, modes, fork points — filters; a kind that ASKS — the
+	// workflow-boundary confirm, the two migration offers, the adoption pane — does not (ADR 0053,
+	// 2026-10-14 amendment): its two or three answers are all on screen, so a letter typed into it
+	// prunes nothing worth pruning and can only hide an answer. Its keys are the cursor's contract
+	// alone (pickerKey), and its legend carries no "type to filter".
+	filters bool
 }
 
 // fixedTitle is the title func of a kind whose pane is named by a constant — most of them; the
@@ -238,6 +247,7 @@ func init() {
 			hint:    pickerHint,
 			rows:    Model.modelRows,
 			matched: matchLeadCell,
+			filters: true,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.bindPickedModel(m.offeredModels()[offered])
 			},
@@ -247,6 +257,7 @@ func init() {
 			hint:    pickerHint,
 			rows:    Model.serverRows,
 			matched: matchLeadCell,
+			filters: true,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				// The one kind whose list is asked per draw (ServerHost.List): the rows are re-read here
 				// rather than trusted from the frame that drew them, so a `servers:` block that shrank under
@@ -263,6 +274,7 @@ func init() {
 			hint:    pickerHint,
 			rows:    Model.launchProfileRows,
 			matched: matchLabelAndGloss,
+			filters: true,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.startProfileLoad(m.picker.profiles[offered].Name)
 			},
@@ -272,6 +284,7 @@ func init() {
 			hint:    pickerChooseHint,
 			rows:    func(Model) []popupRow { return cycleRows() },
 			matched: matchLabelAndGloss,
+			filters: true,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.acceptCycle(scheduleCycles[offered])
 			},
@@ -281,6 +294,7 @@ func init() {
 			hint:    pickerChooseHint,
 			rows:    func(m Model) []popupRow { return scheduleModeRows(m.opts.ScheduleAutoBlocked) },
 			matched: matchLabelAndGloss,
+			filters: true,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				return m.acceptScheduleMode(scheduleModes[offered])
 			},
@@ -290,6 +304,7 @@ func init() {
 			hint:    pickerStopHint,
 			rows:    func(m Model) []popupRow { return scheduleStopRows(m.liveSchedules()) },
 			matched: matchLabelAndGloss,
+			filters: true,
 			accept:  Model.acceptScheduleStop,
 		},
 		pickerKeyMigration: {
@@ -304,6 +319,7 @@ func init() {
 			hint:    pickerChooseHint,
 			rows:    func(m Model) []popupRow { return effortRows(m.effortSupport()) },
 			matched: matchLabelAndGloss,
+			filters: true,
 			accept:  Model.acceptEffort,
 		},
 		pickerSubAgentsServer: {
@@ -311,6 +327,7 @@ func init() {
 			hint:    pickerChooseHint,
 			rows:    Model.subAgentsServerRows,
 			matched: matchLeadCell,
+			filters: true,
 			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
 				// Re-read for pickerServer's reason and with the same answer: the targets are asked per
 				// draw, so a `servers:` block that shrank under the open overlay costs the accept and nothing
@@ -340,6 +357,7 @@ func init() {
 			hint:    pickerChooseHint,
 			rows:    func(m Model) []popupRow { return modeRows(m.th) },
 			matched: matchLabelAndGloss,
+			filters: true,
 			accept:  Model.acceptMode,
 		},
 		pickerFork: {
@@ -347,6 +365,7 @@ func init() {
 			hint:    forkPickerHint,
 			rows:    func(m Model) []popupRow { return forkRows(m.transcript.forkPoints()) },
 			matched: matchCells(1), // the prompt's text, never its ordinal
+			filters: true,
 			accept:  Model.acceptFork,
 		},
 		pickerWorkflowBoundary: {
@@ -1131,22 +1150,35 @@ func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
 // pickerKey routes a keypress while the picker is open (at idle, and — for /schedule's kinds, whose
 // verb is live mid-run — while a worker works). Every key of it is the shared list contract
 // (listKey, listsurface.go): ↑/↓ move the highlight (wrapping, the sessionBrowser posture), ⏎ takes
-// the highlighted row, esc closes, and everything PRINTABLE types — the key's runes extend the
-// filter that prunes the rows. It always fully consumes the key — the picker is modal, so a key the
-// surface hands back (listUnclaimed) is swallowed here rather than routed on.
+// the highlighted row, esc closes, and — on a kind that filters (pickerOffering.filters) — everything
+// PRINTABLE types, the key's runes extending the filter that prunes the rows. A kind that asks rather
+// than lists takes the cursor's contract alone (listCursor.key): a letter it does not bind and
+// backspace reach no filter, because it has none. It always fully consumes the key — the picker is
+// modal, so a key the surface hands back (listUnclaimed) is swallowed here rather than routed on.
 //
 // What is left in this file is the two acts a picker's keys MEAN: closing the overlay clears the
 // half-built Schedule and the migration round with it (the whole-struct zeroing), and accepting
 // resolves the highlighted row through the kind that is open (acceptPicker).
 func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.picker.kind == pickerWorkflowBoundary {
-		// The confirm answers its own y and n ahead of the filter, and its esc cancels the boundary
-		// rather than merely closing: what the confirm held back resumes either way (commandrun.go).
+		// The confirm answers its own y and n ahead of the list contract, and its esc cancels the
+		// boundary rather than merely closing: what the confirm held back resumes either way
+		// (commandrun.go).
 		if next, cmd, ok := m.boundaryKey(msg); ok {
 			return next, cmd
 		}
 	}
-	verdict, cmd := m.listKey(&m.picker.listSurface, msg, m.pickerOfferingRows(), pickerOfferings[m.picker.kind].matched, listWrapsAround)
+	offering, rows := pickerOfferings[m.picker.kind], m.pickerOfferingRows()
+	var (
+		verdict listVerdict
+		cmd     tea.Cmd
+	)
+	if offering.filters {
+		verdict, cmd = m.listKey(&m.picker.listSurface, msg, rows, offering.matched, listWrapsAround)
+	} else {
+		// No filter ever narrows a question kind, so the rows it paints are its whole offering.
+		verdict = m.picker.listCursor.key(msg, len(rows), listWrapsAround)
+	}
 	switch verdict {
 	case listCloses:
 		m.picker = picker{}
@@ -1158,7 +1190,8 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.acceptPicker()
 	case listSwallowed, listUnclaimed:
 		// Both end the same way here: the surface either spent the key or found no use for it, and a
-		// modal with no verbs of its own swallows whatever is left. A rune into the filter prunes
+		// modal with no verbs of its own swallows whatever is left — a question kind's unbound letter
+		// among them. A rune into the filter prunes
 		// rows, and a shorter row list is a shorter pane — the repaint tail lays out again when the
 		// viewport widget's height no longer matches the transcript's drawn row count (settle,
 		// model.go).

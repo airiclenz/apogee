@@ -2448,6 +2448,64 @@ func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 	}
 }
 
+// The panes that ASK rather than list — the workflow-boundary confirm, the key migration offer, the
+// sub-agents migration offer and the adoption pane — have no List filter (ADR 0053, 2026-10-14
+// amendment): a letter they do not bind prunes nothing, backspace edits nothing, and their legend
+// never offers "type to filter". The probe letter is `q` because it is in no row of any of the four
+// and is not the boundary's own `y`/`n`, so a filter that still listened would empty the pane.
+func TestQuestionPickersDoNotFilter(t *testing.T) {
+	t.Parallel()
+	log := func() *configWriteLog { return &configWriteLog{path: "/home/x/.apogee/config.yaml"} }
+	for _, tc := range []struct {
+		name string
+		kind pickerKind
+		open func(t *testing.T) Model
+	}{
+		{"workflow boundary", pickerWorkflowBoundary, func(t *testing.T) Model {
+			t.Helper()
+			m, _ := typeCommand(t, runningWorkflowModel(t, &fakeEngine{}), "/clear")
+			return m
+		}},
+		{"key migration", pickerKeyMigration, func(t *testing.T) Model {
+			t.Helper()
+			return armOffer(t, offerModel(t, log(), "workstation"))
+		}},
+		{"sub-agents migration", pickerSubAgentsMigration, func(t *testing.T) Model {
+			t.Helper()
+			return armOffer(t, subAgentsOfferModel(t, log(), "cheap"))
+		}},
+		{"adoption", pickerAdoption, func(t *testing.T) Model {
+			t.Helper()
+			return armAdoption(t, newTestModelEng(t, &fakeEngine{}, adoptionOpts(&adoptionLog{}, goTestRule)))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := tc.open(t)
+			if !m.picker.open || m.picker.kind != tc.kind {
+				t.Fatalf("picker = %+v, want the %v pane open", m.picker, tc.kind)
+			}
+			offered := len(m.pickerOfferingRows())
+
+			for _, key := range []tea.KeyPressMsg{keyRune('q'), keyBackspace()} {
+				m = step(t, m, key)
+				if !m.picker.open || m.picker.kind != tc.kind {
+					t.Fatalf("after %q: picker = %+v, want the %v pane still asking", key.String(), m.picker, tc.kind)
+				}
+				if got := m.pickerCount(); got != offered {
+					t.Errorf("after %q: pickerCount() = %d, want every one of the %d answers", key.String(), got, offered)
+				}
+				if got := m.picker.filter.value(); got != "" {
+					t.Errorf("after %q: filter = %q, want none — a question pane does not filter", key.String(), got)
+				}
+			}
+			if hint := pickerHintFor(tc.kind); strings.Contains(hint, "type to filter") {
+				t.Errorf("pickerHintFor(%v) = %q, want no filter offered on a question pane", tc.kind, hint)
+			}
+		})
+	}
+}
+
 // Every value of the pickerKind enum — pickerModel through the last declared constant — has a row
 // in pickerOfferings with all five answers filled in. The four lookups (pickerTitle, pickerHintFor,
 // pickerOfferingRows, acceptPicker) carry no missing-key branch on the strength of this test, so a
