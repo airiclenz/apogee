@@ -348,10 +348,10 @@ func (a *Agent) stopWorkflow(id string) (queued bool, err error) {
 // background launch. It does not wait for the run: the WorkflowPhaseEvents report it.
 //
 // Refused: a workflow this Agent runs or queues, one that has not finished (stopped, or cut off
-// while running — its unfinished items would run too), a finished one with nothing blocked, and one
-// whose items no longer hash to its folder (the workspace moved under a source), which would
-// otherwise run everything in a new folder. Like StartRecipe's background launch it reads the Agent
-// for the launch-time snapshot, so a Driver calls it only at idle.
+// while running — its unfinished items would run too), a finished one with nothing re-runnable
+// (hasRerunnableItem), and one whose items no longer hash to its folder (the workspace moved under a
+// source), which would otherwise run everything in a new folder. Like StartRecipe's background
+// launch it reads the Agent for the launch-time snapshot, so a Driver calls it only at idle.
 func (a *Agent) RerunFailed(id string) error {
 	if a.background.isLive(id) {
 		return fmt.Errorf(workflowAlreadyRunningFormat, id)
@@ -367,16 +367,21 @@ func (a *Agent) RerunFailed(id string) error {
 	if status.Phase != workflow.PhaseDone && status.Phase != workflow.PhaseFailed {
 		return fmt.Errorf(rerunUnfinishedFormat, id, status.Phase)
 	}
-	if status.Phase == workflow.PhaseDone && !hasBlockedItem(status) {
+	if status.Phase == workflow.PhaseDone && !hasRerunnableItem(status) {
 		return fmt.Errorf(rerunNothingFormat, id)
 	}
 	_, err = a.startBackground(a.folderLaunch(store, id, status.Recipe, true))
 	return err
 }
 
-// hasBlockedItem reports whether any item of status ended on a blocked receipt — the items a re-run
-// runs again.
-func hasBlockedItem(status workflow.RunStatus) bool {
+// hasRerunnableItem reports whether status holds re-runnable work: an item of any stage kind, not
+// only a fan-out's, that ended on a blocked receipt — which is also where a faulted item lands once
+// its retries are spent, and where a script stage that exits non-zero or cannot run ends. It is the
+// question RerunFailed asks before launching, and it is deliberately wider than the Blocked count of
+// workflow.TallyOf and workflow.TallyOfStatus, which tally fan-out items only (ADR 0089, 2026-09-30
+// amendment): a done workflow whose one blocked receipt is a script stage's shows `blocked 0` yet
+// still has work a re-run does again.
+func hasRerunnableItem(status workflow.RunStatus) bool {
 	for _, stage := range status.Stages {
 		for _, item := range stage.Items {
 			if item.Receipt != nil && item.Receipt.Status == workflow.StatusBlocked {

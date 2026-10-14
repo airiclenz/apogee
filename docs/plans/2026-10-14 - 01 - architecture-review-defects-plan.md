@@ -206,7 +206,9 @@ NOTES (2026-10-14): the stage whose error ends the run keeps its own status.json
 - `GOMEMLIMIT=2GiB go test -race -count=1 -parallel 1 -run 'TestBackground|StopWorkflow' ./internal/agent/`
 **Commit:** `fix(agent): say a stopped queued workflow never started`
 
-## 10. Name the re-run predicate for what it answers
+## 10. Name the re-run predicate for what it answers — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): the new test runs the script stage in auto mode with a fake FSWrite confiner, since a background workflow's ask-before approval would queue for a Driver the test does not have; the RerunFailed doc comment's refusal list now reads "nothing re-runnable (hasRerunnableItem)" in place of "nothing blocked".
 
 **What:**
 **Goal:** the predicate `RerunFailed` uses is named and documented as "has re-runnable work" (any stage kind's blocked or faulted receipt), distinct from the fan-out-only Blocked tally; no behaviour change.

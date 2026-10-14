@@ -507,6 +507,46 @@ func TestBackground_RerunFailedRunsOnlyTheBlockedAndFaultedItems(t *testing.T) {
 	}
 }
 
+// TestBackground_RerunFailedRerunsAScriptStageTheTallyDoesNotCount pins that the re-run predicate
+// asks about re-runnable work, not the fan-out-only Blocked tally (hasRerunnableItem): a done
+// workflow whose one blocked receipt is a script stage's tallies `blocked 0`, and RerunFailed still
+// launches it and runs the script again.
+func TestBackground_RerunFailedRerunsAScriptStageTheTallyDoesNotCount(t *testing.T) {
+	t.Parallel()
+
+	cfg := recipeConfig(t, newLockedSink(), scriptRecipe("sh {{SKILL_DIR}}/bin/count.sh {workflow_dir}"))
+	// Auto mode runs the script confined and without an approval, which a background workflow
+	// would otherwise queue for the Driver.
+	cfg.Mode = domain.ModeAuto
+	cfg.Confiner = &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}
+	shell := &shellTool{run: func(string) domain.ToolResult {
+		return domain.ToolResult{Content: "COUNT=3\n[exit code 1]", IsError: true}
+	}}
+	_ = cfg.Tools.Register(shell)
+	a := newBackgroundParent(t, cfg, &workflowResponder{})
+	id := launchBackground(t, a, "tally")
+	a.background.waitAll()
+
+	first := workflowInfo(t, a, id)
+	if first.Status.Phase != workflow.PhaseDone {
+		t.Fatalf("first run phase = %s, want done — a blocked script receipt does not fail the workflow", first.Status.Phase)
+	}
+	if blocked := workflow.TallyOfStatus(first.Status).Blocked; blocked != 0 {
+		t.Fatalf("TallyOfStatus Blocked = %d, want 0 — the tally counts fan-out items only", blocked)
+	}
+
+	if err := a.RerunFailed(id); err != nil {
+		t.Fatalf("RerunFailed of a done workflow with a blocked script stage: %v, want a launch", err)
+	}
+	a.background.waitAll()
+	shell.mu.Lock()
+	runs := len(shell.runs)
+	shell.mu.Unlock()
+	if runs != 2 {
+		t.Errorf("the script ran %d times over both runs, want 2 — the re-run runs it again", runs)
+	}
+}
+
 func TestBackground_RerunFailedRefusesALiveOrUnfinishedWorkflow(t *testing.T) {
 	t.Parallel()
 
