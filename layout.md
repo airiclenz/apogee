@@ -388,11 +388,16 @@ arrive whole where a key row is recognised from its start; and the scroll window
 than the pane can seat.
 
 **Each step names its own keys on the hint row**, because the keys mean different things in each.
-The key list reads `↑/↓ select · ⏎ edit · ⌫ reset · esc close` — the reset is named because it is
-the one act of this pane no row advertises, and it removes a line from a file the human maintains by
-hand. On the `server` row it reads `↑/↓ select · ⏎ edit · esc close` instead: that key's line is the
-recording of a switch rather than a value the pane writes (ADR 0036 D2, ADR 0037 D5), so `⌫` is inert
-there and a legend is the only place a human could have read that from. The value sub-list reads `↑/↓ select · ⏎ set · esc back`, the single-line buffer
+The key list reads `type to filter · ↑/↓ select · ⏎ edit · ⌫ reset · esc close` — the reset is named
+because it is the one act of this pane no row advertises, and it removes a line from a file the human
+maintains by hand. On the `server` row it reads `type to filter · ↑/↓ select · ⏎ edit · esc close`
+instead: that key's line is the recording of a switch rather than a value the pane writes (ADR 0036
+D2, ADR 0037 D5), so `⌫` is inert there and a legend is the only place a human could have read that
+from. An Allow rule's row reads `type to filter · ↑/↓ select · ⏎ adopt · ⌫ remove · esc close`,
+without `⏎ adopt` on a rule already in force. Those are the empty-filter legends; once a filter holds
+text, `type to filter` drops, `⌫ trim` stands before `esc close` and the backspace verb moves to `⌦`
+just behind it — `↑/↓ select · ⏎ edit · ⌫ trim · ⌦ reset · esc close` (`⌦ remove` on a rule, no `⌦`
+entry on `server`) — and a filter that matches nothing leaves `⌫ trim · esc close`. The value sub-list reads `↑/↓ select · ⏎ set · esc back`, the single-line buffer
 `⏎ save · esc cancel`, and an armed reset `⏎ confirm reset · esc cancel` — the one line this pane
 asks anything on, the `/sessions` delete-confirm posture with `⏎` in place of `y`. The multi-line
 field reads `ctrl+s save · esc discard`, and it has to be read: `⏎` there belongs to the **value**,

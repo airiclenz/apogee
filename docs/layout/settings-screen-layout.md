@@ -42,7 +42,7 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 ```
 ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Settings                                                                                     │
-│ Description: The upstream servers this workspace can talk to.                                │
+│ Description: The servers you run models on — name, endpoint, and what each one needs.        │
 │                                                                                              │
 │                                                                                              │
 │   Upstream                                                                                   │
@@ -66,7 +66,7 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 │   Model profiles                                                                             │
 │   model-profiles        native       (default)  · ⏎ opens $EDITOR                            │
 │                                                                                              │
-│ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                    │
+│ type to filter · ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -87,23 +87,112 @@ a configuration with nothing read-only and nothing edited yet. A commit on a key
 (a project-param or tighten-only key, ADR 0096 §6) asks which file it lands in before anything is
 written — the legend becomes `Save to: [global] / this project · ←/→ choose · ⏎ save · esc back`
 (`Reset in:` for a reset), the bracket on the file that supplies the key now, and the row's value
-cell shows the value being saved. The row then reports the file that supplies the key and the value
+cell shows the value being saved. The legend names `←/→`, but `↑/↓`, `tab` and `shift+tab` move the
+bracket too: there are two files, so every one of those keys swaps it to the other. The row then reports the file that supplies the key and the value
 both files resolve to together. A row the Project config sets that this pane cannot write there
 points at it (`· set in the project config`).
 
 The mockup is **abridged**: it shows five of the pane's ten sections. In the built pane
 `Tools & skills`, `Session`, `Presentation`, `Interface` and `Reactions` sit between `Confinement`
 and `Model profiles`, in that order, and a section is a run over the registry's own order rather than
-a per-key label — so a key added to the registry inherits the section it was inserted into.
+a per-key label — so a key added to the registry inherits the section it was inserted into. The
+five sections it does show are **abridged too**: `Upstream`, for one, also holds `currency`,
+`sub-agents-server` and `sub-agents-choice`, and `System prompt` holds `use-default-prompt` and
+`system-prompt-layers`. The registry (`internal/config/registry.go`) is the row list; the mockup is
+the shape.
+
+The list is taller than any terminal, so it **scrolls**: the row window follows the highlight, and a
+section heading is a row like any other — it scrolls away with the rows above the window rather than
+pinning to its top, so a window opened mid-section starts on a key row, not on a label. While the
+list overflows its window and `ui.show-scrollbar` is on, a scroll bar runs down the pane's right-hand
+column, its thumb standing for the rows in view; a list that fits paints no bar and gives up no
+column. The mouse wheel walks the highlight one row per notch, clamping at the first and the last key
+where `↑/↓` wrap round.
 
 After `Model profiles` comes one more section, `Allow rules`, whose rows are no registry key's: one
 per Allow rule the session holds (ADR 0096 §4) — the rules in force first, then the proposed and the
 rejected project rules — keyed by list and text (`terminal: go test`), with where the rule stands as
 the value (`live` for a global rule, `adopted`, `proposed`, `rejected`) and its layer as the source
-mark. ⏎ adopts a proposed or rejected rule; ⌫ arms its removal from the file that holds it and ⏎
-confirms (`⏎ confirm remove · esc cancel`). The legend on a rule's row reads
-`↑/↓ select · ⏎ adopt · ⌫ remove · esc close`, dropping `⏎ adopt` on a rule already in force. A
-session with no rules shows no such section.
+mark. ⏎ adopts a proposed or rejected rule; ⌫ (or ⌦, whatever the filter holds) arms its removal
+from the file that holds it and ⏎ confirms (`⏎ confirm remove · esc cancel`). The legend on a
+rule's row reads `type to filter · ↑/↓ select · ⏎ adopt · ⌫ remove · esc close`, dropping
+`⏎ adopt` on a rule already in force. A session with no rules shows no such section.
+
+### The filter
+
+```
+╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Settings · filter: mode▌                                                                     │
+│ Description: Autonomy mode: how tool calls are gated, from least to most autonomous.         │
+│                                                                                              │
+│                                                                                              │
+│   Autonomy                                                                                   │
+│ ❯ mode                                ask-before  (global)                                   │
+│                                                                                              │
+│   System prompt                                                                              │
+│   system-prompt-models                none        (default)  · ⏎ opens $EDITOR               │
+│                                                                                              │
+│   Session                                                                                    │
+│   remember-model                      true        (default)                                  │
+│                                                                                              │
+│   Presentation                                                                               │
+│   present.command-on-model-documents  false       (default)  · ⏎ opens $EDITOR               │
+│                                                                                              │
+│   Model profiles                                                                             │
+│   model-profiles                      native      (default)  · ⏎ opens $EDITOR               │
+│                                                                                              │
+│ ↑/↓ select · ⏎ edit · ⌫ trim · ⌦ reset · esc close                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+The key list is a **searchable list**, and it keeps the one filter contract every such list keeps
+(ADR 0053, 2026-10-14 amendment). There is no key that starts a search: **every printable key types
+into the filter**, and a paste is typing — it lands in the filter folded onto one line, never in the
+chat draft under the pane. What a filter matches is what the row *says it is*: a case-insensitive
+substring of the **key path** or of its **section heading**, matched apart so a filter never spans a
+path and the heading after it. A heading match keeps its whole section (`interface` keeps every row
+under `Interface`, whatever its key is called), and a heading stays on screen while any of its rows match. The value, the
+source mark and the note are never matched — a filter that found rows by their live state would
+answer differently from one moment to the next — and nothing is ranked, reordered or highlighted.
+
+The filter **rides the title row** — `Settings · filter: mode▌` — and only while it holds text, so
+no row is taken from the list and nothing moves on the first key: the description header and the
+list stay where they were. When the title row is too narrow the filter stays whole, or shows its
+caret end behind a leading `…`. The highlight **stays on its row** while that row still matches,
+else it moves to the first match, and it stays where it is when the filter empties; `↑/↓` walk and
+wrap over the matching rows only.
+
+**`⌫` trims** a filter that holds text. On an empty filter it keeps the meaning it had before the
+pane filtered — it arms the selected row's reset (or an Allow rule's removal). **`⌦` arms that
+reset whatever the filter holds**, so a filtered view never has to be thrown away to reset the row
+it found. **`esc` closes the pane**, filter and all; `⌫` is the filter's only undo.
+
+The legend follows the filter's state. Empty, it leads with `type to filter`, as in the key list's
+mockup. Once text is typed `type to filter` drops, `⌫ trim` stands before `esc close`, and the row's
+backspace verb moves to `⌦` just behind it — `⌦ reset`, or `⌦ remove` on a rule's row; the `server`
+row, which takes no reset, gets no `⌦` entry. A filter that matches nothing paints one faint,
+unselectable row in the pane's noun, the description header stays as tall as before and blank (no
+row is highlighted for it to describe), and the legend keeps only the trim and the way out:
+
+```
+╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Settings · filter: zzz▌                                                                      │
+│                                                                                              │
+│                                                                                              │
+│                                                                                              │
+│   no setting matches "zzz"                                                                   │
+│                                                                                              │
+│ ⌫ trim · esc close                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+**The filter survives the pane's sub-steps.** `⏎` on a filtered row opens the same step it opens
+unfiltered, and the keys inside that step are the step's — none of them reaches the filter. A step
+drawn over the list — the single-line field, the armed reset, `Save to:` — keeps the filter text on
+the title row with no caret, because the next keystroke lands in the step and not in the filter. A
+step that replaces the list — the value sub-list and the multi-line field — hides it, since the list
+it narrowed is not on screen. Either way the step ends back on the filtered list, the filter as it
+was.
 
 ### An edited row
 
@@ -126,7 +215,8 @@ and a write whose apply then failed reads `✗ saved — live apply failed: …`
 ```
 ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Settings                                                                                     │
-│ mode — How much the agent may do without asking.                                             │
+│ mode — Autonomy mode: how tool calls are gated, from least to most autonomous.               │
+│                                                                                              │
 │ · plan                                                                                       │
 │ ❯ ask-before   (current)                                                                     │
 │ · allow-edits                                                                                │
@@ -143,11 +233,23 @@ live switch — the same move `/server` makes. Confirming the server the session
 switches nothing, and the row says so — `· already on macStudio` — because the answer `/server` gives
 in the transcript is behind this pane.
 
-The `server` row is also the one row **`⌫` does nothing on**, and its hint line reads
-`↑/↓ select · ⏎ edit · esc close` to say so. `server:` is not a value the pane writes but the
-*recording* of a switch (ADR 0036 decision 2), and the only door onto it is the switch itself
-(ADR 0037 decision 5): deleting the line would leave the session running against a server the file no
-longer names. Choosing a different server is how this key changes.
+The `server` row is also the one row whose **kind** takes no reset: `⌫` and `⌦` do nothing on it,
+and its hint line reads `type to filter · ↑/↓ select · ⏎ edit · esc close` to say so. `server:` is
+not a value the pane writes but the *recording* of a switch (ADR 0036 decision 2), and the only door
+onto it is the switch itself (ADR 0037 decision 5): deleting the line would leave the session running
+against a server the file no longer names. Choosing a different server is how this key changes.
+
+It is not the only row the reset keys pass over silently — they arm nothing, and say nothing, on
+three kinds of row:
+
+- a **non-editable** row — one whose last cell already names where it is edited (`· use /confine`,
+  `· ⏎ opens $EDITOR`);
+- a row **already at its default** that this session has not edited — there is no line to remove;
+- the **`server`** row, for the reason above.
+
+Only the last drops `⌫ reset` from its legend. The other two keep it, because the distinction is the
+row's kind and not the moment's: a default-valued row is one edit away from having something to
+reset, and a read-only row's own cell already says why nothing happens there.
 
 ### The single-line field (string and int keys)
 

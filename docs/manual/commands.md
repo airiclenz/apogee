@@ -614,7 +614,7 @@ file and another on screen explains itself. The mark follows the files: a save o
 pane, or a save to either file that apogee reloads, moves it at once, while an `(env)` or `(flag)`
 override keeps its mark for the whole run. Saving a key a project may set — the context files, the
 project-skills switch, `tools.disabled`, `url-safety.deny-hosts` — asks **Save to: global / this
-project** (`←/→` choose, `⏎` save, `esc` back), opening on the file that supplies the key now; every
+project** (`←/→` choose — `↑/↓`, `tab` and `shift+tab` swap it too — `⏎` save, `esc` back), opening on the file that supplies the key now; every
 other key is written to the global file as before. The row then shows what the two files resolve
 to together — a list saved to the project still carries the global entries, and a global save
 under a project value notes `· saved to global; the project config outranks it`. A row the project
@@ -628,7 +628,19 @@ than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:`
 list says what the key under the cursor is for, and `esc` closes the pane and hands the
 transcript back. Section labels stand in white above the rows they open, the row being typed
 into is lit, and the mouse works where the keys do — a click selects a row, the wheel walks
-the list one row per notch. It needs a quiet engine, so typed mid-run it queues and **opens at idle**.
+the list one row per notch. The list scrolls under a window that follows the `❯`, the section
+labels scrolling away with their rows, and a scroll bar runs down its right-hand edge while it
+overflows (`ui.show-scrollbar`). It needs a quiet engine, so typed mid-run it queues and **opens at idle**.
+
+**Type to filter.** Every letter you type narrows the list — there is no search key to press first,
+and a paste does the same, folded onto one line. The filter shows on the pane's title row
+(`Settings · filter: mode▌`) and matches the **key path** or its **section heading**, case-insensitively:
+a heading match keeps its whole section, and a key's value, source mark and note are never matched.
+The `❯` stays on its row while that row still matches, else it jumps to the first match, and `↑/↓`
+walk only the matches. `backspace` trims the filter, `esc` closes the pane — filter and all — and a
+filter that matches nothing says so (`no setting matches "zzz"`) with the legend down to
+`⌫ trim · esc close`. The filter outlasts an edit: `⏎` on a filtered row opens its step, the keys
+inside that step are the step's, and you come back to the same filtered list.
 
 **Editing writes one key, when you ask.** `⏎` on a true/false row toggles it, `⏎` on a row
 with a fixed set of values — such as `mode:`, `server:`, `ui.spinner:` or `cursor-shape:` — opens that list to pick from, `⏎` on a
@@ -674,11 +686,15 @@ override will win again the next time apogee starts — startup precedence is un
 write lands but the live apply refuses it, the row says exactly that
 (`saved — live apply failed: …`) rather than leaving you to guess which half happened.
 
-**`backspace` unsets.** On a row you have set, `backspace` arms a reset, the hint line asks
-for a confirming `⏎`, and what that sends **removes the key's line** from the file rather than
+**`backspace` unsets.** On a row you have set, `backspace` arms a reset — or, while a filter holds
+text and `backspace` is trimming it, `delete` (`⌦`) does, which it also does with no filter — the hint
+line asks for a confirming `⏎`, and what that sends **removes the key's line** from the file rather than
 writing today's default into it — so the key goes back to following the built-in default
 instead of being pinned to a copy of it. The default is applied on the same keypress, and the
-row reports it with the same marker: `default *`.
+row reports it with the same marker: `default *`. Neither key does anything on a row already at
+its default, on a read-only row (such as one that points at `/confine` or opens your editor), or on
+`server:`, whose line records a switch rather than a value — that one row's legend leaves the reset
+out.
 
 **What no row can write opens your editor.** `servers:`, `sub-agents-server:`, `mcp-servers:`,
 `reactions:`, `system-prompt-models:`, `system-prompt-layers:`, `tools.enabled:` and the model
@@ -717,7 +733,7 @@ them is the same kind of row — `on`/`off`, applied to the running session the 
 in force first, then the project's proposed and rejected ones — keyed by list and text
 (`terminal: go test`), with where the rule stands as its value (`live` for one of your global rules,
 `adopted`, `proposed`, `rejected`) and the file it came from as its source mark. `⏎` on a proposed or
-rejected rule adopts it; `backspace` arms the rule's removal from the file that holds it and `⏎`
+rejected rule adopts it; `backspace` (or `⌦`) arms the rule's removal from the file that holds it and `⏎`
 confirms (`⏎ confirm remove · esc cancel`). A session with no rules shows no such section. Rules
 the project proposes are also asked about on their own, at start-up and from a shell with
 `apogee project adopt` — see [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml).

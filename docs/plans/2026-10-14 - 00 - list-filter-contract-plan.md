@@ -257,7 +257,10 @@ internal/tuitest/driver.go — Driver.WaitGone
 **Commit:** `test(e2e): drive the list filter through /settings and a picker`
 Depends on item 8.
 
-## 10. Docs: the /settings layout spec and manual
+## 10. Docs: the /settings layout spec and manual — ✅ DONE (2026-10-14)
+
+NOTES (2026-10-14): layout.md's /settings legend paragraph also gains the Allow rule row's empty-filter legend, so the list names every key-list legend item 8 composes (empty, filtered, zero-match).
+NOTES (2026-10-14): the manual's Save to: parenthesis also names ↑/↓, tab and shift+tab, matching the spec fix (same section of commands.md the item lists).
 
 **What:**
 **Goal:** `docs/layout/settings-screen-layout.md` and the `/settings` section of `docs/manual/commands.md` describe the filter as built (typing, matched text, title-row filter, ⌫ trim / ⌦ reset, zero-match row, legends, paste, sub-step display, mockups), and the layout spec's drift is gone: the enum mockup carries the blank under its question; the `mode` and `servers` descriptions match `internal/config/registry.go`; ⌫'s no-op rows are stated as non-editable, default-valued and `server`; `Save to:` lists ←/→, ↑/↓, tab, shift+tab; scrolling, the scrollbar and headers scrolling away are stated; the abridged sections are said to be abridged. `layout.md`'s `/settings` legend list matches item 8.
