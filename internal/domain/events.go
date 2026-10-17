@@ -870,8 +870,10 @@ func (t WorkflowTally) Total() int {
 // question on WorkflowWaiting and the cause on WorkflowFailed, "" otherwise.
 //
 // The rest describe the Workflow's shape, so a Driver can rebuild it from these events alone.
-// Stages lists the plan's stage names in order, on WorkflowStarted only. Items is a stage's item
-// count on WorkflowStageStarted — 0 for a stage that runs no child (script, ask, pick, repeat).
+// Stages lists the plan's stage names in order, on WorkflowStarted only, and StageKinds beside it
+// each stage's kind (workflow.StageKind as a string — "fanout", "verify", …), index-aligned with
+// Stages, so a Driver knows every stage's kind before any of its items arrive. Items is a stage's
+// item count on WorkflowStageStarted — 0 for a stage that runs no child (script, ask, pick, repeat).
 // Round is the 1-based round of the stage on the stage and item phases: 1 for its own run, one
 // more for each time a repeat re-runs it; a Driver keys a stage by (Stage, Round). Rounds is, on
 // the WorkflowStageStarted of a stage a repeat re-runs, the most rounds it can run — its own
@@ -931,6 +933,7 @@ type WorkflowPhaseEvent struct {
 	Call       string
 	Origin     string
 	Stages     []string
+	StageKinds []string
 	Items      int
 	Round      int
 	Rounds     int

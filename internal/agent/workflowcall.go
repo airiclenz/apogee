@@ -726,9 +726,11 @@ type workflowObserver struct {
 	agent *Agent
 	turn  int
 	name  string
-	// stages is the plan's stage names in order (domain.WorkflowPhaseEvent.Stages), and rounds the
-	// most rounds each stage a repeat re-runs can run, its own included (…Rounds).
+	// stages is the plan's stage names in order (domain.WorkflowPhaseEvent.Stages), kinds each
+	// one's workflow.StageKind beside it (…StageKinds), and rounds the most rounds each stage a
+	// repeat re-runs can run, its own included (…Rounds).
 	stages []string
+	kinds  []string
 	rounds map[string]int
 	// background marks every event a background workflow's observer emits (domain.
 	// WorkflowPhaseEvent.Background); driveBackground sets it before the run starts.
@@ -772,7 +774,7 @@ type itemRuns struct {
 func (a *Agent) observeWorkflow(runner *workflow.Runner, turn int, plan workflow.Plan) *workflowObserver {
 	observer := &workflowObserver{
 		agent: a, turn: turn, name: plan.Name, origin: workflow.OriginOf(plan),
-		stages: stageNames(plan), rounds: repeatedRounds(plan), runs: map[itemPlace]itemRuns{},
+		stages: stageNames(plan), kinds: stageKinds(plan), rounds: repeatedRounds(plan), runs: map[itemPlace]itemRuns{},
 	}
 	runner.Observer = observer
 	if spawner, ok := runner.Spawner.(*workflowSpawner); ok {
@@ -791,6 +793,15 @@ func stageNames(plan workflow.Plan) []string {
 		names[index] = stage.Name
 	}
 	return names
+}
+
+// stageKinds is plan's stage kinds in order, index-aligned with stageNames.
+func stageKinds(plan workflow.Plan) []string {
+	kinds := make([]string, len(plan.Stages))
+	for index, stage := range plan.Stages {
+		kinds[index] = string(stage.Kind)
+	}
+	return kinds
 }
 
 // repeatedRounds maps each stage a repeat stage re-runs to the most rounds it can run: its own run
@@ -913,14 +924,16 @@ func eventTally(result workflow.Result) *domain.WorkflowTally {
 	return &domain.WorkflowTally{OK: tally.OK, Partial: tally.Partial, Blocked: tally.Blocked, Unfinished: tally.Unfinished}
 }
 
-// startLocked emits started, with the stage names and the resume command, the first time a
-// notification names the Workflow's id. The caller holds mu.
+// startLocked emits started, with the stage names and kinds and the resume command, the first
+// time a notification names the Workflow's id. The caller holds mu.
 func (o *workflowObserver) startLocked(id string) {
 	if o.id != "" || id == "" {
 		return
 	}
 	o.id = id
-	o.emitLocked(domain.WorkflowPhaseEvent{Phase: domain.WorkflowStarted, Stages: slices.Clone(o.stages), Resume: o.resume})
+	o.emitLocked(domain.WorkflowPhaseEvent{
+		Phase: domain.WorkflowStarted, Stages: slices.Clone(o.stages), StageKinds: slices.Clone(o.kinds), Resume: o.resume,
+	})
 }
 
 // emitLocked stamps event with this Agent's identity, the Workflow's id, name and origin, and

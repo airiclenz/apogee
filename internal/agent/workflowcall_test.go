@@ -550,6 +550,53 @@ func TestWorkflowCall_TheSameCallAgainResumesTheStoredWorkflow(t *testing.T) {
 	}
 }
 
+// TestWorkflowCall_StartedCarriesEachStagesKind pins WorkflowStarted's StageKinds: a fan_out with a
+// verify stage starts with the kinds index-aligned with its stage names, and so does the same call
+// again, which resumes the stored Workflow. The verify's `when` selects no item, so it runs none.
+func TestWorkflowCall_StartedCarriesEachStagesKind(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := workflowConfig(t, sink)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	argsJSON, _ := json.Marshal(map[string]any{
+		"task": fanOutTask, "over": []string{"alpha", "beta"}, "returns": map[string]string{"count": "int"},
+		"verify": map[string]string{"when": "count > 5"},
+	})
+	args := string(argsJSON)
+	up := (&workflowResponder{}).
+		route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, args)).
+		route("resume the work", nil, toolCallScript("fo2", tools.FanOutToolName, args)).
+		route("resume the work", nil, contentScript("all done")).
+		route("check alpha", nil, finishScript("f1", "alpha is fine")).
+		route("check beta", cancelWith(cancel, nil), cancelledScript()).
+		route("check beta", nil, finishScript("f2", "beta is fine"))
+	a, _ := runWorkflowParent(t, ctx, cfg, up, "please fan out")
+	a.SettleExchange()
+
+	runSubmitted(t, context.Background(), a, "resume the work")
+
+	if got := callResult(t, sink.events, "fo2"); got.IsError || !strings.Contains(got.Content, "resumed 1") {
+		t.Fatalf("resumed fan_out result = %+v, want the stored workflow resumed", got)
+	}
+	var started []domain.WorkflowPhaseEvent
+	for _, phase := range workflowPhaseEvents(sink.events) {
+		if phase.Phase == domain.WorkflowStarted {
+			started = append(started, phase)
+		}
+	}
+	if len(started) != 2 {
+		t.Fatalf("started phases = %d, want one per run, the resumed one included", len(started))
+	}
+	wantStages, wantKinds := []string{"items", "verify"}, []string{"fanout", "verify"}
+	for run, phase := range started {
+		if !slices.Equal(phase.Stages, wantStages) || !slices.Equal(phase.StageKinds, wantKinds) {
+			t.Errorf("run %d started with stages %v, kinds %v; want %v, %v", run+1, phase.Stages, phase.StageKinds, wantStages, wantKinds)
+		}
+	}
+}
+
 // deepWorkflowCancel runs a fan_out at delegate-max-depth 2 whose one item child delegates to a
 // grandchild; the grandchild's second request cancels the run with cause. It returns the fan_out's
 // result, the responder, and how long the run took.

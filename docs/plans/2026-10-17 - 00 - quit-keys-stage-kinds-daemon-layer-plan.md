@@ -64,7 +64,7 @@ internal/tui/settings.go — Model.settingsKey; internal/tui/model_test.go — c
 - `docs/layout/settings-screen-layout.md` states that `ctrl+c` and `ctrl+l` keep their frame meaning while the pane is open.
 **Commit:** `fix(tui): let ctrl+c and ctrl+l through every modal pane`
 
-## 2. Carry stage kinds on WorkflowStarted
+## 2. Carry stage kinds on WorkflowStarted — ✅ DONE (2026-10-17)
 
 **What:**
 **Goal:** a `domain.WorkflowPhaseEvent` of phase `WorkflowStarted` carries `StageKinds []string`, index-aligned with `Stages`, each the plan stage's `workflow.StageKind` as a string; the NDJSON line is unchanged.

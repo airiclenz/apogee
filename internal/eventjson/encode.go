@@ -243,11 +243,11 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 // carries omitempty: ADR 0075 decision 3 promises a consumer never has to test for a missing key,
 // so a zero value is written as the zero and not dropped. The tags name the variant's own fields
 // under the same names. A member added to an Event variant is added here only when the line's
-// documented shape grows with it: domain.WorkflowPhaseEvent's ItemName, Stages, Items, Round,
-// Rounds, Run and Attempt describe the Workflow's shape for a Driver that draws it, Resume is the
-// resume command such a Driver shows its user, Tally is the end phase's item tally and Origin
-// names a background sub_agent's run, read in process only; none is on the workflow_phase line
-// (workflowPhaseData).
+// documented shape grows with it: domain.WorkflowPhaseEvent's ItemName, Stages, StageKinds,
+// Items, Round, Rounds, Run and Attempt describe the Workflow's shape for a Driver that draws it,
+// Resume is the resume command such a Driver shows its user, Tally is the end phase's item tally
+// and Origin names a background sub_agent's run, read in process only; none is on the
+// workflow_phase line (workflowPhaseData).
 
 // tokenData is the token line: one streamed chunk of assistant text.
 type tokenData struct {
