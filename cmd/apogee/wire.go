@@ -677,8 +677,17 @@ func ensureScratchDir(root, id string) string {
 //
 // keep names the records this run must not lose — the id a --resume or --continue start resolved,
 // so the session being opened is never swept out from under the run that is opening it. A fresh
-// start has no such id and passes none. Store.Prune is itself a no-op for a policy that names
-// neither knob (it walks no directory), which is what makes the unconfigured default free.
+// start has no such id and passes none.
+//
+// It runs two steps. The orphan-journal sweep (Store.SweepJournals) goes first and under EVERY
+// policy: it removes the Event journals of sessions whose lock is free — runs that crashed or were
+// killed before releasing — and keeps every journal a live owner holds. keep does not shield a
+// journal: the session this run resumes is not held yet, so a journal beside it is a dead run's,
+// and the host opens a fresh one under its own hold. Then Store.Prune applies the retention policy,
+// a no-op for one that names neither knob. The unconfigured default is therefore no longer free of
+// disk reads: the journal sweep reads the sessions directory when it exists — and creates nothing
+// when it does not.
 func gcSessions(store *session.Store, policy config.SessionSettings, keep ...string) {
+	_, _ = store.SweepJournals()
 	_, _ = store.Prune(session.Retention{MaxAge: policy.MaxAge, MaxCount: policy.MaxCount}, keep...)
 }

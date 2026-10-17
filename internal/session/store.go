@@ -69,6 +69,18 @@ var ErrInvalidID = errors.New("apogee: invalid session id")
 // mainstream filesystem enforces. Minted ids are 25 bytes; the slack is for legacy stems.
 const maxIDLen = 200
 
+// journalSuffix names a session's Event journal beside its record: <id>.events.jsonl. It does not
+// end in ".json", so scan never mistakes a journal for a record, and a record's id never ends in
+// it either, so Live can recover the id by trimming it.
+const journalSuffix = ".events.jsonl"
+
+// holdContentionWait is how long hold waits out a lock somebody else has before refusing. The
+// holders it is sized for are the momentary ones — a watcher's ProbeHold, which takes a shared
+// lock for the microseconds of one check, and SweepJournals' remove-under-hold — never a live
+// session, whose hold lasts its whole run and so outlasts any wait. A few retries of
+// platform.AcquireLockWait's poll cover the former while keeping a real refusal prompt.
+const holdContentionWait = 30 * time.Millisecond
+
 // HeldError is the refusal Hold, Delete, Prune and Rename return when another live apogee holds
 // the session: its record is open in a second instance, and resuming, removing or retitling it here
 // would have two writers over one file. It wraps the *platform.LockHeldError the OS lock answered with, so a caller
@@ -453,14 +465,19 @@ func (s *Store) Hold(id string) (release func() error, err error) {
 	return s.hold(id)
 }
 
-// hold is Hold's body past the id check, shared with Delete and Rename, which have validated the id
-// already. A hold taken is recorded in held until its release runs, so Rename can recognise the
-// store's own hold.
+// hold is Hold's body past the id check, shared with Delete, Rename and SweepJournals, which have
+// validated the id already. A hold taken is recorded in held until its release runs, so Rename can
+// recognise the store's own hold.
+//
+// The lock is taken through platform.AcquireLockWait with holdContentionWait rather than refused on
+// the first contended attempt: a watcher's ProbeHold holds the same lock, shared, for the length of
+// one check, and a Hold that lands inside that window must not tell the user the session is open
+// in another apogee. A live holder outlasts the wait and is refused exactly as before.
 func (s *Store) hold(id string) (release func() error, err error) {
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
 		return nil, fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
 	}
-	unlock, err := platform.AcquireLock(s.lockPath(id))
+	unlock, err := platform.AcquireLockWait(s.lockPath(id), holdContentionWait)
 	if err != nil {
 		var held *platform.LockHeldError
 		if errors.As(err, &held) {
@@ -501,6 +518,198 @@ func (s *Store) holdsItself(id string) bool {
 // reads *.json only, so the lock files never list as records.
 func (s *Store) lockPath(id string) string { return filepath.Join(s.dir, id+".lock") }
 
+// ProbeHold reports whether session id is held — its owner is running it — without ever holding it:
+// the lock file is opened read-only and never created, written or truncated (platform.ProbeLock),
+// so a watcher, which must never become a holder or a writer, can ask. A missing lock file reads as
+// not held. pid is the holder's recorded process id when held (0 when unreadable): diagnostics
+// only, as HeldError.PID is. A session this store holds itself reads as held too — the probe is a
+// second open file description, which the store's own lock refuses like any other.
+//
+// An id that is not a safe filename component is refused with ErrInvalidID before it becomes a
+// path. Any other failure is returned wrapped, naming the id.
+func (s *Store) ProbeHold(id string) (held bool, pid int, err error) {
+	if err := validateID(id); err != nil {
+		return false, 0, err
+	}
+	held, pid, err = platform.ProbeLock(s.lockPath(id))
+	if err != nil {
+		return false, 0, fmt.Errorf("apogee: probe session %q: %w", id, err)
+	}
+	return held, pid, nil
+}
+
+// JournalPath names session id's Event journal, <dir>/<id>.events.jsonl, beside its record and
+// its lock. It is a name only — it opens and checks nothing — so it is meant for ids the store
+// handed out or Live listed; OpenJournal and RemoveJournal are the doors that validate an id
+// before it touches the disk.
+func (s *Store) JournalPath(id string) string { return filepath.Join(s.dir, id+journalSuffix) }
+
+// OpenJournal creates session id's Event journal for writing, with the record's own file mode
+// (filePerm), truncating whatever an earlier run of the same session left there. It is only ever
+// called by the session's owner, UNDER the record's hold (Hold): the truncate is safe only there,
+// since the hold is what guarantees no other live writer has the file open and no SweepJournals is
+// mid-removal of it. The store directory already exists then — hold created it.
+//
+// An id that is not a safe filename component is refused with ErrInvalidID. Any other failure is
+// returned wrapped, naming the path; the file is nil on every error.
+func (s *Store) OpenJournal(id string) (*os.File, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	path := s.JournalPath(id)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, filePerm)
+	if err != nil {
+		return nil, fmt.Errorf("apogee: open session journal %q: %w", path, err)
+	}
+	// O_CREATE's mode applies only to a file it creates: a journal an earlier run left behind
+	// keeps its own mode unless it is set here, as atomicWrite sets the record's.
+	if err := file.Chmod(filePerm); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("apogee: chmod session journal %q: %w", path, err)
+	}
+	return file, nil
+}
+
+// RemoveJournal removes session id's Event journal — the owner's step when it releases the
+// session. A journal that is not there is not an error. An id that is not a safe filename
+// component is refused with ErrInvalidID.
+func (s *Store) RemoveJournal(id string) error {
+	if err := validateID(id); err != nil {
+		return err
+	}
+	if err := os.Remove(s.JournalPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("apogee: remove session journal %q: %w", id, err)
+	}
+	return nil
+}
+
+// LiveEntry is one session Live found running: an Event journal present and its lock held.
+type LiveEntry struct {
+	// ID is the session's id.
+	ID string
+	// PID is the owner's process id as its lock file recorded it, or 0 when unreadable.
+	// Diagnostics only, as HeldError.PID is.
+	PID int
+	// JournalPath is the journal a watcher reads (JournalPath).
+	JournalPath string
+	// HasRecord reports whether <id>.json exists yet: a session born moments ago may be journalling
+	// before its first Save.
+	HasRecord bool
+}
+
+// Live lists the sessions running now: every id with an Event journal present AND a lock that
+// ProbeHold finds held, in the directory listing's lexical order (chronological, for minted ids).
+// Liveness is the probe, never the files' presence — .lock files outlive their runs, and a crashed
+// owner's journal stays until SweepJournals removes it. Live only reads: it holds nothing and
+// writes nothing, so a watcher may call it.
+//
+// A journal whose name does not yield a valid id is a foreign file and is skipped, as is one whose
+// lock cannot be probed: neither is a session this reader can show. A missing store directory is
+// an empty list, not an error.
+func (s *Store) Live() ([]LiveEntry, error) {
+	entries, err := s.journalEntries()
+	if err != nil {
+		return nil, err
+	}
+	live := make([]LiveEntry, 0, len(entries))
+	for _, id := range entries {
+		held, pid, err := s.ProbeHold(id)
+		if err != nil || !held {
+			continue // soft-skip: an unprobeable lock is not a session this reader can show
+		}
+		_, statErr := os.Stat(filepath.Join(s.dir, id+".json"))
+		live = append(live, LiveEntry{
+			ID:          id,
+			PID:         pid,
+			JournalPath: s.JournalPath(id),
+			HasRecord:   statErr == nil,
+		})
+	}
+	return live, nil
+}
+
+// SweepJournals removes every Event journal whose session is no longer running — the startup
+// journal sweep, the retention sweep's sibling. An owner removes its own journal at release
+// (RemoveJournal); a journal still here with its lock free is an orphan of a run that crashed or
+// was killed. It reports how many journals it removed.
+//
+// It is a step of its own, never part of Prune: Prune walks no directory for the zero Retention,
+// while orphans must go under every policy. It reads the store directory when that exists and
+// creates nothing when it does not.
+//
+// A journal whose lock ProbeHold finds held is kept. A free one is removed under the record's
+// hold — taken only once the probe has said free, so a live owner is never contended — which
+// closes the gap in which an owner starting the same session would Hold and OpenJournal between
+// the probe and the removal: the hold makes the two take turns. A hold refused in that gap means
+// an owner has just arrived, and its journal stays. A foreign file whose name is not a valid id is
+// never touched. One failure does not abort the sweep — the first error is returned alongside the
+// count of what did go.
+func (s *Store) SweepJournals() (int, error) {
+	ids, err := s.journalEntries()
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	var firstErr error
+	note := func(err error) {
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	for _, id := range ids {
+		held, _, err := s.ProbeHold(id)
+		if err != nil {
+			note(err)
+			continue
+		}
+		if held {
+			continue // its owner is running: a watcher may be reading this journal right now
+		}
+		release, err := s.hold(id)
+		if err != nil {
+			var arrived *HeldError
+			if !errors.As(err, &arrived) {
+				note(err)
+			}
+			continue
+		}
+		removeErr := os.Remove(s.JournalPath(id))
+		_ = release()
+		switch {
+		case removeErr == nil:
+			removed++
+		case !errors.Is(removeErr, os.ErrNotExist):
+			note(fmt.Errorf("apogee: sweep session journal %q: %w", id, removeErr))
+		}
+	}
+	return removed, firstErr
+}
+
+// journalEntries lists the ids of the Event journals in the store directory, in the listing's
+// lexical order, skipping any whose stem is not a valid id. A missing store directory is an empty
+// list, not an error.
+func (s *Store) journalEntries() ([]string, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("apogee: read sessions directory %q: %w", s.dir, err)
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), journalSuffix) {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), journalSuffix)
+		if validateID(id) != nil {
+			continue // a foreign file: never a session this store may list or remove
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 // Delete removes the record file for id. An id that is not a safe filename component is
 // refused with ErrInvalidID, so a record's declared id can never aim the browser's delete at a
 // file outside the store.
@@ -512,6 +721,11 @@ func (s *Store) lockPath(id string) string { return filepath.Join(s.dir, id+".lo
 // unlinked inode in the gap is holding a session that no longer exists, which is benign. The lock
 // goes on every path, a missing record's included, so a failed delete leaves no lock behind; a
 // lock that was never there is not an error.
+//
+// The session's Event journal goes with the record, under the same hold and before the lock:
+// best-effort and silent, so Delete's result is the record's alone — a journal that is not there,
+// or that could not be removed, never changes what Delete returns (SweepJournals collects a
+// leftover at the next start, its lock being free).
 func (s *Store) Delete(id string) error {
 	if err := validateID(id); err != nil {
 		return err
@@ -523,6 +737,7 @@ func (s *Store) Delete(id string) error {
 		return err
 	}
 	removeErr := os.Remove(filepath.Join(s.dir, id+".json"))
+	_ = os.Remove(s.JournalPath(id)) // best-effort by contract: the record's removal is the result
 	_ = release()
 	if err := os.Remove(s.lockPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) && removeErr == nil {
 		return fmt.Errorf("apogee: delete session %q: remove its lock: %w", id, err)
@@ -536,7 +751,9 @@ func (s *Store) Delete(id string) error {
 // Retention is the session store's pruning policy: records not updated within MaxAge go, and
 // only the newest MaxCount survive. A zero field is that rule switched off, so the zero
 // Retention prunes nothing — retention is opt-in, and a caller that configured neither knob
-// keeps every session it ever wrote.
+// keeps every session it ever wrote. Prune then walks no directory, but that no longer makes an
+// unconfigured start free of disk reads: the orphan-journal sweep (SweepJournals) is a separate
+// step that reads the store directory, when it exists, under every policy.
 type Retention struct {
 	MaxAge   time.Duration // discard records last updated before now-MaxAge; zero = no age rule
 	MaxCount int           // keep only this many newest records; zero = no count rule

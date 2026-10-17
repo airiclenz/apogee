@@ -34,6 +34,17 @@ func lockFile(file *os.File) error {
 	return err
 }
 
+// probeLockFile takes a shared flock on file's open file description without blocking — the
+// probe ProbeLock makes on a read-only descriptor, which flock permits for either lock type —
+// reporting errLockHeld when an exclusive holder already has it.
+func probeLockFile(file *os.File) error {
+	err := unix.Flock(int(file.Fd()), unix.LOCK_SH|unix.LOCK_NB)
+	if errors.Is(err, unix.EWOULDBLOCK) {
+		return errLockHeld
+	}
+	return err
+}
+
 // unlockFile drops the flock. Closing the descriptor would drop it too; doing it explicitly
 // keeps the release path identical on both platforms, where Windows genuinely needs the
 // explicit call.

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1725,4 +1726,333 @@ func TestMetaEffectiveCurrencyKeepsAPricedLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+// orphanJournal leaves id with an Event journal holding content and a FREE lock — what a run that
+// crashed after opening its journal leaves behind.
+func orphanJournal(t *testing.T, st *Store, id, content string) {
+	t.Helper()
+	release := liveJournal(t, st, id, content)
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+}
+
+// liveJournal holds id and opens its Event journal with content, as a running owner does, and
+// returns the hold's release (also registered as cleanup).
+func liveJournal(t *testing.T, st *Store, id, content string) func() error {
+	t.Helper()
+	release, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold %s: %v", id, err)
+	}
+	t.Cleanup(func() { _ = release() })
+	journal, err := st.OpenJournal(id)
+	if err != nil {
+		t.Fatalf("OpenJournal %s: %v", id, err)
+	}
+	if _, err := journal.WriteString(content); err != nil {
+		t.Fatalf("write the journal: %v", err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("close the journal: %v", err)
+	}
+	return release
+}
+
+// journalExists reports whether id's Event journal is on disk.
+func journalExists(t *testing.T, st *Store, id string) bool {
+	t.Helper()
+	_, err := os.Stat(st.JournalPath(id))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat the journal: %v", err)
+	}
+	return err == nil
+}
+
+// The journal lives beside the record as <id>.events.jsonl, is created with the record's mode,
+// truncates an earlier run's leftovers, never lists as a record, and RemoveJournal removes it —
+// a second time is not an error.
+func TestStoreJournalLifecycle(t *testing.T) {
+	t.Parallel()
+	st, id := holdStore(t)
+
+	if got, want := st.JournalPath(id), filepath.Join(st.dir, id+".events.jsonl"); got != want {
+		t.Errorf("JournalPath = %q, want %q", got, want)
+	}
+	orphanJournal(t, st, id, "an earlier run's line, longer than the next\n")
+	liveJournal(t, st, id, "fresh\n")
+
+	data, err := os.ReadFile(st.JournalPath(id))
+	if err != nil {
+		t.Fatalf("read the journal: %v", err)
+	}
+	if string(data) != "fresh\n" {
+		t.Errorf("journal after a second OpenJournal = %q, want only the new run's %q", data, "fresh\n")
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(st.JournalPath(id))
+		if err != nil {
+			t.Fatalf("stat the journal: %v", err)
+		}
+		if info.Mode().Perm() != filePerm {
+			t.Errorf("journal mode = %v, want the record's %v", info.Mode().Perm(), filePerm)
+		}
+	}
+	if got := storedIDs(t, st); !slices.Equal(got, []string{id}) {
+		t.Errorf("List with a journal present = %v, want only %q — a journal never lists as a record", got, id)
+	}
+
+	if err := st.RemoveJournal(id); err != nil {
+		t.Fatalf("RemoveJournal: %v", err)
+	}
+	if journalExists(t, st, id) {
+		t.Error("the journal survived RemoveJournal")
+	}
+	if err := st.RemoveJournal(id); err != nil {
+		t.Errorf("RemoveJournal of a missing journal = %v, want nil", err)
+	}
+}
+
+// OpenJournal, RemoveJournal and ProbeHold refuse an id that is not a safe filename component
+// before it becomes a path.
+func TestStoreJournalAndProbeRejectUnsafeID(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	st := NewStore(filepath.Join(home, "sessions"))
+	for _, tc := range unsafeIDs {
+		if journal, err := st.OpenJournal(tc.id); !errors.Is(err, ErrInvalidID) {
+			t.Errorf("OpenJournal(%q) err = %v, want ErrInvalidID", tc.id, err)
+			if journal != nil {
+				_ = journal.Close()
+			}
+		}
+		if err := st.RemoveJournal(tc.id); !errors.Is(err, ErrInvalidID) {
+			t.Errorf("RemoveJournal(%q) err = %v, want ErrInvalidID", tc.id, err)
+		}
+		if _, _, err := st.ProbeHold(tc.id); !errors.Is(err, ErrInvalidID) {
+			t.Errorf("ProbeHold(%q) err = %v, want ErrInvalidID", tc.id, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "sessions")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused id created the store directory (stat err = %v)", err)
+	}
+}
+
+// Delete and Prune take a record's journal with it; a Delete with no journal returns exactly as
+// it always has.
+func TestStoreDeleteAndPruneRemoveTheJournal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delete", func(t *testing.T) {
+		t.Parallel()
+		st, id := holdStore(t)
+		orphanJournal(t, st, id, "line\n")
+		if err := st.Delete(id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if journalExists(t, st, id) {
+			t.Error("the journal survived its record's Delete")
+		}
+	})
+
+	t.Run("delete without a journal", func(t *testing.T) {
+		t.Parallel()
+		st, id := holdStore(t)
+		if err := st.Delete(id); err != nil {
+			t.Errorf("Delete of a record with no journal = %v, want nil", err)
+		}
+		if err := st.Delete(id); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("Delete of a missing record with no journal = %v, want ErrNotExist", err)
+		}
+	})
+
+	t.Run("prune", func(t *testing.T) {
+		t.Parallel()
+		st := pruneStore(t, map[string]time.Duration{
+			"20260901T120000Z-0000000a": 48 * time.Hour,
+			"20260902T110000Z-0000000b": time.Hour,
+		})
+		orphanJournal(t, st, "20260901T120000Z-0000000a", "old\n")
+		orphanJournal(t, st, "20260902T110000Z-0000000b", "kept\n")
+		removed, err := st.Prune(Retention{MaxAge: 24 * time.Hour})
+		if err != nil || removed != 1 {
+			t.Fatalf("Prune = (%d, %v), want (1, nil)", removed, err)
+		}
+		if journalExists(t, st, "20260901T120000Z-0000000a") {
+			t.Error("the pruned record's journal survived")
+		}
+		if !journalExists(t, st, "20260902T110000Z-0000000b") {
+			t.Error("Prune removed the journal of a record it kept")
+		}
+	})
+}
+
+// ProbeHold sees the store's own Hold and its pid, reads a free or missing lock as not held, and
+// never creates the lock file it asks about.
+func TestStoreProbeHold(t *testing.T) {
+	t.Parallel()
+	st, id := holdStore(t)
+
+	held, pid, err := st.ProbeHold(id)
+	if err != nil || held || pid != 0 {
+		t.Fatalf("ProbeHold with no lock file = (%v, %d, %v), want (false, 0, nil)", held, pid, err)
+	}
+	if _, err := os.Stat(st.lockPath(id)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ProbeHold created the lock file it probed (stat err = %v)", err)
+	}
+
+	release, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	held, pid, err = st.ProbeHold(id)
+	if err != nil || !held || pid != os.Getpid() {
+		t.Errorf("ProbeHold on a held session = (%v, %d, %v), want (true, %d, nil)", held, pid, err, os.Getpid())
+	}
+
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	held, _, err = st.ProbeHold(id)
+	if err != nil || held {
+		t.Errorf("ProbeHold after release = (%v, %v), want (false, nil)", held, err)
+	}
+}
+
+// A Hold that lands while a watcher's probe has the lock — shared, for the length of one check —
+// waits it out instead of reporting the session open in another apogee.
+func TestStoreHoldSucceedsWhileAProbeIsInFlight(t *testing.T) {
+	t.Parallel()
+	st, id := holdStore(t)
+	release, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	stop := make(chan struct{})
+	probing := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		started := false
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _, _ = st.ProbeHold(id)
+			if !started {
+				close(probing)
+				started = true
+			}
+		}
+	}()
+	<-probing
+
+	const holds = 200
+	for i := range holds {
+		release, err := st.Hold(id)
+		if err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("Hold %d of %d with a probe in flight = %v, want the hold", i+1, holds, err)
+		}
+		if err := release(); err != nil {
+			t.Fatalf("release: %v", err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+}
+
+// Live lists exactly the sessions with a journal present AND a held lock: a held session with no
+// journal, and a journal whose lock is free, are not live. A session journalling before its first
+// Save is live with HasRecord false.
+func TestStoreLive(t *testing.T) {
+	t.Parallel()
+	st, recorded := holdStore(t)
+	const (
+		unsaved   = "20260919T120001Z-bbbb2222"
+		noJournal = "20260919T120002Z-cccc3333"
+		crashed   = "20260919T120003Z-dddd4444"
+	)
+	liveJournal(t, st, recorded, "line\n")
+	liveJournal(t, st, unsaved, "line\n")
+	releaseNoJournal, err := st.Hold(noJournal)
+	if err != nil {
+		t.Fatalf("Hold %s: %v", noJournal, err)
+	}
+	t.Cleanup(func() { _ = releaseNoJournal() })
+	orphanJournal(t, st, crashed, "line\n")
+
+	live, err := st.Live()
+	if err != nil {
+		t.Fatalf("Live: %v", err)
+	}
+	want := []LiveEntry{
+		{ID: recorded, PID: os.Getpid(), JournalPath: st.JournalPath(recorded), HasRecord: true},
+		{ID: unsaved, PID: os.Getpid(), JournalPath: st.JournalPath(unsaved), HasRecord: false},
+	}
+	if !reflect.DeepEqual(live, want) {
+		t.Errorf("Live = %+v, want %+v", live, want)
+	}
+
+	empty, err := NewStore(filepath.Join(t.TempDir(), "absent")).Live()
+	if err != nil || len(empty) != 0 {
+		t.Errorf("Live over a missing store directory = (%v, %v), want (empty, nil)", empty, err)
+	}
+}
+
+// The journal sweep keeps a held journal, removes a free one, never touches a foreign file, and
+// over a missing store directory creates nothing.
+func TestStoreSweepJournals(t *testing.T) {
+	t.Parallel()
+
+	t.Run("held kept, free removed", func(t *testing.T) {
+		t.Parallel()
+		st, live := holdStore(t)
+		const crashed = "20260919T120003Z-dddd4444"
+		liveJournal(t, st, live, "line\n")
+		orphanJournal(t, st, crashed, "line\n")
+		foreign := filepath.Join(st.dir, ".hidden.events.jsonl")
+		if err := os.WriteFile(foreign, nil, filePerm); err != nil {
+			t.Fatalf("write a foreign file: %v", err)
+		}
+
+		removed, err := st.SweepJournals()
+
+		if err != nil || removed != 1 {
+			t.Fatalf("SweepJournals = (%d, %v), want (1, nil)", removed, err)
+		}
+		if !journalExists(t, st, live) {
+			t.Error("the sweep removed a journal its owner holds")
+		}
+		if journalExists(t, st, crashed) {
+			t.Error("the sweep kept a journal whose lock is free")
+		}
+		if _, err := os.Stat(foreign); err != nil {
+			t.Errorf("the sweep touched a foreign file: %v", err)
+		}
+		if held, _, err := st.ProbeHold(crashed); err != nil || held {
+			t.Errorf("ProbeHold after the sweep = (%v, %v), want the swept session left free", held, err)
+		}
+	})
+
+	t.Run("no store directory", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(t.TempDir(), "sessions")
+		removed, err := NewStore(root).SweepJournals()
+		if err != nil || removed != 0 {
+			t.Errorf("SweepJournals over a missing directory = (%d, %v), want (0, nil)", removed, err)
+		}
+		if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("the sweep created the missing store directory (stat err = %v)", err)
+		}
+	})
 }

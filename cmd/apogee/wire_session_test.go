@@ -1016,6 +1016,45 @@ func TestGCSessionsAppliesTheConfiguredPolicy(t *testing.T) {
 			t.Errorf("the sweep touched a missing sessions root (stat err = %v)", err)
 		}
 	})
+
+	t.Run("orphan journals go under the unconfigured default", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		live := saveAt(t, store, "/ws", now.Add(-time.Hour), "live")
+		crashed := saveAt(t, store, "/ws", now.Add(-2*time.Hour), "crashed")
+		openJournal := func(id string) func() error {
+			t.Helper()
+			release, err := store.Hold(id)
+			if err != nil {
+				t.Fatalf("Hold %s: %v", id, err)
+			}
+			t.Cleanup(func() { _ = release() })
+			journal, err := store.OpenJournal(id)
+			if err != nil {
+				t.Fatalf("OpenJournal %s: %v", id, err)
+			}
+			if err := journal.Close(); err != nil {
+				t.Fatalf("close the journal: %v", err)
+			}
+			return release
+		}
+		openJournal(live)
+		if err := openJournal(crashed)(); err != nil {
+			t.Fatalf("release %s: %v", crashed, err)
+		}
+
+		gcSessions(store, config.SessionSettings{})
+
+		if _, err := os.Stat(store.JournalPath(live)); err != nil {
+			t.Errorf("the sweep removed a journal its owner holds: %v", err)
+		}
+		if _, err := os.Stat(store.JournalPath(crashed)); !os.IsNotExist(err) {
+			t.Errorf("the sweep kept a journal whose lock is free (stat err = %v)", err)
+		}
+		if got := titles(t, store); len(got) != 2 {
+			t.Errorf("the journal sweep left records %v; want both kept under an unconfigured policy", got)
+		}
+	})
 }
 
 // The ORDERING, on the real boot path: a `--continue` target that does not rank inside `max-count`

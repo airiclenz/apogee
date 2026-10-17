@@ -60,6 +60,26 @@ func lockFile(file *os.File) error {
 	return err
 }
 
+// probeLockFile takes a SHARED byte-range lock on the same region without blocking — the probe
+// ProbeLock makes on a read-only handle, which LockFileEx accepts since the handle carries
+// GENERIC_READ — reporting errLockHeld when an exclusive holder already has the region. unlockFile
+// releases it exactly as it releases the exclusive one: the region is the same.
+func probeLockFile(file *os.File) error {
+	overlapped := lockRegion()
+	err := windows.LockFileEx(
+		windows.Handle(file.Fd()),
+		windows.LOCKFILE_FAIL_IMMEDIATELY,
+		0,
+		lockRegionLength,
+		0,
+		&overlapped,
+	)
+	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+		return errLockHeld
+	}
+	return err
+}
+
 // unlockFile drops the byte-range lock. Windows releases a closed handle's locks eventually
 // rather than promptly, so the explicit call is what makes release deterministic — a restart
 // right after a clean shutdown must never lose the race to its own predecessor.

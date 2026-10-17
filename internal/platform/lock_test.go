@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -257,5 +258,134 @@ func TestAcquireLockWaitReportsAnUnusablePathWithoutWaiting(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed >= patience {
 		t.Errorf("AcquireLockWait took %v on an unusable path, want an immediate failure", elapsed)
+	}
+}
+
+// The probe sees an AcquireLock holder and its recorded pid, and leaves the lock file exactly as
+// it found it — bytes and mtime alike — since a watcher must never be a writer.
+func TestProbeLockSeesAHolderAndLeavesTheFileUntouched(t *testing.T) {
+	t.Parallel()
+
+	path := lockPath(t)
+	acquire(t, path)
+	// Back-date the mtime so a write the probe made would show as a fresh stamp rather than one
+	// lost inside the filesystem's timestamp granularity.
+	past := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatalf("back-date the lock file: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the held lock file: %v", err)
+	}
+
+	held, pid, err := ProbeLock(path)
+
+	if err != nil || !held || pid != os.Getpid() {
+		t.Fatalf("ProbeLock on a held lock = (%v, %d, %v), want (true, %d, nil)", held, pid, err, os.Getpid())
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("re-read the lock file: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("lock file after the probe = %q, want it unchanged from %q", after, before)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat the lock file: %v", err)
+	}
+	if !info.ModTime().Equal(past) {
+		t.Errorf("lock file mtime after the probe = %v, want it unchanged at %v", info.ModTime(), past)
+	}
+}
+
+// A free lock probes free, and the probe drops its own momentary lock: the next AcquireLock
+// takes it at once.
+func TestProbeLockOnAFreeLockLeavesItFree(t *testing.T) {
+	t.Parallel()
+
+	path := lockPath(t)
+	release := acquire(t, path)
+	release()
+
+	held, pid, err := ProbeLock(path)
+
+	if err != nil || held || pid != 0 {
+		t.Fatalf("ProbeLock on a free lock = (%v, %d, %v), want (false, 0, nil)", held, pid, err)
+	}
+	acquire(t, path)
+}
+
+// The probe opens the file read-only, so a lock file the prober may only read is probeable, held
+// or free.
+func TestProbeLockOnAReadOnlyFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("held", func(t *testing.T) {
+		t.Parallel()
+		path := lockPath(t)
+		acquire(t, path)
+		if err := os.Chmod(path, 0o400); err != nil {
+			t.Fatalf("make the lock file read-only: %v", err)
+		}
+		held, pid, err := ProbeLock(path)
+		if err != nil || !held || pid != os.Getpid() {
+			t.Errorf("ProbeLock on a held read-only file = (%v, %d, %v), want (true, %d, nil)", held, pid, err, os.Getpid())
+		}
+	})
+
+	t.Run("free", func(t *testing.T) {
+		t.Parallel()
+		path := lockPath(t)
+		if err := os.WriteFile(path, []byte("4242\n"), 0o400); err != nil {
+			t.Fatalf("write a read-only lock file: %v", err)
+		}
+		held, pid, err := ProbeLock(path)
+		if err != nil || held || pid != 0 {
+			t.Errorf("ProbeLock on a free read-only file = (%v, %d, %v), want (false, 0, nil)", held, pid, err)
+		}
+	})
+}
+
+// A lock file that does not exist is held by no one, and the probe never creates it.
+func TestProbeLockOnAMissingFileCreatesNothing(t *testing.T) {
+	t.Parallel()
+
+	path := lockPath(t)
+
+	held, pid, err := ProbeLock(path)
+
+	if err != nil || held || pid != 0 {
+		t.Fatalf("ProbeLock on a missing file = (%v, %d, %v), want (false, 0, nil)", held, pid, err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stat after probing a missing lock = %v, want it still absent", err)
+	}
+}
+
+// A path that exists but cannot be opened is a plain failure naming the path, not "not held".
+func TestProbeLockReportsAnUnusablePath(t *testing.T) {
+	t.Parallel()
+
+	// A regular file standing where a directory should be: open fails with ENOTDIR, which is
+	// neither "missing" nor "held". Windows answers the same open with ERROR_PATH_NOT_FOUND, which
+	// is os.ErrNotExist there — so it reads as "missing", correctly, and has no case to pin.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reports a path under a regular file as missing, not unusable")
+	}
+	parent := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(parent, nil, 0o600); err != nil {
+		t.Fatalf("write the blocking file: %v", err)
+	}
+	path := filepath.Join(parent, "daemon.lock")
+
+	held, _, err := ProbeLock(path)
+
+	if err == nil || held {
+		t.Fatalf("ProbeLock on an unusable path = (%v, %v), want (false, an error)", held, err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("ProbeLock error = %q, want it to name the path", err)
 	}
 }

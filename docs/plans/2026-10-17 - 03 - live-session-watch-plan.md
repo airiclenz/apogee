@@ -194,7 +194,12 @@ NOTES (2026-10-17): the golden test carries a package-local `-update` flag (`go 
 
 Depends on item 4.
 
-## 6. Session store: journal lifecycle and a read-only hold probe
+## 6. Session store: journal lifecycle and a read-only hold probe — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the journal sweep is `Store.SweepJournals`, run by `gcSessions` as its own statement ahead of `Prune` (never inside Prune), so the TUI, daemon and headless boot beats all get it through their existing `gcSessions` call and the "no store directory" case exercises it; `cmd/apogee/wire_live.go` needed no change and is not in FILES.
+NOTES (2026-10-17): `SweepJournals` removes a journal only after its probe reads free AND under the record's hold (`Store.hold`), not on the probe alone — closing the probe-to-remove gap in which an owner starting the same session could Hold and OpenJournal; a hold refused there keeps the journal.
+NOTES (2026-10-17): `Store.hold` absorbs probe contention with `platform.AcquireLockWait(lockPath, holdContentionWait)`, `holdContentionWait = 30ms`; a real live holder is now refused after that wait instead of at once. `platform.ProbeLock` reads a missing lock file as (false, 0, nil), so `Store.ProbeHold` inherits "missing reads as not held".
+NOTES (2026-10-17): `TestProbeLockReportsAnUnusablePath` skips on Windows, where a path under a regular file opens as ERROR_PATH_NOT_FOUND (os.ErrNotExist) and so correctly reads as "missing".
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:**

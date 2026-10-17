@@ -28,7 +28,8 @@ import (
 //
 // The per-OS halves are lock_unix.go (flock) and lock_windows.go (LockFileEx). They share this
 // file's shape: a non-blocking exclusive lock on the descriptor, [errLockHeld] when the lock is
-// somebody else's, and the raw error when the call failed for any other reason.
+// somebody else's, and the raw error when the call failed for any other reason — and the same
+// shape for [ProbeLock]'s non-blocking SHARED lock on a read-only descriptor.
 
 const (
 	// lockFilePerm keeps the lock file owner-only: it is machine-local coordination state in
@@ -144,6 +145,47 @@ func acquireLock(path string, timeout time.Duration) (release func(), err error)
 
 	var once sync.Once
 	return func() { once.Do(func() { releaseLock(file) }) }, nil
+}
+
+// ProbeLock reports whether another descriptor currently holds the lock on path, without ever
+// taking it for longer than the probe itself and without touching the file: it opens path
+// READ-ONLY — never creating, writing or truncating it, so a lock file's bytes and mtime survive
+// any number of probes, and a file the prober may only read is probeable — takes a SHARED,
+// non-blocking lock, and drops it again at once. Shared, because the probe states its intent:
+// it conflicts with an exclusive holder, which is the only thing it asks about, and two probes
+// never refuse each other.
+//
+// It is for a reader that must never become a holder — a watcher asking whether a session's
+// owner is still running. held is true when an [AcquireLock] holder has the lock, and pid is then
+// the number that holder recorded (0 when unreadable; diagnostics only, exactly as
+// [LockHeldError.PID]). A lock file that does not exist is held by no one: (false, 0, nil).
+//
+// The probe is a real, if momentary, lock: an [AcquireLock] that lands inside it is refused as if
+// held. A caller that takes holds where probes may run absorbs that with [AcquireLockWait] and a
+// timeout of a few milliseconds.
+//
+// Errors: a wrapped error naming the path when the file exists but could not be opened, or the
+// lock call failed for any reason other than contention.
+func ProbeLock(path string) (held bool, pid int, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, 0, nil
+		}
+		return false, 0, fmt.Errorf("apogee: probe lock %s: open: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	switch err := probeLockFile(file); {
+	case errors.Is(err, errLockHeld):
+		return true, readLockPID(file), nil
+	case err != nil:
+		return false, 0, fmt.Errorf("apogee: probe lock %s: %w", path, err)
+	}
+	if err := unlockFile(file); err != nil {
+		return false, 0, fmt.Errorf("apogee: probe lock %s: unlock: %w", path, err)
+	}
+	return false, 0, nil
 }
 
 // lockFileWithin takes the lock on file, retrying every [lockRetryInterval] while it is held
