@@ -9,6 +9,12 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **`ctrl+c` and `ctrl+l` now work under every modal pane.** With the `/sessions` browser, `/settings` (the key list or any step over it — a value list, an edit field, an armed reset, the save-target question), the model picker or the `/workflows` view open, a first `ctrl+c` now arms the quit and a second one quits, and `ctrl+l` forces the full repaint; before, those panes swallowed both keys, so the only way out was `esc` first. The pane is left exactly as it stood — only an edit field's drag-selection highlight goes, as it does on any keypress.
+
+- **Fixed:** a running or failed workflow block's totals line ("items N · ok a · …") no longer counts a verify, merge or other non-fan-out stage's receipts as items, so it agrees with the tally the same workflow shows once it finishes. Each stage row's kind is now kept in the session record; a record written before that still loads and counts every item as before.
+
+- `apogee daemon`: each Firing now runs with its own workspace's Project config (`.apogee/config.yaml`) layered over the daemon's global configuration, read fresh at that Firing, so an edit to the project file reaches the next tick without a restart. Two schedules in two workspaces never see each other's layer, and a project file's notices (a skipped file, a global-only key) are logged to the daemon log once per Project root rather than on every Firing. The daemon's startup still reads `config.yaml` alone, once.
+
 - `stubllm replay --cassette <file>` serves a cassette at its captured pace, and `stubllm capture --upstream <url> [--key-env <VAR>] --out <file>` proxies a live model and writes the cassette when interrupted; both print `listening <url>` once bound (`docs/design/test-drivers.md`, "Cassettes: replay and capture").
 
 - **`sessionexpect`, a dev tool for photon's `run:` expects.** `make sessionexpect` builds `./sessionexpect`, which judges the newest session saved under `--sessions` (default `$PHOTON_WORK/home/.apogee/sessions`): `--entry <selector>` locates one transcript entry (`kind=…,text=…,tool=…,target=…,nth=N|last`) and `--contains`, `--before <selector>` and `--after <selector>` judge it. It prints demorig's one-line detail on stdout and exits 0 on a pass, 1 on a fail, 2 on a bad command line. It is never a release asset.
