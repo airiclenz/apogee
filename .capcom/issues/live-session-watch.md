@@ -34,3 +34,7 @@ Design calls (owner, 2026-10-17) and the items are in the plan. The research is 
   `sessions.share-group`, is listed, tagged and watchable read-only by another user in that group.
 - The decision is recorded as an ADR. The manual documents watch mode, the journal and both keys.
   `make check` passes.
+
+## Log
+
+- 2026-10-17 Airic Lenz: Plan 2026-10-17 - 03 - live-session-watch-plan delivered all items 1-16 (archived at c40c98ff): ADR 0103, Event journal for every Driver, TUI watch mode, /sessions live rows, --resume into watch, watch-homes/share-group, manual. Left open for two deferred gaps: readJournal misses a same-inode reopen that regrows past the old offset within one poll; watching a running session reports the owner busy to the schedule Gate, deferring Firings until esc.
