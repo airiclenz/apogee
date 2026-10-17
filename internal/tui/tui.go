@@ -116,6 +116,29 @@ type SessionHost interface {
 	// mark `● live` and open in watch mode. The host leaves out every session it holds itself, so
 	// the watcher's own row is never live. It only reads: it holds, writes and creates nothing.
 	LiveSessions() ([]LiveSession, error)
+	// WatchedSessions lists the sessions of every watched home (`sessions.watch-homes:`, ADR 0103
+	// decision 7), live and finished alike, for the /sessions browser to mix in by time, each
+	// tagged with its home's label. A home that will not read is left out and reported in
+	// unreadable — one error per home, whose Error() the browser notes verbatim — and costs the
+	// list nothing else. Like LiveSessions it only reads: nothing in a watched home is ever
+	// created, written, swept, truncated or held. The browser asks it on open only, never on the
+	// re-list a rename or delete carries.
+	WatchedSessions() (sessions []WatchedSession, unreadable []error)
+}
+
+// WatchedSession is one session of a watched home, as [SessionHost.WatchedSessions] lists it. It
+// is never resumed, renamed or deleted from here: ⏎ watches it, live or finished.
+type WatchedSession struct {
+	// Home is the label of the watched home the session is in.
+	Home string
+	// Meta is the session's record as listed. A live session with no record yet carries the zero
+	// Meta, and the browser lists it from Live's journal frame instead.
+	Meta session.Meta
+	// RecordPath is the record a watch paints from, read by path, read-only.
+	RecordPath string
+	// Live is the session as its owner runs it now (its Home is this Home), or nil once it has
+	// finished.
+	Live *LiveSession
 }
 
 // LiveSession is one session another instance is running, as [SessionHost.LiveSessions] lists it:
@@ -131,9 +154,15 @@ type LiveSession struct {
 	Workspace string
 	At        time.Time
 	// RecordPath is where the session's record is, or will be once its owner first saves; a watch
-	// reads it by path, read-only. JournalPath is the Event journal the watch follows.
+	// reads it by path, read-only. JournalPath is the Event journal the watch follows — "" for a
+	// finished session of a watched home, which the watch paints from its record and shows
+	// finished at once.
 	RecordPath  string
 	JournalPath string
+	// Home is the label of the watched home the session is in (`sessions.watch-homes:`, ADR 0103
+	// decision 7), "" for a session of this apogee's own home. A watched home's session is never
+	// resumable.
+	Home string
 	// Probe asks whether the owner still holds the session, without ever holding it
 	// (session.Store.ProbeHold); nil never ends the watch.
 	Probe func() (isHeld bool, err error)
@@ -1604,9 +1633,9 @@ type Options struct {
 	Resumed *ResumedSession
 
 	// Watch is the live session this run opens watching (ADR 0103 decision 5): set when --resume
-	// names a session another instance holds with an Event journal, nil otherwise, and never set
-	// beside Resumed. newModel builds a fresh session as usual and enters watch mode over it, so esc
-	// lands in that fresh session.
+	// names a session another instance holds with an Event journal, or one a watched home holds
+	// live or finished (its Home set), nil otherwise, and never set beside Resumed. newModel builds a
+	// fresh session as usual and enters watch mode over it, so esc lands in that fresh session.
 	Watch *LiveSession
 }
 

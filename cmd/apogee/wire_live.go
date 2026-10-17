@@ -243,7 +243,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		w.announce(shareWarning)
 	}
 	w.store = session.NewStore(w.roots.sessions, storeOpts...)
-	w.resumed, w.watch, err = resolveResume(w.store, w.opts.Resume, w.opts.ContinueSession, w.roots.workspace)
+	// The configured watched homes (`sessions.watch-homes:`, ADR 0103 decision 7), each behind a
+	// read-only store: --resume looks in them for an id this home lacks, and the host lists them
+	// for /sessions. Building them touches no disk.
+	watched := watchedHomesOf(w.opts.Sessions.WatchHomes)
+	w.resumed, w.watch, err = resolveResume(w.store, watched, w.opts.Resume, w.opts.ContinueSession,
+		w.roots.workspace)
 	if err != nil {
 		return err
 	}
@@ -323,7 +328,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// same reason — the store is named by the session's id — but carries the ID rather than a path:
 	// opening a journal needs the apogee home and the workspace too, and those are this root's to
 	// know (ADR 0074).
-	w.host = newSessionHost(w.store, w.roots.workspace, w.opts.Model, w.resumed,
+	w.host = newSessionHost(w.store, watched, w.roots.workspace, w.opts.Model, w.resumed,
 		w.roots.scratch, w.engine.SetScratchDir,
 		w.roots.snapshots, func(id string) { w.openSessionJournal(ctx, id) })
 	// The configured `currency:` label, which a Save writes beside the session's usage unless a resumed

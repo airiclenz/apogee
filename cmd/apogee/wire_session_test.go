@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -70,7 +72,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 	}
 
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
-	host := newSessionHost(store, t.TempDir(), "fake", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, t.TempDir(), "fake", nil, "", nil, "", nil)
 	if err := host.Save(snap, nil, "hi", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -82,7 +84,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 	// the resume door would refuse it (TestResolveResumeRefusesAHeldSessionWithTheFriendlyLine).
 	host.Close()
 
-	rec, _, err := resolveResume(store, id, false, "")
+	rec, _, err := resolveResume(store, nil, id, false, "")
 	if err != nil {
 		t.Fatalf("resolveResume by id: %v", err)
 	}
@@ -99,7 +101,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 func TestResolveResumeMissingArg(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
-	_, _, err := resolveResume(store, filepath.Join(t.TempDir(), "absent.json"), false, "")
+	_, _, err := resolveResume(store, nil, filepath.Join(t.TempDir(), "absent.json"), false, "")
 	if err == nil {
 		t.Fatal("resolveResume of a value that is neither an id nor a file: want error, got nil")
 	}
@@ -117,7 +119,7 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 	}
 
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
-	rec, _, err := resolveResume(store, path, false, "")
+	rec, _, err := resolveResume(store, nil, path, false, "")
 	if err != nil {
 		t.Fatalf("resolveResume of a future-version file: %v", err)
 	}
@@ -136,7 +138,7 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "model-x", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "model-x", nil, "", nil, "", nil)
 
 	if host.ActiveID() != "" {
 		t.Errorf("ActiveID before any Save = %q; want empty", host.ActiveID())
@@ -182,7 +184,7 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 func TestSessionHostSetModelStampsSaves(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "", nil, "", nil, "", nil) // a cold start: nothing bound yet
+	host := newSessionHost(store, nil, "/ws", "", nil, "", nil, "", nil) // a cold start: nothing bound yet
 
 	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save before the bind: %v", err)
@@ -211,7 +213,7 @@ func TestSessionHostSetModelStampsSaves(t *testing.T) {
 func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 
 	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save A: %v", err)
@@ -259,7 +261,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 func TestSessionHostRenameActiveSticks(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	if err := host.Save(apogee.Session{}, nil, "original", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -285,7 +287,7 @@ func TestSessionHostResumeBeginsActive(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
 	seed := &session.Record{Meta: session.Meta{ID: "20260724T120000Z-abcd", Title: "kept"}}
-	host := newSessionHost(store, "/ws", "m", seed, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", seed, "", nil, "", nil)
 
 	if host.ActiveID() != seed.Meta.ID {
 		t.Errorf("ActiveID of a resumed host = %q; want the resumed id %q", host.ActiveID(), seed.Meta.ID)
@@ -327,7 +329,7 @@ func TestSessionHostForkWritesAChildRecord(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	store := session.NewStore(dir)
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	if err := host.Save(apogee.Session{}, nil, "parent", 2, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save parent: %v", err)
 	}
@@ -394,7 +396,7 @@ func TestSessionHostForkWritesAChildRecord(t *testing.T) {
 func TestForkStampsParentIDFromTheHostIdentity(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	preMinted := host.SessionID()
 	if preMinted == "" || host.ActiveID() != "" {
 		t.Fatalf("pre-minted id %q, active %q; want a pre-minted id and no active session", preMinted, host.ActiveID())
@@ -418,7 +420,7 @@ func TestForkStampsParentIDFromTheHostIdentity(t *testing.T) {
 func TestActivateCarriesParentIDIntoLaterSaves(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	if err := host.Save(apogee.Session{}, nil, "parent", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save parent: %v", err)
 	}
@@ -453,7 +455,7 @@ func TestResumeCarriesParentIDIntoLaterSaves(t *testing.T) {
 	child := &session.Record{Meta: session.Meta{
 		ID: "20260916T120000Z-abcd", Title: "kept", ParentID: "20260916T110000Z-0000",
 	}}
-	host := newSessionHost(store, "/ws", "m", child, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", child, "", nil, "", nil)
 
 	if err := host.Save(apogee.Session{}, nil, "derived", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -516,7 +518,7 @@ func TestResumedSessionKeepsItsPricedCurrency(t *testing.T) {
 			t.Parallel()
 			store := session.NewStore(t.TempDir())
 			rec := tc.record
-			host := newSessionHost(store, "/ws", "m", &rec, "", nil, "", nil)
+			host := newSessionHost(store, nil, "/ws", "m", &rec, "", nil, "", nil)
 			host.currency = "USD"
 			defer host.Close()
 
@@ -532,7 +534,7 @@ func TestResumedSessionKeepsItsPricedCurrency(t *testing.T) {
 			if err := store.Save(tc.record); err != nil {
 				t.Fatalf("seed the record: %v", err)
 			}
-			host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+			host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 			host.currency = "USD"
 			defer host.Close()
 
@@ -552,7 +554,7 @@ func TestRotateReturnsToTheConfiguredCurrency(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
 	rec := pricedEURRecord()
-	host := newSessionHost(store, "/ws", "m", &rec, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", &rec, "", nil, "", nil)
 	host.currency = "USD"
 	defer host.Close()
 
@@ -597,7 +599,7 @@ func TestRotateClearsParentID(t *testing.T) {
 	child := &session.Record{Meta: session.Meta{
 		ID: "20260916T120000Z-abcd", Title: "kept", ParentID: "20260916T110000Z-0000",
 	}}
-	host := newSessionHost(store, "/ws", "m", child, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", child, "", nil, "", nil)
 
 	host.Rotate()
 	if err := host.Save(apogee.Session{}, nil, "fresh", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
@@ -628,7 +630,7 @@ func TestResolveResumeLegacyPath(t *testing.T) {
 		t.Fatalf("write legacy: %v", err)
 	}
 	store := session.NewStore(filepath.Join(dir, "sessions"))
-	rec, _, err := resolveResume(store, legacyPath, false, "")
+	rec, _, err := resolveResume(store, nil, legacyPath, false, "")
 	if err != nil {
 		t.Fatalf("resolveResume by path: %v", err)
 	}
@@ -669,7 +671,7 @@ func TestResolveResumeByPathRemintsID(t *testing.T) {
 		t.Fatalf("write planted: %v", err)
 	}
 
-	rec, _, err := resolveResume(store, plantedPath, false, "/ws")
+	rec, _, err := resolveResume(store, nil, plantedPath, false, "/ws")
 	if err != nil {
 		t.Fatalf("resolveResume by path: %v", err)
 	}
@@ -682,7 +684,7 @@ func TestResolveResumeByPathRemintsID(t *testing.T) {
 
 	// The run continues as a NEW session: its autosave lands on its own file and the victim's
 	// record is untouched.
-	host := newSessionHost(store, "/ws", "m", rec, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", rec, "", nil, "", nil)
 	if host.ActiveID() != rec.Meta.ID {
 		t.Errorf("host active id = %q; want the re-minted %q", host.ActiveID(), rec.Meta.ID)
 	}
@@ -714,7 +716,7 @@ func TestResolveResumeRejectsTraversalRecordID(t *testing.T) {
 		t.Fatalf("write planted: %v", err)
 	}
 	store := session.NewStore(filepath.Join(dir, "sessions"))
-	if _, _, err := resolveResume(store, plantedPath, false, "/ws"); err == nil {
+	if _, _, err := resolveResume(store, nil, plantedPath, false, "/ws"); err == nil {
 		t.Fatal("resolveResume of a record declaring a traversal id: want an error, got nil")
 	}
 }
@@ -749,7 +751,7 @@ func TestResolveContinuePicksWorkspaceNewest(t *testing.T) {
 // test's own resume, prune or delete to take — a live host would hold it against them.
 func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title string) string {
 	t.Helper()
-	h := newSessionHost(store, ws, "m", nil, "", nil, "", nil)
+	h := newSessionHost(store, nil, ws, "m", nil, "", nil, "", nil)
 	h.now = func() time.Time { return when }
 	if err := h.Save(apogee.Session{}, nil, title, 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("saveAt %q: %v", title, err)
@@ -763,7 +765,7 @@ func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title
 func TestResolveResumeMutuallyExclusive(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	_, _, err := resolveResume(store, "some-id", true, "/ws")
+	_, _, err := resolveResume(store, nil, "some-id", true, "/ws")
 	if err == nil {
 		t.Fatal("resolveResume with both --resume and --continue: want a flag error")
 	}
@@ -782,7 +784,7 @@ func TestResolveResumeMutuallyExclusive(t *testing.T) {
 func TestSessionHostStoresBothTokenAccountings(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "model-x", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "model-x", nil, "", nil, "", nil)
 
 	main := session.Usage{Calls: 4, PromptTokens: 60000, CachedPromptTokens: 12000, TotalTokens: 64000}
 	delegates := session.Usage{Calls: 300, PromptTokens: 900000, TotalTokens: 936000}
@@ -820,7 +822,7 @@ func TestSessionHostStoresBothTokenAccountings(t *testing.T) {
 func TestResolveResumeFreshStart(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	rec, _, err := resolveResume(store, "", false, "/ws")
+	rec, _, err := resolveResume(store, nil, "", false, "/ws")
 	if err != nil {
 		t.Fatalf("resolveResume fresh: %v", err)
 	}
@@ -881,7 +883,7 @@ func TestSessionHostScratchFollowsTheActiveSession(t *testing.T) {
 	root := t.TempDir()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	var moved []string
-	host := newSessionHost(store, "/ws", "m", nil, root, func(dir string) { moved = append(moved, dir) }, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, root, func(dir string) { moved = append(moved, dir) }, "", nil)
 
 	bootDir := host.SessionScratchDir()
 	if bootDir == "" {
@@ -923,7 +925,7 @@ func TestSessionHostWithoutScratchRootIsInert(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	called := false
-	host := newSessionHost(store, "/ws", "m", nil, "", func(string) { called = true }, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", func(string) { called = true }, "", nil)
 
 	if dir := host.SessionScratchDir(); dir != "" {
 		t.Errorf("SessionScratchDir = %q on a disabled seam, want \"\"", dir)
@@ -1176,7 +1178,7 @@ func TestSessionHostDeleteRemovesTheSnapshotStore(t *testing.T) {
 	id := saveAt(t, store, "/ws", time.Now(), "done with")
 	dir := snapshotDirAt(t, root, id, time.Now())
 
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, root, nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, root, nil)
 	if err := host.Delete(id); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -1203,7 +1205,7 @@ func TestSessionHostJournalFollowsTheActiveSession(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	var reopened []string
-	host := newSessionHost(store, "/ws", "m", nil, "", nil,
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil,
 		t.TempDir(), func(id string) { reopened = append(reopened, id) })
 
 	boot := host.SessionID()
@@ -1293,7 +1295,7 @@ func TestSessionHostHoldsAtTheFirstSaveAndReleasesOnClose(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "sessions")
 	store := session.NewStore(dir)
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("a host that has not saved created the sessions dir (stat err = %v)", err)
@@ -1329,7 +1331,7 @@ func TestSessionHostHoldsAtTheFirstSaveAndReleasesOnClose(t *testing.T) {
 func TestSessionHostRotateReleasesAndActivateReHolds(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save A: %v", err)
 	}
@@ -1378,10 +1380,10 @@ func TestResolveResumeRefusesAHeldSessionWithTheFriendlyLine(t *testing.T) {
 	defer func() { _ = release() }()
 	want := fmt.Sprintf("session %s is open in another apogee (pid %d) — fork it to work alongside", id, os.Getpid())
 
-	if _, _, err := resolveResume(store, id, false, "/ws"); err == nil || err.Error() != want {
+	if _, _, err := resolveResume(store, nil, id, false, "/ws"); err == nil || err.Error() != want {
 		t.Errorf("resolveResume(--resume %s) err = %v; want %q", id, err, want)
 	}
-	if _, _, err := resolveResume(store, "", true, "/ws"); err == nil || err.Error() != want {
+	if _, _, err := resolveResume(store, nil, "", true, "/ws"); err == nil || err.Error() != want {
 		t.Errorf("resolveResume(--continue) err = %v; want %q", err, want)
 	}
 }
@@ -1393,13 +1395,13 @@ func TestResolveResumeProbesAndReleasesForTheHostsHold(t *testing.T) {
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	id := saveAt(t, store, "/ws", time.Now(), "free")
 
-	rec, _, err := resolveResume(store, id, false, "/ws")
+	rec, _, err := resolveResume(store, nil, id, false, "/ws")
 	if err != nil {
 		t.Fatalf("resolveResume: %v", err)
 	}
 	assertHeld(t, store, id, false)
 
-	host := newSessionHost(store, "/ws", "m", rec, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", rec, "", nil, "", nil)
 	assertHeld(t, store, id, true)
 	if err := host.Save(apogee.Session{}, nil, "free", 2, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save on the resumed host: %v", err)
@@ -1441,7 +1443,7 @@ func TestSessionHostLoadParksTheHoldForActivate(t *testing.T) {
 	store := session.NewStore(dir)
 	first := saveAt(t, store, "/ws", time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC), "first")
 	third := saveAt(t, store, "/ws", time.Date(2026, 9, 19, 13, 0, 0, 0, time.UTC), "third")
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	if err := host.Save(apogee.Session{}, nil, "second", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -1725,7 +1727,7 @@ func TestSessionHostEventJournalRecordsPromptsAndEvents(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "sessions")
 	store := session.NewStore(dir)
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	inner := &eventRecorder{}
 	sink := newLiveJournalSink(inner)
 	host.attachEventJournal(sink, firingJournal(store, nil))
@@ -1787,7 +1789,7 @@ func TestSessionHostEventJournalEndsBeforeTheHoldIsReleased(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	stored := recordWithEntries(t, store, "stored", forkPrefix()[:2])
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	log := &journalLog{store: store}
 	host.attachEventJournal(newLiveJournalSink(nil), log.open)
 
@@ -1842,7 +1844,7 @@ func TestSessionHostEventJournalBornAtAttachOnAResumedRecord(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	rec := recordWithEntries(t, store, "resumed", forkPrefix())
-	host := newSessionHost(store, "/ws", "m", &rec, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", &rec, "", nil, "", nil)
 	log := &journalLog{store: store}
 	host.attachEventJournal(newLiveJournalSink(nil), log.open)
 
@@ -1965,7 +1967,7 @@ func TestSessionHostListsLiveSessionsOfOtherInstances(t *testing.T) {
 	runElsewhere(t, store, journalOnly, "a headless run", "/ws/b", "")
 	torn := session.NewID(time.Now().Add(time.Second))
 	runElsewhere(t, store, torn, "", "", `{"kind":"run_sta`)
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	defer host.Close()
 
 	rows, err := host.LiveSessions()
@@ -2000,7 +2002,7 @@ func TestSessionHostLiveLeavesOutItsOwnSessions(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	parked := saveAt(t, store, "/ws", time.Now(), "parked")
-	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	host := newSessionHost(store, nil, "/ws", "m", nil, "", nil, "", nil)
 	defer host.Close()
 	host.attachEventJournal(newLiveJournalSink(&eventRecorder{}), firingJournal(store, nil))
 	assertNoLive := func(when string) {
@@ -2076,7 +2078,7 @@ func TestResolveResumeWatchesAJournalOnlyRun(t *testing.T) {
 	id := session.NewID(time.Now())
 	runElsewhere(t, store, id, "a headless run", "/ws", "")
 
-	rec, live, err := resolveResume(store, id, false, "/ws")
+	rec, live, err := resolveResume(store, nil, id, false, "/ws")
 
 	if err != nil {
 		t.Fatalf("resolveResume(--resume %s): %v", id, err)
@@ -2091,7 +2093,7 @@ func TestResolveResumeWatchesAHeldRecordWithAJournal(t *testing.T) {
 	id := saveAt(t, store, "/ws", time.Now(), "a recorded run")
 	runElsewhere(t, store, id, "a recorded run", "/ws", "")
 
-	rec, live, err := resolveResume(store, id, false, "/ws")
+	rec, live, err := resolveResume(store, nil, id, false, "/ws")
 
 	if err != nil {
 		t.Fatalf("resolveResume(--resume %s): %v", id, err)
@@ -2114,7 +2116,7 @@ func TestResolveResumeWatchNeedsAHoldAndAJournal(t *testing.T) {
 		}
 		defer func() { _ = release() }()
 
-		rec, live, err := resolveResume(store, id, false, "/ws")
+		rec, live, err := resolveResume(store, nil, id, false, "/ws")
 
 		if err == nil || err.Error() != heldElsewhereLine(id) || rec != nil || live != nil {
 			t.Errorf("resolveResume = %v, %v, %v; want only the refusal %q", rec, live, err, heldElsewhereLine(id))
@@ -2128,7 +2130,7 @@ func TestResolveResumeWatchNeedsAHoldAndAJournal(t *testing.T) {
 			t.Fatalf("write orphan journal: %v", err)
 		}
 
-		rec, live, err := resolveResume(store, id, false, "/ws")
+		rec, live, err := resolveResume(store, nil, id, false, "/ws")
 
 		if err != nil || live != nil || rec == nil || rec.Meta.ID != id {
 			t.Errorf("resolveResume = %v, %v, %v; want the record %s resumed", rec, live, err, id)
@@ -2140,7 +2142,7 @@ func TestResolveResumeWatchNeedsAHoldAndAJournal(t *testing.T) {
 		id := saveAt(t, store, "/ws", time.Now(), "running elsewhere")
 		runElsewhere(t, store, id, "running elsewhere", "/ws", "")
 
-		rec, live, err := resolveResume(store, "", true, "/ws")
+		rec, live, err := resolveResume(store, nil, "", true, "/ws")
 
 		if err == nil || err.Error() != heldElsewhereLine(id) || rec != nil || live != nil {
 			t.Errorf("resolveResume(--continue) = %v, %v, %v; want only the refusal %q", rec, live, err, heldElsewhereLine(id))
@@ -2176,5 +2178,227 @@ func TestResumeWatchWiresAFreshStart(t *testing.T) {
 	opts := w.options()
 	if opts.Resumed != nil || opts.Watch != w.watch {
 		t.Errorf("options Resumed = %+v, Watch = %+v; want no resume payload and the live session", opts.Resumed, opts.Watch)
+	}
+}
+
+// watchedHomeLabel is the label the watched-home fixtures are configured under.
+const watchedHomeLabel = "bob"
+
+// watchedHomeFixture is a watched home on disk: the home directory, the store another apogee writes
+// its sessions with, and the watched homes this apogee is configured with to read it.
+func watchedHomeFixture(t *testing.T) (home string, writer *session.Store, watched []watchedHome) {
+	t.Helper()
+	home = t.TempDir()
+	writer = session.NewStore(filepath.Join(home, sessionsDirName))
+	watched = watchedHomesOf([]config.WatchHome{{Label: watchedHomeLabel, Path: home}})
+	return home, writer, watched
+}
+
+// The host lists a watched home's sessions, each tagged with its label: a finished record, a record
+// its owner runs now (marked live, following the owner's hold), and a live run with no record yet
+// (the zero Meta, its row from the journal frame). The own home's List stays the own home's.
+func TestWatchedHomeSessionsAreListedAndTagged(t *testing.T) {
+	t.Parallel()
+	home, writer, watched := watchedHomeFixture(t)
+	now := time.Now()
+	finished := saveAt(t, writer, "/ws", now.Add(-time.Hour), "bobs finished run")
+	running := saveAt(t, writer, "/ws", now.Add(-time.Minute), "bobs live run")
+	runElsewhere(t, writer, running, "bobs live run", "/ws", "")
+	journalOnly := session.NewID(now)
+	runElsewhere(t, writer, journalOnly, "bobs headless run", "/ws/b", "")
+	own := session.NewStore(filepath.Join(t.TempDir(), sessionsDirName))
+	mine := saveAt(t, own, "/ws", now, "my own run")
+	host := newSessionHost(own, watched, "/ws", "m", nil, "", nil, "", nil)
+	defer host.Close()
+
+	rows, unreadable := host.WatchedSessions()
+
+	if len(unreadable) != 0 {
+		t.Fatalf("unreadable = %v; want none", unreadable)
+	}
+	byID := map[string]tui.WatchedSession{}
+	for _, row := range rows {
+		if row.Home != watchedHomeLabel {
+			t.Errorf("row %+v; want it tagged %q", row, watchedHomeLabel)
+		}
+		id := row.Meta.ID
+		if id == "" && row.Live != nil {
+			id = row.Live.ID
+		}
+		byID[id] = row
+	}
+	if len(rows) != 3 {
+		t.Fatalf("watched rows = %+v; want the finished, the running and the journal-only session", rows)
+	}
+	dir := filepath.Join(home, sessionsDirName)
+	if row := byID[finished]; row.Live != nil || row.RecordPath != filepath.Join(dir, finished+".json") {
+		t.Errorf("finished row = %+v; want not live, with its record path", row)
+	}
+	if row := byID[running]; row.Live == nil || row.Live.Home != watchedHomeLabel ||
+		row.Live.JournalPath != filepath.Join(dir, running+".events.jsonl") {
+		t.Errorf("running row = %+v; want it live in the watched home with its journal", row)
+	} else if held, err := row.Live.Probe(); err != nil || !held {
+		t.Errorf("probe of the running session = %v, %v; want held", held, err)
+	}
+	if row := byID[journalOnly]; row.Meta.ID != "" || row.Live == nil || row.Live.Title != "bobs headless run" {
+		t.Errorf("journal-only row = %+v; want the zero Meta and the frame's title", row)
+	}
+	metas, err := host.List()
+	if err != nil || len(metas) != 1 || metas[0].ID != mine {
+		t.Errorf("own List = %v, %v; want the own home's one record", metas, err)
+	}
+}
+
+// A watched home whose sessions directory will not read is one notice naming its label, and no
+// rows; a readable home beside it still lists, and a home with no sessions directory is no notice.
+func TestWatchedHomeUnreadableIsOneNotice(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a directory mode that denies this process")
+	}
+	shut := t.TempDir()
+	shutDir := filepath.Join(shut, sessionsDirName)
+	saveAt(t, session.NewStore(shutDir), "/ws", time.Now(), "unreachable")
+	if err := os.Chmod(shutDir, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(shutDir, 0o700) })
+	open, writer, _ := watchedHomeFixture(t)
+	saveAt(t, writer, "/ws", time.Now(), "readable")
+	watched := watchedHomesOf([]config.WatchHome{
+		{Label: "shut", Path: shut},
+		{Label: watchedHomeLabel, Path: open},
+		{Label: "empty", Path: t.TempDir()},
+	})
+	host := newSessionHost(session.NewStore(t.TempDir()), watched, "/ws", "m", nil, "", nil, "", nil)
+	defer host.Close()
+
+	rows, unreadable := host.WatchedSessions()
+
+	if len(unreadable) != 1 || !strings.HasPrefix(unreadable[0].Error(), "could not read watched home shut: ") {
+		t.Errorf("unreadable = %v; want one notice naming the shut home", unreadable)
+	}
+	if len(rows) != 1 || rows[0].Home != watchedHomeLabel {
+		t.Errorf("rows = %+v; want the readable home's one session", rows)
+	}
+}
+
+// --resume resolves an id found in a watched home into watch mode, never into a record to resume:
+// a live one to its journal, a finished one to its record with no journal. An id the own home has
+// stays the own home's record.
+func TestWatchedHomeResumeResolvesAnID(t *testing.T) {
+	t.Parallel()
+	home, writer, watched := watchedHomeFixture(t)
+	finished := saveAt(t, writer, "/ws", time.Now().Add(-time.Hour), "bobs finished run")
+	running := saveAt(t, writer, "/ws", time.Now(), "bobs live run")
+	runElsewhere(t, writer, running, "bobs live run", "/ws", "")
+	own := session.NewStore(t.TempDir())
+	mine := saveAt(t, own, "/ws", time.Now(), "my own run")
+	dir := filepath.Join(home, sessionsDirName)
+
+	for _, tc := range []struct {
+		name, id, wantJournal string
+	}{
+		{"finished", finished, ""},
+		{"live", running, filepath.Join(dir, running+".events.jsonl")},
+	} {
+		rec, live, err := resolveResume(own, watched, tc.id, false, "/ws")
+		if err != nil || rec != nil || live == nil {
+			t.Fatalf("%s: resolveResume = %v, %v, %v; want a watch and no record", tc.name, rec, live, err)
+		}
+		if live.Home != watchedHomeLabel || live.JournalPath != tc.wantJournal ||
+			live.RecordPath != filepath.Join(dir, tc.id+".json") {
+			t.Errorf("%s: watch = %+v; want home %q, journal %q and the record path", tc.name, live, watchedHomeLabel, tc.wantJournal)
+		}
+	}
+	rec, live, err := resolveResume(own, watched, mine, false, "/ws")
+	if err != nil || live != nil || rec == nil || rec.Meta.ID != mine {
+		t.Errorf("own id: resolveResume = %v, %v, %v; want the own record", rec, live, err)
+	}
+	if _, _, err := resolveResume(own, watched, session.NewID(time.Now()), false, "/ws"); err == nil {
+		t.Error("an id no home has resolved; want the not-known error")
+	}
+}
+
+// watchedFileFacts is what a tree snapshot records of one file: nothing a reader may change.
+type watchedFileFacts struct {
+	size    int64
+	mode    os.FileMode
+	modTime time.Time
+}
+
+// watchedTreeSnapshot records every name under root with its size, mode and modification time.
+func watchedTreeSnapshot(t *testing.T, root string) map[string]watchedFileFacts {
+	t.Helper()
+	tree := map[string]watchedFileFacts{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		tree[path] = watchedFileFacts{size: info.Size(), mode: info.Mode(), modTime: info.ModTime()}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot %s: %v", root, err)
+	}
+	return tree
+}
+
+// Listing a watched home, resolving its ids, probing a live one until its owner finishes and
+// probing it free afterwards leaves the home's tree exactly as it was: the same names, sizes,
+// modes and modification times — nothing created, written, swept, truncated or locked into being.
+func TestWatchedHomeTreeIsUntouchedByListingWatchingAndFinishing(t *testing.T) {
+	t.Parallel()
+	home, writer, watched := watchedHomeFixture(t)
+	finished := saveAt(t, writer, "/ws", time.Now().Add(-time.Hour), "bobs finished run")
+	running := saveAt(t, writer, "/ws", time.Now(), "bobs live run")
+	release, err := writer.Hold(running)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	journal, err := writer.OpenJournal(running)
+	if err != nil {
+		t.Fatalf("OpenJournal: %v", err)
+	}
+	eventjson.NewJournal(journal, eventjson.JournalOptions{Session: running, Title: "bobs live run"}).Close()
+	if err := journal.Close(); err != nil {
+		t.Fatalf("close journal: %v", err)
+	}
+	host := newSessionHost(session.NewStore(t.TempDir()), watched, "/ws", "m", nil, "", nil, "", nil)
+	defer host.Close()
+	before := watchedTreeSnapshot(t, home)
+
+	rows, _ := host.WatchedSessions()
+	for _, id := range []string{finished, running} {
+		if _, _, err := resolveResume(host.store, watched, id, false, "/ws"); err != nil {
+			t.Fatalf("resolveResume %s: %v", id, err)
+		}
+	}
+	var probe func() (bool, error)
+	for _, row := range rows {
+		if row.Live != nil {
+			probe = row.Live.Probe
+		}
+	}
+	if probe == nil {
+		t.Fatal("setup: the running session was not listed live")
+	}
+	if held, err := probe(); err != nil || !held {
+		t.Fatalf("probe while running = %v, %v; want held", held, err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if held, err := probe(); err != nil || held {
+		t.Fatalf("probe after the finish = %v, %v; want free", held, err)
+	}
+	host.WatchedSessions()
+
+	if after := watchedTreeSnapshot(t, home); !reflect.DeepEqual(after, before) {
+		t.Errorf("the watched home's tree changed:\nbefore %v\nafter  %v", before, after)
 	}
 }

@@ -519,7 +519,13 @@ Unset, every mode stays owner-private (`0700`/`0600`). Scratch, snapshots and ev
 
 Depends on items 6, 13.
 
-## 15. Watched homes in /sessions and --resume
+## 15. Watched homes in /sessions and --resume — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): re-derived from the assumption that the no-journal watch lands in internal/tui/sessions.go — watch mode's read lives in internal/tui/watch.go (enterWatch, enterStartupWatch). A source with no journal path now reads the whole record once (readRecordOnly) and ends as finished. watchSourceOf replaces the two hand-built watchSource literals.
+NOTES (2026-10-17): session.ReadOnlyStore also offers JournalPath and RecordPath, which only build path names and open nothing. They sit beside List, Live and ProbeHold because a watch reads by path.
+NOTES (2026-10-17): newSessionHost and resolveResume take the watched homes as their second parameter, so the existing test call sites now pass nil. resolveResumeArg now returns (*Record, *LiveSession, error): it checks the watched homes after the own id and before the path fallback, and the own home wins on an id collision, in the browser too.
+NOTES (2026-10-17): watched rows obey the browser's workspace filter like every other row. A watched session recorded against a different workspace only shows under ^a.
+NOTES (2026-10-17): the re-list after a rename or delete keeps the watched rows the open listed (sessionBrowser.watchedList) and does not read them again. A watched live row can therefore show stale until /sessions is opened again.
 
 **What:**
 **Goal:** sessions under each `sessions.watch-homes` entry appear in `/sessions` mixed in by time, tagged `· <label>`.

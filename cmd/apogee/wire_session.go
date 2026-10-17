@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/run"
@@ -53,7 +54,10 @@ import (
 // model is mutex-guarded: Save runs on a Bubble Tea Cmd goroutine while SetModel is driven from the
 // Update loop, so the two can race. Live guards its own state.
 type sessionHost struct {
-	store     *session.Store
+	store *session.Store
+	// watched are the `sessions.watch-homes:` entries, in the configured order, each read only
+	// through its read-only store (WatchedSessions); empty watches the own home alone.
+	watched   []watchedHome
 	workspace string
 	// currency is the configured `currency:` label a Save writes onto Meta.Currency beside the
 	// usage it labels (ADR 0093 decision 6) whenever the active session has no label of its own
@@ -168,6 +172,97 @@ func (s *liveJournalSink) swap(journal domain.EventSink) {
 // sessionHost satisfies the persistence seam the TUI drives.
 var _ tui.SessionHost = (*sessionHost)(nil)
 
+// watchedHome is one `sessions.watch-homes:` entry as the binary reads it (ADR 0103 decision 7): the
+// label its rows are tagged with and a read-only view of its sessions directory — the only door to
+// a watched home this binary builds, so nothing there can be created, written, swept, truncated or
+// held.
+type watchedHome struct {
+	label string
+	store *session.ReadOnlyStore
+}
+
+// sessionsDirName is the directory under an apogee home its sessions live in (stateRoots.sessions).
+const sessionsDirName = "sessions"
+
+// watchedHomesOf builds the read-only views of the configured watched homes, in their order. It
+// touches no disk: a home is read only when the browser lists it or --resume looks in it.
+func watchedHomesOf(homes []config.WatchHome) []watchedHome {
+	out := make([]watchedHome, 0, len(homes))
+	for _, home := range homes {
+		out = append(out, watchedHome{
+			label: home.Label,
+			store: session.NewReadOnlyStore(filepath.Join(home.Path, sessionsDirName)),
+		})
+	}
+	return out
+}
+
+// sessions lists the home's sessions for the browser: every record it lists, newest first, each
+// marked live when its owner runs it now, then every live session with no record yet. A directory
+// that will not list — the record scan or the journal scan — is the home's error, and no rows.
+func (w watchedHome) sessions() ([]tui.WatchedSession, error) {
+	metas, err := w.store.List()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := w.store.Live()
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]tui.LiveSession, len(entries))
+	for _, entry := range entries {
+		if row, ok := liveSessionOf(w.store, entry, w.label); ok {
+			live[entry.ID] = row
+		}
+	}
+	rows := make([]tui.WatchedSession, 0, len(metas)+len(live))
+	for _, meta := range metas {
+		row := tui.WatchedSession{Home: w.label, Meta: meta, RecordPath: w.store.RecordPath(meta.ID)}
+		if running, isLive := live[meta.ID]; isLive {
+			row.Live = &running
+			delete(live, meta.ID)
+		}
+		rows = append(rows, row)
+	}
+	for _, entry := range entries {
+		if running, isLive := live[entry.ID]; isLive {
+			rows = append(rows, tui.WatchedSession{Home: w.label, RecordPath: running.RecordPath, Live: &running})
+		}
+	}
+	return rows, nil
+}
+
+// finished is the watch a --resume of id opens on a record this home lists, with no journal to
+// follow: the record painted, shown finished, never resumable. ok is false when the home lists no
+// such record, or will not list.
+func (w watchedHome) finished(id string) (tui.LiveSession, bool) {
+	metas, err := w.store.List()
+	if err != nil {
+		return tui.LiveSession{}, false
+	}
+	for _, meta := range metas {
+		if meta.ID == id {
+			return tui.LiveSession{
+				ID:         id,
+				Title:      meta.Title,
+				Workspace:  meta.Workspace,
+				At:         meta.UpdatedAt,
+				RecordPath: w.store.RecordPath(id),
+				Home:       w.label,
+			}, true
+		}
+	}
+	return tui.LiveSession{}, false
+}
+
+// sessionsReader is what the doors of a watch read a home's sessions through — the own home's
+// *session.Store and a watched home's *session.ReadOnlyStore alike: the hold probe and the
+// journal's name, neither of which holds, writes or creates anything.
+type sessionsReader interface {
+	ProbeHold(id string) (held bool, pid int, err error)
+	JournalPath(id string) string
+}
+
 // newSessionHost builds the host over a store and the run's wiring facts, and the session.Live it
 // runs on. When resumed is non-nil (a --resume/--continue start) Live begins ACTIVE on that record,
 // so subsequent Saves update its file in place — its id, CreatedAt, Title and ParentID carried over
@@ -176,15 +271,17 @@ var _ tui.SessionHost = (*sessionHost)(nil)
 // ago, so this is the one real hold of the run; one Live cannot take is re-attempted, and reported,
 // by the first Save. A fresh start instead PRE-MINTS the id its first Save will adopt, so the
 // session's scratch dir can exist before the first tool call, and holds nothing until its first
-// prompt (Prompt) or that Save.
+// prompt (Prompt) or that Save. watched are the configured watched homes the browser mixes in
+// (WatchedSessions); the host only ever reads them.
 // scratchRoot and scratchMoved wire the scratch seam, snapshotsRoot and journalMoved the undo-store
 // seam beside it ("" / nil disable either — see the fields); followScratch and followJournal are
 // Live's followers, in that order, and construction calls neither (the composition root seeds its
 // boot state from SessionScratchDir and SessionID).
-func newSessionHost(store *session.Store, workspace, model string, resumed *session.Record,
+func newSessionHost(store *session.Store, watched []watchedHome, workspace, model string,
+	resumed *session.Record,
 	scratchRoot string, scratchMoved func(dir string),
 	snapshotsRoot string, journalMoved func(id string)) *sessionHost {
-	h := &sessionHost{store: store, workspace: workspace, model: model, now: time.Now,
+	h := &sessionHost{store: store, watched: watched, workspace: workspace, model: model, now: time.Now,
 		scratchRoot: scratchRoot, scratchMoved: scratchMoved,
 		snapshotsRoot: snapshotsRoot, journalMoved: journalMoved}
 	if resumed != nil {
@@ -414,11 +511,32 @@ func (h *sessionHost) LiveSessions() ([]tui.LiveSession, error) {
 		if h.live.Holds(entry.ID) {
 			continue
 		}
-		if row, ok := liveSessionOf(h.store, entry); ok {
+		if row, ok := liveSessionOf(h.store, entry, ""); ok {
 			out = append(out, row)
 		}
 	}
 	return out, nil
+}
+
+// WatchedSessions lists the sessions of every watched home, in the configured order, for the
+// /sessions browser to mix in (ADR 0103 decision 7). A home whose sessions directory will not read
+// adds one error naming its label to unreadable and no rows; a home with no sessions directory
+// lists nothing and is no error.
+//
+// It only reads, through each home's read-only store: it creates, writes, sweeps, truncates and
+// holds nothing there.
+func (h *sessionHost) WatchedSessions() ([]tui.WatchedSession, []error) {
+	var rows []tui.WatchedSession
+	var unreadable []error
+	for _, home := range h.watched {
+		homeRows, err := home.sessions()
+		if err != nil {
+			unreadable = append(unreadable, fmt.Errorf("could not read watched home %s: %w", home.label, err))
+			continue
+		}
+		rows = append(rows, homeRows...)
+	}
+	return rows, unreadable
 }
 
 // maxJournalFrameBytes bounds the read of a journal's opening frame: the frame carries a title, a
@@ -429,8 +547,9 @@ const maxJournalFrameBytes = 64 << 10
 // names, the record path a watch paints from — beside the journal, where the owner's first Save
 // puts it — and a probe over the store's read-only ProbeHold. A journal whose first line does not
 // decode as a frame — torn, foreign, too long — leaves a session with a record its record's own
-// facts; one with no record yet has nothing to show, and is skipped (ok false).
-func liveSessionOf(store *session.Store, entry session.LiveEntry) (tui.LiveSession, bool) {
+// facts; one with no record yet has nothing to show, and is skipped (ok false). home is the label of
+// the watched home the session is in, "" for the own home's.
+func liveSessionOf(store sessionsReader, entry session.LiveEntry, home string) (tui.LiveSession, bool) {
 	frame, at, err := readJournalFrame(entry.JournalPath)
 	if err != nil && !entry.HasRecord {
 		return tui.LiveSession{}, false
@@ -443,6 +562,7 @@ func liveSessionOf(store *session.Store, entry session.LiveEntry) (tui.LiveSessi
 		At:          at,
 		RecordPath:  filepath.Join(filepath.Dir(entry.JournalPath), id+".json"),
 		JournalPath: entry.JournalPath,
+		Home:        home,
 		Probe: func() (bool, error) {
 			held, _, err := store.ProbeHold(id)
 			return held, err
@@ -666,22 +786,19 @@ func (h *sessionHost) ActiveID() string { return h.live.ActiveID() }
 // A --resume id another instance is running with an Event journal resolves to the live session to
 // watch instead (resolveLive, ADR 0103 decision 5), and the record is nil: the start is a fresh one
 // that opens watching. --continue never watches — it resumes this workspace's own newest record, and
-// one another apogee holds is refused (resolveContinue).
+// one another apogee holds is refused (resolveContinue). A --resume id this home does not have is
+// looked for in the watched homes too (resolveResumeArg), and opens watching there.
 func resolveResume(
-	store *session.Store, resume string, continueSession bool, workspace string,
+	store *session.Store, watched []watchedHome, resume string, continueSession bool, workspace string,
 ) (*session.Record, *tui.LiveSession, error) {
 	switch {
 	case resume != "" && continueSession:
 		return nil, nil, errors.New("apogee: --resume and --continue are mutually exclusive; pass one or the other")
 	case resume != "":
-		if live, isLive := resolveLive(store, resume); isLive {
+		if live, isLive := resolveLive(store, resume, ""); isLive {
 			return nil, &live, nil
 		}
-		rec, err := resolveResumeArg(store, resume)
-		if err != nil {
-			return nil, nil, err
-		}
-		return &rec, nil, nil
+		return resolveResumeArg(store, watched, resume)
 	case continueSession:
 		rec, err := resolveContinue(store, workspace)
 		if err != nil {
@@ -702,8 +819,9 @@ func resolveResume(
 // will not read.
 //
 // It only reads, as a watcher must: the probe never holds the lock, and the journal and record are
-// only stat'ed here.
-func resolveLive(store *session.Store, id string) (tui.LiveSession, bool) {
+// only stat'ed here. store is the own home's store or a watched home's read-only one, whose label
+// is home ("" for the own home).
+func resolveLive(store sessionsReader, id, home string) (tui.LiveSession, bool) {
 	held, pid, err := store.ProbeHold(id)
 	if err != nil || !held {
 		return tui.LiveSession{}, false
@@ -718,7 +836,25 @@ func resolveLive(store *session.Store, id string) (tui.LiveSession, bool) {
 		PID:         pid,
 		JournalPath: journal,
 		HasRecord:   recordErr == nil,
-	})
+	}, home)
+}
+
+// resolveWatched reports the session of a watched home a --resume id names, from the first home in
+// the configured order that has it: live — held with a journal, as resolveLive finds it — or else
+// finished, a record the home lists, which the watch paints with no journal to follow (JournalPath
+// ""). Either carries its home's label, so it is never resumable. A value that is no valid id —
+// a path — matches nothing in any home: the probe refuses it and no listed record declares it. It
+// only reads.
+func resolveWatched(homes []watchedHome, id string) (tui.LiveSession, bool) {
+	for _, home := range homes {
+		if live, isLive := resolveLive(home.store, id, home.label); isLive {
+			return live, true
+		}
+		if finished, isFinished := home.finished(id); isFinished {
+			return finished, true
+		}
+	}
+	return tui.LiveSession{}, false
 }
 
 // resolveResumeArg resolves a --resume value: a store id first (the common case — the id shown in
@@ -735,20 +871,29 @@ func resolveLive(store *session.Store, id string) (tui.LiveSession, bool) {
 // A record resolved by id is probed for its live-instance hold (probeHold): one another apogee is
 // running is refused with the friendly line rather than opened twice. A path-resumed record is not —
 // its re-minted id is this run's own, held by no one.
-func resolveResumeArg(store *session.Store, arg string) (session.Record, error) {
+//
+// An id this store has no record of is looked for in the watched homes before it is read as a path
+// (resolveWatched): one found there resolves to the watch it opens (the record nil), never to a
+// record to resume — a watched home is never resumable.
+func resolveResumeArg(
+	store *session.Store, watched []watchedHome, arg string,
+) (*session.Record, *tui.LiveSession, error) {
 	if rec, err := store.Load(arg); err == nil {
 		if err := probeHold(store, rec.Meta.ID); err != nil {
-			return session.Record{}, err
+			return nil, nil, err
 		}
-		return rec, nil
+		return &rec, nil, nil
+	}
+	if live, isWatched := resolveWatched(watched, arg); isWatched {
+		return nil, &live, nil
 	}
 	rec, err := store.LoadPath(arg)
 	if err != nil {
-		return session.Record{}, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"apogee: --resume %q: not a known session id (see /sessions) nor a readable session file", arg)
 	}
 	rec.Meta.ID = session.NewID(time.Now())
-	return rec, nil
+	return &rec, nil, nil
 }
 
 // resolveContinue resumes the most recent session recorded for the resolved workspace — the

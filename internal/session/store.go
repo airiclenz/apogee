@@ -743,6 +743,42 @@ func (s *Store) Live() ([]LiveEntry, error) {
 	return live, nil
 }
 
+// ReadOnlyStore is a read-only view of a sessions directory this process does not own — a
+// `sessions.watch-homes:` entry's (ADR 0103 decision 7). It answers List, Live and ProbeHold, and
+// names the record and journal paths a watch reads by, and nothing else: no Save, Hold, Rename,
+// Delete, Prune or journal sweep exists on it, so nothing in a watched home can be created,
+// written, swept, truncated or held through it — by type, not by convention. It creates nothing
+// either, not even the directory: a home with no sessions directory lists as empty.
+type ReadOnlyStore struct {
+	store *Store
+}
+
+// NewReadOnlyStore returns a read-only view of the sessions directory dir.
+func NewReadOnlyStore(dir string) *ReadOnlyStore {
+	return &ReadOnlyStore{store: NewStore(dir)}
+}
+
+// List is [Store.List] over the viewed directory: every record's Meta, newest first, a file that
+// will not decode skipped, a missing directory an empty list.
+func (r *ReadOnlyStore) List() ([]Meta, error) { return r.store.List() }
+
+// Live is [Store.Live] over the viewed directory: the sessions running there now, found by probe.
+func (r *ReadOnlyStore) Live() ([]LiveEntry, error) { return r.store.Live() }
+
+// ProbeHold is [Store.ProbeHold] over the viewed directory: it opens the lock file read-only and
+// never creates, writes or truncates it.
+func (r *ReadOnlyStore) ProbeHold(id string) (held bool, pid int, err error) {
+	return r.store.ProbeHold(id)
+}
+
+// JournalPath names session id's Event journal in the viewed directory, as [Store.JournalPath]
+// does. It is a name only, meant for ids List or Live handed out.
+func (r *ReadOnlyStore) JournalPath(id string) string { return r.store.JournalPath(id) }
+
+// RecordPath names session id's record in the viewed directory, <dir>/<id>.json — the path a watch
+// reads it by. It is a name only, meant for ids List or Live handed out.
+func (r *ReadOnlyStore) RecordPath(id string) string { return filepath.Join(r.store.dir, id+".json") }
+
 // SweepJournals removes every Event journal whose session is no longer running — the startup
 // journal sweep, the retention sweep's sibling. An owner removes its own journal at release
 // (RemoveJournal); a journal still here with its lock free is an orphan of a run that crashed or

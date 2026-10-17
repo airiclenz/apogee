@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -250,26 +251,56 @@ func (m Model) enterWatch(src watchSource) (Model, tea.Cmd) {
 	m.transcript.paints = newPaintCache()
 	m.clearWatchView()
 	m.forgetPaintedFrame()
+	if src.journalPath == "" {
+		gen := m.watch.gen
+		return m, func() tea.Msg { return readRecordOnly(src, gen) }
+	}
 	read := m.readJournalCmd()
 	return m, read
 }
 
+// watchSourceOf is the source a watch of live follows: its record, its journal, its probe, and a
+// session of a watched home marked foreign (ADR 0103 decision 7). title is what the box shows until
+// the journal names one.
+func watchSourceOf(live LiveSession, title string) watchSource {
+	return watchSource{
+		id:          live.ID,
+		recordPath:  live.RecordPath,
+		journalPath: live.JournalPath,
+		title:       title,
+		isForeign:   live.Home != "",
+		probe:       live.Probe,
+	}
+}
+
+// readRecordOnly is the one read of a watch with no journal — a finished session of a watched home
+// (ADR 0103 decision 7): the whole record, painted from its path as an opening frame claiming every
+// entry would paint it, and then the run's end, so the follow stops at once with the "finished"
+// banner and nothing is ever polled or probed. A record that will not read paints the watch's
+// unreadable note in its place.
+func readRecordOnly(src watchSource, gen int) watchBatchMsg {
+	entries, err := recordHead(src.recordPath, math.MaxInt)
+	return watchBatchMsg{
+		gen:         gen,
+		isOwnerGone: true,
+		items: []watchItem{
+			{start: &watchStart{entries: entries, err: err}},
+			{isFinished: true},
+		},
+	}
+}
+
 // enterStartupWatch is the --resume half of entering a watch: newModel calls it last, over the fresh
 // session it has just built, when the binary resolved --resume to a session another instance is
-// running (Options.Watch). The follower's first read is kept for Init to send. The box names the
+// running, or to one of a watched home (Options.Watch). The follower's first read is kept for Init
+// to send. The box names the
 // journal frame's title, else the session id — the record that might name one is the owner's, and
 // this run does not load it. A nil live, or a start the watch refuses, leaves the fresh session.
 func (m *Model) enterStartupWatch(live *LiveSession) {
 	if live == nil {
 		return
 	}
-	next, read := m.enterWatch(watchSource{
-		id:          live.ID,
-		recordPath:  live.RecordPath,
-		journalPath: live.JournalPath,
-		title:       cmp.Or(live.Title, live.ID),
-		probe:       live.Probe,
-	})
+	next, read := m.enterWatch(watchSourceOf(*live, cmp.Or(live.Title, live.ID)))
 	*m = next
 	m.startupWatchRead = read
 }

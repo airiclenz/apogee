@@ -44,6 +44,13 @@ type sessionBrowser struct {
 	// loading it (acceptBrowser). It is replaced whole at every list and never written into, so the
 	// value-copied Model shares it safely.
 	live map[string]LiveSession
+	// watchedList is what the open read of the watched homes listed (SessionHost.WatchedSessions),
+	// kept whole so the re-list a rename or delete carries — which reads the own home only — can
+	// fold it in again; watched is that list's rows by id, as the merge kept them. A watched row
+	// wears its home's `· <label>` tag, ⏎ on it watches it, and ^r and ^d refuse it. Both are
+	// replaced whole and never written into, like live.
+	watchedList []WatchedSession
+	watched     map[string]WatchedSession
 	// renameBuf is the inline title edit in progress: a [lineEditor] behind a [copyOnWriteField] like
 	// the filter beside it, built on the title the armed row holds (sessionRenameKey's ctrl+r) and
 	// zeroed again the moment the edit commits or is abandoned. It is the browser's OWN field and no
@@ -84,6 +91,10 @@ const (
 
 // liveRowCell is the cell a row of a session another instance is running wears (withLiveCell).
 const liveRowCell = "● live"
+
+// watchedHomeReadOnlyFormat is the note ^r and ^d raise on a row of a watched home, filled with the
+// session id and the home's label: nothing in a watched home is ever written.
+const watchedHomeReadOnlyFormat = "session %s is in watched home %s — read-only"
 
 // liveRowColumn is the column liveRowCell sits in: past the title, time, count and spend cells, so
 // it lines up down the pane whether or not a row reported a spend.
@@ -135,12 +146,17 @@ const progressSavedNote = "this record was saved while a delegation was still ru
 // sessionListMsg carries the result of an off-loop Sessions.List() back to the Update loop: the
 // metas to render (newest first) or the error that aborts the open (foldSessionList), and beside
 // them the sessions other instances are running (Sessions.LiveSessions) or the error that kept them
-// from being listed — which costs the pane its live rows, never the open.
+// from being listed — which costs the pane its live rows, never the open. hasWatched says the read
+// asked the watched homes too (the open, listSessions), and watched and unreadable are their
+// answer; a re-list leaves it false, and the fold keeps the watched rows the open listed.
 type sessionListMsg struct {
-	metas   []session.Meta
-	live    []LiveSession
-	err     error
-	liveErr error
+	metas      []session.Meta
+	live       []LiveSession
+	err        error
+	liveErr    error
+	hasWatched bool
+	watched    []WatchedSession
+	unreadable []error
 }
 
 // readSessionList reads what the browser lists — the stored sessions and the live ones — off the
@@ -184,11 +200,18 @@ func (m Model) openSessionBrowser() (tea.Model, tea.Cmd) {
 
 // listSessions builds the Cmd that reads Sessions.List() off the Update loop and reports it as a
 // sessionListMsg. It captures the host by value so the closure holds no pointer into the
-// value-copied Model.
+// value-copied Model. It is the one read that asks the watched homes as well
+// (Sessions.WatchedSessions): the re-list a rename or delete carries reads the own home only.
 func (m Model) listSessions() tea.Cmd {
 	sessions := m.sessions
 	return func() tea.Msg {
-		return readSessionList(sessions)
+		msg := readSessionList(sessions)
+		if msg.err != nil {
+			return msg
+		}
+		msg.watched, msg.unreadable = sessions.WatchedSessions()
+		msg.hasWatched = true
+		return msg
 	}
 }
 
@@ -207,7 +230,15 @@ func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
 	if msg.liveErr != nil {
 		m.transcript.addNote("could not list live sessions: " + msg.liveErr.Error())
 	}
+	for _, err := range msg.unreadable {
+		m.transcript.addNote(err.Error())
+	}
+	watchedList := m.sessionBrowser.watchedList
+	if msg.hasWatched {
+		watchedList = msg.watched
+	}
 	metas, live := mergeLive(msg.metas, msg.live)
+	metas, live, watched := mergeWatched(metas, live, watchedList)
 	if len(metas) == 0 {
 		m.sessionBrowser = sessionBrowser{}
 		m.transcript.addNote("no saved sessions")
@@ -215,6 +246,8 @@ func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
 	}
 	m.sessionBrowser.metas = metas
 	m.sessionBrowser.live = live
+	m.sessionBrowser.watchedList = watchedList
+	m.sessionBrowser.watched = watched
 	m.sessionBrowser.open = true
 	m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
 	return nil
@@ -242,19 +275,69 @@ func mergeLive(metas []session.Meta, live []LiveSession) ([]session.Meta, map[st
 			continue
 		}
 		listed[l.ID] = true
-		at := slices.IndexFunc(merged, func(meta session.Meta) bool { return meta.UpdatedAt.Before(l.At) })
-		if at < 0 {
-			at = len(merged)
-		}
-		merged = slices.Insert(merged, at, session.Meta{
-			ID:        l.ID,
-			Title:     l.Title,
-			CreatedAt: l.At,
-			UpdatedAt: l.At,
-			Workspace: l.Workspace,
-		})
+		merged = insertByTime(merged, liveMeta(l))
 	}
 	return merged, byID
+}
+
+// mergeWatched folds the watched homes' sessions into the merged list, each placed by its time in
+// the newest-first order — a record's UpdatedAt, a record-less live run's journal frame time — and
+// a live one added to the live set, so its row wears `● live` and ⏎ watches it as it runs. A
+// session whose id the list holds already is left out: the own home's row is the one its verbs
+// reach. It returns the merged metas, the live set — mergeLive's own, written into before the
+// browser stores it — and the watched rows it kept, by id.
+func mergeWatched(
+	metas []session.Meta, live map[string]LiveSession, watched []WatchedSession,
+) ([]session.Meta, map[string]LiveSession, map[string]WatchedSession) {
+	if len(watched) == 0 {
+		return metas, live, nil
+	}
+	listed := make(map[string]bool, len(metas))
+	for _, meta := range metas {
+		listed[meta.ID] = true
+	}
+	merged := slices.Clone(metas)
+	byID := make(map[string]WatchedSession, len(watched))
+	for _, w := range watched {
+		meta := w.Meta
+		if meta.ID == "" && w.Live != nil {
+			meta = liveMeta(*w.Live)
+		}
+		if meta.ID == "" || listed[meta.ID] {
+			continue
+		}
+		listed[meta.ID] = true
+		byID[meta.ID] = w
+		merged = insertByTime(merged, meta)
+		if w.Live == nil {
+			continue
+		}
+		if live == nil {
+			live = map[string]LiveSession{}
+		}
+		live[meta.ID] = *w.Live
+	}
+	return merged, live, byID
+}
+
+// liveMeta is the row a live session with no record yet lists under: its journal frame's facts.
+func liveMeta(l LiveSession) session.Meta {
+	return session.Meta{
+		ID:        l.ID,
+		Title:     l.Title,
+		CreatedAt: l.At,
+		UpdatedAt: l.At,
+		Workspace: l.Workspace,
+	}
+}
+
+// insertByTime inserts meta into the newest-first metas ahead of the first one older than it.
+func insertByTime(metas []session.Meta, meta session.Meta) []session.Meta {
+	at := slices.IndexFunc(metas, func(listed session.Meta) bool { return listed.UpdatedAt.Before(meta.UpdatedAt) })
+	if at < 0 {
+		at = len(metas)
+	}
+	return slices.Insert(metas, at, meta)
 }
 
 // visible returns the metas the current view shows: all of them when allWorkspaces is set, else
@@ -333,6 +416,9 @@ func (b sessionBrowser) unfilteredRows(th theme, workspace string, now time.Time
 	rows := make([]popupRow, 0, len(visible))
 	for _, meta := range visible {
 		row := sessionRowCells(th, meta, b.parentTitle(meta), workspace, b.allWorkspaces, now)
+		if w, isWatched := b.watched[meta.ID]; isWatched {
+			row[0] += " · " + stripEscapes(w.Home)
+		}
 		if _, isLive := b.live[meta.ID]; isLive {
 			row = withLiveCell(row)
 		}
@@ -455,16 +541,23 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 //
 // A live row — a session another instance is running — is watched instead (watchLive), and it
 // branches off BEFORE that door: a watch loads nothing and leaves the watcher's own session where
-// it is, so it takes no load hold and asks nothing about the workflows that session runs.
+// it is, so it takes no load hold and asks nothing about the workflows that session runs. A
+// finished row of a watched home is watched too — its record painted read-only, the watch shown
+// finished at once, and resume refused (watchFinished) — since nothing in a watched home is ever
+// resumed.
 func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 	meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows)
 	if !ok {
 		return m, nil
 	}
 	live, isLive := m.sessionBrowser.live[meta.ID]
+	watched, isWatched := m.sessionBrowser.watched[meta.ID]
 	m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
-	if isLive {
+	switch {
+	case isLive:
 		return m.watchLive(meta, live)
+	case isWatched:
+		return m.watchFinished(meta, watched)
 	}
 	return m.openStoredSession(meta.ID)
 }
@@ -472,15 +565,18 @@ func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 // watchLive enters watch mode (watch.go) on the live session meta's row lists. The title the box
 // shows until the journal names one is the journal frame's, else the record's.
 func (m Model) watchLive(meta session.Meta, live LiveSession) (tea.Model, tea.Cmd) {
-	title := cmp.Or(live.Title, meta.Title)
-	src := watchSource{
-		id:          live.ID,
-		recordPath:  live.RecordPath,
-		journalPath: live.JournalPath,
-		title:       title,
-		probe:       live.Probe,
-	}
-	return m.enterWatch(src)
+	return m.enterWatch(watchSourceOf(live, cmp.Or(live.Title, meta.Title)))
+}
+
+// watchFinished enters watch mode on a finished session of a watched home: no journal to follow,
+// so the watch paints the record once and shows it finished (readRecordOnly), a foreign source
+// whose ⏎ resumes nothing.
+func (m Model) watchFinished(meta session.Meta, watched WatchedSession) (tea.Model, tea.Cmd) {
+	return m.enterWatch(watchSourceOf(LiveSession{
+		ID:         meta.ID,
+		RecordPath: watched.RecordPath,
+		Home:       watched.Home,
+	}, meta.Title))
 }
 
 // openStoredSession is the normal door into stored session id, shared by the browser's ⏎ and a
@@ -526,11 +622,11 @@ func (m Model) sessionBrowserVerb(msg tea.KeyPressMsg, rows []popupRow) (tea.Mod
 		m.sessionBrowser.allWorkspaces = !m.sessionBrowser.allWorkspaces
 		m.sessionBrowser.selected = 0
 	case "ctrl+d":
-		if _, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok {
+		if meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok && !m.refuseWatchedVerb(meta) {
 			m.sessionBrowser.confirming = true // arm the inline "delete? y/n" on the selected row
 		}
 	case "ctrl+r":
-		if meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok {
+		if meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok && !m.refuseWatchedVerb(meta) {
 			m.sessionBrowser.renaming = true
 			// The seed is a stored title, so it is escape-stripped on the way INTO the buffer: the
 			// rename row paints the buffer verbatim, and the commit strips anyway — seeding it clean
@@ -540,6 +636,18 @@ func (m Model) sessionBrowserVerb(msg tea.KeyPressMsg, rows []popupRow) (tea.Mod
 		}
 	}
 	return m, nil
+}
+
+// refuseWatchedVerb answers ^r or ^d on a row of a watched home: it notes the refusal and reports
+// true, so the verb is never armed and nothing reaches the host. A row of the own home is not
+// refused.
+func (m *Model) refuseWatchedVerb(meta session.Meta) bool {
+	watched, isWatched := m.sessionBrowser.watched[meta.ID]
+	if !isWatched {
+		return false
+	}
+	m.transcript.addNote(fmt.Sprintf(watchedHomeReadOnlyFormat, meta.ID, stripEscapes(watched.Home)))
+	return true
 }
 
 // sessionBrowserPaste lands a bracketed paste where the browser's keys would land it (listPaste):

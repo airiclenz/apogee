@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -3021,5 +3024,305 @@ func TestSessionBrowserLiveListFailureKeepsTheStoredRows(t *testing.T) {
 	}
 	if strings.Contains(plain(m.View()), liveRowCell) {
 		t.Error("a row is marked live although no live session was listed")
+	}
+}
+
+// watchedHomeLabel is the label the watched-home fixtures are configured under.
+const watchedHomeLabel = "bob"
+
+// watchedFinished is a finished session of the watched home: f's record, listed with its own facts.
+func watchedFinished(f *watchFixture, title, workspace string, at time.Time) WatchedSession {
+	return WatchedSession{
+		Home:       watchedHomeLabel,
+		Meta:       session.Meta{ID: f.src.id, Title: title, Workspace: workspace, UpdatedAt: at, UserMsgs: 1},
+		RecordPath: f.src.recordPath,
+	}
+}
+
+// watchedLive is a live, record-less session of the watched home: f's journal, listed from its frame.
+func watchedLive(f *watchFixture, title, workspace string, at time.Time) WatchedSession {
+	live := liveRowWith(f, title, workspace, at)
+	live.Home = watchedHomeLabel
+	return WatchedSession{Home: watchedHomeLabel, RecordPath: live.RecordPath, Live: &live}
+}
+
+// /sessions mixes the watched homes' sessions in by time, each tagged `· <label>` — a live one with
+// its `● live` cell too — and leaves out a watched session whose id the own home lists already.
+func TestSessionsBrowserListsWatchedRowsTagged(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	finished := newWatchFixture(t, "bobs finished run", recordHeadEntries(), 3)
+	running := newWatchFixture(t, "bobs live run", nil, 0)
+	running.src.id = "20261017T130000Z-0000aaaa"
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-mine", "my own run", "/ws/a", now.Add(-2*time.Minute), 0, nil)
+	host.watched = []WatchedSession{
+		watchedFinished(finished, "bobs finished run", "/ws/a", now.Add(-time.Minute)),
+		watchedLive(running, "bobs live run", "/ws/a", now),
+		{Home: watchedHomeLabel, Meta: session.Meta{ID: "sess-mine", Title: "a copy", Workspace: "/ws/a"}},
+	}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+
+	m = openBrowser(t, m)
+
+	var ids []string
+	for _, meta := range m.sessionBrowserView().metas {
+		ids = append(ids, meta.ID)
+	}
+	if want := []string{running.src.id, finished.src.id, "sess-mine"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("browser rows = %v; want %v (mixed in by time, the own id listed once)", ids, want)
+	}
+	painted := plain(m.View())
+	for title, want := range map[string]struct{ isTagged, isLive bool }{
+		"bobs finished run": {isTagged: true},
+		"bobs live run":     {isTagged: true, isLive: true},
+		"my own run":        {},
+	} {
+		line := paintedLine(painted, title)
+		if line == "" {
+			t.Fatalf("no painted row names %q:\n%s", title, painted)
+		}
+		if got := strings.Contains(line, title+" · "+watchedHomeLabel); got != want.isTagged {
+			t.Errorf("row %q tagged = %v; want %v: %q", title, got, want.isTagged, line)
+		}
+		if got := strings.Contains(line, liveRowCell); got != want.isLive {
+			t.Errorf("row %q live = %v; want %v: %q", title, got, want.isLive, line)
+		}
+	}
+}
+
+// ⏎ on a live row of a watched home watches it as it runs, as a session of a watched home: the
+// watch is foreign, so a finish never offers ⏎ resume.
+func TestSessionsBrowserWatchesAWatchedLiveRow(t *testing.T) {
+	t.Parallel()
+	running := newWatchFixture(t, "bobs live run", nil, 0)
+	host := &fakeSessionHost{watched: []WatchedSession{watchedLive(running, "bobs live run", "/ws/a", time.Now())}}
+	m := openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, "/ws/a"))
+
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if !m.watch.isActive || !m.watch.source.isForeign {
+		t.Fatalf("watch active %v, foreign %v; want a foreign watch", m.watch.isActive, m.watch.source.isForeign)
+	}
+	if m.watch.source.journalPath != running.src.journalPath {
+		t.Errorf("watch journal = %q; want the live row's %q", m.watch.source.journalPath, running.src.journalPath)
+	}
+	if cmd == nil {
+		t.Fatal("entering the watch scheduled no journal read")
+	}
+}
+
+// ⏎ on a finished row of a watched home opens it read-only: a watch with no journal that paints the
+// whole record, shows the "finished" banner at once, and refuses ⏎ — nothing is loaded or restored.
+func TestSessionsBrowserPaintsAWatchedFinishedRowReadOnly(t *testing.T) {
+	t.Parallel()
+	finished := newWatchFixture(t, "bobs finished run", recordHeadEntries(), 3)
+	host := &fakeSessionHost{watched: []WatchedSession{
+		watchedFinished(finished, "bobs finished run", "/ws/a", time.Now()),
+	}}
+	eng := watchEngine()
+	m := openBrowser(t, newBrowserModel(t, eng, host, "/ws/a"))
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	if !m.watch.isActive || cmd == nil {
+		t.Fatal("⏎ on a finished watched row did not enter a watch")
+	}
+	m = step(t, m, cmd())
+
+	if m.watch.source.journalPath != "" || !m.watch.source.isForeign {
+		t.Errorf("watch source = %+v; want a foreign source with no journal", m.watch.source)
+	}
+	if got, want := entryTexts(m, entryUser), []string{"first ask", "saved after the journal was born"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("user entries = %q; want the whole record %q", got, want)
+	}
+	if want := fmt.Sprintf(watchEndedLegendFormat, "bobs finished run", watchFinishedBanner); m.legend() != want {
+		t.Errorf("legend = %q; want %q", m.legend(), want)
+	}
+	m, cmd = stepCmd(t, m, keyEnter())
+	if !m.watch.isActive || m.flash != watchRefusedFlash {
+		t.Errorf("active %v, flash %q; want ⏎ refused with the watch kept", m.watch.isActive, m.flash)
+	}
+	if cmd != nil {
+		if _, isLoad := cmd().(sessionLoadedMsg); isLoad {
+			t.Error("⏎ on a finished watched session loaded it")
+		}
+	}
+	if len(eng.restoreCalls) != 0 {
+		t.Errorf("RestoreSession calls = %d; want none", len(eng.restoreCalls))
+	}
+}
+
+// ^d and ^r on a row of a watched home are refused with the read-only line, armed never, and reach
+// no host verb.
+func TestSessionsBrowserWatchedRowRefusesDeleteAndRename(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		chord rune
+	}{
+		{"delete", 'd'},
+		{"rename", 'r'},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			finished := newWatchFixture(t, "bobs finished run", recordHeadEntries(), 3)
+			host := &fakeSessionHost{watched: []WatchedSession{
+				watchedFinished(finished, "bobs finished run", "/ws/a", time.Now()),
+			}}
+			m := openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, "/ws/a"))
+
+			m, cmd := stepCmd(t, m, keyCtrl(tc.chord))
+
+			want := "session " + watchSessionID + " is in watched home " + watchedHomeLabel + " — read-only"
+			if !hasEntry(m, entryNote, want) {
+				t.Errorf("the refusal was not noted; want %q in %v", want, noteTexts(m))
+			}
+			if m.sessionBrowser.confirming || m.sessionBrowser.renaming {
+				t.Error("the verb was armed on a watched row")
+			}
+			if cmd != nil {
+				t.Error("the refused verb dispatched a Cmd")
+			}
+			if len(host.renames) != 0 || !m.sessionBrowser.open {
+				t.Errorf("renames %v, browser open %v; want no host verb and the pane kept", host.renames, m.sessionBrowser.open)
+			}
+		})
+	}
+}
+
+// The re-list a rename carries reads the own home only — the watched homes are asked on open, never
+// on the record-write goroutine — and the watched rows the open listed stay on the pane.
+func TestSessionsBrowserRelistKeepsWatchedRowsWithoutRereading(t *testing.T) {
+	t.Parallel()
+	finished := newWatchFixture(t, "bobs finished run", recordHeadEntries(), 3)
+	host := &fakeSessionHost{watched: []WatchedSession{
+		watchedFinished(finished, "bobs finished run", "/ws/a", time.Now().Add(-time.Hour)),
+	}}
+	storeMeta(host, "sess-mine", "my own run", "/ws/a", time.Now(), 0, nil)
+	m := openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, "/ws/a"))
+
+	m = step(t, m, keyCtrl('r'))
+	m = step(t, m, keyRune('!'))
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd == nil {
+		t.Fatal("the rename dispatched no record write")
+	}
+	m = runWrites(t, m, cmd)
+
+	if host.watchedReads != 1 {
+		t.Errorf("WatchedSessions reads = %d; want the open's one only", host.watchedReads)
+	}
+	if _, isWatched := m.sessionBrowser.watched[watchSessionID]; !isWatched || len(m.sessionBrowserView().metas) != 2 {
+		t.Errorf("rows after the re-list = %v; want the own row and the watched one", m.sessionBrowserView().metas)
+	}
+}
+
+// A watched home that will not read costs the pane its rows and shows one notice, not an error: the
+// browser still opens over the own home.
+func TestSessionsBrowserUnreadableWatchedHomeIsOneNotice(t *testing.T) {
+	t.Parallel()
+	notice := "could not read watched home " + watchedHomeLabel + ": permission denied"
+	host := &fakeSessionHost{unreadable: []error{errors.New(notice)}}
+	storeMeta(host, "sess-mine", "my own run", "/ws/a", time.Now(), 0, nil)
+
+	m := openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, "/ws/a"))
+
+	if !m.sessionBrowser.open || len(m.sessionBrowserView().metas) != 1 {
+		t.Fatalf("browser open = %v over %d rows; want it open over the own row", m.sessionBrowser.open, len(m.sessionBrowserView().metas))
+	}
+	count := 0
+	for _, text := range noteTexts(m) {
+		if text == notice {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("notice %q noted %d times; want once in %v", notice, count, noteTexts(m))
+	}
+}
+
+// A --resume start resolved to a session of a watched home (Options.Watch with Home set) opens a
+// foreign watch; with no journal it paints the record and shows it finished.
+func TestSessionsStartupWatchOfAWatchedFinishedSession(t *testing.T) {
+	t.Parallel()
+	finished := newWatchFixture(t, "bobs finished run", recordHeadEntries(), 3)
+	opts := testOpts
+	opts.Watch = &LiveSession{
+		ID:         finished.src.id,
+		Title:      "bobs finished run",
+		RecordPath: finished.src.recordPath,
+		Home:       watchedHomeLabel,
+	}
+
+	m := newTestModelEng(t, watchEngine(), opts)
+	if !m.watch.isActive || m.startupWatchRead == nil || !m.watch.source.isForeign {
+		t.Fatal("newModel did not open a foreign watch of the watched session")
+	}
+	m = step(t, m, m.startupWatchRead())
+
+	if want := fmt.Sprintf(watchEndedLegendFormat, "bobs finished run", watchFinishedBanner); m.watchLegend() != want {
+		t.Errorf("legend = %q; want %q", m.watchLegend(), want)
+	}
+	if got := entryTexts(m, entryUser); !slices.Contains(got, "first ask") {
+		t.Errorf("user entries = %q; want the record painted", got)
+	}
+}
+
+// fileFacts is what a tree snapshot records of one file: nothing a reader may change.
+type fileFacts struct {
+	size    int64
+	mode    os.FileMode
+	modTime time.Time
+}
+
+// treeSnapshot records every name under root with its size, mode and modification time.
+func treeSnapshot(t *testing.T, root string) map[string]fileFacts {
+	t.Helper()
+	tree := map[string]fileFacts{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		tree[path] = fileFacts{size: info.Size(), mode: info.Mode(), modTime: info.ModTime()}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("snapshot %s: %v", root, err)
+	}
+	return tree
+}
+
+// Watching a watched home's sessions — a finished one painted from its record, a live one followed
+// through its journal until its owner finishes — leaves the home's tree exactly as it was: the same
+// names, sizes, modes and modification times.
+func TestSessionsWatchedHomeTreeIsUntouchedByWatching(t *testing.T) {
+	t.Parallel()
+	running, probe := probedFixture(t)
+	running.finish()
+	home := filepath.Dir(running.src.recordPath)
+	before := treeSnapshot(t, home)
+	live := watchedLive(running, "watched", "/ws/a", time.Now())
+	live.Live.Probe = probe.probe
+	host := &fakeSessionHost{watched: []WatchedSession{live}}
+	m := openBrowser(t, newBrowserModel(t, watchEngine(), host, "/ws/a"))
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = step(t, m, cmd())
+	probe.free()
+	m = probeWatch(t, m)
+	if m.watch.ending != watchOwnerFinished {
+		t.Fatalf("watch ending = %v; want the owner finished", m.watch.ending)
+	}
+	m = step(t, m, keyEsc())
+	finished := watchSourceOf(LiveSession{ID: running.src.id, RecordPath: running.src.recordPath, Home: watchedHomeLabel}, "watched")
+	m, cmd = m.enterWatch(finished)
+	_ = step(t, m, cmd())
+
+	if after := treeSnapshot(t, home); !reflect.DeepEqual(after, before) {
+		t.Errorf("the watched home's tree changed:\nbefore %v\nafter  %v", before, after)
 	}
 }

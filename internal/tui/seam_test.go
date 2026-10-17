@@ -784,6 +784,11 @@ type fakeSessionHost struct {
 	// scripted failure to list them.
 	live    []LiveSession
 	liveErr error
+	// watched and unreadable are what WatchedSessions answers — the watched homes' sessions and
+	// the homes that would not read — and watchedReads counts how often it was asked.
+	watched      []WatchedSession
+	unreadable   []error
+	watchedReads int
 }
 
 // seed adds a record to the fake store so the /sessions browser can list/load it.
@@ -849,6 +854,13 @@ func (h *fakeSessionHost) LiveSessions() ([]LiveSession, error) {
 		return nil, h.liveErr
 	}
 	return slices.Clone(h.live), nil
+}
+
+func (h *fakeSessionHost) WatchedSessions() ([]WatchedSession, []error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.watchedReads++
+	return slices.Clone(h.watched), slices.Clone(h.unreadable)
 }
 
 func (h *fakeSessionHost) Load(id string) (session.Record, error) {
