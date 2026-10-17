@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 deps: [hero-photon-config]
+plan: 2026-10-17 - 02 - film-hero-retire-demorig-plan.md
 created: 2026-10-17T10:34:01Z
 ---
 

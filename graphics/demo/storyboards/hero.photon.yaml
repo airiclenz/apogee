@@ -31,7 +31,7 @@ beats:
     why: no dead air — the take starts at apogee's first paint, so there is no shell launch to cut
     do:
       - wait: {screen: "◐ ask before", timeout: 30s}
-    duration: 2s
+    duration: 1s
     notes: |
       apogee starts in its default mode, ask before, so the next beat has something to change.
       The footer carries the server alias, the model id and `~/Repos/taskman` for the whole clip

@@ -3,6 +3,7 @@ title: demorig second-take EPERM was closed with a retry; root cause unknown
 status: open
 type: bug
 priority: 3
+plan: 2026-10-17 - 02 - film-hero-retire-demorig-plan.md
 created: 2026-10-12T21:51:16Z
 ---
 
