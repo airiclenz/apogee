@@ -110,7 +110,12 @@ With `PHOTON_WORK` unset, both scripts' `WORK=` line falls back to `$HOME/.cache
 
 **Commit:** `chore(demo): drop demorig's work-dir and port knobs from the rig`
 
-## 4. hero.yaml becomes photon's storyboard; fonts go; review take filmed
+## 4. hero.yaml becomes photon's storyboard; fonts go; review take filmed — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): photon was the owner's installed /home/airic/go/bin/photon (module 4c5822bb6280, a descendant of c8c2cfb), as the dispatch DECISION allowed; no `PHOTON_BIN` temp dir was created, so the `rm -rf "$PHOTON_BIN"` step had nothing to remove.
+NOTES (2026-10-17): the take passed on the first attempt (every check-table row PASS); the apogee it filmed is the one on PATH (/home/linuxbrew/.linuxbrew/bin/apogee, v0.25.2+4483.gfbf5f6328b5c), since setup.sh bakes `command -v apogee` and the item does not run `make install`.
+NOTES (2026-10-17): render: `/home/airic/.cache/apogee-demo-photon/hero-review.gif  1.1M  53s` (809 frames, logical screen 1250x826), next to the old GIF's 54.0 s / 810 frames; the render took 30 min 15 s on the Pi with available memory never below ~3.2 GB.
+NOTES (2026-10-17): beat 3's notes reflowed after the typing citation changed, to keep the line width; the beat's `do:`, `frame:`, `ship:` and expects are byte-for-byte as in hero.photon.yaml.
 
 **What:**
 **Goal:** `graphics/demo/storyboards/hero.yaml` is photon's storyboard and lints clean, `hero.photon.yaml` and `graphics/demo/fonts/` are gone, and a full photon record and render of it succeeds, leaving the review GIF at `~/.cache/apogee-demo-photon/hero-review.gif` and `graphics/demo.gif` untouched.
