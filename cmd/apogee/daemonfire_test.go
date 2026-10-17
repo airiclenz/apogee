@@ -1282,3 +1282,93 @@ func TestDaemonFireServerStatsOffWritesNothing(t *testing.T) {
 		t.Errorf("stat the stats file = %v; server-stats: off must neither write nor create it", err)
 	}
 }
+
+// writeDaemonProjectConfig writes body as the Project config of workspace, a folder that is its own
+// Project root.
+func writeDaemonProjectConfig(t *testing.T, workspace, body string) {
+	t.Helper()
+
+	path := config.ProjectFilePath(workspace)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the project config: %v", err)
+	}
+}
+
+// Each Firing runs with its OWN workspace's Project config layered over the daemon's startup
+// resolution (ADR 0096): two schedules rooted in two workspaces, fired by one daemon, each hand
+// their run the context-file names their own project file states — never the other's, and never
+// one left behind on the shared options by the Firing before.
+func TestDaemonFiringTakesItsWorkspacesProjectLayer(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	alpha := entryFor(t, "alpha", daemon.Action{Server: "box"})
+	writeDaemonProjectConfig(t, alpha.Run.Workspace, "context-files:\n  names: [ALPHA.md]\n")
+	beta := entryFor(t, "beta", daemon.Action{Server: "box"})
+	writeDaemonProjectConfig(t, beta.Run.Workspace, "context-files:\n  names: [BETA.md]\n")
+
+	alphaFiles := harness.fire(t, alpha).Config.ContextFiles
+	betaFiles := harness.fire(t, beta).Config.ContextFiles
+	alphaAgain := harness.fire(t, alpha).Config.ContextFiles
+
+	if want := []string{"ALPHA.md"}; !reflect.DeepEqual(alphaFiles, want) {
+		t.Errorf("the alpha firing ran with context files %v, want its own project's %v", alphaFiles, want)
+	}
+	if want := []string{"BETA.md"}; !reflect.DeepEqual(betaFiles, want) {
+		t.Errorf("the beta firing ran with context files %v, want its own project's %v", betaFiles, want)
+	}
+	if !reflect.DeepEqual(alphaAgain, alphaFiles) {
+		t.Errorf("alpha fired after beta ran with context files %v, want %v; a layer leaked between firings",
+			alphaAgain, alphaFiles)
+	}
+	if harness.wiring.opts.ContextFiles != nil {
+		t.Errorf("the daemon's own options now carry context files %v; a firing wrote its layer into them",
+			harness.wiring.opts.ContextFiles)
+	}
+}
+
+// A Firing reads its Project config as it stands at that Firing, so an edit to the project file
+// reaches the next tick without a daemon restart — only config.yaml is read once (ADR 0055).
+func TestDaemonFiringReadsItsProjectLayerFresh(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	entry := entryFor(t, "nightly", daemon.Action{Server: "box"})
+	writeDaemonProjectConfig(t, entry.Run.Workspace, "context-files:\n  names: [BEFORE.md]\n")
+	harness.fire(t, entry)
+
+	writeDaemonProjectConfig(t, entry.Run.Workspace, "context-files:\n  names: [AFTER.md]\n")
+	got := harness.fire(t, entry).Config.ContextFiles
+
+	if want := []string{"AFTER.md"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the firing after the edit ran with context files %v, want the edited file's %v", got, want)
+	}
+}
+
+// What a Project config costs in notices — here a global-only key it may not set — is said on the
+// daemon log once per Project root and notice, not on every Firing: the file says the same thing
+// each tick, and a nightly schedule would otherwise repeat it in the journal forever. The keys the
+// file may set still apply on every Firing.
+func TestDaemonFiringLogsAProjectNoticeOnce(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	entry := entryFor(t, "nightly", daemon.Action{Server: "box"})
+	writeDaemonProjectConfig(t, entry.Run.Workspace, "mode: auto\nworkflow-retries: 9\n")
+
+	first := harness.fire(t, entry)
+	second := harness.fire(t, entry)
+
+	if got := strings.Count(harness.logged.String(), "ignoring global-only"); got != 1 {
+		t.Errorf("the global-only notice was logged %d times over two firings, want exactly 1; the log "+
+			"holds:\n%s", got, harness.logged.String())
+	}
+	for i, spec := range []run.Spec{first, second} {
+		if got := spec.Config.Workflow.Retries; got == nil || *got != 9 {
+			t.Errorf("firing %d ran with workflow-retries %v, want the project's 9", i+1, got)
+		}
+	}
+}

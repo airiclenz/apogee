@@ -125,7 +125,13 @@ internal/config/allow.go — classifyProjectRules; internal/config/layer_test.go
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/config/`
 **Commit:** `feat(config): overlay a single Project layer onto resolved options`
 
-## 5. Daemon firings layer their workspace's Project config
+## 5. Daemon firings layer their workspace's Project config — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the startup global document is read by `newDaemonWiring` (config.ReadGlobalDocument, held on `daemonWiring.global`), so the test harness and `runDaemonWith` share one capture; a read error there is a startup refusal like an unresolvable root. Each Firing calls `daemonWiring.firingOptions(roots)` → `config.OverlayProjectLayer(w.opts, w.global, roots.project, os.ReadFile, …)`; an empty Project root needs no guard (the overlay answers base).
+NOTES (2026-10-17): the layered options feed the whole Firing, not only `raise`: the unconfined-Auto and pre-warm gates read them too. `confine-to-workspace` is global-only, so their behaviour is unchanged.
+NOTES (2026-10-17): project-layer notices are latched under `w.mu` keyed by (root, text) and logged through `daemonLogWriter` (escape-stripped to one line), not `daemonLog.line`, because the notice quotes a file in the workspace.
+NOTES (2026-10-17): gofmt re-aligned the existing fields of `newDaemonWiring`'s struct literal when `global` and `saidProjectNotices` were added; no value changed.
+NOTES (2026-10-17): new tests are `TestDaemonFiringTakesItsWorkspacesProjectLayer`, `TestDaemonFiringReadsItsProjectLayerFresh` and `TestDaemonFiringLogsAProjectNoticeOnce`. All three fail with the overlay bypassed (`opts := w.opts`). docs/manual/daemon.md:140 still says the Project config is not layered; item 6 owns that change.
 
 **What:**
 **Goal:** every `apogee daemon` firing runs with Options that carry its own workspace's project layer, read at that firing; two schedules in two workspaces never see each other's layer; a broken or global-only-key project file logs its notice to the daemon log once per root and notice text, not on every firing; the daemon startup resolve stays global-only.

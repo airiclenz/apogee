@@ -46,7 +46,8 @@ func projectConfig(
 		ConfigDir:    roots.config,
 		WorkspaceDir: roots.workspace,
 		// The Project root the layered load read the Project config from (ADR 0096 §1) — empty when
-		// the workspace is the user's home, and for a Firing, whose daemon reads no Project config.
+		// the workspace is the user's home. A daemon Firing's is its own workspace's, whose Project
+		// config it layered at that Firing (daemonWiring.firingOptions).
 		ProjectRoot: roots.project,
 		// The OS confinement backend this run is fenced by — the host's real one (landlock on
 		// Linux, seatbelt on macOS, denyConfiner elsewhere — confinement-execution-contract §2.6),

@@ -7,13 +7,15 @@ package main
 // raise in wire_firing.go — resolved from a different set of facts: not the session's live
 // binding and not one command's flags, but one validated entry of
 // `~/.apogee/daemon/schedules.yaml` — which server it names, which model, which workspace, which
-// mode — read against a `config.yaml` this process loaded once at startup.
+// mode — read against a `config.yaml` this process loaded once at startup, with the entry's own
+// workspace's Project config layered over it at each Firing.
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +43,10 @@ import (
 //   - The ENTRY half — which server, which model, which workspace, which mode — is resolved per
 //     Firing off the adopted set, because `schedules.yaml` IS live-reloaded (ADR 0034) and the
 //     entry a name resolves to is whatever the last accepted edit said it was.
+//   - The PROJECT half — the workspace's own `.apogee/config.yaml` — is read per Firing too and
+//     layered over a copy of the host's resolved config ([daemonWiring.firingOptions]), because
+//     each entry names its own workspace and so its own Project config (ADR 0096). The global
+//     file it is merged into is the one read at startup, never re-read.
 //
 // That split is why the adopted set lives here rather than beside the daemon's loop: fire runs on
 // the Scheduler's own goroutines while a reload swaps the set on the watcher's, so the map and its
@@ -56,6 +62,10 @@ type daemonWiring struct {
 	// the `servers:` list a schedule binds into by name, and every file-only key an unattended run
 	// must honour for the one-configuration reason headless honours them (ADR 0031).
 	opts config.Options
+	// global is config.yaml as this daemon read it at startup: the document every Firing's
+	// Project config is merged into (config.OverlayProjectLayer), held here so that layering a
+	// workspace's file never reads the global one again (ADR 0055).
+	global config.GlobalDocument
 	// keys resolves an entry's key SOURCE into the token its Firings send. One resolver for the
 	// daemon's lifetime, so a `api-key-cmd:` runs once per entry rather than once per Firing — it
 	// is goroutine-safe, which is what lets Firings on different Schedules share it.
@@ -91,7 +101,7 @@ type daemonWiring struct {
 	stats *statsRecorder
 
 	// mu guards adopted, which the daemon's reload replaces wholesale while Firings read it, and
-	// the two per-process latches below. Firings on different Schedules run on their own
+	// the latches below. Firings on different Schedules run on their own
 	// goroutines and overlap, so a check-and-set left outside the lock is how the same warning
 	// gets said twice and the same workspace gets walked twice.
 	mu sync.RWMutex
@@ -107,6 +117,16 @@ type daemonWiring struct {
 	// prewarmed is the set of workspace roots whose label walk this daemon has already pre-warmed
 	// (see [daemonWiring.latchPrewarm]).
 	prewarmed map[string]struct{}
+	// saidProjectNotices is the set of project-layer notices this daemon has already logged (see
+	// [daemonWiring.latchProjectNotice]).
+	saidProjectNotices map[projectNotice]struct{}
+}
+
+// projectNotice is one project-layer notice as the latch tells it apart: the Project root whose
+// file earned it and the notice's own text.
+type projectNotice struct {
+	root string
+	text string
 }
 
 // daemonDeps is what `apogee daemon` takes from its host rather than deciding for itself: the
@@ -170,21 +190,33 @@ func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*dae
 		buildConfiner = platform.NewConfiner
 	}
 
+	// The global file every Firing's Project config is merged into, read here once beside the
+	// startup resolution that just read it (ADR 0055). That resolution already folded or refused a
+	// retired shape, so this read has nothing to migrate and nothing to announce.
+	global, err := config.ReadGlobalDocument(opts.ConfigDir, os.ReadFile, func(msg string) {
+		log.line("%s", msg)
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return &daemonWiring{
-		opts: opts,
+		opts:   opts,
+		global: global,
 		// The key resolver is built ROOTLESS because the `api-key-cmd:` exec fence is judged per
 		// Firing, against the Firing's workspace: the daemon's workspace is the SCHEDULE ENTRY's,
 		// minted per Firing, so there is no one root the daemon itself could measure an api-key
 		// command against — firingConfig names the Firing's own roots.workspace on every
 		// resolution (KeyResolver.ResolveWithin), memoised keys included.
-		keys:      config.NewKeyResolver(""),
-		confiner:  buildConfiner(),
-		runner:    deps.runner,
-		store:     store,
-		log:       log,
-		stats:     newStatsRecorder(serverStatsPath(roots.config), opts.ServerStats),
-		adopted:   make(map[string]daemon.Entry),
-		prewarmed: make(map[string]struct{}),
+		keys:               config.NewKeyResolver(""),
+		confiner:           buildConfiner(),
+		runner:             deps.runner,
+		store:              store,
+		log:                log,
+		stats:              newStatsRecorder(serverStatsPath(roots.config), opts.ServerStats),
+		adopted:            make(map[string]daemon.Entry),
+		prewarmed:          make(map[string]struct{}),
+		saidProjectNotices: make(map[projectNotice]struct{}),
 	}, nil
 }
 
@@ -284,6 +316,40 @@ func (w *daemonWiring) latchPrewarm(workspace string) bool {
 	return true
 }
 
+// latchProjectNotice reports whether THIS Firing is the one that logs text about the Project config
+// of root, and marks it logged. A broken project file, or one stating a global-only key, earns its
+// notice on every Firing that layers it, and a nightly schedule would otherwise write the same line
+// into the journal every tick until the file is fixed. Per root AND text, so a second workspace's
+// trouble is still said, and so is an edit that turns one complaint about a file into another.
+func (w *daemonWiring) latchProjectNotice(root, text string) bool {
+	key := projectNotice{root: root, text: text}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, said := w.saidProjectNotices[key]; said {
+		return false
+	}
+	w.saidProjectNotices[key] = struct{}{}
+	return true
+}
+
+// firingOptions answers the options a Firing rooted in roots runs under: the daemon's startup
+// resolution — the global file alone (Options.GlobalConfigOnly) — with the Project config of the
+// Firing's own Project root layered over a copy of it, read now, so an edit to that file reaches the
+// next Firing without a restart (ADR 0096). A workspace with no Project root, or no project file,
+// answers the startup resolution itself. w.opts is never changed, so Firings in two workspaces
+// never see each other's layer.
+//
+// What the layer had to say — a file it skipped, a global-only key it dropped — goes on the daemon
+// log once per root and notice (latchProjectNotice), through daemonLogWriter: the notice quotes a
+// file in the workspace, so it is stripped to one line before it reaches the journal.
+func (w *daemonWiring) firingOptions(roots stateRoots) config.Options {
+	return config.OverlayProjectLayer(w.opts, w.global, roots.project, os.ReadFile, func(msg string) {
+		if w.latchProjectNotice(roots.project, msg) {
+			_, _ = daemonLogWriter{log: w.log}.Write([]byte(msg))
+		}
+	})
+}
+
 // fire performs one Firing and reports the record it left behind. It is [schedule.Config.Fire] for
 // the daemon's single Scheduler, and it runs on that Scheduler's goroutine — never the reload's —
 // which is why everything it touches is its own copy or explicitly goroutine-safe (the adopted map,
@@ -312,6 +378,10 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		return schedule.Outcome{}, err
 	}
 
+	// The options THIS Firing runs under: the host's, with its own workspace's Project config
+	// layered in as it reads now. Every gate below reads them, as a session in that workspace would.
+	opts := w.firingOptions(roots)
+
 	// The confinement posture THIS Firing runs under, said now that its mode and its workspace are
 	// both known — the two facts the launch path has at startup and a daemon does not, because a
 	// schedule entry carries its own mode and its own tree (ADR 0034).
@@ -326,7 +396,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// The daemon's OTHER confinement sentence — probe.ResidualNotice — is said at boot instead
 	// (daemon.go), and stays there: its cell is the backend's own residual write class, a fact of
 	// this host that every Firing shares, whereas this one is a fact of this ENTRY.
-	if f.Mode == domain.ModeAuto && !w.opts.ConfineToWorkspace && w.latchUnconfinedWarning() {
+	if f.Mode == domain.ModeAuto && !opts.ConfineToWorkspace && w.latchUnconfinedWarning() {
 		w.log.line("%s", unconfinedAutoWarning)
 	}
 
@@ -340,7 +410,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// Latched per workspace path rather than per process, because what is warmed is one tree.
 	// The progress notice leaves through the daemon log like every other thing a Firing narrates:
 	// one seam, so the journal stays one timestamped line per event.
-	if shouldPrewarmLabelWalk(f.Mode, w.opts.ConfineToWorkspace, w.confiner.Capabilities().FSWrite) &&
+	if shouldPrewarmLabelWalk(f.Mode, opts.ConfineToWorkspace, w.confiner.Capabilities().FSWrite) &&
 		w.latchPrewarm(roots.workspace) {
 		platform.PrewarmLabelWalk(w.confiner, roots.workspace, daemonLogWriter{log: w.log})
 	}
@@ -353,7 +423,8 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	reportReaction := func(line string) { _, _ = daemonLogWriter{log: w.log}.Write([]byte(line)) }
 
 	// The one act every unattended run is (raise, wire_firing.go), reached from this Driver's own
-	// facts: the bound entry, that entry's roots, the daemon's own key resolver — so an
+	// facts: the bound entry, that entry's roots, the options its Project config layered, the
+	// daemon's own key resolver — so an
 	// `api-key-cmd:` runs once per entry rather than once per Firing — and the mode the Schedule
 	// fired, which is the FIRING's and never re-read off the entry (ADR 0033, decision 3). The
 	// Schedule this run belongs to travels with it, so this Firing's own Reaction Runner stamps it
@@ -384,7 +455,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		prompt, recipe = "", &domain.RecipeLaunch{SkillID: workflow.Recipe, Text: workflow.Inputs}
 	}
 	res, notices, err := raise(ctx, firingInputs{
-		opts:     w.opts,
+		opts:     opts,
 		entry:    server,
 		keys:     w.keys,
 		roots:    roots,

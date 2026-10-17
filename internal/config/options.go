@@ -456,9 +456,10 @@ type Options struct {
 
 	// GlobalConfigOnly says this resolution reads the global config alone and takes no Project
 	// config layer (ADR 0096). Not flag-bound: a Driver sets it before ApplyConfig — the daemon
-	// does, since a Firing's workspace is not the one the daemon starts in. False ⇒ the layer is
-	// read from the workspace's Project root, which is what every interactive and one-shot command
-	// wants.
+	// does for its startup resolution, since a Firing's workspace is not the one the daemon starts
+	// in, and layers each Firing's own Project config over it ([OverlayProjectLayer]). False ⇒ the
+	// layer is read from the workspace's Project root, which is what every interactive and one-shot
+	// command wants.
 	GlobalConfigOnly bool
 
 	// ProjectRoot is the Project root a running session fixed at boot, read as the project layer's

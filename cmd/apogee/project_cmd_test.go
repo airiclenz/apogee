@@ -265,7 +265,7 @@ func TestProjectCmdHeadlessIsSilentAboutProposedRules(t *testing.T) {
 	}
 }
 
-// The daemon reads no Project config at all, so a proposed rule is neither announced nor read.
+// The daemon's startup resolution reads no Project config, so a proposed rule is not announced.
 func TestProjectCmdDaemonIsSilentAboutProposedRules(t *testing.T) {
 	workspace := t.TempDir()
 	writeProjectAllow(t, workspace, "go test")

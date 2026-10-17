@@ -266,7 +266,8 @@ func TestResolveOptionsResolvesTheEffectiveAllowRules(t *testing.T) {
 	}
 }
 
-// The daemon takes no project layer, so a project's rules are not even proposed there.
+// A global-only resolution (the daemon's startup) takes no project layer, so a project's rules are
+// not even proposed there.
 func TestResolveOptionsReadsNoProjectAllowRulesWhenGlobalConfigOnly(t *testing.T) {
 	t.Parallel()
 

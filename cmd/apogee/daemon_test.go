@@ -359,10 +359,12 @@ func TestDaemonRefusesWhenAnotherDaemonHoldsTheLock(t *testing.T) {
 	}
 }
 
-// The daemon reads no Project config (ADR 0096): a workspace whose `.apogee/config.yaml` states a
-// global-only key would cost an interactive start the notice that ignores it, and the daemon's
-// start says nothing about it — the layer is never read.
-func TestDaemonTakesNoProjectLayer(t *testing.T) {
+// The daemon's STARTUP resolution reads no Project config (ADR 0096): a workspace whose
+// `.apogee/config.yaml` states a global-only key would cost an interactive start the notice that
+// ignores it, and the daemon's start says nothing about it — the folder it starts in is not a
+// Firing's workspace, so no layer is read until a Firing layers its own
+// (TestDaemonFiringTakesItsWorkspacesProjectLayer).
+func TestDaemonStartupTakesNoProjectLayer(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workspace, ".apogee"), 0o700); err != nil {
 		t.Fatalf("create the project folder: %v", err)
@@ -381,7 +383,7 @@ func TestDaemonTakesNoProjectLayer(t *testing.T) {
 	}
 
 	if strings.Contains(h.errOut.String(), "project config") {
-		t.Errorf("the daemon read the Project config; stderr said:\n%s", h.errOut.String())
+		t.Errorf("the daemon's start read the Project config; stderr said:\n%s", h.errOut.String())
 	}
 }
 
