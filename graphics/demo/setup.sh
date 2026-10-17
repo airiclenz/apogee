@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the demo rig: an isolated apogee home, the taskman stage repo with its planted
-# bug, the env.sh a take launches apogee under, and rig.env. Idempotent — re-run it any
+# bug, the env.sh a take launches apogee under, rig.env, and the rig's tools (stubllm and
+# sessionexpect, which photon.yaml runs) in bin/. Idempotent — re-run it any
 # time; it rebuilds the stage from the templates in stage/ and leaves the warm Go cache alone.
 #
 #   ./setup.sh
@@ -90,6 +91,11 @@ printf 'PORT=%s\n' "$PORT" > "$WORK/rig.env"
 cp "$HERE/reset.sh" "$WORK/reset.sh"
 chmod +x "$WORK/reset.sh"
 
+# The rig's tools, from this checkout: stubllm serves the model (photon.yaml's model service) and
+# sessionexpect judges the storyboard's session expects. -C because this script runs from any
+# directory, and the trailing slash because -o with two packages needs a directory.
+go -C "$REPO" build -o "$WORK/bin/" ./cmd/stubllm ./cmd/sessionexpect
+
 # Warm the build cache so the first on-camera `go test` is fast rather than a cold compile.
 ( set -a; . "$WORK/env.sh" >/dev/null 2>&1; set +a; go test ./... >/dev/null 2>&1 || true )
 
@@ -97,6 +103,7 @@ echo "demo rig ready"
 echo "  work dir : $WORK"
 echo "  stage    : $STAGE"
 echo "  server   : $HOST_ALIAS at http://127.0.0.1:$PORT   model: $MODEL"
+echo "  tools    : $WORK/bin (stubllm, sessionexpect)"
 echo
 # demorig reads only APOGEE_DEMO_WORK or --work, so a rig built from PHOTON_WORK or the default
 # names its work dir explicitly in the hint.

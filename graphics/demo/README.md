@@ -52,6 +52,18 @@ through `--key-env` — it names the variable, the proxy reads it and adds it to
 request, and it is never written anywhere. `--key-env` left off sends no key, for a keyless local
 server; naming a variable that is unset is refused rather than capturing a cassette of 401s.
 
+**photon (in transition).** The rig is moving from `demorig` to
+[photon](https://github.com/airiclenz/photon), a standalone recorder. `photon.yaml` here is its
+project config — the rig's setup and reset, apogee's launch, the `model` service (`stubllm`
+replaying `storyboards/hero.cassette` on port 18181, or recording a new one under `--profile
+capture`) and the `footer`, `status` and `transcript` areas — and `storyboards/hero.photon.yaml`
+is the hero clip in photon's schema, its session expects run by `sessionexpect`. `setup.sh` builds
+both tools into `<work>/bin`. photon's rig lands in `~/.cache/apogee-demo-photon` (photon's
+`--work` or `PHOTON_WORK` move it), separate from demorig's `~/.cache/apogee-demo`, and
+`photon.yaml` unsets `APOGEE_DEMO_WORK` and `APOGEE_DEMO_PORT` for `setup.sh` and `reset.sh`.
+`photon lint graphics/demo/storyboards/hero.photon.yaml` checks the pair. Until demorig retires,
+`hero.yaml` stays the clip demorig films, and a change to the clip lands in both storyboards.
+
 ## Layout
 
 | path | what it is |

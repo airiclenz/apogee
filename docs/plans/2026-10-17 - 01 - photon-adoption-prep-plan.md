@@ -122,7 +122,12 @@ cmd/demorig/record.go — runTake (reset.Env sets APOGEE_DEMO_WORK), openRig; gr
 - `GOMEMLIMIT=2GiB go test -count=1 ./cmd/demorig/`
 **Commit:** `chore(demo): let the rig scripts read PHOTON_WORK`
 
-## 5. `photon.yaml`, `hero.photon.yaml` and the rig's tool builds
+## 5. `photon.yaml`, `hero.photon.yaml` and the rig's tool builds — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): photon was built into the session scratchpad (`go -C ~/repos/photon build -o <scratch>/bin/photon ./cmd/photon`, `-mod=readonly`), not `~/go/bin`, per the read-only-photon machine rule; `photon lint` on hero.photon.yaml exits 0 against photon at cbb039e plus its uncommitted working tree.
+NOTES (2026-10-17): the issue's "theme set explicitly" and a separate `replay` profile are not followed — the plan's ratified approach sets no `theme:` (photon's defaults are demorig's Mocha set) and makes the declared `model` service the replay, with `capture` the only profile.
+NOTES (2026-10-17): the `run:` expects are YAML `>-` block scalars (one command line each), so their mixed quoting needs no YAML escaping; every one was smoke-run by `sh -c` in a fresh rig's work dir and exits 1 (a judged fail on an empty rig), never 2 (usage), and the model service's replay command was seen listening.
+NOTES (2026-10-17): setup.sh also prints a `tools : <work>/bin (stubllm, sessionexpect)` line in its closing summary; the hero.photon.yaml beat notes are carried over from hero.yaml unchanged, demorig file references included.
 
 **What:**
 **Goal:** `photon lint graphics/demo/storyboards/hero.photon.yaml` passes with `graphics/demo/photon.yaml` found by walk-up; every demorig expect in `hero.yaml` has a photon equivalent in the sibling; `setup.sh` builds `stubllm` and `sessionexpect` into `$WORK/bin`.

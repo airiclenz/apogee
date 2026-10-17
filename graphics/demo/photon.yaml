@@ -1,0 +1,79 @@
+# How photon films apogee: the rig, the program, the model it talks to and the screen areas a
+# storyboard aims at. photon finds this file by walking up from a storyboard's directory, so
+# every storyboard under storyboards/ uses it. Read by photon (github.com/airiclenz/photon);
+# `demorig` never reads it — until retirement, storyboards/hero.yaml stays demorig's and
+# storyboards/hero.photon.yaml is photon's.
+#
+# Every command below runs by `sh -c` in this file's directory (graphics/demo) with PHOTON_WORK
+# set to the rig's work dir; no `work:` is set, so it defaults to ~/.cache/apogee-demo-photon,
+# separate from demorig's ~/.cache/apogee-demo.
+
+name: apogee-demo
+
+# setup.sh and reset.sh read APOGEE_DEMO_WORK before PHOTON_WORK and APOGEE_DEMO_PORT for the
+# model port; both are unset here so an exported demorig setting never moves the photon rig off
+# its work dir or off the model service's fixed port 18181 that setup.sh bakes into apogee's
+# config.
+setup: env -u APOGEE_DEMO_WORK -u APOGEE_DEMO_PORT ./setup.sh
+reset: env -u APOGEE_DEMO_WORK -u APOGEE_DEMO_PORT ./reset.sh
+
+# apogee runs under the rig's generated env.sh (its HOME, PATH, Go caches and the stage repo as
+# the working dir). Every APOGEE_* variable of the operator's is stripped, so no other config,
+# server, model, mode or API key steers the take away from the rig; the one a take sets turns
+# the boot update check off, so a recording neither calls the release server nor paints its
+# notice.
+launch:
+  command: bash -c '. "$PHOTON_WORK/env.sh" >/dev/null && exec apogee'
+  strip: ['APOGEE_*']
+  env:
+    APOGEE_NO_UPDATE_CHECK: "1"
+
+# The model apogee's one server entry names: http://127.0.0.1:18181, keyless. By default stubllm
+# replays the committed cassette, offline; the capture profile records a fresh one from the live
+# model instead. setup.sh builds stubllm (and sessionexpect) into $PHOTON_WORK/bin.
+services:
+  model:
+    command: '"$PHOTON_WORK/bin/stubllm" replay --cassette storyboards/hero.cassette --listen "127.0.0.1:$PHOTON_PORT"'
+    port: 18181
+    ready: {tcp: true}
+
+profiles:
+  # `photon record --profile capture`: the only take that talks to a live model or needs a key.
+  # The proxy reads the key from OPENROUTER_API_KEY and adds it upstream; apogee never sees it.
+  # Only a take whose every beat passed replaces the committed cassette.
+  capture:
+    services:
+      model:
+        command: '"$PHOTON_WORK/bin/stubllm" capture --upstream https://openrouter.ai/api --key-env OPENROUTER_API_KEY --out "$PHOTON_WORK/hero.cassette" --listen "127.0.0.1:$PHOTON_PORT"'
+    on_success: cp "$PHOTON_WORK/hero.cassette" storyboards/hero.cassette
+
+# apogee's clean quit, ⌃c⌃c: the first press arms it, the second confirms it, and a clean quit
+# flushes the session to disk — the session the `run:` expects judge.
+end:
+  keys: [ctrl+c, ctrl+c]
+
+# The bands of apogee's screen a target is searched in, found afresh on every screen:
+#   footer     — the row above the lowest ▁ floor hairline;
+#   status     — the row below the lowest ▔ top rule above the prompt box's lowest ╭ corner;
+#   transcript — every row above that ▔ top rule.
+areas:
+  footer:
+    top: {match: '^ *▁', pick: last, offset: -1}
+    bottom: {match: '^ *▁', pick: last, offset: -1}
+  status:
+    top:
+      match: '^ *▔'
+      pick: last
+      above: {match: '^ *╭', pick: last}
+      offset: 1
+    bottom:
+      match: '^ *▔'
+      pick: last
+      above: {match: '^ *╭', pick: last}
+      offset: 1
+  transcript:
+    bottom:
+      match: '^ *▔'
+      pick: last
+      above: {match: '^ *╭', pick: last}
+      offset: -1
