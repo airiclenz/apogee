@@ -1,34 +1,35 @@
 #!/usr/bin/env bash
 # Build the demo rig: an isolated apogee home, the taskman stage repo with its planted
-# bug, the env.sh a take launches apogee under, rig.env, and the rig's tools (stubllm and
+# bug, the env.sh a take launches apogee under, and the rig's tools (stubllm and
 # sessionexpect, which photon.yaml runs) in bin/. Idempotent — re-run it any
 # time; it rebuilds the stage from the templates in stage/ and leaves the warm Go cache alone.
 #
 #   ./setup.sh
 #
-# Overridable:
-#   APOGEE_DEMO_WORK        where the rig is built    (default $PHOTON_WORK, else ~/.cache/apogee-demo)
-#   PHOTON_WORK             photon's work dir, used when APOGEE_DEMO_WORK is unset
-#   APOGEE_DEMO_PORT        the local model port      (default 18181)
-#   APOGEE_DEMO_HOST_ALIAS  the name in the footer    (default openrouter)
-#   APOGEE_DEMO_MODEL       the model in the footer   (default ~deepseek/deepseek-v4-flash-latest)
+# The rig is built in $PHOTON_WORK (photon's work dir, exported to every command it runs), else
+# ~/.cache/apogee-demo-photon — photon's default for photon.yaml's `name: apogee-demo`.
 #
 # apogee never talks to a live server directly: its one server entry points at
-# http://127.0.0.1:<port>, keyless, where `demorig record` serves the clip's cassette and
-# `demorig capture` serves a recording proxy to the live model (the proxy holds the key).
-# Both the alias and the model id are ON CAMERA in the footer for the whole clip. The
-# cassette is keyed by conversation (wire, stream flag, tool names, first user message and
-# the assistant turns) and leaves the model id out, so a changed model still replays the
-# old model's replies without complaint — change either and re-capture.
+# http://127.0.0.1:18181, keyless, where photon.yaml's model service runs stubllm — replaying
+# the clip's cassette, or under `--profile capture` a recording proxy to the live model (the
+# proxy holds the key).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
-WORK="${APOGEE_DEMO_WORK:-${PHOTON_WORK:-$HOME/.cache/apogee-demo}}"
-PORT="${APOGEE_DEMO_PORT:-18181}"
-HOST_ALIAS="${APOGEE_DEMO_HOST_ALIAS:-openrouter}"
-MODEL="${APOGEE_DEMO_MODEL:-~deepseek/deepseek-v4-flash-latest}"
+WORK="${PHOTON_WORK:-$HOME/.cache/apogee-demo-photon}"
+
+# The model service's port: must match services.model.port in photon.yaml.
+PORT=18181
+
+# The server alias and the model id must match the committed cassette (storyboards/
+# hero.cassette). Both are ON CAMERA in the footer for the whole clip. The cassette is keyed by
+# conversation (wire, stream flag, tool names, first user message and the assistant turns) and
+# leaves the model id out, so a changed model still replays the old model's replies without
+# complaint — change either and re-capture.
+HOST_ALIAS=openrouter
+MODEL='~deepseek/deepseek-v4-flash-latest'
 
 DEMO_HOME="$WORK/home"
 STAGE="$DEMO_HOME/Repos/taskman"
@@ -68,8 +69,8 @@ git -C "$STAGE" -c user.email=demo@local -c user.name=demo \
 } > "$DEMO_HOME/.apogee/config.yaml"
 
 # env.sh is generated (not checked in) because it bakes in machine-specific absolute paths.
-# `demorig record` and `demorig capture` source it before they exec apogee in the take's pty,
-# so none of this appears on camera.
+# photon.yaml's launch command sources it before it execs apogee in the take's pty, so none of
+# this appears on camera.
 cat > "$WORK/env.sh" <<ENV
 export HOME=$DEMO_HOME
 export PATH=$(dirname "$(command -v apogee || echo /usr/local/bin/apogee)"):\$PATH
@@ -84,9 +85,6 @@ export GOMODCACHE="\$PWD/.gopath/pkg/mod"
 export TMPDIR="\$PWD/.gotmp"
 mkdir -p "\$GOCACHE" "\$GOPATH" "\$TMPDIR"
 ENV
-
-# rig.env is read by demorig: PORT is where a take serves the model apogee's server entry names.
-printf 'PORT=%s\n' "$PORT" > "$WORK/rig.env"
 
 cp "$HERE/reset.sh" "$WORK/reset.sh"
 chmod +x "$WORK/reset.sh"
@@ -105,12 +103,10 @@ echo "  stage    : $STAGE"
 echo "  server   : $HOST_ALIAS at http://127.0.0.1:$PORT   model: $MODEL"
 echo "  tools    : $WORK/bin (stubllm, sessionexpect)"
 echo
-# demorig reads only APOGEE_DEMO_WORK or --work, so a rig built from PHOTON_WORK or the default
-# names its work dir explicitly in the hint.
-if [ -n "${APOGEE_DEMO_WORK:-}" ]; then
-  echo "next (from the repo root): go run ./cmd/demorig record graphics/demo/storyboards/hero.yaml"
-else
-  cat <<HINT
-next (from the repo root): go run ./cmd/demorig record --work "$WORK" graphics/demo/storyboards/hero.yaml
-HINT
+# photon's own default work dir needs no --work; any other one is named, so the hint records
+# into the rig just built.
+hint="next (from the repo root): photon record graphics/demo/storyboards/hero.yaml"
+if [ "$WORK" != "$HOME/.cache/apogee-demo-photon" ]; then
+  hint="$hint --work \"$WORK\""
 fi
+echo "$hint"

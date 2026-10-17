@@ -82,7 +82,10 @@ cmd/sessionexpect/selector.go — selector doc; cmd/sessionexpect/judge.go — c
 
 **Commit:** `refactor(demo): drop demorig citations and unexport clampMargins`
 
-## 3. Rig scripts and photon.yaml without demorig knobs
+## 3. Rig scripts and photon.yaml without demorig knobs — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): photon.yaml's launch command is single-quoted YAML (`'. "$PHOTON_WORK/env.sh" >/dev/null && exec apogee'`), matching the file's other commands; the parsed value is exactly the plan's command.
+NOTES (2026-10-17): graphics/demo/README.md still names `rig.env` and the `APOGEE_DEMO_*` knobs; it is item 5's (not yet done), so it was left untouched.
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** `graphics/demo/setup.sh` and `reset.sh` read only `PHOTON_WORK` (default `~/.cache/apogee-demo-photon`), use the fixed port 18181, write no `rig.env`, and setup's closing hint names `photon record graphics/demo/storyboards/hero.yaml`. `graphics/demo/photon.yaml` runs them bare and mentions no demorig.

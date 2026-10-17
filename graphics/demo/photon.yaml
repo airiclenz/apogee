@@ -1,21 +1,16 @@
 # How photon films apogee: the rig, the program, the model it talks to and the screen areas a
 # storyboard aims at. photon finds this file by walking up from a storyboard's directory, so
-# every storyboard under storyboards/ uses it. Read by photon (github.com/airiclenz/photon);
-# `demorig` never reads it — until retirement, storyboards/hero.yaml stays demorig's and
-# storyboards/hero.photon.yaml is photon's.
+# every storyboard under storyboards/ uses it. Read by photon (github.com/airiclenz/photon).
 #
 # Every command below runs by `sh -c` in this file's directory (graphics/demo) with PHOTON_WORK
-# set to the rig's work dir; no `work:` is set, so it defaults to ~/.cache/apogee-demo-photon,
-# separate from demorig's ~/.cache/apogee-demo.
+# set to the rig's work dir; no `work:` is set, so it defaults to ~/.cache/apogee-demo-photon.
 
 name: apogee-demo
 
-# setup.sh and reset.sh read APOGEE_DEMO_WORK before PHOTON_WORK and APOGEE_DEMO_PORT for the
-# model port; both are unset here so an exported demorig setting never moves the photon rig off
-# its work dir or off the model service's fixed port 18181 that setup.sh bakes into apogee's
-# config.
-setup: env -u APOGEE_DEMO_WORK -u APOGEE_DEMO_PORT ./setup.sh
-reset: env -u APOGEE_DEMO_WORK -u APOGEE_DEMO_PORT ./reset.sh
+# setup.sh builds the rig in $PHOTON_WORK and bakes the model service's fixed port 18181 into
+# apogee's config; reset.sh restores the stage between takes.
+setup: ./setup.sh
+reset: ./reset.sh
 
 # apogee runs under the rig's generated env.sh (its HOME, PATH, Go caches and the stage repo as
 # the working dir). Every APOGEE_* variable of the operator's is stripped, so no other config,
@@ -23,7 +18,7 @@ reset: env -u APOGEE_DEMO_WORK -u APOGEE_DEMO_PORT ./reset.sh
 # the boot update check off, so a recording neither calls the release server nor paints its
 # notice.
 launch:
-  command: bash -c '. "$PHOTON_WORK/env.sh" >/dev/null && exec apogee'
+  command: '. "$PHOTON_WORK/env.sh" >/dev/null && exec apogee'
   strip: ['APOGEE_*']
   env:
     APOGEE_NO_UPDATE_CHECK: "1"
