@@ -105,7 +105,12 @@ internal/tui/transcriptbridge.go — toWireWorkflow, fromWireWorkflow; internal/
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/session/`
 **Commit:** `fix(tui): count only fan-out items in a workflow block's fallback totals`
 
-## 4. Config: overlay one Project layer onto resolved Options
+## 4. Config: overlay one Project layer onto resolved Options — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): besides the one overlay function (`OverlayProjectLayer`), the package exports `GlobalDocument` + `ReadGlobalDocument(configDir, readFile, notify)` (non-migrating read). This is how the regression guard's "global bytes captured once at startup and passed in" is met. Item 5 captures the document with it once at daemon start.
+NOTES (2026-10-17): the merge/decode/check/classify body of `parseLayeredConfig` moved into a shared `layerProject` helper that the startup path and the overlay both call. Startup behaviour is unchanged.
+NOTES (2026-10-17): env/flag precedence is read off `base.Overrides` (filled by ApplyConfig). No project-capable row has an EnvVar or FlagName today, so the skip guards future rows only. The test sets Overrides by hand.
+NOTES (2026-10-17): tighten-only unions need no `slices.Clone`. The rows re-run their `fromFile` on a freshly decoded merged document, so no field of base is appended into. The cap > len test pins this.
 
 **What:**
 **Goal:** `internal/config` exports one function that, given already-resolved Options and a Project root, returns a copy with that root's project layer applied — project-param and tighten-only keys with the same semantics `ResolveOptions` gives them, granting (`allow:`) entries classified but never made live beyond what adoption grants — and reports the layer's notices (skipped file, global-only keys, unreadable adoption record) through a notify callback. The input Options are not mutated.

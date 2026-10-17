@@ -30,6 +30,11 @@ import (
 // one document exactly as it reads the global file alone. The project file is a guest: it never
 // goes through the legacy migration, a defect in it — a parse error, a value its key refuses —
 // degrades to one notice naming its path and the layer is skipped, and it can never stop a start.
+//
+// A Driver whose sessions run in many workspaces resolves the global file alone at its start and
+// layers each workspace's project later: it keeps the global document it read then
+// ([GlobalDocument]) and overlays a project onto that resolution ([OverlayProjectLayer]) through
+// the same merge, so the global file is read once and every project file fresh.
 
 // projectConfigDirName and projectConfigFileName spell where a Project root keeps its config.
 const (
@@ -134,9 +139,24 @@ func parseLayeredConfig(globalPath, projectRoot string, readFile func(string) ([
 		}
 		stated.global = statedKeys(data)
 	}
+	if fc, ok := layerProject(data, globalPath, projectRoot, readFile, notify, &stated); ok {
+		return fc, stated, nil
+	}
+	return global, stated, nil
+}
+
+// layerProject merges the Project config of projectRoot into the global document data (the
+// migrated bytes of the global file at globalPath, nil when there is none) and answers the decoded
+// merged schema, recording on stated what the layer contributed: its keys, its dangerous-action
+// additions and its Allow rules sorted by the adoption record. ok is false when there is no layer
+// to take — no project file, one that states nothing, or one skipped with a notice — and stated is
+// then left as it was. It is the one merge both a startup resolution and a later overlay
+// ([OverlayProjectLayer]) run, so a project file means the same thing to both.
+func layerProject(data []byte, globalPath, projectRoot string, readFile func(string) ([]byte, error),
+	notify func(string), stated *layerKeys) (fileConfig, bool) {
 	layer, ok := readProjectLayer(projectFilePath(projectRoot), globalPath, readFile, notify)
 	if !ok {
-		return global, stated, nil
+		return fileConfig{}, false
 	}
 	merged, projectKeys, err := mergeProjectLayer(data, layer)
 	if err == nil {
@@ -153,14 +173,103 @@ func parseLayeredConfig(globalPath, projectRoot string, readFile func(string) ([
 					projectKeys[allowPath] = true
 				}
 				stated.project = projectKeys
-				return fc, stated, nil
+				return fc, true
 			}
 		}
 	}
 	// Unreachable for a project file that passed its checks alone, which is every one that gets
 	// here — but a layer must never be the reason a start fails, so it degrades like the rest.
 	notify(fmt.Sprintf(projectSkippedNotice, layer.path, sansPrefix{err}.Error()))
-	return global, stated, nil
+	return fileConfig{}, false
+}
+
+// GlobalDocument is the global config file as a Driver read it once at its start: its path and its
+// bytes, already in the current shape. It is what [OverlayProjectLayer] merges each Project config
+// into, so a Driver that layers many projects over one startup resolution — the daemon, once per
+// Firing — never reads the global file again (ADR 0055). The zero value is no global file.
+type GlobalDocument struct {
+	path string
+	data []byte
+}
+
+// ReadGlobalDocument reads the global config file of the apogee home configDir for later overlays.
+// It never migrates: the startup resolution it follows has already folded a retired shape, so one
+// still standing is refused with that resolution's error ([ErrRetiredShape]). An absent file is
+// the empty document, not an error; a file that cannot be read is.
+func ReadGlobalDocument(configDir string, readFile func(string) ([]byte, error),
+	notify func(string)) (GlobalDocument, error) {
+	path := FilePath(configDir)
+	data, _, err := readConfigData(path, readFile, notify, false)
+	if err != nil {
+		return GlobalDocument{}, err
+	}
+	return GlobalDocument{path: path, data: data}, nil
+}
+
+// OverlayProjectLayer answers a copy of base — a resolution that took no project layer
+// ([Options.GlobalConfigOnly]) over the global file global holds — with the Project config of
+// projectRoot layered in as a startup resolution would have layered it (ADR 0096 §6). The project
+// file is read fresh on every call; the global file never is.
+//
+// Every project-param and tighten-only key is resolved again from the global document with the
+// project file merged into it, through the key's own file pass, so a tighten-only list is the union
+// of both files and a block whose keys share one field (`context-files:`) keeps its global half. A
+// key an environment variable or a flag set for this run ([Options.Overrides]) keeps base's value:
+// the precedence stays default < global < project < env < flag. Global-only keys are dropped with
+// one notice, a project's `allow:` rules are sorted by the adoption record and only the adopted
+// ones join base's global rules, and ProjectKeys and DangerousRules.ProjectAdd say what the layer
+// contributed. No project file, one that states nothing, or one that cannot be layered answers base
+// itself — the last after one notice naming the file. Notices go to notify, which must be non-nil.
+//
+// base is never changed: every field the overlay writes is replaced by a freshly built value, so
+// overlays of one base may run concurrently.
+func OverlayProjectLayer(base Options, global GlobalDocument, projectRoot string,
+	readFile func(string) ([]byte, error), notify func(string)) Options {
+	var stated layerKeys
+	fc, ok := layerProject(global.data, global.path, projectRoot, readFile, notify, &stated)
+	if !ok {
+		return base
+	}
+	overlaid := base
+	if err := applyProjectRows(&overlaid, fc, base.Overrides); err != nil {
+		notify(fmt.Sprintf(projectSkippedNotice, projectFilePath(projectRoot), sansPrefix{err}.Error()))
+		return base
+	}
+	overlaid.ProjectKeys = stated.project
+	overlaid.DangerousRules.ProjectAdd = stated.projectDangerous
+	overlaid.AllowRules = stated.projectAllow.effective(globalAllowRules(base.AllowRules.Rules))
+	return overlaid
+}
+
+// applyProjectRows is the file pass (applyFile) narrowed to the keys a Project config may set —
+// project-param and tighten-only — less the ones overridden names as won by the environment or a
+// flag. It runs the merged document's `context-files:` check startup runs, so a layer startup would
+// refuse is refused here too.
+func applyProjectRows(o *Options, fc fileConfig, overridden map[string]Source) error {
+	for _, k := range KeyRegistry {
+		if k.Class != ClassProjectParam && k.Class != ClassTightenOnly {
+			continue
+		}
+		if _, won := overridden[k.Path]; won {
+			continue
+		}
+		if err := k.fromFile(o, fc); err != nil {
+			return err
+		}
+	}
+	return fc.contextFiles().validate()
+}
+
+// globalAllowRules is the global layer's rules of rules, in order — what a project's adopted rules
+// join, whatever layer the resolution they came from took.
+func globalAllowRules(rules []AllowRule) []AllowRule {
+	var global []AllowRule
+	for _, r := range rules {
+		if r.Layer == SourceGlobal {
+			global = append(global, r)
+		}
+	}
+	return global
 }
 
 // statedKeys is the registry paths the config document in data writes a value for — a bare `key:`

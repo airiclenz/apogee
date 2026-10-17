@@ -409,3 +409,151 @@ func TestResolveOptionsReadsTheProjectOfTheCurrentDirectory(t *testing.T) {
 		t.Errorf("workflow-retries = %d; want the current directory's project 6", opts.WorkflowRetries)
 	}
 }
+
+// overlayOnStartup resolves a global-only base over a home holding global — as the daemon resolves
+// at its start — and overlays the Project config of a root holding project onto it, answering the
+// base, the overlaid options and every notice the overlay produced.
+func overlayOnStartup(t *testing.T, global, project string) (base, overlaid Options, notices []string) {
+	t.Helper()
+
+	globalPath, projectRoot := layerFixture(t, global, project)
+	base = Options{ConfigDir: filepath.Dir(globalPath), Workspace: projectRoot, GlobalConfigOnly: true}
+	if _, err := ResolveOptions(&base, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify, testHostID); err != nil {
+		t.Fatalf("ResolveOptions: %v", err)
+	}
+	doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("ReadGlobalDocument: %v", err)
+	}
+	overlaid = OverlayProjectLayer(base, doc, projectRoot, os.ReadFile,
+		func(n string) { notices = append(notices, n) })
+	return base, overlaid, notices
+}
+
+// sansRoots is o without the fields that name where its files sit and which Driver resolved it, so
+// two resolutions of the same files from two temp dirs compare equal.
+func sansRoots(o Options) Options {
+	o.ConfigDir, o.Workspace, o.GlobalConfigOnly = "", "", false
+	return o
+}
+
+// An overlay resolves every key exactly as a startup resolution that took the same project layer.
+func TestOverlayProjectLayerMatchesTheStartupLayer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		global  string
+		project string
+	}{
+		{
+			name:   "project-param and tighten-only keys",
+			global: "workflow-retries: 2\ntools:\n  disabled: [web_fetch]\ncontext-files:\n  names: [A.md]\n",
+			project: "workflow-retries: 6\ntools:\n  disabled: [terminal]\n" +
+				"context-files:\n  names: [B.md, C.md]\n",
+		},
+		{
+			name:    "the global names under the project's switch",
+			global:  "context-files:\n  names: [A.md]\n",
+			project: "context-files:\n  enable: true\n",
+		},
+		{
+			name:    "the project's names under the global switch",
+			global:  "context-files:\n  enable: false\n",
+			project: "context-files:\n  names: [X.md]\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, overlaid, notices := overlayOnStartup(t, tt.global, tt.project)
+			startup, _ := resolveLayeredStartup(t, tt.global, tt.project, Options{}, nil)
+
+			if len(notices) != 0 {
+				t.Errorf("notices = %q; want none", notices)
+			}
+			if got, want := sansRoots(overlaid), sansRoots(startup); !reflect.DeepEqual(got, want) {
+				t.Errorf("overlay = %+v\nwant the startup resolution %+v", got, want)
+			}
+		})
+	}
+}
+
+// A global-only key in the project file is dropped with one notice; the keys the layer honours land.
+func TestOverlayProjectLayerDropsAGlobalOnlyKey(t *testing.T) {
+	t.Parallel()
+
+	base, overlaid, notices := overlayOnStartup(t, "mode: plan\n", "mode: auto\nworkflow-retries: 6\n")
+
+	if overlaid.Mode != base.Mode || overlaid.WorkflowRetries != 6 {
+		t.Errorf("mode = %q, workflow-retries = %d; want the global %q and the project's 6",
+			overlaid.Mode, overlaid.WorkflowRetries, base.Mode)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], `global-only key "mode"`) {
+		t.Errorf("notices = %q; want one naming the global-only mode", notices)
+	}
+}
+
+// A project file that cannot be layered costs one notice naming it and leaves the base as it was.
+func TestOverlayProjectLayerSkipsABrokenProjectFile(t *testing.T) {
+	t.Parallel()
+
+	base, overlaid, notices := overlayOnStartup(t, "workflow-retries: 2\n", "workflow-retries: [6\n")
+
+	if !reflect.DeepEqual(overlaid, base) {
+		t.Errorf("overlay = %+v\nwant the base %+v", overlaid, base)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], "the project layer is skipped") {
+		t.Errorf("notices = %q; want one skipped-layer line", notices)
+	}
+}
+
+// A key the environment or a flag won keeps the base's value over the project's.
+func TestOverlayProjectLayerKeepsAnOverriddenKey(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", "workflow-retries: 6\n")
+	doc, err := ReadGlobalDocument(filepath.Dir(globalPath), os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("ReadGlobalDocument: %v", err)
+	}
+	base := Options{WorkflowRetries: 4, Overrides: map[string]Source{"workflow-retries": SourceEnv}}
+
+	overlaid := OverlayProjectLayer(base, doc, projectRoot, os.ReadFile, noNotify)
+
+	if overlaid.WorkflowRetries != 4 {
+		t.Errorf("workflow-retries = %d; want the overriding 4", overlaid.WorkflowRetries)
+	}
+}
+
+// The overlay never writes into its input, not even the spare capacity of a tighten-only list the
+// union could have grown in place — concurrent overlays of one base share those arrays.
+func TestOverlayProjectLayerLeavesTheBaseUnchanged(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t,
+		"workflow-retries: 2\ntools:\n  disabled: [web_fetch]\nurl-safety:\n  deny-hosts: [bad.example]\n",
+		"tools:\n  disabled: [terminal]\n"+
+			"url-safety:\n  deny-hosts: [evil.example]\nworkflow-retries: 6\n")
+	doc, err := ReadGlobalDocument(filepath.Dir(globalPath), os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("ReadGlobalDocument: %v", err)
+	}
+	disabled := append(make([]string, 0, 4), "web_fetch")
+	denied := append(make([]string, 0, 4), "bad.example")
+	base := Options{WorkflowRetries: 2, ToolsDisabled: disabled, URLDenyHosts: denied}
+	before := base
+	before.ToolsDisabled = slices.Clone(disabled[:cap(disabled)])
+	before.URLDenyHosts = slices.Clone(denied[:cap(denied)])
+
+	overlaid := OverlayProjectLayer(base, doc, projectRoot, os.ReadFile, noNotify)
+
+	if overlaid.WorkflowRetries != 6 || !slices.Contains(overlaid.ToolsDisabled, "terminal") {
+		t.Fatalf("overlay = %+v; want the project layer applied", overlaid)
+	}
+	if base.WorkflowRetries != 2 || !slices.Equal(disabled[:cap(disabled)], before.ToolsDisabled) ||
+		!slices.Equal(denied[:cap(denied)], before.URLDenyHosts) {
+		t.Errorf("base after the overlay: retries %d, tools.disabled %q, deny-hosts %q; want 2, %q, %q",
+			base.WorkflowRetries, disabled[:cap(disabled)], denied[:cap(denied)],
+			before.ToolsDisabled, before.URLDenyHosts)
+	}
+}
