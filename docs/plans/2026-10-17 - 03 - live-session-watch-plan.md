@@ -368,7 +368,18 @@ NOTES (2026-10-17): watch.go is now 691 lines (item 9 already over the ~400 guid
 
 Depends on item 9.
 
-## 10. Watch mode: the owner ends
+## 10. Watch mode: the owner ends — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the probe rides the follower's own read chain instead of a separate ~1 s tick. Every `watchProbeEvery`-th read (watchProbeInterval 1 s / watchPollInterval 100 ms, the entry read included) calls `watchSource.probe` first and then drains the journal in the same Cmd. Only one journal read is ever in flight, so the drain after a free probe never races a poll over the same bytes. Once the owner has ended, the follower and probe stop. That means no probe is in flight at ⏎-resume, and leaveWatch drops a stale one by its watch.
+NOTES (2026-10-17): `watchSource` gains `id`, `isForeign` (item 9's planned `foreign bool`, renamed for the boolean naming rule) and `probe holdProbe` (`func() (isHeld bool, err error)`, which the doors bind to `Store.ProbeHold`). A nil probe never ends a watch. A probe error counts as still held.
+NOTES (2026-10-17): the follower now keeps the journal descriptor open across reads (`watchState.journal`, replacing `file os.FileInfo`), and only Update closes it (foldWatchBatch, noteOwnerEnded, leaveWatch, and dropped batches). If the path names nothing, the owner is releasing, and the follower drains the held fd. A different file under the path counts as a truncation.
+NOTES (2026-10-17): the banner is a segment in the prompt-box legend: `watching <title> · finished · read-only · ⏎ resume · esc back` (own home), `… · finished · read-only · esc back` (watched home), and `… · owner gone without a final save · read-only · esc back`. ⏎ resumes only after a finish in the watcher's own home. After an "owner gone" end, ⏎ stays refused with the watch flash, because the Goal grants resume for the finished case only.
+NOTES (2026-10-17): ⏎-resume (`resumeWatched`, sessions.go) runs leaveWatch, then `openStoredSession`. That helper is new, extracted from acceptBrowser and shared by both: confirmBoundary(boundarySwitch) when workflows are running, else switchSession. The held Msgs are delivered first (tea.Sequence). It does not force the state to idle. The parked state is idle by enterWatch's guard, and forcing it would hide an owner error folded meanwhile.
+NOTES (2026-10-17): interject.go was not on the item's Files list. ⏎ and ctrl+g at idle reach the watch only through `sendAtIdle`, so it gets one check: an empty box on a resumable watch calls resumeWatched.
+NOTES (2026-10-17): RemoveJournal tolerates the Windows sharing violation and does not retry. The owner removes before it releases, and the watcher closes only once the hold reads free, so a retry would wait on a watcher that is waiting on it. The predicate `isRemoveSharingError` sits beside `isRenameSharingError` in rename_windows.go and rename_other.go (always false outside Windows). Those two files were not on the Files list, but a build-tagged predicate needs them. The Windows path is checked only by `GOOS=windows go build`/`vet`. No test runs it.
+NOTES (2026-10-17): consequential edit — internal/tui/doc.go: made necessary by watch.go's new role (owner's end probed, banner, ⏎-resume).
+NOTES (2026-10-17): watch.go is now 864 lines (it was already 698, over the ~400 guideline).
+NOTES (2026-10-17): no CHANGELOG entry, because watch mode still has no user-facing door until items 11 and 12 (as in item 9).
 
 **What:**
 **Goal:** while watching, the TUI probes the hold about once a second.

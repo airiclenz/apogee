@@ -571,16 +571,22 @@ func (s *Store) OpenJournal(id string) (*os.File, error) {
 }
 
 // RemoveJournal removes session id's Event journal — the owner's step when it releases the
-// session. A journal that is not there is not an error. An id that is not a safe filename
-// component is refused with ErrInvalidID.
+// session. A journal that is not there is not an error, and neither is one a watcher holds open on
+// Windows, where Go's open shares no delete and the removal fails until the watcher lets go
+// (isRemoveSharingError): the owner removes before it releases its hold (ADR 0103 decision 4),
+// while the watcher closes only once it reads the hold free, so a retry here would wait on the
+// watcher waiting on it. The journal left behind has a free lock, so Live never lists it and the
+// next startup sweep collects it (SweepJournals). An id that is not a safe filename component is
+// refused with ErrInvalidID.
 func (s *Store) RemoveJournal(id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
-	if err := os.Remove(s.JournalPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("apogee: remove session journal %q: %w", id, err)
+	err := os.Remove(s.JournalPath(id))
+	if err == nil || errors.Is(err, os.ErrNotExist) || isRemoveSharingError(err) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("apogee: remove session journal %q: %w", id, err)
 }
 
 // LiveEntry is one session Live found running: an Event journal present and its lock held.

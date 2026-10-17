@@ -29,3 +29,10 @@ func renameRecord(from, to string) error {
 func isRenameSharingError(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_ACCESS_DENIED)
 }
+
+// isRemoveSharingError reports whether err is a Windows removal refused because another handle —
+// a watcher following the journal — has the file open without FILE_SHARE_DELETE. DeleteFile
+// answers that case with the same two errors a rename does (isRenameSharingError).
+func isRemoveSharingError(err error) bool {
+	return isRenameSharingError(err)
+}

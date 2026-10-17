@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +63,7 @@ func newWatchFixture(t *testing.T, title string, entries []session.Entry, head i
 		t.Fatalf("write record: %v", err)
 	}
 	f := &watchFixture{t: t, src: watchSource{
+		id:          watchSessionID,
 		recordPath:  recordPath,
 		journalPath: filepath.Join(dir, watchSessionID+".events.jsonl"),
 		title:       title,
@@ -531,7 +535,7 @@ func TestWatchFollowerPollsOnItsOwn(t *testing.T) {
 	f := newWatchFixture(t, "watched", nil, 0)
 	m := enterWatchOn(t, watchEngine(), f)
 
-	_, cmd := stepCmd(t, m, watchBatchMsg{gen: m.watch.gen, offset: m.watch.offset, file: m.watch.file})
+	_, cmd := stepCmd(t, m, watchBatchMsg{gen: m.watch.gen, offset: m.watch.offset, journal: m.watch.journal})
 	polled := make(chan bool, 1)
 	go func() { polled <- containsPoll(cmd(), m.watch.gen) }()
 
@@ -1124,5 +1128,293 @@ func TestWatchIsolatesHoldsTheOwnersSurfacesUntilEsc(t *testing.T) {
 	}
 	if !m.sessionBrowser.open {
 		t.Error("the held listing was lost on the way out of the watch")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The owner ends (item 10)
+// ----------------------------------------------------------------------------
+
+// fakeProbe is a watch's hold probe the test answers: held until free is called.
+type fakeProbe struct {
+	isFree atomic.Bool
+	calls  atomic.Int32
+}
+
+// probe answers the watch's question (holdProbe).
+func (p *fakeProbe) probe() (bool, error) {
+	p.calls.Add(1)
+	return !p.isFree.Load(), nil
+}
+
+// free lets the session go, as an owner releasing its hold does.
+func (p *fakeProbe) free() { p.isFree.Store(true) }
+
+// probedFixture is a watched session whose hold a fakeProbe answers.
+func probedFixture(t *testing.T) (*watchFixture, *fakeProbe) {
+	t.Helper()
+	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	probe := &fakeProbe{}
+	f.src.probe = probe.probe
+	return f, probe
+}
+
+// finish closes the journal with run_finished, as an owner's release does before it lets go.
+func (f *watchFixture) finish() { f.journal.Close() }
+
+// probeWatch drives the follower through its next probing read: the probe rides every
+// watchProbeEvery-th read, the first at entry included.
+func probeWatch(t *testing.T, m Model) Model {
+	t.Helper()
+	for range m.watch.readsUntilProbe + 1 {
+		m = pollWatch(t, m)
+	}
+	return m
+}
+
+// ownerHostFor is the watcher's own session host with the watched record stored in it, so the
+// normal door can load it.
+func ownerHostFor(t *testing.T, f *watchFixture) *fakeSessionHost {
+	t.Helper()
+	rec, err := session.NewStore(filepath.Dir(f.src.recordPath)).LoadPath(f.src.recordPath)
+	if err != nil {
+		t.Fatalf("read the fixture record: %v", err)
+	}
+	host := &fakeSessionHost{}
+	host.seed(rec)
+	return host
+}
+
+// endWatchedOwner enters watch on f over the watcher's own session, follows it, finishes the
+// journal when isFinished, frees the probe and drives the follower to the probe that reads it.
+func endWatchedOwner(t *testing.T, m Model, f *watchFixture, probe *fakeProbe, isFinished bool) Model {
+	t.Helper()
+	m = enterAndFollow(t, m, f)
+	if isFinished {
+		f.finish()
+	}
+	probe.free()
+	return probeWatch(t, m)
+}
+
+func TestWatchOwnerFinishedResumesInTheOwnHome(t *testing.T) {
+	t.Parallel()
+	f, probe := probedFixture(t)
+	eng := watchEngine()
+	m := endWatchedOwner(t, ownerSession(t, eng, ownerHostFor(t, f)), f, probe, true)
+	if want := fmt.Sprintf(watchResumableLegendFormat, "watched", watchFinishedBanner); m.legend() != want {
+		t.Fatalf("legend = %q; want the finished banner with the ⏎ that resumes, %q", m.legend(), want)
+	}
+
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.watch.isActive || m.eng != Engine(eng) {
+		t.Fatal("⏎ did not leave the watch for the watcher's own engine before the load")
+	}
+	if cmd == nil {
+		t.Fatal("⏎ on a finished watch started no load")
+	}
+	loaded, ok := cmd().(sessionLoadedMsg)
+	if !ok || loaded.err != nil {
+		t.Fatalf("the resume's Cmd answered %#v; want the record loaded", loaded)
+	}
+	m = step(t, m, loaded)
+	if restores := eng.restoreCalls; len(restores) != 1 {
+		t.Errorf("RestoreSession calls = %d; want the watched record restored once", len(restores))
+	}
+	if !slices.Contains(entryTexts(m, entryUser), "first ask") {
+		t.Error("the resumed session did not repaint the record's own scrollback")
+	}
+}
+
+func TestWatchOwnerFinishedInAWatchedHomeStaysRefused(t *testing.T) {
+	t.Parallel()
+	f, probe := probedFixture(t)
+	f.src.isForeign = true
+	eng := watchEngine()
+	m := endWatchedOwner(t, ownerSession(t, eng, ownerHostFor(t, f)), f, probe, true)
+
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if want := fmt.Sprintf(watchEndedLegendFormat, "watched", watchFinishedBanner); m.legend() != want {
+		t.Errorf("legend = %q; want the finished banner with no resume, %q", m.legend(), want)
+	}
+	if !m.watch.isActive || m.flash != watchRefusedFlash {
+		t.Errorf("active %v, flash %q; want ⏎ refused with the watch kept", m.watch.isActive, m.flash)
+	}
+	if cmd != nil {
+		if _, isLoad := cmd().(sessionLoadedMsg); isLoad {
+			t.Error("⏎ in a watched home loaded the record")
+		}
+	}
+	if len(eng.restoreCalls) != 0 {
+		t.Errorf("RestoreSession calls = %d; want none", len(eng.restoreCalls))
+	}
+}
+
+func TestWatchOwnerGoneShowsTheBannerAndStaysReadOnly(t *testing.T) {
+	t.Parallel()
+	f, probe := probedFixture(t)
+	eng := watchEngine()
+	m := endWatchedOwner(t, ownerSession(t, eng, ownerHostFor(t, f)), f, probe, false)
+
+	if want := fmt.Sprintf(watchEndedLegendFormat, "watched", watchOwnerGoneBanner); m.legend() != want {
+		t.Errorf("legend = %q; want the owner-gone banner, %q", m.legend(), want)
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v; want the vanished owner's run shown idle", m.state)
+	}
+	if _, read := stepCmd(t, m, watchPollMsg{gen: m.watch.gen}); read != nil {
+		t.Error("the follower read on after the owner's end")
+	}
+	calls := probe.calls.Load()
+
+	m = step(t, m, keyEnter())
+
+	if !m.watch.isActive || m.flash != watchRefusedFlash || len(eng.restoreCalls) != 0 {
+		t.Errorf("active %v, flash %q, restores %d; want ⏎ refused and the watch kept",
+			m.watch.isActive, m.flash, len(eng.restoreCalls))
+	}
+	if probe.calls.Load() != calls {
+		t.Error("the probe ran on after the owner's end")
+	}
+}
+
+func TestWatchOwnerFinishedIsReadFromARemovedJournal(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	dir := filepath.Dir(f.src.recordPath)
+	owner := session.NewStore(dir)
+	release, err := owner.Hold(watchSessionID)
+	if err != nil {
+		t.Fatalf("the owner's Hold: %v", err)
+	}
+	watcher := session.NewStore(dir)
+	f.src.probe = func() (bool, error) {
+		isHeld, _, err := watcher.ProbeHold(watchSessionID)
+		return isHeld, err
+	}
+	m := enterAndFollow(t, ownerSession(t, watchEngine(), ownerHostFor(t, f)), f)
+
+	// The owner's release, in its order: the last words, the closing frame, the journal removed,
+	// and only then the hold let go — all before the follower reads again.
+	f.emit(domain.TokenEvent{EventBase: domain.EventBase{Turn: 1}, Text: "last words"},
+		domain.MessageEvent{EventBase: domain.EventBase{Turn: 1}, Text: "last words"})
+	f.finish()
+	if err := f.file.Close(); err != nil {
+		t.Fatalf("close the journal: %v", err)
+	}
+	if err := owner.RemoveJournal(watchSessionID); err != nil {
+		t.Fatalf("RemoveJournal: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	m = probeWatch(t, m)
+
+	if want := fmt.Sprintf(watchResumableLegendFormat, "watched", watchFinishedBanner); m.legend() != want {
+		t.Errorf("legend = %q; want the finished banner, %q", m.legend(), want)
+	}
+	if !slices.Contains(entryTexts(m, entryAssistant), "last words") {
+		t.Error("the lines written before the removal were not drained")
+	}
+}
+
+func TestWatchOwnerResumeAsksTheSwitchConfirmWithAWorkflowRunning(t *testing.T) {
+	t.Parallel()
+	f, probe := probedFixture(t)
+	eng := watchEngine()
+	m := ownerSession(t, eng, ownerHostFor(t, f))
+	m.workflows.live = map[string]backgroundWorkflow{"wf-own": {name: "nightly"}}
+	m = endWatchedOwner(t, m, f, probe, true)
+
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	if m.watch.isActive {
+		t.Fatal("⏎ did not leave the watch before asking")
+	}
+	if !m.boundaryConfirmOpen() || m.picker.boundary.kind != boundarySwitch ||
+		m.picker.boundary.sessionID != watchSessionID {
+		t.Fatalf("picker %+v; want the switch confirm for %s", m.picker, watchSessionID)
+	}
+	if cmd != nil {
+		if _, isLoad := cmd().(sessionLoadedMsg); isLoad {
+			t.Error("the load ran before the confirm was answered")
+		}
+	}
+}
+
+// holdingHost is a session host whose Load takes the real live-instance hold, as the production
+// host's does (Live.Park), so a resume meets the lock a watcher's probe shares.
+type holdingHost struct {
+	*fakeSessionHost
+	store    *session.Store
+	mu       sync.Mutex
+	releases []func() error
+}
+
+// Load reads the record and holds it.
+func (h *holdingHost) Load(id string) (session.Record, error) {
+	rec, err := h.store.Load(id)
+	if err != nil {
+		return session.Record{}, err
+	}
+	release, err := h.store.Hold(id)
+	if err != nil {
+		return session.Record{}, err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.releases = append(h.releases, release)
+	return rec, nil
+}
+
+func TestWatchOwnerResumeWithAProbeInFlightIsNotRefusedAsHeld(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	dir := filepath.Dir(f.src.recordPath)
+	releaseOwner, err := session.NewStore(dir).Hold(watchSessionID)
+	if err != nil {
+		t.Fatalf("the owner's Hold: %v", err)
+	}
+	store := session.NewStore(dir)
+	f.src.probe = func() (bool, error) {
+		isHeld, _, err := store.ProbeHold(watchSessionID)
+		return isHeld, err
+	}
+	host := &holdingHost{fakeSessionHost: &fakeSessionHost{}, store: store}
+	t.Cleanup(func() {
+		for _, release := range host.releases {
+			_ = release()
+		}
+	})
+	eng := watchEngine()
+	own := newSessionModel(t, eng, host)
+	own.transcript.addUser("my own question", nil)
+	m := enterAndFollow(t, own, f)
+	f.finish()
+	if err := releaseOwner(); err != nil {
+		t.Fatalf("the owner's release: %v", err)
+	}
+	m = probeWatch(t, m)
+	if !m.isWatchResumable() {
+		t.Fatalf("legend %q; setup: the watch did not reach the resumable finish", m.legend())
+	}
+	stale := m
+	stale.watch.readsUntilProbe = 0
+	inFlight := stale.readJournalCmd() // a probing read the follower had in flight at ⏎
+
+	m, load := stepCmd(t, m, keyEnter())
+	probed := make(chan tea.Msg, 1)
+	go func() { probed <- inFlight() }()
+	loaded, ok := load().(sessionLoadedMsg)
+	m = step(t, step(t, m, loaded), <-probed)
+
+	if !ok || loaded.err != nil {
+		t.Fatalf("the resume's load answered %#v; want the record held and loaded", loaded)
+	}
+	if len(eng.restoreCalls) != 1 || m.watch.isActive {
+		t.Errorf("restores %d, watching %v; want the record resumed and the late probe dropped",
+			len(eng.restoreCalls), m.watch.isActive)
 	}
 }

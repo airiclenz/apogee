@@ -217,8 +217,12 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // they were steering a delegate with. Everywhere else it submits.
 //
 // While watching, the line first meets watch mode's allow-list gate: only a view-only verb runs, and
-// anything else flashes and leaves the box as typed (watch.go).
+// anything else flashes and leaves the box as typed (watch.go) — except that an empty box resumes a
+// watch whose owner finished in the watcher's own home (resumeWatched).
 func (m Model) sendAtIdle() (tea.Model, tea.Cmd) {
+	if m.isWatchResumable() && strings.TrimSpace(m.input.Value()) == "" {
+		return m.resumeWatched()
+	}
 	if m.watchRefuses(m.submitLine()) {
 		return m.refuseWatchInput()
 	}

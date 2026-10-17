@@ -9,3 +9,9 @@ import "os"
 func renameRecord(from, to string) error {
 	return os.Rename(from, to)
 }
+
+// isRemoveSharingError is always false outside Windows: an unlink succeeds while a reader holds
+// the file open — the reader keeps the old inode — so no removal is ever refused for it.
+func isRemoveSharingError(error) bool {
+	return false
+}

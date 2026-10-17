@@ -42,8 +42,34 @@ import (
 // reader still sees as streaming, at the cost of one stat and one short read per poll.
 const watchPollInterval = 100 * time.Millisecond
 
+// watchProbeInterval is about how often the watch asks whether the owner still holds the session
+// (watchSource.probe): often enough that the banner follows the owner's end within a second, rare
+// enough that the shared lock the probe takes is never in a live owner's way (ADR 0103 decision 12).
+const watchProbeInterval = time.Second
+
+// watchProbeEvery is the follower read the probe rides on: every watchProbeEvery-th, the first one
+// included. Riding the follower's own chain keeps one read of the journal in flight at a time, so
+// the drain after a free probe never races a poll over the same bytes.
+const watchProbeEvery = int(watchProbeInterval / watchPollInterval)
+
 // watchLegendFormat is the prompt box's invitation while watching, filled with the session title.
 const watchLegendFormat = "watching %s · read-only · esc back"
+
+// watchEndedLegendFormat is the box once the owner has ended, filled with the title and the
+// banner; watchResumableLegendFormat is the same, in the watcher's own home after a finish, where
+// ⏎ resumes the record (resumeWatched).
+const (
+	watchEndedLegendFormat     = "watching %s · %s · read-only · esc back"
+	watchResumableLegendFormat = "watching %s · %s · read-only · ⏎ resume · esc back"
+)
+
+// The owner-end banners. watchFinishedBanner: the journal closed with run_finished and the hold is
+// free — the owner saved and let go. watchOwnerGoneBanner: the hold is free with no run_finished —
+// the owner crashed or was killed, and its record may lack the last of what the journal showed.
+const (
+	watchFinishedBanner  = "finished"
+	watchOwnerGoneBanner = "owner gone without a final save"
+)
 
 // watchRefusedFlash is the status-line flash a refused key or verb raises while watching: the
 // session is someone else's run, and nothing typed here reaches it.
@@ -63,13 +89,35 @@ var watchVerbs = map[string]bool{
 	"version":  true,
 }
 
-// watchSource names the session a watch follows: the record it paints from, the journal it
-// follows, and the title the box shows until the journal names one.
+// watchSource names the session a watch follows: its id, the record it paints from, the journal it
+// follows, and the title the box shows until the journal names one. isForeign marks a session of a
+// watched home (ADR 0103 decision 7), which is never resumable. probe asks whether the owner still
+// holds the session — the door that opens the watch binds it to Store.ProbeHold, so the TUI keeps
+// no store of its own — and a nil probe never ends the watch.
 type watchSource struct {
+	id          string
 	recordPath  string
 	journalPath string
 	title       string
+	isForeign   bool
+	probe       holdProbe
 }
+
+// holdProbe reports whether the watched session's owner still holds it. It never holds, writes or
+// creates anything (Store.ProbeHold); an error says nothing either way.
+type holdProbe func() (isHeld bool, err error)
+
+// watchEnding is what the watch knows of its owner's end.
+type watchEnding int
+
+const (
+	// watchOwnerLive: the owner holds the session, or the watch has not yet found it free.
+	watchOwnerLive watchEnding = iota
+	// watchOwnerFinished: the hold is free and the journal closed with run_finished.
+	watchOwnerFinished
+	// watchOwnerGone: the hold is free and the journal never closed.
+	watchOwnerGone
+)
 
 // watchState is the Model's watch-mode slot. It holds plain values only (ADR 0011): the parked
 // owner engine and session view, the follower's read position, and gen, which tags every follower
@@ -90,10 +138,18 @@ type watchState struct {
 	// held are the owner's Msgs that would open a surface over the view (watchRouteHeld); they are
 	// delivered again once the watch ends.
 	held []tea.Msg
-	// offset is how many journal bytes have been folded; file is the journal the offset counts in,
-	// so a journal replaced under the same path reads as a truncation.
-	offset int64
-	file   os.FileInfo
+	// offset is how many journal bytes have been folded; journal is the descriptor the offset counts
+	// in, held open across reads so that a journal the owner removes on release still drains to its
+	// end, and so that a different file under the same path reads as a truncation. It is a pointer,
+	// shared by every copy of the Model, and only Update closes it (closeJournal).
+	offset  int64
+	journal *os.File
+	// readsUntilProbe counts the follower reads left before the next one probes the hold.
+	readsUntilProbe int
+	// hasRunFinished says the journal's run_finished has folded since its last run_started.
+	hasRunFinished bool
+	// ending is the owner's end once the probe found the hold free; past it nothing is read.
+	ending watchEnding
 }
 
 // parkedSession is the session view watch mode sets aside: exactly the field set resetSessionView
@@ -130,13 +186,15 @@ type parkedSession struct {
 type watchPollMsg struct{ gen int }
 
 // watchBatchMsg is one follower read: the complete lines appended since the last one, decoded, and
-// where the next read starts. truncated says the journal shrank or was replaced, so the view
-// clears before items fold.
+// where the next read starts, in journal. isTruncated says the journal shrank or was replaced, so
+// the view clears before items fold. isOwnerGone says the read's probe found the hold free — the
+// owner has ended, and items are the last the journal will ever hold.
 type watchBatchMsg struct {
 	gen         int
 	offset      int64
-	file        os.FileInfo
+	journal     *os.File
 	isTruncated bool
+	isOwnerGone bool
 	items       []watchItem
 }
 
@@ -191,18 +249,21 @@ func (m Model) enterWatch(src watchSource) (Model, tea.Cmd) {
 	m.transcript.paints = newPaintCache()
 	m.clearWatchView()
 	m.forgetPaintedFrame()
-	return m, m.readJournalCmd()
+	read := m.readJournalCmd()
+	return m, read
 }
 
-// leaveWatch is every way out of a watch — esc, and quit before it acts: the owner's engine,
-// session host and session view come back exactly as parked, and every follower message still in
-// flight is dropped by the generation it carries. The Cmd delivers the owner's held Msgs again, so
-// they fold into the restored session; it is nil when nothing was held or no watch was active.
+// leaveWatch is every way out of a watch — esc, ⏎-resume and quit before they act: the owner's
+// engine, session host and session view come back exactly as parked, the journal's descriptor is
+// closed, and every follower message still in flight — its probe included — is dropped by the
+// watch it names. The Cmd delivers the owner's held Msgs again, so they fold into the restored
+// session; it is nil when nothing was held or no watch was active.
 func (m Model) leaveWatch() (Model, tea.Cmd) {
 	if !m.watch.isActive {
 		return m, nil
 	}
 	held := m.watch.held
+	closeJournal(m.watch.journal)
 	m.eng, m.sessions = m.watch.owner, m.watch.ownerSessions
 	m.restoreSession(m.watch.parked)
 	m.watch = watchState{gen: m.watch.gen}
@@ -384,10 +445,17 @@ func (m *Model) clearWatchView() {
 	m.reroot()
 }
 
-// readJournalCmd is the follower's read, run off the Update goroutine.
-func (m Model) readJournalCmd() tea.Cmd {
-	src, gen, offset, file := m.watch.source, m.watch.gen, m.watch.offset, m.watch.file
-	return func() tea.Msg { return readJournal(src, gen, offset, file) }
+// readJournalCmd is the follower's next read, run off the Update goroutine. Every
+// watchProbeEvery-th read, the first included, probes the owner's hold before it reads.
+func (m *Model) readJournalCmd() tea.Cmd {
+	isProbing := false
+	if m.watch.readsUntilProbe == 0 {
+		isProbing = m.watch.source.probe != nil
+		m.watch.readsUntilProbe = watchProbeEvery
+	}
+	m.watch.readsUntilProbe--
+	src, gen, offset, journal := m.watch.source, m.watch.gen, m.watch.offset, m.watch.journal
+	return func() tea.Msg { return readJournal(src, gen, offset, journal, isProbing) }
 }
 
 // nextWatchPoll schedules the follower's next read.
@@ -397,31 +465,41 @@ func (m Model) nextWatchPoll() tea.Cmd {
 }
 
 // readJournal reads the complete lines appended to src's journal past offset and decodes them. It
-// touches the journal only — open, stat, read — and never the record's lock (ADR 0103 decision 5).
+// touches the journal only — open, stat, read — and never takes the record's lock (ADR 0103
+// decision 5); a probing read asks src.probe first, which holds nothing either.
+//
+// The probe goes before the read: the owner removes its journal and only then releases its hold
+// (ADR 0103 decision 4), so a hold read free means every line is written, and the read after it
+// drains the journal to its end through the descriptor the follower holds — the path may already
+// name nothing. A path that names nothing is the owner releasing, never a truncation.
 //
 // A journal that shrank below offset, or a different file now under the path (the owner reopened
-// the record, which truncates its journal), restarts the read at 0 and reports isTruncated. A
-// trailing line the owner has not finished writing is left for the next read. A journal that will
-// not open or read yields a batch with no items at the same offset: the follower simply looks again
-// on its next poll, which is all a reader of a file it does not own can do.
-func readJournal(src watchSource, gen int, offset int64, known os.FileInfo) watchBatchMsg {
-	batch := watchBatchMsg{gen: gen, offset: offset, file: known}
-	f, err := os.Open(src.journalPath)
+// the record, which truncates its journal, or a later run wrote a new one), restarts the read at 0
+// and reports isTruncated. A trailing line the owner has not finished writing is left for the next
+// read. A journal that will not open or read yields a batch with no items at the same offset: the
+// follower simply looks again on its next poll, which is all a reader of a file it does not own
+// can do.
+func readJournal(src watchSource, gen int, offset int64, held *os.File, isProbing bool) watchBatchMsg {
+	batch := watchBatchMsg{gen: gen, offset: offset, journal: held}
+	if isProbing {
+		batch.isOwnerGone = isHoldFree(src.probe)
+	}
+	journal, isReplaced := followedJournal(src.journalPath, held)
+	if journal == nil {
+		return batch
+	}
+	batch.journal = journal
+	info, err := journal.Stat()
 	if err != nil {
 		return batch
 	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return batch
-	}
-	if known != nil && (!os.SameFile(known, info) || info.Size() < offset) {
+	if isReplaced || info.Size() < offset {
 		batch.isTruncated = true
 		offset = 0
 	}
-	batch.offset, batch.file = offset, info
+	batch.offset = offset
 
-	data, err := io.ReadAll(io.NewSectionReader(f, offset, info.Size()-offset))
+	data, err := io.ReadAll(io.NewSectionReader(journal, offset, info.Size()-offset))
 	if err != nil {
 		return batch
 	}
@@ -436,6 +514,49 @@ func readJournal(src watchSource, gen int, offset int64, known os.FileInfo) watc
 		}
 	}
 	return batch
+}
+
+// isHoldFree asks probe whether the owner has let the session go. A probe that fails answers
+// "still held": the watch stays live and asks again within a second, rather than telling the
+// watcher an owner ended that may be running still.
+func isHoldFree(probe holdProbe) bool {
+	isHeld, err := probe()
+	return err == nil && !isHeld
+}
+
+// followedJournal is the journal the follower reads: held, while the path still names that file or
+// names nothing — the owner removed it on release, and the open descriptor is what drains the rest
+// — and otherwise the file now under the path, opened fresh, with isReplaced reporting the switch.
+// It is nil while there is no journal to read yet. The descriptor it replaces is left for Update to
+// close (foldWatchBatch), which owns every descriptor the watch holds.
+func followedJournal(path string, held *os.File) (journal *os.File, isReplaced bool) {
+	current, err := os.Stat(path)
+	switch {
+	case held != nil && (err != nil || isSameFile(held, current)):
+		return held, false
+	case held == nil && err != nil:
+		return nil, false
+	}
+	fresh, err := os.Open(path)
+	if err != nil {
+		return held, false
+	}
+	return fresh, held != nil
+}
+
+// isSameFile reports whether the open journal is the file info describes.
+func isSameFile(journal *os.File, info os.FileInfo) bool {
+	held, err := journal.Stat()
+	return err == nil && os.SameFile(held, info)
+}
+
+// closeJournal closes a descriptor the watch held. The journal was only ever read, so a failed
+// close loses nothing and is not reported; a descriptor closed twice — a dropped batch carrying
+// one leaveWatch already closed — answers os.ErrClosed, which is the same nothing.
+func closeJournal(journal *os.File) {
+	if journal != nil {
+		_ = journal.Close()
+	}
 }
 
 // decodeWatchLine decodes one journal line into the item the watch folds. A line that does not
@@ -502,27 +623,39 @@ func recordHead(path string, n int) ([]entry, error) {
 	return entries, nil
 }
 
-// foldWatchPoll answers the follower's tick with the next read.
+// foldWatchPoll answers the follower's tick with the next read. A watch whose owner has ended
+// reads no more.
 func (m Model) foldWatchPoll(msg watchPollMsg) (tea.Model, tea.Cmd) {
-	if !m.watch.isActive || msg.gen != m.watch.gen {
+	if !m.watch.isActive || msg.gen != m.watch.gen || m.watch.ending != watchOwnerLive {
 		return m, nil
 	}
-	return m, m.readJournalCmd()
+	read := m.readJournalCmd()
+	return m, read
 }
 
 // foldWatchBatch folds one follower read into the watch view, in journal order, and schedules the
-// next poll. A batch for another watch, or one arriving after esc, is dropped whole.
+// next poll — or, when the read's probe found the hold free, ends the follow with the owner's
+// banner instead. A batch for another watch, or one arriving after esc, is dropped whole, and the
+// descriptor it carries closed.
 func (m Model) foldWatchBatch(msg watchBatchMsg) (tea.Model, tea.Cmd) {
 	if !m.watch.isActive || msg.gen != m.watch.gen {
+		closeJournal(msg.journal)
 		return m, nil
 	}
-	m.watch.offset, m.watch.file = msg.offset, msg.file
+	if msg.journal != m.watch.journal {
+		closeJournal(m.watch.journal)
+	}
+	m.watch.offset, m.watch.journal = msg.offset, msg.journal
 	if msg.isTruncated {
 		m.clearWatchView()
 	}
 	wasRunning := m.state == stateRunning
 	for _, item := range msg.items {
 		m = m.foldWatchItem(item)
+	}
+	if msg.isOwnerGone {
+		m.noteOwnerEnded()
+		return m, nil
 	}
 	cmds := []tea.Cmd{m.nextWatchPoll()}
 	if m.state == stateRunning && !wasRunning {
@@ -532,6 +665,28 @@ func (m Model) foldWatchBatch(msg watchBatchMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.spin.arm(m.worker.gen, m.opts.UI.Spinner))
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// noteOwnerEnded ends the follow once the owner has let the session go: the banner it shows says
+// whether the journal closed with run_finished, the watched run shows idle, and the drained
+// journal's descriptor is closed. The view stays read-only; esc, or ⏎ where resumeWatched allows
+// it, is the way on.
+func (m *Model) noteOwnerEnded() {
+	m.watch.ending = watchOwnerGone
+	if m.watch.hasRunFinished {
+		m.watch.ending = watchOwnerFinished
+	}
+	closeJournal(m.watch.journal)
+	m.watch.journal = nil
+	m.watchIdle()
+}
+
+// isWatchResumable reports whether ⏎ resumes the watched record: its owner finished and let it go,
+// and it is a session of the watcher's own home. A watched home's session never is (ADR 0103
+// decision 7), nor one whose owner vanished without its final save.
+func (m Model) isWatchResumable() bool {
+	return m.watch.isActive && m.watch.ending == watchOwnerFinished &&
+		!m.watch.source.isForeign && m.watch.source.id != ""
 }
 
 // foldWatchItem folds one journal line. A prompt paints as the owner's TUI painted it — a top-level
@@ -549,6 +704,7 @@ func (m Model) foldWatchItem(item watchItem) Model {
 		m.transcript.addUser(stripEscapes(item.prompt.Text), nil)
 		m.watchRunning()
 	case item.isFinished:
+		m.watch.hasRunFinished = true
 		m.watchIdle()
 	case item.event != nil:
 		m = m.foldWatchedEvent(item.event)
@@ -564,6 +720,7 @@ func (m Model) foldWatchItem(item watchItem) Model {
 // session is not being resumed.
 func (m *Model) paintWatchStart(start watchStart) {
 	m.clearWatchView()
+	m.watch.hasRunFinished = false
 	if title := stripEscapes(start.title); title != "" {
 		m.watch.title = title
 	}
@@ -614,8 +771,17 @@ func (m *Model) watchIdle() {
 	m.state = stateIdle
 }
 
-// watchLegend is the prompt box's invitation while watching.
+// watchLegend is the prompt box's invitation while watching: once the owner has ended it carries
+// the banner, and in the watcher's own home after a finish the ⏎ that resumes.
 func (m Model) watchLegend() string {
+	switch {
+	case m.isWatchResumable():
+		return fmt.Sprintf(watchResumableLegendFormat, m.watch.title, watchFinishedBanner)
+	case m.watch.ending == watchOwnerFinished:
+		return fmt.Sprintf(watchEndedLegendFormat, m.watch.title, watchFinishedBanner)
+	case m.watch.ending == watchOwnerGone:
+		return fmt.Sprintf(watchEndedLegendFormat, m.watch.title, watchOwnerGoneBanner)
+	}
 	return fmt.Sprintf(watchLegendFormat, m.watch.title)
 }
 

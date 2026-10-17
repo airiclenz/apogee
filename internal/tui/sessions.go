@@ -373,10 +373,29 @@ func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
+	return m.openStoredSession(meta.ID)
+}
+
+// openStoredSession is the normal door into stored session id, shared by the browser's ⏎ and a
+// finished watch's: with background workflows running it asks first whether to stop them (the
+// boundary confirm, commandrun.go), else it starts the load (switchSession).
+func (m Model) openStoredSession(id string) (tea.Model, tea.Cmd) {
 	if m.workflowsRunning() {
-		return m.confirmBoundary(pendingBoundary{kind: boundarySwitch, sessionID: meta.ID})
+		return m.confirmBoundary(pendingBoundary{kind: boundarySwitch, sessionID: id})
 	}
-	return m.switchSession(meta.ID, false)
+	return m.switchSession(id, false)
+}
+
+// resumeWatched is ⏎ on a watch whose owner finished, in the watcher's own home
+// ([Model.isWatchResumable]): it leaves the watch first — the owner's engine, host and session view
+// restored, the journal closed, the follower's chain ended with its probe — and only then takes the
+// normal door (openStoredSession), so the load's Hold is the one this process takes and the record
+// opens exactly as the browser would open it. The owner's Msgs the watch held fold first.
+func (m Model) resumeWatched() (tea.Model, tea.Cmd) {
+	id := m.watch.source.id
+	left, redelivered := m.leaveWatch()
+	next, opened := left.openStoredSession(id)
+	return next, tea.Sequence(redelivered, opened)
 }
 
 // switchSession starts the load of the stored session id that resumeLoaded then restores, keep

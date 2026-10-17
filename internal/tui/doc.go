@@ -1149,8 +1149,9 @@
 // (ADR 0103) — another session painted live and read-only from its record's head and its Event
 // journal, followed off the Update loop and folded through the eventMsg routing, behind an inert
 // Engine, the parked session view and host every way out restores, the owner's own Msgs folded
-// into that parked session meanwhile, and the one allow-list gate every send, verb and engine
-// setter meets while watching;
+// into that parked session meanwhile, the one allow-list gate every send, verb and engine
+// setter meets while watching, and the owner's end — its hold probed on the follower's chain, the
+// banner it shows, and ⏎ resuming a finished session of the watcher's own home;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block and the super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the
