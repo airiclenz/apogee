@@ -551,7 +551,12 @@ NOTES (2026-10-17): the re-list after a rename or delete keeps the watched rows 
 
 Depends on items 11, 12, 13.
 
-## 16. Manual: watch mode, the journal, and the security note
+## 16. Manual: watch mode, the journal, and the security note — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): consequential edit — docs/manual/commands.md: made necessary by the /sessions row saying a resume asks to stop background workflows, which a ⏎ on a `● live` row (a watch) does not.
+NOTES (2026-10-17): the "Seqcom-style setup" is written generically (a service account running `apogee daemon` and the users who watch it), because Seqcom is named nowhere in the public docs and the owner ratified the feature as general rather than Seqcom-specific.
+NOTES (2026-10-17): the sessions.md held-session bullet also restates the hold timing as "from its first prompt" (ADR 0103 decision 10, item 8). The old "from the moment its record first reaches disk" was made false by item 8.
+NOTES (2026-10-17): SECURITY.md also names one share-group exposure the plan did not list. Read access to a group-readable `.lock` file is enough to flock it, so a group member can keep the owner from holding a session. It is stated as a denial of service the group is trusted not to commit.
 
 **What:**
 **Goal:** the manual documents what ships:

@@ -66,8 +66,9 @@ in config.yaml` (for a model the server does not list, the same fact rides the n
 notice as a clause), and runs on with the Budget inactive and every request held to that
 assumption.
 The run is saved to
-`~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
-records nothing — no session record, and no undo snapshot store either, since a store filed
+`~/.apogee/sessions` and shows up in `/sessions` like any other — while it runs, as a `● live` row
+you can [watch](#the-event-journal--what-a-watcher-reads); `--no-save` runs it and
+records nothing — no session record, no Event journal, and no undo snapshot store either, since a store filed
 under a record nothing keeps is one `apogee undo` could never reach. Either way the startup
 sweep still applies whatever bound the `sessions:`
 block names — `--no-save` drops this run's own record, not the retention policy, so a host
@@ -393,6 +394,40 @@ that survivable:
   `run_finished`**. It is the escape hatch for a stream nobody is draining, and the one path on
   which the closing frame is not written.
 
+### The Event journal — what a watcher reads
+
+Whether or not `--format json` is given, a run that keeps a record also writes its Event lines to a
+file beside that record while it runs: `~/.apogee/sessions/<id>.events.jsonl`, the **Event journal**
+that [watch mode](sessions.md#watching-a-live-session) follows from another terminal
+([ADR 0103](../../.capcom/knowledge/decisions/adr-0103.md)). It is the same `v:2` envelope and the
+same line kinds as stdout, with three differences that make it a coalesced variant of them:
+
+- **Deltas are merged.** The `token` and `reasoning` deltas that arrive within one window of about
+  30 ms are written as one line whose text is exactly their concatenation, so a fast stream costs a
+  line per window on disk rather than a line per token. Nothing is lost, and no other line kind is
+  merged.
+- **The opening frame carries two more members**: `title`, the session's title, and `entries`, the
+  number of transcript entries the record held when the journal began — where a watcher stops
+  painting the record and starts following the journal.
+- **A `prompt` line** is written for each top-level prompt and each Interjection — `data.text` is
+  what was submitted and `data.interjection` says which it was — because a prompt is not an Event
+  and a watcher would otherwise see answers with no question. This kind is the journal's own and
+  never reaches stdout.
+
+A journal holds exactly one `run_started` and one `run_finished`. Its **lifetime is the run's hold
+on the record**: it is born once the run holds its record and has its prompt, and it is removed
+after the final save and before the hold is released, so a finished run leaves only its record.
+A run killed before that leaves its journal behind; the next startup of any apogee Driver sweeps
+an orphan journal whose lock is free, with or without a `sessions:` retention bound. The journal is
+not a log to keep — for a lasting stream of a run, redirect `--format json`. It is written as the
+lines happen; if a write fails, `session journal stopped — <reason>` is said once on stderr, the
+journal stops, and the run goes on to its own end.
+
+Like stdout and the record, the journal is **not scrubbed**: it holds every tool argument and result
+the run saw. It is written owner-private (`0600`) unless
+[`sessions.share-group`](configuration.md#keeping-the-session-store-bounded--sessions) shares it
+with a group (see [SECURITY.md](../../SECURITY.md)).
+
 ### Where `--format` reaches
 
 Here and nowhere else. [`apogee daemon`](daemon.md) keeps its prose log — its stdout multiplexes
@@ -400,3 +435,6 @@ many Firings, which needs a per-stream identity this envelope has no field for �
 [`apogee probe`](probe.md) stays a prose report; neither takes `--format`. A `--format` value that
 is neither `text` nor `json` is refused in prose, exit `2`: no stream exists yet to carry the news,
 and a JSONL stream whose single line said *that is not a format* would be the worse answer.
+The [Event journal](#the-event-journal--what-a-watcher-reads) is not a `--format`: every Driver
+writes one beside the record it holds — a daemon firing and an interactive session included —
+whatever its stdout carries.

@@ -24,9 +24,10 @@ still remembers.
   refuses, naming the workspace and pointing at `--resume <id>`. Resuming also re-opens
   the session's snapshot store, so
   [`/undo`](commands.md#undoing-the-agents-file-writes--undo-and-redo) still reaches what
-  an earlier process wrote.
+  an earlier process wrote. `--resume` on a session another apogee is running watches it
+  instead (see [watching a live session](#watching-a-live-session)).
 - `/sessions` opens the in-TUI browser (newest first): typing filters the list,
-  `⏎` resumes, `^r` renames inline, `^d` deletes after a confirm, `^a` toggles
+  `⏎` resumes (or watches a `● live` row), `^r` renames inline, `^d` deletes after a confirm, `^a` toggles
   between this workspace and all workspaces. The verbs are chords precisely so
   the letters are free to type with — every pop-up that lists things to search
   (`/sessions`, `/settings`, and the `/model`, `/server`, `/sub-agents-server`,
@@ -42,10 +43,13 @@ still remembers.
   question with fixed answers — `stop running workflows? (y/n)`, the start-up
   offers about a plaintext key or a retired flag, and the offer to adopt a rule
   the project proposes — do not filter.
-- A session is **held** by the apogee that has it open, from the moment its record
-  first reaches disk until that apogee exits, so two instances can never write one
-  record. Opening a held session anywhere else — `--resume`, `--continue`, the
-  browser's `⏎` — or renaming it with `^r` or deleting it with `^d` is refused with one line:
+- A session is **held** by the apogee that has it open, from its first prompt until
+  that apogee exits, so two instances can never write one record. A held session that
+  is running opens elsewhere only to be **watched**: `--resume <id>` and the browser's
+  `⏎` open it in [watch mode](#watching-a-live-session), read-only, instead of loading
+  it. Everything that would take it over is refused with one line —
+  `--continue`, renaming it with `^r`, deleting it with `^d`, and `--resume` or `⏎` on
+  a held session that writes no Event journal (one `apogee undo` is reverting, say):
   `session <id> is open in another apogee (pid N) — fork it to work alongside`
   (the pid is omitted when it is not known). `--continue` refuses rather than
   quietly opening the workspace's next-newest session; in the browser the refusal
@@ -177,3 +181,96 @@ paints every task-list card, and every `✦ Tools (N calls)` umbrella with more
 type rows than `ui.tools-fold-over`, the way you last left them, not the way the
 record found them.
 
+
+## Watching a live session
+
+A session another apogee is running — a TUI session in another terminal, an
+[`apogee headless`](headless.md) run, a [daemon](daemon.md) firing or a `/schedule` run — can
+be followed live from a second terminal, read-only. While it runs, the Driver running it writes an
+**Event journal** beside the record (`~/.apogee/sessions/<id>.events.jsonl`), and watch mode paints
+the record's committed entries and then follows that journal: the streamed answer, the tool cards
+as they run, the delegations and their run views, and the model's thinking. The owner never learns
+that anyone is watching, and nothing flows back to it. The design is
+[ADR 0103](../../.capcom/knowledge/decisions/adr-0103.md).
+
+- **Finding one.** In `/sessions`, a row whose session is running now ends in a `● live` cell. A
+  run that has not saved a record yet gets a row of its own, named and dated from its Event
+  journal. Your own running session is never marked live, so `⏎` on its row reloads it as
+  before. If the live list cannot be read, the saved rows still open, with a
+  `could not list live sessions: …` note.
+- **Opening one.** `⏎` on a live row opens it in watch mode without loading it: nothing is held,
+  nothing is saved, and your background workflows are not asked to stop. `apogee --resume <id>`
+  on a running session does the same at start-up, a headless run or firing that has not saved yet
+  included.
+- **While you watch**, the prompt box reads `watching <title> · read-only · esc back`. Typing to
+  the session, sending, a command that would act on it, `shift+tab` and every picker are refused
+  with a flash: `read-only — you are watching this session; esc goes back`. The view-only
+  commands still work — `/thinking`, `/help`, `/usage`, `/inspect` and `/version`. Thinking is
+  shown only in the `/thinking` pop-up, never inline. Opening a delegation's row opens its run
+  view read-only, as it would in your own session. If the record cannot be read, the view says
+  `the session record could not be read — showing the live events only` and follows the journal
+  alone.
+- **Leaving.** `esc` returns to the session you were in, exactly as you left it: watching parks
+  your own session and changes nothing in it. After `--resume`, `esc` lands in a fresh session.
+  Quitting while you watch quits as usual.
+- **When the owner ends**, a banner joins the legend and the view stays read-only:
+  `watching <title> · finished · read-only · ⏎ resume · esc back` once the owner saved and let
+  go. `⏎` then resumes the session through the normal door. If the owner let go without a final
+  save — a crash or a `kill -9` — the legend reads
+  `watching <title> · owner gone without a final save · read-only · esc back`, and `⏎` stays
+  refused.
+
+A watch reads files another process writes, so everything it shows is treated as untrusted and
+reaches the screen through the same escape stripping as every other text. The Event journal is
+removed when its owner releases the session, and a journal left behind by a crash is swept at the
+next startup once its lock is free, so the record stays the only history: a finished session is
+read from its record, never replayed from a journal.
+
+### Watching another user's sessions
+
+The same view reaches the sessions of another user on the same machine, once both sides opt in.
+The usual arrangement is one account that runs the work — a service account running
+`apogee daemon`, say — and the people who watch it. Both keys are global-only and described with
+the [rest of the `sessions:` block](configuration.md#keeping-the-session-store-bounded--sessions):
+
+1. **A group both accounts are in.** Create it and add the owner and every watcher to it — on
+   Linux `sudo groupadd apogee-watch` and `sudo usermod -aG apogee-watch <user>` for each. A new
+   membership takes effect at the user's next login.
+2. **The owner shares its session files** with that group in its own `~/.apogee/config.yaml`:
+
+   ```yaml
+   sessions:
+     share-group: apogee-watch
+   ```
+
+   From then on every session file apogee writes belongs to the group: the apogee home becomes
+   group-traversable (`0710`), `sessions/` group-listable (`0750`), and records, Event journals and
+   `.lock` files group-readable (`0640`). A file written owner-private before is re-moded the next
+   time it is written. Scratch, snapshots and everything else under the home stay owner-private.
+   If the owner's `config.yaml` is itself group-readable, apogee warns at startup: the shared home
+   lets the group reach it, and with it any plaintext `api-key:` it holds.
+3. **Each watcher names the owner's home** in its own `~/.apogee/config.yaml`, under a label:
+
+   ```yaml
+   sessions:
+     watch-homes:
+       builds: /home/apogee-svc/.apogee
+   ```
+
+Both keys are read at startup, so restart the owner's apogee — a running daemon included — and
+the watcher's. The watcher's `/sessions` then mixes the owner's sessions into its own list by time,
+each tagged `· builds`, and they obey the browser's workspace filter like any other row — one
+recorded against another workspace shows under `^a`. `⏎` on a live one watches it as it runs; `⏎`
+on a finished one opens it read-only, painting its record under the `finished` banner. A watched
+home's session is never resumable: the finished banner offers no `⏎ resume`, and `^d` and `^r`
+refuse with `session <id> is in watched home builds — read-only`. `apogee --resume <id>` finds
+ids in watched homes too and opens them in watch mode; where an id is in your own home as well,
+yours wins. A watched home is only ever read: nothing in it is created, written, swept or held, and
+no config or skill is read from it. One that cannot be read shows a single
+`could not read watched home <label>: …` notice instead of failing the list.
+
+Removing `share-group` later makes records and Event journals owner-private again on their next
+write, but leaves the directories and the existing `.lock` files as the shared run left them; to
+close the share at once, `chmod 700 ~/.apogee ~/.apogee/sessions` and
+`chmod 600 ~/.apogee/sessions/*`. What sharing exposes is set out in
+[SECURITY.md](../../SECURITY.md).

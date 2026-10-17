@@ -49,7 +49,9 @@ documented posture says it cannot. The guarantees apogee makes, in the order the
 
 Out of scope: a model behaving badly within its permitted mode, denial of service against
 your own machine, findings that require a compromised `~/.apogee` or a hostile local user,
-and third-party model servers or MCP servers themselves.
+and third-party model servers or MCP servers themselves. The one exception to the hostile local
+user is the session sharing below: once `sessions.share-group` or `sessions.watch-homes` is set,
+the other user on the far side of it is inside the threat model for those files.
 
 **The Windows confinement journal.** On Windows the box is a mandatory label on the disk, and
 `~/.apogee/confinement` holds the journal that undoes it after an interrupted run. That
@@ -63,6 +65,41 @@ record written before creation times were journalled carries none, and for it th
 alone decides. A
 same-user, Medium-integrity process that forges a journal is out of scope — it can forge
 anything it can read, which is the hostile-local-user case above.
+
+**Session records and Event journals, and watching them.** A session record holds what the
+session saw, unscrubbed: every tool argument and result, so every file the agent read and every
+command's output. While a session runs, the Event journal beside it
+(`~/.apogee/sessions/<id>.events.jsonl`, which [watch mode](docs/manual/sessions.md#watching-a-live-session)
+follows) holds the same and more — the streamed answer, the model's thinking and each prompt —
+and is just as unscrubbed. It is not the Windows confinement journal above. Both are
+owner-private by default (`0700` directories, `0600` files), and the Event journal is removed when
+its session is released. What a watch costs the owner is nothing: the owner writes the journal
+whether or not anyone reads it, never learns of a reader, and nothing flows back from one to it.
+
+- **`sessions.share-group` deliberately admits that group's members as readers.** With it set,
+  the apogee home becomes `0710` — traversable by the group, not listable — `sessions/` becomes
+  `0750`, and every record, Event journal and `.lock` file in it `0640`, owned by the group.
+  A member reads everything those sessions saw, secrets that passed through a tool result
+  included, so name a group of people you would show your terminal to. Because the home is now
+  traversable, any file under it whose own mode grants the group is reachable too: apogee warns
+  at startup when `config.yaml` is group-readable, since it may hold a plaintext `api-key:`.
+  Read access to a `.lock` file is also enough to take a lock on it, so a member can keep the
+  owner from holding one of its sessions — a denial of service the group is trusted not to
+  commit. Scratch, snapshots and the rest of the home stay owner-private. That a member can
+  read the shared files is the design, not a vulnerability; a member reaching anything beyond
+  them, or writing to the owner's home, is in scope. Removing the key re-privatises records
+  and journals on their next write but leaves the directories and existing `.lock` files as
+  they were (the [sessions page](docs/manual/sessions.md#watching-another-users-sessions) says
+  how to close them at once).
+- **A watched home's bytes are untrusted.** A home named under `sessions.watch-homes` belongs to
+  another user, who controls every byte of its records and journals. apogee only reads it,
+  through a read-only store: it never creates, writes, sweeps, truncates or holds anything
+  there — asking whether a session is live is a momentary shared lock that the owner's hold
+  waits out — never resumes a session from it, and reads no config or skill from it; what it paints
+  passes through the same escape stripping as any other untrusted text. A crafted record or
+  journal in a watched home that makes the watcher's apogee write, run, or reach the terminal
+  with an escape sequence is in scope. Both keys are global-only, so a repository's own config
+  can never choose whose sessions you read or widen who reads yours.
 
 **A checkout's own git hooks are a trust decision, not something apogee fences.** This
 repository ships git hooks under `.githooks/`, and the documented activation step —

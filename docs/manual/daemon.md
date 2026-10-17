@@ -111,6 +111,18 @@ later has somewhere to go: the session's snapshots outlive the process that wrot
 it — an unsaved record, or a firing whose undo was the narrower in-memory one. A `plan` firing
 changes nothing and logs no such block.
 
+**While a firing runs it can be watched.** Each firing writes an **Event journal** beside its
+record, `~/.apogee/sessions/<id>.events.jsonl` — the coalesced Event lines described under
+[`apogee headless`](headless.md#the-event-journal--what-a-watcher-reads) — so `/sessions` in a TUI
+shows the running firing as a `● live` row, and `⏎` on it (or `apogee --resume <id>`) follows it
+live and read-only in [watch mode](sessions.md#watching-a-live-session)
+([ADR 0103](../../.capcom/knowledge/decisions/adr-0103.md)). The journal lives exactly as long as
+the firing's hold on its record: it is removed after the firing's final save, and one a killed
+daemon left behind is swept at the next startup once its lock is free. The record is still the only
+thing a firing leaves behind. A journal that cannot be written is said once in the log as
+`session journal stopped — <reason>`, and the firing goes on. To watch a daemon that runs under an
+account of its own, see [watching another user's sessions](sessions.md#watching-another-users-sessions).
+
 An `auto` firing running with `confine-to-workspace: false` says so too, in the same words an
 unconfined interactive launch prints: switching confinement off is the one blanket loosen in the
 system, so it is stated rather than assumed remembered. It is said once per daemon start, however

@@ -292,6 +292,11 @@ The full tour is in [the manual](docs/manual/README.md).
   deletes, `/fork` branches a new session from any earlier prompt, and an interrupted
   task picks up with `/continue`. Optional retention rules keep the store from growing
   for ever. See [Sessions](docs/manual/sessions.md).
+- **Watch a running session** — a session open in another terminal, a headless run or a
+  daemon firing shows as `● live` in `/sessions`; `⏎` (or `apogee --resume <id>`) follows
+  it live and read-only — the streamed answer, tool cards, delegations and `/thinking` —
+  and `esc` takes you back. Another user's sessions can be watched the same way once both
+  sides opt in. See [Watching a live session](docs/manual/sessions.md#watching-a-live-session).
 - **Scheduled prompts** — `/schedule` runs a prompt on a cycle while apogee is open;
   [`apogee daemon`](docs/manual/daemon.md) keeps standing schedules running under your
   OS's supervisor — `apogee daemon install` writes the systemd, launchd or Task Scheduler
@@ -334,7 +339,7 @@ The [manual](docs/manual/README.md) carries the full reference:
 | Page | Covers |
 |---|---|
 | [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, `/settings` |
-| [Sessions](docs/manual/sessions.md) | Saving, resuming, forking, browsing, renaming conversations |
+| [Sessions](docs/manual/sessions.md) | Saving, resuming, forking, browsing, renaming conversations; watching a live one |
 | [Configuration](docs/manual/configuration.md) | `~/.apogee/config.yaml` and a project's `.apogee/config.yaml` end to end: servers and wires, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
 | [Workflows](docs/manual/workflows.md) | One brief over many items: `fan_out`, recipes, `/bg` background workflows, background `sub_agent`, `/workflows` |
 | [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did (`run:`), commands or webhooks that advise the model on a tool result (`advise:`) or gate a tool call (`gate:`), migrating from `hooks:` |
