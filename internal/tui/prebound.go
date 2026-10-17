@@ -91,8 +91,8 @@ func preboundFact(p PreboundStart) string {
 
 // preboundPhrase is that fact styled for the status line, and "" for a bound session — the string
 // [Model.statusLeft] puts in the slot an idle frame otherwise leaves empty (settingsGiveWayPhrase is
-// the other, and takes precedence: a pane swallowing every key on a window showing none of it is the
-// more urgent fact).
+// the other, and takes precedence: a pane swallowing every key but the frame chords on a window
+// showing none of it is the more urgent fact).
 func (m Model) preboundPhrase() string {
 	fact := preboundFact(m.opts.Prebound)
 	if fact == "" {

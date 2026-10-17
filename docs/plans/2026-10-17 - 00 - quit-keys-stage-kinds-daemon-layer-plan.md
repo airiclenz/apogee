@@ -37,7 +37,13 @@ block's no-tally fallback counts fan-out items only, as `workflow.TallyOf` does;
 - 5: guard folded (startup global document captured once on `daemonWiring`, repo-wide comment grep, startup test kept)
 - 6: guard folded (manual-only stale grep, ADR checked by pointer)
 
-## 1. Frame chords pass through every modal pane
+## 1. Frame chords pass through every modal pane — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): ctrl+c/ctrl+l now have one owner, `Model.frameChord` (model.go), asked in `handleKey` ahead of `claimKey` and the rule field; the two `switch` cases they replace were removed rather than kept as a second path, and the rule field's carve-out in `projectRuleKey` went with them.
+NOTES (2026-10-17): the six-state /settings table is shared, not copied: `TestSettingsFilterSurvivesEverySubStep`'s inline cases became `settingsSubStepCases()` in settings_test.go (same five cases), which framechords_test.go walks plus a key-list case.
+NOTES (2026-10-17): consequential edit — internal/tui/settings_test.go: made necessary by framechords_test.go reusing TestSettingsFilterSurvivesEverySubStep's case table (extracted to settingsSubStepCases, behaviour unchanged)
+NOTES (2026-10-17): consequential edit — internal/tui/prebound.go: made necessary by the frame-chord pre-check (its "a pane swallowing every key" comment matched the plan's comment-rule grep)
+NOTES (2026-10-17): the comment-rule grep was a floor: beyond the named sites, `keyClaimOrder`'s doc, the ctrlCResetMsg comment (handleKey's ctrl+c case → frameChord's), `draftRowsCeiling`, the status-line give-way comment in model.go, settings.go's runSettingsCommand/settingsGiveWayNote docs and layout.md:369/:1839 were also qualified with "but the frame chords".
 
 **What:**
 **Goal:** with any modal claimant open — sessions browser, `/settings` (every `settingsKind` state), model picker, workflows view — a `ctrl+c` arms the quit double-tap and a second one quits, and `ctrl+l` returns `tea.ClearScreen`, the pane's own state unchanged by either key. The prompt pane and the approval rule field keep that behaviour.

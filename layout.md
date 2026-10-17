@@ -351,7 +351,8 @@ all** — the transcript gives way entirely, the way it already does on a short 
 past the pane floors and the band's claim goes to the pane (ADR 0035). It takes those rows from the
 **transcript** and never from a sibling: the even split of the surplus between open panes is
 untouched, and in practice there is nothing to split with, because the verb is idle-only and the pane
-swallows every keypress — no prompt, browser, picker or dropdown can be up beside it.
+swallows every keypress but the frame chords (`ctrl+c` and `ctrl+l`, which keep their frame meaning
+under every pane) — no prompt, browser, picker or dropdown can be up beside it.
 
 **Nothing else about a full-height pane is special, and that is the point.** Its irreducible height
 is the same **four rows** every pane's is, spent the same way (two borders, a title row, a key hint);
@@ -367,7 +368,7 @@ with `↑/↓` moves the highlight and nothing else (ADR 0037). A longer descrip
 an `…` on the second line rather than the list losing a row to it. And when the frame can seat it
 nowhere, it does what every surface that disappears owes: it **leaves its fact on the status line**.
 For this pane the fact carries the way OUT as well — `settings — esc close` — because it is swallowing every
-keypress on a window that is showing none of it, and a frame that went quiet there would read as an
+keypress but the frame chords on a window that is showing none of it, and a frame that went quiet there would read as an
 idle session with a dead keyboard.
 
 **The value sub-list is the one state in which a full-height pane is short.** When `⏎` on an enum key
@@ -1837,7 +1838,7 @@ under a notice saying why it came up unasked, or `/settings` when there is nothi
 read-only `servers` row is the pointer — and the fact is what survives the `esc` that closes that
 pane, so a frame the human dismissed the question on never looks like an ordinary idle session. The
 pane's fact wins where both are owed, being the more urgent of the two: a modal is swallowing every
-keypress on a window showing none of it, and the session's fact is still there when it closes. The
+keypress but the frame chords on a window showing none of it, and the session's fact is still there when it closes. The
 fact goes the moment a server is bound.
 
 ---
@@ -2497,7 +2498,8 @@ them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight,
 `type to filter · ↑/↓ select · ⏎ switch · esc close` under it, at most eight rows with a window
 scrolling around the selection — set off, like the browser's, by the house blank under the title and
-the one over the hint. It is modal — while it is open every key belongs to it. `/server` lists the servers
+the one over the hint. It is modal — while it is open every key belongs to it but the frame chords, `ctrl+c` and
+`ctrl+l`, which keep their frame meaning under every pane. `/server` lists the servers
 `config.yaml` names plus the one this session started on, in three columns — `name`, `— endpoint`,
 `· current` — and the row the session is on is the one that fills the third, faintly; picking it
 says so instead of switching. **The second server-kind question is `/sub-agents-server`**, which

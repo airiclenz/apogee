@@ -1008,14 +1008,12 @@ func (m Model) openProjectRule() (tea.Model, tea.Cmd) {
 
 // projectRuleKey routes a keypress while the rule field is open: esc goes back to the menu, ⏎
 // saves, and every other key edits the field — the letters that answer the menu included, so typing
-// `go test ./...` types it rather than allowing or denying the call. ctrl+c and ctrl+l are not
-// claimed: the quit gesture and the repaint stay the frame's, as they are under every other field.
-// It is asked before handleKey's own switch, so this esc is the field's, never the first press of
-// the stop double-tap.
+// `go test ./...` types it rather than allowing or denying the call. ctrl+c and ctrl+l never reach
+// it: the quit gesture and the repaint stay the frame's, answered ahead of this field as they are
+// ahead of every pane ([Model.frameChord]). It is asked before handleKey's own switch, so this esc
+// is the field's, never the first press of the stop double-tap.
 func (m Model) projectRuleKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	switch msg.String() {
-	case "ctrl+c", "ctrl+l":
-		return m, nil, false
 	case "esc":
 		m.ruleEdit = projectRuleEdit{}
 		return m, nil, true

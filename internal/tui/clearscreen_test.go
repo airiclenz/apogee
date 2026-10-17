@@ -138,12 +138,11 @@ func TestCtrlLKeyStealsNothingFromThePromptEditor(t *testing.T) {
 	}
 }
 
-// TestCtrlLKeySwallowedByModalOverlay holds the modal contract: while a full-claim overlay is up it
-// takes every key it does not act on, and ctrl+l is not one of the keys any of them act on. A
-// repaint fired from under a modal would be harmless on screen but would break the rule the three
-// panes share — the human's keyboard is the overlay's for as long as it is open — so the escape
-// hatch waits for esc like everything else.
-func TestCtrlLKeySwallowedByModalOverlay(t *testing.T) {
+// TestCtrlLKeyRepaintsUnderModalOverlay holds the frame-chord contract: a full-claim overlay takes
+// every key it does not act on EXCEPT the frame chords, so ctrl+l repaints from under every one of
+// them and leaves the overlay standing. A smeared frame is exactly when the human cannot read the
+// pane to find its way out, so the repair must not wait for esc (Model.frameChord).
+func TestCtrlLKeyRepaintsUnderModalOverlay(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
@@ -165,6 +164,11 @@ func TestCtrlLKeySwallowedByModalOverlay(t *testing.T) {
 			open: func(m Model) Model { m.picker = picker{open: true, kind: pickerModel}; return m },
 			up:   func(m Model) bool { return m.picker.open },
 		},
+		{
+			name: "workflows view",
+			open: func(m Model) Model { m.workflowsPane = workflowsPane{open: true}; return m },
+			up:   func(m Model) bool { return m.workflowsPane.open },
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -173,8 +177,8 @@ func TestCtrlLKeySwallowedByModalOverlay(t *testing.T) {
 
 			next, cmd := stepCmd(t, m, keyCtrlL())
 
-			if cmd != nil {
-				t.Errorf("ctrl+l returned a Cmd under the %s; the modal must swallow it", tc.name)
+			if got, want := cmdMsg(cmd), tea.ClearScreen(); !reflect.DeepEqual(got, want) {
+				t.Errorf("ctrl+l under the %s produced %#v, want tea.ClearScreen's Msg", tc.name, got)
 			}
 			if !tc.up(next) {
 				t.Errorf("ctrl+l closed the %s; it must leave the overlay standing", tc.name)

@@ -17,8 +17,8 @@ import (
 //
 // The picker's and the browser's third sibling, and the frame's first FULL-HEIGHT pane: a modal
 // list of every config key with the value THIS run resolved for it, painted through the shared popup
-// module (renderPopup) and claiming every keypress while it is open (handleKey routes to
-// settingsKey first). What it lists comes from the binary's declarative key registry across ONE
+// module (renderPopup) and claiming every keypress but the frame chords ctrl+c and ctrl+l while it
+// is open (handleKey answers those first — frameChord — then routes to settingsKey). What it lists comes from the binary's declarative key registry across ONE
 // seam ([SettingsHost.Rows]) — the renderer holds no schema, reads no file and knows no
 // precedence, exactly as it holds no session format behind [Options.Sessions] (ADR 0011's thin
 // renderer).
@@ -468,9 +468,9 @@ func (m *Model) settingsSourceOf(row SettingRow) SettingSource {
 // binary's).
 //
 // The provider is called HERE as well as at render, and deliberately: "is there anything to show"
-// is the one question the answer to which decides whether a modal that claims every key goes up
-// at all, and asking it at open is what keeps the human from having to press esc to escape an empty
-// pane.
+// is the one question the answer to which decides whether a modal that claims every key but the
+// frame chords goes up at all, and asking it at open is what keeps the human from having to press
+// esc to escape an empty pane.
 func (m Model) runSettingsCommand() (tea.Model, tea.Cmd) {
 	if len(m.settingRows()) == 0 {
 		m.transcript.addNote(noSettingsNote)
@@ -594,7 +594,9 @@ func init() {
 // backspace trims a set filter and arms the row's reset on an empty one, delete (⌦) arms the reset
 // with or without a filter, and esc closes — filter and all (ADR 0053 amend-1014). Every other key —
 // tab, a ctrl chord — is SWALLOWED, because the pane is modal: a keystroke that fell through to the
-// input box would edit a draft the human cannot see behind a full-height pane.
+// input box would edit a draft the human cannot see behind a full-height pane. The frame chords
+// ctrl+c and ctrl+l never arrive here: handleKey answers them ahead of the pane ([Model.frameChord]),
+// which drops this field's drag-selection on their way past as this function does for every key.
 //
 // The row count is re-derived and the selection re-clamped on every key rather than once at open,
 // the picker's posture: the provider answers from the binary's live resolution, so the list can
@@ -2291,8 +2293,8 @@ func settingsEnumPrompt(row SettingRow) string {
 // settingsGiveWayNote is what the status line says for a settings pane the frame could not seat —
 // under twelve rows, or under a window a long draft has taken the last of. It is the licence
 // layout.md gives every surface that disappears (the band's "N queued" is the other), and here it
-// carries the ONE fact the human cannot do without: the pane is open, it is claiming every key,
-// and esc is the way out. Without it a short terminal would answer /settings with a frame that
+// carries the ONE fact the human cannot do without: the pane is open, it is claiming every key but
+// the frame chords, and esc is the way out. Without it a short terminal would answer /settings with a frame that
 // looked idle and a keyboard that did nothing.
 const settingsGiveWayNote = "settings — esc close"
 

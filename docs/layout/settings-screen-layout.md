@@ -33,6 +33,12 @@ hand-drawn sketch the requirements were written against. Where the two differed:
 - **`system-prompt-file` and `context-files.names` are editable in the pane** (ADR 0037 decision 5),
   so neither carries the `edit in config.yaml` label the sketch showed; the label exists nowhere any
   more. What replaced it on the blocks no row can hold is `· ⏎ opens $EDITOR`.
+- **`ctrl+c` and `ctrl+l` keep their frame meaning while the pane is open.** The pane is modal and
+  swallows every other key it does not act on, but these two are the frame's: a first `ctrl+c` arms
+  the quit and a second one quits, and `ctrl+l` forces the full repaint — from the key list and from
+  every step over it (a value sub-list, an edit field, an armed reset, the save-target question)
+  alike, leaving the pane exactly as it stood. The one thing either takes with it is an edit field's
+  drag-selection highlight, which every keypress drops.
 - **A row's value cell is blank when the key holds nothing** and it is a row that seeds an edit
   field (`system-prompt-file`). `none` is reserved for the structured rows, whose
   `⏎` opens an editor rather than a field.

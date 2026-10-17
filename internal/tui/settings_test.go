@@ -4957,25 +4957,35 @@ func TestSettingsDeleteRemovesARuleUnderAFilter(t *testing.T) {
 	}
 }
 
+// settingsSubStepCase is one second step of the /settings pane: the row it is opened on, a filter
+// that keeps that row in view, the keys that open the step from the filtered key list, and the
+// settingsKind the pane must then be in.
+type settingsSubStepCase struct {
+	name   string
+	row    SettingRow
+	filter string
+	open   []tea.KeyPressMsg
+	kind   settingsKind
+}
+
+// settingsSubStepCases is every second step of the pane, one case each — the table the filter's
+// survival (TestSettingsFilterSurvivesEverySubStep) and the frame chords' pass-through
+// (framechords_test.go) both walk, so a step added to the pane is added to both at once.
+func settingsSubStepCases() []settingsSubStepCase {
+	return []settingsSubStepCase{
+		{"enum sub-list", settingsEnumRow(), "spin", []tea.KeyPressMsg{keyEnter()}, settingsEnumList},
+		{"value field", settingsStringRow(), "endp", []tea.KeyPressMsg{keyEnter()}, settingsValueBuffer},
+		{"text field", settingsTextRow(), "prompt", []tea.KeyPressMsg{keyEnter()}, settingsTextEditor},
+		{"armed reset", settingsStringRow(), "endp", []tea.KeyPressMsg{keyDelete()}, settingsResetArmed},
+		{"save target", settingsProjectBoolRow(SettingFromGlobal), "skills", []tea.KeyPressMsg{keyEnter()}, settingsSaveTarget},
+	}
+}
+
 // The filter survives every second step: a step claims its keys first, so nothing typed inside one
 // reaches the filter, and backing out of it lands on the key list still filtered.
 func TestSettingsFilterSurvivesEverySubStep(t *testing.T) {
 	t.Parallel()
-	resettable := settingsStringRow()
-	cases := []struct {
-		name   string
-		row    SettingRow
-		filter string
-		open   []tea.KeyPressMsg
-		kind   settingsKind
-	}{
-		{"enum sub-list", settingsEnumRow(), "spin", []tea.KeyPressMsg{keyEnter()}, settingsEnumList},
-		{"value field", settingsStringRow(), "endp", []tea.KeyPressMsg{keyEnter()}, settingsValueBuffer},
-		{"text field", settingsTextRow(), "prompt", []tea.KeyPressMsg{keyEnter()}, settingsTextEditor},
-		{"armed reset", resettable, "endp", []tea.KeyPressMsg{keyDelete()}, settingsResetArmed},
-		{"save target", settingsProjectBoolRow(SettingFromGlobal), "skills", []tea.KeyPressMsg{keyEnter()}, settingsSaveTarget},
-	}
-	for _, c := range cases {
+	for _, c := range settingsSubStepCases() {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			rows := []SettingRow{settingsIntRow(), c.row}

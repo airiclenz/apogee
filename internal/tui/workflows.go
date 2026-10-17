@@ -314,7 +314,9 @@ func (p *workflowsPane) cursor() *listCursor {
 }
 
 // workflowsKey routes a keypress while the pane is up: ↑/↓ walk the level's rows, ⏎ opens what the
-// highlight names, esc goes one level up, and a workflow's detail answers its chords (workflowsVerb). It swallows every other key — the pane is modal.
+// highlight names, esc goes one level up, and a workflow's detail answers its chords (workflowsVerb).
+// It swallows every other key — the pane is modal — bar the frame chords ctrl+c and ctrl+l, which
+// handleKey answers ahead of it ([Model.frameChord]).
 func (m Model) workflowsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.workflowsPane.naming {
 		return m.workflowsNameKey(msg)

@@ -1255,7 +1255,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case ctrlCResetMsg:
 		// The Ctrl+C quit window closed without a second press: this tick is the window's only
 		// end, so disarm the gesture here and the "press ctrl+c again to quit" hint clears
-		// (handleKey's ctrl+c case). A tick scheduled by an earlier arm is stale — a fresher arm
+		// (frameChord's ctrl+c case). A tick scheduled by an earlier arm is stale — a fresher arm
 		// owns the gesture now — and changes nothing.
 		if msg.gen == m.ctrlCGen {
 			m.lastCtrlC = time.Time{}
@@ -1657,7 +1657,9 @@ type keyClaimant struct {
 }
 
 // modalClaim adapts a MODAL surface's key handler — one that swallows every key it does not act on
-// — to the claimant contract: while the surface is open every key is its own, so the claim is total.
+// — to the claimant contract: while the surface is open every key that reaches it is its own, so the
+// claim is total. The frame chords never reach it: [Model.frameChord] answers ctrl+c and ctrl+l
+// ahead of every claimant.
 //
 // The type assertion is this package's own contract rather than a hope: every key handler in it
 // returns the [Model] it was handed, widened to tea.Model only because that is what Update returns.
@@ -1703,8 +1705,9 @@ func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, te
 	return func(m Model, msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) { return m.reportKey(r, msg) }
 }
 
-// keyClaimOrder is the overlay precedence [Model.handleKey] walks, top rung first: the modal
-// overlays that own the keyboard while they are up, then the report panes that claim only their
+// keyClaimOrder is the overlay precedence [Model.handleKey] walks, top rung first — after the frame
+// chords, which no rung is ever asked for ([Model.frameChord]): the modal overlays that own the
+// keyboard while they are up, then the report panes that claim only their
 // own keys, then the transcript's block cursor — and only then the frame's own verbs, the state-gated
 // switches in handleKey itself.
 //
@@ -1796,9 +1799,52 @@ func (m Model) claimKey(order []keyClaimant, msg tea.KeyPressMsg) (Model, tea.Cm
 	return m, nil, false
 }
 
+// frameChord answers the frame chords — the two keys whose meaning belongs to the frame rather than
+// to whatever surface is up — and reports whether msg was one. [Model.handleKey] asks it ahead of
+// every claimant in [keyClaimOrder] and ahead of the approval pane's rule field, so a modal pane that
+// claims every other key never sees these two: a quit and a repair must be reachable from under any
+// pane, or the one way out of a pane the human cannot read (a terminal that smeared it) is gone.
+//
+//   - ctrl+c: a lone press no longer quits — a stray hit must never drop the human out of a session.
+//     The first press arms the gesture (and shows the hint via statusRight); a second press folded
+//     while it is still armed confirms the quit, however long the fold queue held it. Only the tick
+//     disarms it (ctrlCResetMsg), and it is ordered behind any press typed before it fired (ADR 0099).
+//   - ctrl+l: the readline/terminal meaning of the key — redraw — and here it is a repair tool. The
+//     renderer paints each frame as a DIFF against its own model of the screen, so a terminal that
+//     disagrees with that model about where a write landed leaves cells the diff believes are already
+//     correct and never repaints (the Windows ghosting: see docs/plans/archived/2026-08-06 - 04 -
+//     windows-tui-ghosting-plan.md). tea.ClearScreen drives the renderer's MoveTo(0,0) + Erase(),
+//     which marks the whole screen for a full repaint on the next frame — the same resync a terminal
+//     resize performs, without resizing. It steals nothing: the textarea binds no ctrl+l (its
+//     bindings are set in newPromptEditor / lineEditor.singleLine).
+//
+// Neither touches the state of the pane it passes through. The one exception is the every-keypress
+// contract: a drag-selection loses its highlight to either chord exactly as it does to any other key.
+// handleKey's own clears (m.sel, dropRecall) have run before this is asked, and the /settings edit
+// field's span is dropped HERE, because the chord never reaches [Model.settingsKey], the chokepoint
+// that otherwise clears it.
+func (m Model) frameChord(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "ctrl+c":
+		m.settings.sel = fieldSel{}
+		if !m.lastCtrlC.IsZero() {
+			next, cmd := m.quit()
+			return next.(Model), cmd, true
+		}
+		m.lastCtrlC = time.Now()
+		m.ctrlCGen++
+		gen := m.ctrlCGen
+		return m, tea.Tick(ctrlCQuitWindow, func(time.Time) tea.Msg { return ctrlCResetMsg{gen: gen} }), true
+	case "ctrl+l":
+		m.settings.sel = fieldSel{}
+		return m, tea.ClearScreen, true
+	}
+	return m, nil, false
+}
+
 // handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
 // is otherwise a no-op); Ctrl+C twice — the second folded before ctrlCResetMsg disarms the first — quits; Ctrl+L forces a full repaint
-// and changes nothing else. Enter submits at idle — the
+// and changes nothing else — both under every pane, modal ones included ([Model.frameChord]). Enter submits at idle — the
 // box plus any interjections a stop or an error left held, even on an empty box — answers a
 // pending ask, dismisses an error, and while a worker runs STAGES what was typed as an
 // interjection, launching nothing, so the single-worker invariant the seam relies on still
@@ -1832,6 +1878,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	rec := m.recall
 	m.dropRecall()
 
+	// The frame chords come first, ahead of every claimant: ctrl+c and ctrl+l keep their frame meaning
+	// under every pane, modal ones included ([Model.frameChord]).
+	if next, cmd, isChord := m.frameChord(msg); isChord {
+		return next, cmd
+	}
+
 	// The overlay claim order. Each surface in [keyClaimOrder] is asked, in that order, whether the
 	// keypress is its own; the first one that claims it answers, and nothing further down the list
 	// ever sees the key ([Model.claimKey] walks it). The order is load-bearing — it is stated once,
@@ -1842,9 +1894,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, claimCmd
 	}
 
-	// The approval pane's rule field, while it is open, takes every key but the frame's own ctrl+c
-	// and ctrl+l — asked HERE, ahead of the switch, so its esc goes back to the menu rather than
-	// arming the stop double-tap, and its letters type rather than rule (projectRuleKey, approval.go).
+	// The approval pane's rule field, while it is open, takes every key the frame chords above left —
+	// asked HERE, ahead of the switch, so its esc goes back to the menu rather than arming the stop
+	// double-tap, and its letters type rather than rule (projectRuleKey, approval.go).
 	if m.editingProjectRule() {
 		if next, cmd, claimed := m.projectRuleKey(msg); claimed {
 			return next, cmd
@@ -1852,38 +1904,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "ctrl+c":
-		// A lone Ctrl+C no longer quits — a stray hit must never drop the human out of a
-		// session. The first press arms the gesture (and shows the hint via statusRight); a
-		// second press folded while it is still armed confirms the quit, however long the fold
-		// queue held it. Only the tick disarms it (ctrlCResetMsg), and it is ordered behind any
-		// press typed before it fired (ADR 0099).
-		if !m.lastCtrlC.IsZero() {
-			return m.quit()
-		}
-		m.lastCtrlC = time.Now()
-		m.ctrlCGen++
-		gen := m.ctrlCGen
-		return m, tea.Tick(ctrlCQuitWindow, func(time.Time) tea.Msg { return ctrlCResetMsg{gen: gen} })
-	case "ctrl+l":
-		// The readline/terminal meaning of the key — redraw — and here it is a repair tool. The
-		// renderer paints each frame as a DIFF against its own model of the screen, so a terminal
-		// that disagrees with that model about where a write landed leaves cells the diff believes
-		// are already correct and never repaints (the Windows ghosting: see
-		// docs/plans/archived/2026-08-06 - 04 - windows-tui-ghosting-plan.md). tea.ClearScreen drives the
-		// renderer's MoveTo(0,0) + Erase(), which marks the whole screen for a full repaint on the
-		// next frame — the same resync a terminal resize performs today, without resizing.
-		//
-		// It is a display command and nothing else: this branch touches no state, so the frame that
-		// lands is the frame that would have landed anyway — with the one exception every branch of
-		// this switch inherits, the unconditional pre-switch clears above (m.sel, dropRecall). A
-		// live drag-selection therefore loses its highlight to ⌃l exactly as it loses it to any
-		// other keypress, which is the every-keypress contract those clears exist to keep, not a
-		// side effect of redrawing. Live in every state, and
-		// it steals nothing — the textarea binds no ctrl+l (its bindings are set in
-		// newPromptEditor / lineEditor.singleLine) — while the modal overlays above swallow it with
-		// every other key they do not claim, which is the contract they already keep.
-		return m, tea.ClearScreen
 	case "esc":
 		// Esc never ends the program; it only cancels an in-flight worker. At idle/errored it
 		// is a no-op (use Ctrl+C twice to exit), so a reflexive Esc never quits.
@@ -2952,8 +2972,8 @@ func (m *Model) inputRows() int {
 //
 // The prompt bound is for the modal prompt ALONE. The dropdown, the /sessions browser and the
 // picker are all further down the give-way order than the prompt, and none of them can be open
-// beside a draft the human is still growing: the browser and the picker claim every keypress while
-// they are open (handleKey), and the dropdown is a completion of the very draft it would be
+// beside a draft the human is still growing: the browser and the picker claim every keypress but the
+// frame chords while they are open (handleKey), and the dropdown is a completion of the very draft it would be
 // shrinking. They still fit, because the frame bound above is not about panes at all.
 func (m Model) draftRowsCeiling() int {
 	box := inputBorderRows + m.pendingImageRows() // what the box spends besides the draft's own rows
@@ -4221,9 +4241,9 @@ func (m Model) statusLeftWithin(width int) string {
 		// layout.md gives every surface that gives way entirely (settingsGiveWayPhrase); and a session
 		// with no server bound carries its standing fact here for as long as that holds, which is what
 		// survives the esc that closes the pane asking about it (preboundPhrase, ADR 0036). The pane's
-		// fact wins where both are owed: a modal swallowing every key on a window showing none of it is
-		// the more urgent of the two, and the session's fact is still there when it closes. Every other
-		// idle frame leaves the slot to the queue, as before.
+		// fact wins where both are owed: a modal swallowing every key but the frame chords on a window
+		// showing none of it is the more urgent of the two, and the session's fact is still there when
+		// it closes. Every other idle frame leaves the slot to the queue, as before.
 		phrase = m.settingsGiveWayPhrase()
 		if phrase == "" {
 			phrase = m.preboundPhrase()

@@ -36,9 +36,10 @@ const (
 // pane and View renders each open one once. It must agree with render to the row — the widget's scroll
 // clamp and the click map rest on it — and sweepOverlayHeightQuery (panes_test.go) pins that for every row.
 //
-// modal says the pane swallows every key it does not act on while it is up — the /sessions browser,
-// the picker and the /settings pane through their modalClaim key, the approval or ask prompt through
-// the state-gated switches in handleKey — as opposed to a pane that says something rather than
+// modal says the pane swallows every key it does not act on while it is up (the frame chords
+// excepted: ctrl+c and ctrl+l are answered ahead of every pane, [Model.frameChord]) — the /sessions
+// browser, the picker and the /settings pane through their modalClaim key, the approval or ask
+// prompt through the state-gated switches in handleKey — as opposed to a pane that says something rather than
 // asking (the four reports, the dropdown), behind which the box stays live.
 //
 // key is the pane's rung of the overlay precedence in the claimant currency [keyClaimant.claim]
@@ -144,9 +145,9 @@ func init() {
 			click:   Model.handleBrowserClick,
 			wheel:   Model.browserWheel,
 			// The top rung of the key precedence: a modal overlay (idle only), so while open it claims
-			// every keypress — selection, resume, delete-confirm, rename edit, and esc to close
-			// (sessions.go) — before the normal input routing, exactly as the autocomplete dropdown claims
-			// its keys first.
+			// every keypress but the frame chords — selection, resume, delete-confirm, rename edit, and
+			// esc to close (sessions.go) — before the normal input routing, exactly as the autocomplete
+			// dropdown claims its keys first.
 			rank: paneRank{key: 1, pointer: 6},
 		},
 		panePicker: {
@@ -196,8 +197,8 @@ func init() {
 		paneSettings: {
 			// The /settings pane is the frame's one FULL-HEIGHT pane (frameRowPlan): it is granted the
 			// transcript's whole budget, and on every window it is seated in it is the only thing in
-			// the slot — its verb is idle-only and it swallows every key, so no prompt, browser, picker
-			// or dropdown can be up beside it.
+			// the slot — its verb is idle-only and it swallows every key but the frame chords, so no
+			// prompt, browser, picker or dropdown can be up beside it.
 			name:    "settings pane",
 			slot:    slotTranscript,
 			modal:   true,
@@ -211,8 +212,8 @@ func init() {
 			// Modal in the key precedence as the browser is, and for a stronger reason: as the frame's one
 			// full-height pane it hides the input box behind it, a box the human cannot read — a keystroke
 			// falling through to it would edit an invisible draft. Idle-only, like its verb (commandSpecs),
-			// and it swallows every key it does not act on (settings.go). It is asked FIRST of the pointer
-			// chain, for the reason pointerPanes states.
+			// and it swallows every key it does not act on bar the frame chords (settings.go). It is
+			// asked FIRST of the pointer chain, for the reason pointerPanes states.
 			rank: paneRank{key: 2, pointer: 1},
 		},
 		// The four reports close the transcript-side slot, nearest the chrome, because they are the
