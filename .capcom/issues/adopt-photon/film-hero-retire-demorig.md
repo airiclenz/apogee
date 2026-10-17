@@ -1,11 +1,13 @@
 ---
 title: Film hero with photon, compare with demo.gif, retire cmd/demorig
-status: open
+status: done
 type: task
 priority: 3
 deps: [hero-photon-config]
 plan: 2026-10-17 - 02 - film-hero-retire-demorig-plan.md
 created: 2026-10-17T10:34:01Z
+closed: 2026-10-17T16:56:41Z
+reason: "Resolved by plan 2026-10-17 - 02 - film-hero-retire-demorig-plan (archived in e9b14d71): cmd/demorig retired, hero.yaml is photon's storyboard, photon review take approved by owner and committed as graphics/demo.gif."
 ---
 
 Record and render hero under photon, compare with `graphics/demo.gif`, then delete
