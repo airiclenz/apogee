@@ -39,6 +39,18 @@ const (
 	kindRunFinished       = "run_finished"
 )
 
+// kindPrompt is the journal's own line kind (ADR 0103 decision 11): the Driver writes one for each
+// top-level prompt and each Interjection, because prompts are not Events (ADR 0025). It is not part
+// of the headless vocabulary, so Kinds does not list it; Decode reads it into Line.Prompt.
+const kindPrompt = "prompt"
+
+// Prompt is the `data` of a prompt line: the text the human submitted, and whether it was an
+// Interjection into a run already in flight rather than a top-level prompt.
+type Prompt struct {
+	Text         string `json:"text"`
+	Interjection bool   `json:"interjection"`
+}
+
 // Kinds returns every line kind the Event lines can carry, the two frames included, in the order
 // ADR 0075 §4 lists them, a kind added since placed before the frames. It is the vocabulary itself rather than a derivation of it, so the
 // manual's table of kinds is checkable against the code that writes them instead of drifting from

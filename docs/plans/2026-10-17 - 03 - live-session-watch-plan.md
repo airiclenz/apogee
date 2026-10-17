@@ -146,7 +146,14 @@ NOTES (2026-10-17): internal/eventjson/encode.go now runs ~900 lines, past the ~
 
 Depends on item 2.
 
-## 4. eventjson: decoder with round-trip tests
+## 4. eventjson: decoder with round-trip tests — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): consequential edit — internal/eventjson/doc.go: made necessary by the new decode.go (the package doc's "files, one line each" map gains its line)
+NOTES (2026-10-17): encode.go gains the journal-only `kindPrompt` ("prompt") and the exported `Prompt{Text, Interjection}` data struct (json `text`, `interjection`) that item 5's writer is expected to write; kindPrompt is deliberately NOT in Kinds() (the headless vocabulary the manual's drift test pins)
+NOTES (2026-10-17): API chosen: `Line{Kind, V, Seq, Time time.Time, Session, Turn, Depth, CallID, RunID, Event, Started *RunStarted, Finished *RunFinished, Prompt *Prompt}` — null envelope members read as zero; an unknown kind returns the envelope with every payload nil and no error; `v` > 2 wraps the new exported sentinel `ErrUnsupportedVersion`; a missing event kind, unparsable time or mistyped member is an error
+NOTES (2026-10-17): the summary mirror decodes through a `(*toolResult).UnmarshalJSON` that pre-seeds Summary with a *json.RawMessage, so the encoder's wire structs are reused (no second set); an unknown summary `kind` decodes as a nil summary (ADR 0075 D10)
+NOTES (2026-10-17): further documented drops beyond the Goal's list (all on Decode's doc): SeamClosedEvent.Value, an image's bytes (Images return name and media type only — Data is nil, never allocated from the line's size), the usage line's currency label, sub_agent_phase's constant `cancelled`; empty Rules/Images decode nil; a null argument decodes nil; an unknown seam closing name decodes as Moment ""
+NOTES (2026-10-17): no CHANGELOG entry — the decoder is internal and changes no user-visible surface
 
 **What:**
 **Goal:** `eventjson.Decode(line []byte) (Line, error)` returns the envelope fields (`seq`, `time`, `session`, `turn`, `depth`, `call_id`, `run_id`, `v`) and the `domain.Event`, or a frame for `run_started`/`run_finished`. An unknown kind or field is skipped without error (ADR 0075 D10). `v` > 2 is an error. Encoding then decoding every kind returns the original Event, apart from the documented drops and the documented lossy points: UpstreamAttempt durations truncate to whole ms; a nil `Fired` decodes as `[]` and nil receipt `Fields` as `{}`; RawMessage arguments come back compacted and HTML-escaped by `json.Marshal`; `Malformed.Err` comes back as a text-only error (its processing sentinel is not rebuilt).

@@ -30,4 +30,7 @@
 // writer.go is the line itself: the Writer that stamps the envelope, counts seq, writes and
 // flushes one line per Event, forwards to the sink it wraps, and writes the two frames — plus the
 // frame structs a Driver fills.
+//
+// decode.go is the way back: Decode reads one line into its envelope and its domain.Event, a frame
+// or a journal prompt line, for a reader watching a live session's Event journal (ADR 0103).
 package eventjson
