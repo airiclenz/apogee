@@ -115,7 +115,15 @@ NOTES (2026-10-17): DelegationOutcome.Bound is spelled on the wire as a name (`s
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/eventjson/ && go test -race -count=1 ./internal/domain/ && go test -race -count=1 -run 'TestE2EEventLinesGolden|TestManualListsEveryEventLineKind' ./cmd/apogee/`
 **Commit:** `feat(eventjson): encode ToolResult.Summary as a tagged summary mirror`
 
-## 3. eventjson: close the remaining encoder gaps
+## 3. eventjson: close the remaining encoder gaps — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): consequential edit — internal/eventjson/writer_test.go: made necessary by the new `malformed` member on every tool_call line (its expected line gains `"malformed":null`)
+NOTES (2026-10-17): consequential edit — internal/domain/tools.go: made necessary by tool_call's new `malformed` member (ToolCall.Malformed's comment said event JSON never carries it)
+NOTES (2026-10-17): consequential edit — .capcom/knowledge/decisions/adr-0075/adr-0075-decision.md: made necessary by the 24th kind (decision 4's dated count trail gains "Amended 2026-10-17: twenty-four, `sub_agent_group` added", the precedent malformed_chunks set)
+NOTES (2026-10-17): TestKindsAreTwentyThree renamed TestKindsAreTwentyFour (as the 22→23 bump renamed TestKindsAreTwentyTwo); the two skip tests are renamed with their inversion: TestEncodeWritesTheSubAgentGroupEvent and TestEncodeWritesTheDriverWorkflowPhases
+NOTES (2026-10-17): wire names chosen: usage's PricedCalls is `cumulative_priced_calls` (beside `cumulative_unpriced_calls`, where the plan's prose said `priced_calls`); malformed is `{err, raw}` with err the error's text; recipe is `{skill_id, text, background}`; tally is `{ok, partial, blocked, unfinished}`; every new member sits after the existing ones (ADR 0075 decision 10)
+NOTES (2026-10-17): the every-variant test (TestEncodeMapsEveryEventVariant) reads internal/domain's source with go/parser for the EventBase-embedding structs, so a variant added there without a mapping fails; encode's usage and workflow_phase arms moved into usageOf/workflowPhaseOf helpers to keep the switch short
+NOTES (2026-10-17): internal/eventjson/encode.go now runs ~900 lines, past the ~400-line guideline (it was 789 before this item); splitting the mirrors into their own file is a candidate cleanup
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** every Event variant except `WireEvent` encodes the fields the TUI's fold reads. These fields and events are added under `v` 2:

@@ -41,7 +41,8 @@ kinds today, at `v:2` — `mechanism_fired` and `floor_guard` folded into the on
 kind (ADR 0076 D1, the bump), and `ref_clipped` and `seam_closed` were added. Amended 2026-09-24:
 twenty-one, `upstream_attempt` added within `v:2` (ADR 0085). Amended 2026-09-30: twenty-two,
 `workflow_phase` added within `v:2`. Amended 2026-10-08: twenty-three, `malformed_chunks` added
-within `v:2` — a successful reply that skipped undecodable stream chunks says so; the list is
+within `v:2` — a successful reply that skipped undecodable stream chunks says so. Amended
+2026-10-17: twenty-four, `sub_agent_group` added within `v:2` (ADR 0103 decision 13); the list is
 `Kinds()` in `internal/eventjson/encode.go`.) The case difference is the
 signal: a Hooks name and an Event-line name for the same moment are *not* the same moment —
 `turn-finished` is Depth-0 only, `turn` is every depth. `error` collides benignly and means the same

@@ -6,8 +6,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-three line kinds of ADR 0075 §4 — twenty-one Event variants, workflow_phase (ADR 0087)
-// and malformed_chunks the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// The twenty-four line kinds of ADR 0075 §4 — twenty-two Event variants, workflow_phase (ADR 0087),
+// malformed_chunks and sub_agent_group (ADR 0103 decision 13) the newest, plus the two frames that
+// bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -33,6 +34,7 @@ const (
 	kindUpstreamAttempt   = "upstream_attempt"
 	kindWorkflowPhase     = "workflow_phase"
 	kindMalformedChunks   = "malformed_chunks"
+	kindSubAgentGroup     = "sub_agent_group"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -64,6 +66,7 @@ func Kinds() []string {
 		kindUpstreamAttempt,
 		kindWorkflowPhase,
 		kindMalformedChunks,
+		kindSubAgentGroup,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -73,18 +76,14 @@ func Kinds() []string {
 // the envelope's turn/depth/call_id/run_id are stamped from, and the value that marshals to the
 // line's `data` object.
 //
-// ok is false for the two SINK-ONLY variants — domain.WireEvent and domain.SubAgentGroupEvent —
-// and for a nil or unrecognised event. The Inspector's raw provider protocol is excluded by ADR
-// 0075 decision 2: putting a wire format on a documented stdout contract would make it part of a
-// public surface. A sub-agent group's announced size is a drawing Driver's queued count (ADR 0025,
-// amended 2026-10-05) and has no line kind: the stream's tool_call and sub_agent_phase lines
-// already tell a consumer every member as it reaches it. A caller that sees false writes no line at
-// all and, per the same decision, consumes no sequence number for it.
-//
-// ok is false as well for the two workflow phases that describe a Workflow's shape for a Driver
-// that draws it — domain.WorkflowItemStarted and domain.WorkflowStageFinished — which the
-// workflow_phase line's documented phase list does not carry (docs/manual/headless.md), so the
-// NDJSON stream is the same whether the engine reports them or not.
+// ok is false for the one SINK-ONLY variant, domain.WireEvent, and for a nil or unrecognised
+// event. The Inspector's raw provider protocol is excluded by ADR 0075 decision 2: putting a wire
+// format on a documented stdout contract would make it part of a public surface. A caller that
+// sees false writes no line at all and, per the same decision, consumes no sequence number for it.
+// Every other variant maps to a kind, with every member a Driver's fold reads (ADR 0103): a
+// sub-agent group's announced size writes a sub_agent_group line (ADR 0103 decision 13, amending
+// ADR 0025), and a workflow_phase line is written for every phase, the two that describe a
+// Workflow's shape for a drawing Driver — item_started and stage_finished — included.
 //
 // A domain.SeamClosedEvent maps to the seam_closed kind, but only PART of it: its Value is the
 // seam's live working value, read-only and valid only for the duration of Emit, so no line carries
@@ -130,9 +129,13 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 		}, true
 	case domain.SubAgentPhaseEvent:
 		return kindSubAgentPhase, e.EventBase, subAgentPhaseData{
-			Phase:  string(e.Phase),
-			Result: toolResultOf(e.Result),
+			Phase:        string(e.Phase),
+			Result:       toolResultOf(e.Result),
+			StepCap:      e.StepCap,
+			CapRequested: e.CapRequested,
 		}, true
+	case domain.SubAgentGroupEvent:
+		return kindSubAgentGroup, e.EventBase, subAgentGroupData{Size: e.Size, Width: e.Width}, true
 	case domain.SubAgentNamedEvent:
 		return kindSubAgentNamed, e.EventBase, subAgentNamedData{Name: e.Name}, true
 	case domain.ChildInterjectionEvent:
@@ -169,26 +172,7 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 	case domain.RefClippedEvent:
 		return kindRefClipped, e.EventBase, refClippedData{Ref: e.Ref, Tokens: e.Tokens, Absolute: e.Absolute}, true
 	case domain.UsageEvent:
-		return kindUsage, e.EventBase, usageData{
-			PromptTokens:                 e.PromptTokens,
-			CompletionTokens:             e.CompletionTokens,
-			TotalTokens:                  e.TotalTokens,
-			CachedPromptTokens:           e.CachedPromptTokens,
-			Model:                        e.Model,
-			ServedModel:                  e.ServedModel,
-			ContextWindow:                e.ContextWindow,
-			CumulativePromptTokens:       e.Cumulative.PromptTokens,
-			CumulativeCompletionTokens:   e.Cumulative.CompletionTokens,
-			CumulativeTotalTokens:        e.Cumulative.TotalTokens,
-			CumulativeCachedPromptTokens: e.Cumulative.CachedPromptTokens,
-			CumulativeCalls:              e.Cumulative.Calls,
-			Cost:                         CostAmount(e.CostMicros),
-			Priced:                       e.Priced,
-			CumulativeCost:               CostAmount(e.Cumulative.CostMicros),
-			CumulativeUnpricedCalls:      e.Cumulative.UnpricedCalls,
-			Currency:                     FrameCurrency(e.Cumulative, currency),
-			Maintenance:                  e.Maintenance,
-		}, true
+		return kindUsage, e.EventBase, usageOf(e, currency), true
 	case domain.AuditEvent:
 		return kindAudit, e.EventBase, auditData{
 			Tool:     e.Tool,
@@ -217,21 +201,7 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 			Outcome:      e.Outcome,
 		}, true
 	case domain.WorkflowPhaseEvent:
-		if !isLineWorkflowPhase(e.Phase) {
-			return "", domain.EventBase{}, nil, false
-		}
-		return kindWorkflowPhase, e.EventBase, workflowPhaseData{
-			Phase:    string(e.Phase),
-			Workflow: e.Workflow,
-			Name:     e.Name,
-			Stage:    e.Stage,
-			Item:     e.Item,
-			Index:    e.Index,
-			Resumed:  e.Resumed,
-			Receipt:  workflowReceiptOf(e.Receipt),
-			Detail:   e.Detail,
-			Call:     e.Call,
-		}, true
+		return kindWorkflowPhase, e.EventBase, workflowPhaseOf(e), true
 	case domain.MalformedChunksEvent:
 		return kindMalformedChunks, e.EventBase, malformedChunksData{Count: e.Count}, true
 	default:
@@ -242,12 +212,11 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 // The per-variant `data` values. Every exported field carries an explicit snake_case tag and NONE
 // carries omitempty: ADR 0075 decision 3 promises a consumer never has to test for a missing key,
 // so a zero value is written as the zero and not dropped. The tags name the variant's own fields
-// under the same names. A member added to an Event variant is added here only when the line's
-// documented shape grows with it: domain.WorkflowPhaseEvent's ItemName, Stages, StageKinds,
-// Items, Round, Rounds, Run and Attempt describe the Workflow's shape for a Driver that draws it,
-// Resume is the resume command such a Driver shows its user, Tally is the end phase's item tally
-// and Origin names a background sub_agent's run, read in process only; none is on the
-// workflow_phase line (workflowPhaseData).
+// under the same names. Every member a Driver's fold reads is on its line (ADR 0103): a member
+// added to a variant since joins its object additively (ADR 0075 decision 10), after the members
+// already there. Three things stay off by design — domain.SeamClosedEvent's live Value (Encode),
+// an image's bytes (inputImage) and the Go type of a malformed call's parse error, which travels
+// as its text (malformedArguments).
 
 // tokenData is the token line: one streamed chunk of assistant text.
 type tokenData struct {
@@ -297,33 +266,112 @@ type toolResultData struct {
 // phase reports one, and domain.SubAgentPhaseEvent no longer carries a flag for it. The key stays
 // on the line because removing a member bumps the contract's `v` (ADR 0075); in a log written
 // before that change, true marked a finished phase with no result.
+//
+// StepCap and CapRequested are the child's step-cap facts on the started phase — the cap it runs
+// under (0 for unbounded) and the `max_steps` its call asked for when that ask was clamped to a
+// lower configured cap (0 otherwise) — and 0 on every finished phase.
 type subAgentPhaseData struct {
-	Phase     string     `json:"phase"`
-	Result    toolResult `json:"result"`
-	Cancelled bool       `json:"cancelled"`
+	Phase        string     `json:"phase"`
+	Result       toolResult `json:"result"`
+	Cancelled    bool       `json:"cancelled"`
+	StepCap      int        `json:"step_cap"`
+	CapRequested int        `json:"cap_requested"`
 }
 
-// workflowPhaseData is the workflow_phase line: one Workflow crossing a lifecycle boundary. Stage,
-// item, index, resumed and receipt are the zero values on the phases they do not describe, and the
-// receipt's status is "" on every phase but item_finished. Call is on every phase: the call id the
-// Workflow's item children carry as their envelope's call_id.
+// subAgentGroupData is the sub_agent_group line: a reply's group of two or more delegations
+// announced before the first of them is prepared — how many members will run, and the pool width
+// they run at (1 for a serial group). Its envelope is the agent whose reply holds the group.
+type subAgentGroupData struct {
+	Size  int `json:"size"`
+	Width int `json:"width"`
+}
+
+// workflowPhaseData is the workflow_phase line: one Workflow crossing a lifecycle boundary, on every
+// phase domain.WorkflowPhaseEvent reports. Stage, item, index, resumed and receipt are the zero
+// values on the phases they do not describe, and the receipt's status is "" on every phase but
+// item_finished. Call is on every phase: the call id the Workflow's item children carry as their
+// envelope's call_id.
+//
+// The members after call describe the Workflow's shape, so a Driver can rebuild it from the lines
+// alone, each on the phases domain.WorkflowPhaseEvent documents and the zero value elsewhere:
+// item_name (the item's short name), background, origin, stages and stage_kinds (null off the
+// started phase), items, round, rounds, outcome, run, attempt, resume, and tally — null except on
+// finished and stopped.
 type workflowPhaseData struct {
-	Phase    string          `json:"phase"`
-	Workflow string          `json:"workflow"`
-	Name     string          `json:"name"`
-	Stage    string          `json:"stage"`
-	Item     string          `json:"item"`
-	Index    int             `json:"index"`
-	Resumed  bool            `json:"resumed"`
-	Receipt  workflowReceipt `json:"receipt"`
-	Detail   string          `json:"detail"`
-	Call     string          `json:"call"`
+	Phase      string          `json:"phase"`
+	Workflow   string          `json:"workflow"`
+	Name       string          `json:"name"`
+	Stage      string          `json:"stage"`
+	Item       string          `json:"item"`
+	Index      int             `json:"index"`
+	Resumed    bool            `json:"resumed"`
+	Receipt    workflowReceipt `json:"receipt"`
+	Detail     string          `json:"detail"`
+	Call       string          `json:"call"`
+	ItemName   string          `json:"item_name"`
+	Background bool            `json:"background"`
+	Origin     string          `json:"origin"`
+	Stages     []string        `json:"stages"`
+	StageKinds []string        `json:"stage_kinds"`
+	Items      int             `json:"items"`
+	Round      int             `json:"round"`
+	Rounds     int             `json:"rounds"`
+	Outcome    string          `json:"outcome"`
+	Run        string          `json:"run"`
+	Attempt    int             `json:"attempt"`
+	Resume     string          `json:"resume"`
+	Tally      *workflowTally  `json:"tally"`
 }
 
-// isLineWorkflowPhase reports whether phase is one the workflow_phase line carries: every phase but
-// the two a drawing Driver alone reads (Encode).
-func isLineWorkflowPhase(phase domain.WorkflowPhase) bool {
-	return phase != domain.WorkflowItemStarted && phase != domain.WorkflowStageFinished
+// workflowTally mirrors domain.WorkflowTally: the items a finished or stopped Workflow ran, by the
+// receipt each ended on, and those a cancel left unfinished.
+type workflowTally struct {
+	OK         int `json:"ok"`
+	Partial    int `json:"partial"`
+	Blocked    int `json:"blocked"`
+	Unfinished int `json:"unfinished"`
+}
+
+// workflowPhaseOf converts a domain.WorkflowPhaseEvent to its line's data.
+func workflowPhaseOf(e domain.WorkflowPhaseEvent) workflowPhaseData {
+	return workflowPhaseData{
+		Phase:      string(e.Phase),
+		Workflow:   e.Workflow,
+		Name:       e.Name,
+		Stage:      e.Stage,
+		Item:       e.Item,
+		Index:      e.Index,
+		Resumed:    e.Resumed,
+		Receipt:    workflowReceiptOf(e.Receipt),
+		Detail:     e.Detail,
+		Call:       e.Call,
+		ItemName:   e.ItemName,
+		Background: e.Background,
+		Origin:     e.Origin,
+		Stages:     e.Stages,
+		StageKinds: e.StageKinds,
+		Items:      e.Items,
+		Round:      e.Round,
+		Rounds:     e.Rounds,
+		Outcome:    string(e.Outcome),
+		Run:        e.Run,
+		Attempt:    e.Attempt,
+		Resume:     e.Resume,
+		Tally:      workflowTallyOf(e.Tally),
+	}
+}
+
+// workflowTallyOf copies a tally onto the line, nil for none so the member encodes as null.
+func workflowTallyOf(tally *domain.WorkflowTally) *workflowTally {
+	if tally == nil {
+		return nil
+	}
+	return &workflowTally{
+		OK:         tally.OK,
+		Partial:    tally.Partial,
+		Blocked:    tally.Blocked,
+		Unfinished: tally.Unfinished,
+	}
 }
 
 // workflowReceipt is a workflow item's receipt on the line. Fields is an object on every line,
@@ -449,6 +497,10 @@ type malformedChunksData struct {
 // is in — the configured one only once a call behind the running sums was priced (FrameCurrency).
 // Amounts are exact decimals (CostAmount), and an unpriced line writes the zero values rather than
 // dropping the keys.
+//
+// delegate_fold marks the one maintenance reading that is not a Compaction — the fold of a capped
+// delegate's conversation, which compacted nothing — and cumulative_priced_calls counts how many
+// of cumulative_calls were priced. Both joined the line additively, so they sit last.
 type usageData struct {
 	PromptTokens       int    `json:"prompt_tokens"`
 	CompletionTokens   int    `json:"completion_tokens"`
@@ -470,7 +522,36 @@ type usageData struct {
 	CumulativeUnpricedCalls int         `json:"cumulative_unpriced_calls"`
 	Currency                string      `json:"currency"`
 
-	Maintenance bool `json:"maintenance"`
+	Maintenance           bool `json:"maintenance"`
+	DelegateFold          bool `json:"delegate_fold"`
+	CumulativePricedCalls int  `json:"cumulative_priced_calls"`
+}
+
+// usageOf converts a domain.UsageEvent to its line's data, the run's currency label stated under
+// FrameCurrency's rule.
+func usageOf(e domain.UsageEvent, currency string) usageData {
+	return usageData{
+		PromptTokens:                 e.PromptTokens,
+		CompletionTokens:             e.CompletionTokens,
+		TotalTokens:                  e.TotalTokens,
+		CachedPromptTokens:           e.CachedPromptTokens,
+		Model:                        e.Model,
+		ServedModel:                  e.ServedModel,
+		ContextWindow:                e.ContextWindow,
+		CumulativePromptTokens:       e.Cumulative.PromptTokens,
+		CumulativeCompletionTokens:   e.Cumulative.CompletionTokens,
+		CumulativeTotalTokens:        e.Cumulative.TotalTokens,
+		CumulativeCachedPromptTokens: e.Cumulative.CachedPromptTokens,
+		CumulativeCalls:              e.Cumulative.Calls,
+		Cost:                         CostAmount(e.CostMicros),
+		Priced:                       e.Priced,
+		CumulativeCost:               CostAmount(e.Cumulative.CostMicros),
+		CumulativeUnpricedCalls:      e.Cumulative.UnpricedCalls,
+		Currency:                     FrameCurrency(e.Cumulative, currency),
+		Maintenance:                  e.Maintenance,
+		DelegateFold:                 e.DelegateFold,
+		CumulativePricedCalls:        e.Cumulative.PricedCalls,
+	}
 }
 
 // auditData is the audit line. CallID is the AUDITED call — the one this record is about — while
@@ -520,11 +601,22 @@ type upstreamAttemptData struct {
 // domain field acquiring a json tag for some other reason can never move the contract.
 
 // toolCall mirrors domain.ToolCall. Arguments is the model's raw argument JSON, embedded verbatim
-// (ADR 0075 decision 11): what the model wrote is what a consumer reads.
+// (ADR 0075 decision 11): what the model wrote is what a consumer reads. Malformed is null for a
+// well-formed call; for one whose arguments were not a JSON object (Arguments then reads `{}`) it
+// carries what went wrong and what the model sent. It joined the object additively, so it sits
+// last.
 type toolCall struct {
-	ID        string          `json:"id"`
-	Tool      string          `json:"tool"`
-	Arguments json.RawMessage `json:"arguments"`
+	ID        string              `json:"id"`
+	Tool      string              `json:"tool"`
+	Arguments json.RawMessage     `json:"arguments"`
+	Malformed *malformedArguments `json:"malformed"`
+}
+
+// malformedArguments mirrors domain.MalformedArguments. Err is the parse failure's text — the
+// error's Go type and chain stay in process — and Raw the argument text exactly as sent.
+type malformedArguments struct {
+	Err string `json:"err"`
+	Raw string `json:"raw"`
 }
 
 // toolResult mirrors domain.ToolResult. Summary is the result's Tool summary as a tagged object —
@@ -651,11 +743,23 @@ type approvalRequest struct {
 
 // userInput mirrors domain.UserInput — the message a human addressed to a running sub-agent. Its
 // images are listed by name, media type and size only: an image's bytes never reach the stream.
+// Recipe is the recipe launch the input carries, null for none, and RecipeInputs the launch's
+// inputs already bound, null when none were; both joined the object additively, so they sit last.
 type userInput struct {
-	Text     string       `json:"text"`
-	FileRefs []string     `json:"file_refs"`
-	SkillIDs []string     `json:"skill_ids"`
-	Images   []inputImage `json:"images"`
+	Text         string            `json:"text"`
+	FileRefs     []string          `json:"file_refs"`
+	SkillIDs     []string          `json:"skill_ids"`
+	Images       []inputImage      `json:"images"`
+	Recipe       *recipeLaunch     `json:"recipe"`
+	RecipeInputs map[string]string `json:"recipe_inputs"`
+}
+
+// recipeLaunch mirrors domain.RecipeLaunch: the recipe skill's id, the text its inputs bind from,
+// and whether it runs in the background.
+type recipeLaunch struct {
+	SkillID    string `json:"skill_id"`
+	Text       string `json:"text"`
+	Background bool   `json:"background"`
 }
 
 // inputImage mirrors one domain.Image of a userInput without its Data: Size is the byte count.
@@ -667,7 +771,25 @@ type inputImage struct {
 
 // toolCallOf converts a domain.ToolCall to its wire mirror.
 func toolCallOf(call domain.ToolCall) toolCall {
-	return toolCall{ID: call.ID, Tool: call.Tool, Arguments: rawOrNull(call.Arguments)}
+	return toolCall{
+		ID:        call.ID,
+		Tool:      call.Tool,
+		Arguments: rawOrNull(call.Arguments),
+		Malformed: malformedArgumentsOf(call.Malformed),
+	}
+}
+
+// malformedArgumentsOf converts a malformed-call marker to its wire mirror, nil for none so the
+// member encodes as null. A marker with no error writes its err as "".
+func malformedArgumentsOf(marker *domain.MalformedArguments) *malformedArguments {
+	if marker == nil {
+		return nil
+	}
+	mirror := &malformedArguments{Raw: marker.Raw}
+	if marker.Err != nil {
+		mirror.Err = marker.Err.Error()
+	}
+	return mirror
 }
 
 // toolResultOf converts a domain.ToolResult to its wire mirror, its Summary included.
@@ -753,7 +875,23 @@ func approvalRequestOf(req domain.ApprovalRequest) approvalRequest {
 
 // userInputOf converts a domain.UserInput to its wire mirror.
 func userInputOf(in domain.UserInput) userInput {
-	return userInput{Text: in.Text, FileRefs: in.FileRefs, SkillIDs: in.SkillIDs, Images: inputImagesOf(in.Images)}
+	return userInput{
+		Text:         in.Text,
+		FileRefs:     in.FileRefs,
+		SkillIDs:     in.SkillIDs,
+		Images:       inputImagesOf(in.Images),
+		Recipe:       recipeLaunchOf(in.Recipe),
+		RecipeInputs: in.RecipeInputs,
+	}
+}
+
+// recipeLaunchOf converts a recipe launch to its wire mirror, nil for none so the member encodes
+// as null.
+func recipeLaunchOf(launch *domain.RecipeLaunch) *recipeLaunch {
+	if launch == nil {
+		return nil
+	}
+	return &recipeLaunch{SkillID: launch.SkillID, Text: launch.Text, Background: launch.Background}
 }
 
 // inputImagesOf lists images by name, media type and size, nil for none — the member then encodes

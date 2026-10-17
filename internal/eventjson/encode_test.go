@@ -2,6 +2,12 @@ package eventjson
 
 import (
 	"encoding/json"
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +71,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "tool_call",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"call":{"id":"call-1","tool":"write_file",` +
-				`"arguments":{"path":"docs/notes.md"}},"resolved_path":"/elsewhere/notes.md","spawn_run_id":""}`,
+				`"arguments":{"path":"docs/notes.md"},"malformed":null},"resolved_path":"/elsewhere/notes.md","spawn_run_id":""}`,
 		},
 		{
 			name: "tool_call with empty arguments",
@@ -75,7 +81,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "tool_call",
 			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"call":{"id":"call-2","tool":"git_status","arguments":null},"resolved_path":"","spawn_run_id":""}`,
+			wantData: `{"call":{"id":"call-2","tool":"git_status","arguments":null,"malformed":null},"resolved_path":"","spawn_run_id":""}`,
 		},
 		{
 			name: "tool_call of a delegation names the run it spawns",
@@ -86,8 +92,30 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "tool_call",
 			wantBase: domain.EventBase{Turn: 2, Depth: 1, CallID: "call-0", RunID: "0badc0de.1"},
-			wantData: `{"call":{"id":"call-5","tool":"sub_agent","arguments":null},"resolved_path":"",` +
+			wantData: `{"call":{"id":"call-5","tool":"sub_agent","arguments":null,"malformed":null},"resolved_path":"",` +
 				`"spawn_run_id":"0badc0de.2"}`,
+		},
+		{
+			// A call whose arguments were not a JSON object carries "{}" as its arguments and the
+			// parse failure's text beside what the model actually sent.
+			name: "tool_call with malformed arguments",
+			event: domain.ToolCallEvent{
+				EventBase: domain.EventBase{Turn: 2},
+				Call: domain.ToolCall{
+					ID:        "call-6",
+					Tool:      "read_file",
+					Arguments: json.RawMessage(`{}`),
+					Malformed: &domain.MalformedArguments{
+						Err: errors.New("unexpected end of JSON input"),
+						Raw: `{"path":"a.txt"`,
+					},
+				},
+			},
+			wantKind: "tool_call",
+			wantBase: domain.EventBase{Turn: 2},
+			wantData: `{"call":{"id":"call-6","tool":"read_file","arguments":{},` +
+				`"malformed":{"err":"unexpected end of JSON input","raw":"{\"path\":\"a.txt\""}},` +
+				`"resolved_path":"","spawn_run_id":""}`,
 		},
 		{
 			name: "tool_result carries its summary",
@@ -142,7 +170,22 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "sub_agent_phase",
 			wantBase: domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9"},
 			wantData: `{"phase":"started","result":{"call_id":"","content":"","is_error":false,"summary":null},` +
-				`"cancelled":false}`,
+				`"cancelled":false,"step_cap":0,"cap_requested":0}`,
+		},
+		{
+			// The started phase carries the step cap the child runs under, and the larger
+			// max_steps its call asked for when the configured cap clamped it.
+			name: "sub_agent_phase started under a clamped step cap",
+			event: domain.SubAgentPhaseEvent{
+				EventBase:    domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9", RunID: "0badc0de.2"},
+				Phase:        domain.SubAgentStarted,
+				StepCap:      20,
+				CapRequested: 50,
+			},
+			wantKind: "sub_agent_phase",
+			wantBase: domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9", RunID: "0badc0de.2"},
+			wantData: `{"phase":"started","result":{"call_id":"","content":"","is_error":false,"summary":null},` +
+				`"cancelled":false,"step_cap":20,"cap_requested":50}`,
 		},
 		{
 			// A cancel settles a delegation with a result (ADR 0088), so the finished phase carries
@@ -162,7 +205,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Depth: 1, Turn: 6, CallID: "call-9"},
 			wantData: `{"phase":"finished","result":{"call_id":"call-9","content":"stopped","is_error":true,` +
 				`"summary":{"kind":"delegation_outcome","bound":"","stopped_by_user":true,"has_no_report":false,` +
-				`"steered_messages":1}},"cancelled":false}`,
+				`"steered_messages":1}},"cancelled":false,"step_cap":0,"cap_requested":0}`,
 		},
 		{
 			name: "workflow_phase started",
@@ -177,7 +220,68 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"phase":"started","workflow":"20260927-101500-ab12","name":"check each package",` +
 				`"stage":"","item":"","index":0,"resumed":false,` +
-				`"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"call-7"}`,
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"call-7",` +
+				`"item_name":"","background":false,"origin":"","stages":null,"stage_kinds":null,"items":0,` +
+				`"round":0,"rounds":0,"outcome":"","run":"","attempt":0,"resume":"","tally":null}`,
+		},
+		{
+			// The started phase of a background Recipe launch carries the Workflow's whole shape:
+			// its stages and their kinds, its origin and the resume command a Driver shows.
+			name: "workflow_phase started carries the shape",
+			event: domain.WorkflowPhaseEvent{
+				EventBase:  domain.EventBase{Turn: 2},
+				Phase:      domain.WorkflowStarted,
+				Workflow:   "20260927-101500-ab12",
+				Name:       "audit",
+				Call:       "recipe-1",
+				Background: true,
+				Origin:     "sub_agent",
+				Stages:     []string{"items", "check"},
+				StageKinds: []string{"fanout", "verify"},
+				Resume:     "re-run `/audit` to resume",
+			},
+			wantKind: "workflow_phase",
+			wantBase: domain.EventBase{Turn: 2},
+			wantData: `{"phase":"started","workflow":"20260927-101500-ab12","name":"audit",` +
+				`"stage":"","item":"","index":0,"resumed":false,` +
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"recipe-1",` +
+				`"item_name":"","background":true,"origin":"sub_agent","stages":["items","check"],` +
+				`"stage_kinds":["fanout","verify"],"items":0,"round":0,"rounds":0,"outcome":"","run":"",` +
+				`"attempt":0,"resume":"re-run ` + "`/audit`" + ` to resume","tally":null}`,
+		},
+		{
+			name: "workflow_phase stage_started carries its items and rounds",
+			event: domain.WorkflowPhaseEvent{
+				EventBase: domain.EventBase{Turn: 3},
+				Phase:     domain.WorkflowStageStarted,
+				Workflow:  "wf-1",
+				Stage:     "items",
+				Items:     4,
+				Round:     2,
+				Rounds:    3,
+			},
+			wantKind: "workflow_phase",
+			wantBase: domain.EventBase{Turn: 3},
+			wantData: `{"phase":"stage_started","workflow":"wf-1","name":"","stage":"items","item":"","index":0,` +
+				`"resumed":false,"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"",` +
+				`"item_name":"","background":false,"origin":"","stages":null,"stage_kinds":null,"items":4,` +
+				`"round":2,"rounds":3,"outcome":"","run":"","attempt":0,"resume":"","tally":null}`,
+		},
+		{
+			name: "workflow_phase finished carries the tally",
+			event: domain.WorkflowPhaseEvent{
+				EventBase: domain.EventBase{Turn: 6},
+				Phase:     domain.WorkflowFinished,
+				Workflow:  "wf-1",
+				Tally:     &domain.WorkflowTally{OK: 3, Partial: 1, Blocked: 1, Unfinished: 0},
+			},
+			wantKind: "workflow_phase",
+			wantBase: domain.EventBase{Turn: 6},
+			wantData: `{"phase":"finished","workflow":"wf-1","name":"","stage":"","item":"","index":0,` +
+				`"resumed":false,"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"",` +
+				`"item_name":"","background":false,"origin":"","stages":null,"stage_kinds":null,"items":0,` +
+				`"round":0,"rounds":0,"outcome":"","run":"","attempt":0,"resume":"",` +
+				`"tally":{"ok":3,"partial":1,"blocked":1,"unfinished":0}}`,
 		},
 		{
 			name: "workflow_phase item_finished carries the receipt",
@@ -188,7 +292,9 @@ func TestEncodeJSONGolden(t *testing.T) {
 				Name:      "check each package",
 				Stage:     "items",
 				Item:      "internal/tui",
-				ItemName:  "tui", // a Driver display field: the line below has no key for it
+				ItemName:  "tui",
+				Round:     1,
+				Run:       "0badc0de.4",
 				Index:     2,
 				Resumed:   true,
 				Receipt: domain.WorkflowReceipt{
@@ -199,7 +305,9 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.3"},
 			wantData: `{"phase":"item_finished","workflow":"20260927-101500-ab12","name":"check each package",` +
 				`"stage":"items","item":"internal/tui","index":2,"resumed":true,` +
-				`"receipt":{"status":"partial","summary":"two findings","fields":{"findings":"2"}},"detail":"","call":""}`,
+				`"receipt":{"status":"partial","summary":"two findings","fields":{"findings":"2"}},"detail":"","call":"",` +
+				`"item_name":"tui","background":false,"origin":"","stages":null,"stage_kinds":null,"items":0,` +
+				`"round":1,"rounds":0,"outcome":"","run":"0badc0de.4","attempt":0,"resume":"","tally":null}`,
 		},
 		{
 			name: "workflow_phase waiting carries the question",
@@ -214,7 +322,9 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Turn: 5},
 			wantData: `{"phase":"waiting","workflow":"20260927-101500-ab12","name":"",` +
 				`"stage":"confirm","item":"","index":0,"resumed":false,` +
-				`"receipt":{"status":"","summary":"","fields":{}},"detail":"Fix the refuted items?","call":""}`,
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"Fix the refuted items?","call":"",` +
+				`"item_name":"","background":false,"origin":"","stages":null,"stage_kinds":null,"items":0,` +
+				`"round":0,"rounds":0,"outcome":"","run":"","attempt":0,"resume":"","tally":null}`,
 		},
 		{
 			name: "sub_agent_named",
@@ -242,8 +352,27 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
 			wantData: `{"input":{"text":"check the manual too",` +
 				`"file_refs":["docs/manual/headless.md"],"skill_ids":["coding-standards"],` +
-				`"images":[{"name":"shot.png","media_type":"image/png","size":10}]},` +
+				`"images":[{"name":"shot.png","media_type":"image/png","size":10}],"recipe":null,"recipe_inputs":null},` +
 				`"landed":true,"reason":""}`,
+		},
+		{
+			// A recipe launch rides the input as a value, its bound inputs beside it.
+			name: "child_interjection carrying a recipe launch",
+			event: domain.ChildInterjectionEvent{
+				EventBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
+				Input: domain.UserInput{
+					Text:         "/audit internal/tui",
+					SkillIDs:     []string{"audit"},
+					Recipe:       &domain.RecipeLaunch{SkillID: "audit", Text: "internal/tui", Background: true},
+					RecipeInputs: map[string]string{"target": "internal/tui"},
+				},
+				Landed: true,
+			},
+			wantKind: "child_interjection",
+			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
+			wantData: `{"input":{"text":"/audit internal/tui","file_refs":null,"skill_ids":["audit"],` +
+				`"images":null,"recipe":{"skill_id":"audit","text":"internal/tui","background":true},` +
+				`"recipe_inputs":{"target":"internal/tui"}},"landed":true,"reason":""}`,
 		},
 		{
 			name: "child_interjection with no refs",
@@ -254,7 +383,8 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "child_interjection",
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
-			wantData: `{"input":{"text":"stop","file_refs":null,"skill_ids":null,"images":null},"landed":false,"reason":"capped"}`,
+			wantData: `{"input":{"text":"stop","file_refs":null,"skill_ids":null,"images":null,` +
+				`"recipe":null,"recipe_inputs":null},"landed":false,"reason":"capped"}`,
 		},
 		{
 			name: "child_interjection undelivered to a stopped child",
@@ -265,7 +395,8 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "child_interjection",
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
-			wantData: `{"input":{"text":"also check the vendor directory","file_refs":null,"skill_ids":null,"images":null},"landed":false,"reason":"stopped"}`,
+			wantData: `{"input":{"text":"also check the vendor directory","file_refs":null,"skill_ids":null,` +
+				`"images":null,"recipe":null,"recipe_inputs":null},"landed":false,"reason":"stopped"}`,
 		},
 		{
 			name: "approval decided",
@@ -429,7 +560,28 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"cumulative_prompt_tokens":1800,"cumulative_completion_tokens":240,` +
 				`"cumulative_total_tokens":2040,"cumulative_cached_prompt_tokens":640,` +
 				`"cumulative_calls":2,"cost":0,"priced":false,"cumulative_cost":0,` +
-				`"cumulative_unpriced_calls":0,"currency":"","maintenance":true}`,
+				`"cumulative_unpriced_calls":0,"currency":"","maintenance":true,"delegate_fold":false,` +
+				`"cumulative_priced_calls":0}`,
+		},
+		{
+			// A capped delegate's fold is maintenance that compacted nothing, and the running sums
+			// say how many of the agent's calls were priced.
+			name: "usage of a delegate fold",
+			event: domain.UsageEvent{
+				EventBase:    domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.2"},
+				Cumulative:   domain.Usage{Calls: 3, PricedCalls: 2, UnpricedCalls: 1},
+				Maintenance:  true,
+				DelegateFold: true,
+			},
+			wantKind: "usage",
+			wantBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.2"},
+			wantData: `{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,` +
+				`"cached_prompt_tokens":0,"model":"","served_model":"","context_window":0,` +
+				`"cumulative_prompt_tokens":0,"cumulative_completion_tokens":0,` +
+				`"cumulative_total_tokens":0,"cumulative_cached_prompt_tokens":0,` +
+				`"cumulative_calls":3,"cost":0,"priced":false,"cumulative_cost":0,` +
+				`"cumulative_unpriced_calls":1,"currency":"","maintenance":true,"delegate_fold":true,` +
+				`"cumulative_priced_calls":2}`,
 		},
 		{
 			// The envelope takes the SPAWNING delegation's id off the embedded EventBase while
@@ -627,49 +779,98 @@ func TestEncodeSkipsTheWireEvent(t *testing.T) {
 	}
 }
 
-// TestEncodeSkipsTheSubAgentGroupEvent pins that a sub-agent group's announced size is sink-only:
-// it feeds a drawing Driver's queued count and has no line kind, so the stream carries no line for
-// it and the kind list is unchanged.
-func TestEncodeSkipsTheSubAgentGroupEvent(t *testing.T) {
+// TestEncodeWritesTheSubAgentGroupEvent pins ADR 0103 decision 13: a sub-agent group's announced
+// size and width write a sub_agent_group line, stamped with the emitting agent's identity, so a
+// watcher can show the members of a wave still queued.
+func TestEncodeWritesTheSubAgentGroupEvent(t *testing.T) {
 	t.Parallel()
 
-	kind, base, data, ok := Encode(domain.SubAgentGroupEvent{
-		EventBase: domain.EventBase{Turn: 1},
-		Size:      3,
-		Width:     1,
-	})
+	wantBase := domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9", RunID: "0badc0de.2"}
 
-	if ok {
-		t.Fatalf("Encode(SubAgentGroupEvent) ok = true, want false")
+	kind, base, data, ok := Encode(domain.SubAgentGroupEvent{EventBase: wantBase, Size: 3, Width: 1})
+
+	if !ok || kind != "sub_agent_group" {
+		t.Fatalf("Encode(SubAgentGroupEvent) = (%q, ok %v), want a sub_agent_group line", kind, ok)
 	}
-	if kind != "" || data != nil || base != (domain.EventBase{}) {
-		t.Errorf("Encode(SubAgentGroupEvent) = (%q, %+v, %v, false), want zero values", kind, base, data)
+	if base != wantBase {
+		t.Errorf("base = %+v, want %+v", base, wantBase)
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("json.Marshal(data): %v", err)
+	}
+	if want := `{"size":3,"width":1}`; string(encoded) != want {
+		t.Errorf("data JSON = %s, want %s", encoded, want)
 	}
 }
 
-// TestEncodeSkipsTheDriverOnlyWorkflowPhases pins that the two phases a drawing Driver alone reads
-// — an item's run starting and a stage finishing — write no workflow_phase line, so the NDJSON
-// stream keeps the phase list the headless manual documents.
-func TestEncodeSkipsTheDriverOnlyWorkflowPhases(t *testing.T) {
+// TestEncodeWritesTheDriverWorkflowPhases pins that the two phases describing a Workflow's shape —
+// an item's run starting and a stage finishing — write a workflow_phase line like every other
+// phase, with the members a Driver rebuilds the Workflow from: the item's run, attempt and short
+// name, and the stage's round and outcome.
+func TestEncodeWritesTheDriverWorkflowPhases(t *testing.T) {
 	t.Parallel()
 
-	for _, phase := range []domain.WorkflowPhase{domain.WorkflowItemStarted, domain.WorkflowStageFinished} {
-		t.Run(string(phase), func(t *testing.T) {
-			t.Parallel()
-
-			kind, base, data, ok := Encode(domain.WorkflowPhaseEvent{
+	cases := []struct {
+		event    domain.WorkflowPhaseEvent
+		wantData string
+	}{
+		{
+			event: domain.WorkflowPhaseEvent{
 				EventBase: domain.EventBase{Turn: 1},
-				Phase:     phase,
+				Phase:     domain.WorkflowItemStarted,
 				Workflow:  "wf-1",
 				Stage:     "items",
-				Run:       "r1",
-			})
+				Item:      "internal/tui",
+				ItemName:  "tui",
+				Index:     2,
+				Round:     1,
+				Run:       "0badc0de.4",
+				Attempt:   2,
+			},
+			wantData: `{"phase":"item_started","workflow":"wf-1","name":"","stage":"items",` +
+				`"item":"internal/tui","index":2,"resumed":false,` +
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"",` +
+				`"item_name":"tui","background":false,"origin":"","stages":null,"stage_kinds":null,` +
+				`"items":0,"round":1,"rounds":0,"outcome":"","run":"0badc0de.4","attempt":2,` +
+				`"resume":"","tally":null}`,
+		},
+		{
+			event: domain.WorkflowPhaseEvent{
+				EventBase: domain.EventBase{Turn: 1},
+				Phase:     domain.WorkflowStageFinished,
+				Workflow:  "wf-1",
+				Stage:     "check",
+				Round:     2,
+				Outcome:   domain.WorkflowStageSkipped,
+			},
+			wantData: `{"phase":"stage_finished","workflow":"wf-1","name":"","stage":"check",` +
+				`"item":"","index":0,"resumed":false,` +
+				`"receipt":{"status":"","summary":"","fields":{}},"detail":"","call":"",` +
+				`"item_name":"","background":false,"origin":"","stages":null,"stage_kinds":null,` +
+				`"items":0,"round":2,"rounds":0,"outcome":"skipped","run":"","attempt":0,` +
+				`"resume":"","tally":null}`,
+		},
+	}
 
-			if ok {
-				t.Fatalf("Encode(%s) ok = true, want false", phase)
+	for _, c := range cases {
+		t.Run(string(c.event.Phase), func(t *testing.T) {
+			t.Parallel()
+
+			kind, base, data, ok := Encode(c.event)
+
+			if !ok || kind != "workflow_phase" {
+				t.Fatalf("Encode(%s) = (%q, ok %v), want a workflow_phase line", c.event.Phase, kind, ok)
 			}
-			if kind != "" || data != nil || base != (domain.EventBase{}) {
-				t.Errorf("Encode(%s) = (%q, %+v, %v, false), want zero values", phase, kind, base, data)
+			if base != c.event.EventBase {
+				t.Errorf("base = %+v, want %+v", base, c.event.EventBase)
+			}
+			encoded, err := json.Marshal(data)
+			if err != nil {
+				t.Fatalf("json.Marshal(data): %v", err)
+			}
+			if string(encoded) != c.wantData {
+				t.Errorf("data JSON =\n  %s\nwant\n  %s", encoded, c.wantData)
 			}
 		})
 	}
@@ -810,6 +1011,124 @@ func TestEncodeUsageCarriesTheSpend(t *testing.T) {
 	}
 }
 
+// sinkOnlyVariants names the one domain Event variant no line carries: the Inspector's raw provider
+// protocol (ADR 0075 decision 2).
+var sinkOnlyVariants = map[string]bool{"WireEvent": true}
+
+// TestEncodeMapsEveryEventVariant pins ADR 0103's promise that the lines carry every Event a
+// Driver folds: every variant internal/domain declares — read off its source, so a variant added
+// there without a case here is a failing test — maps to a kind in Kinds(), WireEvent alone
+// excepted, and every kind but the two frames is some variant's line.
+func TestEncodeMapsEveryEventVariant(t *testing.T) {
+	t.Parallel()
+
+	variants := map[string]domain.Event{
+		"TokenEvent":             domain.TokenEvent{},
+		"ReasoningEvent":         domain.ReasoningEvent{},
+		"StreamResetEvent":       domain.StreamResetEvent{},
+		"MessageEvent":           domain.MessageEvent{},
+		"ToolCallEvent":          domain.ToolCallEvent{},
+		"ToolResultEvent":        domain.ToolResultEvent{},
+		"SubAgentPhaseEvent":     domain.SubAgentPhaseEvent{},
+		"SubAgentGroupEvent":     domain.SubAgentGroupEvent{},
+		"SubAgentNamedEvent":     domain.SubAgentNamedEvent{},
+		"ChildInterjectionEvent": domain.ChildInterjectionEvent{},
+		"ApprovalEvent":          domain.ApprovalEvent{},
+		"TurnEvent":              domain.TurnEvent{},
+		"ReactionFiredEvent":     domain.ReactionFiredEvent{},
+		"SeamClosedEvent":        domain.SeamClosedEvent{},
+		"ErrorEvent":             domain.ErrorEvent{},
+		"PruneEvent":             domain.PruneEvent{},
+		"RefClippedEvent":        domain.RefClippedEvent{},
+		"MalformedChunksEvent":   domain.MalformedChunksEvent{},
+		"UsageEvent":             domain.UsageEvent{},
+		"AuditEvent":             domain.AuditEvent{},
+		"WireEvent":              domain.WireEvent{},
+		"UpstreamAttemptEvent":   domain.UpstreamAttemptEvent{},
+		"WorkflowPhaseEvent":     domain.WorkflowPhaseEvent{},
+	}
+	declared := declaredEventVariants(t)
+	known := make(map[string]bool, len(Kinds()))
+	for _, kind := range Kinds() {
+		known[kind] = true
+	}
+
+	for _, name := range declared {
+		if _, listed := variants[name]; !listed {
+			t.Errorf("internal/domain declares the Event variant %s, which this test does not list", name)
+		}
+	}
+	if len(declared) != len(variants) {
+		t.Errorf("internal/domain declares %d Event variants %v; this test lists %d",
+			len(declared), declared, len(variants))
+	}
+	written := map[string]bool{}
+	for name, event := range variants {
+		kind, _, _, ok := Encode(event)
+		switch {
+		case sinkOnlyVariants[name] && ok:
+			t.Errorf("Encode(%s) wrote a %q line; the variant is sink-only", name, kind)
+		case !sinkOnlyVariants[name] && (!ok || !known[kind]):
+			t.Errorf("Encode(%s) = (%q, ok %v); want a kind Kinds() names", name, kind, ok)
+		}
+		written[kind] = ok
+	}
+	for _, kind := range Kinds()[:len(Kinds())-2] {
+		if !written[kind] {
+			t.Errorf("no Event variant writes the %q kind", kind)
+		}
+	}
+}
+
+// declaredEventVariants reads internal/domain's source for every struct type that embeds
+// EventBase — the variants of the sealed Event sum — and returns their names, sorted.
+func declaredEventVariants(t *testing.T) []string {
+	t.Helper()
+
+	files, err := filepath.Glob(filepath.Join("..", "domain", "*.go"))
+	if err != nil {
+		t.Fatalf("glob internal/domain: %v", err)
+	}
+	var names []string
+	fileSet := token.NewFileSet()
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fileSet, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			spec, isType := node.(*ast.TypeSpec)
+			if isType && embedsEventBase(spec) {
+				names = append(names, spec.Name.Name)
+			}
+			return true
+		})
+	}
+	if len(names) == 0 {
+		t.Fatal("found no Event variant in internal/domain; the source scan has stopped working")
+	}
+	sort.Strings(names)
+	return names
+}
+
+// embedsEventBase reports whether spec declares a struct with an embedded EventBase field.
+func embedsEventBase(spec *ast.TypeSpec) bool {
+	structType, isStruct := spec.Type.(*ast.StructType)
+	if !isStruct {
+		return false
+	}
+	for _, field := range structType.Fields.List {
+		ident, isIdent := field.Type.(*ast.Ident)
+		if isIdent && len(field.Names) == 0 && ident.Name == "EventBase" {
+			return true
+		}
+	}
+	return false
+}
+
 // TestEncodeSkipsAnUnknownEvent covers the sealed type's default arm: a variant this package has
 // not been taught is skipped rather than written as a half-line.
 func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
@@ -820,16 +1139,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentyThree pins the vocabulary itself — the twenty-one serialized variants, the
+// TestKindsAreTwentyFour pins the vocabulary itself — the twenty-two serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentyThree(t *testing.T) {
+func TestKindsAreTwentyFour(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 23 {
-		t.Fatalf("len(Kinds()) = %d, want 23: %v", len(kinds), kinds)
+	if len(kinds) != 24 {
+		t.Fatalf("len(Kinds()) = %d, want 24: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

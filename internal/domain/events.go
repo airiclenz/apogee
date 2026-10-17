@@ -276,9 +276,9 @@ type SubAgentPhaseEvent struct {
 // Its EventBase is the EMITTING agent's identity — the one whose reply holds the group — not a
 // child's: Depth 0 for the top-level agent's group, deeper for a delegate's own.
 //
-// It is OBSERVATION ONLY and in-process: delivered to the Driver's sink like every variant, it is
-// never written as an NDJSON line (internal/eventjson), so ADR 0031's wire-silent engine holds and
-// the headless contract is unchanged. An observer that ignores it loses the queued count and
+// It is OBSERVATION ONLY: delivered to the Driver's sink like every variant, it reaches the Event
+// lines as a Driver-written `sub_agent_group` line (internal/eventjson, ADR 0103 decision 13), so
+// ADR 0031's wire-silent engine holds. An observer that ignores it loses the queued count and
 // nothing else.
 type SubAgentGroupEvent struct {
 	EventBase
@@ -891,7 +891,7 @@ func (t WorkflowTally) Total() int {
 // one's. A background workflow's item children run under the synthetic call id
 // BackgroundWorkflowCallPrefix + Workflow, so their events carry that EventBase.CallID; that is
 // how a Driver keeps them apart from the conversation's own delegations. No headless or daemon
-// run starts one (ADR 0089 D1), so the NDJSON encoding does not carry the flag.
+// run starts one (ADR 0089 D1).
 //
 // Call is the id of the call the Workflow's item children are bracketed under — the EventBase.CallID
 // every event of an item child carries: the fan_out call's own id, the synthetic `recipe-…` call a
@@ -902,8 +902,7 @@ func (t WorkflowTally) Total() int {
 // Origin is what launched the Workflow when that is not a Recipe or a fan_out, as
 // workflow.RunStatus.Origin records it: workflow.OriginSubAgent ("sub_agent") on every phase of a
 // background sub_agent's one-item workflow (ADR 0094), "" on a fan_out's and a Recipe's. It is a
-// launcher's name, unrelated to the Origin type that classes a Reaction's source. The NDJSON
-// encoding does not carry it.
+// launcher's name, unrelated to the Origin type that classes a Reaction's source.
 //
 // Resume is, on the WorkflowStarted of a Recipe launch, the text telling the user how to resume
 // the Workflow should it stop — "re-run `/<id> <text>` to resume" for a typed launch, "run `/<id>`
@@ -911,8 +910,7 @@ func (t WorkflowTally) Total() int {
 // phase and on a fan_out's or a background workflow's started phase.
 //
 // Tally is, on WorkflowFinished and WorkflowStopped, the Workflow's item tally — the same counts
-// the model's note on it reports — and nil on WorkflowFailed and every other phase. The NDJSON
-// encoding does not carry it.
+// the model's note on it reports — and nil on WorkflowFailed and every other phase.
 //
 // It is OBSERVATION ONLY: nothing in the loop reads it, and the result the Workflow's caller reads
 // is its result lines, not these events. A Driver that ignores it loses the Workflow's liveness

@@ -238,8 +238,9 @@ type ToolCall struct {
 	// Malformed marks a call whose model-emitted arguments were not a JSON object; nil for every
 	// well-formed call. A marked call's Arguments is "{}", so history and every wire carry a valid
 	// object for it, and dispatch answers it with the parse error instead of running it. The marker
-	// is json:"-": history, session payloads and event JSON never carry it, so a call reloaded from
-	// a snapshot is an ordinary call with arguments "{}".
+	// is json:"-": history and session payloads never carry it, so a call reloaded from a snapshot
+	// is an ordinary call with arguments "{}". The Event lines carry it through their own mirror
+	// (internal/eventjson's tool_call `malformed`), never through this tag.
 	Malformed *MalformedArguments `json:"-"`
 }
 

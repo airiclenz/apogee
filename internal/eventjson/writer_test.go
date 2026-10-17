@@ -114,7 +114,7 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 		`{"event":"token","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,"data":{"text":"hel"}}`,
 		`{"event":"token","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":4,"depth":1,"call_id":"call-9","run_id":"0badc0de.1","data":{"text":"lo"}}`,
 		`{"event":"tool_call","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,` +
-			`"data":{"call":{"id":"call-9","tool":"sub_agent","arguments":null},"resolved_path":"","spawn_run_id":"0badc0de.1"}}`,
+			`"data":{"call":{"id":"call-9","tool":"sub_agent","arguments":null,"malformed":null},"resolved_path":"","spawn_run_id":"0badc0de.1"}}`,
 		`{"event":"tool_result","v":2,"seq":4,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,` +
 			`"data":{"result":{"call_id":"call-9","content":"report","is_error":false,"summary":null},"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.1"}}`,
 		`{"event":"run_started","v":2,"seq":5,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,"run_id":null,` +
