@@ -1418,3 +1418,42 @@ func TestWatchOwnerResumeWithAProbeInFlightIsNotRefusedAsHeld(t *testing.T) {
 			len(eng.restoreCalls), m.watch.isActive)
 	}
 }
+
+// A --resume start of a running session (Options.Watch) opens watching it over a fresh session: the
+// watch is entered at construction, Init sends the follower's first read, the box names the frame's
+// title — the id while the frame has none — and esc lands in the fresh session newModel built.
+func TestResumeWatchOpensAtStartAndEscLandsFresh(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t, "", recordHeadEntries(), 0)
+	eng := watchEngine()
+	opts := testOpts
+	opts.Watch = &LiveSession{
+		ID:          f.src.id,
+		RecordPath:  f.src.recordPath,
+		JournalPath: f.src.journalPath,
+	}
+
+	m := newTestModelEng(t, eng, opts)
+
+	if !m.watch.isActive || m.startupWatchRead == nil {
+		t.Fatal("newModel did not open watching the live session")
+	}
+	if want := fmt.Sprintf(watchLegendFormat, watchSessionID); m.watchLegend() != want {
+		t.Errorf("legend = %q; want %q", m.watchLegend(), want)
+	}
+	m = step(t, m, m.startupWatchRead())
+	f.prompt("theirs", false)
+	m = pollWatch(t, m)
+	if got := entryTexts(m, entryUser); !slices.Contains(got, "theirs") {
+		t.Errorf("user entries while watching = %q; want the journal's prompt", got)
+	}
+
+	m = step(t, m, keyEsc())
+
+	if m.watch.isActive || m.eng != Engine(eng) || m.state != stateIdle {
+		t.Fatal("esc did not leave the watch for the fresh session's engine")
+	}
+	if got := entryTexts(m, entryUser); len(got) != 0 {
+		t.Errorf("user entries after esc = %q; want the fresh session's none", got)
+	}
+}

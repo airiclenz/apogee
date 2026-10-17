@@ -228,9 +228,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The id-addressed session store under this run's sessions root, and the record a --resume or
 	// --continue start restores from (nil for a fresh start). Resolving it here lets the host begin
 	// ACTIVE on that record — continuing its file in place rather than forking a new session — and
-	// the Agent resume off rec.Session below.
+	// the Agent resume off rec.Session below. A --resume of a session another instance is running
+	// resolves to the live session to watch instead (w.watch), with w.resumed nil: everything below
+	// builds a fresh start, which the TUI opens watching.
 	w.store = session.NewStore(w.roots.sessions)
-	w.resumed, err = resolveResume(w.store, w.opts.Resume, w.opts.ContinueSession, w.roots.workspace)
+	w.resumed, w.watch, err = resolveResume(w.store, w.opts.Resume, w.opts.ContinueSession, w.roots.workspace)
 	if err != nil {
 		return err
 	}

@@ -434,6 +434,10 @@ type Model struct {
 	holds         engineHold
 	resumePending bool
 
+	// startupWatchRead is the follower's first read of the watch a --resume start of a live session
+	// entered at construction (enterStartupWatch, watch.go), for Init to send; nil otherwise.
+	startupWatchRead tea.Cmd
+
 	// adoption is the adoption pane's session state (adoption.go, ADR 0096 §4): the proposed project
 	// rules waiting for the next idle fold with nothing else up, and every rule a pane has already
 	// raised, so a later config change offers only what is new.
@@ -940,6 +944,10 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		m.queueAdoption(opts.ProposedRules)
 	}
 	m.openAdoption()
+	// A --resume of a session another instance is running opens watching it (enterStartupWatch,
+	// watch.go). It goes last, over the fresh session built above — the one esc goes back to — and
+	// after the asks, which stay open over the watch exactly as they would over that session.
+	m.enterStartupWatch(opts.Watch)
 	return m
 }
 
@@ -1145,7 +1153,7 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 // construction returns no Cmd, so its drain marker and backstop leave from here (startupLatchCmds).
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd(),
-		m.startupLatchCmds())
+		m.startupLatchCmds(), m.startupWatchRead)
 }
 
 // startupLatchCmds issues the arming Cmds for a latched surface newModel opened, and nothing when

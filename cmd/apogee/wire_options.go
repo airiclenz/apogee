@@ -275,6 +275,8 @@ func (w *rootWiring) options() tui.Options {
 		// appends the interrupted note and /continue picks the work back up. A pre-bound start has
 		// no Agent to ask, and answers false: nothing is open until something is bound.
 		Resumed: resumedSession(w.resumed, w.opts.Currency, w.engine.InExchange()),
+		// The live session a --resume start opens watching (resolveResume), nil otherwise.
+		Watch: w.watch,
 	}
 }
 

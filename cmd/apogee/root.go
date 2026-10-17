@@ -128,7 +128,7 @@ func newRootCommandWith(launch launcher, deps rootDeps, subs ...*cobra.Command) 
 	flags.BoolVar(&opts.Bypass, "bypass", false,
 		"run with advise and shape Reactions of user or bench origin off; "+
 			"Floor guards and structural reducers stay on (ADR 0076)")
-	flags.StringVar(&opts.Resume, "resume", "", "resume a saved session (id from /sessions, or a file path)")
+	flags.StringVar(&opts.Resume, "resume", "", "resume a saved session (id from /sessions, or a file path), or watch one another apogee is running")
 	flags.BoolVar(&opts.ContinueSession, "continue", false,
 		"resume this workspace's most recent saved session (mutually exclusive with --resume)")
 	flags.StringVar(&opts.ConfigDir, "config", "",

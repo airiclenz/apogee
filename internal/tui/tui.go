@@ -1602,6 +1602,12 @@ type Options struct {
 	// an honest note with the view otherwise fresh. The binary resolves the store record and
 	// projects it onto this small value, so the renderer never decodes the record itself.
 	Resumed *ResumedSession
+
+	// Watch is the live session this run opens watching (ADR 0103 decision 5): set when --resume
+	// names a session another instance holds with an Event journal, nil otherwise, and never set
+	// beside Resumed. newModel builds a fresh session as usual and enters watch mode over it, so esc
+	// lands in that fresh session.
+	Watch *LiveSession
 }
 
 // colorScheme is the palette to build the theme from: what the binary resolved, or the built-in

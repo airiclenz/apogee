@@ -662,25 +662,63 @@ func (h *sessionHost) ActiveID() string { return h.live.ActiveID() }
 // --continue is set. --resume tries its value as a store id first (the handle /sessions lists) and
 // falls back to a file path (which still reads a pre-plan bare envelope); --continue resumes this
 // workspace's most recent session. The two flags are mutually exclusive.
-func resolveResume(store *session.Store, resume string, continueSession bool, workspace string) (*session.Record, error) {
+//
+// A --resume id another instance is running with an Event journal resolves to the live session to
+// watch instead (resolveLive, ADR 0103 decision 5), and the record is nil: the start is a fresh one
+// that opens watching. --continue never watches — it resumes this workspace's own newest record, and
+// one another apogee holds is refused (resolveContinue).
+func resolveResume(
+	store *session.Store, resume string, continueSession bool, workspace string,
+) (*session.Record, *tui.LiveSession, error) {
 	switch {
 	case resume != "" && continueSession:
-		return nil, errors.New("apogee: --resume and --continue are mutually exclusive; pass one or the other")
+		return nil, nil, errors.New("apogee: --resume and --continue are mutually exclusive; pass one or the other")
 	case resume != "":
+		if live, isLive := resolveLive(store, resume); isLive {
+			return nil, &live, nil
+		}
 		rec, err := resolveResumeArg(store, resume)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return &rec, nil
+		return &rec, nil, nil
 	case continueSession:
 		rec, err := resolveContinue(store, workspace)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return &rec, nil
+		return &rec, nil, nil
 	default:
-		return nil, nil
+		return nil, nil, nil
 	}
+}
+
+// resolveLive reports the live session a --resume value names: a valid store id whose lock another
+// instance holds (Store.ProbeHold) and whose Event journal is on disk — a record-less headless run
+// included — as the row /sessions would list for it (liveSessionOf). Everything else reads as not
+// live and is left to resolveResumeArg unchanged: an invalid id or a path (`./x.json`), a probe that
+// errs, a held id without a journal (refused there with the friendly line), a free one with a
+// journal (an orphan the startup sweep removes), and a journal-only session whose opening frame
+// will not read.
+//
+// It only reads, as a watcher must: the probe never holds the lock, and the journal and record are
+// only stat'ed here.
+func resolveLive(store *session.Store, id string) (tui.LiveSession, bool) {
+	held, pid, err := store.ProbeHold(id)
+	if err != nil || !held {
+		return tui.LiveSession{}, false
+	}
+	journal := store.JournalPath(id)
+	if _, err := os.Stat(journal); err != nil {
+		return tui.LiveSession{}, false
+	}
+	_, recordErr := os.Stat(filepath.Join(filepath.Dir(journal), id+".json"))
+	return liveSessionOf(store, session.LiveEntry{
+		ID:          id,
+		PID:         pid,
+		JournalPath: journal,
+		HasRecord:   recordErr == nil,
+	})
 }
 
 // resolveResumeArg resolves a --resume value: a store id first (the common case — the id shown in

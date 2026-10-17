@@ -251,6 +251,7 @@ type rootWiring struct {
 	toolSet       *liveTools
 	store         *session.Store
 	resumed       *session.Record
+	watch         *tui.LiveSession
 	engine        *lateEngine
 	host          *sessionHost
 	holder        *upstreamHolder

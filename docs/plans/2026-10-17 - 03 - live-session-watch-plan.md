@@ -431,7 +431,12 @@ NOTES (2026-10-17): a failed LiveSessions call does not fail the open. The store
 
 Depends on items 6, 9a.
 
-## 12. --resume <id> on a live session enters watch mode
+## 12. --resume <id> on a live session enters watch mode — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): re-derived from the assumption that the TUI already accepts a watch at start-up — it had only the /sessions door (watchLive), so `tui.Options.Watch *LiveSession` was added (internal/tui/tui.go), newModel enters the watch last via `enterStartupWatch` (internal/tui/watch.go, internal/tui/model.go), and Init sends the follower's first read (`startupWatchRead`); internal/tui/watch_test.go gains TestResumeWatchOpensAtStartAndEscLandsFresh.
+NOTES (2026-10-17): `resolveResume` now returns `(*session.Record, *tui.LiveSession, error)`; the new `resolveLive` (ProbeHold + journal stat, row built by the existing `liveSessionOf`) runs before `resolveResumeArg`, so the existing test call sites in cmd/apogee/wire_session_test.go take the extra return value.
+NOTES (2026-10-17): consequential edit — cmd/apogee/root.go: made necessary by --resume now watching a live session (the flag's help text said only "resume a saved session").
+NOTES (2026-10-17): the startup watch's box falls back to the session id when the journal frame carries no title — the record that could name one is the owner's, and the watcher does not load it (standing requirement). Start-up asks (prebound picker, key migration, adoption) still open, over the watch view; their accepts meet the inert engine's refusal there, and esc returns to the fresh session where they act normally.
 
 **What:**
 **Goal:**

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -251,6 +252,26 @@ func (m Model) enterWatch(src watchSource) (Model, tea.Cmd) {
 	m.forgetPaintedFrame()
 	read := m.readJournalCmd()
 	return m, read
+}
+
+// enterStartupWatch is the --resume half of entering a watch: newModel calls it last, over the fresh
+// session it has just built, when the binary resolved --resume to a session another instance is
+// running (Options.Watch). The follower's first read is kept for Init to send. The box names the
+// journal frame's title, else the session id — the record that might name one is the owner's, and
+// this run does not load it. A nil live, or a start the watch refuses, leaves the fresh session.
+func (m *Model) enterStartupWatch(live *LiveSession) {
+	if live == nil {
+		return
+	}
+	next, read := m.enterWatch(watchSource{
+		id:          live.ID,
+		recordPath:  live.RecordPath,
+		journalPath: live.JournalPath,
+		title:       cmp.Or(live.Title, live.ID),
+		probe:       live.Probe,
+	})
+	*m = next
+	m.startupWatchRead = read
 }
 
 // leaveWatch is every way out of a watch — esc, ⏎-resume and quit before they act: the owner's

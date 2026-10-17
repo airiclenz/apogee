@@ -82,7 +82,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 	// the resume door would refuse it (TestResolveResumeRefusesAHeldSessionWithTheFriendlyLine).
 	host.Close()
 
-	rec, err := resolveResume(store, id, false, "")
+	rec, _, err := resolveResume(store, id, false, "")
 	if err != nil {
 		t.Fatalf("resolveResume by id: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 func TestResolveResumeMissingArg(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
-	_, err := resolveResume(store, filepath.Join(t.TempDir(), "absent.json"), false, "")
+	_, _, err := resolveResume(store, filepath.Join(t.TempDir(), "absent.json"), false, "")
 	if err == nil {
 		t.Fatal("resolveResume of a value that is neither an id nor a file: want error, got nil")
 	}
@@ -117,7 +117,7 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 	}
 
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
-	rec, err := resolveResume(store, path, false, "")
+	rec, _, err := resolveResume(store, path, false, "")
 	if err != nil {
 		t.Fatalf("resolveResume of a future-version file: %v", err)
 	}
@@ -628,7 +628,7 @@ func TestResolveResumeLegacyPath(t *testing.T) {
 		t.Fatalf("write legacy: %v", err)
 	}
 	store := session.NewStore(filepath.Join(dir, "sessions"))
-	rec, err := resolveResume(store, legacyPath, false, "")
+	rec, _, err := resolveResume(store, legacyPath, false, "")
 	if err != nil {
 		t.Fatalf("resolveResume by path: %v", err)
 	}
@@ -669,7 +669,7 @@ func TestResolveResumeByPathRemintsID(t *testing.T) {
 		t.Fatalf("write planted: %v", err)
 	}
 
-	rec, err := resolveResume(store, plantedPath, false, "/ws")
+	rec, _, err := resolveResume(store, plantedPath, false, "/ws")
 	if err != nil {
 		t.Fatalf("resolveResume by path: %v", err)
 	}
@@ -714,7 +714,7 @@ func TestResolveResumeRejectsTraversalRecordID(t *testing.T) {
 		t.Fatalf("write planted: %v", err)
 	}
 	store := session.NewStore(filepath.Join(dir, "sessions"))
-	if _, err := resolveResume(store, plantedPath, false, "/ws"); err == nil {
+	if _, _, err := resolveResume(store, plantedPath, false, "/ws"); err == nil {
 		t.Fatal("resolveResume of a record declaring a traversal id: want an error, got nil")
 	}
 }
@@ -763,7 +763,7 @@ func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title
 func TestResolveResumeMutuallyExclusive(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	_, err := resolveResume(store, "some-id", true, "/ws")
+	_, _, err := resolveResume(store, "some-id", true, "/ws")
 	if err == nil {
 		t.Fatal("resolveResume with both --resume and --continue: want a flag error")
 	}
@@ -820,7 +820,7 @@ func TestSessionHostStoresBothTokenAccountings(t *testing.T) {
 func TestResolveResumeFreshStart(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	rec, err := resolveResume(store, "", false, "/ws")
+	rec, _, err := resolveResume(store, "", false, "/ws")
 	if err != nil {
 		t.Fatalf("resolveResume fresh: %v", err)
 	}
@@ -1378,10 +1378,10 @@ func TestResolveResumeRefusesAHeldSessionWithTheFriendlyLine(t *testing.T) {
 	defer func() { _ = release() }()
 	want := fmt.Sprintf("session %s is open in another apogee (pid %d) — fork it to work alongside", id, os.Getpid())
 
-	if _, err := resolveResume(store, id, false, "/ws"); err == nil || err.Error() != want {
+	if _, _, err := resolveResume(store, id, false, "/ws"); err == nil || err.Error() != want {
 		t.Errorf("resolveResume(--resume %s) err = %v; want %q", id, err, want)
 	}
-	if _, err := resolveResume(store, "", true, "/ws"); err == nil || err.Error() != want {
+	if _, _, err := resolveResume(store, "", true, "/ws"); err == nil || err.Error() != want {
 		t.Errorf("resolveResume(--continue) err = %v; want %q", err, want)
 	}
 }
@@ -1393,7 +1393,7 @@ func TestResolveResumeProbesAndReleasesForTheHostsHold(t *testing.T) {
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	id := saveAt(t, store, "/ws", time.Now(), "free")
 
-	rec, err := resolveResume(store, id, false, "/ws")
+	rec, _, err := resolveResume(store, id, false, "/ws")
 	if err != nil {
 		t.Fatalf("resolveResume: %v", err)
 	}
@@ -2035,4 +2035,146 @@ func TestSessionHostLiveLeavesOutItsOwnSessions(t *testing.T) {
 	defer func() { _ = file.Close() }()
 	eventjson.NewJournal(file, eventjson.JournalOptions{Session: parked, Title: "parked"})
 	assertNoLive("with a parked record")
+}
+
+// heldElsewhereLine is the refusal a held session without a journal still meets at the door: the
+// friendly line of the *session.HeldError another apogee's hold raises (this test process holds it,
+// so the pid is its own).
+func heldElsewhereLine(id string) string {
+	return fmt.Sprintf("session %s is open in another apogee (pid %d) — fork it to work alongside", id, os.Getpid())
+}
+
+// assertWatches checks that --resume id resolved to a watch of the running session — no record to
+// restore, and the live session's row with its journal, record path, frame title and a probe that
+// finds the owner holding it.
+func assertWatches(t *testing.T, store *session.Store, rec *session.Record, live *tui.LiveSession, id, title string) {
+	t.Helper()
+	if rec != nil {
+		t.Errorf("resolved record = %+v; want nil — a watch restores nothing", rec.Meta)
+	}
+	if live == nil {
+		t.Fatal("resolved no live session; want a watch source")
+	}
+	journal := store.JournalPath(id)
+	if live.ID != id || live.JournalPath != journal ||
+		live.RecordPath != filepath.Join(filepath.Dir(journal), id+".json") || live.Title != title {
+		t.Errorf("live session = %+v; want id %s, journal %s, title %q", live, id, journal, title)
+	}
+	if live.Probe == nil {
+		t.Fatal("live session has no probe")
+	}
+	if held, err := live.Probe(); err != nil || !held {
+		t.Errorf("probe = %v, %v; want held by its owner", held, err)
+	}
+}
+
+// A record-less run another instance holds with a journal — a headless Firing before its first save
+// — is watched by --resume, where it was "not a known session id" before journals existed.
+func TestResolveResumeWatchesAJournalOnlyRun(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	id := session.NewID(time.Now())
+	runElsewhere(t, store, id, "a headless run", "/ws", "")
+
+	rec, live, err := resolveResume(store, id, false, "/ws")
+
+	if err != nil {
+		t.Fatalf("resolveResume(--resume %s): %v", id, err)
+	}
+	assertWatches(t, store, rec, live, id, "a headless run")
+}
+
+// A recorded session another instance holds with a journal is watched too, rather than refused.
+func TestResolveResumeWatchesAHeldRecordWithAJournal(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	id := saveAt(t, store, "/ws", time.Now(), "a recorded run")
+	runElsewhere(t, store, id, "a recorded run", "/ws", "")
+
+	rec, live, err := resolveResume(store, id, false, "/ws")
+
+	if err != nil {
+		t.Fatalf("resolveResume(--resume %s): %v", id, err)
+	}
+	assertWatches(t, store, rec, live, id, "a recorded run")
+}
+
+// Only a held id with a journal is watched: a held one without a journal keeps the friendly
+// refusal, a free one with a journal — an orphan the sweep has yet to remove — resumes as before,
+// and --continue refuses its newest record whenever another apogee holds it, journal or not.
+func TestResolveResumeWatchNeedsAHoldAndAJournal(t *testing.T) {
+	t.Parallel()
+	t.Run("held without a journal", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		id := saveAt(t, store, "/ws", time.Now(), "held elsewhere")
+		release, err := store.Hold(id)
+		if err != nil {
+			t.Fatalf("Hold: %v", err)
+		}
+		defer func() { _ = release() }()
+
+		rec, live, err := resolveResume(store, id, false, "/ws")
+
+		if err == nil || err.Error() != heldElsewhereLine(id) || rec != nil || live != nil {
+			t.Errorf("resolveResume = %v, %v, %v; want only the refusal %q", rec, live, err, heldElsewhereLine(id))
+		}
+	})
+	t.Run("free with an orphan journal", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		id := saveAt(t, store, "/ws", time.Now(), "crashed")
+		if err := os.WriteFile(store.JournalPath(id), []byte("{}\n"), 0o600); err != nil {
+			t.Fatalf("write orphan journal: %v", err)
+		}
+
+		rec, live, err := resolveResume(store, id, false, "/ws")
+
+		if err != nil || live != nil || rec == nil || rec.Meta.ID != id {
+			t.Errorf("resolveResume = %v, %v, %v; want the record %s resumed", rec, live, err, id)
+		}
+	})
+	t.Run("continue", func(t *testing.T) {
+		t.Parallel()
+		store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+		id := saveAt(t, store, "/ws", time.Now(), "running elsewhere")
+		runElsewhere(t, store, id, "running elsewhere", "/ws", "")
+
+		rec, live, err := resolveResume(store, "", true, "/ws")
+
+		if err == nil || err.Error() != heldElsewhereLine(id) || rec != nil || live != nil {
+			t.Errorf("resolveResume(--continue) = %v, %v, %v; want only the refusal %q", rec, live, err, heldElsewhereLine(id))
+		}
+	})
+}
+
+// A --resume start of a running session is a fresh start that opens watching: the wiring keeps no
+// record (so the sweeps keep nothing, the host mints its own session, and the Agent restores none),
+// the host neither holds nor adopts the watched id, and the TUI's options carry the live session in
+// place of a resume payload.
+func TestResumeWatchWiresAFreshStart(t *testing.T) {
+	t.Parallel()
+	id := session.NewID(time.Now())
+	w := urlGuardWiring(t, config.Options{Resume: id})
+	store := session.NewStore(w.roots.sessions)
+	runElsewhere(t, store, id, "theirs", w.roots.workspace, "")
+
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+
+	if w.resumed != nil {
+		t.Errorf("w.resumed = %+v; want nil on a watch start", w.resumed.Meta)
+	}
+	if w.watch == nil || w.watch.ID != id {
+		t.Fatalf("w.watch = %+v; want the live session %s", w.watch, id)
+	}
+	if w.host.ActiveID() != "" || w.host.live.Holds(id) {
+		t.Errorf("host active %q, holds %s = %v; want a fresh host that never touches the watched id",
+			w.host.ActiveID(), id, w.host.live.Holds(id))
+	}
+	opts := w.options()
+	if opts.Resumed != nil || opts.Watch != w.watch {
+		t.Errorf("options Resumed = %+v, Watch = %+v; want no resume payload and the live session", opts.Resumed, opts.Watch)
+	}
 }
