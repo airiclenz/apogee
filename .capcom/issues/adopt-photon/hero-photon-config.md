@@ -1,11 +1,13 @@
 ---
 title: graphics/demo/photon.yaml and hero.photon.yaml
-status: open
+status: done
 type: task
 priority: 3
 deps: [stubllm-cassette-subcommands, session-expect-helper, rig-scripts-photon-work]
 plan: 2026-10-17 - 01 - photon-adoption-prep-plan.md
 created: 2026-10-17T10:34:01Z
+closed: 2026-10-17T11:20:24Z
+reason: "Resolved by photon-adoption-prep-plan (2026-10-17 - 01), archived at 211384d7, item 5: photon.yaml and hero.photon.yaml lint; setup.sh builds the tools (model service is the replay default, capture the only profile, no explicit theme)."
 ---
 
 apogee's photon project config and the hero storyboard in photon's schema.

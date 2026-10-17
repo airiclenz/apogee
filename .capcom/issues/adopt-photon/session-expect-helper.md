@@ -1,10 +1,12 @@
 ---
 title: "cmd/sessionexpect: judge a take's session entries from a photon run: expect"
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-10-17 - 01 - photon-adoption-prep-plan.md
 created: 2026-10-17T10:34:00Z
+closed: 2026-10-17T11:20:24Z
+reason: "Resolved by photon-adoption-prep-plan (2026-10-17 - 01), archived at 211384d7, items 2-3: cmd/sessionexpect judge, command and make target."
 ---
 
 photon judges a take only by screen (`seen`) and by `run:` commands; it knows nothing of apogee

@@ -1,10 +1,12 @@
 ---
 title: "stubllm: replay and capture cassette subcommands for photon services"
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-10-17 - 01 - photon-adoption-prep-plan.md
 created: 2026-10-17T10:34:00Z
+closed: 2026-10-17T11:20:24Z
+reason: "Resolved by photon-adoption-prep-plan (2026-10-17 - 01), archived at 211384d7, item 1: stubllm replay and capture subcommands."
 ---
 
 photon runs the hero clip's model as a **service** chosen by profile (`replay` by default,

@@ -1,10 +1,12 @@
 ---
 title: graphics/demo rig scripts read PHOTON_WORK
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-10-17 - 01 - photon-adoption-prep-plan.md
 created: 2026-10-17T10:34:01Z
+closed: 2026-10-17T11:20:24Z
+reason: "Resolved by photon-adoption-prep-plan (2026-10-17 - 01), archived at 211384d7, item 4: setup.sh/reset.sh resolve APOGEE_DEMO_WORK, else PHOTON_WORK, else default."
 ---
 
 photon hands its commands the work dir as `PHOTON_WORK`; `graphics/demo/{setup,reset}.sh` read
