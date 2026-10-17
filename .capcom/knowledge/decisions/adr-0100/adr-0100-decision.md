@@ -10,5 +10,10 @@ title: ADR 0100 decision
 3. **The Project config is a layer, not a second home.** `<Project root>/.apogee/config.yaml`
    (committable) layers over the global file, and its granting entries are live only by
    Adoption (ADR 0096).
+
+   > **Amended 2026-10-17 (ADR 0103 D7).** A home named under `sessions.watch-homes` is a
+   > read-only source of sessions to watch, never a second home. Nothing in it is swept, written,
+   > held or configured from, and its sessions are never resumable.
+
 4. **This is settled.** A design or review that proposes XDG or `os.UserConfigDir` re-opens
    this record and must supersede it explicitly.

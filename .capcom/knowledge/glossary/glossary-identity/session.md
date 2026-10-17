@@ -40,7 +40,11 @@ record — live host state, re-confirmed on resume
 moves to another session), so every door into it from a second instance — `--resume`,
 `--continue`, the browser's resume, rename and delete — is refused with `session <id> is open in another
 apogee (pid N) — fork it to work alongside`; the hold guards only against *other* instances, and
-`/fork` is the way to work alongside. See ADR 0022.
+`/fork` is the way to work alongside. *Amended 2026-10-17 (ADR 0103):* `--resume` and the
+browser's ⏎ on a held record now open it in **Watch mode** instead of refusing, and only rename,
+delete and `--continue` refuse. The interactive TUI takes its hold at the first prompt, before
+Turn 1, and while a record is held its Driver writes an **Event journal** beside it. See ADR 0022
+and ADR 0103.
 _Avoid_: "session file" for the Session itself (the *record* is the file; the Session is its
 engine payload), "history" (that is the browser's list of records, not one Session — and it is not
 Prompt recall either, which is the prompt box's own list of sent inputs).

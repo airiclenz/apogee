@@ -104,3 +104,4 @@ title: "apogee's decision records: one Note per record, with each of its section
 - `adr-0100` — The global state home is one ~/.apogee dotdir on every OS
 - `adr-0101` — Regressions are never deferred
 - `adr-0102` — A plan owns an issue through the plan field, never a status
+- `adr-0103` — Live sessions are watchable through a Driver-written event journal

@@ -26,6 +26,10 @@ transcript codec mirrors of the regions for a width-dependent re-paint is decisi
 field on the codec's own wire type, not persistence of the summary. The edit blocks'
 `+A −R` slot reads the same summary instead of re-deriving from arguments.
 
+> **Amended 2026-10-17 (ADR 0103, `adr-0052-amend-1017`).** "With no wire form of its own" no
+> longer holds: the summary gains a wire mirror owned by `internal/eventjson`, decoded only for
+> live watching. The session record still carries no `ToolSummary` value.
+
 *Amendment (2026-08-31) — `write_file` is a fourth recorder.* Decision 1 named the three edit
 tools because they were the whole of the group on the day it was written. `write_file` now
 records Edit regions too, cut the same way from the file it read before the write against the

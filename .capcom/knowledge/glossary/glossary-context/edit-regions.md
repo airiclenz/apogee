@@ -7,7 +7,8 @@ The typed summary an edit tool records **at apply time**: each changed region's 
 start lines, its removed and inserted lines, and up to three merged unchanged lines of context
 each side — counted from the applied change itself, so a view never re-reads the file or
 re-derives positions from arguments. It rides the **Tool summary** contract unchanged — display
-data, never sent to the model, and no wire form for the summary value — and the region facts are
+data, never sent to the model, and no wire form for the summary value outside the eventjson mirror
+that live **Watch mode** decodes (amended 2026-10-17, ADR 0103) — and the region facts are
 the one part of a summary the neutral codec in `internal/session` mirrors onto a wire type of
 its own, so a resumed session renders the same split diffs
 (ADR 0052 §5;

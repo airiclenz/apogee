@@ -17,6 +17,9 @@ alone. It is **Driver state**, bounded (a record's last 64 KB; the board's 64 mo
 oldest dropped) and never persisted — it empties at every session boundary (`/clear`, `/new`, a
 `/sessions` resume, `/fork`), so a new or resumed session opens with an empty board, while the
 canonical reasoning of each committed Turn stays where it always was, on the engine's own message.
+In **Watch mode** a watcher's board is filled live from the watched session's **Event journal**,
+and `/thinking` is the only place a watcher sees that thinking: it is never shown inline (amended
+2026-10-17, ADR 0103).
 _Avoid_: "reasoning pane" (the channel is the **Thinking channel** and `/thinking` is the verb),
 "thinking transcript" (a board beside the conversation, never an entry in it), "reasoning tail"
 (the retired seam this replaced).

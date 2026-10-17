@@ -20,5 +20,9 @@ title: ADR 0022 consequences
   plan. There is no auto-pruning: manual `^d` only. *Amended:* both have since shipped — retention
   under the `sessions:` block (`max-age`, `max-count`), and the lock as the live-session hold of
   decision 7's 2026-09-19 note (`apogee-3b3`).
+- **Amended 2026-10-17 (ADR 0103 D8): the share-group exception.** Records stay owner-private
+  (`0o700`/`0o600`) unless the global-only key `sessions.share-group: <group>` is set. Then the
+  owner's session files and Event journals are readable by that OS group, so its members can
+  watch them. It is the one opt-in exception to the owner-private modes.
 - **The bench is untouched.** `session.Store`'s new API stays embeddable and the bench keeps
   composing `Snapshot`/`Encode` directly (ADR 0001) — no bench code depends on the store.

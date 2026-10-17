@@ -65,6 +65,10 @@ of "scheduled": queue, and deliver at the first boundary that exists.
 > line, so the engine stays wire-silent (added by `docs/plans/2026-10-05 - 01`). Ratified
 > 2026-10-05, implemented by `docs/plans/2026-10-05 - 00`; ADR 0039 is amended the same day.
 
+> **Amended 2026-10-17 (ADR 0103, `adr-0025-amend-1017`).** "Writes no NDJSON line" no longer
+> holds: the Driver's encoder writes a `sub_agent_group` line for this event. The engine stays
+> wire-silent.
+
 **3. Three parties, split by what each one owns.** The staging is the TUI's, the delivery is the
 worker's, the commit is the engine's — and the split follows ownership, not convenience:
 

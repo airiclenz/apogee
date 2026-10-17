@@ -3,7 +3,9 @@ title: "Event lines: the one-JSON-line-per-Event rendering `apogee headless --fo
 ---
 
 **Event lines**:
-The one-line-per-**Event** JSON rendering `apogee headless --format json` writes to stdout. The
+The one-line-per-**Event** JSON rendering `apogee headless --format json` writes to stdout, and
+— in a coalesced variant — the **Event journal** every Driver writes while it holds a record
+(amended 2026-10-17, ADR 0103). The
 **Event stream** it renders is the engine's sequence of Events on `EventSink`, in emission order,
 whichever **Driver** reads it — that term means only that, and the lines are one rendering of it.
 They are a Driver's protocol, not the engine's surface: the engine stays wire-silent and hands out
@@ -16,7 +18,8 @@ frames that are *not* Events — `run_started` and `run_finished`, the latter ca
 summary and exit code and written on every exit path, including one whose run never started. Lossless and ordered: they never drop, the
 deliberate contrast with an observe **Reaction**, which does — a stalled
 reader stalls the loop instead. Versioned `v:2` and additive within it. See
-ADR 0075.
+ADR 0075 and ADR 0103.
 _Avoid_: "Event stream" for the lines (that is the engine's sequence these render), "log" (apogee
-owns no log files or retention policy — this is a contract), "API" / "server mode" (a wire surface
+owns no log files or retention policy — this is a contract; the **Event journal** is no exception,
+since it is removed when its session is released and nothing replays it, amended 2026-10-17), "API" / "server mode" (a wire surface
 would be `apogee serve`, a separate **Driver**).

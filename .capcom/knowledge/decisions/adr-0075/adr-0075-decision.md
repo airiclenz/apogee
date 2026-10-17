@@ -65,6 +65,9 @@ run still has an id. `saved` says whether a record was written, so a consumer do
 of an unsaved run to `apogee undo`. A run cancelled by Ctrl-C still writes `run_finished`, with the
 exit code the text path gives that case (`runFailed`, exit 1, `headless.go:567-570`, `:676-684`).
 The lines are therefore not purely the engine's, and that is stated rather than hidden.
+(Amended 2026-10-17, ADR 0103 D3: the frames are per journal too. An Event journal holds exactly
+one `run_started`/`run_finished` pair spanning one hold of one record id, and its `run_started`
+adds two journal-only members, `title` and `entries`. The stdout frames above are unchanged.)
 `final_text` is duplicated from the `message` lines on purpose. `MessageEvent.Text` is already
 committed text (`internal/run/run.go:605-611`, `:842-846`), so a consumer reading `message` needs
 no accumulator; but the simplest consumer of all reads `token`s, and that one must implement both an
@@ -175,6 +178,10 @@ amended 2026-09-15: through `raise`, the same act headless calls, with no `narra
 Event lines) and never passes through `runHeadless`, and `probe` runs no loop. The daemon keeps its prose log
 (ADR 0034 decision 7): its stdout multiplexes N Firings, which needs a per-stream identity this
 envelope has no field for. `probe` stays a prose report. Both are separate beads if wanted.
+(Amended 2026-10-17, ADR 0103 D1–D2: the lines now reach every Driver through the Event journal.
+The TUI, headless and the daemon each write `<sessions>/<id>.events.jsonl` while a held session
+runs, with token and reasoning deltas coalesced. The `--format` flag is still headless-only, and
+the daemon's stdout stays prose.)
 
 **14. The contract is protected by goldens.** A scripted `stubllm` upstream drives a real
 `--format json` run end to end against a checked-in `.jsonl` golden with `time` and `session`

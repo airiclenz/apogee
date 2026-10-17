@@ -12,6 +12,9 @@ that share libraries and stores, never a protocol. The TUI's session-scoped `/sc
 unchanged; neither process depends on the other running. Ephemeral-while-open and durable are
 different promises, and two surfaces stating them separately is honest. IPC can be added later
 without unwinding anything decided here.
+(Amended 2026-10-17, ADR 0103 D6: a TUI watching a daemon Firing tails that Firing's Event
+journal. A tailed file is not IPC: the daemon never learns a watcher exists, nothing flows back,
+and neither process depends on the other.)
 
 **3. Control plane: a declarative file with live reload.** `~/.apogee/daemon/schedules.yaml`
 is the source of truth. The daemon watches it: parse, validate, then atomically swap the

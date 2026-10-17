@@ -100,6 +100,15 @@ recorded `ISSUES.md` follow-on, not built here.
 > start rather than its first Save, because the run's undo journal is written under that id from
 > the first Exchange. A Firing whose id another instance holds is refused with the same
 > `*session.HeldError`; a run with no Store or no id takes no hold and touches no disk.
+>
+> **Amended 2026-10-17 (ADR 0103 D10, D12, D14).** Two doors now watch a held record instead of
+> refusing it: `--resume <id>` and the browser's ⏎ open it in Watch mode, which reads the record
+> and its Event journal and never loads, holds, saves or deletes it. Rename, delete (`^d`) and
+> `--continue` still refuse with the line above. The interactive TUI's hold timing changes: it is
+> taken when the first prompt is submitted, before Turn 1, rather than at the first Save (hold at
+> the first prompt, never at the mint), so a watcher can find a session before its first Turn
+> ends. A session that never sends a prompt still touches no disk. `Store.hold` absorbs a
+> probe-length lock contention, so a watcher's probe never makes the owner refuse.
 
 **8. What is deliberately NOT session state.** The record carries the conversation and the
 scrollback and nothing else about the live host. **Agent mode, the allow-for-session approval

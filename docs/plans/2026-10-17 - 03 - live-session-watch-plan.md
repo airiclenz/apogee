@@ -62,7 +62,12 @@
 
 **Out of scope:** inline thinking; replaying a finished run from its journal; an `apogee watch` subcommand; watch over a network or socket; interjecting into or steering a watched session; `--format` for the daemon; `WireEvent` on any line (ADR 0075 D2).
 
-## 1. ADR 0103 and glossary: event journal and watch mode
+## 1. ADR 0103 and glossary: event journal and watch mode — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): ADR 0052 and ADR 0025 are superseded by new child Notes (`adr-0052-amend-1017`, `adr-0025-amend-1017`, added to each parent's read list) plus a short dated pointer at each superseded sentence (amend-0824 bullet 1, adr-0052-decision decision 1, adr-0025-decision D2's 2026-10-05 sentence); ADR 0022 D7 and consequences, ADR 0075 D5 and D13, ADR 0034 D2 and ADR 0100 carry inline dated amendment blocks, following each record's existing amendment style.
+NOTES (2026-10-17): ADR 0103's decision Note numbers the regression-guard points as D10 (hold at the first prompt), D11 (`prompt` line), D12 (`Store.hold` absorbs probe contention), and adds D13 (`sub_agent_group` line) and D14 (the doors) so later items and amendments can cite them by number.
+NOTES (2026-10-17): no CHANGELOG entry — the item records a design and ships no behaviour; the later items carry the user-visible entries.
+NOTES (2026-10-17): consequential edit — .capcom/knowledge/decisions.md: index entry for adr-0103
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** ADR 0103 records the design. The ADRs it amends and the glossary terms it touches carry dated notes pointing at it, and `capcom check` reports no problems.

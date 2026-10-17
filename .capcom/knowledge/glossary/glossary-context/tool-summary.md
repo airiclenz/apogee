@@ -25,8 +25,10 @@ share the parser and keep their own renderings), so the model reads what its edi
 did to the file while the host's card still shows only the tool's own first line — the write always
 lands, and the trailer is feedback, never a refusal.
 A summary is **never sent to the model** — it is display data a host consumes, and the
-summary *value* has no wire form; what the transcript codec may mirror into the session record are
-the **facts** a variant carries, which is what the neutral codec in `internal/session` does for the
+summary *value* never reaches the session record. Since 2026-10-17 it has one wire form, a mirror
+owned by `internal/eventjson` on **Event lines** and the **Event journal**, decoded only for live
+**Watch mode** and never on a record replay path (ADR 0103 D9, amending ADR 0052). What the
+transcript codec may mirror into the session record are the **facts** a variant carries, which is what the neutral codec in `internal/session` does for the
 **Edit regions** below
 (ADR 0052 §5);
 the rendered view the codec stores keeps its presenter verdicts on the wire, a standing denial

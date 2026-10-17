@@ -14,7 +14,9 @@ engine does dial out: the **Upstream**, the network tools (`http_request`, `web_
 `web_search`) and, beside them, one Reaction wire of its own — a sync-lane advise or gate
 **Reaction** spelled as a webhook POSTs its seam document through the url-safety guard
 (`(*Agent).runSyncWebhook`; ADR 0076's 2026-09-19 amendment). An observe webhook is posted by the
-Driver's Reaction runner, not by the engine. See
+Driver's Reaction runner, not by the engine. Every Driver that holds a record writes its
+**Event journal**. **Watch mode** is not a Driver: it drives no loop and holds an inert Engine
+(amended 2026-10-17, ADR 0103). See
 ADR 0031.
 _Avoid_: "embedder" (names the linking, not the responsibility of pacing the loop),
 "frontend" / "client" (a Driver owns the loop's pace and state roots, not just a view).
