@@ -1,10 +1,12 @@
 ---
 title: demorig second-take EPERM was closed with a retry; root cause unknown
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-10-17 - 02 - film-hero-retire-demorig-plan.md
 created: 2026-10-12T21:51:16Z
+closed: 2026-10-17T15:44:19Z
+reason: "Moot: cmd/demorig retired by film-hero-retire-demorig-plan item 1 (archived e9b14d71); photon carries the same EPERM retry and probe and records one take per process (owner-ratified 2026-10-17)."
 ---
 
 `demorig-take-start-eperm` was closed on 2026-09-25 with a workaround, not a cause: `StartTerminal` (`cmd/demorig/term.go`) retries an EPERM launch up to 3× on a fresh pty. About 1 in 12 `APOGEE_DEMO_E2E=1` e2e runs saw the second take fail with `fork/exec /usr/bin/bash: operation not permitted` from the Setsid+Setctty launch, and 20 e2e runs plus 2000 pty starts did not reproduce it afterwards. The retry hides whatever makes the second Setctty launch refuse.
