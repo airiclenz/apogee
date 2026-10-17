@@ -39,7 +39,9 @@ and a photon-rendered review GIF is ready for the owner to compare with `graphic
 - Any change in `~/repos/photon`.
 - Historical records: released `CHANGELOG.md` sections, `docs/plans/archived/`, `docs/reviews/`, ADR 0083, closed issues.
 
-## 1. Delete cmd/demorig and its build surface
+## 1. Delete cmd/demorig and its build surface — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): ci.yml's filter comment reflowed to keep its lines under the old width after the `graphics/demo/stage/**` wording replaced `graphics/demo/** (cmd/demorig's tests)`.
 
 **What:**
 **Goal:** no `cmd/demorig` directory, no `demorig` Makefile target or `.gitignore` entry, no `make demorig` row in `docs/manual/building.md`, no `cmd/demorig` rows in `scripts/test-timings.seed`, `golang.org/x/image` gone from `go.mod`/`go.sum`, and the CI path filter skips `graphics/demo/**`.

@@ -108,11 +108,6 @@ stubllm:
 sessionexpect:
 	go build -o sessionexpect ./cmd/sessionexpect
 
-## demorig: build the demo storyboard rig to ./demorig (a dev tool, never a release asset)
-.PHONY: demorig
-demorig:
-	go build -o demorig ./cmd/demorig
-
 ## run: build-and-run the binary (pass flags via ARGS="...")
 .PHONY: run
 run:

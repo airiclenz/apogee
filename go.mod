@@ -30,7 +30,6 @@ require (
 	github.com/muesli/cancelreader v0.2.2
 	github.com/rivo/uniseg v0.4.7
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/image v0.45.0
 	golang.org/x/net v0.60.0
 	golang.org/x/oauth2 v0.35.0
 	golang.org/x/sys v0.48.0

@@ -14,10 +14,10 @@ on:
     # Makefile target reads, and a later positive line takes one file back. The filter reads
     # the whole push, so a push mixing prose and code still runs. Docs a test does read stay
     # in: README.md and VERSION, docs/manual/** and docs/design/test-drivers.md (drift tests),
-    # .apogee/** (TestRepoReleaseSkillsLoad), graphics/demo/** (cmd/demorig's tests). A new
-    # test that reads a file dropped here must take it back below, or a push touching only
-    # that file goes untested. pull_request stays unfiltered: the PRs this repo gets are
-    # dependabot's, which always touch code.
+    # .apogee/** (TestRepoReleaseSkillsLoad), graphics/demo/stage/** (gofmt -l . reads
+    # stage's Go). A new test that reads a file dropped here must take it back below, or a
+    # push touching only that file goes untested. pull_request stays unfiltered: the PRs this
+    # repo gets are dependabot's, which always touch code.
     paths:
       - '**'
       - '!.capcom/**'
@@ -41,7 +41,8 @@ on:
       - '!layout.md'
       - '!graphics/*.svg'
       - '!graphics/demo.gif'
-      - '!graphics/demo/README.md'
+      - '!graphics/demo/**'
+      - 'graphics/demo/stage/**'
   pull_request:
     branches: [main]
 
