@@ -312,8 +312,9 @@ actually sent, in order, and which turn answered it.
 
 ### The binary: `cmd/stubllm`
 
-`internal/stubllm` is a library; `cmd/stubllm` is the thin binary around it, for the two things a
-human does at a command line. `make stubllm` builds it to `./stubllm` — it is a dev tool, so
+`internal/stubllm` is a library; `cmd/stubllm` is the thin binary around it, for the things a
+human does at a command line: serve or record a script fixture, and replay or capture a cassette
+(see [Cassettes](#cassettes-replay-and-capture)). `make stubllm` builds it to `./stubllm` — it is a dev tool, so
 `make dist` never ships it and `make build` never mentions it.
 
 ```console
@@ -391,6 +392,37 @@ deleted one.
 server they were recorded from and the run they pin, e.g. `qwen3-smoke.yaml`. The one exception is
 `example.yaml`, the hand-written worked example of the format that this document shows and that
 `cmd/stubllm`'s own test serves.
+
+### Cassettes: replay and capture
+
+A **cassette** is the other recording format: where a script fixture re-renders a server's
+behaviour, a cassette keeps a live model's raw reply bytes and their arrival offsets, filed under a
+key naming the conversation the request carried (`internal/stubllm/capture.go` documents the key).
+It is what the demo rig plays apogee's hero session from, so the replayed clip is the captured
+model, pacing included. Two subcommands drive it:
+
+```console
+$ stubllm capture --upstream https://openrouter.ai/api --key-env OPENROUTER_API_KEY --out hero.cassette
+listening http://127.0.0.1:41234
+capturing https://openrouter.ai/api -> hero.cassette
+^C                                                 # after the session: written on the way out
+cassette: hero.cassette
+$ stubllm replay --cassette hero.cassette --listen 127.0.0.1:18181
+listening http://127.0.0.1:18181
+```
+
+`capture` proxies `/v1/*` (and `/props`) to `--upstream`, adding the key held in the variable
+`--key-env` names — a keyless capture records a cassette of 401s, so a `--key-env` naming an unset
+or empty variable is refused, and an empty `--key-env` sends none. It writes the cassette to `--out`
+when it is interrupted (SIGINT or SIGTERM), and `--out`'s directory is checked before the port
+opens, so a session run against a live model is never lost to an unwritable path. `replay` serves a
+cassette at the captured pace until it is interrupted; a request the cassette holds no exchange for
+is answered HTTP 500 naming its key, so a replayed session that drifted from the captured one stops
+where it drifted. Both print `listening <url>` once bound, default to `--listen 127.0.0.1:0`, and
+keep `serve`'s exit codes: **2** for a bad command line, **1** for a run that started and failed.
+
+A cassette is never hand-written: its keys are a digest only the recorder computes, so a
+hand-keyed exchange is refused at replay. A test that needs one captures it first.
 
 ## tuitest
 

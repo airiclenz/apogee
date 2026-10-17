@@ -111,6 +111,129 @@ func TestRecordCommandWarnsOnStderrAboutUndecodableEvents(t *testing.T) {
 	}
 }
 
+// TestCaptureCommandWritesTheCassetteOnTheInterrupt drives `capture` the way a human does: start
+// it, send a session through the announced address, interrupt it. The cassette is written on the
+// way out, and LoadCassette reads it back with the exchange the session made.
+func TestCaptureCommandWritesTheCassetteOnTheInterrupt(t *testing.T) {
+	t.Parallel()
+
+	cassettePath, output := captureCassette(t)
+
+	cassette, err := stubllm.LoadCassette(cassettePath)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+	if len(cassette.Exchanges) != 1 {
+		t.Fatalf("cassette holds %d exchanges, want the 1 the session made", len(cassette.Exchanges))
+	}
+	if want := "cassette: " + cassettePath + "\n"; !strings.Contains(output, want) {
+		t.Errorf("output = %q, want the line %q", output, want)
+	}
+}
+
+// TestReplayCommandServesACapturedExchange pins `replay` against a cassette a capture wrote: the
+// same request, sent to the replay, is answered with the exact bytes the capture filed for it.
+// The cassette is never hand-built, because only the recorder knows how an exchange is keyed.
+func TestReplayCommandServesACapturedExchange(t *testing.T) {
+	t.Parallel()
+
+	cassettePath, _ := captureCassette(t)
+	cassette, err := stubllm.LoadCassette(cassettePath)
+	if err != nil {
+		t.Fatalf("LoadCassette: %v", err)
+	}
+	var want strings.Builder
+	for _, chunk := range cassette.Exchanges[0].Chunks {
+		want.Write(chunk.Bytes)
+	}
+
+	out := &syncBuffer{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := run(ctx, out, "replay", "--cassette", cassettePath, "--listen", "127.0.0.1:0")
+
+	url := waitForAddress(t, out)
+	if got := postStream(t, url); got != want.String() {
+		t.Errorf("replayed reply = %q, want the captured bytes %q", got, want.String())
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("replay exited with %v, want a clean stop on the interrupt", err)
+	}
+}
+
+// TestCaptureCommandRefusesBeforeListening pins the two refusals `capture` makes before it opens a
+// port — a session run against a live model is wasted if its cassette cannot be written, or if it
+// ran without the key it was meant to carry — each a run failure (exit 1) with no address announced.
+func TestCaptureCommandRefusesBeforeListening(t *testing.T) {
+	const keyVariable = "STUBLLM_TEST_EMPTY_KEY"
+	t.Setenv(keyVariable, "")
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "the --out directory is missing",
+			args: []string{"--out", filepath.Join(t.TempDir(), "absent", "hero.cassette")},
+			want: "no such file or directory",
+		},
+		{
+			name: "--key-env names an empty variable",
+			args: []string{"--out", filepath.Join(t.TempDir(), "hero.cassette"), "--key-env", keyVariable},
+			want: keyVariable + " is unset or empty",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out := &syncBuffer{}
+			args := append([]string{"capture", "--upstream", "http://127.0.0.1:1", "--listen", "127.0.0.1:0"},
+				test.args...)
+			err := <-run(t.Context(), out, args...)
+
+			if err == nil {
+				t.Fatal("capture succeeded")
+			}
+			if code := exitCodeFor(err); code != exitRunFailed {
+				t.Errorf("exit code = %d, want %d", code, exitRunFailed)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Errorf("error = %q, want it to say %q", err, test.want)
+			}
+			if strings.Contains(out.String(), "listening ") {
+				t.Errorf("output = %q, want no address announced", out.String())
+			}
+		})
+	}
+}
+
+// captureCassette runs `capture` against a scripted upstream, sends one streamed session through
+// it, interrupts it, and returns the cassette's path and the command's output.
+func captureCassette(t *testing.T) (string, string) {
+	t.Helper()
+
+	upstream := stubllm.New(t, stubllm.Script{
+		Model: "rec-model",
+		Turns: []stubllm.Turn{{Text: "one two three", ChunkRunes: 4}},
+	})
+	out := &syncBuffer{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cassettePath := filepath.Join(t.TempDir(), "session.cassette")
+	done := run(ctx, out, "capture", "--upstream", upstream.URL, "--out", cassettePath, "--listen", "127.0.0.1:0")
+
+	url := waitForAddress(t, out)
+	postStream(t, url)
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("capture exited with %v, want the cassette written on the interrupt", err)
+	}
+	return cassettePath, out.String()
+}
+
 // malformingUpstream starts a scripted upstream that slips one undecodable data event into a
 // streamed reply after its first write, and returns the upstream's URL.
 func malformingUpstream(t *testing.T, s stubllm.Script) string {
@@ -148,9 +271,9 @@ func (m *malformingResponse) Flush() {
 	}
 }
 
-// postStream sends one streamed completion request through the recorder and reads the reply to
-// its end, so the proxy files the turn.
-func postStream(t *testing.T, url string) {
+// postStream sends one streamed completion request to url and reads the reply to its end — so a
+// proxy in front of the upstream files the turn — returning the reply body.
+func postStream(t *testing.T, url string) string {
 	t.Helper()
 
 	body := `{"model":"rec-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`
@@ -165,9 +288,11 @@ func postStream(t *testing.T, url string) {
 		t.Fatalf("post: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if _, err := io.ReadAll(resp.Body); err != nil {
+	reply, err := io.ReadAll(resp.Body)
+	if err != nil {
 		t.Fatalf("read reply: %v", err)
 	}
+	return string(reply)
 }
 
 // run executes the command tree with args and returns a channel carrying its result, so a

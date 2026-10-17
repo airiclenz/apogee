@@ -39,7 +39,10 @@ a `sessionexpect` judge for `run:` expects, rig scripts that read `PHOTON_WORK`,
 - 4 (round 2): guard folded (setup.sh's closing hint passes `--work "$WORK"` when `APOGEE_DEMO_WORK` is unset, README says demorig reads only `APOGEE_DEMO_WORK`/`--work`; Acceptance adds the default-fallback case); yields to `cmd/demorig/main.go:66-68` (cmd/demorig untouched).
 - 5 (round 2): guard folded (writer decision: photon.yaml's setup/reset also unset `APOGEE_DEMO_PORT`, keeping setup.sh's port at the service's fixed 18181).
 
-## 1. stubllm: `replay` and `capture` cassette subcommands
+## 1. stubllm: `replay` and `capture` cassette subcommands — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): `record`, `replay` and `capture` now share two helpers, `startServer` (listen, serve, announce) and `shutdown` (grace-bounded Shutdown), per the approach's "one helper if three commands would repeat it"; `record`'s observable behaviour is unchanged.
+NOTES (2026-10-17): `postStream` in main_test.go now returns the reply body so the replay test can compare it with the captured exchange's bytes; its one existing caller ignores the result.
 
 **What:**
 **Goal:** `stubllm replay --cassette <file> [--listen]` serves a cassette; `stubllm capture --upstream <url> [--key-env <VAR>] --out <file> [--listen]` proxies to a live model and writes the recorded cassette when its context ends (SIGINT or SIGTERM); both print `listening <url>` once bound; `docs/design/test-drivers.md` documents both.
