@@ -231,7 +231,18 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// the Agent resume off rec.Session below. A --resume of a session another instance is running
 	// resolves to the live session to watch instead (w.watch), with w.resumed nil: everything below
 	// builds a fresh start, which the TUI opens watching.
-	w.store = session.NewStore(w.roots.sessions)
+	//
+	// With `sessions.share-group:` set the store writes every session file for that group, and the
+	// one start-up fact that owes the human — a config.yaml the shared home now exposes — is said
+	// here, before the alternate screen, through the same seam as the confinement sentences.
+	storeOpts, shareWarning, err := sessionStoreOptions(w.opts.Sessions, w.roots.config)
+	if err != nil {
+		return err
+	}
+	if shareWarning != "" {
+		w.announce(shareWarning)
+	}
+	w.store = session.NewStore(w.roots.sessions, storeOpts...)
 	w.resumed, w.watch, err = resolveResume(w.store, w.opts.Resume, w.opts.ContinueSession, w.roots.workspace)
 	if err != nil {
 		return err
@@ -586,4 +597,43 @@ func (w *rootWiring) openSessionJournal(ctx context.Context, id string) {
 // through some other constructor would be the very drift this function exists to prevent.
 func mcpGuard(allow, deny []string) security.URLGuard {
 	return security.NewURLGuard(allow, deny)
+}
+
+// groupReadBit is the permission bit that lets a file's group read it.
+const groupReadBit os.FileMode = 0o040
+
+// sessionStoreOptions answers the session.Store options this home's `sessions.share-group:` asks
+// for — none when the key is unset — and, when it is set, the start-up warning owed if the home's
+// config.yaml is group-readable ("" when it is not). Every Driver that builds the home's store
+// (the TUI here, headless, the daemon) builds it with these, so no writer of the home's sessions
+// leaves a file the group cannot read; home is the apogee home (stateRoots.config).
+//
+// The gid is resolved again rather than carried from start-up: config.ResolveShareGroup already
+// accepted the key there (SessionSettings.ValidateHost), so an error here is the machine changing
+// under the run, returned as the same startup error.
+func sessionStoreOptions(policy config.SessionSettings, home string) ([]session.Option, string, error) {
+	if policy.ShareGroup == "" {
+		return nil, "", nil
+	}
+	gid, err := config.ResolveShareGroup(policy.ShareGroup)
+	if err != nil {
+		return nil, "", err
+	}
+	warning := shareGroupConfigWarning(config.FilePath(home), policy.ShareGroup)
+	return []session.Option{session.WithShareGroup(gid)}, warning, nil
+}
+
+// shareGroupConfigWarning is the warning a shared home owes when its config file at path is
+// group-readable: the home's 0710 lets every member of group reach a file it can name, so a mode
+// that grants the group read hands it the file — a plaintext `api-key:` included. "" when the file
+// is not group-readable or cannot be examined: the warning is advice about a file's mode, and a
+// file that cannot be read is the config loader's to report, which it has already done.
+func shareGroupConfigWarning(path, group string) string {
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm()&groupReadBit == 0 {
+		return ""
+	}
+	return fmt.Sprintf("apogee: WARNING — sessions.share-group %q lets that group into this apogee home, "+
+		"and %s is group-readable, so its members can read it (any api-key: in it too). "+
+		"Run chmod g-r %s to keep it yours.", group, path, path)
 }

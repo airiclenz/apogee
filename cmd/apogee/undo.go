@@ -174,6 +174,11 @@ func runUndoVerb(cmd *cobra.Command, id string, confirm bool, generation uint64,
 		return err
 	}
 
+	// The store is built owner-private whatever `sessions.share-group:` says, because this command
+	// reads no config file. That costs a shared home nothing: the verb only holds, and an
+	// owner-private hold leaves an existing lock file's mode and group as it finds them, while a lock
+	// it has to create is re-moded for the group by the owner's next hold — the only hold a watcher
+	// ever probes, since only a running owner keeps a journal.
 	release, err := session.NewStore(roots.sessions).Hold(id)
 	if err != nil {
 		var held *session.HeldError

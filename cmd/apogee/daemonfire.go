@@ -171,7 +171,18 @@ func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*dae
 	// The session sweep, on the same beat and for the same reason (wire.go): a host that only ever
 	// runs daemons never passes the TUI's boot, so this is where its retention policy is applied.
 	// A daemon resumes nothing — every Firing mints its own record — so no id is kept.
-	store := session.NewStore(roots.sessions)
+	//
+	// With `sessions.share-group:` set the store writes every session file for that group — each
+	// Firing's record and journal included — and the warning a group-readable config.yaml owes goes
+	// to the daemon's log (sessionStoreOptions).
+	storeOpts, shareWarning, err := sessionStoreOptions(opts.Sessions, roots.config)
+	if err != nil {
+		return nil, err
+	}
+	if shareWarning != "" {
+		log.line("%s", shareWarning)
+	}
+	store := session.NewStore(roots.sessions, storeOpts...)
 	gcSessions(store, opts.Sessions)
 
 	// The undo stores' own sweep, on the same beat and for the same reason (wire_live.go runs it

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -601,5 +602,85 @@ func TestWireSessionBootToolsReadTheAnnouncedScratchDir(t *testing.T) {
 	if listed.IsError || !strings.Contains(listed.Content, "probe.txt") {
 		t.Errorf("list_dir(%s) = %q (IsError %v); want the announced scratch dir listed",
 			announced, listed.Content, listed.IsError)
+	}
+}
+
+// shareTestHome is an apogee home holding a config.yaml of mode perm, for the share-group start-up
+// checks. A share group is refused on Windows (config.ResolveShareGroup), so the tests skip there.
+func shareTestHome(t *testing.T, perm os.FileMode) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("sessions.share-group is refused on Windows")
+	}
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(path, []byte("sessions: {}\n"), perm); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.Chmod(path, perm); err != nil {
+		t.Fatalf("chmod config: %v", err)
+	}
+	return home
+}
+
+func TestSessionStoreOptions_ShareGroupUnset_AnswersNoOptionAndNoWarning(t *testing.T) {
+	home := shareTestHome(t, 0o644)
+
+	opts, warning, err := sessionStoreOptions(config.SessionSettings{}, home)
+
+	if err != nil || len(opts) != 0 || warning != "" {
+		t.Fatalf("sessionStoreOptions = (%d options, %q, %v), want none, no warning, no error",
+			len(opts), warning, err)
+	}
+}
+
+func TestSessionStoreOptions_ShareGroupSet_WarnsOfAGroupReadableConfig(t *testing.T) {
+	home := shareTestHome(t, 0o640)
+	group := strconv.Itoa(os.Getegid())
+
+	opts, warning, err := sessionStoreOptions(config.SessionSettings{ShareGroup: group}, home)
+
+	if err != nil {
+		t.Fatalf("sessionStoreOptions: %v", err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("got %d store options, want the share group's one", len(opts))
+	}
+	if path := filepath.Join(home, "config.yaml"); !strings.Contains(warning, path) ||
+		!strings.Contains(warning, "group-readable") {
+		t.Errorf("warning = %q, want one naming %s as group-readable", warning, path)
+	}
+}
+
+func TestSessionStoreOptions_ShareGroupSet_OwnerOnlyConfig_IsNotWarnedOf(t *testing.T) {
+	home := shareTestHome(t, 0o600)
+
+	_, warning, err := sessionStoreOptions(config.SessionSettings{ShareGroup: strconv.Itoa(os.Getegid())}, home)
+
+	if err != nil || warning != "" {
+		t.Fatalf("sessionStoreOptions = (%q, %v), want no warning and no error", warning, err)
+	}
+}
+
+func TestSessionStoreOptions_ShareGroupSet_StoreWritesGroupReadableRecords(t *testing.T) {
+	home := shareTestHome(t, 0o600)
+	opts, _, err := sessionStoreOptions(config.SessionSettings{ShareGroup: strconv.Itoa(os.Getegid())}, home)
+	if err != nil {
+		t.Fatalf("sessionStoreOptions: %v", err)
+	}
+	id := "20260601T120000Z-5ba7e001"
+	store := session.NewStore(filepath.Join(home, "sessions"), opts...)
+
+	err = store.Save(session.Record{Meta: session.Meta{ID: id}})
+
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(home, "sessions", id+".json"))
+	if err != nil {
+		t.Fatalf("stat record: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o640 {
+		t.Errorf("record mode = %v, want the shared 0640", got)
 	}
 }

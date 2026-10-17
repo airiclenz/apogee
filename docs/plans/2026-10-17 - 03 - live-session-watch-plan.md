@@ -490,7 +490,13 @@ NOTES (2026-10-17): consequential edit — internal/config/registry_test.go: mad
 **Acceptance:** `go test -race -count=1 ./internal/config/ && go test -race -count=1 -run 'TestSettingsRows|TestManualDocumentsEverySettingsKey|TestSettingSections' ./cmd/apogee/`
 **Commit:** `feat(config): sessions.watch-homes and sessions.share-group keys`
 
-## 14. share-group: group-readable session files
+## 14. share-group: group-readable session files — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): re-derived from the assumption that cmd/apogee/undo.go has an opts.Sessions to pass the share group from. `apogee undo` reads no config file by its documented contract (newUndoCommand), so its store stays owner-private. An owner-private hold leaves an existing lock file's mode and group untouched (platform.AcquireLockWait, unchanged), so undo neither widens nor narrows a shared home. undo.go only gains a comment saying so.
+NOTES (2026-10-17): the share-group tests live in new Unix-only files (internal/session/store_share_test.go, internal/platform/lock_mode_unix_test.go), not in store_test.go, because a file's gid is read off syscall.Stat_t, which does not compile for Windows. The startup-warning tests went into cmd/apogee/wire_live_test.go beside the new helper.
+NOTES (2026-10-17): the platform side is a new `AcquireLockWaitMode(path, timeout, perm, gid)` rather than the plan's `AcquireLockShared(path, mode, gid)`. It carries the hold's contention wait, and "Shared" would be misread as the LOCK_SH a ProbeLock takes. AcquireLock and AcquireLockWait keep their signatures and behaviour, so the daemon lock and its stubs are unaffected. lock_unix.go needed no change.
+NOTES (2026-10-17): the sessions dir and its files are re-moded explicitly only when share-group is set. With it unset, the store behaves exactly as before: records and journals are already chmodded 0600 on each write, while the lock file and the directories keep create-mode 0600/0700. Removing the key therefore makes records and journals private again on their next write, but leaves an earlier shared run's lock files (0640) and directories (0750/0710) as they are until the user re-modes them. Item 16's manual text may want to say so.
+NOTES (2026-10-17): the gid is resolved again at each store site (sessionStoreOptions → config.ResolveShareGroup) rather than carried over from ValidateHost, which throws it away. The config.yaml warning is announced through w.announce (stderr plus transcript) in the TUI, cmd.PrintErrln in headless, and the daemon log for the daemon.
 
 **What:**
 **Goal:** with `sessions.share-group` set, every write to the home's sessions store goes out group-owned by that group:

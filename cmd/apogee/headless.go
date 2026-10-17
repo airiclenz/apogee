@@ -907,7 +907,17 @@ func runHeadlessBody(
 	// records ALREADY on disk, not about the one this run may add, so the flag must not switch it
 	// off. Building it costs nothing on its own — the store is a directory path and a clock until
 	// something reads or writes.
-	sessions := session.NewStore(roots.sessions)
+	//
+	// With `sessions.share-group:` set it writes every session file for that group, and the warning
+	// a group-readable config.yaml owes goes to this command's stderr (sessionStoreOptions).
+	storeOpts, shareWarning, err := sessionStoreOptions(opts.Sessions, roots.config)
+	if err != nil {
+		return run.Result{}, notStarted(err)
+	}
+	if shareWarning != "" {
+		cmd.PrintErrln(shareWarning)
+	}
+	sessions := session.NewStore(roots.sessions, storeOpts...)
 
 	// The store the record lands in: the shared sessions store, so a headless run is browsable in
 	// /sessions beside the conversations it ran beside. --no-save leaves it nil, which is

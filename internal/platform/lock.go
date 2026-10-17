@@ -33,7 +33,8 @@ import (
 
 const (
 	// lockFilePerm keeps the lock file owner-only: it is machine-local coordination state in
-	// the user's ~/.apogee, and nothing but the owning user has business holding it.
+	// the user's ~/.apogee, and nothing but the owning user has business holding it. The one
+	// widening is the caller's own, explicit one ([AcquireLockWaitMode]).
 	lockFilePerm = 0o600
 
 	// pidReadLimit caps what the PID read looks at. A PID is a handful of digits; anything
@@ -93,7 +94,7 @@ func (e *LockHeldError) Error() string {
 // is nil on every error. On success it is safe to call more than once — the second and later
 // calls do nothing — so a caller can defer it and still release early.
 func AcquireLock(path string) (release func(), err error) {
-	return acquireLock(path, 0)
+	return acquireLock(path, 0, nil)
 }
 
 // AcquireLockWait is [AcquireLock] for a caller that would rather queue than be refused: when
@@ -110,14 +111,58 @@ func AcquireLock(path string) (release func(), err error) {
 // opened or the lock call failed for any reason other than contention. release is nil on every
 // error.
 func AcquireLockWait(path string, timeout time.Duration) (release func(), err error) {
-	return acquireLock(path, timeout)
+	return acquireLock(path, timeout, nil)
 }
 
-// acquireLock is the one body behind [AcquireLock] and [AcquireLockWait]: open the file, take
-// the lock (retrying through contention until timeout has elapsed), record the PID. The
-// descriptor stays open across the retries, so each attempt contends with the holder exactly
-// as the first one did.
-func acquireLock(path string, timeout time.Duration) (release func(), err error) {
+// AcquireLockWaitMode is [AcquireLockWait] for a lock file whose mode and group the caller owns
+// rather than this file: once the lock is taken, the file is set to perm and — when gid is 0 or
+// more — handed to group gid, explicitly on the held descriptor (fchmod, fchown), never by the
+// create mode alone. The create mode is filtered by the umask and applies only to a file the
+// open creates, so a lock file an earlier run left owner-private is re-moded here on its next
+// acquire. A gid below zero leaves the file's group as it is.
+//
+// It is for a lock other users may need to open read-only — a session's hold, which a watcher in
+// the share group probes with [ProbeLock]. The price of that read access is stated, not hidden:
+// anyone who can open the file can take the SHARED lock a probe takes and keep it, so a group
+// member can hold off an [AcquireLockWaitMode] for as long as it likes, and is refused only once
+// the timeout runs out.
+//
+// The mode and group are applied after the lock is taken, never before, for the reason the PID
+// is written then: a refused caller must not touch the real holder's file. Windows files carry
+// no POSIX group, so a gid of 0 or more fails the acquire there (os.File.Chown).
+//
+// Errors: [AcquireLockWait]'s, plus a wrapped error naming the path when the mode or the group
+// could not be set — the lock is released again then, and release is nil.
+func AcquireLockWaitMode(path string, timeout time.Duration, perm os.FileMode, gid int) (release func(), err error) {
+	return acquireLock(path, timeout, &lockAccess{perm: perm, gid: gid})
+}
+
+// lockAccess is the mode and group [AcquireLockWaitMode] sets on a lock file it holds; a nil one,
+// [AcquireLock]'s and [AcquireLockWait]'s, leaves the file as the open made it.
+type lockAccess struct {
+	perm os.FileMode
+	gid  int
+}
+
+// apply sets the mode and, for a gid of 0 or more, the group on the held lock file. The group goes
+// first: a chown by a non-root caller may clear mode bits, so the mode is the last word.
+func (a *lockAccess) apply(file *os.File) error {
+	if a.gid >= 0 {
+		if err := file.Chown(-1, a.gid); err != nil {
+			return fmt.Errorf("set the group: %w", err)
+		}
+	}
+	if err := file.Chmod(a.perm); err != nil {
+		return fmt.Errorf("set the mode: %w", err)
+	}
+	return nil
+}
+
+// acquireLock is the one body behind [AcquireLock], [AcquireLockWait] and [AcquireLockWaitMode]:
+// open the file, take the lock (retrying through contention until timeout has elapsed), set the
+// mode and group access asks for (nil: none), record the PID. The descriptor stays open across the
+// retries, so each attempt contends with the holder exactly as the first one did.
+func acquireLock(path string, timeout time.Duration, access *lockAccess) (release func(), err error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, lockFilePerm)
 	if err != nil {
 		return nil, fmt.Errorf("apogee: lock %s: open: %w", path, err)
@@ -136,6 +181,13 @@ func acquireLock(path string, timeout time.Duration) (release func(), err error)
 			return nil, &LockHeldError{Path: path, PID: pid}
 		}
 		return nil, fmt.Errorf("apogee: lock %s: %w", path, err)
+	}
+
+	if access != nil {
+		if err := access.apply(file); err != nil {
+			releaseLock(file)
+			return nil, fmt.Errorf("apogee: lock %s: %w", path, err)
+		}
 	}
 
 	if err := writeLockPID(file); err != nil {

@@ -20,10 +20,27 @@ import (
 )
 
 // dirPerm and filePerm scope session state to the owner: records are a private history of
-// conversations, so neither the directory nor the files are group/world readable.
+// conversations, so neither the directory nor the files are group/world readable — unless the
+// owner names a group to share them with (WithShareGroup, the shared* modes below).
 const (
 	dirPerm  os.FileMode = 0o700
 	filePerm os.FileMode = 0o600
+)
+
+// The modes a store built WithShareGroup writes in place of dirPerm and filePerm, every one of
+// them group-owned by the share group: the apogee home becomes traversable by the group (never
+// listable — x without r), the sessions directory listable, and the files in it — records and
+// their temp files, journals, lock files — readable. Nothing the group may write.
+//
+// The home's 0710 is a door to every name in it, not to the sessions directory alone: a file under
+// the home whose OWN mode lets the group read it is readable to a member who knows its name — a
+// hand-made 0644 config.yaml holding a plaintext api-key: is the case that matters, and the startup
+// warns of it (cmd/apogee). Every other directory apogee keeps there (scratch, snapshots, …) is
+// created owner-private and stays so, which is what keeps it shut.
+const (
+	sharedHomePerm os.FileMode = 0o710
+	sharedDirPerm  os.FileMode = 0o750
+	sharedFilePerm os.FileMode = 0o640
 )
 
 // fileLayout is the id/filename timestamp layout: a sortable, filesystem-safe UTC stamp
@@ -263,6 +280,12 @@ type Store struct {
 	dir string
 	now func() time.Time // injectable so a test controls Rename's UpdatedAt stamp
 
+	// isShared and shareGID are WithShareGroup's: when isShared is set, every directory, file and
+	// lock the store writes is group-owned by shareGID with the shared* modes. Unset, the store
+	// writes owner-private exactly as it always has. Both are fixed at construction.
+	isShared bool
+	shareGID int
+
 	// mu serializes the three writers — Save, Rename and Delete — against each other. Rename is
 	// why it exists: its Load→retitle→Save is a read-modify-write over the WHOLE record, so a Save
 	// landing between its read and its write is silently rolled back, taking a complete Turn (the
@@ -283,11 +306,42 @@ type Store struct {
 	held   map[string]struct{}
 }
 
-// NewStore returns a Store rooted at dir. The directory is created lazily on the first Save
-// (resolveRoots yields paths only, deferring creation to the writer that needs it), so an
-// apogee run that never saves touches no disk.
-func NewStore(dir string) *Store {
-	return &Store{dir: dir, now: time.Now}
+// NewStore returns a Store rooted at dir, configured by opts (WithShareGroup; none is an
+// owner-private store). The directory is created lazily on the first Save (resolveRoots yields
+// paths only, deferring creation to the writer that needs it), so an apogee run that never saves
+// touches no disk.
+func NewStore(dir string, opts ...Option) *Store {
+	s := &Store{dir: dir, now: time.Now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// Option configures a Store at construction (NewStore).
+type Option func(*Store)
+
+// WithShareGroup makes the store write for group gid (`sessions.share-group:`) so that members of
+// that group can watch its live sessions read-only. Every write sets the mode and group explicitly,
+// whatever the umask and whatever an earlier run left: the store directory's parent — the apogee
+// home, which is where every caller roots a store — is set to 0710, the store directory to 0750,
+// and each record (from its temp file on), journal and lock file to 0640, all group gid. A file or
+// directory written owner-private before is re-moded on its next write; one nothing writes again
+// keeps its old mode.
+//
+// Group read on a lock file is what lets a watcher probe a hold, and it is also enough to TAKE the
+// probe's shared lock and keep it: a member can then hold off this store's Hold until its
+// contention wait runs out (platform.AcquireLockWaitMode). That is the trust the share group is
+// given, on top of reading every session.
+//
+// gid must be a group the process may hand files to — config.ResolveShareGroup is the check, made
+// at startup. Windows files carry no POSIX group, so a shared store fails every write there; the
+// config refuses the key on Windows before a store is built.
+func WithShareGroup(gid int) Option {
+	return func(s *Store) {
+		s.isShared = true
+		s.shareGID = gid
+	}
 }
 
 // NewID mints a chronologically-sortable, collision-safe session id of the form
@@ -323,8 +377,8 @@ func (s *Store) save(rec Record) error {
 	if err := validateID(rec.Meta.ID); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
-		return fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
+	if err := s.ensureDir(); err != nil {
+		return err
 	}
 	rec.RecordVersion = RecordVersion
 	data, err := json.Marshal(rec)
@@ -332,7 +386,7 @@ func (s *Store) save(rec Record) error {
 		return fmt.Errorf("apogee: encode session record: %w", err)
 	}
 	path := filepath.Join(s.dir, rec.Meta.ID+".json")
-	if err := atomicWrite(path, data); err != nil {
+	if err := atomicWrite(path, data, s.setFileAccess); err != nil {
 		return err
 	}
 	return nil
@@ -474,10 +528,10 @@ func (s *Store) Hold(id string) (release func() error, err error) {
 // one check, and a Hold that lands inside that window must not tell the user the session is open
 // in another apogee. A live holder outlasts the wait and is refused exactly as before.
 func (s *Store) hold(id string) (release func() error, err error) {
-	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
-		return nil, fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
+	if err := s.ensureDir(); err != nil {
+		return nil, err
 	}
-	unlock, err := platform.AcquireLockWait(s.lockPath(id), holdContentionWait)
+	unlock, err := s.acquireHoldLock(id)
 	if err != nil {
 		var held *platform.LockHeldError
 		if errors.As(err, &held) {
@@ -503,6 +557,61 @@ func (s *Store) hold(id string) (release func() error, err error) {
 		})
 		return nil
 	}, nil
+}
+
+// acquireHoldLock takes the exclusive lock behind a hold of id. A shared store takes it through
+// platform.AcquireLockWaitMode, which sets the lock file to sharedFilePerm and the share group on the
+// held descriptor, so a watcher in the group can probe it; an owner-private store leaves the file as
+// its create mode (lockFilePerm, 0600) made it.
+func (s *Store) acquireHoldLock(id string) (release func(), err error) {
+	if s.isShared {
+		return platform.AcquireLockWaitMode(s.lockPath(id), holdContentionWait, sharedFilePerm, s.shareGID)
+	}
+	return platform.AcquireLockWait(s.lockPath(id), holdContentionWait)
+}
+
+// ensureDir creates the store directory when it is absent (dirPerm, the home with it when that is
+// absent too) — save's and hold's first step. A shared store then sets the home's and the store
+// directory's mode and group explicitly, on every call: MkdirAll's mode is filtered by the umask and
+// applies only to a directory it creates, so a directory an owner-private run made is re-moded here
+// on the next write.
+func (s *Store) ensureDir() error {
+	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
+		return fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
+	}
+	if !s.isShared {
+		return nil
+	}
+	if err := shareDir(filepath.Dir(s.dir), sharedHomePerm, s.shareGID); err != nil {
+		return err
+	}
+	return shareDir(s.dir, sharedDirPerm, s.shareGID)
+}
+
+// shareDir hands directory path to group gid and sets its mode to perm. The group goes first: a
+// chown by a non-root caller may clear mode bits, so the mode is the last word.
+func shareDir(path string, perm os.FileMode, gid int) error {
+	if err := os.Chown(path, -1, gid); err != nil {
+		return fmt.Errorf("apogee: share sessions directory %q: %w", path, err)
+	}
+	if err := os.Chmod(path, perm); err != nil {
+		return fmt.Errorf("apogee: share sessions directory %q: %w", path, err)
+	}
+	return nil
+}
+
+// setFileAccess sets the mode — and, in a shared store, the group — of a file the store writes,
+// explicitly on its open descriptor: filePerm for an owner-private store; sharedFilePerm and the
+// share group for a shared one, the group first for shareDir's reason. It is the one place records
+// (through atomicWrite) and journals take their access from.
+func (s *Store) setFileAccess(file *os.File) error {
+	if !s.isShared {
+		return file.Chmod(filePerm)
+	}
+	if err := file.Chown(-1, s.shareGID); err != nil {
+		return err
+	}
+	return file.Chmod(sharedFilePerm)
 }
 
 // holdsItself reports whether this store already holds id — the check Rename makes before taking a
@@ -544,8 +653,8 @@ func (s *Store) ProbeHold(id string) (held bool, pid int, err error) {
 // before it touches the disk.
 func (s *Store) JournalPath(id string) string { return filepath.Join(s.dir, id+journalSuffix) }
 
-// OpenJournal creates session id's Event journal for writing, with the record's own file mode
-// (filePerm), truncating whatever an earlier run of the same session left there. It is only ever
+// OpenJournal creates session id's Event journal for writing, with the record's own file mode and
+// group (setFileAccess), truncating whatever an earlier run of the same session left there. It is only ever
 // called by the session's owner, UNDER the record's hold (Hold): the truncate is safe only there,
 // since the hold is what guarantees no other live writer has the file open and no SweepJournals is
 // mid-removal of it. The store directory already exists then — hold created it.
@@ -562,10 +671,10 @@ func (s *Store) OpenJournal(id string) (*os.File, error) {
 		return nil, fmt.Errorf("apogee: open session journal %q: %w", path, err)
 	}
 	// O_CREATE's mode applies only to a file it creates: a journal an earlier run left behind
-	// keeps its own mode unless it is set here, as atomicWrite sets the record's.
-	if err := file.Chmod(filePerm); err != nil {
+	// keeps its own mode and group unless they are set here, as atomicWrite sets the record's.
+	if err := s.setFileAccess(file); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("apogee: chmod session journal %q: %w", path, err)
+		return nil, fmt.Errorf("apogee: set the mode of session journal %q: %w", path, err)
 	}
 	return file, nil
 }
@@ -955,8 +1064,10 @@ func legacyTime(path string) time.Time {
 // a reader never observes a partially-written record and a crash leaves no truncated file.
 // The temp file is removed on any failure and never survives a successful rename. The rename
 // goes through renameRecord, which on Windows waits out a reader holding the record open
-// (rename.go) instead of failing the save on it.
-func atomicWrite(path string, data []byte) error {
+// (rename.go) instead of failing the save on it. setAccess sets the temp file's mode and group
+// (Store.setFileAccess) before a byte is written, so the record is never readable beyond them,
+// not even as a temp file.
+func atomicWrite(path string, data []byte, setAccess func(*os.File) error) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".apogee-session-*.tmp")
 	if err != nil {
@@ -966,9 +1077,9 @@ func atomicWrite(path string, data []byte) error {
 	// Remove the temp file on every path except a successful rename (where it no longer
 	// exists, so Remove is a harmless no-op).
 	defer func() { _ = os.Remove(tmpName) }()
-	if err := tmp.Chmod(filePerm); err != nil {
+	if err := setAccess(tmp); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("apogee: chmod temp session file %q: %w", tmpName, err)
+		return fmt.Errorf("apogee: set the mode of temp session file %q: %w", tmpName, err)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
