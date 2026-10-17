@@ -311,30 +311,32 @@ func (m *backgroundManager) storesElsewhere(root string) []keptRun {
 // RerunFailed's, which stays as it was (markStopped). An id this Agent neither runs nor queues is an
 // error.
 func (a *Agent) StopWorkflow(id string) error {
-	_, err := a.stopWorkflow(id)
+	_, _, err := a.stopWorkflow(id)
 	return err
 }
 
 // stopWorkflow is StopWorkflow, also reporting whether the workflow was still queued — dropped from
 // the line before it ever started, so no Runner ran it, no finish note is held for it and no
-// WorkflowPhaseEvent will report its end. The workflow tool's stop answer reads it to tell the model
-// so (workflowStopResult).
-func (a *Agent) stopWorkflow(id string) (queued bool, err error) {
+// WorkflowPhaseEvent will report its end — and, for a queued one, the phase its folder is left in
+// (markStopped): stopped for a queued first run, the kept done or failed for a queued RerunFailed's.
+// The workflow tool's stop answer reads both to tell the model so (workflowStopResult).
+func (a *Agent) stopWorkflow(id string) (queued bool, kept workflow.Phase, err error) {
 	m := &a.background
 	m.mu.Lock()
 	run := m.liveLocked(id)
 	if run == nil {
 		m.mu.Unlock()
-		return false, fmt.Errorf(unknownWorkflowFormat, id)
+		return false, "", fmt.Errorf(unknownWorkflowFormat, id)
 	}
 	if run.running {
 		run.cancel()
 		m.mu.Unlock()
-		return false, nil
+		return false, "", nil
 	}
 	m.dropLocked(run)
 	m.mu.Unlock()
-	return true, markStopped(run)
+	kept, err = markStopped(run)
+	return true, kept, err
 }
 
 // RerunFailed runs the finished workflow id again, in the background and in its own folder, as a new
@@ -647,7 +649,7 @@ func (a *Agent) stopAllBackground() {
 	m.launched = nil
 	m.mu.Unlock()
 	for _, run := range dropped {
-		_ = markStopped(run) // best-effort, like every stop on the way out: nobody is left to tell
+		_, _ = markStopped(run) // best-effort, like every stop on the way out: nobody is left to tell
 	}
 }
 
@@ -732,22 +734,23 @@ func (a *Agent) backgroundServer(seat delegationSeat) string {
 
 // markStopped writes a queued run's folder as stopped: it never started, so no Runner will. A folder
 // already done or failed — a queued RerunFailed's — is left as it is: the re-run never started, so
-// the run it would have repeated stands, and a later RerunFailed still accepts it. The stamp reads
-// the run's Runner clock (Runner.Now), else time.Now.
-func markStopped(run *backgroundRun) error {
+// the run it would have repeated stands, and a later RerunFailed still accepts it. It returns the
+// phase the folder is left in: PhaseStopped when it wrote it, else the kept PhaseDone or
+// PhaseFailed. The stamp reads the run's Runner clock (Runner.Now), else time.Now.
+func markStopped(run *backgroundRun) (workflow.Phase, error) {
 	status, err := run.runner.Store.ReadStatus(run.id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if status.Phase == workflow.PhaseDone || status.Phase == workflow.PhaseFailed {
-		return nil
+		return status.Phase, nil
 	}
 	status.Phase = workflow.PhaseStopped
 	status.Updated = time.Now()
 	if run.runner.Now != nil {
 		status.Updated = run.runner.Now()
 	}
-	return run.runner.Store.WriteStatus(status)
+	return workflow.PhaseStopped, run.runner.Store.WriteStatus(status)
 }
 
 // liveLocked returns the live run id names, or nil. The caller holds the lock.

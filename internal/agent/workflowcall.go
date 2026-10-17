@@ -948,20 +948,21 @@ func (a observedAsker) Ask(ctx context.Context, question workflow.Question) (str
 // The workflow control call's answers (ADR 0089 D4). Each refusal is the whole tool error, so it
 // says what to send instead.
 const (
-	workflowControlArgumentsFormat = "workflow was not run: its arguments are not valid JSON (%v); send an object with action"
-	workflowControlActionFormat    = "workflow was not run: action %q is not one of status, stop, message"
-	workflowControlDelegate        = "workflow was not run: only the main agent controls the session's background workflows"
-	workflowControlNeedsID         = "workflow was not run: stop needs the id of the workflow to stop, as status lists it"
-	workflowControlNeedsItem       = "workflow was not run: message needs item (a running item's run id or name, as status lists it) and text"
-	workflowControlListFailed      = "workflow could not list the session's workflows: %v"
-	workflowControlUnknownFormat   = "workflow: no workflow %q in this session; the workflows are: %s"
-	workflowControlStopFailed      = "workflow could not stop %s: %v"
-	workflowControlStopped         = "workflow %s is stopping; its finished items are kept, and its result reaches you when it ends"
-	workflowControlStoppedQueued   = "workflow %s was queued and never started; it was dropped from the line and marked stopped, and no result follows"
-	workflowControlNoItemFormat    = "workflow: no running item %q; the running items are: %s"
-	workflowControlAmbiguousFormat = "workflow: %d running items are named %q; send item as one of their run ids: %s"
-	workflowControlGoneFormat      = "workflow: item %s ended before the message could be queued"
-	workflowControlQueuedFormat    = "message queued for %s (%s); it reaches the helper between its steps"
+	workflowControlArgumentsFormat    = "workflow was not run: its arguments are not valid JSON (%v); send an object with action"
+	workflowControlActionFormat       = "workflow was not run: action %q is not one of status, stop, message"
+	workflowControlDelegate           = "workflow was not run: only the main agent controls the session's background workflows"
+	workflowControlNeedsID            = "workflow was not run: stop needs the id of the workflow to stop, as status lists it"
+	workflowControlNeedsItem          = "workflow was not run: message needs item (a running item's run id or name, as status lists it) and text"
+	workflowControlListFailed         = "workflow could not list the session's workflows: %v"
+	workflowControlUnknownFormat      = "workflow: no workflow %q in this session; the workflows are: %s"
+	workflowControlStopFailed         = "workflow could not stop %s: %v"
+	workflowControlStopped            = "workflow %s is stopping; its finished items are kept, and its result reaches you when it ends"
+	workflowControlStoppedQueued      = "workflow %s was queued and never started; it was dropped from the line and marked stopped, and no result follows"
+	workflowControlStoppedQueuedRerun = "workflow %s: its queued re-run never started and was dropped from the line; its folder stays %s from its last run, a later re-run still accepts it, and no result follows"
+	workflowControlNoItemFormat       = "workflow: no running item %q; the running items are: %s"
+	workflowControlAmbiguousFormat    = "workflow: %d running items are named %q; send item as one of their run ids: %s"
+	workflowControlGoneFormat         = "workflow: item %s ended before the message could be queued"
+	workflowControlQueuedFormat       = "message queued for %s (%s); it reaches the helper between its steps"
 )
 
 // The words the status listing is built from.
@@ -1041,14 +1042,18 @@ func (a *Agent) workflowStatusResult(callID, id string) domain.ToolResult {
 
 // workflowStopResult stops the background workflow id, keeping its finished items (ADR 0088). A
 // running one's answer promises the result its end delivers; a queued one never started, so its
-// answer says it was dropped and that no result follows.
+// answer says it was dropped and that no result follows — a queued first run's that its folder was
+// marked stopped, a queued re-run's the done or failed phase its folder keeps from its last run.
 func (a *Agent) workflowStopResult(callID, id string) domain.ToolResult {
 	if id == "" {
 		return errorToolResult(callID, workflowControlNeedsID)
 	}
-	queued, err := a.stopWorkflow(id)
+	queued, kept, err := a.stopWorkflow(id)
 	if err != nil {
 		return errorToolResult(callID, fmt.Sprintf(workflowControlStopFailed, id, err))
+	}
+	if queued && kept != workflow.PhaseStopped {
+		return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStoppedQueuedRerun, id, kept)}
 	}
 	if queued {
 		return domain.ToolResult{CallID: callID, Content: fmt.Sprintf(workflowControlStoppedQueued, id)}

@@ -29,7 +29,10 @@ actually holds: a queued first run is marked stopped; a queued `RerunFailed` kee
 - The TUI's `^x` stop path (`workflowStoppedMsg` carries only an error; it words no phase).
 - `stopAllBackground`'s best-effort `markStopped` on the way out.
 
-## 1. Word a queued re-run's stop answer by its folder's kept phase
+## 1. Word a queued re-run's stop answer by its folder's kept phase — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): gofmt realigned the whole workflow-control const block in internal/agent/workflowcall.go for the longer new name workflowControlStoppedQueuedRerun (whitespace only on the other lines).
+NOTES (2026-10-17): the Done test now stops the re-run through controlCall and the fresh first run still through StopWorkflow; both re-run tests share a new assertRerunStopAnswer helper in background_test.go.
 
 **What:** fix for issue `queued-rerun-stop-answer`: stopping a queued `RerunFailed` answers `workflowControlStoppedQueued` ("… marked stopped …") though `markStopped` leaves a `done`/`failed` folder as it was.
 

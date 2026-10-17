@@ -601,10 +601,9 @@ func TestBackground_StoppingAQueuedRerunLeavesTheFolderDone(t *testing.T) {
 		t.Fatalf("the re-run = %+v, want it queued behind the slow workflow", info)
 	}
 
-	for _, stop := range []string{id, fresh} {
-		if err := a.StopWorkflow(stop); err != nil {
-			t.Fatalf("StopWorkflow(%s): %v", stop, err)
-		}
+	assertRerunStopAnswer(t, controlCall(a, `{"action":"stop","id":"`+id+`"}`), id, workflow.PhaseDone)
+	if err := a.StopWorkflow(fresh); err != nil {
+		t.Fatalf("StopWorkflow(%s): %v", fresh, err)
 	}
 	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseDone {
 		t.Errorf("the stopped re-run's folder = %+v, want it still done and no longer live", info)
@@ -625,6 +624,18 @@ func TestBackground_StoppingAQueuedRerunLeavesTheFolderDone(t *testing.T) {
 	}
 	if n := up.askedCount("sweep new"); n != 0 {
 		t.Errorf("the stopped new workflow's child ran %d times, want 0", n)
+	}
+}
+
+// assertRerunStopAnswer checks the workflow tool's answer to stopping id's queued re-run: it names
+// kept, the phase the folder stays in from its last run, and never claims the folder was marked
+// stopped.
+func assertRerunStopAnswer(t *testing.T, answer domain.ToolResult, id string, kept workflow.Phase) {
+	t.Helper()
+	if answer.IsError || !strings.Contains(answer.Content, id+": its queued re-run never started") ||
+		!strings.Contains(answer.Content, "its folder stays "+string(kept)) || strings.Contains(answer.Content, "marked stopped") {
+		t.Errorf("queued re-run stop = %q (error %v), want it to say the folder stays %s, never marked stopped",
+			answer.Content, answer.IsError, kept)
 	}
 }
 
@@ -695,9 +706,7 @@ func TestBackground_StoppingAQueuedRerunLeavesTheFolderFailed(t *testing.T) {
 		t.Fatalf("the re-run = %+v, want it queued behind the slow workflow", info)
 	}
 
-	if err := a.StopWorkflow(id); err != nil {
-		t.Fatalf("StopWorkflow(%s): %v", id, err)
-	}
+	assertRerunStopAnswer(t, controlCall(a, `{"action":"stop","id":"`+id+`"}`), id, workflow.PhaseFailed)
 	if info := workflowInfo(t, a, id); info.Background || info.Status.Phase != workflow.PhaseFailed {
 		t.Errorf("the stopped re-run's folder = %+v, want it still failed and no longer live", info)
 	}
