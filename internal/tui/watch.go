@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,8 +29,13 @@ import (
 // exists (ADR 0034 D2): nothing here takes a lock, saves, or calls a real Engine method.
 //
 // One seam does the isolating: entering swaps m.eng for an [inertEngine] and parks the owner's
-// engine and session view in [watchState]; esc swaps them back. Every keyed way to act on the
-// session meets one allow-list gate ([Model.watchRefuses]) at the send and command chokepoints.
+// engine, session host and session view in [watchState]; esc, and every other way out, swaps them
+// back. Every keyed way to act on the session meets one allow-list gate ([Model.watchRefuses]) at
+// the send and command chokepoints, and every engine setter a key reaches (shift+tab, a picker's
+// accept) refuses with the same flash. A Msg of the owner's own session arriving meanwhile folds
+// into the parked view with it swapped in, or waits for the way out ([Model.foldWhileWatching]),
+// and the engine holds the watch takes (holdWatching) keep the idle-only work — a wake, a resume, a
+// waiting pane — for after it.
 
 // watchPollInterval is how often the follower looks for lines the owner appended to the journal.
 // The journal coalesces deltas over ~30 ms, so a poll a few windows long paints text in steps a
@@ -76,17 +82,24 @@ type watchState struct {
 	title string
 	// owner is the watcher's own engine, parked while m.eng is the inert one.
 	owner Engine
+	// ownerSessions is the watcher's own session host, parked while m.sessions is nil — which is
+	// what gates every save (persist, saveAtIdle) and every queued record write out of the watch.
+	ownerSessions SessionHost
 	// parked is the watcher's own session view, restored on the way out.
 	parked parkedSession
+	// held are the owner's Msgs that would open a surface over the view (watchRouteHeld); they are
+	// delivered again once the watch ends.
+	held []tea.Msg
 	// offset is how many journal bytes have been folded; file is the journal the offset counts in,
 	// so a journal replaced under the same path reads as a truncation.
 	offset int64
 	file   os.FileInfo
 }
 
-// parkedSession is the session view watch mode sets aside: the field set resetSessionView
+// parkedSession is the session view watch mode sets aside: exactly the field set resetSessionView
 // (commandrun.go) resets, plus the run state the watch moves (state, acts, cursor). A field added
-// to resetSessionView belongs here too.
+// to resetSessionView belongs here too, and TestWatchIsolatesParksExactlyTheSessionViewResetSet
+// fails until it is.
 type parkedSession struct {
 	spentSkills     map[string]bool
 	thinking        thinkingBoard
@@ -161,33 +174,145 @@ func (m Model) enterWatch(src watchSource) (Model, tea.Cmd) {
 		isInExchange:   m.eng.InExchange(),
 	}
 	m.watch = watchState{
-		isActive: true,
-		gen:      m.watch.gen + 1,
-		source:   src,
-		title:    stripEscapes(src.title),
-		owner:    m.eng,
-		parked:   m.parkSession(),
+		isActive:      true,
+		gen:           m.watch.gen + 1,
+		source:        src,
+		title:         stripEscapes(src.title),
+		owner:         m.eng,
+		ownerSessions: m.sessions,
+		parked:        m.parkSession(),
 	}
-	m.eng = inert
+	m.eng, m.sessions = inert, nil
+	// The block-paint cache is keyed by entry index (paintcache.go). The parked transcript's is
+	// cleared on the way in, as on the way out, and the watch paints through a cache of its own,
+	// so an owner Msg folded with the parked view swapped in (foldForOwner) never paints into the
+	// cache the watch reads, nor the watch into the owner's.
+	m.transcript.paints.clear()
+	m.transcript.paints = newPaintCache()
 	m.clearWatchView()
+	m.forgetPaintedFrame()
 	return m, m.readJournalCmd()
 }
 
-// leaveWatch is esc's way out: the owner's engine and session view come back exactly as parked,
-// and every follower message still in flight is dropped by the generation it carries.
-func (m Model) leaveWatch() Model {
+// leaveWatch is every way out of a watch — esc, and quit before it acts: the owner's engine,
+// session host and session view come back exactly as parked, and every follower message still in
+// flight is dropped by the generation it carries. The Cmd delivers the owner's held Msgs again, so
+// they fold into the restored session; it is nil when nothing was held or no watch was active.
+func (m Model) leaveWatch() (Model, tea.Cmd) {
 	if !m.watch.isActive {
-		return m
+		return m, nil
 	}
-	m.eng = m.watch.owner
+	held := m.watch.held
+	m.eng, m.sessions = m.watch.owner, m.watch.ownerSessions
 	m.restoreSession(m.watch.parked)
 	m.watch = watchState{gen: m.watch.gen}
 	// The block-paint cache is keyed by entry index, and the indices now mean the restored
 	// transcript's entries again, not the watched one's (paintcache.go).
 	m.transcript.paints.clear()
-	m.transcript.touch()
-	m.layout()
-	return m
+	m.forgetPaintedFrame()
+	return m, redeliver(held)
+}
+
+// forgetPaintedFrame makes Update's tail lay out the session view a swap just put in place. The
+// frame key settle compares names the transcript by its generation, and the parked and the watched
+// transcript count generations apart, so an equal number would not mean an equal frame; with no
+// frame on record as painted, the tail repaints whatever view the swap left (settle, paintcache.go).
+func (m *Model) forgetPaintedFrame() {
+	m.painted = frameKey{}
+}
+
+// redeliver is the Cmd that hands msgs back to the Update loop, in order, once the watch that held
+// them has ended.
+func redeliver(msgs []tea.Msg) tea.Cmd {
+	if len(msgs) == 0 {
+		return nil
+	}
+	cmds := make([]tea.Cmd, 0, len(msgs))
+	for _, msg := range msgs {
+		cmds = append(cmds, func() tea.Msg { return msg })
+	}
+	return tea.Sequence(cmds...)
+}
+
+// watchRoute names where a Msg that arrives while watching goes.
+type watchRoute int
+
+const (
+	// watchRouteView: the watch view's own Msg — the follower's, input, the frame, a widget's — folds
+	// as it would outside a watch.
+	watchRouteView watchRoute = iota
+	// watchRouteOwner: a Msg of the watcher's own session folds into the parked view, with that view,
+	// its engine and its session host swapped in (foldForOwner).
+	watchRouteOwner
+	// watchRouteHeld: an owner Msg whose fold opens a surface over the view or switches the session
+	// waits for the watch to end (leaveWatch delivers it again).
+	watchRouteHeld
+)
+
+// watchRouteOf routes msg while watching. Every Msg type [Model.fold] has a case for is named below
+// — TestWatchIsolatesRoutesEveryFoldedMsg fails until a new one is — and anything else is a widget's
+// own Msg, which belongs to the input box and so to the view.
+func watchRouteOf(msg tea.Msg) watchRoute {
+	switch msg.(type) {
+	case watchPollMsg, watchBatchMsg,
+		tea.WindowSizeMsg, tea.ModeReportMsg, tea.ColorProfileMsg, tea.KeyboardEnhancementsMsg,
+		tea.KeyPressMsg, tea.PasteMsg, clipboardImageMsg, clipboardTextMsg,
+		ctrlCResetMsg, escStopResetMsg, tea.CursorPositionMsg,
+		tea.MouseWheelMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg,
+		spinnerTickMsg, skillHintTickMsg, flashClearMsg:
+		return watchRouteView
+	case sessionListMsg, sessionLoadedMsg, workflowsListMsg, workflowItemMsg,
+		settingsEditedMsg, settingsDetachedMsg, approvalReqMsg, approvalArmedMsg, askReqMsg:
+		return watchRouteHeld
+	case eventMsg, scheduleEventMsg, routingNoticeMsg, hookNoticeMsg, presentedMsg,
+		exchangeDoneMsg, cancelledMsg, errMsg, compactDoneMsg, interjectedMsg, turnSnapshotMsg,
+		saveDoneMsg, recordWriteDoneMsg, autoTitleMsg, manualTitleMsg, configChangedMsg,
+		workflowStoppedMsg, workflowSavedMsg, bgStartedMsg, workflowNoteLostMsg,
+		skillsReloadedMsg, skillsRescannedMsg, recallLoadedMsg, updateCheckedMsg,
+		beatMsg, actuationMsg, restoreMsg, heartbeatTickMsg:
+		return watchRouteOwner
+	}
+	return watchRouteView
+}
+
+// foldWhileWatching is Update's watch-mode door: an owner Msg folds into the parked session or is
+// held, and isOwners reports that it was taken; a view Msg is left to the ordinary fold.
+func (m Model) foldWhileWatching(msg tea.Msg) (next tea.Model, cmd tea.Cmd, isOwners bool) {
+	switch watchRouteOf(msg) {
+	case watchRouteOwner:
+		next, cmd = m.foldForOwner(msg)
+		return next, cmd, true
+	case watchRouteHeld:
+		// Rebuilt rather than appended in place, so the Model copy this Update started from never
+		// sees the change (ADR 0011).
+		m.watch.held = append(slices.Clip(m.watch.held), msg)
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// foldForOwner folds an owner Msg with the owner's session swapped in: its engine, its session host
+// and its parked view take the watch's place for the one fold, so a background workflow's event
+// routes by the owner's workflows, a save carries the owner's transcript to the owner's record, and
+// a title, a rebind or a config reload lands on the owner's state — exactly as without the watch.
+// Then the result is parked again and the watch view comes back, for Update's tail to repaint.
+//
+// The watch stays active throughout, so the engine holds it takes (holdWatching) still keep a wake,
+// a resume and every waiting pane for after the watch, both inside this fold and in Update's tail.
+func (m Model) foldForOwner(msg tea.Msg) (tea.Model, tea.Cmd) {
+	watched, inert := m.parkSession(), m.eng
+	m.eng, m.sessions = m.watch.owner, m.watch.ownerSessions
+	m.restoreSession(m.watch.parked)
+
+	next, cmd := m.fold(msg)
+	folded := next.(Model) // every arm of fold returns the Model it folded
+
+	folded.watch.owner, folded.watch.ownerSessions = folded.eng, folded.sessions
+	folded.watch.parked = folded.parkSession()
+	folded.eng, folded.sessions = inert, nil
+	folded.restoreSession(watched)
+	folded.forgetPaintedFrame()
+	return folded, cmd
 }
 
 // parkSession copies the session view out of the Model.

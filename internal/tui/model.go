@@ -1208,6 +1208,20 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// observation in one place.
 	m.diag.observe(msg)
 
+	// While watching, a Msg that belongs to the watcher's own session never reaches the watch view:
+	// it folds into the parked session, or waits for the watch to end (watch.go, foldWhileWatching).
+	if m.watch.isActive {
+		if next, cmd, isOwners := m.foldWhileWatching(msg); isOwners {
+			return next, cmd
+		}
+	}
+	return m.fold(msg)
+}
+
+// fold is Update's switch: one case per Msg the Model folds, each returning from its own arm. It is
+// apart from Update so that watch mode can fold a Msg of the parked session with that session
+// swapped in (watch.go), under Update's one set of deferred consequences.
+func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -1924,7 +1938,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// While watching there is no worker of the watcher's to cancel: esc leaves the watch and goes
 		// back to the parked session (watch.go). A run view or pane open in the watch claimed it above.
 		if m.watch.isActive {
-			return m.leaveWatch(), nil
+			return m.leaveWatch()
 		}
 		// A background workflow's prompt (either pane) has no worker behind it: one press sends it
 		// back to the engine's queue unanswered (dismissWorkflowPrompt, workflow.go).
@@ -2045,6 +2059,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Cycle the autonomy mode one rung up the privilege ladder (wraps Auto → Plan). Live in
 		// every state (idle, running, awaiting approval/answer): SetMode is goroutine-safe, so the
 		// change can race-free overlap a running Step and takes effect on the next tool call.
+		// While watching, the engine in hand is the inert one and the session is someone else's:
+		// the chord is refused like every other engine setter (watch.go).
+		if m.watch.isActive {
+			return m.refuseWatchInput()
+		}
 		next := domain.NextMode(m.opts.Mode)
 		m.eng.SetMode(next)
 		m.opts.Mode = next // the footer renders the mode from opts.Mode (footerContent)
@@ -2693,6 +2712,15 @@ func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
 // requested with rows queued simply exits, and the deferred exit beats the terminal fold's flush
 // (flushAfterCompletion).
 func (m Model) quit() (tea.Model, tea.Cmd) {
+	// A watch ends first, so everything below — the stop, the closing flush — acts on the
+	// watcher's own session and engine, never on the watched view (watch.go).
+	m, redeliver := m.leaveWatch()
+	next, cmd := m.quitSession()
+	return next, tea.Batch(redeliver, cmd)
+}
+
+// quitSession is quit past the watch: the prompt-pane dismissal, the busy stop or the closing flush.
+func (m Model) quitSession() (tea.Model, tea.Cmd) {
 	// A background workflow's prompt pane stands at idle with no worker to wait for: it goes back
 	// to the engine's queue first, so the quit is the idle one below.
 	if m.workflowPromptOrigin() != nil {

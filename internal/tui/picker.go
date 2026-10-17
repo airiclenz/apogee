@@ -1255,7 +1255,15 @@ func (m Model) pickerWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // the session somewhere the human never saw. The caller has already established that there is a row
 // to take (pickerKey) and the selection is clamped, so the mapping fails only on a list that emptied
 // between the two reads.
+//
+// While watching, no row is taken: every kind's accept moves the engine, the session or the host
+// (the mode, effort and confinement rungs, a model or server switch, a fork), and the session in
+// view is someone else's — the accept is refused with watch mode's flash, and the overlay stays up
+// for esc to close (watch.go).
 func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
+	if m.watch.isActive {
+		return m.refuseWatchInput()
+	}
 	offered, ok := m.pickerFilteredView().offeringIndex(m.picker.selected)
 	if !ok {
 		return m, nil

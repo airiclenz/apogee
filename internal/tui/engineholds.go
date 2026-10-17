@@ -24,6 +24,10 @@ const (
 	holdQuitting
 	// holdPrebound: the session has no engine bound yet ([Model.prebound]).
 	holdPrebound
+	// holdWatching: the view is watching another session (watch.go), so the engine is parked
+	// behind an inert one and nothing idle-only — a wake, a workflow resume, a waiting prompt or
+	// adoption pane, a queued command — may act on the parked session until the watch ends.
+	holdWatching
 )
 
 // The hold groups the questions below read. Each is named once so two questions that ask the same
@@ -40,8 +44,9 @@ const (
 	// be stashed for the boundary rather than applied.
 	holdsBlockingRebind = holdsOwningEngine | holdBgLaunch
 	// holdsBlockingResume are the holds an idle-only resume or wake waits out: no engine yet, an
-	// exit under way, or an idle-only operation still in flight.
-	holdsBlockingResume = holdPrebound | holdQuitting | holdSessionLoad | holdBgLaunch | holdRecordWrite
+	// exit under way, an idle-only operation still in flight, or a watch holding the engine parked.
+	holdsBlockingResume = holdPrebound | holdQuitting | holdSessionLoad | holdBgLaunch | holdRecordWrite |
+		holdWatching
 )
 
 // has reports whether every hold in want is in the set.
@@ -72,6 +77,7 @@ var engineHoldSources = [...]struct {
 	{holdRecordWrite, func(m Model) bool { return m.writeBusy || len(m.pendingWrites) > 0 }},
 	{holdQuitting, func(m Model) bool { return m.quitting }},
 	{holdPrebound, Model.prebound},
+	{holdWatching, func(m Model) bool { return m.watch.isActive }},
 }
 
 // engineHolds is a snapshot of who holds the engine — the hold set — together with the non-hold
@@ -125,9 +131,10 @@ func (h engineHolds) commandRunnable(parsed parsedInput) bool {
 }
 
 // canRunDeferred reports whether the queued idle-only commands may be drained now: nothing takes
-// the Agent, the program is not exiting, and the stop-or-keep confirm is not waiting on an answer.
+// the Agent, the program is not exiting, no watch has the engine parked, and the stop-or-keep
+// confirm is not waiting on an answer.
 func (h engineHolds) canRunDeferred() bool {
-	return !h.holding(holdsTakingAgent|holdQuitting) && !h.isConfirmOpen
+	return !h.holding(holdsTakingAgent|holdQuitting|holdWatching) && !h.isConfirmOpen
 }
 
 // canRebind reports whether an observed rebind may be applied now rather than stashed for the

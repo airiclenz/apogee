@@ -1148,8 +1148,9 @@
 // workflow's detail answering ^x (stop it) and ^r (re-run its failed items); watch.go watch mode
 // (ADR 0103) — another session painted live and read-only from its record's head and its Event
 // journal, followed off the Update loop and folded through the eventMsg routing, behind an inert
-// Engine, the parked session view esc restores, and the one allow-list gate every send and verb
-// meets while watching;
+// Engine, the parked session view and host every way out restores, the owner's own Msgs folded
+// into that parked session meanwhile, and the one allow-list gate every send, verb and engine
+// setter meets while watching;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block and the super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the

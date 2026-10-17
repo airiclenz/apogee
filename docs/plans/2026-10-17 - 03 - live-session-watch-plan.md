@@ -331,7 +331,17 @@ NOTES (2026-10-17): no CHANGELOG entry — watch mode has no user-facing door un
 
 Depends on item 4.
 
-## 9a. Watch mode isolates the owner's session
+## 9a. Watch mode isolates the owner's session — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): one generic seam instead of per-fold edits: Update's switch moved into `Model.fold` (same file, same indentation; Update keeps its defers and diag), and while watching `foldWhileWatching` routes by `watchRouteOf` — view/input Msgs fold as usual, owner Msgs fold through `foldForOwner` (the parked engine, `m.sessions` and session view swapped in for the one fold, then re-parked and the watch view repainted), and the Msgs that open a surface or switch the session (sessionList/Loaded, workflowsList/Item, settingsEdited/Detached, approvalReq/Armed, askReq) are held in `watchState.held` and re-delivered by `leaveWatch`'s Cmd (tea.Sequence). So autotitle.go, heartbeat.go, settingswatcher.go, settingsapply.go, sessionsave.go, commandrun.go, workflow.go, transcript.go, confine.go and effort.go needed no change.
+NOTES (2026-10-17): `m.sessions` is parked as `watchState.ownerSessions` (nil in the watch view, so persist/saveAtIdle/queueWrite gate out). Watch entry is not refused on a busy write queue: a write in flight at entry lands through `foldForOwner`, whose pump uses the parked host (the plan's "or writeCmd uses the parked host" branch).
+NOTES (2026-10-17): `holdWatching` joins the engine holds (in holdsBlockingResume, and canRunDeferred), so canWake/canResumeWorkflows answer false while watching: wake, workflow resume, waiting-prompt and adoption offers wait for the way out. quit() now calls `leaveWatch` first (the old body is `quitSession`), covering ctrl+c and every other caller.
+NOTES (2026-10-17): engine-setter refusals are at shift+tab and `acceptPicker` (every picker kind's accept); the verbs (/model, /clear, /compact, /effort, /confine, …) were already refused by item 9's allow-list gate. The footer's mode-marker click (mouse.go, not in this item's files) still opens the mode picker in watch; its accept is refused.
+NOTES (2026-10-17): beyond clearing the paint cache on enter and exit, the watch view paints through a cache of its own (`newPaintCache` in enterWatch), so an owner Msg folded mid-watch and the watch never share index-keyed paints.
+NOTES (2026-10-17): the guard tests are AST scans: TestWatchIsolatesParksExactlyTheSessionViewResetSet derives resetSessionView's written field set (transitively through Model methods; `eng` excluded as parked whole) and requires parkSession/restoreSession to cover exactly it plus state/acts/cursor; TestWatchIsolatesRoutesEveryFoldedMsg requires watchRouteOf to name exactly `Model.fold`'s case set.
+NOTES (2026-10-17): fixed item 9's `TestArmsLeaveLayoutToTail` failure (leaveWatch's bare `m.layout()` in watch.go, found by this item's `make test`): every swap (enter, leave, the owner fold) now calls `forgetPaintedFrame` (zeroes `m.painted`) and leaves the repaint to Update's tail, since the parked and watched transcripts count generations apart and an equal generation would otherwise skip the repaint.
+NOTES (2026-10-17): consequential edit — internal/tui/doc.go: made necessary by watch.go's new role (owner Msgs folded into the parked session, engine-setter refusals).
+NOTES (2026-10-17): watch.go is now 691 lines (item 9 already over the ~400 guideline) and watch_test.go 1128.
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** while watching, nothing the owner's session holds is saved, changed or lost, and every way out of watch restores it:

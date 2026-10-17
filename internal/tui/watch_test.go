@@ -2,6 +2,11 @@ package tui
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -561,4 +566,563 @@ func containsPoll(msg tea.Msg, gen int) bool {
 		}
 	}
 	return false
+}
+
+// ----------------------------------------------------------------------------
+// Isolating the watcher's own session (item 9a)
+// ----------------------------------------------------------------------------
+
+// watchedTexts are the texts the isolation fixtures put in the watched session: none of them may
+// ever reach the watcher's own record.
+var watchedTexts = []string{"first ask", "first answer", "saved after the journal was born", "theirs"}
+
+// isolationFixture is a watched session whose record head and journal both carry watchedTexts.
+func isolationFixture(t *testing.T) *watchFixture {
+	t.Helper()
+	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	f.prompt("theirs", false)
+	return f
+}
+
+// ownerSession builds the watcher's own idle session over eng and host, with one exchange of its own
+// in the transcript and a quiescent boundary cached, so a progress save has an engine half to pair.
+func ownerSession(t *testing.T, eng *fakeEngine, host *fakeSessionHost) Model {
+	t.Helper()
+	m := newSessionModel(t, eng, host)
+	m.transcript.addUser("my own question", nil)
+	m.cacheBoundary(domain.Session{})
+	return m
+}
+
+// enterAndFollow enters watch on f over m and folds the first read and one poll.
+func enterAndFollow(t *testing.T, m Model, f *watchFixture) Model {
+	t.Helper()
+	m, cmd := m.enterWatch(f.src)
+	if !m.watch.isActive {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	return pollWatch(t, step(t, m, cmd()))
+}
+
+// assertSavesCarryOnlyTheOwner fails when a save the host took carries a watched entry, or misses
+// the owner's own question.
+func assertSavesCarryOnlyTheOwner(t *testing.T, host *fakeSessionHost) {
+	t.Helper()
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	for i, save := range host.saves {
+		entries, err := decodeTranscript(save.transcript)
+		if err != nil {
+			t.Fatalf("save %d: decode: %v", i, err)
+		}
+		var texts []string
+		for _, e := range entries {
+			texts = append(texts, e.text)
+		}
+		if !slices.Contains(texts, "my own question") {
+			t.Errorf("save %d carries %q; want the owner's own question", i, texts)
+		}
+		for _, watched := range watchedTexts {
+			if slices.Contains(texts, watched) {
+				t.Errorf("save %d carries the watched entry %q: %q", i, watched, texts)
+			}
+		}
+	}
+}
+
+// assertNoRetargets fails when the host was asked to rename, fork or rotate anything.
+func assertNoRetargets(t *testing.T, host *fakeSessionHost) {
+	t.Helper()
+	host.mu.Lock()
+	defer host.mu.Unlock()
+	if len(host.renames) != 0 || len(host.forks) != 0 || host.rotates != 0 {
+		t.Errorf("host renames=%v forks=%v rotates=%d; want none", host.renames, host.forks, host.rotates)
+	}
+}
+
+// countToolCalls counts the transcript's tool-call entries.
+func countToolCalls(m Model) int {
+	n := 0
+	for _, e := range m.transcript.entries {
+		if e.kind == entryToolCall {
+			n++
+		}
+	}
+	return n
+}
+
+func TestWatchIsolatesOwnerEventsInTheParkedSession(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	m := enterAndFollow(t, ownerSession(t, watchEngine(), host), isolationFixture(t))
+	watchedCalls := countToolCalls(m)
+	delegation := domain.ToolCallEvent{EventBase: domain.EventBase{Turn: 1}, Call: domain.ToolCall{
+		ID: "own-s1", Tool: subAgentToolName, Arguments: []byte(`{"task":"owner work"}`),
+	}}
+
+	m, cmd := stepCmd(t, m, eventMsg{Event: delegation})
+	m = runWrites(t, m, cmd)
+
+	if got := countToolCalls(m); got != watchedCalls {
+		t.Errorf("tool calls in the watch view = %d, want %d: the owner's event reached the view", got, watchedCalls)
+	}
+	if !m.watch.isActive {
+		t.Fatal("the owner's event ended the watch")
+	}
+	host.mu.Lock()
+	saves := len(host.saves)
+	host.mu.Unlock()
+	if saves == 0 {
+		t.Error("the owner's delegation made no progress save; the parked session's record fell behind")
+	}
+	assertSavesCarryOnlyTheOwner(t, host)
+
+	m = step(t, m, keyEsc())
+
+	if got := countToolCalls(m); got != 1 {
+		t.Errorf("tool calls after esc = %d, want the owner's one delegation", got)
+	}
+	if got := entryTexts(m, entryUser); !slices.Equal(got, []string{"my own question"}) {
+		t.Errorf("user entries after esc = %q; want only the owner's", got)
+	}
+	assertNoRetargets(t, host)
+}
+
+func TestWatchIsolatesQuitFromTheWatch(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		isRunning bool
+		isFresh   bool
+	}{
+		{name: "idle", isRunning: false},
+		{name: "while the watched run is running", isRunning: true},
+		{name: "a fresh owner session", isFresh: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host := &fakeSessionHost{}
+			var m Model
+			if tc.isFresh {
+				m = newSessionModel(t, watchEngine(), host)
+			} else {
+				m = ownerSession(t, watchEngine(), host)
+			}
+			f := isolationFixture(t)
+			if !tc.isRunning {
+				f.emit(domain.TurnEvent{EventBase: domain.EventBase{Turn: 1}, Status: domain.StatusExchangeComplete})
+			}
+			m = enterAndFollow(t, m, f)
+			if got := m.state == stateRunning; got != tc.isRunning {
+				t.Fatalf("setup: watched run running = %v, want %v", got, tc.isRunning)
+			}
+
+			m = step(t, m, keyCtrlC())
+			m, cmd := stepCmd(t, m, keyCtrlC())
+
+			if m.watch.isActive {
+				t.Fatal("ctrl+c quit without leaving the watch first")
+			}
+			m = drainToQuit(t, m, cmd)
+			host.mu.Lock()
+			saves := len(host.saves)
+			host.mu.Unlock()
+			if tc.isFresh && saves != 0 {
+				t.Errorf("a fresh owner session saved %d records on quit; want none", saves)
+			}
+			if !tc.isFresh && saves == 0 {
+				t.Error("the owner's own session was not flushed on quit")
+			}
+			assertSavesCarryOnlyTheOwner(t, host)
+			assertNoRetargets(t, host)
+		})
+	}
+}
+
+func TestWatchIsolatesTheEngineSetters(t *testing.T) {
+	t.Parallel()
+	eng := watchEngine()
+	m := newTestModelEng(t, eng, testOpts)
+	modeBefore := m.opts.Mode
+	m = enterAndFollow(t, m, isolationFixture(t))
+	refused := func(name string, m Model) {
+		t.Helper()
+		if m.flash != watchRefusedFlash {
+			t.Errorf("%s: flash = %q, want the watch refusal", name, m.flash)
+		}
+	}
+
+	m = step(t, m, keyShiftTab())
+	refused("shift+tab", m)
+	m.flash = ""
+	m.picker = picker{open: true, kind: pickerMode}
+	m = step(t, m, keyEnter())
+	refused("the mode picker's accept", m)
+	m.picker = picker{}
+	for _, line := range []string{"/mode auto", "/effort high", "/confine off", "/model other", "/compact", "/clear"} {
+		m.flash = ""
+		m.input.SetValue(line)
+		m = step(t, m, keyEnter())
+		refused(line, m)
+	}
+	m = step(t, m, keyEsc())
+
+	if m.opts.Mode != modeBefore {
+		t.Errorf("opts.Mode = %q after the watch, want %q", m.opts.Mode, modeBefore)
+	}
+	if len(eng.modeSet) != 0 || len(eng.effortSet) != 0 || len(eng.confineSet) != 0 ||
+		eng.compactCalls != 0 || eng.clearCalls != 0 {
+		t.Errorf("an engine setter reached the watcher's engine: modes=%v efforts=%v confines=%v compacts=%d clears=%d",
+			eng.modeSet, eng.effortSet, eng.confineSet, eng.compactCalls, eng.clearCalls)
+	}
+}
+
+func TestWatchIsolatesARecordWriteInFlightAtEntry(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	m := ownerSession(t, watchEngine(), host)
+	m, first := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{}})
+	m, queued := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{}})
+	if first == nil || queued != nil || len(m.pendingWrites) != 1 {
+		t.Fatalf("setup: want one save in flight and one queued, got first=%v queued=%v pending=%d",
+			first != nil, queued != nil, len(m.pendingWrites))
+	}
+
+	m = enterAndFollow(t, m, isolationFixture(t))
+	m = runWrites(t, m, first)
+
+	host.mu.Lock()
+	saves := len(host.saves)
+	host.mu.Unlock()
+	if saves != 2 || m.writeBusy || len(m.pendingWrites) != 0 {
+		t.Errorf("saves = %d busy=%v pending=%d; want both writes landed through the parked host",
+			saves, m.writeBusy, len(m.pendingWrites))
+	}
+	assertSavesCarryOnlyTheOwner(t, host)
+	if !m.watch.isActive {
+		t.Error("the landed writes ended the watch")
+	}
+}
+
+func TestWatchIsolatesOwnerStateChangesUntilEsc(t *testing.T) {
+	t.Parallel()
+	t.Run("a generated title names the owner's session", func(t *testing.T) {
+		t.Parallel()
+		m := enterAndFollow(t, ownerSession(t, watchEngine(), &fakeSessionHost{}), isolationFixture(t))
+
+		m = step(t, m, autoTitleMsg{title: "Named by the model"})
+
+		if m.sessionName != "" {
+			t.Errorf("watch view sessionName = %q; the owner's title reached the view", m.sessionName)
+		}
+		m = step(t, m, keyEsc())
+		if m.sessionName != "Named by the model" {
+			t.Errorf("owner sessionName after esc = %q, want the generated title", m.sessionName)
+		}
+	})
+	t.Run("a beat rebind lands on the owner's transcript", func(t *testing.T) {
+		t.Parallel()
+		rb := &fakeRebind{}
+		m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+		m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+		m = enterAndFollow(t, m, isolationFixture(t))
+		changed := "model changed: test-model → new-model, context 32k → 16k"
+
+		m = foldBeatMsg(t, m, upBeat("new-model", 16384))
+
+		if len(rb.calls) != 2 {
+			t.Fatalf("rebind calls = %+v; want the beat during the watch applied", rb.calls)
+		}
+		if n := countNotes(m, changed); n != 0 {
+			t.Error("the owner's rebind note was painted into the watch view")
+		}
+		m = step(t, m, keyEsc())
+		if n := countNotes(m, changed); n != 1 {
+			t.Errorf("change notes after esc = %d, want 1; notes = %q", n, noteTexts(m))
+		}
+	})
+	t.Run("a config reload lands on the owner's transcript", func(t *testing.T) {
+		t.Parallel()
+		rows := []SettingRow{{Path: "context-files.names", Section: "System prompt", Kind: SettingString,
+			Value: "[AGENTS.md]", Editable: true}}
+		edit := &externalEditLog{applied: []AppliedSetting{{Path: "context-files.names", Value: "[CLAUDE.md]"}}}
+		m := enterAndFollow(t, configWatchModel(t, rows, &settingsWriteLog{}, edit), isolationFixture(t))
+
+		m = step(t, m, configChangedMsg{alive: true})
+
+		if edit.reloads != 1 {
+			t.Fatalf("reloads = %d; want the report during the watch applied", edit.reloads)
+		}
+		if got := appliedNotes(m); len(got) != 0 {
+			t.Errorf("the owner's reload note was painted into the watch view: %q", got)
+		}
+		m = step(t, m, keyEsc())
+		if got := appliedNotes(m); len(got) != 1 {
+			t.Errorf("applied notes after esc = %q, want the reload's one line", got)
+		}
+	})
+}
+
+func TestWatchIsolatesAPendingWakeUntilEsc(t *testing.T) {
+	t.Parallel()
+	eng := watchEngine()
+	m := newTestModelEng(t, eng, testOpts)
+	// Pending before the watch starts: enterWatch is called directly, so no fold can take it first.
+	m.wakePending = true
+	f := isolationFixture(t)
+	f.emit(domain.TurnEvent{EventBase: domain.EventBase{Turn: 1}, Status: domain.StatusExchangeComplete})
+
+	m, cmd := m.enterWatch(f.src)
+	m = pollWatch(t, step(t, m, cmd()))
+	if m.state != stateIdle {
+		t.Fatalf("setup: watched run state = %v, want idle so only the watch holds the wake", m.state)
+	}
+
+	if !m.wakePending || eng.wakeCalls != 0 {
+		t.Fatalf("wakePending=%v wakeCalls=%d during the watch; want the wake held", m.wakePending, eng.wakeCalls)
+	}
+	m = step(t, m, keyEsc())
+	if eng.wakeCalls != 1 {
+		t.Errorf("wake calls after esc = %d, want the held wake delivered to the owner's engine", eng.wakeCalls)
+	}
+}
+
+func TestWatchIsolatesThePaintsOfTheRestoredTranscript(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, watchEngine(), testOpts)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 80})
+	// The owner's user entry sits at index 3, where the watched transcript paints its own "theirs":
+	// a cache the two shared would hand one's paint to the other (paintcache.go keys by index).
+	m.transcript.addNote("my own note")
+	m.transcript.addNote("my second note")
+	m.transcript.addUser("my own question", nil)
+	_ = m.View() // warm the owner's paint cache at the indices the watch will reuse
+
+	m = enterAndFollow(t, m, isolationFixture(t))
+	_ = m.View()
+	m = step(t, m, keyEsc())
+
+	screen := plain(m.View())
+	for _, want := range []string{"my own question", "my own note", "my second note"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the restored view is missing %q:\n%s", want, screen)
+		}
+	}
+	for _, watched := range watchedTexts {
+		if strings.Contains(screen, watched) {
+			t.Errorf("the restored view paints the watched %q:\n%s", watched, screen)
+		}
+	}
+}
+
+// packageMethods parses this package's production files and returns its Model methods by name.
+func packageMethods(t *testing.T) map[string]*ast.FuncDecl {
+	t.Helper()
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	methods := map[string]*ast.FuncDecl{}
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if ok && fn.Recv != nil && strings.TrimPrefix(types.ExprString(fn.Recv.List[0].Type), "*") == "Model" {
+				methods[fn.Name.Name] = fn
+			}
+		}
+	}
+	return methods
+}
+
+// receiverName is the name a Model method calls its receiver.
+func receiverName(fn *ast.FuncDecl) string {
+	return fn.Recv.List[0].Names[0].Name
+}
+
+// modelField reports the Model field an expression is rooted at — m.transcript.paints is
+// "transcript" — or "" when it is not rooted at the receiver's field.
+func modelField(expr ast.Expr, receiver string) string {
+	for {
+		switch e := expr.(type) {
+		case *ast.SelectorExpr:
+			if id, ok := e.X.(*ast.Ident); ok && id.Name == receiver {
+				return e.Sel.Name
+			}
+			expr = e.X
+		case *ast.IndexExpr:
+			expr = e.X
+		case *ast.StarExpr:
+			expr = e.X
+		case *ast.ParenExpr:
+			expr = e.X
+		default:
+			return ""
+		}
+	}
+}
+
+// fieldsWritten is the set of Model fields method writes — assigns, or calls a method on — and so
+// does every Model method it calls, transitively. A field it only reads is not in the set.
+func fieldsWritten(methods map[string]*ast.FuncDecl, name string, seen map[string]bool) map[string]bool {
+	written := map[string]bool{}
+	fn, ok := methods[name]
+	if !ok || seen[name] {
+		return written
+	}
+	seen[name] = true
+	receiver := receiverName(fn)
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range n.Lhs {
+				if field := modelField(lhs, receiver); field != "" {
+					written[field] = true
+				}
+			}
+		case *ast.IncDecStmt:
+			if field := modelField(n.X, receiver); field != "" {
+				written[field] = true
+			}
+		case *ast.CallExpr:
+			sel, ok := n.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == receiver {
+				for field := range fieldsWritten(methods, sel.Sel.Name, seen) {
+					written[field] = true
+				}
+				return true
+			}
+			if field := modelField(sel.X, receiver); field != "" {
+				written[field] = true
+			}
+		}
+		return true
+	})
+	return written
+}
+
+// fieldsRead is the set of Model fields method names anywhere in its body.
+func fieldsRead(methods map[string]*ast.FuncDecl, name string) map[string]bool {
+	read := map[string]bool{}
+	fn := methods[name]
+	receiver := receiverName(fn)
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == receiver {
+				read[sel.Sel.Name] = true
+			}
+		}
+		return true
+	})
+	return read
+}
+
+// sortedKeys lists a set in order, for a readable failure.
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func TestWatchIsolatesParksExactlyTheSessionViewResetSet(t *testing.T) {
+	t.Parallel()
+	methods := packageMethods(t)
+	want := fieldsWritten(methods, "resetSessionView", map[string]bool{})
+	// The engine resetSessionView asks for the context files is parked whole, as watch.owner; the
+	// run state the watch moves is parked beside the reset set.
+	delete(want, "eng")
+	for _, moved := range []string{"state", "acts", "cursor"} {
+		want[moved] = true
+	}
+
+	parked := fieldsRead(methods, "parkSession")
+	restored := fieldsWritten(methods, "restoreSession", map[string]bool{})
+
+	if !maps.Equal(parked, want) {
+		t.Errorf("parkSession parks %v;\nwant resetSessionView's set plus the run state %v", sortedKeys(parked), sortedKeys(want))
+	}
+	if !maps.Equal(restored, want) {
+		t.Errorf("restoreSession restores %v;\nwant %v", sortedKeys(restored), sortedKeys(want))
+	}
+}
+
+// switchCases lists the case types of the first type switch in method's body.
+func switchCases(t *testing.T, fn *ast.FuncDecl) map[string]bool {
+	t.Helper()
+	cases := map[string]bool{}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		sw, ok := n.(*ast.TypeSwitchStmt)
+		if !ok || len(cases) > 0 {
+			return len(cases) == 0
+		}
+		for _, stmt := range sw.Body.List {
+			for _, expr := range stmt.(*ast.CaseClause).List {
+				cases[types.ExprString(expr)] = true
+			}
+		}
+		return false
+	})
+	return cases
+}
+
+func TestWatchIsolatesRoutesEveryFoldedMsg(t *testing.T) {
+	t.Parallel()
+	methods := packageMethods(t)
+	folded := switchCases(t, methods["fold"])
+	if len(folded) == 0 {
+		t.Fatal("found no case in Model.fold")
+	}
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "watch.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse watch.go: %v", err)
+	}
+	var routed map[string]bool
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "watchRouteOf" {
+			routed = switchCases(t, fn)
+		}
+	}
+
+	if !maps.Equal(folded, routed) {
+		t.Errorf("watchRouteOf routes %v;\nwant every Msg Model.fold folds: %v", sortedKeys(routed), sortedKeys(folded))
+	}
+}
+
+func TestWatchIsolatesHoldsTheOwnersSurfacesUntilEsc(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	m := enterAndFollow(t, ownerSession(t, watchEngine(), host), isolationFixture(t))
+	listing := sessionListMsg{metas: []session.Meta{{ID: "s1", Title: "an older task"}}}
+
+	m = step(t, m, listing)
+
+	if m.sessionBrowser.open {
+		t.Fatal("the owner's /sessions listing opened over the watch view")
+	}
+	m, cmd := stepCmd(t, m, keyEsc())
+	if m.sessionBrowser.open {
+		t.Fatal("the held listing opened before it was delivered again")
+	}
+	for _, msg := range expandBatch(cmd) {
+		m = step(t, m, msg)
+	}
+	if !m.sessionBrowser.open {
+		t.Error("the held listing was lost on the way out of the watch")
+	}
 }

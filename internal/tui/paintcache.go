@@ -333,8 +333,9 @@ type paintCache struct {
 	misses int
 }
 
-// newPaintCache returns a ready cache. Production builds exactly one, in newModel, and hands it to
-// the transcript; everything else runs against a nil cache and renders cold.
+// newPaintCache returns a ready cache. Production builds one in newModel and hands it to the
+// transcript, and a watch builds a second for the watched view while the first stays with the
+// parked session (watch.go, enterWatch); everything else runs against a nil cache and renders cold.
 func newPaintCache() *paintCache { return &paintCache{rows: make(map[int]paintRow)} }
 
 // lookup returns the paint stored for this head index when it was stored under this exact key, and
