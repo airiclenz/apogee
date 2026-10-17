@@ -31,6 +31,10 @@
 // flushes one line per Event, forwards to the sink it wraps, and writes the two frames — plus the
 // frame structs a Driver fills.
 //
+// journal.go is the coalesced variant: the Journal a Driver writes beside a live session's record
+// (ADR 0103), the same lines with adjacent token and reasoning deltas merged over a short window,
+// its own frames, and the prompt line.
+//
 // decode.go is the way back: Decode reads one line into its envelope and its domain.Event, a frame
 // or a journal prompt line, for a reader watching a live session's Event journal (ADR 0103).
 package eventjson

@@ -1,0 +1,11 @@
+{"event":"run_started","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":null,"depth":null,"call_id":null,"run_id":null,"data":{"session":"s-1","workspace":"/work/project","title":"fix the parser","entries":3}}
+{"event":"prompt","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":null,"depth":null,"call_id":null,"run_id":null,"data":{"text":"fix the parser","interjection":false}}
+{"event":"reasoning","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":1,"depth":0,"call_id":null,"run_id":null,"data":{"text":"Look at the parser."}}
+{"event":"token","v":2,"seq":4,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":1,"depth":0,"call_id":null,"run_id":null,"data":{"text":"Delegating."}}
+{"event":"message","v":2,"seq":5,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":1,"depth":0,"call_id":null,"run_id":null,"data":{"text":"Delegating."}}
+{"event":"token","v":2,"seq":6,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":1,"depth":1,"call_id":"call-1","run_id":"run-1","data":{"text":"Child reads."}}
+{"event":"token","v":2,"seq":7,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":1,"depth":0,"call_id":null,"run_id":null,"data":{"text":"Parent "}}
+{"event":"prompt","v":2,"seq":8,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":null,"depth":null,"call_id":null,"run_id":null,"data":{"text":"and its tests","interjection":true}}
+{"event":"token","v":2,"seq":9,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":1,"depth":0,"call_id":null,"run_id":null,"data":{"text":"waits."}}
+{"event":"token","v":2,"seq":10,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":2,"depth":0,"call_id":null,"run_id":null,"data":{"text":"Done."}}
+{"event":"run_finished","v":2,"seq":11,"time":"2026-09-07T12:00:00Z","session":"s-1","turn":null,"depth":null,"call_id":null,"run_id":null,"data":{}}

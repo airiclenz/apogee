@@ -167,7 +167,12 @@ NOTES (2026-10-17): no CHANGELOG entry — the decoder is internal and changes n
 
 Depends on item 3.
 
-## 5. eventjson: coalescing journal writer
+## 5. eventjson: coalescing journal writer — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): consequential edit — internal/eventjson/doc.go: made necessary by the new journal.go (the package doc's one-paragraph-per-file map now names it).
+NOTES (2026-10-17): the journal's opening frame is a journal-only `JournalStarted{session, workspace, title, entries}` rather than RunStarted plus two members: JournalOptions (the Goal's field list) carries no model/server/mode/bypass/confined/version, so embedding RunStarted would write misleading zero values. The closing frame's data is an empty object (`journalFinished{}`); `Close()` takes no outcome, per the Goal.
+NOTES (2026-10-17): `Decode` reads a journal's run_started into `*RunStarted`, so `title` and `entries` are not surfaced by the decoder yet — the watch-mode reader (item 9) has to read them (decode.go was outside this item's Files).
+NOTES (2026-10-17): the golden test carries a package-local `-update` flag (`go test ./internal/eventjson -run TestJournalGolden -update`); the merge key is the whole EventBase plus kind, as teaSink's is (Depth, Turn, RunID and the CallID they imply).
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** `eventjson.NewJournal(w io.Writer, JournalOptions{Session, Title, Workspace, Entries, Report, Now, Window})` is a sink. It writes `run_started` (with the item 1 fields) on open and `run_finished` on `Close`. It merges consecutive `token`/`reasoning` deltas that share depth, run id and turn for up to 30 ms. It flushes a pending delta before any other event, on `Close`, and from a timer once the window passes, so a quiet stream still lands within ~30 ms. It never drops content. On the first write error it reports once through `Report` and goes silent.
