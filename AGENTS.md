@@ -47,11 +47,16 @@ Without a `capcom` binary, install it from https://github.com/airiclenz/capcom#i
 
 - `capcom ready`: the issues ready to work on, most urgent first
 - `capcom show <id>`: one issue in full, with what blocks it
+- `capcom update <id> --status active`: claim it before you start
+- `capcom log <id> <text>`: note progress as work lands
+- `capcom close <id> --reason <text>`: close an issue; it names the issues this made ready
+- `capcom reopen <id> --reason <text>`: undo a close
 - `capcom create --id <slug> --title <title> [--dep <id>]`: file a new issue
 - `capcom dep add <id> <dep-id>`: make an issue wait for another; `capcom dep list <id>` shows both sides
-- `capcom close <id> --reason <text>`: close an issue; it names the issues this made ready
 - `capcom list --tree --depth 2`: the outline of the issues
 - `capcom know tree`: the outline of the Knowledge tree; `capcom know show <id>` reads a Note
+
+Each command's flags are in `capcom <cmd> --help`.
 
 An issue's body says what is wrong or wanted, why, and how to tell it is done (`## Acceptance`),
 readable on its own; a plan says how and in what order.

@@ -3,6 +3,7 @@ title: Stopping a queued re-run claims its folder was marked stopped
 status: open
 type: bug
 priority: 2
+plan: 2026-10-17 - 00 - queued-rerun-stop-answer-plan
 created: 2026-10-14T17:50:59Z
 ---
 
