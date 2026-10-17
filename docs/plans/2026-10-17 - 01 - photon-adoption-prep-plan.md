@@ -79,7 +79,10 @@ cmd/demorig/anchors_test.go — heroEntries, heroRecord, TestHeroFixtureIsCurren
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/sessionexpect/`
 **Commit:** `feat(sessionexpect): port demorig's session-entry judge`
 
-## 3. sessionexpect: the command and its build wiring
+## 3. sessionexpect: the command and its build wiring — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the one-line detail is printed on stdout on a pass as well as on a fail; a judged fail returns a sentinel (`errExpectFailed`) that main does not echo on stderr, while a session that cannot be found or read is a run failure (exit 1) printed on stderr as `sessionexpect: no session saved under <dir>` (demorig's `— the take cannot be checked` tail dropped).
+NOTES (2026-10-17): Cobra validates required flags only after PreRunE, so PreRunE calls `cmd.ValidateRequiredFlags()` first; a missing `--entry` reads `required flag(s) "entry" not set` (exit 2). An empty `$PHOTON_WORK` counts as unset.
 
 **What:**
 **Goal:** `sessionexpect --entry <selector> [--contains <s>] [--before <selector>] [--after <selector>] [--sessions <dir>]` judges the newest session and exits 0 on a pass, 1 with the one-line detail on stdout on a fail, 2 on bad usage; `--sessions` defaults to `$PHOTON_WORK/home/.apogee/sessions`; `make sessionexpect` builds `./sessionexpect`.

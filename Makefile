@@ -103,6 +103,11 @@ build:
 stubllm:
 	go build -o stubllm ./cmd/stubllm
 
+## sessionexpect: build the session-entry expect judge to ./sessionexpect (a dev tool, never a release asset)
+.PHONY: sessionexpect
+sessionexpect:
+	go build -o sessionexpect ./cmd/sessionexpect
+
 ## demorig: build the demo storyboard rig to ./demorig (a dev tool, never a release asset)
 .PHONY: demorig
 demorig:

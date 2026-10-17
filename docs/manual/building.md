@@ -21,6 +21,7 @@ A `Makefile` wraps the common Go invocations:
 | `make install` | Build, then copy the binary to a directory on your `PATH` |
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
 | `make stubllm` | Compile the scripted test upstream to `./stubllm` — a dev tool, never a release asset |
+| `make sessionexpect` | Compile the session-entry expect judge to `./sessionexpect` — a dev tool, never a release asset; it judges the newest saved session for photon's `run:` expects (`./sessionexpect --help`) |
 | `make demorig` | Compile the demo storyboard rig to `./demorig` — a dev tool, never a release asset (see `graphics/demo/README.md`, "Storyboards") |
 | `make test` | Run the test suite with the race detector, as a queue of short-lived processes over a few lanes (see [Testing](#testing)); `ARGS="..."` passes extra `go test` flags to every process |
 | `make test-timings-seed` | Copy the last run's `.test-timings` into the committed `scripts/test-timings.seed` the runner packs by on a fresh checkout (see [Testing](#testing)) |
