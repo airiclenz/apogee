@@ -6,7 +6,8 @@
 #   ./setup.sh
 #
 # Overridable:
-#   APOGEE_DEMO_WORK        where the rig is built    (default ~/.cache/apogee-demo)
+#   APOGEE_DEMO_WORK        where the rig is built    (default $PHOTON_WORK, else ~/.cache/apogee-demo)
+#   PHOTON_WORK             photon's work dir, used when APOGEE_DEMO_WORK is unset
 #   APOGEE_DEMO_PORT        the local model port      (default 18181)
 #   APOGEE_DEMO_HOST_ALIAS  the name in the footer    (default openrouter)
 #   APOGEE_DEMO_MODEL       the model in the footer   (default ~deepseek/deepseek-v4-flash-latest)
@@ -23,7 +24,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
-WORK="${APOGEE_DEMO_WORK:-$HOME/.cache/apogee-demo}"
+WORK="${APOGEE_DEMO_WORK:-${PHOTON_WORK:-$HOME/.cache/apogee-demo}}"
 PORT="${APOGEE_DEMO_PORT:-18181}"
 HOST_ALIAS="${APOGEE_DEMO_HOST_ALIAS:-openrouter}"
 MODEL="${APOGEE_DEMO_MODEL:-~deepseek/deepseek-v4-flash-latest}"
@@ -97,4 +98,12 @@ echo "  work dir : $WORK"
 echo "  stage    : $STAGE"
 echo "  server   : $HOST_ALIAS at http://127.0.0.1:$PORT   model: $MODEL"
 echo
-echo "next (from the repo root): go run ./cmd/demorig record graphics/demo/storyboards/hero.yaml"
+# demorig reads only APOGEE_DEMO_WORK or --work, so a rig built from PHOTON_WORK or the default
+# names its work dir explicitly in the hint.
+if [ -n "${APOGEE_DEMO_WORK:-}" ]; then
+  echo "next (from the repo root): go run ./cmd/demorig record graphics/demo/storyboards/hero.yaml"
+else
+  cat <<HINT
+next (from the repo root): go run ./cmd/demorig record --work "$WORK" graphics/demo/storyboards/hero.yaml
+HINT
+fi

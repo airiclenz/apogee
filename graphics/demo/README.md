@@ -67,7 +67,10 @@ server; naming a variable that is unset is refused rather than capturing a casse
 
 Nothing is built inside this repo. The rig lands in `~/.cache/apogee-demo` (override with
 `APOGEE_DEMO_WORK`, or `--work` on `capture` and `record`), which keeps a 60 MB+ Go build cache,
-a generated apogee home and the takes out of the tree.
+a generated apogee home and the takes out of the tree. `setup.sh` and `reset.sh` also read
+`PHOTON_WORK` when `APOGEE_DEMO_WORK` is unset (`APOGEE_DEMO_WORK` wins when both are set), but
+demorig reads only `APOGEE_DEMO_WORK` or `--work`, so a rig built from `PHOTON_WORK` alone needs
+`--work` on `capture` and `record` — `setup.sh`'s closing hint names it.
 
 ## How a take works
 

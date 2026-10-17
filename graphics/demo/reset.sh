@@ -4,7 +4,7 @@
 # The gitignored Go caches survive, so takes stay fast.
 set -euo pipefail
 
-WORK="${APOGEE_DEMO_WORK:-$HOME/.cache/apogee-demo}"
+WORK="${APOGEE_DEMO_WORK:-${PHOTON_WORK:-$HOME/.cache/apogee-demo}}"
 DEMO_HOME="$WORK/home"
 STAGE="$DEMO_HOME/Repos/taskman"
 

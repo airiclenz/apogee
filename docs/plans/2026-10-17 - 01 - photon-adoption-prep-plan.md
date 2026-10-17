@@ -99,7 +99,9 @@ NOTES (2026-10-17): Cobra validates required flags only after PreRunE, so PreRun
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/sessionexpect/`
 **Commit:** `feat(sessionexpect): add the command and its make target`
 
-## 4. Rig scripts read `PHOTON_WORK`
+## 4. Rig scripts read `PHOTON_WORK` — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): setup.sh's closing hint prints the `--work "$WORK"` line through an unquoted heredoc (so the source carries the literal text the Acceptance grep looks for); it also appears in the default-fallback case, since demorig's own default only matches when neither variable is set.
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** `graphics/demo/setup.sh` and `reset.sh` resolve the work dir as `$APOGEE_DEMO_WORK`, else `$PHOTON_WORK`, else `~/.cache/apogee-demo`; `graphics/demo/README.md` names both variables.
