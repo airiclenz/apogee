@@ -90,7 +90,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"spawn_run_id":"0badc0de.2"}`,
 		},
 		{
-			name: "tool_result drops the summary",
+			name: "tool_result carries its summary",
 			event: domain.ToolResultEvent{
 				EventBase: domain.EventBase{Turn: 2},
 				Result: domain.ToolResult{
@@ -103,7 +103,8 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"result":{"call_id":"call-3","content":"4 matches","is_error":false},` +
+			wantData: `{"result":{"call_id":"call-3","content":"4 matches","is_error":false,` +
+				`"summary":{"kind":"matched_lines","total":4}},` +
 				`"tool":"grep","write_target":"","spawn_run_id":""}`,
 		},
 		{
@@ -116,7 +117,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"result":{"call_id":"call-4","content":"wrote docs/notes.md","is_error":false},` +
+			wantData: `{"result":{"call_id":"call-4","content":"wrote docs/notes.md","is_error":false,"summary":null},` +
 				`"tool":"write_file","write_target":"/work/docs/notes.md","spawn_run_id":""}`,
 		},
 		{
@@ -129,7 +130,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"result":{"call_id":"call-5","content":"report","is_error":false},` +
+			wantData: `{"result":{"call_id":"call-5","content":"report","is_error":false,"summary":null},` +
 				`"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.2"}`,
 		},
 		{
@@ -140,7 +141,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "sub_agent_phase",
 			wantBase: domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9"},
-			wantData: `{"phase":"started","result":{"call_id":"","content":"","is_error":false},` +
+			wantData: `{"phase":"started","result":{"call_id":"","content":"","is_error":false,"summary":null},` +
 				`"cancelled":false}`,
 		},
 		{
@@ -150,12 +151,18 @@ func TestEncodeJSONGolden(t *testing.T) {
 			event: domain.SubAgentPhaseEvent{
 				EventBase: domain.EventBase{Depth: 1, Turn: 6, CallID: "call-9"},
 				Phase:     domain.SubAgentFinished,
-				Result:    domain.ToolResult{CallID: "call-9", Content: "stopped", IsError: true},
+				Result: domain.ToolResult{
+					CallID:  "call-9",
+					Content: "stopped",
+					IsError: true,
+					Summary: domain.DelegationOutcome{IsStoppedByUser: true, SteeredMessages: 1},
+				},
 			},
 			wantKind: "sub_agent_phase",
 			wantBase: domain.EventBase{Depth: 1, Turn: 6, CallID: "call-9"},
-			wantData: `{"phase":"finished","result":{"call_id":"call-9","content":"stopped","is_error":true},` +
-				`"cancelled":false}`,
+			wantData: `{"phase":"finished","result":{"call_id":"call-9","content":"stopped","is_error":true,` +
+				`"summary":{"kind":"delegation_outcome","bound":"","stopped_by_user":true,"has_no_report":false,` +
+				`"steered_messages":1}},"cancelled":false}`,
 		},
 		{
 			name: "workflow_phase started",
@@ -488,6 +495,114 @@ func TestEncodeJSONGolden(t *testing.T) {
 			}
 			if string(encoded) != c.wantData {
 				t.Errorf("data JSON =\n  %s\nwant\n  %s", encoded, c.wantData)
+			}
+		})
+	}
+}
+
+// TestEncodeToolSummaryMirror pins the tagged `summary` object of ADR 0103 decision 9: one case per
+// domain.ToolSummary variant, each naming its variant as `kind` ahead of its facts, and a nil
+// summary written as `"summary":null` rather than dropped (ADR 0075 decision 3).
+func TestEncodeToolSummaryMirror(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		summary     domain.ToolSummary
+		wantSummary string
+	}{
+		{name: "nil", summary: nil, wantSummary: `null`},
+		{
+			name:        "read_span without a locate term",
+			summary:     domain.ReadSpan{Start: 1, End: 40, Total: 120},
+			wantSummary: `{"kind":"read_span","start":1,"end":40,"total":120,"locate":"","located_on":null}`,
+		},
+		{
+			name:    "read_span with a locate term",
+			summary: domain.ReadSpan{Start: 10, End: 20, Total: 90, Locate: "Encode", LocatedOn: []int{12, 77}},
+			wantSummary: `{"kind":"read_span","start":10,"end":20,"total":90,"locate":"Encode",` +
+				`"located_on":[12,77]}`,
+		},
+		{
+			name:        "read_span whose locate term matched nothing",
+			summary:     domain.ReadSpan{Start: 1, End: 5, Total: 5, Locate: "absent", LocatedOn: []int{}},
+			wantSummary: `{"kind":"read_span","start":1,"end":5,"total":5,"locate":"absent","located_on":[]}`,
+		},
+		{
+			name:        "listed_entries",
+			summary:     domain.ListedEntries{Total: 48, Skipped: 20},
+			wantSummary: `{"kind":"listed_entries","total":48,"skipped":20}`,
+		},
+		{
+			name:        "matched_lines of zero",
+			summary:     domain.MatchedLines{Total: 0},
+			wantSummary: `{"kind":"matched_lines","total":0}`,
+		},
+		{
+			name:        "diff_stat",
+			summary:     domain.DiffStat{Added: 7, Removed: 3},
+			wantSummary: `{"kind":"diff_stat","added":7,"removed":3}`,
+		},
+		{
+			name:        "changed_files",
+			summary:     domain.ChangedFiles{Staged: 2, Unstaged: 1, Untracked: 4},
+			wantSummary: `{"kind":"changed_files","staged":2,"unstaged":1,"untracked":4}`,
+		},
+		{
+			name: "edit_regions",
+			summary: domain.EditRegions{Regions: []domain.EditRegion{{
+				BeforeStart: 3,
+				AfterStart:  3,
+				Leading:     []string{"a", "b"},
+				Removed:     []string{"old"},
+				Inserted:    []string{"new", "newer"},
+				Trailing:    nil,
+			}}},
+			wantSummary: `{"kind":"edit_regions","regions":[{"before_start":3,"after_start":3,` +
+				`"leading":["a","b"],"removed":["old"],"inserted":["new","newer"],"trailing":null}]}`,
+		},
+		{
+			name:        "edit_regions with none",
+			summary:     domain.EditRegions{},
+			wantSummary: `{"kind":"edit_regions","regions":null}`,
+		},
+		{
+			name:        "search_hits",
+			summary:     domain.SearchHits{Count: 5},
+			wantSummary: `{"kind":"search_hits","count":5}`,
+		},
+		{
+			name:    "delegation_outcome at a bound",
+			summary: domain.DelegationOutcome{Bound: domain.DelegationTokenBudget},
+			wantSummary: `{"kind":"delegation_outcome","bound":"token_budget","stopped_by_user":false,` +
+				`"has_no_report":false,"steered_messages":0}`,
+		},
+		{
+			name:    "delegation_outcome with no report",
+			summary: domain.DelegationOutcome{HasNoReport: true, SteeredMessages: 2},
+			wantSummary: `{"kind":"delegation_outcome","bound":"","stopped_by_user":false,` +
+				`"has_no_report":true,"steered_messages":2}`,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			event := domain.ToolResultEvent{
+				Result: domain.ToolResult{CallID: "call-1", Content: "prose", Summary: c.summary},
+				Tool:   "some_tool",
+			}
+
+			_, _, data, ok := Encode(event)
+			encoded, err := json.Marshal(data)
+
+			if !ok || err != nil {
+				t.Fatalf("Encode ok = %v, json.Marshal err = %v", ok, err)
+			}
+			want := `{"result":{"call_id":"call-1","content":"prose","is_error":false,"summary":` +
+				c.wantSummary + `},"tool":"some_tool","write_target":"","spawn_run_id":""}`
+			if string(encoded) != want {
+				t.Errorf("data JSON =\n  %s\nwant\n  %s", encoded, want)
 			}
 		})
 	}

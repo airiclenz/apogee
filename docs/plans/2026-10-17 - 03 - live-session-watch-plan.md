@@ -100,7 +100,10 @@ Glossary:
 **Acceptance:** `capcom check`; `capcom know show "ADR 0103"`; `capcom know show "Event journal"`; `capcom know show "Watch mode"`; `capcom know show "Tool summary"` names ADR 0103.
 **Commit:** `docs(adr): record ADR 0103 — live sessions watchable through an event journal`
 
-## 2. eventjson: ToolSummary wire mirror
+## 2. eventjson: ToolSummary wire mirror — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): consequential edit — internal/eventjson/writer_test.go: made necessary by the new `summary` member on every tool_result line (its expected line gains `"summary":null`)
+NOTES (2026-10-17): DelegationOutcome.Bound is spelled on the wire as a name (`step_cap`, `token_budget`, `time_limit`, `""` when unbounded), not the Go enum's integer; the manual gains a `### The tool summary` section listing every kind's facts beside the two table rows
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** `tool_result` and `sub_agent_phase` lines carry the result's ToolSummary as an additive `summary` object, `{"kind": <variant>, …facts}`, for all eight variants in `internal/domain/toolsummary.go`. A nil summary writes `"summary":null`. `v` stays 2.

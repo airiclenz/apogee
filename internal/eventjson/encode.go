@@ -527,13 +527,110 @@ type toolCall struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-// toolResult mirrors domain.ToolResult. Summary is deliberately absent: it is a sealed interface
-// whose implementations are view-facing, never persisted, and a JSON rendering of it would be a
-// second contract this one does not want to own.
+// toolResult mirrors domain.ToolResult. Summary is the result's Tool summary as a tagged object —
+// one of the *Summary mirrors below, or nil for a result that carries none, which encodes as
+// `"summary":null` (ADR 0103 decision 9). It joined the object additively (ADR 0075 decision 10),
+// so it sits last.
 type toolResult struct {
 	CallID  string `json:"call_id"`
 	Content string `json:"content"`
 	IsError bool   `json:"is_error"`
+	Summary any    `json:"summary"`
+}
+
+// The Tool summary mirror (ADR 0103 decision 9). domain.ToolSummary is a sealed sum type, so each
+// variant gets its own tagged shape here, and `kind` names the variant in snake_case ahead of its
+// facts. This package owns the mirror the way internal/session owns session.EditRegion: the facts a
+// variant carries are copied onto wire names this package decides, and the domain type stays
+// untagged. A nil slice member encodes as null, an empty one as `[]`, so the copy is lossless.
+const (
+	summaryReadSpan          = "read_span"
+	summaryListedEntries     = "listed_entries"
+	summaryMatchedLines      = "matched_lines"
+	summaryDiffStat          = "diff_stat"
+	summaryChangedFiles      = "changed_files"
+	summaryEditRegions       = "edit_regions"
+	summarySearchHits        = "search_hits"
+	summaryDelegationOutcome = "delegation_outcome"
+)
+
+// readSpanSummary mirrors domain.ReadSpan: the 1-based inclusive span returned, the file's total
+// lines, the locate term ("" when none was asked for) and the absolute lines it was found on.
+type readSpanSummary struct {
+	Kind      string `json:"kind"`
+	Start     int    `json:"start"`
+	End       int    `json:"end"`
+	Total     int    `json:"total"`
+	Locate    string `json:"locate"`
+	LocatedOn []int  `json:"located_on"`
+}
+
+// listedEntriesSummary mirrors domain.ListedEntries.
+type listedEntriesSummary struct {
+	Kind    string `json:"kind"`
+	Total   int    `json:"total"`
+	Skipped int    `json:"skipped"`
+}
+
+// matchedLinesSummary mirrors domain.MatchedLines.
+type matchedLinesSummary struct {
+	Kind  string `json:"kind"`
+	Total int    `json:"total"`
+}
+
+// diffStatSummary mirrors domain.DiffStat.
+type diffStatSummary struct {
+	Kind    string `json:"kind"`
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
+}
+
+// changedFilesSummary mirrors domain.ChangedFiles.
+type changedFilesSummary struct {
+	Kind      string `json:"kind"`
+	Staged    int    `json:"staged"`
+	Unstaged  int    `json:"unstaged"`
+	Untracked int    `json:"untracked"`
+}
+
+// editRegionsSummary mirrors domain.EditRegions: every changed region of the write, in file order.
+type editRegionsSummary struct {
+	Kind    string       `json:"kind"`
+	Regions []editRegion `json:"regions"`
+}
+
+// editRegion mirrors one domain.EditRegion.
+type editRegion struct {
+	BeforeStart int      `json:"before_start"`
+	AfterStart  int      `json:"after_start"`
+	Leading     []string `json:"leading"`
+	Removed     []string `json:"removed"`
+	Inserted    []string `json:"inserted"`
+	Trailing    []string `json:"trailing"`
+}
+
+// searchHitsSummary mirrors domain.SearchHits.
+type searchHitsSummary struct {
+	Kind  string `json:"kind"`
+	Count int    `json:"count"`
+}
+
+// delegationOutcomeSummary mirrors domain.DelegationOutcome. Bound is the engine bound the run was
+// stopped at as a name (delegationBoundNames), "" when none stopped it.
+type delegationOutcomeSummary struct {
+	Kind            string `json:"kind"`
+	Bound           string `json:"bound"`
+	StoppedByUser   bool   `json:"stopped_by_user"`
+	HasNoReport     bool   `json:"has_no_report"`
+	SteeredMessages int    `json:"steered_messages"`
+}
+
+// delegationBoundNames spells each domain.DelegationBound on the wire. DelegationUnbounded is
+// absent, so it — like any bound added later and not yet named here — reads as "".
+var delegationBoundNames = map[domain.DelegationBound]string{
+	domain.DelegationStepCap:     "step_cap",
+	domain.DelegationTokenBudget: "token_budget",
+	domain.DelegationTimeLimit:   "time_limit",
 }
 
 // approvalRequest mirrors domain.ApprovalRequest — every disclosure the gate carries, so a reader
@@ -573,9 +670,68 @@ func toolCallOf(call domain.ToolCall) toolCall {
 	return toolCall{ID: call.ID, Tool: call.Tool, Arguments: rawOrNull(call.Arguments)}
 }
 
-// toolResultOf converts a domain.ToolResult to its wire mirror, dropping Summary.
+// toolResultOf converts a domain.ToolResult to its wire mirror, its Summary included.
 func toolResultOf(res domain.ToolResult) toolResult {
-	return toolResult{CallID: res.CallID, Content: res.Content, IsError: res.IsError}
+	return toolResult{
+		CallID:  res.CallID,
+		Content: res.Content,
+		IsError: res.IsError,
+		Summary: toolSummaryOf(res.Summary),
+	}
+}
+
+// toolSummaryOf converts a domain.ToolSummary to its tagged wire mirror. A nil summary returns nil,
+// which encodes as null; so does a variant this switch does not name, since the sum is sealed and
+// every variant it holds today is listed.
+func toolSummaryOf(summary domain.ToolSummary) any {
+	switch s := summary.(type) {
+	case domain.ReadSpan:
+		return readSpanSummary{
+			Kind: summaryReadSpan, Start: s.Start, End: s.End, Total: s.Total,
+			Locate: s.Locate, LocatedOn: s.LocatedOn,
+		}
+	case domain.ListedEntries:
+		return listedEntriesSummary{Kind: summaryListedEntries, Total: s.Total, Skipped: s.Skipped}
+	case domain.MatchedLines:
+		return matchedLinesSummary{Kind: summaryMatchedLines, Total: s.Total}
+	case domain.DiffStat:
+		return diffStatSummary{Kind: summaryDiffStat, Added: s.Added, Removed: s.Removed}
+	case domain.ChangedFiles:
+		return changedFilesSummary{
+			Kind: summaryChangedFiles, Staged: s.Staged, Unstaged: s.Unstaged, Untracked: s.Untracked,
+		}
+	case domain.EditRegions:
+		return editRegionsSummary{Kind: summaryEditRegions, Regions: editRegionsOf(s.Regions)}
+	case domain.SearchHits:
+		return searchHitsSummary{Kind: summarySearchHits, Count: s.Count}
+	case domain.DelegationOutcome:
+		return delegationOutcomeSummary{
+			Kind: summaryDelegationOutcome, Bound: delegationBoundNames[s.Bound],
+			StoppedByUser: s.IsStoppedByUser, HasNoReport: s.HasNoReport, SteeredMessages: s.SteeredMessages,
+		}
+	default:
+		return nil
+	}
+}
+
+// editRegionsOf converts edit regions to their wire mirrors, nil for nil so the member encodes as
+// null, and an empty non-nil slice as `[]`.
+func editRegionsOf(regions []domain.EditRegion) []editRegion {
+	if regions == nil {
+		return nil
+	}
+	out := make([]editRegion, 0, len(regions))
+	for _, region := range regions {
+		out = append(out, editRegion{
+			BeforeStart: region.BeforeStart,
+			AfterStart:  region.AfterStart,
+			Leading:     region.Leading,
+			Removed:     region.Removed,
+			Inserted:    region.Inserted,
+			Trailing:    region.Trailing,
+		})
+	}
+	return out
 }
 
 // approvalRequestOf converts a domain.ApprovalRequest to its wire mirror.

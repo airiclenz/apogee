@@ -116,7 +116,7 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 		`{"event":"tool_call","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,` +
 			`"data":{"call":{"id":"call-9","tool":"sub_agent","arguments":null},"resolved_path":"","spawn_run_id":"0badc0de.1"}}`,
 		`{"event":"tool_result","v":2,"seq":4,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,` +
-			`"data":{"result":{"call_id":"call-9","content":"report","is_error":false},"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.1"}}`,
+			`"data":{"result":{"call_id":"call-9","content":"report","is_error":false,"summary":null},"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.1"}}`,
 		`{"event":"run_started","v":2,"seq":5,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,"run_id":null,` +
 			`"data":{"session":"sess-1","workspace":"/w","model":"gpt-oss-20b","server":"http://host.internal:1111","mode":"auto","bypass":false,"confined":true,"version":"0.20.9"}}`,
 		`{"event":"run_finished","v":2,"seq":6,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,"run_id":null,` +

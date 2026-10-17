@@ -569,7 +569,8 @@ type ToolResult struct {
 	// It describes what the TOOL DID, not what the text says, so text rewriting never
 	// invalidates it: a reaction that edits Content on the post-tool-result seam, and the
 	// loop's own clampToolResult elision of an oversized result, both leave the summary
-	// true. It is view-facing only — the model reads Content — and is never persisted.
+	// true. It is view-facing only — the model reads Content. The session record never stores it;
+	// the Event lines carry it as a tagged mirror for a live watcher (ADR 0103 decision 9).
 	Summary ToolSummary
 }
 

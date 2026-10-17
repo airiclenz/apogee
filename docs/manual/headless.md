@@ -253,8 +253,8 @@ moment, and the case difference is the signal.
 | `stream_reset` | the text streamed so far was discarded — an accumulator starts again here |
 | `message` | a completed assistant message |
 | `tool_call` | a tool call the model requested, with its arguments and any resolved path |
-| `tool_result` | that call's outcome after execution, with `data.tool` — the tool it ran under, as the pre-tool-exec Reactions left the call — and `data.write_target`, the resolved path the call wrote (the same resolution `tool_call`'s `resolved_path` comes from; `""` for a call that is not a write, and a value that is a *changed* file only together with `is_error: false`) |
-| `sub_agent_phase` | one delegation crossing a lifecycle boundary; a `finished` carries the delegation's result, a cancelled run's included (a finished child's report, a running one's stopped summary, a queued one's not-started result). `data.cancelled` is always `false` — a cancel no longer rolls a delegation back — and stays on the line only so its shape is unchanged |
+| `tool_result` | that call's outcome after execution, with `data.tool` — the tool it ran under, as the pre-tool-exec Reactions left the call — and `data.write_target`, the resolved path the call wrote (the same resolution `tool_call`'s `resolved_path` comes from; `""` for a call that is not a write, and a value that is a *changed* file only together with `is_error: false`). `data.result.summary` is the result's [tool summary](#the-tool-summary) — the structured facts the tool reported beside its prose — or `null` when it reported none |
+| `sub_agent_phase` | one delegation crossing a lifecycle boundary; a `finished` carries the delegation's result, a cancelled run's included (a finished child's report, a running one's stopped summary, a queued one's not-started result). `data.result.summary` is that result's [tool summary](#the-tool-summary) — a `delegation_outcome` for a run that started — or `null`. `data.cancelled` is always `false` — a cancel no longer rolls a delegation back — and stays on the line only so its shape is unchanged |
 | `sub_agent_named` | the name a delegated run was given |
 | `child_interjection` | input steered into a running delegation, whether it landed, and — as `data.reason` on one that did not — why: `completed`, `capped`, `faulted`, `stopped` or `cancelled` (the child ended that way before the boundary the message waited for — `stopped` is a child a stop found running — the human's stop of that one child while the parent's turn went on, or the cancel of the whole turn; `cancelled` is one that ended cancelled without a stop finding it running) or `refused` (the child, still running, refused it there); `""` on a landed message. The set is open: read an unknown value as `completed` |
 | `approval` | an approval request: its phase, the request, the decision — and, as `data.rules`, the allow rules that answered it when the decision is `allowed-by-rule` (`null` otherwise) |
@@ -277,6 +277,23 @@ kept off because putting a wire format on a documented stdout contract would mak
 surface. A sub-agent group's announced size (how many delegations a reply's group will run, and
 at what width) is kept off because it only feeds the TUI's queued count: the `tool_call` and
 `sub_agent_phase` lines already show every delegation as the run reaches it.
+
+### The tool summary
+
+A tool result's `summary` is an object whose `kind` names what the tool reported, followed by that
+kind's facts — or `null` when the tool reported nothing structured, which is always the case for an
+embedder's own tool. Like every enum here, `kind` is an open set.
+
+| `kind` | Tool | Facts |
+|---|---|---|
+| `read_span` | `read_file` | `start` and `end`, the 1-based inclusive lines returned; `total`, the file's line count; `locate`, the locate term (`""` when none was asked for); `located_on`, the lines it was found on across the whole file (`null` when there are none — a set `locate` with none matched nothing) |
+| `listed_entries` | `list_dir` | `total` entries in the directory; `skipped`, the pagination offset before the first one shown |
+| `matched_lines` | `grep` | `total` matching lines, `0` included |
+| `diff_stat` | `view_diff` | `added` and `removed` lines |
+| `changed_files` | `git_status` | `staged`, `unstaged` and `untracked` path counts, full even where the printed list was capped |
+| `edit_regions` | the writing tools | `regions`, in file order: each with `before_start` and `after_start` (1-based, leading context included) and the `leading`, `removed`, `inserted` and `trailing` lines |
+| `search_hits` | `web_search` | `count` of results |
+| `delegation_outcome` | `sub_agent` | `bound` (`step_cap`, `token_budget`, `time_limit`, or `""` when no bound stopped the run), `stopped_by_user`, `has_no_report` and `steered_messages` |
 
 ### `--seams` — the seam closures, on request
 

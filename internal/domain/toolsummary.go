@@ -28,14 +28,16 @@ package domain
 // An embedder's tool emits none, ToolResult.Summary stays nil, and the host renders the
 // prose exactly as it does today.
 //
-// NO WIRE FORM: a summary describes what a tool did during one call, and the summary VALUE
-// itself never reaches disk. domain.Message carries only Content, and the session codec
-// (internal/session) stores the RENDERED tool view rather than the ToolResult, so no ToolSummary
-// is ever decoded back (no replay path re-runs a presenter) and a session written before a variant
-// existed reopens unchanged. What the TRANSCRIPT codec may do is mirror the FACTS a variant carries
-// onto a wire type of its own, where a replayed view cannot be re-composed without them — it does
-// exactly that for the Edit regions below (session.EditRegion, ADR 0052 §5). That mirror is the
-// codec's own additive contract about its rendering; it is not a wire form for this type.
+// UNTAGGED, MIRRORED BY CODECS: a summary describes what a tool did during one call, and this type
+// carries no json tags and is never decoded back on a record replay path. domain.Message carries
+// only Content, and the session codec (internal/session) stores the RENDERED tool view rather than
+// the ToolResult, so no replay path re-runs a presenter and a session written before a variant
+// existed reopens unchanged. What a codec may do is mirror the FACTS a variant carries onto a wire
+// type of its own, as that codec's additive contract. Two do: the TRANSCRIPT codec mirrors the Edit
+// regions below (session.EditRegion, ADR 0052 §5), where a replayed view cannot be re-composed
+// without them; and the Event lines (internal/eventjson) mirror every variant as the tagged
+// `summary` object of a tool_result or sub_agent_phase line (ADR 0103 decision 9), which a watcher
+// decodes only to paint a live session.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
 // alongside its prose Content. The variants are the eight below; the marker method is
@@ -127,13 +129,14 @@ type EditRegion struct {
 // single_find_and_replace and multi_find_and_replace: every changed region of the write just
 // applied, in file order.
 // It rides the Tool summary contract unchanged, which is to say it is DISPLAY DATA — never sent
-// to the model, and the summary VALUE has no wire form — and it is what the Split diff and its
-// Stacked reading are painted from (ADR 0052). The neutral codec in internal/session does mirror the region
-// FACTS onto a wire type of its own (session.EditRegion), because the Split reading is composed at
-// paint time against the live width and has nothing to compose from once the regions are gone;
-// that persistence is the codec's rendering contract (ADR 0052 §5), not this type's. A result
-// carrying no regions, because the pair was over budget to diff or because an embedder's own
-// tool attached nothing, renders the argument-derived list exactly as before.
+// to the model, and the summary VALUE carries no json tags — and it is what the Split diff
+// and its Stacked reading are painted from (ADR 0052). The neutral codec in internal/session does
+// mirror the region FACTS onto a wire type of its own (session.EditRegion), because the Split
+// reading is composed at paint time against the live width and has nothing to compose from once
+// the regions are gone; that persistence is the codec's rendering contract (ADR 0052 §5), not this
+// type's. The Event lines mirror them too, as an `edit_regions` summary (ADR 0103 decision 9).
+// A result carrying no regions, because the pair was over budget to diff or because an
+// embedder's own tool attached nothing, renders the argument-derived list exactly as before.
 type EditRegions struct{ Regions []EditRegion }
 
 func (EditRegions) isToolSummary() {}
