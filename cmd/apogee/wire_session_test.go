@@ -23,6 +23,7 @@ import (
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
+	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -1921,4 +1922,117 @@ func TestSessionE2EWritesALiveEventJournal(t *testing.T) {
 	if journals := journalFilesIn(t, dir); len(journals) != 0 {
 		t.Errorf("journals after exit = %v, want none", journals)
 	}
+}
+
+// runElsewhere stands in for another apogee running session id: it holds the record and writes
+// the journal's opening frame (raw "" — the real Journal's), or raw bytes in its place. The hold
+// and the file are released at cleanup.
+func runElsewhere(t *testing.T, store *session.Store, id, title, workspace, raw string) {
+	t.Helper()
+	release, err := store.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold %s: %v", id, err)
+	}
+	t.Cleanup(func() { _ = release() })
+	file, err := store.OpenJournal(id)
+	if err != nil {
+		t.Fatalf("OpenJournal %s: %v", id, err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	if raw != "" {
+		if _, err := file.WriteString(raw); err != nil {
+			t.Fatalf("write journal %s: %v", id, err)
+		}
+		return
+	}
+	eventjson.NewJournal(file, eventjson.JournalOptions{Session: id, Title: title, Workspace: workspace})
+}
+
+// The host lists every session another instance runs with a journal: a held record with one, and a
+// held journal-only run (a headless or daemon Firing before its first save) whose row takes its
+// title, workspace and time from the journal's frame. A record-less run whose frame does not decode
+// has nothing to show and is skipped; a record keeps its row whatever its journal holds. Each row's
+// probe follows the owner's hold.
+func TestSessionHostListsLiveSessionsOfOtherInstances(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "sessions")
+	store := session.NewStore(dir)
+	recorded := saveAt(t, store, "/ws", time.Now(), "a recorded run")
+	runElsewhere(t, store, recorded, "a recorded run", "/ws", "")
+	tornRecorded := saveAt(t, store, "/ws", time.Now(), "torn but recorded")
+	runElsewhere(t, store, tornRecorded, "", "", `{"kind":"run_sta`)
+	journalOnly := session.NewID(time.Now())
+	runElsewhere(t, store, journalOnly, "a headless run", "/ws/b", "")
+	torn := session.NewID(time.Now().Add(time.Second))
+	runElsewhere(t, store, torn, "", "", `{"kind":"run_sta`)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	defer host.Close()
+
+	rows, err := host.LiveSessions()
+	if err != nil {
+		t.Fatalf("LiveSessions: %v", err)
+	}
+	byID := make(map[string]tui.LiveSession, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	if len(rows) != 3 || byID[recorded].ID == "" || byID[tornRecorded].ID == "" || byID[journalOnly].ID == "" {
+		t.Fatalf("live rows = %+v; want the recorded run, the torn recorded run and the journal-only run", rows)
+	}
+	row := byID[journalOnly]
+	if row.Title != "a headless run" || row.Workspace != "/ws/b" || row.At.IsZero() {
+		t.Errorf("journal-only row = %+v; want the frame's title, workspace and time", row)
+	}
+	if row.JournalPath != store.JournalPath(journalOnly) || row.RecordPath != filepath.Join(dir, journalOnly+".json") {
+		t.Errorf("journal-only row paths = %q, %q; want the journal and the record beside it", row.JournalPath, row.RecordPath)
+	}
+	if held, err := row.Probe(); err != nil || !held {
+		t.Errorf("probe of a running session = %v, %v; want held", held, err)
+	}
+	if got := byID[recorded].Title; got != "a recorded run" {
+		t.Errorf("recorded row title = %q; want the journal frame's", got)
+	}
+}
+
+// The host's own session is never live, though its journal and its hold are on disk: not once the
+// first prompt has Claimed it before any Save, not once it is saved, and not a record Load parked.
+func TestSessionHostLiveLeavesOutItsOwnSessions(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	parked := saveAt(t, store, "/ws", time.Now(), "parked")
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	defer host.Close()
+	host.attachEventJournal(newLiveJournalSink(&eventRecorder{}), firingJournal(store, nil))
+	assertNoLive := func(when string) {
+		t.Helper()
+		rows, err := host.LiveSessions()
+		if err != nil {
+			t.Fatalf("LiveSessions %s: %v", when, err)
+		}
+		if len(rows) != 0 {
+			t.Errorf("live rows %s = %+v; want none — every one is this host's own", when, rows)
+		}
+	}
+
+	host.Prompt("Say hello", false)
+	if _, err := os.Stat(store.JournalPath(host.SessionID())); err != nil {
+		t.Fatalf("setup: the first prompt opened no journal: %v", err)
+	}
+	assertNoLive("after the first prompt")
+
+	if err := host.Save(apogee.Session{}, nil, "Say hello", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	assertNoLive("after the first save")
+
+	if _, err := host.Load(parked); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	file, err := store.OpenJournal(parked) // a journal a crashed owner left, not yet swept
+	if err != nil {
+		t.Fatalf("OpenJournal: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+	eventjson.NewJournal(file, eventjson.JournalOptions{Session: parked, Title: "parked"})
+	assertNoLive("with a parked record")
 }

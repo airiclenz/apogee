@@ -2869,3 +2869,157 @@ func TestResumeLoadedWhileBusy(t *testing.T) {
 	}
 	assertLastNote(t, m, resumeBusyNote)
 }
+
+// liveRowWith is the LiveSession the host lists for a record-less session another instance is
+// running, its journal and record paths the watch fixture's.
+func liveRowWith(f *watchFixture, title, workspace string, at time.Time) LiveSession {
+	return LiveSession{
+		ID:          f.src.id,
+		Title:       title,
+		Workspace:   workspace,
+		At:          at,
+		RecordPath:  f.src.recordPath,
+		JournalPath: f.src.journalPath,
+	}
+}
+
+// paintedLine is the one line of the painted frame that carries text, or "" when none does.
+func paintedLine(painted, text string) string {
+	for line := range strings.SplitSeq(painted, "\n") {
+		if strings.Contains(line, text) {
+			return line
+		}
+	}
+	return ""
+}
+
+// /sessions marks every row another instance is running with `● live` — a record-less run gets a
+// row of its own, from its journal's frame, placed by the frame's time — and ⏎ on a live row enters
+// watch mode with its legend in the box. A watch loads nothing: no load hold is taken, and the
+// watcher's own running workflows raise no "stop running workflows?" confirm.
+func TestSessionBrowserMarksLiveRowsAndWatchesThem(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	f := newWatchFixture(t, "headless run", nil, 0)
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-held", "running elsewhere", "/ws/a", now.Add(-time.Minute), 0, nil)
+	storeMeta(host, "sess-old", "an older one", "/ws/a", now.Add(-time.Hour), 0, nil)
+	host.live = []LiveSession{
+		liveRowWith(f, "headless run", "/ws/a", now),
+		{ID: "sess-held", Title: "running elsewhere", Workspace: "/ws/a", At: now.Add(-time.Minute)},
+	}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m.workflows.live = map[string]backgroundWorkflow{"wf-own": {name: "nightly"}}
+	m = openBrowser(t, m)
+
+	var ids []string
+	for _, meta := range m.sessionBrowserView().metas {
+		ids = append(ids, meta.ID)
+	}
+	if want := []string{watchSessionID, "sess-held", "sess-old"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("browser rows = %v; want %v (the record-less run first by its frame's time, no row twice)", ids, want)
+	}
+	painted := plain(m.View())
+	for title, wantLive := range map[string]bool{"headless run": true, "running elsewhere": true, "an older one": false} {
+		line := paintedLine(painted, title)
+		if line == "" {
+			t.Fatalf("no painted row names %q:\n%s", title, painted)
+		}
+		if got := strings.Contains(line, liveRowCell); got != wantLive {
+			t.Errorf("row %q shows %q = %v; want %v: %q", title, liveRowCell, got, wantLive, line)
+		}
+	}
+
+	m, cmd := stepCmd(t, m, keyEnter()) // the newest row: the record-less run
+	if !m.watch.isActive {
+		t.Fatal("⏎ on a live row did not enter watch mode")
+	}
+	if m.watch.source.journalPath != f.src.journalPath || m.watch.source.recordPath != f.src.recordPath {
+		t.Errorf("watch source = %+v; want the live row's journal and record", m.watch.source)
+	}
+	if m.holds.has(holdSessionLoad) {
+		t.Error("⏎ on a live row took the session-load hold; a watch loads nothing")
+	}
+	if m.boundaryConfirmOpen() {
+		t.Error("⏎ on a live row asked to stop the running workflows; a watch leaves the session where it is")
+	}
+	if m.sessionBrowser.open {
+		t.Error("the browser stayed open over the watch")
+	}
+	if cmd == nil {
+		t.Fatal("entering the watch scheduled no journal read")
+	}
+	m = step(t, m, cmd())
+	want := fmt.Sprintf(watchLegendFormat, "headless run")
+	if got := plain(m.View()); !strings.Contains(got, want) {
+		t.Errorf("the box does not show the watch legend %q:\n%s", want, got)
+	}
+}
+
+// Deleting or renaming a live row is refused with the host's held line, exactly as for any record
+// another apogee has open, and the re-list keeps the row and its `● live` cell.
+func TestSessionBrowserLiveRowRefusesDeleteAndRename(t *testing.T) {
+	t.Parallel()
+	held := &session.HeldError{ID: watchSessionID, PID: 4242}
+	for _, tc := range []struct {
+		name string
+		verb func(t *testing.T, m Model) (Model, tea.Cmd)
+		want string
+	}{
+		{"delete", func(t *testing.T, m Model) (Model, tea.Cmd) {
+			m = step(t, m, keyCtrl('d'))
+			return stepCmd(t, m, keyRune('y'))
+		}, "could not delete session: " + held.Error()},
+		{"rename", func(t *testing.T, m Model) (Model, tea.Cmd) {
+			m = step(t, m, keyCtrl('r'))
+			m = step(t, m, keyRune('!'))
+			return stepCmd(t, m, keyEnter())
+		}, "could not rename session: " + held.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWatchFixture(t, "headless run", nil, 0)
+			host := &fakeSessionHost{deleteErr: held, renameErr: held}
+			host.live = []LiveSession{liveRowWith(f, "headless run", "/ws/a", time.Now())}
+			m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+			m = openBrowser(t, m)
+
+			m, cmd := tc.verb(t, m)
+			if cmd == nil {
+				t.Fatal("the verb dispatched no record write")
+			}
+			m = runWrites(t, m, cmd)
+
+			if !hasEntry(m, entryNote, tc.want) {
+				t.Errorf("the refusal was not noted; want %q in %v", tc.want, noteTexts(m))
+			}
+			if m.watch.isActive {
+				t.Error("a refused verb entered watch mode")
+			}
+			if _, isLive := m.sessionBrowser.live[watchSessionID]; !isLive || !m.sessionBrowser.open {
+				t.Errorf("after the re-list the browser open = %v with live %v; want it open on the live row",
+					m.sessionBrowser.open, m.sessionBrowser.live)
+			}
+		})
+	}
+}
+
+// A host that cannot list the live sessions costs the pane its live rows, not the open: the stored
+// rows list, unmarked, and the failure is noted.
+func TestSessionBrowserLiveListFailureKeepsTheStoredRows(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{liveErr: errors.New("permission denied")}
+	storeMeta(host, "sess-1", "stored", "/ws/a", time.Now(), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m)
+
+	if !m.sessionBrowser.open || len(m.sessionBrowserView().metas) != 1 {
+		t.Fatalf("browser open = %v over %d rows; want it open over the stored row", m.sessionBrowser.open, len(m.sessionBrowserView().metas))
+	}
+	if want := "could not list live sessions: permission denied"; !hasEntry(m, entryNote, want) {
+		t.Errorf("the live-list failure was not noted; want %q in %v", want, noteTexts(m))
+	}
+	if strings.Contains(plain(m.View()), liveRowCell) {
+		t.Error("a row is marked live although no live session was listed")
+	}
+}

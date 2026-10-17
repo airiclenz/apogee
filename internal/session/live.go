@@ -242,6 +242,15 @@ func (l *Live) ActiveID() string {
 	return l.active.ID
 }
 
+// Holds reports whether id is a session this Live holds — its live hold, its active identity's or
+// the one parked. A Driver listing the sessions running now (Store.Live) asks it to leave its own
+// out, since the store's probe reads this process's hold as held like any other (Store.ProbeHold).
+func (l *Live) Holds(id string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.holdsLocked(id)
+}
+
 // Close releases the live hold and any hold parked that no Activate adopted, so the record is free
 // to resume elsewhere the moment this run is done writing it. The identity itself stays readable.
 // Idempotent; no follower is called.

@@ -8,15 +8,20 @@ package main
 // TUI's recall seam itself (wire_options.go).
 
 import (
+	"bufio"
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
@@ -391,6 +396,88 @@ func (h *sessionHost) Rotate() {
 
 // List returns every stored session's browsable metadata, newest first (the store's ordering).
 func (h *sessionHost) List() ([]session.Meta, error) { return h.store.List() }
+
+// LiveSessions lists the sessions another apogee is running now, for the /sessions browser to mark
+// `● live` and watch (ADR 0103): every session Store.Live finds with an Event journal and a held
+// lock, less every id this host holds itself — the active session's, the one a first prompt Claimed
+// before any Save, the one Load parked — since the store's probe reads this process's own hold as
+// held like any other. The host's own row is never live, so ⏎ on it still reloads it.
+//
+// It only reads (Store.Live, liveSessionOf): it holds, writes and creates nothing.
+func (h *sessionHost) LiveSessions() ([]tui.LiveSession, error) {
+	entries, err := h.store.Live()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tui.LiveSession, 0, len(entries))
+	for _, entry := range entries {
+		if h.live.Holds(entry.ID) {
+			continue
+		}
+		if row, ok := liveSessionOf(h.store, entry); ok {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
+// maxJournalFrameBytes bounds the read of a journal's opening frame: the frame carries a title, a
+// workspace root and two small numbers, so a first line past this is not a frame worth reading.
+const maxJournalFrameBytes = 64 << 10
+
+// liveSessionOf is the browser's row of one running session: the facts its journal's opening frame
+// names, the record path a watch paints from — beside the journal, where the owner's first Save
+// puts it — and a probe over the store's read-only ProbeHold. A journal whose first line does not
+// decode as a frame — torn, foreign, too long — leaves a session with a record its record's own
+// facts; one with no record yet has nothing to show, and is skipped (ok false).
+func liveSessionOf(store *session.Store, entry session.LiveEntry) (tui.LiveSession, bool) {
+	frame, at, err := readJournalFrame(entry.JournalPath)
+	if err != nil && !entry.HasRecord {
+		return tui.LiveSession{}, false
+	}
+	id := entry.ID
+	return tui.LiveSession{
+		ID:          id,
+		Title:       frame.Title,
+		Workspace:   frame.Workspace,
+		At:          at,
+		RecordPath:  filepath.Join(filepath.Dir(entry.JournalPath), id+".json"),
+		JournalPath: entry.JournalPath,
+		Probe: func() (bool, error) {
+			held, _, err := store.ProbeHold(id)
+			return held, err
+		},
+	}, true
+}
+
+// readJournalFrame reads a journal's first line — complete, newline-terminated, within
+// maxJournalFrameBytes — and returns its opening frame and the moment it was written. The file is
+// opened read-only and closed before it returns.
+func readJournalFrame(path string) (eventjson.JournalStarted, time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return eventjson.JournalStarted{}, time.Time{}, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := bufio.NewReader(io.LimitReader(f, maxJournalFrameBytes)).ReadBytes('\n')
+	if err != nil {
+		return eventjson.JournalStarted{}, time.Time{}, fmt.Errorf("journal %q: no complete opening frame: %w", path, err)
+	}
+	line, err := eventjson.Decode(raw)
+	if err != nil {
+		return eventjson.JournalStarted{}, time.Time{}, err
+	}
+	if line.Started == nil {
+		return eventjson.JournalStarted{}, time.Time{}, fmt.Errorf("journal %q: first line is %q, not its opening frame", path, line.Kind)
+	}
+	var frame struct {
+		Data eventjson.JournalStarted `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		return eventjson.JournalStarted{}, time.Time{}, err
+	}
+	return frame.Data, line.Time, nil
+}
 
 // Load returns a stored record; it does NOT change the active session. Activation is deferred to
 // Activate so the /sessions resume flow switches which file Saves target only after the live

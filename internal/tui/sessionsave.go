@@ -384,8 +384,7 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 			// read AFTER the write that changed them and the fold that lands has everything it needs
 			// in one Msg — leaving foldRecordWrite one Cmd to return rather than a tea.Batch, which
 			// on this path would be two record writes on two goroutines again.
-			metas, err := sessions.List()
-			done.list = sessionListMsg{metas: metas, err: err}
+			done.list = readSessionList(sessions)
 		}
 		return done
 	}

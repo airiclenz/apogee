@@ -402,7 +402,14 @@ NOTES (2026-10-17): no CHANGELOG entry, because watch mode still has no user-fac
 
 Depends on item 9a.
 
-## 11. /sessions lists live sessions and opens them in watch mode
+## 11. /sessions lists live sessions and opens them in watch mode — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): re-derived from "the host's list merges `Store.Live()` into `Store.List` results". The host's new `SessionHost.LiveSessions` returns only the live rows (`tui.LiveSession`: id, title, workspace, time, record and journal paths, probe). The TUI merges them into the List metas (`mergeLive`, sessions.go): a listed record is marked live, and a record-less run becomes a synthesized `session.Meta` placed newest-first by its frame time. `session.Meta` is unchanged, as the regression guard requires.
+NOTES (2026-10-17): internal/session/live.go was not on the Files list. It gains `Live.Holds(id)` (exported `holdsLocked`), because `Live` has no accessor for the parked id. A first prompt also holds the pre-minted id while `ActiveID()` still reads "", so dropping only `ActiveID()` would have marked the host's own fresh session live. The host drops every id `Live.Holds` reports.
+NOTES (2026-10-17): internal/tui/sessionsave.go was not on the Files list. The re-list after a delete/rename now uses the shared `readSessionList` (List + LiveSessions), so a refused delete/rename of a live row keeps its row and its `● live` cell.
+NOTES (2026-10-17): the host reads only the journal's first complete line, bounded at 64 KiB (`readJournalFrame`). If it does not decode as the opening frame, a record-less row is skipped and a recorded row stays, using the record's own title. The record path is the journal's directory plus `<id>.json`, since `Store` has no record-path accessor.
+NOTES (2026-10-17): `● live` is a plain constant (`liveRowCell`), not a `glyphSet` entry, so `ui.glyphs: safe` also shows `●` (U+25CF, as common as the safe set's `○`). It sits in a fifth column, padded past the spend cell, so it lines up down the pane. The browser hint still reads `⏎ resume`; the manual (item 16) owns the watch wording.
+NOTES (2026-10-17): a failed LiveSessions call does not fail the open. The stored rows list without live marks, and `could not list live sessions: <err>` is noted.
 
 **What:**
 **Goal:**

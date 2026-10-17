@@ -780,6 +780,10 @@ type fakeSessionHost struct {
 	// deleteErr scripts a Delete refusal — the host's HeldError for a record another apogee has
 	// open — leaving the record in place, as the real host does.
 	deleteErr error
+	// live is what LiveSessions answers — the sessions another instance is running — and liveErr a
+	// scripted failure to list them.
+	live    []LiveSession
+	liveErr error
 }
 
 // seed adds a record to the fake store so the /sessions browser can list/load it.
@@ -836,6 +840,15 @@ func (h *fakeSessionHost) List() ([]session.Meta, error) {
 	}
 	sort.Slice(metas, func(i, j int) bool { return metas[i].UpdatedAt.After(metas[j].UpdatedAt) })
 	return metas, nil
+}
+
+func (h *fakeSessionHost) LiveSessions() ([]LiveSession, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.liveErr != nil {
+		return nil, h.liveErr
+	}
+	return slices.Clone(h.live), nil
 }
 
 func (h *fakeSessionHost) Load(id string) (session.Record, error) {

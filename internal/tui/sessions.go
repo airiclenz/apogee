@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -38,6 +39,11 @@ type sessionBrowser struct {
 	allWorkspaces bool
 	confirming    bool
 	renaming      bool
+	// live is the sessions another instance is running now (SessionHost.LiveSessions), by id: each
+	// row whose id it names wears the `● live` cell, and ⏎ on it watches the session instead of
+	// loading it (acceptBrowser). It is replaced whole at every list and never written into, so the
+	// value-copied Model shares it safely.
+	live map[string]LiveSession
 	// renameBuf is the inline title edit in progress: a [lineEditor] behind a [copyOnWriteField] like
 	// the filter beside it, built on the title the armed row holds (sessionRenameKey's ctrl+r) and
 	// zeroed again the moment the edit commits or is abandoned. It is the browser's OWN field and no
@@ -75,6 +81,13 @@ const (
 	sessionBrowserHint       = "type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · " +
 		sessionBrowserScopeEntry + " · esc close"
 )
+
+// liveRowCell is the cell a row of a session another instance is running wears (withLiveCell).
+const liveRowCell = "● live"
+
+// liveRowColumn is the column liveRowCell sits in: past the title, time, count and spend cells, so
+// it lines up down the pane whether or not a row reported a spend.
+const liveRowColumn = 4
 
 // sessionBrowserNoun is what one of the browser's rows is — the word its zero-match row says
 // (listZeroMatchNote).
@@ -120,10 +133,26 @@ const resumeBusyNote = "session not loaded — the agent is busy; resume it from
 const progressSavedNote = "this record was saved while a delegation was still running — that unfinished work was not kept; /continue re-runs the step that started it, a new message discards it"
 
 // sessionListMsg carries the result of an off-loop Sessions.List() back to the Update loop: the
-// metas to render (newest first) or the error that aborts the open (foldSessionList).
+// metas to render (newest first) or the error that aborts the open (foldSessionList), and beside
+// them the sessions other instances are running (Sessions.LiveSessions) or the error that kept them
+// from being listed — which costs the pane its live rows, never the open.
 type sessionListMsg struct {
-	metas []session.Meta
-	err   error
+	metas   []session.Meta
+	live    []LiveSession
+	err     error
+	liveErr error
+}
+
+// readSessionList reads what the browser lists — the stored sessions and the live ones — off the
+// Update loop, for the open (listSessions) and the re-list a record write carries alike, so a pane
+// refreshed under a delete or a rename keeps its live rows.
+func readSessionList(sessions SessionHost) sessionListMsg {
+	metas, err := sessions.List()
+	if err != nil {
+		return sessionListMsg{err: err}
+	}
+	live, liveErr := sessions.LiveSessions()
+	return sessionListMsg{metas: metas, live: live, liveErr: liveErr}
 }
 
 // sessionLoadedMsg carries the result of an off-loop Sessions.Load(id) back to the Update loop:
@@ -159,8 +188,7 @@ func (m Model) openSessionBrowser() (tea.Model, tea.Cmd) {
 func (m Model) listSessions() tea.Cmd {
 	sessions := m.sessions
 	return func() tea.Msg {
-		metas, err := sessions.List()
-		return sessionListMsg{metas: metas, err: err}
+		return readSessionList(sessions)
 	}
 }
 
@@ -168,22 +196,65 @@ func (m Model) listSessions() tea.Cmd {
 // and opens no overlay; otherwise the browser opens (or refreshes, after a delete/rename) over the
 // metas with the selection clamped into range. The empty-store note fires on the raw List result,
 // not the workspace-filtered view — a store with sessions only in OTHER workspaces still opens so
-// the human can widen with `a`.
+// the human can widen with `a`. The live sessions merge in first (mergeLive), so a store holding
+// only a headless run's journal still opens over that run's row.
 func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
 	if msg.err != nil {
 		m.sessionBrowser = sessionBrowser{}
 		m.transcript.addNote("could not list sessions: " + msg.err.Error())
 		return nil
 	}
-	if len(msg.metas) == 0 {
+	if msg.liveErr != nil {
+		m.transcript.addNote("could not list live sessions: " + msg.liveErr.Error())
+	}
+	metas, live := mergeLive(msg.metas, msg.live)
+	if len(metas) == 0 {
 		m.sessionBrowser = sessionBrowser{}
 		m.transcript.addNote("no saved sessions")
 		return nil
 	}
-	m.sessionBrowser.metas = msg.metas
+	m.sessionBrowser.metas = metas
+	m.sessionBrowser.live = live
 	m.sessionBrowser.open = true
 	m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
 	return nil
+}
+
+// mergeLive folds the live sessions into the stored list: a live session whose record is listed
+// marks that row, and one with no record yet — a run journalling before its first save, a headless
+// or daemon run — gets a row of its own, built from its journal's opening frame and placed by that
+// frame's time in the newest-first order. It returns the merged metas and the live set by id.
+func mergeLive(metas []session.Meta, live []LiveSession) ([]session.Meta, map[string]LiveSession) {
+	if len(live) == 0 {
+		return metas, nil
+	}
+	byID := make(map[string]LiveSession, len(live))
+	for _, l := range live {
+		byID[l.ID] = l
+	}
+	listed := make(map[string]bool, len(metas))
+	for _, meta := range metas {
+		listed[meta.ID] = true
+	}
+	merged := slices.Clone(metas)
+	for _, l := range live {
+		if listed[l.ID] {
+			continue
+		}
+		listed[l.ID] = true
+		at := slices.IndexFunc(merged, func(meta session.Meta) bool { return meta.UpdatedAt.Before(l.At) })
+		if at < 0 {
+			at = len(merged)
+		}
+		merged = slices.Insert(merged, at, session.Meta{
+			ID:        l.ID,
+			Title:     l.Title,
+			CreatedAt: l.At,
+			UpdatedAt: l.At,
+			Workspace: l.Workspace,
+		})
+	}
+	return merged, byID
 }
 
 // visible returns the metas the current view shows: all of them when allWorkspaces is set, else
@@ -261,9 +332,23 @@ func (b sessionBrowser) unfilteredRows(th theme, workspace string, now time.Time
 	visible := b.visible(workspace)
 	rows := make([]popupRow, 0, len(visible))
 	for _, meta := range visible {
-		rows = append(rows, sessionRowCells(th, meta, b.parentTitle(meta), workspace, b.allWorkspaces, now))
+		row := sessionRowCells(th, meta, b.parentTitle(meta), workspace, b.allWorkspaces, now)
+		if _, isLive := b.live[meta.ID]; isLive {
+			row = withLiveCell(row)
+		}
+		rows = append(rows, row)
 	}
 	return rows, visible
+}
+
+// withLiveCell adds the `● live` cell to row, padded out to liveRowColumn with the empty cells a row
+// without a spend leaves (an empty cell keeps the columns after it aligned, popup.go). It is a cell
+// past the matched title cell, so a filter never matches on it.
+func withLiveCell(row popupRow) popupRow {
+	for len(row) < liveRowColumn {
+		row = append(row, "")
+	}
+	return append(row, liveRowCell)
 }
 
 // parentTitle is the title of the record a fork was cut from — the name its row's fork tag
@@ -367,13 +452,35 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 //
 // A switch with background workflows running asks first whether to stop them (the boundary confirm,
 // commandrun.go): the browser closes and the load waits for the answer.
+//
+// A live row — a session another instance is running — is watched instead (watchLive), and it
+// branches off BEFORE that door: a watch loads nothing and leaves the watcher's own session where
+// it is, so it takes no load hold and asks nothing about the workflows that session runs.
 func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 	meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows)
 	if !ok {
 		return m, nil
 	}
+	live, isLive := m.sessionBrowser.live[meta.ID]
 	m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
+	if isLive {
+		return m.watchLive(meta, live)
+	}
 	return m.openStoredSession(meta.ID)
+}
+
+// watchLive enters watch mode (watch.go) on the live session meta's row lists. The title the box
+// shows until the journal names one is the journal frame's, else the record's.
+func (m Model) watchLive(meta session.Meta, live LiveSession) (tea.Model, tea.Cmd) {
+	title := cmp.Or(live.Title, meta.Title)
+	src := watchSource{
+		id:          live.ID,
+		recordPath:  live.RecordPath,
+		journalPath: live.JournalPath,
+		title:       title,
+		probe:       live.Probe,
+	}
+	return m.enterWatch(src)
 }
 
 // openStoredSession is the normal door into stored session id, shared by the browser's ⏎ and a

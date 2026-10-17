@@ -111,6 +111,32 @@ type SessionHost interface {
 	Fork(parent session.Meta, sess domain.Session, transcript []session.Entry, title string) (session.Meta, error)
 	// ActiveID reports the active session's ID, or "" before the first Save has minted one.
 	ActiveID() string
+	// LiveSessions lists the sessions ANOTHER instance is running now with an Event journal (ADR
+	// 0103) — headless and daemon runs without a record yet included — for the /sessions browser to
+	// mark `● live` and open in watch mode. The host leaves out every session it holds itself, so
+	// the watcher's own row is never live. It only reads: it holds, writes and creates nothing.
+	LiveSessions() ([]LiveSession, error)
+}
+
+// LiveSession is one session another instance is running, as [SessionHost.LiveSessions] lists it:
+// the facts a row without a record takes from its journal's opening frame, and the watch source
+// ⏎ on its row opens (watch.go). Title and Workspace are untrusted disk input; the browser strips
+// them where it paints them, as it strips a record's Meta.
+type LiveSession struct {
+	// ID is the session's id.
+	ID string
+	// Title, Workspace and At are the journal's opening frame: its title, its workspace root and the
+	// moment it was written. A row whose record is listed keeps the record's own facts instead.
+	Title     string
+	Workspace string
+	At        time.Time
+	// RecordPath is where the session's record is, or will be once its owner first saves; a watch
+	// reads it by path, read-only. JournalPath is the Event journal the watch follows.
+	RecordPath  string
+	JournalPath string
+	// Probe asks whether the owner still holds the session, without ever holding it
+	// (session.Store.ProbeHold); nil never ends the watch.
+	Probe func() (isHeld bool, err error)
 }
 
 // RecallHost is the prompt-recall seam the TUI drives: record an input the human sent
