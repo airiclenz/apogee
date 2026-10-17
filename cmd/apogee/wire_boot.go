@@ -249,7 +249,13 @@ func (w *rootWiring) resolveConfig() error {
 	// the key says, because the key is live-editable: an off recorder opens nothing and records
 	// nothing until the `/settings` row switches it on.
 	w.stats = newStatsRecorder(serverStatsPath(w.roots.config), w.opts.ServerStats)
-	w.cfg.Events = w.stats.wrap(w.hooks)
+	// And the live Event journal's sink outermost over both (ADR 0103 decision 1): every Event a
+	// watcher may follow is recorded into the session's `<id>.events.jsonl` while one is open, and
+	// reaches the recorder — and so the Runner and the renderer — unchanged. It sits over the chain,
+	// never inside reactions.Runner (ADR 0075 D9), and is built once: the session host swaps which
+	// record's journal it records into as the hold moves (sessionHost.attachEventJournal).
+	w.events = newLiveJournalSink(w.stats.wrap(w.hooks))
+	w.cfg.Events = w.events
 	// And the same Runner as the Agent's observe half (ADR 0076 A8), with the list it was built
 	// from: Agent.SetReactions swaps it whenever a generation's observe list moves off that list,
 	// so the Floor-, Bypass- and sync-only edits a settings row makes never retire it.

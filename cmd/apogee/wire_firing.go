@@ -936,7 +936,9 @@ func raise(
 
 // firingJournal is the production run.JournalOpener every Firing is raised with: the record's own
 // `<id>.events.jsonl` in store, written as the coalesced Event journal (eventjson.Journal, ADR 0103).
-// nil store ⇒ nil opener — a run that keeps no record keeps no journal.
+// nil store ⇒ nil opener — a run that keeps no record keeps no journal. The interactive session's
+// host opens its journals through it too (sessionHost.attachEventJournal), reporting on the TUI's
+// own notice line.
 //
 // Nothing about the journal can fail the run. A journal that would not open, or whose first write
 // failed, is said once on report — the Driver's own line, the one its Reactions' trouble reaches

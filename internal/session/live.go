@@ -27,10 +27,14 @@ type Identity struct {
 //     run before a Turn is ever saved, and whatever is named by the id — a scratch dir, an undo
 //     store — must exist before the first of them. An id is only a name; nothing reaches the store
 //     until a Driver saves.
-//   - The hold is taken at the record's BIRTH — Begin, or NewLive on a resumed record — never at the
-//     mint, so a run that never saves touches no disk (ADR 0022). It is kept, not re-taken, across
-//     every Begin and Activate of the id already held: flock refuses a second open of one path in one
-//     process with this process's own pid, so re-acquiring would refuse ourselves.
+//   - The hold is taken at the FIRST PROMPT, never at the mint (ADR 0103 decision 10, amending ADR
+//     0022 D7's first-Save timing): the interactive Driver Claims it when the first prompt is
+//     submitted, before Turn 1, so a watcher can find the session before its first Turn ends; Begin
+//     — the record's birth — takes it for a Driver that saves without Claiming first, and NewLive on
+//     a resumed record holds from construction. A run that neither sends a prompt nor saves touches
+//     no disk (ADR 0022). The hold is kept, not re-taken, across every Claim, Begin and Activate of
+//     the id already held: flock refuses a second open of one path in one process with this
+//     process's own pid, so re-acquiring would refuse ourselves.
 //   - Park takes a hold ahead of the Activate that will adopt it — the /sessions resume door, which
 //     must refuse a record another apogee holds before anything is restored. A parked hold nobody
 //     adopts is released at the next identity boundary: Rotate, Close, DropParked of its id, or the
@@ -71,8 +75,8 @@ type Live struct {
 // born before this run. A hold it cannot take (a second instance won the gap since the door probed,
 // or the lock file could not be opened) is not a construction failure: the first Begin re-attempts
 // it and returns the refusal, Begin being what precedes a write over the other instance's record.
-// A fresh start instead pre-mints the id its first Begin will adopt and holds nothing. No follower
-// is called.
+// A fresh start instead pre-mints the id its first Claim holds and its first Begin adopts, and holds
+// nothing until then. No follower is called.
 func NewLive(store *Store, now func() time.Time, resumed *Record, onMove ...func(id string)) *Live {
 	if now == nil {
 		now = time.Now
@@ -93,11 +97,31 @@ func identityOf(meta Meta) *Identity {
 	return &Identity{ID: meta.ID, Title: meta.Title, CreatedAt: meta.CreatedAt, ParentID: meta.ParentID}
 }
 
+// Claim takes the live hold on the record the next Save writes under — the active identity's, or the
+// id pre-minted at the last boundary for the first Begin to adopt — WITHOUT adopting it: the Title and
+// CreatedAt of a fresh record stay Begin's to fix at its birth. It is the interactive Driver's hold at
+// the first prompt (ADR 0103 decision 10). It returns that identity: the active one in full, or only
+// the pre-minted ID while none is active. A hold already in place is kept; a refused one (a
+// *HeldError) or a failed one is returned with a zero Identity, leaving nothing held, and the next
+// Claim or Begin re-attempts it. No follower is called.
+func (l *Live) Claim() (Identity, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ident := Identity{ID: l.nextID}
+	if l.active != nil {
+		ident = *l.active
+	}
+	if err := l.holdLocked(ident.ID); err != nil {
+		return Identity{}, err
+	}
+	return ident, nil
+}
+
 // Begin returns the identity the Save about to run writes under, making it the record's birth when
 // no identity is active: the id pre-minted at the last boundary is adopted (NewLive and Rotate, the
 // only ways to an inactive Live, both mint one), with title and at as its Title and CreatedAt. Both
 // are ignored once an identity is active, so a later Save never rewrites them. It then holds that id
-// (kept when already held). A refused hold — the record is open in another apogee, a *HeldError — or
+// (kept when already held — Claim's hold at the first prompt included). A refused hold — the record is open in another apogee, a *HeldError — or
 // a failed one is returned with a zero Identity BEFORE the caller writes anything: two instances
 // never write one record. The identity adopted stays active either way, so the next Begin retries
 // the same record. No follower is called.

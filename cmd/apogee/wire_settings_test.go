@@ -4081,10 +4081,16 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 	if w.hooks == nil {
 		t.Fatal("the root built no Reaction Runner")
 	}
-	sink, ok := w.cfg.Events.(statsSink)
+	// The live Event journal's sink is outermost (ADR 0103 decision 1) and the root's own: unwrapped,
+	// it holds the stats recorder over the Runner — the journal never sits inside the Runner.
+	journal, ok := w.cfg.Events.(*liveJournalSink)
+	if !ok || journal != w.events {
+		t.Fatalf("Config.Events = %T, want the root's own live Event journal sink outermost", w.cfg.Events)
+	}
+	sink, ok := journal.inner.(statsSink)
 	if !ok || sink.inner != domain.EventSink(w.hooks) {
-		t.Fatalf("Config.Events = %T, want the stats recorder over the root's own *reactions.Runner",
-			w.cfg.Events)
+		t.Fatalf("the journal sink's inner = %T, want the stats recorder over the root's own *reactions.Runner",
+			journal.inner)
 	}
 	// And an Event emitted before wireSession has installed a tool set at all — the first beat of a
 	// cold start — is forwarded: the Runner holds no handle on the registry to dereference.

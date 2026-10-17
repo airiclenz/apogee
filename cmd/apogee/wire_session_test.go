@@ -10,14 +10,20 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
+	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
+	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
+	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
 func TestBuildAgentResumeRoundTrip(t *testing.T) {
@@ -1547,4 +1553,372 @@ func TestSessionHostLoadParksTheHoldForActivate(t *testing.T) {
 		}
 	})
 	host.Close()
+}
+
+// eventRecorder is an inner sink that keeps every Event it was handed, in order.
+type eventRecorder struct {
+	mu     sync.Mutex
+	events []domain.Event
+}
+
+// Emit implements domain.EventSink.
+func (r *eventRecorder) Emit(ev domain.Event) {
+	r.mu.Lock()
+	r.events = append(r.events, ev)
+	r.mu.Unlock()
+}
+
+// got returns a copy of the Events recorded so far.
+func (r *eventRecorder) got() []domain.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.events)
+}
+
+// journalEnd is one End a journalLog saw: the record the journal belonged to, and whether that
+// record was still held when its journal ended.
+type journalEnd struct {
+	id   string
+	held bool
+}
+
+// journalLog is a run.JournalOpener stand-in that records every journal the host opened and every
+// one it ended — probing, at each End, whether the record is still held, which is the order the host
+// promises: the journal goes BEFORE the hold.
+type journalLog struct {
+	store *session.Store
+
+	mu     sync.Mutex
+	starts []run.JournalStart
+	ends   []journalEnd
+}
+
+// open is the opener the host is attached with.
+func (l *journalLog) open(start run.JournalStart) run.LiveJournal {
+	l.mu.Lock()
+	l.starts = append(l.starts, start)
+	l.mu.Unlock()
+	return &loggedJournal{log: l, id: start.RecordID}
+}
+
+// snapshot returns copies of the starts and ends recorded so far.
+func (l *journalLog) snapshot() ([]run.JournalStart, []journalEnd) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.starts), slices.Clone(l.ends)
+}
+
+// loggedJournal is one journal journalLog opened.
+type loggedJournal struct {
+	log *journalLog
+	id  string
+}
+
+// Wrap implements run.LiveJournal; the stand-in records no Event.
+func (j *loggedJournal) Wrap(domain.EventSink) domain.EventSink { return discardEvents{} }
+
+// Prompt implements run.LiveJournal.
+func (j *loggedJournal) Prompt(string, bool) {}
+
+// End implements run.LiveJournal, probing the record's hold as the journal goes.
+func (j *loggedJournal) End() {
+	held, _, err := j.log.store.ProbeHold(j.id)
+	j.log.mu.Lock()
+	j.log.ends = append(j.log.ends, journalEnd{id: j.id, held: held && err == nil})
+	j.log.mu.Unlock()
+}
+
+// journalFilesIn lists the live Event journals a sessions directory holds; a directory that does not
+// exist holds none.
+func journalFilesIn(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var journals []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".events.jsonl") {
+			journals = append(journals, e.Name())
+		}
+	}
+	return journals
+}
+
+// readJournal decodes every line of the journal at path, and the opening frame's journal-only data.
+func readJournal(t *testing.T, path string) ([]eventjson.Line, eventjson.JournalStarted) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the journal: %v", err)
+	}
+	var lines []eventjson.Line
+	var started eventjson.JournalStarted
+	for i, raw := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+		line, err := eventjson.Decode(raw)
+		if err != nil {
+			t.Fatalf("journal line %d %q: %v", i+1, raw, err)
+		}
+		if i == 0 {
+			var frame struct {
+				Data eventjson.JournalStarted `json:"data"`
+			}
+			if err := json.Unmarshal(raw, &frame); err != nil {
+				t.Fatalf("the opening frame %q: %v", raw, err)
+			}
+			started = frame.Data
+		}
+		lines = append(lines, line)
+	}
+	return lines, started
+}
+
+// promptLines returns the journal's prompt lines, in order.
+func promptLines(lines []eventjson.Line) []eventjson.Prompt {
+	var prompts []eventjson.Prompt
+	for _, l := range lines {
+		if l.Prompt != nil {
+			prompts = append(prompts, *l.Prompt)
+		}
+	}
+	return prompts
+}
+
+// tokenText concatenates the journal's top-level token lines — the answer the session streamed.
+func tokenText(lines []eventjson.Line) string {
+	var text strings.Builder
+	for _, l := range lines {
+		if tok, ok := l.Event.(domain.TokenEvent); ok && l.Depth == 0 {
+			text.WriteString(tok.Text)
+		}
+	}
+	return text.String()
+}
+
+// recordWithEntries stores a record whose transcript holds entries, and returns it.
+func recordWithEntries(t *testing.T, store *session.Store, title string, entries []session.Entry) session.Record {
+	t.Helper()
+	blob, err := session.EncodeTranscript(entries)
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	now := time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC)
+	rec := session.Record{
+		Meta:       session.Meta{ID: session.NewID(now), Title: title, CreatedAt: now, UpdatedAt: now, Workspace: "/ws"},
+		Transcript: blob,
+	}
+	if err := store.Save(rec); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return rec
+}
+
+// The interactive session holds its record at the first prompt — before Turn 1 and before any Save —
+// and its live Event journal is born just after that hold: the prompt and interjection lines and the
+// session's Events land in it, in order, while every Event still reaches the chain beneath unchanged.
+// Close removes the journal and then lets the hold go.
+func TestSessionHostEventJournalRecordsPromptsAndEvents(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "sessions")
+	store := session.NewStore(dir)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	inner := &eventRecorder{}
+	sink := newLiveJournalSink(inner)
+	host.attachEventJournal(sink, firingJournal(store, nil))
+	id := host.SessionID()
+
+	before := domain.TurnEvent{Status: domain.StatusTurnComplete}
+	sink.Emit(before)
+	if journals := journalFilesIn(t, dir); len(journals) != 0 {
+		t.Fatalf("journals before the first prompt = %v, want none", journals)
+	}
+	assertHeld(t, store, id, false)
+
+	host.Prompt("Say hello", false)
+	assertHeld(t, store, id, true)
+	if host.ActiveID() != "" {
+		t.Errorf("the first prompt adopted the identity %q; the first Save is the record's birth", host.ActiveID())
+	}
+	sink.Emit(domain.TokenEvent{Text: "Hel"})
+	sink.Emit(domain.TokenEvent{Text: "lo."})
+	turn := domain.TurnEvent{Status: domain.StatusExchangeComplete}
+	sink.Emit(turn)
+	if err := host.Save(apogee.Session{}, nil, "Say hello", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	host.Prompt("and this", true)
+
+	lines, started := readJournal(t, store.JournalPath(id))
+	kinds := make([]string, 0, len(lines))
+	for _, l := range lines {
+		kinds = append(kinds, l.Kind)
+	}
+	if want := []string{"run_started", "prompt", "token", "turn", "prompt"}; !slices.Equal(kinds, want) {
+		t.Errorf("journal kinds = %v, want %v", kinds, want)
+	}
+	if want := (eventjson.JournalStarted{Session: id, Workspace: "/ws", Title: "Say hello", Entries: 0}); started != want {
+		t.Errorf("opening frame = %+v, want %+v", started, want)
+	}
+	if want := []eventjson.Prompt{{Text: "Say hello"}, {Text: "and this", Interjection: true}}; !slices.Equal(promptLines(lines), want) {
+		t.Errorf("prompt lines = %+v, want %+v", promptLines(lines), want)
+	}
+	if got := tokenText(lines); got != "Hello." {
+		t.Errorf("journalled answer = %q, want %q", got, "Hello.")
+	}
+	if got := inner.got(); len(got) != 4 {
+		t.Errorf("the chain beneath received %d Events, want all 4, unmerged", len(got))
+	}
+
+	host.Close()
+	if journals := journalFilesIn(t, dir); len(journals) != 0 {
+		t.Errorf("journals after Close = %v, want none", journals)
+	}
+	assertHeld(t, store, id, false)
+}
+
+// On /clear (Rotate), a /sessions switch (Load + Activate), /fork (Fork + Activate of the child) and
+// exit (Close), the open journal ends while its record is still held — the journal goes, then the
+// hold. Each new id gets a journal of its own, born with the record's transcript length.
+func TestSessionHostEventJournalEndsBeforeTheHoldIsReleased(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	stored := recordWithEntries(t, store, "stored", forkPrefix()[:2])
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	log := &journalLog{store: store}
+	host.attachEventJournal(newLiveJournalSink(nil), log.open)
+
+	host.Prompt("first", false)
+	first := host.SessionID()
+	if err := host.Save(apogee.Session{}, nil, "first", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	host.Prompt("again", false) // the open journal takes it; no second birth
+
+	host.Rotate() // /clear
+	assertHeld(t, store, first, false)
+	host.Prompt("cleared", false)
+	cleared := host.SessionID()
+
+	rec, err := host.Load(stored.Meta.ID) // a /sessions switch
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	host.Activate(rec.Meta)
+	assertHeld(t, store, cleared, false)
+
+	child, err := host.Fork(session.Meta{}, apogee.Session{}, forkPrefix(), "child") // /fork
+	if err != nil {
+		t.Fatalf("Fork: %v", err)
+	}
+	host.Activate(child)
+	assertHeld(t, store, stored.Meta.ID, false)
+
+	host.Close() // exit
+	assertHeld(t, store, child.ID, false)
+
+	starts, ends := log.snapshot()
+	wantStarts := []run.JournalStart{
+		{RecordID: first, Title: "first", Workspace: "/ws", Entries: 0},
+		{RecordID: cleared, Title: "cleared", Workspace: "/ws", Entries: 0},
+		{RecordID: stored.Meta.ID, Title: "stored", Workspace: "/ws", Entries: 2},
+		{RecordID: child.ID, Title: "child", Workspace: "/ws", Entries: len(forkPrefix())},
+	}
+	if !slices.Equal(starts, wantStarts) {
+		t.Errorf("journals born = %+v, want %+v", starts, wantStarts)
+	}
+	wantEnds := []journalEnd{{first, true}, {cleared, true}, {stored.Meta.ID, true}, {child.ID, true}}
+	if !slices.Equal(ends, wantEnds) {
+		t.Errorf("journals ended = %+v, want each ended under its record's hold %+v", ends, wantEnds)
+	}
+}
+
+// A run resumed on a record holds it from construction, and that record has had its prompt: its
+// journal is born at attach, with the record's title and transcript length.
+func TestSessionHostEventJournalBornAtAttachOnAResumedRecord(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	rec := recordWithEntries(t, store, "resumed", forkPrefix())
+	host := newSessionHost(store, "/ws", "m", &rec, "", nil, "", nil)
+	log := &journalLog{store: store}
+	host.attachEventJournal(newLiveJournalSink(nil), log.open)
+
+	starts, _ := log.snapshot()
+	want := []run.JournalStart{{RecordID: rec.Meta.ID, Title: "resumed", Workspace: "/ws", Entries: len(forkPrefix())}}
+	if !slices.Equal(starts, want) {
+		t.Errorf("journals born at attach = %+v, want %+v", starts, want)
+	}
+	host.Close()
+	if _, ends := log.snapshot(); !slices.Equal(ends, []journalEnd{{rec.Meta.ID, true}}) {
+		t.Errorf("journals ended at Close = %+v, want the resumed record's, under its hold", ends)
+	}
+}
+
+// A driven TUI session writes its live Event journal: none before the first prompt, one after it
+// holding the prompts and the answers the session streamed, in order; /clear removes it and the next
+// prompt starts a new one under the new id; exit removes that one too.
+func TestSessionE2EWritesALiveEventJournal(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "queued-command"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+	dir := filepath.Join(sess.Home(), "sessions")
+	if journals := journalFilesIn(t, dir); len(journals) != 0 {
+		t.Fatalf("journals before the first prompt = %v, want none", journals)
+	}
+
+	// journalled waits for exactly one journal whose decoded lines satisfy done, and returns its id.
+	journalled := func(what string, done func([]eventjson.Line) bool) string {
+		t.Helper()
+		var id string
+		testtime.Eventually(t, testtime.Budget(10*time.Second), func() bool {
+			journals := journalFilesIn(t, dir)
+			if len(journals) != 1 {
+				return false
+			}
+			id = strings.TrimSuffix(journals[0], ".events.jsonl")
+			lines, _ := readJournal(t, filepath.Join(dir, journals[0]))
+			return done(lines)
+		}, what)
+		return id
+	}
+
+	submit(drv, "Say hello")
+	drv.WaitText("Hello there.")
+	waitIdle(drv)
+	submit(drv, "And once more")
+	drv.WaitText("Thought about it.")
+	waitIdle(drv)
+	first := journalled("the first session's journal", func(lines []eventjson.Line) bool {
+		prompts := promptLines(lines)
+		return len(prompts) == 2 && prompts[0].Text == "Say hello" && prompts[1].Text == "And once more" &&
+			tokenText(lines) == "Hello there.Thought about it."
+	})
+
+	submit(drv, "/clear")
+	testtime.Eventually(t, testtime.Budget(10*time.Second), func() bool {
+		return len(journalFilesIn(t, dir)) == 0
+	}, "/clear to remove the journal")
+
+	submit(drv, "After the clear")
+	drv.WaitText("Thought about it.")
+	waitIdle(drv)
+	second := journalled("the cleared session's journal", func(lines []eventjson.Line) bool {
+		prompts := promptLines(lines)
+		return len(prompts) == 1 && prompts[0].Text == "After the clear"
+	})
+	if second == first {
+		t.Errorf("the cleared session journals under the old id %q", first)
+	}
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("quit: %v", err)
+	}
+	if journals := journalFilesIn(t, dir); len(journals) != 0 {
+		t.Errorf("journals after exit = %v, want none", journals)
+	}
 }

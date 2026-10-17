@@ -256,7 +256,14 @@ NOTES (2026-10-17): the unwritable-journal headless test injects its failure thr
 
 Depends on items 5, 6.
 
-## 8. The interactive TUI session writes a journal
+## 8. The interactive TUI session writes a journal — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the first-prompt hold is a new `session.Live.Claim()`: it holds the active id, or the pre-minted one, without adopting it, so the first Save stays the record's birth (Title, CreatedAt) and keeps Claim's hold. Live's "hold at BIRTH, never at the mint" doc now reads "hold at the FIRST PROMPT, never at the mint".
+NOTES (2026-10-17): the journal sink is `liveJournalSink` (wire_session.go): outermost over `w.stats.wrap(w.hooks)`, built once in wire_boot.go and held on `rootWiring.events`. `sessionHost` swaps the journal it records into. A journal is born at the first prompt (`sessionHost.Prompt` -> `Live.Claim`), at a Save that births a record with no prompt (a background workflow), after an Activate whose hold was taken, and at attach on a resumed record. It reuses `firingJournal`'s store-backed opener and reports on `bridge.NotifyHook` (an ephemeral note), because the TUI has no other Driver report line. `Entries` comes from the stored record's decoded transcript (0 when the record does not exist yet).
+NOTES (2026-10-17): re-derived from the assumption that the plan's file list covers the wiring: the attach call (`w.host.attachEventJournal`, `w.engine.onPrompt(w.host.Prompt)`) sits in cmd/apogee/wire_live.go, where `newSessionHost` is now called, and the sink's field sits on `rootWiring` in cmd/apogee/wire.go.
+NOTES (2026-10-17): consequential edit — cmd/apogee/wire_firing.go: `firingJournal`'s doc names the interactive host as a second caller, made necessary by the host reusing that opener.
+NOTES (2026-10-17): `lateEngine.Interject` reports every committed Interjection as a `prompt` line with `interjection: true`. That includes the workflow notes `deliverWorkflowNotes` delivers through the same call. A fresh session's journal title is `title.Derive` over the raw first prompt. The TUI derives its own title from `transcript.firstUserText()`, so the two can differ when the TUI rewrites the first message.
+NOTES (2026-10-17): no test drives a real Interjection end to end (that needs a tool-call Turn to interject into). Interjection lines and their order are covered at the host (`TestSessionHostEventJournalRecordsPromptsAndEvents`). The driven test (`TestSessionE2EWritesALiveEventJournal`) reuses the `queued-command` stubllm script and covers first prompt, a second prompt, `/clear` and exit. The host test `TestSessionHostEventJournalEndsBeforeTheHoldIsReleased` covers the switch and `/fork` boundaries and the journal-before-hold order.
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:**

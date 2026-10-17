@@ -316,6 +316,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The configured `currency:` label, which a Save writes beside the session's usage unless a resumed
 	// record brought a priced label of its own (sessionHost.sessionLabel, ADR 0093).
 	w.host.currency = w.opts.Currency
+	// The live Event journal (ADR 0103) rides the host too, since it follows the record's hold: the
+	// host points the chain's journal sink at the active record's `<id>.events.jsonl`, opened by the
+	// same store-backed opener a Firing's journal is (firingJournal), and the engine holder tells it
+	// of every accepted prompt — the moment a fresh session's hold is taken, and a `prompt` line.
+	w.host.attachEventJournal(w.events, firingJournal(w.store, w.bridge.NotifyHook))
+	w.engine.onPrompt(w.host.Prompt)
 	w.cfg.ScratchDir = w.host.SessionScratchDir()
 	// The read tools reach this same dir back through ReadMounts.Scratch, bound above, ahead of the
 	// tool build.

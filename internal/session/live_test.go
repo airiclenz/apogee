@@ -111,6 +111,71 @@ func TestLiveHoldsAtBeginNotAtTheMint(t *testing.T) {
 	assertLiveHeld(t, store, id, false)
 }
 
+// The interactive Driver holds at the first prompt, before Turn 1 and before any Save (ADR 0103
+// decision 10): Claim holds the pre-minted id without adopting it, so the Begin that follows is still
+// the record's birth — its title and instant are the ones fixed — and keeps Claim's hold rather than
+// refusing itself. Nothing is followed, and Rotate lets the claimed hold go.
+func TestLiveClaimHoldsAtTheFirstPromptBeforeTheBirth(t *testing.T) {
+	t.Parallel()
+	live, store, log := newTestLive(t, nil)
+	id := live.ID()
+	assertLiveHeld(t, store, id, false)
+
+	claimed, err := live.Claim()
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if want := (Identity{ID: id}); claimed != want {
+		t.Errorf("Claim on a fresh Live = %+v, want only the pre-minted id %+v", claimed, want)
+	}
+	assertLiveHeld(t, store, id, true)
+	if got := live.ActiveID(); got != "" {
+		t.Errorf("ActiveID after Claim = %q, want \"\": Claim adopts nothing", got)
+	}
+	if _, err := live.Claim(); err != nil {
+		t.Fatalf("a second Claim of the id already held: %v", err)
+	}
+
+	birth := begin(t, live, "born")
+	if want := (Identity{ID: id, Title: "born", CreatedAt: liveClock}); birth != want {
+		t.Errorf("Begin after Claim = %+v, want the record's birth %+v", birth, want)
+	}
+	assertLiveHeld(t, store, id, true)
+	again, err := live.Claim()
+	if err != nil || again != birth {
+		t.Errorf("Claim on the active identity = %+v, %v; want %+v, nil", again, err, birth)
+	}
+	if moves := log.moves(); len(moves) != 0 {
+		t.Errorf("Claim called the followers with %v, want no call", moves)
+	}
+
+	live.Rotate()
+	assertLiveHeld(t, store, id, false)
+}
+
+// A Claim another apogee refuses holds nothing and returns the *HeldError with a zero identity.
+func TestLiveClaimRefusedHoldsNothing(t *testing.T) {
+	t.Parallel()
+	live, store, _ := newTestLive(t, nil)
+	id := live.ID()
+	other := NewStore(store.dir)
+	release, err := other.Hold(id)
+	if err != nil {
+		t.Fatalf("the other instance's Hold: %v", err)
+	}
+
+	got, err := live.Claim()
+	var held *HeldError
+	if !errors.As(err, &held) || got != (Identity{}) {
+		t.Fatalf("Claim of a held id = %+v, %v; want a zero identity and a *HeldError", got, err)
+	}
+	_ = release()
+	if _, err := live.Claim(); err != nil {
+		t.Fatalf("Claim once the other instance let go: %v", err)
+	}
+	assertLiveHeld(t, store, id, true)
+}
+
 // NewLive on a resumed record begins active on it, carrying its identity, and holds it from there.
 func TestLiveResumedBeginsActiveAndHeld(t *testing.T) {
 	t.Parallel()

@@ -129,6 +129,13 @@ type lateEngine struct {
 	// here, so a bind leaves the Agent on the rules its Config seeded — a pointer, because an
 	// installed EMPTY set (every rule removed) is a different instruction from "never moved".
 	pendingAllowRules *[]apogee.AllowRule
+
+	// prompted hears every prompt the engine accepted — a top-level one from Submit (false) and an
+	// Interjection from Interject (true) — so the session host can hold the record at the first
+	// prompt and write each to the live Event journal as a `prompt` line (ADR 0103 decisions 10 and
+	// 11). Prompts are not Events (ADR 0025), so the Driver writes them here, and the engine emits
+	// nothing new. nil hears nothing.
+	prompted func(text string, interjection bool)
 }
 
 // sessionJournal is one opened undo journal together with the note that says why it is the journal
@@ -276,13 +283,37 @@ func (e *lateEngine) bound() *apogee.Agent {
 	return e.agent
 }
 
-// Submit enqueues user input, or refuses when there is no engine to enqueue it in.
+// Submit enqueues user input, or refuses when there is no engine to enqueue it in. Input the engine
+// accepted is a prompt the listener hears (onPrompt) — before the Step that opens its Turn 1.
 func (e *lateEngine) Submit(in apogee.UserInput) error {
 	agent := e.bound()
 	if agent == nil {
 		return errNoServerBound
 	}
-	return agent.Submit(in)
+	if err := agent.Submit(in); err != nil {
+		return err
+	}
+	e.notePrompt(in.Text, false)
+	return nil
+}
+
+// onPrompt installs the listener every accepted prompt and Interjection is told of (prompted). The
+// composition root calls it once, once the session host exists and before the first prompt.
+func (e *lateEngine) onPrompt(listener func(text string, interjection bool)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.prompted = listener
+}
+
+// notePrompt tells the listener of one accepted prompt. It is called outside the lock: the listener
+// may take the record's hold, which is file I/O.
+func (e *lateEngine) notePrompt(text string, interjection bool) {
+	e.mu.Lock()
+	listener := e.prompted
+	e.mu.Unlock()
+	if listener != nil {
+		listener(text, interjection)
+	}
 }
 
 // Step advances the loop one Turn. It runs outside the lock: a Turn is a network call.
@@ -313,13 +344,18 @@ func (e *lateEngine) CutSnapshot(dropExchanges int) (apogee.Session, error) {
 	return agent.CutSnapshot(dropExchanges)
 }
 
-// Interject commits a message into the open Exchange; unbound there is none.
+// Interject commits a message into the open Exchange; unbound there is none. A committed message is
+// an Interjection the prompt listener hears (onPrompt).
 func (e *lateEngine) Interject(ctx context.Context, in apogee.UserInput) error {
 	agent := e.bound()
 	if agent == nil {
 		return errNoServerBound
 	}
-	return agent.Interject(ctx, in)
+	if err := agent.Interject(ctx, in); err != nil {
+		return err
+	}
+	e.notePrompt(in.Text, true)
+	return nil
 }
 
 // InterjectChild queues a message for a running sub-agent; unbound there is no tree to reach into.

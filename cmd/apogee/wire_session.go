@@ -16,8 +16,11 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
+	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -34,6 +37,13 @@ import (
 // one holds is refused at its door). The host's two followers ride Live's onMove: followScratch
 // creates the active session's scratch dir and tells the engine it moved (scratchMoved), and
 // followJournal re-opens the undo journal under the new id (journalMoved).
+//
+// The host also drives the session's live Event journal (ADR 0103), the `<id>.events.jsonl` a
+// watcher follows: it is born just after the record's hold — at the first prompt (Prompt, through
+// Live.Claim), at a Save that births the record without one, at an Activate, and at boot on a
+// resumed record (attachEventJournal) — and Rotate, Activate and Close end and remove it BEFORE they
+// hand the hold to Live to release. The journal is the host's own and not a Live follower, because
+// Live's moves release the hold before they call a follower, and Close and Begin call none.
 //
 // model is mutex-guarded: Save runs on a Bubble Tea Cmd goroutine while SetModel is driven from the
 // Update loop, so the two can race. Live guards its own state.
@@ -87,6 +97,67 @@ type sessionHost struct {
 	// arrives after construction; Save resolves the two. Set by newSessionHost and Activate, cleared
 	// by Rotate, and guarded for the reason model is.
 	sessionLabel string
+
+	// events is the interactive chain's outermost sink the live Event journal records through, and
+	// openEvents opens one record's journal (firingJournal's opener over the store, in production).
+	// Both are set once by attachEventJournal, before the first prompt; nil — tests, and any host
+	// built without one — keeps no journal at all.
+	events     *liveJournalSink
+	openEvents run.JournalOpener
+
+	// evMu guards the open journal and serializes every step of its life — a Prompt on the worker
+	// goroutine, a Save or a Rotate/Activate on the record-write Cmd, Close at teardown — so no
+	// journal is born on an id between its end and the release of that id's hold. It is taken before
+	// Live's own lock, never inside it.
+	evMu sync.Mutex
+	// journal is the open live Event journal, nil while none is; journalID names the record it
+	// belongs to.
+	journal   run.LiveJournal
+	journalID string
+	// failedID is the id whose journal would not open — the opener has said why already — so it is
+	// not retried, and not said again, until the identity moves.
+	failedID string
+}
+
+// liveJournalSink is the interactive chain's outermost Event sink (ADR 0103 decision 1): every Event
+// is recorded into the session's open live Event journal, if one is open, and forwarded unchanged to
+// inner — the stats recorder over the Reaction Runner, never inside it (ADR 0075 D9). The chain is
+// built once at boot (wire_boot.go); the session host swaps the journal it records into as the
+// session's identity and hold move, so nothing below it is ever rebuilt.
+//
+// The journal's own sink is read under the mutex and called outside it: a swap never waits on an
+// Emit, and an Emit that read a journal a swap then ended writes nothing, since a closed journal
+// writes no line (eventjson.Journal.Close).
+type liveJournalSink struct {
+	inner domain.EventSink
+
+	mu      sync.Mutex
+	journal domain.EventSink
+}
+
+// newLiveJournalSink builds the sink over inner with no journal open.
+func newLiveJournalSink(inner domain.EventSink) *liveJournalSink {
+	return &liveJournalSink{inner: inner}
+}
+
+// Emit implements domain.EventSink: the journal records ev first, then inner receives it.
+func (s *liveJournalSink) Emit(ev domain.Event) {
+	s.mu.Lock()
+	journal := s.journal
+	s.mu.Unlock()
+	if journal != nil {
+		journal.Emit(ev)
+	}
+	if s.inner != nil {
+		s.inner.Emit(ev)
+	}
+}
+
+// swap makes journal the sink every later Event is recorded into; nil records none.
+func (s *liveJournalSink) swap(journal domain.EventSink) {
+	s.mu.Lock()
+	s.journal = journal
+	s.mu.Unlock()
 }
 
 // sessionHost satisfies the persistence seam the TUI drives.
@@ -99,7 +170,8 @@ var _ tui.SessionHost = (*sessionHost)(nil)
 // run. The door that resolved the record (resolveResume) probed the hold and let go of it a moment
 // ago, so this is the one real hold of the run; one Live cannot take is re-attempted, and reported,
 // by the first Save. A fresh start instead PRE-MINTS the id its first Save will adopt, so the
-// session's scratch dir can exist before the first tool call, and holds nothing until that Save.
+// session's scratch dir can exist before the first tool call, and holds nothing until its first
+// prompt (Prompt) or that Save.
 // scratchRoot and scratchMoved wire the scratch seam, snapshotsRoot and journalMoved the undo-store
 // seam beside it ("" / nil disable either — see the fields); followScratch and followJournal are
 // Live's followers, in that order, and construction calls neither (the composition root seeds its
@@ -120,8 +192,109 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 
 // Close releases the live-instance hold — and any hold Load parked that no Activate adopted — at the
 // end of the run, after the engine has closed, so the record is free to resume elsewhere the moment
-// this apogee is done writing it. Idempotent.
-func (h *sessionHost) Close() { h.live.Close() }
+// this apogee is done writing it. The live Event journal ends and is removed first, under the hold
+// still: the final save has landed by then, and a journal on disk only ever names a session still
+// running or one a crash left for the startup sweep. Idempotent.
+func (h *sessionHost) Close() {
+	h.evMu.Lock()
+	defer h.evMu.Unlock()
+	h.endEventJournalLocked()
+	h.live.Close()
+}
+
+// attachEventJournal hands the host the chain's journal sink and the opener it opens a record's
+// journal with — the composition root's one call, after construction and before the first prompt.
+// A host resumed on a record holds it from construction, and that record has had its prompt, so its
+// journal is born here; a fresh host's waits for its first prompt.
+func (h *sessionHost) attachEventJournal(events *liveJournalSink, open run.JournalOpener) {
+	h.evMu.Lock()
+	defer h.evMu.Unlock()
+	h.events, h.openEvents = events, open
+	if h.live.ActiveID() == "" {
+		return
+	}
+	if ident, err := h.live.Claim(); err == nil {
+		h.openEventJournalLocked(ident)
+	}
+}
+
+// Prompt is the engine holder's word that a prompt was submitted (interjection false) or an
+// Interjection committed (true): the record is held from here — the first prompt is the moment a
+// fresh session's hold is taken (Live.Claim, ADR 0103 decision 10) — its live Event journal is born
+// if it has none, and the prompt is written to it as a `prompt` line (decision 11). A hold that is
+// refused or fails opens no journal: the Save that follows re-attempts it and reports it, refusing
+// before it writes. A fresh record's journal is titled the way its record will be (title.Derive
+// over the first prompt, the rule the TUI's own title follows).
+func (h *sessionHost) Prompt(text string, interjection bool) {
+	h.evMu.Lock()
+	defer h.evMu.Unlock()
+	if h.events == nil {
+		return
+	}
+	if h.journal == nil {
+		ident, err := h.live.Claim()
+		if err != nil {
+			return
+		}
+		if ident.Title == "" {
+			ident.Title = title.Derive(text, title.MaxRunes, h.now())
+		}
+		h.openEventJournalLocked(ident)
+	}
+	if h.journal != nil {
+		h.journal.Prompt(text, interjection)
+	}
+}
+
+// openEventJournalLocked opens the live Event journal of ident's record — held by the caller's
+// Claim, Begin or Activate — unless one is open already, the host keeps none, or that record's
+// journal already failed to open. Entries is the record's transcript length at this birth. Callers
+// hold evMu.
+func (h *sessionHost) openEventJournalLocked(ident session.Identity) {
+	if h.events == nil || h.openEvents == nil || h.journal != nil || ident.ID == h.failedID {
+		return
+	}
+	journal := h.openEvents(run.JournalStart{
+		RecordID:  ident.ID,
+		Title:     ident.Title,
+		Workspace: h.workspace,
+		Entries:   h.recordEntries(ident.ID),
+	})
+	if journal == nil {
+		h.failedID = ident.ID
+		return
+	}
+	h.journal, h.journalID = journal, ident.ID
+	h.events.swap(journal.Wrap(nil))
+}
+
+// endEventJournalLocked takes the open live Event journal down — no Event is recorded into it from
+// here, its closing frame is written and its file closed and removed — and forgets a failed id, the
+// identity being about to move. Callers hold evMu, and the hold of the journal's record still.
+func (h *sessionHost) endEventJournalLocked() {
+	h.failedID = ""
+	if h.journal == nil {
+		return
+	}
+	h.events.swap(nil)
+	h.journal.End()
+	h.journal, h.journalID = nil, ""
+}
+
+// recordEntries counts the transcript entries of id's stored record — the count a watcher paints
+// from the record before it follows the journal (ADR 0103 decision 3). A record not written yet, the
+// fresh session's at its first prompt, counts zero, as does one that will not load or decode.
+func (h *sessionHost) recordEntries(id string) int {
+	rec, err := h.store.Load(id)
+	if err != nil {
+		return 0
+	}
+	entries, err := session.DecodeTranscript(rec.Transcript)
+	if err != nil {
+		return 0
+	}
+	return len(entries)
+}
 
 // Save persists the active session, fixing its id, Title and CreatedAt on the first call and
 // updating that same file thereafter. Title is set at create and never overwritten
@@ -136,10 +309,10 @@ func (h *sessionHost) Close() { h.live.Close() }
 // (sessionLabel), else the configured label (ADR 0093, amendment 2026-10-04).
 //
 // The first Save is the record's birth: Live.Begin adopts the pre-minted id with title and this
-// Save's moment as its Title and CreatedAt, and takes its live-instance hold; every later Save of the
-// same id finds the hold in place and keeps it. A hold that is refused — the record is open in
-// another apogee — or fails is this Save's error, returned BEFORE anything is written: two instances
-// never write one record.
+// Save's moment as its Title and CreatedAt, and takes its live-instance hold — or keeps the one the
+// first prompt's Claim took (Prompt); every later Save of the same id finds the hold in place and
+// keeps it. A hold that is refused — the record is open in another apogee — or fails is this Save's
+// error, returned BEFORE anything is written: two instances never write one record.
 func (h *sessionHost) Save(
 	sess apogee.Session,
 	transcript []byte,
@@ -153,6 +326,11 @@ func (h *sessionHost) Save(
 	if err != nil {
 		return err
 	}
+	// A record born without a prompt — a background workflow the human started before typing any —
+	// is held from this Begin, and its journal is born under it.
+	h.evMu.Lock()
+	h.openEventJournalLocked(a)
+	h.evMu.Unlock()
 	h.mu.Lock()
 	model := h.model
 	currency := cmp.Or(h.sessionLabel, h.currency)
@@ -195,12 +373,19 @@ func (h *sessionHost) SetModel(model string) {
 // (pushed to the engine via scratchMoved) and re-open its undo journal, before the new session's
 // first tool call. It is idempotent on an already-inactive host (each call simply re-mints). The
 // closed session's live-instance hold goes with it, and so does a hold Load parked that no Activate
-// adopted; the fresh id holds nothing until its first Save. The closed session's currency label
+// adopted; the fresh id holds nothing until its first prompt or Save. The closed session's currency label
 // goes too: the fresh session saves under the configured label.
+//
+// The closed session's live Event journal ends and is removed before Live releases its hold — the
+// record-write queue has landed the session's final save ahead of this Rotate — and the fresh id
+// gets a journal of its own at its first prompt.
 func (h *sessionHost) Rotate() {
 	h.mu.Lock()
 	h.sessionLabel = ""
 	h.mu.Unlock()
+	h.evMu.Lock()
+	defer h.evMu.Unlock()
+	h.endEventJournalLocked()
 	h.live.Rotate()
 }
 
@@ -242,12 +427,24 @@ func (h *sessionHost) Activate(meta session.Meta) {
 	h.mu.Lock()
 	h.sessionLabel = meta.EffectiveCurrency("")
 	h.mu.Unlock()
+	h.evMu.Lock()
+	defer h.evMu.Unlock()
+	// The outgoing session's live Event journal ends and is removed under its hold, before Live
+	// moves the hold — unless meta is the record it already belongs to, whose one hold, and so one
+	// journal, goes on. The incoming record has had its prompt, so its journal is born as soon as it
+	// is held.
+	if meta.ID != h.journalID {
+		h.endEventJournalLocked()
+	}
 	// Activate reports nothing (tui.SessionHost), so a hold Live could not take is left for the next
 	// Save to re-attempt and report: the Save is what would write over the other instance's record,
 	// and it refuses before writing. The followers below have already moved by then — a refused hold
 	// still moves the scratch dir and the undo journal to meta's id, by design (owner call 2026-10-02):
 	// the identity moved, so what fences the next tool call and what /undo reaches move with it.
-	_ = h.live.Activate(meta)
+	if err := h.live.Activate(meta); err != nil {
+		return
+	}
+	h.openEventJournalLocked(session.Identity{ID: meta.ID, Title: meta.Title})
 }
 
 // SessionScratchDir returns the scratch dir of the session Saves currently target — the active

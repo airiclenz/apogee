@@ -235,6 +235,9 @@ type rootWiring struct {
 	// every UpstreamAttemptEvent to ~/.apogee/server-stats.jsonl while `server-stats:` is on. It
 	// decorates hooks as Config.Events, and the `/settings` row opens or stops it live.
 	stats *statsRecorder
+	// events is the outermost sink of Config.Events, over stats: the live Event journal's (ADR 0103),
+	// which the session host points at the active record's journal (sessionHost.attachEventJournal).
+	events *liveJournalSink
 	// namer names an unnamed delegation out of band on the child's own Upstream (ADR 0068). It is
 	// held rather than left inside cfg because the `auto-title:` gate on it is live: the renderer
 	// flips it through tui.Options.OnAutoTitle when the pane or the file moves the key, long after
