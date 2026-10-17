@@ -292,11 +292,12 @@ addresses. A redirect is **never followed**: a 3xx comes back as itself and is r
 host you did not name. A webhook that redirects must be configured at the URL it redirects to.
 A running session's own webhooks keep the lists it started with: an edit to `url-safety:` reaches
 them at the next start. A `/schedule` firing raised after the edit composes its webhooks from the
-settings the session is running then, so it follows the edit; `apogee headless` and
-`apogee daemon` read the lists once, at start, like the rest of their configuration — for a
-headless run that includes a project's `url-safety.deny-hosts`, which a
-[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to; the daemon
-reads the global file alone.
+settings the session is running then, so it follows the edit. `apogee headless` reads the lists
+once, at start, like the rest of its configuration, and that includes a project's
+`url-safety.deny-hosts`, which a
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to.
+`apogee daemon` reads the global lists once, at start, and each daemon firing adds the
+`url-safety.deny-hosts` of its own workspace's Project config, read at that firing.
 
 ## Advising the model
 

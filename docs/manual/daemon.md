@@ -136,12 +136,17 @@ file carries no secrets. Leave `server:` out and the schedule runs on whatever `
 in `config.yaml` names as the startup default.
 
 `config.yaml` is read **once**, at startup: changing your servers means restarting the
-daemon. It is the only config the daemon reads: a repository's
-[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) is not layered over it,
-because the folder the daemon starts in is not the workspace its firings run in; and a firing,
-like a headless run, never reaches the ordinary prompt an
-[Allow rule](configuration.md#commands-that-run-without-asking--allow) answers. `schedules.yaml` is the only live surface. The seven Floor guards are on for
-every firing, exactly as they are in a session.
+daemon. The folder the daemon starts in is not the workspace its firings run in, so it starts
+on `config.yaml` alone; each firing then layers its own workspace's
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) over it, read afresh at
+that firing — an edit to a project's file reaches its next firing without a restart, and two
+schedules in two repositories never see each other's file. A project file the firing skips, or a
+global-only key in it, is one line in the daemon's log the first time, not one per firing. A
+firing, like a headless run, never reaches the ordinary prompt an
+[Allow rule](configuration.md#commands-that-run-without-asking--allow) answers, so a rule the
+Project config proposes stays proposed, and nothing is said about it. `schedules.yaml` is the
+only file the daemon watches. The seven Floor guards are on for every firing, exactly as they are
+in a session.
 
 The daemon **never loads a model**. On a server llama-launcher fronts, `model:` would be
 a request to *load* that model, so it is refused there — drop the key and the firing

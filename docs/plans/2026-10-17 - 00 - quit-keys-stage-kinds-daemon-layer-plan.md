@@ -150,7 +150,11 @@ cmd/apogee/daemonfire_test.go — newDaemonFireHarness, entryFor; cmd/apogee/dae
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestDaemon' ./cmd/apogee/`
 **Commit:** `feat(daemon): layer each firing's own Project config`
 
-## 6. Docs and ADR 0096 amendment for per-firing layering
+## 6. Docs and ADR 0096 amendment for per-firing layering — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): consequential edit — .capcom/knowledge/decisions/adr-0096.md: made necessary by the new amendment Note (the record's reading-order line now names `adr-0096-amend-1017`, as other amended ADRs' parents do).
+NOTES (2026-10-17): daemon.md's "`schedules.yaml` is the only live surface" became "the only file the daemon watches", since a project file is now read per firing; reactions.md's url-safety sentence was split so the daemon's per-firing `url-safety.deny-hosts` (the webhook guard reads the layered Firing options) is stated beside headless's read-once.
+NOTES (2026-10-17): the stale-statement grep's one remaining hit, probe.md:148, is about `apogee probe config`, not the daemon; the ADR's original §4 sentence is kept with a blockquoted amendment pointer after item 4, as `adr-0076-decision.md` does.
 
 **What:**
 **Goal:** no shipped doc or decision record says the daemon reads no Project config; ADR 0096 records the per-firing layering as an amendment.

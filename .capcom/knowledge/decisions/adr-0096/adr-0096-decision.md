@@ -36,6 +36,12 @@ the repo, pinned to that entry's exact content, so the pin — not a write refus
    folder and every firing reuses them, so one repo's project layer would leak into another's
    firings — per-firing layering is a follow-up.
    A fresh clone, or the same repo at another path, asks once.
+
+   > *Amendment (2026-10-17, `adr-0096-amend-1017`):* the daemon now layers each Firing's own
+   > workspace's Project config, read fresh at that Firing, over a copy of its startup Options; the
+   > startup resolve stays global-only and read once. The daemon sentence above is superseded on that
+   > point alone.
+
 5. **Write refusal.** File tools are refused — Tier 1, every mode, no look — on writing, moving or
    deleting `<Project root>/.apogee/config.yaml`, and on deleting, moving or replacing `.apogee/`
    itself. The shell reader refuses the forms it can see. `.apogee/skills/` stays workspace territory.

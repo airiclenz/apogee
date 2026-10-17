@@ -354,9 +354,12 @@ project supplied `(project)`, and [`apogee probe config`](probe.md), run in the 
 two files resolved together.
 
 **Who reads it.** A session in the TUI reads and watches it. `apogee headless` reads it for its
-workspace like a session, but asks nothing about it. `apogee daemon` reads **no** Project config:
-the folder a daemon starts in is not the workspace its firings run in, so it resolves the global
-file alone.
+workspace like a session, but asks nothing about it. `apogee daemon` starts on the global file
+alone — the folder it starts in is not the workspace its firings run in — and layers each
+[firing](daemon.md)'s own workspace's Project config over it, read afresh at that firing, so an
+edit reaches the next firing without a restart and two schedules in two repositories never see
+each other's file. A project file the daemon skips, or a global-only key it ignores, is one line
+in the daemon's log the first time, not one per firing.
 
 **Adoption.** A project rule is *proposed* until you answer it, and the answer is kept on your
 machine, never in the repository: `~/.apogee/workspaces/<sha256>.yaml`, one record per Project
