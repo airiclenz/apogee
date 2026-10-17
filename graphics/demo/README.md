@@ -4,132 +4,152 @@ Everything needed to re-record the README hero clip, or to record a new clip sho
 other feature, without rediscovering any of the groundwork.
 
 The clip is driven from a storyboard rather than performed by hand, on purpose: when the TUI
-changes, re-recording is one command instead of a careful hand performance. `demorig`, the rig's
-Go dev tool, runs the real `apogee` binary in a pty, performs every beat the storyboard lists —
-humanized typing, keys, waits and real mouse clicks — while a recorded model answers, and renders
-the shipped GIF from what the terminal showed.
+changes, re-recording is one command instead of a careful hand performance.
+[photon](https://github.com/airiclenz/photon), a standalone terminal-clip recorder, runs the real
+`apogee` binary in a pty, performs every beat the storyboard lists — humanized typing, keys,
+waits and real mouse clicks — while a recorded model answers, checks the take, and renders the
+shipped GIF from what the terminal showed. This file covers apogee's side of that: the rig, the
+model service and what a keeper take must show. photon's own behaviour — its commands, the
+storyboard and `photon.yaml` schemas, section timing, zoom, cursor and fonts — is documented once,
+in [photon's README](https://github.com/airiclenz/photon#readme), and not restated here.
+
+## Install
+
+```sh
+make install                                              # the apogee the rig films (below)
+go install github.com/airiclenz/photon/cmd/photon@latest  # the recorder
+```
+
+photon's `render` needs `ffmpeg` on `PATH` and uses `gifsicle` for a lossless pass when it finds
+it; `setup` and `record` need a unix pty, so they run on Linux and macOS
+([photon's Install](https://github.com/airiclenz/photon#install)). The rig builds its own two
+tools from this checkout, so there is nothing else to install.
 
 ## Quick start
 
 From the repo root:
 
 ```sh
-make install                     # the rig runs the apogee on your PATH — install the one you mean to film
-make demorig                     # the rig's Go tool, built to ./demorig (never a release asset)
-graphics/demo/setup.sh           # build the rig: isolated home, stage repo, env.sh, rig.env (idempotent)
+make install          # the rig runs the apogee on your PATH — install the one you mean to film
+photon setup graphics/demo/storyboards/hero.yaml    # build the rig: isolated home, stage repo, env.sh, tools (idempotent)
 
-# once per storyboard change — the only step that talks to a live model or needs a key
+# once per storyboard change — the only take that talks to a live model or needs a key
 export OPENROUTER_API_KEY=…
-./demorig capture graphics/demo/storyboards/hero.yaml \
-    --upstream https://openrouter.ai/api --key-env OPENROUTER_API_KEY
+photon record graphics/demo/storyboards/hero.yaml --profile capture
 
 # every take after that — offline, keyless, deterministic
-./demorig record graphics/demo/storyboards/hero.yaml    # exit 1 = the check found a FAIL
-./demorig render graphics/demo/storyboards/hero.yaml    # writes ../demo.gif (the storyboard's ship:)
+photon record graphics/demo/storyboards/hero.yaml   # exit 1 = a beat or an expect FAILed
+photon render graphics/demo/storyboards/hero.yaml -o /tmp/hero.gif   # review it first
 ```
 
-`capture` is a whole take against the live model behind a recording proxy; once every beat has
-run it saves the model's replies as the storyboard's `cassette:` (`storyboards/hero.cassette`),
-then checks the take like `record` does. `record` replays that cassette as the model, so it needs
-no network and no key, and a retake costs seconds of wall clock rather than a model's mood. Both
-reset the stage first, write the take to `<work>/<clip>.take` and exit with the check's status,
-so a retake loop is `until ./demorig record graphics/demo/storyboards/hero.yaml; do :; done`.
+`make install` comes first because `setup.sh` bakes the directory of `command -v apogee` into the
+rig's `env.sh`: the rig films the apogee on your `PATH`, so install the build you mean to film
+before you set up.
 
-`render` reads that take by default (pass another take as its second argument), writes the
-storyboard's `ship:` path unless `-o` names another, and `--dry-run` prints the ffmpeg command
-line instead of running it. It needs `ffmpeg` on PATH and uses `gifsicle` when it finds it, for
-a lossless pass — never `--lossy`, whose near-colour matches speckle flat backgrounds.
-`./demorig lint <storyboard>` checks a storyboard's schema without touching the rig;
-`./demorig check <storyboard> [<take>] --stage <dir>` re-judges a take by hand. `go run ./cmd/demorig …` works in place of `make demorig`.
+`record --profile capture` is a whole take against the live model behind a recording proxy; once
+every beat has passed it copies the model's replies over `storyboards/hero.cassette`, the cassette
+every later take replays. A plain `record` replays that cassette as the model, so it needs no
+network and no key, and a retake costs seconds of wall clock rather than a model's mood. Both
+reset the stage first, write the take to `<work>/hero.take` and exit with the check's status, so
+a retake loop is `until photon record graphics/demo/storyboards/hero.yaml; do :; done`.
 
-**The server alias and the model id are on camera** in the footer for the whole clip, so pick
-both deliberately. `setup.sh` defaults them to the `openrouter` alias and
-`~deepseek/deepseek-v4-flash-latest` (fast inference, so a capture is short);
-`APOGEE_DEMO_HOST_ALIAS` and `APOGEE_DEMO_MODEL` override them. apogee itself never talks to the
-live server: its one server entry is `http://127.0.0.1:<port>` (`APOGEE_DEMO_PORT`, default
-18181), keyless, where `capture` serves its proxy and `record` its replayer. The key travels only
-through `--key-env` — it names the variable, the proxy reads it and adds it to each forwarded
-request, and it is never written anywhere. `--key-env` left off sends no key, for a keyless local
-server; naming a variable that is unset is refused rather than capturing a cassette of 401s.
+`render` writes `graphics/demo.gif` — the storyboard's `ship:` path, the one the README shows —
+unless `-o` names another file, so pass `-o` to review a render before it replaces the shipped
+clip. `photon lint graphics/demo/storyboards/hero.yaml` checks the storyboard against
+`photon.yaml` without touching the rig; `photon check graphics/demo/storyboards/hero.yaml`
+re-judges the last take without recording it again.
 
-**photon (in transition).** The rig is moving from `demorig` to
-[photon](https://github.com/airiclenz/photon), a standalone recorder. `photon.yaml` here is its
-project config — the rig's setup and reset, apogee's launch, the `model` service (`stubllm`
-replaying `storyboards/hero.cassette` on port 18181, or recording a new one under `--profile
-capture`) and the `footer`, `status` and `transcript` areas — and `storyboards/hero.photon.yaml`
-is the hero clip in photon's schema, its session expects run by `sessionexpect`. `setup.sh` builds
-both tools into `<work>/bin`. photon's rig lands in `~/.cache/apogee-demo-photon` (photon's
-`--work` or `PHOTON_WORK` move it), separate from demorig's `~/.cache/apogee-demo`, and
-`photon.yaml` unsets `APOGEE_DEMO_WORK` and `APOGEE_DEMO_PORT` for `setup.sh` and `reset.sh`.
-`photon lint graphics/demo/storyboards/hero.photon.yaml` checks the pair. Until demorig retires,
-`hero.yaml` stays the clip demorig films, and a change to the clip lands in both storyboards.
+**The server alias and the model id are on camera** in the footer for the whole clip, so they are
+chosen deliberately and fixed in `setup.sh`: the `openrouter` alias and
+`~deepseek/deepseek-v4-flash-latest` (fast inference, so a capture is short). Both must match the
+committed cassette — change either in `setup.sh` and re-capture. apogee itself never talks to the
+live server: its one server entry is `http://127.0.0.1:18181`, keyless, where `photon.yaml`'s
+`model` service runs. The key travels only through `--key-env OPENROUTER_API_KEY` on the capture
+proxy's command line — it names the variable, the proxy reads it and adds it to each forwarded
+request, and it is never written anywhere; naming a variable that is unset is refused rather than
+capturing a cassette of 401s.
 
 ## Layout
 
 | path | what it is |
 |---|---|
-| `setup.sh` | builds the rig: isolated apogee home, stage repo, generated `env.sh` and `rig.env`, warm Go cache |
-| `reset.sh` | restores the planted bug + CHANGELOG stub, wipes session state; `capture` and `record` run it before every take |
-| `storyboards/<clip>.yaml` | one storyboard per clip — the whole clip: the actions of every beat, its section timing, zoom and expects, and the director's notes; `hero.yaml` is the README clip |
-| `storyboards/<clip>.cassette` | the model replies `capture` saved and `record` replays (JSON, committed beside its storyboard) |
-| `fonts/` | the rasterizer's faces and their OFL licences (**Fonts and licences**, below) |
+| `photon.yaml` | photon's project config: the rig's setup and reset, apogee's launch, the `model` service and its `capture` profile, apogee's quit keys and the `footer`, `status` and `transcript` areas |
+| `setup.sh` | builds the rig: isolated apogee home, stage repo, generated `env.sh`, the rig's tools in `<work>/bin`, warm Go cache; `photon setup` runs it |
+| `reset.sh` | restores the planted bug + CHANGELOG stub, wipes session state; `photon record` runs it before every take |
+| `storyboards/<clip>.yaml` | one storyboard per clip — the whole clip: the actions of every beat, its section timing and expects, and the director's notes; `hero.yaml` is the README clip |
+| `storyboards/<clip>.cassette` | the model replies a capture saved and the `model` service replays (JSON, committed beside its storyboard) |
 | `stage/` | templates for the taskman stage repo (copied out by `setup.sh`) |
 | `history/` | local only (gitignored): one folder per shipped clip — the GIF that shipped, its variants, and a `NOTES.md` of the recording facts |
-| `cmd/demorig` (repo root) | the rig's Go tool: `lint`, `capture`, `record`, `check`, `render` |
+| `cmd/stubllm` (repo root) | the model service: replays a cassette, or captures one through a recording proxy |
+| `cmd/sessionexpect` (repo root) | judges one entry of the session a take saved; the storyboard's session expects run it |
 
-Nothing is built inside this repo. The rig lands in `~/.cache/apogee-demo` (override with
-`APOGEE_DEMO_WORK`, or `--work` on `capture` and `record`), which keeps a 60 MB+ Go build cache,
-a generated apogee home and the takes out of the tree. `setup.sh` and `reset.sh` also read
-`PHOTON_WORK` when `APOGEE_DEMO_WORK` is unset (`APOGEE_DEMO_WORK` wins when both are set), but
-demorig reads only `APOGEE_DEMO_WORK` or `--work`, so a rig built from `PHOTON_WORK` alone needs
-`--work` on `capture` and `record` — `setup.sh`'s closing hint names it.
+Nothing is built inside this repo. The rig lands in photon's work dir,
+`~/.cache/apogee-demo-photon` (photon's default for `photon.yaml`'s `name: apogee-demo`), which
+keeps a 60 MB+ Go build cache, a generated apogee home, the rig's tools and the takes out of the
+tree. `--work <dir>` on any photon command, or `PHOTON_WORK`, moves it; photon exports the work
+dir to `setup.sh` and `reset.sh` as `PHOTON_WORK`, and both fall back to the same default when run
+by hand. A rig built anywhere else needs the same `--work` on every later command — `setup.sh`'s
+closing hint names it.
 
 ## How a take works
 
-`capture` and `record` run the same take; only the model source differs. The take resets the
-stage, serves the model on the rig's port, launches `apogee` in a pty sized to the storyboard's
-`frame.cols` × `frame.rows` (135 × 44 for the hero) under the generated `env.sh`, waits for the
-first paint, and performs the beats in order. The terminal is emulated with
-`charmbracelet/x/vt`; every change of the screen is kept as a full-grid snapshot stamped on the
-take's clock (sampled no faster than `frame.fps`, identical grids collapsed), beside a log of what
-the rig did — each beat's start, each typed string, key and click, and the cell every target
-resolved to. That is the take file: the render draws from it and never goes back to apogee or the
-pty. The take starts at apogee's first paint, so there is no shell launch to trim, and it ends
-with the last beat: the rig then waits for apogee to go idle (a second without a paint, at most
-15 s) and quits it with ⌃c⌃c, so the session is flushed to disk before the check reads it —
-killing apogee only if it has not exited 10 s later. Nothing apogee paints on its way out
-reaches the take.
+`photon record` and `photon record --profile capture` run the same take; only the model service
+differs. The take runs `reset.sh`, starts the `model` service on port 18181 and waits for it to
+accept connections, then launches `apogee` in a pty sized to the storyboard's `frame.cols` ×
+`frame.rows` (135 × 44 for the hero) under the generated `env.sh`, waits for the first paint, and
+performs the beats in order. The take starts at apogee's first paint, so there is no shell launch
+to trim. After the last beat photon waits for apogee to go idle and quits it with ⌃c⌃c (`end.keys`
+in `photon.yaml`): the first press arms apogee's quit and the second confirms it, and a clean quit
+flushes the session to disk before the check reads it. Nothing apogee paints on its way out
+reaches the take. photon's own account of a take — the take file, the end of a take, what a
+failed beat leaves behind — is [The take and the retake
+loop](https://github.com/airiclenz/photon#the-take-and-the-retake-loop).
 
-A beat whose action fails — a wait that times out, a click target not on screen — ends the take
-with that error; the take is still written, because it is what shows why, but it is not checked
-and `capture` saves no cassette. APOGEE_* variables that would steer apogee away from the rig
-(another config, server, endpoint, model, mode, bypass or workspace) are stripped from the
-environment the take launches in: the rig's `config.yaml` is the whole of what a take runs on.
+**The launch is isolated from the operator.** `launch.strip: ['APOGEE_*']` removes every APOGEE_*
+variable from the environment the take launches in, so no other config, server, endpoint, model,
+mode, bypass, workspace or API key steers apogee away from the rig: the rig's `config.yaml` is the
+whole of what a take runs on. The one variable the launch sets, `APOGEE_NO_UPDATE_CHECK=1`, turns
+the boot update check off, so a recording neither calls the release server nor paints its notice.
 
-**Checking a take.** The check runs at the end of every `capture` and `record`, and on demand as
-`demorig check`. Each expect is one `beat N | PASS/FAIL | detail` row, then a `stage` row, and
-exit 1 on any FAIL. Entry expects judge the session the take saved (the newest
-`<work>/home/.apogee/sessions/*.json`, whose path the take carries); `seen` expects judge the
-screens the take recorded inside the beat; `expect: {stage: dirty}` judges the stage repo, which a
-hand-run `check` reports as `SKIP` unless `--stage <work>/home/Repos/taskman` names it. A missed
-queued message fails beat 5 with the entry saved as `user` instead of `interjected`. For the deep
-dive — exactly where the queued message landed in the tool sequence, and what the stage looks
-like — read the session and the stage directly:
+**Checking a take.** The check runs at the end of every `record`, and on demand as `photon
+check`. Each expect is one `beat N | PASS/FAIL | detail` row (`take | …` for the storyboard-level
+ones), and the exit status is 1 on any FAIL. A `seen` expect judges the screens the take recorded
+inside the beat. A `run` expect is a shell command whose exit status is the verdict, and the hero
+uses two kinds:
+
+- **Session expects** run `"$PHOTON_WORK/bin/sessionexpect"`, which judges one entry of the newest
+  session the take saved (`$PHOTON_WORK/home/.apogee/sessions/*.json`). `--entry` selects it with
+  comma-separated `key=value` pairs — `kind` (required, an entry kind as the session JSON spells
+  it: `user`, `toolCall`, `interjected`, …), `text`, `tool` and `target` (prefix matches on the
+  entry's text, tool label and tool target) and `nth` (a positive integer or `last`) — and the
+  clauses judge it: `--contains` (a substring of its text, tool label, tool stat or tool summary —
+  where apogee saves an edit's diffstat and a test run's verdict), `--before` and `--after` (each a
+  second selector the entry must come before or after). Exit 0 is a pass, 1 a fail, 2 a mistyped
+  command line.
+- **The stage expect** at the top of `hero.yaml` is a `git status --porcelain` of the stage repo:
+  the fix and the CHANGELOG entry must still be there after the take.
+
+A missed queued message fails beat 5, because the entry is saved as `user` instead of
+`interjected`. For the deep dive — exactly where the queued message landed in the tool sequence,
+and what the stage looks like — read the session and the stage directly:
 
 ```sh
 python3 -c "import json,sys; e=json.load(open(sys.argv[1]))['transcript']['entries']; \
 [print(i, x.get('kind'), (x.get('tool') or {}).get('label',''), str(x.get('text',''))[:70]) \
- for i,x in enumerate(e)]" ~/.cache/apogee-demo/home/.apogee/sessions/*.json
-cd ~/.cache/apogee-demo/home/Repos/taskman && git diff && go test ./...
+ for i,x in enumerate(e)]" ~/.cache/apogee-demo-photon/home/.apogee/sessions/*.json
+cd ~/.cache/apogee-demo-photon/home/Repos/taskman && git diff && go test ./...
 ```
 
 ## Capture and replay
 
 A model is nondeterministic; a clip should not be. So the model is recorded once and replayed:
-`capture` puts a recording proxy (`stubllm`'s cassette recorder) between apogee and the live
-server, and files every completion reply — its raw bytes, chunked as they arrived and stamped with
-when — plus the answers to the `/v1/models` and `/props` discovery probes. `record` serves that
-cassette back at the captured pace, so the replayed run streams exactly like the live one did.
+under `--profile capture` the `model` service is `stubllm capture`, a recording proxy between
+apogee and the live server, and it files every completion reply — its raw bytes, chunked as they
+arrived and stamped with when — plus the answers to the `/v1/models` and `/props` discovery
+probes into `<work>/hero.cassette`. Only a take whose every beat passed copies that file over
+`storyboards/hero.cassette` (the profile's `on_success`). Without the profile the service is
+`stubllm replay`, which serves the committed cassette back at the captured pace, so the replayed
+run streams exactly like the live one did.
 
 **The cassette key names the conversation, not the bytes.** A replayed request never matches its
 captured bytes — the system prompt carries a scratch directory and a session id, tool results
@@ -141,166 +161,57 @@ results and the model id are left out. A key asked for twice answers from its qu
 order; a retried request was captured once, as the reply that finally answered it.
 
 **When to re-capture: an unknown-key 500.** A replayed request whose key the cassette does not
-hold is answered HTTP 500, naming the key and the request's first user message, and logged — the
-replay never improvises, because an improvised reply would hide the moment the run drifted from
-the capture. apogee retries a 5xx, gets the same 500, reports a failed turn; the next wait times out and the
-take fails.
-That is the signal to run `capture` again. It happens when something the key reads has changed:
-a typed prompt (beat 3's sentence *is* the first user message), apogee's tool menu, the
-orientation text in the first message, or the model's own earlier replies — which is to say any
-storyboard change that makes the model answer differently. A change the key does not read
-replays silently, so re-capture on purpose after changing the model id or the alias, too: the
-footer would show a model the replies never came from.
+hold is answered HTTP 500, naming the key and the request's first user message, and logged to
+`<work>/model.log` — the replay never improvises, because an improvised reply would hide the
+moment the run drifted from the capture. apogee retries a 5xx, gets the same 500, reports a failed
+turn; the next wait times out and the take fails.
+That is the signal to run `photon record --profile capture` again. It happens when something the
+key reads has changed: a typed prompt (beat 3's sentence *is* the first user message), apogee's
+tool menu, the orientation text in the first message, or the model's own earlier replies — which
+is to say any storyboard change that makes the model answer differently. A change the key does
+not read replays silently, so re-capture on purpose after changing the model id or the alias,
+too: the footer would show a model the replies never came from.
 
 A cassette is committed beside its storyboard, so a re-record on another machine is offline from
 the first take.
 
 ## Storyboards
 
-`storyboards/<clip>.yaml` is the whole clip: the actions the recorder performs at each beat, how
-long each beat lasts in the render and where it zooms, what a keeper take must show, and the
-director's notes — the *why* behind every choice. **A re-record starts by editing the
-storyboard.** It is read by humans and by `demorig` (`make demorig`, never a release asset), and
-the decode is strict: an unknown field is an error, so `demorig lint` catches a typo before a take
-does. The schema, with `hero.yaml`'s header and beat 6 as the worked example:
+`storyboards/<clip>.yaml` is the whole clip: the actions photon performs at each beat, how long
+each beat lasts in the render, what a keeper take must show, and the director's notes — the *why*
+behind every choice. **A re-record starts by editing the storyboard.** The schema is photon's
+([Storyboard reference](https://github.com/airiclenz/photon#storyboard-reference)), and the decode
+is strict: an unknown field is an error, so `photon lint` catches a typo before a take does.
+`hero.yaml`'s header comment and beat notes are the worked example. What is apogee's own:
 
-```yaml
-clip: hero
-ship: ../../demo.gif             # relative to this storyboard file's own directory
-cassette: hero.cassette          # likewise; written by `demorig capture`, replayed by `demorig record`
-fonts: ../fonts                  # likewise
-frame: {cols: 135, rows: 44, padding: 32, font_size: 30, line_height: 1.2, scale: 2, width: 1250, fps: 24, max_colors: 192}
-expect: {stage: dirty}           # the stage repo still carries the exchange's writes after the take
-beats:
-  - id: 6
-    title: click into the sub-agent's run view and back
-    why: every child run is inspectable — one click in, one click out
-    do:
-      - click: {target: {text: "┕ .*tool calls", nth: last, area: transcript}}
-      - wait: {screen: "← main ›", timeout: 5s}
-      - pause: {for: 2500ms}
-      - click: {target: {text: "← main ›"}}
-      - wait: {screen: "← main ›", gone: true, timeout: 5s}
-    duration: 6s
-    zoom: {target: {text: "← main ›"}, factor: 1.5}
-    notes: |
-      The member row (`┕ … tool calls`, the LAST one on screen — the newest run) opens the run
-      view; its header band reads `← main › <run>`, and clicking the band goes back up.
-```
+- **No `cassette:` and no `fonts:`.** The model is a service in `photon.yaml`, not a storyboard
+  field, and the faces are the ones embedded in photon.
+- **The frame.** `hero.yaml`'s `frame` is both the recorded terminal (135 × 44 cells) and the
+  shipped geometry: rasterized at scale 2 and downscaled to a 1250-wide GIF, so a zoom has real
+  pixels to draw on. `photon.yaml` sets no `theme`, so frames draw on photon's defaults: Catppuccin
+  Mocha's foreground and ANSI colours on a near-black `#0e1117`.
+- **Areas.** `photon.yaml` declares the three bands of apogee's screen a target or a `seen` is
+  searched in, read off apogee's own chrome (`layout.md`) and found afresh on every screen:
 
-**The header.** `clip` names the clip and its take file. `ship`, `cassette` and `fonts` are paths
-relative to the storyboard's own directory. `frame` is both the recorded terminal and the shipped
-geometry: `cols` × `rows` is the pty, `padding` (pixels), `font_size` (points) and `line_height`
-(a multiple of the font size) lay the cells out, `scale` is what frames are rasterized at —
-padding and font size multiplied through, so a zoom has real pixels to draw on — and `width`,
-`fps` and `max_colors` are the shipped GIF's width, frame rate and palette size. The hero's
-135 × 44 cells rasterize to ≈ 2494 × 1648 px at scale 2 and ship 1250 wide (≈ 1.5 : 1).
+  | area | rows |
+  |---|---|
+  | `footer` | the row directly above the lowest `▁` floor hairline — mode marker, server alias, model, workdir |
+  | `status` | the row directly below the lowest `▔` top rule above the prompt box — the context gauge's line |
+  | `transcript` | everything above that top rule |
+  | `any` (or absent) | every row |
 
-**A beat** carries an `id` (positive, unique, ascending), a `title`, `why` and `notes` for the
-humans, a `do` list of actions, its section timing (`duration`, `hold`, `cut` — **Section
-durations**, below), an optional `zoom` and its `expect`s.
+- **Keys and clicks.** Key names are spelled as Bubble Tea's `msg.String()` spells them, which is
+  also photon's spelling (`enter`, `esc`, `shift+tab`, `pgdown`, …). Every on-camera click is a
+  real SGR mouse press and release, which apogee receives because it enables mode 1002 + SGR 1006
+  and toggles blocks on release; nothing is faked by keyboard.
+- **The minus sign.** Every on-screen minus the TUI draws in a diffstat is U+2212 (`−`), never an
+  ASCII hyphen, and every pattern that matches one spells it so — `\+1 −1`.
+- **Expects** are `seen` and `run` only; session and stage expects are the `run` forms under
+  **Checking a take**, above.
 
-**Actions**, one form per list item, performed in order:
-
-| action | does |
-|---|---|
-| `type: {text, humanize}` | types the text with the humanized profile (below); `humanize: false` types it flat |
-| `key: {name, repeat}` | presses a key `repeat` times (once when absent); names are spelled as Bubble Tea's `msg.String()` spells them — `enter`, `esc`, `tab`, `shift+tab`, `space`, `backspace`, `ctrl+c`, the arrows, `pgup`, `pgdown`, `alt+up`, `alt+down`, `f1`–`f12` |
-| `click: {target, times}` | resolves the target on the current screen and clicks its centre cell `times` times (once when absent) |
-| `wait: {screen, gone, timeout}` | blocks until the regex matches the screen — or, with `gone: true`, no longer does; `timeout` is required and at most 180 s, and running out fails the take |
-| `pause: {for}` | idles |
-
-**Clicks are real.** Every on-camera click is an SGR mouse press and release (apogee enables mode
-1002 + SGR 1006 and toggles blocks on release) sent at the target's computed cell; nothing is
-faked by keyboard. The same resolved cell is where the drawn cursor glides to in the render.
-
-**Humanized typing.** Each character is followed by a gap drawn from a fixed profile — 25–45 ms
-after a letter, 60–90 ms after a space, 90–140 ms after `.,-!`, and one space in eight (never
-more than twice a string) a 300–500 ms thinking pause — from a seeded MINSTD generator
-(`cmd/demorig/typing.go`), so the rhythm is identical on every machine and every take.
-
-**Targets and areas.** A target — `{text, nth, area}` — is a place on the screen a click or a
-zoom resolves. `text` is a regex over the screen's rows (a match never spans rows); `nth` picks
-which match counts, in reading order: `first` (the default), a positive integer, or `last` (the
-lowest row's rightmost match). `area` limits the rows searched, read off apogee's own chrome
-(`layout.md`):
-
-| area | rows |
-|---|---|
-| `footer` | the row directly above the `▁` floor hairline — mode marker, server alias, model, workdir |
-| `status` | the row directly below the lowest `▔` top rule above the prompt box — the context gauge's line |
-| `transcript` | everything above that top rule |
-| `any` (or absent) | every row |
-
-A target not on screen, or an `nth` past the matches, fails the action with the pattern and area
-named. Every on-screen minus the TUI draws in a diffstat is U+2212 (`−`), never an ASCII hyphen,
-and every pattern that matches one spells it so — `\+1 −1`.
-
-**Expects** are what a keeper take must show. An expect sets `entry`, `seen` or both. `entry`
-selects one session entry in the session-anchor grammar — `{kind, text, tool, target, nth}`, where
-`kind` is an entry kind as the session JSON spells it (`user`, `toolCall`, `interjected`, …),
-`text`/`tool`/`target` are prefix matches on the entry's text, tool label and tool target, and
-`nth` is a positive integer or `last` — and the entry clauses judge it: `contains` (a substring of
-its text, tool label, tool stat or tool summary — where apogee saves an edit's diffstat and a test
-run's verdict), `before: <id>` and `after: <id>` (ordering against the entry another beat's first
-entry expect locates). `seen` is a regex that must match at least one screen
-the take recorded inside the beat. The top-level `expect: {stage: dirty}` asserts the stage repo
-still carries the exchange's writes after the take.
-
-## Section durations
-
-Every beat carries a target `duration:` — how long its section lasts in the shipped clip — and the
-render derives the speed, never the other way round. A beat's stretch of the take runs from its
-start to the next beat's start (the last one to the take's end). A beat longer than its duration
-plays 1× over its `hold` (leading stretch, default 0) and then at `(L − H) / (D − H)` for the
-rest; a beat that fits plays 1× throughout and **freezes its last frame** for the remainder, which
-is how the closing hold gets a still frame before the loop. `cut: true` drops a beat from the
-render entirely (it is still performed and checked), and needs no duration. The clip's length is
-the sum of the kept durations, to within one frame at `frame.fps`.
-
-`render` prints the clip's path, size and length, then one row per beat with the speed its section
-plays at, and warns about any beat faster than 6× — past that, typing and streaming blur, and the
-beat wants a longer duration or a shorter take. A re-pace is therefore an edit to `duration:` and
-a re-render, never another take.
-
-## Zoom and cursor
-
-**Zoom.** A beat's `zoom: {target, factor, in, out}` pushes into an on-screen target for the
-whole of its section: eased in over `in`, held, eased back out over `out` (1 s each when
-absent, shrunk in proportion when together they outrun the section). `factor` is the
-magnification, 1–3; left off, the render fits it so the target plus two cells each side fills 70%
-of the frame width, clamped to 1.25–2.5. The target resolves where a click of the same beat on the
-same target landed (as the take logged it), else on the latest of the beat's snapshots it is on,
-so the push lands where the beat settles. Every ramp and glide eases with smootherstep — speed
-and acceleration both zero at each end — and a zoom eases its factor's exponent, so each frame
-of a push scales by the same ratio rather than rushing the start and crawling at the end.
-
-**Cursor.** Every click draws a translucent white dot with a dark outline (Catppuccin Mocha's
-crust), kept at constant size whatever the zoom. Per beat that clicks, it fades in (400 ms) at the
-previous click point — the frame's centre column on the last row before the first — glides to
-each click over 900 ms ending on the press, grows a ring pulse (500 ms) on it, lingers 1.5 s after
-the beat's last press and fades out over 400 ms. The dot always sits on the cell the real click
-was sent to.
-
-## Fonts and licences
-
-Frames are rasterized in Go from the take's cells — no terminal, browser or screen recorder in
-the loop — on the Catppuccin Mocha theme: its foreground for the terminal default, its sixteen
-ANSI colours for palette entries 0–15, anything else as sent. The default background is not
-Mocha's blue-grey base but a near-black `#0e1117`. The chrome is a plain padded terminal on that
-background, no window bar. The faces, all under
-`fonts/`:
-
-| file | role | licence |
-|---|---|---|
-| `SourceCodePro-Regular.ttf`, `-Bold.ttf`, `-It.ttf` | the terminal face; bold italic draws bold | `SourceCodePro-OFL.txt` |
-| `NotoSansSymbols2-Regular.ttf` | first fallback for a rune Source Code Pro lacks | `NotoSansSymbols-OFL.txt` |
-| `NotoSansMath-Regular.ttf` | second fallback | `NotoSansMath-OFL.txt` |
-| `NotoSansSymbols-Regular.ttf` | last fallback, for the few runes (`⌃` among them) the others lack | `NotoSansSymbols-OFL.txt` |
-
-All are under the SIL Open Font License 1.1, which allows redistributing them here; the licence
-text travels beside the files and must stay there. Box-drawing and block-element glyphs are drawn
-procedurally rather than from any font, so rules and borders join seamlessly at every scale.
+A section's speed, the zoom and the drawn cursor are photon's ([Sections, zoom and
+cursor](https://github.com/airiclenz/photon#sections-zoom-and-cursor)): a re-pace is an edit to a
+beat's `duration:` and a re-render, never another take.
 
 ## How the isolation works
 
@@ -315,8 +226,8 @@ the footer shows a long absolute path that gives the staging away.
 ## Things that are settled, and why
 
 **The endpoint is the server's base URL, without `/v1`.** apogee appends `/v1/chat/completions`
-and `/v1/models` itself, and so does the capture proxy, so OpenRouter is `--upstream
-https://openrouter.ai/api` — spelled with the `/v1` suffix, the requests land on
+and `/v1/models` itself, and so does the capture proxy, so the capture profile's upstream is
+`--upstream https://openrouter.ai/api` — spelled with the `/v1` suffix, the requests land on
 `/api/v1/v1/…` and 404. A capture that 404s records a cassette of 404s; check the upstream
 before spending a take on it.
 
@@ -363,8 +274,12 @@ the keeper.
 
 ## Recording a new clip for a different feature
 
-Add `storyboards/<name>.yaml`, `demorig lint` it, then `capture` and `record` it as above. The
-stage repo, isolated home, warm cache and reset logic all come for free.
+Add `storyboards/<name>.yaml`, `photon lint` it, then capture and record it as above. The stage
+repo, isolated home, warm cache, reset logic and areas all come for free. One thing does not:
+`photon.yaml`'s `model` service replays `storyboards/hero.cassette` and its `capture` profile
+writes that file, so a clip with a conversation of its own needs its own cassette — give it a
+pair of profiles in `photon.yaml`, one replaying `storyboards/<name>.cassette` and one capturing
+it, and record it with `--profile`.
 
 Worth knowing when writing a new one:
 
@@ -383,9 +298,9 @@ Worth knowing when writing a new one:
   scenario; broken *behaviour* is.
 - Sanity-check the stage before any take: `<work>/reset.sh` prints `stage reset: bug present,
   tests red` and exits non-zero if the stage is wrong.
-- `APOGEE_DEMO_E2E=1 go test -run TestE2ERecordCheckRender ./cmd/demorig/` drives the whole
-  capture → record → check → render pipeline against a scripted upstream, no network or key — the
-  check to run after changing the rig itself.
+- After changing the rig itself — `setup.sh`, `reset.sh`, `photon.yaml`, `stubllm` or
+  `sessionexpect` — re-run `photon setup` and a `photon record` of the hero: a take that passes
+  every expect proves the rig, the model service and the session expects together.
 
 ## History
 
@@ -403,6 +318,8 @@ megabytes and every clone would carry it forever. The folders below were tracked
 and stay readable from git history — `git show 52e1264e:graphics/demo/history/<folder>/NOTES.md`,
 or `git restore --source=52e1264e -- graphics/demo/history/` to bring them back into a working
 tree. A clip recorded since lives only on the machine that recorded it.
+
+The history folders below predate photon: those clips were filmed by `demorig`, the rig's own Go tool until it was retired for photon in 2026-10.
 
 | folder | clip |
 |---|---|

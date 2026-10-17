@@ -136,7 +136,10 @@ NOTES (2026-10-17): beat 3's notes reflowed after the typing citation changed, t
 
 **Commit:** `chore(demo): make hero.yaml photon's storyboard and drop the demo fonts`
 
-## 5. Docs point at photon
+## 5. Docs point at photon — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the demo README's History gains one line saying the listed clips were filmed by `demorig` before photon; it carries "history" so Acceptance 1's History filter admits it.
+NOTES (2026-10-17): "Recording a new clip" now says a clip with its own conversation needs its own cassette via a profile pair in `photon.yaml`, since the `model` service and `capture` profile name `hero.cassette`; the `APOGEE_DEMO_E2E` bullet is replaced by "re-run `photon setup` and a `photon record` of the hero" after changing the rig.
 
 **What:**
 **Goal:** `graphics/demo/README.md` documents the rig as filmed by photon: install, quick start, layout, the model service and its capture profile, the session expects, recording a new clip. It has no demorig command, no `APOGEE_DEMO_*` knob, no fonts section and no "in transition" paragraph, and its History keeps the past tense. `README.md`'s hero alt text describes only what the clip shows.
