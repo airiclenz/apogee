@@ -1,7 +1,7 @@
 // Command sessionexpect judges an expect on a saved apogee session: it locates one transcript
 // entry by a selector and checks what the entry contains and where it sits against another,
-// exiting 0 on a pass and 1 with a one-line detail on a fail. It is the session half of
-// cmd/demorig's `check`, carried over for photon's `run:` expects.
+// exiting 0 on a pass and 1 with a one-line detail on a fail. photon's `run:` expects call it to
+// judge a take's saved session.
 //
 //	sessionexpect --entry 'kind=interjected' --contains CHANGELOG
 //	sessionexpect --entry 'kind=toolCall,target=CHANGELOG.md' --after 'kind=interjected'
@@ -105,7 +105,7 @@ func newRootCommand() *cobra.Command {
 	return cmd
 }
 
-// expect parses the selectors and applies demorig's rule that an entry is judged by at least
+// expect parses the selectors and applies the rule that an entry is judged by at least
 // one of contains, before or after.
 func (given flagValues) expect() (Expect, error) {
 	entry, err := parseSelector(given.entry)

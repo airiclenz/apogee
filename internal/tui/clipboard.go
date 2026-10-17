@@ -232,8 +232,8 @@ const imageSniffBytes = 12
 // the media type each is sent as — the engine's own @ref sniff (internal/agent, imageSignatures),
 // restated because this package cannot import the engine (ADR 0010). WebP is a RIFF container,
 // so its signature is checked at two offsets (imageMediaType). The prefixes are byte slices,
-// not string literals: the PNG and JPEG magic is invalid UTF-8, which a literal would carry into
-// the source (cmd/demorig's TestRasterResolvesEveryTUIRune reads every TUI literal as text).
+// not string literals: the PNG and JPEG magic is invalid UTF-8, binary data a string would
+// pass off as text.
 var imageSignatures = []struct {
 	prefix    []byte
 	mediaType string

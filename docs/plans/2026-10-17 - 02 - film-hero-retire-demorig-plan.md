@@ -62,7 +62,7 @@ scripts/test-timings.seed — cmd/demorig rows; docs/manual/building.md — make
 
 **Commit:** `chore(demo): retire cmd/demorig`
 
-## 2. Repoint code comments that cite demorig
+## 2. Repoint code comments that cite demorig — ✅ DONE (2026-10-17)
 
 **What:**
 **Goal:** no Go source outside the archived history cites `cmd/demorig` or a demorig test, and `ClampMargins` in `internal/tuitest` is unexported because its only outside caller is gone.

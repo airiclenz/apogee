@@ -97,7 +97,7 @@ func (e Expect) judge(entries []session.Entry) (bool, string) {
 // and whether it held.
 type clause func(judged located) (string, bool)
 
-// clauses lists the assertions the expect sets, in the order demorig's schema named them.
+// clauses lists the assertions the expect sets, in a fixed order: contains, before, after.
 func (e Expect) clauses(entries []session.Entry) []clause {
 	var clauses []clause
 	if e.Contains != "" {

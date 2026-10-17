@@ -12,8 +12,8 @@ import (
 
 // EntrySelector picks one transcript entry out of a saved session: Kind is an entry kind as the
 // session JSON spells it, Text, Tool and Target are prefix matches on the entry's text, tool
-// label and tool target, and Nth picks among the matches. It is demorig's session-anchor grammar
-// (cmd/demorig/storyboard.go), spelled on a command line rather than in a storyboard.
+// label and tool target, and Nth picks among the matches. A storyboard's `run:` expect passes it
+// on the command line to name the entry it judges.
 type EntrySelector struct {
 	Kind   string
 	Text   string
@@ -139,7 +139,7 @@ func (s EntrySelector) matches(entry session.Entry) bool {
 		strings.HasPrefix(entry.Tool.Target, s.Target)
 }
 
-// String spells the selector the way demorig's storyboard wrote it, for a detail line.
+// String spells the selector as a YAML flow mapping, for a detail line.
 func (s EntrySelector) String() string {
 	var fields []string
 	add := func(name, value string) {

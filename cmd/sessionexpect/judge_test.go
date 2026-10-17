@@ -23,9 +23,9 @@ const updateFixtures = "SESSIONEXPECT_UPDATE_FIXTURES"
 // heroStart is the wall clock of the first prompt's Enter in the fixture.
 var heroStart = time.Date(2026, time.September, 16, 10, 0, 0, 0, time.UTC)
 
-// heroEntries is cmd/demorig's hero transcript — a real keeper take, in delivery order — with
+// heroEntries is the hero clip's transcript — a real keeper take, in delivery order — with
 // the `Sub-Agent` delegation the hero storyboard's beat 4 expects, sent after the failing test
-// run to find out why. As in demorig's: no `/undo` note (the preview is never persisted), no
+// run to find out why. As in a real take: no `/undo` note (the preview is never persisted), no
 // toolResult entries (a paired result enriches its toolCall entry, so the `+1 −1` diffstat rides
 // the Replace entry itself), and the `interjected` entry immediately AFTER the `Replace task.go`
 // toolCall — the interjection is stamped at delivery, at the Step boundary after the fix card
