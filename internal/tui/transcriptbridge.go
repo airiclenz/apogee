@@ -223,7 +223,7 @@ var workflowStageStateNames = map[workflowStageState]string{
 }
 
 // toWireWorkflow projects a workflow block's view onto the wire: its name, end, cause and resume
-// hint, its stage rows, its finished items and its end phase's tally. The live run's own state — its id, the stage running and an `ask`
+// hint, its stage rows (each with its kind), its finished items and its end phase's tally. The live run's own state — its id, the stage running and an `ask`
 // stage's question — is not kept: the Workflow does not run in the session that reopens it. A view
 // with nothing to draw from (one replayed from an older record) writes nothing, so its block stays
 // the text it came back as.
@@ -235,6 +235,7 @@ func toWireWorkflow(v workflowView) *session.Workflow {
 	for _, s := range v.stages {
 		w.Stages = append(w.Stages, session.WorkflowStage{
 			Name:     s.name,
+			Kind:     s.kind,
 			Round:    s.round,
 			Rounds:   s.rounds,
 			Items:    s.items,
@@ -443,6 +444,7 @@ func fromWireWorkflow(w *session.Workflow) workflowView {
 	for _, s := range w.Stages {
 		v.stages = append(v.stages, workflowStage{
 			name:     s.Name,
+			kind:     s.Kind,
 			round:    s.Round,
 			rounds:   s.Rounds,
 			items:    s.Items,

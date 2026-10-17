@@ -209,7 +209,8 @@ const (
 // phase's Resume, shown once it stopped), one row per stage of its Plan in its order, every item
 // that finished, in the order it finished, and the item tally its finished or stopped end phase
 // carried (nil while it ran, when it failed, and in a record written before the tally was kept).
-// Every string but End and the stage states is display text and is stripped on decode.
+// Every string but End, the stage kinds and the stage states is display text and is stripped on
+// decode.
 type Workflow struct {
 	Name   string               `json:"name,omitempty"`
 	End    string               `json:"end,omitempty"`
@@ -229,13 +230,15 @@ type WorkflowTally struct {
 	Blocked int `json:"blocked,omitempty"`
 }
 
-// WorkflowStage is one stage row: the stage's name, the 1-based round it shows (0 before any phase
-// named it) and the most rounds a repeat can run it (0 when none re-runs it), that round's item count
+// WorkflowStage is one stage row: the stage's name, its kind (a workflow.StageKind — "fanout",
+// "verify", … — and "" in a record written before stage kinds were kept), the 1-based round it shows
+// (0 before any phase named it) and the most rounds a repeat can run it (0 when none re-runs it), that round's item count
 // and how many of them ended on a receipt, whether one of those receipts was not ok, whether one of
 // the round's item runs started (so the row has a run to open), and its state (the WorkflowStage*
 // constants).
 type WorkflowStage struct {
 	Name     string `json:"name,omitempty"`
+	Kind     string `json:"kind,omitempty"`
 	Round    int    `json:"round,omitempty"`
 	Rounds   int    `json:"rounds,omitempty"`
 	Items    int    `json:"items,omitempty"`
@@ -510,8 +513,9 @@ func stripEntry(e *Entry) {
 }
 
 // stripWorkflow strips a Workflow block's structure: its name, cause, resume hint, stage names and
-// every finished item's words. End and the stage states are closed enums a consumer maps to its own wording, so an
-// unrecognised value never reaches the terminal as text.
+// every finished item's words. End, the stage kinds and the stage states are closed enums a consumer
+// maps to its own wording or only compares, so an unrecognised value never reaches the terminal as
+// text.
 func stripWorkflow(w *Workflow) {
 	w.Name = sanitize.StripEscapes(w.Name)
 	w.Cause = sanitize.StripEscapes(w.Cause)

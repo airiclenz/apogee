@@ -138,26 +138,33 @@ const (
 	stageSkipped                           // it never ran: its `when:` was false, or its source was skipped
 )
 
-// workflowStage is one stage row: the stage's name and the round it shows — a stage a repeat
-// re-runs keeps ONE row, which moves on to each new round as its first phase arrives — with that
-// round's counts and state. A stage is keyed by (name, round), so a phase of an earlier round than
-// the row shows folds nothing.
+// workflowStage is one stage row: the stage's name and kind and the round it shows — a stage a
+// repeat re-runs keeps ONE row, which moves on to each new round as its first phase arrives — with
+// that round's counts and state. A stage is keyed by (name, round), so a phase of an earlier round
+// than the row shows folds nothing.
 type workflowStage struct {
 	name     string
-	round    int  // the 1-based round the row shows; 0 before any phase named the stage
-	rounds   int  // the most rounds a repeat can run the stage (the phase's Rounds), 0 when none re-runs it
-	items    int  // the round's item count (the phase's Items), 0 for a stage that runs no child
-	finished int  // the round's items that ended on a receipt
-	troubled bool // one of those receipts is not ok
-	entered  bool // one of the round's item runs has started, so the row has a run to open
+	kind     string // the stage's workflow.StageKind as the started phase named it; "" when it named none
+	round    int    // the 1-based round the row shows; 0 before any phase named the stage
+	rounds   int    // the most rounds a repeat can run the stage (the phase's Rounds), 0 when none re-runs it
+	items    int    // the round's item count (the phase's Items), 0 for a stage that runs no child
+	finished int    // the round's items that ended on a receipt
+	troubled bool   // one of those receipts is not ok
+	entered  bool   // one of the round's item runs has started, so the row has a run to open
 	state    workflowStageState
 }
 
-// workflowStagesOf is the pending row of every stage the Plan names, in its order.
-func workflowStagesOf(names []string) []workflowStage {
+// workflowStagesOf is the pending row of every stage the Plan names, in its order, each wearing the
+// kind kinds names at its index (the started phase's StageKinds); a row kinds is too short to name
+// has none, so its items are counted like a fan-out's (workflowView.isCountedItem).
+func workflowStagesOf(names, kinds []string) []workflowStage {
 	stages := make([]workflowStage, 0, len(names))
-	for _, name := range names {
-		stages = append(stages, workflowStage{name: stripEscapes(name)})
+	for i, name := range names {
+		stage := workflowStage{name: stripEscapes(name)}
+		if i < len(kinds) {
+			stage.kind = kinds[i]
+		}
+		stages = append(stages, stage)
 	}
 	return stages
 }
@@ -184,7 +191,7 @@ func (t *transcript) addWorkflowPhase(e domain.WorkflowPhaseEvent) {
 		view := workflowView{
 			id:     e.Workflow,
 			name:   stripEscapes(e.Name),
-			stages: workflowStagesOf(e.Stages),
+			stages: workflowStagesOf(e.Stages, e.StageKinds),
 			resume: stripEscapes(e.Resume),
 		}
 		// The call its item children are bracketed under is the block's own: it is what their
@@ -298,8 +305,9 @@ func (v workflowView) fold(e domain.WorkflowPhaseEvent) workflowView {
 
 // withStage returns the view with apply run on the row of the stage e names, in e's round: a row
 // showing an earlier round moves on to e's, starting it afresh, and a phase of an earlier round than
-// the row shows applies nothing. A stage the Plan did not name (a Workflow whose start carried no
-// stage list) gets a row of its own at the end. The row list is copied before it changes.
+// the row shows applies nothing; the row keeps its kind into every round. A stage the Plan did not
+// name (a Workflow whose start carried no stage list) gets a kindless row of its own at the end. The
+// row list is copied before it changes.
 func (v workflowView) withStage(e domain.WorkflowPhaseEvent, apply func(*workflowStage)) workflowView {
 	name := stripEscapes(e.Stage)
 	if name == "" {
@@ -316,7 +324,7 @@ func (v workflowView) withStage(e domain.WorkflowPhaseEvent, apply func(*workflo
 	case e.Round < row.round:
 		return v
 	case e.Round > row.round:
-		*row = workflowStage{name: name, round: e.Round, rounds: row.rounds}
+		*row = workflowStage{name: name, kind: row.kind, round: e.Round, rounds: row.rounds}
 	}
 	apply(row)
 	v.stages = stages
@@ -487,22 +495,42 @@ func (v workflowView) spansStages() bool {
 
 // totals is the totals line: `items N · ok a · partial b · blocked c` — the end phase's tally where
 // the view carries one (tallyLine), so a verify or merge step's receipt is never counted as an item,
-// and its finished items counted by status where it carries none: a running or failed Workflow, and
-// one replayed from a record written before the tally was kept.
+// and its finished items of every round counted by status where it carries none: a running or failed
+// Workflow, and one replayed from a record written before the tally was kept. That count leaves out
+// what the tally leaves out (workflow.TallyOf) as far as the rows know it: the items of a stage whose
+// kind is not fan-out (isCountedItem).
 func (v workflowView) totals() string {
 	if v.tally != nil {
 		return tallyLine(*v.tally)
 	}
 	counts := map[string]int{}
+	counted := 0
 	for _, item := range v.items {
+		if !v.isCountedItem(item) {
+			continue
+		}
 		counts[item.status]++
+		counted++
 	}
 	return strings.Join([]string{
-		"items " + strconv.Itoa(len(v.items)),
+		"items " + strconv.Itoa(counted),
 		workflowStatusOK + " " + strconv.Itoa(counts[workflowStatusOK]),
 		workflowStatusParts + " " + strconv.Itoa(counts[workflowStatusParts]),
 		workflowStatusBlock + " " + strconv.Itoa(counts[workflowStatusBlock]),
 	}, workflowTotalSep)
+}
+
+// isCountedItem reports whether the fallback totals count item: every item but one of a stage whose
+// row names a kind other than fan-out. A kindless row — from a record written before stage kinds were
+// kept, or a stage the started phase did not name — counts its items, as every item was counted
+// before kinds reached the block.
+func (v workflowView) isCountedItem(item workflowItem) bool {
+	i := slices.IndexFunc(v.stages, func(s workflowStage) bool { return s.name == item.stage })
+	if i < 0 {
+		return true
+	}
+	kind := v.stages[i].kind
+	return kind == "" || kind == string(workflow.StageFanout)
 }
 
 // tallyLine renders an end phase's tally as a totals line (workflow.Tally.Line): its items that

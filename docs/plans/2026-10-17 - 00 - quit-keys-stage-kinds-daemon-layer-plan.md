@@ -79,7 +79,10 @@ internal/eventjson/encode.go — workflowPhaseData; internal/workflow/plan.go �
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/eventjson/`
 **Commit:** `feat(workflow): carry stage kinds on the WorkflowStarted event`
 
-## 3. Fallback totals count fan-out items only
+## 3. Fallback totals count fan-out items only — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): `workflowStagesOf` now takes `(names, kinds []string)`; its three existing test call sites pass `nil` kinds. The new rule is checked in `workflowView.isCountedItem`.
+NOTES (2026-10-17): new tests: `TestWorkflowBlockWithoutATallyCountsAKindlessRow` (a kindless row counts, a kinded verify row does not), `TestWorkflowBlockKeepsStageKindsThroughTheRecord` (kinds survive toWireWorkflow → fromWireWorkflow through the codec), `TestDecodeReadsAWorkflowRecordWithoutStageKinds` (session); `TestTranscriptRoundTripsAWorkflowBlock` now carries kinds.
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** a workflow block without a tally (running, failed) shows "items N" counting every finished item (every round) except those of a stage whose kind is not fan-out; a session record written before stage kinds were kept still loads and still counts every item.

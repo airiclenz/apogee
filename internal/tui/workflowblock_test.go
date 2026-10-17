@@ -594,11 +594,13 @@ func TestWorkflowBlockListsOnlyTroubleOnALargeRun(t *testing.T) {
 
 // verifiedOneItem is a Recipe run whose one fan-out item and the verify step that checked it both
 // ended ok, ended on end — the tally the engine reports on a finished or stopped end, none on
-// another.
+// another. Its started phase names each stage's kind, as the engine's does.
 func verifiedOneItem(end domain.WorkflowPhase) []domain.WorkflowPhaseEvent {
 	verify := stageItemFinished("verify", 1, 0, "ok")
+	started := startedWith("items", "verify")
+	started.StageKinds = []string{string(workflow.StageFanout), string(workflow.StageVerify)}
 	phases := []domain.WorkflowPhaseEvent{
-		startedWith("items", "verify"),
+		started,
 		stageStarted("items", 1, 1, 0),
 		itemFinished(0, "alpha", "ok", "alpha is fine", nil),
 		stageFinished("items", 1),
@@ -632,8 +634,8 @@ func TestWorkflowBlockTotalsExcludeAVerifyItem(t *testing.T) {
 	}
 }
 
-// A block with no tally to read — a running Workflow, and a failed one — counts the items that
-// finished, a verify step's included.
+// A block with no tally to read — a running Workflow, and a failed one — counts the fan-out items
+// that finished, as the tally would: the verify step's receipt is not an item.
 func TestWorkflowBlockWithoutATallyCountsItsItems(t *testing.T) {
 	t.Parallel()
 	for name, end := range map[string]domain.WorkflowPhase{"running": "", "failed": domain.WorkflowFailed} {
@@ -641,16 +643,60 @@ func TestWorkflowBlockWithoutATallyCountsItsItems(t *testing.T) {
 			t.Parallel()
 			v := liveWorkflowView(verifiedOneItem(end)...)
 
-			if got, want := v.totals(), "items 2 · ok 2 · partial 0 · blocked 0"; got != want {
+			if got, want := v.totals(), "items 1 · ok 1 · partial 0 · blocked 0"; got != want {
 				t.Errorf("totals = %q; want %q", got, want)
 			}
 		})
 	}
 }
 
+// A row the started phase did not name has no kind, so the fallback totals still count its items,
+// while the items of a kinded verify row beside it are not counted.
+func TestWorkflowBlockWithoutATallyCountsAKindlessRow(t *testing.T) {
+	t.Parallel()
+	started := startedWith("verify")
+	started.StageKinds = []string{string(workflow.StageVerify)}
+	v := liveWorkflowView(
+		started,
+		stageItemFinished("verify", 1, 0, "ok"),
+		stageItemFinished("extra", 1, 0, "partial"),
+		stageItemFinished("extra", 1, 1, "ok"),
+	)
+
+	got := v.totals()
+
+	if want := "items 2 · ok 1 · partial 1 · blocked 0"; got != want {
+		t.Errorf("totals = %q; want %q", got, want)
+	}
+}
+
+// Each stage row's kind survives the session record, so a replayed block whose tally is gone still
+// counts its fan-out items only.
+func TestWorkflowBlockKeepsStageKindsThroughTheRecord(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	for _, e := range verifiedOneItem(domain.WorkflowFinished) {
+		m.transcript.apply(e)
+	}
+
+	view := roundTrip(t, &m.transcript)[0].workflow
+	view.tally = nil
+
+	kinds := make([]string, 0, len(view.stages))
+	for _, s := range view.stages {
+		kinds = append(kinds, s.kind)
+	}
+	if want := []string{string(workflow.StageFanout), string(workflow.StageVerify)}; !slices.Equal(kinds, want) {
+		t.Errorf("replayed stage kinds = %v; want %v", kinds, want)
+	}
+	if got, want := view.totals(), "items 1 · ok 1 · partial 0 · blocked 0"; got != want {
+		t.Errorf("replayed totals without a tally = %q; want %q", got, want)
+	}
+}
+
 // The end phase's tally survives the session record: the replayed block paints the totals the live
-// one painted, the verify step left out, while a record written before the tally was kept counts
-// its items.
+// one painted, the verify step left out, while a record written before the tally and the stage kinds
+// were kept counts every item.
 func TestWorkflowBlockReplaysTheEndPhaseTally(t *testing.T) {
 	t.Parallel()
 	const want = "items 1 · ok 1 · partial 0 · blocked 0"
@@ -665,6 +711,9 @@ func TestWorkflowBlockReplaysTheEndPhaseTally(t *testing.T) {
 	older := newTestModel(t)
 	older.transcript.entries = roundTrip(t, &m.transcript)
 	older.transcript.entries[0].workflow.tally = nil
+	for i := range older.transcript.entries[0].workflow.stages {
+		older.transcript.entries[0].workflow.stages[i].kind = ""
+	}
 	older.transcript.touch()
 
 	painted := workflowPaint(replayed)
@@ -1629,9 +1678,15 @@ func TestItemRunsAreClimbedThroughTheirWorkflowHead(t *testing.T) {
 // The workflow block's live star
 // ----------------------------------------------------------------------------
 
-// liveWorkflowView is testWorkflowID's view as a live block holds it once each phase has folded.
+// liveWorkflowView is testWorkflowID's view as a live block holds it once each phase has folded. A
+// leading started phase opens its stage rows — names and kinds — as addWorkflowPhase does, since fold
+// has no case for it; without one the block opens on the kindless rows scan and confirm.
 func liveWorkflowView(phases ...domain.WorkflowPhaseEvent) workflowView {
-	v := workflowView{id: testWorkflowID, name: "audit", stages: workflowStagesOf([]string{"scan", "confirm"})}
+	v := workflowView{id: testWorkflowID, name: "audit", stages: workflowStagesOf([]string{"scan", "confirm"}, nil)}
+	if len(phases) > 0 && phases[0].Phase == domain.WorkflowStarted {
+		v.stages = workflowStagesOf(phases[0].Stages, phases[0].StageKinds)
+		phases = phases[1:]
+	}
 	for _, e := range phases {
 		v = v.fold(e)
 	}
@@ -1679,7 +1734,7 @@ func TestWorkflowStarSteadyOnceEnded(t *testing.T) {
 		"finished": liveWorkflowView(stageStarted("scan", 1, 2, 0), workflowPhase(domain.WorkflowFinished)),
 		"stopped":  liveWorkflowView(stageStarted("scan", 1, 2, 0), workflowPhase(domain.WorkflowStopped)),
 		"failed":   liveWorkflowView(stageStarted("scan", 1, 2, 0), failed),
-		"replayed": {replayed: true, name: "audit", stages: workflowStagesOf([]string{"scan"})},
+		"replayed": {replayed: true, name: "audit", stages: workflowStagesOf([]string{"scan"}, nil)},
 	}
 	for name, v := range cases {
 		for _, blink := range []bool{false, true} {
@@ -1746,7 +1801,7 @@ func TestWorkflowItemLineReadsALeadingNewlineSummary(t *testing.T) {
 				t.Errorf("item line = %q, want %q", got, want)
 			}
 
-			v := workflowView{id: testWorkflowID, name: "audit", stages: workflowStagesOf([]string{"items"})}.fold(e)
+			v := workflowView{id: testWorkflowID, name: "audit", stages: workflowStagesOf([]string{"items"}, nil)}.fold(e)
 			if body, want := strings.Join(v.stageBody(), "\n"), "items · a.go — partial — first real line"; !strings.Contains(body, want) {
 				t.Errorf("stage body = %q, want it to carry %q", body, want)
 			}

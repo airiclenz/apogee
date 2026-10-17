@@ -429,7 +429,7 @@ func TestTranscriptRoundTripsAWorkflowItemHead(t *testing.T) {
 }
 
 // TestTranscriptRoundTripsAWorkflowBlock pins a Workflow block's structure through the codec: its
-// resume hint, stage rows and finished items come back as written.
+// resume hint, stage rows (each with its kind) and finished items come back as written.
 func TestTranscriptRoundTripsAWorkflowBlock(t *testing.T) {
 	t.Parallel()
 	in := []Entry{{
@@ -439,9 +439,9 @@ func TestTranscriptRoundTripsAWorkflowBlock(t *testing.T) {
 			End:    "stopped",
 			Resume: "re-run `/audit src` to resume",
 			Stages: []WorkflowStage{
-				{Name: "plan", Round: 1, Items: 1, Finished: 1, Entered: true, State: WorkflowStageDone},
-				{Name: "build", Round: 2, Rounds: 3, Items: 2, Finished: 2, Troubled: true, Entered: true, State: WorkflowStageDone},
-				{Name: "recheck", Round: 1, State: WorkflowStageSkipped},
+				{Name: "plan", Kind: "ask", Round: 1, Items: 1, Finished: 1, Entered: true, State: WorkflowStageDone},
+				{Name: "build", Kind: "fanout", Round: 2, Rounds: 3, Items: 2, Finished: 2, Troubled: true, Entered: true, State: WorkflowStageDone},
+				{Name: "recheck", Kind: "verify", Round: 1, State: WorkflowStageSkipped},
 			},
 			Items: []WorkflowItemResult{{Stage: "build", Label: "beta", Status: "partial", Summary: "half of it"}},
 		},
@@ -490,6 +490,24 @@ func TestTranscriptRoundTripsAWorkflowTally(t *testing.T) {
 	}
 	if len(old) != 1 || old[0].Workflow == nil || old[0].Workflow.Tally != nil {
 		t.Errorf("older record decoded = %#v; want a workflow block with a nil tally", old)
+	}
+}
+
+// TestDecodeReadsAWorkflowRecordWithoutStageKinds pins a record written before stage kinds were kept:
+// it still loads, each stage row with an empty kind and the rest of the row as written.
+func TestDecodeReadsAWorkflowRecordWithoutStageKinds(t *testing.T) {
+	t.Parallel()
+	const older = `{"version":1,"entries":[{"kind":"workflow","workflow":{"name":"audit","end":"failed",` +
+		`"stages":[{"name":"build","round":1,"items":2,"finished":2,"state":"failed"}]}}]}`
+	want := WorkflowStage{Name: "build", Round: 1, Items: 2, Finished: 2, State: WorkflowStageFailed}
+
+	got, err := DecodeTranscript([]byte(older))
+
+	if err != nil {
+		t.Fatalf("DecodeTranscript(older record): %v", err)
+	}
+	if len(got) != 1 || got[0].Workflow == nil || len(got[0].Workflow.Stages) != 1 || got[0].Workflow.Stages[0] != want {
+		t.Errorf("older record decoded = %#v; want one workflow block whose stage is %#v", got, want)
 	}
 }
 
