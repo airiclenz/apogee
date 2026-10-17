@@ -1,9 +1,11 @@
 ---
 title: Film the hero clip with photon; retire cmd/demorig
-status: open
+status: done
 type: chore
 priority: 3
 created: 2026-10-17T08:52:56Z
+closed: 2026-10-17T16:59:56Z
+reason: All five children closed; hero.yaml records and renders under photon (graphics/demo.gif re-filmed, 23f54ca1), cmd/demorig and its Makefile target deleted, graphics/demo/README.md points at photon (plan 2026-10-17 - 02 - film-hero-retire-demorig-plan, archived in e9b14d71).
 ---
 
 `cmd/demorig` is being extracted into photon (github.com/airiclenz/photon), a standalone demo
