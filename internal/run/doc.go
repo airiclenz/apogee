@@ -73,6 +73,11 @@
 // other refusal runs unheld and surfaces at the save. A run with no Store or no RecordID takes no
 // hold at all.
 //
+// A held run with a Spec.Journal opener also writes its live Event journal (ADR 0103) for exactly
+// as long as it holds the record: the journal opens immediately after the hold, carries the
+// Firing's prompt and every Event, and is ended — closed and removed — after the final save and
+// before the hold is released. A journal that cannot be opened or written never fails the run.
+//
 // A caller that wants to observe the run supplies Config.Events; a nil sink is a discard.
 // A Turn the loop abandoned reports domain.StepResult.Faulted and surfaces its own
 // ErrorEvent through that sink — Once does not translate it into a returned error, since

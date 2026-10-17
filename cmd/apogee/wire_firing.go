@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -915,6 +917,9 @@ func raise(
 		// fields are nil when no key named one — the unrouted floor every Firing had before.
 		DelegationTarget: routing.target,
 		DelegationSeat:   routing.seat,
+		// The live Event journal a watcher follows while the Firing runs (ADR 0103), opened by
+		// run.Once under the record's hold. A store-less run (`--no-save`) gets none.
+		Journal: firingJournal(store, in.report),
 	}
 	if ref != nil {
 		spec.ScheduleID, spec.ScheduleName = ref.ID, ref.Name
@@ -927,6 +932,66 @@ func raise(
 	}
 	res, err := runner(ctx, spec)
 	return res, notices, err
+}
+
+// firingJournal is the production run.JournalOpener every Firing is raised with: the record's own
+// `<id>.events.jsonl` in store, written as the coalesced Event journal (eventjson.Journal, ADR 0103).
+// nil store ⇒ nil opener — a run that keeps no record keeps no journal.
+//
+// Nothing about the journal can fail the run. A journal that would not open, or whose first write
+// failed, is said once on report — the Driver's own line, the one its Reactions' trouble reaches
+// (firingInputs.report) — and the Firing goes on unjournaled; nil report drops the line.
+func firingJournal(store *session.Store, report func(string)) run.JournalOpener {
+	if store == nil {
+		return nil
+	}
+	say := func(err error) {
+		if report != nil {
+			report("session journal stopped — " + err.Error())
+		}
+	}
+	return func(start run.JournalStart) run.LiveJournal {
+		file, err := store.OpenJournal(start.RecordID)
+		if err != nil {
+			say(err)
+			return nil
+		}
+		return &firingJournalFile{
+			Journal: eventjson.NewJournal(file, eventjson.JournalOptions{
+				Session:   start.RecordID,
+				Title:     start.Title,
+				Workspace: start.Workspace,
+				Entries:   start.Entries,
+				Report:    say,
+			}),
+			file:  file,
+			store: store,
+			id:    start.RecordID,
+			say:   say,
+		}
+	}
+}
+
+// firingJournalFile is one Firing's open journal: the coalescing writer over the file it owns. End
+// writes the closing frame, closes the file and removes it — the owner's release step, so a journal
+// on disk always names a session still running or one a crash left for the startup sweep.
+type firingJournalFile struct {
+	*eventjson.Journal
+	file  *os.File
+	store *session.Store
+	id    string
+	say   func(error)
+}
+
+// End implements run.LiveJournal.
+func (f *firingJournalFile) End() {
+	f.Close()
+	if err := f.file.Close(); err != nil {
+		f.say(err)
+	}
+	if err := f.store.RemoveJournal(f.id); err != nil {
+		f.say(err)
+	}
 }
 
 // recipeWorkflowFailure reports why a recipe run's workflow counts as a failed run, nil when it

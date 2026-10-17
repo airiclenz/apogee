@@ -4627,3 +4627,175 @@ func TestHeadlessRecipeFlowsToTheRunnerSpec(t *testing.T) {
 		}
 	})
 }
+
+// journalGate holds the journal tests' one reply, so the run is caught mid-flight with its journal
+// open.
+const journalGate = "journal-mid-run"
+
+// journalPrompt is what the journal tests' headless run asks; the stub answers by position.
+const journalPrompt = "say something while a watcher looks on"
+
+// journalHeadlessRun is one real `apogee headless` (the given runner, run.Once or a wrapper of
+// it) started in the background against stub in a home of its own. done carries the command's
+// error; errOut is stderr, read only after done has delivered.
+type journalHeadlessRun struct {
+	home   string
+	done   chan error
+	errOut bytes.Buffer
+}
+
+func startJournalHeadless(
+	t *testing.T,
+	stub *stubllm.Server,
+	runner func(context.Context, run.Spec) (run.Result, error),
+	args ...string,
+) *journalHeadlessRun {
+	t.Helper()
+	assertNoAmbientApogeeConfig(t)
+	t.Setenv(config.EnvMode, "")
+
+	r := &journalHeadlessRun{home: eventLinesHome(t, stub.URL, stub.Model), done: make(chan error, 1)}
+	// Naming off: a second request would be a second thing to script.
+	appendHomeConfig(t, r.home, "auto-title: false\n")
+	cmd := newHeadlessCommandWith(headlessDeps{runner: runner})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&r.errOut)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs(append([]string{"--config", r.home, "--workspace", e2eWorkspace(t)}, args...))
+	go func() { r.done <- cmd.ExecuteContext(context.Background()) }()
+	return r
+}
+
+// journals lists the Event journals in the run's sessions store.
+func (r *journalHeadlessRun) journals(t *testing.T) []string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(r.home, "sessions", "*.events.jsonl"))
+	if err != nil {
+		t.Fatalf("list the session journals: %v", err)
+	}
+	return paths
+}
+
+// awaitHeldRequest waits until the stub has the run's first request in hand — the run is then
+// mid-flight, its reply held at journalGate.
+func awaitHeldRequest(t *testing.T, stub *stubllm.Server) {
+	t.Helper()
+	testtime.Eventually(t, testtime.Budget(10*time.Second), func() bool { return len(stub.Requests()) > 0 },
+		"the headless run to reach the upstream")
+}
+
+// TestHeadlessWritesALiveJournalWhileItRuns drives a real headless Firing whose reply the upstream
+// holds: mid-run, sessions/<id>.events.jsonl exists and decodes, its opening run_started frame
+// carries entries 0 and its next line is the Firing's prompt; once the run returns, the journal is
+// gone and the record it shadowed is saved (ADR 0103).
+func TestHeadlessWritesALiveJournalWhileItRuns(t *testing.T) {
+	stub := stubllm.New(t, stubllm.Script{
+		Model: headlessBeatModel,
+		Turns: []stubllm.Turn{{Text: "watched answer", Await: journalGate}},
+	})
+	r := startJournalHeadless(t, stub, run.Once, journalPrompt)
+	awaitHeldRequest(t, stub)
+
+	paths := r.journals(t)
+	if len(paths) != 1 {
+		stub.Release(journalGate)
+		<-r.done
+		t.Fatalf("mid-run the store holds %d journal(s) %q; want exactly the running Firing's", len(paths), paths)
+	}
+	body, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatalf("read the live journal: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("the live journal holds %d line(s); want the opening frame and the prompt:\n%s", len(lines), body)
+	}
+	for i, raw := range lines {
+		if _, err := eventjson.Decode([]byte(raw)); err != nil {
+			t.Errorf("journal line %d does not decode: %v\n%s", i+1, err, raw)
+		}
+	}
+	var opening struct {
+		Event string `json:"event"`
+		Data  struct {
+			Entries *int `json:"entries"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &opening); err != nil {
+		t.Fatalf("parse the opening frame: %v", err)
+	}
+	if opening.Event != "run_started" || opening.Data.Entries == nil || *opening.Data.Entries != 0 {
+		t.Errorf("the journal opens with %s; want run_started carrying entries 0", lines[0])
+	}
+	second, err := eventjson.Decode([]byte(lines[1]))
+	if err != nil {
+		t.Fatalf("decode the journal's second line: %v", err)
+	}
+	if second.Prompt == nil || second.Prompt.Text != journalPrompt || second.Prompt.Interjection {
+		t.Errorf("the journal's second line is %s; want the Firing's prompt", lines[1])
+	}
+	id := strings.TrimSuffix(filepath.Base(paths[0]), ".events.jsonl")
+
+	stub.Release(journalGate)
+	if err := <-r.done; err != nil {
+		t.Fatalf("headless: %v\nstderr: %s", err, r.errOut.String())
+	}
+	if left := r.journals(t); len(left) != 0 {
+		t.Errorf("after the run the store still holds journal(s) %q; want the owner to have removed it", left)
+	}
+	if _, err := session.NewStore(filepath.Join(r.home, "sessions")).Load(id); err != nil {
+		t.Errorf("the record %q the journal shadowed was not saved: %v", id, err)
+	}
+}
+
+// TestHeadlessNoSaveWritesNoJournal: --no-save keeps no record, so it keeps no journal either — not
+// even while the run is in flight.
+func TestHeadlessNoSaveWritesNoJournal(t *testing.T) {
+	stub := stubllm.New(t, stubllm.Script{
+		Model: headlessBeatModel,
+		Turns: []stubllm.Turn{{Text: "unrecorded answer", Await: journalGate}},
+	})
+	r := startJournalHeadless(t, stub, run.Once, "--no-save", journalPrompt)
+	awaitHeldRequest(t, stub)
+
+	mid := r.journals(t)
+	stub.Release(journalGate)
+	if err := <-r.done; err != nil {
+		t.Fatalf("headless --no-save: %v\nstderr: %s", err, r.errOut.String())
+	}
+	if len(mid) != 0 {
+		t.Errorf("a --no-save run wrote journal(s) %q mid-run; want none", mid)
+	}
+}
+
+// TestHeadlessUnwritableJournalStillCompletesTheRun: a journal that cannot be opened — its path is
+// already taken by a directory — is said once on stderr and the Firing runs to completion anyway,
+// its record saved: the journal never fails the run.
+func TestHeadlessUnwritableJournalStillCompletesTheRun(t *testing.T) {
+	stub := stubllm.New(t, stubllm.Script{
+		Model: headlessBeatModel,
+		Turns: []stubllm.Turn{{Text: "answered regardless"}},
+	})
+	var recordID string
+	blocking := func(ctx context.Context, spec run.Spec) (run.Result, error) {
+		recordID = spec.RecordID
+		open := spec.Journal
+		spec.Journal = func(start run.JournalStart) run.LiveJournal {
+			if err := os.Mkdir(spec.Store.JournalPath(start.RecordID), 0o700); err != nil {
+				t.Errorf("block the journal path: %v", err)
+			}
+			return open(start)
+		}
+		return run.Once(ctx, spec)
+	}
+	r := startJournalHeadless(t, stub, blocking, journalPrompt)
+	if err := <-r.done; err != nil {
+		t.Fatalf("headless with an unwritable journal: %v\nstderr: %s", err, r.errOut.String())
+	}
+	if n := strings.Count(r.errOut.String(), "session journal stopped"); n != 1 {
+		t.Errorf("the journal's failure was reported %d time(s); want once:\n%s", n, r.errOut.String())
+	}
+	if _, err := session.NewStore(filepath.Join(r.home, "sessions")).Load(recordID); err != nil {
+		t.Errorf("the record was not saved past the journal's failure: %v", err)
+	}
+}

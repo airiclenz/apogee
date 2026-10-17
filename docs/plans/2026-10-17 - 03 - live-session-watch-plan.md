@@ -225,7 +225,11 @@ NOTES (2026-10-17): `TestProbeLockReportsAnUnusablePath` skips on Windows, where
 **Acceptance:** `go test -race -count=1 ./internal/platform/ && go test -race -count=1 ./internal/session/ && go test -race -count=1 -run 'TestGCSessions' ./cmd/apogee/ && GOOS=windows go vet ./internal/platform/ ./internal/session/`
 **Commit:** `feat(session): event journal files and a read-only hold probe`
 
-## 7. Firings write a journal (headless, daemon, TUI-scheduled)
+## 7. Firings write a journal (headless, daemon, TUI-scheduled) — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the opener is `run.Spec.Journal` (`run.JournalOpener func(run.JournalStart) run.LiveJournal`). It returns nil when the journal will not open, and the opener reports the failure itself, so Once has no journal-error path. The production opener is `firingJournal` in cmd/apogee/wire_firing.go (store.OpenJournal + eventjson.NewJournal; End closes, then removes), reporting on the Driver's `firingInputs.report` line as "session journal stopped — <err>". A nil store (`--no-save`) gives a nil opener.
+NOTES (2026-10-17): Once installs the journal through `eventTap.attach`, inside the tap ahead of the caller's sink, so `spec.Config.Events` (the encoder outermost, ADR 0075 D9) is untouched. Because the Agent is already built at that point, `eventTap.inner` is now read and written under the tap's mutex. `holdRecord` also returns `isHeld`, so the journal opens only after a hold was actually taken (an unheld invalid id never truncates a file).
+NOTES (2026-10-17): the unwritable-journal headless test injects its failure through a runner wrapper (`headlessDeps.runner`) that puts a directory at the journal path before calling the real opener. A mid-stream write failure is covered in internal/run (`TestOnceCompletesWhenTheJournalFails`, a real eventjson.Journal over a failing writer).
 
 **What:**
 **Goal:**

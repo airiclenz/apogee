@@ -11,11 +11,13 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
@@ -2939,5 +2941,252 @@ func TestOnceLaunchesTheSpecsRecipe(t *testing.T) {
 	}
 	if !strings.HasPrefix(res.Title, "/review src") {
 		t.Errorf("Result.Title = %q; want it derived from the launch line", res.Title)
+	}
+}
+
+// recordingJournal is a LiveJournal that keeps what Once did with it: the start it was opened
+// with, the prompt lines written, how many Events passed through it and how often it was ended.
+// onEnd, when set, runs inside End, so a test can read the store at exactly that moment.
+type recordingJournal struct {
+	mu      sync.Mutex
+	start   JournalStart
+	opened  int
+	prompts []string
+	events  int
+	ended   int
+	inner   domain.EventSink
+	onEnd   func()
+}
+
+func (j *recordingJournal) open(start JournalStart) LiveJournal {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.start = start
+	j.opened++
+	return j
+}
+
+func (j *recordingJournal) Wrap(inner domain.EventSink) domain.EventSink {
+	j.inner = inner
+	return j
+}
+
+func (j *recordingJournal) Emit(e domain.Event) {
+	j.mu.Lock()
+	j.events++
+	j.mu.Unlock()
+	if j.inner != nil {
+		j.inner.Emit(e)
+	}
+}
+
+func (j *recordingJournal) Prompt(text string, interjection bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if interjection {
+		text = "interjection: " + text
+	}
+	j.prompts = append(j.prompts, text)
+}
+
+func (j *recordingJournal) End() {
+	j.mu.Lock()
+	j.ended++
+	onEnd := j.onEnd
+	j.mu.Unlock()
+	if onEnd != nil {
+		onEnd()
+	}
+}
+
+// snapshot returns the counters under the lock.
+func (j *recordingJournal) snapshot() (start JournalStart, opened int, prompts []string, events, ended int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.start, j.opened, append([]string(nil), j.prompts...), j.events, j.ended
+}
+
+// TestOnceJournalsAHeldFiringForTheLifeOfItsHold pins the live Event journal's lifecycle (ADR
+// 0103): a held Firing opens its journal through Spec.Journal before its first request, with the
+// record's id, the title the record will carry, its workspace and Entries 0, and writes the
+// Firing's prompt as the journal's first line; every Event passes through the journal on its way to
+// the caller's sink; and the journal is ended exactly once, after the record is saved and while
+// the hold is still taken.
+func TestOnceJournalsAHeldFiringForTheLifeOfItsHold(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "journal this firing"
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Text: "done", Await: "answer"}}})
+	dir := t.TempDir()
+	store := session.NewStore(dir)
+	sink := &recordingSink{}
+	spec := planSpec(up.URL, prompt)
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.Events = sink
+	spec.Store = store
+	spec.RecordID = callerRecordID
+	spec.Now = at(time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local))
+
+	var savedAtEnd, heldAtEnd bool
+	journal := &recordingJournal{}
+	journal.onEnd = func() {
+		_, loadErr := store.Load(callerRecordID)
+		savedAtEnd = loadErr == nil
+		held, _, probeErr := session.NewStore(dir).ProbeHold(callerRecordID)
+		heldAtEnd = held && probeErr == nil
+	}
+	spec.Journal = journal.open
+
+	type outcome struct {
+		res Result
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := Once(context.Background(), spec)
+		done <- outcome{res: res, err: err}
+	}()
+	awaitFirstRequest(t, up)
+
+	start, opened, prompts, _, ended := journal.snapshot()
+	if opened != 1 || ended != 0 {
+		t.Errorf("mid-Firing the journal was opened %d time(s) and ended %d; want 1 and 0", opened, ended)
+	}
+	if !slices.Equal(prompts, []string{prompt}) {
+		t.Errorf("journal prompts = %q; want the Firing's own prompt, once", prompts)
+	}
+
+	up.Release("answer")
+	got := <-done
+	if got.err != nil {
+		t.Fatalf("Once: %v", got.err)
+	}
+
+	want := JournalStart{
+		RecordID:  callerRecordID,
+		Title:     got.res.Title,
+		Workspace: spec.Config.WorkspaceDir,
+		Entries:   0,
+	}
+	if start != want {
+		t.Errorf("JournalStart = %+v; want %+v", start, want)
+	}
+	_, _, _, events, ended := journal.snapshot()
+	if ended != 1 {
+		t.Errorf("the journal was ended %d time(s); want exactly once", ended)
+	}
+	if events == 0 || !sink.saw(0, "done") {
+		t.Errorf("journal saw %d Event(s), caller saw the answer: %v; want every Event through "+
+			"the journal and on to the caller's sink", events, sink.saw(0, "done"))
+	}
+	if !savedAtEnd {
+		t.Error("the journal ended before the record was saved; want it ended after the final save")
+	}
+	if !heldAtEnd {
+		t.Error("the journal ended after the hold was released; want it ended while the record is held")
+	}
+}
+
+// TestOnceOpensNoJournalWithoutAHeldRecord: the journal is a held record's alone. A run with no
+// Store (`--no-save`, the bench), one with no RecordID, and one whose RecordID cannot name a file
+// (and so runs unheld) never call the opener — its truncating open is safe only under the hold.
+func TestOnceOpensNoJournalWithoutAHeldRecord(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		hasStore bool
+		recordID string
+		// isSaveRefused marks the run whose record Store.Save refuses at completion.
+		isSaveRefused bool
+	}{
+		{name: "no store", recordID: callerRecordID},
+		{name: "no record id", hasStore: true},
+		{name: "an id that cannot name a file", hasStore: true, recordID: "../escape", isSaveRefused: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			up := stubllm.New(t, finalScript("unjournaled"))
+			spec := planSpec(up.URL, "run with no hold")
+			if tc.hasStore {
+				spec.Store = session.NewStore(t.TempDir())
+			}
+			spec.RecordID = tc.recordID
+			journal := &recordingJournal{}
+			spec.Journal = journal.open
+
+			if _, err := Once(context.Background(), spec); (err != nil) != tc.isSaveRefused {
+				t.Fatalf("Once: %v; want an error only when the record's save is refused", err)
+			}
+
+			if _, opened, _, _, _ := journal.snapshot(); opened != 0 {
+				t.Errorf("the opener was called %d time(s); want none for a run that holds no record", opened)
+			}
+		})
+	}
+}
+
+// failingWriter refuses every write, as a full disk or a removed directory would.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+// eventjsonLive adapts an eventjson.Journal to LiveJournal for the write-failure case below.
+type eventjsonLive struct{ *eventjson.Journal }
+
+func (l eventjsonLive) End() { l.Close() }
+
+// TestOnceCompletesWhenTheJournalFails: a journal can never fail the run. An opener that could not
+// open one (nil) runs the Firing unjournaled, and a journal whose every write fails reports once
+// and goes silent — in both the Firing finishes, its answer reaches the caller and its record lands.
+func TestOnceCompletesWhenTheJournalFails(t *testing.T) {
+	t.Parallel()
+
+	var reports []error
+	var mu sync.Mutex
+	openers := map[string]JournalOpener{
+		"the journal would not open": func(JournalStart) LiveJournal { return nil },
+		"every journal write fails": func(start JournalStart) LiveJournal {
+			return eventjsonLive{eventjson.NewJournal(failingWriter{}, eventjson.JournalOptions{
+				Session: start.RecordID,
+				Report: func(err error) {
+					mu.Lock()
+					defer mu.Unlock()
+					reports = append(reports, err)
+				},
+			})}
+		},
+	}
+	for name, opener := range openers {
+		t.Run(name, func(t *testing.T) {
+			up := stubllm.New(t, finalScript("finished anyway"))
+			store := session.NewStore(t.TempDir())
+			sink := &recordingSink{}
+			spec := planSpec(up.URL, "run past a broken journal")
+			spec.Config.Events = sink
+			spec.Store = store
+			spec.RecordID = callerRecordID
+			spec.Journal = opener
+
+			res, err := Once(context.Background(), spec)
+
+			if err != nil {
+				t.Fatalf("Once: %v; a journal failure must never fail the run", err)
+			}
+			if res.FinalText != "finished anyway" || !sink.saw(0, "finished anyway") {
+				t.Errorf("FinalText = %q, caller saw the answer: %v; want the run to finish and forward",
+					res.FinalText, sink.saw(0, "finished anyway"))
+			}
+			if _, err := store.Load(callerRecordID); err != nil {
+				t.Errorf("the record did not land: %v", err)
+			}
+		})
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reports) != 1 {
+		t.Errorf("the failing journal reported %d time(s); want exactly once: %v", len(reports), reports)
 	}
 }

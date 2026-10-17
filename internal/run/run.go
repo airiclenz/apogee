@@ -123,7 +123,44 @@ type Spec struct {
 	// the target is the dial a spawn builds from, this is display text. A seat named without a
 	// target describes a place nothing routes to, and that is the Driver's call to make.
 	DelegationSeat *agent.DelegationSeat
+
+	// Journal opens the Firing's live Event journal (ADR 0103) — the file a watcher follows while
+	// the run is in flight. Once calls it only for a run that HOLDS its record (a Store and a
+	// RecordID, and the hold taken), immediately after the hold, and ends the journal after the
+	// final save and before the hold is released, so the journal exists exactly while the record is
+	// held. nil ⇒ no journal: the bench, every test that keeps none, and a Driver that keeps no
+	// record (`--no-save`) all leave it nil, and a run with no Store never calls it either way.
+	Journal JournalOpener
 }
+
+// JournalStart is what a Firing's live Event journal opens with: the record it belongs to and the
+// facts its opening frame carries (ADR 0103 decision 3). Entries is always 0 — a Firing never
+// resumes a record, so its journal follows a record with no transcript before it.
+type JournalStart struct {
+	// RecordID is the held record's id — the journal's file name and its lines' session.
+	RecordID string
+	// Title is the title the record will carry (Spec.title at the run's start).
+	Title string
+	// Workspace is the workspace the run edits, as the record's Meta.Workspace names it.
+	Workspace string
+	// Entries is how many transcript entries the record held when the journal was born.
+	Entries int
+}
+
+// LiveJournal is one open live Event journal as Once drives it. Wrap installs the sink it forwards
+// every Event to and returns the sink to emit into; Prompt writes the Firing's prompt line (prompts
+// are not Events, ADR 0025); End writes the closing frame and takes the journal down — its file
+// closed and removed. None of the three returns an error: a journal that cannot be written never
+// fails the run, so its trouble is the opener's to report, in the Driver's own voice.
+type LiveJournal interface {
+	Wrap(inner domain.EventSink) domain.EventSink
+	Prompt(text string, interjection bool)
+	End()
+}
+
+// JournalOpener opens the live Event journal for start, or returns nil when it could not — having
+// already said why on the Driver's report line — and the Firing then runs without one.
+type JournalOpener func(start JournalStart) LiveJournal
 
 // Result reports what one Firing did. It is returned even when the run failed, so a caller
 // can report the partial outcome rather than only the failure.
@@ -341,20 +378,23 @@ func openRecordJournal(ctx context.Context, spec Spec, cfg domain.Config) (*undo
 // exactly what the hold exists to prevent. Any other refusal (an id that cannot name a file,
 // session.ErrInvalidID) runs the Firing unheld, so Store.Save reports it at completion exactly as
 // it does for a run the hold never touched.
-func holdRecord(spec Spec) (release func() error, err error) {
+//
+// isHeld reports whether the hold was actually taken: only a held record may open its live Event
+// journal (Spec.Journal), since the journal's truncating open is safe only under the hold.
+func holdRecord(spec Spec) (release func() error, isHeld bool, err error) {
 	noHold := func() error { return nil }
 	if spec.Store == nil || spec.RecordID == "" {
-		return noHold, nil
+		return noHold, false, nil
 	}
 	release, err = spec.Store.Hold(spec.RecordID)
 	var held *session.HeldError
 	switch {
 	case errors.As(err, &held):
-		return nil, held
+		return nil, false, held
 	case err != nil:
-		return noHold, nil
+		return noHold, false, nil
 	}
-	return release, nil
+	return release, true, nil
 }
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
@@ -435,11 +475,30 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// Agent is built and its sync lane armed, so a Firing refused at construction leaves no
 	// <id>.lock behind; and only when the run has both a Store and a RecordID, so a run that keeps
 	// no record takes no hold and touches no disk.
-	release, err := holdRecord(spec)
+	release, isHeld, err := holdRecord(spec)
 	if err != nil {
 		return Result{}, fmt.Errorf("apogee: hold the firing's record: %w", err)
 	}
 	defer func() { _ = release() }()
+
+	// The live Event journal (ADR 0103), opened the moment the record is held and installed in the
+	// tap's forward path ahead of the caller's sink, so a watcher sees every Event of the run while
+	// the caller's composition — the Event-line encoder outermost (ADR 0075 decision 9) — is left
+	// exactly as it was handed in. Its deferred End is registered after the release's, so it runs
+	// first: after the final save below and before the hold is released, and the journal never
+	// outlives the hold that makes it this run's. The prompt line follows the opening frame at
+	// once: the engine reports no event for a submission.
+	if isHeld && spec.Journal != nil {
+		if live := spec.Journal(JournalStart{
+			RecordID:  spec.RecordID,
+			Title:     spec.title(startedAt),
+			Workspace: cfg.WorkspaceDir,
+		}); live != nil {
+			tap.attach(live)
+			live.Prompt(spec.line(), false)
+			defer live.End()
+		}
+	}
 
 	// What the workspace context files contributed, read HERE and held: this is session
 	// construction, the boundary an interactive session takes the same measure at, and the
@@ -733,6 +792,8 @@ func (d *denier) count() int {
 // before they existed, a hand-built one — is bracketed by the (depth, spawning call id) pair it
 // always was ([runKey]).
 type eventTap struct {
+	// inner is the sink every Event is forwarded to: the caller's, or the live journal wrapping it
+	// once attach has run. Guarded by mu.
 	inner domain.EventSink
 	// window is the Firing's context window, the FALLBACK stamped onto a finished run's reading
 	// when the run's own readings named none: an unrouted sub-agent inherits the parent's Config
@@ -834,9 +895,21 @@ func (t *eventTap) Emit(e domain.Event) {
 		t.closeSubAgentRun(ev)
 		t.closeFanOut(ev)
 	}
-	if t.inner != nil {
-		t.inner.Emit(e)
+	t.mu.Lock()
+	inner := t.inner
+	t.mu.Unlock()
+	if inner != nil {
+		inner.Emit(e)
 	}
+}
+
+// attach puts the Firing's live Event journal in the tap's forward path, ahead of the caller's
+// sink: every Event reaches the journal first, which forwards it on unmerged (LiveJournal.Wrap).
+// It takes the tap's lock because the Agent is already built and Emit reads inner under it.
+func (t *eventTap) attach(live LiveJournal) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.inner = live.Wrap(t.inner)
 }
 
 // noteWorkflowPhase folds one workflow_phase event into the recipe Workflow's outcome. The
