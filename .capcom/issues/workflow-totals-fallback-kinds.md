@@ -3,6 +3,7 @@ title: TUI workflow totals fallback counts verify and merge items
 status: open
 type: bug
 priority: 4
+plan: 2026-10-17 - 00 - quit-keys-stage-kinds-daemon-layer-plan.md
 created: 2026-10-14T15:26:49Z
 ---
 

@@ -3,6 +3,7 @@ title: Daemon firings layer their own workspace's Project config
 status: open
 type: feature
 priority: 4
+plan: 2026-10-17 - 00 - quit-keys-stage-kinds-daemon-layer-plan.md
 aliases: [apogee-daemon-project-layer]
 created: 2026-10-10T09:03:44Z
 ---

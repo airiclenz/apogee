@@ -3,6 +3,7 @@ title: /settings swallows ctrl+c and ctrl+l while open
 status: open
 type: bug
 priority: 3
+plan: 2026-10-17 - 00 - quit-keys-stage-kinds-daemon-layer-plan.md
 created: 2026-10-14T06:57:53Z
 ---
 
