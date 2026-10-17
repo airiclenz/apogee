@@ -9,8 +9,10 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -273,11 +275,12 @@ func (cf contextFilesSettings) resolved() []string {
 const defaultStallAfterText = "120s"
 
 // SessionSettings is the resolved `sessions:` block — the retention policy the session store is
-// swept against. It is one struct rather than loose fields on [Options] for [domain.UIPrefs]' reason: the
-// two keys describe ONE subsystem and travel together, from the on-disk block through resolution to
-// whichever Driver runs the sweep.
+// swept against, and who else may watch it: the other homes this apogee watches and the group its
+// session files are shared with. It is one struct rather than loose fields on [Options] for
+// [domain.UIPrefs]' reason: the keys describe ONE subsystem and travel together, from the on-disk
+// block through resolution to whichever Driver reads them.
 //
-// Both keys are OFF at their zero value, and off is the shipped default: a session store that never
+// The two retention keys are OFF at their zero value, and off is the shipped default: a session store that never
 // forgets is what apogee has always done, so neither key changes anything for a config that does not
 // name it. The two are also INDEPENDENT rules rather than one policy with two spellings — an age cut
 // and a count cut answer different questions ("how long is this worth keeping" and "how many is too
@@ -300,6 +303,25 @@ type SessionSettings struct {
 	// the yaml seam applies no judgement of its own (toSessionSettings) and Validate is the one place
 	// a sessions block is refused.
 	unparsedMaxAge string
+	// WatchHomes are the OTHER apogee homes whose live sessions this one may watch, read-only, in
+	// the order `sessions.watch-homes:` lists them — each a label the session browser tags its rows
+	// with and the absolute path of the home. Empty, the default, watches only this apogee's own
+	// home. A watched home is never resumable and is never written to.
+	WatchHomes []WatchHome
+	// ShareGroup is the group name — or numeric gid — `sessions.share-group:` names: the group this
+	// apogee's session files are made readable by, so its members can watch them. Empty, the
+	// default, keeps every session file the owner's alone. It is carried as written; whether this
+	// machine has the group and the user is in it is ValidateHost's question, asked at startup.
+	ShareGroup string
+}
+
+// WatchHome is one entry of `sessions.watch-homes:` — a label and the absolute path of an apogee
+// home other than this process's own.
+type WatchHome struct {
+	// Label names the home where its sessions are listed (`· <label>` in the session browser).
+	Label string
+	// Path is the home's absolute path — the directory another apogee keeps its sessions under.
+	Path string
 }
 
 // defaultSessionSettings is the resolved `sessions:` block with nothing configured: both rules off,
@@ -312,7 +334,15 @@ func defaultSessionSettings() SessionSettings { return SessionSettings{} }
 // that names the key; left to the sweep they would silently resolve to "off" and the user would be
 // left wondering why their retention policy did nothing — and, unlike a cosmetic key, a retention
 // policy that quietly did nothing is only discovered by the disk filling up.
+//
+// It also refuses a `watch-homes:` entry with no label, a label two entries share, or a path that
+// is not absolute: defects in the FILE, whatever machine reads it. What only this machine can
+// answer — whether a path is this apogee's own home, whether the share group exists and the user
+// is in it — is ValidateHost's.
 func (s SessionSettings) Validate() error {
+	if err := validateWatchHomes(s.WatchHomes); err != nil {
+		return err
+	}
 	if s.unparsedMaxAge != "" {
 		return fmt.Errorf("apogee: invalid sessions.max-age %q: want a length of time like 720h or 30m, "+
 			"or 0 to keep sessions for ever", s.unparsedMaxAge)
@@ -326,6 +356,111 @@ func (s SessionSettings) Validate() error {
 			"session", s.MaxCount)
 	}
 	return nil
+}
+
+// validateWatchHomes is Validate's judgement of the `watch-homes:` entries: each needs a label, no
+// two may share one — the label is how a watched row says which home it came from — and each path
+// must be absolute, because a relative one would be read against whatever directory apogee happened
+// to start in.
+func validateWatchHomes(homes []WatchHome) error {
+	seen := make(map[string]bool, len(homes))
+	for _, h := range homes {
+		if h.Label == "" {
+			return fmt.Errorf("apogee: invalid sessions.watch-homes entry %q: want a non-empty label "+
+				"naming the home", h.Path)
+		}
+		if seen[h.Label] {
+			return fmt.Errorf("apogee: invalid sessions.watch-homes label %q: it names two homes; "+
+				"want each label once", h.Label)
+		}
+		seen[h.Label] = true
+		if !filepath.IsAbs(h.Path) {
+			return fmt.Errorf("apogee: invalid sessions.watch-homes.%s %q: want the absolute path of "+
+				"another apogee home", h.Label, h.Path)
+		}
+	}
+	return nil
+}
+
+// ValidateHost refuses what only this machine can judge about a `sessions:` block that Validate
+// has already accepted: a `watch-homes:` path that is this process's own apogee home (ownHome; ""
+// when it could not be resolved, which skips that check — resolveRoots reports the failure), and a
+// `share-group:` this machine cannot honour (ResolveShareGroup). Each refusal is a startup error
+// naming the key and the value.
+func (s SessionSettings) ValidateHost(ownHome string) error {
+	if ownHome != "" {
+		for _, h := range s.WatchHomes {
+			if samePath(h.Path, ownHome) {
+				return fmt.Errorf("apogee: invalid sessions.watch-homes.%s %q: that is this apogee's own "+
+					"home, whose sessions are listed already; want another user's home", h.Label, h.Path)
+			}
+		}
+	}
+	if s.ShareGroup != "" {
+		if _, err := ResolveShareGroup(s.ShareGroup); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// samePath says whether two absolute paths name one directory: equal once cleaned, or equal once
+// every symbolic link in both is resolved. A path that does not exist is compared as written.
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	realA, errA := filepath.EvalSymlinks(a)
+	realB, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && realA == realB
+}
+
+// ResolveShareGroup answers the gid `sessions.share-group:` names on this machine, or the startup
+// error that names the key and the value: a group that does not exist, one the user is not a
+// member of, or any group at all on Windows, whose files carry no POSIX group.
+func ResolveShareGroup(group string) (int, error) {
+	return resolveShareGroup(group, runtime.GOOS, user.LookupGroup, os.Getgroups, os.Getegid())
+}
+
+// resolveShareGroup is ResolveShareGroup with the machine injected: the OS, the group-name lookup,
+// the supplementary groups and the effective gid. A numeric value is taken as the gid itself, with
+// no lookup, so a group a directory service holds can still be named: release builds are
+// CGO_ENABLED=0, and the pure-Go lookup reads /etc/group alone. Membership is the gid being the
+// process's effective gid or one of its supplementary groups (os.Getgroups) — the groups a file
+// it creates may be handed to.
+func resolveShareGroup(group, goos string, lookup func(string) (*user.Group, error),
+	groups func() ([]int, error), egid int) (int, error) {
+	if goos == "windows" {
+		return 0, fmt.Errorf("apogee: invalid sessions.share-group %q: Windows files have no POSIX group, "+
+			"so sessions cannot be shared through one; remove the key", group)
+	}
+	gid, err := strconv.Atoi(group)
+	if err != nil {
+		found, lookupErr := lookup(group)
+		if lookupErr != nil {
+			return 0, fmt.Errorf("apogee: invalid sessions.share-group %q: no group of that name in "+
+				"/etc/group (apogee looks group names up there only; write the numeric gid for a group "+
+				"another directory holds)", group)
+		}
+		if gid, err = strconv.Atoi(found.Gid); err != nil {
+			return 0, fmt.Errorf("apogee: invalid sessions.share-group %q: its gid %q is not a number",
+				group, found.Gid)
+		}
+	}
+	if gid < 0 {
+		return 0, fmt.Errorf("apogee: invalid sessions.share-group %q: want a group name or a gid of "+
+			"0 or more", group)
+	}
+	member, err := groups()
+	if err != nil {
+		return 0, fmt.Errorf("apogee: invalid sessions.share-group %q: read this process's groups: %w",
+			group, err)
+	}
+	if gid != egid && !slices.Contains(member, gid) {
+		return 0, fmt.Errorf("apogee: invalid sessions.share-group %q: you are not a member of that "+
+			"group (gid %d); want a group you belong to", group, gid)
+	}
+	return gid, nil
 }
 
 // The hand-written file projections: resolution's file pass (Key.fromFile) for every registry row
@@ -1236,9 +1371,11 @@ type fileConfig struct {
 	// than being an explicit zero setting, which would read as `spinner-color: false`.
 	UI *uiConfig `yaml:"ui"`
 	// Sessions bounds the session store: how old a saved session may get and how many may stand
-	// before a startup sweep discards the rest. File-only (no flag/env), like the blocks above — a
+	// before a startup sweep discards the rest — and names the other homes this apogee may watch and
+	// the group its session files are shared with. File-only (no flag/env), like the blocks above — a
 	// retention policy is a fact about this machine's disk, not about one invocation. Absent ⇒ both
-	// rules off, which is a store that keeps everything (the shipped behaviour). A pointer for the
+	// rules off, which is a store that keeps everything (the shipped behaviour), no watched home and
+	// no shared group. A pointer for the
 	// `ui:` block's reason: an absent block falls through to those defaults rather than being an
 	// explicit zero setting.
 	Sessions *sessionsConfig `yaml:"sessions"`
@@ -2428,6 +2565,69 @@ type sessionsConfig struct {
 	// MaxCount is how many session records a sweep may leave standing, or `0` to turn the count rule
 	// off. A pointer for MaxAge's reason above.
 	MaxCount *WholeCount `yaml:"max-count"`
+	// WatchHomes is the map of label → absolute home path naming the other apogee homes this one may
+	// watch. Global-only, like every key of the block. Kept in file order, and with a repeated
+	// label kept too, so SessionSettings.Validate is the one place an entry is refused.
+	WatchHomes watchHomesConfig `yaml:"watch-homes"`
+	// ShareGroup is the group, by name or numeric gid, this apogee's session files are made
+	// readable by. Global-only: a repository must not be able to widen who reads your sessions.
+	ShareGroup string `yaml:"share-group"`
+}
+
+// watchHomesConfig is the on-disk `sessions.watch-homes:` map, decoded as its entries in the order
+// the file writes them. A plain Go map would lose that order and, worse, let the yaml decoder refuse
+// a label written twice in its own sentence, which names neither the key nor the home.
+type watchHomesConfig []watchHomeConfig
+
+// watchHomeConfig is one `label: path` pair of the map, as written.
+type watchHomeConfig struct {
+	Label string
+	Path  string
+}
+
+// UnmarshalYAML reads the map's pairs in file order. It refuses only a shape no entry can be made
+// of — a list or a scalar where the map belongs, or a home that is not one path — and judges
+// nothing else: an empty or repeated label and a relative path are SessionSettings.Validate's.
+func (w *watchHomesConfig) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("apogee: invalid sessions.watch-homes at line %d: want a map of label to "+
+			"home path", node.Line)
+	}
+	entries := make(watchHomesConfig, 0, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		label, home := resolveAlias(node.Content[i]), resolveAlias(node.Content[i+1])
+		if home.Kind != yaml.ScalarNode {
+			return fmt.Errorf("apogee: invalid sessions.watch-homes.%s at line %d: want one home path",
+				label.Value, home.Line)
+		}
+		entries = append(entries, watchHomeConfig{Label: label.Value, Path: home.Value})
+	}
+	*w = entries
+	return nil
+}
+
+// resolved maps the entries across onto the resolved shape, trimmed, or nil for none — the value
+// an absent key resolves to, so "nothing set" and an empty map read back alike.
+func (w watchHomesConfig) resolved() []WatchHome {
+	if len(w) == 0 {
+		return nil
+	}
+	homes := make([]WatchHome, len(w))
+	for i, e := range w {
+		homes[i] = WatchHome{Label: strings.TrimSpace(e.Label), Path: strings.TrimSpace(e.Path)}
+	}
+	return homes
+}
+
+// fileWatchHomes projects `sessions.watch-homes:` onto its one field of the block, writing it on
+// every pass so a re-read over a file that no longer names the key clears it.
+func fileWatchHomes(o *Options, fc fileConfig) error {
+	o.Sessions.WatchHomes = nil
+	if fc.Sessions != nil {
+		o.Sessions.WatchHomes = fc.Sessions.WatchHomes.resolved()
+	}
+	return nil
 }
 
 // toSessionSettings maps the on-disk sessions block onto the resolved value, applying the defaults
@@ -2451,6 +2651,8 @@ func (c sessionsConfig) toSessionSettings() SessionSettings {
 	if c.MaxCount != nil {
 		s.MaxCount = int(*c.MaxCount) // a negative count is refused by SessionSettings.Validate, not here
 	}
+	s.WatchHomes = c.WatchHomes.resolved()
+	s.ShareGroup = strings.TrimSpace(c.ShareGroup)
 	return s
 }
 
@@ -3320,6 +3522,16 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// retention policy that quietly resolved to "off" is discovered by the disk filling up months
 	// later, with nothing pointing at the typo.
 	if err := opts.Sessions.Validate(); err != nil {
+		return notices, err
+	}
+	// And what only this machine can answer about the block: a watched home that is this apogee's
+	// own, and a share group the machine lacks or the user is not in. A home that cannot be resolved
+	// skips the first check rather than failing here — resolveRoots refuses it with a clearer error.
+	ownHome, homeErr := ApogeeHome(opts.ConfigDir)
+	if homeErr != nil {
+		ownHome = ""
+	}
+	if err := opts.Sessions.ValidateHost(ownHome); err != nil {
 		return notices, err
 	}
 	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,

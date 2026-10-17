@@ -6,9 +6,12 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"os/user"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -705,7 +708,9 @@ func everyKeyFileConfig() fileConfig {
 			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true),
 			SkillSuggestions: boolptr(false), TaskListOpen: boolptr(false), ToolsOpen: boolptr(true),
 			ToolsFoldOver: countptr(8)},
-		Sessions: &sessionsConfig{MaxAge: strptr("720h"), MaxCount: countptr(50)},
+		Sessions: &sessionsConfig{MaxAge: strptr("720h"), MaxCount: countptr(50),
+			WatchHomes: watchHomesConfig{{Label: "bob", Path: "/home/bob/.apogee"}},
+			ShareGroup: "apogee-watch"},
 	}
 }
 
@@ -5546,10 +5551,247 @@ func TestApplyConfigSessionsRetention(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ApplyConfig: %v", err)
 			}
-			if opts.Sessions != tt.want {
+			if !reflect.DeepEqual(opts.Sessions, tt.want) {
 				t.Errorf("opts.sessions = %+v; want %+v", opts.Sessions, tt.want)
 			}
 		})
+	}
+}
+
+// applySessionsYAML resolves a fresh home whose config carries yaml — built from the home's own
+// path, so a case can name that path — and answers the resolution's error with the resolved block.
+func applySessionsYAML(t *testing.T, yaml func(home string) string) (SessionSettings, error) {
+	t.Helper()
+	home := t.TempDir()
+	writeConfigHome(t, home, yaml(home))
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify)
+	return opts.Sessions, err
+}
+
+// notAGroupOfMine is a gid this process is not a member of — neither its effective gid nor one of
+// its supplementary groups — for the membership refusal.
+func notAGroupOfMine(t *testing.T) int {
+	t.Helper()
+	groups, err := os.Getgroups()
+	if err != nil {
+		t.Fatalf("os.Getgroups: %v", err)
+	}
+	gid := 2_000_000_000
+	for gid == os.Getegid() || slices.Contains(groups, gid) {
+		gid++
+	}
+	return gid
+}
+
+// `sessions.watch-homes` and `sessions.share-group` parse beside the retention keys: the homes in
+// the order the file lists them, trimmed, and the group as written — here this process's own gid,
+// which a numeric value names with no lookup at all.
+func TestApplyConfigSessionsWatchHomesAndShareGroup(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("sessions.share-group is refused on Windows; TestResolveShareGroup covers that")
+	}
+	gid := strconv.Itoa(os.Getegid())
+	got, err := applySessionsYAML(t, func(string) string {
+		return "sessions:\n  max-count: 3\n  watch-homes:\n    zed: /home/zed/.apogee\n" +
+			"    bob:  /home/bob/.apogee \n  share-group: \"" + gid + "\"\n"
+	})
+	if err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	want := SessionSettings{
+		MaxCount: 3,
+		WatchHomes: []WatchHome{
+			{Label: "zed", Path: "/home/zed/.apogee"},
+			{Label: "bob", Path: "/home/bob/.apogee"},
+		},
+		ShareGroup: gid,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sessions = %+v; want %+v", got, want)
+	}
+}
+
+// Every refusal of the two keys is a startup error naming the key and the value, pinned here by its
+// exact text.
+func TestApplyConfigSessionsWatchRefusals(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the share-group cases resolve against POSIX groups")
+	}
+	outsider := notAGroupOfMine(t)
+	for _, tt := range []struct {
+		name string
+		yaml func(home string) string
+		want func(home string) string
+	}{
+		{
+			name: "an empty label",
+			yaml: func(string) string { return "sessions:\n  watch-homes:\n    \"\": /home/bob/.apogee\n" },
+			want: func(string) string {
+				return `apogee: invalid sessions.watch-homes entry "/home/bob/.apogee": want a non-empty label naming the home`
+			},
+		},
+		{
+			name: "a label two homes share",
+			yaml: func(string) string {
+				return "sessions:\n  watch-homes:\n    bob: /home/bob/.apogee\n    bob: /srv/bob/.apogee\n"
+			},
+			want: func(string) string {
+				return `apogee: invalid sessions.watch-homes label "bob": it names two homes; want each label once`
+			},
+		},
+		{
+			name: "a relative path",
+			yaml: func(string) string { return "sessions:\n  watch-homes:\n    bob: bob/.apogee\n" },
+			want: func(string) string {
+				return `apogee: invalid sessions.watch-homes.bob "bob/.apogee": want the absolute path of another apogee home`
+			},
+		},
+		{
+			name: "this apogee's own home",
+			yaml: func(home string) string { return "sessions:\n  watch-homes:\n    me: " + home + "/\n" },
+			want: func(home string) string {
+				return `apogee: invalid sessions.watch-homes.me "` + home + `/": that is this apogee's own home, ` +
+					`whose sessions are listed already; want another user's home`
+			},
+		},
+		{
+			name: "a group this machine does not have",
+			yaml: func(string) string { return "sessions:\n  share-group: no-such-group-apogee\n" },
+			want: func(string) string {
+				return `apogee: invalid sessions.share-group "no-such-group-apogee": no group of that name in ` +
+					`/etc/group (apogee looks group names up there only; write the numeric gid for a group ` +
+					`another directory holds)`
+			},
+		},
+		{
+			name: "a group the user is not in",
+			yaml: func(string) string { return "sessions:\n  share-group: " + strconv.Itoa(outsider) + "\n" },
+			want: func(string) string {
+				return fmt.Sprintf(`apogee: invalid sessions.share-group "%d": you are not a member of that `+
+					`group (gid %d); want a group you belong to`, outsider, outsider)
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var home string
+			_, err := applySessionsYAML(t, func(h string) string { home = h; return tt.yaml(h) })
+			if err == nil {
+				t.Fatal("ApplyConfig accepted the block; want it refused")
+			}
+			if want := tt.want(home); err.Error() != want {
+				t.Errorf("error = %q\nwant    %q", err, want)
+			}
+		})
+	}
+}
+
+// A `watch-homes:` value no entry can be made of — a list where the map belongs, or a home that is
+// not one path — is refused at the load, naming the key and the line.
+func TestApplyConfigSessionsWatchHomesShapeRefusals(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ name, yaml, want string }{
+		{
+			name: "a list where the map belongs",
+			yaml: "sessions:\n  watch-homes: [/home/bob/.apogee]\n",
+			want: "apogee: invalid sessions.watch-homes at line 2: want a map of label to home path",
+		},
+		{
+			name: "a home that is not one path",
+			yaml: "sessions:\n  watch-homes:\n    bob: [/home/bob/.apogee]\n",
+			want: "apogee: invalid sessions.watch-homes.bob at line 3: want one home path",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := applySessionsYAML(t, func(string) string { return tt.yaml })
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v; want it to carry %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// resolveShareGroup with the machine injected: a numeric gid is taken as written with no lookup, a
+// name through the lookup, and membership is judged by the supplementary groups (os.Getgroups) or
+// the effective gid — on every OS but Windows, which refuses the key outright.
+func TestResolveShareGroup(t *testing.T) {
+	t.Parallel()
+	lookup := func(name string) (*user.Group, error) {
+		if name == "watchers" {
+			return &user.Group{Gid: "1500", Name: name}, nil
+		}
+		return nil, user.UnknownGroupError(name)
+	}
+	noLookup := func(name string) (*user.Group, error) {
+		t.Errorf("a numeric gid was looked up as the name %q", name)
+		return nil, user.UnknownGroupError(name)
+	}
+	groups := func() ([]int, error) { return []int{20, 1500}, nil }
+	const egid = 1000
+
+	for _, tt := range []struct {
+		name   string
+		group  string
+		goos   string
+		lookup func(string) (*user.Group, error)
+		want   int
+		err    string
+	}{
+		{name: "a numeric supplementary gid", group: "20", goos: "linux", lookup: noLookup, want: 20},
+		{name: "the effective gid", group: "1000", goos: "darwin", lookup: noLookup, want: 1000},
+		{name: "a name through the lookup", group: "watchers", goos: "linux", lookup: lookup, want: 1500},
+		{
+			name: "a numeric gid the user is not in", group: "30", goos: "linux", lookup: noLookup,
+			err: `apogee: invalid sessions.share-group "30": you are not a member of that group (gid 30); ` +
+				`want a group you belong to`,
+		},
+		{
+			name: "a negative gid", group: "-1", goos: "linux", lookup: noLookup,
+			err: `apogee: invalid sessions.share-group "-1": want a group name or a gid of 0 or more`,
+		},
+		{
+			name: "Windows", group: "20", goos: "windows", lookup: noLookup,
+			err: `apogee: invalid sessions.share-group "20": Windows files have no POSIX group, so ` +
+				`sessions cannot be shared through one; remove the key`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveShareGroup(tt.group, tt.goos, tt.lookup, groups, egid)
+			if tt.err != "" {
+				if err == nil || err.Error() != tt.err {
+					t.Errorf("error = %v\nwant    %s", err, tt.err)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Errorf("resolveShareGroup(%q) = %d, %v; want %d", tt.group, got, err, tt.want)
+			}
+		})
+	}
+}
+
+// Both keys are global-only (ADR 0096 D6): a Project config that sets either is ignored, and the
+// one global-only notice names them.
+func TestProjectConfigCannotSetTheSessionsWatchKeys(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "",
+		"sessions:\n  watch-homes:\n    bob: /home/bob/.apogee\n  share-group: staff\n")
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if o.Sessions.WatchHomes != nil || o.Sessions.ShareGroup != "" {
+		t.Errorf("sessions = %+v; want the project's watch keys ignored", o.Sessions)
+	}
+	want := "apogee: project config " + projectFilePath(projectRoot) + `: ignoring global-only keys ` +
+		`"sessions.watch-homes", "sessions.share-group" — set them in the global config ` + globalPath
+	if len(notices) != 1 || notices[0] != want {
+		t.Errorf("notices = %q\nwant one: %q", notices, want)
 	}
 }
 

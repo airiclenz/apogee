@@ -999,7 +999,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
 		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI",
 		"ui.tools-open": "UI", "ui.tools-fold-over": "UI",
-		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions",
+		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions", "sessions.share-group": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
 		"currency": "Currency",
 	}

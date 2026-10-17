@@ -1647,6 +1647,35 @@ kept whatever the rules say about it. An edit through `/settings` therefore take
 start rather than in the session you are in. Config-file only (no flag or environment variable);
 what a session record holds and how one is resumed is on the [sessions page](sessions.md).
 
+**Watching other people's sessions — `sessions.watch-homes:` and `sessions.share-group:`.** Two
+more keys of the block open the store to other users of the same machine, and both are off unless
+you name them:
+
+```yaml
+# ~/.apogee/config.yaml
+sessions:
+  watch-homes:
+    bob: /home/bob/.apogee     # label: the absolute path of another user's apogee home
+  share-group: apogee-watch    # the group your own session files are made readable by
+```
+
+`sessions.watch-homes` is a map of **label → home path**: each entry names another user's apogee
+home whose live sessions you may watch, read-only, and the label is what those sessions are tagged
+with where they are listed. Every label must be non-empty and used once, and every path must be
+absolute and must not be your own apogee home, whose sessions are listed already. A watched home is
+only ever read — never resumed, never written to. `sessions.share-group` is the other side of the
+arrangement: the group your own session files are made readable by, so that its members can watch
+them. Name a group you are a member of, by name or by numeric gid. A name is looked up in
+`/etc/group` only, so a group a directory service holds is written as its gid; membership is your
+process's own groups. The key is refused on Windows, whose files carry no POSIX group.
+
+Each mistake in either key — a missing or repeated label, a relative path, your own home, a group
+that does not exist or that you are not in — stops apogee at startup with an error naming the key
+and the value. Both keys are **global-only**: a [Project config](#a-projects-own-config--apogeeconfigyaml) that sets either
+is ignored, with a notice, because a repository must not be able to choose whose sessions you read
+or widen who reads yours. Neither is editable in `/settings` — the rows show the count of watched
+homes and the group — and both are config-file only (no flag or environment variable).
+
 **Naming a session, and naming a delegation — `auto-title:`.** A root key of its own, beside the
 block rather than inside it: `auto-title:` is a bool that defaults to **true** and is config-file
 only (no flag, no environment variable). It does two jobs. A **new session** names itself from its

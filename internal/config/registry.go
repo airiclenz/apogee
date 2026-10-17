@@ -1114,6 +1114,26 @@ var KeyRegistry = bindRows([]Key{
 		field: sessionsMaxCount(),
 	},
 	{
+		// A map of label → home path, so structured: no one-line row holds it, and the row counts the
+		// homes. Global-only by the zero class — a repository must not be able to point this apogee at
+		// homes to read — and not editable: which other users' sessions this one reads belongs in the
+		// file, beside the label that says whose they are.
+		Path: "sessions.watch-homes", Kind: KindStructured,
+		Desc:      "Other users' apogee homes whose live sessions /sessions lists, read-only, by label.",
+		Read:      func(o Options) string { return countSummary(len(o.Sessions.WatchHomes), "home") },
+		Structure: func(o Options) any { return o.Sessions.WatchHomes },
+		fromFile:  fileWatchHomes,
+	},
+	{
+		// A group name, global-only for watch-homes' reason turned around: a repository must not be
+		// able to widen who reads your sessions. Not editable either — the group is judged against
+		// this machine (SessionSettings.ValidateHost) at startup, and the file is where a change of
+		// who may read your sessions belongs.
+		Path: "sessions.share-group", Kind: KindString,
+		Desc:  "The group your session files are made readable by, so its members can watch them; empty keeps them yours.",
+		field: sessionsShareGroup(),
+	},
+	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,

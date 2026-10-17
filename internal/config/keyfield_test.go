@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -276,7 +277,7 @@ func TestFieldEmptyFileResolvesBlockDefaults(t *testing.T) {
 	if want := (PresentSettings{AutoOpen: true}); o.Present != want {
 		t.Errorf("present = %+v, want %+v", o.Present, want)
 	}
-	if want := defaultSessionSettings(); o.Sessions != want {
+	if want := defaultSessionSettings(); !reflect.DeepEqual(o.Sessions, want) {
 		t.Errorf("sessions = %+v, want %+v", o.Sessions, want)
 	}
 	if o.CursorShape != "" {

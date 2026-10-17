@@ -81,6 +81,12 @@ func fabricatedSettings() config.Options {
 		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, Glyphs: domain.GlyphsSafe, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3},
+		// The retention keys stay unset; the two watch keys are set, so their rows report a value.
+		Sessions: config.SessionSettings{
+			WatchHomes: []config.WatchHome{{Label: "bob", Path: "/home/bob/.apogee"},
+				{Label: "ci", Path: "/srv/ci/.apogee"}},
+			ShareGroup: "apogee-watch",
+		},
 		Bypass: true,
 		ModelProfiles: []profiles.Entry{
 			{Pattern: "minimax-m3", Profile: apogee.ModelProfile{
@@ -472,13 +478,15 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.tools-fold-over":                 "3",     // a count prints itself, and the fixture's 3 is not the default 5
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
-		"sessions.max-age":   "0s",
-		"sessions.max-count": "0",
-		"cursor-shape":       "block", // unset, so the declared default is what is in force
-		"editor":             "code -w",
-		"bypass":             "true",
-		"reactions":          noneSettingValue, // unset in the fixture: the lane is dormant by default
-		"model-profiles":     "1 model profile",
+		"sessions.max-age":     "0s",
+		"sessions.max-count":   "0",
+		"sessions.watch-homes": "2 homes",      // a map of homes is summarized by its count
+		"sessions.share-group": "apogee-watch", // a group name printed as written
+		"cursor-shape":         "block",        // unset, so the declared default is what is in force
+		"editor":               "code -w",
+		"bypass":               "true",
+		"reactions":            noneSettingValue, // unset in the fixture: the lane is dormant by default
+		"model-profiles":       "1 model profile",
 	}
 	for path, wantValue := range want {
 		if got := byPath[path].Value; got != wantValue {

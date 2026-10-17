@@ -1145,11 +1145,21 @@ ui:
 #   max-age    discard sessions last updated longer ago than this — a length of time written the way
 #              Go spells one (720h = 30 days, 30m); 0 keeps them for ever
 #   max-count  keep at most this many sessions, newest first; 0 keeps every one
-# Config-file only (no flag or env).
+# Two more keys open the store to other people on this machine, both off unless you name them:
+#   watch-homes  other users' apogee homes whose live sessions /sessions lists for you to watch,
+#                read-only — a map of label to absolute home path; never this apogee's own home
+#   share-group  the group your session files are made readable by, so its members can watch
+#                them — a group you are a member of, by name (looked up in /etc/group) or by gid;
+#                not available on Windows
+# Config-file only (no flag or env), and global-only: a project's .apogee/config.yaml cannot set
+# any of the four.
 #
 # sessions:
 #   max-age: 720h    # 30 days
 #   max-count: 200
+#   watch-homes:
+#     bob: /home/bob/.apogee
+#   share-group: apogee-watch
 
 # =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -297,6 +298,24 @@ func sessionsMaxAge() scalarField[time.Duration] {
 		},
 		parse: parseSessionsMaxAge, format: time.Duration.String,
 		land: landIn(sessionsOf, SessionSettings.Validate, parseSessionsMaxAge, at),
+	}
+}
+
+// sessionsShareGroup is the descriptor of `sessions.share-group`: a group name copied across as the
+// file spells it, trimmed, and judged against this machine at ResolveOptions
+// (SessionSettings.ValidateHost) rather than at the load.
+func sessionsShareGroup() scalarField[string] {
+	at := func(s *SessionSettings) *string { return &s.ShareGroup }
+	return scalarField[string]{
+		at: func(o *Options) *string { return at(sessionsOf(o)) },
+		file: func(fc fileConfig) *string {
+			if fc.Sessions == nil {
+				return nil
+			}
+			return nonEmpty(strings.TrimSpace(fc.Sessions.ShareGroup))
+		},
+		parse: asIs, format: spelled[string],
+		land: landIn(sessionsOf, SessionSettings.Validate, asIs, at),
 	}
 }
 

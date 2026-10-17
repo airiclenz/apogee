@@ -459,7 +459,13 @@ NOTES (2026-10-17): the startup watch's box falls back to the session id when th
 
 Depends on items 6, 9a.
 
-## 13. Config: sessions.watch-homes and sessions.share-group
+## 13. Config: sessions.watch-homes and sessions.share-group — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the resolved `sessions.watch-homes` is an ordered `[]config.WatchHome{Label, Path}` (file order, trimmed), not a Go map. The on-disk value is still a YAML map, decoded by a custom `watchHomesConfig.UnmarshalYAML` that keeps the file order and keeps duplicate labels, so `SessionSettings.Validate` makes the duplicate refusal in its own words. Both `!=` comparisons on `SessionSettings` (config_test.go, keyfield_test.go) now use `reflect.DeepEqual`.
+NOTES (2026-10-17): the validation is split in two. File-only defects (empty or repeated label, relative path) are checked in `SessionSettings.Validate`. Checks that depend on this machine (own home, share-group existence and membership, Windows) are in a new `SessionSettings.ValidateHost(ownHome)`, which ResolveOptions calls right after Validate. The own-home check compares cleaned paths and, where both resolve, their symlink-resolved forms.
+NOTES (2026-10-17): membership is the resolved gid being in `os.Getgroups()` OR equal to `os.Getegid()`. The plan names only Getgroups; the egid is added because a process can hand a file it creates to its effective group even when the supplementary list leaves that group out. The resolver is exported as `config.ResolveShareGroup(group) (gid, error)` so item 14 can reuse it.
+NOTES (2026-10-17): both rows are `Editable: false`: `sessions.watch-homes` is KindStructured and its row reads as "N homes"; `sessions.share-group` is KindString with a field descriptor that lands through `landIn`. Because neither has a `settingsTable` entry in cmd/apogee/wire_settings.go, a live re-read that changes one gets the same "cannot be applied to the running session" answer as `currency`. The "Sixteen /settings keys" count in configuration.md is unchanged.
+NOTES (2026-10-17): consequential edit — internal/config/registry_test.go: made necessary by the new `sessions.share-group` row having a Set (its Options field is added to the `owns` table in TestRegistrySetIsTheInverseOfRead)
 
 **What:**
 **Goal:** `sessions.watch-homes` (a map of label → absolute home path) and `sessions.share-group` (a group name) parse in the global config.
