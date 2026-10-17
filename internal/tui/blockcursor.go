@@ -172,6 +172,11 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		if !ok {
 			return m, nil, false
 		}
+		if m.watch.isActive {
+			// A watched run's rows stop nothing: the watch is read-only (watch.go).
+			cmd := m.showFlash(watchRefusedFlash)
+			return m, cmd, true
+		}
 		m.stopRun(head)
 		return m, nil, true
 	}

@@ -64,7 +64,16 @@ func (m Model) commandRunnable(parsed parsedInput) bool {
 // A line that could not run even at idle — a parse error — is not queued: runCommand's own usage
 // note answers it right here, as it would at idle, because deferring it would only defer the same
 // refusal to a moment the human is no longer looking at the line.
+//
+// While watching nothing is queued: a view-only verb runs now and every other verb is refused at
+// the watch gate (watch.go), since the idle it would wait for is the watched run's, not this one's.
 func (m Model) queueCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
+	if m.watch.isActive {
+		if m.watchRefuses(parsed) {
+			return m.refuseWatchInput()
+		}
+		return m.runCommand(parsed)
+	}
 	if parsed.err != nil {
 		return m.runCommand(parsed)
 	}
@@ -456,6 +465,11 @@ func (m *Model) resetSessionBoards() {
 // parse: parsed.err is reported as a note (it carries its own usage line) and nothing is driven,
 // so a mistyped /confine can never be mistaken for one that took effect.
 func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
+	// Watch mode runs only its view-only verbs (watch.go): every caller reaches this gate, so no
+	// path into a verb can act on the watched session or the parked one.
+	if m.watchRefuses(parsed) {
+		return m.refuseWatchInput()
+	}
 	if parsed.err != nil {
 		m.transcript.addNote(parsed.err.Error())
 		return m, nil

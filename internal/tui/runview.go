@@ -186,7 +186,14 @@ func (m Model) runLabel(run runRef) string {
 // live": at errored esc still walks up, so the box there goes on naming the child. The other three
 // states hand their own invitation — ⏎ queues while a worker runs, sends at idle and errored — to
 // [Model.legendFor], which lets an open run view outrank it.
+//
+// A watch outranks all of it: the box reads `watching <title> · read-only · esc back` whatever the
+// watched run is doing and whichever of its run views is open, because nothing typed here reaches
+// that run (watch.go).
 func (m Model) legend() string {
+	if m.watch.isActive {
+		return m.watchLegend()
+	}
 	switch m.state {
 	case stateAwaitingAsk:
 		return m.idleLegend()
@@ -443,6 +450,11 @@ func (m Model) runViewKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	case "ctrl+x":
 		if _, onRow := m.cursorRunHead(); onRow {
 			return false, m, nil
+		}
+		if m.watch.isActive {
+			// A watched run is someone else's: the view is read-only and stops nothing (watch.go).
+			next, cmd := m.refuseWatchInput()
+			return true, next, cmd
 		}
 		if head, ok := m.viewedChild(); ok {
 			m.stopRun(head)

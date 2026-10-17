@@ -663,6 +663,10 @@ type Model struct {
 	// and a fixed-size array of plain ints, so it rides the value-copied Model with no exception to
 	// ADR 0011's copy rule.
 	spans frameSpans
+	// watch is watch mode's slot (watch.go, ADR 0103 decision 5): while isActive, m.eng is the inert
+	// engine and the watcher's own engine and session view are parked here. Plain values only, so
+	// it rides the value-copied Model under ADR 0011's copy rule.
+	watch watchState
 }
 
 // liveStats is the reading the status line takes off the engine's UsageEvents for the conversation
@@ -1325,6 +1329,15 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 		return m, tea.Batch(reassert, resumed, refresh)
 
+	case watchPollMsg:
+		// Watch mode's follower asks for its next journal read (watch.go).
+		return m.foldWatchPoll(msg)
+
+	case watchBatchMsg:
+		// The follower's read: the journal lines the watched session's owner appended, folded through
+		// the eventMsg routing above minus the owner-only steps (watch.go, foldWatchBatch).
+		return m.foldWatchBatch(msg)
+
 	case approvalReqMsg:
 		// The worker's Approver hands the gate to the Update loop: record the request and switch
 		// state (approval.go).
@@ -1908,6 +1921,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Esc never ends the program; it only cancels an in-flight worker. At idle/errored it
 		// is a no-op (use Ctrl+C twice to exit), so a reflexive Esc never quits.
 		//
+		// While watching there is no worker of the watcher's to cancel: esc leaves the watch and goes
+		// back to the parked session (watch.go). A run view or pane open in the watch claimed it above.
+		if m.watch.isActive {
+			return m.leaveWatch(), nil
+		}
 		// A background workflow's prompt (either pane) has no worker behind it: one press sends it
 		// back to the engine's queue unanswered (dismissWorkflowPrompt, workflow.go).
 		if m.workflowPromptOrigin() != nil {

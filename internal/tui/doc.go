@@ -1145,7 +1145,11 @@
 // /workflows view (ADR 0087 D5) — the session's workflows listed with their state and item counts,
 // one opened to its stages and items, and an item opened read-only to its receipt, detail output and
 // saved conversation, every read off the Update loop and refreshed on each workflow phase, with a
-// workflow's detail answering ^x (stop it) and ^r (re-run its failed items);
+// workflow's detail answering ^x (stop it) and ^r (re-run its failed items); watch.go watch mode
+// (ADR 0103) — another session painted live and read-only from its record's head and its Event
+// journal, followed off the Update loop and folded through the eventMsg routing, behind an inert
+// Engine, the parked session view esc restores, and the one allow-list gate every send and verb
+// meets while watching;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block and the super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the

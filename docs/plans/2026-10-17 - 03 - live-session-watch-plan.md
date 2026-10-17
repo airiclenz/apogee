@@ -289,7 +289,16 @@ NOTES (2026-10-17): no test drives a real Interjection end to end (that needs a 
 
 Depends on items 5, 6.
 
-## 9. TUI watch mode core
+## 9. TUI watch mode core — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): entry is `Model.enterWatch(watchSource{recordPath, journalPath, title})` (idle only; refused otherwise), exit is esc (`leaveWatch`); no door calls it yet (items 11/12). The follower is `readJournal` in a Cmd (open, stat, read complete lines, decode), re-armed by a `watchPollMsg` tick at the production const `watchPollInterval = 100ms`; batches carry the watch generation and are dropped after esc.
+NOTES (2026-10-17): item 9 already parks the resetSessionView field set (plus state, acts and the block cursor) in `watchState.parked`, because esc's "returns to the previous session" needs it; 9a still owns `m.sessions`, the Msg routing into the parked state, quit/ctrl+c, the engine-setter refusals, the wake and the exact-set guard test. `leaveWatch` also clears the paint cache on exit (enter clears it through `transcript.reset`), since the restored indices would otherwise hit the watched session's paints.
+NOTES (2026-10-17): the allow-list gate (`watchRefuses`, view-only set /thinking /help /usage /inspect /version) sits at `sendAtIdle` and `stageWhileRunning` (the two ⏎/ctrl+g chokepoints, which reach `submit`, `stageCommand` and the run view's child send), in `runCommand` and `queueCommand` (never queues while watching), and in `acceptAutocomplete` before the token cut. tui.go needed no change. keyclaim_test.go is untouched: watch's esc is handled in handleKey's esc case, not as a `keyClaimOrder` claimant.
+NOTES (2026-10-17): `eventjson.Decode` drops the journal frame's `title`/`entries`, so watch.go re-reads them off the raw run_started line into `eventjson.JournalStarted` (decode.go untouched). The record head is read with `session.NewStore(dir).LoadPath(path)` — read-only, never Load/Hold/Save/Delete/Prune.
+NOTES (2026-10-17): the watched run shows running from a top-level `prompt` line (through markRunning, with one spinner chain per running stretch) until a depth-0 TurnEvent whose status is not turn-complete (or faulted) or the closing `run_finished`. "The inert engine records zero calls" is asserted on the watcher's own parked fakeEngine; the inert engine is a stateless production type.
+NOTES (2026-10-17): watch.go is 575 lines, over the ~400 guideline, because the 37-method inert engine sits beside the watch logic per the item's file list.
+NOTES (2026-10-17): watchSource omits the Goal's `foreign bool` — nothing in item 9 reads it; item 10 (⏎ refused in a watched home) adds it back with its first reader.
+NOTES (2026-10-17): no CHANGELOG entry — watch mode has no user-facing door until items 11 and 12.
 
 **What:** Recast at the regression check (2026-10-17).
 **Goal:** given a watch source `{recordPath, journalPath, title, foreign bool}`, the TUI enters watch mode:

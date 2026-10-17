@@ -899,6 +899,10 @@ func (m Model) acceptAutocomplete() (tea.Model, tea.Cmd) {
 		return m.spliceCompletion("/" + it.value)
 	}
 	parsed := parsedInput{kind: kindCommand, command: it.value}
+	if m.watchRefuses(parsed) {
+		// Refused before the cut, so the draft keeps the token the human was completing (watch.go).
+		return m.refuseWatchInput()
+	}
 	m = m.removeCompletionToken()
 	if !m.commandRunnable(parsed) {
 		return m.queueCommand(parsed)

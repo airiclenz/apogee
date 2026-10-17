@@ -215,7 +215,13 @@ func (b *interjectBox) drainAll() []queuedInterjection {
 // was opened from (ADR 0063) — at idle as much as while a worker runs, because the view outlives
 // the run it was opened on and a send there must not silently start an Exchange the reader thought
 // they were steering a delegate with. Everywhere else it submits.
+//
+// While watching, the line first meets watch mode's allow-list gate: only a view-only verb runs, and
+// anything else flashes and leaves the box as typed (watch.go).
 func (m Model) sendAtIdle() (tea.Model, tea.Cmd) {
+	if m.watchRefuses(m.submitLine()) {
+		return m.refuseWatchInput()
+	}
 	if m.inRunView() {
 		return m.stageChildMessage(false)
 	}
@@ -227,7 +233,13 @@ func (m Model) sendAtIdle() (tea.Model, tea.Cmd) {
 // child on screen inside a run view and as an interjection into the running Exchange everywhere
 // else, delivered at the next between-Steps boundary (ADR 0025). now picks whether it waits for a
 // running sub_agent wave or skips the wave's members not yet started (amended 2026-10-05).
+//
+// While watching, the watched run's running state stages nothing: the line meets the same gate
+// sendAtIdle's does, and a refused one is never queued (watch.go).
 func (m Model) stageWhileRunning(now bool) (tea.Model, tea.Cmd) {
+	if m.watchRefuses(m.submitLine()) {
+		return m.refuseWatchInput()
+	}
 	if m.inRunView() {
 		return m.stageChildMessage(now)
 	}
