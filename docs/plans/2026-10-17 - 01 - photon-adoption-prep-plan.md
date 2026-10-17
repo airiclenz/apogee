@@ -59,7 +59,11 @@ docs/design/test-drivers.md — "The binary: cmd/stubllm", "Recording a fixture"
 - `GOMEMLIMIT=2GiB go test -race -count=1 ./cmd/stubllm/`
 **Commit:** `feat(stubllm): add replay and capture cassette subcommands`
 
-## 2. sessionexpect: the entry judge
+## 2. sessionexpect: the entry judge — ✅ DONE (2026-10-17)
+
+NOTES (2026-10-17): the Sub-Agent toolCall sits at entry 3 (after the failing Tests run, before the root-cause assistant line), so demorig's 2 stays 2 and its 5/7/8/9 become 6/8/9/10; later callIDs renumbered call_3..call_6. Fixture differs from demorig's only by that entry and the callIDs.
+NOTES (2026-10-17): an order clause whose other selector locates nothing reads `<before|after>: <findEntry's error>` (e.g. `after: no entry matches {kind: toolCall, tool: Git}`) in place of demorig's `beat N locates no session entry to order against`; an expect with no clause passes with the bare entry description (item 3's CLI refuses that shape).
+NOTES (2026-10-17): parseSelector also refuses a repeated key, an empty value and a pair without `=`, and trims whitespace around each pair — beyond the plan's listed refusals; a value cannot carry a comma.
 
 **What:**
 **Goal:** package `main` under `cmd/sessionexpect` holds a tested judge: parse a selector string, load a session file's entries, locate the selected entry, and judge `contains`, `before` and `after` against it, returning pass/fail and a one-line detail with demorig's wording (`no entry matches {…}`, `entry N <kind> …: contains "…"`).
