@@ -1,10 +1,12 @@
 ---
 title: Stopping a queued re-run claims its folder was marked stopped
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-10-17 - 00 - queued-rerun-stop-answer-plan
 created: 2026-10-14T17:50:59Z
+closed: 2026-10-17T10:22:10Z
+reason: "Resolved by plan 2026-10-17 - 00 - queued-rerun-stop-answer-plan (archived at 6853932f): a queued re-run's stop answer names its folder's kept done/failed phase; a queued first run still answers marked stopped."
 ---
 
 Found by the closeout of the plan `2026-10-14 - 01 - architecture-review-defects-plan` (item 9).
