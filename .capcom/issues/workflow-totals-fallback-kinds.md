@@ -1,10 +1,12 @@
 ---
 title: TUI workflow totals fallback counts verify and merge items
-status: open
+status: done
 type: bug
 priority: 4
 plan: 2026-10-17 - 00 - quit-keys-stage-kinds-daemon-layer-plan.md
 created: 2026-10-14T15:26:49Z
+closed: 2026-10-17T12:41:46Z
+reason: "Resolved by plan '2026-10-17 - 00 - quit-keys-stage-kinds-daemon-layer-plan' items 2-3 (archived at c46ba088): stage kinds ride WorkflowStarted and persist; the no-tally fallback counts fan-out items only, kindless older records still count every item."
 ---
 
 When a workflow block has no tally (running, failed, or an older record), `workflowView.totals()` (`internal/tui/workflowblock.go`) counts every item line, verify and merge stages included. `workflow.TallyOf` counts fan-out stage items only (ADR 0089, 2026-09-30 amendment), so the fallback's "items N" disagrees with the tally the same workflow shows once it finishes.
