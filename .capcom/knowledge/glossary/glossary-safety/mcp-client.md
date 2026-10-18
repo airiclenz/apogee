@@ -5,17 +5,23 @@ title: "MCP client (Model Context Protocol): apogee's client for external MCP se
 **MCP client** (Model Context Protocol):
 Apogee's client for external **MCP** servers, on the official Go SDK over **stdio / SSE /
 streamable-http** (`internal/mcp`, P3.15). It connects the servers a host lists in `config.yaml`'s
-`mcp-servers:` block (config-file-only, default-empty ⇒ dormant), discovers each server's tools, and
+`mcp-servers:` block (default-empty ⇒ dormant; no flag or variable — the global file, plus any entry
+of a **Project config** the user has **Adopted**, ADR 0104), discovers each server's tools, and
 surfaces them into the registry as `ExternalEffectTool` of kind **`mcp`** named `<server>__<tool>`.
 An MCP server is an **external, untrusted** process Apogee **cannot confine**, so its tools always
 **gate through Approval in Auto** under `confine-to-workspace=true` (the per-tool teeth above) — and
 their description / schema / result are untrusted data shown to the model, never executed. An http(s)
 server (sse / streamable-http) passes **url-safety**'s scheme/host allow-deny and dials **pinned to
 the configured endpoint's own addresses** — the endpoint is exempt from the resolved-IP SSRF floor
-(you named it in your own config; the floor is the anti-*model* control), while any *other* private
+(you named it in your own config, or adopted it from a Project config whose pane named it; the floor
+is the anti-*model* control), while any *other* private
 address that connection is pointed at is still refused, redirects are not followed and the
 connection goes out through the configured egress proxy when one applies (ADR 0012,
 Amendment 2026-07-26); a stdio server is a trusted local launch (no URL check), its calls still gate.
+A repo server (an adopted Project config entry) gets the platform environment floor when it sets no
+`env-allowlist:`, launches from the Project root, may run an in-root program only when its pin holds
+it, and is answered only by an Allow rule adopted in that project or a session approval — never by a
+global `allow.mcp-servers` rule.
 An http(s) server's entry may add request headers sent on every request — the server's own auth
 scheme, a tenant id: `headers:` maps a header name to a literal value, and `headers-env:` maps one
 to the **name** of an environment variable holding the value, so a token never sits in the config

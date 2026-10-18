@@ -33,6 +33,16 @@ The same list is fired by every front-end — the interactive TUI, a `/schedule`
 [`apogee headless`](headless.md) and an [`apogee daemon`](daemon.md) firing — from one library, so
 an entry means the same thing wherever the run was started from.
 
+A repository's own [Project config](configuration.md#a-projects-own-config--apogeeconfigyaml)
+(`.apogee/config.yaml` at its Project root) may carry a `reactions:` list too, in the same shape.
+Each of its entries is **proposed** and arms nothing until you adopt it, and adoption pins its `id`,
+its `run:`, `advise:` and `gate:` values and the content of every project file they name — so an
+edit to one of those, or to a script it runs, asks you again, while an edit to `on:`, `timeout:`,
+`enabled:` or `workspace:` does not. An entry whose `id` is one of yours is dropped with a notice:
+yours wins. The sections below say where an adopted project reaction is held to more than yours is;
+[A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml) has the whole
+list, and what adopting a script means.
+
 ## An entry
 
 ```yaml
@@ -256,6 +266,19 @@ The rest of the posture, which is the one an `api-key-cmd:` already runs under:
   group and is the one way to leave something running. A detached process still holding the stderr
   pipe gets a further two seconds before apogee stops waiting on it.
 
+That posture is for your own entries. A `run:` command an adopted
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) entry spells is the
+repository's text, not yours, so it runs as an `advise:` or `gate:` command does (see
+[Where an `advise:` or `gate:` command runs](#where-an-advise-or-gate-command-runs)): inside the
+workspace fence when `confine-to-workspace` is on and not at all on a host that cannot build it,
+with the execution tools' credential scrub, and under that door's ceilings — so its failure reads
+`<program> exited 3: …`. It runs in the **Project root**, not apogee's working directory, and a
+relative program resolves against that root. It may run a script inside the root —
+`run: ["./scripts/notify.sh"]` — only because adoption pinned that script's content: the pinned
+files are checked again before every spawn, and one that changed, went missing or is newly named
+refuses that run with a notice naming the file, and the entry is proposed again. An adopted script runs whatever it contains, so read it, and what it
+calls, before you adopt it.
+
 ## Sending a webhook
 
 A webhook `run:` POSTs the same JSON document to its `url:`, **once**. There is no retry: this is a
@@ -285,8 +308,8 @@ Every webhook — `run:`, `advise:` and `gate:` alike — is fenced by your
 [`url-safety:`](configuration.md#what-the-network-tools-may-reach--url-safety) lists: a host
 `deny-hosts` names, or one off a non-empty `allow-hosts`, is refused before anything is dialled, and
 the failure says it was refused by url-safety. The private-range floor is **off** for a webhook,
-as it is for an MCP endpoint: the address is one you wrote in your own config, so a loopback or LAN
-receiver still gets its POST, and the connection is pinned to that endpoint's own resolved
+as it is for an MCP endpoint: the address is one you wrote in your own config — or adopted from a
+Project config whose pane named it — so a loopback or LAN receiver still gets its POST, and the connection is pinned to that endpoint's own resolved
 addresses. A redirect is **never followed**: a 3xx comes back as itself and is reported as
 `HTTP <code>` — a failed post — so neither the body nor your `headers-env:` secrets ever reach a
 host you did not name. A webhook that redirects must be configured at the URL it redirects to.
@@ -416,7 +439,9 @@ command runs unfenced, as a `run:` does. With it **on**, the command runs inside
 workspace box a subprocess tool would be confined to — and on a host that cannot build that box
 it does not run at all: `workspace confinement is unavailable on this host` is reported to you, an
 advise contributes nothing and a gate asks. As with `run:`, the program is resolved before it
-starts and refused when it lives somewhere the model could have written it. Unlike `run:`, the
+starts and refused when it lives somewhere the model could have written it — save, for an adopted
+project reaction, a script its pin holds (see [Running a command](#running-a-command)), and such a
+command runs in the Project root. Unlike `run:`, the
 command is spawned through the same door every execution tool uses, so it gets that door's
 credential scrub — apogee's own key, every `api-key-env:` variable, every webhook
 `headers-env:` variable and every `mcp-servers:` entry's `headers-env:` and `client-secret-env:`
@@ -424,7 +449,8 @@ variable are **absent** from its environment — along with the process-tree tea
 and that door's ceilings: combined stdout and stderr are capped at 256 KiB before the 8 KiB advice
 cap is applied, and a `timeout:` above 3600 s is clamped to 3600 s. A `timeout: 0s` on an entry that
 spells only `advise:` or `gate:` falls back to the class default, where the same value on a `run:`
-entry is a startup refusal. A `run:` command alone inherits the environment whole. None of this
+entry is a startup refusal. A `run:` command of your own alone inherits the environment whole; an
+adopted project entry's `run:` goes through this door too. None of this
 reaches a **webhook** under either key: nothing is spawned, so there is no permit, no box and no
 scrub — the request leaves over the network under the class deadline, exactly as a `run:` webhook
 does, and `headers-env:` is read at send time from apogee's own environment.
@@ -446,6 +472,12 @@ The filter scopes every action key the entry spells: a scoped `gate:` is not ask
 `advise:` adds nothing outside its workspace, exactly as a scoped `run:` does not fire there.
 
 Leave the key out and the entry is active in every workspace.
+
+A Project config's reaction never leaves its repository: it exists only in sessions under that
+Project root, so leaving `workspace:` out confines it there already. A `workspace:` it does spell
+must name the Project root or a folder inside it, and a relative one resolves against that root;
+one outside it refuses that entry with a notice, and the rest of the Project config still
+applies. `workspace:` is a parameter, not part of the pin, so changing it does not ask again.
 
 ## When a reaction is slow
 
@@ -497,10 +529,24 @@ raised afterwards fires the list the session is running now, not the one apogee 
 list the session will not take — a malformed entry, an unresolvable `workspace:` — is refused
 whole, and the session keeps firing the Reactions it already had.
 
-`apogee headless` and `apogee daemon` read the list **once**, at start. A daemon watches its
-`schedules.yaml`, but not `config.yaml`, so an edit here reaches it at its next restart.
-`reactions:` is a global-only key: a `reactions:` block in a project's `.apogee/config.yaml` is
-ignored with a start-up notice, so a repository you clone cannot add a Reaction to your sessions
+A Project config's reactions ride the same swap. A save to the project's `.apogee/config.yaml`, or
+an answer to one of its proposed reactions — in the adoption pane, in `/settings`, or with
+`apogee project adopt` from another terminal — re-reads both files and swaps the lanes over at once,
+your entries plus the adopted project ones. A project file that stops parsing takes its reactions
+out of the lanes, leaving yours, until it parses again. A project entry the session refuses — one
+whose `id` is yours, a `workspace:` outside the Project root — is dropped alone with a notice, never
+the whole list.
+
+`apogee headless` reads the list **once**, at start — yours and its workspace's adopted project
+reactions together. `apogee daemon` reads yours once, at start, and layers each firing's own
+workspace's adopted project reactions over them at that firing, so an adoption or a project edit
+reaches the next firing without a restart; an edit to `config.yaml` itself reaches the daemon at its
+next restart, since it watches its `schedules.yaml` and not `config.yaml`. Neither ever asks: a
+project reaction still proposed is skipped, and the run says so in one line naming it — on stderr
+for a headless run, once in the daemon's log —
+``apogee: project config <path> proposes reaction `fmt`; this run skips it until it is adopted —
+answer with `apogee project adopt` in that project``. A repository you clone therefore adds no
+Reaction to your sessions until you have read and adopted it
 (see [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml)).
 
 ## Migrating from `hooks:`

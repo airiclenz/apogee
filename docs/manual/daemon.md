@@ -156,7 +156,12 @@ schedules in two repositories never see each other's file. A project file the fi
 global-only key in it, is one line in the daemon's log the first time, not one per firing. A
 firing, like a headless run, never reaches the ordinary prompt an
 [Allow rule](configuration.md#commands-that-run-without-asking--allow) answers, so a rule the
-Project config proposes stays proposed, and nothing is said about it. `schedules.yaml` is the
+Project config proposes stays proposed, and nothing is said about it. A firing fires the
+[Reactions](reactions.md) its workspace's Project config proposes once you have adopted them, under
+the rules a project reaction always runs by, and never asks about one: a project reaction still
+proposed is skipped, with one line in the log naming it the first time — again only when the set
+of skipped reactions changes — and pointing at `apogee project adopt`. No firing contacts an MCP
+server, adopted or not. `schedules.yaml` is the
 only file the daemon watches. The seven Floor guards are on for every firing, exactly as they are
 in a session.
 

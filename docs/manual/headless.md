@@ -89,7 +89,12 @@ and `present_document` are not registered, and no MCP server is contacted. An
 [Allow rule](configuration.md#commands-that-run-without-asking--allow) answers an ordinary prompt,
 and `plan` and a fenced `auto` never reach one, so a rule — global or adopted — has nothing to
 clear here; and a rule the Project config proposes is never asked about: it stays proposed until you answer it in a
-session or with `apogee project adopt`.
+session or with `apogee project adopt`. The same holds for the Project config's
+[Reactions](reactions.md): the run fires the ones you adopted, under the rules a project reaction
+always runs by, and skips any still proposed, saying so in one stderr line before the run —
+``apogee: project config <path> proposes reaction `fmt`; this run skips it until it is adopted —
+answer with `apogee project adopt` in that project``. Its MCP servers, adopted or not, are never
+contacted, like every other.
 
 Under the default `--format text`, only the model's answer goes to **stdout**, once, when
 the run is done; everything else — resolution notices, the live narration below, and the

@@ -29,19 +29,34 @@ documented posture says it cannot. The guarantees apogee makes, in the order the
 - **Network fencing** — the `url-safety:` allow and deny lists and the private-range floor
   bind the web tools and MCP endpoints; redirects are never followed. A webhook reaction
   (`run:`, `advise:` and `gate:` alike) obeys the same allow and deny lists and never follows a
-  redirect, but — like an MCP endpoint, an address you wrote yourself — skips the private-range
-  floor, so a loopback or LAN endpoint still works; a running session's own webhooks pick up a
+  redirect, but — like an MCP endpoint, an address you wrote yourself or adopted from a
+  Project config — skips the private-range floor, so a loopback or LAN endpoint still works; a running session's own webhooks pick up a
   `url-safety:` edit at its next start, while a `/schedule` firing raised after the edit already
   uses the new lists. An SSRF past them is in scope.
 - **Secrets** — API keys are stripped from the environment of every tool subprocess and
   every `advise:` or `gate:` reaction command, and the variables your `api-key-env:` and
   `headers-env:` entries name are redacted from their output. Two exceptions inherit
-  apogee's full environment: a stdio MCP server, unless its entry sets
+  apogee's full environment, and both are entries of your own global config: a stdio MCP server,
+  unless its entry sets
   [`env-allowlist:`](docs/manual/configuration.md#external-mcp-servers--mcp-servers), and a
   `run:` reaction command — your own notifier, whose output never reaches the model (see
   [The upstream API key](docs/manual/configuration.md#the-upstream-api-key) and
   [reactions.md](docs/manual/reactions.md)). A key that shows up where it should not is in
   scope.
+- **Project config adoption** — a repository's own `.apogee/config.yaml` grants nothing until
+  you adopt the entry: an Allow rule, an MCP server or a reaction it proposes is inert while
+  proposed or rejected, in every Driver. Adoption pins the rule's exact text, or the server's or
+  reaction's canonical fields together with the SHA-256 of every project file its command or an
+  `env:` value names, and those files are checked again before every spawn. An adopted repo
+  entry is held to more than one of yours: your own entry of the same name or id wins; a stdio
+  server with no `env-allowlist:` gets only the platform floor; a reaction's `run:` runs under
+  the `advise:`/`gate:` fence and credential scrub, in the Project root, and its `workspace:`
+  stays inside it; a program inside the root runs only when its pin holds it; and only an Allow
+  rule adopted in that project, or a session approval, answers a repo server's tools. Anything
+  a repository proposes that runs, connects or sends before you adopt it — or that runs a
+  changed pinned file, or slips one of those rules — is in scope. What an adopted script does is
+  not: it runs whatever it contains, as it would if you ran it yourself (see
+  [A project's own config](docs/manual/configuration.md#a-projects-own-config--apogeeconfigyaml)).
 - **Prompt-injection escalation** — text a model reads (a file, a tool result, a fetched page,
   a skill) that gets apogee to skip a guard it would otherwise apply. Injection that merely
   makes the model do something the current mode already allows is not a vulnerability;

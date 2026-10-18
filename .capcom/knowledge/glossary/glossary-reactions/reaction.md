@@ -41,7 +41,9 @@ and gate firings (and the engine's own) do — and its handler's failure reaches
 Runner's report line alone. Whichever lane fires it, an out-of-process handler reads the **one**
 payload document, `domain.SeamPayload`: the identity block, the per-Moment members its Moment
 carries, and — on the sync lane alone — the call's `arguments` and `result`.
-A **user**-origin Reaction is one entry of the global `reactions:` list —
+A **user**-origin Reaction is one entry of the global `reactions:` list, or an **Adopted** entry of a
+**Project config**'s (`domain.Reaction.Project` set; fenced, scrubbed and run in the Project root,
+its pinned project files re-checked before every spawn — ADR 0104) —
 `{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv | {url, …}>, gate: <argv | {url, …}>, workspace?, timeout?, enabled?}` —
 resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**
 class, fired by the async lane (`internal/reactions`' own runner) on notices; `advise:` at

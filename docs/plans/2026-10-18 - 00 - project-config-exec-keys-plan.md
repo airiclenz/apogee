@@ -285,7 +285,12 @@ internal/config/layer.go — layerProject, layerProjectRoot, resolveProjectRoot;
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestMCP' ./cmd/apogee/`
 **Commit:** `feat(mcp): apogee mcp list, and login refuses an unadopted repo server`
 
-## 13. The manual, SECURITY.md and glossary describe repo servers and reactions
+## 13. The manual, SECURITY.md and glossary describe repo servers and reactions — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): per the DECISION, the docs state that a server's `env:` entries are shown in full as `KEY=VALUE` and pinned, and that in-root files an `env:` value names (whole value, a word, the part after a word's `=`, a path-list element) are pinned by digest like argv-named files; item 12's `apogee mcp list`/login text in configuration.md §External MCP servers is kept as it was and only linked to.
+NOTES (2026-10-18): configuration.md's `headers-env:` and `client-secret-env:` paragraphs said the tool-subprocess scrub was fixed at start ("from the next start"); item 8 made it widen live, so both now say a variable an edit or an adoption adds is scrubbed from that moment and a dropped one stays scrubbed for the session.
+NOTES (2026-10-18): the repo `run:` posture is documented as it ships, not as ADR 0104 §8's "with the fence off it runs as a global run: does": the spawn always goes through the hook door (agent.spawnReactionArgv), so even unfenced it gets the credential scrub, that door's ceilings and failure wording, and the Project root as working directory.
+NOTES (2026-10-18): SECURITY.md gains a "Project config adoption" bullet under What counts (in scope: anything a repo proposes acting before adoption, a changed pinned file running, or a repo entry slipping one of its rules; out of scope: what an adopted script does); the configuration.md and reactions.md "adopted script" paragraphs add that only the files the entry names are pinned — what a script reads, sources or runs is not.
 
 **What:** Depends on items 4–12. ADR 0104 §1–§12.
 **Goal:** `docs/manual/configuration.md` §A project's own config lists `mcp-servers:` and `reactions:` as granting with what Adoption pins; its MCP and Reactions sections, `docs/manual/reactions.md` (§Running a command, §`workspace:`, §Live reload) and `SECURITY.md` state the repo-entry rules (env floor, fenced `run:`, project scripts pinned by content, own entry wins, project rules only); the glossary Notes **Adoption** and **Project config** say the same; the manual states beside the feature that an adopted script runs whatever it contains.

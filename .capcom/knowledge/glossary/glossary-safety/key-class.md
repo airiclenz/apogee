@@ -9,7 +9,8 @@ What a **Project config** may do with one config key, carried by the key's regis
 global one and is live as written (`context-files.*`, `use-project-skills`, the three `workflow-*`
 limits). **Tighten-only** keys may narrow and never widen: the project's entries are added to the
 global ones, never put in their place (`tools.disabled`, `url-safety.deny-hosts`, `dangerous-rules:`
-whose project `remove:` is ignored). **Granting** is the **Allow rule**, inert until **Adoption**.
+whose project `remove:` is ignored). **Granting** is `allow:` (the **Allow rule**), `mcp-servers:`
+and `reactions:` (ADR 0104): a project entry of any of them is inert until **Adoption**.
 **Global-only** is every other key and the default, so a new key is safe until marked otherwise: a
 project file that states one is ignored for it, with one start-up line naming the keys. Precedence
 for a key a project may set is default < global < project < env < flag; a tighten-only key unions

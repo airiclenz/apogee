@@ -181,10 +181,11 @@ the highlighted row. A question's `⏎` arms exactly as an approval's decision k
 effect a moment after the question appears, so a keystroke already in flight cannot send an
 answer you have not read — while typing an answer, `↑`/`↓`, `space` and `esc` are live at once.
 The panes apogee raises without being asked — the start-up offers to move a plaintext key and a
-retired `sub-agents: true` flag, and the pane asking whether to adopt a rule the project proposes
+retired `sub-agents: true` flag, and the pane asking whether to adopt a rule, an MCP server or a
+reaction the project proposes
 (see [a project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml)) — arm the same way: their `⏎` takes effect a moment after
 the pane appears, so the `⏎` that answered the pane before it cannot answer the next one, while
-`↑`/`↓` and `esc` are live at once. The project-rule pane opens on `not now`, the answer that
+`↑`/`↓` and `esc` are live at once. The adoption pane opens on `not now`, the answer that
 changes nothing. `⌥↑`/`⌥↓` light a
 bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
 the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
@@ -743,3 +744,15 @@ rejected rule adopts it; `backspace` (or `⌦`) arms the rule's removal from the
 confirms (`⏎ confirm remove · esc cancel`). A session with no rules shows no such section. Rules
 the project proposes are also asked about on their own, at start-up and from a shell with
 `apogee project adopt` — see [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml).
+
+**A project's MCP servers and reactions are rows under their keys.** Each `mcp-servers:` and
+`reactions:` entry the Project config states gets a read-only row right below the `mcp-servers` or
+`reactions` row — `mcp-servers: wiki`, `reactions: fmt` — marked `(project)`, with where it stands
+as its value (`adopted`, `proposed` or `rejected`) and `set in the project config` beside it, since
+what an entry runs is edited in that file and never from the pane. A proposed row's description
+says what changed since you adopted it, when something did. `⏎` on a proposed or rejected entry
+adopts it; `backspace` (or `⌦`) on a proposed one arms its rejection and `⏎` confirms
+(`⏎ confirm reject · esc cancel`). Either answer is recorded exactly as the adoption pane records
+it, so an adopted server connects and an adopted reaction arms at once, and the rows follow every
+answer and every save to the Project config or the adoption record — this session's or another
+terminal's — without a restart.
