@@ -79,6 +79,9 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 	if row.Kind == SettingRule {
 		return m.settingsRemoveRule(row)
 	}
+	if row.Kind == SettingProposal {
+		return m.settingsRejectProposal(row)
+	}
 	if m.opts.Settings == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
 		return m, nil
@@ -115,6 +118,36 @@ func (m Model) settingsAdoptRule(row SettingRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if err := m.configHostOrNoop().AdoptRules([]domain.Proposal{row.Rule.Proposal()}); err != nil {
+		return m.settingsFailed(row, err.Error())
+	}
+	m.settings.failure, m.settings.answer = settingFailure{}, settingAnswer{}
+	return m, nil
+}
+
+// settingsAdoptProposal is ⏎ on a repo entry's row: an inert entry — proposed, or rejected earlier —
+// is adopted through [ConfigHost.AdoptRules], as the Proposal the adoption pane would have offered,
+// so the server connects or the reaction arms as an adoption there would. An adopted entry has
+// nothing to adopt, and the keypress does nothing. A refusal stays on the row; an adoption that
+// lands shows as the row's new state on the next paint.
+func (m Model) settingsAdoptProposal(row SettingRow) (tea.Model, tea.Cmd) {
+	if !row.RuleState.adoptable() {
+		return m, nil
+	}
+	return m.settingsAnswerProposal(row, m.configHostOrNoop().AdoptRules)
+}
+
+// settingsRejectProposal is the armed reset's answer on a repo entry's row: the proposed entry is
+// rejected through [ConfigHost.RejectRules], as the adoption pane's "reject" records it — it stays
+// inert and is not asked about again. It is never a removal: the entry stays in the project file,
+// and its row stays, now reading rejected.
+func (m Model) settingsRejectProposal(row SettingRow) (tea.Model, tea.Cmd) {
+	return m.settingsAnswerProposal(row, m.configHostOrNoop().RejectRules)
+}
+
+// settingsAnswerProposal records one answer for the row's entry: a refusal stays on the row, and an
+// answer that lands clears the row's old note, the row's next paint being the whole report.
+func (m Model) settingsAnswerProposal(row SettingRow, answer func([]domain.Proposal) error) (tea.Model, tea.Cmd) {
+	if err := answer([]domain.Proposal{row.Proposal}); err != nil {
 		return m.settingsFailed(row, err.Error())
 	}
 	m.settings.failure, m.settings.answer = settingFailure{}, settingAnswer{}

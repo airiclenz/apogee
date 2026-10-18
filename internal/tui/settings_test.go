@@ -4763,6 +4763,162 @@ func TestSettingsPaneRuleEnterAdoptsOnlyAnInertRule(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The repo entries' rows (ADR 0104 §12)
+// ----------------------------------------------------------------------------
+
+// settingsProposalRow is one repo entry's row as the binary hands it over (cmd/apogee/settingsrows.go):
+// under its key's section, its state as the value, tagged project, read-only with the project
+// pointer, the Proposal riding along for the answer.
+func settingsProposalRow(kind domain.ProposalKind, handle string, state SettingRuleState) SettingRow {
+	block := "reactions"
+	if kind == domain.ProposalMCPServer {
+		block = "mcp-servers"
+	}
+	return SettingRow{
+		Path: block + ": " + handle, Section: "Tools & skills", Kind: SettingProposal, Value: string(state),
+		Source: SettingFromProject, EditPointer: "set in the project config",
+		Desc:      "A project entry `" + handle + "`.",
+		RuleState: state,
+		Proposal:  domain.Proposal{Kind: kind, Handle: handle, Text: "pin " + handle, Fingerprint: "fp-" + handle},
+	}
+}
+
+// Each repo server is listed under the `mcp-servers` key's section with its state as the value and
+// the project tag as its source mark, read-only — the pointer says where it is edited.
+func TestSettingsPaneListsRepoServersWithState(t *testing.T) {
+	t.Parallel()
+	rows := []SettingRow{
+		{Path: "mcp-servers", Section: "Tools & skills", Kind: SettingStructured, Value: "2 servers",
+			Source: SettingFromProject, EditPointer: "set in the project config"},
+		settingsProposalRow(domain.ProposalMCPServer, "wiki", SettingRuleAdopted),
+		settingsProposalRow(domain.ProposalMCPServer, "tracker", SettingRuleProposed),
+		settingsProposalRow(domain.ProposalMCPServer, "scraper", SettingRuleRejected),
+	}
+	m := settingsRuleModel(t, &rows, fakeConfigHost{}, &settingsWriteLog{})
+
+	pane := strip(m.renderSettings())
+	if !strings.Contains(pane, "Tools & skills") {
+		t.Fatalf("the pane has no section heading over the repo servers:\n%s", pane)
+	}
+	for _, want := range []struct{ handle, state string }{
+		{"wiki", "adopted"}, {"tracker", "proposed"}, {"scraper", "rejected"},
+	} {
+		line := ""
+		for _, l := range strings.Split(pane, "\n") {
+			if strings.Contains(l, "mcp-servers: "+want.handle) {
+				line = l
+			}
+		}
+		if !strings.Contains(line, want.state) || !strings.Contains(line, "(project)") ||
+			!strings.Contains(line, "set in the project config") {
+			t.Errorf("the %q server's row reads %q; want its state %q, the project tag and the project pointer",
+				want.handle, line, want.state)
+		}
+	}
+}
+
+// ⏎ adopts a proposed repo reaction through the config host as the Proposal the adoption pane would
+// offer, ⌫ then ⏎ rejects one, and ⏎ adopts a rejected one — each answer recorded once, and none of
+// them reaching the settings host.
+func TestSettingsPaneAdoptsARepoReaction(t *testing.T) {
+	t.Parallel()
+	rows := []SettingRow{
+		settingsProposalRow(domain.ProposalReaction, "fmt", SettingRuleProposed),
+		settingsProposalRow(domain.ProposalReaction, "lint", SettingRuleProposed),
+		settingsProposalRow(domain.ProposalReaction, "notify", SettingRuleRejected),
+	}
+	var adopted, rejected [][]domain.Proposal
+	host := fakeConfigHost{
+		adoptRules: func(p []domain.Proposal) error {
+			adopted = append(adopted, p)
+			return nil
+		},
+		rejectRules: func(p []domain.Proposal) error {
+			rejected = append(rejected, p)
+			return nil
+		},
+	}
+	log := &settingsWriteLog{}
+	m := settingsRuleModel(t, &rows, host, log)
+
+	if got := m.settingsPaneHint(m.settingRows()); got != settingsProposalHint {
+		t.Errorf("the legend on a proposed entry = %q, want %q", got, settingsProposalHint)
+	}
+	m = step(t, m, keyEnter())
+	m = step(t, m, keyDown())
+	armed := step(t, m, keyBackspace())
+	if armed.settings.kind != settingsResetArmed {
+		t.Fatalf("pane = %+v, want the rejection armed", armed.settings)
+	}
+	if pane := strip(armed.renderSettings()); !strings.Contains(pane, settingsProposalRejectArmHint) {
+		t.Errorf("the armed rejection's legend is not the rejection's:\n%s", pane)
+	}
+	if len(rejected) != 0 {
+		t.Fatalf("arming rejected %+v; arming is not the act", rejected)
+	}
+	m = step(t, armed, keyEnter())
+	m = step(t, m, keyDown())
+	if got := m.settingsPaneHint(m.settingRows()); got != settingsProposalRejectedHint {
+		t.Errorf("the legend on a rejected entry = %q, want %q", got, settingsProposalRejectedHint)
+	}
+	m = step(t, m, keyEnter())
+
+	if want := [][]domain.Proposal{{rows[0].Proposal}, {rows[2].Proposal}}; !reflect.DeepEqual(adopted, want) {
+		t.Errorf("AdoptRules calls = %+v, want %+v", adopted, want)
+	}
+	if want := [][]domain.Proposal{{rows[1].Proposal}}; !reflect.DeepEqual(rejected, want) {
+		t.Errorf("RejectRules calls = %+v, want %+v", rejected, want)
+	}
+	if len(log.writes)+len(log.resets)+len(log.applies)+len(log.targeted) != 0 {
+		t.Errorf("an answer reached the settings host: %+v", log)
+	}
+	if m.settings.kind != settingsKeyList {
+		t.Errorf("pane = %+v, want the key list — an answer opens no step", m.settings)
+	}
+}
+
+// A repo entry is never edited or removed from the pane: ⏎ on an adopted one does nothing, ⌫ and ⌦
+// arm nothing on it, and a proposed one's ⌫ then ⏎ is its rejection — never RemoveRule, never a
+// reset, never the human's editor.
+func TestSettingsPaneRepoEntryIsNotEditable(t *testing.T) {
+	t.Parallel()
+	rows := []SettingRow{
+		settingsProposalRow(domain.ProposalMCPServer, "wiki", SettingRuleAdopted),
+		settingsProposalRow(domain.ProposalReaction, "fmt", SettingRuleProposed),
+	}
+	var calls []string
+	host := fakeConfigHost{
+		adoptRules:  func([]domain.Proposal) error { calls = append(calls, "adopt"); return nil },
+		rejectRules: func([]domain.Proposal) error { calls = append(calls, "reject"); return nil },
+		removeRule:  func(domain.AllowRule) error { calls = append(calls, "remove"); return nil },
+		externalEditSpec: func(string) (EditorCommand, error) {
+			calls = append(calls, "edit")
+			return EditorCommand{}, nil
+		},
+	}
+	log := &settingsWriteLog{}
+	m := settingsRuleModel(t, &rows, host, log)
+
+	if got := m.settingsPaneHint(m.settingRows()); got != settingsProposalAdoptedHint {
+		t.Errorf("the legend on an adopted entry = %q, want %q", got, settingsProposalAdoptedHint)
+	}
+	for _, key := range []tea.KeyPressMsg{keyEnter(), keyBackspace(), keyDelete()} {
+		m = step(t, m, key)
+		if m.settings.kind != settingsKeyList {
+			t.Fatalf("%v on an adopted entry opened %+v, want nothing", key, m.settings)
+		}
+	}
+	m = pressSettings(t, m, keyDown(), keyBackspace(), keyEnter())
+
+	if want := []string{"reject"}; !reflect.DeepEqual(calls, want) {
+		t.Errorf("config host calls = %v, want %v — the proposed entry's rejection alone", calls, want)
+	}
+	if len(log.writes)+len(log.resets)+len(log.applies)+len(log.targeted) != 0 {
+		t.Errorf("a repo entry reached the settings host: %+v", log)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The key list's filter (ADR 0053 amend-1014)
 // ----------------------------------------------------------------------------
 

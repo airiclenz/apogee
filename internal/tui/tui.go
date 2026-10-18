@@ -1935,11 +1935,22 @@ const (
 	// not a key's line. Neither act is journaled: the row's next paint, re-derived from the session's
 	// rules in force, is the whole report.
 	SettingRule SettingKind = "rule"
+	// SettingProposal is one repo MCP server or repo reaction a Project config states (ADR 0104 §12)
+	// — a row spliced under the `mcp-servers` or `reactions` key, not a config key of its own. The
+	// entry travels in [SettingRow.Proposal] and where it stands in [SettingRow.RuleState] (adopted,
+	// proposed or rejected), which is also its value cell. The row answers the adoption pane's
+	// question and nothing else: ⏎ on a proposed or rejected entry adopts it ([ConfigHost.AdoptRules])
+	// and ⌫ then ⏎ on a proposed one rejects it ([ConfigHost.RejectRules]). It is never edited here
+	// — what the entry runs is the project file's, and stays there — and never removed: no
+	// [ConfigHost.RemoveRule] and no [SettingsHost.Reset] reaches it. Neither answer is journaled;
+	// the row's next paint, re-derived from the session's proposals, is the whole report.
+	SettingProposal SettingKind = "proposal"
 )
 
 // SettingRuleState is where a [SettingRule] row's rule stands: a global rule is live as written, and
 // a project rule is live only by Adoption — adopted, proposed (no answer recorded for its text) or
-// rejected (ADR 0096 §4).
+// rejected (ADR 0096 §4). A [SettingProposal] row's repo entry stands in one of the last three (ADR
+// 0104 §12).
 type SettingRuleState string
 
 const (
@@ -1952,6 +1963,13 @@ const (
 // adoptable reports whether a rule in this state is one ⏎ adopts: an inert project rule.
 func (s SettingRuleState) adoptable() bool {
 	return s == SettingRuleProposed || s == SettingRuleRejected
+}
+
+// rejectable reports whether an entry in this state is one ⌫ then ⏎ rejects: a [SettingProposal]
+// no answer is recorded for. A rejected entry has been answered already, and an adopted one is in
+// force — taking it back is an edit to the project file, which this pane does not make.
+func (s SettingRuleState) rejectable() bool {
+	return s == SettingRuleProposed
 }
 
 // SettingSource is which precedence source supplied the value a row shows, in the order they rank:
@@ -2060,6 +2078,11 @@ type SettingRow struct {
 	// came from — and where it stands. Both are zero on every other row.
 	Rule      domain.AllowRule
 	RuleState SettingRuleState
+
+	// Proposal is a [SettingProposal] row's repo entry — the server or reaction as the adoption pane
+	// offers it, pin and fingerprint included, so an answer from this row records exactly what the
+	// pane's would. Its state rides in RuleState. Zero on every other row.
+	Proposal domain.Proposal
 }
 
 // EditorCommand is one resolved external edit — the OUT half of the round trip

@@ -208,6 +208,9 @@ func (w *rootWiring) options() tui.Options {
 			// The *Allow rules* section lists from the live-settings holder, which every rule act —
 			// the approval pane's, the adoption pane's, this pane's own — settles into.
 			allowRules: w.live.allowRules,
+			// The repo servers' and reactions' rows list from the same holder, which every adoption
+			// act and every watched re-read settles into.
+			proposals: w.live.proposals,
 		},
 		Skills: w.skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
@@ -447,6 +450,11 @@ type settingsHost struct {
 	// session's and moves under an open pane, and it reads memory, never the store or a config file,
 	// because Rows is asked on every paint. A nil func lists no rules.
 	allowRules func() config.AllowRules
+	// proposals is the Project config's repo MCP servers and reactions as they stand now — the same
+	// holder, settled by every adoption act and every watched re-read — whose rows are spliced in
+	// under the `mcp-servers` and `reactions` keys (spliceRepoEntryRows, ADR 0104 §12). A func for
+	// allowRules' reason, read from memory on every paint. A nil func lists no entries.
+	proposals func() config.ProjectProposals
 }
 
 // Rows is every key the registry describes, with the value this run resolved and the source mark
@@ -461,7 +469,10 @@ type settingsHost struct {
 // pane open shows on the next paint, and a prompt written through the pane stops seeding from the
 // keypress that lands it, with nothing to invalidate.
 //
-// After the registry's rows come the *Allow rules* section's, one per rule the session holds now
+// The Project config's repo MCP servers and reactions follow the `mcp-servers` and `reactions` rows,
+// one row each with its state (spliceRepoEntryRows) — spliced HERE, onto the finished registry rows,
+// never into settingsRows, whose output a watched re-read indexes by registry position. After the
+// registry's rows come the *Allow rules* section's, one per rule the session holds now
 // (allowRuleRows) — appended, so the registry's own order and sections stand as they are.
 func (h settingsHost) Rows() []tui.SettingRow {
 	rows := overlayLiveSettings(settingsRows(h.layeredOpts()), h.live)
@@ -470,6 +481,9 @@ func (h settingsHost) Rows() []tui.SettingRow {
 	}
 	if h.promptSeed != nil {
 		rows = seedPromptEditor(rows, h.promptSeed())
+	}
+	if h.proposals != nil {
+		rows = spliceRepoEntryRows(rows, h.proposals())
 	}
 	if h.allowRules == nil {
 		return rows

@@ -230,7 +230,12 @@ internal/tui/keymigration_test.go — fakeConfigHost; internal/tui/picker.go —
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestAdoption|TestSettingsPaneRule' ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectRule|TestE2EAdoption' ./cmd/apogee/`
 **Commit:** `feat(tui): the adoption pane offers repo servers and reactions with a body`
 
-## 10. /settings lists repo servers and reactions with their state
+## 10. /settings lists repo servers and reactions with their state — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): re-derived from the assumption that item 9's settling updates the live holder's server and reaction proposals — it installed only the Allow rules. installAllowRules now also installs the resolution's Proposals on the holder (holdProposals, cmd/apogee/projectrules.go), every watched re-read refreshes them even when no registry row moved (followReloadedProposals — a newly proposed entry or an answer from another terminal moves no row's value), and the holder answers them through liveSettings.proposals (cmd/apogee/wire_settings.go), the allowRules accessor's twin; TestSettingsHostRepoReactionRowFollowsAnAdopt reaches the proposed row through ReloadConfig to pin that.
+NOTES (2026-10-18): repo rows are a new removal-free kind, tui.SettingProposal, with the entry on a new SettingRow.Proposal field (SettingRow.Rule stays an AllowRule) and its state on the existing RuleState. Reject is ⌫ (or ⌦ under a filter) then ⏎, offered on a proposed entry only — a rejected one is already answered, and taking back an adopted (in-force) entry is a project-file edit, not a recorded answer; legends: `⏎ adopt · ⌫ reject` (proposed), `⏎ adopt` (rejected), list moves only (adopted), `⏎ confirm reject · esc cancel` (armed).
+NOTES (2026-10-18): a proposed row's description carries the adoption pane's re-ask reason (Proposal.Changed) after its state sentence.
+NOTES (2026-10-18): the `mcp-servers` and `reactions` registry rows keep items 4/5's marking — once an entry is adopted they read `(project)` with `set in the project config` and no ⏎ editor, the same as `allow:` (setInProject's granting-key rule); the spliced rows under them now name which entries are the project's and where each stands.
 
 **What:** Depends on item 9. ADR 0104 §12.
 **Goal:** `/settings` shows each repo server and reaction read-only, tagged `project` with its state (adopted, proposed, rejected), and adopt / reject from that row record the answer as the pane does; editing a repo entry from `/settings` is not offered.

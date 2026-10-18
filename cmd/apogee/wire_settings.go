@@ -236,6 +236,20 @@ func (s *liveSettings) allowRules() config.AllowRules {
 	return s.now.AllowRules
 }
 
+// proposals reports the Project config's repo MCP servers and reactions — adopted, proposed and
+// rejected — as they stand NOW: the resolution installAllowRules last put here (projectrules.go),
+// which every adoption act and every watched re-read settles into. It is what the `/settings` repo
+// rows under the `mcp-servers` and `reactions` keys list from, for allowRules' reason: Rows is asked
+// on every paint and reads no disk. A nil holder has no proposals.
+func (s *liveSettings) proposals() config.ProjectProposals {
+	if s == nil {
+		return config.ProjectProposals{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.now.Proposals
+}
+
 // pin reports the context-window pin in force right now — what a first binding and a server move
 // adopt as the session's window, since the pin is global and survives both.
 func (s *liveSettings) pin() int {

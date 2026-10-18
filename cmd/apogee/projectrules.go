@@ -330,10 +330,14 @@ func (w *rootWiring) settleAllowRules() error {
 // a rule set that empties summarizes as an empty value, which the pane journals without applying.
 // A resolution that fails leaves the rules in force as they were and says so as a notice beside the
 // re-read's own.
+//
+// The repo entries' proposals are refreshed on EVERY re-read, moved key or not: an entry the file
+// newly proposes, or an answer recorded in another terminal, moves no registry row's value — a
+// proposed server is no server in force — yet the `/settings` rows listing them must follow it.
 func (w *rootWiring) followReloadedAllowRules(reload tui.ConfigReload) tui.ConfigReload {
 	hasMoved := slices.ContainsFunc(reload.Applied, func(a tui.AppliedSetting) bool { return a.Path == settingKeyAllow })
 	if !hasMoved {
-		return reload
+		return w.followReloadedProposals(reload)
 	}
 	if err := w.installAllowRules(); err != nil {
 		reload.Notices = append(reload.Notices, fmt.Sprintf(
@@ -342,9 +346,24 @@ func (w *rootWiring) followReloadedAllowRules(reload tui.ConfigReload) tui.Confi
 	return reload
 }
 
+// followReloadedProposals is that refresh for the repo entries alone, on a re-read that moved no
+// Allow rule: the proposals re-resolved and installed on the holder. A resolution that fails leaves
+// them as they were and says so beside the re-read's own notices.
+func (w *rootWiring) followReloadedProposals(reload tui.ConfigReload) tui.ConfigReload {
+	resolved, err := w.layeredOptions()
+	if err != nil {
+		reload.Notices = append(reload.Notices, fmt.Sprintf(
+			"apogee: the project config changed on disk, but its listed entries could not be refreshed: %v", err))
+		return reload
+	}
+	w.holdProposals(resolved)
+	return reload
+}
+
 // installAllowRules re-resolves the effective Allow rules from the two files and the adoption
 // record — the resolution a relaunch would make — and installs them on the live-settings holder and
-// the engine.
+// the engine, with the repo servers' and reactions' proposals of the same resolution beside them on
+// the holder (holdProposals).
 //
 // Errors: a global config that no longer resolves; nothing is installed then.
 func (w *rootWiring) installAllowRules() error {
@@ -352,6 +371,7 @@ func (w *rootWiring) installAllowRules() error {
 	if err != nil {
 		return err
 	}
+	w.holdProposals(resolved)
 	if w.live != nil {
 		w.live.update(func(o *config.Options) { o.AllowRules = resolved.AllowRules })
 	}
@@ -359,6 +379,15 @@ func (w *rootWiring) installAllowRules() error {
 		w.engine.SetAllowRules(allowRulesFromOptions(resolved))
 	}
 	return nil
+}
+
+// holdProposals installs resolved's repo MCP servers and reactions — adopted, proposed, rejected —
+// on the live-settings holder, which the `/settings` repo rows list from (liveSettings.proposals). A
+// wiring with no holder has nowhere to put them.
+func (w *rootWiring) holdProposals(resolved config.Options) {
+	if w.live != nil {
+		w.live.update(func(o *config.Options) { o.Proposals = resolved.Proposals })
+	}
 }
 
 // proposedRules re-resolves the two files and the adoption record and reports what comes out

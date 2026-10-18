@@ -124,6 +124,19 @@ from the file that holds it and ⏎ confirms (`⏎ confirm remove · esc cancel`
 rule's row reads `type to filter · ↑/↓ select · ⏎ adopt · ⌫ remove · esc close`, dropping
 `⏎ adopt` on a rule already in force. A session with no rules shows no such section.
 
+A Project config's repo MCP servers and repo reactions (ADR 0104 §12) are listed in their key's own
+section, one row each spliced in right after the `mcp-servers` or `reactions` row — the adopted first,
+then the proposed, then the rejected, each in file order — keyed by the block and the entry's name
+(`mcp-servers: wiki`, `reactions: fmt`), with where it stands as the value (`adopted`, `proposed`,
+`rejected`), the `(project)` source mark, and the `set in the project config` pointer: what an entry
+runs is edited in that file, never here, and no entry is removed from here. The rows answer the
+adoption pane's question as the pane does: ⏎ adopts a proposed or rejected entry, and ⌫ (or ⌦,
+whatever the filter holds) arms the rejection of a proposed one, which ⏎ confirms (`⏎ confirm reject ·
+esc cancel`); the entry stays listed, now `rejected`. The legend reads `type to filter · ↑/↓ select ·
+⏎ adopt · ⌫ reject · esc close` on a proposed entry, drops `⌫ reject` on a rejected one, and keeps only
+`type to filter · ↑/↓ select · esc close` on an adopted one. A project that states no such entries
+adds no rows.
+
 ### The filter
 
 ```
@@ -175,7 +188,8 @@ it found. **`esc` closes the pane**, filter and all; `⌫` is the filter's only 
 
 The legend follows the filter's state. Empty, it leads with `type to filter`, as in the key list's
 mockup. Once text is typed `type to filter` drops, `⌫ trim` stands before `esc close`, and the row's
-backspace verb moves to `⌦` just behind it — `⌦ reset`, or `⌦ remove` on a rule's row; the `server`
+backspace verb moves to `⌦` just behind it — `⌦ reset`, `⌦ remove` on a rule's row, or `⌦ reject` on
+a proposed repo entry's; the `server`
 row, which takes no reset, gets no `⌦` entry. A filter that matches nothing paints one faint,
 unselectable row in the pane's noun, the description header stays as tall as before and blank (no
 row is highlighted for it to describe), and the legend keeps only the trim and the way out:

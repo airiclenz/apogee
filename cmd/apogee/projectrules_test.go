@@ -442,7 +442,8 @@ func TestProjectRuleSettingsSectionListsFromTheLiveHolder(t *testing.T) {
 }
 
 // The section's rows come after every registry row, under their own header, so the registry's order
-// and sections stand as they are; a session with no rules has no section at all.
+// and sections stand as they are — the repo entries' rows spliced in after the `mcp-servers` and
+// `reactions` keys only; a session with no rules has no section at all.
 func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
 	t.Parallel()
 	set := config.AllowRules{
@@ -453,15 +454,39 @@ func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
 		Proposed: []config.AllowRule{{Kind: config.AllowTerminal, Text: "ls", Layer: config.SourceProject}},
 		Rejected: []config.AllowRule{{Kind: config.AllowTerminal, Text: "rm", Layer: config.SourceProject}},
 	}
-	host := settingsHost{allowRules: func() config.AllowRules { return set }}
+	proposals := config.ProjectProposals{
+		Adopted:  []apogee.Proposal{{Kind: apogee.ProposalMCPServer, Handle: "wiki"}},
+		Proposed: []apogee.Proposal{{Kind: apogee.ProposalReaction, Handle: "fmt"}},
+	}
+	host := settingsHost{
+		allowRules: func() config.AllowRules { return set },
+		proposals:  func() config.ProjectProposals { return proposals },
+	}
 	rows := host.Rows()
 	registry := settingsRows(config.Options{})
-	if len(rows) != len(registry)+4 {
-		t.Fatalf("rows = %d, want the %d registry rows and 4 rules", len(rows), len(registry))
+	if len(rows) != len(registry)+2+4 {
+		t.Fatalf("rows = %d, want the %d registry rows, 2 repo entries and 4 rules", len(rows), len(registry))
+	}
+	var keys []string
+	for _, r := range rows[:len(registry)+2] {
+		if r.Kind != tui.SettingProposal {
+			keys = append(keys, r.Path)
+		}
 	}
 	for i, r := range registry {
-		if rows[i].Path != r.Path {
-			t.Fatalf("row %d = %q, want the registry's %q — the rules come after it", i, rows[i].Path, r.Path)
+		if keys[i] != r.Path {
+			t.Fatalf("registry row %d = %q, want the registry's %q — the rules come after it", i, keys[i], r.Path)
+		}
+	}
+	for _, spliced := range []struct{ after, path string }{
+		{"mcp-servers", "mcp-servers: wiki"}, {"reactions", "reactions: fmt"},
+	} {
+		at := slices.IndexFunc(rows, func(r tui.SettingRow) bool { return r.Path == spliced.after })
+		if at < 0 || at+1 >= len(rows) {
+			t.Fatalf("no row follows %q", spliced.after)
+		}
+		if next := rows[at+1]; next.Path != spliced.path || next.Section != rows[at].Section {
+			t.Errorf("the row after %q = %+v, want %q in its section %q", spliced.after, next, spliced.path, rows[at].Section)
 		}
 	}
 	type ruleCell struct {
@@ -481,7 +506,7 @@ func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
 			apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "rm", Layer: apogee.AllowRuleProject}},
 	}
 	for i, w := range want {
-		r := rows[len(registry)+i]
+		r := rows[len(registry)+2+i]
 		got := ruleCell{r.Path, r.RuleState, r.Source, r.Rule}
 		if got != w || r.Kind != tui.SettingRule || r.Section != allowRulesSection || r.Value != string(w.state) {
 			t.Errorf("rule row %d = %+v, want %+v under %q", i, r, w, allowRulesSection)
@@ -491,9 +516,59 @@ func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
 		}
 	}
 
-	if got := len((settingsHost{allowRules: func() config.AllowRules { return config.AllowRules{} }}).Rows()); got != len(registry) {
+	if got := len((settingsHost{
+		allowRules: func() config.AllowRules { return config.AllowRules{} },
+		proposals:  func() config.ProjectProposals { return config.ProjectProposals{} },
+	}).Rows()); got != len(registry) {
 		t.Errorf("rows with no rules = %d, want the %d registry rows alone", got, len(registry))
 	}
+}
+
+// The `/settings` row of a repo reaction follows the file and the answers recorded through
+// configHost — the adoption pane's acts — read off the live holder: proposed once a watched re-read
+// finds the file stating it (a re-read that moves no registry row), adopted once adopted, tagged
+// project and read-only throughout, and still listed once the Project config is gone from disk,
+// because Rows reads no disk.
+func TestSettingsHostRepoReactionRowFollowsAnAdopt(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	settings := settingsHost{allowRules: w.live.allowRules, proposals: w.live.proposals}
+	writeProjectConfig(t, w.roots.project, projectNotifyReactionYAML)
+	if _, err := host.ReloadConfig(); err != nil {
+		t.Fatalf("ReloadConfig: %v", err)
+	}
+
+	row := repoRowOf(t, settings.Rows(), "reactions: notify")
+	if row.RuleState != tui.SettingRuleProposed || row.Kind != tui.SettingProposal ||
+		row.Source != tui.SettingFromProject || row.Editable || row.ExternalEdit {
+		t.Fatalf("the reaction's row before any answer = %+v, want proposed, project, read-only", row)
+	}
+	if err := host.AdoptRules([]apogee.Proposal{row.Proposal}); err != nil {
+		t.Fatalf("AdoptRules from the row's proposal: %v", err)
+	}
+
+	row = repoRowOf(t, settings.Rows(), "reactions: notify")
+	if row.RuleState != tui.SettingRuleAdopted || row.Value != string(tui.SettingRuleAdopted) {
+		t.Errorf("the reaction's row after the adoption = %+v, want adopted", row)
+	}
+	if err := os.Remove(config.ProjectFilePath(w.roots.project)); err != nil {
+		t.Fatalf("remove the project config: %v", err)
+	}
+	if got := repoRowOf(t, settings.Rows(), "reactions: notify"); got.RuleState != tui.SettingRuleAdopted {
+		t.Errorf("the row with the project config gone = %+v, want it unchanged — Rows reads no disk", got)
+	}
+}
+
+// repoRowOf is the row keyed path among rows, failing the test when there is none.
+func repoRowOf(t *testing.T, rows []tui.SettingRow, path string) tui.SettingRow {
+	t.Helper()
+	i := slices.IndexFunc(rows, func(r tui.SettingRow) bool { return r.Path == path })
+	if i < 0 {
+		t.Fatalf("no %q row among the settings rows", path)
+	}
+	return rows[i]
 }
 
 // The child's task — what the parent delegates, and so the last message of the child's first

@@ -19,6 +19,7 @@ package main
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -437,4 +438,107 @@ func allowRuleDesc(r config.AllowRule, state tui.SettingRuleState) string {
 	}
 	return "A project rule proposed by the project config, inert until adopted: " + subject +
 		" would run without asking."
+}
+
+// The two registry keys a Project config's repo entries are listed under (ADR 0104 §12): each repo
+// MCP server's row sits right after the `mcp-servers` row and each repo reaction's right after the
+// `reactions` row, in that key's section — the rows a reader of that key needs beside it.
+const (
+	settingKeyMCPServers = "mcp-servers"
+	settingKeyReactions  = "reactions"
+)
+
+// spliceRepoEntryRows is rows with the repo entries' rows (repoEntryRows) spliced in after the
+// `mcp-servers` and `reactions` registry rows, each in that row's section. It builds a fresh list
+// and leaves rows as it was, so the registry's own projection — which a watched re-read indexes by
+// registry position (externalEdit.changed) — is never the list that grew. No entries, the same rows.
+func spliceRepoEntryRows(rows []tui.SettingRow, proposals config.ProjectProposals) []tui.SettingRow {
+	servers := repoEntryRows(proposals, apogee.ProposalMCPServer)
+	reactions := repoEntryRows(proposals, apogee.ProposalReaction)
+	if len(servers)+len(reactions) == 0 {
+		return rows
+	}
+	spliced := make([]tui.SettingRow, 0, len(rows)+len(servers)+len(reactions))
+	for _, row := range rows {
+		spliced = append(spliced, row)
+		switch row.Path {
+		case settingKeyMCPServers:
+			spliced = append(spliced, inSection(servers, row.Section)...)
+		case settingKeyReactions:
+			spliced = append(spliced, inSection(reactions, row.Section)...)
+		}
+	}
+	return spliced
+}
+
+// inSection is rows with every row's section set to section — the section of the registry key the
+// rows sit under, so a heading the filter keeps keeps them too.
+func inSection(rows []tui.SettingRow, section string) []tui.SettingRow {
+	for i := range rows {
+		rows[i].Section = section
+	}
+	return rows
+}
+
+// repoEntryRows is one row per repo entry of kind the Project config states: the adopted first, then
+// the proposed, then the rejected, each in file order — the Allow rules section's order.
+func repoEntryRows(proposals config.ProjectProposals, kind apogee.ProposalKind) []tui.SettingRow {
+	var rows []tui.SettingRow
+	for _, set := range []struct {
+		entries []apogee.Proposal
+		state   tui.SettingRuleState
+	}{
+		{proposals.Adopted, tui.SettingRuleAdopted},
+		{proposals.Proposed, tui.SettingRuleProposed},
+		{proposals.Rejected, tui.SettingRuleRejected},
+	} {
+		for _, p := range set.entries {
+			if p.Kind == kind {
+				rows = append(rows, repoEntryRow(p, set.state))
+			}
+		}
+	}
+	return rows
+}
+
+// repoEntryRow is one repo entry's row: keyed by the block it sits in and its handle as the file
+// spells them ("mcp-servers: wiki"), tagged with the project layer, its state as its value, and
+// read-only — the entry is edited in the project file, so its pointer says so — with the Proposal
+// itself for the answer a keypress on it records.
+func repoEntryRow(p apogee.Proposal, state tui.SettingRuleState) tui.SettingRow {
+	block := settingKeyReactions
+	if p.Kind == apogee.ProposalMCPServer {
+		block = settingKeyMCPServers
+	}
+	return tui.SettingRow{
+		Path:        block + ": " + p.Handle,
+		Kind:        tui.SettingProposal,
+		Value:       string(state),
+		Source:      tui.SettingFromProject,
+		EditPointer: pointerProject,
+		Desc:        repoEntryDesc(p, state),
+		RuleState:   state,
+		Proposal:    p,
+	}
+}
+
+// repoEntryDesc is a repo entry's description: where it stands and what it does — in the conditional
+// for an entry that does nothing until it is adopted — and, for an entry asked about again, what
+// changed since it was adopted, as the adoption pane's first line says it.
+func repoEntryDesc(p apogee.Proposal, state tui.SettingRuleState) string {
+	does, would := "arms the reaction `"+p.Handle+"`", "would arm the reaction `"+p.Handle+"`"
+	if p.Kind == apogee.ProposalMCPServer {
+		does, would = "connects the MCP server `"+p.Handle+"`", "would connect the MCP server `"+p.Handle+"`"
+	}
+	switch state {
+	case tui.SettingRuleAdopted:
+		return "A project entry you adopted, in force: it " + does + " as the project config pins it."
+	case tui.SettingRuleRejected:
+		return "A project entry you turned down, inert: it " + would + "."
+	}
+	desc := "A project entry proposed by the project config, inert until adopted: it " + would + "."
+	if len(p.Changed) > 0 {
+		desc += " " + strings.Join(p.Changed, "; ") + "."
+	}
+	return desc
 }

@@ -301,6 +301,17 @@ const (
 	settingsRuleRemoveArmHint = "⏎ confirm remove · esc cancel"
 )
 
+// The legends of a repo entry's row ([SettingProposal]): ⏎ adopts a proposed or rejected entry, ⌫
+// arms the rejection of a proposed one, and an adopted entry offers neither — it is taken back in
+// the project file, not here — so its legend is the list's own moves alone. The armed rejection's
+// legend names the act it confirms.
+const (
+	settingsProposalHint          = listFilterEntry + listLegendJoin + "↑/↓ select · ⏎ adopt · ⌫ reject · esc close"
+	settingsProposalRejectedHint  = listFilterEntry + listLegendJoin + "↑/↓ select · ⏎ adopt · esc close"
+	settingsProposalAdoptedHint   = listFilterEntry + listLegendJoin + "↑/↓ select · esc close"
+	settingsProposalRejectArmHint = "⏎ confirm reject · esc cancel"
+)
+
 // The save-target question's legend: which file a project-capable key's commit lands in, the
 // highlighted one bracketed, and the keys that answer. It is composed per paint (settingsTargetHint)
 // because the bracket moves with the choice.
@@ -796,6 +807,8 @@ func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 //     ([SettingText]) — the one step whose ⏎ is the value's rather than the pane's; and
 //   - an Allow rule's row adopts its rule when the rule is inert, and does nothing when it is already
 //     in force ([SettingRule], settingsAdoptRule) — it is no config key, so none of the above apply;
+//   - a repo entry's row adopts its entry when the entry is inert, the same way, and is never edited
+//     here ([SettingProposal], settingsAdoptProposal);
 //   - a row the registry does not let this surface write does nothing at all — its own cell already
 //     says where it IS edited ([SettingRow.EditPointer]), so a refusal note here would only repeat it.
 //
@@ -809,6 +822,9 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 	row := rows[sel]
 	if row.Kind == SettingRule {
 		return m.settingsAdoptRule(row)
+	}
+	if row.Kind == SettingProposal {
+		return m.settingsAdoptProposal(row)
 	}
 	if !row.Editable {
 		// A block this pane cannot hold on a row is edited where it CAN be edited: the human's own
@@ -1329,10 +1345,14 @@ func settingsBufferable(row SettingRow) bool {
 //
 // A kind that takes no reset AT ALL is refused before either question is asked (settingsResetKind).
 // An Allow rule's row always has something for it to do: its reset is the rule's removal, and the
-// rule is in a file for as long as the row is there to show it.
+// rule is in a file for as long as the row is there to show it. A repo entry's row has something only
+// while the entry is proposed: its "reset" is the rejection, and no entry is ever removed from here.
 func (m Model) settingsResettable(row SettingRow) bool {
 	if row.Kind == SettingRule {
 		return true
+	}
+	if row.Kind == SettingProposal {
+		return row.RuleState.rejectable()
 	}
 	if !row.Editable || !settingsResetKind(row) {
 		return false
@@ -1619,6 +1639,8 @@ func (m Model) settingsPaneHint(rows []SettingRow) string {
 		hint = settingsRuleHint
 	case ok && row.Kind == SettingRule:
 		hint = settingsRuleInForceHint
+	case ok && row.Kind == SettingProposal:
+		hint = settingsProposalHintOf(row.RuleState)
 	case ok && !settingsResetKind(row):
 		hint = settingsNoResetHint
 	}
@@ -1669,11 +1691,27 @@ const (
 	settingsDeleteLead    = "⌦ "
 )
 
+// settingsProposalHintOf is a repo entry's key-list legend for where the entry stands: every answer
+// still open to it, and nothing it has no use for.
+func settingsProposalHintOf(state SettingRuleState) string {
+	switch {
+	case state.rejectable():
+		return settingsProposalHint
+	case state.adoptable():
+		return settingsProposalRejectedHint
+	}
+	return settingsProposalAdoptedHint
+}
+
 // settingsResetArmedHint is the armed reset's legend: the removal's wording on an Allow rule's row,
-// the reset's on every other.
+// the rejection's on a repo entry's, the reset's on every other.
 func (m Model) settingsResetArmedHint() string {
-	if row, ok := m.settingsSelectedRow(m.settingRows()); ok && row.Kind == SettingRule {
+	row, ok := m.settingsSelectedRow(m.settingRows())
+	switch {
+	case ok && row.Kind == SettingRule:
 		return settingsRuleRemoveArmHint
+	case ok && row.Kind == SettingProposal:
+		return settingsProposalRejectArmHint
 	}
 	return settingsResetHint
 }
