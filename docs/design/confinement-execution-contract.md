@@ -1470,6 +1470,7 @@ row, the first of what were two rows here, was retired 2026-09-15 — §10.3's a
 | who spawns | Moment | minted by |
 |---|---|---|
 | a **user-origin sync reaction** — class advise or gate, a `reactions:` entry's `advise:` or `gate:` argv (ADR 0076 D2, D8; stage 3, 2026-09-12) | `pre-tool-exec` (the gate stage of the Approver) and `post-tool-result` (the advise slot; `file-changed` is that seam narrowed to a successful write) | `syncPermitCtx`, the row below |
+| an **adopted repo reaction's observe-lane `run:`** — a Project config `reactions:` entry the user adopted (`domain.Reaction.Project`; ADR 0104 §8, 2026-10-18) | every Moment the observe lane fires on | `syncPermitCtx` again, through `(*Agent).RunProjectReaction` — the fenced runner the Driver's Runner is handed late (`Config.BindProjectRun`), so the observe lane mints no permit of its own |
 
 Pre-request, post-response and history-rewrite carry no permit, and pre-tool-exec and
 post-tool-result carry one for the sync lane alone, which under §10.2 keeps every other spawn at
@@ -1501,6 +1502,17 @@ been confined to, and a host that cannot build that box gets no unfenced fallbac
 supersedes §10.3 for sync reactions; since 2026-09-15 it is the only permit row the engine has,
 §10.3's post-response row being retired.
 
+**Repo reactions (amendment, 2026-10-18 — ADR 0104 §4, §8).** An adopted repo reaction's command
+takes this same row on **both** lanes: its `advise:`/`gate:` as any sync reaction's, and its
+observe-lane `run:` too, which a global `run:` never does (§10.5). Three things are added for it
+alone, in `(*Agent).spawnReactionArgv`: the project files its adoption pin holds are re-checked
+before every spawn (`domain.ProjectPin.Changed`), and a moved, missing or newly named file refuses
+that run with a notice naming the file — the config layer proposes the entry again at its next
+read; it runs with the Project root as its working directory; and the door's admit option
+(`tools.AdmitProjectPrograms`) resolves a relative `argv[0]` against that root and lets through a
+program inside the fence only when it is one of the pinned files. With `confine-to-workspace` off
+the row's first line applies and the repo command runs unfenced, as a global `run:` does.
+
 ### 10.5 The hook spawns through the tools funnel (amendment, 2026-08-20)
 
 §10.1–10.4 settle *whether* a hook may spawn and *inside which box*; they never said *through what*.
@@ -1515,9 +1527,11 @@ through (via its `execHost`'s `run`). *(Corrected 2026-10-02: no hook spawns thr
 formatter hook went with the Mechanism catalogue, ADR 0071.)* Its one production caller is the sync
 lane's executor, `(*Agent).runSyncArgv` (`internal/agent/syncexec.go`), spawning every `advise:` and
 `gate:` command through the door under §10.4's permit, with the seam document on stdin and the class
-default deadline (advise 10s, gate 5s) or the entry's own `timeout:`. An observe-lane `run:` command
-does **not** use this door: it spawns through `internal/userexec` `Run` with no permit and outside
-confinement (`internal/reactions/command.go`; the manual's *Outside confinement*). The funnel
+default deadline (advise 10s, gate 5s) or the entry's own `timeout:`. A global observe-lane `run:`
+command does **not** use this door: it spawns through `internal/userexec` `Run` with no permit and
+outside confinement (`internal/reactions/command.go`; the manual's *Outside confinement*). An
+adopted repo reaction's observe-lane `run:` does (ADR 0104 §8, 2026-10-18): the Runner hands it to
+`(*Agent).RunProjectReaction`, which spawns it through this door under §10.4's permit. The funnel
 itself stays unexported: the door takes only what a hook names (ctx, argv, dir, secretEnv, timeout,
 stdin) and returns the child's stdout alone, so a caller consuming the output as a payload — the
 formatter reads the reformatted file off stdout — never gets a diagnostic spliced into it.
@@ -1551,8 +1565,8 @@ the package that declares its `With…`/`…From…` pair, so only that pair can
 
 | Key (declaring file) | Installer | Reader | Lifetime |
 |---|---|---|---|
-| `confinementCtxKey` (`internal/domain/confinement.go`) | `WithConfinement`, from `executeTool` on a Confine verdict (`box != nil`), `executeRun` on a `confineChildren` Run, and `syncPermitCtx` when confine-to-workspace is on. `WithoutConfinement` shadows it with nil for dispatch's own bookkeeping context (`floorCtx`) | `ConfinementFromContext`: `subprocess.ConfinementHandoff` (confines the cmd), `gitexec`'s and `tools`' `confinementBox` (the exec and read fence's box), `tools.RunHookSubprocess` (argv[0] resolution) | One tool execution, or one sync-reaction command |
-| `subprocessPermitCtxKey` (`internal/domain/confinement.go`) | `WithSubprocessPermit`, from `syncPermitCtx` only (§10.4), called by `runSyncArgv` | `SubprocessPermitFromContext`: `tools.RunHookSubprocess`, the door the sync lane's argv `advise:` / `gate:` reactions spawn through (§10.5). No hook spawns through it, and an observe-lane `run:` command spawns through `internal/userexec` `Run` with no permit and outside confinement | One sync-reaction command. Absent is refusal (§10.2) |
+| `confinementCtxKey` (`internal/domain/confinement.go`) | `WithConfinement`, from `executeTool` on a Confine verdict (`box != nil`), `executeRun` on a `confineChildren` Run, and `syncPermitCtx` when confine-to-workspace is on (for a sync-reaction command, and for an adopted repo reaction's observe-lane `run:`). `WithoutConfinement` shadows it with nil for dispatch's own bookkeeping context (`floorCtx`) | `ConfinementFromContext`: `subprocess.ConfinementHandoff` (confines the cmd), `gitexec`'s and `tools`' `confinementBox` (the exec and read fence's box), `tools.RunHookSubprocess` (argv[0] resolution) | One tool execution, or one sync-reaction command |
+| `subprocessPermitCtxKey` (`internal/domain/confinement.go`) | `WithSubprocessPermit`, from `syncPermitCtx` only (§10.4), called by `runSyncArgv` and `RunProjectReaction` | `SubprocessPermitFromContext`: `tools.RunHookSubprocess`, the door the sync lane's argv `advise:` / `gate:` reactions and an adopted repo reaction's observe-lane `run:` spawn through (§10.5). No hook spawns through it, and a global observe-lane `run:` command spawns through `internal/userexec` `Run` with no permit and outside confinement | One sync-reaction or repo-reaction command. Absent is refusal (§10.2) |
 | `writeEscapePermitCtxKey` (`internal/domain/confinement.go`) | `WithWriteEscapePermit`, from `writeEscapeCtx` in `executeRun`, the one minting point (ADR 0049) | `WriteEscapePermitFrom`: `tools.writeScopeOf`, the shared write funnel | One tool execution. An empty `Real` revokes an outer grant |
 | `ruleAnsweredCtxKey` (`internal/domain/confinement.go`) | `WithRuleAnswered`, from `executeGate` when an Allow rule answered the gate (ADR 0096 §3), reached from `runCall` and from `recipe.go` `runScriptCall`. A human approval, an allow-for-session and the forced runtime-demote gate (`executeConfineFallback`) never install it | `RuleAnswered`: `tools.Terminal.Execute`, which withholds from the child the inherited environment the matcher never saw | One tool execution. Absent is a human-cleared (or ungated) call |
 | `subAgentDepthCtxKey` (`internal/domain/ask.go`) | `WithSubAgentDepth`, from `executeTool`, on every call | `SubAgentDepthFromContext`: `ask_user`, `present_document` | One tool execution. A nested delegation overwrites its parent's value; 0 is the top-level agent |

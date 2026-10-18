@@ -1117,7 +1117,9 @@ var errConfinementUnavailable = errors.New("workspace confinement is unavailable
 // (docs/design/confinement-execution-contract.md §10.4). It is the engine's ONE minting site: no
 // other Moment's reactions carry a permit, so every other spawn stays on the contract's refusal
 // default (the post-response cascade's Auto-only row was retired 2026-09-15 — no shipped Reaction
-// spawns there). Its row:
+// spawns there). The one observe-lane command that spawns under it is an adopted repo reaction's
+// `run:` (RunProjectReaction, ADR 0104 §8), which takes this same row rather than a second one. Its
+// row:
 //
 //	| confine-to-workspace | fs caps     | installed                                    |
 //	|----------------------|-------------|----------------------------------------------|

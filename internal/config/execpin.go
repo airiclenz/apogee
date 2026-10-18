@@ -300,6 +300,35 @@ func VerifyExecPins(projectRoot, text string) ([]string, error) {
 	return changedSince(text, rebuilt), nil
 }
 
+// adoptedPin is the domain.ProjectPin an adopted repo reaction carries to its spawn: the Project
+// root and the text the user adopted it with. Plain values, so two armings of one adopted entry
+// compare equal and a re-read that changed nothing never swaps the observe lane.
+type adoptedPin struct {
+	root string
+	text string
+}
+
+// Root is the Project root the entry was pinned against.
+func (p adoptedPin) Root() string { return p.root }
+
+// Changed is VerifyExecPins over the adopted text: the pinned files that moved since adoption.
+func (p adoptedPin) Changed() ([]string, error) { return VerifyExecPins(p.root, p.text) }
+
+// Programs is the absolute path of every project file the adopted text pins, sorted. A text that
+// is not a pin holds none.
+func (p adoptedPin) Programs() []string {
+	_, files, ok := splitPin(p.text)
+	if !ok {
+		return nil
+	}
+	programs := make([]string, 0, len(files))
+	for path := range files {
+		programs = append(programs, filepath.Join(p.root, filepath.FromSlash(path)))
+	}
+	slices.Sort(programs)
+	return programs
+}
+
 // changedSince names what moved between the text an entry was adopted with and its text now: each
 // pinned field whose value differs, in the pane's order (pinFieldOrder), and then each pinned file,
 // by path, whose digest differs or that only one of the two texts holds — a file gone missing

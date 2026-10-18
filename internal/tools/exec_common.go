@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -264,7 +265,10 @@ const maxSubprocessErrorExcerptBytes = 256
 // refusal — the program resolves inside a path the model can write, or PATH answered with a
 // relative entry — is returned as the funnel's error and nothing is spawned. An empty
 // workspaceRoot with no box on ctx names no fence, which by security's empty-fence rule refuses
-// nothing.
+// nothing. opts vary that judgement for one caller alone: AdmitProjectPrograms, which an adopted
+// repo reaction's spawn passes, resolves a relative argv[0] against the Project root and admits
+// the pinned project programs the fence would refuse. With none, every program inside the fence is
+// refused.
 //
 // secretEnv names the operator-declared credential variables to drop beside apogee's own — the
 // same `api-key-env:` names (ADR 0047) the execution tools take from HostTools.SecretEnvVars,
@@ -292,12 +296,13 @@ func RunHookSubprocess(
 	extraEnv []string,
 	timeout time.Duration,
 	stdin string,
+	opts ...HookOption,
 ) (string, error) {
 	if _, ok := domain.SubprocessPermitFromContext(ctx); !ok {
 		return "", errNoSubprocessPermit
 	}
 	if len(argv) > 0 {
-		program, err := security.ResolveProgram(nil, argv[0], workspaceRoot, confinementBox(ctx))
+		program, err := resolveHookProgram(ctx, argv[0], workspaceRoot, hookOptionsOf(opts))
 		if err != nil {
 			return "", err
 		}
@@ -326,6 +331,74 @@ func RunHookSubprocess(
 		return "", fmt.Errorf("apogee: %s exited %d%s", argv[0], res.ExitCode, diagnosticsExcerpt(res.CombinedOutput))
 	}
 	return res.Stdout, nil
+}
+
+// HookOption varies one RunHookSubprocess call past its defaults. None is the default: every
+// program inside the fence refused.
+type HookOption func(*hookOptions)
+
+// hookOptions is what the HookOptions of one call set.
+type hookOptions struct {
+	// projectRoot is the base a relative argv[0] carrying a path separator resolves against; ""
+	// leaves it to apogee's own working directory, as exec does.
+	projectRoot string
+	// admitted is the absolute paths of the programs the fence lets through although they resolve
+	// inside it.
+	admitted []string
+}
+
+// hookOptionsOf folds opts over the defaults.
+func hookOptionsOf(opts []HookOption) hookOptions {
+	var o hookOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
+}
+
+// AdmitProjectPrograms is the option an adopted repo reaction's spawn runs under (ADR 0104 §4): a
+// relative argv[0] carrying a path separator (`./scripts/fmt.sh`) resolves against projectRoot
+// rather than apogee's own working directory, and a program the fence refuses for lying inside
+// the workspace or the box is admitted when, symlinks evaluated, it IS one of programs — the
+// absolute paths of the project files the user adopted the entry with, whose content the caller
+// has just checked. Anything else inside the fence stays refused: a bare name a PATH entry inside
+// the root answers, an unpinned script beside a pinned one, a relative PATH answer.
+func AdmitProjectPrograms(projectRoot string, programs []string) HookOption {
+	return func(o *hookOptions) {
+		o.projectRoot = projectRoot
+		o.admitted = programs
+	}
+}
+
+// resolveHookProgram turns argv0 into the absolute program RunHookSubprocess spawns, or the fence's
+// refusal: security.ResolveProgram against workspaceRoot and the box on ctx, after the project-root
+// resolution and before the admission AdmitProjectPrograms asks for.
+func resolveHookProgram(ctx context.Context, argv0, workspaceRoot string, o hookOptions) (string, error) {
+	name := argv0
+	if o.projectRoot != "" && !filepath.IsAbs(name) && filepath.Base(name) != name {
+		name = filepath.Join(o.projectRoot, name)
+	}
+	program, err := security.ResolveProgram(nil, name, workspaceRoot, confinementBox(ctx))
+	if errors.Is(err, security.ErrExecFromWritablePath) && isAdmittedProgram(program, o.admitted) {
+		return program, nil
+	}
+	return program, err
+}
+
+// isAdmittedProgram reports whether program — an absolute path the fence refused — is one of
+// admitted, both compared with their symlinks evaluated so a spelling of the root through a link
+// is the same file. A relative program is never admitted.
+func isAdmittedProgram(program string, admitted []string) bool {
+	if !filepath.IsAbs(program) {
+		return false
+	}
+	resolved := security.EvalRealPath(program)
+	for _, candidate := range admitted {
+		if filepath.IsAbs(candidate) && security.EvalRealPath(candidate) == resolved {
+			return true
+		}
+	}
+	return false
 }
 
 // diagnosticsExcerpt renders a failed command's stderr for an error message: a bounded TAIL —

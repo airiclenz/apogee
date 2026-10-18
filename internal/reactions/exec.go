@@ -25,11 +25,16 @@ import (
 // guard the root builds from its url-safety allow/deny lists — security.NewURLGuard over the same
 // two fields the network tools are guarded by.
 //
+// project is the command half's runner for an adopted repo reaction (domain.Reaction.Project):
+// its `run:` runs inside the workspace exec fence under the Agent's own permit rather than on the
+// user's unsandboxed posture (ADR 0104 §8), so the root hands in the Agent's runner — late-bound,
+// since the Runner is built before the Agent. nil refuses every repo `run:`.
+//
 // The returned Executor is safe for concurrent use across every Reaction at the root, which the
 // Executor contract requires.
-func DefaultExecutor(workspaceRoot string, guard security.URLGuard) Executor {
+func DefaultExecutor(workspaceRoot string, guard security.URLGuard, project domain.ProjectRun) Executor {
 	return defaultExecutor{
-		command: commandExecutor{workspaceRoot: workspaceRoot},
+		command: commandExecutor{workspaceRoot: workspaceRoot, project: project},
 		webhook: webhookSender{guard: guard},
 	}
 }

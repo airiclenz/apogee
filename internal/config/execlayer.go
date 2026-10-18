@@ -308,16 +308,21 @@ func reactionRefusal(id string, err error) string {
 }
 
 // resolveRepoReactions turns the reactions' classification into the Reactions the adopted ones arm
-// and the Proposals of every one. store is as resolveRepoServers takes it.
+// and the Proposals of every one. store is as resolveRepoServers takes it. Each adopted Reaction
+// carries its adoption pin (adoptedPin over projectRoot and the adopted text), which its spawn
+// checks before it runs (ADR 0104 §4).
 func resolveRepoReactions(pinned []pinnedReaction, sorted adoption.Classification,
-	store *adoption.Store) projectReactionSet {
+	store *adoption.Store, projectRoot string) projectReactionSet {
 	byID := make(map[string][]domain.Reaction, len(pinned))
 	for _, r := range pinned {
 		byID[r.entry.Handle] = r.armed
 	}
 	resolved := projectReactionSet{proposals: kindProposals(sorted, ReactionAdoptionKind, reactionHandleField, store)}
 	for _, e := range kindEntries(sorted.Adopted, ReactionAdoptionKind) {
-		resolved.adopted = append(resolved.adopted, byID[e.Handle]...)
+		for _, armed := range byID[e.Handle] {
+			armed.Pin = adoptedPin{root: projectRoot, text: e.Text}
+			resolved.adopted = append(resolved.adopted, armed)
+		}
 	}
 	return resolved
 }
@@ -346,7 +351,7 @@ func classifyProjectLayer(layer projectLayer, global fileConfig, workspacesDir, 
 	}
 	sorted, store := classifyProjectEntries(entries, layer.path, workspacesDir, projectRoot, notify)
 	return projectAllowRulesOf(sorted), resolveRepoServers(servers, sorted, store),
-		resolveRepoReactions(pinned, sorted, store)
+		resolveRepoReactions(pinned, sorted, store, projectRoot)
 }
 
 // pinRepoServers pins each of the layer's servers that no global server shadows, in file order.

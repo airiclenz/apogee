@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -26,6 +27,10 @@ import (
 // (runSyncWebhook) sends the SAME document as the POST body and hands the seam the reply body on
 // the same terms; it takes no permit, because nothing is spawned — the request leaves the process
 // over the network, as the observe lane's webhooks already do.
+//
+// An adopted repo reaction's observe-lane `run:` is the one observe command spawned here too
+// (RunProjectReaction, ADR 0104 §8): it runs under the same permit row through the same door, so
+// a repo command is fenced the same way whichever lane fires it.
 
 // runSyncArgv runs one sync-lane reaction's command and returns what it wrote to standard output.
 //
@@ -70,16 +75,88 @@ func (a *Agent) runSyncArgv(
 		return "", err
 	}
 
-	return tools.RunHookSubprocess(
-		ctx,
-		handler.Argv,
-		"", // apogee's own working directory: the payload names the workspace by path
-		a.cfg.WorkspaceDir,
-		a.cfg.SecretEnvVars,
-		doc.Env(),
-		syncTimeout(r),
-		string(document),
-	)
+	return a.spawnReactionArgv(ctx, r, handler.Argv, doc.Env(), syncTimeout(r), string(document))
+}
+
+// RunProjectReaction is the fenced runner an adopted repo reaction's observe-lane `run:` spawns
+// through (domain.ProjectRun, ADR 0104 §8): the same permit row as a sync reaction's
+// (syncPermitCtx — inside the workspace exec fence when `confine-to-workspace` is on, refused on a
+// host that cannot confine, unfenced when it is off) and the same door (spawnReactionArgv), so the
+// observe lane mints no permit of its own. The Driver's Runner reaches it through
+// Config.BindProjectRun. stdin is the payload document the Runner encoded, env its headline facts,
+// and the deadline the entry's own `timeout:`, which the context the Runner hands in already
+// carries. What the command printed is dropped: nothing an observe reaction prints reaches anyone.
+func (a *Agent) RunProjectReaction(ctx context.Context, r domain.Reaction, stdin string, env []string) error {
+	handler, ok := r.Handler.(domain.ArgvHandler)
+	if !ok || len(handler.Argv) == 0 {
+		return fmt.Errorf("apogee: reaction %q: no command to run", r.ID)
+	}
+	ctx, err := a.syncPermitCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = a.spawnReactionArgv(ctx, r, handler.Argv, env, r.Timeout, stdin)
+	return err
+}
+
+// bindProjectRun hands this Agent's fenced runner to the Driver that asked for it
+// (Config.BindProjectRun). New and Resume call it once the Agent is built; a sub-agent never does,
+// so the runner a Driver's Runner holds is always its top-level Agent's.
+func (a *Agent) bindProjectRun() {
+	if bind := a.cfg.BindProjectRun; bind != nil {
+		bind(a.RunProjectReaction)
+	}
+}
+
+// spawnReactionArgv is the one call a user reaction's command reaches tools.RunHookSubprocess
+// through, on a ctx that already carries its permit. A global reaction runs in apogee's own working
+// directory — its payload names the workspace by path — under the workspace program fence. An
+// adopted repo reaction (domain.Reaction.Project) has its pinned project files checked first
+// (checkProjectPin), then runs with the Project root as its working directory and the base of a
+// relative argv[0], and may run a program inside the fence only when it is one of the files its pin
+// holds (ADR 0104 §4).
+func (a *Agent) spawnReactionArgv(
+	ctx context.Context,
+	r domain.Reaction,
+	argv []string,
+	env []string,
+	timeout time.Duration,
+	stdin string,
+) (string, error) {
+	dir := ""
+	var opts []tools.HookOption
+	if r.Project {
+		if err := checkProjectPin(r); err != nil {
+			return "", err
+		}
+		dir = r.Pin.Root()
+		opts = append(opts, tools.AdmitProjectPrograms(dir, r.Pin.Programs()))
+	}
+	return tools.RunHookSubprocess(ctx, argv, dir, a.cfg.WorkspaceDir, a.cfg.SecretEnvVars, env, timeout, stdin, opts...)
+}
+
+// changedPinNotice is the refusal a repo reaction whose pinned project files moved since adoption
+// earns: the files by path, and that the entry waits on a fresh adoption — the config layer
+// proposes it again, naming the same files, the next time it reads the Project config.
+const changedPinNotice = "apogee: reaction %q: refusing to run — %s changed since you adopted it; " +
+	"it is proposed again for adoption"
+
+// checkProjectPin is the spawn-time check of an adopted repo reaction (ADR 0104 §4): nil when every
+// project file its pin holds is still what the user adopted. A Project reaction with no pin, a pin
+// whose files cannot be read, and a moved file all refuse the spawn — none of them is a command
+// the user said yes to.
+func checkProjectPin(r domain.Reaction) error {
+	if r.Pin == nil {
+		return fmt.Errorf("apogee: reaction %q: refusing to run — a project reaction carries no adoption pin", r.ID)
+	}
+	changed, err := r.Pin.Changed()
+	if err != nil {
+		return fmt.Errorf("apogee: reaction %q: refusing to run — %w", r.ID, err)
+	}
+	if len(changed) > 0 {
+		return fmt.Errorf(changedPinNotice, r.ID, strings.Join(changed, ", "))
+	}
+	return nil
 }
 
 // runSyncWebhook POSTs one sync-lane reaction's document to its webhook and returns the reply body,

@@ -215,13 +215,19 @@ func (w *rootWiring) resolveConfig() error {
 	// Its webhooks post through the url-safety guard built from the options' allow/deny host lists —
 	// off w.opts, since the projected cfg does not exist yet — so a host the operator closed for the
 	// network tools is closed for a Reaction's POST too.
+	//
+	// An adopted repo reaction's `run:` reaches the session's Agent through projectRuns instead of
+	// running on the global posture (ADR 0104 §8): the Agent binds its fenced runner into the slot
+	// once the late engine builds it (Config.BindProjectRun, below), and the command runs inside
+	// the workspace exec fence under that Agent's permit.
 	observe := generationOf(w.opts).Observe
 	webhookGuard := security.NewURLGuard(w.opts.URLAllowHosts, w.opts.URLDenyHosts)
+	projectRuns := &projectRunSlot{}
 	runner, err := reactions.New(observe, reactions.Options{
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
-		Exec:      reactions.DefaultExecutor(w.roots.workspace, webhookGuard),
+		Exec:      reactions.DefaultExecutor(w.roots.workspace, webhookGuard, projectRuns.runner()),
 	})
 	if err != nil {
 		return err
@@ -261,6 +267,9 @@ func (w *rootWiring) resolveConfig() error {
 	// so the Floor-, Bypass- and sync-only edits a settings row makes never retire it.
 	w.cfg.ObserveRunner = w.hooks
 	w.cfg.Observe = observe
+	// The slot the Runner's repo `run:` entries reach the Agent through: every Agent the late
+	// engine builds binds its fenced runner into it, so a rebuilt engine rebinds (ADR 0104 §8).
+	w.cfg.BindProjectRun = projectRuns.bind
 	// Where a SYNC-lane reaction's trouble is said out loud — a gate or advise command that
 	// failed, timed out or could not be spawned. It is the same seam the Runner reports the
 	// observe lane's failures through (Report above), so one `reactions:` file's trouble reads

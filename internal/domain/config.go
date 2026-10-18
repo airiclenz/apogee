@@ -271,6 +271,14 @@ type Config struct {
 	// makes the first swap re-hand that list, which costs one Runner generation and nothing else.
 	Observe []Reaction
 
+	// BindProjectRun is handed the Agent's fenced runner for an adopted repo reaction's
+	// observe-lane `run:` (ProjectRun, ADR 0104 §8) once the Agent New or Resume builds is in
+	// place — the Driver's Runner is built before that Agent exists, so it reaches the runner
+	// through this late bind rather than at its own construction. A sub-agent never binds. nil
+	// binds nothing, and a Runner left unbound refuses every repo `run:` rather than run it
+	// outside the fence.
+	BindProjectRun func(run ProjectRun)
+
 	// Skills resolves the user's attached skill IDs (UserInput.SkillIDs) to their injectable
 	// bodies; nil ⇒ no skills are wired and any attached ID is reported and dropped. It is an
 	// interface defined here (not the concrete internal/skills catalog) so the loop fulfils the

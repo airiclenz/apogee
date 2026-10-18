@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee"
@@ -111,6 +112,10 @@ type firingInputs struct {
 	// nil is the legitimate absence — a Driver that raises no Reactions, and every composition test —
 	// and it leaves Config.Events nil exactly as it was before this key existed.
 	hooks *reactions.Runner
+	// projectRuns is the slot hooks hands an adopted repo reaction's `run:` to (firingHooks): the
+	// Agent this Firing builds binds its fenced runner into it (Config.BindProjectRun). nil — no
+	// Runner, or a composition test — binds nothing.
+	projectRuns *projectRunSlot
 	// report is where a SYNC-lane reaction's trouble is said out loud — a `gate:` or `advise:`
 	// command that failed, timed out or could not be spawned (domain.Config.Report). It is the SAME
 	// function the Driver hands its Runner for the observe lane's failures, so one `reactions:`
@@ -500,6 +505,12 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	if in.hooks != nil {
 		cfg.Events = in.hooks
 	}
+	// The slot that Runner's repo `run:` entries reach this Firing's Agent through: the Agent
+	// run.Once builds binds its fenced runner into it, so a repo command runs under that Agent's
+	// permit (ADR 0104 §8). A Driver that built no slot leaves the bind nil.
+	if in.projectRuns != nil {
+		cfg.BindProjectRun = in.projectRuns.bind
+	}
 	// The per-server stats recorder (ADR 0085) wraps whatever sink stands above — the Runner, or
 	// none — as the session's own does (wire_boot.go): every Event reaches that sink first and
 	// unchanged, and each upstream attempt is then recorded. A Driver that passed no recorder leaves
@@ -715,12 +726,19 @@ func resolveFiringRouting(
 // guard is the url-safety guard every webhook Reaction posts through: the caller builds it from the
 // url-safety allow/deny lists of the options the Firing composes from (raise, off in.opts), so a
 // host the operator closed for the network tools is closed for a Firing's webhooks too.
+//
+// projectRuns is the slot an adopted repo reaction's `run:` reaches the Firing's Agent through
+// (ADR 0104 §8): the Runner is built before run.Once builds that Agent, so the Agent binds its
+// fenced runner into the slot once it exists (domain.Config.BindProjectRun, which firingConfig
+// sets from the same slot) and the repo command runs under that Agent's permit. A nil slot
+// refuses every repo `run:`.
 func firingHooks(
 	observe []domain.Reaction,
 	workspace string,
 	guard security.URLGuard,
 	sched *reactions.ScheduleRef,
 	report func(string),
+	projectRuns *projectRunSlot,
 ) (*reactions.Runner, error) {
 	return reactions.New(observe, reactions.Options{
 		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
@@ -730,8 +748,42 @@ func firingHooks(
 		Workspace: workspace,
 		Schedule:  sched,
 		Report:    report,
-		Exec:      reactions.DefaultExecutor(workspace, guard),
+		Exec:      reactions.DefaultExecutor(workspace, guard, projectRuns.runner()),
 	})
+}
+
+// errProjectRunUnbound refuses an adopted repo reaction's `run:` that fired before an Agent bound
+// its fenced runner into the slot: running it without the Agent's permit would run it unfenced.
+var errProjectRunUnbound = errors.New("refusing to run a project reaction before its session's engine is built")
+
+// projectRunSlot is the late bind between a Driver's Reaction Runner and the Agent whose permit an
+// adopted repo reaction's observe-lane `run:` spawns under (ADR 0104 §8). The Runner is built
+// first and holds runner(); the Agent, once New or Resume has built it, stores its fenced runner
+// through bind (domain.Config.BindProjectRun). A later Agent — a rebuilt session engine — simply
+// rebinds. It is safe for concurrent use: the Runner's workers read it while a bind may land.
+type projectRunSlot struct {
+	run atomic.Pointer[domain.ProjectRun]
+}
+
+// bind stores the Agent's fenced runner, replacing any earlier one.
+func (s *projectRunSlot) bind(run domain.ProjectRun) {
+	s.run.Store(&run)
+}
+
+// runner is the domain.ProjectRun the Runner's executor is handed: the bound Agent's runner, or
+// errProjectRunUnbound while none is bound. A nil slot answers nil, which the executor reads as no
+// fenced runner at all.
+func (s *projectRunSlot) runner() domain.ProjectRun {
+	if s == nil {
+		return nil
+	}
+	return func(ctx context.Context, r domain.Reaction, stdin string, env []string) error {
+		run := s.run.Load()
+		if run == nil {
+			return errProjectRunUnbound
+		}
+		return (*run)(ctx, r, stdin, env)
+	}
 }
 
 // The two stages at which raise can refuse a Firing before it starts, carried on errNotStarted so
@@ -861,7 +913,8 @@ func raise(
 ) (run.Result, []string, error) {
 	lanes := domain.LanesOf(in.opts.Reactions)
 	guard := security.NewURLGuard(in.opts.URLAllowHosts, in.opts.URLDenyHosts)
-	hookRunner, err := firingHooks(lanes.Observe, in.roots.workspace, guard, ref, in.report)
+	projectRuns := &projectRunSlot{}
+	hookRunner, err := firingHooks(lanes.Observe, in.roots.workspace, guard, ref, in.report, projectRuns)
 	if err != nil {
 		return run.Result{}, nil, errNotStarted{Stage: stageCompose, Err: err}
 	}
@@ -871,6 +924,7 @@ func raise(
 		_ = hookRunner.Close(closeCtx)
 	}()
 	in.hooks = hookRunner
+	in.projectRuns = projectRuns
 
 	now := in.now
 	if now == nil {

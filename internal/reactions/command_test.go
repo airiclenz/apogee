@@ -63,7 +63,7 @@ func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t 
 
 	// DefaultExecutor rather than commandExecutor directly, so the dispatch on `command:` is
 	// exercised by the same test that proves what the command receives.
-	if err := DefaultExecutor(dir, security.URLGuard{}).Run(context.Background(), hook, payload); err != nil {
+	if err := DefaultExecutor(dir, security.URLGuard{}, nil).Run(context.Background(), hook, payload); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -226,4 +226,85 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(content)
+}
+
+// recordingProjectRun is an injected fenced runner that records each firing it is handed.
+type recordingProjectRun struct {
+	reactions []domain.Reaction
+	stdins    []string
+}
+
+// run is the domain.ProjectRun the executor under test is handed.
+func (r *recordingProjectRun) run(_ context.Context, reaction domain.Reaction, stdin string, _ []string) error {
+	r.reactions = append(r.reactions, reaction)
+	r.stdins = append(r.stdins, stdin)
+	return nil
+}
+
+// TestRepoEntryGoesToTheInjectedRunner pins the observe lane's half of ADR 0104 §8: an adopted
+// repo entry's `run:` is handed, with its payload document, to the fenced runner the Driver
+// injected — never spawned on the global posture — and with no runner injected it is refused
+// rather than run outside the fence. The canary is the file the command would have written.
+func TestRepoEntryGoesToTheInjectedRunner(t *testing.T) {
+	requireShell(t)
+	workspace := t.TempDir()
+	marker := filepath.Join(workspace, "ran-unfenced")
+	hook := shellHook("repo-notify", "touch "+marker)
+	hook.Project = true
+	payload := domain.SeamPayload{Event: TurnFinished, Workspace: workspace}
+
+	t.Run("injected", func(t *testing.T) {
+		injected := &recordingProjectRun{}
+
+		err := DefaultExecutor(workspace, security.URLGuard{}, injected.run).Run(context.Background(), hook, payload)
+
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if len(injected.reactions) != 1 || injected.reactions[0].ID != hook.ID {
+			t.Fatalf("injected runner got %v, want the one repo entry", injected.reactions)
+		}
+		if !strings.Contains(injected.stdins[0], `"event":"`+string(TurnFinished)+`"`) {
+			t.Errorf("stdin = %q, want the payload document", injected.stdins[0])
+		}
+	})
+	t.Run("none injected", func(t *testing.T) {
+		err := DefaultExecutor(workspace, security.URLGuard{}, nil).Run(context.Background(), hook, payload)
+
+		if !errors.Is(err, errNoProjectRunner) {
+			t.Errorf("err = %v, want errNoProjectRunner", err)
+		}
+	})
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("the repo command ran on the global posture: %v", statErr)
+	}
+}
+
+// TestGlobalRunStillRefusesAWorkspaceProgram pins that the fenced runner changes nothing for the
+// user's own entries: a global `run:` naming a program inside the workspace is still refused with
+// security.ErrExecFromWritablePath, and is never handed to the injected runner.
+func TestGlobalRunStillRefusesAWorkspaceProgram(t *testing.T) {
+	requireShell(t)
+	workspace := t.TempDir()
+	marker := filepath.Join(workspace, "it-ran")
+	program := filepath.Join(workspace, "hook.sh")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatalf("write the program: %v", err)
+	}
+	hook := shellHook("planted", "")
+	hook.Handler = domain.ArgvHandler{Argv: []string{program}}
+	injected := &recordingProjectRun{}
+
+	err := DefaultExecutor(workspace, security.URLGuard{}, injected.run).
+		Run(context.Background(), hook, domain.SeamPayload{Event: TurnFinished})
+
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("err = %v, want it to wrap security.ErrExecFromWritablePath", err)
+	}
+	if len(injected.reactions) != 0 {
+		t.Errorf("a global entry reached the injected runner: %v", injected.reactions)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("the refused program ran anyway: %v", statErr)
+	}
 }

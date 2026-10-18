@@ -773,6 +773,7 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	a.dial = o.dial       // the seam the dial above crossed is the one every later dial of this Agent crosses
 	a.ownsUpstream = true // this Agent dialled that client, so Close is the one that tears it down
 	tap.bind(a)
+	a.bindProjectRun()
 	return a, nil
 }
 
@@ -791,6 +792,7 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 	a.dial = o.dial       // as in New
 	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
 	tap.bind(a)
+	a.bindProjectRun()
 	return a, nil
 }
 

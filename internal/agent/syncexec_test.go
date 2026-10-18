@@ -10,6 +10,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -342,5 +343,171 @@ func TestSyncWebhookDenyListedEndpointIsNeverPosted(t *testing.T) {
 	}
 	if hits.Load() != 0 {
 		t.Errorf("the deny-listed endpoint was called %d times, want 0", hits.Load())
+	}
+}
+
+// fakePin is a domain.ProjectPin the repo-run tests state outright: the root, the pinned programs,
+// and what its check reports as changed since adoption.
+type fakePin struct {
+	root     string
+	programs []string
+	changed  []string
+}
+
+func (p fakePin) Root() string               { return p.root }
+func (p fakePin) Changed() ([]string, error) { return p.changed, nil }
+func (p fakePin) Programs() []string         { return p.programs }
+
+// repoReaction is an adopted repo reaction over the script at root/scripts/fmt.sh, written with
+// body, whose pin reports changed. The argv is the relative spelling a repo writes.
+func repoReaction(t *testing.T, root string, class domain.Class, body string, changed ...string) domain.Reaction {
+	t.Helper()
+
+	script := filepath.Join(root, "scripts", "fmt.sh")
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("write the script: %v", err)
+	}
+	r := syncReaction(class, 0, "./scripts/fmt.sh")
+	r.Project = true
+	r.Pin = fakePin{root: root, programs: []string{script}, changed: changed}
+	return r
+}
+
+// TestRepoRunRunsInsideTheExecFence pins ADR 0104 §8 where runner and permit meet: with
+// confine-to-workspace on, an adopted repo reaction's command — its pinned script inside the
+// workspace, named relatively — runs on either lane under the permit's box, in the Project root,
+// with the tools' secret scrub. The observe lane reaches it through the runner the Agent binds.
+func TestRepoRunRunsInsideTheExecFence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the executor it pins is platform-independent")
+	}
+	t.Setenv("REPO_RUN_SECRET", "leaked")
+
+	conf := &fakeConfiner{caps: capsBoth()}
+	a := syncAgent(t, &recordingSink{}, conf, true)
+	a.cfg.SecretEnvVars = []string{"REPO_RUN_SECRET"}
+	root := a.cfg.WorkspaceDir
+	r := repoReaction(t, root, domain.ClassGate, `printf '%s|%s' "$(pwd -P)" "${REPO_RUN_SECRET:-scrubbed}"`)
+	var bound domain.ProjectRun
+	a.cfg.BindProjectRun = func(run domain.ProjectRun) { bound = run }
+
+	out, err := a.runSyncArgv(context.Background(), 1, r, domain.SeamPayload{Event: domain.MomentPreToolExec})
+	a.bindProjectRun()
+	observeErr := bound(context.Background(), r, "{}", nil)
+
+	if err != nil {
+		t.Fatalf("runSyncArgv: %v", err)
+	}
+	realRoot, _ := filepath.EvalSymlinks(root)
+	if want := realRoot + "|scrubbed"; out != want {
+		t.Errorf("stdout = %q, want %q — the Project root as working directory, the secret scrubbed", out, want)
+	}
+	if observeErr != nil {
+		t.Errorf("bound observe runner: %v", observeErr)
+	}
+	if conf.confineCount() != 2 {
+		t.Errorf("Confine called %d times, want 2 — both lanes run inside the permit's box", conf.confineCount())
+	}
+	if box := conf.lastConfinedBox(); box.WorkspaceRoot != root {
+		t.Errorf("box.WorkspaceRoot = %q, want %q", box.WorkspaceRoot, root)
+	}
+}
+
+// TestRepoRunFailsWithoutConfinement pins the permit row's refusal for a repo command: the operator
+// asked for the fence and the host cannot build one, so the observe lane's runner spawns nothing,
+// exactly as an `advise:` or `gate:` command would not. The canary is the file it would write.
+func TestRepoRunFailsWithoutConfinement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the executor it pins is platform-independent")
+	}
+	t.Parallel()
+
+	a := syncAgent(t, &recordingSink{}, &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: false}}, true)
+	canary := filepath.Join(t.TempDir(), "spawned")
+	r := repoReaction(t, a.cfg.WorkspaceDir, domain.ClassObserve, "touch "+canary)
+
+	err := a.RunProjectReaction(context.Background(), r, "{}", nil)
+
+	if !errors.Is(err, errConfinementUnavailable) {
+		t.Errorf("err = %v, want errConfinementUnavailable", err)
+	}
+	if _, statErr := os.Stat(canary); statErr == nil {
+		t.Error("the command ran; a refused permit must spawn nothing at all")
+	}
+}
+
+// TestRepoRunRefusesAChangedScript pins the spawn-time pin check (ADR 0104 §4): a repo reaction
+// whose pinned script moved since adoption, or that carries no pin at all, is refused before
+// anything is confined or spawned, and the refusal names the file.
+func TestRepoRunRefusesAChangedScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the executor it pins is platform-independent")
+	}
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		edit func(*domain.Reaction)
+		want string
+	}{
+		{name: "changed script", edit: func(*domain.Reaction) {}, want: "scripts/fmt.sh changed since you adopted it"},
+		{name: "no pin", edit: func(r *domain.Reaction) { r.Pin = nil }, want: "carries no adoption pin"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			conf := &fakeConfiner{caps: capsBoth()}
+			a := syncAgent(t, &recordingSink{}, conf, true)
+			canary := filepath.Join(t.TempDir(), "spawned")
+			r := repoReaction(t, a.cfg.WorkspaceDir, domain.ClassGate, "touch "+canary, "scripts/fmt.sh")
+			tc.edit(&r)
+
+			out, err := a.runSyncArgv(context.Background(), 1, r, domain.SeamPayload{Event: domain.MomentPreToolExec})
+
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v (out = %q), want it to say %q", err, out, tc.want)
+			}
+			if _, statErr := os.Stat(canary); statErr == nil {
+				t.Error("the command ran; a refused pin must spawn nothing")
+			}
+			if conf.confineCount() != 0 {
+				t.Errorf("Confine called %d times, want 0", conf.confineCount())
+			}
+		})
+	}
+}
+
+// TestRepoRunRunnerIsBoundByNew pins the late bind a Driver's Runner reaches the Agent's fenced
+// runner through (Config.BindProjectRun): New hands it over once the Agent is built, and the runner
+// it hands over is that Agent's — a repo command fired through it is refused by THIS Agent's permit
+// row when the host cannot confine.
+func TestRepoRunRunnerIsBoundByNew(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Endpoint = "http://127.0.0.1:1/v1"
+	cfg.WorkspaceDir = t.TempDir()
+	cfg.Confiner = &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: false}}
+	cfg.ConfineToWorkspace = true
+	var bound domain.ProjectRun
+	cfg.BindProjectRun = func(run domain.ProjectRun) { bound = run }
+
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	if bound == nil {
+		t.Fatal("New bound no runner")
+	}
+	r := syncReaction(domain.ClassObserve, 0, "true")
+	r.Project = true
+	r.Pin = fakePin{root: cfg.WorkspaceDir}
+	if err := bound(context.Background(), r, "{}", nil); !errors.Is(err, errConfinementUnavailable) {
+		t.Errorf("bound runner err = %v, want this Agent's errConfinementUnavailable", err)
 	}
 }

@@ -465,6 +465,60 @@ func TestRunHookSubprocessRefusesAProgramInsideTheWorkspace(t *testing.T) {
 	}
 }
 
+// TestRunHookSubprocessAdmitsAPinnedProjectProgram pins the admit option an adopted repo reaction
+// spawns under (ADR 0104 §4): a relative `./scripts/fmt.sh` resolves against the Project root, not
+// apogee's own working directory, and runs although it lies inside the workspace, because it is a
+// pinned program; an unpinned script beside it and a bare name a PATH entry inside the root answers
+// stay refused, since only a resolved program equal to a pinned path is admitted.
+func TestRunHookSubprocessAdmitsAPinnedProjectProgram(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell scripts; the admission it pins is platform-independent")
+	}
+
+	root := t.TempDir()
+	pinned := filepath.Join(root, "scripts", "fmt.sh")
+	if err := os.MkdirAll(filepath.Dir(pinned), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(pinned, []byte("#!/bin/sh\nprintf formatted\n"), 0o755); err != nil {
+		t.Fatalf("write the pinned script: %v", err)
+	}
+	plantExecutable(t, root, "scripts/other.sh")
+	onPath := plantExecutable(t, root, "bin/lint")
+	t.Setenv("PATH", filepath.Dir(onPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	admit := AdmitProjectPrograms(root, []string{pinned, onPath + ".unrelated"})
+
+	cases := []struct {
+		name      string
+		argv0     string
+		wantOut   string
+		wantFence bool
+	}{
+		{name: "a relative pinned program runs", argv0: "./scripts/fmt.sh", wantOut: "formatted"},
+		{name: "an unpinned script beside it is refused", argv0: "./scripts/other.sh", wantFence: true},
+		{name: "an unpinned PATH hit inside the root is refused", argv0: "lint", wantFence: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := RunHookSubprocess(unfencedPermitCtx(), []string{tc.argv0}, root, root,
+				nil, nil, 30*time.Second, "", admit)
+
+			if tc.wantFence {
+				if !errors.Is(err, security.ErrExecFromWritablePath) {
+					t.Fatalf("err = %v, want the workspace fence's refusal (out = %q)", err, out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RunHookSubprocess: %v", err)
+			}
+			if out != tc.wantOut {
+				t.Errorf("stdout = %q, want %q", out, tc.wantOut)
+			}
+		})
+	}
+}
+
 // TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath pins the other half of the door's
 // resolution: a bare name on PATH is looked up and argv[0] becomes the absolute program, so the
 // child is never started from a name the OS would re-resolve against its own environment. The

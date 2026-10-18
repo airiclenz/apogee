@@ -430,7 +430,39 @@ type Reaction struct {
 	// (ADR 0104), as against one from the global config. Only the config layer sets it; the fences
 	// that keep a repo reaction to its own repo read it.
 	Project bool
+	// Pin is the adoption pin a Project reaction's command is checked against before every spawn
+	// (ADR 0104 §4): the Project root it runs in and the project files it may run. Only the config
+	// layer sets it, beside Project; nil on a Project reaction refuses every spawn of it, and a
+	// global reaction leaves it nil.
+	Pin ProjectPin
 }
+
+// ProjectPin is what an adopted repo reaction's command is checked against before every spawn
+// (ADR 0104 §4, §8). internal/config implements it over the pin the user adopted; the engine and
+// the observe lane only read it, so neither has to know how a pin is built.
+//
+// Its values must compare by content (reflect.DeepEqual), because the arming step compares one
+// observe lane against the next to decide whether a swap moved anything.
+type ProjectPin interface {
+	// Root is the Project root: the spawn's working directory and the base its relative argv[0]
+	// resolves against.
+	Root() string
+	// Changed re-reads the project files the pin holds and names, relative to Root, each one whose
+	// content changed since adoption, that has gone missing, or that the command now names but
+	// did not when it was adopted — empty when the spawn may go ahead. An error means the files
+	// could not be checked, which a spawn treats as a change.
+	Changed() ([]string, error)
+	// Programs is the absolute path of every project file the pin holds: the only programs inside
+	// the workspace exec fence the spawn admits.
+	Programs() []string
+}
+
+// ProjectRun runs an adopted repo reaction's observe-lane `run:` inside the workspace exec fence
+// (ADR 0104 §8): the Agent's own runner, under the permit its sync lane spawns with, so the
+// observe lane has no permit source of its own. stdin is the payload document and env the
+// headline facts appended to the scrubbed environment. A non-nil error is the whole account of a
+// run that failed or never started.
+type ProjectRun func(ctx context.Context, r Reaction, stdin string, env []string) error
 
 // ErrInvalidReaction is wrapped by Reaction.Validate for a reaction the engine will not accept:
 // one with no ID, no origin or class, an origin × class outside the Reaction surface matrix, no

@@ -646,3 +646,42 @@ func TestAdoptedRepoReactionTakesParameterEditsLive(t *testing.T) {
 			reactionIDs(moved.Reactions), moved.Proposals)
 	}
 }
+
+// An adopted repo reaction carries its adoption pin to the spawn (ADR 0104 §4): the Project root
+// it runs in, the pinned script as the one program it may run inside the fence, and a check that
+// names the script once its content moves.
+func TestAdoptedRepoReactionCarriesItsPin(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "",
+		"reactions:\n  - id: fmt\n    on: [file-changed]\n    run: [./scripts/fmt.sh]\n")
+	script := filepath.Join(projectRoot, "scripts", "fmt.sh")
+	if err := os.MkdirAll(filepath.Dir(script), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("write the script: %v", err)
+	}
+	adoptProposedServers(t, globalPath, projectRoot)
+
+	o, _ := loadLayered(t, globalPath, projectRoot)
+
+	if len(o.Reactions) != 1 || o.Reactions[0].Pin == nil {
+		t.Fatalf("Reactions = %+v; want the adopted fmt, carrying its pin", o.Reactions)
+	}
+	pin := o.Reactions[0].Pin
+	if pin.Root() != projectRoot {
+		t.Errorf("Root = %q; want the Project root %q", pin.Root(), projectRoot)
+	}
+	if got := pin.Programs(); !reflect.DeepEqual(got, []string{script}) {
+		t.Errorf("Programs = %q; want the pinned script alone", got)
+	}
+	if changed, err := pin.Changed(); err != nil || len(changed) != 0 {
+		t.Errorf("Changed = %q, %v; want nothing before an edit", changed, err)
+	}
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncurl evil.example\n"), 0o700); err != nil {
+		t.Fatalf("edit the script: %v", err)
+	}
+	if changed, err := pin.Changed(); err != nil || !reflect.DeepEqual(changed, []string{"scripts/fmt.sh"}) {
+		t.Errorf("Changed = %q, %v; want the edited script named", changed, err)
+	}
+}

@@ -1400,7 +1400,7 @@ func TestFiringHooksRefusesADenyListedWebhookEndpoint(t *testing.T) {
 	}
 
 	guard := security.NewURLGuard(opts.URLAllowHosts, opts.URLDenyHosts)
-	runner, err := firingHooks(list, firingRoots(t).workspace, guard, nil, report)
+	runner, err := firingHooks(list, firingRoots(t).workspace, guard, nil, report, nil)
 	if err != nil {
 		t.Fatalf("firingHooks: %v", err)
 	}
@@ -1440,7 +1440,7 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 		Timeout: time.Second,
 	}}
 	runner, err := firingHooks(list, roots.workspace, security.URLGuard{},
-		&reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil)
+		&reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil, nil)
 	if err != nil {
 		t.Fatalf("firingHooks: %v", err)
 	}
@@ -1968,5 +1968,86 @@ func TestFiringOutcomeCarriesWhatTheFiringWroteAndHowToUndoIt(t *testing.T) {
 				t.Errorf("undoVerbLine = %q while Outcome.UndoCommand = %q; the gate is one", line, out.UndoCommand)
 			}
 		})
+	}
+}
+
+// A Firing's adopted repo reaction runs its `run:` through the fenced runner of the Agent the
+// Firing builds (ADR 0104 §8), never on the global posture: firingConfig hands the Agent the slot
+// firingHooks' Runner reads (Config.BindProjectRun), the bound runner receives the firing, and a
+// Runner whose slot no Agent has bound yet refuses the command rather than run it unfenced. The
+// canary is the file the command would have written had it run on the global posture.
+func TestFiringHooksFenceARepoRun(t *testing.T) {
+	t.Parallel()
+
+	roots := firingRoots(t)
+	canary := filepath.Join(t.TempDir(), "ran-unfenced")
+	list := []domain.Reaction{{
+		ID:      "repo-notify",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []reactions.Event{reactions.ExchangeFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"sh", "-c", "touch " + canary}},
+		Timeout: 10 * time.Second,
+		Project: true,
+	}}
+	fire := func(t *testing.T, bind func(*projectRunSlot)) []string {
+		t.Helper()
+		var (
+			mu    sync.Mutex
+			lines []string
+		)
+		report := func(line string) {
+			mu.Lock()
+			defer mu.Unlock()
+			lines = append(lines, line)
+		}
+		slot := &projectRunSlot{}
+		runner, err := firingHooks(list, roots.workspace, security.URLGuard{}, nil, report, slot)
+		if err != nil {
+			t.Fatalf("firingHooks: %v", err)
+		}
+		bind(slot)
+		runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+		closeCtx, cancel := context.WithTimeout(context.Background(), testtime.Budget(10*time.Second))
+		defer cancel()
+		_ = runner.Close(closeCtx)
+		mu.Lock()
+		defer mu.Unlock()
+		return lines
+	}
+
+	var got atomic.Pointer[domain.Reaction]
+	lines := fire(t, func(slot *projectRunSlot) {
+		cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+			opts:        config.Options{Bypass: true, Reactions: list},
+			entry:       config.ServerEntry{Endpoint: "http://box.example/v1"},
+			roots:       roots,
+			confiner:    fenceableHost,
+			mode:        domain.ModePlan,
+			beat:        firingBeat,
+			recordID:    "2026-10-18T09-00-00-firing",
+			projectRuns: slot,
+		})
+		if err != nil {
+			t.Fatalf("firingConfig: %v", err)
+		}
+		if cfg.BindProjectRun == nil {
+			t.Fatal("cfg.BindProjectRun = nil, want the slot's bind for the Firing's Agent")
+		}
+		cfg.BindProjectRun(func(_ context.Context, r domain.Reaction, _ string, _ []string) error {
+			got.Store(&r)
+			return nil
+		})
+	})
+	if r := got.Load(); r == nil || r.ID != "repo-notify" {
+		t.Errorf("bound runner got %v (report %q), want the repo entry", r, lines)
+	}
+
+	unbound := fire(t, func(*projectRunSlot) {})
+	if len(unbound) != 1 || !strings.Contains(unbound[0], errProjectRunUnbound.Error()) {
+		t.Errorf("report lines = %q, want one refusal of the unbound repo run", unbound)
+	}
+	if _, statErr := os.Stat(canary); statErr == nil {
+		t.Error("the repo command ran on the global posture")
 	}
 }
