@@ -3,6 +3,7 @@ title: A shared store fails every save when the apogee home belongs to another u
 status: open
 type: bug
 priority: 2
+plan: 2026-10-18 - 01 - share-group-foreign-home-plan.md
 created: 2026-10-18T08:01:08Z
 ---
 
