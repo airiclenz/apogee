@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -12,8 +13,10 @@ import (
 	"github.com/muesli/cancelreader"
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/run"
 )
 
@@ -278,4 +281,178 @@ func TestProjectCmdDaemonIsSilentAboutProposedRules(t *testing.T) {
 		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
 	}
 	assertNoAdoptionNotice(t, "the daemon", h.errOut.String())
+}
+
+// ----------------------------------------------------------------------------
+// Repo servers and reactions, asked about and fired (ADR 0104 §12)
+// ----------------------------------------------------------------------------
+
+// projectFmtReactionYAML is a Project config proposing one reaction whose argv runs past the
+// adoption pane's eight-line bound on a value, so a body printed whole is told from a bounded one.
+const projectFmtReactionYAML = "reactions:\n  - id: fmt\n    on: [file-changed]\n" +
+	"    run: [notify-send, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10]\n"
+
+// projectTwoReactionsYAML is a Project config proposing two observe-lane reactions on the exchange
+// boundary, which a test adopts one of.
+const projectTwoReactionsYAML = "reactions:\n" +
+	"  - id: notify\n    on: [exchange-finished]\n    run: [notify-send, saved]\n" +
+	"  - id: lint\n    on: [exchange-finished]\n    run: [notify-send, linted]\n"
+
+// adoptProposalsNamed records as adopted each entry the layered config of the apogee home and
+// projectRoot proposes whose handle is among handles — what `apogee project adopt` writes for a
+// yes — and fails the test when one of handles is not proposed.
+func adoptProposalsNamed(t *testing.T, home, projectRoot string, handles ...string) {
+	t.Helper()
+	o, err := loadLayeredOptions(config.FilePath(home), projectRoot)
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	store, err := adoption.New(config.WorkspacesDir(home), projectRoot)
+	if err != nil {
+		t.Fatalf("open the adoption record: %v", err)
+	}
+	for _, handle := range handles {
+		i := slices.IndexFunc(o.Proposals.Proposed, func(p apogee.Proposal) bool { return p.Handle == handle })
+		if i < 0 {
+			t.Fatalf("the Project config proposes no entry %q: %+v", handle, o.Proposals.Proposed)
+		}
+		p := o.Proposals.Proposed[i]
+		if err := store.Adopt(adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}); err != nil {
+			t.Fatalf("Adopt %s: %v", handle, err)
+		}
+	}
+}
+
+// layeredProposals is what the layered config of the apogee home and projectRoot sorts the
+// Project config's servers and reactions into now.
+func layeredProposals(t *testing.T, home, projectRoot string) config.ProjectProposals {
+	t.Helper()
+	o, err := loadLayeredOptions(config.FilePath(home), projectRoot)
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	return o.Proposals
+}
+
+// projectRunRecorder stands in for the fenced runner a Firing's Agent binds: it records the id of
+// every repo reaction whose `run:` reached it, and runs nothing. Reaction workers call it from
+// their own goroutines.
+type projectRunRecorder struct {
+	mu  sync.Mutex
+	ids []string
+}
+
+// run is the domain.ProjectRun the recorder is bound as.
+func (r *projectRunRecorder) run(_ context.Context, reaction domain.Reaction, _ string, _ []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if reaction.Project {
+		r.ids = append(r.ids, reaction.ID)
+	}
+	return nil
+}
+
+// fired is the ids recorded so far, in order.
+func (r *projectRunRecorder) fired() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.ids)
+}
+
+// A project proposing only a reaction is asked about with the adoption pane's title and its body
+// printed whole — every argv element, none elided — and a yes adopts the reaction as it was offered.
+func TestProjectCmdAdoptsARepoReaction(t *testing.T) {
+	t.Parallel()
+	home, workspace := projectAdoptRoots(t)
+	writeProjectConfig(t, workspace, projectFmtReactionYAML)
+
+	out, err := runProjectAdopt(t, home, workspace, true, "y")
+
+	if err != nil {
+		t.Fatalf("project adopt: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"proposes 1 entry:",
+		"  use reaction `fmt` in this project?\n",
+		"\n    run:\n      - notify-send\n      - a1\n",
+		"      - a10\n  adopt? [y]es / [n]ot now / [r]eject: ",
+		"Adopted 1, rejected 0, left 0 proposed.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "more lines") {
+		t.Errorf("the body was bounded; a terminal prints it whole:\n%s", out)
+	}
+	adopted := layeredProposals(t, home, workspace).Adopted
+	if len(adopted) != 1 || adopted[0].Kind != apogee.ProposalReaction || adopted[0].Handle != "fmt" {
+		t.Errorf("adopted after the yes = %+v, want the reaction fmt", adopted)
+	}
+}
+
+// `apogee project adopt` asks rather than skips, so it never says the unattended Drivers' skipped
+// reaction line, even when the reaction is left proposed.
+func TestProjectCmdPrintsNoSkippedReactionNotice(t *testing.T) {
+	t.Parallel()
+	home, workspace := projectAdoptRoots(t)
+	writeProjectConfig(t, workspace, projectFmtReactionYAML)
+	skipped := skippedReactionsNotice(workspace, layeredProposals(t, home, workspace))
+	if skipped == "" {
+		t.Fatal("a proposed reaction composes no skipped notice; the test has nothing to look for")
+	}
+
+	out, err := runProjectAdopt(t, home, workspace, true, "n")
+
+	if err != nil {
+		t.Fatalf("project adopt: %v\n%s", err, out)
+	}
+	if strings.Contains(out, skipped) || strings.Contains(out, "this run skips") {
+		t.Errorf("project adopt said the skipped-reaction line:\n%s", out)
+	}
+	if proposed := layeredProposals(t, home, workspace).Proposed; len(proposed) != 1 {
+		t.Errorf("proposed after not now = %+v, want the reaction still proposed", proposed)
+	}
+}
+
+// A headless run fires the adopted repo reaction through its Agent's fenced runner, skips the one
+// still proposed — off the lanes, named on one stderr line — and asks nothing.
+func TestHeadlessFiresOnlyAdoptedRepoReactions(t *testing.T) {
+	recorder := &projectRunRecorder{}
+	stub := &stubRunner{
+		res:        run.Result{SessionID: "s-1", FinalText: "done", Turns: 1},
+		projectRun: recorder.run,
+		emit: func(sink domain.EventSink) {
+			sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+		},
+	}
+	t.Setenv(config.EnvMode, "")
+	configDir, workspace := testConfigHomeOn(t, headlessBeatServer(t), ""), t.TempDir()
+	writeProjectConfig(t, workspace, projectTwoReactionsYAML)
+	adoptProposalsNamed(t, configDir, workspace, "notify")
+
+	cmd := newHeadlessCommandWith(headlessDeps{runner: stub.once})
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", configDir, "--workspace", workspace, "a prompt"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("headless: %v\n%s", err, errOut.String())
+	}
+
+	if got := recorder.fired(); !slices.Equal(got, []string{"notify"}) {
+		t.Errorf("repo reactions fired = %v, want only the adopted notify", got)
+	}
+	observe := stub.spec.Generation.Observe
+	if len(observe) != 1 || observe[0].ID != "notify" || !observe[0].Project {
+		t.Errorf("observe lane = %+v, want the adopted repo reaction notify alone", observe)
+	}
+	if got := strings.Count(errOut.String(), "this run skips"); got != 1 {
+		t.Errorf("the skipped-reaction line was said %d times, want once:\n%s", got, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "proposes reaction `lint`; this run skips it") ||
+		strings.Contains(errOut.String(), "reaction `notify`") {
+		t.Errorf("the skipped-reaction line does not name lint alone:\n%s", errOut.String())
+	}
 }

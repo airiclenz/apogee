@@ -67,22 +67,42 @@ func (m Model) adoptionBody() string {
 	}
 	inner := popupInnerWidth(m.th, m.width)
 	var wrapped []string
-	for _, line := range proposalBodyLines(m.picker.adoption[0]) {
+	for _, line := range proposalBodyLines(m.picker.adoption[0], argumentValueMaxLines) {
 		wrapped = append(wrapped, wrapBodyLine(m.th, line, inner)...)
 	}
 	return strings.Join(wrapped, "\n")
 }
 
+// AdoptionQuestion is the adoption pane's question about p as a terminal asks it (`apogee project
+// adopt`): the pane's title, and its body in the pane's parts and spellings, one line apiece —
+// neither wrapped, since a terminal wraps its own lines, nor bounded, since the terminal is where
+// the body is printed whole (docs/layout/user-questions-layout.md §Adoption pane). Every line that
+// carries the file's text is escape-stripped. An Allow rule's question has no body.
+func AdoptionQuestion(p domain.Proposal) (title string, body []string) {
+	title = adoptionQuestionTitle(p)
+	if !isStructured(p) {
+		return title, nil
+	}
+	for _, line := range proposalBodyLines(p, unboundedValue) {
+		body = append(body, expandTabs(line.lead+line.text))
+	}
+	return title, body
+}
+
+// unboundedValue is the per-value line bound that bounds nothing: every line of every value is kept.
+const unboundedValue = 0
+
 // proposalBodyLines is p's body as its parts, one blank line apart: the re-ask reason, the fields
-// in the parts their kind groups them into, and the pinned files.
-func proposalBodyLines(p domain.Proposal) []bodyLine {
+// in the parts their kind groups them into, and the pinned files. Each value keeps at most maxLines
+// of its own lines around a marker (boundValue); unboundedValue keeps them all.
+func proposalBodyLines(p domain.Proposal, maxLines int) []bodyLine {
 	var parts [][]bodyLine
 	if len(p.Changed) > 0 {
 		parts = append(parts, []bodyLine{{text: changedReason(p.Changed), hang: adoptionHang}})
 	}
-	parts = append(parts, fieldParts(p)...)
+	parts = append(parts, fieldParts(p, maxLines)...)
 	if len(p.Files) > 0 {
-		parts = append(parts, listField(adoptionPinnedFilesLabel, p.Files, 0))
+		parts = append(parts, listField(adoptionPinnedFilesLabel, p.Files, 0, maxLines))
 	}
 	var lines []bodyLine
 	for i, part := range parts {
@@ -105,22 +125,22 @@ func changedReason(changed []string) string {
 
 // fieldParts groups p's fields into the body's parts: a server's into what it runs or connects to
 // and what it carries — the latter stating an unset allowlist on a stdio server — and a reaction's
-// one part per action.
-func fieldParts(p domain.Proposal) [][]bodyLine {
+// one part per action. Each value is bounded at maxLines (boundValue).
+func fieldParts(p domain.Proposal, maxLines int) [][]bodyLine {
 	if p.Kind == domain.ProposalReaction {
 		parts := make([][]bodyLine, 0, len(p.Fields))
 		for _, f := range p.Fields {
-			parts = append(parts, fieldLines(f, 0))
+			parts = append(parts, fieldLines(f, 0, maxLines))
 		}
 		return parts
 	}
 	var runs, carries []bodyLine
 	for _, f := range p.Fields {
 		if slices.Contains(adoptionRunLabels, f.Label) {
-			runs = append(runs, fieldLines(f, 0)...)
+			runs = append(runs, fieldLines(f, 0, maxLines)...)
 			continue
 		}
-		carries = append(carries, fieldLines(f, 0)...)
+		carries = append(carries, fieldLines(f, 0, maxLines)...)
 		if f.Label == adoptionEnvLabel && needsFloorFact(p) {
 			carries = append(carries, floorFact())
 		}
@@ -164,37 +184,37 @@ func nonEmptyParts(parts ...[]bodyLine) [][]bodyLine {
 
 // fieldLines spells one field at indent by its shape: a scalar on its label's line, a list
 // element by element behind `- `, a map as `key: value` lines and a group as its own fields, each
-// hung one step in. Every value is bounded at argumentValueMaxLines of its own lines.
-func fieldLines(f domain.ProposalField, indent int) []bodyLine {
+// hung one step in. Every value is bounded at maxLines of its own lines (boundValue).
+func fieldLines(f domain.ProposalField, indent, maxLines int) []bodyLine {
 	pad := strings.Repeat(" ", indent)
 	label := flatText(f.Label)
 	switch f.Shape {
 	case domain.ProposalGroup:
 		lines := []bodyLine{{lead: pad + label + ":"}}
 		for _, sub := range f.Fields {
-			lines = append(lines, fieldLines(sub, indent+adoptionHang)...)
+			lines = append(lines, fieldLines(sub, indent+adoptionHang, maxLines)...)
 		}
 		return lines
 	case domain.ProposalList:
-		return listField(label, f.Values, indent)
+		return listField(label, f.Values, indent, maxLines)
 	case domain.ProposalMap:
 		var value []bodyLine
 		for _, v := range f.Values {
 			value = append(value, valueLines(pad+"  ", v, indent+2*adoptionHang)...)
 		}
-		return append([]bodyLine{{lead: pad + label + ":"}}, boundValue(value, indent+adoptionHang)...)
+		return append([]bodyLine{{lead: pad + label + ":"}}, boundValue(value, indent+adoptionHang, maxLines)...)
 	}
 	text := ""
 	if len(f.Values) > 0 {
 		text = f.Values[0]
 	}
 	value := valueLines(pad+label+": ", text, indent+adoptionHang)
-	return boundValue(value, indent+adoptionHang)
+	return boundValue(value, indent+adoptionHang, maxLines)
 }
 
 // listField spells a list under its label, one element per line behind `- `; an explicitly empty
-// list reads as the file spells one.
-func listField(label string, values []string, indent int) []bodyLine {
+// list reads as the file spells one. The elements are bounded at maxLines (boundValue).
+func listField(label string, values []string, indent, maxLines int) []bodyLine {
 	pad := strings.Repeat(" ", indent)
 	if len(values) == 0 {
 		return []bodyLine{{lead: pad + label + ": ", text: "[]", hang: indent + adoptionHang}}
@@ -203,7 +223,7 @@ func listField(label string, values []string, indent int) []bodyLine {
 	for _, v := range values {
 		value = append(value, valueLines(pad+"  - ", v, indent+2*adoptionHang)...)
 	}
-	return append([]bodyLine{{lead: pad + label + ":"}}, boundValue(value, indent+adoptionHang)...)
+	return append([]bodyLine{{lead: pad + label + ":"}}, boundValue(value, indent+adoptionHang, maxLines)...)
 }
 
 // valueLines is one value as lines: its first behind lead, and each of its own line breaks as a
@@ -222,10 +242,10 @@ func valueLines(lead, value string, hang int) []bodyLine {
 	return lines
 }
 
-// boundValue seats a value's lines in argumentValueMaxLines, head, marker and tail (elisionSplit),
-// the marker hung at indent; a short-enough value comes back untouched.
-func boundValue(lines []bodyLine, indent int) []bodyLine {
-	head, tail, hidden := elisionSplit(len(lines), argumentValueMaxLines)
+// boundValue seats a value's lines in maxLines, head, marker and tail (elisionSplit), the marker
+// hung at indent; a short-enough value, and any value under unboundedValue, comes back untouched.
+func boundValue(lines []bodyLine, indent, maxLines int) []bodyLine {
+	head, tail, hidden := elisionSplit(len(lines), maxLines)
 	if hidden == 0 {
 		return lines
 	}

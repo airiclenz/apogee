@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1370,5 +1371,71 @@ func TestDaemonFiringLogsAProjectNoticeOnce(t *testing.T) {
 		if got := spec.Config.Workflow.Retries; got == nil || *got != 9 {
 			t.Errorf("firing %d ran with workflow-retries %v, want the project's 9", i+1, got)
 		}
+	}
+}
+
+// A Firing fires its workspace's adopted repo reaction through the fenced runner its Agent binds,
+// and says nothing about skipping it.
+func TestDaemonFiringFiresAnAdoptedRepoReaction(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	recorder := &projectRunRecorder{}
+	harness.runner.projectRun = recorder.run
+	harness.runner.emit = func(sink domain.EventSink) {
+		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}
+	entry := entryFor(t, "nightly", daemon.Action{Server: "box"})
+	writeDaemonProjectConfig(t, entry.Run.Workspace, projectTwoReactionsYAML)
+	adoptProposalsNamed(t, harness.wiring.opts.ConfigDir, entry.Run.Workspace, "notify", "lint")
+
+	spec := harness.fire(t, entry)
+
+	if got := recorder.fired(); !slices.Equal(got, []string{"lint", "notify"}) &&
+		!slices.Equal(got, []string{"notify", "lint"}) {
+		t.Errorf("repo reactions fired = %v, want both adopted ones", got)
+	}
+	if observe := spec.Generation.Observe; len(observe) != 2 || !observe[0].Project || !observe[1].Project {
+		t.Errorf("observe lane = %+v, want the two adopted repo reactions", observe)
+	}
+	if strings.Contains(harness.logged.String(), "this run skips") {
+		t.Errorf("the daemon logged a skipped reaction though every one is adopted:\n%s", harness.logged.String())
+	}
+}
+
+// A reaction the Project config proposes is skipped by every Firing — off the lanes, never run — and
+// named on the daemon log once per Project root, not once per tick; the server it proposes beside it
+// earns no line.
+func TestDaemonFiringSkipsAProposedRepoReactionWithOneNotice(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid"}},
+	})
+	recorder := &projectRunRecorder{}
+	harness.runner.projectRun = recorder.run
+	harness.runner.emit = func(sink domain.EventSink) {
+		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
+	}
+	entry := entryFor(t, "nightly", daemon.Action{Server: "box"})
+	writeDaemonProjectConfig(t, entry.Run.Workspace, projectWikiServerYAML+projectTwoReactionsYAML)
+	adoptProposalsNamed(t, harness.wiring.opts.ConfigDir, entry.Run.Workspace, "notify")
+
+	first := harness.fire(t, entry)
+	second := harness.fire(t, entry)
+
+	if got := recorder.fired(); !slices.Equal(got, []string{"notify", "notify"}) {
+		t.Errorf("repo reactions fired over two firings = %v, want the adopted notify on each", got)
+	}
+	for i, spec := range []run.Spec{first, second} {
+		if observe := spec.Generation.Observe; len(observe) != 1 || observe[0].ID != "notify" {
+			t.Errorf("firing %d observe lane = %+v, want the adopted notify alone", i+1, observe)
+		}
+	}
+	logged := harness.logged.String()
+	if got := strings.Count(logged, "this run skips"); got != 1 {
+		t.Errorf("the skipped-reaction line was logged %d times over two firings, want once:\n%s", got, logged)
+	}
+	if !strings.Contains(logged, "proposes reaction `lint`; this run skips it") ||
+		strings.Contains(logged, "wiki") {
+		t.Errorf("the skipped-reaction line does not name lint alone:\n%s", logged)
 	}
 }

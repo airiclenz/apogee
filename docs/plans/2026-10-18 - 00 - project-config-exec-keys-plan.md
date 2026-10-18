@@ -249,7 +249,12 @@ internal/tui/settings_test.go — TestSettingsPaneRuleEnterAdoptsOnlyAnInertRule
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSettingsPane' ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSettingsHostRows|TestSettingsHostRepo|TestProjectRuleSettings' ./cmd/apogee/`
 **Commit:** `feat(settings): list and answer repo servers and reactions`
 
-## 11. Unattended Drivers and `apogee project adopt` take the new kinds
+## 11. Unattended Drivers and `apogee project adopt` take the new kinds — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): deviation — internal/tui/adoption.go and internal/tui/adoptionbody.go, which item 11's **Files:** does not list, gain two exported functions, `tui.AdoptionQuestion` (the pane's title and its body, unwrapped and unbounded) and `tui.AdoptionEntryName` (the pane's entry spelling). This lets the CLI question and the unattended notice reuse the pane's single spelling (item 1's spec) without copying it. To print the body unbounded, `proposalBodyLines`/`fieldParts`/`fieldLines`/`listField`/`boundValue` now take a per-value line bound, which the pane passes as `argumentValueMaxLines`. The pane's own output is unchanged.
+NOTES (2026-10-18): the skipped-reaction notice is composed by `skippedReactionsNotice` in headless.go, from `Options.Proposals`. Only proposed reactions earn it. The daemon logs it through the existing per-root+text latch (`latchProjectNotice`), so a change in which reactions are proposed is logged again.
+NOTES (2026-10-18): the `project`/`project adopt` help text now names servers and reactions. A run of only Allow rules keeps the "N rules" header and Allow-rule question line unchanged; a run that includes a server or reaction reads "N entries". The "proposes no rule that is waiting on an answer" line is kept as it was.
+NOTES (2026-10-18): stubRunner (headless_test.go) gains an opt-in `projectRun` that binds into `Config.BindProjectRun`, the bind a real run's Agent makes. With it, tests can see a repo reaction's `run:` reach the fenced runner.
 
 **What:** Depends on items 5 and 9. ADR 0104 §12.
 **Goal:** `apogee project adopt` asks about and records repo servers and reactions alongside Allow rules; a headless run and a daemon Firing fire adopted repo reactions, skip proposed ones with one notice per Project root, and never prompt.

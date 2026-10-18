@@ -350,15 +350,22 @@ func (w *daemonWiring) latchProjectNotice(root, text string) bool {
 // answers the startup resolution itself. w.opts is never changed, so Firings in two workspaces
 // never see each other's layer.
 //
-// What the layer had to say — a file it skipped, a global-only key it dropped — goes on the daemon
-// log once per root and notice (latchProjectNotice), through daemonLogWriter: the notice quotes a
-// file in the workspace, so it is stripped to one line before it reaches the journal.
+// What the layer had to say — a file it skipped, a global-only key it dropped, the proposed
+// reactions this Firing skips because nobody has adopted them (skippedReactionsNotice, ADR 0104
+// §12) — goes on the daemon log once per root and notice (latchProjectNotice), through
+// daemonLogWriter: the notice quotes a file in the workspace, so it is stripped to one line before
+// it reaches the journal. The adopted reactions are on the options and fire.
 func (w *daemonWiring) firingOptions(roots stateRoots) config.Options {
-	return config.OverlayProjectLayer(w.opts, w.global, roots.project, os.ReadFile, func(msg string) {
+	logOnce := func(msg string) {
 		if w.latchProjectNotice(roots.project, msg) {
 			_, _ = daemonLogWriter{log: w.log}.Write([]byte(msg))
 		}
-	})
+	}
+	opts := config.OverlayProjectLayer(w.opts, w.global, roots.project, os.ReadFile, logOnce)
+	if n := skippedReactionsNotice(roots.project, opts.Proposals); n != "" {
+		logOnce(n)
+	}
+	return opts
 }
 
 // fire performs one Firing and reports the record it left behind. It is [schedule.Config.Fire] for

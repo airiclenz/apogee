@@ -52,11 +52,18 @@ type stubRunner struct {
 	// drives an Event the COMMAND's own sink is supposed to render (the prune notice) without a
 	// model or a real loop. nil emits nothing, which is what every other test here wants.
 	emit func(domain.EventSink)
+	// projectRun, when set, is bound into the Config's project-run slot before emit runs — the bind
+	// the Agent a real run builds makes (domain.Config.BindProjectRun), so an adopted repo reaction's
+	// `run:` reaches it instead of being refused as unbound. nil binds nothing.
+	projectRun domain.ProjectRun
 }
 
 func (s *stubRunner) once(_ context.Context, spec run.Spec) (run.Result, error) {
 	s.called = true
 	s.spec = spec
+	if s.projectRun != nil && spec.Config.BindProjectRun != nil {
+		spec.Config.BindProjectRun(s.projectRun)
+	}
 	if s.emit != nil && spec.Config.Events != nil {
 		s.emit(spec.Config.Events)
 	}

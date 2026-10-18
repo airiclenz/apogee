@@ -32,6 +32,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // ----------------------------------------------------------------------------
@@ -791,6 +792,13 @@ func runHeadlessBody(
 		return run.Result{}, notStarted(err)
 	}
 
+	// A reaction the Project config proposes runs nothing until it is adopted, and an unattended run
+	// has nobody to ask, so it is skipped with one line naming it (ADR 0104 §12) — on stderr, where
+	// it cannot contaminate the answer. The adopted ones are already in opts.Reactions and fire.
+	if n := skippedReactionsNotice(roots.project, opts.Proposals); n != "" {
+		cmd.PrintErrln(n)
+	}
+
 	// The scratch sweep, run once here for the reason runRoot runs it at boot (wire.go): this run
 	// mints a dir of its own below and a host that is only ever driven headlessly never passes the
 	// TUI's boot, so this is the only beat on which the dirs earlier runs left behind are reclaimed.
@@ -1278,6 +1286,42 @@ func headlessSummary(res run.Result) string {
 		return stats
 	}
 	return "session: " + res.SessionID + " · " + stats
+}
+
+// skippedReactionsNotice is the one line an unattended run says about the reactions the Project
+// config of projectRoot proposes that nobody on this machine has adopted (ADR 0104 §12): it fires
+// none of them, and an unattended run has nobody to ask, so it names them and the command that
+// answers them. It is the shared composer behind both unattended Drivers — runHeadlessBody prints it
+// on stderr, daemonWiring.firingOptions logs it once per Project root — and it is composed from
+// Options.Proposals there, never by the loader, so a session and `apogee project adopt`, which ask,
+// say nothing of it. An adopted or rejected reaction, a proposed Allow rule and a proposed server
+// earn no line: the first fires, the second was answered, and the others never fire on their own.
+// Nothing proposed composes "".
+func skippedReactionsNotice(projectRoot string, proposals config.ProjectProposals) string {
+	var names []string
+	for _, p := range proposals.Proposed {
+		if p.Kind == apogee.ProposalReaction {
+			names = append(names, tui.AdoptionEntryName(p))
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	pronoun := "it is"
+	if len(names) > 1 {
+		pronoun = "they are"
+	}
+	return fmt.Sprintf("apogee: project config %s proposes %s; this run skips %s until %s adopted "+
+		"— answer with `apogee project adopt` in that project",
+		config.ProjectFilePath(projectRoot), strings.Join(names, ", "), objectPronoun(len(names)), pronoun)
+}
+
+// objectPronoun is "it" for one and "them" for more.
+func objectPronoun(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
 }
 
 // writtenFilesLines renders what a Firing CHANGED on disk: a header naming the count, then one

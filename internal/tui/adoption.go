@@ -193,12 +193,21 @@ func (m Model) adoptionTitle() string {
 	if len(m.picker.adoption) == 0 {
 		return ""
 	}
-	head := m.picker.adoption[0]
-	if isStructured(head) {
-		return fmt.Sprintf("use %s in this project?", proposalName(head))
-	}
-	return fmt.Sprintf("allow %s without asking in this project?", proposalName(head))
+	return adoptionQuestionTitle(m.picker.adoption[0])
 }
+
+// adoptionQuestionTitle is the question about p, naming it: a server or reaction is asked whether
+// to use it, an Allow rule whether to allow it without asking.
+func adoptionQuestionTitle(p domain.Proposal) string {
+	if isStructured(p) {
+		return fmt.Sprintf("use %s in this project?", proposalName(p))
+	}
+	return fmt.Sprintf("allow %s without asking in this project?", proposalName(p))
+}
+
+// AdoptionEntryName spells p for a sentence exactly as the adoption pane does (proposalName) — the
+// one spelling a Driver that names a Project config entry outside the pane uses too.
+func AdoptionEntryName(p domain.Proposal) string { return proposalName(p) }
 
 // adoptionOfferingRows is the open pane's offering: the answers for the entry it asks about.
 func (m Model) adoptionOfferingRows() []popupRow {
