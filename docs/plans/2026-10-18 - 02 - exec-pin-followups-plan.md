@@ -58,7 +58,7 @@ NOTES (2026-10-18): no CHANGELOG entry — a behaviour-preserving refactor with 
 **Closes:** project-program-admit-dup
 **Commit:** `refactor(security): one pinned-program admission serves repo servers and reaction runs`
 
-## 2. ADR 0104 amendment: env display and file search in argv and env
+## 2. ADR 0104 amendment: env display and file search in argv and env — ✅ DONE (2026-10-18)
 
 **What:**
 **Goal:** ADR 0104 carries an amendment Note recording that (a) the adoption pane shows each `env:` entry in full (`KEY=VALUE`), and (b) every argv element and every `env:` value is searched for in-root files — the whole text, each word, the part after a word's `=`, each path-list element — and each such existing regular file is pinned by path and SHA-256; `capcom check` passes.
