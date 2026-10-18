@@ -68,7 +68,7 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 	return &watchedConfig{
 		path:  path,
 		edits: newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" }),
-		await: awaitConfigChangeOn(startConfigWatcher(t, path), nil, nil),
+		await: awaitConfigChangeOn(startConfigWatcher(t, path), nil, nil, nil),
 	}
 }
 
@@ -104,7 +104,7 @@ func newWatchedLayeredConfig(t *testing.T, global, project string) *watchedConfi
 		projectRoot: projectRoot,
 		edits:       newExternalEdit(opts, workspace, func(string) string { return "" }),
 		await: awaitConfigChangeOn(startConfigWatcher(t, path), startConfigWatcher(t, projectPath),
-			startConfigWatcher(t, adoptionPath)),
+			startConfigWatcher(t, adoptionPath), nil),
 	}
 }
 

@@ -347,15 +347,16 @@ func TestSyncWebhookDenyListedEndpointIsNeverPosted(t *testing.T) {
 }
 
 // fakePin is a domain.ProjectPin the repo-run tests state outright: the root, the pinned programs,
-// and what its check reports as changed since adoption.
+// what its check reports as changed since adoption, and whether that check could be made at all.
 type fakePin struct {
 	root     string
 	programs []string
 	changed  []string
+	err      error
 }
 
 func (p fakePin) Root() string               { return p.root }
-func (p fakePin) Changed() ([]string, error) { return p.changed, nil }
+func (p fakePin) Changed() ([]string, error) { return p.changed, p.err }
 func (p fakePin) Programs() []string         { return p.programs }
 
 // repoReaction is an adopted repo reaction over the script at root/scripts/fmt.sh, written with
@@ -475,6 +476,52 @@ func TestRepoRunRefusesAChangedScript(t *testing.T) {
 			}
 			if conf.confineCount() != 0 {
 				t.Errorf("Confine called %d times, want 0", conf.confineCount())
+			}
+		})
+	}
+}
+
+// TestRepoRunRefusalPokesPinMoved pins the re-ask cue (Config.PinMoved): every spawn the pin check
+// refuses because the pinned files moved, or could not be checked, tells the Driver once — on
+// either lane — so a pane can ask again; a reaction carrying no pin moved no file and cues nothing.
+func TestRepoRunRefusalPokesPinMoved(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the executor it pins is platform-independent")
+	}
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		edit func(*domain.Reaction)
+		want int
+	}{
+		{name: "changed script", edit: func(*domain.Reaction) {}, want: 2},
+		{name: "unreadable pin", edit: func(r *domain.Reaction) {
+			r.Pin = fakePin{root: r.Pin.Root(), err: errors.New("scripts/fmt.sh: permission denied")}
+		}, want: 2},
+		{name: "no pin", edit: func(r *domain.Reaction) { r.Pin = nil }, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := syncAgent(t, &recordingSink{}, &fakeConfiner{caps: capsBoth()}, true)
+			pokes := 0
+			a.cfg.PinMoved = func() { pokes++ }
+			canary := filepath.Join(t.TempDir(), "spawned")
+			r := repoReaction(t, a.cfg.WorkspaceDir, domain.ClassGate, "touch "+canary, "scripts/fmt.sh")
+			tc.edit(&r)
+
+			_, syncErr := a.runSyncArgv(context.Background(), 1, r, domain.SeamPayload{Event: domain.MomentPreToolExec})
+			observeErr := a.RunProjectReaction(context.Background(), r, "{}", nil)
+
+			if syncErr == nil || observeErr == nil {
+				t.Fatalf("sync err = %v, observe err = %v; want both lanes refused", syncErr, observeErr)
+			}
+			if pokes != tc.want {
+				t.Errorf("PinMoved called %d times, want %d — once per refused spawn of a moved pin", pokes, tc.want)
+			}
+			if _, statErr := os.Stat(canary); statErr == nil {
+				t.Error("the command ran; a refused pin must spawn nothing")
 			}
 		})
 	}

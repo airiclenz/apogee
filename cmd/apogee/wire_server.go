@@ -169,15 +169,22 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 // without touching either config file. A report from any of them is the same news — the re-read
 // resolves all three and diffs the result — so the wait does not say which file moved.
 //
+// And it fans in wake, the session's own cue that a re-read is due though no watched file moved
+// (reloadWake): an adopted repo reaction refused because its pinned script changed (ADR 0104 §4)
+// is proposed again by that re-read, so the adoption pane asks about it at the next idle moment.
+// A nil wake never fires.
+//
 // It answers false on two ends, and they mean the same thing to the caller: the program's context is
 // done (a quit, which must not leave a goroutine parked on a channel until teardown reaches the
 // watcher), or a watch has been stopped and closed its channel — teardown stops them together.
 // Either way there will never be another report, and the chain retires.
-func awaitConfigChangeOn(global, project, adoptions *filewatch.Watcher) func(context.Context) bool {
+func awaitConfigChangeOn(global, project, adoptions *filewatch.Watcher, wake reloadWake) func(context.Context) bool {
 	return func(ctx context.Context) bool {
 		select {
 		case <-ctx.Done():
 			return false
+		case <-wake:
+			return true
 		case _, ok := <-changesOf(global):
 			return ok
 		case _, ok := <-changesOf(project):
@@ -195,6 +202,27 @@ func changesOf(w *filewatch.Watcher) <-chan struct{} {
 		return nil
 	}
 	return w.Changes()
+}
+
+// reloadWake is the session's own trigger for a config re-read no watched file reported — the
+// wire-silent cue the engine gives when an adopted repo reaction's pinned files moved under it
+// (apogee.Config.PinMoved). The wait the renderer parks on selects on it beside the watchers
+// (awaitConfigChangeOn), so the re-read and the adoption refresh behind it run exactly as they do
+// for a saved file. It holds one pending cue: a burst of refusals before the wait comes round is
+// one re-read, which is all the news is worth — the re-read finds every moved entry at once.
+type reloadWake chan struct{}
+
+// newReloadWake is an empty wake, ready to hold the one pending cue.
+func newReloadWake() reloadWake { return make(reloadWake, 1) }
+
+// poke queues a re-read without ever blocking: the engine calls it from the loop goroutine and the
+// observe lane's workers, and a cue already pending already asks for the re-read this one would. A
+// nil wake (a wiring that built none) drops it.
+func (c reloadWake) poke() {
+	select {
+	case c <- struct{}{}:
+	default:
+	}
 }
 
 // serverHost is this binary's [tui.ServerHost]: the six acts over the one Upstream this session is

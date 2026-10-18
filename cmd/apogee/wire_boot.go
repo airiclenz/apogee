@@ -64,7 +64,14 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 // caller (rootDeps): a boot test dictates the backend's capability matrix through it and asks its
 // gating question on every host. Zero deps resolve to the production values.
 func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, deps rootDeps) *rootWiring {
-	w := &rootWiring{opts: opts, mode: mode, roots: roots, runner: deps.runner, mcpLogin: deps.mcpLogin}
+	w := &rootWiring{
+		opts:       opts,
+		mode:       mode,
+		roots:      roots,
+		runner:     deps.runner,
+		mcpLogin:   deps.mcpLogin,
+		reloadWake: newReloadWake(),
+	}
 
 	// The one key resolver this run has. Every seam that needs a server's API key — the startup
 	// Config below, the bind, a `/server` switch, the Sub-agent server's beat — resolves through
@@ -275,6 +282,10 @@ func (w *rootWiring) resolveConfig() error {
 	// observe lane's failures through (Report above), so one `reactions:` file's trouble reads
 	// the same way whichever lane it came from.
 	w.cfg.Report = w.bridge.NotifyHook
+	// The re-ask cue (ADR 0104 §4): a repo reaction refused because its pinned files moved wakes
+	// the config wait (reloadWake), whose re-read proposes the entry again for the adoption pane —
+	// no Project config edit and no restart needed.
+	w.cfg.PinMoved = w.reloadWake.poke
 	w.cfg.Approver = w.bridge.Approver()
 	w.cfg.Asker = w.bridge.Asker()
 	// The pre-emption seam (ADR 0025): the Bridge answers whether the TUI's queue holds a

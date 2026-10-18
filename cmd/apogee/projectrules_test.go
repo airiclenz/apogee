@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -44,8 +45,9 @@ func proposalOfRule(rule apogee.AllowRule) apogee.Proposal {
 }
 
 // projectRuleWiring is a rootWiring with what the rule acts reach: a home naming endpoint, a Project
-// root that is the workspace, the live-settings holder, the external-edit baseline, and an engine
-// bound to a real Agent in ask-before whose every gate goes to approver.
+// root that is the workspace, the live-settings holder, the external-edit baseline, the config wake,
+// and an engine bound to a real Agent in ask-before whose every gate goes to approver and whose
+// moved-pin refusals poke that wake, as the session's own Config does (wire_boot.go).
 func projectRuleWiring(t *testing.T, endpoint string, approver apogee.Approver, sink apogee.EventSink) *rootWiring {
 	t.Helper()
 	home := upstreamHome(t, endpoint)
@@ -56,6 +58,7 @@ func projectRuleWiring(t *testing.T, endpoint string, approver apogee.Approver, 
 		engine:        newLateEngine(domain.ModeAskBefore, false),
 		live:          newLiveSettings(opts),
 		externalEdits: newExternalEdit(opts, root, noEnvironment),
+		reloadWake:    newReloadWake(),
 	}
 	t.Cleanup(func() { _ = w.engine.Close() })
 	err := w.engine.Bind(func() (*apogee.Agent, error) {
@@ -67,6 +70,7 @@ func projectRuleWiring(t *testing.T, endpoint string, approver apogee.Approver, 
 			Approver:     approver,
 			Tools:        tools.NewDefaultRegistry(root),
 			WorkspaceDir: root,
+			PinMoved:     w.reloadWake.poke,
 		})
 	})
 	if err != nil {
@@ -775,6 +779,97 @@ func TestProjectRuleHandEditedGlobalAllowAppliesLive(t *testing.T) {
 	runE2EExchange(t, ctx, w.engine, "and once more")
 	if got := approver.requests(); len(got) != 1 {
 		t.Errorf("approval requests after the entry is gone = %d, want the gate back", len(got))
+	}
+}
+
+// projectScriptReactionYAML is a Project config proposing one observe-lane reaction whose command
+// is a script inside the repository, so its adoption pins that script's content.
+const projectScriptReactionYAML = "reactions:\n  - id: x\n    on: [file-changed]\n    run: [./scripts/x.sh]\n"
+
+// writeReactionScript writes the repo reaction's script under root with body, executable.
+func writeReactionScript(t *testing.T, root, body string) {
+	t.Helper()
+	path := filepath.Join(root, "scripts", "x.sh")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create scripts/: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("write scripts/x.sh: %v", err)
+	}
+}
+
+// adoptedReaction is the repo reaction id as the layered config arms it once adopted — its pin
+// included — failing the test when the config does not arm it.
+func adoptedReaction(t *testing.T, w *rootWiring, id string) domain.Reaction {
+	t.Helper()
+	o, err := w.layeredOptions()
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	for _, r := range o.Reactions {
+		if r.ID == id && r.Project {
+			return r
+		}
+	}
+	t.Fatalf("reactions = %+v, want the adopted repo reaction %q armed", o.Reactions, id)
+	return domain.Reaction{}
+}
+
+// An adopted repo reaction whose script is edited mid-session is refused at its next spawn, and that
+// refusal alone — no config file and no adoption record moved, and no watcher running — wakes the
+// config wait; the re-read then proposes the entry again naming the edited script, and adopting
+// the new content arms it so it runs again.
+func TestChangedReactionScriptReasksInSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the wake it pins is platform-independent")
+	}
+	t.Parallel()
+	ctx := context.Background()
+	w := projectRuleWiring(t, scriptedTerminalModel(t).URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	writeReactionScript(t, w.roots.project, "exit 0")
+	projectPath := config.ProjectFilePath(w.roots.project)
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	writeSettingsFixture(t, projectPath, projectScriptReactionYAML)
+	first, err := host.ProposedRules()
+	if err != nil {
+		t.Fatalf("ProposedRules: %v", err)
+	}
+	if err := host.AdoptRules(first); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+	armed := adoptedReaction(t, w, "x")
+	run := w.engine.bound().RunProjectReaction
+	if err := run(ctx, armed, "{}", nil); err != nil {
+		t.Fatalf("the adopted reaction before the edit: %v", err)
+	}
+
+	writeReactionScript(t, w.roots.project, "echo edited")
+	refusal := run(ctx, armed, "{}", nil)
+	waitCtx, cancel := context.WithTimeout(ctx, configWatchTestDeadline)
+	defer cancel()
+	woke := host.AwaitConfigChange(waitCtx)
+	proposed, err := host.ProposedRules()
+	if err != nil {
+		t.Fatalf("ProposedRules after the edit: %v", err)
+	}
+
+	if refusal == nil || !strings.Contains(refusal.Error(), "scripts/x.sh changed since you adopted it") {
+		t.Fatalf("the edited script's spawn err = %v, want the moved-pin refusal", refusal)
+	}
+	if !woke {
+		t.Fatal("AwaitConfigChange did not return true — the refusal must wake the re-read with no watcher moved")
+	}
+	if len(proposed) != 1 || proposed[0].Handle != "x" || !slices.Contains(proposed[0].Changed, "scripts/x.sh") {
+		t.Fatalf("proposed after the refusal = %+v, want reaction x again with scripts/x.sh in Changed", proposed)
+	}
+	if err := host.AdoptRules(proposed); err != nil {
+		t.Fatalf("AdoptRules of the edited script: %v", err)
+	}
+	if err := run(ctx, adoptedReaction(t, w, "x"), "{}", nil); err != nil {
+		t.Errorf("the re-adopted reaction: %v, want it armed on the new content", err)
 	}
 }
 

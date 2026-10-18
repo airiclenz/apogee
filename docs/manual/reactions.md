@@ -276,8 +276,10 @@ with the execution tools' credential scrub, and under that door's ceilings — s
 and a relative program resolves against that root. It may run a script inside the root —
 `run: ["./scripts/notify.sh"]` — only because adoption pinned that script's content: the pinned
 files are checked again before every spawn, and one that changed, went missing or is newly named
-refuses that run with a notice naming the file, and the entry is proposed again. An adopted script
-runs whatever it contains, so read it, and what it calls, before you adopt it.
+refuses that run with a notice naming the file, and the entry is proposed again: in the TUI that
+refusal re-reads the config, so the adoption pane asks about the new content at the next idle
+moment — no Project config edit or restart needed — and adopting it arms the reaction again. An
+adopted script runs whatever it contains, so read it, and what it calls, before you adopt it.
 
 ## Sending a webhook
 

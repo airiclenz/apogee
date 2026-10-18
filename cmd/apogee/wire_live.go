@@ -537,8 +537,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		// the same Bridge seam the session's own Runner reports through, so a failing Reaction reads
 		// identically whichever of the two fired it.
 		notifyHook: w.bridge.NotifyHook,
-		upstream:   w.upstream,
-		stats:      w.stats,
+		// And where one of those Firings' repo reactions, refused for its moved pinned files, cues
+		// this session's config re-read — the wake the session's own engine pokes (reloadWake).
+		pinMoved: w.reloadWake.poke,
+		upstream: w.upstream,
+		stats:    w.stats,
 	}
 	w.gate = newIdleGate()
 	w.schedules, err = schedule.New(schedule.Config{

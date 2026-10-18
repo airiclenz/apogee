@@ -104,6 +104,11 @@ type scheduleWiring struct {
 	// from Update. nil leaves a Reaction's failure silent, which is what a composition test wants.
 	notifyHook func(string)
 
+	// pinMoved is the session's config wake (reloadWake.poke): a Firing's repo reaction refused for
+	// its moved pinned files cues the session's re-read, so the adoption pane asks about the entry
+	// again (domain.Config.PinMoved). nil drops the cue, which is what a composition test wants.
+	pinMoved func()
+
 	// upstream is the footer's liveness verdict on the bound server, as the TUI last published it
 	// through [tui.Options.ReportUpstream] (upstreamLatch, below) — the pair a Firing's beat carries
 	// so raise can refuse one up front while the server is offline. It is the renderer's OWN
@@ -197,8 +202,9 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 				EffortSupport: domain.EffortSupport{Dialect: domainEffortDialect(w.live.observedDialect())},
 			}
 		},
-		report: w.notifyHook,
-		stats:  w.stats,
+		report:   w.notifyHook,
+		pinMoved: w.pinMoved,
+		stats:    w.stats,
 	}, f.Prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
 
 	// A Firing refused before it began — a composition that would not produce a Config, or a footer

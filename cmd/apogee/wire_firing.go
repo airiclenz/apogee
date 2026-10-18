@@ -125,6 +125,12 @@ type firingInputs struct {
 	// nil DROPS the line, exactly as domain.Config.Report's own default does — every composition
 	// test, and a Driver with nowhere to put it.
 	report func(msg string)
+	// pinMoved is the re-ask cue an adopted repo reaction refused for its moved pinned files gives
+	// (domain.Config.PinMoved, ADR 0104 §4) — the raising session's own config wake, so a Firing
+	// that trips over a changed script brings the session's adoption pane round to ask about it, as
+	// the session's own refusal does. nil drops it: headless and the daemon have no pane to ask in,
+	// and a composition test asks nothing.
+	pinMoved func()
 	// stats is the Driver's per-server stats recorder (ADR 0085), which records every
 	// UpstreamAttemptEvent this Firing's engine emits while `server-stats:` is on. nil records
 	// nothing and leaves Config.Events exactly as the Runner above left it.
@@ -524,6 +530,11 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// voice — and a Driver that passed neither leaves both nil, which is what a bare composition is.
 	if in.report != nil {
 		cfg.Report = in.report
+	}
+	// The re-ask cue goes beside it, for the same one-decision reason: a Driver that can ask about
+	// a moved pin hears of it from either lane's refusal. A Driver that passed none leaves it nil.
+	if in.pinMoved != nil {
+		cfg.PinMoved = in.pinMoved
 	}
 
 	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session

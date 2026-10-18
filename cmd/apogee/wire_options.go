@@ -338,11 +338,12 @@ func (h configHost) ReloadConfig() (tui.ConfigReload, error) {
 
 // AwaitConfigChange is the trigger that needs no editor at all (ADR 0041 decision 3): one wait on the
 // watchers started in the assembly — the global file's, the Project config's and the adoption
-// record's — answered when any of the three changes. What the renderer does with the
+// record's — answered when any of the three changes, or when the engine cues a re-read because an
+// adopted reaction's pinned files moved (reloadWake). What the renderer does with the
 // news is exactly what it does when an editor exits — re-read through ReloadConfig, apply through the
 // two homes above — so a saved file applies whoever saved it (decision 5).
 func (h configHost) AwaitConfigChange(ctx context.Context) bool {
-	return awaitConfigChangeOn(h.w.configWatch, h.w.projectWatch, h.w.adoptionWatch)(ctx)
+	return awaitConfigChangeOn(h.w.configWatch, h.w.projectWatch, h.w.adoptionWatch, h.w.reloadWake)(ctx)
 }
 
 // MigrateKey answers the key-migration offer's "move it" (keymigrate.go, ADR 0047): the store write,

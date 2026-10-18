@@ -107,7 +107,13 @@ Fix of a pin gap from the exec-keys plan (ADR 0104 decision 4 as amended by item
 **Closes:** server-pin-field-drift
 **Commit:** `test(config): every repo MCP server field is held in its adoption pin`
 
-## 5. A refused reaction spawn re-asks in-session
+## 5. A refused reaction spawn re-asks in-session — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): the cue fires for a pin whose files moved or could not be checked (Changed error), not for a Project reaction carrying no pin — no file moved, so a re-read has nothing new to ask; checkProjectPin became an Agent method to reach Config.PinMoved.
+NOTES (2026-10-18): consequential edit — cmd/apogee/wire_options.go: made necessary by awaitConfigChangeOn growing its wake parameter (configHost.AwaitConfigChange is its production call site, beside the two test sites the plan names).
+NOTES (2026-10-18): Firings threaded per the regression guard (firingInputs.pinMoved beside report, wire_firing.go); carrying the session's wake to it needed scheduleWiring.pinMoved (cmd/apogee/schedule.go) and its literal in cmd/apogee/wire_live.go — two files the plan's Files line did not name. Headless and daemon Firings pass none (no pane): out of scope.
+NOTES (2026-10-18): consequential edit — docs/manual/reactions.md: made necessary by the refusal now re-asking in-session (the "proposed again" sentence says when and where).
+NOTES (2026-10-18): the cmd/apogee test fires the adopted `run:` entry through the Agent's fenced runner (lateEngine.bound().RunProjectReaction — the runner BindProjectRun hands a Driver's Runner), since projectRuleWiring builds no observe Runner; bite checked by dropping PinMoved from projectRuleWiring (AwaitConfigChange then times out). No composition test pins the Firing's cfg.PinMoved.
 
 **What:**
 **Goal:** after a pinned reaction script changes mid-session, its next refused spawn wakes the config reload, so the adoption pane re-asks at the next idle moment without a Project config edit or a restart, and adopting the new content arms the reaction.

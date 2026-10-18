@@ -264,6 +264,9 @@ type rootWiring struct {
 	configWatch   *filewatch.Watcher
 	projectWatch  *filewatch.Watcher
 	adoptionWatch *filewatch.Watcher
+	// reloadWake is the re-read cue the engine pokes when an adopted repo reaction's pinned files
+	// moved (apogee.Config.PinMoved); the renderer's config wait selects on it beside the watchers.
+	reloadWake    reloadWake
 	mover         sessionMover
 	launcherPath  *launcherPath
 	launcherSeams launcherWiring
