@@ -426,6 +426,10 @@ type Reaction struct {
 	// agent — today's unconditional membership inheritance — while true keeps the reaction at
 	// depth 0.
 	TopLevelOnly bool
+	// Project marks a user-origin reaction the Project config defined and the user adopted
+	// (ADR 0104), as against one from the global config. Only the config layer sets it; the fences
+	// that keep a repo reaction to its own repo read it.
+	Project bool
 }
 
 // ErrInvalidReaction is wrapped by Reaction.Validate for a reaction the engine will not accept:

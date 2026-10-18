@@ -11,20 +11,23 @@ import (
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"gopkg.in/yaml.v3"
 )
 
-// The Project config's execution keys — repo MCP servers (ADR 0104)
+// The Project config's execution keys — repo MCP servers and reactions (ADR 0104)
 //
-// A Project config's `mcp-servers:` entries are granting: a cloned repo must not launch a program
-// or dial an endpoint because it says so. So the layer carries them apart from the node merge
-// (layer.go). Each entry is decoded and checked ALONE — a refused one is dropped with a notice
-// naming it and never costs the rest of the file (ADR 0104 §7) — then pinned (execpin.go), and
-// sorted by the user's adoption record together with the file's Allow rules, in one read of it. An
-// entry whose name a global server already uses is dropped before it is offered: the user's own
-// entry wins (§5). Only an adopted entry joins the resolved servers, flagged Project and, when it
-// is a stdio server that lists no `env-allowlist:`, narrowed to the platform floor (§6); every one
-// is reported on Options.Proposals with what its adoption pane shows.
+// A Project config's `mcp-servers:` and `reactions:` entries are granting: a cloned repo must not
+// launch a program, dial an endpoint or run a command because it says so. So the layer carries them
+// apart from the node merge (layer.go). Each entry is decoded and checked ALONE — a refused one is
+// dropped with a notice naming it and never costs the rest of the file (ADR 0104 §7) — then pinned
+// (execpin.go), and sorted by the user's adoption record together with the file's Allow rules, in
+// one read of it. An entry whose name (server) or id (reaction) a global entry already uses is
+// dropped before it is offered: the user's own entry wins (§5). Only an adopted entry joins the
+// resolved servers or reactions, flagged Project — a stdio server that lists no `env-allowlist:`
+// narrowed to the platform floor (§6), a reaction armed with the `on:`, `timeout:`, `enabled:` and
+// `workspace:` the file states now, since its pin leaves those parameters out (§2); every one is
+// reported on Options.Proposals with what its adoption pane shows.
 
 // mcpServersPath is the `mcp-servers:` key's registry path, the granting key whose project entries
 // the layer judges one by one.
@@ -33,6 +36,22 @@ const mcpServersPath = "mcp-servers"
 // serverHandleField is the pinned field that names a server entry, which the pane carries in its
 // title rather than its body.
 const serverHandleField = "name"
+
+// reactionsPath is the `reactions:` key's registry path, the granting key whose project entries
+// the layer judges one by one.
+const reactionsPath = "reactions"
+
+// reactionHandleField is the pinned field that names a reaction entry, carried in the pane's title.
+const reactionHandleField = "id"
+
+// repoReactionRefusedNotice is the line a project `reactions:` entry that cannot be used costs: the
+// project file, the entry, and why. The rest of the file still applies.
+const repoReactionRefusedNotice = "apogee: project config %s: ignoring reactions entry %s: %s"
+
+// repoReactionShadowedNotice is the line a project reaction with a global one's id costs: the
+// user's own entry wins, and the project's is never offered (ADR 0104 §5).
+const repoReactionShadowedNotice = "apogee: project config %s: ignoring reactions entry %q — " +
+	"your global config defines a reaction of that id, and it wins"
 
 // repoServerRefusedNotice is the line a project `mcp-servers:` entry that cannot be used costs: the
 // project file, the entry, and why. The rest of the file still applies.
@@ -48,10 +67,11 @@ const repoServerShadowedNotice = "apogee: project config %s: ignoring mcp-server
 const projectSkippedKeyNotice = "apogee: project config %s: ignoring %s: %s"
 
 // ProjectProposals is a Project config's structured granting entries sorted by the user's adoption
-// record, each list in file order. Adopted entries are live — an adopted server is also in
-// Options.MCPServers; Proposed ones wait on an answer, each carrying what changed since its handle
-// was last adopted; Rejected ones the user turned down. Only Adopted grants anything. The zero
-// value is no entries.
+// record, each list holding the servers in file order and then the reactions in file order.
+// Adopted entries are live — an adopted server is also in Options.MCPServers, an adopted reaction
+// in Options.Reactions; Proposed ones wait on an answer, each carrying what changed since its
+// handle was last adopted; Rejected ones the user turned down. Only Adopted grants anything. The
+// zero value is no entries.
 type ProjectProposals struct {
 	Adopted  []domain.Proposal
 	Proposed []domain.Proposal
@@ -72,6 +92,43 @@ func (p projectServers) effective(global []mcp.ServerConfig) []mcp.ServerConfig 
 		return global
 	}
 	return slices.Concat(global, p.adopted)
+}
+
+// concatProposals is first's lists followed by second's, each built fresh.
+func concatProposals(first, second ProjectProposals) ProjectProposals {
+	return ProjectProposals{
+		Adopted:  slices.Concat(first.Adopted, second.Adopted),
+		Proposed: slices.Concat(first.Proposed, second.Proposed),
+		Rejected: slices.Concat(first.Rejected, second.Rejected),
+	}
+}
+
+// projectReactionSet is a Project config's reactions resolved by Adoption: the Reactions the
+// adopted entries arm, and every entry as a Proposal.
+type projectReactionSet struct {
+	adopted   []domain.Reaction
+	proposals ProjectProposals
+}
+
+// effective is the resolved `reactions:` key: the global Reactions, then the adopted project ones.
+// It builds a fresh slice whenever it adds any, so a base resolution's list is never shared.
+func (p projectReactionSet) effective(global []domain.Reaction) []domain.Reaction {
+	if len(p.adopted) == 0 {
+		return global
+	}
+	return slices.Concat(global, p.adopted)
+}
+
+// globalReactions is list less every Reaction the Project config contributed — what a project's
+// adopted reactions join, whatever layer the resolution they came from took. Built fresh.
+func globalReactions(list []domain.Reaction) []domain.Reaction {
+	var global []domain.Reaction
+	for _, r := range list {
+		if !r.Project {
+			global = append(global, r)
+		}
+	}
+	return global
 }
 
 // globalMCPServers is servers less every one the Project config contributed — what a project's
@@ -137,25 +194,159 @@ func checkRepoServer(m mcpServerConfig, named map[string]bool) error {
 	return server.ValidateAuth()
 }
 
+// repoReactionConfigs decodes the project file's `reactions:` value (nil when the file states none)
+// one entry at a time, answering the entries that passed in file order. An entry that does not
+// decode, has no id, or repeats an earlier entry's id is dropped with one notice naming it; a value
+// that is not a list drops every entry with one notice. Neither ever skips the layer. What the
+// entry arms is judged later, against the Project root (repoArmed).
+func repoReactionConfigs(value *yaml.Node, path string, notify func(string)) []reactionConfig {
+	if value == nil {
+		return nil
+	}
+	if value.Kind != yaml.SequenceNode {
+		notify(fmt.Sprintf(projectSkippedKeyNotice, path, reactionsPath, "it is not a list of reactions"))
+		return nil
+	}
+	var entries []reactionConfig
+	seen := make(map[string]bool, len(value.Content))
+	for i, item := range value.Content {
+		var r reactionConfig
+		label := fmt.Sprintf("#%d", i+1)
+		err := resolveAlias(item).Decode(&r)
+		id := strings.TrimSpace(r.ID)
+		if err == nil {
+			if id != "" {
+				label = fmt.Sprintf("%q", id)
+			}
+			err = checkRepoReactionID(id, seen)
+		}
+		if err != nil {
+			notify(fmt.Sprintf(repoReactionRefusedNotice, path, label, sansPrefix{err}.Error()))
+			continue
+		}
+		seen[id] = true
+		entries = append(entries, r)
+	}
+	return entries
+}
+
+// checkRepoReactionID refuses a repo reaction whose id is empty or repeats one in seen.
+func checkRepoReactionID(id string, seen map[string]bool) error {
+	switch {
+	case id == "":
+		return errors.New("it has no id")
+	case seen[id]:
+		return errors.New("an earlier entry already uses that id")
+	}
+	return nil
+}
+
+// repoArmed maps the repo reaction r against projectRoot (entryReactionsIn) and runs on it alone
+// the checks each lane's owner holds for the global block (validateReactionBlocks), answering the
+// Reactions it arms — none while it is parked by `enabled: false`, though a parked entry is still
+// checked, so it is never offered for adoption in a shape that could not run once switched on.
+func (r reactionConfig) repoArmed(projectRoot string) ([]domain.Reaction, error) {
+	mapped, err := r.entryReactionsIn(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	observe, sync := domain.SplitLanes(mapped)
+	if err := reactions.ValidateAll(observe); err != nil {
+		return nil, err
+	}
+	if err := (domain.Generation{Sync: sync}).Validate(); err != nil {
+		return nil, err
+	}
+	if r.Enabled != nil && !*r.Enabled {
+		return nil, nil
+	}
+	return mapped, nil
+}
+
+// pinnedReaction is a repo reaction with the Reactions it arms and the Adoption entry its pin
+// builds.
+type pinnedReaction struct {
+	armed []domain.Reaction
+	entry adoption.Entry
+}
+
+// pinRepoReactions maps and pins each of the layer's reactions that no global reaction shadows, in
+// file order. One that cannot be mapped — a `workspace:` outside the Project root among the ways —
+// or pinned is dropped with a notice naming it.
+func pinRepoReactions(layer projectLayer, global []reactionConfig, projectRoot string,
+	notify func(string)) []pinnedReaction {
+	globalIDs := make(map[string]bool, len(global))
+	for _, r := range global {
+		globalIDs[strings.TrimSpace(r.ID)] = true
+	}
+	var pinned []pinnedReaction
+	for _, r := range layer.reactions {
+		id := strings.TrimSpace(r.ID)
+		if globalIDs[id] {
+			notify(fmt.Sprintf(repoReactionShadowedNotice, layer.path, id))
+			continue
+		}
+		armed, err := r.repoArmed(projectRoot)
+		var entry adoption.Entry
+		if err == nil {
+			entry, err = r.execPin(projectRoot)
+		}
+		if err != nil {
+			notify(fmt.Sprintf(repoReactionRefusedNotice, layer.path, fmt.Sprintf("%q", id),
+				reactionRefusal(id, err)))
+			continue
+		}
+		pinned = append(pinned, pinnedReaction{armed: armed, entry: entry})
+	}
+	return pinned
+}
+
+// reactionRefusal spells err for the refused-entry notice, which names the entry already: without
+// the `reaction "id": ` its mapping prefixes, or apogee's own prefix.
+func reactionRefusal(id string, err error) string {
+	return strings.TrimPrefix(sansPrefix{err}.Error(), fmt.Sprintf("reaction %q: ", id))
+}
+
+// resolveRepoReactions turns the reactions' classification into the Reactions the adopted ones arm
+// and the Proposals of every one. store is as resolveRepoServers takes it.
+func resolveRepoReactions(pinned []pinnedReaction, sorted adoption.Classification,
+	store *adoption.Store) projectReactionSet {
+	byID := make(map[string][]domain.Reaction, len(pinned))
+	for _, r := range pinned {
+		byID[r.entry.Handle] = r.armed
+	}
+	resolved := projectReactionSet{proposals: kindProposals(sorted, ReactionAdoptionKind, reactionHandleField, store)}
+	for _, e := range kindEntries(sorted.Adopted, ReactionAdoptionKind) {
+		resolved.adopted = append(resolved.adopted, byID[e.Handle]...)
+	}
+	return resolved
+}
+
 // pinnedServer is a repo server with the Adoption entry its pin builds.
 type pinnedServer struct {
 	config mcpServerConfig
 	entry  adoption.Entry
 }
 
-// classifyProjectLayer sorts the layer's Allow rules and MCP servers by the adoption record under
-// workspacesDir, in one read of it. A server named like one of global — the global file's servers
-// — is dropped with a notice before it is pinned, and so is one whose pin cannot be built (a named
-// project file that cannot be read), since what cannot be pinned cannot be shown to stay adopted.
-func classifyProjectLayer(layer projectLayer, global []mcpServerConfig, workspacesDir,
-	projectRoot string, notify func(string)) (projectAllowRules, projectServers) {
-	servers := pinRepoServers(layer, global, projectRoot, notify)
+// classifyProjectLayer sorts the layer's Allow rules, MCP servers and reactions by the adoption
+// record under workspacesDir, in one read of it. A server or reaction named like one of global's —
+// the global file's — is dropped with a notice before it is pinned, and so is one whose pin cannot
+// be built (a named project file that cannot be read), since what cannot be pinned cannot be shown
+// to stay adopted.
+func classifyProjectLayer(layer projectLayer, global fileConfig, workspacesDir, projectRoot string,
+	notify func(string)) (projectAllowRules, projectServers, projectReactionSet) {
+	servers := pinRepoServers(layer, global.MCPServers, projectRoot, notify)
+	pinned := pinRepoReactions(layer, global.Reactions, projectRoot, notify)
 	entries := slices.Clone(layer.allow)
 	for _, s := range servers {
 		entries = append(entries, s.entry)
 	}
+	for _, r := range pinned {
+		entries = append(entries, r.entry)
+	}
 	sorted, store := classifyProjectEntries(entries, layer.path, workspacesDir, projectRoot, notify)
-	return projectAllowRulesOf(sorted), resolveRepoServers(servers, sorted, store)
+	return projectAllowRulesOf(sorted), resolveRepoServers(servers, sorted, store),
+		resolveRepoReactions(pinned, sorted, store)
 }
 
 // pinRepoServers pins each of the layer's servers that no global server shadows, in file order.
@@ -190,31 +381,41 @@ func resolveRepoServers(servers []pinnedServer, sorted adoption.Classification,
 	for _, s := range servers {
 		byName[s.entry.Handle] = s.config
 	}
-	var resolved projectServers
-	for _, e := range serverEntries(sorted.Adopted) {
+	resolved := projectServers{proposals: kindProposals(sorted, MCPServerAdoptionKind, serverHandleField, store)}
+	for _, e := range kindEntries(sorted.Adopted, MCPServerAdoptionKind) {
 		resolved.adopted = append(resolved.adopted, byName[e.Handle].repoServerConfig())
-		resolved.proposals.Adopted = append(resolved.proposals.Adopted, proposalOf(e, serverHandleField))
-	}
-	for _, e := range serverEntries(sorted.Proposed) {
-		proposal := proposalOf(e, serverHandleField)
-		proposal.Changed = changedSinceAdopted(store, e)
-		resolved.proposals.Proposed = append(resolved.proposals.Proposed, proposal)
-	}
-	for _, e := range serverEntries(sorted.Rejected) {
-		resolved.proposals.Rejected = append(resolved.proposals.Rejected, proposalOf(e, serverHandleField))
 	}
 	return resolved
 }
 
-// serverEntries is the entries of entries that are repo MCP servers, in order.
-func serverEntries(entries []adoption.Entry) []adoption.Entry {
-	var servers []adoption.Entry
+// kindProposals is the Proposals of sorted's entries of one structured kind, each named by
+// handleField, a proposed one carrying its change reason read from store.
+func kindProposals(sorted adoption.Classification, kind, handleField string,
+	store *adoption.Store) ProjectProposals {
+	var proposals ProjectProposals
+	for _, e := range kindEntries(sorted.Adopted, kind) {
+		proposals.Adopted = append(proposals.Adopted, proposalOf(e, handleField))
+	}
+	for _, e := range kindEntries(sorted.Proposed, kind) {
+		proposal := proposalOf(e, handleField)
+		proposal.Changed = changedSinceAdopted(store, e)
+		proposals.Proposed = append(proposals.Proposed, proposal)
+	}
+	for _, e := range kindEntries(sorted.Rejected, kind) {
+		proposals.Rejected = append(proposals.Rejected, proposalOf(e, handleField))
+	}
+	return proposals
+}
+
+// kindEntries is the entries of entries of one Adoption kind, in order.
+func kindEntries(entries []adoption.Entry, kind string) []adoption.Entry {
+	var matched []adoption.Entry
 	for _, e := range entries {
-		if e.Kind == MCPServerAdoptionKind {
-			servers = append(servers, e)
+		if e.Kind == kind {
+			matched = append(matched, e)
 		}
 	}
-	return servers
+	return matched
 }
 
 // repoServerConfig is the adopted repo server m as the client connects it: flagged Project, and a

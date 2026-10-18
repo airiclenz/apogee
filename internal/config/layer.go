@@ -24,8 +24,8 @@ import (
 // its `add:` reaches the security seam as the project's additions and its `remove:` is dropped with
 // a notice. A granting key is never layered here — its project entries are live only by Adoption, so
 // they are carried apart from this merge: `allow:`'s rules are checked alone with the rest of the
-// file, `mcp-servers:` entries one by one (execlayer.go), then both are sorted by the user's
-// adoption record (allow.go), and only the adopted ones grant.
+// file, `mcp-servers:` and `reactions:` entries one by one (execlayer.go), then all are sorted by
+// the user's adoption record (allow.go), and only the adopted ones grant.
 //
 // The merge happens on the YAML node tree, before the decode, so the file pass (applyFile) reads
 // one document exactly as it reads the global file alone. The project file is a guest: it never
@@ -72,13 +72,15 @@ const projectGlobalOnlyNotice = "apogee: project config %s: ignoring global-only
 // applies, in file order, the dangerous-action rules its `dangerous-rules: {add: …}` states, which
 // never enter the merge — they reach the security seam as its project additions — and the Allow
 // rules its `allow:` states, which never enter it either: they wait on the adoption record, as do
-// the MCP servers its `mcp-servers:` states, each already checked alone (execlayer.go).
+// the MCP servers its `mcp-servers:` states and the reactions its `reactions:` states, each already
+// checked alone (execlayer.go).
 type projectLayer struct {
 	path         string
 	entries      []projectEntry
 	dangerousAdd []domain.DangerousRule
 	allow        []adoption.Entry
 	servers      []mcpServerConfig
+	reactions    []reactionConfig
 }
 
 // projectEntry is one project-capable key the project file states: its registry path, its class
@@ -109,7 +111,8 @@ func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]
 	o.DangerousRules.ProjectAdd = stated.projectDangerous
 	o.AllowRules = stated.projectAllow.effective(o.AllowRules.Rules)
 	o.MCPServers = stated.projectServers.effective(o.MCPServers)
-	o.Proposals = stated.projectServers.proposals
+	o.Reactions = stated.projectReactions.effective(o.Reactions)
+	o.Proposals = stated.proposals()
 	return o, nil
 }
 
@@ -120,14 +123,21 @@ func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]
 // dangerous-action additions, which the merge never sees and resolution lands on
 // DangerousRuleSet.ProjectAdd after the file pass, and projectAllow, the project layer's Allow
 // rules sorted by the adoption record, which resolution joins to the global rules after it, and
-// projectServers, its MCP servers sorted the same way, whose adopted ones resolution joins to the
-// global servers.
+// projectServers and projectReactions, its MCP servers and reactions sorted the same way, whose
+// adopted ones resolution joins to the global servers and reactions.
 type layerKeys struct {
 	global           map[string]bool
 	project          map[string]bool
 	projectDangerous []domain.DangerousRule
 	projectAllow     projectAllowRules
 	projectServers   projectServers
+	projectReactions projectReactionSet
+}
+
+// proposals is every structured entry the layer proposed, servers first and then reactions, as
+// Options.Proposals reports them. Built fresh.
+func (s layerKeys) proposals() ProjectProposals {
+	return concatProposals(s.projectServers.proposals, s.projectReactions.proposals)
 }
 
 // parseLayeredConfig is parseConfigFile for the global file with the Project config of projectRoot
@@ -156,7 +166,7 @@ func parseLayeredConfig(globalPath, projectRoot string, readFile func(string) ([
 // layerProject merges the Project config of projectRoot into the global document data (the
 // migrated bytes of the global file at globalPath, nil when there is none) and answers the decoded
 // merged schema, recording on stated what the layer contributed: its keys, its dangerous-action
-// additions, and its Allow rules and MCP servers sorted by the adoption record. ok is false when there is no layer
+// additions, and its Allow rules, MCP servers and reactions sorted by the adoption record. ok is false when there is no layer
 // to take — no project file, one that states nothing, or one skipped with a notice — and stated is
 // then left as it was. It is the one merge both a startup resolution and a later overlay
 // ([OverlayProjectLayer]) run, so a project file means the same thing to both.
@@ -175,13 +185,16 @@ func layerProject(data []byte, globalPath, projectRoot string, readFile func(str
 					projectKeys[dangerousRulesPath] = true
 					stated.projectDangerous = layer.dangerousAdd
 				}
-				stated.projectAllow, stated.projectServers = classifyProjectLayer(layer, fc.MCPServers,
-					workspacesDirOf(globalPath), projectRoot, notify)
+				stated.projectAllow, stated.projectServers, stated.projectReactions = classifyProjectLayer(
+					layer, fc, workspacesDirOf(globalPath), projectRoot, notify)
 				if len(stated.projectAllow.adopted) > 0 {
 					projectKeys[allowPath] = true
 				}
 				if len(stated.projectServers.adopted) > 0 {
 					projectKeys[mcpServersPath] = true
+				}
+				if len(stated.projectReactions.adopted) > 0 {
+					projectKeys[reactionsPath] = true
 				}
 				stated.project = projectKeys
 				return fc, true
@@ -227,9 +240,9 @@ func ReadGlobalDocument(configDir string, readFile func(string) ([]byte, error),
 // of both files and a block whose keys share one field (`context-files:`) keeps its global half. A
 // key an environment variable or a flag set for this run ([Options.Overrides]) keeps base's value:
 // the precedence stays default < global < project < env < flag. Global-only keys are dropped with
-// one notice, a project's `allow:` rules and `mcp-servers:` entries are sorted by the adoption
-// record and only the adopted ones join base's global rules and servers (Proposals reports them
-// all), and ProjectKeys and DangerousRules.ProjectAdd say what the layer contributed. No project file, one that states nothing, or one that cannot be layered answers base
+// one notice, a project's `allow:` rules, `mcp-servers:` entries and `reactions:` entries are
+// sorted by the adoption record and only the adopted ones join base's global rules, servers and
+// reactions (Proposals reports them all), and ProjectKeys and DangerousRules.ProjectAdd say what the layer contributed. No project file, one that states nothing, or one that cannot be layered answers base
 // itself — the last after one notice naming the file. Notices go to notify, which must be non-nil.
 //
 // base is never changed: every field the overlay writes is replaced by a freshly built value, so
@@ -250,7 +263,8 @@ func OverlayProjectLayer(base Options, global GlobalDocument, projectRoot string
 	overlaid.DangerousRules.ProjectAdd = stated.projectDangerous
 	overlaid.AllowRules = stated.projectAllow.effective(globalAllowRules(base.AllowRules.Rules))
 	overlaid.MCPServers = stated.projectServers.effective(globalMCPServers(base.MCPServers))
-	overlaid.Proposals = stated.projectServers.proposals
+	overlaid.Reactions = stated.projectReactions.effective(globalReactions(base.Reactions))
+	overlaid.Proposals = stated.proposals()
 	return overlaid
 }
 
@@ -361,8 +375,9 @@ func resolveProjectRoot(workspace string, notify func(string)) string {
 // a file that states nothing are no layer, silently; every other way the file can fail is one
 // notice naming its path. Unknown keys are announced against the project path, and the global-only
 // keys it states are named in one notice and dropped before the checks, so a key the layer ignores
-// cannot also cost it the keys it honours. Its `mcp-servers:` entries are taken out of that check
-// and judged one by one once it passes (repoMCPServers), so a refused server costs only itself.
+// cannot also cost it the keys it honours. Its `mcp-servers:` and `reactions:` entries are taken
+// out of that check and judged one by one once it passes (repoMCPServers, repoReactionConfigs), so
+// a refused entry costs only itself.
 func readProjectLayer(path, globalPath string, readFile func(string) ([]byte, error),
 	notify func(string)) (projectLayer, bool) {
 	if path == "" {
@@ -416,9 +431,10 @@ func readProjectLayer(path, globalPath string, readFile func(string) ([]byte, er
 		return projectLayer{}, false
 	}
 	layer := projectLayer{path: path, entries: walk.entries, dangerousAdd: checked.DangerousRules.Add,
-		allow: allowEntries(checked.AllowRules.Rules), servers: repoMCPServers(walk.servers, path, notify)}
+		allow: allowEntries(checked.AllowRules.Rules), servers: repoMCPServers(walk.servers, path, notify),
+		reactions: repoReactionConfigs(walk.reactions, path, notify)}
 	return layer, len(layer.entries) > 0 || len(layer.dangerousAdd) > 0 || len(layer.allow) > 0 ||
-		len(layer.servers) > 0
+		len(layer.servers) > 0 || len(layer.reactions) > 0
 }
 
 // sameConfigFile reports whether the symlink-resolved project file is the global config file —
@@ -460,14 +476,15 @@ func checkProjectLayer(checked *yaml.Node) (Options, error) {
 // is decoded alone before anything is merged. A granting key goes into checked alone, never into
 // entries: its rules are judged with the rest of the file and then wait on the adoption record. droppedRemove records a `dangerous-rules: {remove: …}`
 // the layer refused; the block's `add:` goes into checked alone and never into entries. servers is
-// the `mcp-servers:` value, kept out of checked too: its entries are judged one by one, so one bad
-// server never skips the layer.
+// the `mcp-servers:` value and reactions the `reactions:` value, kept out of checked too: their
+// entries are judged one by one, so one bad entry never skips the layer.
 type projectWalk struct {
 	entries       []projectEntry
 	dropped       []string
 	droppedRemove bool
 	checked       *yaml.Node
 	servers       *yaml.Node
+	reactions     *yaml.Node
 }
 
 // mapping walks one mapping node of the project file at the dotted prefix. A key that is a registry
@@ -510,6 +527,10 @@ func (w *projectWalk) key(k Key, value *yaml.Node) {
 	}
 	if k.Path == mcpServersPath {
 		w.servers = value
+		return
+	}
+	if k.Path == reactionsPath {
+		w.reactions = value
 		return
 	}
 	switch k.Class {

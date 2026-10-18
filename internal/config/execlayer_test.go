@@ -7,17 +7,20 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/reactions/scope"
 )
 
 // projectDocsServerYAML is a Project config proposing one stdio server and nothing else.
 const projectDocsServerYAML = "mcp-servers:\n  - name: docs\n    transport: stdio\n    command: docs-server\n"
 
 // adoptProposedServers loads the layered config of globalPath and projectRoot and records every
-// MCP server entry it proposes as adopted, answering the proposals it adopted.
+// structured entry it proposes — MCP servers and reactions alike — as adopted, answering the
+// proposals it adopted.
 func adoptProposedServers(t *testing.T, globalPath, projectRoot string) []domain.Proposal {
 	t.Helper()
 
@@ -328,5 +331,318 @@ func TestRepoMCPServerRefusedAloneKeepsTheTightenOnlyKeys(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// projectNotifyReactionYAML is a Project config proposing one observe reaction and nothing else.
+const projectNotifyReactionYAML = "reactions:\n  - id: notify\n    on: [file-changed]\n    run: [notify-send, saved]\n"
+
+// reactionIDs is the ids of list, in order, each marked `(project)` when the Project config
+// contributed it.
+func reactionIDs(list []domain.Reaction) []string {
+	ids := make([]string, len(list))
+	for i, r := range list {
+		ids[i] = r.ID
+		if r.Project {
+			ids[i] += " (project)"
+		}
+	}
+	return ids
+}
+
+// proposalHandles is the handles of proposals, in order.
+func proposalHandles(proposals []domain.Proposal) []string {
+	var handles []string
+	for _, p := range proposals {
+		handles = append(handles, p.Handle)
+	}
+	return handles
+}
+
+// A Project config's reaction is proposed — with what its pane shows — and fires nothing until the
+// user adopts it; once adopted it joins the global reactions, flagged Project, at every site a
+// project layer is resolved.
+func TestRepoReactionIsInertUntilAdopted(t *testing.T) {
+	t.Parallel()
+	global := "reactions:\n  - id: log\n    on: [turn-finished]\n    run: [logger, turn]\n"
+	globalPath, projectRoot := layerFixture(t, global, projectNotifyReactionYAML)
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if got := reactionIDs(o.Reactions); !slices.Equal(got, []string{"log"}) {
+		t.Errorf("Reactions = %q; want the global log alone — a proposed reaction fires nothing", got)
+	}
+	if len(o.Proposals.Proposed) != 1 || len(o.Proposals.Adopted)+len(o.Proposals.Rejected) != 0 {
+		t.Fatalf("Proposals = %+v; want the one reaction proposed", o.Proposals)
+	}
+	got := o.Proposals.Proposed[0]
+	wantFields := []domain.ProposalField{{Label: "run", Values: []string{"notify-send", "saved"}}}
+	if got.Kind != domain.ProposalReaction || got.Handle != "notify" || !reflect.DeepEqual(got.Fields, wantFields) {
+		t.Errorf("proposal = %+v; want reaction entry notify with fields %+v", got, wantFields)
+	}
+	if o.ProjectKeys[reactionsPath] {
+		t.Errorf("ProjectKeys = %v; a proposed reaction contributes nothing to the run", o.ProjectKeys)
+	}
+	if len(notices) != 0 {
+		t.Errorf("notices = %q; want none — a proposal is reported on Proposals, not announced", notices)
+	}
+
+	adoptProposedServers(t, globalPath, projectRoot)
+	resolvers := map[string]func(t *testing.T) Options{
+		"LoadLayeredConfig": func(t *testing.T) Options {
+			resolved, _ := loadLayered(t, globalPath, projectRoot)
+			return resolved
+		},
+		"ResolveOptions": func(t *testing.T) Options {
+			return resolveAt(t, globalPath, projectRoot, false)
+		},
+		"OverlayProjectLayer": func(t *testing.T) Options {
+			base := resolveAt(t, globalPath, projectRoot, true)
+			doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
+			if err != nil {
+				t.Fatalf("ReadGlobalDocument: %v", err)
+			}
+			overlaid := OverlayProjectLayer(base, doc, projectRoot, os.ReadFile, noNotify)
+			if got := reactionIDs(base.Reactions); !slices.Equal(got, []string{"log"}) {
+				t.Errorf("base reactions = %q after the overlay; want the base left as it was", got)
+			}
+			return overlaid
+		},
+	}
+	for name, resolve := range resolvers {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			resolved := resolve(t)
+
+			if got, want := reactionIDs(resolved.Reactions), []string{"log", "notify (project)"}; !slices.Equal(got, want) {
+				t.Errorf("Reactions = %q; want %q", got, want)
+			}
+			if got := proposalHandles(resolved.Proposals.Adopted); !slices.Equal(got, []string{"notify"}) {
+				t.Errorf("adopted = %q; want notify", got)
+			}
+			if !resolved.ProjectKeys[reactionsPath] {
+				t.Errorf("ProjectKeys = %v; want reactions recorded once a project reaction is live",
+					resolved.ProjectKeys)
+			}
+		})
+	}
+}
+
+// A repo reaction with the id of one of the user's own is dropped with a notice naming it and never
+// offered: the global entry stands as written.
+func TestRepoReactionIDCollisionKeepsTheGlobal(t *testing.T) {
+	t.Parallel()
+	global := "reactions:\n  - id: notify\n    on: [turn-finished]\n    run: [logger, turn]\n"
+	globalPath, projectRoot := layerFixture(t, global, projectNotifyReactionYAML)
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if len(o.Reactions) != 1 || o.Reactions[0].Project || o.Reactions[0].On[0] != domain.MomentTurnFinished {
+		t.Errorf("Reactions = %+v; want the global notify alone", o.Reactions)
+	}
+	if !reflect.DeepEqual(o.Proposals, ProjectProposals{}) {
+		t.Errorf("Proposals = %+v; want none — a shadowed reaction is never offered", o.Proposals)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], `reactions entry "notify"`) ||
+		!strings.Contains(notices[0], "global config") {
+		t.Errorf("notices = %q; want one naming the shadowed notify entry", notices)
+	}
+}
+
+// An adopted repo reaction that spells no `workspace:` carries no filter: the layer already keeps
+// it to sessions under its Project root (ADR 0104 §7).
+func TestRepoReactionUnsetWorkspaceLeavesTheFilterEmpty(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "", projectNotifyReactionYAML)
+	adoptProposedServers(t, globalPath, projectRoot)
+
+	o, _ := loadLayered(t, globalPath, projectRoot)
+
+	if len(o.Reactions) != 1 || !o.Reactions[0].Project {
+		t.Fatalf("Reactions = %+v; want the adopted notify, flagged Project", o.Reactions)
+	}
+	if got := o.Reactions[0].Workspace; got != "" {
+		t.Errorf("Workspace = %q; want the filter left empty", got)
+	}
+}
+
+// A repo reaction's spelled `workspace:` must name the Project root or a directory inside it, a
+// relative one resolving against the root; one outside refuses that entry alone with a notice.
+func TestRepoReactionWorkspaceOutsideTheRootIsRefused(t *testing.T) {
+	t.Parallel()
+	outside := t.TempDir()
+	tests := []struct {
+		name      string
+		workspace string
+		want      func(projectRoot string) string
+		refused   bool
+	}{
+		{name: "an absolute path outside", workspace: outside, refused: true},
+		{name: "a relative path climbing out", workspace: "../elsewhere", refused: true},
+		{name: "a home-relative path", workspace: "~/elsewhere", refused: true},
+		{
+			name: "a relative path inside resolves against the root", workspace: "sub",
+			want: func(projectRoot string) string { return filepath.Join(projectRoot, "sub") },
+		},
+		{
+			name: "the root itself", workspace: ".",
+			want: func(projectRoot string) string { return projectRoot },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			project := "reactions:\n  - id: scoped\n    on: [file-changed]\n    run: [notify-send]\n" +
+				"    workspace: " + tt.workspace + "\n" + projectNotifyReactionYAML[len("reactions:\n"):]
+			globalPath, projectRoot := layerFixture(t, "", project)
+			adoptProposedServers(t, globalPath, projectRoot)
+
+			o, notices := loadLayered(t, globalPath, projectRoot)
+
+			if tt.refused {
+				if got := reactionIDs(o.Reactions); !slices.Equal(got, []string{"notify (project)"}) {
+					t.Errorf("Reactions = %q; want the refused entry dropped and notify kept", got)
+				}
+				if len(notices) != 1 || !strings.Contains(notices[0], `reactions entry "scoped"`) ||
+					!strings.Contains(notices[0], "outside the Project root") {
+					t.Errorf("notices = %q; want one refusing scoped as outside the root", notices)
+				}
+				return
+			}
+			if len(notices) != 0 || len(o.Reactions) != 2 {
+				t.Fatalf("Reactions = %q, notices = %q; want both entries live and no notice",
+					reactionIDs(o.Reactions), notices)
+			}
+			want, err := scope.Resolve(tt.want(projectRoot))
+			if err != nil {
+				t.Fatalf("scope.Resolve: %v", err)
+			}
+			if got := o.Reactions[0].Workspace; got != want {
+				t.Errorf("Workspace = %q; want %q", got, want)
+			}
+		})
+	}
+}
+
+// A repo reaction that cannot be used is dropped alone with a notice naming it: the file's other
+// reactions are still offered and its tighten-only keys still apply.
+func TestRepoReactionRefusedAloneKeepsTheRest(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		reactions    string
+		wantProposed []string
+		wantNotices  []string
+	}{
+		{
+			name: "bad entries beside a good one",
+			reactions: "reactions:\n" +
+				"  - on: [file-changed]\n    run: [nameless]\n" +
+				"  - id: typo\n    on: [file-chnaged]\n    run: [x]\n" +
+				projectNotifyReactionYAML[len("reactions:\n"):] +
+				"  - id: actionless\n    on: [file-changed]\n" +
+				"  - id: slow\n    on: [file-changed]\n    run: [x]\n    timeout: soon\n" +
+				"  - id: shape\n    on: [file-changed]\n    run: echo\n",
+			wantProposed: []string{"notify"},
+			wantNotices: []string{
+				"reactions entry #1: it has no id",
+				`reactions entry "typo": `,
+				`reactions entry "actionless": `,
+				`reactions entry "slow": timeout: "soon" is not a duration`,
+				`reactions entry "shape": run: is an argv list`,
+			},
+		},
+		{
+			name:        "a value that is not a list",
+			reactions:   "reactions: notify\n",
+			wantNotices: []string{"ignoring reactions: it is not a list of reactions"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			globalPath, projectRoot := layerFixture(t, "", "tools:\n  disabled: [web_fetch]\n"+tt.reactions)
+
+			o, notices := loadLayered(t, globalPath, projectRoot)
+
+			if !slices.Contains(o.ToolsDisabled, "web_fetch") {
+				t.Errorf("tools.disabled = %q; want the project's web_fetch to still apply", o.ToolsDisabled)
+			}
+			if got := proposalHandles(o.Proposals.Proposed); !slices.Equal(got, tt.wantProposed) {
+				t.Errorf("proposed = %q; want %q", got, tt.wantProposed)
+			}
+			if len(notices) != len(tt.wantNotices) {
+				t.Fatalf("notices = %q; want %d", notices, len(tt.wantNotices))
+			}
+			for i, want := range tt.wantNotices {
+				if !strings.Contains(notices[i], want) {
+					t.Errorf("notice %d = %q; want it to contain %q", i, notices[i], want)
+				}
+			}
+		})
+	}
+}
+
+// A second repo reaction with an id an earlier one took is refused alone; the first is offered.
+func TestRepoReactionRepeatedIDIsRefused(t *testing.T) {
+	t.Parallel()
+	project := projectNotifyReactionYAML + "  - id: notify\n    on: [turn-finished]\n    run: [other]\n"
+	globalPath, projectRoot := layerFixture(t, "", project)
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if len(o.Proposals.Proposed) != 1 {
+		t.Fatalf("Proposals = %+v; want the first notify alone proposed", o.Proposals)
+	}
+	if got := o.Proposals.Proposed[0].Fields; !reflect.DeepEqual(got,
+		[]domain.ProposalField{{Label: "run", Values: []string{"notify-send", "saved"}}}) {
+		t.Errorf("proposed fields = %+v; want the first entry's", got)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], `reactions entry "notify": an earlier entry already uses that id`) {
+		t.Errorf("notices = %q; want one refusing the repeated notify", notices)
+	}
+}
+
+// The parameters a reaction's pin leaves out — `on:`, `timeout:`, `enabled:` and `workspace:` —
+// apply to an adopted entry as the file states them now, without proposing it again; a change to
+// what it runs proposes it again and leaves it inert.
+func TestAdoptedRepoReactionTakesParameterEditsLive(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "", projectNotifyReactionYAML)
+	adoptProposedServers(t, globalPath, projectRoot)
+	writeLayerFile(t, projectFilePath(projectRoot), "reactions:\n  - id: notify\n"+
+		"    on: [turn-finished]\n    run: [notify-send, saved]\n    timeout: 9s\n    workspace: sub\n"+
+		"    enabled: true\n")
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if len(notices) != 0 || len(o.Proposals.Proposed) != 0 || len(o.Reactions) != 1 {
+		t.Fatalf("Reactions = %q, Proposals = %+v, notices = %q; want notify still adopted and live",
+			reactionIDs(o.Reactions), o.Proposals, notices)
+	}
+	wantWorkspace, err := scope.Resolve(filepath.Join(projectRoot, "sub"))
+	if err != nil {
+		t.Fatalf("scope.Resolve: %v", err)
+	}
+	got := o.Reactions[0]
+	if !slices.Equal(got.On, []domain.Moment{domain.MomentTurnFinished}) || got.Timeout != 9*time.Second ||
+		got.Workspace != wantWorkspace || !got.Project {
+		t.Errorf("reaction = %+v; want on [turn-finished], 9s, workspace %q, flagged Project", got, wantWorkspace)
+	}
+
+	writeLayerFile(t, projectFilePath(projectRoot), projectNotifyReactionYAML+"    enabled: false\n")
+	parked, _ := loadLayered(t, globalPath, projectRoot)
+	if len(parked.Reactions) != 0 || len(parked.Proposals.Adopted) != 1 {
+		t.Errorf("Reactions = %q, Proposals = %+v; want notify still adopted but parked",
+			reactionIDs(parked.Reactions), parked.Proposals)
+	}
+
+	writeLayerFile(t, projectFilePath(projectRoot), strings.Replace(projectNotifyReactionYAML, "saved", "done", 1))
+	moved, _ := loadLayered(t, globalPath, projectRoot)
+	if len(moved.Reactions) != 0 || len(moved.Proposals.Proposed) != 1 ||
+		!slices.Equal(moved.Proposals.Proposed[0].Changed, []string{"run"}) {
+		t.Errorf("Reactions = %q, Proposals = %+v; want notify proposed again for its run and inert",
+			reactionIDs(moved.Reactions), moved.Proposals)
 	}
 }

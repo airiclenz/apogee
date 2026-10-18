@@ -115,7 +115,15 @@ internal/config/registry.go — KeyRegistry (mcp-servers row); internal/config/r
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestRegistryKeyClasses|TestRepoMCP|TestRepoStdio|TestAdoptedRepoMCP|TestDocMap' ./internal/config/`
 **Commit:** `feat(config): adoption-gated MCP servers in the Project config`
 
-## 5. Repo reactions are layered by Adoption
+## 5. Repo reactions are layered by Adoption — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): consequential edit — internal/config/layer.go: made necessary by the layer carrying repo reactions apart from the merge (projectWalk.reactions, projectLayer.reactions, readProjectLayer's non-empty predicate, layerKeys.projectReactions/proposals(), and the LoadLayeredConfig and OverlayProjectLayer merge sites — the plan names OverlayProjectLayer under Read first but not layer.go under Files).
+NOTES (2026-10-18): consequential edit — internal/config/allow.go: made necessary by reactions joining the one classify pass; the unread-record notice now ends "its allow rules, MCP servers and reactions stay proposed".
+NOTES (2026-10-18): consequential edit — internal/config/options.go: made necessary by Options.Reactions and Options.Proposals now carrying adopted/proposed repo reactions (doc comments only).
+NOTES (2026-10-18): consequential edit — internal/config/doc.go: made necessary by execlayer.go now layering `reactions:` too (its map sentence).
+NOTES (2026-10-18): the project-origin flag is `domain.Reaction.Project` (set by entryReactionsIn when given a Project root). classifyProjectLayer now takes the merged global fileConfig (servers and reactions both shadow by name/id); resolveRepoServers was folded onto shared kindProposals/kindEntries helpers (replacing serverEntries) so both kinds build Proposals one way. Options.Proposals lists servers first, then reactions, each in file order.
+NOTES (2026-10-18): a repo reaction is decoded and its id checked (missing / repeated) in readProjectLayer, then mapped against the Project root with the global block's lane checks (repoArmed) and pinned in the classify stage, where a global id collision, a `workspace:` outside the root (a `~` path included), or any mapping refusal drops it alone with a notice. A parked (`enabled: false`) repo entry is still checked and proposed, and arms nothing while adopted. The reactions row's Desc is unchanged (pinned by TestRegistry… wantDesc); only its Class and comment moved.
+NOTES (2026-10-18): until items 6, 8 and 9 land, an adopted repo reaction fires without the item-6 fences, live reload does not yet re-layer it, and the in-app adoption pane does not yet show reaction proposals.
 
 **What:** Recast at the regression check (2026-10-18). Depends on item 4. ADR 0104 §1, §5, §7.
 **Goal:** a Project config's `reactions:` entries are classified like servers; `Options.Reactions` is the global set plus adopted repo reactions carrying the project-origin flag; a repo reaction whose `id` matches a global one is dropped with a notice; an unset `workspace:` leaves the filter empty, and a spelled `workspace:` outside the Project root (a relative one resolving against it) refuses that entry alone with a notice; `on:`, `timeout`, `enabled` and `workspace:` edits apply to an adopted entry without re-proposing.

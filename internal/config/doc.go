@@ -78,9 +78,9 @@
 // canonical JSON of its pinned fields with the content digest of every in-root project file its
 // argv or `env:` values name — names what changed since an adopted pin, resolves a repo entry's
 // relative names against the Project root, and re-checks the pinned files before a spawn. execlayer.go
-// layers a Project config's `mcp-servers:` entries by Adoption (ADR 0104 §1, §5, §6) — each judged
-// alone, pinned, sorted by the adoption record with the Allow rules, the adopted ones joined to the
-// global servers and every one reported as a Proposal (Options.Proposals). The one-goroutine
+// layers a Project config's `mcp-servers:` and `reactions:` entries by Adoption (ADR 0104 §1, §5–§7)
+// — each judged alone, pinned, sorted by the adoption record with the Allow rules, the adopted ones
+// joined to the global servers and reactions and every one reported as a Proposal (Options.Proposals). The one-goroutine
 // poller that reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows
 // nothing about YAML or this schema, and it has a second caller in the daemon's schedules watch, so
 // it lives in internal/filewatch.

@@ -350,7 +350,8 @@ type Options struct {
 	// file only (default-empty ⇒ nothing fires). One entry contributes one Reaction per action key
 	// it spells, all under its id, so a Driver divides the list ([domain.LanesOf]) into the observe
 	// lane its Runner fires and the sync lane its Agent runs. ApplyConfig sets it from settings, and
-	// the TUI re-reads it in place when the file changes.
+	// the TUI re-reads it in place when the file changes. A Project config's adopted reactions
+	// (ADR 0104) follow the global ones, flagged Project.
 	Reactions []domain.Reaction
 
 	// toolsDisabled and toolsEnabled are the resolved GLOBAL roster deltas (ADR 0057) — the built-in
@@ -388,10 +389,11 @@ type Options struct {
 	// no flag or env: a rule widens what runs unasked, so only the user's own answers build it.
 	AllowRules AllowRules
 
-	// Proposals is the Project config's structured granting entries — its `mcp-servers:` entries
-	// (ADR 0104) — sorted by the user's adoption record, each with what its adoption pane shows. An
-	// adopted server is also in MCPServers, flagged Project; a proposed or rejected one is reported
-	// here alone and runs nothing. Empty when no project layer was read.
+	// Proposals is the Project config's structured granting entries — its `mcp-servers:` and
+	// `reactions:` entries (ADR 0104) — sorted by the user's adoption record, each with what its
+	// adoption pane shows. An adopted server is also in MCPServers and an adopted reaction in
+	// Reactions, each flagged Project; a proposed or rejected one is reported here alone and runs
+	// nothing. Empty when no project layer was read.
 	Proposals ProjectProposals
 
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed

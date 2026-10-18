@@ -100,9 +100,9 @@ const (
 	// global layer's rather than replacing them, so a repo can switch a tool off or deny a host but
 	// never switch one back on.
 	ClassTightenOnly
-	// ClassGranting keys widen what runs unasked — the Allow rules, and the MCP servers a project
-	// would launch or dial — so a project's entries for one are live only once the user has Adopted
-	// their pinned content.
+	// ClassGranting keys widen what runs unasked — the Allow rules, and the MCP servers and
+	// reactions a project would launch, dial or run — so a project's entries for one are live only
+	// once the user has Adopted their pinned content.
 	ClassGranting
 )
 
@@ -1177,8 +1177,11 @@ var KeyRegistry = bindRows([]Key{
 		// directly under `bypass`, which opens the pane's Reactions section: the off-switch first,
 		// then the list it switches off. Read-only, and NOT Interlocked: apogee has one config file,
 		// and the flag would take the row out of the live reload diff that keeps a session's
-		// Reactions following the file.
+		// Reactions following the file. Granting since ADR 0104 §1: a Project config's entries are
+		// carried apart from the layered merge (execlayer.go) and fire only once the user has adopted
+		// their pin; the global file's are live as written.
 		Path: "reactions", Kind: KindStructured,
+		Class:     ClassGranting,
 		Editable:  false,
 		Desc:      "Commands run when a Moment closes or a seam fires; advise text reaches the model fenced, a gate answers before the Approver does.",
 		Read:      func(o Options) string { return countSummary(distinctReactionIDs(o.Reactions), "reaction") },

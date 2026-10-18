@@ -97,6 +97,13 @@ const contextFillNoticeKey = "context-fill-notice"
 // outside the notice vocabulary is not refused by [reactionConfig.moments]: which spellings are
 // legal depends on the class, which only the core knows.
 func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
+	return r.entryReactionsIn("")
+}
+
+// entryReactionsIn is entryReactions for an entry of the file at projectRoot: "" for the global
+// file, and for a Project config's entry its Project root — then a relative `workspace:` resolves
+// against that root, one outside it is refused (ADR 0104 §7), and every Reaction is flagged Project.
+func (r reactionConfig) entryReactionsIn(projectRoot string) ([]domain.Reaction, error) {
 	id := strings.TrimSpace(r.ID)
 	if id == "" {
 		return nil, fmt.Errorf(
@@ -115,7 +122,7 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	workspace, err := r.resolvedWorkspace(id)
+	workspace, err := r.resolvedWorkspace(id, projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +148,7 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 			Handler:   handler,
 			Workspace: workspace,
 			Timeout:   timeout,
+			Project:   projectRoot != "",
 		})
 	}
 	// An entry that spells no action key at all has been written against a schema apogee does not
@@ -330,7 +338,12 @@ func shapeError(id, key string) error {
 // resolvedWorkspace reduces this entry's `workspace:` filter to its comparable spelling. An empty
 // filter stays empty — the unset filter, active at every root — and a leading `~` goes through this
 // package's own expansion first so the key reads like every other path key the schema carries.
-func (r reactionConfig) resolvedWorkspace(id string) (string, error) {
+//
+// projectRoot is "" for the global file's entry. For a Project config's entry it is that root: an
+// unset filter still stays empty, since the layer already confines the entry to sessions under the
+// root, while a spelled one resolves a relative path against the root and must name the root or a
+// directory inside it — a repo reaction stays in its repo (ADR 0104 §7).
+func (r reactionConfig) resolvedWorkspace(id, projectRoot string) (string, error) {
 	if strings.TrimSpace(r.Workspace) == "" {
 		return "", nil
 	}
@@ -338,11 +351,33 @@ func (r reactionConfig) resolvedWorkspace(id string) (string, error) {
 	if err != nil {
 		return "", reactionEntryError(id, "workspace: %v", err)
 	}
+	if projectRoot != "" {
+		expanded = ResolveAgainstProjectRoot(projectRoot, expanded)
+	}
 	resolved, err := scope.Resolve(expanded)
 	if err != nil {
 		return "", reactionEntryError(id, "%v", err)
 	}
+	if projectRoot != "" && !insideProjectRoot(projectRoot, resolved) {
+		return "", reactionEntryError(id,
+			"workspace: %q is outside the Project root %s — a project reaction stays in its repo",
+			r.Workspace, projectRoot)
+	}
 	return resolved, nil
+}
+
+// insideProjectRoot reports whether the resolved path is projectRoot itself or lies inside it,
+// both compared in the one spelling scope.Resolve gives them.
+func insideProjectRoot(projectRoot, resolved string) bool {
+	root, err := scope.Resolve(projectRoot)
+	if err != nil {
+		return false
+	}
+	if resolved == root {
+		return true
+	}
+	_, inside := relativeInsideRoot(root, resolved)
+	return inside
 }
 
 // toReactions maps the whole `reactions:` list, stopping at the first entry it cannot map. One

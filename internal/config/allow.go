@@ -35,7 +35,7 @@ const workspacesDirName = "workspaces"
 // adoptionUnreadNotice is the line a project file whose entries cannot be classified costs: they
 // all stay proposed — inert — and the session says why.
 const adoptionUnreadNotice = "apogee: project config %s: cannot read the adoption record: %v; " +
-	"its allow rules and MCP servers stay proposed"
+	"its allow rules, MCP servers and reactions stay proposed"
 
 // AllowRule is one Allow rule: the key it sits under, its text exactly as the file spells it — the
 // text an adoption pins — and the layer it came from, SourceGlobal or SourceProject.

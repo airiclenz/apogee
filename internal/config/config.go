@@ -3494,7 +3494,8 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	opts.DangerousRules.ProjectAdd = stated.projectDangerous
 	opts.AllowRules = stated.projectAllow.effective(opts.AllowRules.Rules)
 	opts.MCPServers = stated.projectServers.effective(opts.MCPServers)
-	opts.Proposals = stated.projectServers.proposals
+	opts.Reactions = stated.projectReactions.effective(opts.Reactions)
+	opts.Proposals = stated.proposals()
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}
