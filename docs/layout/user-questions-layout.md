@@ -233,9 +233,10 @@ parts, one blank line apart, each part a run of labelled fields:
   shown: they are parameters that change without asking (ADR 0104 §2), and a pane that drew them
   would claim a pin they do not have.
 - **Pinned files**, last: under `pinned files:`, the path (relative to the Project root,
-  slash-separated) of every project file whose content the pin holds — each argv element, the program
-  included, that resolves to an existing regular file inside the Project root, and each in-root
-  project file an `env:` value names, pinned the same way (plan item 3). The digest is not drawn; the
+  slash-separated) of every project file whose content the pin holds — each in-root regular file an
+  argv element, the program included, or an `env:` value names, by one search over its whole text,
+  its words, the part after a word's `=` and its path-list elements (`--require=./hook.js` names
+  `hook.js`). The digest is not drawn; the
   label says what it means, and the adopt row's gloss says what moves it. An entry that names no
   project file draws no such part.
 

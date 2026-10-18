@@ -38,13 +38,14 @@ var pinFieldOrder = []string{
 }
 
 // pinArgvKeys are the pinned fields whose every element is an argv element a file may be named
-// by: a server's program and arguments, and a reaction's three action keys when they hold a
-// command. A reaction's webhook mapping names no file.
+// in: a server's program and arguments, and a reaction's three action keys when they hold a
+// command. Each element is searched by nameCandidates, so `--require=./hook.js` names hook.js as
+// `./hook.js` does. A reaction's webhook mapping names no file.
 var pinArgvKeys = []string{"command", "args", "run", "advise", "gate"}
 
 // pinEnvKey is the pinned field whose KEY=VALUE entries may name a file in their VALUE — a repo
 // `env: [NODE_OPTIONS=--require ./hook.js]` makes the server load hook.js — so the value is
-// searched for project files as an argv is.
+// searched for project files by the same nameCandidates an argv element is.
 const pinEnvKey = "env"
 
 // pinnedFile is one project file a pin holds: its path relative to the Project root,
@@ -143,7 +144,7 @@ func canonicalJSON(value any) (string, error) {
 }
 
 // pinnedFiles is every existing regular file inside projectRoot that fields name — an argv element
-// as a whole, an `env:` value by any of its envValueCandidates — once each, sorted by path.
+// or an `env:` value by any of its nameCandidates — once each, sorted by path.
 func pinnedFiles(projectRoot string, fields map[string]any) ([]pinnedFile, error) {
 	if projectRoot == "" {
 		return nil, nil
@@ -167,26 +168,29 @@ func pinnedFiles(projectRoot string, fields map[string]any) ([]pinnedFile, error
 	return files, nil
 }
 
-// fileCandidates lists every name in fields that may name a project file: each element of an argv
-// field, and each candidate of each `env:` entry's value.
+// fileCandidates lists every name in fields that may name a project file: each candidate of each
+// element of an argv field, and each candidate of each `env:` entry's value — one search for both.
 func fileCandidates(fields map[string]any) []string {
 	var names []string
 	for _, key := range pinArgvKeys {
-		names = append(names, textsOf(fields[key])...)
+		for _, element := range textsOf(fields[key]) {
+			names = append(names, nameCandidates(element)...)
+		}
 	}
 	for _, entry := range textsOf(fields[pinEnvKey]) {
 		if _, value, ok := strings.Cut(entry, "="); ok {
-			names = append(names, envValueCandidates(value)...)
+			names = append(names, nameCandidates(value)...)
 		}
 	}
 	return names
 }
 
-// envValueCandidates splits an `env:` value into the names a launched program may read a file by:
-// the whole value, each whitespace-separated word (`--require ./hook.js`), the part of a word after
-// its first `=` (`--require=./hook.js`), and each element of a path list (`LD_PRELOAD=a.so:b.so`).
-// A candidate that names no in-root file costs nothing, so the split errs toward more of them.
-func envValueCandidates(value string) []string {
+// nameCandidates splits an argv element or an `env:` value into the names a launched program may
+// read a file by: the whole text, each whitespace-separated word (`--require ./hook.js`), the part
+// of a word after its first `=` (`--require=./hook.js`), and each element of a path list
+// (`LD_PRELOAD=a.so:b.so`). A candidate that names no in-root file costs nothing, so the split
+// errs toward more of them.
+func nameCandidates(value string) []string {
 	names := []string{value}
 	for _, word := range strings.Fields(value) {
 		names = append(names, word)

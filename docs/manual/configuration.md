@@ -419,9 +419,10 @@ lines, counted, before any answer does, and `apogee project adopt` prints it who
   reformatting the file, reordering keys or adding a comment never asks again — only a changed
   value does.
 - **Every project file the entry names, by content.** Each argv element, the program included, and
-  each path an `env:` value names — the whole value, one of its words, the part after a word's `=`,
-  or one element of a path list — that is an existing regular file inside the Project root is
-  pinned by its path and the SHA-256 of its content. A file that changes, goes missing or is newly
+  each `env:` value go through one search: the whole text, one of its words, the part after a
+  word's `=`, or one element of a path list — so `--require=./hook.js` names `hook.js` whether it
+  is an argv element or an `env:` value. Each name that is an existing regular file inside the
+  Project root is pinned by its path and the SHA-256 of its content. A file that changes, goes missing or is newly
   named asks again, whoever changed it, and the pane's first line says which:
   `` `scripts/fmt.sh` changed since you adopted it ``. The files are checked again before every
   spawn: a mismatch refuses that run, or that server's launch, with a notice naming the file, and

