@@ -56,16 +56,23 @@ const (
 )
 
 // Entry is one granting entry of a Project config: the granting key it sits under (Kind — say
-// "terminal" or "mcp-servers") and its exact text. The kind is part of the pin, so the same text
-// under another key is a different entry.
+// "terminal" or "mcp-servers"), its text, and — for a structured kind — the Handle that names it
+// under that key (a server or reaction name). The kind is part of the pin, so the same text under
+// another key is a different entry.
+//
+// An Allow rule has no handle and its text is the rule exactly as written. A structured entry's
+// text is the canonical form its caller builds; adopting it also records that text under its kind
+// and handle ([Store.Adopted]), so a later change to the entry can be named against it (ADR 0104).
 type Entry struct {
-	Kind string
-	Text string
+	Kind   string
+	Handle string
+	Text   string
 }
 
 // Fingerprint is the pin an answer to entry e is recorded under: the hex SHA-256 of its kind, a NUL
 // and its text, byte for byte. Nothing is normalised — an entry whose text changes in any way,
-// whitespace included, is a new entry (ADR 0096 §4: pinned to the entry's exact content).
+// whitespace included, is a new entry (ADR 0096 §4: pinned to the entry's exact content). The
+// handle is not part of the pin, so every Allow-rule fingerprint ever recorded still matches.
 func Fingerprint(e Entry) string {
 	sum := sha256.Sum256([]byte(e.Kind + "\x00" + e.Text))
 	return hex.EncodeToString(sum[:])
@@ -81,11 +88,17 @@ type Classification struct {
 
 // record is the on-disk shape of one Project root's answers. Root makes the file self-describing,
 // so a record read under the wrong name is refused rather than trusted. Entries keeps every value
-// it finds: only "adopted" and "rejected" are answers, and anything else reads as no answer.
+// it finds: only "adopted" and "rejected" are answers, and anything else reads as no answer. Pins
+// holds the adopted text of each structured entry under its pinKey; a record written before pins
+// existed has none and reads unchanged.
 type record struct {
 	Root    string            `yaml:"root"`
 	Entries map[string]string `yaml:"entries,omitempty"`
+	Pins    map[string]string `yaml:"pins,omitempty"`
 }
+
+// pinKey is where a structured entry's adopted text is recorded: "<kind>/<handle>".
+func pinKey(kind, handle string) string { return kind + "/" + handle }
 
 // Store is the adoption record of ONE Project root, bound at construction. Resolving the root, and
 // the directory the record lives in, is the caller's job (ADR 0001).
@@ -175,7 +188,22 @@ func (s *Store) Classify(entries []Entry) (Classification, error) {
 	return c, nil
 }
 
-// Adopt records entries as adopted, replacing any earlier answer to the same text.
+// Adopted is the text last adopted for the structured entry kind and handle name, and whether one
+// is on record. It is what a re-ask names a change against; an Allow rule (no handle) never has
+// one. It decides nothing — [Store.Classify] does — so a record that cannot be read reports no
+// text (ok false), and a caller words the re-ask without naming a change, while Classify surfaces
+// the same failure.
+func (s *Store) Adopted(kind, handle string) (text string, ok bool) {
+	rec, err := s.read()
+	if err != nil {
+		return "", false
+	}
+	text, ok = rec.Pins[pinKey(kind, handle)]
+	return text, ok
+}
+
+// Adopt records entries as adopted, replacing any earlier answer to the same text. An entry with a
+// handle also records its text under its kind and handle, replacing the text adopted before.
 //
 // Errors: as [Store.Classify], plus an error when the record cannot be locked or written; nothing
 // is recorded then.
@@ -183,31 +211,45 @@ func (s *Store) Adopt(entries ...Entry) error {
 	return s.update(func(rec *record) {
 		for _, e := range entries {
 			rec.Entries[Fingerprint(e)] = string(Adopted)
+			if e.Handle != "" {
+				rec.Pins[pinKey(e.Kind, e.Handle)] = e.Text
+			}
 		}
 	})
 }
 
-// Reject records entries as rejected, replacing any earlier answer to the same text.
+// Reject records entries as rejected, replacing any earlier answer to the same text. An entry
+// with a handle also drops the text adopted under its kind and handle.
 //
 // Errors: as [Store.Adopt].
 func (s *Store) Reject(entries ...Entry) error {
 	return s.update(func(rec *record) {
 		for _, e := range entries {
 			rec.Entries[Fingerprint(e)] = string(Rejected)
+			dropPin(rec, e)
 		}
 	})
 }
 
 // Forget drops any answer to entries, so they are proposed again — what removing a rule from the
-// Project config leaves behind.
+// Project config leaves behind. An entry with a handle also drops the text adopted under its kind
+// and handle.
 //
 // Errors: as [Store.Adopt].
 func (s *Store) Forget(entries ...Entry) error {
 	return s.update(func(rec *record) {
 		for _, e := range entries {
 			delete(rec.Entries, Fingerprint(e))
+			dropPin(rec, e)
 		}
 	})
+}
+
+// dropPin removes the adopted text recorded for e's kind and handle; an Allow rule has none.
+func dropPin(rec *record, e Entry) {
+	if e.Handle != "" {
+		delete(rec.Pins, pinKey(e.Kind, e.Handle))
+	}
 }
 
 // update is the one read-modify-write of the record: take the lock beside it, read it, apply
@@ -231,6 +273,9 @@ func (s *Store) update(change func(*record)) error {
 	if rec.Entries == nil {
 		rec.Entries = make(map[string]string)
 	}
+	if rec.Pins == nil {
+		rec.Pins = make(map[string]string)
+	}
 	change(&rec)
 	data, err := yaml.Marshal(rec)
 	if err != nil {
@@ -252,7 +297,7 @@ func (s *Store) read() (record, error) {
 	if err := yaml.Unmarshal(data, &rec); err != nil {
 		return record{}, fmt.Errorf("apogee: read adoption record %q: %w", s.path, err)
 	}
-	if rec.Root == "" && len(rec.Entries) == 0 {
+	if rec.Root == "" && len(rec.Entries) == 0 && len(rec.Pins) == 0 {
 		return record{Root: s.root}, nil // an empty file records nothing
 	}
 	if rec.Root != s.root {

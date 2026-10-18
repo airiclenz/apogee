@@ -60,7 +60,10 @@ internal/tui/adoption.go — adoptionTitle, adoptionRows, raiseAdoption, adoptio
 **Acceptance:** `grep -n "^## Adoption pane" docs/layout/user-questions-layout.md && grep -n "changed since you adopted it" docs/layout/user-questions-layout.md`
 **Commit:** `docs(layout): specify the adoption pane body and re-ask reason`
 
-## 2. The adoption store remembers what was adopted
+## 2. The adoption store remembers what was adopted — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): `Store.Adopted(kind, handle) (text string, ok bool)` keeps the Goal's exact two-value signature; a record that cannot be read reports ok=false (Adopted decides nothing — Classify still surfaces that failure), stated in its doc comment.
+NOTES (2026-10-18): Reject and Forget drop the `<kind>/<handle>` pin whatever text the rejected/forgotten entry carries, as the approach says; one extra test, TestAdoptedTextPersistsAndKeepsTheAnswer, pins that a pin survives a new Store and the entry still classifies as adopted.
 
 **What:**
 **Goal:** `adoption.Store` records, for an entry adopted with a non-empty handle, the adopted `Text` under its kind and handle, and returns it through `Store.Adopted(kind, handle) (text string, ok bool)`; Allow rules (empty handle) are recorded exactly as before, and a record file written before this item still reads.

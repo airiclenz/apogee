@@ -205,21 +205,176 @@ func TestRecordStatesItsRootAndAnswers(t *testing.T) {
 	t.Parallel()
 
 	store, _ := newTestStore(t)
-	entry := Entry{Kind: "terminal", Text: "go test"}
-	if err := store.Adopt(entry); err != nil {
+	rule := Entry{Kind: "terminal", Text: "go test"}
+	server := Entry{Kind: "mcp-servers", Handle: "github", Text: "command: gh-mcp"}
+	if err := store.Adopt(rule, server); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
 	data, err := os.ReadFile(store.Path())
 	if err != nil {
 		t.Fatalf("read record: %v", err)
 	}
-	for _, want := range []string{"root: " + store.Root(), Fingerprint(entry) + ": adopted"} {
+	for _, want := range []string{
+		"root: " + store.Root(),
+		Fingerprint(rule) + ": adopted",
+		Fingerprint(server) + ": adopted",
+		"pins:",
+		"mcp-servers/github: 'command: gh-mcp'",
+	} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("record lacks %q:\n%s", want, data)
 		}
 	}
-	if strings.Contains(string(data), entry.Text) {
-		t.Errorf("record spells the entry's text; it should hold only its fingerprint:\n%s", data)
+	if strings.Contains(string(data), rule.Text) {
+		t.Errorf("record spells the Allow rule's text; it should hold only its fingerprint:\n%s", data)
+	}
+}
+
+func TestRecordNeverSpellsAnAllowRuleText(t *testing.T) {
+	t.Parallel()
+
+	store, _ := newTestStore(t)
+	adopted := Entry{Kind: "terminal", Text: "go test ./internal/adoption/"}
+	rejected := Entry{Kind: "read", Text: "/srv/secrets/**"}
+	if err := store.Adopt(adopted); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	if err := store.Reject(rejected); err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+	data, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	for _, e := range []Entry{adopted, rejected} {
+		if strings.Contains(string(data), e.Text) {
+			t.Errorf("record spells the Allow rule text %q:\n%s", e.Text, data)
+		}
+	}
+	if strings.Contains(string(data), "pins:") {
+		t.Errorf("Allow rules alone wrote a pins map:\n%s", data)
+	}
+	if text, ok := store.Adopted(adopted.Kind, ""); ok {
+		t.Errorf("Adopted(%q, \"\") = %q, true; an Allow rule has no adopted text", adopted.Kind, text)
+	}
+}
+
+func TestAdoptRemembersTheTextByKindAndHandle(t *testing.T) {
+	t.Parallel()
+
+	v1 := Entry{Kind: "mcp-servers", Handle: "github", Text: "command: gh-mcp\nargs: [serve]"}
+	v2 := Entry{Kind: "mcp-servers", Handle: "github", Text: "command: gh-mcp\nargs: [serve, --all]"}
+	sameHandleOtherKind := Entry{Kind: "reactions", Handle: "github", Text: "on: turn-end"}
+	cases := []struct {
+		name     string
+		record   func(*Store) error
+		kind     string
+		handle   string
+		wantText string
+		wantOK   bool
+	}{
+		{"nothing recorded has no text", func(*Store) error { return nil }, v1.Kind, v1.Handle, "", false},
+		{"adopt records the text", func(s *Store) error { return s.Adopt(v1) }, v1.Kind, v1.Handle, v1.Text, true},
+		{"a later adoption replaces the text", func(s *Store) error {
+			if err := s.Adopt(v1); err != nil {
+				return err
+			}
+			return s.Adopt(v2)
+		}, v1.Kind, v1.Handle, v2.Text, true},
+		{"the kind is part of the key", func(s *Store) error { return s.Adopt(v1, sameHandleOtherKind) },
+			sameHandleOtherKind.Kind, sameHandleOtherKind.Handle, sameHandleOtherKind.Text, true},
+		{"another handle has no text", func(s *Store) error { return s.Adopt(v1) }, v1.Kind, "linear", "", false},
+		{"reject drops the text", func(s *Store) error {
+			if err := s.Adopt(v1); err != nil {
+				return err
+			}
+			return s.Reject(v2)
+		}, v1.Kind, v1.Handle, "", false},
+		{"forget drops the text", func(s *Store) error {
+			if err := s.Adopt(v1); err != nil {
+				return err
+			}
+			return s.Forget(v1)
+		}, v1.Kind, v1.Handle, "", false},
+		{"reject keeps another kind's text", func(s *Store) error {
+			if err := s.Adopt(v1, sameHandleOtherKind); err != nil {
+				return err
+			}
+			return s.Reject(v1)
+		}, sameHandleOtherKind.Kind, sameHandleOtherKind.Handle, sameHandleOtherKind.Text, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store, _ := newTestStore(t)
+			if err := tc.record(store); err != nil {
+				t.Fatalf("record: %v", err)
+			}
+			text, ok := store.Adopted(tc.kind, tc.handle)
+			if text != tc.wantText || ok != tc.wantOK {
+				t.Errorf("Adopted(%q, %q) = %q, %v, want %q, %v", tc.kind, tc.handle, text, ok, tc.wantText, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestAdoptedTextPersistsAndKeepsTheAnswer(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "workspaces")
+	root := t.TempDir()
+	server := Entry{Kind: "mcp-servers", Handle: "github", Text: "command: gh-mcp"}
+	first, err := New(dir, root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := first.Adopt(server); err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	second, err := New(dir, root)
+	if err != nil {
+		t.Fatalf("New (second): %v", err)
+	}
+	if text, ok := second.Adopted(server.Kind, server.Handle); !ok || text != server.Text {
+		t.Errorf("Adopted in a new store = %q, %v, want %q, true", text, ok, server.Text)
+	}
+	if state := stateOf(classify(t, second, server), server); state != Adopted {
+		t.Errorf("a structured entry classifies as %s, want %s", state, Adopted)
+	}
+}
+
+func TestRecordWithoutPinsStillReads(t *testing.T) {
+	t.Parallel()
+
+	store, dir := newTestStore(t)
+	rule := Entry{Kind: "terminal", Text: "go test"}
+	rejected := Entry{Kind: "terminal", Text: "rm -rf build"}
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// The record shape written before pins existed: a root and an entries map, nothing else.
+	legacy := "root: " + store.Root() + "\nentries:\n" +
+		"  " + Fingerprint(rule) + ": adopted\n" +
+		"  " + Fingerprint(rejected) + ": rejected\n"
+	if err := os.WriteFile(store.Path(), []byte(legacy), filePerm); err != nil {
+		t.Fatalf("write record: %v", err)
+	}
+	got := classify(t, store, rule, rejected)
+	want := Classification{Adopted: []Entry{rule}, Rejected: []Entry{rejected}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Classify of a pre-pins record = %+v, want %+v", got, want)
+	}
+	if text, ok := store.Adopted("mcp-servers", "github"); ok {
+		t.Errorf("Adopted on a pre-pins record = %q, true; want no text", text)
+	}
+	server := Entry{Kind: "mcp-servers", Handle: "github", Text: "command: gh-mcp"}
+	if err := store.Adopt(server); err != nil {
+		t.Fatalf("Adopt onto a pre-pins record: %v", err)
+	}
+	got = classify(t, store, rule, rejected, server)
+	want = Classification{Adopted: []Entry{rule, server}, Rejected: []Entry{rejected}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Classify after adding a pin = %+v, want %+v", got, want)
 	}
 }
 
@@ -266,6 +421,20 @@ func TestUnknownAnswerReadsAsProposedAndSurvivesARewrite(t *testing.T) {
 	}
 	if !strings.Contains(string(data), Fingerprint(odd)+": maybe") {
 		t.Errorf("a rewrite dropped an entry it could not read:\n%s", data)
+	}
+}
+
+func TestAllowRuleFingerprintsAreUnchanged(t *testing.T) {
+	t.Parallel()
+
+	// The fingerprint recorded for this Allow rule before entries carried a handle. Every record
+	// on disk holds values like it, so it must never move.
+	const recorded = "0499f4d513474b27235abb2b3071288b5fecc81ca7d6aa50a61632115cb4488b"
+	if got := Fingerprint(Entry{Kind: "terminal", Text: "go test"}); got != recorded {
+		t.Errorf("Fingerprint of a recorded Allow rule = %s, want %s", got, recorded)
+	}
+	if got := Fingerprint(Entry{Kind: "terminal", Handle: "h", Text: "go test"}); got != recorded {
+		t.Errorf("a handle changed the fingerprint: %s, want %s", got, recorded)
 	}
 }
 
