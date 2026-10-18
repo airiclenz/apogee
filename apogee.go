@@ -190,6 +190,21 @@ type AllowRuleKind = domain.AllowRuleKind
 // AllowRuleLayer is the config file an AllowRule came from: the global config or the Project config.
 type AllowRuleLayer = domain.AllowRuleLayer
 
+// Proposal is one granting entry of a Project config the user rules on — an Allow rule, a repo MCP
+// server or a repo reaction — with what its adoption pane shows (ADR 0104). See domain.Proposal.
+type Proposal = domain.Proposal
+
+// ProposalKind is the Adoption kind of a Proposal.
+type ProposalKind = domain.ProposalKind
+
+// ProposalField is one pinned field of a structured Proposal, as the adoption pane draws it.
+type ProposalField = domain.ProposalField
+
+const (
+	ProposalMCPServer = domain.ProposalMCPServer
+	ProposalReaction  = domain.ProposalReaction
+)
+
 const (
 	AllowRuleTerminal  = domain.AllowRuleTerminal
 	AllowRuleMCPServer = domain.AllowRuleMCPServer

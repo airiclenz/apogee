@@ -100,8 +100,9 @@ const (
 	// global layer's rather than replacing them, so a repo can switch a tool off or deny a host but
 	// never switch one back on.
 	ClassTightenOnly
-	// ClassGranting keys widen what runs unasked — the Allow rules — so a project's entries for one
-	// are live only once the user has Adopted that exact file content.
+	// ClassGranting keys widen what runs unasked — the Allow rules, and the MCP servers a project
+	// would launch or dial — so a project's entries for one are live only once the user has Adopted
+	// their pinned content.
 	ClassGranting
 )
 
@@ -495,8 +496,12 @@ var KeyRegistry = bindRows([]Key{
 			func(fc fileConfig) *string { return nonEmpty(fc.WebSearch) }),
 	},
 	{
+		// Granting since ADR 0104 §1: a Project config's entries are carried apart from the layered
+		// merge (execlayer.go) and connect only once the user has adopted their pin; the global
+		// file's are live as written.
 		Path: "mcp-servers", Kind: KindStructured,
-		Desc:      "External MCP servers connected at startup; their tools always ask in auto.",
+		Class:     ClassGranting,
+		Desc:      "External MCP servers connected at startup; their tools always ask in auto; a project config's servers connect only once adopted.",
 		Read:      func(o Options) string { return countSummary(len(o.MCPServers), "server") },
 		Structure: func(o Options) any { return o.MCPServers },
 		fromFile:  fileMCPServers,

@@ -3493,6 +3493,8 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	opts.GlobalKeys, opts.ProjectKeys = stated.global, stated.project
 	opts.DangerousRules.ProjectAdd = stated.projectDangerous
 	opts.AllowRules = stated.projectAllow.effective(opts.AllowRules.Rules)
+	opts.MCPServers = stated.projectServers.effective(opts.MCPServers)
+	opts.Proposals = stated.projectServers.proposals
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}

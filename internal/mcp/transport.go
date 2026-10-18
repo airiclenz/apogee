@@ -121,6 +121,11 @@ type ServerConfig struct {
 	// AuthOAuth, and ClientSecretEnv needs ClientID.
 	ClientID        string
 	ClientSecretEnv string
+
+	// Project marks a server the Project config defined and the user adopted (ADR 0104), as against
+	// one from the user's own global config. Only the config layer sets it; the fences and the Allow
+	// rule match read it, since a repo server is trusted only as far as its adoption reaches.
+	Project bool
 }
 
 // AuthOAuth is the one recognised ServerConfig.Auth value: apogee authorises to the server with an

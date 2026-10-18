@@ -32,10 +32,10 @@ const (
 // record (ADR 0096 §4).
 const workspacesDirName = "workspaces"
 
-// adoptionUnreadNotice is the line a project file whose rules cannot be classified costs: they all
-// stay proposed — inert — and the session says why.
+// adoptionUnreadNotice is the line a project file whose entries cannot be classified costs: they
+// all stay proposed — inert — and the session says why.
 const adoptionUnreadNotice = "apogee: project config %s: cannot read the adoption record: %v; " +
-	"its allow rules stay proposed"
+	"its allow rules and MCP servers stay proposed"
 
 // AllowRule is one Allow rule: the key it sits under, its text exactly as the file spells it — the
 // text an adoption pins — and the layer it came from, SourceGlobal or SourceProject.
@@ -139,13 +139,15 @@ func allowEntries(rules []AllowRule) []adoption.Entry {
 	return entries
 }
 
-// classifyProjectRules sorts the project file's rules (at path, under projectRoot) by the adoption
-// record kept under workspacesDir. A record that cannot be read leaves every rule proposed — inert
-// — with one notice: a rule that cannot be shown to be adopted is not.
-func classifyProjectRules(entries []adoption.Entry, path, workspacesDir, projectRoot string,
-	notify func(string)) projectAllowRules {
+// classifyProjectEntries sorts the project file's granting entries (at path, under projectRoot) by
+// the adoption record kept under workspacesDir, in ONE read of it, and answers the store it read so
+// a caller can look up what an entry's handle was last adopted as. A record that cannot be read
+// leaves every entry proposed — inert — with one notice and no store: an entry that cannot be shown
+// to be adopted is not.
+func classifyProjectEntries(entries []adoption.Entry, path, workspacesDir, projectRoot string,
+	notify func(string)) (adoption.Classification, *adoption.Store) {
 	if len(entries) == 0 {
-		return projectAllowRules{}
+		return adoption.Classification{}, nil
 	}
 	store, err := adoption.New(workspacesDir, projectRoot)
 	var sorted adoption.Classification
@@ -154,13 +156,31 @@ func classifyProjectRules(entries []adoption.Entry, path, workspacesDir, project
 	}
 	if err != nil {
 		notify(fmt.Sprintf(adoptionUnreadNotice, path, err))
-		return projectAllowRules{proposed: projectRulesOf(entries)}
+		return adoption.Classification{Proposed: entries}, nil
 	}
+	return sorted, store
+}
+
+// projectAllowRulesOf is the Allow rules of a classification — its entries without a handle, which
+// is what an Allow rule's entry is (adoption.Entry) — as project-layer rules.
+func projectAllowRulesOf(sorted adoption.Classification) projectAllowRules {
 	return projectAllowRules{
-		adopted:  projectRulesOf(sorted.Adopted),
-		proposed: projectRulesOf(sorted.Proposed),
-		rejected: projectRulesOf(sorted.Rejected),
+		adopted:  projectRulesOf(allowRuleEntries(sorted.Adopted)),
+		proposed: projectRulesOf(allowRuleEntries(sorted.Proposed)),
+		rejected: projectRulesOf(allowRuleEntries(sorted.Rejected)),
 	}
+}
+
+// allowRuleEntries is the entries of entries that are Allow rules — the ones without a handle — in
+// order.
+func allowRuleEntries(entries []adoption.Entry) []adoption.Entry {
+	var rules []adoption.Entry
+	for _, e := range entries {
+		if e.Handle == "" {
+			rules = append(rules, e)
+		}
+	}
+	return rules
 }
 
 // projectRulesOf turns classified adoption entries back into project-layer rules.

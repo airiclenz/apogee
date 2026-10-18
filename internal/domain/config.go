@@ -636,6 +636,46 @@ func (r AllowRule) String() string {
 	return string(r.Layer) + " rule `" + r.Text + "`"
 }
 
+// ProposalKind is the Adoption kind of a Project config entry — the key it sits under, which is part
+// of its pin (ADR 0104 §1). An Allow rule's kind is its AllowRuleKind spelled as a ProposalKind.
+type ProposalKind string
+
+const (
+	// ProposalMCPServer is one repo `mcp-servers:` entry, its handle the server's `name:`. It is
+	// distinct from AllowRuleMCPServer, so an entry and an Allow rule naming one server never share
+	// a pin.
+	ProposalMCPServer ProposalKind = "mcp-server"
+	// ProposalReaction is one repo `reactions:` entry, its handle the reaction's `id:`.
+	ProposalReaction ProposalKind = "reaction"
+)
+
+// ProposalField is one pinned field of a structured Proposal as the adoption pane draws it: its
+// label, the key as the file spells it, and its values verbatim — one for a scalar, each element
+// in order for a list, one `key: value` per entry for a mapping, sorted by key. An explicitly empty
+// list is a field with no values.
+type ProposalField struct {
+	Label  string
+	Values []string
+}
+
+// Proposal is one granting entry of a Project config the user rules on (ADR 0096 §4, ADR 0104): an
+// Allow rule, a repo MCP server or a repo reaction. Kind and Handle name it — an Allow rule has no
+// handle — and Text is what Adoption pins: an Allow rule's text exactly as written, a structured
+// entry's canonical pin. Fingerprint is the pin an answer to it is recorded under. Fields, in the
+// pane's order, and Files, the slash-separated Project-root-relative paths of the project files
+// the pin holds, are what a structured entry's pane shows; an Allow rule has neither. Changed
+// names, fields first and then files, what moved since the user last adopted this kind and handle
+// — empty for a first proposal, and for an entry never adopted before.
+type Proposal struct {
+	Kind        ProposalKind
+	Handle      string
+	Text        string
+	Fingerprint string
+	Fields      []ProposalField
+	Files       []string
+	Changed     []string
+}
+
 // FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only
 // what the model sees after its own failure, or shapes the request without steering it, so it needs
 // no per-model proof and is NOT an armed Reaction: it is plain engine behaviour that stays on

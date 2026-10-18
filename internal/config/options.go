@@ -388,6 +388,12 @@ type Options struct {
 	// no flag or env: a rule widens what runs unasked, so only the user's own answers build it.
 	AllowRules AllowRules
 
+	// Proposals is the Project config's structured granting entries — its `mcp-servers:` entries
+	// (ADR 0104) — sorted by the user's adoption record, each with what its adoption pane shows. An
+	// adopted server is also in MCPServers, flagged Project; a proposed or rejected one is reported
+	// here alone and runs nothing. Empty when no project layer was read.
+	Proposals ProjectProposals
+
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
 	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
 	// (default-empty). ApplyConfig sets it from settings; the composition root matches the BOUND

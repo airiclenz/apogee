@@ -13,14 +13,15 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/adoption"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // The Adoption kinds of the two execution keys a Project config may propose (ADR 0104 §1). They
 // are distinct from the Allow kind `mcp-servers`, so a server entry and an Allow rule naming the
 // same server never share a pin.
 const (
-	MCPServerAdoptionKind = "mcp-server"
-	ReactionAdoptionKind  = "reaction"
+	MCPServerAdoptionKind = string(domain.ProposalMCPServer)
+	ReactionAdoptionKind  = string(domain.ProposalReaction)
 )
 
 // pinFilesKey is the canonical text's key holding the pinned project files. No field of either
