@@ -337,11 +337,17 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	cfg.EnabledTools = []string{"web_search"}
 	cfg.Profile.Tools = domain.ToolRosterDelta{Enabled: []string{"console_open"}}
 	cfg.SecretEnvVars = []string{"SOME_PROVIDER_KEY"}
+	cfg.SecretEnv = apogee.NewSecretEnv([]string{"SOME_PROVIDER_KEY"})
 	cfg.ReadMounts.Roots = func() []string { return []string{t.TempDir()} }
 	cfg.ReadMounts.Scratch = func() string { return t.TempDir() }
 	cfg.ReadMounts.Virtual = func() map[string]fs.FS { return nil }
 
-	host := reflect.ValueOf(tools.HostToolsOf(cfg, true, true))
+	composed := tools.HostToolsOf(cfg, true, true)
+	if composed.SecretEnv != cfg.SecretEnv {
+		t.Error("HostToolsOf handed the execution tools a different SecretEnv than the Config's — " +
+			"a mid-session widening of the Config's holder would never reach them")
+	}
+	host := reflect.ValueOf(composed)
 	mountsType := reflect.TypeFor[tools.ReadMounts]()
 	for i := range host.NumField() {
 		field, name := host.Field(i), host.Type().Field(i).Name
