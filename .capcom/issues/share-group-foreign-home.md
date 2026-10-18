@@ -21,3 +21,7 @@ Blocks Seqcom's `apogee-watch` (in `seqcom-infra`), which waits on a patch relea
 - A directory whose group or mode differs is still fixed as today, and a failure to fix it is still reported (existing `store_share_test.go` cases keep passing).
 - `docs/manual/sessions.md` ("Watching another user's sessions") and `SECURITY.md` mention that a home owned by another user (e.g. root) works when it is set up with the share group and 0710 in advance.
 - `CHANGELOG.md` under `[Unreleased]`, and a patch release (v0.26.1).
+
+## Log
+
+- 2026-10-18 Airic Lenz: Plan '2026-10-18 - 01 - share-group-foreign-home-plan' (archived at 29804b44) landed the shareDir fix with tests, the sessions.md/SECURITY.md wording and the [Unreleased] CHANGELOG entry; only the v0.26.1 patch release remains (release-apogee).
