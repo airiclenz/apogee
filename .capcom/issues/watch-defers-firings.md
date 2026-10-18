@@ -3,6 +3,7 @@ title: Watching a running session defers Firings
 status: open
 type: bug
 priority: 2
+plan: 2026-10-18 - 00 - watch-mode-fixes-plan.md
 created: 2026-10-17T21:42:10Z
 ---
 
