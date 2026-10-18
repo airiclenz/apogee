@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **A shared session store works with a home another user owns.** With `sessions.share-group` set, every save and hold used to change the group and mode of the apogee home and its `sessions/` directory, so a home owned by another user (for example root) or on a read-only mount failed every save even when it was already shared correctly. apogee now changes either directory only when its group or mode differs from the shared one (`0710` for the home, `0750` for `sessions/`); a directory it must fix and cannot is still reported as before.
+
 ## [0.26.0] — 2026-10-18
 
 - **Watching a session no longer holds back your own `/schedule` Firings.** While watch mode followed a running session, the watched run's busy state was reported as this session's, so a due Firing here waited until esc. The schedule gate now hears this session's own activity throughout a watch; the watch view still shows the watched run as running.
