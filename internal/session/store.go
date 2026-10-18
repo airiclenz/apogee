@@ -322,12 +322,14 @@ func NewStore(dir string, opts ...Option) *Store {
 type Option func(*Store)
 
 // WithShareGroup makes the store write for group gid (`sessions.share-group:`) so that members of
-// that group can watch its live sessions read-only. Every write sets the mode and group explicitly,
-// whatever the umask and whatever an earlier run left: the store directory's parent — the apogee
-// home, which is where every caller roots a store — is set to 0710, the store directory to 0750,
-// and each record (from its temp file on), journal and lock file to 0640, all group gid. A file or
-// directory written owner-private before is re-moded on its next write; one nothing writes again
-// keeps its old mode.
+// that group can watch its live sessions read-only. Every write leaves what it touches at these
+// modes, all group gid, whatever the umask and whatever an earlier run left: the store directory's
+// parent — the apogee home, which is where every caller roots a store — at 0710, the store
+// directory at 0750, and each record (from its temp file on), journal and lock file at 0640. Each
+// file's mode and group are set explicitly on every write; the two directories are changed only
+// when their group or mode differs, so a home already set up that way works even when another user
+// owns it or it is mounted read-only. A file or directory written owner-private before is re-moded
+// on its next write; one nothing writes again keeps its old mode.
 //
 // Group read on a lock file is what lets a watcher probe a hold, and it is also enough to TAKE the
 // probe's shared lock and keep it: a member can then hold off this store's Hold until its
@@ -571,10 +573,11 @@ func (s *Store) acquireHoldLock(id string) (release func(), err error) {
 }
 
 // ensureDir creates the store directory when it is absent (dirPerm, the home with it when that is
-// absent too) — save's and hold's first step. A shared store then sets the home's and the store
-// directory's mode and group explicitly, on every call: MkdirAll's mode is filtered by the umask and
-// applies only to a directory it creates, so a directory an owner-private run made is re-moded here
-// on the next write.
+// absent too) — save's and hold's first step. A shared store then brings the home's and the store
+// directory's mode and group to the shared ones wherever they differ (shareDir): MkdirAll's mode is
+// filtered by the umask and applies only to a directory it creates, so a directory an
+// owner-private run made is re-moded here on the next write, while one already shared is left
+// alone.
 func (s *Store) ensureDir() error {
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
 		return fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
@@ -588,14 +591,42 @@ func (s *Store) ensureDir() error {
 	return shareDir(s.dir, sharedDirPerm, s.shareGID)
 }
 
-// shareDir hands directory path to group gid and sets its mode to perm. The group goes first: a
-// chown by a non-root caller may clear mode bits, so the mode is the last word.
+// chownDir and chmodDir are shareDir's directory chown and chmod: os.Chown and os.Chmod, swapped
+// only by tests to observe which of them a directory needs.
+var (
+	chownDir = os.Chown
+	chmodDir = os.Chmod
+)
+
+// shareDir hands directory path to group gid and sets its permission bits to perm, each only when
+// it differs — a directory already shared that way is left alone, so one another user owns or one
+// on a read-only mount (where either change fails) still serves. Special bits (setuid, setgid,
+// sticky) are neither compared nor changed: a chmod carries over whichever of them the directory
+// has. The group goes first: a chown by a non-root caller may clear mode bits, so the mode is
+// re-read after one and is the last word. A failed stat, chown or chmod is returned wrapped,
+// naming path.
 func shareDir(path string, perm os.FileMode, gid int) error {
-	if err := os.Chown(path, -1, gid); err != nil {
+	wrap := func(err error) error {
 		return fmt.Errorf("apogee: share sessions directory %q: %w", path, err)
 	}
-	if err := os.Chmod(path, perm); err != nil {
-		return fmt.Errorf("apogee: share sessions directory %q: %w", path, err)
+	info, err := os.Stat(path)
+	if err != nil {
+		return wrap(err)
+	}
+	if group, ok := fileGroup(info); !ok || group != gid {
+		if err := chownDir(path, -1, gid); err != nil {
+			return wrap(err)
+		}
+		if info, err = os.Stat(path); err != nil {
+			return wrap(err)
+		}
+	}
+	if info.Mode().Perm() == perm {
+		return nil
+	}
+	special := info.Mode() & (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+	if err := chmodDir(path, perm|special); err != nil {
+		return wrap(err)
 	}
 	return nil
 }

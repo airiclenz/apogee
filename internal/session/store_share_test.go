@@ -3,8 +3,10 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -78,6 +80,27 @@ func fileGID(t *testing.T, path string) int {
 		t.Fatalf("stat %s: %v", path, err)
 	}
 	return int(info.Sys().(*syscall.Stat_t).Gid)
+}
+
+// preShare gives directory path group gid and mode perm with the real os.Chown and os.Chmod,
+// before any test swaps shareDir's seams.
+func preShare(t *testing.T, path string, perm os.FileMode, gid int) {
+	t.Helper()
+	if err := os.Chown(path, -1, gid); err != nil {
+		t.Fatalf("chown %s: %v", path, err)
+	}
+	if err := os.Chmod(path, perm); err != nil {
+		t.Fatalf("chmod %s: %v", path, err)
+	}
+}
+
+// swapDirSeam replaces *seam — chownDir or chmodDir — with replacement for the rest of the test.
+// The tests that call it never run in parallel: the seam is package state.
+func swapDirSeam[F any](t *testing.T, seam *F, replacement F) {
+	t.Helper()
+	original := *seam
+	*seam = replacement
+	t.Cleanup(func() { *seam = original })
 }
 
 // writeAll saves rec, holds it and opens its journal — every kind of file the store writes —
@@ -198,4 +221,69 @@ func TestStoreShareGroup_ScratchBesideTheStore_IsUntouched(t *testing.T) {
 	writeAll(t, NewStore(dir, WithShareGroup(gid)), shareTestRecord())
 
 	assertAccess(t, scratch, dirPerm, scratchGID)
+}
+
+func TestStoreShareGroup_AlreadyShared_IsNotChownedOrChmodded(t *testing.T) {
+	gid := shareTestGID(t)
+	home, dir := sharedStoreLayout(t)
+	if err := os.Mkdir(dir, dirPerm); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	preShare(t, home, sharedHomePerm, gid)
+	preShare(t, dir, sharedDirPerm, gid)
+	swapDirSeam(t, &chownDir, func(path string, _, _ int) error {
+		t.Errorf("chown %s on an already-shared directory", path)
+		return syscall.EPERM
+	})
+	swapDirSeam(t, &chmodDir, func(path string, _ os.FileMode) error {
+		t.Errorf("chmod %s on an already-shared directory", path)
+		return syscall.EPERM
+	})
+
+	writeAll(t, NewStore(dir, WithShareGroup(gid)), shareTestRecord())
+
+	assertAccess(t, home, sharedHomePerm, gid)
+	assertAccess(t, dir, sharedDirPerm, gid)
+}
+
+func TestStoreShareGroup_DifferingDir_FixFailureIsReported(t *testing.T) {
+	gid := shareTestGID(t)
+	home, dir := sharedStoreLayout(t)
+	if err := os.Mkdir(dir, dirPerm); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	preShare(t, home, sharedHomePerm, gid)
+	swapDirSeam(t, &chmodDir, func(string, os.FileMode) error { return syscall.EPERM })
+
+	err := NewStore(dir, WithShareGroup(gid)).Save(shareTestRecord())
+
+	if !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("Save error = %v, want EPERM", err)
+	}
+	if want := "share sessions directory " + `"` + dir + `"`; !strings.Contains(err.Error(), want) {
+		t.Errorf("Save error = %q, want it to name %q", err, dir)
+	}
+}
+
+func TestStoreShareGroup_SetgidDir_KeepsSetgid(t *testing.T) {
+	gid := shareTestGID(t)
+	home, dir := sharedStoreLayout(t)
+	if err := os.Mkdir(dir, dirPerm); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	preShare(t, dir, dirPerm|os.ModeSetgid, gid)
+
+	if err := NewStore(dir, WithShareGroup(gid)).Save(shareTestRecord()); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	assertAccess(t, home, sharedHomePerm, gid)
+	assertAccess(t, dir, sharedDirPerm, gid)
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat %s: %v", dir, err)
+	}
+	if info.Mode()&os.ModeSetgid == 0 {
+		t.Errorf("%s mode = %v, want setgid kept", dir, info.Mode())
+	}
 }

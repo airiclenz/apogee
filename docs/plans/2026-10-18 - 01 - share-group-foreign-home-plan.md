@@ -27,7 +27,9 @@
 
 **Out of scope:** the v0.26.1 patch release the issue asks for (the owner cuts it with `release-apogee` after this plan); `setFileAccess` and the platform lock's file chown (files in `sessions/` are the process's own); Windows (a share group is refused there).
 
-## 1. A shared store leaves an already-shared directory alone
+## 1. A shared store leaves an already-shared directory alone — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): retry fix — shareDir's chmod now passes perm plus the directory's existing setuid/setgid/sticky bits, so "special bits are left as set" holds when the permission bits differ too; added TestStoreShareGroup_SetgidDir_KeepsSetgid (a setgid sessions/ at dirPerm keeps setgid after Save), beyond the plan's two named tests.
 
 **What:** Fix (defect `share-group-foreign-home`): `shareDir` chowns and chmods the apogee home and `sessions/` on every `save` and `hold`, so a home owned by another user (EPERM) or on a read-only mount (EROFS) fails every save, though it is already shared correctly.
 **Regression guard.** `TestStoreShareGroup_DifferingDir_FixFailureIsReported` first pre-sets the home to `sharedHomePerm` and `shareTestGID` with the real `os.Chown`/`os.Chmod`, then swaps the chmod seam, and asserts the error names `dir` (`sessions/`), not the home. Every comment in `internal/session/store.go` saying the store sets the home's or `sessions/`'s mode/group on every write or call is rewritten — grep `on every call\|Every write sets\|explicitly` (`ensureDir`'s doc and `WithShareGroup`'s doc both carry it) — and `setFileAccess`'s "for shareDir's reason" cross-reference stays true (`shareDir` keeps the chown before the chmod).
