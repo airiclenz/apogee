@@ -73,7 +73,11 @@
 // (internal/adoption) — only the adopted ones join the effective set, the rest are reported as
 // proposed or rejected — and where those records live (`~/.apogee/workspaces`). unknownkeys.go is the walk that
 // announces, at startup, every key of the migrated file the schema does not spell — a notice, never
-// a refusal — and the yaml-tag reader it shares with the registry bijection test. The one-goroutine
+// a refusal — and the yaml-tag reader it shares with the registry bijection test. execpin.go builds the
+// Adoption pin of a Project config's `mcp-servers:` and `reactions:` entry (ADR 0104 §2–§4) — the
+// canonical JSON of its pinned fields with the content digest of every in-root project file its
+// argv or `env:` values name — names what changed since an adopted pin, resolves a repo entry's
+// relative names against the Project root, and re-checks the pinned files before a spawn. The one-goroutine
 // poller that reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows
 // nothing about YAML or this schema, and it has a second caller in the daemon's schedules watch, so
 // it lives in internal/filewatch.

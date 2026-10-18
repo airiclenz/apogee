@@ -76,7 +76,14 @@ internal/adoption/doc.go — package doc; internal/config/allow.go — allowEntr
 **Acceptance:** `go build ./internal/adoption/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestAdopt|TestAllowRuleFingerprints|TestRecord|TestFingerprint|TestClassify' ./internal/adoption/`
 **Commit:** `feat(adoption): remember an adopted entry's text by kind and handle`
 
-## 3. Repo entries have canonical pins with file digests
+## 3. Repo entries have canonical pins with file digests — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): per the user DECISION, an `env:` entry's VALUE is searched for in-root project files the same way an argv element is (whole value, each whitespace word, the part after a word's first `=`, each path-list element), each pinned by SHA-256 under the same Project-root resolution and missing-file rules; env entries stay in full KEY=VALUE in the canonical text (new test TestExecPinFoldsAFileAnEnvValueNames).
+NOTES (2026-10-18): exported surface for items 4-7: `MCPServerAdoptionKind`/`ReactionAdoptionKind`, `ResolveAgainstProjectRoot(projectRoot, name)` (the shared resolution base) and `VerifyExecPins(projectRoot, adoptedText) ([]string, error)`; builders are `mcpServerConfig.execPin(root)` / `reactionConfig.execPin(root)` returning `(adoption.Entry, error)` (an in-root file that exists but cannot be read, or an unrenderable value, is an error rather than an unpinned file), and `changedSince` is unexported as the goal names it.
+NOTES (2026-10-18): VerifyExecPins rebuilds the pin from the adopted text's own fields against the tree now, so besides an edited or deleted pinned file it also names an in-root file the entry names that was created after adoption; a file counts as in-root only if both its spelled path and its symlink-evaluated path lie inside the root.
+NOTES (2026-10-18): a server field the entry leaves unset (or sets to an empty list/map) is left out of the text, except `env-allowlist:`, whose explicit `[]` is kept apart from absent; changed fields are named in the adoption pane's field order, then files by path.
+NOTES (2026-10-18): consequential edit — internal/config/doc.go: made necessary by the new execpin.go (the package file map that TestDocMapNamesEveryFile enforces).
+NOTES (2026-10-18): idea only — an argv element is pinned whole, per ADR 0104 §4, so `node --require=./hook.js` in `args:` does not pin hook.js the way the same word in an `env:` value does.
 
 **What:** Recast at the regression check (2026-10-18). Depends on item 2. ADR 0104 §2–§4.
 **Goal:** `internal/config` builds an `adoption.Entry` for a repo `mcp-servers:` entry (kind `mcp-server`, handle = `name`, text = canonical JSON of the whole entry) and a repo `reactions:` entry (kind `reaction`, handle = `id`, text = canonical JSON of `id`, `run`, `advise`, `gate`); every argv element, program included, that resolves to an existing regular file inside the Project root adds `{path, sha256}` to the text, and a named file that is now missing simply leaves the text; a function `changedSince(adoptedText, text) []string` names the changed fields and files.
