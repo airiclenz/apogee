@@ -368,22 +368,22 @@ in the daemon's log the first time, not one per firing.
 you answer it, and the answer is kept on your machine, never in the repository:
 `~/.apogee/workspaces/<sha256>.yaml`, one record per Project root, pinned to each rule's exact text
 and to each server's or reaction's pinned fields and files (below). A session that finds a
-proposed entry opens a small pane at start-up — ``allow `go test` without asking in this project?``, ``use MCP server entry `wiki` in this project?``, ``use reaction `fmt`
-in this project?`` — with three answers: **adopt** (it runs here, until the entry changes), **not
-now** (it stays inert, and the offer comes back at the next start-up; `esc` answers this for every
-entry left) and **reject** (it stays inert and is not offered again until the entry changes).
-The pane opens on **not now**, the one
-answer that changes nothing, and it takes no `⏎` for a moment after it appears — until the terminal
-confirms the pane has been drawn — so a `⏎` you were already pressing when it rose cannot adopt,
-defer or reject anything; the arrows and `esc` work at once. An entry that a pull, a teammate's
-commit or an edit made behind apogee's back adds or changes mid-session is offered at the next idle
-moment, never in the middle of a turn it would answer for. A rule you write yourself from the
-approval pane (`Always in this project…`) is adopted as it is saved, and the `/settings` *Allow
+proposed entry opens a small pane at start-up — ``allow `go test` without asking in this project?``,
+``use MCP server entry `wiki` in this project?``, ``use reaction `fmt` in this project?`` — with
+three answers: **adopt** (it runs here, until the entry changes), **not now** (it stays inert, and
+the offer comes back at the next start-up; `esc` answers this for every entry left) and **reject**
+(it stays inert and is not offered again until the entry changes). The pane opens on **not now**,
+the one answer that changes nothing, and it takes no `⏎` for a moment after it appears — until the
+terminal confirms the pane has been drawn — so a `⏎` you were already pressing when it rose cannot
+adopt, defer or reject anything; the arrows and `esc` work at once. An entry that a pull, a
+teammate's commit or an edit made behind apogee's back adds or changes mid-session is offered at the
+next idle moment, never in the middle of a turn it would answer for. A rule you write yourself from
+the approval pane (`Always in this project…`) is adopted as it is saved, and the `/settings` *Allow
 rules* section lists every rule with where it stands — adopts a proposed or rejected one, and
 removes a rule from the file that holds it; the project's servers and reactions get rows of their
-own under the `mcp-servers` and `reactions` keys (see
-[the settings screen](commands.md#the-settings-screen--settings)). An unattended run never asks:
-`apogee headless` and a daemon firing leave proposed entries proposed.
+own under the `mcp-servers` and `reactions` keys (see [the settings
+screen](commands.md#the-settings-screen--settings)). An unattended run never asks: `apogee headless`
+and a daemon firing leave proposed entries proposed.
 
 From a shell, `apogee project adopt` asks the same question for each proposed entry — the Allow
 rules, then the servers, then the reactions, each in file order, a server or reaction with the
@@ -463,9 +463,10 @@ adopted and skip the proposed ones with one line naming them; neither contacts a
 
 **What adopting a script means.** An adopted server or reaction that names a project script runs
 whatever that script contains — at every Moment the reaction fires on, at every launch of the
-server — with no prompt, exactly as running it yourself in a fresh clone would. The pin holds the script to the content you adopted, but only the files the entry names: what
-the script itself reads, sources or runs — a Makefile, a module it imports, the project's code — is
-not pinned and can change without asking. Read the script, and what it calls, before you adopt it.
+server — with no prompt, exactly as running it yourself in a fresh clone would. The pin holds the
+script to the content you adopted, but only the files the entry names: what the script itself reads,
+sources or runs — a Makefile, a module it imports, the project's code — is not pinned and can change
+without asking. Read the script, and what it calls, before you adopt it.
 
 **What apogee writes there.** apogee writes the project file only on your own act (the list is
 [above](#configuration)), and a new one starts empty rather than from the global starter template,
@@ -593,16 +594,16 @@ rather than one a model chose, though it too refuses to follow a redirect.
 
 A configured MCP endpoint is the first of two deliberate exemptions. An `mcp-servers:` address is
 one you wrote in your own config, or adopted from a Project config whose pane named it, so the
-floor — which exists to stop a *model* pivoting to internal addresses — is not applied to it, and the connection is pinned to that endpoint's own resolved
-addresses instead ([ADR
-0012](../../.capcom/knowledge/decisions/adr-0012.md)). Your
-two host lists still apply: a denied endpoint is refused at startup with the same url-safety
-message, and any *other* private address that connection is later pointed at stays refused.
+floor — which exists to stop a *model* pivoting to internal addresses — is not applied to it, and
+the connection is pinned to that endpoint's own resolved addresses instead ([ADR
+0012](../../.capcom/knowledge/decisions/adr-0012.md)). Your two host lists still apply:
+a denied endpoint is refused at startup with the same url-safety message, and any *other* private
+address that connection is later pointed at stays refused.
 
-A webhook Reaction's `url:` is the second, on the same terms: you wrote it, or adopted it, so the floor is off for
-it and the post is pinned to that endpoint's own addresses — a loopback or LAN receiver still gets
-it — while your two host lists still refuse a host they close before anything is dialled, and a 3xx
-is reported as the failed post it is, never followed ([Sending a
+A webhook Reaction's `url:` is the second, on the same terms: you wrote it, or adopted it, so the
+floor is off for it and the post is pinned to that endpoint's own addresses — a loopback or LAN
+receiver still gets it — while your two host lists still refuse a host they close before anything is
+dialled, and a 3xx is reported as the failed post it is, never followed ([Sending a
 webhook](reactions.md#sending-a-webhook)).
 
 If your machine reaches out through an egress proxy, apogee uses it. `HTTP_PROXY`, `HTTPS_PROXY`
@@ -656,13 +657,13 @@ in place — the next call goes to the new endpoint, mid-session, with nothing r
 servers apogee connects on startup. It is **empty by default**, which leaves the whole feature
 dormant — no connections, no error, nothing on the model's menu. A
 [Project config](#a-projects-own-config--apogeeconfigyaml) may propose servers of its own in the
-same shape; each connects only once you adopt it, and runs under the rules that section lists. Each entry needs a `name` (unique;
-it becomes the prefix on every tool that server contributes, so the model sees `github__create_issue`
-and you can tell whose tool a call reached) and a `transport`, which is `stdio` for a local process
-apogee launches or `sse` / `streamable-http` for a server reached over http(s). A stdio entry takes
-`command`, optional `args`, and optional `env`; an http one takes `endpoint`, and optional
-`headers` and `headers-env` — and a `streamable-http` one can instead log in with OAuth
-(`auth: oauth`, optionally with `client-id` and `client-secret-env`).
+same shape; each connects only once you adopt it, and runs under the rules that section lists. Each
+entry needs a `name` (unique; it becomes the prefix on every tool that server contributes, so the
+model sees `github__create_issue` and you can tell whose tool a call reached) and a `transport`,
+which is `stdio` for a local process apogee launches or `sse` / `streamable-http` for a server
+reached over http(s). A stdio entry takes `command`, optional `args`, and optional `env`; an http
+one takes `endpoint`, and optional `headers` and `headers-env` — and a `streamable-http` one can
+instead log in with OAuth (`auth: oauth`, optionally with `client-id` and `client-secret-env`).
 
 A prefixed name the model providers would refuse — one outside `^[a-zA-Z0-9_-]{1,64}$`, because the
 server's or the tool's name holds a dot, a space or a non-ASCII letter, or the two run past 64
@@ -691,20 +692,21 @@ radius](#auto-modes-blast-radius)). An "Always allow this session" on one of its
 (see [how far an approval reaches](commands.md#approving-a-call--how-far-an-approval-reaches)). Its
 tool descriptions, schemas and results are untrusted input: they are shown to the model and
 rendered, never executed. An http(s) endpoint is one *you* wrote
-here, or adopted, rather than one a model chose, so it is exempt from the SSRF floor and the connection is pinned
-to that endpoint's own addresses — your [`url-safety:`](#what-the-network-tools-may-reach--url-safety)
-lists still judge it, and redirects are not followed. A `stdio` command is resolved on `PATH` through
-the same exec fence the tools use, so what launches is an absolute program that does not live inside
-the workspace; a server binary the model could have written is refused at startup rather than run.
-The one exception is an adopted project server's own program, admitted only because its content is
-pinned and checked again before every launch.
+here, or adopted, rather than one a model chose, so it is exempt from the SSRF floor and the
+connection is pinned to that endpoint's own addresses — your
+[`url-safety:`](#what-the-network-tools-may-reach--url-safety) lists still judge it, and redirects
+are not followed. A `stdio` command is resolved on `PATH` through the same exec fence the tools use,
+so what launches is an absolute program that does not live inside the workspace; a server binary the
+model could have written is refused at startup rather than run. The one exception is an adopted
+project server's own program, admitted only because its content is pinned and checked again before
+every launch.
 
 **What a stdio server inherits — `env-allowlist:`.** By default a server your own file names gets
 apogee's **whole environment**, every secret in it included, plus whatever `env:` adds; a
-Project config's server with no `env-allowlist:` gets the `[]` behaviour below instead. That is deliberate and
-not an oversight: you chose the command, at the same trust level as the toolchain apogee already
-invokes, and most servers need an inherited `PATH`, `HOME` or runtime variable to work at all. When
-you want to run a server you trust *less* than that, name the keys it may see:
+Project config's server with no `env-allowlist:` gets the `[]` behaviour below instead. That is
+deliberate and not an oversight: you chose the command, at the same trust level as the toolchain
+apogee already invokes, and most servers need an inherited `PATH`, `HOME` or runtime variable to
+work at all. When you want to run a server you trust *less* than that, name the keys it may see:
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -758,8 +760,8 @@ configured twice, in either map and in any case; and when a `headers-env:` entry
 variable. A variable `headers-env:` names is dropped from the environment of every tool subprocess,
 exactly as an `api-key-env:` name is, so a command the model chose cannot read the token back out —
 a variable a live edit or an adoption adds is scrubbed from that moment, and one an edit drops stays
-scrubbed until the session ends. The two keys are read by the **http** transports alone: a `stdio` entry that sets either is
-told so at startup, as a notice and never a refusal.
+scrubbed until the session ends. The two keys are read by the **http** transports alone: a `stdio`
+entry that sets either is told so at startup, as a notice and never a refusal.
 
 **Logging in to an http server — `auth: oauth`.** A `streamable-http` server protected by OAuth
 2.1 — the [MCP authorization
@@ -3025,9 +3027,9 @@ adopt`, the `/settings` *Allow rules* section — is under
 [A project's own config](#a-projects-own-config--apogeeconfigyaml). The `/settings` row counts the
 live rules and the proposed ones. A server the Project config itself defines answers to project
 rules alone: a global `mcp-servers:` rule never covers it, even by name, while a rule adopted in
-that project does, and so does a session approval. Allowing `go test` or `make lint` runs whatever the repository's code does when
-you run it, and in `allow-edits` the model may edit that code. The key is file-only (no flag, no
-environment variable).
+that project does, and so does a session approval. Allowing `go test` or `make lint` runs whatever
+the repository's code does when you run it, and in `allow-edits` the model may edit that code. The
+key is file-only (no flag, no environment variable).
 
 ## The Console family
 

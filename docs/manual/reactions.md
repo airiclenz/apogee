@@ -272,12 +272,12 @@ repository's text, not yours, so it runs as an `advise:` or `gate:` command does
 [Where an `advise:` or `gate:` command runs](#where-an-advise-or-gate-command-runs)): inside the
 workspace fence when `confine-to-workspace` is on and not at all on a host that cannot build it,
 with the execution tools' credential scrub, and under that door's ceilings — so its failure reads
-`<program> exited 3: …`. It runs in the **Project root**, not apogee's working directory, and a
-relative program resolves against that root. It may run a script inside the root —
+`apogee: <program> exited 3: …`. It runs in the **Project root**, not apogee's working directory,
+and a relative program resolves against that root. It may run a script inside the root —
 `run: ["./scripts/notify.sh"]` — only because adoption pinned that script's content: the pinned
 files are checked again before every spawn, and one that changed, went missing or is newly named
-refuses that run with a notice naming the file, and the entry is proposed again. An adopted script runs whatever it contains, so read it, and what it
-calls, before you adopt it.
+refuses that run with a notice naming the file, and the entry is proposed again. An adopted script
+runs whatever it contains, so read it, and what it calls, before you adopt it.
 
 ## Sending a webhook
 
@@ -309,18 +309,18 @@ Every webhook — `run:`, `advise:` and `gate:` alike — is fenced by your
 `deny-hosts` names, or one off a non-empty `allow-hosts`, is refused before anything is dialled, and
 the failure says it was refused by url-safety. The private-range floor is **off** for a webhook,
 as it is for an MCP endpoint: the address is one you wrote in your own config — or adopted from a
-Project config whose pane named it — so a loopback or LAN receiver still gets its POST, and the connection is pinned to that endpoint's own resolved
-addresses. A redirect is **never followed**: a 3xx comes back as itself and is reported as
-`HTTP <code>` — a failed post — so neither the body nor your `headers-env:` secrets ever reach a
-host you did not name. A webhook that redirects must be configured at the URL it redirects to.
-A running session's own webhooks keep the lists it started with: an edit to `url-safety:` reaches
-them at the next start. A `/schedule` firing raised after the edit composes its webhooks from the
-settings the session is running then, so it follows the edit. `apogee headless` reads the lists
-once, at start, like the rest of its configuration, and that includes a project's
-`url-safety.deny-hosts`, which a
-[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to.
-`apogee daemon` reads the global lists once, at start, and each daemon firing adds the
-`url-safety.deny-hosts` of its own workspace's Project config, read at that firing.
+Project config whose pane named it — so a loopback or LAN receiver still gets its POST, and the
+connection is pinned to that endpoint's own resolved addresses. A redirect is **never followed**: a
+3xx comes back as itself and is reported as `HTTP <code>` — a failed post — so neither the body nor
+your `headers-env:` secrets ever reach a host you did not name. A webhook that redirects must be
+configured at the URL it redirects to. A running session's own webhooks keep the lists it started
+with: an edit to `url-safety:` reaches them at the next start. A `/schedule` firing raised after the
+edit composes its webhooks from the settings the session is running then, so it follows the edit.
+`apogee headless` reads the lists once, at start, like the rest of its configuration, and that
+includes a project's `url-safety.deny-hosts`, which a [Project
+config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to. `apogee daemon` reads
+the global lists once, at start, and each daemon firing adds the `url-safety.deny-hosts` of its own
+workspace's Project config, read at that firing.
 
 ## Advising the model
 
@@ -513,11 +513,11 @@ that entry has succeeded in between.
 An `advise:` or `gate:` command that fails — a non-zero exit, a timeout, a refused permit — reaches
 you at the same place under the same prefix, `reaction <id> (<moment>): <error>`, each time it
 fails; the once-only fold above is the `run:` lane's. The error itself is worded by the door the
-command ran through, so it differs from a `run:` failure's: `<program> exited 3: <last 256 bytes
-of stderr>` or `<program> timed out`, where a `run:` reports `exit 3: <first 240 runes>` or
-`timed out after 30s`. It is booked as a `reaction_fired` line with
-`"action": "failed"` and the error as its `detail`, never as an `error` notice, and the turn goes
-on: the advise contributes nothing, the gate escalates to `ask`.
+command ran through, so it differs from a `run:` failure's: `apogee: <program> exited 3: <last
+256 bytes of stderr>` or `apogee: <program> timed out`, where a `run:` reports `exit 3: <first 240
+runes>` or `timed out after 30s`. It is booked as a `reaction_fired` line with `"action": "failed"`
+and the error as its `detail`, never as an `error` notice, and the turn goes on: the advise
+contributes nothing, the gate escalates to `ask`.
 
 ## Live reload
 

@@ -41,8 +41,8 @@ still remembers.
   (`no session matches "zzz"`). While you rename, your keys and a paste go to the
   name, and the filter waits, unchanged, on the title row. The panes that ask a
   question with fixed answers — `stop running workflows? (y/n)`, the start-up
-  offers about a plaintext key or a retired flag, and the offer to adopt a rule
-  the project proposes — do not filter.
+  offers about a plaintext key or a retired flag, and the offer to adopt a rule,
+  MCP server or reaction the project proposes — do not filter.
 - A session is **held** by the apogee that has it open, from its first prompt until
   that apogee exits, so two instances can never write one record. A held session that
   is running opens elsewhere only to be **watched**: `--resume <id>` and the browser's
