@@ -35,7 +35,6 @@ on:
       - '!CHANGELOG.md'
       - '!AGENTS.md'
       - '!CLAUDE.md'
-      - '!CONTEXT.md'
       - '!SECURITY.md'
       - '!LICENSE'
       - '!layout.md'

@@ -25,7 +25,7 @@ func TestDangerousActionGuard_PayloadTextNotInspected(t *testing.T) {
 
 	// A payload is not an action: text a tool merely writes, transmits or searches for
 	// must never fire a rule, however dangerous the literal it quotes. Documenting the
-	// guard's own ruleset — this repo's ADR 0012 and CONTEXT.md both name ~/.ssh — is the
+	// guard's own ruleset — this repo's ADR 0012 and glossary both name ~/.ssh — is the
 	// case that first hit it, and a hard-refuse has no per-call override to escape with.
 	// Each exclusion is earned by the calling tool's own declaration, so every case passes
 	// the real tool, never nil.
