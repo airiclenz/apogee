@@ -2648,45 +2648,20 @@ nothing reads. Either answer prints one line — the move naming the file it wro
 saying so, `not now` saying the offer comes back — and closes the pane for the rest of the session;
 `esc` is a `not now` and writes nothing.
 
-**And the last, about a rule the project proposes.** An Allow rule in the Project config
-(`<Project root>/.apogee/config.yaml`) that no adoption or rejection is recorded for is *proposed* —
-inert until the human adopts it (ADR 0096 §4) — and it opens the same pane once more, one pane per
-rule. It gives way to everything: the pre-bound ask and both offers above are asked first, and so is
-whatever else holds the keyboard or the engine — a turn, an approval, an open picker, the `/settings`
-pane, a `/sessions` load. The rules simply wait, and the pane comes up at the first fold that finds
-the session idle with nothing else up. That fold is also how the pane returns mid-session: a config
-file that changes while apogee runs is re-read for what it proposes, and a rule no pane has raised
-this session — a new one, or one whose text changed — is asked about at once after an idle save and
-after the turn ends on a save that landed mid-turn, never in the middle of a turn it would have
-answered for. One note comes first, naming every rule in the round — ``this project's
-.apogee/config.yaml proposes `go test` and MCP server `docs` — no proposed rule applies until you
-adopt it`` — a `terminal` rule spelled as the backticked prefix it matches and a server rule as
-``MCP server `<alias>` ``; then a pane titled `allow <rule> without asking in this project?`, in that
-same spelling, so a round of several can never be answered for the wrong rule. Like every pane's
-title it is cut to the pane's width, never wrapped. Under it, three rows in two columns: `adopt`,
-`— it runs without asking here, until the entry changes`; `not now`, `— it stays inert; the offer
-comes back at the next start-up`; `reject`, `— it stays inert, and is not offered again until the
-entry changes`. The pane opens with `not now` highlighted — the one answer that changes nothing,
-because `adopt` makes a granting entry live — and the hint reads `⏎ choose`. It arms as the offers
-above do, on the approval prompt's latch: its `⏎` and the second click that takes a row answer
-nothing until the terminal has answered the drain marker asked from behind the pane's frame (or the
-two-second backstop lands), so a `⏎` already in flight when the pane rose — the one that answered
-the rule before it, above all — adopts, defers and rejects nothing, and the deliberate `⏎` that
-follows takes `not now` unless the highlight was moved. `↑`/`↓` and `esc` are live at once; like
-the two offers, the pane does not filter. Every answer
-prints one line — `adopted <rule> — it runs without asking in this project`, `<rule> stays
-proposed — the offer comes back at the next start-up`, `rejected <rule> — it is not offered again
-until the entry changes` — and a failed adopt or reject says so with the reason, `could not adopt
-<rule>: <why>`, leaving the rule proposed, which is exactly where `not now` leaves it. The next rule's
-pane then opens where the last one closed. `esc` ends the round outright, and so
-does a click outside the pane, which is modal like every picker: whatever is left is a `not now`, no
-line is printed and nothing is written. A rule a pane has raised is not raised again in the same
-session, answered or not — a watched save of some unrelated key, or apogee's own write of an `Always
-in this project…` rule, does not put a `not now` back up — so the next start-up is where a deferred
-rule is asked about again. The rule's text is a repository file's, and it is escape-stripped
-everywhere the note, the title and the answer lines show it. With no config file wired (a Driver that
-composes none) nothing is proposed and the pane never opens. The same rules are listed with their
-state, and can be adopted later, in `/settings`' `Allow rules` section
+**And the last, about what the project proposes.** An Allow rule, an MCP server entry or a reaction
+in the Project config (`<Project root>/.apogee/config.yaml`) that no adoption or rejection is
+recorded for — or whose pin has moved since — is *proposed*, inert until the human adopts it
+(ADR 0096 §4, ADR 0104), and it opens the same pane once more, one pane per entry. It gives way to
+everything, the pre-bound ask and both offers above included, and comes up at the first fold that
+finds the session idle with nothing else up. Its title names the entry it asks about and, like every
+pane's title, is cut to the pane's width, never wrapped; for a server or a reaction a body between
+the title and the rows shows what Adoption pins, verbatim, and wraps rather than cuts a value. Its
+three rows — `adopt`, `not now` (highlighted when the pane opens), `reject` — arm on the approval
+prompt's latch as the offers do, and like them the pane does not filter. The pane is specified in
+one place — its note, title, body, re-ask reason, rows, answers, arming and narrow-width behaviour,
+with mockups at eighty and fifty columns — in
+[`docs/layout/user-questions-layout.md`](docs/layout/user-questions-layout.md) §Adoption pane. The
+same entries are listed with their state, and can be adopted later, in `/settings`
 ([`docs/layout/settings-screen-layout.md`](docs/layout/settings-screen-layout.md)).
 
 **The `/sessions` browser types too, which is why its verbs are chords.** The browser filters

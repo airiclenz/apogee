@@ -39,7 +39,15 @@
 - 12 — guard folded (`--workspace` per verb, rejected → `/settings`, StartupUndetermined); yields to the archived mcp-oauth plan (configuration.md, not commands.md)
 - 13 — guard folded (wider rewrite rule, §9, more drift tests, commands/daemon/headless pages)
 
-## 1. The adoption pane's body is specified
+## 1. The adoption pane's body is specified — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): per the user's DECISION, the body shows `env:` entries in full as `KEY=VALUE` (not names only), and the pinned-files part names in-root project files an `env:` value names, pinned as argv-named files are (item 3).
+NOTES (2026-10-18): a body too tall for the window is elided by the approval prompt's shared rule (each field's value bounded at eight lines, head/marker/tail; three answers as the floor) instead of scrolling as the assumed approach said, to match item 9's regression guard ("reached as approval.go's disclosed budget reaches one"); `apogee project adopt` is named as the place the whole body prints.
+NOTES (2026-10-18): because the whole server entry is pinned (ADR 0104 §2), the body shows every field a server entry sets — also `headers:` with literal values, `auth:` and `client-id:` — beyond the Goal's list; an unset `env-allowlist:` on a repo stdio server is drawn as `not set — the platform floor only`.
+NOTES (2026-10-18): new user-facing spellings chosen for items 9/11 to implement: ``MCP server entry `<name>` `` / ``reaction `<id>` `` (distinct from the Allow rule's ``MCP server `<alias>` ``), titles ``use … in this project?``, the new kinds' adopt/reject glosses and adopt answer line, and the mixed-round note ending `— nothing it proposes applies until you adopt it`; Allow-rule-only rounds and panes are unchanged.
+NOTES (2026-10-18): layout.md's "And the last, about a rule the project proposes" paragraph is replaced by a short summary pointing to docs/layout/user-questions-layout.md §Adoption pane; its pane detail (ordering, mid-session return, note, title, rows, arming, answers, esc) moved there, rewritten for all three kinds.
+NOTES (2026-10-18): fix-retry — the fifty-column mockup's `env:` line now wraps at its space after `--require` (it was broken mid-token), its caption says so; §Wrapping now states width never costs a value a character and height alone is given up (a value's own lines past eight, rows the window cannot seat), counted on a marker, and §Too tall says the eight-line value bound counts the value's own lines before any wrap — the two sections no longer contradict.
+
 
 **What:** Recast at the regression check (2026-10-18).
 **Goal:** `docs/layout/user-questions-layout.md` has an `## Adoption pane` section specifying the pane for all three kinds (Allow rule, `mcp-server`, `reaction`): title, the body of pinned fields shown verbatim (command and args, transport and endpoint, `env` and `env-allowlist` names, `headers-env` and `client-secret-env` names, each action's argv or webhook URL, each pinned project file), the re-ask reason line ("`scripts/fmt.sh` changed since you adopted it" / "`args` changed since you adopted it"), wrapping and truncation at narrow widths, and an ASCII mockup at 80 and 50 columns.
