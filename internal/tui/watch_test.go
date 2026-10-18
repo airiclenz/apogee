@@ -1457,3 +1457,35 @@ func TestResumeWatchOpensAtStartAndEscLandsFresh(t *testing.T) {
 		t.Errorf("user entries after esc = %q; want the fresh session's none", got)
 	}
 }
+
+// The schedule Gate holds a due Firing on THIS session's activity (ADR 0033). While watching, the
+// view mirrors the watched owner's run, and that run going busy must not defer the watcher's own
+// Firings — so nothing is reported, during the watch or on the way out of it.
+func TestWatchReportsTheWatchersOwnActivity(t *testing.T) {
+	t.Parallel()
+	var reports []bool
+	m := activityModel(t, &reports)
+	f := newWatchFixture(t, "watched", nil, 0)
+	m, cmd := m.enterWatch(f.src)
+	if !m.watch.isActive || cmd == nil {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	m = step(t, m, cmd())
+
+	f.prompt("theirs", false)
+	m = pollWatch(t, m)
+	if m.state != stateRunning {
+		t.Fatalf("state = %v; want running while the watched Exchange is open", m.state)
+	}
+	if len(reports) != 0 {
+		t.Errorf("reports while the watched run runs = %v; want none — this session is idle", reports)
+	}
+
+	m = step(t, m, keyEsc())
+	if m.watch.isActive {
+		t.Fatal("esc did not leave the watch")
+	}
+	if len(reports) != 0 {
+		t.Errorf("reports after esc = %v; want none — this session never went busy", reports)
+	}
+}

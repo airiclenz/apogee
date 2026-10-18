@@ -162,7 +162,9 @@ func (h engineHolds) canLaunchBg() bool {
 
 // quiescent reports whether nothing this session owns is in flight, the fact the Gate holds a due
 // Firing on ([Model.quiescent], ADR 0033). It deliberately ignores the /bg launch and session-load
-// holds (ADR 0033 decision 5), and stateErrored with nothing queued counts as quiescent.
+// holds (ADR 0033 decision 5), and stateErrored with nothing queued counts as quiescent. While
+// watching, [Model.quiescent] takes the snapshot over the parked session's state rather than the
+// mirrored watched run's, so holdWorker here answers for this session's own worker.
 func (h engineHolds) quiescent() bool {
 	return !h.holding(holdsOwningEngine) && !h.hasInterjections && !h.hasQueuedCommands
 }

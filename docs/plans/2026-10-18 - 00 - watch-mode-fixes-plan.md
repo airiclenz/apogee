@@ -25,7 +25,7 @@
 **Regression check (2026-10-18, daf9f806):**
 - 2: guard folded (replaced-journal test variant; only a short read or byte mismatch restarts at 0)
 
-## 1. Watch mode reports this session's own activity to the schedule Gate
+## 1. Watch mode reports this session's own activity to the schedule Gate — ✅ DONE (2026-10-18)
 
 **What:** Fix (defect from the live-session-watch plan): while watch mode follows a running session, `reportActivity` publishes the watched owner's busy state, so this session's due Firings are deferred until esc.
 **Goal:** While watching, `Options.ReportActivity` reflects this session's own activity; a watched run going busy reports nothing, and the watch view still shows the run as running.

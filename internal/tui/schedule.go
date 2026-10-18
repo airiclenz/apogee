@@ -286,7 +286,15 @@ func reportActivity(next tea.Model) tea.Model {
 //
 // stateErrored with nothing queued IS quiescent: the worker has unwound and the engine is idle, and
 // a human reading a failure is not a reason to hold a standing instruction back.
+//
+// While watching, m.state mirrors the WATCHED owner's run, not this session's, so the question is
+// asked of the parked state instead: a watched run going busy must not defer this session's own
+// Firings. Only this question reads the parked state — every other reader of m.state (autocomplete,
+// esc-stop, the watch's own folds) keeps the mirrored one. m is a value, so the swap is local.
 func (m Model) quiescent() bool {
+	if m.watch.isActive {
+		m.state = m.watch.parked.state
+	}
 	return m.engineHolds().quiescent()
 }
 
