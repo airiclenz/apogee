@@ -1,9 +1,11 @@
 ---
 title: Pinned project-program admission is duplicated in mcp and tools
-status: open
+status: done
 type: task
 priority: 4
 created: 2026-10-18T19:13:08Z
+closed: 2026-10-18T20:56:54Z
+reason: resolved by plan 2026-10-18 - 02 - exec-pin-followups-plan (archived at 86afb7c1), item 1
 ---
 
 The check that admits a pinned in-root project program past the exec fence exists twice, line for line:

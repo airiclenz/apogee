@@ -1,9 +1,11 @@
 ---
 title: No test keeps every MCP server field in its adoption pin
-status: open
+status: done
 type: task
 priority: 3
 created: 2026-10-18T18:44:05Z
+closed: 2026-10-18T20:56:55Z
+reason: resolved by plan 2026-10-18 - 02 - exec-pin-followups-plan (archived at 86afb7c1), item 4
 ---
 
 ADR 0104 pins a repo MCP server whole, but `mcpServerConfig.execPin` (`internal/config/execpin.go:72-89`) lists the fields it pins by hand. A field later added to `mcpServerConfig` (`internal/config/config.go:2732`) and not added there would change what the server runs without re-proposing it. No drift test guards this.

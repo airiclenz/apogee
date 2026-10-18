@@ -1,9 +1,11 @@
 ---
 title: A repo MCP pin mismatch at connect aborts every server
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-10-18T18:44:11Z
+closed: 2026-10-18T20:56:55Z
+reason: resolved by plan 2026-10-18 - 02 - exec-pin-followups-plan (archived at 86afb7c1), item 7
 ---
 
 A repo MCP server's pinned files are checked again before launch (`internal/mcp/transport.go:383` `resolveStdioProgram`, `changedPinRefusal`). If a pinned file changes in the window between the startup config read and `Connect`, that refusal fails the whole all-or-nothing `ConnectWith` (`internal/mcp/client.go:146`), which kills startup and takes every global server down with it. ADR 0104 decision 4 wants a mismatch to refuse that one server's run with a notice and re-propose it.

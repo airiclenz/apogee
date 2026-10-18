@@ -1,9 +1,11 @@
 ---
 title: A project file inside an argv element is not pinned
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-10-18T18:44:05Z
+closed: 2026-10-18T20:56:55Z
+reason: resolved by plan 2026-10-18 - 02 - exec-pin-followups-plan (archived at 86afb7c1), item 3
 ---
 
 An adopted repo entry's argv element is pinned whole (ADR 0104 decision 4; `internal/config/execpin.go:172` `fileCandidates`): only an element that is itself an in-root file path gets a content digest. An `env:` value goes through `envValueCandidates` (`internal/config/execpin.go:189`), which also tries each word, the part after a word's `=`, and each path-list element. So `args: ["--require=./hook.js"]` on a repo MCP server (or the same in a reaction's `run:`) does not pin `hook.js`, and the file can change after adoption without re-proposing the entry, while the same text in an `env:` value does pin it.
