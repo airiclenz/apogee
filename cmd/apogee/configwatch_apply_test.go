@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -528,4 +529,129 @@ func TestWatchedAdoptionRecordReloadsARepoReaction(t *testing.T) {
 	if len(observe) != 1 || observe[0].ID != "notify" || !observe[0].Project {
 		t.Errorf("observe lane = %+v, want the adopted repo reaction notify", observe)
 	}
+}
+
+// brokenProjectConfigYAML is a Project config saved half-way through an edit: it does not parse,
+// so the loader skips the project layer with a notice rather than refusing the re-read.
+const brokenProjectConfigYAML = "mcp-servers: [\n"
+
+// reloadAndApply waits for the watcher's report of why, re-reads, and applies the row at path
+// through the dispatcher an in-pane commit uses — what the renderer does with a report — answering
+// the whole re-read so a caller can read its notices.
+func reloadAndApply(t *testing.T, c *watchedConfig, applier settingsApplier, path, why string) tui.ConfigReload {
+	t.Helper()
+	reload, err := c.reloadWhole(t, why)
+	if err != nil {
+		t.Fatalf("changed (%s): %v", why, err)
+	}
+	row := appliedPath(t, reload.Applied, path)
+	if _, err := applySettingFor(applier)(row.Path, row.Value); err != nil {
+		t.Fatalf("apply %s (%s): %v", row.Path, why, err)
+	}
+	return reload
+}
+
+// assertSkippedLayerNotice fails the test unless the re-read told the human the project layer was
+// skipped — the one line that explains why the repo entries just left the session.
+func assertSkippedLayerNotice(t *testing.T, reload tui.ConfigReload) {
+	t.Helper()
+	for _, n := range reload.Notices {
+		if strings.Contains(n, "the project layer is skipped") {
+			return
+		}
+	}
+	t.Errorf("notices = %q, want one naming the skipped project layer", reload.Notices)
+}
+
+// assertStillAdopted fails the test unless every entry the Project config proposes is adopted and
+// none awaits an answer: the entries that came back did so on the record already kept, unasked.
+func assertStillAdopted(t *testing.T, c *watchedConfig, want int) {
+	t.Helper()
+	o, err := loadLayeredOptions(c.path, c.projectRoot)
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	if p := o.Proposals; len(p.Adopted) != want || len(p.Proposed) != 0 || len(p.Rejected) != 0 {
+		t.Errorf("proposals = %+v, want %d adopted and nothing awaiting an answer", p, want)
+	}
+}
+
+// A Project config that stops parsing mid-session degrades the layered re-read to the global set
+// (settingsApplier.layeredConfig): the adopted repo server is torn down by a reconnect onto the global
+// servers alone, with the skipped-layer notice saying why. The first save that parses again dials it
+// back on the adoption already recorded — nothing re-asks — and the scrub it widened stays wide.
+func TestWatchedBrokenProjectConfigDropsAdoptedServerUntilItParses(t *testing.T) {
+	t.Parallel()
+	c := newWatchedLayeredConfig(t, mcpServersFixture, projectWikiServerYAML)
+	var dialled [][]mcp.ServerConfig
+	var sessions []*fakeMCPSession
+	fixture := newMCPFixture(&fakeMCPSession{}, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		dialled = append(dialled, servers)
+		s := &fakeMCPSession{}
+		sessions = append(sessions, s)
+		return s, nil
+	})
+	applier := layeredApplier(t, c)
+	applier.engine = &applySettingSpy{}
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+
+	adoptEveryProposal(t, c.path, c.projectRoot)
+	reloadAndApply(t, c, applier, "mcp-servers", "the repo server adopted outside this session")
+
+	writeSettingsFixture(t, c.projectPath, brokenProjectConfigYAML)
+	assertSkippedLayerNotice(t, reloadAndApply(t, c, applier, "mcp-servers", "the Project config that stopped parsing"))
+
+	writeSettingsFixture(t, c.projectPath, projectWikiServerYAML)
+	reloadAndApply(t, c, applier, "mcp-servers", "the Project config that parses again")
+
+	if len(dialled) != 3 {
+		t.Fatalf("dialled %d times, want three reconnects (adopted, broken, repaired)", len(dialled))
+	}
+	if got := dialled[1]; len(got) != 1 || got[0].Name != "docs" || got[0].Project {
+		t.Errorf("while broken dialled %+v, want the global docs server alone", got)
+	}
+	if !sessions[0].closed {
+		t.Error("the session holding the adopted repo server is still open after the teardown")
+	}
+	if got := dialled[2]; len(got) != 2 || got[0].Name != "docs" || got[0].Project ||
+		got[1].Name != "wiki" || !got[1].Project {
+		t.Errorf("once repaired dialled %+v, want the global docs server and the adopted repo wiki server", got)
+	}
+	assertStillAdopted(t, c, 1)
+	if !slices.Contains(applier.secretEnv.Names(), "WIKI_MCP_TOKEN") {
+		t.Errorf("scrub = %q, want WIKI_MCP_TOKEN kept through the teardown", applier.secretEnv.Names())
+	}
+}
+
+// The reaction half: a Project config that stops parsing takes the adopted repo reaction off the
+// lanes on the swap the `reactions:` row drives, and the first save that parses again hangs it back
+// on — the adopted entry, marked as the project's — without asking again.
+func TestWatchedBrokenProjectConfigDropsRepoReactionUntilItParses(t *testing.T) {
+	t.Parallel()
+	c := newWatchedLayeredConfig(t, "", projectNotifyReactionYAML)
+	spy := &applySettingSpy{}
+	applier := layeredApplier(t, c)
+	applier.engine = spy
+
+	adoptEveryProposal(t, c.path, c.projectRoot)
+	reloadAndApply(t, c, applier, "reactions", "the repo reaction adopted outside this session")
+
+	writeSettingsFixture(t, c.projectPath, brokenProjectConfigYAML)
+	assertSkippedLayerNotice(t, reloadAndApply(t, c, applier, "reactions", "the Project config that stopped parsing"))
+
+	writeSettingsFixture(t, c.projectPath, projectNotifyReactionYAML)
+	reloadAndApply(t, c, applier, "reactions", "the Project config that parses again")
+
+	if len(spy.generations) != 3 {
+		t.Fatalf("SetReactions called %d times, want three swaps (adopted, broken, repaired)", len(spy.generations))
+	}
+	if observe := spy.generations[1].Observe; len(observe) != 0 {
+		t.Errorf("while broken the observe lane = %+v, want it empty", observe)
+	}
+	observe := spy.generations[2].Observe
+	if len(observe) != 1 || observe[0].ID != "notify" || !observe[0].Project {
+		t.Errorf("once repaired the observe lane = %+v, want the adopted repo reaction notify", observe)
+	}
+	assertStillAdopted(t, c, 1)
 }
