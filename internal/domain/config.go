@@ -714,6 +714,26 @@ type ProposalField struct {
 	Fields []ProposalField
 }
 
+// Clone returns f with its values and its group's fields copied, at every depth, so the copy
+// shares no backing array with f. A nil list stays nil.
+func (f ProposalField) Clone() ProposalField {
+	f.Values = slices.Clone(f.Values)
+	f.Fields = cloneProposalFields(f.Fields)
+	return f
+}
+
+// cloneProposalFields copies a field list element by element (ProposalField.Clone); nil stays nil.
+func cloneProposalFields(fields []ProposalField) []ProposalField {
+	if fields == nil {
+		return nil
+	}
+	out := make([]ProposalField, len(fields))
+	for i, field := range fields {
+		out[i] = field.Clone()
+	}
+	return out
+}
+
 // Proposal is one granting entry of a Project config the user rules on (ADR 0096 §4, ADR 0104): an
 // Allow rule, a repo MCP server or a repo reaction. Kind and Handle name it — an Allow rule has no
 // handle — and Text is what Adoption pins: an Allow rule's text exactly as written, a structured
@@ -730,6 +750,15 @@ type Proposal struct {
 	Fields      []ProposalField
 	Files       []string
 	Changed     []string
+}
+
+// Clone returns p with its fields (at every depth), files and changed names copied, so the copy
+// shares no backing array with p. A nil list stays nil.
+func (p Proposal) Clone() Proposal {
+	p.Fields = cloneProposalFields(p.Fields)
+	p.Files = slices.Clone(p.Files)
+	p.Changed = slices.Clone(p.Changed)
+	return p
 }
 
 // FloorConfig switches the Floor guards off one at a time (ADR 0071). A Floor guard changes only
@@ -997,6 +1026,13 @@ type ModelProfile struct {
 	Tools ToolRosterDelta
 }
 
+// Clone returns p with its roster lists copied (ToolRosterDelta.Clone), so the copy shares no
+// backing array with p.
+func (p ModelProfile) Clone() ModelProfile {
+	p.Tools = p.Tools.Clone()
+	return p
+}
+
 // ToolRosterDelta is the Model profile's tool-roster axis (CONTEXT: Model profile): a pair of
 // DELTA lists against the default tool set, never a replacement roster — a full list would
 // silently starve a profiled model of every tool a later release adds (ADR 0057). The ZERO value
@@ -1023,6 +1059,14 @@ type ToolRosterDelta struct {
 	// Enabled names built-in tools this model must be offered even when the build registers them
 	// default-off or the global list disables them. Empty/nil ⇒ this axis adds nothing.
 	Enabled []string
+}
+
+// Clone returns d with both lists copied, so the copy shares no backing array with d. A nil list
+// stays nil — nil and empty mean the same here, but a copy changes neither.
+func (d ToolRosterDelta) Clone() ToolRosterDelta {
+	d.Disabled = slices.Clone(d.Disabled)
+	d.Enabled = slices.Clone(d.Enabled)
+	return d
 }
 
 // ToolCallFormat identifies how a model emits tool calls, so the loop can select the matching

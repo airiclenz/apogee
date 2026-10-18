@@ -184,7 +184,10 @@ cmd/apogee/mcp_cmd_test.go — startupWiring, newFakeOAuthMCP, TestStartupMCPLog
 **Closes:** repo-pin-connect-abort
 **Commit:** `fix(apogee): a repo server whose pin moved is skipped with a notice and asked again`
 
-## 8. cloneOptions deep-copies every collection
+## 8. cloneOptions deep-copies every collection — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): `SystemPromptSettings.Clone` and `SessionSettings.Clone` live in internal/config/config.go (where both types are declared; named under Read first but not under Files), following the item's binding rule that a type's deep copy lives with the type.
+NOTES (2026-10-18): added `domain.ModelProfile.Clone` beside `ToolRosterDelta.Clone` so `profiles.Entry.Clone` reaches the roster through the type that owns it; `ServerEntry` and `UnconfinedHost` carry no collections (`ServerEntry.Bypass` is a scalar pointer, exempt), so their lists are copied with `slices.Clone` and get no Clone of their own.
 
 **What:**
 **Goal:** `cloneOptions` returns a `config.Options` sharing no slice or map backing storage with its source, at any depth, and a reflection test fails when any collection field of `config.Options` is not deep-copied.

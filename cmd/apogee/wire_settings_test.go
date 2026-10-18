@@ -1578,6 +1578,162 @@ func clobberOptions(opts config.Options) {
 	clear(opts.SystemPrompt.Models)
 }
 
+// cloneOptions shares no collection with its source, at any depth. Reflection fills every slice
+// and map config.Options reaches — element-wise through its structs, through pointers to the
+// collections behind them, one nested level into a self-referential type — so a collection added
+// to config.Options, or to a type it carries, fails here until a Clone copies it. Interface, func
+// and scalar-pointer fields are shared by design and exempt by kind; unexported fields are
+// skipped. A clone keeps nil exactly where the source had nil, which the zero value and the one
+// load-bearing empty-but-not-nil field (`env-allowlist: []` scrubs the environment; nil does not)
+// pin down.
+func TestCloneOptionsSharesNoCollection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("filled", func(t *testing.T) {
+		t.Parallel()
+		var src config.Options
+		fillCollections(reflect.ValueOf(&src).Elem(), map[reflect.Type]int{})
+		clone := cloneOptions(src)
+
+		checked := map[string]bool{}
+		assertNoSharedCollection(t, "Options", reflect.ValueOf(src), reflect.ValueOf(clone), checked)
+
+		// The filler must actually reach the deep collections the rule names; a filler that
+		// stopped short would pass every check above vacuously.
+		for _, path := range []string{
+			"Options.SystemPrompt.Layers",
+			"Options.SystemPrompt.Models",
+			"Options.Sessions.WatchHomes",
+			"Options.Reactions[0].On",
+			"Options.ModelProfiles[0].Profile.Tools.Disabled",
+			"Options.ModelProfiles[0].Profile.Tools.Enabled",
+			"Options.MCPServers[0].EnvAllowlist",
+			"Options.MCPServers[0].Headers",
+			"Options.Proposals.Adopted[0].Fields[0].Fields[0].Values",
+			"Options.AllowRules.Rules",
+			"Options.DangerousRules.ProjectAdd",
+			"Options.Overrides",
+		} {
+			if !checked[path] {
+				t.Errorf("the filler never reached %s: the check above proves nothing about it", path)
+			}
+		}
+	})
+
+	t.Run("nil stays nil", func(t *testing.T) {
+		t.Parallel()
+		var src config.Options
+		assertNoSharedCollection(t, "Options", reflect.ValueOf(src), reflect.ValueOf(cloneOptions(src)),
+			map[string]bool{})
+	})
+
+	t.Run("an empty env allowlist survives", func(t *testing.T) {
+		t.Parallel()
+		empty := []string{}
+		src := config.Options{MCPServers: []mcp.ServerConfig{{Name: "scrubbed", EnvAllowlist: &empty}}}
+		got := cloneOptions(src).MCPServers[0].EnvAllowlist
+		if got == nil || *got == nil {
+			t.Fatalf("cloned EnvAllowlist = %v, want a non-nil pointer to an empty list: "+
+				"`env-allowlist: []` scrubs the environment, and a nil one inherits all of it", got)
+		}
+		if got == &empty {
+			t.Errorf("cloned EnvAllowlist is the source's own pointer, want a fresh one")
+		}
+		if len(*got) != 0 {
+			t.Errorf("cloned EnvAllowlist = %v, want empty", *got)
+		}
+	})
+}
+
+// fillCollections makes every exported slice and map v reaches non-nil with one element, filling
+// that element in turn, and follows a pointer to a collection or struct by allocating it. inside
+// counts the struct types being filled on the way down: a slice of a struct type already entered
+// twice is left nil, which fills a self-referential type (ProposalField.Fields) one nested level
+// deep and stops there. Interfaces, funcs and pointers to scalars stay zero — they are shared by
+// design and are not the clone's to copy.
+func fillCollections(v reflect.Value, inside map[reflect.Type]int) {
+	switch v.Kind() {
+	case reflect.Struct:
+		inside[v.Type()]++
+		defer func() { inside[v.Type()]-- }()
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() {
+				fillCollections(v.Field(i), inside)
+			}
+		}
+	case reflect.Slice:
+		if elem := v.Type().Elem(); elem.Kind() == reflect.Struct && inside[elem] >= 2 {
+			return
+		}
+		v.Set(reflect.MakeSlice(v.Type(), 1, 1))
+		fillCollections(v.Index(0), inside)
+	case reflect.Map:
+		key := reflect.New(v.Type().Key()).Elem()
+		value := reflect.New(v.Type().Elem()).Elem()
+		fillCollections(value, inside)
+		v.Set(reflect.MakeMapWithSize(v.Type(), 1))
+		v.SetMapIndex(key, value)
+	case reflect.Pointer:
+		switch v.Type().Elem().Kind() {
+		case reflect.Slice, reflect.Map, reflect.Struct:
+			v.Set(reflect.New(v.Type().Elem()))
+			fillCollections(v.Elem(), inside)
+		}
+	}
+}
+
+// assertNoSharedCollection walks src and clone side by side and fails on every slice, map or
+// pointer to a collection the two share, and on every one whose nil-ness the clone changed. Each
+// collection compared is recorded in checked under its path.
+func assertNoSharedCollection(t *testing.T, path string, src, clone reflect.Value, checked map[string]bool) {
+	t.Helper()
+	switch src.Kind() {
+	case reflect.Struct:
+		for i := range src.NumField() {
+			if field := src.Type().Field(i); field.IsExported() {
+				assertNoSharedCollection(t, path+"."+field.Name, src.Field(i), clone.Field(i), checked)
+			}
+		}
+		return
+	case reflect.Pointer:
+		switch src.Type().Elem().Kind() {
+		case reflect.Slice, reflect.Map, reflect.Struct:
+		default:
+			return
+		}
+	case reflect.Slice, reflect.Map:
+	default:
+		return
+	}
+
+	checked[path] = true
+	if src.IsNil() != clone.IsNil() {
+		t.Errorf("%s: source nil = %t, clone nil = %t — a clone keeps nil exactly where the source had it",
+			path, src.IsNil(), clone.IsNil())
+		return
+	}
+	if src.IsNil() {
+		return
+	}
+	if src.Pointer() == clone.Pointer() && (src.Kind() != reflect.Slice || src.Cap() > 0) {
+		t.Errorf("%s: the clone shares the source's backing storage", path)
+	}
+	switch src.Kind() {
+	case reflect.Pointer:
+		assertNoSharedCollection(t, "(*"+path+")", src.Elem(), clone.Elem(), checked)
+	case reflect.Slice:
+		for i := range min(src.Len(), clone.Len()) {
+			assertNoSharedCollection(t, fmt.Sprintf("%s[%d]", path, i), src.Index(i), clone.Index(i), checked)
+		}
+	case reflect.Map:
+		for _, key := range src.MapKeys() {
+			if value := clone.MapIndex(key); value.IsValid() {
+				assertNoSharedCollection(t, fmt.Sprintf("%s[%v]", path, key), src.MapIndex(key), value, checked)
+			}
+		}
+	}
+}
+
 // A rebind sees what the session sees. rebindInputs starts from the overlay rather than the launch
 // snapshot, so the `tools.disabled:` roster a `/settings` commit swapped the session onto — one of
 // the keys that used to be left behind on the boot value — is what the next per-model resolution

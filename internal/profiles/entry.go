@@ -34,6 +34,13 @@ type Entry struct {
 	Note string
 }
 
+// Clone returns e with its profile's lists copied (domain.ModelProfile.Clone), so the copy shares
+// no backing array with e.
+func (e Entry) Clone() Entry {
+	e.Profile = e.Profile.Clone()
+	return e
+}
+
 // spellsToolCall reports whether this entry writes the tool-call axis. The domain value answers
 // it alone: "" is the unwritten format and `native` is the spelled zero, so an entry pinning a
 // model back to native tool calls overrides a deeper layer while one that omits the key defers.

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/adoption"
@@ -54,6 +55,15 @@ type AllowRules struct {
 	Rules    []AllowRule
 	Proposed []AllowRule
 	Rejected []AllowRule
+}
+
+// Clone returns r with each of its three lists copied, so the copy shares no backing array with r.
+// A nil list stays nil.
+func (r AllowRules) Clone() AllowRules {
+	r.Rules = slices.Clone(r.Rules)
+	r.Proposed = slices.Clone(r.Proposed)
+	r.Rejected = slices.Clone(r.Rejected)
+	return r
 }
 
 // allowConfig is the on-disk `allow:` block: the terminal word prefixes and the MCP server names

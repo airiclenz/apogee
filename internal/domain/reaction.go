@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -435,6 +436,14 @@ type Reaction struct {
 	// layer sets it, beside Project; nil on a Project reaction refuses every spawn of it, and a
 	// global reaction leaves it nil.
 	Pin ProjectPin
+}
+
+// Clone returns r with its Moment list copied, so the copy shares no backing array with r. A nil
+// list stays nil. Handler and Pin are interfaces and stay shared, by design: nothing that holds a
+// Reaction edits either in place.
+func (r Reaction) Clone() Reaction {
+	r.On = slices.Clone(r.On)
+	return r
 }
 
 // ProjectPin is what an adopted repo reaction's command, or an adopted repo stdio MCP server's

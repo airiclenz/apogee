@@ -190,23 +190,49 @@ func newLiveSettings(opts config.Options) *liveSettings {
 }
 
 // cloneOptions is the one deep copy of a `config.Options`: the value with every list and map it
-// carries copied, so what comes back shares no backing array with what went in. It is what options()
-// hands out and what now is seeded from, for one reason: the value travels to another goroutine — a
-// Firing composes on the Scheduler's — and a caller that sorted or appended to the roster it was
-// given would otherwise be editing the set this session is running.
+// carries copied, at every depth, so what comes back shares no backing storage with what went in.
+// It is what options() hands out and what now is seeded from, for one reason: the value travels to
+// another goroutine — a Firing composes on the Scheduler's — and a caller that sorted or appended
+// to the roster it was given would otherwise be editing the set this session is running.
 //
-// The eight collections are the ones the value carries; a ninth added to config.Options has to be
-// added here, and TestLiveSettingsOptionsFollowEveryApply's clobber is where a missed one shows.
+// A type that carries collections of its own copies them in its own Clone; this function only
+// calls those and copies the flat lists and maps. Nil stays nil wherever the source had nil.
+// Interface and func fields (a Reaction's Handler, an adoption Pin) are shared by design.
+// TestCloneOptionsSharesNoCollection fills every collection config.Options reaches and fails on
+// one this misses — a collection added to config.Options has to be copied here or in its type.
 func cloneOptions(opts config.Options) config.Options {
+	opts.Servers = slices.Clone(opts.Servers)
+	opts.UnconfinedHosts = slices.Clone(opts.UnconfinedHosts)
+	opts.MCPServers = cloneEach(opts.MCPServers, mcp.ServerConfig.Clone)
+	opts.Reactions = cloneEach(opts.Reactions, domain.Reaction.Clone)
 	opts.ToolsDisabled = slices.Clone(opts.ToolsDisabled)
+	opts.ToolsEnabled = slices.Clone(opts.ToolsEnabled)
 	opts.URLAllowHosts = slices.Clone(opts.URLAllowHosts)
 	opts.URLDenyHosts = slices.Clone(opts.URLDenyHosts)
-	opts.Reactions = slices.Clone(opts.Reactions)
-	opts.Servers = slices.Clone(opts.Servers)
-	opts.ModelProfiles = slices.Clone(opts.ModelProfiles)
+	opts.DangerousRules = opts.DangerousRules.Clone()
+	opts.AllowRules = opts.AllowRules.Clone()
+	opts.Proposals = opts.Proposals.Clone()
+	opts.ModelProfiles = cloneEach(opts.ModelProfiles, profiles.Entry.Clone)
+	opts.SystemPrompt = opts.SystemPrompt.Clone()
 	opts.ContextFiles = slices.Clone(opts.ContextFiles)
-	opts.SystemPrompt.Models = maps.Clone(opts.SystemPrompt.Models)
+	opts.Sessions = opts.Sessions.Clone()
+	opts.Overrides = maps.Clone(opts.Overrides)
+	opts.ProjectKeys = maps.Clone(opts.ProjectKeys)
+	opts.GlobalKeys = maps.Clone(opts.GlobalKeys)
 	return opts
+}
+
+// cloneEach copies list element by element through clone, so elements that carry collections of
+// their own come back deep-copied too. A nil list stays nil.
+func cloneEach[T any](list []T, clone func(T) T) []T {
+	if list == nil {
+		return nil
+	}
+	out := make([]T, len(list))
+	for i, element := range list {
+		out[i] = clone(element)
+	}
+	return out
 }
 
 // update is the ONE door a live key is written through: it runs fn against now under the write lock

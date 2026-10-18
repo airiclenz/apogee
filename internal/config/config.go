@@ -134,6 +134,14 @@ type SystemPromptSettings struct {
 	Layers []SystemPromptLayer
 }
 
+// Clone returns s with its per-model map and its layer list copied, so the copy shares no backing
+// storage with s. A nil map or list stays nil.
+func (s SystemPromptSettings) Clone() SystemPromptSettings {
+	s.Models = maps.Clone(s.Models)
+	s.Layers = slices.Clone(s.Layers)
+	return s
+}
+
 // validate rejects a system-prompt block that is structurally impossible, at EVERY level —
 // including entries this host will never select. Setting both spellings at one level is a
 // contradiction (which prompt was meant?), and an entry setting neither is far more likely a YAML
@@ -313,6 +321,13 @@ type SessionSettings struct {
 	// default, keeps every session file the owner's alone. It is carried as written; whether this
 	// machine has the group and the user is in it is ValidateHost's question, asked at startup.
 	ShareGroup string
+}
+
+// Clone returns s with its watched-home list copied, so the copy shares no backing array with s.
+// A nil list stays nil.
+func (s SessionSettings) Clone() SessionSettings {
+	s.WatchHomes = slices.Clone(s.WatchHomes)
+	return s
 }
 
 // WatchHome is one entry of `sessions.watch-homes:` — a label and the absolute path of an apogee

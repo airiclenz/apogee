@@ -135,6 +135,22 @@ type ServerConfig struct {
 	Pin domain.ProjectPin
 }
 
+// Clone returns c with every list and map it carries copied, so the copy shares no backing storage
+// with c. Nil stays nil exactly where c had nil — EnvAllowlist above all, where nil and a pointer to
+// an empty list mean different things — and a non-nil EnvAllowlist gets a fresh pointer to its own
+// copy of the list. Pin is an interface and stays shared, by design.
+func (c ServerConfig) Clone() ServerConfig {
+	c.Args = slices.Clone(c.Args)
+	c.Env = slices.Clone(c.Env)
+	if c.EnvAllowlist != nil {
+		allowlist := slices.Clone(*c.EnvAllowlist)
+		c.EnvAllowlist = &allowlist
+	}
+	c.Headers = maps.Clone(c.Headers)
+	c.HeadersEnv = maps.Clone(c.HeadersEnv)
+	return c
+}
+
 // AuthOAuth is the one recognised ServerConfig.Auth value: apogee authorises to the server with an
 // OAuth 2.1 bearer token it obtains through an interactive login.
 const AuthOAuth = "oauth"

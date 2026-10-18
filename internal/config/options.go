@@ -8,6 +8,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -518,6 +519,15 @@ type DangerousRuleSet struct {
 	Add        []domain.DangerousRule
 	Remove     []string
 	ProjectAdd []domain.DangerousRule
+}
+
+// Clone returns s with each of its three lists copied, so the copy shares no backing array with s.
+// A nil list stays nil.
+func (s DangerousRuleSet) Clone() DangerousRuleSet {
+	s.Add = slices.Clone(s.Add)
+	s.Remove = slices.Clone(s.Remove)
+	s.ProjectAdd = slices.Clone(s.ProjectAdd)
+	return s
 }
 
 // The two words `workflow-wake:` takes (ADR 0089). They are words rather than a YAML bool because

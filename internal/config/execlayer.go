@@ -78,6 +78,28 @@ type ProjectProposals struct {
 	Rejected []domain.Proposal
 }
 
+// Clone returns p with each of its three lists copied element by element (domain.Proposal.Clone),
+// so the copy shares no backing array with p at any depth. A nil list stays nil.
+func (p ProjectProposals) Clone() ProjectProposals {
+	p.Adopted = cloneProposals(p.Adopted)
+	p.Proposed = cloneProposals(p.Proposed)
+	p.Rejected = cloneProposals(p.Rejected)
+	return p
+}
+
+// cloneProposals is ProjectProposals.Clone's per-list copy: nil stays nil, and every element is
+// deep-copied by its own Clone.
+func cloneProposals(list []domain.Proposal) []domain.Proposal {
+	if list == nil {
+		return nil
+	}
+	out := make([]domain.Proposal, len(list))
+	for i, proposal := range list {
+		out[i] = proposal.Clone()
+	}
+	return out
+}
+
 // projectServers is a Project config's MCP servers resolved by Adoption: the adopted ones as the
 // servers they connect as, and every one as a Proposal.
 type projectServers struct {
