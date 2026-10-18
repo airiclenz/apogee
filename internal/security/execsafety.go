@@ -132,3 +132,49 @@ func ResolveProgram(look func(string) (string, error), name, root string, box *d
 	}
 	return resolved, nil
 }
+
+// ResolveProjectProgram is ResolveProgram for a program a Project config entry names — an adopted
+// repo MCP server's command or a repo reaction's argv[0] (ADR 0104 §4) — and the one place a
+// pinned project file is let past the exec fence.
+//
+// A relative name carrying a path separator (`./scripts/fmt.sh`) resolves against projectRoot
+// rather than apogee's own working directory; a bare name is looked up on PATH as ResolveProgram
+// does, and projectRoot "" leaves every name as given. The result is then fenced against root and
+// box exactly as ResolveProgram fences it, and a REFUSED program is admitted — handed back with a
+// nil error — only when AdmitPinnedProgram finds it among pinned. Every other outcome is
+// ResolveProgram's, unchanged: an absent program, a relative PATH answer, a program inside the
+// fence that is not pinned. A nil or empty pinned admits nothing.
+//
+// The caller owns the pin's freshness: pinned names files whose content the caller has just
+// checked against what the user adopted, because this function compares paths, never bytes.
+func ResolveProjectProgram(
+	name, projectRoot, root string,
+	box *domain.ConfinementBox,
+	pinned []string,
+) (string, error) {
+	if projectRoot != "" && !filepath.IsAbs(name) && filepath.Base(name) != name {
+		name = filepath.Join(projectRoot, name)
+	}
+	program, err := ResolveProgram(nil, name, root, box)
+	if errors.Is(err, ErrExecFromWritablePath) && AdmitPinnedProgram(program, pinned) {
+		return program, nil
+	}
+	return program, err
+}
+
+// AdmitPinnedProgram reports whether program — an absolute path the exec fence refused — is one of
+// pinned, both compared with their symlinks evaluated so a spelling of the root through a link is
+// the same file. A relative program is never admitted, and neither is a relative pinned entry: the
+// child would resolve either against a working directory that is usually the workspace itself.
+func AdmitPinnedProgram(program string, pinned []string) bool {
+	if !filepath.IsAbs(program) {
+		return false
+	}
+	resolved := EvalRealPath(program)
+	for _, candidate := range pinned {
+		if filepath.IsAbs(candidate) && EvalRealPath(candidate) == resolved {
+			return true
+		}
+	}
+	return false
+}

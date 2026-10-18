@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -373,34 +372,11 @@ func AdmitProjectPrograms(projectRoot string, programs []string) HookOption {
 }
 
 // resolveHookProgram turns argv0 into the absolute program RunHookSubprocess spawns, or the fence's
-// refusal: security.ResolveProgram against workspaceRoot and the box on ctx, after the project-root
-// resolution and before the admission AdmitProjectPrograms asks for.
+// refusal: security.ResolveProjectProgram against workspaceRoot and the box on ctx, with the
+// project root and the admitted programs AdmitProjectPrograms set — with neither set, exactly
+// security.ResolveProgram.
 func resolveHookProgram(ctx context.Context, argv0, workspaceRoot string, o hookOptions) (string, error) {
-	name := argv0
-	if o.projectRoot != "" && !filepath.IsAbs(name) && filepath.Base(name) != name {
-		name = filepath.Join(o.projectRoot, name)
-	}
-	program, err := security.ResolveProgram(nil, name, workspaceRoot, confinementBox(ctx))
-	if errors.Is(err, security.ErrExecFromWritablePath) && isAdmittedProgram(program, o.admitted) {
-		return program, nil
-	}
-	return program, err
-}
-
-// isAdmittedProgram reports whether program — an absolute path the fence refused — is one of
-// admitted, both compared with their symlinks evaluated so a spelling of the root through a link
-// is the same file. A relative program is never admitted.
-func isAdmittedProgram(program string, admitted []string) bool {
-	if !filepath.IsAbs(program) {
-		return false
-	}
-	resolved := security.EvalRealPath(program)
-	for _, candidate := range admitted {
-		if filepath.IsAbs(candidate) && security.EvalRealPath(candidate) == resolved {
-			return true
-		}
-	}
-	return false
+	return security.ResolveProjectProgram(argv0, o.projectRoot, workspaceRoot, confinementBox(ctx), o.admitted)
 }
 
 // diagnosticsExcerpt renders a failed command's stderr for an error message: a bounded TAIL —

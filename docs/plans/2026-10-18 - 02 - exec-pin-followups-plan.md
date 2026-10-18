@@ -39,7 +39,9 @@
 - 6 (re-check): guard folded (reconnect interim in the wire_live.go closure; both interims Close the client; all-or-nothing/fatal comment-and-doc rule via grep, Denied docs widened; cmd/apogee acceptance run)
 - 7 (re-check): guard folded (replaces both interims; reconnect note via mcpSession.Skipped + reconnect (note, error) to its three callers, worded from Denied.Name + mcpSentence; redial cost skipped or accepted; wake asserted via AwaitConfigChange; startup test on startupWiring + httptest server)
 
-## 1. One shared pinned-program admission in internal/security
+## 1. One shared pinned-program admission in internal/security — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): no CHANGELOG entry — a behaviour-preserving refactor with nothing a user observes; both callers' admission semantics are unchanged (a Pin.Root() of "" now skips the join instead of joining "", which yields the same name).
 
 **What:**
 **Goal:** a single `internal/security` helper admits a pinned in-root project program past the exec fence and is the only such check; `isPinnedProgram` (internal/mcp) and `isAdmittedProgram` (internal/tools) no longer exist.

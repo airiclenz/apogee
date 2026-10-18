@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -378,8 +377,9 @@ const changedPinRefusal = "refusing to launch — %s changed since you adopted i
 
 // resolveStdioProgram turns cfg.Command into the absolute program a stdio server launches, or the
 // refusal that launch earns: the exec fence (security.ResolveProgram against workspaceRoot) for a
-// global server, and for a Project server first the pin's spawn-time check, then the fence with
-// the Project root as the base of a relative command and the pinned project files admitted.
+// global server, and for a Project server first the pin's spawn-time check, then
+// security.ResolveProjectProgram: the fence with the Project root as the base of a relative command
+// and the pinned project files admitted.
 func resolveStdioProgram(cfg ServerConfig, workspaceRoot string) (string, error) {
 	if !cfg.Project {
 		return security.ResolveProgram(nil, cfg.Command, workspaceRoot, nil)
@@ -394,31 +394,7 @@ func resolveStdioProgram(cfg ServerConfig, workspaceRoot string) (string, error)
 	if len(changed) > 0 {
 		return "", fmt.Errorf(changedPinRefusal, strings.Join(changed, ", "))
 	}
-	name := cfg.Command
-	if !filepath.IsAbs(name) && filepath.Base(name) != name {
-		name = filepath.Join(cfg.Pin.Root(), name)
-	}
-	program, err := security.ResolveProgram(nil, name, workspaceRoot, nil)
-	if errors.Is(err, security.ErrExecFromWritablePath) && isPinnedProgram(program, cfg.Pin.Programs()) {
-		return program, nil
-	}
-	return program, err
-}
-
-// isPinnedProgram reports whether program — an absolute path the fence refused — is one of pinned,
-// both compared with their symlinks evaluated so a spelling of the root through a link is the same
-// file. A relative program is never admitted.
-func isPinnedProgram(program string, pinned []string) bool {
-	if !filepath.IsAbs(program) {
-		return false
-	}
-	resolved := security.EvalRealPath(program)
-	for _, candidate := range pinned {
-		if filepath.IsAbs(candidate) && security.EvalRealPath(candidate) == resolved {
-			return true
-		}
-	}
-	return false
+	return security.ResolveProjectProgram(cfg.Command, cfg.Pin.Root(), workspaceRoot, nil, cfg.Pin.Programs())
 }
 
 // defaultStdioTerminateDuration is the rung wait a non-positive Host.TerminateDuration maps to:

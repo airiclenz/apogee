@@ -198,3 +198,90 @@ func TestResolveProgram(t *testing.T) {
 		}
 	})
 }
+
+// TestAdmitPinnedProgram pins the admission's one rule: a refused program is let through only when,
+// symlinks evaluated, it IS one of the pinned absolute paths — never a relative spelling of either.
+func TestAdmitPinnedProgram(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	pinned := plantProgram(t, filepath.Join(root, "scripts"), "fmt.sh")
+	beside := plantProgram(t, filepath.Join(root, "scripts"), "lint.sh")
+	link := filepath.Join(t.TempDir(), "root-link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skipf("symlinks unavailable on this host: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		program    string
+		pinned     []string
+		isAdmitted bool
+	}{
+		{"an absolute pinned program is admitted", pinned, []string{pinned}, true},
+		{"a relative program is refused", "scripts/fmt.sh", []string{pinned}, false},
+		{"a relative pinned entry admits nothing", pinned, []string{"scripts/fmt.sh"}, false},
+		{"a root spelled through a symlink is the same file", filepath.Join(link, "scripts", "fmt.sh"), []string{pinned}, true},
+		{"an unpinned program beside a pinned one is refused", beside, []string{pinned}, false},
+		{"no pins admit nothing", pinned, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := AdmitPinnedProgram(tc.program, tc.pinned)
+
+			if got != tc.isAdmitted {
+				t.Errorf("AdmitPinnedProgram(%q, %q) = %v, want %v", tc.program, tc.pinned, got, tc.isAdmitted)
+			}
+		})
+	}
+}
+
+// TestResolveProjectProgram pins the project form of the fence: a relative command with a path
+// separator resolves against the Project root, a bare name stays a PATH lookup, and a program
+// inside the fence passes only when it is pinned.
+func TestResolveProjectProgram(t *testing.T) {
+	// No t.Parallel: the bare-name case sets PATH for the whole process.
+	projectRoot := t.TempDir()
+	pinned := plantProgram(t, filepath.Join(projectRoot, "scripts"), "fmt.sh")
+	plantProgram(t, filepath.Join(projectRoot, "scripts"), "lint.sh")
+	plantProgram(t, projectRoot, "tool")
+	onPath := plantProgram(t, t.TempDir(), "tool")
+
+	t.Run("a relative multi-segment command resolves against the root and a pinned one is admitted", func(t *testing.T) {
+		got, err := ResolveProjectProgram("./scripts/fmt.sh", projectRoot, projectRoot, nil, []string{pinned})
+		if err != nil {
+			t.Fatalf("err = %v, want the pinned in-root program admitted", err)
+		}
+		if got != pinned {
+			t.Errorf("ResolveProjectProgram() = %q, want %q", got, pinned)
+		}
+	})
+
+	t.Run("an unpinned in-root program stays refused", func(t *testing.T) {
+		_, err := ResolveProjectProgram("scripts/lint.sh", projectRoot, projectRoot, nil, []string{pinned})
+		if !errors.Is(err, ErrExecFromWritablePath) {
+			t.Fatalf("err = %v, want ErrExecFromWritablePath for a program nobody pinned", err)
+		}
+	})
+
+	t.Run("a box path is fenced as ResolveProgram fences it", func(t *testing.T) {
+		box := &domain.ConfinementBox{WritablePaths: []string{projectRoot}}
+		_, err := ResolveProjectProgram("scripts/lint.sh", projectRoot, "", box, nil)
+		if !errors.Is(err, ErrExecFromWritablePath) {
+			t.Fatalf("err = %v, want ErrExecFromWritablePath for a program inside the box", err)
+		}
+	})
+
+	t.Run("a bare name is looked up on PATH, not joined to the root", func(t *testing.T) {
+		t.Setenv("PATH", filepath.Dir(onPath))
+		got, err := ResolveProjectProgram("tool", projectRoot, projectRoot, nil, nil)
+		if err != nil {
+			t.Fatalf("err = %v, want the PATH program outside the fence", err)
+		}
+		if got != onPath {
+			t.Errorf("ResolveProjectProgram() = %q, want the PATH answer %q", got, onPath)
+		}
+	})
+}
