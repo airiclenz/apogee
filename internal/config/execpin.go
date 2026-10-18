@@ -381,11 +381,14 @@ func changedFields(before, after map[string]json.RawMessage) []string {
 }
 
 // fieldRank is a field's place in pinFieldOrder, with every other field after them all.
-func fieldRank(key string) int {
-	if index := slices.Index(pinFieldOrder, key); index >= 0 {
+func fieldRank(key string) int { return rankIn(pinFieldOrder, key) }
+
+// rankIn is key's place in order, with every key order does not name after them all.
+func rankIn(order []string, key string) int {
+	if index := slices.Index(order, key); index >= 0 {
 		return index
 	}
-	return len(pinFieldOrder)
+	return len(order)
 }
 
 // changedFiles names each path whose digest differs between before and after, present in only one

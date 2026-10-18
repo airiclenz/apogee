@@ -29,10 +29,10 @@ type fakeConfigHost struct {
 	recordModelChoice       func(model string) (bool, error)
 	externalEditSpec        func(path string) (EditorCommand, error)
 	addProjectRule          func(kind domain.AllowRuleKind, text string) error
-	adoptRules              func(rules []domain.AllowRule) error
-	rejectRules             func(rules []domain.AllowRule) error
+	adoptRules              func(proposals []domain.Proposal) error
+	rejectRules             func(proposals []domain.Proposal) error
 	removeRule              func(rule domain.AllowRule) error
-	proposedRules           func() ([]domain.AllowRule, error)
+	proposedRules           func() ([]domain.Proposal, error)
 }
 
 func (h fakeConfigHost) SaveHostAcknowledgement() (string, error) {
@@ -98,18 +98,18 @@ func (h fakeConfigHost) AddProjectRule(kind domain.AllowRuleKind, text string) e
 	return h.addProjectRule(kind, text)
 }
 
-func (h fakeConfigHost) AdoptRules(rules []domain.AllowRule) error {
+func (h fakeConfigHost) AdoptRules(proposals []domain.Proposal) error {
 	if h.adoptRules == nil {
-		return noopConfigHost{}.AdoptRules(rules)
+		return noopConfigHost{}.AdoptRules(proposals)
 	}
-	return h.adoptRules(rules)
+	return h.adoptRules(proposals)
 }
 
-func (h fakeConfigHost) RejectRules(rules []domain.AllowRule) error {
+func (h fakeConfigHost) RejectRules(proposals []domain.Proposal) error {
 	if h.rejectRules == nil {
-		return noopConfigHost{}.RejectRules(rules)
+		return noopConfigHost{}.RejectRules(proposals)
 	}
-	return h.rejectRules(rules)
+	return h.rejectRules(proposals)
 }
 
 func (h fakeConfigHost) RemoveRule(rule domain.AllowRule) error {
@@ -119,7 +119,7 @@ func (h fakeConfigHost) RemoveRule(rule domain.AllowRule) error {
 	return h.removeRule(rule)
 }
 
-func (h fakeConfigHost) ProposedRules() ([]domain.AllowRule, error) {
+func (h fakeConfigHost) ProposedRules() ([]domain.Proposal, error) {
 	if h.proposedRules == nil {
 		return noopConfigHost{}.ProposedRules()
 	}

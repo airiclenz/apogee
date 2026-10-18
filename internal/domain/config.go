@@ -644,6 +644,12 @@ type AllowRule struct {
 	Layer AllowRuleLayer
 }
 
+// Proposal is the rule as the adoption pane offers it: its kind spelled as a ProposalKind, its text,
+// no handle and no fields. The fingerprint is left to the caller that reads the adoption record.
+func (r AllowRule) Proposal() Proposal {
+	return Proposal{Kind: ProposalKind(r.Kind), Text: r.Text}
+}
+
 // String names the rule the way a surface reports it answered a call: its layer and its text —
 // "project rule `go test`". The text is the config file's, so a terminal surface strips it before
 // painting it.
@@ -664,13 +670,34 @@ const (
 	ProposalReaction ProposalKind = "reaction"
 )
 
+// ProposalFieldShape is how a ProposalField's value is spelled, which is how the adoption pane hangs
+// it under its label (docs/layout/user-questions-layout.md §Adoption pane). It is carried rather
+// than guessed from the values because a guess could be steered: a one-element argv whose element
+// reads like a webhook mapping must still be drawn as the argv it is.
+type ProposalFieldShape int
+
+const (
+	// ProposalScalar is one value, drawn on its label's own line.
+	ProposalScalar ProposalFieldShape = iota
+	// ProposalList is each value an element, in order, one per line behind `- `.
+	ProposalList
+	// ProposalMap is each value one `key: value` line, sorted by key.
+	ProposalMap
+	// ProposalGroup is a mapping of fields of its own (Fields) — a webhook action's `url:`,
+	// `headers:` and `headers-env:` — each hung one level in. It has no Values.
+	ProposalGroup
+)
+
 // ProposalField is one pinned field of a structured Proposal as the adoption pane draws it: its
-// label, the key as the file spells it, and its values verbatim — one for a scalar, each element
-// in order for a list, one `key: value` per entry for a mapping, sorted by key. An explicitly empty
-// list is a field with no values.
+// label, the key as the file spells it, its shape, and its values verbatim — one for a scalar,
+// each element in order for a list, one `key: value` per entry for a mapping, sorted by key. An
+// explicitly empty list is a list with no values. A group carries its own fields instead, in the
+// pane's order.
 type ProposalField struct {
 	Label  string
+	Shape  ProposalFieldShape
 	Values []string
+	Fields []ProposalField
 }
 
 // Proposal is one granting entry of a Project config the user rules on (ADR 0096 §4, ADR 0104): an

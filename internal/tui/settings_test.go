@@ -4732,8 +4732,8 @@ func TestSettingsPaneRuleEnterAdoptsOnlyAnInertRule(t *testing.T) {
 		settingsRuleRow("rm -rf", domain.AllowRuleProject, SettingRuleRejected),
 		settingsRuleRow("make", domain.AllowRuleGlobal, SettingRuleLive),
 	}
-	var adopted [][]domain.AllowRule
-	host := fakeConfigHost{adoptRules: func(r []domain.AllowRule) error {
+	var adopted [][]domain.Proposal
+	host := fakeConfigHost{adoptRules: func(r []domain.Proposal) error {
 		adopted = append(adopted, r)
 		return nil
 	}}
@@ -4750,7 +4750,7 @@ func TestSettingsPaneRuleEnterAdoptsOnlyAnInertRule(t *testing.T) {
 	}
 	m = pressSettings(t, m, keyEnter(), keyDown(), keyEnter(), keyDown(), keyEnter())
 
-	want := [][]domain.AllowRule{{proposed.Rule}, {rows[2].Rule}}
+	want := [][]domain.Proposal{{proposed.Rule.Proposal()}, {rows[2].Rule.Proposal()}}
 	if !reflect.DeepEqual(adopted, want) {
 		t.Errorf("AdoptRules calls = %+v, want %+v — the proposed and the rejected rule, not the live ones", adopted, want)
 	}

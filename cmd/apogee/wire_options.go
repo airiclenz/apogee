@@ -47,22 +47,7 @@ func (w *rootWiring) options() tui.Options {
 	// The apply dispatcher, built ahead of the literal rather than inside it, because the settingsHost
 	// below is composed out of it as well as out of the two paths that splice the file — one value the
 	// pane's own ⏎ ([tui.SettingsHost.Apply]) reaches every key through (ADR 0037 decision 1).
-	applySetting := applySettingFor(settingsApplier{
-		engine:     w.engine,
-		live:       w.live,
-		binding:    w.holder.Binding,
-		rebind:     w.rebind,
-		configPath: configPath,
-		skills:     w.skillProvider,
-		tools:      w.toolSet,
-		mcp:        w.mcpSet,
-		roots:      w.roots,
-		present:    w.presentation,
-		caps:       w.caps,
-		delegation: w.delegation,
-		stats:      w.stats,
-		secretEnv:  w.cfg.SecretEnv,
-	})
+	applySetting := applySettingFor(w.settingsApplier())
 
 	return tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
@@ -193,11 +178,12 @@ func (w *rootWiring) options() tui.Options {
 		// — the rewrite, and the retarget that puts it in force in this session — is the host's. It
 		// stays zero on a config that carries no retired flag, which is every config written since.
 		SubAgentsMigration: w.subAgentsFlagged,
-		// The Project config's rules this start-up found proposed (ADR 0096 §4) — in the file, with no
-		// answer recorded for their text — for the adoption pane to offer; each answer is one call
-		// back through the host above (projectrules.go). Empty with no Project config or nothing in it
-		// unanswered, and the renderer then raises nothing.
-		ProposedRules: engineAllowRules(w.opts.AllowRules.Proposed),
+		// The Project config's entries this start-up found proposed (ADR 0096 §4, ADR 0104) — Allow
+		// rules, MCP servers and reactions in the file with no answer recorded for their pin — for
+		// the adoption pane to offer; each answer is one call back through the host above
+		// (projectrules.go). Empty with no Project config or nothing in it unanswered, and the
+		// renderer then raises nothing.
+		ProposedRules: proposalsOf(w.opts),
 		// The whole `/settings` seam as one named capability (ADR 0054): the rows the pane shows,
 		// the write and the reset that splice this run's config.yaml, and the apply that puts the
 		// key just persisted into effect. Everything behind it — the registry, the file format, the
@@ -278,6 +264,30 @@ func (w *rootWiring) options() tui.Options {
 		Resumed: resumedSession(w.resumed, w.opts.Currency, w.engine.InExchange()),
 		// The live session a --resume start opens watching (resolveResume), nil otherwise.
 		Watch: w.watch,
+	}
+}
+
+// settingsApplier is the apply half of `/settings` over this wiring's live seams: the one value
+// every key's apply reaches the session through (applySettingFor) — the pane's ⏎, a watched
+// re-read, and an adoption that puts a repo server or reaction into force at once
+// (applyAdoptedKinds). It is built on each ask rather than held, because every member is a pointer
+// into live state the wiring owns, so two builds apply to the same session.
+func (w *rootWiring) settingsApplier() settingsApplier {
+	return settingsApplier{
+		engine:     w.engine,
+		live:       w.live,
+		binding:    w.holder.Binding,
+		rebind:     w.rebind,
+		configPath: w.configPath(),
+		skills:     w.skillProvider,
+		tools:      w.toolSet,
+		mcp:        w.mcpSet,
+		roots:      w.roots,
+		present:    w.presentation,
+		caps:       w.caps,
+		delegation: w.delegation,
+		stats:      w.stats,
+		secretEnv:  w.cfg.SecretEnv,
 	}
 }
 

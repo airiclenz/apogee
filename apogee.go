@@ -207,9 +207,20 @@ type ProposalKind = domain.ProposalKind
 // ProposalField is one pinned field of a structured Proposal, as the adoption pane draws it.
 type ProposalField = domain.ProposalField
 
+// ProposalFieldShape is how a ProposalField's value is spelled: a scalar, a list, a map or a group
+// of fields of its own.
+type ProposalFieldShape = domain.ProposalFieldShape
+
 const (
 	ProposalMCPServer = domain.ProposalMCPServer
 	ProposalReaction  = domain.ProposalReaction
+)
+
+const (
+	ProposalScalar = domain.ProposalScalar
+	ProposalList   = domain.ProposalList
+	ProposalMap    = domain.ProposalMap
+	ProposalGroup  = domain.ProposalGroup
 )
 
 const (

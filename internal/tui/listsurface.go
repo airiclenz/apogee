@@ -643,7 +643,12 @@ type listContent struct {
 	rowCap    int
 	rows      []popupRow
 	menuRows  bool
-	selected  int
+	// answers says the rows are the answers to the question the body asks — the adoption pane's —
+	// rather than a list to look through: they wrap whole instead of eliding (popupSpec.wrapRows),
+	// and they are the pane's floor (popupFloor.rows), so a body too tall for the window gives up
+	// its lines, counted on its marker, before any answer leaves the screen.
+	answers  bool
+	selected int
 }
 
 // statingFilter folds a filtering pane's filter STATE into c, the last step of composing it: the
@@ -737,11 +742,16 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	// lines to spare. Reserving that window is NOT this call's business — the painter takes the pads
 	// off the grant before it seats a row, and hands them back at the floor (popupRowLinesAt) — so a
 	// list too tall for its window gives up its breathing room rather than a row of the list.
-	padBelow := c.hint != ""
-	pad := popupRowPadLines(len(c.rows) > 0, padBelow)
-	// The pane's rowCap is the taste; popupBudget is the screen's answer to it, so a long offering on a
-	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
-	maxBody, shown, seated := m.popupBudget(c.pane, len(c.rows)+pad, c.rowCap+pad, popupChrome, claim)
+	budget := listBudget{padAbove: true, padBelow: c.hint != ""}
+	seated := false
+	if c.answers {
+		budget, seated = m.answersBudget(c, claim, budget)
+	} else {
+		pad := popupRowPadLines(len(c.rows) > 0, budget.padBelow)
+		// The pane's rowCap is the taste; popupBudget is the screen's answer to it, so a long offering on
+		// a short terminal shrinks the pane instead of pushing the input box off the frame (D2).
+		budget.maxBody, budget.shown, seated = m.popupBudget(c.pane, len(c.rows)+pad, c.rowCap+pad, popupChrome, claim)
+	}
 	if !seated {
 		return popupSpec{}, false
 	}
@@ -753,16 +763,47 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 		title:       c.title,
 		titleTail:   c.titleTail,
 		body:        c.body,
-		maxBodyRows: maxBody,
+		maxBodyRows: budget.maxBody,
 		rows:        c.rows,
 		menuRows:    c.menuRows,
-		rowPadAbove: true,
-		rowStyle:    popupRowStyle{padBelow: padBelow},
+		wrapRows:    c.answers,
+		rowPadAbove: budget.padAbove,
+		rowStyle:    popupRowStyle{padBelow: budget.padBelow},
 		selected:    c.selected,
 		rowTop:      rowTop,
 		pinTop:      pinTop,
 		hint:        c.hint,
-		maxRows:     shown,
+		maxRows:     budget.shown,
 		scrollbar:   m.popupScrollbarOn(),
 	}, true
+}
+
+// listBudget is what the frame granted one list pane: the body lines and the row lines it may
+// paint, and which of the two house blanks around the row block it still draws.
+type listBudget struct {
+	maxBody, shown     int
+	padAbove, padBelow bool
+}
+
+// answersBudget is listSpec's budget for a pane whose rows are ANSWERS (listContent.answers): the
+// answers demanded in the lines they wrap to and claimed whole as the pane's floor, so a body too
+// tall for the window gives up its lines first. Where the grant cannot seat every answer beside the
+// two blanks around them, the pane is budgeted again without the blanks — the approval menu's rule
+// for its disclosure (approval.go) — so breathing room is given up before an answer is.
+func (m Model) answersBudget(c listContent, claim popupFloor, budget listBudget) (listBudget, bool) {
+	heights := popupWrappedRowHeights(m.th, c.rows, m.width)
+	ask := func(pad int) (int, int, int, bool) {
+		demand := popupRowBlockLines(heights, 0, pad)
+		capped := popupRowBlockLines(heights[:min(len(heights), c.rowCap)], 0, pad)
+		claim.rows = demand
+		maxBody, shown, seated := m.popupBudget(c.pane, demand, capped, popupChrome, claim)
+		return demand, maxBody, shown, seated
+	}
+	demand, maxBody, shown, seated := ask(popupRowPadLines(len(c.rows) > 0, budget.padBelow))
+	if seated && shown < demand {
+		budget.padAbove, budget.padBelow = false, false
+		_, maxBody, shown, seated = ask(0)
+	}
+	budget.maxBody, budget.shown = maxBody, shown
+	return budget, seated
 }

@@ -1898,7 +1898,7 @@ func TestPickerFilterMatchesTheRowsMatchedText(t *testing.T) {
 		{"a sub-agents migration answer by its gloss", pickerSubAgentsMigration,
 			subAgentsMigrationRows([]string{"gpu"})[0], "retired flag", true},
 		{"a boundary answer by its gloss", pickerWorkflowBoundary, boundaryRows()[1], "keep them", true},
-		{"an adoption answer by its label", pickerAdoption, adoptionRows()[2], "reject", true},
+		{"an adoption answer by its label", pickerAdoption, adoptionRows(domain.Proposal{})[2], "reject", true},
 		{"a substring the matched text lacks prunes the row", pickerModel, popupRow{"Qwen3-Coder", "— 32k"}, "gemma", false},
 	}
 	for _, tc := range tests {

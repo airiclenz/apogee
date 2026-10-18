@@ -321,7 +321,8 @@ type SettingsHost interface {
 // on the files the composition root resolved — the host acknowledgement `/confine off --save` records,
 // the `$EDITOR` round trip's two halves, the watcher's wait, the three start-up-offer answers, the
 // `remember-model:` recording, the four Allow-rule acts on the Project config and its adoption
-// record (ADR 0096), and the read of the rules it proposes — named as one interface rather than spelled as bare funcs (ADR 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
+// record (ADR 0096) — two of them, adopt and reject, answering every kind of entry it proposes (ADR
+// 0104) — and the read of what it proposes — named as one interface rather than spelled as bare funcs (ADR 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
 // the others lean on for their posture: every act here is "one small file, spliced and renamed",
 // synchronous, on a keypress the human is waiting on, with a failure REPORTED and never swallowed —
 // the [SettingsHost.Write] contract.
@@ -473,15 +474,17 @@ type ConfigHost interface {
 	// synchronous on the keypress, and a failure is REPORTED.
 	AddProjectRule(kind domain.AllowRuleKind, text string) error
 
-	// AdoptRules records the project rules the human accepted — the adoption pane's "adopt" — and
-	// brings them into force. Only the record moves, and only for a rule the Project config still
-	// holds, word for word, at the moment of the answer: each one an edit took out since it was
-	// offered is REPORTED by name in the error, and nothing is recorded for it.
-	AdoptRules(rules []domain.AllowRule) error
+	// AdoptRules records the proposals the human accepted — the adoption pane's "adopt", for an
+	// Allow rule, a repo MCP server or a repo reaction alike (ADR 0104) — and brings them into force
+	// at once: an Allow rule into the effective set, a server dialled, a reaction onto its lane.
+	// Only the record moves, and only for an entry the Project config still holds, pin for pin, at
+	// the moment of the answer: each one an edit changed or took out since it was offered is
+	// REPORTED by name in the error, and nothing is recorded for it.
+	AdoptRules(proposals []domain.Proposal) error
 
-	// RejectRules records the project rules the human turned down; they stay inert, and are not
-	// offered again until their text changes. A rule that was in force leaves the effective set.
-	RejectRules(rules []domain.AllowRule) error
+	// RejectRules records the proposals the human turned down; they stay inert, and are not
+	// offered again until their pin changes. A rule that was in force leaves the effective set.
+	RejectRules(proposals []domain.Proposal) error
 
 	// RemoveRule takes a rule out of the file that holds it, so it grants nothing from the next call
 	// on: a project rule out of the Project config, its recorded answer dropped first; a global rule
@@ -489,13 +492,13 @@ type ConfigHost interface {
 	// section's removal (ADR 0096 §4).
 	RemoveRule(rule domain.AllowRule) error
 
-	// ProposedRules re-reads what the Project config proposes now: its rules no adoption or
-	// rejection is recorded for, resolved from the two files and the adoption record the way a
-	// relaunch would resolve them. The adoption pane asks after a watched change (adoption.go); the
+	// ProposedRules re-reads what the Project config proposes now: its Allow rules, MCP servers and
+	// reactions no adoption or rejection is recorded for, resolved from the two files and the
+	// adoption record the way a relaunch would resolve them. The adoption pane asks after a watched change (adoption.go); the
 	// start-up's finding arrives as [Options.ProposedRules] instead. It writes nothing.
 	//
 	// An error — a config file that no longer resolves — is REPORTED, and nothing is offered.
-	ProposedRules() ([]domain.AllowRule, error)
+	ProposedRules() ([]domain.Proposal, error)
 }
 
 // noopConfigHost is what a nil [ConfigHost] degrades to: every act answers exactly as its unwired
@@ -529,10 +532,10 @@ func (noopConfigHost) ExternalEditSpec(string) (EditorCommand, error) {
 	return EditorCommand{}, errNoExternalEdit
 }
 func (noopConfigHost) AddProjectRule(domain.AllowRuleKind, string) error { return errNoProjectRules }
-func (noopConfigHost) AdoptRules([]domain.AllowRule) error               { return errNoProjectRules }
-func (noopConfigHost) RejectRules([]domain.AllowRule) error              { return errNoProjectRules }
+func (noopConfigHost) AdoptRules([]domain.Proposal) error                { return errNoProjectRules }
+func (noopConfigHost) RejectRules([]domain.Proposal) error               { return errNoProjectRules }
 func (noopConfigHost) RemoveRule(domain.AllowRule) error                 { return errNoProjectRules }
-func (noopConfigHost) ProposedRules() ([]domain.AllowRule, error)        { return nil, nil }
+func (noopConfigHost) ProposedRules() ([]domain.Proposal, error)         { return nil, nil }
 
 // configHostOrNoop is the ONE nil guard the family has: the wired host, or the degrade above when a
 // Driver composed none. Every act that can carry its refusal in its own answer calls through here
@@ -1537,13 +1540,14 @@ type Options struct {
 	// the ordinary case — raises nothing at all.
 	SubAgentsMigration []string
 
-	// ProposedRules are the Project config's Allow rules this start-up found PROPOSED (ADR 0096 §4):
-	// in the file, with no adoption or rejection recorded for their exact text, and so inert. The
-	// adoption pane offers them one at a time once nothing more urgent is up (adoption.go); a rule a
-	// file change proposes later is read through [ConfigHost.ProposedRules]. Empty — no Project
+	// ProposedRules are the Project config's entries this start-up found PROPOSED (ADR 0096 §4, ADR
+	// 0104) — Allow rules, MCP servers and reactions in the file with no adoption or rejection
+	// recorded for their pin, and so inert. The adoption pane offers them one at a time once nothing
+	// more urgent is up (adoption.go); an entry a file change proposes later is read through
+	// [ConfigHost.ProposedRules]. Empty — no Project
 	// config, or nothing in it unanswered — raises nothing, which is what a hand-built Options and
 	// every unattended Driver get: a rule cannot fire there, so there is nothing to ask.
-	ProposedRules []domain.AllowRule
+	ProposedRules []domain.Proposal
 
 	// Launcher is the llama-launcher seam whole ([LauncherHost]): the Launch profiles this machine
 	// defines, the verb that activates one, the two that free or stop the server this session is on,

@@ -472,33 +472,53 @@ func proposalOf(e adoption.Entry, handleField string) domain.Proposal {
 	slices.SortStableFunc(labels, func(a, b string) int { return fieldRank(a) - fieldRank(b) })
 	for _, label := range labels {
 		if label != handleField {
-			proposal.Fields = append(proposal.Fields,
-				domain.ProposalField{Label: label, Values: fieldValues(fields[label])})
+			proposal.Fields = append(proposal.Fields, proposalField(label, fields[label]))
 		}
 	}
 	proposal.Files = slices.Sorted(maps.Keys(files))
 	return proposal
 }
 
-// fieldValues spells a pinned field's canonical value as the pane draws it: a string as itself, a
-// list element by element, a mapping as one `key: value` per entry sorted by key, and anything
-// else as its canonical JSON.
-func fieldValues(raw json.RawMessage) []string {
+// webhookFieldOrder is the order the pane hangs a webhook action's own fields in: where it posts,
+// then what it sends.
+var webhookFieldOrder = []string{"url", "headers", "headers-env"}
+
+// proposalField spells one pinned field's canonical value as the pane draws it, with its shape: a
+// string as itself, a list element by element, a mapping of strings as one `key: value` per entry
+// sorted by key, a mapping of anything else — a webhook action — as a group of its own fields in
+// webhookFieldOrder, and anything else as its canonical JSON on one line.
+func proposalField(label string, raw json.RawMessage) domain.ProposalField {
+	field := domain.ProposalField{Label: label}
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
-		return []string{text}
+		field.Values = []string{text}
+		return field
 	}
 	var list []string
 	if err := json.Unmarshal(raw, &list); err == nil {
-		return nonNilList(list)
+		field.Shape, field.Values = domain.ProposalList, nonNilList(list)
+		return field
 	}
 	var mapping map[string]string
 	if err := json.Unmarshal(raw, &mapping); err == nil {
-		values := make([]string, 0, len(mapping))
+		field.Shape = domain.ProposalMap
 		for _, key := range slices.Sorted(maps.Keys(mapping)) {
-			values = append(values, key+": "+mapping[key])
+			field.Values = append(field.Values, key+": "+mapping[key])
 		}
-		return values
+		return field
 	}
-	return []string{string(raw)}
+	var group map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &group); err == nil {
+		field.Shape = domain.ProposalGroup
+		keys := slices.Sorted(maps.Keys(group))
+		slices.SortStableFunc(keys, func(a, b string) int {
+			return rankIn(webhookFieldOrder, a) - rankIn(webhookFieldOrder, b)
+		})
+		for _, key := range keys {
+			field.Fields = append(field.Fields, proposalField(key, group[key]))
+		}
+		return field
+	}
+	field.Values = []string{string(raw)}
+	return field
 }

@@ -19,44 +19,44 @@ import (
 // The proposed rules the tests offer: a terminal prefix and an MCP server, both from the Project
 // config.
 var (
-	goTestRule = domain.AllowRule{Kind: domain.AllowRuleTerminal, Text: "go test", Layer: domain.AllowRuleProject}
-	docsRule   = domain.AllowRule{Kind: domain.AllowRuleMCPServer, Text: "docs", Layer: domain.AllowRuleProject}
+	goTestRule = domain.AllowRule{Kind: domain.AllowRuleTerminal, Text: "go test", Layer: domain.AllowRuleProject}.Proposal()
+	docsRule   = domain.AllowRule{Kind: domain.AllowRuleMCPServer, Text: "docs", Layer: domain.AllowRuleProject}.Proposal()
 )
 
 // adoptionLog stands in for the adoption seams: the rules each answer recorded, in order, and what
 // a watched change finds proposed. Called synchronously on the test's goroutine, so it needs no guard.
 type adoptionLog struct {
-	adopted  []domain.AllowRule
-	rejected []domain.AllowRule
-	proposed []domain.AllowRule
+	adopted  []domain.Proposal
+	rejected []domain.Proposal
+	proposed []domain.Proposal
 }
 
 // adoptionOpts are the Options of a start-up that found proposed rules: the rules, the two answer
 // seams, the re-read a watched change asks for, and a reload that finds no key changed.
-func adoptionOpts(log *adoptionLog, proposed ...domain.AllowRule) Options {
+func adoptionOpts(log *adoptionLog, proposed ...domain.Proposal) Options {
 	opts := testOpts
 	opts.ProposedRules = proposed
 	seams := configSeams(&opts)
-	seams.adoptRules = func(rules []domain.AllowRule) error {
+	seams.adoptRules = func(rules []domain.Proposal) error {
 		log.adopted = append(log.adopted, rules...)
 		return nil
 	}
-	seams.rejectRules = func(rules []domain.AllowRule) error {
+	seams.rejectRules = func(rules []domain.Proposal) error {
 		log.rejected = append(log.rejected, rules...)
 		return nil
 	}
-	seams.proposedRules = func() ([]domain.AllowRule, error) { return log.proposed, nil }
+	seams.proposedRules = func() ([]domain.Proposal, error) { return log.proposed, nil }
 	seams.reloadConfig = func() (ConfigReload, error) { return ConfigReload{}, nil }
 	return opts
 }
 
 // assertAdoptionPane holds the model to the adoption pane asking about want.
-func assertAdoptionPane(t *testing.T, m Model, want domain.AllowRule) {
+func assertAdoptionPane(t *testing.T, m Model, want domain.Proposal) {
 	t.Helper()
 	if !m.picker.open || m.picker.kind != pickerAdoption {
 		t.Fatalf("picker = %+v, want the adoption pane open", m.picker)
 	}
-	if len(m.picker.adoption) == 0 || m.picker.adoption[0] != want {
+	if len(m.picker.adoption) == 0 || !reflect.DeepEqual(m.picker.adoption[0], want) {
 		t.Fatalf("queue = %v, want %v asked about first", m.picker.adoption, want)
 	}
 }
@@ -136,7 +136,7 @@ func TestAdoptionAdoptRecordsTheRuleAndAdvances(t *testing.T) {
 	m = step(t, m, keyUp()) // "adopt", the row above the "not now" the pane opens on
 	m = step(t, m, keyEnter())
 
-	if !reflect.DeepEqual(log.adopted, []domain.AllowRule{goTestRule}) {
+	if !reflect.DeepEqual(log.adopted, []domain.Proposal{goTestRule}) {
 		t.Errorf("AdoptRules calls = %v, want the one rule asked about", log.adopted)
 	}
 	if len(log.rejected) != 0 {
@@ -159,23 +159,76 @@ func TestAdoptionRejectIsNotReofferedUntilTheTextChanges(t *testing.T) {
 	m = step(t, m, keyDown()) // "reject", the row below the "not now" the pane opens on
 	m = step(t, m, keyEnter())
 
-	if !reflect.DeepEqual(log.rejected, []domain.AllowRule{goTestRule}) {
+	if !reflect.DeepEqual(log.rejected, []domain.Proposal{goTestRule}) {
 		t.Fatalf("RejectRules calls = %v, want the one rule asked about", log.rejected)
 	}
 	if m.picker.open {
 		t.Fatalf("picker = %+v, want the round over", m.picker)
 	}
 
-	log.proposed = []domain.AllowRule{goTestRule}
+	log.proposed = []domain.Proposal{goTestRule}
 	m = step(t, m, configChangedMsg{alive: true})
 	if m.picker.open {
 		t.Fatalf("picker = %+v, want the rejected text not offered again", m.picker)
 	}
 
-	edited := domain.AllowRule{Kind: domain.AllowRuleTerminal, Text: "go test -race", Layer: domain.AllowRuleProject}
-	log.proposed = []domain.AllowRule{edited}
+	edited := domain.AllowRule{Kind: domain.AllowRuleTerminal, Text: "go test -race", Layer: domain.AllowRuleProject}.Proposal()
+	log.proposed = []domain.Proposal{edited}
 	m = step(t, m, configChangedMsg{alive: true})
 	assertAdoptionPane(t, m, edited)
+}
+
+// Adopting a repo reaction is one AdoptRules call about it — the whole Proposal, pin and all — and
+// the answer line makes the promise a server or reaction keeps: it runs until it changes. The round
+// note names it the way the title does.
+func TestAdoptionAdoptsARepoReaction(t *testing.T) {
+	t.Parallel()
+	log := &adoptionLog{}
+	m := armAdoption(t, newTestModelEng(t, &fakeEngine{}, adoptionOpts(log, goTestRule, fmtReaction)))
+	if note := lastNote(m); !strings.Contains(note, "`go test` and reaction `fmt` — nothing it proposes applies") {
+		t.Errorf("notice = %q, want both entries named and the mixed round's wording", note)
+	}
+	m = step(t, m, keyEnter()) // "not now" on the Allow rule
+	m = armAdoption(t, m)
+	if title := m.pickerTitle(); title != "use reaction `fmt` in this project?" {
+		t.Errorf("title = %q, want the reaction asked about", title)
+	}
+
+	m = step(t, m, keyUp()) // "adopt"
+	m = step(t, m, keyEnter())
+
+	if !reflect.DeepEqual(log.adopted, []domain.Proposal{fmtReaction}) {
+		t.Errorf("AdoptRules calls = %+v, want the reaction asked about", log.adopted)
+	}
+	if note := lastNote(m); note != "adopted reaction `fmt` — it runs in this project until it changes" {
+		t.Errorf("note = %q, want the adoption said", note)
+	}
+	if m.picker.open {
+		t.Errorf("picker = %+v, want the round over", m.picker)
+	}
+}
+
+// A repo entry is offered once per session with one pin: a watched change that still proposes it as
+// it was raises nothing, and the same handle with its pin moved — a pinned file edited — is a new
+// question, asked at once.
+func TestAdoptionReoffersAChangedPin(t *testing.T) {
+	t.Parallel()
+	log := &adoptionLog{}
+	m := armAdoption(t, newTestModelEng(t, &fakeEngine{}, adoptionOpts(log, docsServer)))
+	m = step(t, m, keyEnter()) // "not now"
+
+	log.proposed = []domain.Proposal{docsServer}
+	m = step(t, m, configChangedMsg{alive: true})
+	if m.picker.open {
+		t.Fatalf("picker = %+v, want the same pin not offered again", m.picker)
+	}
+
+	moved := docsServer
+	moved.Fingerprint, moved.Changed = "docs-pin-2", []string{"hook.js"}
+	log.proposed = []domain.Proposal{moved}
+	m = step(t, m, configChangedMsg{alive: true})
+
+	assertAdoptionPane(t, m, moved)
 }
 
 // Not now and esc persist nothing. Esc ends the round: every rule left is a "not now".
@@ -204,7 +257,7 @@ func TestAdoptionAfterAMidTurnChangeWaitsForTheTurnToEnd(t *testing.T) {
 	m.transcript.addUser("run the tests", nil)
 	startStubWorker(t, &m)
 
-	log.proposed = []domain.AllowRule{goTestRule}
+	log.proposed = []domain.Proposal{goTestRule}
 	m = step(t, m, configChangedMsg{alive: true})
 	if m.picker.open {
 		t.Fatalf("picker = %+v, want no pane while the turn runs", m.picker)
@@ -220,7 +273,7 @@ func TestAdoptionAfterAnIdleChangeOpensAtOnce(t *testing.T) {
 	log := &adoptionLog{}
 	m := newTestModelEng(t, &fakeEngine{}, adoptionOpts(log))
 
-	log.proposed = []domain.AllowRule{docsRule}
+	log.proposed = []domain.Proposal{docsRule}
 	m = step(t, m, configChangedMsg{alive: true})
 
 	assertAdoptionPane(t, m, docsRule)
@@ -278,7 +331,7 @@ func TestAdoptionEnterIsDeadUntilArmed(t *testing.T) {
 	m = armAdoption(t, m)
 	m = step(t, m, keyEnter())
 
-	if !reflect.DeepEqual(log.adopted, []domain.AllowRule{goTestRule}) {
+	if !reflect.DeepEqual(log.adopted, []domain.Proposal{goTestRule}) {
 		t.Errorf("AdoptRules calls = %v after the pane armed, want the rule asked about", log.adopted)
 	}
 }
@@ -329,13 +382,13 @@ func TestAdoptionRearmsForTheNextRule(t *testing.T) {
 	m = step(t, m, keyUp())
 	m = step(t, m, keyEnter())
 
-	if !reflect.DeepEqual(log.adopted, []domain.AllowRule{goTestRule}) {
+	if !reflect.DeepEqual(log.adopted, []domain.Proposal{goTestRule}) {
 		t.Fatalf("AdoptRules calls = %v, want only the first rule before the second pane armed", log.adopted)
 	}
 
 	m = step(t, armAdoption(t, m), keyEnter())
 
-	if want := []domain.AllowRule{goTestRule, docsRule}; !reflect.DeepEqual(log.adopted, want) {
+	if want := []domain.Proposal{goTestRule, docsRule}; !reflect.DeepEqual(log.adopted, want) {
 		t.Errorf("AdoptRules calls = %v, want %v once the second pane armed", log.adopted, want)
 	}
 }
@@ -347,7 +400,7 @@ func TestAdoptionArmsOnTheDrainedInputPosition(t *testing.T) {
 	t.Parallel()
 	log := &adoptionLog{}
 	m := newTestModelEng(t, &fakeEngine{}, adoptionOpts(log))
-	log.proposed = []domain.AllowRule{goTestRule}
+	log.proposed = []domain.Proposal{goTestRule}
 	m, open := stepCmd(t, m, configChangedMsg{alive: true})
 	assertAdoptionPane(t, m, goTestRule)
 	if open == nil {
@@ -374,7 +427,7 @@ func TestAdoptionArmsOnTheDrainedInputPosition(t *testing.T) {
 	}
 	m = step(t, m, keyEnter())
 
-	if !reflect.DeepEqual(log.adopted, []domain.AllowRule{goTestRule}) {
+	if !reflect.DeepEqual(log.adopted, []domain.Proposal{goTestRule}) {
 		t.Errorf("AdoptRules calls = %v after the pane armed, want the rule asked about", log.adopted)
 	}
 }

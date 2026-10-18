@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
+	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -32,6 +34,14 @@ const projectRuleCommand = "echo"
 
 // echoRule is the project rule projectRuleCommand is saved as.
 var echoRule = apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: projectRuleCommand, Layer: apogee.AllowRuleProject}
+
+// proposalOfRule is rule as ProposedRules reports it: a Proposal carrying the fingerprint its answer
+// is recorded under.
+func proposalOfRule(rule apogee.AllowRule) apogee.Proposal {
+	p := rule.Proposal()
+	p.Fingerprint = adoption.Fingerprint(adoption.Entry{Kind: string(rule.Kind), Text: rule.Text})
+	return p
+}
 
 // projectRuleWiring is a rootWiring with what the rule acts reach: a home naming endpoint, a Project
 // root that is the workspace, the live-settings holder, the external-edit baseline, and an engine
@@ -166,7 +176,7 @@ func TestProjectRuleRejectAndAdoptMoveOnlyTheRecord(t *testing.T) {
 	if err := host.AddProjectRule(apogee.AllowRuleTerminal, projectRuleCommand); err != nil {
 		t.Fatalf("AddProjectRule: %v", err)
 	}
-	if err := host.RejectRules([]apogee.AllowRule{echoRule}); err != nil {
+	if err := host.RejectRules([]apogee.Proposal{echoRule.Proposal()}); err != nil {
 		t.Fatalf("RejectRules: %v", err)
 	}
 	assertRuleRecord(t, w, true, adoption.Rejected)
@@ -176,7 +186,7 @@ func TestProjectRuleRejectAndAdoptMoveOnlyTheRecord(t *testing.T) {
 		t.Errorf("approval requests with the rule rejected = %d, want the gate", len(got))
 	}
 
-	if err := host.AdoptRules([]apogee.AllowRule{echoRule}); err != nil {
+	if err := host.AdoptRules([]apogee.Proposal{echoRule.Proposal()}); err != nil {
 		t.Fatalf("AdoptRules: %v", err)
 	}
 	assertRuleRecord(t, w, true, adoption.Adopted)
@@ -208,7 +218,7 @@ func TestProjectRuleAdoptionReadsWhatTheFileProposes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProposedRules: %v", err)
 	}
-	if want := []apogee.AllowRule{echoRule}; !reflect.DeepEqual(proposed, want) {
+	if want := []apogee.Proposal{proposalOfRule(echoRule)}; !reflect.DeepEqual(proposed, want) {
 		t.Fatalf("ProposedRules = %+v, want %+v", proposed, want)
 	}
 	runE2EExchange(t, ctx, w.engine, "run a command")
@@ -244,7 +254,7 @@ func TestProjectRuleAdoptRefusesARuleTheFileNoLongerHolds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProposedRules: %v", err)
 	}
-	if want := []apogee.AllowRule{echoRule, kept}; !reflect.DeepEqual(proposed, want) {
+	if want := []apogee.Proposal{proposalOfRule(echoRule), proposalOfRule(kept)}; !reflect.DeepEqual(proposed, want) {
 		t.Fatalf("ProposedRules = %+v, want %+v", proposed, want)
 	}
 	writeProjectAllow(t, w.roots.project, keptText)
@@ -273,7 +283,7 @@ func TestProjectRuleAdoptRecordsAHeldRuleWhenTheGlobalConfigDoesNotResolve(t *te
 		t.Fatalf("break the global config: %v", err)
 	}
 
-	err := host.AdoptRules([]apogee.AllowRule{echoRule})
+	err := host.AdoptRules([]apogee.Proposal{echoRule.Proposal()})
 
 	if err == nil || !strings.Contains(err.Error(), "the answer is saved") {
 		t.Errorf("AdoptRules over a broken global config = %v, want the settling's error", err)
@@ -281,20 +291,21 @@ func TestProjectRuleAdoptRecordsAHeldRuleWhenTheGlobalConfigDoesNotResolve(t *te
 	assertRuleRecord(t, w, true, adoption.Adopted)
 }
 
-// A global rule is the human's own line, live as written: no act here answers for it — adoption is a
-// project rule's question — and nothing is written when one is handed over.
-func TestProjectRuleActsRefuseAGlobalRule(t *testing.T) {
+// Adoption is a question only about what the Project config proposes: a proposal of no kind it
+// proposes — no Allow list, no `mcp-servers:` or `reactions:` entry — is refused by both answers,
+// and nothing is written.
+func TestProjectRuleActsRefuseAProposalOfNoKnownKind(t *testing.T) {
 	t.Parallel()
 	srv := scriptedTerminalModel(t)
 	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
 	host := configHost{w: w}
-	global := apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "make", Layer: apogee.AllowRuleGlobal}
+	stray := apogee.Proposal{Kind: "servers", Text: "make"}
 
-	if err := host.AdoptRules([]apogee.AllowRule{global}); err == nil {
-		t.Error("AdoptRules(global) succeeded, want a refusal")
+	if err := host.AdoptRules([]apogee.Proposal{stray}); err == nil {
+		t.Error("AdoptRules(stray) succeeded, want a refusal")
 	}
-	if err := host.RejectRules([]apogee.AllowRule{global}); err == nil {
-		t.Error("RejectRules(global) succeeded, want a refusal")
+	if err := host.RejectRules([]apogee.Proposal{stray}); err == nil {
+		t.Error("RejectRules(stray) succeeded, want a refusal")
 	}
 	if _, err := os.Stat(config.ProjectFilePath(w.roots.project)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the project config exists after refused acts (stat: %v)", err)
@@ -407,7 +418,7 @@ func TestProjectRuleSettingsSectionListsFromTheLiveHolder(t *testing.T) {
 			proposed = r
 		}
 	}
-	if err := host.AdoptRules([]apogee.AllowRule{proposed.Rule}); err != nil {
+	if err := host.AdoptRules([]apogee.Proposal{proposed.Rule.Proposal()}); err != nil {
 		t.Fatalf("AdoptRules from the section's row: %v", err)
 	}
 	want["terminal: ls"] = "adopted project"
@@ -731,4 +742,100 @@ func TestProjectRuleAdoptionWatchPathFollowsTheProjectLayer(t *testing.T) {
 	if got := adoptionWatchPath(config.Options{ConfigDir: home}, stateRoots{config: home}); got != "" {
 		t.Errorf("adoptionWatchPath with no Project root = %q, want none", got)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// Repo MCP servers and reactions through the adoption acts (ADR 0104 §11)
+// ----------------------------------------------------------------------------
+
+// writeProjectConfig writes body as the Project config of root.
+func writeProjectConfig(t *testing.T, root, body string) {
+	t.Helper()
+	path := config.ProjectFilePath(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	writeSettingsFixture(t, path, body)
+}
+
+// proposedOnly is host's one proposal, failing the test unless there is exactly one, of kind.
+func proposedOnly(t *testing.T, host configHost, kind apogee.ProposalKind) []apogee.Proposal {
+	t.Helper()
+	proposed, err := host.ProposedRules()
+	if err != nil {
+		t.Fatalf("ProposedRules: %v", err)
+	}
+	if len(proposed) != 1 || proposed[0].Kind != kind {
+		t.Fatalf("ProposedRules = %+v, want the one %s entry", proposed, kind)
+	}
+	return proposed
+}
+
+// A repo server is adopted only as the file holds it at the answer: an edit after the pane offered
+// it refuses the yes by name and dials nothing, and the entry as it stands now, adopted, is dialled
+// at once — marked as the project's — with no watcher report needed, since apogee's own record
+// write re-takes the baseline.
+func TestProjectRuleAdoptsARepoServerTheFileHolds(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	var dialled [][]mcp.ServerConfig
+	fixture := newMCPFixture(&fakeMCPSession{}, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		dialled = append(dialled, servers)
+		return &fakeMCPSession{}, nil
+	})
+	w.mcpSet, w.toolSet = fixture.set, fixture.tools
+	host := configHost{w: w}
+	writeProjectConfig(t, w.roots.project, projectWikiServerYAML)
+	stale := proposedOnly(t, host, apogee.ProposalMCPServer)
+	writeProjectConfig(t, w.roots.project, strings.Replace(projectWikiServerYAML, "wiki.example.com", "wiki.example.org", 1))
+
+	err := host.AdoptRules(stale)
+
+	if err == nil || !strings.Contains(err.Error(), "no longer holds the mcp-server entry `wiki` as it was offered") {
+		t.Fatalf("AdoptRules of the stale offer = %v, want the refusal naming the entry", err)
+	}
+	if len(dialled) != 0 {
+		t.Fatalf("a refused adoption dialled %+v", dialled)
+	}
+
+	if err := host.AdoptRules(proposedOnly(t, host, apogee.ProposalMCPServer)); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+	if len(dialled) != 1 {
+		t.Fatalf("dialled %d times, want the one reconnect the adoption drives", len(dialled))
+	}
+	i := slices.IndexFunc(dialled[0], func(s mcp.ServerConfig) bool { return s.Name == "wiki" })
+	if i < 0 || !dialled[0][i].Project || dialled[0][i].Endpoint != "https://wiki.example.org/mcp" {
+		t.Errorf("dialled %+v, want the adopted repo wiki server as the file holds it", dialled[0])
+	}
+	if after, err := host.ProposedRules(); err != nil || len(after) != 0 {
+		t.Errorf("ProposedRules after adopting = %+v, %v; want none", after, err)
+	}
+	assertNoReloadedKey(t, host)
+}
+
+// A repo reaction the adoption pane adopts is on the running engine's lanes at once — marked as the
+// project's — so it fires from the next Moment on, with no restart and no watcher report.
+func TestProjectRuleAdoptArmsTheRepoReaction(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	writeProjectConfig(t, w.roots.project, projectNotifyReactionYAML)
+
+	if err := host.AdoptRules(proposedOnly(t, host, apogee.ProposalReaction)); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+
+	w.engine.mu.Lock()
+	gen := w.engine.pendingGeneration
+	w.engine.mu.Unlock()
+	if gen == nil {
+		t.Fatal("the engine holds no generation after the adoption, want the layered reactions swapped in")
+	}
+	if observe := gen.Observe; len(observe) != 1 || observe[0].ID != "notify" || !observe[0].Project {
+		t.Errorf("observe lane = %+v, want the adopted repo reaction notify", observe)
+	}
+	assertNoReloadedKey(t, host)
 }

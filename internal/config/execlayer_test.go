@@ -376,7 +376,7 @@ func TestRepoReactionIsInertUntilAdopted(t *testing.T) {
 		t.Fatalf("Proposals = %+v; want the one reaction proposed", o.Proposals)
 	}
 	got := o.Proposals.Proposed[0]
-	wantFields := []domain.ProposalField{{Label: "run", Values: []string{"notify-send", "saved"}}}
+	wantFields := []domain.ProposalField{{Label: "run", Shape: domain.ProposalList, Values: []string{"notify-send", "saved"}}}
 	if got.Kind != domain.ProposalReaction || got.Handle != "notify" || !reflect.DeepEqual(got.Fields, wantFields) {
 		t.Errorf("proposal = %+v; want reaction entry notify with fields %+v", got, wantFields)
 	}
@@ -426,6 +426,42 @@ func TestRepoReactionIsInertUntilAdopted(t *testing.T) {
 					resolved.ProjectKeys)
 			}
 		})
+	}
+}
+
+// A reaction's webhook action is proposed as a group of its own fields, in the order the pane hangs
+// them — where it posts, then what it sends — and an argv action stays a list even when its one
+// element reads like a mapping, so the pane can never draw a program as a webhook.
+func TestRepoReactionProposalCarriesItsActionShapes(t *testing.T) {
+	t.Parallel()
+	project := "reactions:\n" +
+		"  - id: odd\n" +
+		"    on: [file-changed]\n" +
+		"    run: ['{\"url\":\"https://example.com\"}']\n" +
+		"  - id: warden\n" +
+		"    on: [pre-tool-exec]\n" +
+		"    gate:\n" +
+		"      url: https://hooks.example.com/gate\n" +
+		"      headers-env:\n" +
+		"        Authorization: HOOK_TOKEN\n"
+	globalPath, projectRoot := layerFixture(t, "", project)
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if len(o.Proposals.Proposed) != 2 {
+		t.Fatalf("Proposals = %+v (notices %q); want both reactions proposed", o.Proposals, notices)
+	}
+	want := [][]domain.ProposalField{
+		{{Label: "run", Shape: domain.ProposalList, Values: []string{`{"url":"https://example.com"}`}}},
+		{{Label: "gate", Shape: domain.ProposalGroup, Fields: []domain.ProposalField{
+			{Label: "url", Values: []string{"https://hooks.example.com/gate"}},
+			{Label: "headers-env", Shape: domain.ProposalMap, Values: []string{"Authorization: HOOK_TOKEN"}},
+		}}},
+	}
+	for i, p := range o.Proposals.Proposed {
+		if !reflect.DeepEqual(p.Fields, want[i]) {
+			t.Errorf("%s fields = %+v; want %+v", p.Handle, p.Fields, want[i])
+		}
 	}
 }
 
@@ -596,7 +632,7 @@ func TestRepoReactionRepeatedIDIsRefused(t *testing.T) {
 		t.Fatalf("Proposals = %+v; want the first notify alone proposed", o.Proposals)
 	}
 	if got := o.Proposals.Proposed[0].Fields; !reflect.DeepEqual(got,
-		[]domain.ProposalField{{Label: "run", Values: []string{"notify-send", "saved"}}}) {
+		[]domain.ProposalField{{Label: "run", Shape: domain.ProposalList, Values: []string{"notify-send", "saved"}}}) {
 		t.Errorf("proposed fields = %+v; want the first entry's", got)
 	}
 	if len(notices) != 1 || !strings.Contains(notices[0], `reactions entry "notify": an earlier entry already uses that id`) {

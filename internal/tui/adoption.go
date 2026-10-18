@@ -10,30 +10,33 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The adoption pane (ADR 0096 §4)
+// The adoption pane (ADR 0096 §4, ADR 0104 §11)
 // ----------------------------------------------------------------------------
 //
-// A rule in the Project config grants nothing until the human adopts it: the file is committable, so
-// a teammate's commit, a pull or an edit made behind apogee's back is text nobody here said yes to.
-// Such a rule is PROPOSED, and this pane is where it is asked about — at start-up, and again at the
-// first idle moment after a config file changed mid-session, so a rule never arrives in the middle
-// of a turn it would have answered for.
+// An entry in the Project config grants nothing until the human adopts it: the file is committable,
+// so a teammate's commit, a pull or an edit made behind apogee's back is text nobody here said yes
+// to. Three kinds of entry are such PROPOSALS — an Allow rule, a repo MCP server and a repo
+// reaction (domain.Proposal) — and this pane is where each is asked about: at start-up, and again
+// at the first idle moment after a config file changed mid-session, so an entry never arrives in the
+// middle of a turn it would have answered for. A server's or reaction's pane shows what Adoption
+// pins, verbatim, between its title and its rows (adoptionbody.go); an Allow rule's title is the
+// whole of what it pins.
 //
 // It is the start-up offers' posture (keymigration.go) in every respect but the question and its
 // opening row: the shared picker over three fixed rows, raised unasked under a notice saying why, one
-// rule per pane with the rest queued on the overlay, esc ending the round, each pane LATCHED as the
+// entry per pane with the rest queued on the overlay, esc ending the round, each pane LATCHED as the
 // approval pane is (raiseAdoption). Because "adopt" makes a granting entry live, each pane opens on
-// "not now" rather than on its first row. Esc is "not now" for every rule left, and "not
-// now" persists nothing — the rule stays proposed, so the next start-up asks again. "Adopt" and
+// "not now" rather than on its first row. Esc is "not now" for every entry left, and "not now"
+// persists nothing — the entry stays proposed, so the next start-up asks again. "Adopt" and
 // "reject" are one call each to a seam the binary owns ([ConfigHost.AdoptRules],
-// [ConfigHost.RejectRules]): the adoption record, its fingerprints and the rules in force are the
-// binary's business, and a rejected rule is not offered again until its text changes, because the
+// [ConfigHost.RejectRules]): the adoption record, its fingerprints and what is in force are the
+// binary's business, and a rejected entry is not offered again until its pin changes, because the
 // record pins the text it answered.
 //
-// A rule is offered once per session. A watched change re-reads what is proposed
-// ([ConfigHost.ProposedRules]) and offers only what no pane has raised yet — a new rule, or one whose
-// text changed — so a save of an unrelated key, or apogee's own write of an "Always in this
-// project…" rule, does not put a "not now" answer back up.
+// An entry is offered once per session with one pin. A watched change re-reads what is proposed
+// ([ConfigHost.ProposedRules]) and offers only what no pane has raised yet — a new entry, or one
+// whose pin moved (proposalKey) — so a save of an unrelated key, or apogee's own write of an "Always
+// in this project…" rule, does not put a "not now" answer back up.
 
 // The three answers, in the order the rows are offered. The indexes are the offering's, so they are
 // what acceptAdoption switches on.
@@ -46,31 +49,50 @@ const (
 // adoptionState is the session's side of the pane: what is waiting to be offered and what has been.
 // Plain slices of plain values, safe in the copied Model (ADR 0011).
 type adoptionState struct {
-	// waiting are the proposed rules to raise at the next fold that finds the session idle with
-	// nothing else up (adoptAfterFold) — the start-up's finding, or a watched change's.
-	waiting []domain.AllowRule
-	// offered is every rule a pane has raised this session, answered or not, which is what keeps a
-	// later change from asking about it again.
-	offered []domain.AllowRule
+	// waiting are the proposals to raise at the next fold that finds the session idle with nothing
+	// else up (adoptAfterFold) — the start-up's finding, or a watched change's.
+	waiting []domain.Proposal
+	// offered is every proposal a pane has raised this session, answered or not, which is what keeps
+	// a later change from asking about it again with the same pin.
+	offered []domain.Proposal
 }
 
-// queueAdoption sets the rules waiting to be offered to the proposed rules no pane has raised yet. It
-// REPLACES rather than appends: proposed is the whole of what the files propose now, so a rule a
+// proposalKey is what makes two proposals the same question: the kind, the name it goes by — a
+// structured entry's handle, an Allow rule's text — and the pin the answer would be recorded under.
+// A changed pin is a new question, so an edited entry is offered again.
+func proposalKey(p domain.Proposal) [3]string {
+	name := p.Handle
+	if name == "" {
+		name = p.Text
+	}
+	return [3]string{string(p.Kind), name, p.Fingerprint}
+}
+
+// isStructured reports whether p is a repo MCP server or reaction rather than an Allow rule — an
+// entry with a body to show and a different promise to make.
+func isStructured(p domain.Proposal) bool {
+	return p.Kind == domain.ProposalMCPServer || p.Kind == domain.ProposalReaction
+}
+
+// queueAdoption sets the proposals waiting to be offered to those no pane has raised yet. It
+// REPLACES rather than appends: proposed is the whole of what the files propose now, so an entry a
 // later save took out again is not offered at all.
-func (m *Model) queueAdoption(proposed []domain.AllowRule) {
-	waiting := make([]domain.AllowRule, 0, len(proposed))
-	for _, rule := range proposed {
-		if !slices.Contains(m.adoption.offered, rule) {
-			waiting = append(waiting, rule)
+func (m *Model) queueAdoption(proposed []domain.Proposal) {
+	waiting := make([]domain.Proposal, 0, len(proposed))
+	for _, p := range proposed {
+		key := proposalKey(p)
+		raised := slices.ContainsFunc(m.adoption.offered, func(o domain.Proposal) bool { return proposalKey(o) == key })
+		if !raised {
+			waiting = append(waiting, p)
 		}
 	}
 	m.adoption.waiting = waiting
 }
 
-// openAdoption raises the pane over the waiting rules, the first one asked about and the rest queued
-// behind it, and returns the Cmds its arming latch waits on (raiseAdoption). It gives way to
+// openAdoption raises the pane over the waiting proposals, the first one asked about and the rest
+// queued behind it, and returns the Cmds its arming latch waits on (raiseAdoption). It gives way to
 // everything: the start-up offers and the pre-bound ask are up first at construction, a turn, an
-// approval or an open pane all hold it, and the rules simply keep waiting — the Update tail asks
+// approval or an open pane all hold it, and the proposals simply keep waiting — the Update tail asks
 // again at every fold (adoptAfterFold), so the pane comes up the moment the session is idle with
 // nothing else up. No [ConfigHost] means no pane: whether the question exists is decided ABOUT the
 // host before any act is called (ADR 0054 decision 3a). A pane that did not open returns no Cmd.
@@ -88,23 +110,23 @@ func (m *Model) openAdoption() tea.Cmd {
 	return m.raiseAdoption(queue)
 }
 
-// raiseAdoption puts up the pane asking about rules[0], with the rest queued behind it — the ONE way
-// an adoption pane opens, for the first rule of a round (openAdoption) and for each one after it
+// raiseAdoption puts up the pane asking about queue[0], with the rest queued behind it — the ONE way
+// an adoption pane opens, for the first entry of a round (openAdoption) and for each one after it
 // (acceptAdoption). The pane is a decision surface whose "adopt" makes a granting entry live, so it
 // opens the way the approval pane does: LATCHED ([Model.openDecisionLatch]), its ⏎ and its second
 // click dead until the terminal has answered from behind the pane's frame, so a key or a click already
-// in flight when it appeared — the ⏎ that answered the rule before it, above all — answers nothing.
+// in flight when it appeared — the ⏎ that answered the entry before it, above all — answers nothing.
 // And it opens on "not now", the one answer that changes nothing, rather than on "adopt". The
 // returned Cmds are the latch's marker and backstop; the caller hands them on.
-func (m *Model) raiseAdoption(rules []domain.AllowRule) tea.Cmd {
-	m.picker = picker{open: true, kind: pickerAdoption, adoption: rules, latched: true}
-	m.picker.seat(adoptionNotNow, len(adoptionRows()))
+func (m *Model) raiseAdoption(queue []domain.Proposal) tea.Cmd {
+	m.picker = picker{open: true, kind: pickerAdoption, adoption: queue, latched: true}
+	m.picker.seat(adoptionNotNow, len(adoptionRows(queue[0])))
 	return m.openDecisionLatch()
 }
 
-// adoptAfterFold is the Update tail's adoption half: when rules are waiting, it tries the pane now
-// (openAdoption) and batches the pane's arming Cmds onto the fold's own. Anything but the Model, or a
-// Model with nothing waiting, passes through untouched.
+// adoptAfterFold is the Update tail's adoption half: when proposals are waiting, it tries the pane
+// now (openAdoption) and batches the pane's arming Cmds onto the fold's own. Anything but the Model,
+// or a Model with nothing waiting, passes through untouched.
 func adoptAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	m, ok := next.(Model)
 	if !ok || len(m.adoption.waiting) == 0 {
@@ -122,46 +144,81 @@ func adoptAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 func (m Model) refreshAdoption() Model {
 	proposed, err := m.configHostOrNoop().ProposedRules()
 	if err != nil {
-		m.transcript.addNote("could not read the project's proposed allow rules: " + stripEscapes(err.Error()))
+		m.transcript.addNote("could not read what the project's config proposes: " + stripEscapes(err.Error()))
 		return m
 	}
 	m.queueAdoption(proposed)
 	return m
 }
 
-// adoptionNotice is the line the unasked-for pane comes up under: which rules the Project config
-// proposes, and that none of them does anything yet.
-func adoptionNotice(rules []domain.AllowRule) string {
-	names := make([]string, 0, len(rules))
-	for _, rule := range rules {
-		names = append(names, adoptionRuleName(rule))
+// adoptionNotice is the line the unasked-for pane comes up under: which entries the Project config
+// proposes, and that none of them does anything yet. A round of Allow rules alone keeps the wording
+// it always had.
+func adoptionNotice(queue []domain.Proposal) string {
+	names := make([]string, 0, len(queue))
+	for _, p := range queue {
+		names = append(names, proposalName(p))
 	}
-	return fmt.Sprintf("this project's .apogee/config.yaml proposes %s — no proposed rule applies "+
-		"until you adopt it", entryNameList(names))
+	tail := "no proposed rule applies until you adopt it"
+	if slices.ContainsFunc(queue, isStructured) {
+		tail = "nothing it proposes applies until you adopt it"
+	}
+	return fmt.Sprintf("this project's .apogee/config.yaml proposes %s — %s", entryNameList(names), tail)
 }
 
-// adoptionRuleName spells a rule for a sentence: the prefix a terminal rule matches, or the MCP
-// server a server rule names, its text sanitized because it is a repository file's.
-func adoptionRuleName(rule domain.AllowRule) string {
-	if rule.Kind == domain.AllowRuleMCPServer {
-		return "MCP server `" + stripEscapes(rule.Text) + "`"
+// proposalName spells an entry for a sentence, one spelling for the note, the title and the answer
+// lines alike: the prefix a terminal rule matches, the server an Allow rule names, or the repo
+// server or reaction by its handle — each a repository file's text, so sanitized and flattened onto
+// its line.
+func proposalName(p domain.Proposal) string {
+	switch p.Kind {
+	case domain.ProposalMCPServer:
+		return "MCP server entry `" + flatText(p.Handle) + "`"
+	case domain.ProposalReaction:
+		return "reaction `" + flatText(p.Handle) + "`"
+	case domain.ProposalKind(domain.AllowRuleMCPServer):
+		return "MCP server `" + flatText(p.Text) + "`"
 	}
-	return "`" + stripEscapes(rule.Text) + "`"
+	return "`" + flatText(p.Text) + "`"
 }
 
-// adoptionTitle names the rule THIS pane is asking about, so a round of several can never be
+// flatText is a repository file's text made safe for one line of a pane: escape-stripped and with
+// its line breaks folded (flattenField).
+func flatText(s string) string { return flattenField(stripEscapes(s)) }
+
+// adoptionTitle names the entry THIS pane is asking about, so a round of several can never be
 // answered for the wrong one. A queue that emptied under the pane (which no path reaches) titles
-// nothing rather than inventing a rule.
+// nothing rather than inventing an entry.
 func (m Model) adoptionTitle() string {
 	if len(m.picker.adoption) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("allow %s without asking in this project?", adoptionRuleName(m.picker.adoption[0]))
+	head := m.picker.adoption[0]
+	if isStructured(head) {
+		return fmt.Sprintf("use %s in this project?", proposalName(head))
+	}
+	return fmt.Sprintf("allow %s without asking in this project?", proposalName(head))
 }
 
-// adoptionRows is the offering: three answers, each with a gloss saying what it costs, because
-// "adopt" lets calls run unasked and "not now" has to say that the question comes back.
-func adoptionRows() []popupRow {
+// adoptionOfferingRows is the open pane's offering: the answers for the entry it asks about.
+func (m Model) adoptionOfferingRows() []popupRow {
+	if len(m.picker.adoption) == 0 {
+		return nil
+	}
+	return adoptionRows(m.picker.adoption[0])
+}
+
+// adoptionRows is the offering for p: three answers, each with a gloss saying what it costs,
+// because "adopt" lets an entry run and "not now" has to say that the question comes back. A
+// server or reaction runs until a pinned file changes as well as the entry, and says so.
+func adoptionRows(p domain.Proposal) []popupRow {
+	if isStructured(p) {
+		return []popupRow{
+			{"adopt", "— it runs here until the entry or a pinned file changes"},
+			{"not now", "— it stays inert; the offer comes back at the next start-up"},
+			{"reject", "— it stays inert, and is not offered again until it changes"},
+		}
+	}
 	return []popupRow{
 		{"adopt", "— it runs without asking here, until the entry changes"},
 		{"not now", "— it stays inert; the offer comes back at the next start-up"},
@@ -169,30 +226,33 @@ func adoptionRows() []popupRow {
 	}
 }
 
-// acceptAdoption answers the open pane and moves to the next rule in the round. Each answer is one
-// note and at most one seam call — synchronous file work on a keypress the human is waiting on, a
+// acceptAdoption answers the open pane and moves to the next entry in the round. Each answer is one
+// note and at most one seam call — synchronous work on a keypress the human is waiting on, a
 // failure REPORTED (the [SettingsHost.Write] contract) — and the queue advances whatever came of it:
-// a failed answer leaves the rule proposed, which is exactly the state "not now" leaves it in.
+// a failed answer leaves the entry proposed, which is exactly the state "not now" leaves it in.
 func (m Model) acceptAdoption(choice int) (tea.Model, tea.Cmd) {
 	if len(m.picker.adoption) == 0 {
 		return m, nil
 	}
-	rule, rest := m.picker.adoption[0], m.picker.adoption[1:]
+	head, rest := m.picker.adoption[0], m.picker.adoption[1:]
 
 	switch choice {
 	case adoptionAdopt:
-		m.transcript.addNote(m.answerRuleNote(rule, ConfigHost.AdoptRules,
-			"adopted %s — it runs without asking in this project", "could not adopt %s: %s"))
+		done := "adopted %s — it runs without asking in this project"
+		if isStructured(head) {
+			done = "adopted %s — it runs in this project until it changes"
+		}
+		m.transcript.addNote(m.answerProposalNote(head, ConfigHost.AdoptRules, done, "could not adopt %s: %s"))
 	case adoptionNotNow:
 		m.transcript.addNote(fmt.Sprintf("%s stays proposed — the offer comes back at the next start-up",
-			adoptionRuleName(rule)))
+			proposalName(head)))
 	case adoptionReject:
-		m.transcript.addNote(m.answerRuleNote(rule, ConfigHost.RejectRules,
+		m.transcript.addNote(m.answerProposalNote(head, ConfigHost.RejectRules,
 			"rejected %s — it is not offered again until the entry changes", "could not reject %s: %s"))
 	}
 
 	// The whole overlay is replaced rather than edited, so nothing of the answered pane — the
-	// highlight and the latch above all — survives into the next rule's question, which re-arms from
+	// highlight and the latch above all — survives into the next entry's question, which re-arms from
 	// scratch.
 	m.picker = picker{}
 	if len(rest) > 0 {
@@ -201,15 +261,15 @@ func (m Model) acceptAdoption(choice int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// answerRuleNote records one answer about rule through answer and words what came of it: done when
-// the record moved, failed — naming the rule and the seam's reason — when it did not.
-func (m Model) answerRuleNote(
-	rule domain.AllowRule,
-	answer func(ConfigHost, []domain.AllowRule) error,
+// answerProposalNote records one answer about p through answer and words what came of it: done
+// when the record moved, failed — naming the entry and the seam's reason — when it did not.
+func (m Model) answerProposalNote(
+	p domain.Proposal,
+	answer func(ConfigHost, []domain.Proposal) error,
 	done, failed string,
 ) string {
-	if err := answer(m.configHostOrNoop(), []domain.AllowRule{rule}); err != nil {
-		return fmt.Sprintf(failed, adoptionRuleName(rule), stripEscapes(err.Error()))
+	if err := answer(m.configHostOrNoop(), []domain.Proposal{p}); err != nil {
+		return fmt.Sprintf(failed, proposalName(p), stripEscapes(err.Error()))
 	}
-	return fmt.Sprintf(done, adoptionRuleName(rule))
+	return fmt.Sprintf(done, proposalName(p))
 }

@@ -134,10 +134,11 @@ type picker struct {
 	// (pickerWorkflowBoundary, commandrun.go): which one — /clear, a /sessions switch, a /fork — and
 	// what it needs to go ahead. Plain values, like migration.
 	boundary pendingBoundary
-	// adoption is what is left of a round of adoption offers (adoption.go): the proposed project
-	// rules still to be asked about, the one being asked about now at the front — migration's shape,
-	// so the same whole-struct zeroing ends the round and esc leaves every remaining rule proposed.
-	adoption []domain.AllowRule
+	// adoption is what is left of a round of adoption offers (adoption.go): the Project config's
+	// proposals still to be asked about, the one being asked about now at the front — migration's
+	// shape, so the same whole-struct zeroing ends the round and esc leaves every remaining entry
+	// proposed.
+	adoption []domain.Proposal
 	// latched marks a pane whose ⏎ and second click ANSWER a question the human has to have read —
 	// set only by an opener that goes through [Model.openDecisionLatch] (raiseAdoption, adoption.go;
 	// raiseKeyMigration and openSubAgentsMigration, keymigration.go). Every other kind leaves it false and stays armed from the moment it opens.
@@ -224,6 +225,13 @@ type pickerOffering struct {
 	// noun is what one of the kind's rows IS, in the singular — the word the zero-match row says
 	// ("no model matches "zzz"", listZeroMatchNote). Only a kind that filters has one.
 	noun string
+	// body is what a kind that ASKS shows between its title and its rows — the adoption pane's
+	// pinned fields (adoptionbody.go) — composed per frame at the pane's width. nil, and a func that
+	// answers "", draw none.
+	body func(Model) string
+	// answers says the rows are the answers to the question the body asks (listContent.answers):
+	// they wrap whole rather than elide, and the body gives up its lines before any of them does.
+	answers bool
 }
 
 // fixedTitle is the title func of a kind whose pane is named by a constant — most of them; the
@@ -395,9 +403,11 @@ func init() {
 		pickerAdoption: {
 			title:   Model.adoptionTitle,
 			hint:    keyMigrationHint,
-			rows:    func(Model) []popupRow { return adoptionRows() },
+			rows:    Model.adoptionOfferingRows,
 			matched: matchLabelAndGloss,
 			accept:  Model.acceptAdoption,
+			body:    Model.adoptionBody,
+			answers: true,
 		},
 	}
 }
@@ -1430,7 +1440,8 @@ func (m Model) renderPickerPlaced() (string, popupPlacement) {
 }
 
 // pickerListContent is everything the picker says about itself to the shared list surface — its
-// slot, its name with the filter riding it, its legend, its taste in rows, the FILTERED rows and
+// slot, its name with the filter riding it, the body a kind that asks shows under it, its legend,
+// its taste in rows, the FILTERED rows and
 // which of them the highlight is on, with the legend and the zero-match row the filter's state
 // calls for (listContent.statingFilter). Typing reaches the filter in every state the open picker has,
 // so the caret always shows. ok is false with the overlay closed, which is what makes both renders above answer with
@@ -1440,6 +1451,7 @@ func (m Model) pickerListContent() (listContent, bool) {
 		return listContent{}, false
 	}
 	rows := m.pickerRows()
+	offering := pickerOfferings[m.picker.kind]
 	c := listContent{
 		pane:      panePicker,
 		title:     m.pickerTitle(),
@@ -1447,7 +1459,11 @@ func (m Model) pickerListContent() (listContent, bool) {
 		hint:      pickerHintFor(m.picker.kind),
 		rowCap:    maxPickerRows,
 		rows:      rows,
+		answers:   offering.answers,
 		selected:  m.picker.highlight(len(rows)),
+	}
+	if offering.body != nil {
+		c.body = offering.body(m)
 	}
 	return c.statingFilter(m.picker.filter.value(), pickerOfferings[m.picker.kind].noun, len(rows)), true
 }

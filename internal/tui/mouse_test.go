@@ -5420,7 +5420,7 @@ func TestAdoptionClickBeforeTheLatchAdoptsNothing(t *testing.T) {
 	m = armAdoption(t, m)
 	m = step(t, m, leftClick(x, y))
 
-	if !reflect.DeepEqual(log.adopted, []domain.AllowRule{goTestRule}) {
+	if !reflect.DeepEqual(log.adopted, []domain.Proposal{goTestRule}) {
 		t.Errorf("AdoptRules calls = %v after the pane armed, want the clicked rule", log.adopted)
 	}
 }
