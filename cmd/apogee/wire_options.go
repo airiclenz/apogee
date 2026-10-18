@@ -124,8 +124,9 @@ func (w *rootWiring) options() tui.Options {
 		// one they asked for; the NAME rides in the block above.
 		ColorScheme:         w.colorScheme,
 		ColorSchemeWarnings: w.colorSchemeWarnings,
-		// The confinement posture announceConfinement already said on stderr, repeated so the
-		// alternate screen opening over that line does not lose it (apogee-2sj).
+		// The startup notices announce already said on stderr — the confinement posture, and a repo
+		// MCP server the connect skipped for a moved pin — repeated so the alternate screen opening
+		// over those lines does not lose them (apogee-2sj).
 		StartupNotices: w.startupNotices,
 		// And what keeps the scheme switchable from inside the program: what the picker offers, the
 		// resolve behind an answer to it, and the export that CREATES a scheme file at all — one

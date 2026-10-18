@@ -58,6 +58,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
+	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/projectroot"
@@ -418,12 +419,14 @@ type settingsSkills interface {
 	Reload() error
 }
 
-// mcpSession is the connected-MCP surface a reconnect drives: the tools the servers advertise, and
-// the teardown that ends the connections. *mcp.Client is the only implementation that ships — it is
-// an interface for settingsEngine's reason, so the reconnect's ORDER (dial, swap, tear down) is
+// mcpSession is the connected-MCP surface a reconnect drives: the tools the servers advertise, the
+// repo servers the connect skipped for a moved pin (the reconnect's note names them), and the
+// teardown that ends the connections. *mcp.Client is the only implementation that ships — it is an
+// interface for settingsEngine's reason, so the reconnect's ORDER (dial, swap, tear down) is
 // exercisable against a fake without a server process behind it.
 type mcpSession interface {
 	Tools() []apogee.Tool
+	Skipped() []mcp.Denied
 	Close() error
 }
 

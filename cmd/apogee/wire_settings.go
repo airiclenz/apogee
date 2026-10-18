@@ -1160,8 +1160,9 @@ var settingsTable = slices.Concat([]settingsEntry{
 			// The one key whose value is a set of live CONNECTIONS. It is not pushed and not
 			// re-resolved into a holder either: it is dialled, and the session moves onto the servers
 			// that answered (ADR 0037 decision 6). The value the pane persisted is not read, for the
-			// `servers:` reason — a list of blocks is a shape no single string spells.
-			return "", a.reconnectMCP()
+			// `servers:` reason — a list of blocks is a shape no single string spells. A repo server
+			// skipped for a moved pin is the row's note: the rest of the set landed.
+			return a.reconnectMCP()
 		},
 	},
 	{
@@ -1586,12 +1587,18 @@ func (a settingsApplier) readmitMCP(before toolSetSpec) string {
 	if sameServerNames(was, admitted) {
 		return ""
 	}
-	if err := a.mcp.reconnect(admitted, a.tools, a.engine); err != nil {
+	skipNote, err := a.mcp.reconnect(admitted, a.tools, a.engine)
+	if err != nil {
 		return mcpNoteFor(err)
 	}
 	var note strings.Builder
 	for _, d := range denied {
 		note.WriteString("; mcp server " + d.Name + " disconnected — " + deniedReason(d))
+	}
+	// A repo server the dial skipped for a moved pin is named after the ones the lists closed, in
+	// the same `; mcp server X …` clause shape.
+	if skipNote != "" {
+		note.WriteString("; " + skipNote)
 	}
 	return note.String()
 }
@@ -1937,11 +1944,12 @@ func (a settingsApplier) reloadServers() (bool, error) {
 // (no flag, no environment variable names an MCP server). The scrub widens first (widenSecretEnv).
 //
 // A global file that no longer parses is refused before anything is dialled, so a typo in an
-// unrelated key cannot cost the session the servers it is talking to.
-func (a settingsApplier) reconnectMCP() error {
+// unrelated key cannot cost the session the servers it is talking to. The note is the reconnect's:
+// the repo servers it skipped for a moved pin, or empty.
+func (a settingsApplier) reconnectMCP() (note string, err error) {
 	layered, err := a.layeredConfig()
 	if err != nil {
-		return err
+		return "", err
 	}
 	a.widenSecretEnv(layered)
 	return a.mcp.reconnect(layered.MCPServers, a.tools, a.engine)

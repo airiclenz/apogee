@@ -465,7 +465,8 @@ func findMCPServer(servers []mcp.ServerConfig, name string) (mcp.ServerConfig, b
 // offers that server one and connects again — at most once per `auth: oauth` server, so the loop
 // always ends. Each offer asks on stderr while it is still a safe place to write: declined, or
 // with stdin not a terminal, the launch aborts with the error naming `apogee mcp login <name>`.
-// A repo server the connect skipped for a moved pin aborts the launch too (abortOnSkippedMCP).
+// A repo server the connect skipped for a moved pin does not abort the launch: it is announced and
+// the entry asked about again (announceSkippedMCP), and the session starts on the rest of the set.
 func (w *rootWiring) connectMCPServers(ctx context.Context) (*mcp.Client, error) {
 	deps := w.mcpLogin.withDefaults()
 	host := deps.mcpHost(w.roots.config)
@@ -489,9 +490,7 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) (*mcp.Client, error)
 	for {
 		client, err := mcp.ConnectWith(ctx, host, w.opts.MCPServers, guard, w.roots.workspace)
 		if err == nil {
-			if err := abortOnSkippedMCP(client); err != nil {
-				return nil, err
-			}
+			w.announceSkippedMCP(client.Skipped())
 			return client, nil
 		}
 		var required *mcpauth.LoginRequiredError
@@ -509,22 +508,25 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) (*mcp.Client, error)
 	}
 }
 
-// abortOnSkippedMCP closes client and returns the refusals of the repo servers its connect skipped
-// for a moved pin — the same sentence a connect used to fail on — or nil when it skipped none. It
-// keeps a moved pin as loud at startup and at a reconnect as when the connect itself failed over it,
-// until those callers announce the skip and carry on instead. The client is closed here because
-// neither caller has handed it to anything that would.
-func abortOnSkippedMCP(client *mcp.Client) error {
-	skipped := client.Skipped()
-	if len(skipped) == 0 {
-		return nil
-	}
-	_ = client.Close()
-	errs := make([]error, 0, len(skipped))
+// announceSkippedMCP says, as a startup notice, each repo server the startup connect skipped because
+// a project file its adoption pinned moved — naming the server and the files (mcpSkipClause) — and
+// cues the config re-read (cueSkippedMCP). The launch goes on: the global servers and the other
+// adopted ones are connected, and only the server whose files moved waits on a fresh answer.
+func (w *rootWiring) announceSkippedMCP(skipped []mcp.Denied) {
 	for _, s := range skipped {
-		errs = append(errs, s.Err)
+		w.announce("apogee: " + mcpSkipClause(s))
 	}
-	return errors.Join(errs...)
+	w.cueSkippedMCP(skipped)
+}
+
+// cueSkippedMCP pokes the session's config wake (reloadWake) when a connect skipped any repo server
+// for a moved pin, as a reaction refused for one does (domain.Config.PinMoved): no watched file
+// reported the move, and the re-read it cues is what proposes the server again for the adoption
+// pane at the next idle moment.
+func (w *rootWiring) cueSkippedMCP(skipped []mcp.Denied) {
+	if len(skipped) > 0 {
+		w.reloadWake.poke()
+	}
 }
 
 // mcpStartupLogin is the startup's login offer over one session's home, workspace and guard.

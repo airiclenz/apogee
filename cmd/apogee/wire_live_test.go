@@ -148,7 +148,7 @@ func TestMCPReconnectUsesTheLiveURLSafetyLists(t *testing.T) {
 	if err := w.toolSet.setDenyHosts([]string{"localhost"}, engine); err != nil {
 		t.Fatalf("setDenyHosts: %v", err)
 	}
-	err := w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	_, err := w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
 
 	if err == nil {
 		t.Fatal("reconnect under a live deny list: want the url-safety refusal, got none")
@@ -162,7 +162,7 @@ func TestMCPReconnectUsesTheLiveURLSafetyLists(t *testing.T) {
 	if err := w.toolSet.setDenyHosts(nil, engine); err != nil {
 		t.Fatalf("setDenyHosts(nil): %v", err)
 	}
-	err = w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	_, err = w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
 
 	if err == nil {
 		t.Fatal("reconnect with no deny list: want the connection error, got none")

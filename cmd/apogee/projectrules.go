@@ -155,12 +155,18 @@ func (w *rootWiring) adoptProjectRules(proposals []apogee.Proposal) error {
 // swapped onto their lanes. An Allow rule needs neither — the settling already installed it — and a
 // wiring that holds no live MCP set or engine (a Driver that composes none) has nothing to move.
 //
-// Errors: the reconnect's and the reload's, joined.
+// Errors: the reconnect's and the reload's, joined — and a repo server the reconnect skipped for a
+// moved pin, worded as the reconnect's note: the rest of the set landed, but that server is not in
+// force, and the answer's row is the one surface a mid-session adoption reports on.
 func (w *rootWiring) applyAdoptedKinds(entries []adoption.Entry) error {
 	applier := w.settingsApplier()
 	var errs []error
 	if hasEntryKind(entries, config.MCPServerAdoptionKind) && w.mcpSet != nil && w.toolSet != nil {
-		errs = append(errs, applier.reconnectMCP())
+		note, err := applier.reconnectMCP()
+		errs = append(errs, err)
+		if note != "" {
+			errs = append(errs, errors.New(note))
+		}
 	}
 	if hasEntryKind(entries, config.ReactionAdoptionKind) && w.engine != nil && w.live != nil {
 		errs = append(errs, applier.reloadReactions())

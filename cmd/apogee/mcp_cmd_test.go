@@ -722,7 +722,7 @@ func TestStartupMCPLoginReconnectNeverPrompts(t *testing.T) {
 		t.Fatalf("wireSession: %v", err)
 	}
 
-	err := w.mcpSet.reconnect([]mcp.ServerConfig{fake.serverConfig("remote")}, w.toolSet, &applySettingSpy{})
+	_, err := w.mcpSet.reconnect([]mcp.ServerConfig{fake.serverConfig("remote")}, w.toolSet, &applySettingSpy{})
 
 	if err == nil {
 		t.Fatal("reconnect with no saved token: want the login-required failure, got none")
@@ -732,6 +732,128 @@ func TestStartupMCPLoginReconnectNeverPrompts(t *testing.T) {
 	}
 	if input.openCount() != 0 {
 		t.Errorf("the reconnect read the terminal %d times; want never", input.openCount())
+	}
+}
+
+// repoWikiServerYAML is a Project config proposing one stdio server whose program is a script inside
+// the repository, so its adoption pins that script's content.
+const repoWikiServerYAML = "mcp-servers:\n  - name: wiki\n    transport: stdio\n    command: ./bin/wiki.sh\n"
+
+// writeRepoWikiScript writes the repo server's program under root with body. The pin check refuses
+// a moved script before anything is launched, so the script never runs.
+func writeRepoWikiScript(t *testing.T, root, body string) {
+	t.Helper()
+	path := filepath.Join(root, "bin", "wiki.sh")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create bin/: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatalf("write bin/wiki.sh: %v", err)
+	}
+}
+
+// adoptedRepoWikiServer proposes the repo wiki server in w's Project root, adopts it, and returns it
+// as the layered config then holds it in force — Project, with its pin over the script as it is now.
+func adoptedRepoWikiServer(t *testing.T, w *rootWiring) mcp.ServerConfig {
+	t.Helper()
+	writeRepoWikiScript(t, w.roots.project, "exec true")
+	writeProjectConfig(t, w.roots.project, repoWikiServerYAML)
+	adoptEveryProposal(t, w.configPath(), w.roots.project)
+	o, err := w.layeredOptions()
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	for _, server := range o.MCPServers {
+		if server.Name == "wiki" && server.Project && server.Pin != nil {
+			return server
+		}
+	}
+	t.Fatalf("mcp-servers = %+v, want the adopted repo server wiki with its pin", o.MCPServers)
+	return mcp.ServerConfig{}
+}
+
+// newPingMCPServer starts an MCP server over streamable HTTP advertising one `ping` tool, closed
+// when the test ends, and returns its config under name: the global server a pin skip must spare.
+func newPingMCPServer(t *testing.T, name string) mcp.ServerConfig {
+	t.Helper()
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: name, Version: "v0.0.1"}, nil)
+	server.AddTool(&mcpsdk.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+		func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}}}, nil
+		})
+	srv := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+	t.Cleanup(func() {
+		srv.CloseClientConnections()
+		srv.Close()
+	})
+	return mcp.ServerConfig{Name: name, Transport: mcp.TransportStreamableHTTP, Endpoint: srv.URL + "/mcp"}
+}
+
+// awaitPinWake reports whether w's config wait returns true within the test deadline — the re-read
+// cue a pin skip gives, since no watched config file or adoption record moves in these tests.
+func awaitPinWake(t *testing.T, w *rootWiring) bool {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), configWatchTestDeadline)
+	defer cancel()
+	return configHost{w: w}.AwaitConfigChange(ctx)
+}
+
+// A repo server whose pinned script is edited after the options are resolved and before the startup
+// dial is skipped, not fatal: the launch goes on with the global server connected, a startup notice
+// names the server and the edited file, and the config wait wakes so the entry is asked about again.
+func TestStartupSkipsARepoServerWhosePinMoved(t *testing.T) {
+	t.Parallel()
+	global := newPingMCPServer(t, "remote")
+	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false), global)
+	w.opts.MCPServers = append(w.opts.MCPServers, adoptedRepoWikiServer(t, w))
+	writeRepoWikiScript(t, w.roots.project, "echo edited")
+
+	err := w.wireSession(context.Background())
+
+	if err != nil {
+		t.Fatalf("wireSession: %v, want the launch to go on past the skipped repo server", err)
+	}
+	if !hasMCPTool(w, "ping") {
+		t.Error("the global server's tools are missing; a pin skip must spare the rest of the set")
+	}
+	want := "apogee: mcp server wiki skipped — stdio server \"wiki\": refusing to launch — bin/wiki.sh changed since you adopted it"
+	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0], want) {
+		t.Errorf("startup notices = %q, want one opening %q", w.startupNotices, want)
+	}
+	if !awaitPinWake(t, w) {
+		t.Error("AwaitConfigChange did not return true — the skip must wake the re-read with no watcher moved")
+	}
+}
+
+// A live reconnect onto a set holding a repo server whose pinned script was edited after its options
+// were resolved lands the rest of the set: the reconnect's note names the server and the edited file,
+// the global server is connected, and the config wait wakes so the entry is asked about again.
+func TestReconnectSkipsARepoServerWhosePinMoved(t *testing.T) {
+	t.Parallel()
+	global := newPingMCPServer(t, "remote")
+	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false))
+	// Adopted before the session starts its watchers, so neither the Project config nor the
+	// adoption record is a change they report: only the skip can wake the wait below.
+	servers := []mcp.ServerConfig{global, adoptedRepoWikiServer(t, w)}
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	writeRepoWikiScript(t, w.roots.project, "echo edited")
+
+	note, err := w.mcpSet.reconnect(servers, w.toolSet, &applySettingSpy{})
+
+	if err != nil {
+		t.Fatalf("reconnect: %v, want the rest of the set to land past the skipped repo server", err)
+	}
+	want := "mcp server wiki skipped — stdio server \"wiki\": refusing to launch — bin/wiki.sh changed since you adopted it"
+	if !strings.HasPrefix(note, want) {
+		t.Errorf("reconnect note = %q, want it opening %q", note, want)
+	}
+	if !hasMCPTool(w, "ping") {
+		t.Error("the global server's tools are missing; a pin skip must spare the rest of the set")
+	}
+	if !awaitPinWake(t, w) {
+		t.Error("AwaitConfigChange did not return true — the skip must wake the re-read with no watcher moved")
 	}
 }
 

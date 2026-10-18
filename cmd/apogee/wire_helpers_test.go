@@ -152,12 +152,14 @@ func writeSettingsFixture(t *testing.T, path, body string) {
 // down, and each failure's way back to the set that was serving — while the dialling itself is
 // internal/mcp's, and its own tests connect to a real fixture server over a real transport.
 type fakeMCPSession struct {
-	tools  []apogee.Tool
-	closed bool
+	tools   []apogee.Tool
+	skipped []mcp.Denied
+	closed  bool
 }
 
-func (f *fakeMCPSession) Tools() []apogee.Tool { return f.tools }
-func (f *fakeMCPSession) Close() error         { f.closed = true; return nil }
+func (f *fakeMCPSession) Tools() []apogee.Tool  { return f.tools }
+func (f *fakeMCPSession) Skipped() []mcp.Denied { return f.skipped }
+func (f *fakeMCPSession) Close() error          { f.closed = true; return nil }
 
 // mcpFixtureTool is one tool a fake server advertises, named so a registry can be asked whose tools
 // reached it.

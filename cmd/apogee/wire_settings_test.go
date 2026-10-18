@@ -4163,7 +4163,7 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 			}
 			return err
 		}},
-		{"reconnectMCP", func(*testing.T) error { return a.reconnectMCP() }},
+		{"reconnectMCP", func(*testing.T) error { _, err := a.reconnectMCP(); return err }},
 		{"reloadReactions", func(*testing.T) error { return a.reloadReactions() }},
 		{"reloadModelProfiles", func(*testing.T) error { return a.reloadModelProfiles() }},
 	} {

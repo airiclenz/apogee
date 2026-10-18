@@ -33,8 +33,8 @@ type liveMCP struct {
 	mu      sync.Mutex
 	current mcpSession
 
-	// connect dials a whole set, all-or-nothing, exactly as startup dialled the first one — a repo
-	// server the connect skipped for a moved pin fails it too (abortOnSkippedMCP).
+	// connect dials a whole set, all-or-nothing, exactly as startup dialled the first one — bar a
+	// repo server whose pin moved, which the set it returns reports as skipped (mcpSession.Skipped).
 	connect func(servers []mcp.ServerConfig) (mcpSession, error)
 }
 
@@ -73,18 +73,22 @@ func (m *liveMCP) swap(next mcpSession) mcpSession {
 }
 
 // reconnect moves the session onto servers: validate-then-commit, where "validate" is the connection
-// itself (ADR 0037 decision 6). The new set is dialled FIRST — all-or-nothing, as at startup (a repo
-// server skipped for a moved pin included), but reported rather than fatal, because a session that is
-// already running is not a session to kill over a server that has gone away — and only once the
-// rebuilt registry has been taken by the engine are the old sessions torn down. Every failure leaves the session on the connections and the tool set it
-// already had, which is what makes re-committing the edit a retry.
+// itself (ADR 0037 decision 6). The new set is dialled FIRST — all-or-nothing, as at startup, but
+// reported rather than fatal, because a session that is already running is not a session to kill
+// over a server that has gone away — and only once the rebuilt registry has been taken by the engine
+// are the old sessions torn down. Every failure leaves the session on the connections and the tool
+// set it already had, which is what makes re-committing the edit a retry.
+//
+// A repo server whose pin moved is not a failure: the connect skips it and the rest of the set lands.
+// note names each such server and its moved files (mcpSkipNote) — empty when the connect skipped
+// none, and always empty beside an error — for the caller to relay on its own surface.
 //
 // A busy engine is one of those failures: SwapTools is idle-only, so a reconnect committed mid-run is
 // refused and reported on the row over a value the file already carries (ADR 0037 binding A).
-func (m *liveMCP) reconnect(servers []mcp.ServerConfig, set *liveTools, engine settingsEngine) error {
+func (m *liveMCP) reconnect(servers []mcp.ServerConfig, set *liveTools, engine settingsEngine) (note string, err error) {
 	next, err := m.connect(servers)
 	if err != nil {
-		return mcpReconnectFailed(err)
+		return "", mcpReconnectFailed(err)
 	}
 	// The rebuild below folds the holder's tools, so the new set has to be installed before it — and
 	// put back by hand if the engine will not take the registry built from it.
@@ -96,12 +100,30 @@ func (m *liveMCP) reconnect(servers []mcp.ServerConfig, set *liveTools, engine s
 		// connections nobody is going to use either way, and the failure worth reporting is the one
 		// that already happened.
 		_ = closeSession(next)
-		return mcpReconnectFailed(err)
+		return "", mcpReconnectFailed(err)
 	}
 	// Nothing dispatches to the old sessions any more, so they go. A close that fails leaves the human
 	// nothing to do about it and does not turn a reconnect that worked into an apply that failed.
 	_ = closeSession(previous)
-	return nil
+	return mcpSkipNote(next.Skipped()), nil
+}
+
+// mcpSkipNote is what a reconnect says about the repo servers its connect skipped for a moved pin:
+// one mcpSkipClause per server, joined by "; " — the empty string when it skipped none.
+func mcpSkipNote(skipped []mcp.Denied) string {
+	clauses := make([]string, 0, len(skipped))
+	for _, s := range skipped {
+		clauses = append(clauses, mcpSkipClause(s))
+	}
+	return strings.Join(clauses, "; ")
+}
+
+// mcpSkipClause is the sentence for ONE repo server a connect skipped for a moved pin, worded from
+// its name and its de-labelled refusal (mcpSentence) — which names the moved files and that the
+// server is proposed again — never re-worded here, so every surface that reports a skip (the startup
+// notice, a reconnect's note) says what internal/mcp refused with.
+func mcpSkipClause(s mcp.Denied) string {
+	return "mcp server " + s.Name + " skipped — " + mcpSentence(s.Err)
 }
 
 // closeSession tears a set down, tolerating the holder having none: an embedder that wired no MCP at

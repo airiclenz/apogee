@@ -125,9 +125,10 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// Agent's registry. With no servers configured this is dormant (a no-op Client, nil tools).
 	// On resume the connection is established FRESH here — no server-side state is restored
 	// (ADR 0008). An MCP connect failure is fatal: a configured server that cannot be reached is
-	// a misconfiguration the user should see, not a silently-dropped capability. The connect itself
-	// skips a repo server whose pin moved rather than failing the set (mcp.Client.Skipped); that
-	// skip is turned back into this same fatal error in connectMCPServers.
+	// a misconfiguration the user should see, not a silently-dropped capability. The one exception is
+	// a repo server whose pin moved: the connect skips it rather than failing the set
+	// (mcp.Client.Skipped), and connectMCPServers announces the skip and cues the re-read that asks
+	// about the server again, so the session starts on the rest (announceSkippedMCP).
 	//
 	// The endpoint of an `sse`/`streamable-http` server is checked against the operator's OWN
 	// url-safety host lists — scheme/host allow-deny, with the resolved-IP floor disabled for it
@@ -168,10 +169,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		if err != nil {
 			return nil, err
 		}
-		// A repo server skipped for a moved pin fails the reconnect, as it fails startup.
-		if err := abortOnSkippedMCP(client); err != nil {
-			return nil, err
-		}
+		// A repo server skipped for a moved pin lets the rest of the set land: the reconnect's note
+		// names it (liveMCP.reconnect), and the re-read cued here asks about it again.
+		w.cueSkippedMCP(client.Skipped())
 		return client, nil
 	})
 	// The registry is assembled HERE unconditionally rather than left to the engine's own

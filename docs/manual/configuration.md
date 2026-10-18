@@ -828,7 +828,8 @@ login. Log in now? [y/N]`), and so is one whose saved token the authorization se
 longer refresh or was issued to another client than its `client-id:` now names. Answer anything but yes, or start apogee with stdin not a terminal, and the launch
 stops with an error naming `apogee mcp login <name>` — connecting is all-or-nothing, so one server
 that cannot log in holds back the rest. (A repo server whose pinned file moved is the one server the
-connect skips rather than fails the set over.) Mid-session nothing ever prompts: a reconnect that needs a
+connect skips rather than fails the set over: a notice names it and the moved file, the rest of the
+set connects, and the server is proposed for adoption again.) Mid-session nothing ever prompts: a reconnect that needs a
 login fails, and the `mcp-servers:` row in `/settings` names the same command.
 
 The login always prints the full authorization URL. On a local desktop, `⏎` opens it in your

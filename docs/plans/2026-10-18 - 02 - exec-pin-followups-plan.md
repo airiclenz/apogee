@@ -156,7 +156,15 @@ internal/mcp/mcp_test.go — TestConnect_RefusesAnUnpinnedOrChangedRepoProgram, 
 **Depends on:** item 1
 **Commit:** `fix(mcp): a repo server whose pin moved is skipped at connect, not every server`
 
-## 7. Startup and reconnect announce a skipped repo server and re-ask
+## 7. Startup and reconnect announce a skipped repo server and re-ask — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): both item-6 interims are gone (abortOnSkippedMCP deleted): connectMCPServers announces each Client.Skipped() entry through w.announce ("apogee: mcp server <name> skipped — <mcpSentence(Denied.Err)>", mcpSkipClause in wire_mcp.go) and pokes w.reloadWake; the newLiveMCP reconnect closure pokes the same wake (cueSkippedMCP) and the skips reach liveMCP.reconnect through mcpSession.Skipped(), which returns (note, err) — the wake fires in the composition-root closure rather than inside liveMCP, which holds no wake
+NOTES (2026-10-18): applyAdoptedKinds relays a skip note as part of its returned error ("the adoption is saved, but this session could not apply it: mcp server … skipped — …"), not via w.announce as the item text says: w.announce is a startup-only seam (stderr plus startupNotices, already handed to the TUI at boot), so mid-session it would write over the alternate screen and never reach the transcript; the AdoptRules error is what the answering row shows
+NOTES (2026-10-18): the wake's extra redial is accepted, not skipped: the reload it cues diffs `mcp-servers:` against a baseline still holding the skipped server and runs reconnectMCP once more over the remaining servers (startup included); a skip needs a pinned file to move between the config read and the dial, so the cost is rare, and comparing names alone (sameServerNames) would wrongly skip a genuine same-name edit
+NOTES (2026-10-18): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by reconnectMCP now returning (note, error)
+NOTES (2026-10-18): consequential edit — cmd/apogee/wire_options.go: made necessary by the MCP skip notice joining startupNotices (the StartupNotices comment named only the confinement posture)
+NOTES (2026-10-18): consequential edit — docs/manual/configuration.md: made necessary by the skip now being announced and re-proposed rather than aborting (the login paragraph's pin-skip parenthetical)
+NOTES (2026-10-18): the reconnect test adopts the repo server before wireSession starts the config watchers, so only the skip can wake the wait; both tests were seen to fail on AwaitConfigChange with the poke removed
 
 **What:**
 **Goal:** at startup and on a live reconnect, a repo server skipped for a moved pin yields a notice naming the changed file, the global and other adopted servers stay connected, startup proceeds, and the entry is proposed again in-session.
