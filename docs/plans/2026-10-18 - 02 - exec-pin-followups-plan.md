@@ -93,7 +93,7 @@ Fix of a pin gap from the exec-keys plan (ADR 0104 decision 4 as amended by item
 **Closes:** argv-embedded-file-unpinned
 **Commit:** `fix(config): an argv element pins every in-root file it names, as an env value does`
 
-## 4. Drift test: every mcpServerConfig field is in its adoption pin
+## 4. Drift test: every mcpServerConfig field is in its adoption pin — ✅ DONE (2026-10-18)
 
 **What:**
 **Goal:** a test in `internal/config/` fails when `mcpServerConfig` gains a yaml field that `mcpServerConfig.execPin` does not pin (or that `pinFieldOrder` does not order), with an explicit, empty-today exemption list.

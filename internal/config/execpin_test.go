@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -421,4 +422,78 @@ func TestVerifyExecPinsNamesAChangedFile(t *testing.T) {
 			t.Error("VerifyExecPins accepted a text that is not a pin")
 		}
 	})
+}
+
+// serverPinExempt names the `mcp-servers:` keys a repo server's adoption pin deliberately leaves
+// out, each with the reason. It is empty: every key of a server entry is pinned (ADR 0104 §2), so
+// a key that may change without re-asking has to be argued for here before it leaves the pin.
+var serverPinExempt = map[string]string{}
+
+// TestServerExecPinCoversEveryField guards the server pin against schema drift: every yaml key of
+// mcpServerConfig, set to a value, lands in the pinned text and has a place in pinFieldOrder, so a
+// field added to the schema without a matching line in execPin fails here instead of letting a
+// repo edit of that key go unasked.
+func TestServerExecPinCoversEveryField(t *testing.T) {
+	t.Parallel()
+	var server mcpServerConfig
+	serverValue := reflect.ValueOf(&server).Elem()
+	for _, sk := range schemaKeys(serverValue.Type()) {
+		fillField(t, sk.field.Name, serverValue.FieldByIndex(sk.field.Index))
+	}
+
+	entry, err := server.execPin(t.TempDir())
+
+	if err != nil {
+		t.Fatalf("pin server entry: %v", err)
+	}
+	pinned, _, ok := splitPin(entry.Text)
+	if !ok {
+		t.Fatalf("pin text %q is not a pin", entry.Text)
+	}
+	for _, sk := range schemaKeys(serverValue.Type()) {
+		if sk.key == "" {
+			t.Errorf("mcpServerConfig.%s has no yaml tag, so its pinned key cannot be named", sk.field.Name)
+			continue
+		}
+		if _, exempt := serverPinExempt[sk.key]; exempt {
+			continue
+		}
+		if _, ok := pinned[sk.key]; !ok {
+			t.Errorf("mcp-servers key %q (mcpServerConfig.%s) is not in its adoption pin — pin it in "+
+				"execPin, or argue it into serverPinExempt", sk.key, sk.field.Name)
+		}
+		if !slices.Contains(pinFieldOrder, sk.key) {
+			t.Errorf("mcp-servers key %q has no place in pinFieldOrder, so the adoption pane cannot order it",
+				sk.key)
+		}
+	}
+	for key := range serverPinExempt {
+		if !slices.ContainsFunc(schemaKeys(serverValue.Type()), func(sk schemaKey) bool { return sk.key == key }) {
+			t.Errorf("serverPinExempt names %q, which mcpServerConfig does not have", key)
+		}
+	}
+}
+
+// fillField sets field to a non-empty value of its type, so execPin cannot leave it out as unset.
+// A kind it does not know fails the test, naming the field, rather than leaving it unset.
+func fillField(t *testing.T, name string, field reflect.Value) {
+	t.Helper()
+	switch {
+	case field.Kind() == reflect.String:
+		field.SetString("set")
+	case field.Kind() == reflect.Slice && field.Type().Elem().Kind() == reflect.String:
+		field.Set(reflect.ValueOf([]string{"set"}).Convert(field.Type()))
+	case field.Kind() == reflect.Map && field.Type().Key().Kind() == reflect.String &&
+		field.Type().Elem().Kind() == reflect.String:
+		filled := reflect.MakeMap(field.Type())
+		filled.SetMapIndex(reflect.ValueOf("KEY").Convert(field.Type().Key()),
+			reflect.ValueOf("set").Convert(field.Type().Elem()))
+		field.Set(filled)
+	case field.Kind() == reflect.Pointer && field.Type().Elem().Kind() != reflect.Pointer:
+		target := reflect.New(field.Type().Elem())
+		fillField(t, name, target.Elem())
+		field.Set(target)
+	default:
+		t.Fatalf("mcpServerConfig.%s is a %s, which fillField cannot set — teach it the kind", name, field.Type())
+	}
 }
