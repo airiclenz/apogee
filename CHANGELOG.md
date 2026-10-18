@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-18
+
 - **Watching a session no longer holds back your own `/schedule` Firings.** While watch mode followed a running session, the watched run's busy state was reported as this session's, so a due Firing here waited until esc. The schedule gate now hears this session's own activity throughout a watch; the watch view still shows the watched run as running.
 
 - **Watch mode no longer misses a reopened session.** When the session you are watching was reopened and its journal had already grown past the point the watch had read to by the next poll, the watch went on reading from the middle of the new journal and missed the fresh start. It now notices that the journal's first line changed, starts again from the top and repaints.
