@@ -203,7 +203,10 @@ Fix of a shallow copy: `Proposals`, `AllowRules`, and also `UnconfinedHosts`, `M
 **Closes:** clone-options-shallow-proposals
 **Commit:** `fix(apogee): cloneOptions deep-copies every collection config.Options carries`
 
-## 9. The adoption pane keeps every answer on a short window
+## 9. The adoption pane keeps every answer on a short window — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): the ladder is uniform across the answers (blanks off, then every gloss on one cut line, then labels alone) rather than per row; answersBudget now returns the rows it budgeted and listSpec paints them, so paint, listHeight and popupPaneHit read one composition — popupWrappedRowHeights and the ask/settings callers are unchanged.
+NOTES (2026-10-18): pre-existing, not this item — at 50x22 the body is granted one line, so it shows only its `… (+19 more lines)` marker and not the re-ask reason the layout doc calls "the last thing the body gives up".
 
 **What:**
 **Goal:** when the adoption / Allow-rule pane's answers with wrapped glosses do not fit, glosses give up wrapped lines (to one truncated line, then none) before any answer label leaves the window; at 50x21 every answer label is visible without scrolling; the layout doc states the rule.

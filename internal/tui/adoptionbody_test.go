@@ -293,3 +293,40 @@ func TestAdoptionPaneKeepsItsAnswersOnAShortTerminal(t *testing.T) {
 		t.Errorf("the body hid lines without counting them:\n%s", frame)
 	}
 }
+
+// On a window too short for the answers with their glosses wrapped, the glosses give up lines
+// before an answer does: at fifty columns and twenty-one or twenty-two rows every answer's label
+// opens a row of the pane, and no scroll thumb stands beside the answers to say one is off it.
+func TestAdoptionPaneKeepsEveryAnswerAtFiftyByTwentyOne(t *testing.T) {
+	t.Parallel()
+	for _, height := range []int{21, 22} {
+		m, frame := adoptionFrame(t, 50, height, docsSearchServer)
+
+		interiors := paneInteriors(frame)
+		for _, row := range adoptionRows(docsSearchServer) {
+			if !slices.ContainsFunc(interiors, func(line string) bool { return adoptionAnswerOpens(m.th, line, row[0]) }) {
+				t.Errorf("50x%d: the answer %q opens no row of the pane:\n%s", height, row[0], frame)
+			}
+		}
+		for _, line := range interiors {
+			if strings.Contains(line, glyphScrollThumb) {
+				t.Errorf("50x%d: a scroll thumb stands in the pane, so an answer is off it:\n%s", height, frame)
+				break
+			}
+		}
+	}
+}
+
+// adoptionAnswerOpens reports whether a pane interior row is the first line of the answer label:
+// the row's marker column (the ❯ or two blanks) and then the label, ending there or at a blank.
+func adoptionAnswerOpens(th theme, line, label string) bool {
+	rest, ok := strings.CutPrefix(line, th.glyphs.user+" ")
+	if !ok {
+		rest, ok = strings.CutPrefix(line, "  ")
+	}
+	if !ok {
+		return false
+	}
+	rest, ok = strings.CutPrefix(rest, label)
+	return ok && (rest == "" || strings.HasPrefix(rest, " "))
+}

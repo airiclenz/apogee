@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -646,7 +647,9 @@ type listContent struct {
 	// answers says the rows are the answers to the question the body asks — the adoption pane's —
 	// rather than a list to look through: they wrap whole instead of eliding (popupSpec.wrapRows),
 	// and they are the pane's floor (popupFloor.rows), so a body too tall for the window gives up
-	// its lines, counted on its marker, before any answer leaves the screen.
+	// its lines, counted on its marker, before any answer leaves the screen. On a window too short
+	// for the answers themselves their glosses give up lines too, to one cut line and then none,
+	// before any answer's label does (answersBudget).
 	answers  bool
 	selected int
 }
@@ -744,8 +747,9 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	// list too tall for its window gives up its breathing room rather than a row of the list.
 	budget := listBudget{padAbove: true, padBelow: c.hint != ""}
 	seated := false
+	rows := c.rows
 	if c.answers {
-		budget, seated = m.answersBudget(c, claim, budget)
+		budget, rows, seated = m.answersBudget(c, claim, budget)
 	} else {
 		pad := popupRowPadLines(len(c.rows) > 0, budget.padBelow)
 		// The pane's rowCap is the taste; popupBudget is the screen's answer to it, so a long offering on
@@ -764,7 +768,7 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 		titleTail:   c.titleTail,
 		body:        c.body,
 		maxBodyRows: budget.maxBody,
-		rows:        c.rows,
+		rows:        rows,
 		menuRows:    c.menuRows,
 		wrapRows:    c.answers,
 		rowPadAbove: budget.padAbove,
@@ -790,20 +794,57 @@ type listBudget struct {
 // tall for the window gives up its lines first. Where the grant cannot seat every answer beside the
 // two blanks around them, the pane is budgeted again without the blanks — the approval menu's rule
 // for its disclosure (approval.go) — so breathing room is given up before an answer is.
-func (m Model) answersBudget(c listContent, claim popupFloor, budget listBudget) (listBudget, bool) {
-	heights := popupWrappedRowHeights(m.th, c.rows, m.width)
-	ask := func(pad int) (int, int, int, bool) {
+//
+// Where even that leaves an answer outside the window, the GLOSSES give up their lines next
+// (answerGlossesCut): every gloss cut to the one line its column holds beside its label, ending in an
+// ellipsis, and on a window too short for that the labels alone. An answer is a choice the human has
+// to be able to make without scrolling; what it costs is said at full length on a taller window.
+// The rows it returns are the ones the pane then paints, measures and hit-tests (listSpec puts them in
+// popupSpec.rows), so a cut gloss is counted exactly as it is drawn.
+func (m Model) answersBudget(c listContent, claim popupFloor, budget listBudget) (listBudget, []popupRow, bool) {
+	ask := func(rows []popupRow, pad int) (int, int, int, bool) {
+		heights := popupWrappedRowHeights(m.th, rows, m.width)
 		demand := popupRowBlockLines(heights, 0, pad)
 		capped := popupRowBlockLines(heights[:min(len(heights), c.rowCap)], 0, pad)
 		claim.rows = demand
 		maxBody, shown, seated := m.popupBudget(c.pane, demand, capped, popupChrome, claim)
 		return demand, maxBody, shown, seated
 	}
-	demand, maxBody, shown, seated := ask(popupRowPadLines(len(c.rows) > 0, budget.padBelow))
+	rows := c.rows
+	demand, maxBody, shown, seated := ask(rows, popupRowPadLines(len(rows) > 0, budget.padBelow))
 	if seated && shown < demand {
 		budget.padAbove, budget.padBelow = false, false
-		_, maxBody, shown, seated = ask(0)
+		demand, maxBody, shown, seated = ask(rows, 0)
+	}
+	for _, glossLines := range []int{1, 0} {
+		if !seated || shown >= demand {
+			break
+		}
+		rows = answerGlossesCut(m.th, c.rows, m.width, glossLines)
+		demand, maxBody, shown, seated = ask(rows, 0)
 	}
 	budget.maxBody, budget.shown = maxBody, shown
-	return budget, seated
+	return budget, rows, seated
+}
+
+// answerGlossesCut is rows with every answer's GLOSS — its last column, the prose after the label —
+// held to glossLines painted lines on a pane of the given total width: one line cut to what the
+// gloss column holds beside the labels (truncateToWidth, so the cut ends in the package's ellipsis),
+// or none, the row reduced to the columns before the gloss. The labels are never cut. A row list with
+// no column before its last has no gloss to give up and comes back as it is.
+func answerGlossesCut(th theme, rows []popupRow, width, glossLines int) []popupRow {
+	widths := popupColumnWidths(th, rows)
+	last := popupLastColumn(widths)
+	if last <= 0 {
+		return rows
+	}
+	room := popupInnerWidth(th, width) - popupRowIndent - popupRowHangingIndent(th, widths, last)
+	cut := make([]popupRow, len(rows))
+	for i, row := range rows {
+		cut[i] = slices.Clone(row[:min(len(row), last)])
+		if glossLines > 0 && len(row) > last {
+			cut[i] = append(cut[i], truncateToWidth(th, row[last], room))
+		}
+	}
+	return cut
 }

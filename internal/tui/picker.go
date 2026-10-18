@@ -230,7 +230,8 @@ type pickerOffering struct {
 	// answers "", draw none.
 	body func(Model) string
 	// answers says the rows are the answers to the question the body asks (listContent.answers):
-	// they wrap whole rather than elide, and the body gives up its lines before any of them does.
+	// they wrap whole rather than elide, and the body gives up its lines before any of them does —
+	// on a window too short for them wrapped, their glosses are cut before a label leaves it.
 	answers bool
 }
 

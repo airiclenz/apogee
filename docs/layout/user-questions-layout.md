@@ -262,8 +262,9 @@ text beside it the hang is shed whole and the line wraps flat, as every hanging 
 (`layout.md`).
 
 **Too tall for the window.** The three answers are the pane's floor (`popupFloor.rows`): a window
-too short for the whole body never costs a row. The body loses lines exactly as the approval
-prompt's does (`layout.md`, "What shrinking never buys is silence" and "And what it keeps is the
+too short for the whole body never costs a row (one too short for the answers themselves costs
+their glosses lines first: "Too short for the answers", below). The body loses lines exactly as the
+approval prompt's does (`layout.md`, "What shrinking never buys is silence" and "And what it keeps is the
 head *and* the tail"): one field's value is bounded at eight of its own lines, before any wrap —
 head, `… (+N more lines)`, tail — so a padded `args:` cannot push `env:` off the surface the
 decision is read from, and the body as a whole keeps its head and its last line around one marker
@@ -271,6 +272,16 @@ counting the rest. The re-ask reason is the body's first line, so it is the last
 gives up. What the pane cannot seat it always counts, so the human knows there is more to read: a
 taller window shows it, and `apogee project adopt` prints the same body whole for each entry it asks
 about.
+
+**Too short for the answers.** Where the window cannot seat the three answers with their glosses
+wrapped even once the body is down to its marker and the blanks around the rows are gone, the
+glosses give up lines before an answer does: every gloss is cut to the one line its column holds
+beside the labels, ending in `…`, and on a window too short for that the labels stand alone. So
+every answer label stays on the screen without scrolling — at fifty columns and twenty-one rows the
+pane shows `adopt`, `not now` and `reject` each on one cut line — and only a window too short for
+the three labels themselves puts one behind the scroll bar. A gloss is cut across the width only
+here; a taller window shows it whole, and the cut gloss is what the pane measures and hit-tests, so
+a click lands on the answer it was aimed at.
 
 **The rows.** Under the body, three rows in two columns, with `not now` highlighted when the pane
 opens — the one answer that changes nothing, because `adopt` makes a granting entry live:
@@ -282,7 +293,8 @@ opens — the one answer that changes nothing, because `adopt` makes a granting 
 | `reject` | `— it stays inert, and is not offered again until the entry changes` | `— it stays inert, and is not offered again until it changes` |
 
 — where "it changes" is the entry's pinned fields or a pinned file's content, either of which moves
-the pin. A gloss too long for its column wraps under the gloss column, never under the label. The
+the pin. A gloss too long for its column wraps under the gloss column, never under the label —
+except on a window too short for the answers (below). The
 hint reads `↑/↓ select · ⏎ choose · esc close`, because nothing here switches anything.
 
 **Arming, keys and pointer.** The pane arms on the approval prompt's latch, as the start-up offers
