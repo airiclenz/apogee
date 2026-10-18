@@ -69,7 +69,13 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   call is allowed to write — is refused at connect time rather than executed; `Connect` being
   all-or-nothing, the operator meets that refusal at startup. It still **starts in the workspace**
   (apogee's own working directory, which filesystem-style servers expect): with argv[0] absolute
-  and fenced there is no relative lookup left for the working directory to decide. Its environment
+  and fenced there is no relative lookup left for the working directory to decide. An adopted
+  **repo** server (`ServerConfig.Project`, ADR 0104 §4, 2026-10-18) is the one exception: its pin is
+  re-checked first (a project file it was adopted with that moved refuses the launch, and the entry
+  is proposed again), a relative command with a path separator resolves against the Project root,
+  it starts in the Project root, and a program inside the workspace is admitted only when it is one
+  of the pinned project files — a PATH hit inside the root stays refused. Only a rule adopted in
+  that project, or a session approval, answers its tools (ADR 0104 §10). Its environment
   is unchanged by default — the full process environment plus `cfg.Env`, the deliberate trust
   decision above — with `EnvAllowlist` (`env-allowlist:`) as the per-server opt-in for a
   less-trusted server: named non-nil, the launch inherits only those keys plus the platform's

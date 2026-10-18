@@ -1577,7 +1577,8 @@ type posixShellReporter interface {
 
 // allowRulesCovering is the effective Allow rules (allowRuleSet) that answer call, in first-use
 // order, or nil when none does (ADR 0096 §2). An MCP server's call is answered by a rule naming its
-// alias (the mcpServerGrant marker, so a rule clears exactly the grain an allow-for-session would);
+// alias (the mcpServerGrant marker, so a rule clears exactly the grain an allow-for-session would)
+// — for a repo-defined server, only a rule adopted in that project (ADR 0104 §10);
 // a `terminal` line by the rules the word-prefix matcher reports every simple command covered by,
 // read from the call's own command and workdir under the workspace root. Every other tool —
 // file edits included — and an unknown one are answered by no rule.
@@ -1591,7 +1592,7 @@ func (a *Agent) allowRulesCovering(call domain.ToolCall) []domain.AllowRule {
 		return nil
 	}
 	if alias, isServer := mcpServerAlias(tool); isServer {
-		return mcpRuleCovering(rules, alias)
+		return mcpRuleCovering(rules, alias, mcpServerIsProject(tool))
 	}
 	shell, isShell := tool.(posixShellReporter)
 	if call.Tool != shellToolName || !isShell {
@@ -1609,9 +1610,15 @@ func (a *Agent) allowRulesCovering(call domain.ToolCall) []domain.AllowRule {
 }
 
 // mcpRuleCovering is the first MCP rule naming alias, or nil. An unnamed server's empty alias
-// matches nothing: a rule's text is never empty (the loader refuses one).
-func mcpRuleCovering(rules []domain.AllowRule, alias string) []domain.AllowRule {
+// matches nothing: a rule's text is never empty (the loader refuses one). For a repo-defined server
+// (project) only the Project config's rules are candidates (ADR 0104 §10): a global rule never
+// covers it, even by name, and it is passed over BEFORE matching, so a global rule of the same
+// alias listed first never hides the project one.
+func mcpRuleCovering(rules []domain.AllowRule, alias string, project bool) []domain.AllowRule {
 	for _, r := range rules {
+		if project && r.Layer != domain.AllowRuleProject {
+			continue
+		}
 		if r.Kind == domain.AllowRuleMCPServer && alias != "" && r.Text == alias {
 			return []domain.AllowRule{r}
 		}

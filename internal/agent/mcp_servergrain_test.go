@@ -22,11 +22,13 @@ import (
 // mcpServerTool is a fake ExternalEffectTool of kind mcp that ALSO exposes a ServerAlias — the
 // optional interface the resolver keys the allow-for-session cache on at server grain. It mirrors
 // internal/mcp's surfaced serverTool without importing that package (the resolver reaches the
-// alias structurally). Two tools sharing an alias are two tools of one server.
+// alias structurally). Two tools sharing an alias are two tools of one server. project is what it
+// reports through ProjectServer: a repo-defined server's tool (ADR 0104 §10).
 type mcpServerTool struct {
-	name  string
-	alias string
-	ran   *int
+	name    string
+	alias   string
+	project bool
+	ran     *int
 }
 
 func (t mcpServerTool) Name() string                              { return t.name }
@@ -34,6 +36,7 @@ func (t mcpServerTool) Description() string                       { return t.nam
 func (t mcpServerTool) Schema() json.RawMessage                   { return json.RawMessage(`{"type":"object"}`) }
 func (t mcpServerTool) ExternalEffect() domain.ExternalEffectKind { return domain.EffectMCP }
 func (t mcpServerTool) ServerAlias() string                       { return t.alias }
+func (t mcpServerTool) ProjectServer() bool                       { return t.project }
 func (t mcpServerTool) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if t.ran != nil {
 		*t.ran++

@@ -245,7 +245,7 @@ func (c *Client) connectOne(ctx context.Context, host Host, cfg ServerConfig, gu
 	}
 	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td, cancel: cancel})
 
-	tools, err := listServerTools(ctx, cfg.Name, session, redactor)
+	tools, err := listServerTools(ctx, cfg.Name, cfg.Project, session, redactor)
 	if err != nil {
 		return err
 	}
@@ -277,8 +277,9 @@ const (
 // tools. A tool with an empty name from the server is skipped (it could never be addressed)
 // rather than failing the whole server, and so is one whose schema exceeds maxMCPToolSchemaBytes.
 // redactor cuts the server's endpoint from a list error and is handed to every surfaced tool for
-// its own call errors; nil for stdio.
-func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.ClientSession, redactor *security.OriginRedactor) ([]domain.Tool, error) {
+// its own call errors; nil for stdio. project is the server's ServerConfig.Project, carried on every
+// surfaced tool for the Allow rule match.
+func listServerTools(ctx context.Context, serverAlias string, project bool, session *mcpsdk.ClientSession, redactor *security.OriginRedactor) ([]domain.Tool, error) {
 	var (
 		out    []domain.Tool
 		cursor string
@@ -293,6 +294,7 @@ func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.Cl
 				continue
 			}
 			tool := newServerTool(serverAlias, t, session, redactor)
+			tool.project = project
 			if len(tool.schema) > maxMCPToolSchemaBytes {
 				continue
 			}

@@ -437,9 +437,10 @@ type Reaction struct {
 	Pin ProjectPin
 }
 
-// ProjectPin is what an adopted repo reaction's command is checked against before every spawn
-// (ADR 0104 §4, §8). internal/config implements it over the pin the user adopted; the engine and
-// the observe lane only read it, so neither has to know how a pin is built.
+// ProjectPin is what an adopted repo reaction's command, or an adopted repo stdio MCP server's
+// launch (mcp.ServerConfig.Pin), is checked against before every spawn (ADR 0104 §4, §8).
+// internal/config implements it over the pin the user adopted; the engine, the observe lane and
+// the MCP client only read it, so none of them has to know how a pin is built.
 //
 // Its values must compare by content (reflect.DeepEqual), because the arming step compares one
 // observe lane against the next to decide whether a swap moved anything.

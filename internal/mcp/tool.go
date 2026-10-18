@@ -41,6 +41,7 @@ type serverTool struct {
 	name        string                   // model-facing: "<serverAlias>__<remoteName>", sanitised by modelToolName
 	remoteName  string                   // the server's own tool name (what CallTool addresses)
 	alias       string                   // the server alias this tool was qualified with ("" = unnamed server)
+	project     bool                     // the server is a Project config's, adopted (ServerConfig.Project)
 	description string                   // the server's advertised description (untrusted presentation)
 	schema      json.RawMessage          // the server's input schema, normalised to JSON (untrusted)
 	caller      toolCaller               // the live session this tool forwards a call to
@@ -164,6 +165,12 @@ func (t serverTool) Name() string { return t.name }
 // empty alias is the degenerate single-unnamed-server case, which is still one grain. The
 // resolver reaches this through an optional interface (it does not import this package).
 func (t serverTool) ServerAlias() string { return t.alias }
+
+// ProjectServer reports whether this tool's server is one a Project config defined and the user
+// adopted (ADR 0104 §10): only an Allow rule adopted in that project answers its calls, never a
+// global one of the same alias. The dispatch reaches it through an optional interface, as it does
+// ServerAlias.
+func (t serverTool) ProjectServer() bool { return t.project }
 
 // Description returns the server's advertised description (untrusted presentation data shown to
 // the model, never executed). An empty server description is given a minimal stand-in so the

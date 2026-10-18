@@ -158,7 +158,15 @@ internal/agent/syncexec_test.go — TestSyncArgvRunsConfinedWhenTheBoxCanBeBuilt
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestRepoEntry|TestGlobalRun' ./internal/reactions/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestRunHookSubprocess' ./internal/tools/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestRepoRun|TestSyncArgv' ./internal/agent/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFiringHooks' ./cmd/apogee/`
 **Commit:** `feat(reactions): fence a repo run: and admit its pinned project script`
 
-## 7. A repo MCP server may launch a project program and answers only project rules
+## 7. A repo MCP server may launch a project program and answers only project rules — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): re-derived from "the spawn-time pin check is item 3's config.VerifyExecPins called in buildStdioTransport": internal/mcp cannot import internal/config (config imports mcp), so the pin rides the server as `mcp.ServerConfig.Pin domain.ProjectPin`, the interface item 6 introduced, and resolveRepoServers sets it on every adopted repo server as the same `adoptedPin{root, adopted text}` the reactions carry (internal/config/execlayer.go; covered by the new TestAdoptedRepoMCPServerCarriesItsPin, which also pins a file an `env:` value names). Its Changed is VerifyExecPins, so the launch-time check covers env-named files as well as argv.
+NOTES (2026-10-18): consequential edit — internal/domain/reaction.go: made necessary by ProjectPin now also being carried by mcp.ServerConfig (its type doc said "a repo reaction's command" only).
+NOTES (2026-10-18): consequential edit — internal/mcp/doc.go: made necessary by the stdio exec-fence admission for pinned repo programs (its trust-boundary paragraph said every in-workspace program is refused).
+NOTES (2026-10-18): consequential edit — docs/design/mcp-client.md: made necessary by the same admission, the Project-root working directory and the project-rules-only match (its stdio-fence bullet said every in-workspace program is refused and the server always starts in the workspace).
+NOTES (2026-10-18): the admission helper (isPinnedProgram in transport.go) duplicates ~10 lines of item 6's tools.isAdmittedProgram rather than importing internal/tools into internal/mcp; a shared home in internal/security would remove the copy.
+NOTES (2026-10-18): a repo server refused at launch (pin moved between the config read and the connect) fails the whole Connect, as any misconfigured server does today (Connect is all-or-nothing); in the ordinary case the config layer has already re-proposed it, so it is never dialled.
+NOTES (2026-10-18): the project origin reaches internal/agent through a second optional interface (`ProjectServer() bool`, read by mcpServerIsProject in resolution.go) beside serverAliaser rather than widening serverAliaser, so existing alias-only fakes keep their meaning; a tool that does not state its origin reads as a global server's.
 
 **What:** Depends on item 4. ADR 0104 §4, §10.
 **Goal:** an adopted repo stdio server whose command resolves inside the Project root connects (a global one is still refused); a global `allow.mcp-servers` rule never covers a tool of a repo server, while a project rule adopted for that name and a session approval do.

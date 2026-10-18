@@ -350,7 +350,7 @@ func classifyProjectLayer(layer projectLayer, global fileConfig, workspacesDir, 
 		entries = append(entries, r.entry)
 	}
 	sorted, store := classifyProjectEntries(entries, layer.path, workspacesDir, projectRoot, notify)
-	return projectAllowRulesOf(sorted), resolveRepoServers(servers, sorted, store),
+	return projectAllowRulesOf(sorted), resolveRepoServers(servers, sorted, store, projectRoot),
 		resolveRepoReactions(pinned, sorted, store, projectRoot)
 }
 
@@ -379,16 +379,20 @@ func pinRepoServers(layer projectLayer, global []mcpServerConfig, projectRoot st
 
 // resolveRepoServers turns the servers' classification into the adopted servers and the Proposals
 // of every one. store is the record sorted was read from — nil when it could not be read, and then
-// no change reason is named.
+// no change reason is named. Each adopted server carries its adoption pin (adoptedPin over
+// projectRoot and the adopted text), which a stdio server's launch checks before it runs (ADR 0104
+// §4).
 func resolveRepoServers(servers []pinnedServer, sorted adoption.Classification,
-	store *adoption.Store) projectServers {
+	store *adoption.Store, projectRoot string) projectServers {
 	byName := make(map[string]mcpServerConfig, len(servers))
 	for _, s := range servers {
 		byName[s.entry.Handle] = s.config
 	}
 	resolved := projectServers{proposals: kindProposals(sorted, MCPServerAdoptionKind, serverHandleField, store)}
 	for _, e := range kindEntries(sorted.Adopted, MCPServerAdoptionKind) {
-		resolved.adopted = append(resolved.adopted, byName[e.Handle].repoServerConfig())
+		server := byName[e.Handle].repoServerConfig()
+		server.Pin = adoptedPin{root: projectRoot, text: e.Text}
+		resolved.adopted = append(resolved.adopted, server)
 	}
 	return resolved
 }

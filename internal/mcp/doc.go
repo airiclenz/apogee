@@ -43,7 +43,9 @@
 //     command), so no URL check applies, but the launched tool calls still gate
 //     through Approval exactly the same way. What it launches meets the EXEC FENCE
 //     instead: the command is resolved on PATH to an absolute program and one
-//     resolving inside the workspace is refused at connect time, and the process is
+//     resolving inside the workspace is refused at connect time — unless the server is
+//     an adopted repo server and the program is one of the project files its pin holds,
+//     re-checked before the launch (ServerConfig.Pin, ADR 0104 §4) — and the process is
 //     held in a process group / Job Object that Close reaps, so no descendant of a
 //     configured server outlives the session. The process joins that container the
 //     moment it starts, before the handshake, so a failed handshake is reaped as a

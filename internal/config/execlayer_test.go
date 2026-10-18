@@ -647,6 +647,49 @@ func TestAdoptedRepoReactionTakesParameterEditsLive(t *testing.T) {
 	}
 }
 
+// An adopted repo server carries its adoption pin to the MCP client's launch (ADR 0104 §4): the
+// Project root, the pinned project files — the program and a file an env value names — and a
+// Changed that names one of them once it is edited.
+func TestAdoptedRepoMCPServerCarriesItsPin(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "",
+		"mcp-servers:\n  - name: lint\n    transport: stdio\n    command: ./bin/lint-server\n"+
+			"    env: [LINT_CONFIG=conf/lint.json]\n")
+	program := filepath.Join(projectRoot, "bin", "lint-server")
+	config := filepath.Join(projectRoot, "conf", "lint.json")
+	for _, f := range []string{program, config} {
+		if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(f, []byte("v1\n"), 0o700); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+	adoptProposedServers(t, globalPath, projectRoot)
+
+	o, _ := loadLayered(t, globalPath, projectRoot)
+
+	if len(o.MCPServers) != 1 || o.MCPServers[0].Pin == nil {
+		t.Fatalf("MCPServers = %+v; want the adopted lint, carrying its pin", o.MCPServers)
+	}
+	pin := o.MCPServers[0].Pin
+	if pin.Root() != projectRoot {
+		t.Errorf("Root = %q; want the Project root %q", pin.Root(), projectRoot)
+	}
+	if got, want := pin.Programs(), []string{program, config}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Programs = %q; want %q", got, want)
+	}
+	if changed, err := pin.Changed(); err != nil || len(changed) != 0 {
+		t.Errorf("Changed = %q, %v; want nothing before an edit", changed, err)
+	}
+	if err := os.WriteFile(config, []byte("v2\n"), 0o700); err != nil {
+		t.Fatalf("edit the config: %v", err)
+	}
+	if changed, err := pin.Changed(); err != nil || !reflect.DeepEqual(changed, []string{"conf/lint.json"}) {
+		t.Errorf("Changed = %q, %v; want the edited env-named file named", changed, err)
+	}
+}
+
 // An adopted repo reaction carries its adoption pin to the spawn (ADR 0104 §4): the Project root
 // it runs in, the pinned script as the one program it may run inside the fence, and a check that
 // names the script once its content moves.

@@ -422,6 +422,167 @@ func TestConnect_RefusesAStdioServerInsideTheWorkspace(t *testing.T) {
 	}
 }
 
+// fakeProjectPin is a domain.ProjectPin a test states outright: the Project root, the pinned
+// programs, and what Changed reports — the config layer's real pin cannot be built here, since
+// internal/config imports this package.
+type fakeProjectPin struct {
+	root     string
+	programs []string
+	changed  []string
+	err      error
+}
+
+func (p fakeProjectPin) Root() string               { return p.root }
+func (p fakeProjectPin) Changed() ([]string, error) { return p.changed, p.err }
+func (p fakeProjectPin) Programs() []string         { return p.programs }
+
+// repoStdioServer plants the fixture server at rel inside a fresh Project root, which is also the
+// workspace the connect fences, and returns a Project stdio config launching it by its absolute
+// path under a pin holding it alone.
+func repoStdioServer(t *testing.T, rel string) (cfg ServerConfig, root, program string) {
+	t.Helper()
+	root = t.TempDir()
+	program = filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(program), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cfg = stdioServerConfig(t)
+	cfg.Command = copyExecutable(t, cfg.Command, program)
+	cfg.Project = true
+	cfg.Pin = fakeProjectPin{root: root, programs: []string{program}}
+	return cfg, root, program
+}
+
+// connectOnly connects cfg alone with workspace as the exec fence, under the package's connect
+// budget.
+func connectOnly(t *testing.T, cfg ServerConfig, workspace string) (*Client, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
+	defer cancel()
+	return Connect(ctx, []ServerConfig{cfg}, security.URLGuard{}, workspace)
+}
+
+// TestConnect_AdmitsARepoStdioServerInsideTheProject proves ADR 0104 §4's admission: an adopted
+// repo server whose program is a pinned project file inside the workspace connects — the same
+// planting TestConnect_RefusesAStdioServerInsideTheWorkspace refuses for a global server — and
+// every tool it surfaces reports its project origin to the Allow rule match.
+func TestConnect_AdmitsARepoStdioServerInsideTheProject(t *testing.T) {
+	cfg, root, _ := repoStdioServer(t, "bin/mcp-server")
+
+	c, err := connectOnly(t, cfg, root)
+	if err != nil {
+		t.Fatalf("Connect: %v; want the pinned project program admitted", err)
+	}
+	defer func() { _ = c.Close() }()
+	if len(c.Tools()) == 0 {
+		t.Fatal("the repo server surfaced no tools")
+	}
+	for _, tool := range c.Tools() {
+		reporter, ok := tool.(interface{ ProjectServer() bool })
+		if !ok || !reporter.ProjectServer() {
+			t.Errorf("tool %s does not report a project server", tool.Name())
+		}
+	}
+}
+
+// TestConnect_AdmitsARelativeRepoCommand proves a repo server's relative command resolves against
+// the Project root, not apogee's own working directory, and that the server starts in the Project
+// root — while a global server keeps apogee's working directory.
+func TestConnect_AdmitsARelativeRepoCommand(t *testing.T) {
+	cfg, root, program := repoStdioServer(t, "bin/mcp-server")
+	cfg.Command = "./bin/mcp-server"
+
+	cmd := buildStdioCmd(t, root, cfg)
+	if cmd.Path != program {
+		t.Errorf("program = %q; want the command resolved against the Project root: %q", cmd.Path, program)
+	}
+	if cmd.Dir != root {
+		t.Errorf("Dir = %q; want the Project root %q", cmd.Dir, root)
+	}
+
+	c, err := connectOnly(t, cfg, root)
+	if err != nil {
+		t.Fatalf("Connect: %v; want the relative pinned command admitted", err)
+	}
+	_ = c.Close()
+
+	if global := buildStdioCmd(t, t.TempDir(), stdioServerConfig(t)); global.Dir != "" {
+		t.Errorf("global Dir = %q; want apogee's own working directory (unset)", global.Dir)
+	}
+}
+
+// TestConnect_RefusesAnUnpinnedOrChangedRepoProgram proves the admission reaches no further than
+// the pin: an in-root program the pin does not hold, a PATH hit inside the root, a pinned program
+// whose content moved since adoption, and a repo server with no pin at all are each refused at
+// connect time.
+func TestConnect_RefusesAnUnpinnedOrChangedRepoProgram(t *testing.T) {
+	t.Run("unpinned in-root program", func(t *testing.T) {
+		cfg, root, _ := repoStdioServer(t, "bin/mcp-server")
+		cfg.Pin = fakeProjectPin{root: root, programs: []string{filepath.Join(root, "bin", "other")}}
+
+		c, err := connectOnly(t, cfg, root)
+		if err == nil {
+			_ = c.Close()
+			t.Fatal("an unpinned in-root program connected")
+		}
+		if !errors.Is(err, security.ErrExecFromWritablePath) {
+			t.Errorf("error = %v; want it to wrap ErrExecFromWritablePath", err)
+		}
+	})
+	t.Run("PATH hit inside the root", func(t *testing.T) {
+		cfg, root, program := repoStdioServer(t, "bin/mcp-server")
+		binDir := filepath.Join(root, "node_modules", ".bin")
+		if err := os.MkdirAll(binDir, 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		copyExecutable(t, program, filepath.Join(binDir, "lint-server"))
+		t.Setenv("PATH", binDir)
+		cfg.Command = "lint-server"
+
+		c, err := connectOnly(t, cfg, root)
+		if err == nil {
+			_ = c.Close()
+			t.Fatal("a PATH hit inside the Project root connected")
+		}
+		if !errors.Is(err, security.ErrExecFromWritablePath) {
+			t.Errorf("error = %v; want it to wrap ErrExecFromWritablePath", err)
+		}
+	})
+	t.Run("changed pinned program", func(t *testing.T) {
+		cfg, root, program := repoStdioServer(t, "bin/mcp-server")
+		cfg.Pin = fakeProjectPin{root: root, programs: []string{program}, changed: []string{"bin/mcp-server"}}
+
+		c, err := connectOnly(t, cfg, root)
+		if err == nil {
+			_ = c.Close()
+			t.Fatal("a repo server whose pinned program changed connected")
+		}
+		for _, want := range []string{cfg.Name, "bin/mcp-server", "proposed again for adoption"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %v; want it to name %q", err, want)
+			}
+		}
+	})
+	t.Run("pin unreadable", func(t *testing.T) {
+		cfg, root, program := repoStdioServer(t, "bin/mcp-server")
+		cfg.Pin = fakeProjectPin{root: root, programs: []string{program}, err: errors.New("read bin/mcp-server: denied")}
+
+		if c, err := connectOnly(t, cfg, root); err == nil {
+			_ = c.Close()
+			t.Fatal("a repo server whose pin could not be checked connected")
+		}
+	})
+	t.Run("no pin", func(t *testing.T) {
+		cfg, root, _ := repoStdioServer(t, "bin/mcp-server")
+		cfg.Pin = nil
+
+		if c, err := connectOnly(t, cfg, root); err == nil {
+			_ = c.Close()
+			t.Fatal("a repo server with no adoption pin connected")
+		}
+	})
+}
+
 // TestClose_ReapsTheStdioServersDescendants proves F-42's fix: Close reaps the launched server's
 // whole process TREE, not the leader alone. Apogee's spec-shaped shutdown ladder (close stdin,
 // wait, SIGTERM, SIGKILL — stdinLadder.Close) signals cmd.Process only, so before the process
@@ -1145,7 +1306,7 @@ func listFromInProcessServer(t *testing.T, pageSize int, addTools func(*mcpsdk.S
 	}
 	t.Cleanup(func() { _ = session.Close() })
 
-	tools, err := listServerTools(ctx, "many", session, nil)
+	tools, err := listServerTools(ctx, "many", false, session, nil)
 	if err != nil {
 		t.Fatalf("listServerTools: %v", err)
 	}

@@ -10,11 +10,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
@@ -126,6 +128,12 @@ type ServerConfig struct {
 	// one from the user's own global config. Only the config layer sets it; the fences and the Allow
 	// rule match read it, since a repo server is trusted only as far as its adoption reaches.
 	Project bool
+	// Pin is the adoption pin a Project stdio server's launch is checked against (ADR 0104 §4): the
+	// Project root it starts in and resolves a relative command against, and the project files —
+	// the program and any file its args or env values name — the user adopted it with. Only the
+	// config layer sets it, beside Project; nil on a Project stdio server refuses its launch, and a
+	// global server leaves it nil.
+	Pin domain.ProjectPin
 }
 
 // AuthOAuth is the one recognised ServerConfig.Auth value: apogee authorises to the server with an
@@ -291,10 +299,18 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // launched is an ABSOLUTE program that does not live inside the workspace: a server binary the
 // model could have authored — or a PATH entry pointing into the box — is refused at connect time
 // rather than executed. Connect being all-or-nothing, the operator meets that refusal at startup,
-// where every other misconfigured server is met. cmd.Dir is deliberately NOT set: the server keeps
-// starting in apogee's own working directory, the workspace, which is what filesystem-style MCP
-// servers expect, and with argv[0] an absolute fenced path there is no relative lookup left for
-// the working directory to decide.
+// where every other misconfigured server is met. For a global server cmd.Dir is deliberately NOT
+// set: the server keeps starting in apogee's own working directory, the workspace, which is what
+// filesystem-style MCP servers expect, and with argv[0] an absolute fenced path there is no
+// relative lookup left for the working directory to decide.
+//
+// A Project server (cfg.Project, ADR 0104 §4) is launched only once its pin holds: every project
+// file it was adopted with is re-hashed first, and one that changed, went missing or is newly named
+// refuses the launch (the config layer proposes the server again on its next read). Its relative
+// command carrying a path separator (`./bin/server`) resolves against the Project root, it starts
+// in the Project root, and a program the fence refuses for lying inside the workspace is admitted
+// only when it IS one of the pinned project files — a PATH hit inside the root (`node_modules/.bin`)
+// or any other unpinned in-root program stays refused.
 //
 // The returned ProcessTeardown holds the launched process's whole tree — a POSIX process group, a
 // Windows Job Object — so Client.Close reaps every descendant the server spawned rather than only
@@ -312,9 +328,11 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // TRUST NOTE (security-review L4): BY DEFAULT — no env-allowlist: key on the server — a configured
 // stdio MCP server is launched with Apogee's FULL process environment (cmd.Environ()) plus the
 // per-server cfg.Env, so it sees every secret the Apogee process holds (API keys, tokens). That
-// default is DELIBERATE and is a conscious trust decision, not a leak: the stdio command is chosen
-// by the host in global config (the same trust level as the toolchain Apogee invokes), and many
-// MCP servers need inherited PATH/HOME/runtime vars to function. It is broader than the git tool's
+// default is DELIBERATE and is a conscious trust decision, not a leak: a global server's command is
+// chosen by the host in global config (the same trust level as the toolchain Apogee invokes), and
+// many MCP servers need inherited PATH/HOME/runtime vars to function. A Project server never gets
+// that default: the config layer hands it the explicitly empty allowlist unless the repo names the
+// variables it needs (ADR 0104 §6), and those names are part of what the user adopted. It is broader than the git tool's
 // allowlisted env (gitexec.SafeEnv) on purpose. The opt-in for a host that wants to run a LESS-trusted
 // stdio server is cfg.EnvAllowlist (`env-allowlist:` in config): naming it scrubs the launch down
 // to those keys plus the platform's essentials, with PATH scoped away from the workspace exactly as
@@ -325,12 +343,15 @@ func buildStdioTransport(host Host, cfg ServerConfig, workspaceRoot string) (mcp
 	if strings.TrimSpace(cfg.Command) == "" {
 		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)
 	}
-	program, err := security.ResolveProgram(nil, cfg.Command, workspaceRoot, nil)
+	program, err := resolveStdioProgram(cfg, workspaceRoot)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q: %w", cfg.Name, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, program, cfg.Args...)
+	if cfg.Project {
+		cmd.Dir = cfg.Pin.Root()
+	}
 	switch {
 	case cfg.EnvAllowlist != nil:
 		// The opt-in scrub: only the named keys (plus the platform's essentials) reach the child,
@@ -348,6 +369,56 @@ func buildStdioTransport(host Host, cfg ServerConfig, workspaceRoot string) (mcp
 	// After the teardown, which set the platform default: the host's own drain bound wins.
 	cmd.WaitDelay = host.WaitDelay
 	return &stdioTransport{cmd: cmd, td: td, terminateDuration: host.TerminateDuration}, cmd, td, cancel, nil
+}
+
+// changedPinRefusal is the refusal a Project server's launch earns when a project file it was
+// adopted with moved: the files by path, and that the server waits on a fresh adoption — the config
+// layer proposes it again, naming the same files, the next time it reads the Project config.
+const changedPinRefusal = "refusing to launch — %s changed since you adopted it; it is proposed again for adoption"
+
+// resolveStdioProgram turns cfg.Command into the absolute program a stdio server launches, or the
+// refusal that launch earns: the exec fence (security.ResolveProgram against workspaceRoot) for a
+// global server, and for a Project server first the pin's spawn-time check, then the fence with
+// the Project root as the base of a relative command and the pinned project files admitted.
+func resolveStdioProgram(cfg ServerConfig, workspaceRoot string) (string, error) {
+	if !cfg.Project {
+		return security.ResolveProgram(nil, cfg.Command, workspaceRoot, nil)
+	}
+	if cfg.Pin == nil {
+		return "", errors.New("refusing to launch — a project server carries no adoption pin")
+	}
+	changed, err := cfg.Pin.Changed()
+	if err != nil {
+		return "", fmt.Errorf("refusing to launch — %w", err)
+	}
+	if len(changed) > 0 {
+		return "", fmt.Errorf(changedPinRefusal, strings.Join(changed, ", "))
+	}
+	name := cfg.Command
+	if !filepath.IsAbs(name) && filepath.Base(name) != name {
+		name = filepath.Join(cfg.Pin.Root(), name)
+	}
+	program, err := security.ResolveProgram(nil, name, workspaceRoot, nil)
+	if errors.Is(err, security.ErrExecFromWritablePath) && isPinnedProgram(program, cfg.Pin.Programs()) {
+		return program, nil
+	}
+	return program, err
+}
+
+// isPinnedProgram reports whether program — an absolute path the fence refused — is one of pinned,
+// both compared with their symlinks evaluated so a spelling of the root through a link is the same
+// file. A relative program is never admitted.
+func isPinnedProgram(program string, pinned []string) bool {
+	if !filepath.IsAbs(program) {
+		return false
+	}
+	resolved := security.EvalRealPath(program)
+	for _, candidate := range pinned {
+		if filepath.IsAbs(candidate) && security.EvalRealPath(candidate) == resolved {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultStdioTerminateDuration is the rung wait a non-positive Host.TerminateDuration maps to:

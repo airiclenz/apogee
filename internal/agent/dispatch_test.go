@@ -3134,6 +3134,73 @@ func TestAllowRuleAnswersAnMCPServer(t *testing.T) {
 	}
 }
 
+// A global `allow.mcp-servers` rule never answers a repo-defined server's call, even naming its
+// alias (ADR 0104 §10): the call is asked. A session approval still clears the server for the rest
+// of the Session.
+func TestGlobalAllowRuleDoesNotCoverARepoServer(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
+	ran := 0
+	rule := domain.AllowRule{Kind: domain.AllowRuleMCPServer, Text: "lint", Layer: domain.AllowRuleGlobal}
+	a := newRuleAgent(t, allowRuleConfig(t, sink, approver, []domain.AllowRule{rule},
+		mcpServerTool{name: "lint__check", alias: "lint", project: true, ran: &ran},
+		mcpServerTool{name: "lint__fix", alias: "lint", project: true, ran: &ran}))
+
+	prepareAndRun(a, domain.ToolCall{ID: "c1", Tool: "lint__check", Arguments: []byte(`{}`)})
+	if approver.calls != 1 {
+		t.Fatalf("asked %d times; want the global rule passed over and the call asked", approver.calls)
+	}
+	prepareAndRun(a, domain.ToolCall{ID: "c2", Tool: "lint__fix", Arguments: []byte(`{}`)})
+	if ran != 2 || approver.calls != 1 {
+		t.Errorf("ran %d, asked %d; want both calls run and the second cleared by the session approval",
+			ran, approver.calls)
+	}
+}
+
+// A rule adopted in the project answers a repo-defined server's call unasked (ADR 0104 §10).
+func TestProjectAllowRuleCoversARepoServer(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	ran := 0
+	rule := domain.AllowRule{Kind: domain.AllowRuleMCPServer, Text: "lint", Layer: domain.AllowRuleProject}
+	a := newRuleAgent(t, allowRuleConfig(t, sink, approver, []domain.AllowRule{rule},
+		mcpServerTool{name: "lint__check", alias: "lint", project: true, ran: &ran}))
+
+	prepareAndRun(a, domain.ToolCall{ID: "c1", Tool: "lint__check", Arguments: []byte(`{}`)})
+
+	if ran != 1 || approver.calls != 0 {
+		t.Errorf("ran %d, asked %d; want the call run unasked under the project rule", ran, approver.calls)
+	}
+}
+
+// A global rule of the repo server's alias listed BEFORE the project one does not hide it: the
+// project rule answers the call, and it is the rule the decision names.
+func TestProjectAllowRuleCoversARepoServerBesideAGlobalRuleOfTheSameAlias(t *testing.T) {
+	t.Parallel()
+
+	global := domain.AllowRule{Kind: domain.AllowRuleMCPServer, Text: "lint", Layer: domain.AllowRuleGlobal}
+	project := domain.AllowRule{Kind: domain.AllowRuleMCPServer, Text: "lint", Layer: domain.AllowRuleProject}
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalDeny}
+	ran := 0
+	a := newRuleAgent(t, allowRuleConfig(t, sink, approver, []domain.AllowRule{global, project},
+		mcpServerTool{name: "lint__check", alias: "lint", project: true, ran: &ran}))
+
+	prepareAndRun(a, domain.ToolCall{ID: "c1", Tool: "lint__check", Arguments: []byte(`{}`)})
+
+	if ran != 1 || approver.calls != 0 {
+		t.Fatalf("ran %d, asked %d; want the call run unasked under the project rule", ran, approver.calls)
+	}
+	approvals := approvalEvents(sink.events)
+	if len(approvals) != 1 || !reflect.DeepEqual(approvals[0].Rules, []domain.AllowRule{project}) {
+		t.Errorf("ApprovalEvents = %+v; want one decided by the project rule alone", approvals)
+	}
+}
+
 // Auto's STATIC gate for a backend that cannot confine is not forced, so a rule answers it.
 func TestAllowRuleAnswersAutosUnconfinableGate(t *testing.T) {
 	t.Parallel()

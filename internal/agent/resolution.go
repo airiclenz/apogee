@@ -766,6 +766,26 @@ func mcpServerAlias(tool domain.Tool) (alias string, ok bool) {
 	return aliaser.ServerAlias(), true
 }
 
+// projectServerReporter is the optional interface an MCP tool states its server's origin through
+// (internal/mcp's serverTool.ProjectServer): whether the server is one a Project config defined and
+// the user adopted (ADR 0104 §10). Like serverAliaser it is reached structurally, so internal/agent
+// does not import internal/mcp.
+type projectServerReporter interface {
+	ProjectServer() bool
+}
+
+// mcpServerIsProject reports whether tool is an MCP tool of a repo-defined server — the one fact
+// the Allow rule match reads beside the alias (mcpRuleCovering). A tool that does not state its
+// origin reads as a global server's, the case every server was before a Project config could
+// define one.
+func mcpServerIsProject(tool domain.Tool) bool {
+	if _, isServer := mcpServerAlias(tool); !isServer {
+		return false
+	}
+	reporter, states := tool.(projectServerReporter)
+	return states && reporter.ProjectServer()
+}
+
 // gateArgumentsSeparator sits between a gate cache key's tool name and its argument digest. It
 // is a byte no tool name carries, and the digest that follows it is fixed-length, so two
 // argument-grain keys are equal only when both the tool and the arguments are.
