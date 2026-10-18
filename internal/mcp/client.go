@@ -43,6 +43,7 @@ const (
 type Client struct {
 	sessions []liveSession // one per connected server, in config order
 	tools    []domain.Tool // surfaced server tools, in (server, tool) order
+	skipped  []Denied      // Project servers left undialled for a moved pin, in config order
 }
 
 // liveSession is one connected server: the SDK session, plus — for a stdio server — the process
@@ -71,6 +72,12 @@ type liveSession struct {
 // surfaced as an error AFTER tearing down whatever connected first — Connect is all-or-nothing
 // so a half-wired MCP set never reaches the registry. The host decides whether an MCP failure is
 // fatal or a logged degradation; this package does not silently swallow it.
+//
+// The one exception is a Project server whose adoption pin moved (a *PinChangedError): that server
+// is refused before anything launches, the rest of the set still connects and Connect succeeds, and
+// the skip is reported through Client.Skipped rather than swallowed. Such a server waits on the
+// user's fresh adoption, so failing the whole set over it would cost every other server for an
+// edit the config layer already proposes again.
 //
 // ctx bounds the whole connect sweep (every server's handshake and tools/list) — never the life of
 // a launched stdio server, which is the session's. A duplicate or empty server name is rejected
@@ -159,9 +166,17 @@ func ConnectWith(
 
 	c := &Client{}
 	for _, cfg := range servers {
-		if err := c.connectOne(ctx, host, cfg, guard, workspaceRoot); err != nil {
+		err := c.connectOne(ctx, host, cfg, guard, workspaceRoot)
+		var pinChanged *PinChangedError
+		if errors.As(err, &pinChanged) {
+			// A moved pin refuses the launch before anything starts, so there is nothing of this
+			// server's to tear down: it is recorded and the sweep goes on (see Connect).
+			c.skipped = append(c.skipped, Denied{Name: cfg.Name, Err: err})
+			continue
+		}
+		if err != nil {
 			// Roll back every session opened so far so a partial connect leaves no orphan, then
-			// surface the failure — Connect is all-or-nothing.
+			// surface the failure — Connect is all-or-nothing for every other refusal.
 			_ = c.Close()
 			return nil, err
 		}
@@ -170,21 +185,24 @@ func ConnectWith(
 }
 
 // Denied is one configured server a connect may NOT dial: the alias the host knows it by, and the
-// refusal its endpoint earned. It is a value rather than an error slice because the caller reports
-// the servers by NAME — a human who closed a host wants to be told which of their servers went with
-// it, and the error alone spells that only inside its own sentence.
+// refusal it earned — its endpoint's under Admit, its moved pin's under Client.Skipped. It is a value
+// rather than an error slice because the caller reports the servers by NAME — a human who closed a
+// host, or edited a pinned file, wants to be told which of their servers went with it, and the error
+// alone spells that only inside its own sentence.
 type Denied struct {
 	// Name is the server's configured alias — the same one its tools are surfaced under.
 	Name string
-	// Err is why the endpoint was refused: ErrEndpointDenied where the host lists closed it, the
-	// missing/unparseable-endpoint refusal otherwise.
+	// Err is why the server was refused: from Admit, ErrEndpointDenied where the host lists closed
+	// it, the missing/unparseable-endpoint refusal otherwise; from Client.Skipped, an error wrapping
+	// the *PinChangedError that names the moved files.
 	Err error
 }
 
 // Admit partitions a configured server set into the servers guard lets a connect dial and the ones
 // its endpoint closes, WITHOUT dialling anything.
 //
-// It exists because Connect is all-or-nothing (see above): a host that wants the set to follow a
+// It exists because Connect is all-or-nothing for an endpoint refusal (only a moved Project pin is
+// skipped instead — see above): a host that wants the set to follow a
 // url-safety edit rather than fail whole has to know which servers the new lists still admit before
 // it dials. The check is exactly the one a connect makes at the door — checkEndpoint's
 // guard.DisableIPFloor().CheckContext over the normalised endpoint — so a server this admits is a
@@ -216,7 +234,7 @@ func Admit(servers []ServerConfig, guard security.URLGuard) (admitted []ServerCo
 
 // connectOne dials a single server, lists its tools, and appends the session and the surfaced
 // tools to the Client. A connect or list failure is returned (the caller rolls the whole set
-// back). The session is recorded BEFORE listing tools so a list failure still tears the
+// back, or — for a *PinChangedError — skips the server). The session is recorded BEFORE listing tools so a list failure still tears the
 // just-opened session down on rollback.
 //
 // A stdio server's process joins its teardown inside stdioTransport.Connect, immediately after
@@ -257,8 +275,9 @@ func (c *Client) connectOne(ctx context.Context, host Host, cfg ServerConfig, gu
 // "an MCP server's response is read with no size cap" for discovery. A server that never ends
 // its cursor chain, advertises tools without end, or hands one tool a schema the size of a book
 // would otherwise grow the registry (and the model's tool menu) without bound. Past either list
-// cap discovery stops and the capped list is returned SILENTLY: Connect returns tools and errors
-// only, and there is no Client report or notice path to carry a "cut short" line. A surfaced
+// cap discovery stops and the capped list is returned SILENTLY: Connect returns tools and errors,
+// and its one report path, Client.Skipped, carries whole servers left undialled for a moved pin —
+// there is no Client report or notice path to carry a "cut short" line. A surfaced
 // tool's description is not a skip bound: newServerTool clips it at maxMCPToolDescriptionBytes
 // (tool.go).
 const (
@@ -321,6 +340,19 @@ func (c *Client) Tools() []domain.Tool {
 	}
 	out := make([]domain.Tool, len(c.tools))
 	copy(out, c.tools)
+	return out
+}
+
+// Skipped returns the Project servers this connect left undialled because a file their adoption
+// pinned changed, went missing or is newly named — each by alias, with the error wrapping the
+// *PinChangedError that names the files — in config order. Empty when every server connected. The
+// slice is a fresh copy, as Tools' is.
+func (c *Client) Skipped() []Denied {
+	if c == nil || len(c.skipped) == 0 {
+		return nil
+	}
+	out := make([]Denied, len(c.skipped))
+	copy(out, c.skipped)
 	return out
 }
 

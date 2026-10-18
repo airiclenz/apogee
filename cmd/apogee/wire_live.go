@@ -125,7 +125,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// Agent's registry. With no servers configured this is dormant (a no-op Client, nil tools).
 	// On resume the connection is established FRESH here — no server-side state is restored
 	// (ADR 0008). An MCP connect failure is fatal: a configured server that cannot be reached is
-	// a misconfiguration the user should see, not a silently-dropped capability.
+	// a misconfiguration the user should see, not a silently-dropped capability. The connect itself
+	// skips a repo server whose pin moved rather than failing the set (mcp.Client.Skipped); that
+	// skip is turned back into this same fatal error in connectMCPServers.
 	//
 	// The endpoint of an `sse`/`streamable-http` server is checked against the operator's OWN
 	// url-safety host lists — scheme/host allow-deny, with the resolved-IP floor disabled for it
@@ -162,7 +164,15 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		spec := w.toolSet.built()
 		// It never offers a login: a server that needs one fails the reconnect with the error naming
 		// `apogee mcp login <name>`, which the settings row relays.
-		return mcp.ConnectWith(ctx, w.mcpLogin.mcpHost(w.roots.config), servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
+		client, err := mcp.ConnectWith(ctx, w.mcpLogin.mcpHost(w.roots.config), servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
+		if err != nil {
+			return nil, err
+		}
+		// A repo server skipped for a moved pin fails the reconnect, as it fails startup.
+		if err := abortOnSkippedMCP(client); err != nil {
+			return nil, err
+		}
+		return client, nil
 	})
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the

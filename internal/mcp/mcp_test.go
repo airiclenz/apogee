@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -514,7 +515,7 @@ func TestConnect_AdmitsARelativeRepoCommand(t *testing.T) {
 // TestConnect_RefusesAnUnpinnedOrChangedRepoProgram proves the admission reaches no further than
 // the pin: an in-root program the pin does not hold, a PATH hit inside the root, a pinned program
 // whose content moved since adoption, and a repo server with no pin at all are each refused at
-// connect time.
+// connect time — the moved pin as a skip Client.Skipped reports, the others as a failed connect.
 func TestConnect_RefusesAnUnpinnedOrChangedRepoProgram(t *testing.T) {
 	t.Run("unpinned in-root program", func(t *testing.T) {
 		cfg, root, _ := repoStdioServer(t, "bin/mcp-server")
@@ -553,13 +554,20 @@ func TestConnect_RefusesAnUnpinnedOrChangedRepoProgram(t *testing.T) {
 		cfg.Pin = fakeProjectPin{root: root, programs: []string{program}, changed: []string{"bin/mcp-server"}}
 
 		c, err := connectOnly(t, cfg, root)
-		if err == nil {
-			_ = c.Close()
-			t.Fatal("a repo server whose pinned program changed connected")
+		if err != nil {
+			t.Fatalf("Connect: %v; want the moved pin skipped, not the set failed", err)
+		}
+		defer func() { _ = c.Close() }()
+		if len(c.Tools()) != 0 {
+			t.Fatalf("a repo server whose pinned program changed surfaced %d tools", len(c.Tools()))
+		}
+		skipped := c.Skipped()
+		if len(skipped) != 1 {
+			t.Fatalf("Skipped() = %+v; want the one repo server", skipped)
 		}
 		for _, want := range []string{cfg.Name, "bin/mcp-server", "proposed again for adoption"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error = %v; want it to name %q", err, want)
+			if !strings.Contains(skipped[0].Err.Error(), want) {
+				t.Errorf("skip error = %v; want it to name %q", skipped[0].Err, want)
 			}
 		}
 	})
@@ -581,6 +589,57 @@ func TestConnect_RefusesAnUnpinnedOrChangedRepoProgram(t *testing.T) {
 			t.Fatal("a repo server with no adoption pin connected")
 		}
 	})
+}
+
+// TestConnect_SkipsARepoServerWhosePinMoved proves a moved pin costs its own server and no other:
+// of a global server and two repo servers, the one whose pinned program changed is left undialled
+// and reported by name with the changed file, while the servers on either side of it connect and
+// Connect succeeds.
+func TestConnect_SkipsARepoServerWhosePinMoved(t *testing.T) {
+	kept, root, _ := repoStdioServer(t, "bin/kept-server")
+	kept.Name = "kept"
+	moved := stdioServerConfig(t)
+	moved.Name = "moved"
+	moved.Command = copyExecutable(t, moved.Command, filepath.Join(root, "bin", "moved-server"))
+	moved.Project = true
+	moved.Pin = fakeProjectPin{root: root, programs: []string{moved.Command}, changed: []string{"bin/moved-server"}}
+	global := stdioServerConfig(t)
+	global.Name = "global"
+
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
+	defer cancel()
+	c, err := Connect(ctx, []ServerConfig{global, moved, kept}, security.URLGuard{}, root)
+	if err != nil {
+		t.Fatalf("Connect: %v; want the moved repo server skipped and the rest connected", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	servers := map[string]bool{}
+	for _, tool := range c.Tools() {
+		alias, _, _ := strings.Cut(tool.Name(), toolNameSeparator)
+		servers[alias] = true
+	}
+	if !servers["global"] || !servers["kept"] || servers["moved"] {
+		t.Errorf("tools surfaced from %v; want global and kept, never moved", servers)
+	}
+	if len(c.sessions) != 2 {
+		t.Errorf("client holds %d sessions; want the two servers whose launch was admitted", len(c.sessions))
+	}
+
+	skipped := c.Skipped()
+	if len(skipped) != 1 || skipped[0].Name != "moved" {
+		t.Fatalf("Skipped() = %+v; want the moved repo server alone", skipped)
+	}
+	var pinChanged *PinChangedError
+	if !errors.As(skipped[0].Err, &pinChanged) {
+		t.Fatalf("skip error = %v; want it to wrap a *PinChangedError", skipped[0].Err)
+	}
+	if pinChanged.Server != "moved" || !slices.Equal(pinChanged.Files, []string{"bin/moved-server"}) {
+		t.Errorf("PinChangedError = %+v; want server moved and file bin/moved-server", pinChanged)
+	}
+	if !strings.Contains(skipped[0].Err.Error(), "bin/moved-server changed since you adopted it") {
+		t.Errorf("skip error = %v; want the changed-pin refusal naming the file", skipped[0].Err)
+	}
 }
 
 // TestClose_ReapsTheStdioServersDescendants proves F-42's fix: Close reaps the launched server's
@@ -1142,10 +1201,11 @@ func TestBuildTransport_UnknownAndMissing(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// Rollback on a failing server (the all-or-nothing connect)
+// Rollback on a failing server (the all-or-nothing connect, a moved pin aside)
 // ----------------------------------------------------------------------------
 
-// TestConnect_RollsBackOnLaterFailure proves Connect is all-or-nothing: when a later server
+// TestConnect_RollsBackOnLaterFailure proves Connect is all-or-nothing (a moved Project pin, which
+// is skipped instead, aside — TestConnect_SkipsARepoServerWhosePinMoved): when a later server
 // fails to connect, the session opened for an earlier, healthy server is torn down and the
 // error is surfaced — no half-wired MCP set, no orphan. (The first server is the live stdio
 // fixture; the second is a stdio server whose command does not exist.)
@@ -1332,7 +1392,7 @@ func findTool(t *testing.T, tools []domain.Tool, name string) domain.Tool {
 
 // Admit is the partition a host makes BEFORE it dials, so that a url-safety edit can move the
 // connected set to what the new lists still allow instead of failing it whole (Connect is
-// all-or-nothing). The three classes in one call are the whole claim: an HTTP-transported server on
+// all-or-nothing over an endpoint refusal). The three classes in one call are the whole claim: an HTTP-transported server on
 // a closed host is denied by name, one on an open host is admitted, and a stdio server — a trusted
 // local launch with no endpoint at all — is outside the URL policy and rides through untouched.
 func TestAdmitPartitionsTheSetByTheHostLists(t *testing.T) {

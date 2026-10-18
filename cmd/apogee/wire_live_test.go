@@ -114,8 +114,8 @@ func TestASessionRaisedFiringRunsThroughTheBootsRunner(t *testing.T) {
 }
 
 // A startup connect is judged by the operator's own host lists: the endpoint is refused before
-// anything is dialled, with the url-safety message, and the all-or-nothing connect makes that the
-// startup error. A connection error here would mean the guard is still the zero one.
+// anything is dialled, with the url-safety message, and the connect — all-or-nothing over an
+// endpoint refusal — makes that the startup error. A connection error here would mean the guard is still the zero one.
 func TestWireSessionConnectsMCPUnderTheConfiguredURLGuard(t *testing.T) {
 	t.Parallel()
 	w := urlGuardWiring(t, config.Options{
@@ -228,8 +228,9 @@ func TestWireSessionFencesTheSettingsEditorAgainstTheWorkspace(t *testing.T) {
 // transport.go), so a connection made under the old lists keeps talking to a host the operator has
 // just closed until something else happens to reconnect. This is the re-admission that closes it
 // (audit 2026-08-28: "after a `/settings` url-safety edit, network tools and the MCP connection
-// disagree about which hosts are allowed") — and because Connect is all-or-nothing, the denied
-// server is DROPPED and named rather than costing the session the servers it may still talk to.
+// disagree about which hosts are allowed") — and because Connect is all-or-nothing over an endpoint
+// refusal, the denied server is DROPPED and named rather than costing the session the servers it may
+// still talk to.
 func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")

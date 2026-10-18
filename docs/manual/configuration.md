@@ -827,7 +827,8 @@ offered the login on the terminal before the TUI opens (`MCP server "tracker" ne
 login. Log in now? [y/N]`), and so is one whose saved token the authorization server will no
 longer refresh or was issued to another client than its `client-id:` now names. Answer anything but yes, or start apogee with stdin not a terminal, and the launch
 stops with an error naming `apogee mcp login <name>` — connecting is all-or-nothing, so one server
-that cannot log in holds back the rest. Mid-session nothing ever prompts: a reconnect that needs a
+that cannot log in holds back the rest. (A repo server whose pinned file moved is the one server the
+connect skips rather than fails the set over.) Mid-session nothing ever prompts: a reconnect that needs a
 login fails, and the `mcp-servers:` row in `/settings` names the same command.
 
 The login always prints the full authorization URL. On a local desktop, `⏎` opens it in your

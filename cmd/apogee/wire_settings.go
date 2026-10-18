@@ -1545,9 +1545,10 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 // else happened to reconnect (audit 2026-08-28: "after a `/settings` url-safety edit, network tools
 // and the MCP connection disagree about which hosts are allowed").
 //
-// Connect is all-or-nothing, so the set is PARTITIONED first (mcp.Admit) and only the admitted
-// servers are dialled: a server the new lists close is dropped and named, rather than costing the
-// session every other server it was talking to.
+// Connect is all-or-nothing over an endpoint refusal (only a moved repo pin is skipped instead), so
+// the set is PARTITIONED first (mcp.Admit) and only the admitted servers are dialled: a server the
+// new lists close is dropped and named, rather than costing the session every other server it was
+// talking to.
 //
 // Three things it deliberately does not do.
 //

@@ -465,6 +465,7 @@ func findMCPServer(servers []mcp.ServerConfig, name string) (mcp.ServerConfig, b
 // offers that server one and connects again — at most once per `auth: oauth` server, so the loop
 // always ends. Each offer asks on stderr while it is still a safe place to write: declined, or
 // with stdin not a terminal, the launch aborts with the error naming `apogee mcp login <name>`.
+// A repo server the connect skipped for a moved pin aborts the launch too (abortOnSkippedMCP).
 func (w *rootWiring) connectMCPServers(ctx context.Context) (*mcp.Client, error) {
 	deps := w.mcpLogin.withDefaults()
 	host := deps.mcpHost(w.roots.config)
@@ -487,9 +488,15 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) (*mcp.Client, error)
 
 	for {
 		client, err := mcp.ConnectWith(ctx, host, w.opts.MCPServers, guard, w.roots.workspace)
+		if err == nil {
+			if err := abortOnSkippedMCP(client); err != nil {
+				return nil, err
+			}
+			return client, nil
+		}
 		var required *mcpauth.LoginRequiredError
-		if err == nil || retries == 0 || !errors.As(err, &required) {
-			return client, err
+		if retries == 0 || !errors.As(err, &required) {
+			return nil, err
 		}
 		retries--
 		server, isFound := findMCPServer(w.opts.MCPServers, required.Server)
@@ -500,6 +507,24 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) (*mcp.Client, error)
 			return nil, err
 		}
 	}
+}
+
+// abortOnSkippedMCP closes client and returns the refusals of the repo servers its connect skipped
+// for a moved pin — the same sentence a connect used to fail on — or nil when it skipped none. It
+// keeps a moved pin as loud at startup and at a reconnect as when the connect itself failed over it,
+// until those callers announce the skip and carry on instead. The client is closed here because
+// neither caller has handed it to anything that would.
+func abortOnSkippedMCP(client *mcp.Client) error {
+	skipped := client.Skipped()
+	if len(skipped) == 0 {
+		return nil
+	}
+	_ = client.Close()
+	errs := make([]error, 0, len(skipped))
+	for _, s := range skipped {
+		errs = append(errs, s.Err)
+	}
+	return errors.Join(errs...)
 }
 
 // mcpStartupLogin is the startup's login offer over one session's home, workspace and guard.

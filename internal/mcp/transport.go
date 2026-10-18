@@ -297,15 +297,17 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // The command is resolved on PATH through the exec fence (security.ResolveProgram), so what is
 // launched is an ABSOLUTE program that does not live inside the workspace: a server binary the
 // model could have authored — or a PATH entry pointing into the box — is refused at connect time
-// rather than executed. Connect being all-or-nothing, the operator meets that refusal at startup,
-// where every other misconfigured server is met. For a global server cmd.Dir is deliberately NOT
+// rather than executed. Connect being all-or-nothing (bar a Project server whose pin moved, which it
+// skips and reports — Client.Skipped), the operator meets that refusal at startup, where every other
+// misconfigured server is met. For a global server cmd.Dir is deliberately NOT
 // set: the server keeps starting in apogee's own working directory, the workspace, which is what
 // filesystem-style MCP servers expect, and with argv[0] an absolute fenced path there is no
 // relative lookup left for the working directory to decide.
 //
 // A Project server (cfg.Project, ADR 0104 §4) is launched only once its pin holds: every project
 // file it was adopted with is re-hashed first, and one that changed, went missing or is newly named
-// refuses the launch (the config layer proposes the server again on its next read). Its relative
+// refuses the launch with a *PinChangedError (the config layer proposes the server again on its
+// next read). Its relative
 // command carrying a path separator (`./bin/server`) resolves against the Project root, it starts
 // in the Project root, and a program the fence refuses for lying inside the workspace is admitted
 // only when it IS one of the pinned project files — a PATH hit inside the root (`node_modules/.bin`)
@@ -375,6 +377,22 @@ func buildStdioTransport(host Host, cfg ServerConfig, workspaceRoot string) (mcp
 // layer proposes it again, naming the same files, the next time it reads the Project config.
 const changedPinRefusal = "refusing to launch — %s changed since you adopted it; it is proposed again for adoption"
 
+// PinChangedError is the refusal a Project server's launch earns when its pin no longer matches:
+// the server's alias and the project files that changed, went missing or are newly named. It is a
+// type rather than a sentinel because a connect does not fail the set over it — ConnectWith skips
+// that one server and reports it through Client.Skipped, and the host words its notice from the
+// files. Its message is changedPinRefusal over those files.
+type PinChangedError struct {
+	// Server is the skipped server's configured alias.
+	Server string
+	// Files are the moved project files, by the path the pin reports them under.
+	Files []string
+}
+
+func (e *PinChangedError) Error() string {
+	return fmt.Sprintf(changedPinRefusal, strings.Join(e.Files, ", "))
+}
+
 // resolveStdioProgram turns cfg.Command into the absolute program a stdio server launches, or the
 // refusal that launch earns: the exec fence (security.ResolveProgram against workspaceRoot) for a
 // global server, and for a Project server first the pin's spawn-time check, then
@@ -392,7 +410,7 @@ func resolveStdioProgram(cfg ServerConfig, workspaceRoot string) (string, error)
 		return "", fmt.Errorf("refusing to launch — %w", err)
 	}
 	if len(changed) > 0 {
-		return "", fmt.Errorf(changedPinRefusal, strings.Join(changed, ", "))
+		return "", &PinChangedError{Server: cfg.Name, Files: changed}
 	}
 	return security.ResolveProjectProgram(cfg.Command, cfg.Pin.Root(), workspaceRoot, nil, cfg.Pin.Programs())
 }
@@ -685,10 +703,10 @@ var ErrEndpointDenied = errors.New("endpoint blocked by url-safety")
 // disabled for it (one of the two production uses of DisableIPFloor; internal/webhook's pre-flight
 // of a webhook Reaction's operator-named `url:` is the other). The floor exists to stop the
 // MODEL pivoting to internal addresses; an `mcp-servers:` endpoint is config-file-only, so the
-// floor there refused the user's own localhost/LAN server and — Connect being all-or-nothing —
-// made apogee fail to start, with no config escape. The user's allow/deny host policy still
-// applies, and the connection is pinned to this endpoint's addresses by vetEndpoint. See ADR
-// 0012, Amendment (2026-07-26).
+// floor there refused the user's own localhost/LAN server and — Connect being all-or-nothing for
+// every refusal but a moved Project pin — made apogee fail to start, with no config escape. The
+// user's allow/deny host policy still applies, and the connection is pinned to this endpoint's
+// addresses by vetEndpoint. See ADR 0012, Amendment (2026-07-26).
 //
 // ctx is threaded into the guard for the same reason it always was — a check that resolves is a
 // check that can hang — even though the floorless form performs no lookup itself. The one lookup

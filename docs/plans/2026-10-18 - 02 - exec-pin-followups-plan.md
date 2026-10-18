@@ -129,7 +129,14 @@ Fix of a silent refusal from the exec-keys plan.
 **Closes:** reaction-script-edit-silent
 **Commit:** `fix(agent): a refused pinned reaction run wakes the reload so the pane asks again`
 
-## 6. Connect skips a repo server whose pin moved
+## 6. Connect skips a repo server whose pin moved — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): consequential edit — cmd/apogee/wire_live_test.go: made necessary by the pin-skip exception to "Connect is all-or-nothing" (the all-or-nothing grep finds two test comments here; both now say "all-or-nothing over an endpoint refusal")
+NOTES (2026-10-18): consequential edit — cmd/apogee/e2e_egress_test.go: made necessary by the pin-skip exception to "Connect is all-or-nothing" (a test comment the all-or-nothing grep finds)
+NOTES (2026-10-18): consequential edit — docs/design/mcp-client.md: made necessary by the pin-skip exception to "Connect is all-or-nothing" (§2 stdio bullet and §3 Connect bullet; the plan's grep omitted docs/design, its stated rule covers it)
+NOTES (2026-10-18): both interims share one helper, abortOnSkippedMCP (cmd/apogee/mcp_cmd.go): it Closes the client and returns errors.Join of every skipped server's Denied.Err — with one skip that is exactly today's abort sentence ("mcp: stdio server %q: refusing to launch — <files> changed since you adopted it; it is proposed again for adoption"); item 7 replaces both call sites
+NOTES (2026-10-18): the plan's transport.go:712 anchor sits at :688 in the tree (the checkEndpoint comment); the client.go caps comment ("no Client report or notice path") now names Client.Skipped as the one report path, for whole servers only
+NOTES (2026-10-18): docs/manual/configuration.md's login paragraph now states the pin-skip exception; at this commit startup still aborts on such a skip (item 6's interim), which item 7's announce-and-continue makes user-visible — no CHANGELOG entry here, item 7 carries it
 
 **What:**
 Recast at the regression check (2026-10-18).

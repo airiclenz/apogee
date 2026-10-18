@@ -33,7 +33,8 @@ type liveMCP struct {
 	mu      sync.Mutex
 	current mcpSession
 
-	// connect dials a whole set, all-or-nothing, exactly as startup dialled the first one.
+	// connect dials a whole set, all-or-nothing, exactly as startup dialled the first one — a repo
+	// server the connect skipped for a moved pin fails it too (abortOnSkippedMCP).
 	connect func(servers []mcp.ServerConfig) (mcpSession, error)
 }
 
@@ -72,10 +73,10 @@ func (m *liveMCP) swap(next mcpSession) mcpSession {
 }
 
 // reconnect moves the session onto servers: validate-then-commit, where "validate" is the connection
-// itself (ADR 0037 decision 6). The new set is dialled FIRST — all-or-nothing, as at startup, but
-// reported rather than fatal, because a session that is already running is not a session to kill over
-// a server that has gone away — and only once the rebuilt registry has been taken by the engine are
-// the old sessions torn down. Every failure leaves the session on the connections and the tool set it
+// itself (ADR 0037 decision 6). The new set is dialled FIRST — all-or-nothing, as at startup (a repo
+// server skipped for a moved pin included), but reported rather than fatal, because a session that is
+// already running is not a session to kill over a server that has gone away — and only once the
+// rebuilt registry has been taken by the engine are the old sessions torn down. Every failure leaves the session on the connections and the tool set it
 // already had, which is what makes re-committing the edit a retry.
 //
 // A busy engine is one of those failures: SwapTools is idle-only, so a reconnect committed mid-run is

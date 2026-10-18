@@ -67,7 +67,8 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   `Command` is resolved on PATH through the exec fence (`security.ResolveProgram`), so what is
   launched is an absolute path and a program resolving **inside the workspace** — bytes a confined
   call is allowed to write — is refused at connect time rather than executed; `Connect` being
-  all-or-nothing, the operator meets that refusal at startup. It still **starts in the workspace**
+  all-or-nothing (a moved Project pin, skipped instead, aside), the operator meets that refusal at
+  startup. It still **starts in the workspace**
   (apogee's own working directory, which filesystem-style servers expect): with argv[0] absolute
   and fenced there is no relative lookup left for the working directory to decide. An adopted
   **repo** server (`ServerConfig.Project`, ADR 0104 §4, 2026-10-18) is the one exception: its pin is
@@ -202,7 +203,9 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
 
 - **Connect** is **all-or-nothing**: a later server's failure tears down every already-opened
   session and returns the error, so a half-wired MCP set never reaches the registry and no orphaned
-  stdio process — or process tree — leaks. `workspaceRoot` is the exec fence a stdio server's
+  stdio process — or process tree — leaks. The one exception is a Project server whose adoption pin
+  moved (`*PinChangedError`): it is refused before anything launches, the rest of the set still
+  connects, and the skip is reported through `Client.Skipped() []Denied`. `workspaceRoot` is the exec fence a stdio server's
   command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
   Close) — a host without MCP pays nothing. Every server's headers must pass `ValidateHeaders` and
   its `auth:` keys `ValidateAuth` (§2),
