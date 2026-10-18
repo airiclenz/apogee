@@ -245,8 +245,15 @@ the [rest of the `sessions:` block](configuration.md#keeping-the-session-store-b
 
    From then on every session file apogee writes belongs to the group: the apogee home becomes
    group-traversable (`0710`), `sessions/` group-listable (`0750`), and records, Event journals and
-   `.lock` files group-readable (`0640`). A file written owner-private before is re-moded the next
-   time it is written. Scratch, snapshots and everything else under the home stay owner-private.
+   `.lock` files group-readable (`0640`). apogee sets the home's and `sessions/`'s group and mode
+   only when they differ from these, so a home another user owns (root, say) or one on a
+   read-only mount works too, once it is set up that way in advance —
+   `sudo chown root:apogee-watch /srv/svc/.apogee && sudo chmod 0710 /srv/svc/.apogee` — and
+   apogee then changes neither. Before the home goes to another owner, the running user must
+   already own `sessions/` (group `apogee-watch`, `0750`) and every other directory apogee
+   creates there that the run uses — `scratch/`, `snapshots/`, `workspaces/`, `daemon/` for
+   `apogee daemon`: a `0710` home it does not own refuses their creation. A file written owner-private before is re-moded the next time it is
+   written. Scratch, snapshots and everything else under the home stay owner-private.
    If the owner's `config.yaml` is itself group-readable, apogee warns at startup: the shared home
    lets the group reach it, and with it any plaintext `api-key:` it holds.
 3. **Each watcher names the owner's home** in its own `~/.apogee/config.yaml`, under a label:

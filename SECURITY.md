@@ -79,6 +79,12 @@ whether or not anyone reads it, never learns of a reader, and nothing flows back
 - **`sessions.share-group` deliberately admits that group's members as readers.** With it set,
   the apogee home becomes `0710` — traversable by the group, not listable — `sessions/` becomes
   `0750`, and every record, Event journal and `.lock` file in it `0640`, owned by the group.
+  apogee sets the home's and `sessions/`'s group and mode only when they differ, so a home
+  another user owns (root, say) or one on a read-only mount works when it is pre-set to the
+  group and `0710` — with `sessions/` and every other directory apogee creates there that the
+  run uses (`scratch/`, `snapshots/`, `workspaces/`, `daemon/` for `apogee daemon`) already
+  owned by the running user, since a `0710` home it does not own refuses their creation — and
+  apogee then changes neither directory.
   A member reads everything those sessions saw, secrets that passed through a tool result
   included, so name a group of people you would show your terminal to. Because the home is now
   traversable, any file under it whose own mode grants the group is reachable too: apogee warns

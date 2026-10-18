@@ -41,7 +41,10 @@ NOTES (2026-10-18): retry fix — shareDir's chmod now passes perm plus the dire
 **Acceptance:** `go build ./internal/session/ && GOOS=windows go build ./internal/session/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestStoreShareGroup' ./internal/session/`
 **Commit:** `fix(session): leave an already-shared home and sessions directory alone`
 
-## 2. The manual and SECURITY.md say a pre-shared foreign home works
+## 2. The manual and SECURITY.md say a pre-shared foreign home works — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): no CHANGELOG entry — the user-facing change is item 1's fix; this item documents it. Wording says "group and mode" (not "exact mode") so it stays true of item 1 keeping setuid/setgid/sticky bits; docs/manual/configuration.md needed no change (it states no directory modes).
+NOTES (2026-10-18): retry per verifier FIX — the list of directories the running user must already own is no longer exhaustive ("every other directory apogee creates there that the run uses") and names `daemon/` for `apogee daemon` in both files.
 
 **What:** Document the layout item 1 enables: a home owned by another user (e.g. root) or mounted read-only works with `share-group` when it is set up with the share group and `0710` (and `sessions/` with the group and `0750`, owned by the running user) in advance; apogee then changes neither.
 **Regression guard.** The new wording says the running user must already own `sessions/` — and the other directories apogee creates under the home (`scratch/`, `snapshots/`, `workspaces/`) — before the home is handed to another owner; a root-owned `0710` home otherwise refuses their creation (EACCES). The Acceptance greps the new phrase in each file separately (the `0710` grep already matches at base, and `-run 'Drift|Doc' ./cmd/apogee/` reads neither file).
