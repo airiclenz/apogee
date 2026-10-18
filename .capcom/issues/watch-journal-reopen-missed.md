@@ -1,10 +1,12 @@
 ---
 title: Watch misses a journal reopened within one poll
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-10-18 - 00 - watch-mode-fixes-plan.md
 created: 2026-10-17T21:42:10Z
+closed: 2026-10-18T06:05:48Z
+reason: "Resolved by plan 2026-10-18 - 00 - watch-mode-fixes-plan (item 2, archived at 413b60be): the follower holds the journal head and restarts at byte 0 on a truncated or replaced journal regrown within one poll; TestWatchRepaintsOnATruncationRegrownPastTheOffset pins it."
 ---
 
 `readJournal` (`internal/tui/watch.go:534`) spots truncation only by inode+size (`followedJournal`, `isSameFile` at `internal/tui/watch.go:600`; the `info.Size() < offset` check in `readJournal`). If the owner reopens the same id (`O_TRUNC`, or delete and recreate with a reused inode) and the journal grows past the old offset within one 100 ms poll, the new `run_started` at byte 0 is missed and the read resumes mid-file.
