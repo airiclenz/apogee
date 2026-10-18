@@ -1,10 +1,12 @@
 ---
 title: MCP servers and Reactions in the Project config, adoption-gated
-status: open
+status: done
 type: feature
 priority: 3
 aliases: [apogee-project-config-exec-keys]
 created: 2026-10-10T09:03:43Z
+closed: 2026-10-18T19:05:53Z
+reason: "Resolved by plan 'project-config-exec-keys-plan' (archived at 2c778c28): repo mcp-servers and reactions are proposed-not-live, pinned by Adoption (ADR 0104), answered in the adoption pane, /settings, apogee project adopt and apogee mcp list; follow-ups filed separately."
 ---
 
 ADR 0096 out-of-scope: mcp-servers and reactions are execution keys ADR 0076 D10 admits from a repo layer only as proposed-not-live entries pinned by Adoption. Extend the 0096 granting class and the adoption pane to them.
