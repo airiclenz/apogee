@@ -511,3 +511,56 @@ func TestRepoRunRunnerIsBoundByNew(t *testing.T) {
 		t.Errorf("bound runner err = %v, want this Agent's errConfinementUnavailable", err)
 	}
 }
+
+// TestSyncLaneReadsTheReloadedScrub pins the sync lane on the live credential scrub (ADR 0104
+// §12): a Config carrying a SecretEnv holder is read at each spawn, so a name the host widens the
+// holder by mid-session — a `headers-env:` token an adopted Project config entry introduced — is
+// scrubbed from the very next command's environment with no rebuild of the Agent, and the advise
+// lane's redaction reads that same holder.
+func TestSyncLaneReadsTheReloadedScrub(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the executor it pins is platform-independent")
+	}
+	// No t.Parallel: t.Setenv.
+	t.Setenv("APOGEE_TEST_RELOADED_SECRET", "hunter2-adopted")
+
+	t.Run("spawn", func(t *testing.T) {
+		a := syncAgent(t, &recordingSink{}, nil, false)
+		holder := domain.NewSecretEnv(nil)
+		a.cfg.SecretEnv = holder
+		r := syncReaction(domain.ClassGate, 0, "/bin/sh", "-c",
+			`printf '%s' "${APOGEE_TEST_RELOADED_SECRET:-scrubbed}"`)
+		payload := domain.SeamPayload{Event: domain.MomentPreToolExec}
+
+		before, errBefore := a.runSyncArgv(context.Background(), 1, r, payload)
+		holder.Widen([]string{"APOGEE_TEST_RELOADED_SECRET"})
+		after, errAfter := a.runSyncArgv(context.Background(), 1, r, payload)
+
+		if errBefore != nil || errAfter != nil {
+			t.Fatalf("runSyncArgv: before %v, after %v", errBefore, errAfter)
+		}
+		if before != "hunter2-adopted" {
+			t.Errorf("stdout before the widening = %q; nothing named the variable yet", before)
+		}
+		if after != "scrubbed" {
+			t.Errorf("stdout after the widening = %q, want %q — the spawn reads the holder", after, "scrubbed")
+		}
+	})
+
+	t.Run("advise redaction", func(t *testing.T) {
+		var reported []string
+		a := adviseArgvAgent(t, &recordingSink{}, t.TempDir(), false, &reported,
+			userAdvise("coach", []domain.Moment{domain.MomentPostToolResult},
+				"/bin/sh", "-c", `printf '%s\n' 'token=hunter2-adopted'`))
+		holder := domain.NewSecretEnv(nil)
+		a.cfg.SecretEnv = holder
+		holder.Widen([]string{"APOGEE_TEST_RELOADED_SECRET"})
+
+		call, result := readCall()
+		msg := adviseArgvCall(t, a, call, result)
+
+		if !strings.Contains(msg.Content, "token=[redacted]") {
+			t.Errorf("advised content = %q, want the widened name's value redacted", msg.Content)
+		}
+	})
+}

@@ -223,7 +223,7 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
 // workspace (with the same host configuration the Agent would derive from Config — the
 // url-safety guard, the web-search endpoint, the Asker, the Presenter, the skill catalog, the
-// credential scrub — through the one composer the engine uses, tools.HostToolsOf) PLUS
+// credential scrub's live holder — through the one composer the engine uses, tools.HostToolsOf) PLUS
 // the dynamically discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a
 // server at runtime), so they are NOT in DefaultTools — they ride the registry as tools.ClassMCP
 // ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's

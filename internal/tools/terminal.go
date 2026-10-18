@@ -154,9 +154,10 @@ type terminalArgs struct {
 type Terminal struct {
 	toolSpec
 	root string
-	// secretEnv names the host-configured credential variables to drop from the child's
-	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
-	secretEnv []string
+	// secretEnv holds the host-configured credential variables to drop from the child's
+	// environment beside apogee's own (HostTools.SecretEnv), read at each call; nil or empty drops
+	// apogee's own alone.
+	secretEnv *domain.SecretEnv
 	// host is the operating system the tool launches through: the platform shell it wraps the
 	// line with and scopes the child's environment through (execHost).
 	host execHost
@@ -168,12 +169,12 @@ type Terminal struct {
 // operating system (defaultExecHost); builtinTools builds the five execution tools on one host
 // through newTerminal.
 func NewTerminal(root string, secretEnv []string) *Terminal {
-	return newTerminal(root, secretEnv, defaultExecHost())
+	return newTerminal(root, domain.NewSecretEnv(secretEnv), defaultExecHost())
 }
 
 // newTerminal is NewTerminal with the host the tool launches through supplied — one execHost
 // shared by the execution tools in production, a host carrying fakes in a test.
-func newTerminal(root string, secretEnv []string, host execHost) *Terminal {
+func newTerminal(root string, secretEnv *domain.SecretEnv, host execHost) *Terminal {
 	return &Terminal{toolSpec: terminalSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
@@ -277,7 +278,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		// variables, which a model-chosen command line has no use for and could exfiltrate,
 		// and minus the PATH entries that resolve inside the workspace, which would let the
 		// model plant the programs its own command line then executes.
-		Env: t.host.subprocessEnvScopedPath(t.root, t.secretEnv),
+		Env: t.host.subprocessEnvScopedPath(t.root, t.secretEnv.Names()),
 	}
 	if domain.RuleAnswered(ctx) {
 		// No human saw this line: an Allow rule cleared it by its words alone, so nothing the line

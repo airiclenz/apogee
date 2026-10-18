@@ -426,6 +426,13 @@ type Config struct {
 	// own assembly and is taken exactly as given (ADR 0001).
 	SecretEnvVars []string
 
+	// SecretEnv is the same scrub as a live holder the host can widen mid-session (a Project config
+	// entry adopted while the session runs, ADR 0104 §12). Set, it OUTRANKS SecretEnvVars: the
+	// default execution tools and the sync Reaction lane read it at every call (SecretEnvNames), so
+	// the host seeds it with the list it would have put in SecretEnvVars. nil ⇒ SecretEnvVars,
+	// fixed for the Agent's life — every embedder that never sets it keeps exactly that.
+	SecretEnv *SecretEnv
+
 	// Profile describes how apogee equips and speaks to the configured model (CONTEXT: Model
 	// profile) — its tool-call format, its inline thinking-channel style, and the tool roster it
 	// is equipped with (ADR 0057 decision 1) — so the loop selects the matching tool-call parser

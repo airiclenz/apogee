@@ -929,6 +929,10 @@ type settingsApplier struct {
 	// stats is the session's per-server stats recorder (ADR 0085), which the `server-stats` row
 	// opens or stops live.
 	stats *statsRecorder
+	// secretEnv is the live credential scrub the execution tools and the sync Reaction lane read
+	// per call (apogee.Config.SecretEnv): a reload of the layered MCP servers or reactions widens it
+	// by the token variables the re-read names (widenSecretEnv). nil widens nothing.
+	secretEnv *apogee.SecretEnv
 }
 
 // applySettingFor builds the dispatcher behind [tui.SettingsHost.Apply]: the one place a key the pane has
@@ -1553,16 +1557,17 @@ func (a settingsApplier) readmitMCP(before toolSetSpec) string {
 	if a.mcp == nil || a.configPath == "" {
 		return ""
 	}
-	// Only the FILE names an MCP server (no flag, no environment variable), so the set to partition
-	// is read exactly as reconnectMCP reads it. A file that no longer parses leaves the connections
-	// where they are and says so, for the reason above: this half cannot fail the row.
-	file, err := a.fileConfig()
+	// Only the config FILES name an MCP server (no flag, no environment variable), so the set to
+	// partition is read exactly as reconnectMCP reads it — the layered set, adopted repo servers
+	// included. A global file that no longer parses leaves the connections where they are and says
+	// so, for the reason above: this half cannot fail the row.
+	layered, err := a.layeredConfig()
 	if err != nil {
 		return mcpNoteFor(mcpReconnectFailed(err))
 	}
 	now := a.tools.built()
-	was, _ := mcp.Admit(file.MCPServers, mcpGuard(before.allowHosts, before.denyHosts))
-	admitted, denied := mcp.Admit(file.MCPServers, mcpGuard(now.allowHosts, now.denyHosts))
+	was, _ := mcp.Admit(layered.MCPServers, mcpGuard(before.allowHosts, before.denyHosts))
+	admitted, denied := mcp.Admit(layered.MCPServers, mcpGuard(now.allowHosts, now.denyHosts))
 	if sameServerNames(was, admitted) {
 		return ""
 	}
@@ -1799,9 +1804,10 @@ func (a settingsApplier) rideTheRebind() error {
 // place that knows how a `/settings` apply reads the file the pane has just written to.
 //
 // Every structured key's apply starts here for the same reason: only the FILE carries those keys —
-// no flag and no environment variable names a prompt, an upstream, an MCP server, a Reaction or a
-// model profile — so resolving the file layer exactly as startup resolved it IS how the pane
-// re-resolves them, and the loader answers with the same Options resolution starts from.
+// no flag and no environment variable names a prompt, an upstream or a model profile — so resolving
+// the file layer exactly as startup resolved it IS how the pane re-resolves them, and the loader
+// answers with the same Options resolution starts from. The two structured keys a Project config
+// may also propose — `mcp-servers:` and `reactions:` — are read layered instead (layeredConfig).
 //
 // Nothing is cached across applies: a row applies against the file as it is at that moment. The
 // notice hook is a no-op because a live read never migrates: a file still in the retired schema is
@@ -1812,6 +1818,30 @@ func (a settingsApplier) rideTheRebind() error {
 // own words rather than being answered for here.
 func (a settingsApplier) fileConfig() (config.Options, error) {
 	return config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+}
+
+// layeredConfig re-reads the set the MCP servers and the reactions resolve from — the global
+// config with the Project config of this session's Project root layered over it, sorted by that
+// root's adoption record (ADR 0104 §12): the global entries plus the adopted repo ones, the
+// resolution a relaunch would make. So an edit to either file, or an adoption answered in another
+// terminal, moves the running session onto the set the next start would have.
+//
+// It is fileConfig's read in every other respect: never cached, never migrating, and a GLOBAL file
+// that no longer parses is reported back for the caller to word. A PROJECT config that stops
+// parsing is not an error: the loader skips that layer, so the re-read degrades to the global set
+// alone — the adopted repo servers are torn down and the repo reactions leave the lanes — and the
+// first save that parses again brings them back (the watched diff sees them return).
+func (a settingsApplier) layeredConfig() (config.Options, error) {
+	return loadLayeredOptions(a.configPath, a.roots.project)
+}
+
+// widenSecretEnv widens the live credential scrub by every token variable the layered set names
+// (secretEnvNames) — a `headers-env:` or `client-secret-env:` an adopted repo entry introduced
+// mid-session is dropped from the next `terminal` child and redacted out of the next sync answer
+// with no restart. It runs BEFORE the servers are dialled or the reactions swapped, and whether or
+// not that later half commits: a wider scrub is never the unsafe direction (apogee.SecretEnv).
+func (a settingsApplier) widenSecretEnv(layered config.Options) {
+	a.secretEnv.Widen(secretEnvNames(layered))
 }
 
 // reloadSystemPrompt re-reads the `system-prompt-*` block from the config file and installs it on the
@@ -1885,32 +1915,36 @@ func (a settingsApplier) reloadServers() (bool, error) {
 	return moved, nil
 }
 
-// reconnectMCP re-reads the `mcp-servers:` block and moves the session onto it. The dial and the
-// registry swap are liveMCP.reconnect's; what belongs here is the same one thing every structured
-// key's apply does — resolve the file layer exactly as startup resolved it — because only the FILE
-// carries this key (no flag, no environment variable names an MCP server).
+// reconnectMCP re-reads the `mcp-servers:` block — layered: the global servers plus the adopted
+// repo ones (layeredConfig) — and moves the session onto it. The dial and the registry swap are
+// liveMCP.reconnect's; what belongs here is the same one thing every structured key's apply does —
+// resolve the files exactly as startup resolved them — because only the config files carry this key
+// (no flag, no environment variable names an MCP server). The scrub widens first (widenSecretEnv).
 //
-// A file that no longer parses is refused before anything is dialled, so a typo in an unrelated key
-// cannot cost the session the servers it is talking to.
+// A global file that no longer parses is refused before anything is dialled, so a typo in an
+// unrelated key cannot cost the session the servers it is talking to.
 func (a settingsApplier) reconnectMCP() error {
-	file, err := a.fileConfig()
+	layered, err := a.layeredConfig()
 	if err != nil {
 		return err
 	}
-	return a.mcp.reconnect(file.MCPServers, a.tools, a.engine)
+	a.widenSecretEnv(layered)
+	return a.mcp.reconnect(layered.MCPServers, a.tools, a.engine)
 }
 
-// reloadReactions re-reads the `reactions:` block and moves the session onto it (ADR 0073 §9, ADR
-// 0076). It is reconnectMCP's shape for reconnectMCP's reason — only the FILE carries this key, so
-// resolving the file layer as startup resolved it IS most of the apply — and it differs in what it
-// does with the answer: the re-read list is hung on the generation the session is RUNNING and pushed
-// through the one swap door, so the Floor gates and `bypass:` cross the edit untouched while the
-// Runner's retired generation finishes what it already holds in the background and then stops.
+// reloadReactions re-reads the `reactions:` block — layered: the global reactions plus the adopted
+// repo ones (layeredConfig, ADR 0104 §12) — and moves the session onto it (ADR 0073 §9, ADR 0076).
+// It is reconnectMCP's shape for reconnectMCP's reason — only the config files carry this key, so
+// resolving them as startup resolved them IS most of the apply, the scrub widened first — and it
+// differs in what it does with the answer: the re-read list is hung on the generation the session
+// is RUNNING and pushed through the one swap door, so the Floor gates and `bypass:` cross the edit
+// untouched while the Runner's retired generation finishes what it already holds in the background
+// and then stops.
 //
-// A file that no longer parses is refused before anything is swapped, and so is a Generation the
-// engine will not arm (a sync entry named after a builtin — Agent.SetReactions) or a list the Runner
-// will not take (an unresolvable `workspace:`): a broken edit costs the session nothing, and it
-// keeps firing the Reactions it already had. A file that has gone BACK to the
+// A global file that no longer parses is refused before anything is swapped, and so is a
+// Generation the engine will not arm (a sync entry named after a builtin — Agent.SetReactions) or a
+// list the Runner will not take (an unresolvable `workspace:`): a broken edit costs the session
+// nothing, and it keeps firing the Reactions it already had. A file that has gone BACK to the
 // retired `hooks:` spelling is refused too, and nothing is written: the fold into `reactions:` is a
 // startup act, because apogee does not rewrite a config file out from under a running session.
 //
@@ -1919,11 +1953,12 @@ func (a settingsApplier) reconnectMCP() error {
 // drains the retired generation on a goroutine of its own, and this arm runs on the Update loop — a
 // synchronous Report would deadlock the program against the send it is waiting for (bridge.go).
 func (a settingsApplier) reloadReactions() error {
-	file, err := a.fileConfig()
+	layered, err := a.layeredConfig()
 	if err != nil {
 		return err
 	}
-	lanes := domain.LanesOf(file.Reactions)
+	a.widenSecretEnv(layered)
+	lanes := domain.LanesOf(layered.Reactions)
 	gen := a.live.generation()
 	gen.Observe, gen.Sync = lanes.Observe, lanes.Sync
 	if err := a.engine.SetReactions(gen); err != nil {

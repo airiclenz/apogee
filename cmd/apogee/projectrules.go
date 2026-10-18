@@ -328,7 +328,17 @@ func (w *rootWiring) proposedRules() ([]apogee.AllowRule, error) {
 // record — what the settling installs and the proposed-rules read reports. The loader's notices are
 // not repeated here: the watched re-read says them (ConfigHost.ReloadConfig).
 func (w *rootWiring) layeredOptions() (config.Options, error) {
-	return config.LoadLayeredConfig(w.configPath(), w.roots.project, os.ReadFile, func(string) {})
+	return loadLayeredOptions(w.configPath(), w.roots.project)
+}
+
+// loadLayeredOptions is the global config at configPath with the Project config of projectRoot
+// layered over it, sorted by that root's adoption record — the one live reading every re-read of
+// the layered set makes (the Allow-rule settling, and the live reload of the MCP servers and
+// reactions, settingsApplier.layeredConfig). It never migrates, and it drops the loader's notices:
+// the watched re-read says them (ConfigHost.ReloadConfig). A Project config that does not parse is
+// skipped by the loader, so the answer is then the global file alone.
+func loadLayeredOptions(configPath, projectRoot string) (config.Options, error) {
+	return config.LoadLayeredConfig(configPath, projectRoot, os.ReadFile, func(string) {})
 }
 
 // workspacesDir is where this run keeps each Project root's adoption record and the Project config

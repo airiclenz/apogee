@@ -132,7 +132,7 @@ func (a *Agent) spawnReactionArgv(
 		dir = r.Pin.Root()
 		opts = append(opts, tools.AdmitProjectPrograms(dir, r.Pin.Programs()))
 	}
-	return tools.RunHookSubprocess(ctx, argv, dir, a.cfg.WorkspaceDir, a.cfg.SecretEnvVars, env, timeout, stdin, opts...)
+	return tools.RunHookSubprocess(ctx, argv, dir, a.cfg.WorkspaceDir, a.cfg.SecretEnvNames(), env, timeout, stdin, opts...)
 }
 
 // changedPinNotice is the refusal a repo reaction whose pinned project files moved since adoption

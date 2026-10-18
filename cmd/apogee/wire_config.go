@@ -101,11 +101,12 @@ func projectConfig(
 		// same `reactions:` list a session does, so it scrubs the same variables. An HTTP MCP
 		// server's `headers-env:` names token variables on the same footing, and so does its
 		// `client-secret-env:` (an OAuth client's secret); both join them.
-		SecretEnvVars: slices.Concat(
-			config.APIKeyEnvNames(opts),
-			config.ReactionEnvNames(opts),
-			config.MCPHeaderEnvNames(opts),
-		),
+		SecretEnvVars: secretEnvNames(opts),
+		// The same list as the live holder the tools and the sync Reaction lane read per call, so
+		// a session's live reload can widen it when an adopted Project config entry names a token
+		// variable mid-session (settingsApplier.widenSecretEnv, ADR 0104 §12). A Firing's is never
+		// widened: it reads its configuration once.
+		SecretEnv: apogee.NewSecretEnv(secretEnvNames(opts)),
 		// The workspace context files (`context-files:`, file-only): the names the engine looks
 		// for in the workspace root at every session boundary, whose content rides the same first
 		// system message as the prompt — verbatim, never as a template. Nil ⇒ the feature is off,
@@ -281,4 +282,17 @@ func dangerousRulesFromOptions(opts config.Options) []apogee.DangerousRule {
 		set.Remove,
 		security.RulesFromDomain(set.ProjectAdd),
 	))
+}
+
+// secretEnvNames is every variable the resolved configuration opts reads a credential out of —
+// the servers' `api-key-env:` key sources, the webhook Reactions' `headers-env:` names and the MCP
+// servers' `headers-env:` and `client-secret-env:` names — which the execution tools drop from a
+// subprocess's environment (Config.SecretEnvVars). It is the one spelling of that list, read at
+// startup by projectConfig and again by a live reload of the layered servers and reactions.
+func secretEnvNames(opts config.Options) []string {
+	return slices.Concat(
+		config.APIKeyEnvNames(opts),
+		config.ReactionEnvNames(opts),
+		config.MCPHeaderEnvNames(opts),
+	)
 }

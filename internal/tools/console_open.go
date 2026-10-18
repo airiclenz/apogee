@@ -68,9 +68,10 @@ const consoleTermVar = "TERM=dumb"
 type ConsoleOpen struct {
 	toolSpec
 	root string
-	// secretEnv names the host-configured credential variables to drop from the child's
-	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
-	secretEnv []string
+	// secretEnv holds the host-configured credential variables to drop from the child's
+	// environment beside apogee's own (HostTools.SecretEnv), read at each call; nil or empty drops
+	// apogee's own alone.
+	secretEnv *domain.SecretEnv
 	// host is the operating system the tool launches through: the platform shell it wraps the
 	// line with and scopes the Console's environment through, and the opener that starts the
 	// Console under the registry (execHost).
@@ -83,12 +84,12 @@ type ConsoleOpen struct {
 // the real operating system (defaultExecHost); builtinTools builds the five execution tools on
 // one host through newConsoleOpen.
 func NewConsoleOpen(root string, secretEnv []string) *ConsoleOpen {
-	return newConsoleOpen(root, secretEnv, defaultExecHost())
+	return newConsoleOpen(root, domain.NewSecretEnv(secretEnv), defaultExecHost())
 }
 
 // newConsoleOpen is NewConsoleOpen with the host the tool launches through supplied — one
 // execHost shared by the execution tools in production, a host carrying fakes in a test.
-func newConsoleOpen(root string, secretEnv []string, host execHost) *ConsoleOpen {
+func newConsoleOpen(root string, secretEnv *domain.SecretEnv, host execHost) *ConsoleOpen {
 	return &ConsoleOpen{toolSpec: consoleOpenSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
@@ -178,7 +179,7 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 		// cmd.exe does not read the escapes an argv join adds. "" on POSIX.
 		CommandLine: rawCommandLine,
 		Dir:         dir,
-		Env:         t.host.subprocessEnvScopedPath(t.root, t.secretEnv, consoleTermVar),
+		Env:         t.host.subprocessEnvScopedPath(t.root, t.secretEnv.Names(), consoleTermVar),
 		Confined:    confined,
 		Prepare:     prepare,
 	})

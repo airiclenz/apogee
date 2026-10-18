@@ -149,7 +149,7 @@ func TestConsoleOpen_ScrubsCredentialsAndAsksForADumbTerminal(t *testing.T) {
 	}
 
 	ctx, _ := consoleTestCtx(t)
-	tool := newConsoleOpen(t.TempDir(), []string{"APOGEE_TEST_PROVIDER_KEY"}, h)
+	tool := newConsoleOpen(t.TempDir(), domain.NewSecretEnv([]string{"APOGEE_TEST_PROVIDER_KEY"}), h)
 
 	if _, err := tool.Execute(ctx, consoleOpenCall("c1", "sh", 10)); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)

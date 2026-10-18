@@ -22,6 +22,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/projectroot"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/security"
@@ -4231,6 +4232,47 @@ func TestLandSettingIsTheRowsOwnReading(t *testing.T) {
 			}
 			if !tt.want(landed) {
 				t.Errorf("landSetting(%s, %q) landed %+v; the row's field did not take the value", tt.key, tt.value, landed)
+			}
+		})
+	}
+}
+
+// TestReloadRecomputesTheSecretScrub pins the credential scrub on the live reload (ADR 0104 §12):
+// either of the `mcp-servers:` and `reactions:` applies re-reads the layered set, and every token
+// variable an adopted repo entry names — a server's `headers-env:`, a webhook reaction's — joins the
+// live holder the execution tools read per call, while the names the session started with stay.
+func TestReloadRecomputesTheSecretScrub(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"mcp-servers", "reactions"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			projectRoot := projectroot.Resolve(t.TempDir(), "")
+			projectFile := config.ProjectFilePath(projectRoot)
+			if err := os.MkdirAll(filepath.Dir(projectFile), 0o700); err != nil {
+				t.Fatalf("create the project's .apogee: %v", err)
+			}
+			writeSettingsFixture(t, projectFile, projectWikiServerYAML+
+				"reactions:\n"+
+				"  - id: bell\n"+
+				"    on: [approval-requested]\n"+
+				"    run:\n"+
+				"      url: https://hooks.example.com/apogee\n"+
+				"      headers-env:\n"+
+				"        Authorization: BELL_WEBHOOK_TOKEN\n")
+			applier := fakeApplier(t)
+			applier.roots.project = projectRoot
+			applier.secretEnv = apogee.NewSecretEnv([]string{"BOX_KEY"})
+			adoptEveryProposal(t, applier.configPath, projectRoot)
+
+			_, err := applySettingFor(applier)(key, "1")
+
+			if err != nil {
+				t.Fatalf("apply %s: %v", key, err)
+			}
+			want := []string{"BOX_KEY", "BELL_WEBHOOK_TOKEN", "WIKI_MCP_TOKEN"}
+			if got := applier.secretEnv.Names(); !slices.Equal(got, want) {
+				t.Errorf("scrub after the %s reload = %q, want %q — the startup name kept, both adopted "+
+					"tokens joined", key, got, want)
 			}
 		})
 	}

@@ -134,7 +134,7 @@ func TestTerminal_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *testin
 	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
 
 	h, captured := capturedRunHost(t)
-	term := newTerminal(t.TempDir(), []string{"apogee_test_provider_key"}, h)
+	term := newTerminal(t.TempDir(), domain.NewSecretEnv([]string{"apogee_test_provider_key"}), h)
 	if _, err := term.Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}

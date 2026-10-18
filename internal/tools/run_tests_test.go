@@ -413,7 +413,7 @@ func TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment(t *testin
 	h.look = fakeLook(true, program)
 
 	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
-	res, err := newRunTests(root, []string{"apogee_test_provider_key"}, h).Execute(context.Background(), domain.ToolCall{
+	res, err := newRunTests(root, domain.NewSecretEnv([]string{"apogee_test_provider_key"}), h).Execute(context.Background(), domain.ToolCall{
 		ID: "c1", Tool: "run_tests", Arguments: jsonArgs(t, nil),
 	})
 	if err != nil {

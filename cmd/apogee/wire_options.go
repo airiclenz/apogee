@@ -61,6 +61,7 @@ func (w *rootWiring) options() tui.Options {
 		caps:       w.caps,
 		delegation: w.delegation,
 		stats:      w.stats,
+		secretEnv:  w.cfg.SecretEnv,
 	})
 
 	return tui.Options{

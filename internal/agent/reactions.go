@@ -526,7 +526,7 @@ func (a *Agent) adviseUser(
 		return domain.Outcome{}, nil
 	}
 
-	text := tools.RedactSecrets(answer, a.cfg.SecretEnvVars)
+	text := tools.RedactSecrets(answer, a.cfg.SecretEnvNames())
 	if text == "" {
 		return domain.Outcome{}, nil
 	}

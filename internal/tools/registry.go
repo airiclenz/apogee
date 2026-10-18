@@ -87,6 +87,12 @@ type HostTools struct {
 	// (isSecretEnv), and a name matching nothing in the environment is simply not there to drop.
 	SecretEnvVars []string
 
+	// SecretEnv is the same scrub as the live holder a running session widens (domain.SecretEnv,
+	// ADR 0104 §12). Set, it outranks SecretEnvVars, and the execution tools read it at every call,
+	// so a name added mid-session is dropped from the next child with no rebuild; nil ⇒
+	// SecretEnvVars, fixed for the tools' life.
+	SecretEnv *domain.SecretEnv
+
 	// SubAgentSeatChoice offers the model the `run_on` argument on sub_agent, and on fan_out where a
 	// roster lifts it (ADR 0087 D9) — the host's `sub-agents-choice: model` gate (ADR 0069). False
 	// is the default and the whole of `sub-agents-choice: fixed`: the plain variant is registered
@@ -194,6 +200,7 @@ func HostToolsOf(cfg domain.Config, seatChoice, offersBackground bool) HostTools
 		ProfileRoster:      cfg.Profile.Tools,
 		ReadMounts:         cfg.ReadMounts,
 		SecretEnvVars:      cfg.SecretEnvVars,
+		SecretEnv:          cfg.SecretEnv,
 		SubAgentSeatChoice: seatChoice,
 		OffersBackground:   offersBackground,
 	}
@@ -252,10 +259,10 @@ func DefaultTools(root string) []domain.Tool {
 // destination, like every other write and execution tool, stays workspace-fenced — see the field's
 // contract.
 //
-// host.SecretEnvVars is threaded into the three EXECUTION tools (terminal, python_exec, run_tests)
-// — the only tools that hand a subprocess the operator's inherited environment — where it joins
-// apogee's own credential names in the scrub each of them applies; nil leaves that scrub exactly
-// as it was. Nothing else receives it: the git and Go-toolchain subprocesses take an allowlist
+// host.SecretEnvVars — or the live host.SecretEnv that outranks it — is threaded into the
+// EXECUTION tools (terminal, python_exec, run_tests, console_open) — the only tools that hand a
+// subprocess the operator's inherited environment — where it joins apogee's own credential names
+// in the scrub each of them applies at every call; nil leaves that scrub exactly as it was. Nothing else receives it: the git and Go-toolchain subprocesses take an allowlist
 // instead, which no configured name can widen.
 //
 // The roster ladder is applied LAST, to the assembled menu (EffectiveRoster): the build's own
@@ -292,6 +299,9 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 	// D1, ADR 0094 D1): the Driver offers background workflows, and a configuration rung lifts the
 	// workflow tool that checks on and stops them.
 	background := host.OffersBackground && host.rosterDeltas().lifts(WorkflowToolName)
+	// secrets is the one scrub holder the four tools that hand a child the inherited environment
+	// share, so a widening reaches all of them at once.
+	secrets := host.secretEnv()
 	return []domain.Tool{
 		NewReadFile(root, mounts),
 		NewWriteFile(root),
@@ -305,8 +315,8 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		NewCopyFile(root, mounts),
 		newMoveFile(root, h),
 		newDeleteFile(root, h),
-		newTerminal(root, host.SecretEnvVars, h),
-		newPythonExec(root, host.SecretEnvVars, h),
+		newTerminal(root, secrets, h),
+		newPythonExec(root, secrets, h),
 		newGitBranch(root, h),
 		newGitCommit(root, h),
 		newGitDiffRange(root, h),
@@ -314,7 +324,7 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		newGitLog(root, h),
 		newGitShow(root, h),
 		newDiagnostics(root, h),
-		newRunTests(root, host.SecretEnvVars, h),
+		newRunTests(root, secrets, h),
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
@@ -340,7 +350,7 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		// The Console family (ADR 0059) sits last because it is the first family registered
 		// DEFAULT-OFF: nothing here reaches a default menu, so its place in build order costs no
 		// model a slot, and a roster that lifts it appends it after the tools every model gets.
-		newConsoleOpen(root, host.SecretEnvVars, h),
+		newConsoleOpen(root, secrets, h),
 		newConsoleSend(h),
 		NewConsoleRead(),
 		NewConsoleClose(),
@@ -395,6 +405,15 @@ func (h HostTools) rosterDeltas() RosterDeltas {
 		Global:  domain.ToolRosterDelta{Disabled: h.Disabled, Enabled: h.Enabled},
 		Profile: h.ProfileRoster,
 	}
+}
+
+// secretEnv is the scrub holder the execution tools read per call: the live SecretEnv when the
+// host set one, else a holder over the fixed SecretEnvVars.
+func (h HostTools) secretEnv() *domain.SecretEnv {
+	if h.SecretEnv != nil {
+		return h.SecretEnv
+	}
+	return domain.NewSecretEnv(h.SecretEnvVars)
 }
 
 // RosterDeltas carries the two CONFIGURATION rungs of the roster precedence ladder — the global

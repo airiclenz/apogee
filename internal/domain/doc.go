@@ -93,8 +93,10 @@
 // result with, and the one strip every host-side reader of that result shares, so a host reads
 // it without importing internal/tools. readmounts.go is ReadMounts — the read-only trees (disk
 // roots, the session scratch dir, virtual mounts) a read tool resolves a path over beside its
-// workspace root, and the one contract they share. confinement.go is the Confiner interface, its
-// capability and box value types, the per-call Confinement / SubprocessPermit context
+// workspace root, and the one contract they share. secretenv.go is SecretEnv — the credential
+// scrub as a live, widen-only list the execution tools and the sync Reaction lane read per call —
+// and Config.SecretEnvNames, the one reading of it beside the fixed SecretEnvVars. confinement.go
+// is the Confiner interface, its capability and box value types, the per-call Confinement / SubprocessPermit context
 // carriers (ADR 0012), and the WriteEscapePermit that carries one approved out-of-workspace
 // write target (ADR 0049). Those carriers, the ask.go and promptslot.go ones, and the undo,
 // console and tasklist keys are listed with their installers, readers and lifetimes in

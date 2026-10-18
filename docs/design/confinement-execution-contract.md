@@ -1548,7 +1548,10 @@ All three of the tool side's execution contracts hold for a hook's child:
   Its fixed half — apogee's own `APOGEE_API_KEY` — needs nothing from the caller; the
   operator-configured `api-key-env` names (ADR 0047) reach a hook the way they reach a tool, along
   their own route: `Config.SecretEnvVars` → `HostTools.SecretEnvVars` → the door's `secretEnv`
-  argument. Until v0.20.0 a Mechanism-spawned hook took a parallel route through
+  argument — or, where the host sets the live holder `Config.SecretEnv` (which outranks the fixed
+  list), `HostTools.SecretEnv` read by each tool at every call and `Config.SecretEnvNames()` read by
+  the sync Reaction lane at every spawn, so a token variable an entry adopted mid-session names is
+  dropped from the next child (ADR 0104 §12). Until v0.20.0 a Mechanism-spawned hook took a parallel route through
   `mechanisms.Deps.SecretEnvVars`, filled by the engine's `deriveDeps`; ADR 0076 D1 deleted the lab
   layer — `Deps`, the catalogue and `deriveDeps` with it — so the door's `secretEnv` argument is the
   only route. A hook's child therefore drops exactly the variables `terminal`,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	apogee "github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -47,10 +48,12 @@ func startConfigWatcher(t *testing.T, path string) *filewatch.Watcher {
 
 // watchedConfig is the chain the composition root wires, composed over temp files: the polls, the
 // baseline the diff is made against, and the seam the renderer parks a wait on. projectPath is the
-// Project config the second watcher polls, or "" for the global file alone.
+// Project config the second watcher polls, or "" for the global file alone; projectRoot is the
+// Project root it belongs to, whose adoption record the third watcher polls.
 type watchedConfig struct {
 	path        string
 	projectPath string
+	projectRoot string
 	edits       *externalEdit
 	await       func(context.Context) bool
 }
@@ -68,7 +71,8 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 	}
 }
 
-// newWatchedLayeredConfig is newWatchedConfig with a Project config beside the global file: a
+// newWatchedLayeredConfig is newWatchedConfig with a Project config beside the global file, and
+// the Project root's adoption record watched beside both (the composition root's three watchers): a
 // workspace outside any repository, which is its own Project root (internal/projectroot), whose
 // `.apogee/config.yaml` is seeded with project — or left absent when project is empty — and watched
 // by the second watcher at the path the composition root derives (projectConfigWatchPath).
@@ -78,7 +82,8 @@ func newWatchedLayeredConfig(t *testing.T, global, project string) *watchedConfi
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, global)
 	opts := config.Options{ConfigDir: home, Workspace: workspace}
-	projectPath := projectConfigWatchPath(opts, projectroot.Resolve(workspace, ""))
+	projectRoot := projectroot.Resolve(workspace, "")
+	projectPath := projectConfigWatchPath(opts, projectRoot)
 	if projectPath == "" {
 		t.Fatal("no Project config path for a workspace that is its own Project root")
 	}
@@ -88,11 +93,17 @@ func newWatchedLayeredConfig(t *testing.T, global, project string) *watchedConfi
 	if project != "" {
 		writeSettingsFixture(t, projectPath, project)
 	}
+	adoptionPath := adoptionWatchPath(opts, stateRoots{config: home, workspace: workspace, project: projectRoot})
+	if adoptionPath == "" {
+		t.Fatal("no adoption record path for the fixture's Project root")
+	}
 	return &watchedConfig{
 		path:        path,
 		projectPath: projectPath,
+		projectRoot: projectRoot,
 		edits:       newExternalEdit(opts, workspace, func(string) string { return "" }),
-		await:       awaitConfigChangeOn(startConfigWatcher(t, path), startConfigWatcher(t, projectPath), nil),
+		await: awaitConfigChangeOn(startConfigWatcher(t, path), startConfigWatcher(t, projectPath),
+			startConfigWatcher(t, adoptionPath)),
 	}
 }
 
@@ -366,8 +377,10 @@ func TestProjectConfigWatchPath(t *testing.T) {
 	}
 }
 
-// The /settings applies re-read the global file alone (settingsApplier.fileConfig): every key they
-// read is global-only, so a Project config that does not even parse cannot fail one of them.
+// The /settings applies of the global-only keys re-read the global file alone
+// (settingsApplier.fileConfig), so a Project config that does not even parse cannot fail one of them.
+// (The `mcp-servers:` and `reactions:` applies read the layered set, where the loader skips such a
+// layer and the re-read degrades to the global entries — settingsApplier.layeredConfig.)
 func TestWatchedMalformedProjectConfigLeavesAServersApplyWorking(t *testing.T) {
 	t.Parallel()
 	applier := fakeApplier(t)
@@ -387,5 +400,132 @@ func TestWatchedMalformedProjectConfigLeavesAServersApplyWorking(t *testing.T) {
 	}
 	if got := applier.live.serverList(); len(got) != 1 || got[0].Name != "local" {
 		t.Errorf("servers after the apply = %+v, want the global file's one local entry", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Adopted repo servers and reactions, live (ADR 0104 §12)
+// ----------------------------------------------------------------------------
+
+// projectWikiServerYAML is a Project config proposing one HTTP server whose bearer token is read
+// out of an environment variable.
+const projectWikiServerYAML = "mcp-servers:\n" +
+	"  - name: wiki\n" +
+	"    transport: streamable-http\n" +
+	"    endpoint: https://wiki.example.com/mcp\n" +
+	"    headers-env:\n" +
+	"      Authorization: WIKI_MCP_TOKEN\n"
+
+// projectNotifyReactionYAML is a Project config proposing one observe-lane reaction.
+const projectNotifyReactionYAML = "reactions:\n  - id: notify\n    on: [file-changed]\n    run: [notify-send, saved]\n"
+
+// adoptEveryProposal records every entry the layered config of globalPath and projectRoot proposes
+// as adopted — exactly what an `apogee project adopt` in another terminal writes — and fails the
+// test when there is none to adopt.
+func adoptEveryProposal(t *testing.T, globalPath, projectRoot string) {
+	t.Helper()
+	o, err := loadLayeredOptions(globalPath, projectRoot)
+	if err != nil {
+		t.Fatalf("load the layered config: %v", err)
+	}
+	if len(o.Proposals.Proposed) == 0 {
+		t.Fatal("the Project config proposes nothing to adopt")
+	}
+	store, err := adoption.New(config.WorkspacesDir(filepath.Dir(globalPath)), projectRoot)
+	if err != nil {
+		t.Fatalf("open the adoption record: %v", err)
+	}
+	for _, p := range o.Proposals.Proposed {
+		if err := store.Adopt(adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}); err != nil {
+			t.Fatalf("Adopt %s: %v", p.Handle, err)
+		}
+	}
+}
+
+// layeredApplier is fakeApplier over c's two files: the global config it re-reads and the Project
+// root whose Project config and adoption record it layers over it, with a live scrub holder.
+func layeredApplier(t *testing.T, c *watchedConfig) settingsApplier {
+	t.Helper()
+	applier := fakeApplier(t)
+	applier.configPath = c.path
+	applier.roots.project = c.projectRoot
+	applier.secretEnv = apogee.NewSecretEnv(nil)
+	return applier
+}
+
+// appliedPath is the applied setting at path in applied, failing the test when the re-read did not
+// report it.
+func appliedPath(t *testing.T, applied []tui.AppliedSetting, path string) tui.AppliedSetting {
+	t.Helper()
+	for _, a := range applied {
+		if a.Path == path {
+			return a
+		}
+	}
+	t.Fatalf("reload = %+v, want %s among the applied keys", applied, path)
+	return tui.AppliedSetting{}
+}
+
+// A Project config's server adopted mid-session — the answer recorded by another terminal, so
+// neither config file moves — is reported by the adoption-record watcher, and the reconnect it
+// drives dials it beside the global servers, marked as the project's own.
+func TestWatchedProjectConfigAdoptedServerConnects(t *testing.T) {
+	t.Parallel()
+	c := newWatchedLayeredConfig(t, mcpServersFixture, projectWikiServerYAML)
+	var dialled [][]mcp.ServerConfig
+	fixture := newMCPFixture(&fakeMCPSession{}, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		dialled = append(dialled, servers)
+		return &fakeMCPSession{}, nil
+	})
+	applier := layeredApplier(t, c)
+	applier.engine = &applySettingSpy{}
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+
+	adoptEveryProposal(t, c.path, c.projectRoot)
+	applied, err := c.reload(t, "the repo server adopted outside this session")
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	row := appliedPath(t, applied, "mcp-servers")
+	if _, err := applySettingFor(applier)(row.Path, row.Value); err != nil {
+		t.Fatalf("apply %s: %v", row.Path, err)
+	}
+
+	if len(dialled) != 1 {
+		t.Fatalf("dialled %d times, want one reconnect", len(dialled))
+	}
+	got := dialled[0]
+	if len(got) != 2 || got[0].Name != "docs" || got[0].Project || got[1].Name != "wiki" || !got[1].Project {
+		t.Errorf("dialled %+v, want the global docs server and the adopted repo wiki server", got)
+	}
+}
+
+// A repo reaction adopted mid-session reaches the running lanes: the record watcher reports it, and
+// the reload the `reactions:` row drives hangs the layered list — the adopted entry, marked as the
+// project's — on the generation it swaps in.
+func TestWatchedAdoptionRecordReloadsARepoReaction(t *testing.T) {
+	t.Parallel()
+	c := newWatchedLayeredConfig(t, "", projectNotifyReactionYAML)
+	spy := &applySettingSpy{}
+	applier := layeredApplier(t, c)
+	applier.engine = spy
+
+	adoptEveryProposal(t, c.path, c.projectRoot)
+	applied, err := c.reload(t, "the repo reaction adopted outside this session")
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	row := appliedPath(t, applied, "reactions")
+	if _, err := applySettingFor(applier)(row.Path, row.Value); err != nil {
+		t.Fatalf("apply %s: %v", row.Path, err)
+	}
+
+	if len(spy.generations) != 1 {
+		t.Fatalf("SetReactions called %d times, want one swap", len(spy.generations))
+	}
+	observe := spy.generations[0].Observe
+	if len(observe) != 1 || observe[0].ID != "notify" || !observe[0].Project {
+		t.Errorf("observe lane = %+v, want the adopted repo reaction notify", observe)
 	}
 }

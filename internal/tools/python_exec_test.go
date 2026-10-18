@@ -410,7 +410,7 @@ func TestPythonExec_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *test
 	h.look = fakeLook(true, "/usr/bin/python3")
 	h = withFakePythonVersion(h, 3, 12, true)
 
-	py := newPythonExec(t.TempDir(), []string{"apogee_test_provider_key"}, h)
+	py := newPythonExec(t.TempDir(), domain.NewSecretEnv([]string{"apogee_test_provider_key"}), h)
 	if _, err := py.Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}

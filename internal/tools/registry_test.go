@@ -551,6 +551,7 @@ func TestHostToolsOfFillsEveryHostField(t *testing.T) {
 		EnabledTools:      []string{"web_search"},
 		Profile:           domain.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"console_open"}}},
 		SecretEnvVars:     []string{"SOME_PROVIDER_KEY"},
+		SecretEnv:         domain.NewSecretEnv([]string{"SOME_PROVIDER_KEY"}),
 		ReadMounts: ReadMounts{
 			Roots:   func() []string { return []string{t.TempDir()} },
 			Scratch: func() string { return t.TempDir() },
@@ -713,3 +714,45 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 // IsExecutionCapable: this stub wires no opener at all, so it can execute nothing of the
 // user's choosing.
 func (stubPresenter) IsExecutionCapable() bool { return false }
+
+// TestHostToolsReadTheSecretScrubPerCall pins the live half of the credential scrub (ADR 0104
+// §12): the execution tools hold the host's SecretEnv rather than a copy of its list, so a name the
+// host widens it by AFTER the roster was built is dropped from the very next child — no rebuild —
+// while a holder never widened leaves the variable inherited.
+func TestHostToolsReadTheSecretScrubPerCall(t *testing.T) {
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_TEST_LIVE_SCRUB_TOKEN", "tok-adopted-mid-session")
+	h, captured := capturedRunHost(t)
+	holder := domain.NewSecretEnv(nil)
+	terminal := findTool(t, builtinToolsWith(t.TempDir(), HostTools{SecretEnv: holder}, h), "terminal")
+
+	if _, err := terminal.Execute(context.Background(), terminalCall("c1", "echo before")); err != nil {
+		t.Fatalf("Execute before the widening: %v", err)
+	}
+	_, inheritedBefore := envValue(captured.Env, "APOGEE_TEST_LIVE_SCRUB_TOKEN")
+	holder.Widen([]string{"APOGEE_TEST_LIVE_SCRUB_TOKEN"})
+	if _, err := terminal.Execute(context.Background(), terminalCall("c2", "echo after")); err != nil {
+		t.Fatalf("Execute after the widening: %v", err)
+	}
+	value, inheritedAfter := envValue(captured.Env, "APOGEE_TEST_LIVE_SCRUB_TOKEN")
+
+	if !inheritedBefore {
+		t.Error("the variable was dropped before any entry named it; only the widened scrub drops it")
+	}
+	if inheritedAfter {
+		t.Errorf("APOGEE_TEST_LIVE_SCRUB_TOKEN = %q reached the child after the widening; the tool must "+
+			"read the holder per call", value)
+	}
+}
+
+// findTool is the tool named name in tools, failing the test when there is none.
+func findTool(t *testing.T, tools []domain.Tool, name string) domain.Tool {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name() == name {
+			return tool
+		}
+	}
+	t.Fatalf("no %s tool among %d", name, len(tools))
+	return nil
+}

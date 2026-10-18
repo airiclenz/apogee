@@ -131,7 +131,7 @@ func (p pythonProbe) honoursSafePath() bool {
 // host whose run answers the probe's argv, never by depending on the Python the host happens to
 // ship.
 func (t *PythonExec) interpreterVersion(ctx context.Context, interp string) (pythonProbe, error) {
-	res, err := t.host.run(ctx, pythonVersionSpec(t.host, interp, t.root, t.secretEnv))
+	res, err := t.host.run(ctx, pythonVersionSpec(t.host, interp, t.root, t.secretEnv.Names()))
 	if err != nil {
 		return pythonProbe{}, err
 	}
@@ -226,9 +226,10 @@ func pythonArgv(interp string, isolate bool) []string {
 type PythonExec struct {
 	toolSpec
 	root string
-	// secretEnv names the host-configured credential variables to drop from the interpreter's
-	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
-	secretEnv []string
+	// secretEnv holds the host-configured credential variables to drop from the interpreter's
+	// environment beside apogee's own (HostTools.SecretEnv), read at each call; nil or empty drops
+	// apogee's own alone.
+	secretEnv *domain.SecretEnv
 	// host is the operating system the tool launches through: the platform rules the
 	// interpreter's environment is scoped through (execHost).
 	host execHost
@@ -240,12 +241,12 @@ type PythonExec struct {
 // operating system (defaultExecHost); builtinTools builds the five execution tools on one host
 // through newPythonExec.
 func NewPythonExec(root string, secretEnv []string) *PythonExec {
-	return newPythonExec(root, secretEnv, defaultExecHost())
+	return newPythonExec(root, domain.NewSecretEnv(secretEnv), defaultExecHost())
 }
 
 // newPythonExec is NewPythonExec with the host the tool launches through supplied — one execHost
 // shared by the execution tools in production, a host carrying fakes in a test.
-func newPythonExec(root string, secretEnv []string, host execHost) *PythonExec {
+func newPythonExec(root string, secretEnv *domain.SecretEnv, host execHost) *PythonExec {
 	return &PythonExec{toolSpec: pythonExecSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
@@ -304,7 +305,7 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		Dir:     dir,
 		Timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		Stdin:   args.Code,
-		Env:     t.host.subprocessEnvScopedPath(t.root, t.secretEnv, pythonSafePathVar),
+		Env:     t.host.subprocessEnvScopedPath(t.root, t.secretEnv.Names(), pythonSafePathVar),
 	}
 	res, err := t.host.run(ctx, spec)
 	if err != nil {

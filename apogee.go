@@ -151,6 +151,13 @@ type Config = domain.Config
 // domain.ReadMounts for the contract the three share.
 type ReadMounts = domain.ReadMounts
 
+// SecretEnv is the credential scrub as a live, widen-only list — Config.SecretEnv, which outranks
+// Config.SecretEnvVars and is read at every call. See domain.SecretEnv.
+type SecretEnv = domain.SecretEnv
+
+// NewSecretEnv is a SecretEnv seeded with names.
+func NewSecretEnv(names []string) *SecretEnv { return domain.NewSecretEnv(names) }
+
 // ContextConfig governs the structural context reducers (Budget, Compaction).
 type ContextConfig = domain.ContextConfig
 

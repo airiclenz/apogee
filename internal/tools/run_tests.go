@@ -211,9 +211,10 @@ var npmTestRunner = testRunner{
 type RunTests struct {
 	toolSpec
 	root string
-	// secretEnv names the host-configured credential variables to drop from the runner's
-	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
-	secretEnv []string
+	// secretEnv holds the host-configured credential variables to drop from the runner's
+	// environment beside apogee's own (HostTools.SecretEnv), read at each call; nil or empty drops
+	// apogee's own alone.
+	secretEnv *domain.SecretEnv
 	// host is the operating system the tool launches through (execHost).
 	host execHost
 }
@@ -224,12 +225,12 @@ type RunTests struct {
 // It runs on the real operating system (defaultExecHost); builtinTools builds the five execution
 // tools on one host through newRunTests.
 func NewRunTests(root string, secretEnv []string) *RunTests {
-	return newRunTests(root, secretEnv, defaultExecHost())
+	return newRunTests(root, domain.NewSecretEnv(secretEnv), defaultExecHost())
 }
 
 // newRunTests is NewRunTests with the host the tool launches through supplied — one execHost
 // shared by the execution tools in production, a host carrying fakes in a test.
-func newRunTests(root string, secretEnv []string, host execHost) *RunTests {
+func newRunTests(root string, secretEnv *domain.SecretEnv, host execHost) *RunTests {
 	return &RunTests{toolSpec: runTestsSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
@@ -301,7 +302,7 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		Argv:    append([]string{program}, runnerArgs...),
 		Dir:     t.root,
 		Timeout: budget,
-		Env:     subprocessEnv(t.secretEnv),
+		Env:     subprocessEnv(t.secretEnv.Names()),
 	})
 	if err != nil {
 		return domain.ToolResult{}, err

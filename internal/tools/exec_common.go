@@ -35,7 +35,8 @@ const maxSubprocessOutputBytes = subprocess.MaxSubprocessOutputBytes
 // entry's key was file-only when the list was written ("APIKey is FILE-ONLY on purpose"), but
 // `api-key-env:` (ADR 0047) lets an entry name an ENVIRONMENT VARIABLE instead, and a variable
 // the operator exported is inherited by every subprocess unless it is dropped too. The host names
-// those variables (HostTools.SecretEnvVars) and isSecretEnv drops them beside this list.
+// those variables (HostTools.SecretEnvVars, or the live HostTools.SecretEnv a session widens) and
+// isSecretEnv drops them beside this list.
 var apogeeSecretEnvVars = []string{"APOGEE_API_KEY"}
 
 // subprocessEnv returns the environment an execution tool's subprocess runs with: everything
@@ -271,9 +272,10 @@ const maxSubprocessErrorExcerptBytes = 256
 // refused.
 //
 // secretEnv names the operator-declared credential variables to drop beside apogee's own — the
-// same `api-key-env:` names (ADR 0047) the execution tools take from HostTools.SecretEnvVars,
-// handed in here by whichever caller opens this door. A hook's child therefore scrubs exactly what
-// a tool's child scrubs; nil names none and leaves the fixed half alone.
+// same `api-key-env:` names (ADR 0047) the execution tools read off HostTools.SecretEnv, handed in
+// here by whichever caller opens this door, read by it at the spawn (domain.Config.SecretEnvNames
+// for the sync Reaction lane). A hook's child therefore scrubs exactly what a tool's child scrubs;
+// nil names none and leaves the fixed half alone.
 //
 // extraEnv is the caller's own "KEY=value" additions, appended AFTER the scrub so they win over an
 // inherited spelling of the same key — the headline facts a fired reaction finds its Moment under

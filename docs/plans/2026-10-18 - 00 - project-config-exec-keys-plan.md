@@ -180,7 +180,18 @@ internal/mcp/mcp_test.go — TestConnect_RefusesAStdioServerInsideTheWorkspace, 
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestConnect_' ./internal/mcp/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'AllowRule' ./internal/agent/`
 **Commit:** `feat(mcp): repo servers launch pinned project programs and answer project rules only`
 
-## 8. Live reload applies the layered servers, reactions and secret scrub
+## 8. Live reload applies the layered servers, reactions and secret scrub — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): re-derived from "SecretEnvVars captured by the tool constructors; make it a shared holder on HostTools": the holder is a new `domain.SecretEnv` (internal/domain/secretenv.go) carried as `domain.Config.SecretEnv` beside the kept `SecretEnvVars` and outranking it, plus `HostTools.SecretEnv` (filled by HostToolsOf). The agent cannot see HostTools, so the sync lane reads it through the new `Config.SecretEnvNames()`. The four execution tools that scrub (terminal, python_exec, run_tests and also console_open) hold the holder and read `Names()` on every call. The public `NewTerminal`/`NewPythonExec`/`NewRunTests`/`NewConsoleOpen` signatures are unchanged.
+NOTES (2026-10-18): the holder only ever widens (`SecretEnv.Widen`, compared case-insensitively). A reload adds what the layered re-read names (`secretEnvNames`, which is now the one spelling shared with projectConfig). A name a later re-read drops stays scrubbed for the session. This keeps names from startup that a file re-read cannot reproduce (the startup entry's resolved `APIKeyEnv`), and it covers a retired reaction generation that is still draining. The widening runs before the dial or swap, and it is kept even if the dial or swap is refused.
+NOTES (2026-10-18): reconnectMCP, reloadReactions and readmitMCP now read `settingsApplier.layeredConfig`. That function and `rootWiring.layeredOptions` both call one new shared `loadLayeredOptions` in projectrules.go. fileConfig stays global-only for every other key. A Project config that stops parsing is skipped by the loader, so the re-read falls back to the global set: adopted repo servers are torn down and repo reactions leave the lanes until the file parses again. This is stated on layeredConfig.
+NOTES (2026-10-18): consequential edit — apogee.go: made necessary by domain.Config gaining the public `SecretEnv` field. An embedder needs the `apogee.SecretEnv` alias and `apogee.NewSecretEnv` to construct one.
+NOTES (2026-10-18): consequential edit — cmd/apogee/projectrules.go: made necessary by the layered re-read now being shared by the settings appliers (`loadLayeredOptions`).
+NOTES (2026-10-18): consequential edit — cmd/apogee/wire_options.go: made necessary by settingsApplier's new `secretEnv` field (wired from w.cfg.SecretEnv).
+NOTES (2026-10-18): consequential edit — internal/domain/doc.go: made necessary by the new secretenv.go (package file map).
+NOTES (2026-10-18): consequential edit — internal/tools/registry_test.go: made necessary by HostTools gaining `SecretEnv` (TestHostToolsOfFillsEveryHostField enumerates every field).
+NOTES (2026-10-18): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the scrub's route now going through the live holder (the hook-scrub paragraph named only the fixed SecretEnvVars route).
+NOTES (2026-10-18): newWatchedLayeredConfig now also watches the adoption record (adoptionWatchPath), as the regression guard asks. watchedConfig gained a `projectRoot` field.
 
 **What:** Depends on items 4 and 5. ADR 0104 §12.
 **Goal:** a change to the Project config or the adoption record reconnects MCP and reloads reactions from the layered set (global + adopted repo entries) in a running session, and the secret-env scrub the tools apply is recomputed from that set, so a `headers-env` name an entry adopted mid-session introduces is scrubbed without a restart.
