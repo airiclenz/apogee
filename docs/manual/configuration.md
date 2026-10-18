@@ -729,7 +729,16 @@ configured `auth: oauth` server and saves its token, replacing any it had; `apog
 <name>` deletes the saved token and says whether there was one. Logout makes no network call: the
 token is forgotten here, not revoked at the authorization server. Both read the configuration
 apogee itself would — `--config` and `APOGEE_CONFIG` included — and refuse a name that is not
-configured and a server without `auth: oauth`.
+configured and a server without `auth: oauth`. A server the Project config proposes is refused
+until you adopt it: `apogee mcp login` on a proposed one names `apogee project adopt`, and on one
+you rejected names its `mcp-servers` row in `/settings`.
+
+**`apogee mcp list`** prints every MCP server the configuration names, one row each: its name, its
+transport, its source — `global` for your own config, `project` for the Project config — and, for a
+project server, whether it is `adopted`, `proposed` or `rejected` (a global one shows `-`). Only an
+adopted project server connects. It reads the same configuration, connects to nothing, and works
+before any LLM server is configured. `apogee mcp list` and `apogee mcp login` take `--workspace` to
+read another directory's Project config than the current one.
 
 You rarely need `login` by hand. At startup, every `auth: oauth` server with no saved token is
 offered the login on the terminal before the TUI opens (`MCP server "tracker" needs an OAuth

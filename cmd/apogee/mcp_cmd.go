@@ -10,13 +10,16 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mcpauth"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -121,27 +124,29 @@ func mcpClientSecret(server mcp.ServerConfig) (string, error) {
 }
 
 // ----------------------------------------------------------------------------
-// `apogee mcp login|logout <name>`
+// `apogee mcp list|login|logout`
 // ----------------------------------------------------------------------------
 
-// newMCPCommand builds `apogee mcp` — the OAuth login and logout of the configured MCP servers —
-// over this process's own terminal and authorization-server client.
+// newMCPCommand builds `apogee mcp` — the list of the configured MCP servers and the OAuth login
+// and logout of each — over this process's own terminal and authorization-server client.
 func newMCPCommand() *cobra.Command {
 	return newMCPCommandWith(mcpLoginDeps{})
 }
 
 // newMCPCommandWith is newMCPCommand over the login dependencies the caller states. The bare noun
-// does nothing on its own and prints its help, and an unknown word after it is refused; `login`
-// and `logout` are the two verbs.
+// does nothing on its own and prints its help, and an unknown word after it is refused; `list`,
+// `login` and `logout` are the three verbs.
 func newMCPCommandWith(deps mcpLoginDeps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "Log in to and out of OAuth-protected MCP servers",
-		Long: "apogee mcp manages the OAuth login of the MCP servers config.yaml configures\n" +
-			"with `auth: oauth`. `apogee mcp login <name>` runs the browser login and saves\n" +
-			"the token under ~/.apogee/mcp-auth; `apogee mcp logout <name>` deletes it. A\n" +
-			"session refreshes a saved token on its own, and asks for a login at startup\n" +
-			"when a server has none.",
+		Short: "List MCP servers, and log in to and out of OAuth-protected ones",
+		Long: "apogee mcp shows and manages the MCP servers config.yaml configures.\n" +
+			"`apogee mcp list` prints each one with where it comes from — your global config or\n" +
+			"the project's .apogee/config.yaml — and, for a project one, whether it is adopted,\n" +
+			"proposed or rejected. `apogee mcp login <name>` runs the browser login of an\n" +
+			"`auth: oauth` server and saves the token under ~/.apogee/mcp-auth; `apogee mcp\n" +
+			"logout <name>` deletes it. A session refreshes a saved token on its own, and asks\n" +
+			"for a login at startup when a server has none.",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -149,8 +154,131 @@ func newMCPCommandWith(deps mcpLoginDeps) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(mcpLoginCommand(deps), mcpLogoutCommand())
+	cmd.AddCommand(mcpListCommand(), mcpLoginCommand(deps), mcpLogoutCommand())
 	return cmd
+}
+
+// mcpListCommand builds `apogee mcp list`: every MCP server the layered config names — the global
+// ones, the project ones adopted on this machine, and the project ones still proposed or rejected,
+// which run nothing — one row each with its transport, source and adoption state.
+func mcpListCommand() *cobra.Command {
+	var opts config.Options
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List the configured MCP servers, their source and adoption state",
+		Long: "apogee mcp list prints every MCP server the configuration names: its name, its\n" +
+			"transport, its source — `global` for ~/.apogee/config.yaml, `project` for the\n" +
+			"Project config — and, for a project server, `adopted`, `proposed` or `rejected`.\n" +
+			"Only an adopted project server is connected; `apogee project adopt` answers the\n" +
+			"proposed ones. It connects to nothing.",
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return listMCPServers(cmd, &opts)
+		},
+	}
+	addMCPConfigFlag(cmd, &opts)
+	addMCPWorkspaceFlag(cmd, &opts)
+	return cmd
+}
+
+// mcpServerRow is one row of `apogee mcp list`: a server as the list names it.
+type mcpServerRow struct {
+	name      string
+	transport string
+	source    string
+	state     string
+}
+
+// Where an `apogee mcp list` row's server comes from, and the state column of a global one, which
+// no adoption answer governs.
+const (
+	mcpSourceGlobal  = "global"
+	mcpSourceProject = "project"
+	mcpStateNone     = "-"
+)
+
+// listMCPServers resolves the config the way a session does and prints its servers. A config that
+// names no startup LLM server still lists its MCP servers, as `apogee project adopt` still asks.
+func listMCPServers(cmd *cobra.Command, opts *config.Options) error {
+	notify := func(msg string) { cmd.PrintErrln(msg) }
+	err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify)
+	var undetermined *config.StartupUndetermined
+	if err != nil && !errors.As(err, &undetermined) {
+		return err
+	}
+	rows := mcpServerRows(*opts)
+	out := cmd.OutOrStdout()
+	if len(rows) == 0 {
+		_, _ = fmt.Fprintln(out, "No MCP servers are configured.")
+		return nil
+	}
+	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(table, "NAME\tTRANSPORT\tSOURCE\tSTATE")
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%s\n", row.name, row.transport, row.source, row.state)
+	}
+	return table.Flush()
+}
+
+// mcpServerRows is every server of opts as `apogee mcp list` prints it: the configured servers in
+// their order — the global ones, then the adopted project ones — then the project ones proposed,
+// then those rejected. A project server's name and transport are the repository's text, so each
+// is stripped to one line before it reaches the terminal.
+func mcpServerRows(opts config.Options) []mcpServerRow {
+	var rows []mcpServerRow
+	for _, server := range opts.MCPServers {
+		row := mcpServerRow{
+			name: server.Name, transport: string(server.Transport), source: mcpSourceGlobal, state: mcpStateNone,
+		}
+		if server.Project {
+			row.source, row.state = mcpSourceProject, "adopted"
+		}
+		rows = append(rows, row.stripped())
+	}
+	rows = appendProposedServerRows(rows, opts.Proposals.Proposed, "proposed")
+	return appendProposedServerRows(rows, opts.Proposals.Rejected, "rejected")
+}
+
+// appendProposedServerRows appends to rows a project row in state for each repo server among
+// proposals.
+func appendProposedServerRows(rows []mcpServerRow, proposals []domain.Proposal, state string) []mcpServerRow {
+	for _, p := range repoServerProposals(proposals) {
+		rows = append(rows, mcpServerRow{
+			name: p.Handle, transport: proposalTransport(p), source: mcpSourceProject, state: state,
+		}.stripped())
+	}
+	return rows
+}
+
+// stripped is the row with its name and transport made safe to print on one line.
+func (r mcpServerRow) stripped() mcpServerRow {
+	r.name = sanitize.StripEscapesToLine(r.name)
+	r.transport = sanitize.StripEscapesToLine(r.transport)
+	return r
+}
+
+// repoServerProposals is the repo MCP servers among proposals, in order — the reactions left out.
+func repoServerProposals(proposals []domain.Proposal) []domain.Proposal {
+	var servers []domain.Proposal
+	for _, p := range proposals {
+		if p.Kind == domain.ProposalMCPServer {
+			servers = append(servers, p)
+		}
+	}
+	return servers
+}
+
+// proposalTransport is the `transport:` a repo server's proposal pins, or mcpStateNone when it
+// pins none.
+func proposalTransport(p domain.Proposal) string {
+	for _, field := range p.Fields {
+		if field.Label == "transport" && len(field.Values) > 0 {
+			return field.Values[0]
+		}
+	}
+	return mcpStateNone
 }
 
 // mcpLoginCommand builds `apogee mcp login <name>`: the interactive login of one configured
@@ -168,7 +296,14 @@ func mcpLoginCommand(deps mcpLoginDeps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			server, target, err := resolveOAuthServer(cmd, &opts, args[0])
+			roots, err := loadMCPConfig(cmd, &opts)
+			if err != nil {
+				return err
+			}
+			if err := refuseUnadoptedRepoServer(opts, roots, args[0]); err != nil {
+				return err
+			}
+			server, target, err := oauthServer(opts, roots, args[0])
 			if err != nil {
 				return err
 			}
@@ -180,6 +315,7 @@ func mcpLoginCommand(deps mcpLoginDeps) *cobra.Command {
 		},
 	}
 	addMCPConfigFlag(cmd, &opts)
+	addMCPWorkspaceFlag(cmd, &opts)
 	return cmd
 }
 
@@ -207,11 +343,19 @@ func mcpLogoutCommand() *cobra.Command {
 	return cmd
 }
 
-// addMCPConfigFlag declares the one flag both verbs take: the apogee home whose config.yaml names
+// addMCPConfigFlag declares the flag every verb takes: the apogee home whose config.yaml names
 // the server and whose token store holds its record.
 func addMCPConfigFlag(cmd *cobra.Command, opts *config.Options) {
 	cmd.Flags().StringVar(&opts.ConfigDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
+}
+
+// addMCPWorkspaceFlag declares the workspace whose Project config's servers `list` and `login`
+// read. It is a flag of its own, not part of addMCPConfigFlag, which `apogee project adopt` also
+// calls beside its own `--workspace`.
+func addMCPWorkspaceFlag(cmd *cobra.Command, opts *config.Options) {
+	cmd.Flags().StringVar(&opts.Workspace, "workspace", "",
+		"workspace whose Project config's MCP servers to read (default: current directory)")
 }
 
 // logoutMCPServer deletes server's saved record and reports on out whether one existed. A record
@@ -236,15 +380,53 @@ func logoutMCPServer(out io.Writer, store *mcpauth.Store, server mcp.ServerConfi
 // ~/.apogee — and returns the `auth: oauth` server it names with where its login lands. An unknown
 // name and a server without `auth: oauth` are refused.
 func resolveOAuthServer(cmd *cobra.Command, opts *config.Options, name string) (mcp.ServerConfig, mcpLoginTarget, error) {
-	notify := func(msg string) { cmd.PrintErrln(msg) }
-	if err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify); err != nil {
-		return mcp.ServerConfig{}, mcpLoginTarget{}, err
-	}
-	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	roots, err := loadMCPConfig(cmd, opts)
 	if err != nil {
 		return mcp.ServerConfig{}, mcpLoginTarget{}, err
 	}
+	return oauthServer(*opts, roots, name)
+}
 
+// loadMCPConfig resolves opts from the flags, the environment and the config files the way a
+// session does, and returns the roots they name.
+func loadMCPConfig(cmd *cobra.Command, opts *config.Options) (stateRoots, error) {
+	notify := func(msg string) { cmd.PrintErrln(msg) }
+	if err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify); err != nil {
+		return stateRoots{}, err
+	}
+	return resolveRoots(opts.ConfigDir, opts.Workspace)
+}
+
+// refuseUnadoptedRepoServer refuses a login to name when it is a repo server the user has not
+// adopted (ADR 0104 §12): a proposed one points at `apogee project adopt`, which asks about it; a
+// rejected one, which that command no longer asks about, at its row in /settings. Any other name
+// passes.
+func refuseUnadoptedRepoServer(opts config.Options, roots stateRoots, name string) error {
+	path := projectConfigWatchPath(opts, roots.project)
+	if hasRepoServer(opts.Proposals.Proposed, name) {
+		return fmt.Errorf("apogee mcp: MCP server %q is proposed by the project config %s and not adopted "+
+			"on this machine, so it has no login — run `apogee project adopt` to adopt it first", name, path)
+	}
+	if hasRepoServer(opts.Proposals.Rejected, name) {
+		return fmt.Errorf("apogee mcp: MCP server %q from the project config %s was rejected on this machine, "+
+			"so it has no login — adopt it from its `mcp-servers` row in /settings first", name, path)
+	}
+	return nil
+}
+
+// hasRepoServer reports whether proposals hold the repo server whose name is name.
+func hasRepoServer(proposals []domain.Proposal, name string) bool {
+	for _, p := range repoServerProposals(proposals) {
+		if p.Handle == name {
+			return true
+		}
+	}
+	return false
+}
+
+// oauthServer returns the `auth: oauth` server of opts named name with where its login lands under
+// roots. An unknown name and a server without `auth: oauth` are refused.
+func oauthServer(opts config.Options, roots stateRoots, name string) (mcp.ServerConfig, mcpLoginTarget, error) {
 	server, isFound := findMCPServer(opts.MCPServers, name)
 	if !isFound {
 		return mcp.ServerConfig{}, mcpLoginTarget{}, fmt.Errorf(

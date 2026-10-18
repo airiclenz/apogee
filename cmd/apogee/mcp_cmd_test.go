@@ -22,6 +22,7 @@ import (
 	"github.com/muesli/cancelreader"
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mcpauth"
@@ -408,10 +409,177 @@ func TestSubcommandsRegistersMCP(t *testing.T) {
 	for _, c := range mcpCommand.Commands() {
 		children[c.Name()] = true
 	}
-	for _, want := range []string{"login", "logout"} {
+	for _, want := range []string{"list", "login", "logout"} {
 		if !children[want] {
 			t.Errorf("`mcp` does not register the %q child; has %v", want, children)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Repo servers: `apogee mcp list`, and login refusing an unadopted one (ADR 0104 §12)
+// ----------------------------------------------------------------------------
+
+// projectMCPServersYAML is a Project config proposing three repo servers, one per transport.
+const projectMCPServersYAML = "mcp-servers:\n" +
+	"  - name: tracker\n    transport: streamable-http\n    endpoint: https://tracker.example.com/mcp\n    auth: oauth\n" +
+	"  - name: docs\n    transport: sse\n    endpoint: https://docs.example.com/sse\n" +
+	"  - name: lint\n    transport: stdio\n    command: lint-server\n"
+
+// rejectProposalsNamed records as rejected each entry the layered config of the apogee home and
+// projectRoot proposes whose handle is among handles — what `apogee project adopt` writes for an
+// r — and fails the test when one of handles is not proposed.
+func rejectProposalsNamed(t *testing.T, home, projectRoot string, handles ...string) {
+	t.Helper()
+	store, err := adoption.New(config.WorkspacesDir(home), projectRoot)
+	if err != nil {
+		t.Fatalf("open the adoption record: %v", err)
+	}
+	proposed := layeredProposals(t, home, projectRoot).Proposed
+	for _, handle := range handles {
+		isFound := false
+		for _, p := range proposed {
+			if p.Handle != handle {
+				continue
+			}
+			isFound = true
+			if err := store.Reject(adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}); err != nil {
+				t.Fatalf("Reject %s: %v", handle, err)
+			}
+		}
+		if !isFound {
+			t.Fatalf("the Project config proposes no entry %q: %+v", handle, proposed)
+		}
+	}
+}
+
+// listRow is the fields of the `apogee mcp list` line naming server, or nil when no line does.
+func listRow(out, server string) []string {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == server {
+			return fields
+		}
+	}
+	return nil
+}
+
+// Every configured server is listed with its transport and source, and a repo server with where
+// the user's answers left it: adopted, proposed or rejected.
+func TestMCPListShowsSourceAndState(t *testing.T) {
+	t.Parallel()
+	home, workspace := t.TempDir(), t.TempDir()
+	writeMCPConfig(t, home, mcp.ServerConfig{
+		Name: "plain", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://mcp.example.com/mcp",
+	})
+	writeProjectConfig(t, workspace, projectMCPServersYAML)
+	adoptProposalsNamed(t, home, workspace, "tracker")
+	rejectProposalsNamed(t, home, workspace, "lint")
+
+	out, err := runMCPCommand(t, mcpLoginDeps{}, "list", "--config", home, "--workspace", workspace)
+
+	if err != nil {
+		t.Fatalf("mcp list: %v\n%s", err, out)
+	}
+	want := map[string][]string{
+		"plain":   {"plain", "streamable-http", "global", "-"},
+		"tracker": {"tracker", "streamable-http", "project", "adopted"},
+		"docs":    {"docs", "sse", "project", "proposed"},
+		"lint":    {"lint", "stdio", "project", "rejected"},
+	}
+	for name, fields := range want {
+		if got := listRow(out, name); strings.Join(got, " ") != strings.Join(fields, " ") {
+			t.Errorf("the %s row = %q; want %q\n%s", name, got, fields, out)
+		}
+	}
+	if got := listRow(out, "NAME"); strings.Join(got, " ") != "NAME TRANSPORT SOURCE STATE" {
+		t.Errorf("the header = %q\n%s", got, out)
+	}
+}
+
+// A config that names no LLM server yet still lists its MCP servers: the list connects to nothing
+// and needs no startup server, as `apogee project adopt` needs none.
+func TestMCPListNeedsNoStartupServer(t *testing.T) {
+	t.Parallel()
+	home, workspace := projectAdoptRoots(t)
+	writeProjectConfig(t, workspace, projectMCPServersYAML)
+
+	out, err := runMCPCommand(t, mcpLoginDeps{}, "list", "--config", home, "--workspace", workspace)
+
+	if err != nil {
+		t.Fatalf("mcp list with no startup server: %v\n%s", err, out)
+	}
+	if got := listRow(out, "docs"); strings.Join(got, " ") != "docs sse project proposed" {
+		t.Errorf("the docs row = %q; want it listed as proposed\n%s", got, out)
+	}
+}
+
+// With no server anywhere the list says so rather than printing a bare header.
+func TestMCPListSaysWhenNoServerIsConfigured(t *testing.T) {
+	t.Parallel()
+	home, workspace := projectAdoptRoots(t)
+
+	out, err := runMCPCommand(t, mcpLoginDeps{}, "list", "--config", home, "--workspace", workspace)
+
+	if err != nil {
+		t.Fatalf("mcp list: %v", err)
+	}
+	if out != "No MCP servers are configured.\n" {
+		t.Errorf("mcp list printed %q; want the no-servers line", out)
+	}
+}
+
+// A login to a repo server still proposed is refused before anything is read or dialled, naming
+// the server and `apogee project adopt`.
+func TestMCPLoginRefusesAProposedRepoServer(t *testing.T) {
+	t.Parallel()
+	home, workspace := t.TempDir(), t.TempDir()
+	writeMCPConfig(t, home, mcp.ServerConfig{
+		Name: "plain", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://mcp.example.com/mcp",
+	})
+	writeProjectConfig(t, workspace, projectMCPServersYAML)
+	input := &scriptedInput{}
+
+	_, err := runMCPCommand(t, testMCPLoginDeps(t, input, &bytes.Buffer{}, true),
+		"login", "tracker", "--config", home, "--workspace", workspace)
+
+	want := `apogee mcp: MCP server "tracker" is proposed by the project config ` +
+		config.ProjectFilePath(workspace) + " and not adopted on this machine, so it has no login — " +
+		"run `apogee project adopt` to adopt it first"
+	if err == nil || err.Error() != want {
+		t.Fatalf("mcp login of a proposed repo server: error = %v; want %q", err, want)
+	}
+	if input.openCount() != 0 {
+		t.Errorf("a refused login read the terminal %d times; want none", input.openCount())
+	}
+	requireStored(t, home, "tracker", "https://tracker.example.com/mcp", false)
+}
+
+// A login to a rejected repo server is refused naming /settings — `apogee project adopt` no longer
+// asks about a rejected entry — and never that command.
+func TestMCPLoginRefusesARejectedRepoServerNamingSettings(t *testing.T) {
+	t.Parallel()
+	home, workspace := t.TempDir(), t.TempDir()
+	writeMCPConfig(t, home, mcp.ServerConfig{
+		Name: "plain", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://mcp.example.com/mcp",
+	})
+	writeProjectConfig(t, workspace, projectMCPServersYAML)
+	rejectProposalsNamed(t, home, workspace, "tracker")
+	input := &scriptedInput{}
+
+	_, err := runMCPCommand(t, testMCPLoginDeps(t, input, &bytes.Buffer{}, true),
+		"login", "tracker", "--config", home, "--workspace", workspace)
+
+	want := `apogee mcp: MCP server "tracker" from the project config ` + config.ProjectFilePath(workspace) +
+		" was rejected on this machine, so it has no login — adopt it from its `mcp-servers` row in /settings first"
+	if err == nil || err.Error() != want {
+		t.Fatalf("mcp login of a rejected repo server: error = %v; want %q", err, want)
+	}
+	if strings.Contains(err.Error(), "apogee project adopt") {
+		t.Errorf("the rejected server's refusal names `apogee project adopt`: %v", err)
+	}
+	if input.openCount() != 0 {
+		t.Errorf("a refused login read the terminal %d times; want none", input.openCount())
 	}
 }
 

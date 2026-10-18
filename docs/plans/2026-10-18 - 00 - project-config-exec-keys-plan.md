@@ -267,7 +267,11 @@ cmd/apogee/headless.go — runHeadlessBody; cmd/apogee/project_cmd_test.go — a
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestProjectCmd|TestDaemonFiring|TestHeadlessFiresOnly' ./cmd/apogee/`
 **Commit:** `feat(project): adopt repo servers and reactions; unattended Drivers fire adopted ones`
 
-## 12. `apogee mcp list` and login respect Adoption
+## 12. `apogee mcp list` and login respect Adoption — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): resolveOAuthServer split into loadMCPConfig + oauthServer so login can check Options.Proposals between them; logout keeps resolveOAuthServer and today's behaviour (no unadopted-server refusal, no --workspace).
+NOTES (2026-10-18): added TestMCPListSaysWhenNoServerIsConfigured (no-servers line) beside the four named tests, and `list` to TestSubcommandsRegistersMCP's expected children; reused projectrules_test.go's writeProjectConfig and project_cmd_test.go's adoptProposalsNamed/layeredProposals.
+NOTES (2026-10-18): repo server name and transport are stripped with sanitize.StripEscapesToLine before printing — they are the repository's text.
 
 **What:** Depends on item 4. ADR 0104 §12; owner call 2026-10-18.
 **Goal:** `apogee mcp list` prints every configured server — name, transport, source (`global`/`project`) and, for a repo server, `adopted`/`proposed`/`rejected` — and `apogee mcp login <name>` on a proposed or rejected repo server exits non-zero naming it and `apogee project adopt`.
