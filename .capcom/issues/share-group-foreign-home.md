@@ -1,10 +1,12 @@
 ---
 title: A shared store fails every save when the apogee home belongs to another user
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-10-18 - 01 - share-group-foreign-home-plan.md
 created: 2026-10-18T08:01:08Z
+closed: 2026-10-18T08:42:35Z
+reason: Fixed in 42f8e803/e2ab9443, shipped in v0.26.1 (https://github.com/airiclenz/apogee/releases/tag/v0.26.1)
 ---
 
 With `sessions.share-group` set, `Store.ensureDir` (`internal/session/store.go`) calls `shareDir` on every `save` and `hold`. That runs `os.Chown(-1, gid)` and `os.Chmod` on the apogee home (`sharedHomePerm`, 0710) and on `sessions/` (`sharedDirPerm`, 0750) every time. It does so even when the group and mode are already right. An unprivileged process gets EPERM from chown/chmod on a directory it does not own, and EROFS on a read-only mount, so every record save and every hold fails.
