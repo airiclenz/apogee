@@ -57,6 +57,9 @@ the repo, pinned to that entry's exact content, so the pin — not a write refus
    - *Global-only — ignored from a project, with a notice:* everything else, including `mode`,
      Bypass, `confine-to-workspace`, `unconfined-hosts`, servers and API keys, `editor`,
      `system-prompt-file`.
+
+   > *Amendment (2026-10-18, `adr-0096-amend-1018`):* `mcp-servers:` and `reactions:` leave
+   > global-only and are granting — adoption-gated structured entries (ADR 0104).
 7. **Precedence and `/settings`.** default < global < project < env < flag; tighten-only keys union
    instead. Each `/settings` row shows its source (`default | global | project | env | flag`). An
    edit to a project-capable key asks *global or this project*; global-only keys write global as

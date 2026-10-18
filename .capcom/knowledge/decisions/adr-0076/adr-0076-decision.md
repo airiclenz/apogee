@@ -167,6 +167,10 @@ could otherwise author a reaction that runs on the next reload. This is doctrine
 layer **ships in stage 2** (decision 13), and day one stays the global file plus the per-entry
 `workspace:` filter. This supersedes ADR 0073 decision 5.
 
+> *Amendment (2026-10-18, `adr-0076-amend-1018`):* ADR 0104 admits the repo layer's execution keys,
+> `mcp-servers:` among them. For those, a repo entry never overrides a global one by key, the pin is
+> canonical and covers the project files the argv names, and a repo `run:` is fenced.
+
 **11. Migration.** The seven Floor-guard booleans **stay canonical** — they are parameters, and a
 Floor guard is by definition one top-level file-only boolean — so nothing migrates. A `hooks:` list
 keeps loading through one migration table as an alias for `reactions:`, with a **one-time load
