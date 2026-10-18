@@ -65,6 +65,8 @@ Where things are: an issue is `.capcom/issues/<id>.md`, and its children sit in 
 `.capcom/issues/<id>/` beside it; Notes follow the same shape under `.capcom/knowledge/`.
 Prefer capcom commands; after a hand edit run `capcom check`.
 
+A standing issue (`standing: true` in its file) only groups its children: never claim or close it.
+
 Tree lock: before a change that spans several files or commits, it is recommended to claim this
 worktree with `capcom lock acquire --purpose <text>` and keep the token it prints.
 `capcom lock touch --token <token>` renews it during long work,

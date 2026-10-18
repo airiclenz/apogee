@@ -1,10 +1,12 @@
 ---
 title: Watch a running session live, read-only, from /sessions
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-10-17 - 03 - live-session-watch-plan
 created: 2026-10-17T17:13:38Z
+closed: 2026-10-18T05:31:31Z
+reason: Plan 2026-10-17 - 03 - live-session-watch-plan fully landed on main (items 1-16, closeout c40c98ff). Remaining gaps filed as watch-journal-reopen-missed and watch-defers-firings; the Windows journal-removal check as windows-journal-remove-check.
 ---
 
 A person cannot watch a running apogee session. Headless and daemon runs save their record once,
