@@ -140,12 +140,8 @@ type watchState struct {
 	// held are the owner's Msgs that would open a surface over the view (watchRouteHeld); they are
 	// delivered again once the watch ends.
 	held []tea.Msg
-	// offset is how many journal bytes have been folded; journal is the descriptor the offset counts
-	// in, held open across reads so that a journal the owner removes on release still drains to its
-	// end, and so that a different file under the same path reads as a truncation. It is a pointer,
-	// shared by every copy of the Model, and only Update closes it (closeJournal).
-	offset  int64
-	journal *os.File
+	// journalCursor is where the follower stands in the journal it follows.
+	journalCursor
 	// readsUntilProbe counts the follower reads left before the next one probes the hold.
 	readsUntilProbe int
 	// hasRunFinished says the journal's run_finished has folded since its last run_started.
@@ -184,17 +180,32 @@ type parkedSession struct {
 	cursor          blockCursor
 }
 
+// journalCursor is where the follower stands in the journal. offset is how many journal bytes have
+// been folded; journal is the descriptor the offset counts in, held open across reads so that a
+// journal the owner removes on release still drains to its end, and so that a different file under
+// the same path reads as a truncation. It is a pointer, shared by every copy of the Model, and only
+// Update closes it (closeJournal). head is the journal's first complete line, newline included, as
+// the read from offset 0 found it: an owner reopening the record truncates the same file
+// (Store.OpenJournal), and its new run_started — unique per open through its time — no longer
+// matching head is what tells a journal regrown past offset within one poll from one that only grew.
+// head is shared by every copy of the Model too, so it is cloned on capture and never mutated
+// (ADR 0011).
+type journalCursor struct {
+	offset  int64
+	journal *os.File
+	head    []byte
+}
+
 // watchPollMsg asks the Model to read the journal once more; gen names the watch that asked.
 type watchPollMsg struct{ gen int }
 
 // watchBatchMsg is one follower read: the complete lines appended since the last one, decoded, and
-// where the next read starts, in journal. isTruncated says the journal shrank or was replaced, so
-// the view clears before items fold. isOwnerGone says the read's probe found the hold free — the
-// owner has ended, and items are the last the journal will ever hold.
+// the cursor the next read starts from. isTruncated says the journal shrank, was replaced or was
+// reopened, so the view clears before items fold. isOwnerGone says the read's probe found the hold
+// free — the owner has ended, and items are the last the journal will ever hold.
 type watchBatchMsg struct {
-	gen         int
-	offset      int64
-	journal     *os.File
+	gen int
+	journalCursor
 	isTruncated bool
 	isOwnerGone bool
 	items       []watchItem
@@ -506,8 +517,8 @@ func (m *Model) readJournalCmd() tea.Cmd {
 		m.watch.readsUntilProbe = watchProbeEvery
 	}
 	m.watch.readsUntilProbe--
-	src, gen, offset, journal := m.watch.source, m.watch.gen, m.watch.offset, m.watch.journal
-	return func() tea.Msg { return readJournal(src, gen, offset, journal, isProbing) }
+	src, gen, cursor := m.watch.source, m.watch.gen, m.watch.journalCursor
+	return func() tea.Msg { return readJournal(src, gen, cursor, isProbing) }
 }
 
 // nextWatchPoll schedules the follower's next read.
@@ -516,7 +527,8 @@ func (m Model) nextWatchPoll() tea.Cmd {
 	return tea.Tick(watchPollInterval, func(time.Time) tea.Msg { return watchPollMsg{gen: gen} })
 }
 
-// readJournal reads the complete lines appended to src's journal past offset and decodes them. It
+// readJournal reads the complete lines appended to src's journal past cursor's offset and decodes
+// them, and returns them with the cursor the next read starts from. It
 // touches the journal only — open, stat, read — and never takes the record's lock (ADR 0103
 // decision 5); a probing read asks src.probe first, which holds nothing either.
 //
@@ -525,18 +537,19 @@ func (m Model) nextWatchPoll() tea.Cmd {
 // drains the journal to its end through the descriptor the follower holds — the path may already
 // name nothing. A path that names nothing is the owner releasing, never a truncation.
 //
-// A journal that shrank below offset, or a different file now under the path (the owner reopened
-// the record, which truncates its journal, or a later run wrote a new one), restarts the read at 0
-// and reports isTruncated. A trailing line the owner has not finished writing is left for the next
-// read. A journal that will not open or read yields a batch with no items at the same offset: the
-// follower simply looks again on its next poll, which is all a reader of a file it does not own
-// can do.
-func readJournal(src watchSource, gen int, offset int64, held *os.File, isProbing bool) watchBatchMsg {
-	batch := watchBatchMsg{gen: gen, offset: offset, journal: held}
+// A journal that shrank below offset, a different file now under the path (a later run wrote a new
+// one), or one that no longer opens with the cursor's head (the owner reopened the record, which
+// truncates its journal, and wrote past offset again before this read) restarts the read at 0 and
+// reports isTruncated; the read from 0 captures the head afresh. A trailing line the owner has not
+// finished writing is left for the next read. A journal that will not open or read yields a batch
+// with no items at the same cursor: the follower simply looks again on its next poll, which is all
+// a reader of a file it does not own can do.
+func readJournal(src watchSource, gen int, cursor journalCursor, isProbing bool) watchBatchMsg {
+	batch := watchBatchMsg{gen: gen, journalCursor: cursor}
 	if isProbing {
 		batch.isOwnerGone = isHoldFree(src.probe)
 	}
-	journal, isReplaced := followedJournal(src.journalPath, held)
+	journal, isReplaced := followedJournal(src.journalPath, cursor.journal)
 	if journal == nil {
 		return batch
 	}
@@ -545,7 +558,16 @@ func readJournal(src watchSource, gen int, offset int64, held *os.File, isProbin
 	if err != nil {
 		return batch
 	}
-	if isReplaced || info.Size() < offset {
+	offset := cursor.offset
+	isTruncated := isReplaced || info.Size() < offset
+	if !isTruncated && offset > 0 && cursor.head != nil {
+		isReopened, err := isHeadChanged(journal, cursor.head)
+		if err != nil {
+			return batch
+		}
+		isTruncated = isReopened
+	}
+	if isTruncated {
 		batch.isTruncated = true
 		offset = 0
 	}
@@ -559,6 +581,9 @@ func readJournal(src watchSource, gen int, offset int64, held *os.File, isProbin
 	if end < 0 {
 		return batch
 	}
+	if offset == 0 {
+		batch.head = bytes.Clone(data[:bytes.IndexByte(data, '\n')+1])
+	}
 	batch.offset = offset + int64(end+1)
 	for _, raw := range bytes.Split(data[:end], []byte{'\n'}) {
 		if item, ok := decodeWatchLine(raw, src); ok {
@@ -566,6 +591,21 @@ func readJournal(src watchSource, gen int, offset int64, held *os.File, isProbin
 		}
 	}
 	return batch
+}
+
+// isHeadChanged reports whether journal no longer opens with head, its first line as the follower
+// last read it from offset 0. A journal now shorter than head (a short read at EOF) has changed; any
+// other read error is returned, so the caller keeps its cursor and looks again on the next poll.
+func isHeadChanged(journal *os.File, head []byte) (bool, error) {
+	got := make([]byte, len(head))
+	n, err := journal.ReadAt(got, 0)
+	if n < len(head) {
+		if errors.Is(err, io.EOF) {
+			return true, nil
+		}
+		return false, err
+	}
+	return !bytes.Equal(got, head), nil
 }
 
 // isHoldFree asks probe whether the owner has let the session go. A probe that fails answers
@@ -697,7 +737,7 @@ func (m Model) foldWatchBatch(msg watchBatchMsg) (tea.Model, tea.Cmd) {
 	if msg.journal != m.watch.journal {
 		closeJournal(m.watch.journal)
 	}
-	m.watch.offset, m.watch.journal = msg.offset, msg.journal
+	m.watch.journalCursor = msg.journalCursor
 	if msg.isTruncated {
 		m.clearWatchView()
 	}

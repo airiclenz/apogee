@@ -38,6 +38,8 @@ type watchFixture struct {
 	src     watchSource
 	file    *os.File
 	journal *eventjson.Journal
+	// now is the clock reopen hands the journal; nil is the journal's own.
+	now func() time.Time
 }
 
 // newWatchFixture writes a record holding entries and opens a journal whose frame names title and
@@ -86,6 +88,7 @@ func (f *watchFixture) reopen(title string, head int) {
 		Session: watchSessionID,
 		Title:   title,
 		Entries: head,
+		Now:     f.now,
 		Window:  time.Hour,
 	})
 }
@@ -427,6 +430,65 @@ func TestWatchRepaintsOnTruncation(t *testing.T) {
 	}
 }
 
+func TestWatchRepaintsOnATruncationRegrownPastTheOffset(t *testing.T) {
+	t.Parallel()
+	later := func() time.Time { return time.Date(2030, 1, 2, 3, 4, 5, 123456789, time.UTC) }
+	cases := []struct {
+		name  string
+		title string
+		// now is the reopened journal's clock; nil keeps the fixture's.
+		now func() time.Time
+		// isReplaced removes the journal first, so the reopen writes a new file under the path.
+		isReplaced bool
+		wantLegend string
+	}{
+		{name: "a new title", title: "again", wantLegend: "watching again"},
+		{name: "only the frame's time differs", title: "watched", now: later, wantLegend: "watching watched"},
+		{name: "a replaced journal", title: "again", isReplaced: true, wantLegend: "watching again"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWatchFixture(t, "watched", nil, 0)
+			m := enterWatchOn(t, watchEngine(), f)
+			f.prompt("before", false)
+			m = pollWatch(t, m)
+
+			if tc.isReplaced {
+				if err := os.Remove(f.src.journalPath); err != nil {
+					t.Fatalf("remove journal: %v", err)
+				}
+			}
+			f.now = tc.now
+			f.reopen(tc.title, 0)
+			f.prompt("after the owner reopened the record, a prompt long enough to regrow the journal", false)
+			info, err := os.Stat(f.src.journalPath)
+			if err != nil {
+				t.Fatalf("stat journal: %v", err)
+			}
+			if info.Size() <= m.watch.offset {
+				t.Fatalf("setup: the reopened journal is %d bytes, not past the follower's offset %d",
+					info.Size(), m.watch.offset)
+			}
+			m = pollWatch(t, m)
+
+			want := []string{"after the owner reopened the record, a prompt long enough to regrow the journal"}
+			if got := entryTexts(m, entryUser); !slices.Equal(got, want) {
+				t.Errorf("user entries = %q; want only the reopened journal's", got)
+			}
+			if got := m.legend(); !strings.Contains(got, tc.wantLegend) {
+				t.Errorf("legend = %q; want it to contain %q", got, tc.wantLegend)
+			}
+
+			f.prompt("and it grows", false)
+			m = pollWatch(t, m)
+			if got := entryTexts(m, entryUser); !slices.Equal(got, append(want, "and it grows")) {
+				t.Errorf("after growth, user entries = %q; want the reopened journal's read on from its offset", got)
+			}
+		})
+	}
+}
+
 func TestWatchRefusesTheStopKeyInRunViewsAndTheBlockCursor(t *testing.T) {
 	t.Parallel()
 	watchedRun := func(t *testing.T, eng *fakeEngine) Model {
@@ -535,7 +597,7 @@ func TestWatchFollowerPollsOnItsOwn(t *testing.T) {
 	f := newWatchFixture(t, "watched", nil, 0)
 	m := enterWatchOn(t, watchEngine(), f)
 
-	_, cmd := stepCmd(t, m, watchBatchMsg{gen: m.watch.gen, offset: m.watch.offset, journal: m.watch.journal})
+	_, cmd := stepCmd(t, m, watchBatchMsg{gen: m.watch.gen, journalCursor: m.watch.journalCursor})
 	polled := make(chan bool, 1)
 	go func() { polled <- containsPoll(cmd(), m.watch.gen) }()
 

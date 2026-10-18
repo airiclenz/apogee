@@ -38,7 +38,11 @@ internal/tui/schedule_test.go — activityModel; internal/tui/watch_test.go — 
 **Closes:** watch-defers-firings
 **Commit:** `fix(tui): report the watcher's own activity to the schedule gate`
 
-## 2. Watch restarts on a journal truncated and regrown within one poll
+## 2. Watch restarts on a journal truncated and regrown within one poll — ✅ DONE (2026-10-18)
+
+NOTES (2026-10-18): offset, journal and head are bundled as an embedded `journalCursor` in both `watchState` and `watchBatchMsg` (promoted fields keep `m.watch.offset` / `msg.journal` working); `readJournal` takes the cursor, so its parameter list shrank to four. The head check lives in a new helper, `isHeadChanged`.
+NOTES (2026-10-18): `watchFixture` gained a `now` clock passed to the reopened journal, so the same-title variant differs from the original frame only by `time` every time it runs; `TestWatchFollowerPollsOnItsOwn`'s hand-built batch now carries the whole cursor, head included.
+NOTES (2026-10-18): the new test checks that the first two variants fail with the head check switched off (confirmed by hand); the replaced-journal variant guards the existing `isSameFile` path.
 
 **What:** Fix (defect from the live-session-watch plan): `readJournal` detects a restart only by file identity (`isSameFile`) or `size < offset`. `Store.OpenJournal` reopens with `O_TRUNC` on the same inode, so a journal regrown past the old offset within one `watchPollInterval` resumes mid-file and misses the new `run_started`.
 **Regression guard.** Only a short read (`n < len(head)`, `io.EOF`) or a byte mismatch restarts at 0; any other `ReadAt` error returns the batch at its offset with head kept (readJournal's doc: a journal that will not read yields no items at the same offset — never `clearWatchView`), and every `readJournal` return carries the held head. The Goal's "(or replaced)" clause gets its own test: `os.Remove(f.src.journalPath)` before `f.reopen`, regrown past `m.watch.offset` (new inode, `isSameFile` false).
