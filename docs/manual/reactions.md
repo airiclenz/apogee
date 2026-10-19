@@ -49,7 +49,7 @@ list, and what adopting a script means.
 # ~/.apogee/config.yaml
 reactions:
   - id: notify                          # unique; it is what a failure notice reports
-    on: [approval-requested]            # one or more of the eleven notices
+    on: [approval-requested]            # one or more of the twelve notices
     run: ["notify-send", "apogee is waiting for an answer"]
     timeout: 10s                        # optional; default 30s
   - id: ci-bell
@@ -80,7 +80,7 @@ reactions:
 | Key | Meaning |
 |---|---|
 | `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id, and so is `context-fill-notice`, the engine's own built-in advise reaction — it is switched with its own top-level key, not with an entry here. |
-| `on:` | Required, at least one. A `run:` entry reacts to the eleven notices below; an `advise:` entry reacts at `post-tool-result` or `file-changed`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a notice other than `file-changed` under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
+| `on:` | Required, at least one. A `run:` entry reacts to the twelve notices below; an `advise:` entry reacts at `post-tool-result` or `file-changed`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a notice other than `file-changed` under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`. `session-started` under `advise:` is refused by a sentence of its own, because advice at a session's start is not admitted yet: `advise: on "session-started" is pending admission — session-start advice awaits its admission arm`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
 | `run:` | The entry's observe action, in either of two shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. `advise:` and `gate:` take the same two shapes; anything else — a bare string, a number — is refused at startup by a sentence naming the key: `reaction <id>: run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`. |
 | `workspace:` | Optional. Scopes the entry to one workspace; unset means every workspace. |
 | `timeout:` | Optional Go duration (`10s`, `2m`). Default `30s` for `run:`, `10s` for `advise:`, `5s` for `gate:`. Bounds the command run and the POST alike, and one `timeout:` binds every Reaction its entry arms. |
@@ -105,9 +105,9 @@ The block is file-only: there is no flag and no environment variable for it. `/s
 read-only `reactions:` row counting what is armed, and `⏎` on it opens your editor, because no
 settings row can write a list this shape.
 
-## The eleven notices
+## The twelve notices
 
-Six report something the session did; five report that one of the loop's own **seams** finished
+Seven report something the session did; five report that one of the loop's own **seams** finished
 passing.
 
 | Notice | Fires when | Depth |
@@ -118,6 +118,7 @@ passing.
 | `approval-requested` | An approval was **raised** and is waiting on you — before you answer, not after. | Any, sub-agents included |
 | `approval-decided` | That same approval reached its verdict, which the payload carries as `decision` — or an [allow rule](configuration.md) answered an ordinary approval in your place, with no `approval-requested` before it. | Any, sub-agents included |
 | `error` | A localised, recovered engine fault. A Reaction's own failure never becomes one of these, because an entry subscribed to `error` would then fire on itself and loop. | Any, sub-agents included |
+| `session-started` | A session started, once per start: a fresh session, a `--resume`, every [`apogee headless`](headless.md), [daemon](daemon.md) or `/schedule` run, `/clear`, `/new`, a `/sessions` resume and `/fork`. The payload's `start` says which — `new`, `resume`, `clear` or `fork`. A sub-agent is not a session start and never fires it. | Top-level only |
 | `pre-request-finished` | The `pre-request` seam's pass finished: the outgoing request is as the loop will send it. Full working value; only serialized when you subscribe. | Top-level only |
 | `post-response-finished` | The `post-response` seam's pass finished, on the model's answer. Full working value; only serialized when you subscribe. | Top-level only |
 | `pre-tool-exec-finished` | The `pre-tool-exec` seam's pass finished, on a call about to run. Full working value; only serialized when you subscribe. | Top-level only |

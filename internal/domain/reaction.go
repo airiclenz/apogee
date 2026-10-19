@@ -63,11 +63,18 @@ const (
 	MomentHistoryRewriteFinished Moment = "history-rewrite-finished"
 )
 
+// MomentSessionStarted is the SESSION-BOUNDARY notice: a standalone notice like the six above,
+// reporting that a top-level session started — constructed fresh, resumed, cleared or forked
+// (ADR 0076 amendment of 2026-10-19). It is declared after the seam-closing notices because it
+// joined the vocabulary after them, and allNotices keeps that order.
+const MomentSessionStarted Moment = "session-started"
+
 // allSeams is the seam vocabulary in loop order; allNotices is the notice vocabulary in the
 // order internal/reactions reports it — the six standalone notices first, in the order that
-// package already listed them, then the five seam-closing notices in loop order. Appending
-// rather than interleaving keeps the five spellings a configuration in the wild already names
-// at the head of every listing they appear in.
+// package already listed them, then the five seam-closing notices in loop order, then
+// session-started. Appending rather than interleaving keeps the spellings a configuration in the
+// wild already names at the head of every listing they appear in, so a notice added later goes
+// at the end.
 var (
 	allSeams = []Moment{
 		MomentPreRequest,
@@ -88,6 +95,7 @@ var (
 		MomentPreToolExecFinished,
 		MomentPostToolResultFinished,
 		MomentHistoryRewriteFinished,
+		MomentSessionStarted,
 	}
 )
 
@@ -139,7 +147,7 @@ func (m Moment) Closing() Moment {
 // listing them for a help text or a validation message cannot disturb the vocabulary.
 func Seams() []Moment { return append([]Moment(nil), allSeams...) }
 
-// Notices returns the eleven notice Moments in their documented order, as a fresh copy.
+// Notices returns the twelve notice Moments in their documented order, as a fresh copy.
 func Notices() []Moment { return append([]Moment(nil), allNotices...) }
 
 // Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (CONTEXT:
@@ -536,6 +544,13 @@ func (r Reaction) Validate() error {
 		if async {
 			switch r.Class {
 			case ClassAdvise:
+				if m == MomentSessionStarted {
+					return fmt.Errorf(
+						"%w %q: advise: on %q is pending admission — session-start advice "+
+							"awaits its admission arm",
+						ErrInvalidReaction, r.ID, m,
+					)
+				}
 				if m != MomentPostToolResult && m != MomentFileChanged {
 					return fmt.Errorf(
 						"%w %q: advise: reacts at post-tool-result or file-changed; %q is neither",

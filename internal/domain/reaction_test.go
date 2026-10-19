@@ -21,7 +21,7 @@ var noopPreRequest = PreRequestFunc(func(context.Context, *Request) (Outcome, er
 	return Outcome{}, nil
 })
 
-// TestMomentValuesArePinnedLiterals pins all sixteen Moment spellings. The strings are the ones a
+// TestMomentValuesArePinnedLiterals pins all seventeen Moment spellings. The strings are the ones a
 // user writes in configuration and an observer reads off a ReactionFiredEvent, so changing one
 // breaks every configuration in the wild — the seams carry the retired hook-point values and the
 // notices the reactions.Event values, unchanged.
@@ -48,6 +48,7 @@ func TestMomentValuesArePinnedLiterals(t *testing.T) {
 		{MomentPreToolExecFinished, "pre-tool-exec-finished"},
 		{MomentPostToolResultFinished, "post-tool-result-finished"},
 		{MomentHistoryRewriteFinished, "history-rewrite-finished"},
+		{MomentSessionStarted, "session-started"},
 	}
 
 	for _, c := range cases {
@@ -123,6 +124,7 @@ func TestSeamsAndNoticesReportTheVocabularyAsACopy(t *testing.T) {
 		MomentPreToolExecFinished,
 		MomentPostToolResultFinished,
 		MomentHistoryRewriteFinished,
+		MomentSessionStarted,
 	}
 
 	seams := Seams()
@@ -177,6 +179,7 @@ func TestMomentIsSeam(t *testing.T) {
 		{MomentPreToolExecFinished, false},
 		{MomentPostToolResultFinished, false},
 		{MomentHistoryRewriteFinished, false},
+		{MomentSessionStarted, false},
 		{Moment("not-a-moment"), false},
 		{Moment(""), false},
 	}
@@ -499,6 +502,49 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				Handler: argv,
 			},
 			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "turn-done" is not one`,
+		},
+		{
+			name: "an argv handler on session-started validates",
+			reaction: Reaction{
+				ID:      "greet",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentSessionStarted},
+				Handler: argv,
+			},
+		},
+		{
+			name: "an argv handler advising at session-started is refused pending admission",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentSessionStarted},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "primer": advise: on "session-started" is pending admission — session-start advice awaits its admission arm`,
+		},
+		{
+			name: "a webhook handler advising at session-started is refused pending admission",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentFileChanged, MomentSessionStarted},
+				Handler: webhook,
+			},
+			wantErr: `apogee: invalid reaction "primer": advise: on "session-started" is pending admission — session-start advice awaits its admission arm`,
+		},
+		{
+			name: "an argv handler gating at session-started is refused",
+			reaction: Reaction{
+				ID:      "warden",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentSessionStarted},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "warden": gate: reacts at pre-tool-exec; "session-started" is not it`,
 		},
 		{
 			name: "an argv handler advising at post-tool-result validates",

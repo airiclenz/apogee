@@ -4,11 +4,12 @@ title: "Moment: a point the loop passes on which a Reaction may fire"
 
 **Moment**:
 A point the loop passes, on which a **Reaction** may fire — `domain.Moment`, one string vocabulary
-of sixteen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and
+of seventeen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and
 its five are listed in the order a Turn passes them: `pre-request`, `post-response`,
 `pre-tool-exec`, `post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload
-sealed, and there are **eleven** of them. Six report a fact of their own: `exchange-finished`,
-`turn-finished`, `file-changed`, `approval-requested`, `approval-decided`, `error`; `file-changed`
+sealed, and there are **twelve** of them. Seven report a fact of their own: `exchange-finished`,
+`turn-finished`, `file-changed`, `approval-requested`, `approval-decided`, `error`,
+`session-started` (a top-level session boundary — fresh, resumed, cleared or forked); `file-changed`
 is also one of the two Moments an advise **Reaction** fires at, beside `post-tool-result`. Five are the
 **seam-closing** notices — one per seam, spelled `<seam>-finished`: `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished`,

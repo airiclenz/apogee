@@ -16,8 +16,8 @@ import (
 // (ADR 0073 §4).
 //
 // Only the six named below have a constant here; the vocabulary itself is domain.Notices(), so
-// the five `<seam>-finished` closings are accepted under `on:` from the same commit that added
-// them to the core, and are matched by their spelling.
+// the five `<seam>-finished` closings and `session-started` are accepted under `on:` from the same
+// commit that added them to the core, and are matched by their spelling.
 //
 // The string is the spelling a user writes in the `on:` list of a `reactions:` entry, so it is
 // also the value that reaches a fired command as APOGEE_REACTION_EVENT and the payload's "event"

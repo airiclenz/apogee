@@ -53,7 +53,12 @@ NOTES (2026-10-19): the amendment also records the ratified Timing call (advise 
 **Acceptance:** `capcom check` reports no problems; `capcom know show "ADR 0076"` lists the amendment; `capcom know show adr-0076-amend-1019` prints it.
 **Commit:** `docs(adr): ADR 0076 amendment — session-started boundary and its advise slot`
 
-## 2. The session-started Moment in the vocabulary
+## 2. The session-started Moment in the vocabulary — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the advise refusal for session-started sits in Reaction.Validate's out-of-process (argv/webhook) branch, ahead of the generic advise sentence; no Go handler can name session-started until item 7 adds its handler type, so the engine-origin path is untouched here.
+NOTES (2026-10-19): internal/reactions/hooks.go gains no SessionStarted constant — like the five seam-closing notices it is accepted by spelling through domain.Notices() and pinned in hooks_test.go through domain.MomentSessionStarted; the package comment says so.
+NOTES (2026-10-19): the reactions.md "The twelve notices" table places the session-started row after `error`, with the standalone notices its prose groups it with ("Seven report something the session did"), not at the vocabulary's end; the row and the config.yaml/configuration.md lines describe the ratified emission (start: new|resume|clear|fork, top-level only) that item 3 implements.
+NOTES (2026-10-19): reactions.md's `on:` row and configuration.md's Reactions paragraph also name the session-started advise refusal sentence, since it is a new user-facing load-time refusal.
 
 **What:**
 **Goal:** `domain.Moment` includes the notice `session-started` (top-level only); `run:` entries may subscribe to it; `advise:` with `session-started` in `on:` is refused at load with a sentence naming the key and that session-start advice awaits its admission arm; `gate:` refuses it as any other notice. The public counts follow: `docs/manual/reactions.md` "The eleven notices" becomes twelve with a table row for `session-started`, and the glossary Moment Note's Moment count follows (seventeen).

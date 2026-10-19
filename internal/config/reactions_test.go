@@ -345,6 +345,16 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: `invalid reaction "coach": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`,
 		},
 		{
+			name: "advise: on session-started awaits its admission arm",
+			body: "reactions:\n  - id: primer\n    on: [session-started]\n    advise: [\"say-something\"]\n",
+			want: `invalid reaction "primer": advise: on "session-started" is pending admission — session-start advice awaits its admission arm`,
+		},
+		{
+			name: "gate: reacts at session-started",
+			body: "reactions:\n  - id: warden\n    on: [session-started]\n    gate: [\"decide\"]\n",
+			want: `invalid reaction "warden": gate: reacts at pre-tool-exec; "session-started" is not it`,
+		},
+		{
 			name: "gate: is a bare string",
 			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate: decide\n",
 			want: `reaction "warden": gate: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,

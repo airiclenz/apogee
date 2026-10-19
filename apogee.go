@@ -720,10 +720,14 @@ const (
 	MomentHistoryRewriteFinished = domain.MomentHistoryRewriteFinished
 )
 
+// MomentSessionStarted is the session-boundary notice: a top-level session started — constructed
+// fresh, resumed, cleared or forked.
+const MomentSessionStarted = domain.MomentSessionStarted
+
 // Seams returns the five seam Moments in loop order, as a fresh copy.
 func Seams() []Moment { return domain.Seams() }
 
-// Notices returns the eleven notice Moments in their documented order, as a fresh copy.
+// Notices returns the twelve notice Moments in their documented order, as a fresh copy.
 func Notices() []Moment { return domain.Notices() }
 
 // Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (ADR 0076 D2).

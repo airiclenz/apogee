@@ -891,9 +891,10 @@ list run directly (no shell; write `["sh", "-c", "…"]` when you want one) or a
 A [Project config](#a-projects-own-config--apogeeconfigyaml) may propose reactions of its own in the
 same shape; each arms only once you adopt it, and runs under the rules that section lists.
 A `run:` reaction is told what already happened, and nothing it prints reaches the model, the
-conversation or the saved session. It takes the eleven notices — the six standalone notices `exchange-finished`,
+conversation or the saved session. It takes the twelve notices — the seven standalone notices `exchange-finished`,
 `turn-finished`, `file-changed`, `approval-requested` (raised, before you answer),
-`approval-decided` (its verdict) and `error`, and the five seam-closing notices `pre-request-finished`,
+`approval-decided` (its verdict), `error` and `session-started` (a session started, resumed,
+cleared or forked), and the five seam-closing notices `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished` and
 `history-rewrite-finished`. The other two keys are the ones the loop waits on, and each takes the
 same two shapes `run:` does — an argv list, or a webhook mapping whose reply body stands where the
@@ -910,7 +911,8 @@ first line it prints, or its webhook answers, is `allow`, `deny` or `ask`, the r
 `tool call denied by reaction <id>`; an `ask` forces the approval prompt, `reaction <id> asks:
 <reason>`, which an unattended run denies; an answer that is missing, malformed, late or crashed
 counts as `ask`, and an `allow` changes nothing the mode already decided. A Moment a key cannot
-take is refused at startup by a sentence naming the key and what it does take.
+take is refused at startup by a sentence naming the key and what it does take, and `session-started`
+under `advise:` by one saying that session-start advice awaits its admission arm.
 
 ```yaml
 # ~/.apogee/config.yaml
