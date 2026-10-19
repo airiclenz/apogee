@@ -73,7 +73,14 @@ internal/reactions/hooks_test.go — TestEventsIsTheWholeVocabularyInOrder, Test
 **Acceptance:** `go build ./...`; `GOMEMLIMIT=2GiB go test -count=1 ./internal/domain/ ./internal/config/ ./internal/reactions/`; `capcom check`.
 **Commit:** `feat(domain): a session-started notice in the Reaction vocabulary`
 
-## 3. The engine emits session-started at every boundary
+## 3. The engine emits session-started at every boundary — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the failed-bind case follows the DECISION: domain.Config gains DeferSessionStart, which holds New's and Resume's construction announcement back, and the public Agent.AnnounceSessionStart announces it, at most once per Agent through a sync.Once. wire_boot.go sets the flag, and lateEngine.Bind announces after `e.agent = agent`, so a bind that refuses its Agent (a held generation or profile) never announces. Pinned by TestLateEngineBindRefusedAnnouncesNoSessionStart, and by TestLateEngineBindAnnouncesTheSessionStartOnceInstalled, which checks that the announcement comes after the replay.
+NOTES (2026-10-19): consequential edit — internal/domain/config.go: made necessary by the DECISION's deferral (the new DeferSessionStart field), and the ObserveRunner field's doc ("the Agent never emits through this field, only swaps it"; "a Firing … holds no Runner") was made false by the new door.
+NOTES (2026-10-19): consequential edit — cmd/apogee/wire_boot.go: made necessary by the DECISION's deferral; the TUI composition root sets Config.DeferSessionStart so that lateEngine.Bind announces the session once it is installed.
+NOTES (2026-10-19): apogee.go also aliases the door's argument type: SessionStart, plus SessionStartNew, SessionStartResume and SessionStartClear. Without them an embedder could not implement the widened apogee.ObserveRunner, because domain is internal. The `fork` start is left to item 4.
+NOTES (2026-10-19): the door's payload carries Turn 0, documented on sessionStartedFiring as "ahead of the session's first Turn". The Agent's running Turn index is not passed through the door.
+NOTES (2026-10-19): bindOverRunner (cmd/apogee/wire_engine_test.go) now sets DeferSessionStart, to mirror the three fields wire_boot.go fills. No existing test reads the starts.
 
 **What:** Recast at the regression check (2026-10-19). Depends on item 2. The public alias `apogee.ObserveRunner` gains the new door — an embedder-facing interface change the CHANGELOG sidecar names (the two test fakes are its only implementers).
 **Goal:** every engine Session boundary emits exactly one `session-started` notice for the top-level agent, carrying `start` (`new` for construction — fresh, `--resume` and Firings; `clear` for `/clear` and `/new`; `resume` for a `/sessions` resume; `fork` for `/fork` is item 4's), matched by the observe lane to `run:` entries with the standard payload plus `start` and the env `APOGEE_REACTION_START`; a Firing's payload carries `schedule` as other notices do. The notice is never emitted twice for one boundary. Delegates emit none.

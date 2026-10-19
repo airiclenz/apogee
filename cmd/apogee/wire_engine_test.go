@@ -302,12 +302,20 @@ func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
 // handed and what the ENGINE was holding at that instant, which is how the order of the two applies
 // is pinned without a Runner — or the goroutines a Runner drains on — behind it. agent is the Agent
 // that holds it (bindOverRunner), read directly rather than through the holder, whose lock the
-// swap runs under.
+// swap runs under. starts is every session-started boundary it was told of, in order, and
+// handedAtStart how many lists it had been handed when each was announced.
 type recordingRunner struct {
-	agent *apogee.Agent
-	lists [][]domain.Reaction
-	seen  []apogee.Generation
-	err   error
+	agent         *apogee.Agent
+	lists         [][]domain.Reaction
+	seen          []apogee.Generation
+	starts        []apogee.SessionStart
+	handedAtStart []int
+	err           error
+}
+
+func (r *recordingRunner) SessionStarted(start apogee.SessionStart) {
+	r.starts = append(r.starts, start)
+	r.handedAtStart = append(r.handedAtStart, len(r.lists))
 }
 
 func (r *recordingRunner) Replace(list []domain.Reaction) error {
@@ -322,14 +330,16 @@ func (r *recordingRunner) Replace(list []domain.Reaction) error {
 }
 
 // bindOverRunner binds engine to an Agent that holds runner as its observe half, built over
-// observe — the two Config fields wire_boot.go fills (Config.ObserveRunner, Config.Observe). A
-// recordingRunner witness is pointed at that Agent before the bind's replay reaches it.
+// observe — the Config fields wire_boot.go fills (Config.ObserveRunner, Config.Observe, and the
+// construction boundary deferred to the bind, Config.DeferSessionStart). A recordingRunner witness is
+// pointed at that Agent before the bind's replay reaches it.
 func bindOverRunner(t *testing.T, engine *lateEngine, runner apogee.ObserveRunner, observe []domain.Reaction) error {
 	t.Helper()
 	return engine.Bind(func() (*apogee.Agent, error) {
 		cfg := validCfg(t)
 		cfg.ObserveRunner = runner
 		cfg.Observe = observe
+		cfg.DeferSessionStart = true
 		agent, err := apogee.New(cfg)
 		if witness, ok := runner.(*recordingRunner); ok {
 			witness.agent = agent
@@ -645,6 +655,48 @@ func TestLateEngineBindRefusesAPendingGenerationTheEngineWillNotArm(t *testing.T
 	}
 	if engine.bound() != nil {
 		t.Errorf("an Agent was installed despite the refusal; want the holder left unbound")
+	}
+}
+
+// The construction boundary's session-started notice is the bind's to announce, once the Agent is
+// INSTALLED (Config.DeferSessionStart): exactly once, and only after the replay — so an entry the
+// held generation armed hears of the session that generation belongs to.
+func TestLateEngineBindAnnouncesTheSessionStartOnceInstalled(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{}
+	engine.seedReactions(apogee.Generation{Observe: []domain.Reaction{observeReaction("notify")}})
+
+	if err := bindOverRunner(t, engine, runner, nil); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	if want := []apogee.SessionStart{apogee.SessionStartNew}; !reflect.DeepEqual(runner.starts, want) {
+		t.Fatalf("the bind announced %v; want the construction boundary once, %v", runner.starts, want)
+	}
+	if runner.handedAtStart[0] != 1 {
+		t.Errorf("the boundary was announced with %d list(s) handed; want it after the replay's one", runner.handedAtStart[0])
+	}
+}
+
+// A bind that refuses the Agent it built — here a held generation the engine will not arm — never
+// installed a session, so it announces none: the Agent is closed unannounced.
+func TestLateEngineBindRefusedAnnouncesNoSessionStart(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{}
+	engine.seedReactions(apogee.Generation{Sync: []domain.Reaction{gateReaction("read-cache")}})
+
+	if err := bindOverRunner(t, engine, runner, nil); !errors.Is(err, apogee.ErrInvalidReaction) {
+		t.Fatalf("Bind err = %v; want the engine's ErrInvalidReaction for a reserved id", err)
+	}
+
+	if len(runner.starts) != 0 {
+		t.Errorf("a refused bind announced %v; want no session-started for a session never installed", runner.starts)
 	}
 }
 

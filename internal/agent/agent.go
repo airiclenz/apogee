@@ -181,6 +181,12 @@ type Agent struct {
 	// under the lock every armed Reaction's Bypass read takes.
 	swapMu sync.Mutex
 
+	// constructionStart makes the construction boundary's session-started notice one-shot
+	// (announceConstruction): New and Resume announce through it unless the Driver deferred the
+	// notice (Config.DeferSessionStart), and the Driver's AnnounceSessionStart does, so the one
+	// boundary is never announced twice whichever of them gets there.
+	constructionStart sync.Once
+
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
 	// follow the modeMu
@@ -763,6 +769,11 @@ func resolveOptions(opts []Option) constructOptions {
 // OpenAI-compatible client unless WithDialer says otherwise) carrying cfg.APIKey —
 // unconditionally, since an empty key sends no auth header — under the wire cfg.Wire names
 // (dialOptions) and, only when cfg.Inspector asks for it, the Inspector's wire observer (wireTap).
+//
+// Construction is a Session boundary: its last act announces the session-started notice with start
+// "new" to the observe Runner — after the fenced runner is bound, so a repo `run:` the notice fires
+// runs under this Agent's permit — unless cfg.DeferSessionStart leaves that to the Driver
+// (AnnounceSessionStart).
 func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	o := resolveOptions(opts)
 	wire, tap := dialOptions(cfg)
@@ -774,6 +785,7 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	a.ownsUpstream = true // this Agent dialled that client, so Close is the one that tears it down
 	tap.bind(a)
 	a.bindProjectRun()
+	a.announceConstruction()
 	return a, nil
 }
 
@@ -781,7 +793,9 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 // live delegates (Approver, Confiner, EventSink) and state roots again — only the
 // serializable conversation state comes from snap. External connections (MCP,
 // network) reconnect fresh; no server-side state is restored (ADR 0008). It takes the
-// same Options as New: a resumed session dials its own client, through the same seam.
+// same Options as New: a resumed session dials its own client, through the same seam. Its
+// construction boundary is announced as New's is, with start "new": a resumed START constructs its
+// session afresh, unlike a live RestoreSession.
 func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, error) {
 	o := resolveOptions(opts)
 	wire, tap := dialOptions(cfg)
@@ -793,6 +807,7 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
 	tap.bind(a)
 	a.bindProjectRun()
+	a.announceConstruction() // as in New: a resumed start is a CONSTRUCTED session, start "new"
 	return a, nil
 }
 
@@ -1943,7 +1958,9 @@ func (a *Agent) CutSnapshot(dropExchanges int) (domain.Session, error) {
 // orphaned. The Agent stays snapshot-safe after it returns.
 //
 // It is also a session boundary, so the workspace context files are re-read here: the new
-// session speaks from whatever the repo's AGENTS.md says NOW. A refused call changes nothing.
+// session speaks from whatever the repo's AGENTS.md says NOW, and a successful clear announces the
+// session-started notice with start "clear" to the observe Runner (announceSessionStart) as its
+// last act. A refused call changes nothing and announces nothing.
 //
 // It is a boundary for the Consoles too, and every Console is closed here (ADR 0059 §1). A Console
 // is a live process the model steers by id, and the ids live in the history this call drops —
@@ -1996,6 +2013,7 @@ func (a *Agent) ClearContext() error {
 	a.reloadContextFiles()
 	a.conv = *domain.NewConversation(nil)
 	a.rearmFillNotice() // the climb the ladder tracked is gone with the conversation
+	a.announceSessionStart(domain.SessionStartClear)
 	return nil
 }
 
@@ -2035,6 +2053,10 @@ func (a *Agent) ClearContext() error {
 // restore leaves them running. A restore the Driver called KeepWorkflows just before — a `/sessions`
 // switch or a `/fork` the human answered "keep them" — stops nothing: the running set and its held
 // notes carry over into the incoming session. The mark is consumed even by a refused restore.
+//
+// A successful restore is a session boundary, and its last act announces the session-started
+// notice with start "resume" to the observe Runner (announceSessionStart); a refused one announces
+// nothing.
 func (a *Agent) RestoreSession(snap domain.Session) error {
 	keep := a.background.takeKeep()
 	if a.turns.inExchange {
@@ -2049,6 +2071,7 @@ func (a *Agent) RestoreSession(snap domain.Session) error {
 	a.consoles.CloseAll()
 	a.usage = usageTally{}
 	a.reloadContextFiles()
+	a.announceSessionStart(domain.SessionStartResume)
 	return nil
 }
 

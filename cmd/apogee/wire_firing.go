@@ -514,6 +514,12 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// so the renderer stays outermost and the Reactions stay invisible to it.
 	if in.hooks != nil {
 		cfg.Events = in.hooks
+		// And the same Runner as the Agent's observe half, seeded with the lane it was built over
+		// (Config.ObserveRunner, Config.Observe), as the TUI boot does: the Agent run.Once builds
+		// announces the Firing's session-started boundary through it, and run.Once's arming swap of
+		// that same lane finds nothing moved and retires nothing.
+		cfg.ObserveRunner = in.hooks
+		cfg.Observe = domain.LanesOf(in.opts.Reactions).Observe
 	}
 	// The slot that Runner's repo `run:` entries reach this Firing's Agent through: the Agent
 	// run.Once builds binds its fenced runner into it, so a repo command runs under that Agent's

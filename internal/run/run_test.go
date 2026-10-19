@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -560,18 +561,100 @@ func TestOnceHandsTheSpecsObserveLaneToTheFiringsRunner(t *testing.T) {
 	if len(got[0]) != 1 || got[0][0].ID != "notify" {
 		t.Errorf("the Runner was handed %+v, want the Spec's one observe entry", got[0])
 	}
+	if want := []domain.SessionStart{domain.SessionStartNew}; !slices.Equal(runner.starts, want) {
+		t.Errorf("the Runner was told of the boundaries %v, want the Firing's one construction %v", runner.starts, want)
+	}
 }
 
-// recordingObserveRunner is a Config.ObserveRunner that keeps every list it is handed, so a test
-// can read which observe lane the Agent passed on. It never refuses. Once swaps on the caller's
-// goroutine before it returns, so the test reads lists without a lock.
+// TestOnceFiresTheFiringsSessionStartedOnceWithItsSchedule — a Firing is a constructed session, so
+// the Agent Once builds announces one session-started boundary, start "new", through the Runner the
+// Config holds; the Runner stamps the Firing's Schedule on it as on every other notice. The Runner is
+// built over the Spec's lane and seeded as Config.Observe, as the Firing composer does, so Once's
+// arming swap retires nothing and the one entry fires exactly once.
+func TestOnceFiresTheFiringsSessionStartedOnceWithItsSchedule(t *testing.T) {
+	t.Parallel()
+
+	lane := []domain.Reaction{{
+		ID:      "primer",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []domain.Moment{domain.MomentSessionStarted},
+		Handler: domain.ArgvHandler{Argv: []string{"true"}},
+		Timeout: time.Second,
+	}}
+	exec := &payloadRecorder{}
+	runner, err := reactions.New(lane, reactions.Options{
+		Workspace: t.TempDir(),
+		Schedule:  &reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"},
+		Exec:      exec,
+	})
+	if err != nil {
+		t.Fatalf("reactions.New: %v", err)
+	}
+	up := stubllm.New(t, finalScript("done"))
+	spec := planSpec(up.URL, "do the thing")
+	spec.Config.Events = runner
+	spec.Config.ObserveRunner = runner
+	spec.Config.Observe = lane
+	spec.Generation = domain.Generation{Observe: lane}
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(5*time.Second))
+	defer cancel()
+	if err := runner.Close(ctx); err != nil {
+		t.Fatalf("runner.Close: %v", err)
+	}
+
+	fired := exec.recorded()
+	if len(fired) != 1 {
+		t.Fatalf("the session-started entry fired %d time(s), want once: %+v", len(fired), fired)
+	}
+	if got := fired[0]; got.Event != domain.MomentSessionStarted || got.Start != domain.SessionStartNew {
+		t.Errorf("fired %q with start %q, want session-started with start new", got.Event, got.Start)
+	}
+	if got := fired[0].Schedule; got == nil || got.ID != "sch-1" || got.Name != "Nightly" {
+		t.Errorf("the firing's schedule = %#v, want the Firing's sch-1/Nightly", got)
+	}
+}
+
+// payloadRecorder is a reactions.Executor that keeps every payload it is handed.
+type payloadRecorder struct {
+	mu       sync.Mutex
+	payloads []domain.SeamPayload
+}
+
+func (p *payloadRecorder) Run(_ context.Context, _ domain.Reaction, payload domain.SeamPayload) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.payloads = append(p.payloads, payload)
+	return nil
+}
+
+// recorded returns a copy of the payloads run so far.
+func (p *payloadRecorder) recorded() []domain.SeamPayload {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.payloads)
+}
+
+// recordingObserveRunner is a Config.ObserveRunner that keeps every list it is handed and every
+// session-started boundary it is told of, so a test can read which observe lane the Agent passed on
+// and which boundaries it announced. It never refuses. Once swaps and announces on the caller's
+// goroutine before it returns, so the test reads both without a lock.
 type recordingObserveRunner struct {
-	lists [][]domain.Reaction
+	lists  [][]domain.Reaction
+	starts []domain.SessionStart
 }
 
 func (r *recordingObserveRunner) Replace(list []domain.Reaction) error {
 	r.lists = append(r.lists, slices.Clone(list))
 	return nil
+}
+
+func (r *recordingObserveRunner) SessionStarted(start domain.SessionStart) {
+	r.starts = append(r.starts, start)
 }
 
 // TestOncePinsAskerAndPresenterOff proves the pin is Once's, not the caller's: a Spec whose

@@ -185,3 +185,11 @@ func firingOf(e Event, payload domain.SeamPayload) firing {
 	payload.Event = e
 	return firing{Event: e, Payload: payload}
 }
+
+// sessionStartedFiring builds the session-started notice's firing. It is not a match case: the
+// notice is no domain.Event — the top-level Agent hands it through the Runner's own door
+// (Runner.SessionStarted) — so it is built from the start alone, at Depth 0 and Turn 0: the
+// top-level agent, ahead of the session's first Turn.
+func sessionStartedFiring(start domain.SessionStart) firing {
+	return firingOf(domain.MomentSessionStarted, domain.SeamPayload{Start: start})
+}

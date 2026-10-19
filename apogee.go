@@ -822,9 +822,22 @@ type Reaction = domain.Reaction
 // silently drops the lane it was not about.
 type Generation = domain.Generation
 
-// ObserveRunner is the observe Runner's live-swap door — the one method of a ReactionRunner the
-// Agent drives when a Generation's observe list moves (Config.ObserveRunner).
+// ObserveRunner is the observe Runner's door — the two methods of a ReactionRunner the Agent
+// drives (Config.ObserveRunner): Replace when a Generation's observe list moves, and the
+// enqueue-only SessionStarted at every top-level Session boundary.
 type ObserveRunner = domain.ObserveRunner
+
+// SessionStart names how a top-level session started — the `start` member of a session-started
+// payload, handed to ObserveRunner.SessionStarted.
+type SessionStart = domain.SessionStart
+
+// The session-started starts: a constructed session (fresh, `--resume` and every Firing), a
+// stored session swapped into the live engine, and a cleared conversation.
+const (
+	SessionStartNew    = domain.SessionStartNew
+	SessionStartResume = domain.SessionStartResume
+	SessionStartClear  = domain.SessionStartClear
+)
 
 // ----------------------------------------------------------------------------
 // Hook working values (internal/domain)

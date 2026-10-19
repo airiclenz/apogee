@@ -259,12 +259,23 @@ type Config struct {
 	// halves: SetReactions arms Floor, Bypass and the sync lane, then hands the observe list to
 	// ObserveRunner.Replace — and only when the list actually moved, because a Replace retires the
 	// Runner's running generation. It is the same Runner a Driver decorates Events with; the
-	// Agent never emits through this field, only swaps it.
+	// Agent never emits an Event through this field. The one other thing it hands it is the
+	// session-started notice (ObserveRunner.SessionStarted): the top-level Agent tells it once per
+	// Session boundary — at the end of New and Resume (unless DeferSessionStart holds that one
+	// back), and after a successful ClearContext or RestoreSession. A delegate never does.
 	//
 	// nil (the default) holds no Runner: SetReactions still validates and reports the observe lane
-	// but swaps nothing, which is what the bench, a Firing and every test that composes a bare
-	// Config run.
+	// but swaps nothing, and no session-started notice is fired, which is what the bench and every
+	// test that composes a bare Config run.
 	ObserveRunner ObserveRunner
+
+	// DeferSessionStart holds the CONSTRUCTION boundary's session-started notice back from New and
+	// Resume, for a Driver that may still refuse the Agent it just built — a late bind replaying
+	// settings onto it that can fail — and must never announce a session it did not install. That
+	// Driver calls Agent.AnnounceSessionStart once the Agent is installed; a refused Agent is
+	// closed unannounced. false (the default) announces at the end of New and Resume, which is
+	// what every Driver that installs whatever it constructs wants.
+	DeferSessionStart bool
 
 	// Observe is the observe list ObserveRunner was built from — the CONSTRUCTION SEED of the live
 	// Generation's member of the same name (Generation.Observe), which SetReactions compares a new

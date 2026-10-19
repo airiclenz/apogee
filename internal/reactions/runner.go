@@ -217,19 +217,38 @@ func (r *Runner) Emit(e domain.Event) {
 	// instant, which is what a human correlating two notifications expects.
 	now := r.now().Format(time.RFC3339Nano)
 	for _, f := range firings {
-		r.fanOut(set, f, now)
+		r.fanOut(set, f, now, r.noteDrop)
 	}
+}
+
+// SessionStarted fires the session-started entries for one top-level Session boundary, with start
+// on the payload (domain.ObserveRunner's session-boundary door). It is no Event, so it is not
+// matched: it builds its own firing (sessionStartedFiring) and fans it out to the entries that
+// subscribe to the notice, and an active set with none pays one map lookup.
+//
+// It is enqueue-only, because the boundaries that call it run on the Bubble Tea Update goroutine:
+// nothing is forwarded to the decorated sink, and a full queue drops the firing SILENTLY
+// (countDrop) rather than reporting it here — a report on the caller's goroutine would reach the
+// Driver's notifier, which on the TUI waits for that same Update loop. The drop still counts
+// toward the total the drain states.
+func (r *Runner) SessionStarted(start domain.SessionStart) {
+	set := r.active.Load()
+	if set == nil || len(set.workers) == 0 || !set.matcher.wants(domain.MomentSessionStarted) {
+		return
+	}
+	r.fanOut(set, sessionStartedFiring(start), r.now().Format(time.RFC3339Nano), countDrop)
 }
 
 // fanOut hands one firing to every worker subscribing to its event, stamping the identity fields
 // only the Runner knows. The send is non-blocking by construction: a full queue drops the NEWEST
-// firing, because the older ones are already the ones a script is working through.
+// firing, because the older ones are already the ones a script is working through, and hands its
+// worker to drop — noteDrop for an Emit, countDrop for a door that must not report.
 //
 // It runs under the set's read lock: the atomic pointer told Emit which generation this is, the
 // lock tells fanOut whether that generation's queues are still open. A set a drain has already
 // closed takes the firing as a counted drop — silently, because the queue was never full and a
 // reload must not announce one; the total still reaches the drain's final drop line.
-func (r *Runner) fanOut(set *hookSet, f firing, now string) {
+func (r *Runner) fanOut(set *hookSet, f firing, now string, drop func(*worker)) {
 	set.mu.RLock()
 	defer set.mu.RUnlock()
 	if set.closed {
@@ -255,9 +274,15 @@ func (r *Runner) fanOut(set *hookSet, f firing, now string) {
 		select {
 		case w.queue <- payload:
 		default:
-			r.noteDrop(w)
+			drop(w)
 		}
 	}
+}
+
+// countDrop counts a dropped firing without reporting it: the total reaches the drain's final drop
+// line (reportDrops), off the goroutine that dropped it.
+func countDrop(w *worker) {
+	w.dropped.Add(1)
 }
 
 // noteDrop counts a dropped firing and reports the FIRST one for this Reaction. Only the first: a

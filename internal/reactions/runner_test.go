@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -861,5 +862,93 @@ func TestSeamClosedProjectionIsTakenBeforeEmitReturns(t *testing.T) {
 				t.Errorf("firing value =\n  %s\nwant\n  %s", encoded, c.want)
 			}
 		})
+	}
+}
+
+// TestSessionStartedFiresTheSubscribedEntryWithItsStart — the session-boundary door fires the
+// entries subscribing to session-started and no other, with the start and the Runner's identity
+// stamps on a Depth-0 payload, and hands nothing to the decorated sink: the notice is no Event.
+func TestSessionStartedFiresTheSubscribedEntryWithItsStart(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	resolved, err := scope.Resolve(workspace)
+	if err != nil {
+		t.Fatalf("scope.Resolve: %v", err)
+	}
+	inner := &recordingSink{}
+	exec := newFakeExecutor()
+	runner, err := New([]domain.Reaction{
+		commandHook("primer", domain.MomentSessionStarted),
+		commandHook("notify", TurnFinished),
+	}, Options{
+		Inner: inner, Workspace: workspace, Exec: exec,
+		Schedule: &ScheduleRef{ID: "sch-1", Name: "Nightly"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runner.SessionStarted(domain.SessionStartClear)
+	closeRunner(t, runner)
+
+	runs := exec.recorded()
+	if len(runs) != 1 {
+		t.Fatalf("ran %d firings, want exactly the one session-started entry: %+v", len(runs), runs)
+	}
+	got := runs[0]
+	if got.Reaction != "primer" || got.Event != domain.MomentSessionStarted || got.Start != domain.SessionStartClear {
+		t.Errorf("payload = %q/%q/%q, want primer/session-started/clear", got.Reaction, got.Event, got.Start)
+	}
+	if got.Depth != 0 || got.Workspace != resolved || got.Time == "" {
+		t.Errorf("payload depth/workspace/time = %d/%q/%q, want 0/%q and a stamped time",
+			got.Depth, got.Workspace, got.Time, resolved)
+	}
+	if got.Schedule == nil || got.Schedule.ID != "sch-1" {
+		t.Errorf("payload schedule = %#v, want the Firing's schedule as every notice carries it", got.Schedule)
+	}
+	if len(inner.events) != 0 {
+		t.Errorf("the decorated sink saw %d events, want none — the door never forwards to the Driver", len(inner.events))
+	}
+}
+
+// TestSessionStartedNeverReportsOnTheCallersGoroutine — a session boundary calls the door on the
+// TUI's Update goroutine, where a report would wait on the Bridge that waits on that same loop. So a
+// full queue under a wedged entry drops SILENTLY there, and the drop total is stated at the drain.
+func TestSessionStartedNeverReportsOnTheCallersGoroutine(t *testing.T) {
+	t.Parallel()
+
+	var inDoor atomic.Bool
+	log := &reportLog{}
+	report := func(line string) {
+		if inDoor.Load() {
+			t.Errorf("Report(%q) was called while the door ran on the caller's goroutine", line)
+		}
+		log.add(line)
+	}
+	exec := newFakeExecutor()
+	exec.gate = make(chan struct{})
+	runner, err := New([]domain.Reaction{commandHook("primer", domain.MomentSessionStarted)}, Options{
+		Workspace: t.TempDir(), Exec: exec, Report: report,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// The first boundary is dequeued by the worker, which then blocks on the gate.
+	runner.SessionStarted(domain.SessionStartNew)
+	awaitStart(t, exec)
+	// queueDepth more fill the queue exactly; the last two have nowhere to go.
+	inDoor.Store(true)
+	for i := 0; i < queueDepth+2; i++ {
+		runner.SessionStarted(domain.SessionStartClear)
+	}
+	inDoor.Store(false)
+
+	close(exec.gate)
+	closeRunner(t, runner)
+
+	if lines := log.all(); len(lines) != 1 || lines[0] != "reaction primer: dropped 2 events" {
+		t.Errorf("reported %q, want only the drain's total %q", lines, "reaction primer: dropped 2 events")
 	}
 }

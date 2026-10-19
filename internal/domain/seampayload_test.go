@@ -93,4 +93,44 @@ func TestSeamPayloadEnv(t *testing.T) {
 	}) {
 		t.Errorf("Env() = %q, want the Schedule id and name after the four headline facts", got)
 	}
+
+	started := domain.SeamPayload{
+		Event:    domain.MomentSessionStarted,
+		Reaction: "primer",
+		Schedule: &domain.ScheduleRef{ID: "nightly"},
+		Start:    domain.SessionStartNew,
+	}
+	if got := started.Env(); !reflect.DeepEqual(got, []string{
+		"APOGEE_REACTION_EVENT=session-started",
+		"APOGEE_REACTION_NAME=primer",
+		"APOGEE_REACTION_SCHEDULE_ID=nightly",
+		"APOGEE_REACTION_START=new",
+	}) {
+		t.Errorf("Env() = %q, want the session's start last, after the Schedule", got)
+	}
+}
+
+// TestSeamPayloadJSONCarriesTheStartOnASessionStartedFiring pins the `start` member: written on a
+// session-started document, beside `schedule`, and absent from every other Moment's.
+func TestSeamPayloadJSONCarriesTheStartOnASessionStartedFiring(t *testing.T) {
+	t.Parallel()
+
+	started, err := json.Marshal(domain.SeamPayload{
+		Event: domain.MomentSessionStarted,
+		Start: domain.SessionStartClear,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(started), `"start":"clear"`) {
+		t.Errorf("session-started document = %s, want it to carry \"start\":\"clear\"", started)
+	}
+
+	finished, err := json.Marshal(domain.SeamPayload{Event: domain.MomentTurnFinished})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(finished), `"start"`) {
+		t.Errorf("turn-finished document = %s, want no start member on a Moment that carries none", finished)
+	}
 }

@@ -273,6 +273,11 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 		}
 	}
 	e.agent = agent
+	// Installed, so the session has started: the construction boundary's session-started notice is
+	// announced HERE, never by a construction a replay above went on to refuse — the composition
+	// root defers it to this line (Config.DeferSessionStart, wire_boot.go). An Agent built without
+	// the deferral already announced, and this call does nothing.
+	agent.AnnounceSessionStart()
 	return nil
 }
 

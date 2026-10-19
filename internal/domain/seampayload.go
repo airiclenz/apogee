@@ -10,6 +10,21 @@ type ScheduleRef struct {
 	Name string `json:"name,omitempty"`
 }
 
+// SessionStart names how a top-level session started — the `start` member of a session-started
+// payload, and the value APOGEE_REACTION_START carries. Its spellings are part of the payload's
+// documented contract.
+type SessionStart string
+
+const (
+	// SessionStartNew is a session the engine CONSTRUCTED: a fresh start, a `--resume` start and
+	// every Firing alike — each builds its Agent anew, whatever conversation it was seeded with.
+	SessionStartNew SessionStart = "new"
+	// SessionStartResume is a stored session swapped into the live engine (a `/sessions` resume).
+	SessionStartResume SessionStart = "resume"
+	// SessionStartClear is the live conversation dropped for an empty one (`/clear`, `/new`).
+	SessionStartClear SessionStart = "clear"
+)
+
 // SeamPayload is the ONE JSON document a fired out-of-process Reaction receives, whichever lane
 // fired it: on stdin for an observe command or a sync-lane advise/gate handler (ADR 0076 D2), as
 // the POST body for an observe webhook. Its field names are a DOCUMENTED CONTRACT: a user's script
@@ -55,6 +70,8 @@ type SeamPayload struct {
 	CallID string `json:"call_id,omitempty"`
 	// Schedule names the Schedule this Firing ran for; absent outside a Firing.
 	Schedule *ScheduleRef `json:"schedule,omitempty"`
+	// Start is how the session started. session-started alone.
+	Start SessionStart `json:"start,omitempty"`
 
 	// Status is the Turn's StepStatus. turn-finished, exchange-finished.
 	Status string `json:"status,omitempty"`
@@ -142,6 +159,7 @@ const (
 	EnvReactionPath         = "APOGEE_REACTION_PATH"
 	EnvReactionScheduleID   = "APOGEE_REACTION_SCHEDULE_ID"
 	EnvReactionScheduleName = "APOGEE_REACTION_SCHEDULE_NAME"
+	EnvReactionStart        = "APOGEE_REACTION_START"
 )
 
 // Env renders the payload's headline facts as `NAME=value` entries for the fired command's
@@ -149,7 +167,7 @@ const (
 // empty, so a script can test with `[ -n "$APOGEE_REACTION_PATH" ]` and a variable inherited from
 // the user's own environment is not silently blanked by a reaction that has nothing to put there.
 func (p SeamPayload) Env() []string {
-	env := make([]string, 0, 6)
+	env := make([]string, 0, 7)
 	add := func(name, value string) {
 		if value != "" {
 			env = append(env, name+"="+value)
@@ -163,5 +181,6 @@ func (p SeamPayload) Env() []string {
 		add(EnvReactionScheduleID, p.Schedule.ID)
 		add(EnvReactionScheduleName, p.Schedule.Name)
 	}
+	add(EnvReactionStart, string(p.Start))
 	return env
 }

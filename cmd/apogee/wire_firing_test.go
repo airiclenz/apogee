@@ -1525,12 +1525,56 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 		t.Errorf("cfg.Events = %v, want the Runner the Driver built — a Firing fires the "+
 			"`reactions:` list through the sink it was handed", cfg.Events)
 	}
+	if cfg.ObserveRunner != apogee.ObserveRunner(runner) || !slices.EqualFunc(cfg.Observe, list,
+		func(a, b domain.Reaction) bool { return a.ID == b.ID }) {
+		t.Errorf("cfg.ObserveRunner/Observe = %v/%+v, want the same Runner seeded with the lane it was "+
+			"built over — the Agent announces the Firing's session-started through it", cfg.ObserveRunner, cfg.Observe)
+	}
 	for _, want := range []string{"STARTUP_KEY", "NOTIFY_TOKEN"} {
 		if !slices.Contains(cfg.SecretEnvVars, want) {
 			t.Errorf("SecretEnvVars = %v, want it to carry %q — both the key sources and the "+
 				"Reaction header sources are scrubbed out of a subprocess the model chose",
 				cfg.SecretEnvVars, want)
 		}
+	}
+}
+
+// A Firing is a constructed session, so the Agent run.Once builds announces ONE session-started
+// boundary through the Runner firingConfig installs as its observe half, and the `run:` entry fires
+// once — start "new", and the Schedule the Firing ran for on the payload as on every notice.
+func TestFiringSessionStartedFiresOnceWithSchedule(t *testing.T) {
+	t.Parallel()
+
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	list := []domain.Reaction{{
+		ID:      "primer",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []domain.Moment{domain.MomentSessionStarted},
+		Handler: domain.ArgvHandler{Argv: []string{"sh", "-c", `cat >> "$0"`, sink}},
+		Timeout: testtime.Budget(10 * time.Second),
+	}}
+	stub := stubllm.New(t, loadScript(t, "hooks"))
+	in := raiseInputs(t, &stubRunner{}, heartbeat.Beat{Reachable: true, Answered: true})
+	in.runner = run.Once
+	in.opts.Reactions = list
+	in.entry.Endpoint, in.entry.Model = stub.URL, stub.Model
+
+	_, _, err := raise(context.Background(), in, "a prompt",
+		&reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+
+	fired := readHookPayloads(t, sink)
+	if len(fired) != 1 {
+		t.Fatalf("the session-started entry fired %d time(s), want once: %+v", len(fired), fired)
+	}
+	if got := fired[0]; got.Event != domain.MomentSessionStarted || got.Start != domain.SessionStartNew {
+		t.Errorf("fired %q with start %q, want session-started with start new", got.Event, got.Start)
+	}
+	if got := fired[0].Schedule; got == nil || got.ID != "sch-1" || got.Name != "Nightly" {
+		t.Errorf("the firing's schedule = %#v, want the Firing's sch-1/Nightly", got)
 	}
 }
 

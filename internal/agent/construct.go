@@ -655,3 +655,35 @@ func validateConfig(cfg domain.Config) error {
 	}
 	return nil
 }
+
+// AnnounceSessionStart announces the construction boundary's session-started notice (start "new")
+// that Config.DeferSessionStart held back from New or Resume: the Driver calls it once it has
+// installed the Agent, so a session a late bind refused is never announced. It announces at most
+// once per Agent — a second call, or a call on an Agent whose construction already announced, does
+// nothing — and, like every boundary's announcement, it is enqueue-only: it never blocks on the
+// observe Runner and never reaches the Driver's sink.
+func (a *Agent) AnnounceSessionStart() {
+	a.constructionStart.Do(func() { a.announceSessionStart(domain.SessionStartNew) })
+}
+
+// announceConstruction is New's and Resume's end: it announces the construction boundary unless the
+// Driver deferred that to its own AnnounceSessionStart (Config.DeferSessionStart).
+func (a *Agent) announceConstruction() {
+	if a.cfg.DeferSessionStart {
+		return
+	}
+	a.AnnounceSessionStart()
+}
+
+// announceSessionStart hands one Session boundary's session-started notice to the observe Runner
+// (Config.ObserveRunner.SessionStarted), exactly once per boundary: each boundary's own call site
+// makes this one call. Only the top-level Agent announces — a delegate starts no session — and an
+// Agent holding no Runner has no one to tell.
+func (a *Agent) announceSessionStart(start domain.SessionStart) {
+	if a.isDelegate() {
+		return
+	}
+	if runner := a.cfg.ObserveRunner; runner != nil {
+		runner.SessionStarted(start)
+	}
+}
