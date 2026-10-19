@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-10-19
+
 - **`session-started` joins the Reaction vocabulary.** A `run:` entry may list `session-started` under `on:` — the twelfth notice, seventeen Moments in all — and the facade re-exports `apogee.MomentSessionStarted`. An `advise:` entry on it is refused at startup with `advise: on "session-started" is pending admission — session-start advice awaits its admission arm`; a `gate:` entry on it is refused as on any other notice.
 
 - **Reactions fire on `session-started`.** Every top-level session boundary now fires a `run:` entry on `session-started` once, on every Driver: a fresh or `--resume` start and every headless, daemon or `/schedule` Firing (`start: new`), `/clear` and `/new` (`start: clear`), and a `/sessions` resume (`start: resume`). The payload gains a `start` member, and the command's environment gains `APOGEE_REACTION_START`. A Firing's payload carries its `schedule` as every other notice does. Sub-agents fire none. The TUI announces its launch only after the session's engine is installed, so a session whose bind is refused announces nothing. Embedder-facing: `apogee.ObserveRunner` gains a second method, `SessionStarted(apogee.SessionStart)`. It is enqueue-only: it never blocks, never reports on the caller's goroutine and never forwards to the Driver's sink. `apogee.Config.DeferSessionStart` and `Agent.AnnounceSessionStart` let a Driver announce the construction boundary itself once it installs the Agent.
