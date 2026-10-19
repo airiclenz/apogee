@@ -7,8 +7,9 @@ One `{id, origin, class, on: [Moments], handler}` — the single thing apogee do
 passes a **Moment**, shipped as `domain.Reaction`. Its **origin** is **engine** (a builtin such as
 a Floor guard, or a Go reaction the bench arms in-process through the facade) or
 **user**; its **class** is one column of the **Reaction surface** matrix. Its handler is one of
-seven kinds behind one sealed interface: five per-seam Go func types, one per seam **Moment**, so
-an engine reaction always names exactly one seam; and two out-of-process kinds a user entry arms —
+eight kinds behind one sealed interface: six Go func types, each naming exactly one **Moment** —
+five per-seam types, one per seam, and `SessionStartedFunc`, the session-start advise slot's, which
+`Validate` admits under class advise alone; and two out-of-process kinds a user entry arms —
 an `ArgvHandler` (a command) and a `WebhookHandler` (a POST), each serving observe, advise and
 gate, the class deciding what the reply is worth — whose `On` list spans Moments and is checked
 against the class. `Validate`
@@ -22,8 +23,11 @@ for both routes: `armReactions` for `Config.Reactions` and `Agent.SetReactions` 
 lane, which validates the Generation it is handed and installs nothing on a refusal. `TopLevelOnly` opts a reaction
 **out** of sub-agent inheritance — the zero value is inherited by every child agent; `Timeout` is
 the deadline an out-of-process handler runs under on either lane (observe 30s, advise 10s, gate 5s
-by default; an entry's `timeout:` binds every reaction it arms) and is ignored by a Go one, which
-runs without a deadline exactly as a Floor guard does.
+by default; an entry's `timeout:` binds every reaction it arms) and is ignored by a per-seam Go one,
+which runs without a deadline exactly as a Floor guard does; a `SessionStartedFunc` honours it (else
+the advise default), since it runs in the background from the **Session boundary** and the session's
+next Exchange opening waits on it for no longer — that join fences its answer ahead of the user's
+text and books it as an `advise` firing.
 The engine fires them with one `fire(ctx, moment, payload)` per seam — builtins first, then
 whatever is armed beside them, each under a recover boundary, an error ending the cascade at once
 and a panic reported and stepped over. Each returns one **`Outcome`**:

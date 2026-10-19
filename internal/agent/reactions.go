@@ -115,8 +115,9 @@ type seamPayload struct {
 
 // fireCascade runs the Reaction cascade for Moment m against payload and reports what the cascade
 // did — one Outcome for the seam to act on, plus the advise slot below. It is the engine's ONLY
-// dispatcher: every seam reaches it, through fire or firePostToolResult, and nothing else fires a
-// reaction.
+// SEAM dispatcher: every seam reaches it, through fire or firePostToolResult, and nothing else fires
+// a reaction at a seam. The one firing outside it is the session-start advise lane's
+// (sessionadvise.go), which a Session boundary starts in the background, where no seam is passing.
 //
 // Two legs run in turn — the builtins, then the armed Reactions. A post-response Retry the loop
 // WILL act on ends the cascade where it fires: the Turn is about to re-stream, so the leg below
@@ -450,13 +451,15 @@ func acted(out domain.Outcome) bool {
 }
 
 // isAdvice reports whether this ACTED Outcome is an advise injection — the one firing that both
-// books under actionAdvise and contributes a span to the advise slot. All three terms are
+// books under actionAdvise and contributes a span to an advise slot. All three terms are
 // necessary: the class says the reaction is allowed to speak to the model, the Moment says there
-// is a tool result to speak on, and a non-empty Inject is the text itself. Of the builtins only
-// the context-fill notice satisfies it — the one engine reaction of class advise (ADR 0077); the
-// seven Floor guards are shape-view and contribute no advice.
+// is somewhere to speak — a tool result at post-tool-result, or the session's next user message at
+// session-started (the session-start lane, sessionadvise.go) — and a non-empty Inject is the text
+// itself. Of the builtins only the context-fill notice satisfies it — the one engine reaction of
+// class advise (ADR 0077); the seven Floor guards are shape-view and contribute no advice.
 func isAdvice(m domain.Moment, r domain.Reaction, out domain.Outcome) bool {
-	return m == domain.MomentPostToolResult && r.Class == domain.ClassAdvise && out.Inject != ""
+	return (m == domain.MomentPostToolResult || m == domain.MomentSessionStarted) &&
+		r.Class == domain.ClassAdvise && out.Inject != ""
 }
 
 // adviceOf turns one advise firing into the slot entry the tool-result seam renders, and reports
@@ -603,7 +606,8 @@ func (a *Agent) writtenPath(call domain.ToolCall) (string, bool) {
 
 // reactionAction is the label an ARMED reaction's firing is booked under. Post-response is the
 // one Moment with an action vocabulary of its own, in the precedence the header ratifies; an
-// advise injection at the tool-result seam is the other named action; the rest have none, so a
+// advise injection — at the tool-result seam, or the session-start lane's at session-started — is
+// the other named action; the rest have none, so a
 // firing there is simply "fired". A builtin never reaches here — it carries its own label.
 func reactionAction(m domain.Moment, r domain.Reaction, out domain.Outcome) string {
 	if isAdvice(m, r, out) {

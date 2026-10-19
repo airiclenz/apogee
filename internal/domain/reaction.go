@@ -263,18 +263,20 @@ type Outcome struct {
 
 // Handler is the behaviour a Reaction runs. It is SEALED — only the types declared below
 // implement it — so Validate can check that the reaction's On list agrees with what its handler
-// can actually be called with. Two kinds share the seal: the five per-seam Go func types, each
-// naming exactly one seam, and the out-of-process handlers ArgvHandler and WebhookHandler, which
-// name no seam at all — their On list, checked against their class, says where they fire. An MCP
-// handler is the kind still to join them.
+// can actually be called with. Two kinds share the seal: the six Go func types, each naming
+// exactly one Moment — the five per-seam types and SessionStartedFunc, the session-start advise
+// slot's — and the out-of-process handlers ArgvHandler and WebhookHandler, which name no Moment at
+// all — their On list, checked against their class, says where they fire. An MCP handler is the
+// kind still to join them.
 type Handler interface {
-	// seam reports the one seam Moment this handler serves, or the ZERO Moment for an
-	// out-of-process handler, which names no seam of its own. Unexported: it is the seal.
+	// seam reports the one Moment a Go handler serves — a seam Moment, or session-started for
+	// SessionStartedFunc — or the ZERO Moment for an out-of-process handler, which names none of
+	// its own. Unexported: it is the seal.
 	seam() Moment
 }
 
-// The five Go handler types, one per seam. Each takes the payload its seam already owns and
-// returns the one Outcome shape; an error ends the cascade at once and surfaces to the seam.
+// The five per-seam Go handler types, one per seam. Each takes the payload its seam already owns
+// and returns the one Outcome shape; an error ends the cascade at once and surfaces to the seam.
 type (
 	// PreRequestFunc shapes the outgoing request before it is sent.
 	PreRequestFunc func(ctx context.Context, req *Request) (Outcome, error)
@@ -298,6 +300,18 @@ func (PostResponseFunc) seam() Moment   { return MomentPostResponse }
 func (PreToolExecFunc) seam() Moment    { return MomentPreToolExec }
 func (PostToolResultFunc) seam() Moment { return MomentPostToolResult }
 func (HistoryRewriteFunc) seam() Moment { return MomentHistoryRewrite }
+
+// SessionStartedFunc is the session-start advise slot's Go handler (ADR 0076 D6, 2026-10-19
+// amendment) — the shape the bench arms an engine-origin advise reaction on session-started with.
+// It runs in the BACKGROUND from the Session boundary, told how the session started; the Outcome's
+// Inject is the advice, fenced ahead of the user's text in the session's next user message, and
+// every other field is ignored. It is fail-open, unlike a per-seam handler: an error, a panic or a
+// missed deadline contributes nothing and is reported, and the session goes on. Its context
+// carries the reaction's Timeout (else DefaultAdviseTimeout) and is cancelled by the next boundary
+// or the agent's Close. Validate admits it under class advise alone.
+type SessionStartedFunc func(ctx context.Context, start SessionStart) (Outcome, error)
+
+func (SessionStartedFunc) seam() Moment { return MomentSessionStarted }
 
 // ArgvHandler runs a command out of process when a Moment fires — what a user's `run:` argv list
 // arms (ADR 0076 D2). Argv[0] is the executable and the rest its arguments; nothing goes through a
@@ -419,12 +433,14 @@ type Reaction struct {
 	// the handler's one seam; the slice is the shape stage 2's argv handlers need, which span
 	// Moments.
 	On []Moment
-	// Handler is the behaviour — one of the five Go func types above.
+	// Handler is the behaviour — one of the Go func types above, or an out-of-process handler.
 	Handler Handler
 	// Timeout is the deadline a non-Go handler runs under, on both lanes — the async observe lane
-	// and the sync advise and gate lane, whose handlers hold the loop while they run. A Go handler
-	// IGNORES it: the engine's own reactions run without a deadline, exactly as today's Floor
-	// guards do.
+	// and the sync advise and gate lane, whose handlers hold the loop while they run. A per-seam Go
+	// handler IGNORES it: the engine's own reactions run without a deadline, exactly as today's
+	// Floor guards do. A SessionStartedFunc is the one Go handler that honours it — zero means
+	// DefaultAdviseTimeout — because it runs in the background and the session's first request
+	// waits on it for no longer than that.
 	Timeout time.Duration
 	// Workspace scopes the reaction to one workspace root: set, it is armed only for a run rooted
 	// exactly there; empty, it is armed in every workspace. Both lanes honour it — the Runner when
@@ -520,6 +536,12 @@ func (r Reaction) Validate() error {
 	}
 	if len(r.On) == 0 {
 		return fmt.Errorf("%w %q: fires on no Moment", ErrInvalidReaction, r.ID)
+	}
+	if _, ok := r.Handler.(SessionStartedFunc); ok && r.Class != ClassAdvise {
+		return fmt.Errorf(
+			"%w %q: a session-started handler reacts as class %s, not %q",
+			ErrInvalidReaction, r.ID, ClassAdvise, r.Class,
+		)
 	}
 
 	// Both out-of-process kinds serve every class a USER entry can carry, so no configuration can

@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -414,6 +415,53 @@ func TestReactionValidateAcceptsEverySeamHandler(t *testing.T) {
 			}
 			if got := c.handler.seam(); got != c.moment {
 				t.Errorf("handler seam = %q, want %q", got, c.moment)
+			}
+		})
+	}
+}
+
+// TestReactionValidateAdmitsASessionStartedHandlerUnderAdviseOnly pins the session-start advise
+// slot's Go handler (SessionStartedFunc): it serves session-started, Validate accepts it there under
+// class advise, and refuses it under every other class — observe and shape-view among them — and on
+// any other Moment.
+func TestReactionValidateAdmitsASessionStartedHandlerUnderAdviseOnly(t *testing.T) {
+	t.Parallel()
+
+	handler := SessionStartedFunc(func(context.Context, SessionStart) (Outcome, error) {
+		return Outcome{}, nil
+	})
+	if got := handler.seam(); got != MomentSessionStarted {
+		t.Fatalf("handler seam = %q, want %q", got, MomentSessionStarted)
+	}
+	cases := []struct {
+		name    string
+		class   Class
+		on      Moment
+		wantErr string
+	}{
+		{"advise on session-started", ClassAdvise, MomentSessionStarted, ""},
+		{"observe", ClassObserve, MomentSessionStarted,
+			`"probe": a session-started handler reacts as class advise, not "observe"`},
+		{"shape-view", ClassShapeView, MomentSessionStarted,
+			`"probe": a session-started handler reacts as class advise, not "shape-view"`},
+		{"advise on another Moment", ClassAdvise, MomentPostToolResult,
+			`"probe": Moment "post-tool-result" is not the handler's seam "session-started"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			reaction := Reaction{ID: "probe", Origin: OriginEngine, Class: c.class, On: []Moment{c.on}, Handler: handler}
+
+			err := reaction.Validate()
+
+			if c.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !errors.Is(err, ErrInvalidReaction) || !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("Validate() = %v, want ErrInvalidReaction containing %q", err, c.wantErr)
 			}
 		})
 	}

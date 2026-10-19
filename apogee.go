@@ -771,17 +771,20 @@ type Outcome = domain.Outcome
 // handler kind of its own.
 type Handler = domain.Handler
 
-// The five Go handler types, one per seam.
+// The six Go handler types: five per seam, and SessionStartedFunc — the session-start advise
+// slot's, which runs in the background from the Session boundary and whose advice is fenced ahead
+// of the user's text in the session's next user message (class advise only).
 type (
 	PreRequestFunc     = domain.PreRequestFunc
 	PostResponseFunc   = domain.PostResponseFunc
 	PreToolExecFunc    = domain.PreToolExecFunc
 	PostToolResultFunc = domain.PostToolResultFunc
+	SessionStartedFunc = domain.SessionStartedFunc
 	HistoryRewriteFunc = domain.HistoryRewriteFunc
 )
 
-// The two out-of-process handler types — a command and a webhook. Neither names a seam the way
-// the five Go func types above do: a command serves the user's observe, advise and gate classes,
+// The two out-of-process handler types — a command and a webhook. Neither names a Moment the way
+// the six Go func types above do: a command serves the user's observe, advise and gate classes,
 // a webhook serves observe alone.
 type (
 	ArgvHandler    = domain.ArgvHandler

@@ -199,6 +199,10 @@ type Agent struct {
 	// session-started entry a live swap arms inside it fires for the session it joined.
 	window sessionWindow
 
+	// sessionAdvice is the session-start advise lane (sessionadvise.go): the background advise runs
+	// the current Session boundary started, joined by the session's next Exchange opening.
+	sessionAdvice sessionAdviseLane
+
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
 	// follow the modeMu
@@ -847,8 +851,10 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // never reaches them. Each is stopped with its finished items kept, and Close waits for them to
 // end — the ones an earlier ClearContext or RestoreSession stopped without waiting included — before
 // it closes the Consoles; a resumed session starts them again from their folders (ResumeWorkflows).
+// It also cancels the session-start advise runs the last boundary started (sessionadvise.go).
 func (a *Agent) Close() error {
 	if !a.isDelegate() {
+		a.sessionAdvice.stop()
 		a.stopAllBackground()
 		a.background.waitAll()
 	}

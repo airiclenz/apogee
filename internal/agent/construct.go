@@ -183,10 +183,12 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 // exchangeClosed is the Agent's half of the exchangeObserver contract for an Exchange END
 // (turnLifecycle.closeExchange): the undo journal's closing capture (closeUndoGroup, agent.go), and
 // the workflow finish notes delivered into it are forgotten — the messages carrying them stand, so
-// they are never delivered again (an abort put them back first, exchangeAborted).
+// they are never delivered again (an abort put them back first, exchangeAborted) — and so are the
+// session-start advise runs its opening carried (sessionAdviseLane.forgetDelivered).
 func (a *Agent) exchangeClosed() {
 	a.closeUndoGroup()
 	a.background.forgetDelivered()
+	a.sessionAdvice.forgetDelivered()
 }
 
 // turnRolledBack is the Agent's half of the exchangeObserver contract for a cancelled Turn's
@@ -209,9 +211,12 @@ func (a *Agent) turnRolledBack() {
 // a TakeWorkflowNotes interjection — are held again (backgroundManager.restoreDelivered), since
 // the abort dropped every message that carried them. A note held again may let the Driver's wake
 // open an Exchange on it right after the cancel; that is intended (ADR 0089 D3): nobody read it.
+// The session-start advice its opening carried is put back the same way
+// (sessionAdviseLane.restoreDelivered), so the next opening carries it instead.
 func (a *Agent) exchangeAborted() {
 	a.retained.rollBackExchange()
 	a.background.restoreDelivered()
+	a.sessionAdvice.restoreDelivered()
 }
 
 // seedTopLevel gives a top-level Agent the fields it owns afresh — the ones a delegate takes from
@@ -678,7 +683,9 @@ func (a *Agent) announceConstruction() {
 // announceSessionStart hands one Session boundary's session-started notice to the observe Runner
 // (Config.ObserveRunner.SessionStarted), exactly once per boundary: each boundary's own call site
 // makes this one call. Only the top-level Agent announces — a delegate starts no session — and an
-// Agent holding no Runner has no one to tell.
+// Agent holding no Runner has no one to tell. Before the Runner is told, the boundary starts its
+// session-start advise runs in the background (startSessionAdvice, sessionadvise.go) — with or
+// without a Runner, since that lane is the engine's own.
 //
 // It also opens the boundary's pre-first-prompt window (sessionWindow) over the observe list the
 // Runner holds, so an entry a later live swap arms before the first user message fires once for
@@ -688,6 +695,7 @@ func (a *Agent) announceSessionStart(start domain.SessionStart) {
 	if a.isDelegate() {
 		return
 	}
+	a.startSessionAdvice(start) // background-only: the boundary never waits on an advise handler
 	runner := a.cfg.ObserveRunner
 	if runner == nil {
 		return

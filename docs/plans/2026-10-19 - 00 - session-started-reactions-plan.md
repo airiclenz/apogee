@@ -164,7 +164,12 @@ internal/agent/wire.go — projectedImages; internal/agent/wire_test.go — Test
 **Acceptance:** `go build ./...`; `GOMEMLIMIT=2GiB go test -count=1 ./internal/domain/ ./internal/provider/ ./internal/floor/`; `GOMEMLIMIT=2GiB go test -count=1 -run 'TestProviderRequest' ./internal/agent/`.
 **Commit:** `feat(domain): session-start advice rides ahead of a user message`
 
-## 7. The session-start advise lane
+## 7. The session-start advise lane — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the lane lives in a new file internal/agent/sessionadvise.go (the plan's Files list put it in reactions.go/loop.go/agent.go/construct.go): reactions.go is already ~860 lines, the plan's own test file name (sessionadvise_test.go) mirrors it, and the coding standards ask for one concern per file; the named files carry only the wiring (loop.go join call, construct.go boundary start + exchangeAborted/exchangeClosed, agent.go field + Close, reactions.go isAdvice/reactionAction widening).
+NOTES (2026-10-19): consequential edit — internal/agent/doc.go: made necessary by the new sessionadvise.go (the package file map, enforced by TestDocMapNamesEveryFile).
+NOTES (2026-10-19): the lane starts in announceSessionStart before its ObserveRunner nil check, so it runs on Agents holding no Runner (the bench); the fireCascade doc's "nothing else fires a reaction" is narrowed to seams, the session-start lane being the one firing outside it.
+NOTES (2026-10-19): a failed session-start run is reported through reportReaction, which books its "failed" firing with Origin user even for an engine-origin Go handler (pre-existing hard-coding in syncexec.go, left untouched); a recovered handler panic is reported at the join as the ErrorEvent recoverHook emits.
 
 **What:** Recast at the regression check (2026-10-19). Depends on items 3, 4, 5, 6.
 **Goal:** at each Session boundary the agent starts every armed advise-class Reaction on `session-started` in the background (D7 timeout, fail-open); the first request that carries a new user message joins them, waiting only for each entry's remaining timeout, and attaches their output, in config order, as leading advice on that user message, committed to the live conversation. No new user message → nothing attached (a mid-Exchange resume attaches to the next prompt). A new boundary discards unattached results. Bypass (`--bypass`) skips the lane (D9). A failure or timeout adds nothing and is reported as other advise failures are. Reachable only by engine-origin Go handlers until `session-start-advise` lands (the user key stays refused by item 2).

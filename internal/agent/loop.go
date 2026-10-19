@@ -122,6 +122,13 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 			opening.Content += workflowNoteSeparator + renderWorkflowNotes(notes)
 		}
 		a.conv.Append(opening)
+		// The session-start advise lane joins here, at the one point a new user message enters
+		// the request: the runs the Session boundary started in the background are waited on for
+		// what is left of each deadline and fenced ahead of the user's text in this opening, taken
+		// into the Exchange so an abort puts them back (exchangeAborted). The wait is ctx-aware —
+		// a cancel ends it and falls to the cancel exit below, leaving the runs for the next
+		// opening (joinSessionAdvice, sessionadvise.go).
+		a.joinSessionAdvice(ctx, turn)
 		// A cancel that landed while the opening was composed — a recipe launch the user stopped
 		// is the case that matters — ends the Turn here, before any request is sent: the model is
 		// not asked to answer a run the user has just stopped. The rollback boundary is the
