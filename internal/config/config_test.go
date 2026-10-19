@@ -2884,6 +2884,116 @@ func TestResolveResponseReserve(t *testing.T) {
 	}
 }
 
+// An entry's own `stream-idle-timeout:` outranks the top-level window for that server alone, and
+// its 0 is a value — the cut turned off for this server — not the absence; only an absent key, or
+// one that is only whitespace (which ParseStreamIdleTimeout would read as its own 10m default),
+// falls through to the root.
+func TestResolveStreamIdleTimeout(t *testing.T) {
+	t.Parallel()
+	const root = 10 * time.Minute
+	tests := []struct {
+		name  string
+		entry string
+		want  time.Duration
+	}{
+		{name: "an entry stating none takes the root", entry: "", want: root},
+		{name: "a whitespace-only entry takes the root, not the parser's default", entry: "  ", want: root},
+		{name: "an entry's 0 turns the cut off for that server", entry: "0", want: 0},
+		{name: "an entry's own window wins", entry: "90s", want: 90 * time.Second},
+		{name: "an entry that does not parse falls through to the root", entry: "soon", want: root},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ResolveStreamIdleTimeout(tt.entry, root); got != tt.want {
+				t.Errorf("ResolveStreamIdleTimeout(%q, %v) = %v; want %v", tt.entry, root, got, tt.want)
+			}
+		})
+	}
+	if got := ResolveStreamIdleTimeout("", 0); got != 0 {
+		t.Errorf("ResolveStreamIdleTimeout(\"\", 0) = %v; want the root's own off, 0", got)
+	}
+}
+
+// A `stream-idle-timeout:` on a `servers:` entry is read by the parser its top-level twin is read by,
+// and a value that parser refuses is refused at startup under ValidateServers' own prefix — the entry
+// and the key named, then the parser's reason. Whitespace is refused outright, as `api-key-env:`'s
+// is, rather than silently becoming the parser's 10m default.
+func TestValidateServersRefusesAnEntryStreamIdleTimeoutThatIsNotALength(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		idle    string
+		wantErr string
+	}{
+		{name: "the key absent", idle: ""},
+		{name: "the cut turned off", idle: "0"},
+		{name: "a window of its own", idle: "90s"},
+		{name: "not a length of time", idle: "soon", wantErr: `stream-idle-timeout: invalid stream-idle-timeout "soon": want a length of time`},
+		{name: "a negative window", idle: "-5s", wantErr: "stream-idle-timeout: invalid stream-idle-timeout -5s: want 0 or more"},
+		{name: "only whitespace", idle: "   ", wantErr: "stream-idle-timeout: is only whitespace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateServers([]ServerEntry{{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111", StreamIdleTimeout: tt.idle,
+			}})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateServers refused stream-idle-timeout: %q — %v", tt.idle, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateServers accepted stream-idle-timeout: %q; want a refusal", tt.idle)
+			}
+			want := `apogee: servers: entry 1 ("workstation"): ` + tt.wantErr
+			if !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("error = %q; want it to start %q", err, want)
+			}
+		})
+	}
+}
+
+// An entry's `stream-idle-timeout:` loads as the text the file wrote — an unquoted 0 included, which
+// is the off value rather than the absence — renders back as itself, and an entry without the key
+// renders no key at all.
+func TestServerEntryStreamIdleTimeoutRoundTrips(t *testing.T) {
+	t.Parallel()
+	var loaded []ServerEntry
+	given := "- {name: slow, endpoint: http://h, stream-idle-timeout: 0}\n" +
+		"- {name: patient, endpoint: http://h, stream-idle-timeout: 30m}\n" +
+		"- {name: plain, endpoint: http://h}\n"
+	if err := yaml.Unmarshal([]byte(given), &loaded); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	want := []ServerEntry{
+		{Name: "slow", Endpoint: "http://h", StreamIdleTimeout: "0"},
+		{Name: "patient", Endpoint: "http://h", StreamIdleTimeout: "30m"},
+		{Name: "plain", Endpoint: "http://h"},
+	}
+	if !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("loaded %#v; want %#v", loaded, want)
+	}
+	out, err := yaml.Marshal(loaded)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	var back []ServerEntry
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("yaml.Unmarshal of the rendered entries: %v", err)
+	}
+	for i := range want {
+		if back[i] != want[i] {
+			t.Errorf("round trip of entry %d = %+v; want %+v", i, back[i], want[i])
+		}
+	}
+	if got := strings.Count(string(out), "stream-idle-timeout"); got != 2 {
+		t.Errorf("rendered %d stream-idle-timeout keys, want 2 — the entry without one must render none:\n%s", got, out)
+	}
+}
+
 // A `response-reserve:` on a `servers:` entry is refused at startup by the range rule its top-level
 // twin is refused by — one number, one meaning, wherever in the file it is written — and the refusal
 // names the entry as well as the key, because a list of servers is where a typo hides longest. 0 is

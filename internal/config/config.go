@@ -1615,6 +1615,15 @@ type UnconfinedHost struct {
 // struct for RequestExtra's reason — ServerEntry is compared with `!=` — and see Price for how a
 // rate the file left out is told apart from a rate of 0.
 //
+// StreamIdleTimeout is this server's own `stream-idle-timeout:`, the raw text the file wrote — how
+// long a streamed reply from THIS server may sit silent before the request is cut and re-sent. It
+// overrides the top-level key for this server alone: a slow-prefill box states a longer window, or
+// 0 to turn the cut off, while every other server keeps the root's. "" is the key absent; the text
+// is held rather than a parsed time.Duration because yaml cannot tell an absent duration from an
+// explicit 0, and 0 is a value here (off), not the absence. ValidateServers reads it through
+// ParseStreamIdleTimeout, and ResolveStreamIdleTimeout answers the window a session on this entry
+// runs with.
+//
 // Vision is the entry's opt-in to image input (`vision: true`): only a server that states it is
 // ever sent an image. Without it, a new image is refused before any request goes out, and an image
 // already in the history goes to that server as an `[image omitted: <name>]` line instead. It is
@@ -1625,28 +1634,29 @@ type UnconfinedHost struct {
 // nowhere in `servers:`, so advice that names the file has to tell the user to add one. It is never
 // read from or written to the file — `yaml:"-"` — because the file holds configured entries only.
 type ServerEntry struct {
-	Name            string       `yaml:"name"`
-	Endpoint        string       `yaml:"endpoint"`
-	Description     string       `yaml:"description,omitempty"`
-	APIKey          string       `yaml:"api-key,omitempty"`
-	APIKeyCmd       string       `yaml:"api-key-cmd,omitempty"`
-	APIKeyEnv       string       `yaml:"api-key-env,omitempty"`
-	PlaintextKeyOK  bool         `yaml:"plaintext-key-ok,omitempty"`
-	Model           string       `yaml:"model,omitempty"`
-	LlamaLauncher   string       `yaml:"llama-launcher,omitempty"`
-	LaunchProfile   string       `yaml:"launch-profile,omitempty"`
-	ParallelAgents  WholeCount   `yaml:"parallel-agents,omitempty"`
-	Bypass          *bool        `yaml:"bypass,omitempty"`
-	ContextWindow   TokenCount   `yaml:"context-window,omitempty"`
-	WorkingWindow   WholeCount   `yaml:"working-window,omitempty"`
-	MaxOutputTokens WholeCount   `yaml:"max-output-tokens,omitempty"`
-	ResponseReserve float64      `yaml:"response-reserve,omitempty"`
-	EffortDialect   string       `yaml:"effort-dialect,omitempty"`
-	Wire            string       `yaml:"wire,omitempty"`
-	RequestExtra    RequestExtra `yaml:"request-extra,omitempty"`
-	Price           Price        `yaml:"price,omitempty"`
-	Vision          bool         `yaml:"vision,omitempty"`
-	Ephemeral       bool         `yaml:"-"`
+	Name              string       `yaml:"name"`
+	Endpoint          string       `yaml:"endpoint"`
+	Description       string       `yaml:"description,omitempty"`
+	APIKey            string       `yaml:"api-key,omitempty"`
+	APIKeyCmd         string       `yaml:"api-key-cmd,omitempty"`
+	APIKeyEnv         string       `yaml:"api-key-env,omitempty"`
+	PlaintextKeyOK    bool         `yaml:"plaintext-key-ok,omitempty"`
+	Model             string       `yaml:"model,omitempty"`
+	LlamaLauncher     string       `yaml:"llama-launcher,omitempty"`
+	LaunchProfile     string       `yaml:"launch-profile,omitempty"`
+	ParallelAgents    WholeCount   `yaml:"parallel-agents,omitempty"`
+	Bypass            *bool        `yaml:"bypass,omitempty"`
+	ContextWindow     TokenCount   `yaml:"context-window,omitempty"`
+	WorkingWindow     WholeCount   `yaml:"working-window,omitempty"`
+	MaxOutputTokens   WholeCount   `yaml:"max-output-tokens,omitempty"`
+	ResponseReserve   float64      `yaml:"response-reserve,omitempty"`
+	StreamIdleTimeout string       `yaml:"stream-idle-timeout,omitempty"`
+	EffortDialect     string       `yaml:"effort-dialect,omitempty"`
+	Wire              string       `yaml:"wire,omitempty"`
+	RequestExtra      RequestExtra `yaml:"request-extra,omitempty"`
+	Price             Price        `yaml:"price,omitempty"`
+	Vision            bool         `yaml:"vision,omitempty"`
+	Ephemeral         bool         `yaml:"-"`
 }
 
 // RequestExtra is a server entry's `request-extra:` mapping as the rest of apogee holds it: the
@@ -2177,6 +2187,18 @@ func ValidateServers(servers []ServerEntry) error {
 				"reply, above 0 and below 1 (0.2 ⇒ a fifth), or remove the key to take the top-level "+
 				"response-reserve:", i+1, s.Name, s.ResponseReserve)
 		}
+		if idle := s.StreamIdleTimeout; idle != "" {
+			if strings.TrimSpace(idle) == "" {
+				return fmt.Errorf("apogee: servers: entry %d (%q): stream-idle-timeout: is only whitespace — "+
+					"give how long a reply from this server may sit silent, like 10m or 30s, or 0 to wait for "+
+					"as long as it takes; or remove the key to take the top-level stream-idle-timeout:",
+					i+1, s.Name)
+			}
+			if _, err := ParseStreamIdleTimeout(idle); err != nil {
+				return fmt.Errorf("apogee: servers: entry %d (%q): stream-idle-timeout: %s", i+1, s.Name,
+					strings.TrimPrefix(err.Error(), "apogee: "))
+			}
+		}
 		if dialect := s.EffortDialect; dialect != "" && !isKnownEffortDialect(dialect) {
 			return fmt.Errorf("apogee: servers: entry %d (%q): effort-dialect: %q is not a dialect — "+
 				"want auto to read the wire off what this server advertises, kwargs, reasoning or "+
@@ -2421,6 +2443,30 @@ func ResolveResponseReserve(entry, session float64) float64 {
 		return session
 	}
 	return 0
+}
+
+// ResolveStreamIdleTimeout answers how long a streamed reply from a `servers:` entry may sit silent
+// before the request is cut and re-sent. entry is that entry's own `stream-idle-timeout:` text ("" when
+// the key is absent) and root is the top-level `stream-idle-timeout:` the whole run carries, already
+// resolved.
+//
+// The ranks are ResolveContextWindow's, for its reason: a window written on the ENTRY describes THAT
+// server's prefill, while the top-level key describes whatever server the session happens to be
+// pointed at. Unlike the counts above, an entry's 0 is a value, not the absence — it turns the cut
+// off for this server — which is why the entry is held as text and only "" (or whitespace, which
+// ParseStreamIdleTimeout would otherwise read as its own 10m default) falls through to root.
+//
+// The entry is guarded rather than trusted — ValidateServers refuses a value that does not parse at
+// startup — so one that still fails to parse falls through to root instead of being spent.
+func ResolveStreamIdleTimeout(entry string, root time.Duration) time.Duration {
+	if strings.TrimSpace(entry) == "" {
+		return root
+	}
+	window, err := ParseStreamIdleTimeout(entry)
+	if err != nil {
+		return root
+	}
+	return window
 }
 
 // presentConfig is the on-disk schema for the `present:` block (ADR 0019). It mirrors

@@ -72,6 +72,37 @@ func TestSaveServerEntrySetting_InsertsTheModelIntoAnEntryThatLacksIt(t *testing
 	}
 }
 
+// A recorded model leaves an entry's own `stream-idle-timeout:` exactly as written, and an entry that
+// never stated one still states none once the writer has been through it — the key is never invented
+// for an entry that leaves the window to the root.
+func TestSaveServerEntrySetting_LeavesTheStreamIdleTimeoutAsWritten(t *testing.T) {
+	before := "servers:\n" +
+		"  - name: slow\n" +
+		"    endpoint: http://192.168.64.1:1111\n" +
+		"    stream-idle-timeout: 0\n" +
+		"  - name: plain\n" +
+		"    endpoint: http://192.168.64.2:1111\n"
+	path := writeTestConfig(t, before)
+
+	if err := SaveServerEntrySetting(path, "plain", entryModelKey, pickedModel); err != nil {
+		t.Fatalf("record the model on the entry: %v", err)
+	}
+	if err := SaveServerEntrySetting(path, "slow", entryModelKey, pickedModel); err != nil {
+		t.Fatalf("record the model on the entry: %v", err)
+	}
+
+	written := readTestConfig(t, path)
+	if got := serverEntry(t, written, "slow").StreamIdleTimeout; got != "0" {
+		t.Errorf("slow's stream-idle-timeout = %q after the write, want the %q it stated", got, "0")
+	}
+	if got := serverEntry(t, written, "plain").StreamIdleTimeout; got != "" {
+		t.Errorf("plain's stream-idle-timeout = %q after the write, want it still absent", got)
+	}
+	if got := strings.Count(written, "stream-idle-timeout"); got != 1 {
+		t.Errorf("the written file carries %d stream-idle-timeout keys, want the one slow stated:\n%s", got, written)
+	}
+}
+
 // The last entry has nothing after it to insert before, so the appended line goes at the end of the
 // list — with the paragraphs below it still where the user put them.
 func TestSaveServerEntrySetting_AppendsToTheLastEntry(t *testing.T) {

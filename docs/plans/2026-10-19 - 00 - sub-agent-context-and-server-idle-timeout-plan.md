@@ -164,7 +164,10 @@ internal/config/registry.go — sub-agents-choice row; docs/manual/workflows.md 
 **Commit:** `docs(manual): document sub-agents-context and the sub_agent context argument`
 Depends on items 2 and 4.
 
-## 6. `servers:` entry carries an optional `stream-idle-timeout`
+## 6. `servers:` entry carries an optional `stream-idle-timeout` — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the refusal's reason is ParseStreamIdleTimeout's message with its leading "apogee: " trimmed, so the prefix reads `apogee: servers: entry N ("<name>"): stream-idle-timeout: invalid stream-idle-timeout ...` without a second "apogee:" mid-line; the whitespace-only value is refused in ValidateServers (as api-key-env: is) AND the resolver treats it as absent, both pinned by tests.
+NOTES (2026-10-19): gofmt realigned the ServerEntry struct's field tags because the new field name is the longest; no field changed beyond the added `StreamIdleTimeout string` (`yaml:"stream-idle-timeout,omitempty"`).
 
 **What:**
 **Goal:** `config.ServerEntry` accepts `stream-idle-timeout`, validated by `ParseStreamIdleTimeout`. A bad value is refused with `ValidateServers`' prefix, `servers: entry N ("<name>"): stream-idle-timeout:`, followed by `ParseStreamIdleTimeout`'s reason. `config.ResolveStreamIdleTimeout(entry, root)` returns the entry's value when it is stated (`0` included, meaning off), and the root otherwise. `ServerEntry` stays comparable, and a written entry omits the key when it is absent.

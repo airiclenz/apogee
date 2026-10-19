@@ -61,6 +61,11 @@ func TestUnknownKeysWalksTheSchemaAsDeepAsItGoes(t *testing.T) {
 			want:  nil,
 		},
 		{
+			name:  "a servers entry's own stream-idle-timeout is a known key",
+			given: "servers: [{name: a, stream-idle-timeout: 90s}]\n",
+			want:  nil,
+		},
+		{
 			name:  "the retired sub-agents flag is exempt on a servers entry",
 			given: "servers: [{name: a, sub-agents: true}]\n",
 			want:  nil,
