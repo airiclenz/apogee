@@ -141,7 +141,12 @@ cmd/apogee/settingsapplier_helper_test.go — fakeApplier (its engine is applySe
 **Acceptance:** `go build ./...`; `GOMEMLIMIT=2GiB go test -count=1 ./internal/agent/ ./internal/reactions/ ./internal/run/`; `GOMEMLIMIT=2GiB go test -count=1 -run 'SessionStarted|NeverReportsOnTheCallersGoroutine' ./cmd/apogee/`.
 **Commit:** `feat(agent): a session-started reaction adopted before the first prompt fires for that session`
 
-## 6. Advice rendered ahead of a user message
+## 6. Advice rendered ahead of a user message — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): AdviceSpan gains `Leading bool` and `End int`. RenderAdvice renders a leading span as fence then blank line, and a trailing span as blank line then fence. WithAdvice with Leading inserts the fence after any leading fences already there, so successive calls keep call order, and it shifts the Offset (and the End of a leading row) of every row at or past the insertion point. fenceStands also checks a leading span's closing line at End.
+NOTES (2026-10-19): the accessor is `Message.ContentWithoutAdvice()`. It removes the leading range only while every leading span stands and they tile the content from 0. It cuts at the first trailing span only while that fence stands. recordContent now returns it, so the record and the Floor guards strip the same bytes.
+NOTES (2026-10-19): the mutator is `(*Conversation).AdviseUserMessage(i, span, text) bool`. It sets span.Leading, refuses a non-user message or an out-of-range index without a revision bump, and bumps the revision when the advice lands. It lives in advice.go next to NoteMessage, so internal/domain/conversation.go (named in Files) is unchanged.
+NOTES (2026-10-19): the provider tests are new characterisation pins (TestOpenAIFormatMessageCarriesALeadingFenceUnchanged, TestAnthropicCodecCarriesALeadingFenceUnchanged). No provider code changed. Each new floor test was checked to fail with the accessor reads reverted to `.Content`.
 
 **What:** Recast at the regression check (2026-10-19).
 **Goal:** a user `domain.Message` can carry session-start advice spans rendered as apogee's fence ahead of the message's text, with the same provenance header (`{reaction, origin, moment, turn}`), cap and redaction contract as the tool-result trailer; the record copy strips them exactly as it strips trailer advice; both wires send the result as one user message (no added message on either wire).

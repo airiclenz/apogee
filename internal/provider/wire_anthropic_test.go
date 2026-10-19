@@ -890,3 +890,37 @@ func rawResponseEqual(a, b RawResponse) bool {
 	}
 	return true
 }
+
+// TestAnthropicCodecCarriesALeadingFenceUnchanged is a characterisation pin for the session-start
+// slot: a user message whose content opens with an advice fence ahead of the prompt goes as one
+// user message of one text block, its text byte-identical. The fence is plain content here — this
+// package never sees the domain ledger (ADR 0010).
+func TestAnthropicCodecCarriesALeadingFenceUnchanged(t *testing.T) {
+	t.Parallel()
+
+	const content = "[advice — reaction orient (engine origin) at session-started, turn 1]\n" +
+		"read AGENTS.md\n[end advice — orient]\n\nfix the parser"
+	codec := &anthropicCodec{}
+
+	body, _, err := codec.encode(Request{Model: "m", Messages: []Message{{Role: "user", Content: content}}})
+
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var sent struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(sent.Messages) != 1 || sent.Messages[0].Role != "user" || len(sent.Messages[0].Content) != 1 ||
+		sent.Messages[0].Content[0].Text != content {
+		t.Errorf("messages = %+v, want one user message whose one text block is the content", sent.Messages)
+	}
+}

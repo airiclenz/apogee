@@ -164,8 +164,8 @@ func restoredFences() []string {
 
 // unforgeableFences are the two fence pairs that belong to no standingBlocks row: the advice fence
 // an advise Reaction's text is delivered in and the engine-note fence the engine's own asides ride
-// in. Neither is ever committed — Message.recordContent cuts a message at its first fence, so no
-// session record carries one (domain/advice.go) — so both are on BOTH lists.
+// in. Neither is ever committed — Message.recordContent removes every fence's range from a message,
+// so no session record carries one (domain/advice.go) — so both are on BOTH lists.
 var unforgeableFences = []string{
 	domain.AdviceFencePrefix, domain.AdviceFenceClosePrefix,
 	domain.EngineNoteFencePrefix, domain.EngineNoteFenceClosePrefix,

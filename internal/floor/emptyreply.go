@@ -48,7 +48,9 @@ func shouldRecoverEmpty(resp *domain.Response) bool {
 	}
 	conv := view.Conversation()
 	last, _, ok := conv.LastUser()
-	if !ok || strings.TrimSpace(last.Content) == "" {
+	// Advice fenced ahead of an image-only prompt is not the user's text: the guard stands down
+	// on it exactly as on the unadvised message.
+	if !ok || strings.TrimSpace(last.ContentWithoutAdvice()) == "" {
 		return false
 	}
 	return hasRecentProgress(conv)

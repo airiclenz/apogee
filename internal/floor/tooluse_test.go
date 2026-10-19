@@ -148,3 +148,54 @@ func TestEnforceToolUseNoOpCases(t *testing.T) {
 		})
 	}
 }
+
+// advisedUserMsg is a user message carrying session-start advice fenced ahead of its prompt — the
+// shape domain.Conversation.AdviseUserMessage commits — with advice as the fenced text.
+func advisedUserMsg(prompt, advice string) domain.Message {
+	span := domain.AdviceSpan{
+		Reaction: "orient",
+		Origin:   domain.OriginEngine,
+		Moment:   domain.MomentSessionStarted,
+		Turn:     1,
+		Leading:  true,
+	}
+	return userMsg(prompt).WithAdvice(span, advice)
+}
+
+// Session-start advice fenced ahead of the prompt is not the user's request: its words neither
+// stand the enforcer down on an action request nor fire it on a question — the guard judges the
+// prompt without its advice, exactly as it judges the unadvised message.
+func TestEnforceToolUseReadsThePromptWithoutItsAdvice(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		prompt   string
+		advice   string
+		wantFire bool
+	}{
+		{
+			name:     "analysis words in the advice leave an action request firing",
+			prompt:   "please implement feature X now",
+			advice:   "review the conventions and explain them",
+			wantFire: true,
+		},
+		{
+			name:   "action words in the advice leave a question standing down",
+			prompt: "what changed in main.go",
+			advice: "implement and write every change",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			history := narrationHistory()
+			history[len(history)-1] = advisedUserMsg(tt.prompt, tt.advice)
+
+			_, fired := EnforceToolUse(guardResponse(history, guardMenu(), "I would edit main.go."))
+
+			if fired != tt.wantFire {
+				t.Errorf("EnforceToolUse fired = %v, want %v", fired, tt.wantFire)
+			}
+		})
+	}
+}

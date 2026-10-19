@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,5 +140,30 @@ func TestOpenAICodecBodyIsUnchanged(t *testing.T) {
 				t.Errorf("posted body =\n%s\nwant\n%s", posted[0], tc.want)
 			}
 		})
+	}
+}
+
+// TestOpenAIFormatMessageCarriesALeadingFenceUnchanged is a characterisation pin for the
+// session-start slot: a user message whose content opens with an advice fence ahead of the prompt
+// goes as one user message, its content byte-identical, with or without tools. The fence is plain
+// content here — this package never sees the domain ledger (ADR 0010).
+func TestOpenAIFormatMessageCarriesALeadingFenceUnchanged(t *testing.T) {
+	t.Parallel()
+
+	const content = "[advice — reaction orient (engine origin) at session-started, turn 1]\n" +
+		"read AGENTS.md\n[end advice — orient]\n\nfix the parser"
+	for _, hasTools := range []bool{true, false} {
+		got, err := json.Marshal(formatMessage(Message{Role: "user", Content: content}, hasTools))
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		text, err := json.Marshal(content)
+		if err != nil {
+			t.Fatalf("Marshal content: %v", err)
+		}
+
+		if want := `{"role":"user","content":` + string(text) + `}`; string(got) != want {
+			t.Errorf("hasTools=%v: message = %s, want %s", hasTools, got, want)
+		}
 	}
 }

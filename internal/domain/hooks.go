@@ -114,8 +114,8 @@ type Message struct {
 	// Advice is the provenance ledger of the advice spans injected into Content — one row
 	// per advise Reaction that fenced text onto this message, in the order they landed
 	// (advice.go). It is runtime-only and deliberately NOT serialized: MarshalJSON writes
-	// Content up to the first span's fence, so a session record carries no advice and a
-	// resume has nothing to drop (ADR 0076 D6).
+	// Content with every span's fence range removed (ContentWithoutAdvice), so a session
+	// record carries no advice and a resume has nothing to drop (ADR 0076 D6).
 	Advice []AdviceSpan `json:"-"`
 
 	// extra carries preserved unknown wire fields (reasoning_content, tool_choice,
@@ -178,7 +178,7 @@ func (m Message) WithExtra(key string, v json.RawMessage) Message {
 // round-trips untouched.
 //
 // Content is the RECORD content, not necessarily the live one: MarshalJSON fills it from
-// Message.recordContent, which cuts at the first advice span's fence. The Advice ledger has
+// Message.recordContent, which removes every advice span's fence range. The Advice ledger has
 // no field here at all — spans are ephemeral by construction (advice.go).
 type messageJSON struct {
 	Role       Role       `json:"role"`
@@ -230,8 +230,8 @@ func isKnownMessageKey(key string) bool {
 //
 // Advice spans are stripped here, at the one encoder every persisted Message crosses (a
 // Conversation marshals its messages through this method): the Content written is
-// recordContent — everything before the first fence — so no session record carries advice
-// and a resume never re-reads it. A message with no spans marshals byte-identically to one
+// recordContent — the content with every fence's range removed — so no session record carries
+// advice and a resume never re-reads it. A message with no spans marshals byte-identically to one
 // written before the ledger existed.
 //
 // The preserved siblings are spliced on in sorted key order rather than via a map marshal,

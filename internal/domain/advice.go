@@ -12,7 +12,10 @@ import (
 //
 // An advise Reaction returns text the model sees. For a tool-shaped Moment the text lands as
 // a fenced trailer on the closing tool result, so the request prefix is untouched and a local
-// server's prefix cache survives the Turn. The engine rides the same seam for its own
+// server's prefix cache survives the Turn. For session-started (ADR 0076, 2026-10-19 amendment)
+// it lands as a LEADING fence inside the user message that opens the session's next Exchange,
+// ahead of the user's own text — still one user message, never an added one
+// (Conversation.AdviseUserMessage). The engine rides the same seam for its own
 // structural text — an ENGINE NOTE (RenderEngineNote, Message.WithEngineNote), fenced under its
 // own header on the closing tool result of a request that needs it (a capped delegate's wrap-up
 // directive, Request.NoteOnTail) and recorded on the same ledger, so one strip and one staleness
@@ -23,17 +26,25 @@ import (
 //   - each injected span is recorded on the message it advised (Message.Advice), which is the
 //     provenance ledger a bench attributes effect through — the TUI's /advice pane shows the
 //     same rows to the human, read off the ReactionFiredEvent each injection books;
-//   - spans are EPHEMERAL: the session record is written from the content before the first
-//     fence, so a resumed conversation carries no advice and a replay never re-reads a stale
-//     SHA or timestamp.
+//   - spans are EPHEMERAL: the session record is written from the content with every fence's
+//     range removed (Message.ContentWithoutAdvice) — the leading fences cut from the front, the
+//     trailers cut from the first one on — so a resumed conversation carries no advice and a
+//     replay never re-reads a stale SHA or timestamp.
 
 // AdviceSpan is one advice injection's ledger row: which Reaction produced the text, the
 // origin and Moment it produced it under, the Turn it landed in, and where its fence begins.
 //
 // Offset is the byte index in the advised Message's Content at which the rendered fence
-// starts — so Content[:Offset] is the message as it stood before any advice, and the first
-// span's Offset is the cut the session-record strip makes. A ledger is append-ordered:
-// spans[0] is the earliest injection, hence the earliest cut.
+// starts. A TRAILING span (Leading false, every tool-shaped injection and every engine note)
+// fences after the text, so the first trailing span's Offset is the cut the session-record strip
+// makes: everything from it on is advice. A ledger is append-ordered, so the first trailing row
+// is the earliest trailer, hence the earliest cut.
+//
+// A LEADING span (Leading true, the session-start slot on a user message) fences ahead of the
+// text instead, and End is the byte index just past its fence and the blank line that parts it
+// from the text: Content[Offset:End] is the range the strip removes. Leading spans tile the front
+// of the content in ledger order — the first at 0, each next one at the previous one's End — so
+// the user's own text begins at the last leading span's End. End is zero on a trailing span.
 //
 // Topic is set on exactly one kind of row: an ENGINE NOTE (Message.WithEngineNote) — structural
 // text the engine itself fences onto a tool result, such as a capped delegate's wrap-up
@@ -50,6 +61,8 @@ type AdviceSpan struct {
 	Turn     int
 	Offset   int
 	Topic    string
+	Leading  bool
+	End      int
 }
 
 // AdviceCap is the byte ceiling on one advise handler's text (ADR 0076 D7). Output past it is
@@ -80,18 +93,32 @@ const (
 	EngineNoteFenceClosePrefix = "[end engine — "
 )
 
-// RenderAdvice renders one advice span as the fenced block appended to a message's Content.
-// Every field of the header comes from span — the caller's text is fenced, never trusted to
-// name itself — so a handler printing its own "[advice — reaction …]" line lands inside the
-// fence rather than beside it.
+// fenceSeparator is the blank line that parts a fence from the message text beside it: before a
+// trailing fence, after a leading one.
+const fenceSeparator = "\n\n"
+
+// RenderAdvice renders one advice span as the fenced block a message's Content carries: appended
+// after the text for a trailing span, set ahead of it for a leading one (span.Leading). Every
+// field of the header comes from span — the caller's text is fenced, never trusted to name
+// itself — so a handler printing its own "[advice — reaction …]" line lands inside the fence
+// rather than beside it.
 //
-// The leading blank line separates the fence from whatever the message already said; text is
-// emitted verbatim between the header and the closing line, so a caller that wants it capped
-// passes it through CapAdvice first.
+// A blank line separates the fence from the message's own text: before a trailing fence, after a
+// leading one. Text is emitted verbatim between the header and the closing line, so a caller that
+// wants it capped passes it through CapAdvice first.
 func RenderAdvice(span AdviceSpan, text string) string {
-	return "\n\n" + AdviceFencePrefix + span.Reaction + " (" + string(span.Origin) +
+	fence := AdviceFencePrefix + span.Reaction + " (" + string(span.Origin) +
 		" origin) at " + string(span.Moment) + ", turn " + strconv.Itoa(span.Turn) + "]\n" +
-		text + "\n" + AdviceFenceClosePrefix + span.Reaction + "]"
+		text + "\n" + adviceFenceClose(span)
+	if span.Leading {
+		return fence + fenceSeparator
+	}
+	return fenceSeparator + fence
+}
+
+// adviceFenceClose is the closing line of span's advice fence.
+func adviceFenceClose(span AdviceSpan) string {
+	return AdviceFenceClosePrefix + span.Reaction + "]"
 }
 
 // CapAdvice truncates text to at most AdviceCap bytes and appends the truncation marker when
@@ -156,34 +183,121 @@ func (c *Conversation) NoteMessage(i int, topic, text string) {
 	c.revision++
 }
 
+// AdviseUserMessage fences text as leading advice ahead of the user message at index i
+// (Message.WithAdvice with span.Leading set) — the session-start slot: the advice rides inside
+// the user message that opens the session's next Exchange, ahead of the user's own text, so the
+// request stays one user message and its prefix up to that message is untouched (ADR 0076,
+// 2026-10-19 amendment). Successive calls land in call order, each after the fences already
+// ahead of the text. The span is as ephemeral as a trailer: recordContent strips it from the
+// session record, so a resume never carries it.
+//
+// It reports whether the advice landed: an out-of-range i, or a message that is not a user
+// message, is refused and leaves the conversation — and its revision — as it was. A landing bumps
+// the revision like every other mutation.
+func (c *Conversation) AdviseUserMessage(i int, span AdviceSpan, text string) bool {
+	if i < 0 || i >= len(c.messages) || c.messages[i].Role != RoleUser {
+		return false
+	}
+	span.Leading = true
+	c.messages[i] = c.messages[i].WithAdvice(span, text)
+	c.revision++
+	return true
+}
+
 // WithAdvice returns a copy of m whose Content carries text as a rendered advice fence and
-// whose ledger records span at the offset that fence begins. The caller's Offset is ignored —
-// it is the message, not the handler, that decides where the span sits.
+// whose ledger records span at the offset that fence begins. The caller's Offset and End are
+// ignored — it is the message, not the handler, that decides where the span sits.
+//
+// A trailing span (span.Leading false) is appended after everything the content already holds. A
+// leading span is inserted ahead of the text, after any leading fences already there, and every
+// row whose fence sits at or past the insertion point has its offsets shifted by the inserted
+// length — so each row's fence still stands where its row says (fenceStands) and the strip still
+// finds it.
 //
 // The ledger is copied, so a caller still holding the original Message is unaffected, matching
 // WithExtra's contract.
 func (m Message) WithAdvice(span AdviceSpan, text string) Message {
-	span.Offset = len(m.Content)
+	if span.Leading {
+		return m.withLeadingAdvice(span, text)
+	}
+	span.Offset, span.End = len(m.Content), 0
 	m.Content += RenderAdvice(span, text)
 	m.Advice = append(append([]AdviceSpan(nil), m.Advice...), span)
 	return m
 }
 
-// recordContent is the Content a session record carries for m: everything before the first
-// advice fence, so a snapshot never persists advice and a resume has nothing to drop.
-//
-// It slices only at a VERIFIED offset. A message's Content can be rewritten after it was
-// advised — the prune replaces an old tool result with a stub through
-// Conversation.SetMessageContent — and a span's Offset does not follow it: over a short noted
-// body ("ok") a longer stub still reaches the offset, and cutting there would persist a
-// truncated stub. The cut is made only while the content at the first span's offset still opens
-// with that span's fence (fenceStands); otherwise the fence is already gone and the content is
-// written whole.
-func (m Message) recordContent() string {
-	if len(m.Advice) == 0 || !m.fenceStands(m.Advice[0]) {
-		return m.Content
+// withLeadingAdvice is WithAdvice for a leading span: the fence goes in at the end of the leading
+// range (leadingEnd), and the rows at or past that point move with the bytes they fence.
+func (m Message) withLeadingAdvice(span AdviceSpan, text string) Message {
+	at := m.leadingEnd()
+	fence := RenderAdvice(span, text)
+	span.Offset, span.End = at, at+len(fence)
+
+	ledger := make([]AdviceSpan, 0, len(m.Advice)+1)
+	for _, row := range m.Advice {
+		if row.Offset >= at {
+			row.Offset += len(fence)
+			if row.Leading {
+				row.End += len(fence)
+			}
+		}
+		ledger = append(ledger, row)
 	}
-	return m.Content[:m.Advice[0].Offset]
+	m.Content = m.Content[:at] + fence + m.Content[at:]
+	m.Advice = append(ledger, span)
+	return m
+}
+
+// ContentWithoutAdvice is m's Content with every advice and engine-note fence removed: the leading
+// fences cut from the front and everything from the first trailing fence on cut from the back — for
+// a user message, the prompt exactly as the user wrote it. A reader that judges what the user ASKED
+// (the Floor guards' intent and emptiness tests, the Loop-break task quote) reads this, never
+// Content, so advice words cannot move it. It is also what the session record carries
+// (recordContent).
+//
+// It cuts only at VERIFIED offsets. A message's Content can be rewritten after it was advised —
+// the prune replaces an old tool result with a stub through Conversation.SetMessageContent — and
+// a span's Offset does not follow it: over a short noted body ("ok") a longer stub still reaches
+// the offset, and cutting there would persist a truncated stub. The leading range is removed only
+// while every leading span's fence still stands in place (leadingEnd), and the trailing cut is
+// made only while the first trailing span's fence still opens at its offset (fenceStands);
+// otherwise that side's fence is already gone and the content is kept whole on it.
+func (m Message) ContentWithoutAdvice() string {
+	start, end := m.leadingEnd(), len(m.Content)
+	for _, span := range m.Advice {
+		if span.Leading {
+			continue
+		}
+		if m.fenceStands(span) && span.Offset >= start {
+			end = span.Offset
+		}
+		break
+	}
+	return m.Content[start:end]
+}
+
+// recordContent is the Content a session record carries for m: ContentWithoutAdvice, so a
+// snapshot never persists advice and a resume has nothing to drop.
+func (m Message) recordContent() string {
+	return m.ContentWithoutAdvice()
+}
+
+// leadingEnd is where m's own text begins past its leading fences: the last leading span's End
+// when the leading spans tile the front of the content (the first at 0, each next at the previous
+// one's End) and every one of their fences stands, else 0 — a leading range that no longer holds
+// is not cut.
+func (m Message) leadingEnd() int {
+	end := 0
+	for _, span := range m.Advice {
+		if !span.Leading {
+			continue
+		}
+		if span.Offset != end || !m.fenceStands(span) {
+			return 0
+		}
+		end = span.End
+	}
+	return end
 }
 
 // dropStaleAdvice clears the ledger when any span's fence no longer stands at its offset
@@ -202,20 +316,35 @@ func (m *Message) dropStaleAdvice() {
 
 // fenceStands reports whether m's Content still opens span's fence at span's Offset: the header
 // RenderEngineNote writes for an engine note (Topic set), the header RenderAdvice writes for
-// advice otherwise, each through the field that names the row. An offset outside the content
-// never stands.
+// advice otherwise, each through the field that names the row. A leading span must also still
+// close at its End — its closing line and the blank line after it end there — since the strip
+// removes everything up to it. An offset outside the content never stands.
 func (m Message) fenceStands(span AdviceSpan) bool {
 	if span.Offset < 0 || span.Offset > len(m.Content) {
 		return false
 	}
-	return strings.HasPrefix(m.Content[span.Offset:], spanFenceHeader(span))
+	if !strings.HasPrefix(m.Content[span.Offset:], spanFenceHeader(span)) {
+		return false
+	}
+	if !span.Leading {
+		return true
+	}
+	if span.End < span.Offset || span.End > len(m.Content) {
+		return false
+	}
+	return strings.HasSuffix(m.Content[span.Offset:span.End], "\n"+adviceFenceClose(span)+fenceSeparator)
 }
 
 // spanFenceHeader is the opening every rendered fence of span's kind starts with, up to the
-// field that names the row — the bytes fenceStands matches at the span's offset.
+// field that names the row — the bytes fenceStands matches at the span's offset. A leading fence
+// opens on its header line itself; a trailing one opens on the blank line before it.
 func spanFenceHeader(span AdviceSpan) string {
 	if span.Topic != "" {
 		return "\n\n" + EngineNoteFencePrefix + span.Topic + "]"
 	}
-	return "\n\n" + AdviceFencePrefix + span.Reaction + " ("
+	header := AdviceFencePrefix + span.Reaction + " ("
+	if span.Leading {
+		return header
+	}
+	return fenceSeparator + header
 }

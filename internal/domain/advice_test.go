@@ -6,6 +6,7 @@ package domain
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -391,4 +392,216 @@ func TestRecordContentNeverSlicesAtAnUnverifiedOffset(t *testing.T) {
 			t.Errorf("pruned message JSON = %s, want the stub written whole", data)
 		}
 	})
+}
+
+// sessionStartSpan is the provenance of one session-start advice injection: the leading slot on
+// the user message that opens the session's next Exchange.
+func sessionStartSpan(reaction string) AdviceSpan {
+	return AdviceSpan{Reaction: reaction, Origin: OriginEngine, Moment: MomentSessionStarted, Turn: 1, Leading: true}
+}
+
+// TestAdviceRenderLeadingIsByteExact pins the leading fence: the same header and closing line as a
+// trailer, set ahead of the text with the blank line after it rather than before it.
+func TestAdviceRenderLeadingIsByteExact(t *testing.T) {
+	t.Parallel()
+
+	got := RenderAdvice(sessionStartSpan("orient"), "the build is make check")
+
+	const want = "[advice — reaction orient (engine origin) at session-started, turn 1]\n" +
+		"the build is make check\n[end advice — orient]\n\n"
+	if got != want {
+		t.Errorf("RenderAdvice = %q, want %q", got, want)
+	}
+}
+
+// TestAdviceLeadingRidesAheadOfThePrompt pins the leading slot on one message: the fence renders
+// first and the prompt follows it unchanged, the row records the fence's range, and the record
+// strip — the accessor every Floor guard reads — gives the prompt back byte-identical.
+func TestAdviceLeadingRidesAheadOfThePrompt(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "fix the parser"
+	bare := Message{Role: RoleUser, Content: prompt}
+
+	advised := bare.WithAdvice(sessionStartSpan("orient"), "the build is make check")
+
+	fence := RenderAdvice(sessionStartSpan("orient"), "the build is make check")
+	if advised.Content != fence+prompt {
+		t.Errorf("Content = %q, want the fence then the prompt %q", advised.Content, fence+prompt)
+	}
+	if len(advised.Advice) != 1 {
+		t.Fatalf("ledger = %+v, want one row", advised.Advice)
+	}
+	if row := advised.Advice[0]; !row.Leading || row.Offset != 0 || row.End != len(fence) {
+		t.Errorf("ledger row = %+v, want a leading row over [0, %d)", row, len(fence))
+	}
+	if got := advised.ContentWithoutAdvice(); got != prompt {
+		t.Errorf("ContentWithoutAdvice = %q, want the prompt %q", got, prompt)
+	}
+	if bare.Content != prompt || len(bare.Advice) != 0 {
+		t.Error("WithAdvice mutated the caller's Message")
+	}
+}
+
+// TestAdviceLeadingAndTrailingFencesStripTogether pins the strip over a user message that carries
+// both kinds: leading advice and a trailing engine note (a cancelled recipe launch's opening,
+// NoteMessage), landed in either order. Every fence stands where its row says, so the strip
+// removes the leading range and cuts the trailer, and the session record carries the prompt
+// byte-identical.
+func TestAdviceLeadingAndTrailingFencesStripTogether(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "run the recipe"
+	bare := Message{Role: RoleUser, Content: prompt}
+	cases := []struct {
+		name string
+		msg  Message
+	}{
+		{
+			name: "leading advice, then a trailing note",
+			msg:  bare.WithAdvice(sessionStartSpan("orient"), "read AGENTS.md").WithEngineNote("cancelled", "the launch was cancelled"),
+		},
+		{
+			name: "a trailing note, then leading advice",
+			msg:  bare.WithEngineNote("cancelled", "the launch was cancelled").WithAdvice(sessionStartSpan("orient"), "read AGENTS.md"),
+		},
+		{
+			name: "two leading spans around a trailing note",
+			msg: bare.WithAdvice(sessionStartSpan("orient"), "read AGENTS.md").
+				WithEngineNote("cancelled", "the launch was cancelled").
+				WithAdvice(sessionStartSpan("branch"), "you are on main"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, row := range tc.msg.Advice {
+				if !tc.msg.fenceStands(row) {
+					t.Errorf("row %+v does not stand over %q", row, tc.msg.Content)
+				}
+			}
+			if got := tc.msg.ContentWithoutAdvice(); got != prompt {
+				t.Errorf("ContentWithoutAdvice = %q, want %q", got, prompt)
+			}
+			if got := recordRoundTrip(t, tc.msg); got != prompt {
+				t.Errorf("restored content = %q, want %q", got, prompt)
+			}
+		})
+	}
+}
+
+// TestAdviceLeadingSpansLandInCallOrder pins the order a second leading injection takes: after the
+// first, ahead of the prompt — the config order the session-start lane attaches in.
+func TestAdviceLeadingSpansLandInCallOrder(t *testing.T) {
+	t.Parallel()
+
+	first, second := sessionStartSpan("orient"), sessionStartSpan("branch")
+	advised := Message{Role: RoleUser, Content: "go"}.WithAdvice(first, "one").WithAdvice(second, "two")
+
+	want := RenderAdvice(first, "one") + RenderAdvice(second, "two") + "go"
+	if advised.Content != want {
+		t.Errorf("Content = %q, want %q", advised.Content, want)
+	}
+}
+
+// TestConversationAdviseUserMessage pins the mutator the session-start lane commits through: it
+// fences leading advice onto a user message and bumps the revision, and it refuses — leaving the
+// message and the revision as they were — an index past the history or a message that is not the
+// user's.
+func TestConversationAdviseUserMessage(t *testing.T) {
+	t.Parallel()
+
+	history := []Message{
+		{Role: RoleSystem, Content: "be brief"},
+		{Role: RoleUser, Content: "fix the parser"},
+	}
+
+	t.Run("a user message takes the advice", func(t *testing.T) {
+		t.Parallel()
+		conv := NewConversation(history)
+		before := conv.Revision()
+
+		landed := conv.AdviseUserMessage(1, AdviceSpan{Reaction: "orient", Origin: OriginEngine, Moment: MomentSessionStarted, Turn: 1}, "read AGENTS.md")
+
+		if !landed || conv.Revision() != before+1 {
+			t.Errorf("landed = %v, revision %d -> %d, want true and one bump", landed, before, conv.Revision())
+		}
+		got := conv.At(1)
+		if !strings.HasPrefix(got.Content, AdviceFencePrefix+"orient (") || got.ContentWithoutAdvice() != "fix the parser" {
+			t.Errorf("advised message = %q, want the fence ahead of the prompt", got.Content)
+		}
+		if len(got.Advice) != 1 || !got.Advice[0].Leading {
+			t.Errorf("ledger = %+v, want one leading row", got.Advice)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		index int
+	}{
+		{name: "a system message", index: 0},
+		{name: "an index past the history", index: 2},
+		{name: "a negative index", index: -1},
+	} {
+		t.Run("refuses "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			conv := NewConversation(history)
+			before := conv.Revision()
+
+			landed := conv.AdviseUserMessage(tc.index, sessionStartSpan("orient"), "read AGENTS.md")
+
+			if landed || conv.Revision() != before {
+				t.Errorf("landed = %v, revision %d -> %d, want a refusal and no bump", landed, before, conv.Revision())
+			}
+			if !reflect.DeepEqual(conv.Messages(), history) {
+				t.Errorf("messages = %+v, want them untouched", conv.Messages())
+			}
+		})
+	}
+}
+
+// TestAdviceLeadingLedgerIsDroppedWhenARewriteLosesTheFence pins the staleness guard and the strip
+// over a leading fence: a rewrite that loses the fence drops the ledger, and a stale leading row
+// left standing never slices the new content.
+func TestAdviceLeadingLedgerIsDroppedWhenARewriteLosesTheFence(t *testing.T) {
+	t.Parallel()
+
+	advised := Message{Role: RoleUser, Content: "go"}.WithAdvice(sessionStartSpan("orient"), "read AGENTS.md")
+
+	t.Run("a rewrite drops the ledger", func(t *testing.T) {
+		t.Parallel()
+		conv := NewConversation([]Message{advised})
+
+		conv.SetMessageContent(0, "something else entirely")
+
+		if got := conv.At(0); len(got.Advice) != 0 || got.ContentWithoutAdvice() != "something else entirely" {
+			t.Errorf("rewritten message = %+v, want no ledger and the content whole", got)
+		}
+	})
+
+	t.Run("a stale row never slices", func(t *testing.T) {
+		t.Parallel()
+		stale := advised
+		stale.Content = "[advice — reaction orient (engine origin) at session-started, turn 1]\nshort"
+
+		if got := stale.ContentWithoutAdvice(); got != stale.Content {
+			t.Errorf("ContentWithoutAdvice = %q, want the content whole", got)
+		}
+	})
+}
+
+// recordRoundTrip writes msg through a Conversation's session-record encoder, reads it back, and
+// returns the restored message's content.
+func recordRoundTrip(t *testing.T, msg Message) string {
+	t.Helper()
+	data, err := json.Marshal(NewConversation([]Message{msg}))
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var restored Conversation
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	return restored.At(0).Content
 }

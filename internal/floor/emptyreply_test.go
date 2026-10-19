@@ -111,3 +111,34 @@ func TestRecoverEmptyTreatsRecentEditAsProgress(t *testing.T) {
 		})
 	}
 }
+
+// An image-only prompt carries no text for the guard to recover for, so it stands down — and the
+// session-start advice fenced ahead of it is not the user's text, so the advised image-only prompt
+// stands down exactly as the unadvised one does.
+func TestRecoverEmptyStandsDownOnAnAdvisedImageOnlyPrompt(t *testing.T) {
+	t.Parallel()
+	image := domain.Image{Name: "shot.png", MediaType: "image/png", Data: []byte{0x89, 'P', 'N', 'G'}}
+	imageOnly := userMsg("")
+	imageOnly.Images = []domain.Image{image}
+	advised := advisedUserMsg("", "read AGENTS.md first")
+	advised.Images = []domain.Image{image}
+	tests := []struct {
+		name string
+		user domain.Message
+	}{
+		{name: "unadvised", user: imageOnly},
+		{name: "advised", user: advised},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			history := []domain.Message{tt.user, assistantText("On it.")}
+
+			nudge, ok := RecoverEmpty(guardResponse(history, guardMenu(), ""))
+
+			if ok || nudge != "" {
+				t.Errorf("RecoverEmpty = (%q, %v), want the no-op (\"\", false)", nudge, ok)
+			}
+		})
+	}
+}

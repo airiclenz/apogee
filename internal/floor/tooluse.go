@@ -45,7 +45,10 @@ func shouldEnforceToolUse(resp *domain.Response) bool {
 	if !ok {
 		return false
 	}
-	if !hasActionIntent(last.Content) || hasAnalysisIntent(last.Content) {
+	// The intent is the user's, so it is read off the prompt alone: session-start advice fenced
+	// ahead of it must not flip the retry.
+	prompt := last.ContentWithoutAdvice()
+	if !hasActionIntent(prompt) || hasAnalysisIntent(prompt) {
 		return false
 	}
 	if wroteRecently(conv, 2) {

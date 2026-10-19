@@ -273,6 +273,32 @@ func TestProviderRequestImageProjection(t *testing.T) {
 	}
 }
 
+// TestProviderRequestAdvisedUserMessageIsOneMessage pins the session-start slot at the projection:
+// a user message carrying leading advice goes to the provider as ONE user message whose content is
+// the fence then the prompt — no added message, so the request prefix up to it is untouched (ADR
+// 0076, 2026-10-19 amendment).
+func TestProviderRequestAdvisedUserMessageIsOneMessage(t *testing.T) {
+	t.Parallel()
+
+	span := domain.AdviceSpan{
+		Reaction: "orient",
+		Origin:   domain.OriginEngine,
+		Moment:   domain.MomentSessionStarted,
+		Turn:     1,
+		Leading:  true,
+	}
+	advised := domain.Message{Role: domain.RoleUser, Content: "fix the parser"}.WithAdvice(span, "read AGENTS.md")
+	a := &Agent{cfg: domain.Config{Model: "test-model"}}
+	req := domain.NewRequest("test-model", []domain.Message{advised}, nil, domain.Budget{}, 0)
+
+	got := a.toProviderRequest(req)
+
+	want := []provider.Message{{Role: "user", Content: domain.RenderAdvice(span, "read AGENTS.md") + "fix the parser"}}
+	if !reflect.DeepEqual(got.Messages, want) {
+		t.Errorf("projected messages = %+v, want %+v", got.Messages, want)
+	}
+}
+
 // TestProviderRequestFoldsPastCallsIntoContent pins the "never double-tell" rule on the history:
 // a prompted-format profile's past calls ride in their message's content in the profile's own
 // format with no native tool calls — on an empty-menu request too, which renders no instruction

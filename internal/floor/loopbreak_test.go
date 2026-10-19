@@ -407,3 +407,26 @@ func TestToolLoopBreakKeysAMalformedCallOnItsRaw(t *testing.T) {
 		})
 	}
 }
+
+// The directive restates the task the user asked, so an Exchange opened by a prompt carrying
+// session-start advice quotes the prompt — never the advice header or its text.
+func TestToolLoopBreakQuotesThePromptNotItsAdvice(t *testing.T) {
+	t.Parallel()
+
+	history := []domain.Message{
+		advisedUserMsg("build the thing", "read AGENTS.md first"),
+		domaintest.AssistantCallsMessage(writeCall("w1", "a.go")),
+		domaintest.ToolResultMessage("w1", "ok"),
+	}
+	directive, ok := ToolLoopBreak(loopResponse(history, writeCall("w2", "a.go")))
+
+	if !ok {
+		t.Fatal("ToolLoopBreak returned ok = false on an identical repeat")
+	}
+	if !strings.Contains(directive, "build the thing") {
+		t.Errorf("directive = %q, want it to restate the user's task", directive)
+	}
+	if strings.Contains(directive, domain.AdviceFencePrefix) || strings.Contains(directive, "AGENTS.md") {
+		t.Errorf("directive = %q, want no trace of the advice", directive)
+	}
+}

@@ -280,7 +280,9 @@ func extractConversationContext(conv domain.ConversationView, ex domain.Exchange
 	if !ex.Found() {
 		return ctx
 	}
-	if task := conv.At(ex.UserIndex()).Content; strings.TrimSpace(task) != "" {
+	// The task is what the user asked: the prompt without the advice fenced ahead of it, so the
+	// directive never quotes an advice header back as the task.
+	if task := conv.At(ex.UserIndex()).ContentWithoutAdvice(); strings.TrimSpace(task) != "" {
 		if len(task) > 150 {
 			task = task[:150] + "..."
 		}
