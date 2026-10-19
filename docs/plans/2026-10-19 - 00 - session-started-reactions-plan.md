@@ -96,7 +96,12 @@ cmd/apogee/wire_engine.go — lateEngine.Bind, buildAgent; internal/domain/seamp
 **Acceptance:** `go build ./...`; `GOMEMLIMIT=2GiB go test -count=1 ./internal/agent/ ./internal/reactions/ ./internal/run/`; `GOMEMLIMIT=2GiB go test -count=1 -run 'TestE2ESessionStartedClearDoesNotHang|TestLateEngine|TestFiringSessionStarted' ./cmd/apogee/`.
 **Commit:** `feat(agent): session boundaries emit session-started`
 
-## 4. A fork marks its session-started boundary as `fork`
+## 4. A fork marks its session-started boundary as `fork` — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): consequential edit — internal/domain/seampayload.go: made necessary by the new `fork` start; it gains the SessionStartFork constant, which item 3 left to this item.
+NOTES (2026-10-19): consequential edit — apogee.go: made necessary by the new `fork` start; it gains the public alias SessionStartFork beside item 3's SessionStartNew, SessionStartResume and SessionStartClear, and the block's doc comment now names the fork.
+NOTES (2026-10-19): the marking method is named MarkFork on Agent, tui.Engine, lateEngine, inertEngine and fakeEngine. It is an atomic.Bool on Agent that RestoreSession takes with Swap at its top, before the ErrInputPending check, and that ClearContext drops at its top, so a refused fork restore never leaves it set. sessionLoadedMsg gains a `fork` bit; foldFork sets it, and resumeLoaded calls MarkFork just before RestoreSession, after its busy and error early returns.
+NOTES (2026-10-19): the agent tests built with newAgent see no construction announcement, so their expected starts begin at the boundary under test.
 
 **What:** Recast at the regression check (2026-10-19). Depends on item 3.
 **Goal:** a `/fork` emits exactly one `session-started` notice with `start: fork` (not `resume`) for the forked session, through item 3's enqueue-only door; `RestoreSession(domain.Session)` keeps its signature and the fork is marked by a separate call.

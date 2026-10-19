@@ -943,6 +943,7 @@ func (inertEngine) Workflows() ([]workflow.Info, error)         { return nil, ni
 func (inertEngine) StopWorkflow(string) error                   { return nil }
 func (inertEngine) RerunFailed(string) error                    { return nil }
 func (inertEngine) KeepWorkflows()                              {}
+func (inertEngine) MarkFork()                                   {}
 func (inertEngine) ResumeWorkflows() error                      { return nil }
 
 func (e inertEngine) ThinkingEffort() (domain.ThinkingEffort, domain.ThinkingEffort) {

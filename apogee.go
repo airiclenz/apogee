@@ -832,11 +832,13 @@ type ObserveRunner = domain.ObserveRunner
 type SessionStart = domain.SessionStart
 
 // The session-started starts: a constructed session (fresh, `--resume` and every Firing), a
-// stored session swapped into the live engine, and a cleared conversation.
+// stored session swapped into the live engine, a cleared conversation, and a forked child swapped
+// into the live engine.
 const (
 	SessionStartNew    = domain.SessionStartNew
 	SessionStartResume = domain.SessionStartResume
 	SessionStartClear  = domain.SessionStartClear
+	SessionStartFork   = domain.SessionStartFork
 )
 
 // ----------------------------------------------------------------------------

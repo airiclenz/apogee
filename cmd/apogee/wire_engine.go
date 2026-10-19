@@ -924,6 +924,14 @@ func (e *lateEngine) KeepWorkflows() {
 	}
 }
 
+// MarkFork marks the bound Agent's next session boundary as a fork; unbound there is no Agent to
+// restore into — RestoreSession is refused — so there is nothing to mark and it does nothing.
+func (e *lateEngine) MarkFork() {
+	if agent := e.bound(); agent != nil {
+		agent.MarkFork()
+	}
+}
+
 // ResumeWorkflows starts the background workflows and adopts the held notes the bound Agent's
 // restored snapshot carried; unbound there is no snapshot restored into anything yet (a resumed
 // record is seeded into the Agent the later Bind builds), so there is nothing to resume.

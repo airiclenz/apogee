@@ -187,7 +187,7 @@ func (m *Model) foldFork(msg recordWriteDoneMsg) tea.Cmd {
 		m.transcript.addNote(fmt.Sprintf("forked as %s — resume it from /sessions", child.ID))
 		return nil
 	}
-	cmd := m.resumeLoaded(sessionLoadedMsg{rec: msg.fork.record, keep: msg.write.fork.keep})
+	cmd := m.resumeLoaded(sessionLoadedMsg{rec: msg.fork.record, keep: msg.write.fork.keep, fork: true})
 	m.transcript.addNote(fmt.Sprintf("forked from %s — %s", child.ParentID, msg.write.fork.title))
 	return cmd
 }

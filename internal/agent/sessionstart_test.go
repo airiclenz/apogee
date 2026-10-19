@@ -2,9 +2,9 @@ package agent
 
 // The session-started notice (ADR 0076 amendment of 2026-10-19): every top-level Session boundary
 // announces exactly one start to the observe Runner — construction "new" (fresh and resumed starts
-// alike), ClearContext "clear", RestoreSession "resume" — a refused boundary and a delegate announce
-// none, a Driver that defers the construction boundary announces it once, and a boundary over a
-// wedged Runner still returns.
+// alike), ClearContext "clear", RestoreSession "resume", or "fork" after MarkFork — a refused
+// boundary and a delegate announce none, a Driver that defers the construction boundary announces it
+// once, and a boundary over a wedged Runner still returns.
 
 import (
 	"context"
@@ -256,5 +256,85 @@ func TestSessionStart_ABoundaryOverAWedgedRunnerReturns(t *testing.T) {
 	defer cancel()
 	if err := runner.Close(ctx); err != nil {
 		t.Fatalf("runner.Close: %v", err)
+	}
+}
+
+// TestSessionStart_AForkRestoreAnnouncesFork — MarkFork makes the next boundary a fork: the restore
+// it marks announces "fork", the boundary consumes the mark, so a later restore is a plain "resume",
+// and a clear that meets the mark drops it rather than announcing a fork.
+func TestSessionStart_AForkRestoreAnnouncesFork(t *testing.T) {
+	t.Parallel()
+
+	restore := func(t *testing.T, a *Agent) {
+		t.Helper()
+		if err := a.RestoreSession(emptySession(t)); err != nil {
+			t.Fatalf("RestoreSession: %v", err)
+		}
+	}
+	for _, tc := range []struct {
+		name       string
+		boundaries func(t *testing.T, a *Agent)
+		want       []domain.SessionStart
+	}{
+		{"a marked restore, then a plain one", func(t *testing.T, a *Agent) {
+			a.MarkFork()
+			restore(t, a)
+			restore(t, a)
+		}, []domain.SessionStart{domain.SessionStartFork, domain.SessionStartResume}},
+		{"a clear that meets the mark, then a restore", func(t *testing.T, a *Agent) {
+			a.MarkFork()
+			if err := a.ClearContext(); err != nil {
+				t.Fatalf("ClearContext: %v", err)
+			}
+			restore(t, a)
+		}, []domain.SessionStart{domain.SessionStartClear, domain.SessionStartResume}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runner := &startRecordingRunner{}
+			cfg := baseConfig(&recordingSink{})
+			cfg.ObserveRunner = runner
+			a, err := newAgent(cfg, echoResponder(t, "reply"))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			t.Cleanup(func() { _ = a.Close() })
+
+			tc.boundaries(t, a)
+
+			if got := runner.recorded(); !slices.Equal(got, tc.want) {
+				t.Errorf("announced %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSessionStartedResumeAfterRefusedForkRestore — a fork restore the engine refuses (a snapshot
+// newer than this build) announces nothing and still consumes the mark, so the `/sessions` resume
+// after it announces "resume", not "fork".
+func TestSessionStartedResumeAfterRefusedForkRestore(t *testing.T) {
+	t.Parallel()
+
+	runner := &startRecordingRunner{}
+	cfg := baseConfig(&recordingSink{})
+	cfg.ObserveRunner = runner
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	future := emptySession(t)
+	future.Version = domain.SessionVersion + 1
+	a.MarkFork()
+	if err := a.RestoreSession(future); !errors.Is(err, domain.ErrSessionVersion) {
+		t.Fatalf("the fork's RestoreSession of a future snapshot = %v, want ErrSessionVersion", err)
+	}
+	if err := a.RestoreSession(emptySession(t)); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+
+	if got, want := runner.recorded(), []domain.SessionStart{domain.SessionStartResume}; !slices.Equal(got, want) {
+		t.Errorf("announced %v, want the refused fork to announce nothing and the resume after it %v", got, want)
 	}
 }

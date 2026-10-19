@@ -4,9 +4,9 @@ package main
 // whose `reactions:` block runs a command on `session-started`, asserted from OUTSIDE apogee — the
 // file that command appended to. The engine half is pinned in internal/agent (sessionstart_test.go);
 // what this proves is the composition: the launch's construction announces once the late engine has
-// installed its Agent, `/clear` announces its own start, and the boundary — which runs on the TUI's
-// Update goroutine — lands rather than waiting on the Runner (the TestE2EBackgroundClearDoesNotHang
-// shape).
+// installed its Agent, `/clear` and `/fork` announce their own starts, and each boundary — which runs
+// on the TUI's Update goroutine — lands rather than waiting on the Runner (the
+// TestE2EBackgroundClearDoesNotHang shape).
 
 import (
 	"path/filepath"
@@ -53,6 +53,52 @@ func TestE2ESessionStartedClearDoesNotHang(t *testing.T) {
 		starts = append(starts, payload.Start)
 	}
 	if want := []domain.SessionStart{domain.SessionStartNew, domain.SessionStartClear}; !slices.Equal(starts, want) {
+		t.Errorf("the session-started starts were %v; want each boundary exactly once, %v", starts, want)
+	}
+}
+
+// TestE2ESessionStartedForkDoesNotHang launches a session, has one exchange, forks it at that
+// exchange's prompt, and sees the switch to the child; the reaction sink then holds exactly the
+// launch's boundary and the fork's, the fork's marked `fork` rather than `resume`.
+func TestE2ESessionStartedForkDoesNotHang(t *testing.T) {
+	t.Parallel()
+
+	sink := filepath.Join(t.TempDir(), "fired.jsonl")
+	stub := stubllm.New(t, loadScript(t, "hooks"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, hookBlockOf(
+		"  - id: "+hooksSinkName+"\n"+
+			"    on: ["+string(domain.MomentSessionStarted)+"]\n"+
+			"    run: [sh, -c, 'cat >> \"$0\"', '"+sink+"']\n"))
+
+	submit(drv, hooksPrompt)
+	drv.WaitText(hooksAnswer)
+	waitIdle(drv)
+	drv.WaitFor(func() bool { return len(readHookPayloads(t, sink)) == 1 },
+		tuitest.Awaiting("the launch's session-started payload in the reaction sink"))
+	drv.WaitFor(func() bool { return len(sess.sessionRecords()) == 1 },
+		tuitest.Awaiting("the parent's idle save to reach the session store"))
+
+	// /fork, and the picker's first row — the one prompt there is, keeping its whole Exchange.
+	submit(drv, "/fork")
+	drv.WaitText(forkPickerTitle)
+	drv.Press(tuitest.Enter)
+	// The switch: only the fork's own fold paints the note naming the parent it was cut from, and it
+	// paints it once the engine has accepted the restore.
+	drv.WaitText("forked from ")
+	waitIdle(drv)
+	drv.WaitFor(func() bool { return len(readHookPayloads(t, sink)) == 2 },
+		tuitest.Awaiting("the fork's session-started payload in the reaction sink"))
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+	// Read once the run has drained its Runner, so a late duplicate would be in the file by now.
+	var starts []domain.SessionStart
+	for _, payload := range readHookPayloads(t, sink) {
+		starts = append(starts, payload.Start)
+	}
+	if want := []domain.SessionStart{domain.SessionStartNew, domain.SessionStartFork}; !slices.Equal(starts, want) {
 		t.Errorf("the session-started starts were %v; want each boundary exactly once, %v", starts, want)
 	}
 }

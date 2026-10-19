@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -387,4 +388,28 @@ func TestForkArmsAreSettledByTheTail(t *testing.T) {
 		t.Fatal("precondition: the picker stayed open after ⏎")
 	}
 	assertSettled(t, m)
+}
+
+// A /fork marks the engine just before the restore that switches to the child (Engine.MarkFork), so
+// its session-started boundary is announced as a fork; a /sessions resume after it is not marked,
+// and so is announced as the resume it is.
+func TestForkMarksOnlyItsOwnRestore(t *testing.T) {
+	t.Parallel()
+
+	eng := &fakeEngine{}
+	host := &fakeSessionHost{}
+	m := newForkModel(t, eng, host)
+	m = openForkPicker(t, m)
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = runWrites(t, m, cmd)
+	if got := eng.restoreForks(); !slices.Equal(got, []bool{true}) {
+		t.Fatalf("restores marked as a fork = %v after the fork landed; want [true] — the child's restore, marked", got)
+	}
+
+	m, cmd = stepCmd(t, m, sessionLoadedMsg{rec: session.Record{Meta: session.Meta{ID: "elsewhere"}}})
+	_ = runWrites(t, m, cmd)
+
+	if got := eng.restoreForks(); !slices.Equal(got, []bool{true, false}) {
+		t.Errorf("restores marked as a fork = %v; want [true false] — the /sessions resume after the fork unmarked", got)
+	}
 }

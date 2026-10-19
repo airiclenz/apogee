@@ -179,6 +179,8 @@ type sessionLoadedMsg struct {
 	rec  session.Record
 	err  error
 	keep bool
+	// fork marks the record as a /fork child (foldFork), so the restore is announced as a fork.
+	fork bool
 }
 
 // Compile-time assertions that the browser Msgs are valid tea.Msgs (mirroring messages.go).
@@ -853,6 +855,9 @@ func (m Model) loadSession(id string, keep bool) tea.Cmd {
 // held notes carry over; anything else lets the restore stop them. Either way the restored record's
 // own set is resumed once the Activate queued below has moved the scratch directory to it
 // (resumePending, resumeAfterFold).
+//
+// A /fork child's record (msg.fork) marks the engine just before the restore too (Engine.MarkFork),
+// so its session-started boundary is announced as a fork rather than a resume.
 func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if m.busy() {
 		// A worker drives the engine, and RestoreSession would swap the conversation out from under
@@ -867,6 +872,9 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	}
 	if msg.keep {
 		m.eng.KeepWorkflows()
+	}
+	if msg.fork {
+		m.eng.MarkFork() // the restore below is a fork's, and its session-started says so
 	}
 	if err := m.eng.RestoreSession(msg.rec.Session); err != nil {
 		m.transcript.addNote("could not restore session: " + err.Error())

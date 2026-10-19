@@ -187,6 +187,11 @@ type Agent struct {
 	// boundary is never announced twice whichever of them gets there.
 	constructionStart sync.Once
 
+	// forkNext is the MarkFork mark: it makes the next RestoreSession announce start "fork" rather
+	// than "resume". The next ClearContext or RestoreSession takes it at its top, whether or not that
+	// boundary succeeds, so a refused fork restore never leaves it set for a later resume.
+	forkNext atomic.Bool
+
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
 	// follow the modeMu
@@ -2000,6 +2005,7 @@ func (a *Agent) CutSnapshot(dropExchanges int) (domain.Session, error) {
 // before the clear (the TUI's saveAtIdle captures its record before this call).
 func (a *Agent) ClearContext() error {
 	keep := a.background.takeKeep()
+	a.forkNext.Store(false) // a clear is never a fork, so a mark it meets is dropped (MarkFork)
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
@@ -2055,10 +2061,15 @@ func (a *Agent) ClearContext() error {
 // notes carry over into the incoming session. The mark is consumed even by a refused restore.
 //
 // A successful restore is a session boundary, and its last act announces the session-started
-// notice with start "resume" to the observe Runner (announceSessionStart); a refused one announces
-// nothing.
+// notice to the observe Runner (announceSessionStart) — with start "fork" when the Driver called
+// MarkFork just before, "resume" otherwise; a refused one announces nothing. Like the KeepWorkflows
+// mark, the fork mark is consumed even by a refused restore.
 func (a *Agent) RestoreSession(snap domain.Session) error {
 	keep := a.background.takeKeep()
+	start := domain.SessionStartResume
+	if a.forkNext.Swap(false) {
+		start = domain.SessionStartFork
+	}
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
@@ -2071,8 +2082,23 @@ func (a *Agent) RestoreSession(snap domain.Session) error {
 	a.consoles.CloseAll()
 	a.usage = usageTally{}
 	a.reloadContextFiles()
-	a.announceSessionStart(domain.SessionStartResume)
+	a.announceSessionStart(start)
 	return nil
+}
+
+// MarkFork makes the next session boundary — the next ClearContext or RestoreSession, and only that
+// one — a fork: the restore of a child cut off the live session (`/fork`) announces its
+// session-started notice with start "fork" rather than "resume". The Driver calls it just before
+// that RestoreSession, which keeps its signature; a ClearContext that meets the mark drops it. The
+// mark is consumed by the boundary whether or not it succeeds, so a refused fork restore leaves a
+// later `/sessions` resume a plain "resume". It only sets a flag — it never waits, emits or reports,
+// so it is safe on the Bubble Tea Update goroutine. A delegate starts no session; it is a no-op
+// there. Call it at an idle boundary, from the goroutine that calls the boundary.
+func (a *Agent) MarkFork() {
+	if a.isDelegate() {
+		return
+	}
+	a.forkNext.Store(true)
 }
 
 // InExchange reports whether a multi-Turn Exchange is currently open (mid-flight). It is a

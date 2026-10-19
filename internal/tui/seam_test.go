@@ -196,6 +196,8 @@ type fakeEngine struct {
 	keepMarked  bool   // a KeepWorkflows call no boundary has consumed yet
 	clearKept   []bool // per ClearContext call, in order: whether KeepWorkflows marked it
 	restoreKept []bool // per RestoreSession call, in order: whether KeepWorkflows marked it
+	forkMarked  bool   // a MarkFork call no boundary has consumed yet
+	restoreFork []bool // per RestoreSession call, in order: whether MarkFork marked it
 	resumeCalls int    // records ResumeWorkflows calls
 	resumeErr   error  // what ResumeWorkflows fails with (nil ⇒ resumed)
 }
@@ -425,12 +427,27 @@ func (f *fakeEngine) KeepWorkflows() {
 	f.mu.Unlock()
 }
 
+// MarkFork marks the next ClearContext or RestoreSession as a fork's, as the engine does; the
+// boundary that consumes the mark records it on a restore (restoreFork) and drops it on a clear.
+func (f *fakeEngine) MarkFork() {
+	f.mu.Lock()
+	f.forkMarked = true
+	f.mu.Unlock()
+}
+
 // ResumeWorkflows records the call and answers with the scripted error (nil ⇒ resumed).
 func (f *fakeEngine) ResumeWorkflows() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resumeCalls++
 	return f.resumeErr
+}
+
+// restoreForks returns a copy of restoreFork: per RestoreSession call, whether MarkFork marked it.
+func (f *fakeEngine) restoreForks() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.restoreFork)
 }
 
 // boundaryKeeps returns copies of clearKept and restoreKept and the ResumeWorkflows call count.
@@ -495,6 +512,7 @@ func (f *fakeEngine) ClearContext() error {
 	f.clearCalls++
 	f.clearKept = append(f.clearKept, f.keepMarked)
 	f.keepMarked = false
+	f.forkMarked = false
 	fn := f.clearFn
 	f.mu.Unlock()
 	if fn != nil {
@@ -526,6 +544,8 @@ func (f *fakeEngine) RestoreSession(snap domain.Session) error {
 	f.restoreCalls = append(f.restoreCalls, snap)
 	f.restoreKept = append(f.restoreKept, f.keepMarked)
 	f.keepMarked = false
+	f.restoreFork = append(f.restoreFork, f.forkMarked)
+	f.forkMarked = false
 	fn := f.restoreFn
 	f.mu.Unlock()
 	if fn != nil {

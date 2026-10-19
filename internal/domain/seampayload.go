@@ -23,6 +23,9 @@ const (
 	SessionStartResume SessionStart = "resume"
 	// SessionStartClear is the live conversation dropped for an empty one (`/clear`, `/new`).
 	SessionStartClear SessionStart = "clear"
+	// SessionStartFork is a child cut off the live session swapped into the live engine (`/fork`):
+	// a restore the Driver marked as a fork just before it (Agent.MarkFork).
+	SessionStartFork SessionStart = "fork"
 )
 
 // SeamPayload is the ONE JSON document a fired out-of-process Reaction receives, whichever lane

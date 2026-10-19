@@ -1219,6 +1219,12 @@ type Engine interface {
 	// calls it just before the boundary when the human answered `n` to "stop running workflows?"
 	// (/clear, a /sessions switch, /fork — commandrun.go); idle-only, like the boundary it marks.
 	KeepWorkflows()
+	// MarkFork makes the next session boundary — the next ClearContext or RestoreSession, and that
+	// one only — a fork, so the restore announces its session-started notice with start `fork`
+	// rather than `resume`; the boundary consumes the mark whether or not it succeeds. The TUI calls
+	// it just before the RestoreSession that switches to a /fork child (resumeLoaded); it only sets
+	// a mark — it never waits, emits or reports — and is idle-only, like the boundary it marks.
+	MarkFork()
 	// ResumeWorkflows starts the background workflows a restored session snapshot carried, from
 	// their folders — finished items skipped, settled script and ask stages replayed — skipping one
 	// already running, and adopts the finish notes the snapshot held. The TUI calls it once the
