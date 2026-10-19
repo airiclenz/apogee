@@ -248,7 +248,9 @@ cmd/apogee/wire_settings.go — liveSettings.pin
 **Commit:** `feat(apogee): a servers entry's stream-idle-timeout bounds its upstream`
 Depends on items 6 and 7.
 
-## 9. Manual documents the per-server `stream-idle-timeout`
+## 9. Manual documents the per-server `stream-idle-timeout` — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): docs/manual/commands.md, listed under Files, is left unedited — the item's own text says its start-only key list stands, and nothing else there describes the window.
 
 **What:** Recast at the regression check (2026-10-19).
 **Goal:** the `servers:` key list in `docs/manual/configuration.md` names `stream-idle-timeout` with its three states. The root key's section says an entry can override it, and says plainly that keepalive comments still reset the timer, so a lower value does not catch a keepalive-only stream.

@@ -1509,6 +1509,29 @@ One consequence to know: a sub-agent that faults is summarised for your agent be
 error result lands, and that summary runs under one more idle window, so the result may
 arrive up to one `stream-idle-timeout:` after the fault.
 
+**A server can state its own window.** A `servers:` entry's own `stream-idle-timeout:` overrides
+the top-level key for that one server — absent, the entry inherits the top-level value; `0`
+turns the cut off for that server alone; a length of time is that server's window:
+
+```yaml
+# ~/.apogee/config.yaml
+stream-idle-timeout: 10m
+servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    stream-idle-timeout: 30m     # a slow local prefill; every other server keeps 10m
+```
+
+The window follows the server, not the session: a `/server` move takes the arrived-at
+entry's value, and moving to an entry without one falls back to the top-level key; a
+sub-agent routed to another entry takes that entry's value as it stands when the sub-agent
+is built; the one-run `--endpoint` server takes the top-level value. An edit of the bound
+entry's `stream-idle-timeout:` does not reach the stream the session is already bound to — it
+takes effect at the next `/server` move or restart, not mid-session. And keep-alive comments
+still reset the timer, for a per-server window exactly as for the top-level one, so a lower
+value does not catch a server that sends nothing but keep-alives: the cut only ever catches
+a stream gone wholly silent.
+
 A transient upstream fault is **ridden out, not surfaced**. An error the server calls
 temporary (a 5xx or 429), a connection dropped mid-reply, and a stream cut by
 `stream-idle-timeout:` all count the same: apogee holds off and sends the same request
@@ -1861,6 +1884,10 @@ outside apogee shows in the footer on the next beat, a minute or so later.
 `endpoint` is required; `api-key` (or `api-key-cmd` /
 `api-key-env` — exactly one of the three), `model`, `parallel-agents`,
 `working-window` (the room a session on that server works in, above),
+`stream-idle-timeout` (how long a stream from that server may sit silent: absent, the
+entry inherits the top-level key; `0` turns the cut off for that server alone; a length
+of time like `30m` is that server's own window —
+[above](#the-context-window-and-the-reply-stream)),
 `effort-dialect` (which of the three wires carries the
 thinking-effort dial, described above) and `wire` (which protocol family the
 server speaks: `openai`, the chat-completions wire and the default, or

@@ -32,6 +32,18 @@ title: ADR 0082 decision
    > bare loop" here and in the *shorter default* alternative below as "worse than the loop without
    > the cut": the same admission test ADR 0071 Decision 1, clause (c) puts to a Floor guard.
 
+   > **Amended 2026-10-19 (plan `2026-10-19 - 00` items 6–9).** The window still rides every dial
+   > the engine makes; its value is now the **bound server's**. A `servers:` entry may state its own
+   > `stream-idle-timeout:` (the same parser): absent inherits the top-level key, `0` turns the cut
+   > off for that server, a positive length is that server's window
+   > (`config.ResolveStreamIdleTimeout`). The host resolves it at each bind — the startup bind, a
+   > `/server` switch (an entry without the key falls back to the top-level value as the session
+   > holds it at the switch), a routed spawn (its target entry's) and a Firing — and the one-run
+   > `--endpoint` server takes the top-level value. Naming calls and discovery probes keep the
+   > provider Client's own default. "Bytes of any kind are activity" is unchanged: a keep-alive
+   > comment resets a per-server window as it resets the top-level one, so a lower value still
+   > catches only a server gone wholly silent.
+
 2. **A Turn re-streams a transient fault up to a per-Turn budget, holding off longer each time.**
    `re-stream-budget:` (a file-only key, an int; `0` = never re-stream), default **3**, replaces the
    one-re-stream latch: a Turn whose request faults transiently — an in-band 429/5xx or
