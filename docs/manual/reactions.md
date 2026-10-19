@@ -41,7 +41,11 @@ edit to one of those, or to a script it runs, asks you again, while an edit to `
 `enabled:` or `workspace:` does not. An entry whose `id` is one of yours is dropped with a notice:
 yours wins. The sections below say where an adopted project reaction is held to more than yours is;
 [A project's own config](configuration.md#a-projects-own-config--apogeeconfigyaml) has the whole
-list, and what adopting a script means.
+list, and what adopting a script means. A `session-started` entry armed before the session's first
+prompt — a project entry adopted in the start-up pane, in `/settings` or with `apogee project adopt`
+from another terminal, or one of your own added by a [live reload](#live-reload) — fires for that
+session, once, with its `start`; one armed after the first prompt fires from the next session
+boundary on. Re-arming an entry that already fired for the session does not fire it again.
 
 ## An entry
 
@@ -128,6 +132,22 @@ passing.
 The turn and seam notices are top-level only on purpose: a sub-agent runs the same loop, so one at
 every depth would fire once per step of every delegation.
 
+`session-started` is top-level for a different reason: a delegation is a turn of the session that
+spawned it, not a session of its own, so a sub-agent never fires it. It fires at the boundary,
+ahead of the session's first turn, so its payload reads `depth` `0` and `turn` `0` and carries no
+`call_id`. Its `start` is `new` for a session apogee built — a fresh start, a `--resume` start, and
+every [`apogee headless`](headless.md), [daemon](daemon.md) and `/schedule` run — `resume` for a
+`/sessions` resume, `clear` for `/clear` and `/new`, and `fork` for `/fork`. A `/schedule` or daemon
+run carries its `schedule` like every other notice it fires. A webhook on it is POSTed the same
+document; a command finds `start` in `APOGEE_REACTION_START` as well:
+
+```yaml
+reactions:
+  - id: session-log
+    on: [session-started]
+    run: ["sh", "-c", "echo \"$(date -u +%FT%TZ) $APOGEE_REACTION_START $APOGEE_REACTION_WORKSPACE\" >> ~/apogee-sessions.log"]
+```
+
 A seam-closing notice reports a pass that is **over** — reading one changes nothing about it. The
 projection of the working value is built while the engine is still handing the moment out, and only
 when an entry actually subscribes: a seam nobody watches costs one map lookup and no work at all.
@@ -168,6 +188,7 @@ Per notice, added to that block:
 | `sub_agent_name` | The two approval notices | The display name of the child whose call it is, when it has one. |
 | `scope` | The two approval notices | What the call reaches beyond what its arguments name, when that is stated. |
 | `decision` | `approval-decided` | The verdict: `allow`, `deny` or `allow-for-session`, or `allowed-by-rule` when an allow rule answered the approval instead of you. |
+| `start` | `session-started` | How the session started: `new`, `resume`, `clear` or `fork` (see [The twelve notices](#the-twelve-notices)). |
 | `source` | `error` | What faulted — a tool name, a reaction id, or `loop`. |
 | `error` | `error` | The fault's message. |
 | `seam` | The five seam-closing notices | The seam whose pass closed, in its own spelling — `pre-request`, `post-response`, `pre-tool-exec`, `post-tool-result` or `history-rewrite`. |
@@ -240,7 +261,8 @@ not parse JSON at all. A fact the firing does not carry is **omitted** rather th
 `[ -n "$APOGEE_REACTION_PATH" ]` is a real test:
 
 `APOGEE_REACTION_EVENT` · `APOGEE_REACTION_NAME` · `APOGEE_REACTION_WORKSPACE` ·
-`APOGEE_REACTION_PATH` · `APOGEE_REACTION_SCHEDULE_ID` · `APOGEE_REACTION_SCHEDULE_NAME`
+`APOGEE_REACTION_PATH` · `APOGEE_REACTION_SCHEDULE_ID` · `APOGEE_REACTION_SCHEDULE_NAME` ·
+`APOGEE_REACTION_START`
 
 The rest of the posture, which is the one an `api-key-cmd:` already runs under:
 
@@ -337,6 +359,15 @@ both:
 - `file-changed` — `post-tool-result` narrowed to a successful workspace write: the entry fires on
   the `write_file` that landed and not on the `list_dir` after it, and `path` names the file. An
   entry listing `file-changed` alone is silent on every other call.
+
+`session-started` is not one of them yet. An `advise:` entry on it is refused at startup —
+`advise: on "session-started" is pending admission — session-start advice awaits its admission arm`
+— until a bench arm shows that advice at a session's start does not make a model worse. The place
+its text will land is already fixed: not a tool result, since none exists yet, and never a message
+of its own, but a fenced block **inside the session's next user message, ahead of your prompt**.
+The entry will start in the background at the boundary, so that first prompt waits only for what
+is left of its `timeout:`; and, like every advice below, the block is the model's alone — the
+session record keeps your prompt without it, so a resumed session carries none.
 
 The command is run like a `run:` list — directly, no shell — with the
 [seam document](#the-seam-document) on **stdin** and the `APOGEE_REACTION_*` facts in its

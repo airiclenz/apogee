@@ -187,7 +187,10 @@ internal/agent/syncexec.go — syncTimeout, reportReaction; internal/agent/const
 **Acceptance:** `go build ./...`; `GOMEMLIMIT=2GiB go test -count=1 ./internal/agent/ ./internal/domain/`; `GOMEMLIMIT=2GiB go test -race -count=1 -run 'SessionAdvise' ./internal/agent/`.
 **Commit:** `feat(agent): session-start advise joins the session's first user message`
 
-## 8. Manual: the session-started notice
+## 8. Manual: the session-started notice — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the notice table row itself was already written by item 2, so this item adds a paragraph under "The twelve notices" instead of extending the row: why delegates never fire it, depth 0 / turn 0 / no call_id, the start-value mapping (`new` covers a fresh start, `--resume` and every headless/daemon/`/schedule` Firing, per domain.SessionStartNew; `resume` is a `/sessions` resume only), Firings carrying `schedule`, and a `run:` example using APOGEE_REACTION_START.
+NOTES (2026-10-19): the pre-first-prompt adoption rule is stated in the adoption intro paragraph and covers a live-reloaded global entry as well as an adopted project one, matching item 5's shipped behaviour (any newly armed entry, deduped per boundary); the advise-refusal paragraph sits in "Advising the model" right after its two-Moment list.
 
 **What:** Depends on items 3, 4, 5.
 **Goal:** `docs/manual/reactions.md` documents `session-started`: the boundaries that fire it and that delegates do not, the `start` field and `APOGEE_REACTION_START`, top-level depth, Firings carrying `schedule`, the pre-first-prompt adoption rule, a `run:` example; and that `advise:` on it is refused pending its admission arm, naming where its text will land (inside the next user message, ahead of the prompt, dropped on resume).
