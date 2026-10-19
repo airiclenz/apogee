@@ -143,7 +143,10 @@ internal/agent/workflowcall.go — backgroundSubAgentResult; internal/agent/suba
 **Commit:** `feat(agent): sub_agent context files are rendered once ahead of the child's task`
 Depends on items 1 and 3.
 
-## 5. Manual documents `sub-agents-context` and the `context` argument
+## 5. Manual documents `sub-agents-context` and the `context` argument — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the plan's "no `/settings` row" does not match the tree — item 2's row exists (read-only, `· ⏎ opens $EDITOR`, pinned by t16-settings-rows); the manual says the key is set in config.yaml only, has no live switch, and its row opens the editor.
+NOTES (2026-10-19): no manual key list names `sub-agents-choice` beyond configuration.md's own section, so no list gained the key on that rule; instead the start-only key lists (configuration.md "Sixteen" → "Seventeen", commands.md's read-only-rows parenthetical) gained `sub-agents-context`, since the key is read once at start like `workflow-wake`.
 
 **What:**
 **Goal:** `docs/manual/configuration.md` extends the `sub-agents-context` entry item 2 added (values, `off` default, set in config.yaml only, the reason it ships off) and, in its delegation section, the sub_agent `context` argument (read scope, refusal rule, rendered once before the task, not re-injected on `continue`). Every manual list of root keys that names `sub-agents-choice` also names `sub-agents-context`.

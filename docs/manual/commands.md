@@ -685,7 +685,7 @@ starts — `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve
 delegation bounds (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`,
 `delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`,
 `sessions.max-age` and `sessions.max-count` — so an edit there is written and takes effect at the
-next start (the three workflow keys wait for it too, but their rows are read-only; the full list is
+next start (the three workflow keys and `sub-agents-context` wait for it too, but their rows are read-only; the full list is
 in [configuration.md](configuration.md)); the row's
 `Description:` says so, and the value cell shows what was written. On a key an environment variable or
 a flag is overriding, the edit still applies and is still written, and the row adds that the

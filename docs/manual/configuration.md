@@ -62,12 +62,12 @@ answer given with `apogee project adopt` in another terminal reaches the running
 rules without a restart.
 Nothing has to be re-entered in the pane: every key that came back
 different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
-for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Sixteen
+for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Seventeen
 `/settings` keys are the exception to "applied now", because they are read only while a session is being wired:
 `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five delegation bounds
 (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
 `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, the three workflow keys
-(`workflow-continuations`, `workflow-retries`, `workflow-wake`), `sessions.max-age` and
+(`workflow-continuations`, `workflow-retries`, `workflow-wake`), `sub-agents-context`, `sessions.max-age` and
 `sessions.max-count` take the save and honour it at the next start, as their `/settings` rows say.
 A few other settings, or parts of them, reach only the next session too, each said where it is
 described: `update-check:`, `dangerous-rules:` (the guard is built when a session starts), the
@@ -1419,6 +1419,21 @@ remove tools, never add one your agent lacks; a name that is not on its menu is 
 a result naming it, so the model learns the spelling instead of silently losing the tool,
 and an empty list is the same as no list at all.
 
+**Files a delegation starts from.** Under
+[`sub-agents-context: on`](#handing-a-delegation-files-to-start-from) a `sub_agent` call may
+also carry `context`: a list of file paths its sub-agent should have in hand before it starts.
+apogee reads each file itself, once, through the same scope `read_file` has — the workspace plus
+the read-only folders `read_file` also reaches — and lays them ahead of the sub-agent's task in
+the fence an [`@` reference](commands.md) uses: each file once, in the order the call named them,
+a PDF as its extracted text, each held to a share of the sub-agent's own context window. So the
+sub-agent starts on its task with the files already read, instead of spending its first turns
+reading them. If any path cannot be read — it is missing, outside that scope, binary, or an
+image — the **whole call is refused** before any sub-agent (or background workflow) starts, with
+a result that names the path, so the model can correct it and call again. The files belong to the
+call that named them: a `continue` call does not send them again, so a continuation that needs
+them names them in its own `context`. With the key `off` the argument is not offered, and a call
+that sends one anyway runs as if it had not.
+
 ## The context window and the reply stream
 
 The context **window** these budgets are measured against is discovered from the
@@ -2335,8 +2350,22 @@ sub-agents-context: on      # off (the default) or on
 `off` is the default and leaves the sub-agent tool exactly as it was. `on`
 publishes `context` on every sub-agent tool the session builds — a sub-agent's
 own included, and an unattended run's. Any word other than `on` or `off` is
-refused at start-up with the key named. The key lives in `config.yaml` only and
-takes effect at the next start.
+refused at start-up with the key named. How a delegation uses the argument —
+what may be read, what is refused, and where the files land — is under
+[Delegated sub-agents](#delegated-sub-agents--what-one-may-spend).
+
+The key is set in `config.yaml` only, with no flag and no environment variable,
+and unlike `sub-agents-choice` it has no live switch: its
+[`/settings`](commands.md#the-settings-screen--settings) row shows the value and
+`⏎` opens your editor on its line. An edit takes effect at the next start,
+because the sub-agent tool is built once, when the session starts.
+
+**Why it ships off.** `context` changes what a sub-agent reads before its task,
+so it is new model-facing surface, and apogee's rule is that nothing which shapes
+what a model sees ships on until a bench run shows the model does better with it
+than without ([ADR 0087](../../.capcom/knowledge/decisions/adr-0087.md) D8). An
+untouched config leaves the sub-agent tool byte-for-byte what it was before the
+key existed.
 
 ## The upstream API key
 
