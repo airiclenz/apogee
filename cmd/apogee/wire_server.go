@@ -85,8 +85,13 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// dial fields here and the holder's below, so the engine and the Monitor dial one server.
 	dial := bindingOfEntry(entry, apiKey)
 	cfg := b.cfg
-	// The endpoint, the key, the wire this server speaks (ADR 0078) and its `request-extra:`
-	// passthrough (ADR 0085) ride the same Config, for the pins' reason below: the Agent is
+	// How long a stream from this server may sit silent: the entry's own `stream-idle-timeout:` over
+	// the root key already in cfg (config.ResolveStreamIdleTimeout, the ranks the window pin below
+	// spells). It rides the binding into fillDial, so the session's first dial is bounded by THIS
+	// server's window; an `--endpoint` row states none and takes the root.
+	dial.StreamIdleTimeout = config.ResolveStreamIdleTimeout(entry.StreamIdleTimeout, cfg.StreamIdleTimeout)
+	// The endpoint, the key, the wire this server speaks (ADR 0078), its `request-extra:`
+	// passthrough (ADR 0085) and the stream-idle window resolved above ride the same Config, for the pins' reason below: the Agent is
 	// constructed from it here, and a session that starts on an anthropic entry must open the
 	// Messages connection — merging the entry's keys over every body — from its very first Turn.
 	// The zero wire folds to openai at the dial; "" merges nothing. The entry's `price:` rides with

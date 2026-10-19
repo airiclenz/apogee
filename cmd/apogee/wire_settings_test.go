@@ -3705,7 +3705,7 @@ func TestFiringBindingCarriesTheLiveSubAgentsServer(t *testing.T) {
 	}
 	live := newLiveSettings(config.Options{Servers: entries, SubAgentsServer: "grunt"})
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil,
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, defaultIdleRoot, nil,
 		config.NewKeyResolver(""))
 	host := delegationHost{w: &rootWiring{live: live, delegation: wiring}}
 

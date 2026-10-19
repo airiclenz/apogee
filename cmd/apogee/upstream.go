@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -78,6 +79,12 @@ type upstreamBinding struct {
 	// for an entry that names none; an out-of-band call built from the binding carries it the way
 	// the engine's own Client does. A string, so the binding stays comparable.
 	RequestExtra string
+	// StreamIdleTimeout is how long a stream from this server may sit silent before the engine's
+	// Client cuts it (domain.Config.StreamIdleTimeout): the entry's own `stream-idle-timeout:` over
+	// the root key, RESOLVED — a plain value, 0 being the cut turned off. bindingOfEntry leaves it 0
+	// and the caller projecting the binding to the engine sets it (dial.go). Only the engine
+	// projections read it; the host-built Client and Monitor keep the provider's default.
+	StreamIdleTimeout time.Duration
 	// EffortDialect is the entry's forced `effort-dialect:` in the config's spelling (ADR 0060
 	// decision 3), "" for an entry that forces none and for a source that carries no forced
 	// spelling at all (bindingOfTarget, bindingOfConfig). Only the Monitor reads it: a forced
@@ -310,6 +317,12 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// never the retired one's. Its `price:` rides the same binding (ADR 0093), the unpriced zero
 	// included, so the calls after the move are priced at the server they now go to.
 	dial := bindingOfEntry(entry, apiKey)
+	// And how long a stream from that server may sit silent: the entry's own `stream-idle-timeout:`
+	// over the root key as the session holds it now (config.ResolveStreamIdleTimeout, the ranks the
+	// window pin above spells), so a move off an entry that overrode it lands back on the root and
+	// a `/settings` edit of the root takes effect here. It rides the binding, so the switch below
+	// states it — a nil there would leave the retired server's window cutting this one's streams.
+	dial.StreamIdleTimeout = config.ResolveStreamIdleTimeout(entry.StreamIdleTimeout, m.live.streamIdlePin())
 	spec := dial.upstreamSpec()
 	// The arrived-at server in the HUMAN's words, so the orientation block names the session seat by
 	// the entry the session is on NOW when the model is offered a seat to choose (ADR 0069). They

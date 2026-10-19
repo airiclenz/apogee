@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -332,6 +333,15 @@ func (s *liveSettings) workingPin() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.now.WorkingWindow
+}
+
+// streamIdlePin reports the top-level `stream-idle-timeout:` window — what a server move resolves an
+// entry's own window over (config.ResolveStreamIdleTimeout), the way pin above is what it resolves an
+// entry's context-window pin over. Read live, so a `/settings` edit of the key reaches the next move.
+func (s *liveSettings) streamIdlePin() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.now.StreamIdleTimeout
 }
 
 // window reports the context window in force right now for the server this session is on: the bound

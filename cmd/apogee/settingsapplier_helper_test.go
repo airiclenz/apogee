@@ -50,7 +50,7 @@ func fakeApplier(t *testing.T) settingsApplier {
 			func(string) string { return "" }, func(tui.Presentation) {}),
 		roots:      roots,
 		caps:       newParallelAgentsCap(&parallelAgentsSpy{}),
-		delegation: &delegationWiring{userProfiles: noProfiles, engine: &delegationSpy{}},
+		delegation: &delegationWiring{userProfiles: noProfiles, streamIdleRoot: defaultIdleRoot, engine: &delegationSpy{}},
 		stats:      newStatsRecorder(serverStatsPath(roots.config), false),
 	}
 }

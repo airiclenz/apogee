@@ -43,8 +43,9 @@ type Config struct {
 	// states one replaces it for that server's client (agent.UpstreamSpec / agent.DelegationTarget),
 	// so a routed child's window may differ from the session's. ZERO DISABLES the cut: an
 	// embedder's zero Config waits for as long as the server takes, and the engine never sees the
-	// provider client's own default. The host folds in the `stream-idle-timeout:` key
-	// (default 10m; 0 = off); an embedder sets it directly.
+	// provider client's own default. The host folds in the bound server's window — its
+	// `servers:` entry's own `stream-idle-timeout:`, else the top-level key (default 10m; 0 = off);
+	// an embedder sets it directly.
 	StreamIdleTimeout time.Duration
 
 	// RestreamBudget is how many times one Turn re-sends its request after a transient Upstream

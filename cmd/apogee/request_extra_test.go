@@ -229,7 +229,7 @@ func TestDelegationWiringRecordsTheTargetsRequestExtraForNaming(t *testing.T) {
 	grunt := stubllm.New(t, stubllm.Script{Model: "cheap-7b", Turns: []stubllm.Turn{{Repeat: true, Text: "grep the keys"}}})
 	entries := []config.ServerEntry{{Name: "grunt", Endpoint: grunt.URL, Model: "cheap-7b"}}
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, defaultIdleRoot, nil, config.NewKeyResolver(""))
 
 	wiring.land(wiring.generation, "grunt", &apogee.DelegationTarget{
 		Endpoint: grunt.URL, Model: "cheap-7b", ServerName: "grunt", RequestExtra: targetExtra,

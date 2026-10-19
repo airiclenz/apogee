@@ -419,7 +419,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// routing state changes on the second heartbeat's own goroutine, which needs a send that is safe
 	// before the program exists and safe from anywhere after it does (tui.Bridge.NotifyRouting).
 	w.delegation = newDelegationWiring(w.opts.SubAgentsServer,
-		w.live.serverList, w.engine, w.live.modelProfileEntries, w.bridge.NotifyRouting, w.keys)
+		w.live.serverList, w.engine, w.live.modelProfileEntries, w.live.streamIdlePin,
+		w.bridge.NotifyRouting, w.keys)
 
 	// The `$EDITOR` round trip's own half of the same story (ADR 0037 decision 5): the keys holding a
 	// structure no row can express are edited in the file, and this is what opens it at the right line

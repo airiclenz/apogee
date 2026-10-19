@@ -55,6 +55,13 @@ func keyedBeatSource(observed heartbeat.Beat, seen *string) func(context.Context
 // written out once because most of these tests are about something else.
 func noProfiles() []profiles.Entry { return nil }
 
+// testIdleRoot is the top-level `stream-idle-timeout:` these tests resolve a target's window over —
+// the loader's own 10m — and defaultIdleRoot the live reader a wiring is handed for it, both written
+// out once because most of these tests are about something else.
+const testIdleRoot = 10 * time.Minute
+
+func defaultIdleRoot() time.Duration { return testIdleRoot }
+
 // noticeSpy records what the human was told, in order. Like delegationSpy it needs no lock: a notice
 // is emitted on the beat's own goroutine, and the join the caller runs is what makes it readable.
 type noticeSpy struct {
@@ -78,10 +85,11 @@ func testDelegationWiring(
 	notices *noticeSpy,
 ) *delegationWiring {
 	wiring := &delegationWiring{
-		server:       &subAgentServer{entry: entry, beat: beatSource(observed)},
-		userProfiles: noProfiles,
-		keys:         config.NewKeyResolver(""),
-		engine:       engine,
+		server:         &subAgentServer{entry: entry, beat: beatSource(observed)},
+		userProfiles:   noProfiles,
+		streamIdleRoot: defaultIdleRoot,
+		keys:           config.NewKeyResolver(""),
+		engine:         engine,
 	}
 	if notices != nil {
 		wiring.notify = notices.add
@@ -113,7 +121,7 @@ func TestResolveDelegationTargetPinsOutrankTheBeat(t *testing.T) {
 
 	// The key is the RESOLVED one the caller hands in — the entry names a source, and turning that
 	// source into a token is the resolver's job one layer up (delegationWiring.observe).
-	target := resolveDelegationTarget(entry, "grunt-key", observed, nil)
+	target := resolveDelegationTarget(entry, "grunt-key", observed, nil, testIdleRoot)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the pinned one")
 	}
@@ -144,7 +152,7 @@ func TestResolveDelegationTargetObservesWhatIsNotPinned(t *testing.T) {
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model", ContextWindow: 8192}
 
-	target := resolveDelegationTarget(entry, "", observed, nil)
+	target := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the observed one")
 	}
@@ -157,7 +165,7 @@ func TestResolveDelegationTargetObservesWhatIsNotPinned(t *testing.T) {
 
 	// And the slot count the same server reports a beat later widens it, with nothing else moving.
 	observed.TotalSlots = 4
-	if wider := resolveDelegationTarget(entry, "", observed, nil); wider.ParallelAgents != 4 {
+	if wider := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot); wider.ParallelAgents != 4 {
 		t.Errorf("ParallelAgents with 4 observed slots = %d; want 4", wider.ParallelAgents)
 	}
 }
@@ -179,7 +187,7 @@ func TestResolveDelegationTargetCarriesTheEntrysResponseReserve(t *testing.T) {
 		Endpoint:        "http://127.0.0.1:2222",
 		ResponseReserve: 0.35,
 	}
-	target := resolveDelegationTarget(stated, "", observed, nil)
+	target := resolveDelegationTarget(stated, "", observed, nil, testIdleRoot)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target; want the one stating a share")
 	}
@@ -191,7 +199,7 @@ func TestResolveDelegationTargetCarriesTheEntrysResponseReserve(t *testing.T) {
 	// And the absent key stays absent: nothing here invents a share for an entry that states none,
 	// because 0 is precisely how the spawn is told to leave the parent's standing.
 	unstated := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
-	quiet := resolveDelegationTarget(unstated, "", observed, nil)
+	quiet := resolveDelegationTarget(unstated, "", observed, nil, testIdleRoot)
 	if quiet == nil {
 		t.Fatal("a reachable server resolved to no target; want the one stating nothing")
 	}
@@ -214,7 +222,7 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 		Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited}},
 	}}
 
-	target := resolveDelegationTarget(entry, "", observed, user)
+	target := resolveDelegationTarget(entry, "", observed, user, testIdleRoot)
 	if target == nil {
 		t.Fatal("a reachable server resolved to no target")
 	}
@@ -223,7 +231,7 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 	}
 	// A model no tier knows keeps the zero profile — native tool calls, no inline thinking — which is
 	// how an unprofiled delegation has always parsed.
-	unmatched := resolveDelegationTarget(entry, "", heartbeat.Beat{Reachable: true, ActiveModel: "nobody-knows"}, user)
+	unmatched := resolveDelegationTarget(entry, "", heartbeat.Beat{Reachable: true, ActiveModel: "nobody-knows"}, user, testIdleRoot)
 	if !reflect.DeepEqual(unmatched.Profile, domain.ModelProfile{}) {
 		t.Errorf("Profile for an unmatched model = %+v; want the zero profile", unmatched.Profile)
 	}
@@ -240,14 +248,14 @@ func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model"}
 
 	// Nothing on the entry: both postures are absent, and absent is what makes a child inherit.
-	bare := resolveDelegationTarget(entry, "", observed, nil)
+	bare := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot)
 	if bare.Bypass != nil {
 		t.Errorf("Bypass with none on the entry = %v; want absent so the child inherits the parent's live flag", bare.Bypass)
 	}
 
 	on := true
 	entry.Bypass = &on
-	dressed := resolveDelegationTarget(entry, "", observed, nil)
+	dressed := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot)
 	if dressed.Bypass == nil || !*dressed.Bypass {
 		t.Errorf("Bypass = %v; want the entry's own true", dressed.Bypass)
 	}
@@ -268,13 +276,13 @@ func TestResolveDelegationTargetTakesTheBeatsEffortDialect(t *testing.T) {
 		EffortSupport: domain.EffortSupport{Supported: true, Dialect: domain.EffortDialectReasoning},
 	}
 
-	if got := resolveDelegationTarget(entry, "", observed, nil).EffortDialect; got != provider.EffortDialectReasoning {
+	if got := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot).EffortDialect; got != provider.EffortDialectReasoning {
 		t.Errorf("dialect = %q; want the beat's %q", got, provider.EffortDialectReasoning)
 	}
 
 	tellLess := observed
 	tellLess.EffortSupport = domain.EffortSupport{}
-	if got := resolveDelegationTarget(entry, "", tellLess, nil).EffortDialect; got != provider.EffortDialectNone {
+	if got := resolveDelegationTarget(entry, "", tellLess, nil, testIdleRoot).EffortDialect; got != provider.EffortDialectNone {
 		t.Errorf("dialect with neither = %q; want the zero that names none", got)
 	}
 }
@@ -287,18 +295,18 @@ func TestResolveDelegationTargetRefusesAnUnusableBeat(t *testing.T) {
 	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
 
 	unreachable := heartbeat.Beat{Failure: "connection refused"}
-	if target := resolveDelegationTarget(entry, "", unreachable, nil); target != nil {
+	if target := resolveDelegationTarget(entry, "", unreachable, nil, testIdleRoot); target != nil {
 		t.Errorf("an unreachable server resolved to %+v; want no target", target)
 	}
 	// Reachable but serving nothing this session can name, and no pin to name it with: a delegation
 	// that cannot say which model it is talking to is not a usable target either.
 	nameless := heartbeat.Beat{Reachable: true}
-	if target := resolveDelegationTarget(entry, "", nameless, nil); target != nil {
+	if target := resolveDelegationTarget(entry, "", nameless, nil, testIdleRoot); target != nil {
 		t.Errorf("a server with no model bound resolved to %+v; want no target", target)
 	}
 	// The pin is what rescues that case: the file names the model the server will serve.
 	entry.Model = "pinned-model"
-	if target := resolveDelegationTarget(entry, "", nameless, nil); target == nil || target.Model != "pinned-model" {
+	if target := resolveDelegationTarget(entry, "", nameless, nil, testIdleRoot); target == nil || target.Model != "pinned-model" {
 		t.Errorf("target with a pinned model on a model-less beat = %+v; want the pin", target)
 	}
 }
@@ -317,7 +325,7 @@ func TestNewDelegationWiringWithoutATargetObservesNothing(t *testing.T) {
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
 	wiring := newDelegationWiring(
-		"", staticServerList(entries), spy, noProfiles, notices.add, config.NewKeyResolver(""))
+		"", staticServerList(entries), spy, noProfiles, defaultIdleRoot, notices.add, config.NewKeyResolver(""))
 	if wiring.server != nil {
 		t.Error("a monitor was constructed for a config that named no Sub-agent server")
 	}
@@ -341,7 +349,7 @@ func TestNewDelegationWiringBuildsTheNamedEntry(t *testing.T) {
 		{Name: "other-grunt", Endpoint: "http://127.0.0.1:3333"},
 	}
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, defaultIdleRoot, nil, config.NewKeyResolver(""))
 	if wiring.server == nil || wiring.server.entry.Name != "grunt" {
 		t.Fatalf("wired server = %+v; want the entry the key names", wiring.server)
 	}
@@ -367,7 +375,7 @@ func TestNewDelegationWiringSaysWhichNameWentMissing(t *testing.T) {
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), spy, noProfiles, notices.add, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), spy, noProfiles, defaultIdleRoot, notices.add, config.NewKeyResolver(""))
 	if wiring.server != nil {
 		t.Error("a monitor was constructed for a name no entry carries")
 	}
@@ -431,7 +439,7 @@ func TestNewDelegationWiringTakesThePostureOfTheNamedEntry(t *testing.T) {
 	}
 
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, defaultIdleRoot, nil, config.NewKeyResolver(""))
 	if wiring.server == nil || wiring.server.entry.Bypass == nil || !*wiring.server.entry.Bypass {
 		t.Fatalf("wired posture = %+v; want the named entry's own bypass", wiring.server)
 	}
@@ -838,7 +846,7 @@ func TestDelegationRelistNamesATarget(t *testing.T) {
 	notices := &noticeSpy{}
 	wiring := newDelegationWiring("",
 		staticServerList([]config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}}),
-		spy, noProfiles, notices.add, config.NewKeyResolver(""))
+		spy, noProfiles, defaultIdleRoot, notices.add, config.NewKeyResolver(""))
 
 	added := []config.ServerEntry{
 		{Name: "here", Endpoint: "http://127.0.0.1:1111"},
@@ -1005,7 +1013,7 @@ func TestApplySettingServersDrivesTheSubAgentServer(t *testing.T) {
 	launchOpts := config.Options{Servers: []config.ServerEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
 	live := newLiveSettings(launchOpts)
 	spy := &delegationSpy{}
-	wiring := &delegationWiring{userProfiles: noProfiles, engine: spy}
+	wiring := &delegationWiring{userProfiles: noProfiles, streamIdleRoot: defaultIdleRoot, engine: spy}
 	applier := fakeApplier(t)
 	applier.live = live
 	applier.configPath = path
@@ -1435,7 +1443,7 @@ func TestResolveDelegationTargetCarriesTheWorkingWindow(t *testing.T) {
 	}
 	observed := heartbeat.Beat{Reachable: true, ActiveModel: "pinned-model", ContextWindow: 131072}
 
-	bounded := resolveDelegationTarget(entry, "", observed, nil)
+	bounded := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot)
 	if bounded == nil {
 		t.Fatal("a reachable server resolved to no target; want the bounded one")
 	}
@@ -1445,12 +1453,82 @@ func TestResolveDelegationTargetCarriesTheWorkingWindow(t *testing.T) {
 
 	entry.WorkingWindow = 0
 
-	unbounded := resolveDelegationTarget(entry, "", observed, nil)
+	unbounded := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot)
 	if unbounded == nil {
 		t.Fatal("a reachable server resolved to no target; want the unbounded one")
 	}
 	if unbounded.WorkingWindow != 0 {
 		t.Errorf("WorkingWindow = %d with no key on the entry; want the honest 0", unbounded.WorkingWindow)
+	}
+}
+
+// A routed child dials its target server with THAT server's stream-idle window: the entry's own
+// `stream-idle-timeout:` over the top-level key, always stated — so an entry that states none hands
+// the child the root rather than leaving it on the window the parent's own server resolved, and an
+// entry's 0 turns the cut off for the child alone.
+func TestResolveDelegationTargetStatesTheStreamIdleWindow(t *testing.T) {
+	t.Parallel()
+
+	observed := heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b", ContextWindow: 32768}
+	tests := []struct {
+		name   string
+		window string
+		want   time.Duration
+	}{
+		{name: "the entry's own window", window: "30m", want: 30 * time.Minute},
+		{name: "the entry's 0 turns the cut off", window: "0", want: 0},
+		{name: "an entry stating none takes the root", window: "", want: testIdleRoot},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entry := config.ServerEntry{
+				Name: "grunt", Endpoint: "http://127.0.0.1:2222", StreamIdleTimeout: tt.window,
+			}
+
+			target := resolveDelegationTarget(entry, "", observed, nil, testIdleRoot)
+
+			if target == nil {
+				t.Fatal("a reachable server resolved to no target")
+			}
+			if target.StreamIdleTimeout == nil {
+				t.Fatalf("the target states no window; want %v", tt.want)
+			}
+			if got := *target.StreamIdleTimeout; got != tt.want {
+				t.Errorf("StreamIdleTimeout = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The live wiring resolves the window over the root as the session holds it at the beat, not at
+// composition: a `/settings` edit of the top-level key reaches the next landing.
+func TestDelegationTargetStreamIdleRootIsReadPerBeat(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}
+	spy := &delegationSpy{}
+	wiring := testDelegationWiring(entry,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	root := testIdleRoot
+	wiring.streamIdleRoot = func() time.Duration { return root }
+
+	wiring.observe(context.Background())()
+	root = 2 * time.Minute
+	wiring.observe(context.Background())()
+
+	if len(spy.pushes) != 2 || spy.pushes[0] == nil || spy.pushes[1] == nil {
+		t.Fatalf("pushes = %+v; want two targets", spy.pushes)
+	}
+	for i, want := range []time.Duration{testIdleRoot, 2 * time.Minute} {
+		got := spy.pushes[i].StreamIdleTimeout
+		if got == nil {
+			t.Errorf("landing %d states no window; want %v", i+1, want)
+			continue
+		}
+		if *got != want {
+			t.Errorf("landing %d window = %v; want %v", i+1, *got, want)
+		}
 	}
 }
 
@@ -1526,7 +1604,7 @@ func TestDelegationSeatFactsFollowTheHumanDoors(t *testing.T) {
 
 	spy := &delegationSpy{}
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), spy, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), spy, noProfiles, defaultIdleRoot, nil, config.NewKeyResolver(""))
 	want := &apogee.DelegationSeat{
 		Name: "grunt", Description: "fast local 4B — search and edits", Model: "qwen3-4b",
 	}
@@ -1572,14 +1650,14 @@ func TestDelegationSeatIsNilWithoutAnEntryToDescribe(t *testing.T) {
 
 	unset := &delegationSpy{}
 	newDelegationWiring(
-		"", staticServerList(entries), unset, noProfiles, nil, config.NewKeyResolver(""))
+		"", staticServerList(entries), unset, noProfiles, defaultIdleRoot, nil, config.NewKeyResolver(""))
 	if len(unset.seats) != 1 || unset.seats[0] != nil {
 		t.Errorf("seats with the key unset = %+v; want exactly one nil", unset.seats)
 	}
 
 	stale := &delegationSpy{}
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), stale, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), stale, noProfiles, defaultIdleRoot, nil, config.NewKeyResolver(""))
 	if len(stale.seats) != 1 || stale.seats[0] != nil {
 		t.Errorf("seats for a name no entry carries = %+v; want exactly one nil", stale.seats)
 	}

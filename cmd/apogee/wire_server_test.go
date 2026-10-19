@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -514,7 +516,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
-			live: newLiveSettings(config.Options{ContextWindow: 16384}),
+			live: newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}),
 			keys: config.NewKeyResolver(""),
 			caps: newParallelAgentsCap(widths),
 		},
@@ -523,6 +525,11 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	}
 	return wiring, agent, host, holder, widths
 }
+
+// fixtureIdleRoot is the top-level `stream-idle-timeout:` the launcher fixture's session holds: a
+// profile's server is in no `servers:` list and states no window of its own, so a load's move
+// carries this one.
+const fixtureIdleRoot = 10 * time.Minute
 
 // twoServerConfig is a launcher config with one profile per backend on two different addresses —
 // the fixture the same-address and cross-address load paths are told apart on.
@@ -644,9 +651,9 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 	// — is what the engine budgets against on the other side of it.
 	wantSpec := apogee.UpstreamSpec{
 		Endpoint: "http://127.0.0.1:9090", APIKey: "llamacpp-key",
-		ServerName: "there", MaxContextTokens: 16384,
+		ServerName: "there", MaxContextTokens: 16384, StreamIdleTimeout: idleWindow(fixtureIdleRoot),
 	}
-	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
+	if len(agent.specs) != 1 || !reflect.DeepEqual(agent.specs[0], wantSpec) {
 		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v] — the key is the launcher config's own",
 			agent.specs, wantSpec)
 	}
@@ -851,9 +858,9 @@ func TestLoadProfileCrossAddressDialsTheLoopback(t *testing.T) {
 	}
 	wantSpec := apogee.UpstreamSpec{
 		Endpoint: dial, APIKey: "llamacpp-key",
-		ServerName: "there", MaxContextTokens: 16384,
+		ServerName: "there", MaxContextTokens: 16384, StreamIdleTimeout: idleWindow(fixtureIdleRoot),
 	}
-	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
+	if len(agent.specs) != 1 || !reflect.DeepEqual(agent.specs[0], wantSpec) {
 		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v]", agent.specs, wantSpec)
 	}
 	if got := holder.Endpoint(); got != dial {
@@ -1371,7 +1378,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	holder := newUpstreamHolder()
 	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111", APIKey: "old-key", Model: "old-model"},
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
-	live := newLiveSettings(config.Options{ContextWindow: 16384})
+	live := newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot})
 	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
 		keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{})}
 
@@ -1387,9 +1394,9 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	wantSpec := apogee.UpstreamSpec{
 		Endpoint: pinned.Endpoint, APIKey: pinned.APIKey,
 		ServerName: pinned.Name, ServerDescription: pinned.Description,
-		MaxContextTokens: 65536, MaxOutputTokens: 8192,
+		MaxContextTokens: 65536, MaxOutputTokens: 8192, StreamIdleTimeout: idleWindow(fixtureIdleRoot),
 	}
-	if len(agent.specs) != 1 || agent.specs[0] != wantSpec {
+	if len(agent.specs) != 1 || !reflect.DeepEqual(agent.specs[0], wantSpec) {
 		t.Errorf("SwitchUpstream specs = %+v; want exactly [%+v] — the entry's own two bounds",
 			agent.specs, wantSpec)
 	}
@@ -1427,8 +1434,9 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	}
 	wantSpec = apogee.UpstreamSpec{
 		Endpoint: bare.Endpoint, ServerName: bare.Name, MaxContextTokens: 16384,
+		StreamIdleTimeout: idleWindow(fixtureIdleRoot),
 	}
-	if len(agent.specs) != 2 || agent.specs[1] != wantSpec {
+	if len(agent.specs) != 2 || !reflect.DeepEqual(agent.specs[1], wantSpec) {
 		t.Errorf("SwitchUpstream specs = %+v; want the second to be [%+v] — the retired entry's "+
 			"bounds must not follow", agent.specs, wantSpec)
 	}
@@ -1944,5 +1952,125 @@ func TestStartupBindCarriesTheEntrysOwnWords(t *testing.T) {
 		t.Errorf("Config.ServerDescription = %q; want the startup entry's own %q — the words the "+
 			"orientation block describes the session Delegation seat with, from the first Turn "+
 			"rather than from the first /server switch", handed.ServerDescription, description)
+	}
+}
+
+// The window that bounds a session's very first dial is the bound entry's own `stream-idle-timeout:`
+// over the top-level key (config.ResolveStreamIdleTimeout): it reaches the Config the Agent is
+// CONSTRUCTED from, so a slow-prefill server's first Turn is not cut under the root's window. An
+// entry's 0 is a value — the cut off for that server — and the one-run `--endpoint` row, which no
+// file holds and so states no window, takes the root.
+func TestServerBindHandsTheEntrysStreamIdleWindowToTheEngine(t *testing.T) {
+	t.Parallel()
+	const root = 45 * time.Second
+
+	tests := []struct {
+		name  string
+		entry config.ServerEntry
+		want  time.Duration
+	}{
+		{
+			name: "the entry's own window outranks the top-level key",
+			entry: config.ServerEntry{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111", StreamIdleTimeout: "30m",
+			},
+			want: 30 * time.Minute,
+		},
+		{
+			name: "an entry's 0 turns the cut off for that server",
+			entry: config.ServerEntry{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111", StreamIdleTimeout: "0",
+			},
+			want: 0,
+		},
+		{
+			name:  "an entry stating none keeps the top-level window",
+			entry: config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
+			want:  root,
+		},
+		{
+			name:  "the --endpoint row takes the top-level window",
+			entry: config.ServerEntry{Name: "override", Endpoint: "http://127.0.0.1:9999", Ephemeral: true},
+			want:  root,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			base := validCfg(t)
+			base.StreamIdleTimeout = root
+
+			engine := newLateEngine(apogee.ModeAskBefore, true)
+			t.Cleanup(func() { _ = engine.Close() })
+			var handed apogee.Config
+			binder := serverBinder{
+				cfg:    base,
+				engine: engine,
+				holder: newUpstreamHolder(),
+				caps:   newParallelAgentsCap(engine),
+				keys:   config.NewKeyResolver(""),
+				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+					handed = cfg
+					return buildAgent(cfg, resumed)
+				},
+			}
+
+			if err := binder.bind(tt.entry); err != nil {
+				t.Fatalf("bind: %v", err)
+			}
+
+			if handed.StreamIdleTimeout != tt.want {
+				t.Errorf("Config.StreamIdleTimeout = %v; want %v — the window this session's very "+
+					"first dial is bounded by", handed.StreamIdleTimeout, tt.want)
+			}
+		})
+	}
+}
+
+// A `/server` move carries the arrived-at entry's window on the switch, STATED: a move onto an entry
+// that overrides the window hands its own, and the move off it onto an entry stating none hands the
+// root back rather than leaving the overriding server's window cutting the next server's streams. The
+// root is the one the session holds NOW, so a `/settings` edit of the key lands at the next move.
+func TestMoveStreamIdleWindowFollowsTheEntry(t *testing.T) {
+	t.Parallel()
+
+	agent := &fakeSwitcher{}
+	holder := newUpstreamHolder()
+	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111"},
+		heartbeat.NewMonitor("http://old.invalid:1111", "", ""))
+	live := newLiveSettings(config.Options{StreamIdleTimeout: fixtureIdleRoot})
+	mover := sessionMover{
+		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(""),
+		caps: newParallelAgentsCap(&parallelAgentsSpy{}),
+	}
+	slow := config.ServerEntry{Name: "slow", Endpoint: "http://192.168.64.1:1111", StreamIdleTimeout: "30m"}
+	bare := config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"}
+
+	for _, entry := range []config.ServerEntry{slow, bare} {
+		if _, err := mover.move(entry); err != nil {
+			t.Fatalf("move onto %q: %v", entry.Name, err)
+		}
+	}
+	applier := fakeApplier(t)
+	applier.live = live
+	if _, err := applyMirror(applier, "stream-idle-timeout", "2m"); err != nil {
+		t.Fatalf("editing the top-level stream-idle-timeout: %v", err)
+	}
+	if _, err := mover.move(bare); err != nil {
+		t.Fatalf("move onto %q after the edit: %v", bare.Name, err)
+	}
+
+	want := []time.Duration{30 * time.Minute, fixtureIdleRoot, 2 * time.Minute}
+	if len(agent.specs) != len(want) {
+		t.Fatalf("SwitchUpstream specs = %+v; want %d", agent.specs, len(want))
+	}
+	for i, spec := range agent.specs {
+		if spec.StreamIdleTimeout == nil {
+			t.Errorf("move %d stated no window; want %v", i+1, want[i])
+			continue
+		}
+		if got := *spec.StreamIdleTimeout; got != want[i] {
+			t.Errorf("move %d stated window %v; want %v", i+1, got, want[i])
+		}
 	}
 }

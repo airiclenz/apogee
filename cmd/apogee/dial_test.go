@@ -6,7 +6,9 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -18,6 +20,14 @@ import (
 
 // dialKey is the key every stub in this file requires.
 const dialKey = "dial-s3cret"
+
+// projectedIdle is the stream-idle window projectedBinding holds: a value neither the provider's
+// default nor the loader's, so a projection that dropped it or a build that took it is visible.
+const projectedIdle = 30 * time.Second
+
+// idleWindow is window stated the way a spec states one — at an address of its own, so a comparison
+// that weighed the pointer rather than the value would see two equal specs as different.
+func idleWindow(window time.Duration) *time.Duration { return &window }
 
 // The Client carries the key, the wire and the request-extra passthrough: the request reaches a
 // server that requires the key, arrives on the Messages wire the binding names, and its body
@@ -131,10 +141,11 @@ func TestDial_BindingsOfEachSource(t *testing.T) {
 			got: bindingOfTarget(&apogee.DelegationTarget{
 				Endpoint: "http://grunt:8080", Model: "cheap-7b", APIKey: dialKey, Wire: "openai",
 				RequestExtra: `{"witness":"grunt"}`, EffortDialect: provider.EffortDialectReasoning,
+				StreamIdleTimeout: idleWindow(projectedIdle),
 			}),
 			want: upstreamBinding{
 				Endpoint: "http://grunt:8080", Model: "cheap-7b", APIKey: dialKey, Wire: "openai",
-				RequestExtra: `{"witness":"grunt"}`,
+				RequestExtra: `{"witness":"grunt"}`, StreamIdleTimeout: projectedIdle,
 			},
 		},
 		{
@@ -142,10 +153,11 @@ func TestDial_BindingsOfEachSource(t *testing.T) {
 			got: bindingOfConfig(apogee.Config{
 				Endpoint: "http://box:8080", Model: "bound", APIKey: dialKey, Wire: "openai",
 				RequestExtra: `{"witness":"config"}`, EffortDialect: domain.EffortDialectKwargs,
+				StreamIdleTimeout: projectedIdle,
 			}),
 			want: upstreamBinding{
 				Endpoint: "http://box:8080", Model: "bound", APIKey: dialKey, Wire: "openai",
-				RequestExtra: `{"witness":"config"}`,
+				RequestExtra: `{"witness":"config"}`, StreamIdleTimeout: projectedIdle,
 			},
 		},
 	}
@@ -165,6 +177,7 @@ func projectedBinding() upstreamBinding {
 	return upstreamBinding{
 		Endpoint: "http://box:8080", Model: "entry-pin", APIKey: dialKey, Wire: "anthropic",
 		RequestExtra: `{"witness":"dial"}`, EffortDialect: "kwargs", Vision: true,
+		StreamIdleTimeout: projectedIdle,
 	}
 }
 
@@ -177,9 +190,9 @@ func TestDial_FillDialSetsTheDialFieldsOnly(t *testing.T) {
 	projectedBinding().fillDial(&cfg)
 
 	if cfg.Endpoint != "http://box:8080" || cfg.APIKey != dialKey || cfg.Wire != "anthropic" ||
-		cfg.RequestExtra != `{"witness":"dial"}` || !cfg.Vision {
-		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q vision %v; want the binding's",
-			cfg.Endpoint, cfg.APIKey, cfg.Wire, cfg.RequestExtra, cfg.Vision)
+		cfg.RequestExtra != `{"witness":"dial"}` || !cfg.Vision || cfg.StreamIdleTimeout != projectedIdle {
+		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q vision %v idle %v; want the binding's",
+			cfg.Endpoint, cfg.APIKey, cfg.Wire, cfg.RequestExtra, cfg.Vision, cfg.StreamIdleTimeout)
 	}
 	if cfg.Model != "caller-model" || cfg.ServerName != "seat" {
 		t.Errorf("fillDial changed caller fields: model %q server name %q; want caller-model, seat", cfg.Model, cfg.ServerName)
@@ -197,9 +210,9 @@ func TestDial_UpstreamSpecCarriesTheDialFields(t *testing.T) {
 
 	want := apogee.UpstreamSpec{
 		Endpoint: "http://box:8080", APIKey: dialKey, Wire: "anthropic", RequestExtra: `{"witness":"dial"}`,
-		Vision: true,
+		Vision: true, StreamIdleTimeout: idleWindow(projectedIdle),
 	}
-	if spec != want {
+	if !reflect.DeepEqual(spec, want) {
 		t.Errorf("upstreamSpec = %+v; want %+v", spec, want)
 	}
 }
@@ -215,6 +228,9 @@ func TestDial_DelegationTargetCarriesTheDialFields(t *testing.T) {
 		target.RequestExtra != `{"witness":"dial"}` || !target.Vision {
 		t.Errorf("dial fields = endpoint %q key %q wire %q request-extra %q vision %v; want the binding's",
 			target.Endpoint, target.APIKey, target.Wire, target.RequestExtra, target.Vision)
+	}
+	if !reflect.DeepEqual(target.StreamIdleTimeout, idleWindow(projectedIdle)) {
+		t.Errorf("StreamIdleTimeout = %v; want the binding's %v stated", target.StreamIdleTimeout, projectedIdle)
 	}
 	if target.Model != "" || target.ServerName != "" || target.EffortDialect != "" {
 		t.Errorf("model %q server name %q effort dialect %q; want all three left to the caller",
@@ -236,5 +252,58 @@ func TestDial_ProbeDialCarriesTheDialFields(t *testing.T) {
 	}
 	if in.Workspace != "/ws" || !in.ConfineToWorkspace {
 		t.Errorf("probeDial changed host facts: workspace %q confine %v", in.Workspace, in.ConfineToWorkspace)
+	}
+}
+
+// A binding whose window is 0 — the cut turned off — still STATES it on both engine projections: a
+// nil would keep the window the session or the parent already had, which is the retired server's.
+func TestDial_ProjectionsStateAZeroStreamIdleWindow(t *testing.T) {
+	t.Parallel()
+
+	off := projectedBinding()
+	off.StreamIdleTimeout = 0
+
+	if got := off.upstreamSpec().StreamIdleTimeout; got == nil || *got != 0 {
+		t.Errorf("upstreamSpec window = %v; want 0 stated", got)
+	}
+	if got := off.delegationTarget().StreamIdleTimeout; got == nil || *got != 0 {
+		t.Errorf("delegationTarget window = %v; want 0 stated", got)
+	}
+}
+
+// Two specs projected from equal bindings hold their windows at different addresses, and still compare
+// equal under the comparison the move tests use — the pointer is how a window is STATED, never part
+// of what it says.
+func TestDial_EqualStreamIdleWindowsCompareEqual(t *testing.T) {
+	t.Parallel()
+
+	first, second := projectedBinding().upstreamSpec(), projectedBinding().upstreamSpec()
+
+	if first.StreamIdleTimeout == second.StreamIdleTimeout {
+		t.Fatal("the two specs share one window pointer; the test needs two addresses")
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Errorf("specs with equal windows compare unequal: %+v vs %+v", first, second)
+	}
+	if !reflect.DeepEqual(first.StreamIdleTimeout, idleWindow(projectedIdle)) {
+		t.Errorf("window = %v; want %v", *first.StreamIdleTimeout, projectedIdle)
+	}
+}
+
+// The Client the binding builds serves the host's own short calls — a naming request, a context
+// probe — and keeps the provider's default cut whatever window the binding holds for the engine: a
+// server's long window (or its 0) is written for a session's stream, not for these.
+func TestDial_ClientKeepsTheProvidersStreamIdleDefault(t *testing.T) {
+	t.Parallel()
+
+	want := provider.NewClient("http://box:8080", "").StreamIdleTimeout()
+	for _, window := range []time.Duration{projectedIdle, 0} {
+		binding := projectedBinding()
+		binding.StreamIdleTimeout = window
+
+		if got := binding.Client().StreamIdleTimeout(); got != want {
+			t.Errorf("binding holding %v built a Client cutting at %v; want the provider's default %v",
+				window, got, want)
+		}
 	}
 }

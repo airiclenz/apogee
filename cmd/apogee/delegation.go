@@ -32,6 +32,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -188,6 +189,10 @@ type delegationWiring struct {
 	// userProfiles reads the `model-profiles:` user tier as it stands NOW, so a profile committed
 	// mid-session reaches the next beat's resolution rather than the next launch.
 	userProfiles func() []profiles.Entry
+	// streamIdleRoot reads the top-level `stream-idle-timeout:` as it stands NOW — the window a routed
+	// child takes when its target entry states none of its own (resolveDelegationTarget) — so a
+	// `/settings` edit of the key reaches the next beat's resolution, userProfiles' reason.
+	streamIdleRoot func() time.Duration
 	// notify puts one routing notice in front of the human, and is nil for a Driver that shows
 	// nothing (a bench, a headless run) — the degrade every seam this root hands across takes.
 	notify func(string)
@@ -241,19 +246,21 @@ func newDelegationWiring(
 	servers func() []config.ServerEntry,
 	engine delegationSetter,
 	userProfiles func() []profiles.Entry,
+	streamIdleRoot func() time.Duration,
 	notify func(string),
 	keys *config.KeyResolver,
 ) *delegationWiring {
 	entries := servers()
 	wiring := &delegationWiring{
-		target:        name,
-		configured:    name,
-		servers:       servers,
-		missingNotice: missingNameNotice(name, entries),
-		userProfiles:  userProfiles,
-		notify:        notify,
-		keys:          keys,
-		engine:        engine,
+		target:         name,
+		configured:     name,
+		servers:        servers,
+		missingNotice:  missingNameNotice(name, entries),
+		userProfiles:   userProfiles,
+		streamIdleRoot: streamIdleRoot,
+		notify:         notify,
+		keys:           keys,
+		engine:         engine,
 	}
 	if entry, ok := config.SubAgentsServerTarget(entries, name); ok {
 		wiring.server = newSubAgentServer(entry)
@@ -423,7 +430,7 @@ func (d *delegationWiring) observe(ctx context.Context) func() {
 			return
 		}
 		d.land(generation, server.entry.Name,
-			resolveDelegationTarget(server.entry, apiKey, observed, d.userProfiles()), nil)
+			resolveDelegationTarget(server.entry, apiKey, observed, d.userProfiles(), d.streamIdleRoot()), nil)
 	}()
 	return func() { <-done }
 }
@@ -842,6 +849,7 @@ func resolveDelegationTarget(
 	apiKey string,
 	observed heartbeat.Beat,
 	userProfiles []profiles.Entry,
+	streamIdleRoot time.Duration,
 ) *apogee.DelegationTarget {
 	if !observed.Reachable {
 		return nil
@@ -878,7 +886,14 @@ func resolveDelegationTarget(
 	// so a child routed to an entry that names none never sends the session server's keys. The
 	// entry's `price:` rides the same binding (ADR 0093), the unpriced zero included, so a routed
 	// child's calls are priced at the server it dials and never at the session server's rate.
-	target := bindingOfEntry(entry, apiKey).delegationTarget()
+	dial := bindingOfEntry(entry, apiKey)
+	// And how long a stream from that server may sit silent: the entry's own `stream-idle-timeout:`
+	// over the root key (config.ResolveStreamIdleTimeout). Unlike the bounds below it IS resolved
+	// over the top-level key, because that key is no statement about the session's server — it is
+	// the run's default silence bound — and the target always states the result, so a routed child
+	// is never left on the window the parent's own server resolved.
+	dial.StreamIdleTimeout = config.ResolveStreamIdleTimeout(entry.StreamIdleTimeout, streamIdleRoot)
+	target := dial.delegationTarget()
 	// The entry's name, so the routed child's Config names the server it actually dials.
 	target.ServerName = entry.Name
 	target.Model = model

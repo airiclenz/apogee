@@ -310,6 +310,45 @@ func TestFiringConfigCarriesTheFloorGuardKeys(t *testing.T) {
 	}
 }
 
+// A Firing bound to an entry dials it with that entry's own `stream-idle-timeout:` over the top-level
+// key the run carries, as the session's bind does: an unattended run on a slow-prefill server is not
+// cut under the root's window, and one on an entry stating none keeps the root.
+func TestFiringConfigResolvesTheEntrysStreamIdleWindow(t *testing.T) {
+	t.Parallel()
+	const root = 45 * time.Second
+
+	for _, tt := range []struct {
+		window string
+		want   time.Duration
+	}{{window: "30m", want: 30 * time.Minute}, {window: "", want: root}} {
+		t.Run(fmt.Sprintf("entry=%q", tt.window), func(t *testing.T) {
+			t.Parallel()
+			roots := firingRoots(t)
+			entry := config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", StreamIdleTimeout: tt.window}
+			opts := config.Options{Servers: []config.ServerEntry{entry}, StreamIdleTimeout: root}
+			provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+
+			cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+				opts:     opts,
+				entry:    entry,
+				roots:    roots,
+				confiner: fenceableHost,
+				mode:     domain.ModeAuto,
+				skills:   provider,
+				beat:     firingBeat,
+				recordID: "2026-10-19T09-00-00-firing",
+			})
+
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+			if cfg.StreamIdleTimeout != tt.want {
+				t.Errorf("Config.StreamIdleTimeout = %v; want %v", cfg.StreamIdleTimeout, tt.want)
+			}
+		})
+	}
+}
+
 // A Firing runs the `context-fill-notice` switch the session it was raised from runs (ADR 0077),
 // carried as is — the key is not a Floor guard, so nothing negates it on the trip. A Firing is
 // composed out of the session's LIVE options, so a session that switched the notice on raises runs
@@ -1362,7 +1401,7 @@ func TestRoutedTargetResolvesTheForcedDialect(t *testing.T) {
 
 	spy := &delegationSpy{}
 	wiring := newDelegationWiring(
-		"grunt", staticServerList(entries), spy, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), spy, noProfiles, defaultIdleRoot, nil, config.NewKeyResolver(""))
 	wiring.observe(context.Background())()
 	if len(spy.pushes) != 1 || spy.pushes[0] == nil {
 		t.Fatalf("the session wiring pushed %v; want one target", spy.pushes)

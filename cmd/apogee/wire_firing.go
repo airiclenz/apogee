@@ -303,7 +303,11 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// the spec's, never the entry's pin: the resolution above already ranked the two. The entry's
 	// `price:` rides the same binding (ADR 0093), so an unattended run prices its calls as a session
 	// on this entry does.
-	bindingOfEntry(in.entry, apiKey).fillDial(&cfg)
+	dial := bindingOfEntry(in.entry, apiKey)
+	// And how long a stream from that entry may sit silent: its own `stream-idle-timeout:` over the
+	// root key the run carries (config.ResolveStreamIdleTimeout), as the session's bind resolves it.
+	dial.StreamIdleTimeout = config.ResolveStreamIdleTimeout(in.entry.StreamIdleTimeout, in.opts.StreamIdleTimeout)
+	dial.fillDial(&cfg)
 	cfg.Model = spec.Model
 	// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
 	// seat by when the model is offered a seat to choose (ADR 0069, wire_server.go's shape). An
@@ -714,7 +718,7 @@ func resolveFiringRouting(
 	// And the one resolution the session's own beat lands, reused whole rather than re-derived: the
 	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends
 	// up routing to a window the other would not.
-	target := resolveDelegationTarget(entry, apiKey, observed, in.opts.ModelProfiles)
+	target := resolveDelegationTarget(entry, apiKey, observed, in.opts.ModelProfiles, in.opts.StreamIdleTimeout)
 	return firingRouting{target: target, seat: seat},
 		delegationStateNotice(name, target, "", nil)
 }

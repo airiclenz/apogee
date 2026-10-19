@@ -211,7 +211,14 @@ internal/agent/agent.go — finishAtFault; internal/agent/subagent.go — foldSt
 - `grep -rn 'StreamIdleTimeout\|idle bound\|silence bound\|carry it alike\|session.s, not a server' internal/agent internal/domain` — no hit claims the bound is a session fact, the same on every dial
 **Commit:** `feat(agent): server bindings carry their stream-idle window`
 
-## 8. Host resolves the per-server window on bind, move and delegation
+## 8. Host resolves the per-server window on bind, move and delegation — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): callers set the resolved window after construction (the plan's named alternative) rather than bindingOfEntry taking a root parameter — `dial.StreamIdleTimeout = config.ResolveStreamIdleTimeout(entry.StreamIdleTimeout, root)` at the four engine-projecting sites (bind, move, Firing fillDial, resolveDelegationTarget); the Monitor/probe-only callers in probe.go, probemodel.go and subAgentBeat need no window, so probe.go and probemodel.go are unchanged.
+NOTES (2026-10-19): resolveDelegationTarget takes the root as a new last parameter; the live wiring reads it per beat through a new newDelegationWiring parameter (`streamIdleRoot func() time.Duration`, fed `w.live.streamIdlePin`), and a Firing's routing passes `in.opts.StreamIdleTimeout`.
+NOTES (2026-10-19): consequential edit — cmd/apogee/wire_live.go: made necessary by the new newDelegationWiring parameter (the one production caller).
+NOTES (2026-10-19): consequential edit — cmd/apogee/naming_test.go, cmd/apogee/request_extra_test.go, cmd/apogee/wire_settings_test.go, cmd/apogee/settingsapplier_helper_test.go: made necessary by the new newDelegationWiring parameter / delegationWiring field (call-site argument only; delegation_test.go holds the shared `defaultIdleRoot` helper).
+NOTES (2026-10-19): consequential edit — internal/domain/config.go: made necessary by the per-entry override landing — the StreamIdleTimeout doc now says the host folds in the bound server's window (entry key, else the top-level key); item 7's NOTES deferred this sentence to item 8.
+NOTES (2026-10-19): added a Firing test (wire_firing_test.go, TestFiringConfigResolvesTheEntrysStreamIdleWindow) and a per-beat root test for the live delegation wiring beyond the plan's listed tests, since the Goal names Firings; the launcher fixture's live options and TestMoveCarriesTheEntrysWindowAndReplyCap now carry a 10m root so the switched specs state a real window.
 
 **What:**
 **Goal:** the window `ResolveStreamIdleTimeout(entry, root)` gives is the one that bounds every upstream apogee binds:

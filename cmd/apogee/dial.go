@@ -25,6 +25,14 @@ package main
 // upstreamSpec, delegationTarget) and the bind, a `/server` move and a routed delegation each carry
 // the price of the server they dial. The entry's `vision:` opt-in rides beside it for the same
 // reason: whether a server accepts images is a fact about the server, never sent on the wire.
+//
+// The stream-idle window is the third such field: a dial fact of the ENGINE's Client — how long a
+// stream from this server may sit silent before it is cut — that the host-built Client and Monitor
+// never carry. A naming call or a discovery probe is one short request, not a session's stream, and
+// handing it a window sized for one slow server's prefill (or 0, the cut off) would bound it by a
+// rule written for something else, so both keep the provider's own default. The window is resolved
+// by the caller that projects the binding to the engine (config.ResolveStreamIdleTimeout over the
+// root key), never by bindingOfEntry, which knows no root.
 
 import (
 	"github.com/airiclenz/apogee"
@@ -38,6 +46,13 @@ import (
 // bindingOfEntry is entry's dial facts, dialled with apiKey — the key resolved for it, which the
 // entry itself never holds in the clear. Model is the entry's own `model:` pin, "" when it pins
 // none; a caller that has already resolved a model sets Model on the result.
+//
+// StreamIdleTimeout is left 0, which on the engine means "the cut is off": the entry's own
+// `stream-idle-timeout:` ranks over a root key this function is not handed, so a caller that
+// projects the result to the engine (fillDial, upstreamSpec, delegationTarget) sets the window it
+// resolved first — config.ResolveStreamIdleTimeout(entry.StreamIdleTimeout, root), the way it
+// resolves the entry's `context-window:` beside it. A caller that only builds a Client or a Monitor
+// needs none.
 func bindingOfEntry(entry config.ServerEntry, apiKey string) upstreamBinding {
 	return upstreamBinding{
 		Endpoint:      entry.Endpoint,
@@ -71,9 +86,11 @@ func priceOfEntry(price config.Price) domain.ServerPrice {
 
 // bindingOfTarget is the dial facts a Delegation target was resolved with. EffortDialect stays
 // "": a target carries no forced spelling, only the dialect its landing beat ranked
-// (DelegationTarget.EffortDialect), which its caller keeps beside the binding.
+// (DelegationTarget.EffortDialect), which its caller keeps beside the binding. StreamIdleTimeout is
+// the window the target states — the host always states one (resolveDelegationTarget) — and 0 for a
+// target that states none.
 func bindingOfTarget(target *apogee.DelegationTarget) upstreamBinding {
-	return upstreamBinding{
+	binding := upstreamBinding{
 		Endpoint:     target.Endpoint,
 		Model:        target.Model,
 		APIKey:       target.APIKey,
@@ -82,6 +99,10 @@ func bindingOfTarget(target *apogee.DelegationTarget) upstreamBinding {
 		Price:        target.Price,
 		Vision:       target.Vision,
 	}
+	if target.StreamIdleTimeout != nil {
+		binding.StreamIdleTimeout = *target.StreamIdleTimeout
+	}
+	return binding
 }
 
 // bindingOfConfig is the dial facts an assembled engine Config carries. EffortDialect stays "" for
@@ -89,19 +110,21 @@ func bindingOfTarget(target *apogee.DelegationTarget) upstreamBinding {
 // forced spelling.
 func bindingOfConfig(cfg apogee.Config) upstreamBinding {
 	return upstreamBinding{
-		Endpoint:     cfg.Endpoint,
-		Model:        cfg.Model,
-		APIKey:       cfg.APIKey,
-		Wire:         cfg.Wire,
-		RequestExtra: cfg.RequestExtra,
-		Price:        cfg.Price,
-		Vision:       cfg.Vision,
+		Endpoint:          cfg.Endpoint,
+		Model:             cfg.Model,
+		APIKey:            cfg.APIKey,
+		Wire:              cfg.Wire,
+		RequestExtra:      cfg.RequestExtra,
+		StreamIdleTimeout: cfg.StreamIdleTimeout,
+		Price:             cfg.Price,
+		Vision:            cfg.Vision,
 	}
 }
 
 // Client builds a Client dialled from the binding: its endpoint and model, with the key, the wire
 // and the request-extra passthrough. opts are the caller's own — a timeout, a retry budget — and
-// are applied after the dial facts.
+// are applied after the dial facts. The stream-idle window is not among them: the Client this builds
+// serves the host's own short calls and keeps the provider's default cut (see the file comment).
 func (b upstreamBinding) Client(opts ...provider.Option) *provider.Client {
 	dial := []provider.Option{
 		provider.WithAPIKey(b.APIKey),
@@ -112,53 +135,63 @@ func (b upstreamBinding) Client(opts ...provider.Option) *provider.Client {
 }
 
 // Monitor builds the heartbeat Monitor that observes the binding's server, with Model as its
-// discovery hint: the key, the wire and the forced effort dialect. It never carries request-extra.
+// discovery hint: the key, the wire and the forced effort dialect. It never carries request-extra,
+// nor the stream-idle window — a discovery probe streams nothing.
 func (b upstreamBinding) Monitor() *heartbeat.Monitor {
 	return heartbeat.NewMonitor(b.Endpoint, b.Model, b.APIKey,
 		provider.WithEffortDialect(provider.EffortDialectFor(b.EffortDialect)),
 		provider.WithWire(provider.WireFor(b.Wire)))
 }
 
-// fillDial sets cfg's dial fields from the binding — the endpoint, the key, the wire and the
-// request-extra passthrough — and the server's price and vision opt-in beside them, and nothing else. Model stays the caller's (a bind pins the entry's
-// own, a Firing the one its spec resolved), and so does EffortDialect: the Config carries the
+// fillDial sets cfg's dial fields from the binding — the endpoint, the key, the wire, the
+// request-extra passthrough and the stream-idle window, written as the binding holds it, 0 (the cut
+// off) included, so the caller resolves the window first — and the server's price and vision opt-in
+// beside them, and nothing else. Model stays the caller's (a bind pins the entry's own, a Firing the one its spec resolved), and so does EffortDialect: the Config carries the
 // RANKED dialect, which the caller resolves against an observation, never the forced spelling.
 func (b upstreamBinding) fillDial(cfg *apogee.Config) {
 	cfg.Endpoint = b.Endpoint
 	cfg.APIKey = b.APIKey
 	cfg.Wire = b.Wire
 	cfg.RequestExtra = b.RequestExtra
+	cfg.StreamIdleTimeout = b.StreamIdleTimeout
 	cfg.Price = b.Price
 	cfg.Vision = b.Vision
 }
 
 // upstreamSpec is the switch a `/server` move hands the engine, carrying the binding's dial fields
-// and the price and vision opt-in only. The caller sets the arrived-at server's name, description and its window, working-window,
-// reply-cap and reserve; a move carries no model at all — the first beat on the new server binds
-// one.
+// and the price and vision opt-in only. The stream-idle window is always STATED — a non-nil
+// pointer, 0 included — because the binding holds the arrived-at server's resolved window, and a
+// nil would leave the retired server's standing. The caller sets the arrived-at server's name,
+// description and its window, working-window, reply-cap and reserve; a move carries no model at
+// all — the first beat on the new server binds one.
 func (b upstreamBinding) upstreamSpec() apogee.UpstreamSpec {
+	window := b.StreamIdleTimeout
 	return apogee.UpstreamSpec{
-		Endpoint:     b.Endpoint,
-		APIKey:       b.APIKey,
-		Wire:         b.Wire,
-		RequestExtra: b.RequestExtra,
-		Price:        b.Price,
-		Vision:       b.Vision,
+		Endpoint:          b.Endpoint,
+		APIKey:            b.APIKey,
+		Wire:              b.Wire,
+		RequestExtra:      b.RequestExtra,
+		StreamIdleTimeout: &window,
+		Price:             b.Price,
+		Vision:            b.Vision,
 	}
 }
 
 // delegationTarget is a Delegation target carrying the binding's dial fields, the price and the vision opt-in only — the dial a
-// routed child is built on. The caller sets the server's name, the model it resolved, the window
-// and the rest; EffortDialect is the beat's ranked one (resolveDelegationTarget), never the forced
+// routed child is built on. Its stream-idle window is always stated, upstreamSpec's reason: a nil
+// would leave the child on the parent's window rather than its own server's. The caller sets the
+// server's name, the model it resolved, the window and the rest; EffortDialect is the beat's ranked one (resolveDelegationTarget), never the forced
 // spelling the binding holds for its Monitor.
 func (b upstreamBinding) delegationTarget() apogee.DelegationTarget {
+	window := b.StreamIdleTimeout
 	return apogee.DelegationTarget{
-		Endpoint:     b.Endpoint,
-		APIKey:       b.APIKey,
-		Wire:         b.Wire,
-		RequestExtra: b.RequestExtra,
-		Price:        b.Price,
-		Vision:       b.Vision,
+		Endpoint:          b.Endpoint,
+		APIKey:            b.APIKey,
+		Wire:              b.Wire,
+		RequestExtra:      b.RequestExtra,
+		StreamIdleTimeout: &window,
+		Price:             b.Price,
+		Vision:            b.Vision,
 	}
 }
 
