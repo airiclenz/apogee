@@ -987,8 +987,9 @@ func raise(
 		// Both lanes of the `reactions:` list this Firing resolved, handed whole and armed on the
 		// Agent run.Once builds before its first Step: a `gate:` answers this run's very first tool
 		// call, and its trouble reaches the same report line the Runner's does (Config.Report,
-		// firingConfig). The observe lane is the one the Runner above was built over, so the Agent
-		// validates and reports it but has no Runner of its own to swap (Config.ObserveRunner).
+		// firingConfig). The observe lane is the one the Runner above was built over and seeded with
+		// (Config.ObserveRunner, Config.Observe, set in firingConfig), so the arming swap finds
+		// nothing moved and retires nothing.
 		Generation: lanes,
 		// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
 		// Firing delegates to the `sub-agents-server:` entry exactly as a session does, and both
