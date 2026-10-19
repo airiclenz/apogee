@@ -3,6 +3,7 @@ title: "sub_agent: shared context files injected once (a files: argument rendere
 status: open
 type: feature
 priority: 3
+plan: 2026-10-19 - 00 - sub-agent-context-and-server-idle-timeout-plan.md
 aliases: [apogee-vi5]
 created: 2026-09-14T20:28:24Z
 ---

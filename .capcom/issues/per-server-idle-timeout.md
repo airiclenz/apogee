@@ -3,6 +3,7 @@ title: Per-server stream-idle-timeout override
 status: open
 type: feature
 priority: 4
+plan: 2026-10-19 - 00 - sub-agent-context-and-server-idle-timeout-plan.md
 aliases: [apogee-per-server-idle-timeout]
 created: 2026-09-23T20:22:39Z
 ---
