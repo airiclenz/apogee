@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -648,6 +649,74 @@ func TestReadScopeReadBounded(t *testing.T) {
 			}
 			if tc.wantFail == "" && string(data) != tc.wantContent {
 				t.Errorf("content = %q, want %q", data, tc.wantContent)
+			}
+		})
+	}
+}
+
+// TestReadScopedText pins the exported engine-side read: it serves exactly what read_file's scope
+// serves — a workspace-relative path, an absolute path under a mounted root, a `mount:rel`
+// reference into a virtual mount — and refuses everything else with an error that begins with the
+// path the caller spelled, including the shared wordings that name no file of their own (an
+// over-cap size) and a binary refusal that carries no `read_file:` prefix.
+func TestReadScopedText(t *testing.T) {
+	t.Parallel()
+
+	workspace, extra, _ := scopeFixture(t)
+	outside := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(outside, "secret.txt"), "not yours")
+	writeFixtureFile(t, filepath.Join(workspace, "blob.bin"), "head\x00tail")
+	writeFixtureFile(t, filepath.Join(workspace, "picture.png"), "not really a png")
+	oversize := filepath.Join(workspace, "huge.txt")
+	writeFixtureFile(t, oversize, "")
+	if err := os.Truncate(oversize, maxFileReadBytes+1); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	mounts := ReadMounts{
+		Roots:   func() []string { return []string{extra} },
+		Virtual: demoMount().Virtual,
+	}
+
+	cases := []struct {
+		name        string
+		input       string
+		wantContent string
+		wantFail    string // a substring the error must carry after its path prefix; "" ⇒ success
+	}{
+		{"workspace relative", "in-workspace.txt", "workspace bytes", ""},
+		{"absolute under a mount root", filepath.Join(extra, "skill.md"), "skill bytes", ""},
+		{"virtual mount reference", "demo:notes/checklist.md", "one\ntwo\nthree\n", ""},
+		{"out of scope", filepath.Join(outside, "secret.txt"), "", ErrPathEscape.Error()},
+		{"binary", "blob.bin", "", "binary file (9 bytes)"},
+		{"missing", "absent.txt", "", "file not found: absent.txt"},
+		{"oversize", "huge.txt", "", fmt.Sprintf("file too large: %d bytes", maxFileReadBytes+1)},
+		{"image", "picture.png", "", "image file"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			content, err := ReadScopedText(context.Background(), workspace, mounts, tc.input)
+
+			if tc.wantFail == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				if content != tc.wantContent {
+					t.Errorf("content = %q, want %q", content, tc.wantContent)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("err = nil, want a refusal carrying %q", tc.wantFail)
+			}
+			msg := err.Error()
+			if !strings.HasPrefix(msg, tc.input+": ") || !strings.Contains(msg, tc.wantFail) {
+				t.Errorf("err = %q, want %q-prefixed and carrying %q", msg, tc.input+": ", tc.wantFail)
+			}
+			if strings.Contains(msg, "read_file:") {
+				t.Errorf("err = %q carries read_file's own prefix", msg)
 			}
 		})
 	}

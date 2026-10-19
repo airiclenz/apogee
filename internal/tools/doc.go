@@ -340,8 +340,9 @@
 // multi-root resolver that tries the workspace first and then any extra read-only roots the
 // host mounts, returning the matched root so a caller pins every later fenced operation to it —
 // plus ReadMounts (an alias of domain.ReadMounts, which holds its contract), the one value a read
-// tool is wired with, and searchTarget, the resolved subject
-// grep and find_files walk. path_virtual.go is that resolver's VIRTUAL half: read-only trees the
+// tool is wired with, searchTarget, the resolved subject
+// grep and find_files walk, and ReadScopedText, that scope exported as a bounded text read for
+// an engine-side caller that reads files with no tool call (a sub_agent's `context` files). path_virtual.go is that resolver's VIRTUAL half: read-only trees the
 // host mounts under a NAME (`shipped:<id>`) rather than under a host path, because they have none
 // — the mount-reference grammar, the fs.FS-backed target every read tool serves them through, and
 // the write-side refusal that keeps the spelling from ever becoming a colon-named workspace file.

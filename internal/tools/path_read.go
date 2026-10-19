@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/doctext"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 )
@@ -407,6 +409,59 @@ func withSiblingSuggestions(failure, root, target string) string {
 		return failure
 	}
 	return notFoundMessage(prefix, target, suggestSiblings(root, workspaceRelative(target, root), target))
+}
+
+// imageExtensions are the raster image formats ReadScopedText refuses by name: an image is not
+// text a model can read as a prefix, and its bytes are refused before they are read. SVG is
+// absent on purpose — it is text, and the binary sniff judges it like any other text file.
+var imageExtensions = map[string]bool{
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".gif":  true,
+	".webp": true,
+	".bmp":  true,
+	".tif":  true,
+	".tiff": true,
+	".avif": true,
+	".heic": true,
+	".ico":  true,
+}
+
+// ReadScopedText reads path as text under the read_file scope rules, for an engine-side caller
+// that renders a file's content without a tool call — a sub_agent's `context` files are the first.
+// It is read_file's own resolution, not a second resolver: a relative path resolves against root,
+// an absolute path against root and then mounts' Roots and Scratch, and a `mount:rel` reference
+// into mounts' Virtual trees (an absolute path never reaches a virtual mount). The read is the
+// one-handle bounded read, capped at maxFileReadBytes, and a PDF is returned as its extracted text
+// exactly as read_file returns it; ctx bounds that extraction.
+//
+// Every failure is an error whose text begins with path as the caller spelled it — a missing file,
+// a path outside every root, an over-cap file, a binary file (NUL in the head) and an image
+// extension alike — because several of the shared refusal wordings ("file too large", an
+// inaccessible root) name no file, and a caller reading several paths must say which one failed.
+func ReadScopedText(ctx context.Context, root string, mounts ReadMounts, path string) (string, error) {
+	if imageExtensions[strings.ToLower(filepath.Ext(path))] {
+		return "", fmt.Errorf("%s: image file, not text", path)
+	}
+
+	scope := readScope{root: root, mounts: mounts}
+	content, failure := scope.readBounded(path)
+	if failure != "" {
+		return "", fmt.Errorf("%s: %s", path, failure)
+	}
+
+	if !doctext.IsPDF(content) {
+		if looksBinary(content) {
+			return "", fmt.Errorf("%s: binary file (%d bytes)", path, len(content))
+		}
+		return string(content), nil
+	}
+	extracted, _, extractFailure := doctext.ExtractPDF(ctx, content, maxFileReadBytes)
+	if extractFailure != "" {
+		return "", fmt.Errorf("%s: %s", path, extractFailure)
+	}
+	return extracted, nil
 }
 
 // readRoot answers the root a fenced read of input must be pinned to: the workspace when it

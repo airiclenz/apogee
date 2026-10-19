@@ -97,7 +97,10 @@ cmd/apogee/e2e_livestate_test.go — TestE2ELiveStateFollowsTheRunningSession
 **Commit:** `feat(config): sub-agents-context root key gates the sub_agent context argument`
 Depends on item 1.
 
-## 3. Exported scoped text read for engine-side context files
+## 3. Exported scoped text read for engine-side context files — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): consequential edit — internal/tools/doc.go: made necessary by the new exported ReadScopedText in path_read.go (the package map's path_read.go entry now names it).
+NOTES (2026-10-19): signature is `ReadScopedText(ctx, root string, mounts ReadMounts, path string) (string, error)`; ctx bounds PDF extraction. Image refusal is by extension (raster set incl. .ico; SVG stays text) and runs before any read; binary/PDF handling is rendered in ReadScopedText itself rather than through readableText, per the item's regression guard.
 
 **What:**
 **Goal:** `internal/tools` exports one function that reads a path under the read_file scope rules: relative paths go against the workspace, absolute paths under `domain.ReadMounts` Roots/Scratch, or a `mount:path` reference into Virtual. It returns the text, or an error that names the path for a missing, out-of-scope, binary or image file. The function is bounded by `maxFileReadBytes`.
