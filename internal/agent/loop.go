@@ -1541,9 +1541,23 @@ func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bo
 			}
 			content, annotation = extracted, " ("+doctext.PDFAnnotation(pages)+")"
 		}
-		fmt.Fprintf(&b, "Referenced file `%s`%s:\n```\n%s\n```\n\n", ref, annotation, a.clampRef(turn, "@"+ref, content, bound))
+		b.WriteString(a.refBlock(turn, "@"+ref, ref, annotation, content, bound))
 	}
 	return b.String(), images
+}
+
+// refBlockFormat is one file's reference block: the path, doctext's annotation for an extracted
+// document (empty for text), and the bounded content fenced below them.
+const refBlockFormat = "Referenced file `%s`%s:\n```\n%s\n```\n\n"
+
+// refBlock renders one file's reference block — the one fence an @file reference
+// (resolveFileRefs) and a sub_agent's `context` file (contextPrefix) both enter a user message in,
+// so the model reads a file handed to it the same way whichever seam handed it. content is clamped
+// to bound first (clampRef), so the header survives an elision; label is the reference as the
+// human or model spelled it, which a clip note names (domain.RefClippedEvent), and ref is the path
+// the header names.
+func (a *Agent) refBlock(turn int, label, ref, annotation, content string, bound int) string {
+	return fmt.Sprintf(refBlockFormat, ref, annotation, a.clampRef(turn, label, content, bound))
 }
 
 // visionRefusalFormat is the refusal an image meets on a server whose entry does not opt into image

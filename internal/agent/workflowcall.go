@@ -320,10 +320,11 @@ func isDelegationCall(call domain.ToolCall, offered bool) bool {
 // backgroundSubAgentResult starts the one-item background workflow a background sub_agent call asks
 // for and answers it at once (ADR 0094). The arguments are checked first, so a call that could
 // never run costs no workflow folder: a continuation is refused (it runs blocking, D4), and an empty
-// task, an unreadable seat or an unknown roster are refused in the blocking call's own words. The
+// task, an unreadable seat, an unknown roster or an unreadable `context` file are refused in the
+// blocking call's own words. The
 // seat the call names sizes and queues the workflow (startBackground); the child resolves it again
 // from the same arguments as it starts.
-func (a *Agent) backgroundSubAgentResult(turn int, call domain.ToolCall) domain.ToolResult {
+func (a *Agent) backgroundSubAgentResult(ctx context.Context, turn int, call domain.ToolCall) domain.ToolResult {
 	var args tools.SubAgentArgs
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return errorToolResult(call.ID, subAgentBackgroundArguments+err.Error())
@@ -344,6 +345,11 @@ func (a *Agent) backgroundSubAgentResult(turn int, call domain.ToolCall) domain.
 	}
 	if _, err := a.requestedChildTools(args.Tools); err != nil {
 		return errorToolResult(call.ID, err.Error())
+	}
+	// Read and thrown away: the background child reads the files again as it starts, on the
+	// blocking path, so this read only refuses an unreadable one before any workflow exists.
+	if _, refusal := a.readDelegationContext(ctx, args.Context); refusal != "" {
+		return errorToolResult(call.ID, refusal)
 	}
 	plan := backgroundSubAgentPlan(call, a.runIDs.mint(), args)
 	id, err := a.startBackground(workflowLaunch{plan: plan, seat: seat, turn: turn, call: call})
@@ -436,7 +442,7 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 		return a.workflowControlResult(call)
 	}
 	if isSubAgentCall(call) {
-		return a.backgroundSubAgentResult(turn, call)
+		return a.backgroundSubAgentResult(ctx, turn, call)
 	}
 	seat, refusal := a.fanOutSeat(call.Arguments)
 	if refusal != "" {

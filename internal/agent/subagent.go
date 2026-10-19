@@ -1117,6 +1117,18 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 
+	// The `context` files, read BEFORE the child is built for the same reason again: an unreadable
+	// path costs no child and is refused naming it. They are rendered only once the child exists
+	// (contextPrefix), against the child's own window, and ahead of the task it is SUBMITTED — the
+	// task handed to newChildAgentOn stays bare, because that one names the delegation to the
+	// approval pane, the transcript and the namer. A continuation renders only the files its own
+	// call names: nothing of them is retained.
+	shared, refusal := a.readDelegationContext(ctx, args.Context)
+	if refusal != "" {
+		giveBack()
+		return errorToolResult(call.ID, refusal), dispatchDone
+	}
+
 	// A cancel of the parent's Turn that reached the call before its child exists settles it
 	// unstarted: nothing is built, a continuation's entry is given back, and the dispatch answers
 	// the call with the not-started result (runDelegation, ADR 0088 D2).
@@ -1193,7 +1205,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		_ = sub.Close()
 	}()
 
-	if err := sub.Submit(domain.UserInput{Text: task}); err != nil {
+	if err := sub.Submit(domain.UserInput{Text: sub.contextPrefix(shared) + task}); err != nil {
 		giveBack()
 		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
 	}
@@ -2241,6 +2253,96 @@ func publishesSeatChoice(roster *domain.ToolRegistry) bool {
 	}
 	spawner, ok := t.(*tools.SubAgent)
 	return ok && spawner.OffersSeatChoice()
+}
+
+// publishesContext reports whether roster's sub_agent tool published the `context` argument — the
+// `sub-agents-context` gate as the model was told it, asked of the tool for publishesSeatChoice's
+// reason. A nil roster, one without sub_agent and a foreign tool under the name report false, and
+// a call's `context` is then ignored rather than read.
+func publishesContext(roster *domain.ToolRegistry) bool {
+	if roster == nil {
+		return false
+	}
+	t, ok := roster.Lookup(tools.SubAgentToolName)
+	return ok && offersContext(t)
+}
+
+// subAgentContextShape refuses a `context` argument that is not the array of file paths the schema
+// publishes, naming the argument so the model knows which one it spelled wrong.
+const subAgentContextShape = "invalid sub_agent context: want an array of file paths"
+
+// subAgentContextRefusal heads the refusal of a call one of whose `context` files cannot be read;
+// the reason that follows begins with the path as the call spelled it (tools.ReadScopedText).
+const subAgentContextRefusal = "sub_agent was not run: context file "
+
+// sharedFile is one `context` file a sub_agent call named, read before its child exists: the path
+// as the call spelled it and the text read from it.
+type sharedFile struct {
+	path    string
+	content string
+}
+
+// readDelegationContext reads the `context` files a sub_agent call names, once each, in argument
+// order — a path repeated is read and later rendered once — through the read_file scope
+// (tools.ReadScopedText: the workspace plus Config.ReadMounts). It runs BEFORE any child is built,
+// on the blocking and the background path alike, so a call that names an unreadable file costs no
+// child and no workflow folder: a missing, out-of-scope, binary or image path refuses the whole
+// call with the refusal returned, which names that path; an empty refusal means the call may run.
+//
+// The argument is only READ where this Agent's own sub_agent tool published it (publishesContext):
+// with the gate off a stray `context` of any shape is ignored, as an unoffered `run_on` is, and the
+// answer is nil. With the gate on, a value that is not an array of strings is refused naming
+// `context`. ctx bounds a PDF's text extraction.
+func (a *Agent) readDelegationContext(ctx context.Context, raw json.RawMessage) ([]sharedFile, string) {
+	if !publishesContext(a.tools) || len(raw) == 0 {
+		return nil, ""
+	}
+	var paths []string
+	if err := json.Unmarshal(raw, &paths); err != nil {
+		return nil, subAgentContextShape
+	}
+	files := make([]sharedFile, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		content, err := a.readContextFile(ctx, path)
+		if err != nil {
+			return nil, subAgentContextRefusal + err.Error()
+		}
+		files = append(files, sharedFile{path: path, content: content})
+	}
+	return files, ""
+}
+
+// readContextFile reads one `context` path under the read_file scope. An Agent with no workspace
+// wires no file tools, so it has no scope to read through and refuses every path by name.
+func (a *Agent) readContextFile(ctx context.Context, path string) (string, error) {
+	if a.cfg.WorkspaceDir == "" {
+		return "", fmt.Errorf("%s: no workspace is open to read it from", path)
+	}
+	return tools.ReadScopedText(ctx, a.cfg.WorkspaceDir, a.cfg.ReadMounts, path)
+}
+
+// contextPrefix renders the `context` files a delegation read (readDelegationContext) as the
+// prefix of this CHILD's first user message: one reference block per file, in the order read, in
+// the fence an @file reference uses (refBlock). The receiver is the child, so each block is
+// bounded by the child's own window — its share of the child's History allocation across the
+// files, never past fileRefMaxTokens (refBound) — and a clip is noted on the child's stream. No
+// files render to the empty prefix. The prefix is user-role text ahead of the task; the child's
+// system message is untouched (ADR 0023 §6).
+func (a *Agent) contextPrefix(files []sharedFile) string {
+	if len(files) == 0 {
+		return ""
+	}
+	bound := a.refBound(len(files))
+	var b strings.Builder
+	for _, file := range files {
+		b.WriteString(a.refBlock(a.turns.index, file.path, file.path, "", file.content, bound))
+	}
+	return b.String()
 }
 
 // completedResult renders the result of a child that ran to COMPLETION — the default outcome of

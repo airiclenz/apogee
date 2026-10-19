@@ -115,7 +115,11 @@ internal/tools/path_read_test.go — scopeFixture, TestReadScopeReadBounded
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'ReadScoped|PathRead' ./internal/tools/`
 **Commit:** `feat(tools): export the read_file scope as a bounded text read`
 
-## 4. runDelegate renders `context` once ahead of the child's task
+## 4. runDelegate renders `context` once ahead of the child's task — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): internal/agent/filerefs_test.go (listed in Files) needed no edit — the extracted renderer (refBlock) keeps FileRefs' output byte-identical, and the existing FileRefs tests pass unchanged under the Acceptance -run.
+NOTES (2026-10-19): backgroundSubAgentResult now takes the dispatch ctx (workflowCallResult passes it) so the pre-start context read can bound a PDF extraction; the background child re-reads the files when its item starts on the blocking path, so a file removed in between refuses that item instead.
+NOTES (2026-10-19): a PDF named in `context` renders as its extracted text with no "(PDF, N pages)" header annotation — tools.ReadScopedText returns no page count; an Agent with no workspace refuses every context path by name.
 
 **What:** Recast at the regression check (2026-10-19).
 **Goal:** when the context gate is on, a sub_agent call with `context: [a, b]` produces a child whose first user message holds each file once, fenced in the same "Referenced file `x`:" form FileRefs uses, in argument order, with duplicate paths dropped, followed by the task. Any unreadable path refuses the call before a child is created, with a tool error naming that path. When the gate is off, `context` is ignored. The child's system message is unchanged (ADR 0023 §6).

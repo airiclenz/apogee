@@ -2050,6 +2050,34 @@ func TestWorkflowCall_ABackgroundSubAgentIsRefusedBeforeItStartsAWorkflow(t *tes
 	}
 }
 
+// TestWorkflowCall_ABackgroundSubAgentWithAnUnreadableContextFileIsRefusedBeforeItStarts: a
+// background call naming a `context` file the read_file scope cannot read is refused with the path
+// before startBackground — no "started in the background" answer and no workflow folder.
+func TestWorkflowCall_ABackgroundSubAgentWithAnUnreadableContextFileIsRefusedBeforeItStarts(t *testing.T) {
+	t.Parallel()
+
+	sink := newLockedSink()
+	cfg := backgroundSubAgentConfig(t, sink)
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(tools.NewSubAgentWith(tools.SubAgentOptions{Background: true, Context: true}))
+	_ = reg.Register(tools.NewWorkflow())
+	cfg.Tools = reg
+	args := backgroundSubAgentArgsJSON(map[string]any{"context": []string{"missing.md"}})
+	up := (&workflowResponder{}).
+		route("please delegate", nil, toolCallScript("sa1", tools.SubAgentToolName, args)).
+		route("please delegate", nil, contentScript("understood"))
+	a := newBackgroundParent(t, cfg, up)
+
+	runSubmitted(t, context.Background(), a, "please delegate")
+
+	if got := callResult(t, lockedEvents(sink), "sa1"); !got.IsError || !strings.Contains(got.Content, "missing.md") {
+		t.Errorf("sub_agent answer = %q (error %v), want a refusal naming missing.md", got.Content, got.IsError)
+	}
+	if infos, err := a.Workflows(); err != nil || len(infos) != 0 {
+		t.Errorf("Workflows = %+v, %v; want none — a refused call starts no workflow", infos, err)
+	}
+}
+
 // TestWorkflowCall_TwoIdenticalBackgroundSubAgentsBothRun pins ADR 0094 D6 and D8: two calls of
 // one reply delegating the same task are two runs (the plan hash is salted with the call id and a
 // minted nonce), and

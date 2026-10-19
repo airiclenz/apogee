@@ -626,6 +626,176 @@ func TestSubAgentsContext_NestedChildKeepsTheContextArgument(t *testing.T) {
 	}
 }
 
+// subAgentContextConfig is a parent Config whose sub_agent publishes `context` (the
+// `sub-agents-context` gate on), wired to a workspace holding files — name to content.
+func subAgentContextConfig(t *testing.T, sink domain.EventSink, files map[string]string) domain.Config {
+	t.Helper()
+	cfg := baseConfig(sink)
+	cfg.Mode = domain.ModeAskBefore
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(tools.NewSubAgentWith(tools.SubAgentOptions{Context: true}))
+	cfg.Tools = reg
+	cfg.WorkspaceDir = t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(cfg.WorkspaceDir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	return cfg
+}
+
+// subAgentContextArgs is a sub_agent call's arguments delegating task with `context` set to value,
+// whatever its shape.
+func subAgentContextArgs(task string, value any) string {
+	b, _ := json.Marshal(map[string]any{"task": task, "context": value})
+	return string(b)
+}
+
+// runSubAgentContextCall drives one parent Turn whose reply is a sub_agent call carrying args,
+// scripted with turns after it, and returns the parent's sub_agent result and the upstream.
+func runSubAgentContextCall(t *testing.T, cfg domain.Config, sink *recordingSink, args string, turns ...stubllm.Turn) (domain.ToolResult, *scriptedUpstream) {
+	t.Helper()
+	upstream := scriptedResponder(t, append([]stubllm.Turn{toolCallTurn("c1", tools.SubAgentToolName, args)}, turns...)...)
+	a, err := newAgent(cfg, upstream)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please delegate"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	result, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	return result, upstream
+}
+
+// lastUserContent is the content of the last user-role message request carried — a fresh child's
+// first request ends on its task message.
+func lastUserContent(t *testing.T, request stubllm.Request) string {
+	t.Helper()
+	for i := len(request.Messages) - 1; i >= 0; i-- {
+		if request.Messages[i].Role == "user" {
+			return request.Messages[i].Content
+		}
+	}
+	t.Fatalf("request %d carried no user message", request.N)
+	return ""
+}
+
+// TestSubAgentContext_FilesAreRenderedOnceAheadOfTheTask: with the gate on, the child's first
+// request carries each `context` file once — a repeated path is dropped — in argument order,
+// fenced as an @file reference is, followed by the task; its system message carries none of them.
+func TestSubAgentContext_FilesAreRenderedOnceAheadOfTheTask(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := subAgentContextConfig(t, sink, map[string]string{"b.md": "beta body", "a.md": "alpha body"})
+	args := subAgentContextArgs("summarise the notes", []string{"b.md", "a.md", "b.md"})
+
+	result, upstream := runSubAgentContextCall(t, cfg, sink, args, contentTurn("child report"), contentTurn("parent done"))
+
+	if result.IsError {
+		t.Fatalf("sub_agent result is an error: %q", result.Content)
+	}
+	child := upstream.requests()[1]
+	want := "Referenced file `b.md`:\n```\nbeta body\n```\n\n" +
+		"Referenced file `a.md`:\n```\nalpha body\n```\n\n" +
+		"summarise the notes"
+	if got := lastUserContent(t, child); got != want {
+		t.Errorf("child's first user message =\n%q\nwant\n%q", got, want)
+	}
+	for _, message := range child.Messages {
+		if message.Role == "system" && strings.Contains(message.Content, "beta body") {
+			t.Errorf("the child's system message carries a context file: %q", message.Content)
+		}
+	}
+}
+
+// TestSubAgentContext_AnUnreadablePathRefusesTheCallBeforeAChildExists: one path the read_file
+// scope cannot read — missing, or outside the workspace — refuses the whole call with an error
+// naming that path as the model sent it, and no child request is ever made.
+func TestSubAgentContext_AnUnreadablePathRefusesTheCallBeforeAChildExists(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{"missing.md", "../outside.md"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			cfg := subAgentContextConfig(t, sink, map[string]string{"a.md": "alpha body"})
+			args := subAgentContextArgs("summarise the notes", []string{"a.md", path})
+
+			result, upstream := runSubAgentContextCall(t, cfg, sink, args, contentTurn("parent done"))
+
+			if !result.IsError || !strings.Contains(result.Content, path) {
+				t.Errorf("sub_agent result = %q (error %v), want a refusal naming %q", result.Content, result.IsError, path)
+			}
+			if got := upstream.calls(); got != 2 {
+				t.Errorf("upstream saw %d requests, want 2 — the parent's two, no child's", got)
+			}
+		})
+	}
+}
+
+// TestSubAgentContext_AWrongShapeIsRefusedNamingContext: with the gate on, a `context` that is not
+// an array of paths is refused naming the argument, before any child exists.
+func TestSubAgentContext_AWrongShapeIsRefusedNamingContext(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	cfg := subAgentContextConfig(t, sink, map[string]string{"a.md": "alpha body"})
+
+	result, upstream := runSubAgentContextCall(t, cfg, sink, subAgentContextArgs("summarise", "a.md"), contentTurn("parent done"))
+
+	if !result.IsError || !strings.Contains(result.Content, "context") {
+		t.Errorf("sub_agent result = %q (error %v), want a refusal naming context", result.Content, result.IsError)
+	}
+	if got := upstream.calls(); got != 2 {
+		t.Errorf("upstream saw %d requests, want 2 — no child's", got)
+	}
+}
+
+// TestSubAgentContext_GateOffIgnoresTheArgument: a parent whose sub_agent never published
+// `context` ignores one of any shape — an array, a string, an object — and the child gets the task
+// alone, exactly as without it.
+func TestSubAgentContext_GateOffIgnoresTheArgument(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "an array", value: []string{"a.md"}},
+		{name: "a string", value: "a.md"},
+		{name: "an object", value: map[string]any{"path": "a.md"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			cfg := subAgentConfig(sink, domain.ModeAskBefore)
+			cfg.WorkspaceDir = t.TempDir()
+			if err := os.WriteFile(filepath.Join(cfg.WorkspaceDir, "a.md"), []byte("alpha body"), 0o600); err != nil {
+				t.Fatalf("write a.md: %v", err)
+			}
+
+			result, upstream := runSubAgentContextCall(t, cfg, sink, subAgentContextArgs("summarise", tc.value),
+				contentTurn("child report"), contentTurn("parent done"))
+
+			if result.IsError {
+				t.Fatalf("sub_agent result is an error: %q", result.Content)
+			}
+			if got := lastUserContent(t, upstream.requests()[1]); got != "summarise" {
+				t.Errorf("child's first user message = %q, want the task alone", got)
+			}
+		})
+	}
+}
+
 // TestSubAgent_ChildNeverHoldsTheHumanSeatTools pins the unconditional withholding at BOTH places
 // it is visible: the roster the orchestrator builds a child with, and the menu the child actually
 // sends upstream in a run. ask_user and present_document are the parent's whichever mode it runs
