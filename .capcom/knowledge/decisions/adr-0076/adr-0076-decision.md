@@ -94,6 +94,11 @@ attributes effect by reaction id; `/settings` can show what the model saw this T
 > the provenance row, in the pane's words. The verb re-opens on the newest firing and never toggles;
 > engine notes (the addendum below) fire no reaction and are absent from it.
 
+> *Amendment (2026-10-19, `adr-0076-amend-1019`):* for the `session-started` notice the "any other
+> Moment" slot is no appended message: the span is a fenced block inside the session's next user
+> message, ahead of the prompt, ephemeral as above. The user advise cell on it waits for its own
+> decision-5-style admission arm.
+
 **7. Deadlines, cap and failure.** `advise` defaults to **10s** and is **fail-open** — no advice is
 just no advice. `gate` defaults to **5s** (it runs on every tool call) and on timeout or crash
 **escalates to ask**: a broken guard becomes a human question, never a silent allow and never a hard

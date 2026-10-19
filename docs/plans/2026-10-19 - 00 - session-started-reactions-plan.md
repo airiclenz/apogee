@@ -38,7 +38,9 @@
 - The tail slot for `pre-request` / `post-response` / `history-rewrite` (rest of `non-tool-advise-slot`).
 - capcom writing an apogee reaction entry (capcom repo).
 
-## 1. ADR 0076 amendment: session-start boundary and slot
+## 1. ADR 0076 amendment: session-start boundary and slot — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the amendment also records the ratified Timing call (advise entries start in the background at the boundary; the first request waits only for the rest of each entry's timeout), the fifth of the header's ratified calls that the Goal's list folded away.
 
 **What:**
 **Goal:** ADR 0076 carries a dated 2026-10-19 amendment Note recording the five ratified calls above: `session-started` is a notice fired at every Session boundary (delegates excluded) with a `start` kind; for `session-started` the D6 non-tool slot is a fenced block inside the next user message ahead of the prompt (role-safe: one message, never after a tool result, so the Rejected row holds); the slot is ephemeral as D6 states; the user advise cell on it ships only after its own D5-style admission arm passes; adoption before the first prompt fires for that session.
