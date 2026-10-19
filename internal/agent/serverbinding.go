@@ -16,6 +16,8 @@ package agent
 // "Presence on the engine binding is pointer fields").
 
 import (
+	"time"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 )
@@ -35,6 +37,10 @@ type serverBinding struct {
 	// RequestExtra is the server's `request-extra:` passthrough (ADR 0085), a dial fact like the
 	// endpoint: the canonical JSON dialOptions hands the Client, "" for an entry that names none.
 	RequestExtra *string
+	// StreamIdleTimeout is the server's stream-idle window (domain.Config.StreamIdleTimeout), a dial
+	// fact like the endpoint: how long a stream from THIS server may stay silent, which dialOptions
+	// hands the Client and the delegate fold bounds read off the Config. Present 0 turns the cut off.
+	StreamIdleTimeout *time.Duration
 	// The per-model bindings: the wire model id and the system-prompt template.
 	Model        *string
 	SystemPrompt *string
@@ -87,6 +93,9 @@ func (b serverBinding) applyTo(cfg domain.Config) domain.Config {
 	if b.RequestExtra != nil {
 		cfg.RequestExtra = *b.RequestExtra
 	}
+	if b.StreamIdleTimeout != nil {
+		cfg.StreamIdleTimeout = *b.StreamIdleTimeout
+	}
 	if b.Model != nil {
 		cfg.Model = *b.Model
 	}
@@ -132,7 +141,8 @@ func (b serverBinding) applyTo(cfg domain.Config) domain.Config {
 // bounds and the price pass through as the pointers they already are, so a spec silent about one
 // leaves it exactly where the bind or the move that set it put it. The dial facts, the seat's words,
 // the working window, the vision opt-in and the ephemeral mark are never a model change's to state,
-// so they stay absent.
+// so they stay absent — the stream-idle window among the dial facts: Rebind never dials, so a window
+// stated here would move the fold bounds while the Client kept the window it was dialled with.
 func (s RebindSpec) binding() serverBinding {
 	return serverBinding{
 		Model:                   &s.Model,
@@ -153,7 +163,10 @@ func (s RebindSpec) binding() serverBinding {
 // the new one an image), the ephemeral mark (false included, so a move off the `--endpoint` entry
 // stops calling the server ephemeral) and the seat's human words are present, and so are all four
 // token bounds — applied as the spec states them, the zeroes included, because an absent pin is a
-// fact about the new server rather than a licence to keep the retired one's number (see each field's contract in rebind.go). Model is present as `""`: a switch UNBINDS
+// fact about the new server rather than a licence to keep the retired one's number (see each field's contract in rebind.go).
+// The stream-idle window is the one dial fact that passes through as the pointer it already is: nil
+// keeps the session's window, a stated one replaces it (UpstreamSpec.StreamIdleTimeout).
+// Model is present as `""`: a switch UNBINDS
 // the model rather than guessing what the new server serves (ADR 0024), and that unbinding is a
 // present zero here, not an absence. The system prompt, the profile, the effort dialect and the
 // posture stand until the new server's first observed model binds through Rebind.
@@ -166,6 +179,7 @@ func (s UpstreamSpec) binding() serverBinding {
 		ServerName:              &s.ServerName,
 		ServerDescription:       &s.ServerDescription,
 		RequestExtra:            &s.RequestExtra,
+		StreamIdleTimeout:       s.StreamIdleTimeout,
 		Price:                   &s.Price,
 		Vision:                  &s.Vision,
 		ServerEphemeral:         &s.ServerEphemeral,
@@ -191,26 +205,28 @@ func (s UpstreamSpec) binding() serverBinding {
 // ResponseReserveFraction is present only when positive, since an entry that states no share
 // leaves the parent's run-wide split standing; EffortDialect is present only when the target names
 // one, since the zero there says "this target names none" and keeps the parent's shape; Bypass
-// passes through as the pointer it already is (ADR 0045 §2's replace-or-inherit rule). The name is
+// passes through as the pointer it already is (ADR 0045 §2's replace-or-inherit rule), and so does
+// StreamIdleTimeout (nil keeps the parent's window, a stated one is the target server's). The name is
 // the one of the seat's human words a target states — it identifies the server the child dials,
 // where the parent's name would describe the box the child left; the description and the system
 // prompt are not a target's to state.
 func (t *DelegationTarget) binding() serverBinding {
 	configured := false
 	b := serverBinding{
-		Endpoint:        &t.Endpoint,
-		APIKey:          &t.APIKey,
-		Wire:            &t.Wire,
-		ServerName:      &t.ServerName,
-		RequestExtra:    &t.RequestExtra,
-		Price:           &t.Price,
-		Vision:          &t.Vision,
-		ServerEphemeral: &configured,
-		Model:           &t.Model,
-		WorkingWindow:   &t.WorkingWindow,
-		MaxOutputTokens: &t.MaxOutputTokens,
-		Profile:         &t.Profile,
-		Bypass:          t.Bypass,
+		Endpoint:          &t.Endpoint,
+		APIKey:            &t.APIKey,
+		Wire:              &t.Wire,
+		ServerName:        &t.ServerName,
+		RequestExtra:      &t.RequestExtra,
+		Price:             &t.Price,
+		Vision:            &t.Vision,
+		ServerEphemeral:   &configured,
+		Model:             &t.Model,
+		WorkingWindow:     &t.WorkingWindow,
+		MaxOutputTokens:   &t.MaxOutputTokens,
+		Profile:           &t.Profile,
+		Bypass:            t.Bypass,
+		StreamIdleTimeout: t.StreamIdleTimeout,
 	}
 	if t.ContextWindow > 0 {
 		b.MaxContextTokens = &t.ContextWindow

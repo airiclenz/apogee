@@ -569,9 +569,9 @@ type wireTap struct {
 // dialOptions composes the provider Options every dial in the engine crosses with: the wire the
 // Config names for the server about to be dialled (provider.WithWire over provider.WireFor, so an
 // unnamed wire folds to openai and the Client never speaks a protocol it does not have — ADR 0078),
-// the silence bound the Config states for a streamed reply (provider.WithStreamIdleTimeout over
-// cfg.StreamIdleTimeout — always, so a zero field disables the cut rather than leaving the Client
-// on its own default), the server entry's `request-extra:` passthrough (provider.WithRequestExtra
+// the silence bound the Config states for a streamed reply from that server
+// (provider.WithStreamIdleTimeout over cfg.StreamIdleTimeout — always, so a zero field disables the
+// cut rather than leaving the Client on its own default), the server entry's `request-extra:` passthrough (provider.WithRequestExtra
 // over cfg.RequestExtra, ADR 0085 — always, since "" merges nothing and sends the codec's bytes;
 // this is the engine's single producer of that Option), the server's identity for attempt
 // measurement (provider.WithServerIdentity over cfg.ServerName and cfg.Endpoint, ADR 0085 — always,
@@ -580,8 +580,10 @@ type wireTap struct {
 // it, the Inspector's wire observer (armWireCapture). It is called at every dial site — New, Resume, SwitchUpstream and the routed
 // spawn — with the Config of the Agent that will speak over the connection, which is what keeps
 // the wire a per-server fact: a switch dials the arrived-at server's wire, a routed child its
-// target's, and neither inherits the departed or parent server's protocol — while the silence
-// bound, a fact of the session rather than of a server, rides every one of them unchanged.
+// target's, and neither inherits the departed or parent server's protocol. The silence bound rides
+// every one of them too, and is a per-server fact on the same terms (ADR 0082 Decision 1, amended):
+// its value is the bound server's window — the one a switch or a routed target stated, else the
+// one the Config already held.
 func dialOptions(cfg domain.Config) ([]provider.Option, *wireTap) {
 	capture, tap := armWireCapture(cfg)
 	opts := []provider.Option{

@@ -22,6 +22,7 @@ package agent
 
 import (
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -58,6 +59,13 @@ type DelegationTarget struct {
 	// the child's Client merges over every body it sends. The TARGET's own value, "" included: a
 	// passthrough is a fact about the server, so a routed child never carries the parent's.
 	RequestExtra string
+	// StreamIdleTimeout is the target server's stream-idle window — how long a stream from it may
+	// stay silent before the routed child's Client cuts it (domain.Config.StreamIdleTimeout): the
+	// flagged entry's own `stream-idle-timeout:`, else the root key, as the host resolved it. It
+	// bounds the child's dial and the child's fold alike. nil ⇒ the target states no window and the
+	// child keeps the parent's; a stated value replaces it as written, 0 included, which turns the
+	// cut off for the child.
+	StreamIdleTimeout *time.Duration
 	// Price is the flagged entry's `price:` (ADR 0093 decision 3): every call a routed child makes
 	// is priced at the server it dials, so this is the TARGET's own value, the unpriced zero
 	// included — a child routed to an entry with no `price:` counts its calls as unpriced and never

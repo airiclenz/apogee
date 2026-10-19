@@ -39,9 +39,11 @@ type Config struct {
 	// headers, or between two chunks — before the provider client cuts it and the loop re-streams
 	// the request as a transient fault; bytes of any kind (reasoning deltas, keep-alive comments)
 	// reset the clock. It rides every dial the engine makes — construction, a `/server` switch, a
-	// routed spawn — so the session client and a child's carry it alike. ZERO DISABLES the cut:
-	// an embedder's zero Config waits for as long as the server takes, and the engine never sees
-	// the provider client's own default. The host folds in the `stream-idle-timeout:` key
+	// routed spawn — and its value is the BOUND server's window: a switch or a routed target that
+	// states one replaces it for that server's client (agent.UpstreamSpec / agent.DelegationTarget),
+	// so a routed child's window may differ from the session's. ZERO DISABLES the cut: an
+	// embedder's zero Config waits for as long as the server takes, and the engine never sees the
+	// provider client's own default. The host folds in the `stream-idle-timeout:` key
 	// (default 10m; 0 = off); an embedder sets it directly.
 	StreamIdleTimeout time.Duration
 

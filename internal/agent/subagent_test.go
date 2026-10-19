@@ -5217,6 +5217,49 @@ func TestSubAgent_FaultedDelegateFoldIsBounded(t *testing.T) {
 	}
 }
 
+// TestSubAgent_RoutedDelegateFoldIsBoundedByTheTargetsStreamIdleWindow: a delegation target that
+// states a stream-idle window bounds the routed child by it (ADR 0082 Decision 1, amended) — the
+// session's own window is far longer, yet the faulted child's stalled fold is cut at the target's
+// and the marker names that bound.
+func TestSubAgent_RoutedDelegateFoldIsBoundedByTheTargetsStreamIdleWindow(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.StreamIdleTimeout = 5 * time.Second // the session's: a fold bounded by it would name "5s"
+	cfg.Delegation.MaxSteps = 3
+	scripts := faultedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName, nil)
+	scripts = append(scripts, contentScript("parent done"))
+	responder := &blockAtResponder{scripts: scripts, blockAt: 4, started: make(chan struct{})} // call 4 is the fold
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.dial = dialerTo(responder).dial // the routed child speaks to the same script, numbering intact
+	window := 20 * time.Millisecond
+	a.SetDelegationTarget(&DelegationTarget{Endpoint: "http://grunt.local:1111", Model: "cheap-4b", StreamIdleTimeout: &window})
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	retained, ok := a.retained.lookup(retainedSurveyName)
+	if !ok {
+		t.Fatalf("no delegation retained under %q", retainedSurveyName)
+	}
+	want := fmt.Sprintf(engineFoldUnavailableFormat, fmt.Sprintf(foldBoundExceededFormat, "20ms"))
+	if len(retained.rounds) != 1 || !strings.HasPrefix(retained.rounds[0].report, want+"\n\n") {
+		t.Errorf("retained rounds = %+v, want one whose report opens on the target-bounded fold %q", retained.rounds, want)
+	}
+}
+
 // TestSubAgent_ACancelledDelegateIsStoppedAndRetained pins the cancel's stop end to end (ADR 0088
 // D2): Esc while the named child runs its second Turn folds the work it did, hands the parent the
 // exact stopped result a human's stop gives — fold, closing text, continue line — retains the

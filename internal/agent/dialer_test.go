@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -85,11 +86,13 @@ func (d *fakeDialer) dialled() []dialRecord {
 // starts on an anthropic entry, the routed target names NO wire — and the child dials openai, the
 // target's own folded answer, never the parent's anthropic — and the switch arrives on an
 // anthropic server again, the spec's value replacing whatever the retired client spoke. The
-// stream idle bound is the opposite kind of fact — the session's, not a server's — so every dial
-// carries cfg.StreamIdleTimeout unchanged: the session's, the routed child's (and grandchild's),
-// and the switched client's alike. The server identity attempt measurements carry (ADR 0085) is a
-// per-server fact again: each dial names the entry it binds — the session's, the routed target's
-// own name and endpoint, the switch's arrived-at server — never the parent's or the departed one's.
+// stream idle bound is a per-server fact too (ADR 0082 Decision 1, amended), but an optional one:
+// neither the routed target nor the switch states a window here, so every dial keeps
+// cfg.StreamIdleTimeout — the session's, the routed child's (and grandchild's), and the switched
+// client's alike (TestStreamIdleWindowStatedBySwitchUpstreamAndTarget covers a stated one). The
+// server identity attempt measurements carry (ADR 0085) is a per-server fact again: each dial names
+// the entry it binds — the session's, the routed target's own name and endpoint, the switch's
+// arrived-at server — never the parent's or the departed one's.
 func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	t.Parallel()
 
@@ -166,6 +169,88 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
 		t.Errorf("dials through the seam = %+v, want %+v", got, want)
+	}
+}
+
+// TestStreamIdleWindowStatedBySwitchUpstreamAndTarget: the stream-idle window is the BOUND
+// server's (ADR 0082 Decision 1, amended). A routed target that states one dials the child's client
+// with it and leaves it on the child's Config, where the child's fold reads it; a switch that states
+// one re-dials the session with it and keeps it on the Config. The session's own window stands on
+// the parent until the switch states another.
+func TestStreamIdleWindowStatedBySwitchUpstreamAndTarget(t *testing.T) {
+	t.Parallel()
+
+	const switchedEndpoint = "http://elsewhere.local:1234"
+	dialer := dialerTo(echoResponder(t, "done"))
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "w"})
+	cfg.StreamIdleTimeout = 45 * time.Second
+	a, err := New(cfg, WithDialer(dialer.dial))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	target := routedTarget()
+	targetWindow := 90 * time.Second
+	target.StreamIdleTimeout = &targetWindow
+	a.SetDelegationTarget(target)
+	child := spawn(t, a)
+	if got := child.cfg.StreamIdleTimeout; got != targetWindow {
+		t.Errorf("routed child Config.StreamIdleTimeout = %v, want the target's %v", got, targetWindow)
+	}
+	if got := a.cfg.StreamIdleTimeout; got != cfg.StreamIdleTimeout {
+		t.Errorf("parent Config.StreamIdleTimeout after the routed spawn = %v, want the session's %v", got, cfg.StreamIdleTimeout)
+	}
+
+	switchedWindow := 30 * time.Second
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: switchedEndpoint, StreamIdleTimeout: &switchedWindow}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+	if got := a.cfg.StreamIdleTimeout; got != switchedWindow {
+		t.Errorf("Config.StreamIdleTimeout after the switch = %v, want the spec's %v", got, switchedWindow)
+	}
+
+	dials := dialer.dialled()
+	if len(dials) != 3 {
+		t.Fatalf("dials through the seam = %+v, want three (session, routed child, switch)", dials)
+	}
+	for i, want := range []time.Duration{cfg.StreamIdleTimeout, targetWindow, switchedWindow} {
+		if got := dials[i].idle; got != want {
+			t.Errorf("dial %d (%s) idle = %v, want %v", i, dials[i].endpoint, got, want)
+		}
+	}
+}
+
+// TestStreamIdleWindowAbsentKeepsTheConfigs pins the binding's presence rule for the window on both
+// specs that may state it: nil keeps the Config's value, a stated value replaces it, and a stated
+// zero replaces it too — 0 is the "cut off" answer, never an absence.
+func TestStreamIdleWindowAbsentKeepsTheConfigs(t *testing.T) {
+	t.Parallel()
+
+	const session = 45 * time.Second
+	var cfg domain.Config
+	cfg.StreamIdleTimeout = session
+	stated, off := 30*time.Second, time.Duration(0)
+	cases := []struct {
+		name   string
+		window *time.Duration
+		want   time.Duration
+	}{
+		{"absent keeps the Config's window", nil, session},
+		{"stated replaces it", &stated, stated},
+		{"stated zero turns the cut off", &off, 0},
+	}
+	for _, tc := range cases {
+		upstream := UpstreamSpec{Endpoint: "http://x.local", StreamIdleTimeout: tc.window}
+		if got := upstream.binding().applyTo(cfg).StreamIdleTimeout; got != tc.want {
+			t.Errorf("UpstreamSpec, %s: StreamIdleTimeout = %v, want %v", tc.name, got, tc.want)
+		}
+		target := &DelegationTarget{Endpoint: "http://x.local", Model: "m", StreamIdleTimeout: tc.window}
+		if got := target.binding().applyTo(cfg).StreamIdleTimeout; got != tc.want {
+			t.Errorf("DelegationTarget, %s: StreamIdleTimeout = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if got := (RebindSpec{Model: "m"}).binding().applyTo(cfg).StreamIdleTimeout; got != session {
+		t.Errorf("RebindSpec: StreamIdleTimeout = %v, want the Config's %v — a model change states no dial facts", got, session)
 	}
 }
 

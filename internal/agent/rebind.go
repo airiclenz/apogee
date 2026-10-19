@@ -14,6 +14,7 @@ package agent
 
 import (
 	"errors"
+	"time"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -256,11 +257,12 @@ func (a *Agent) recalibrate() {
 // serves (ADR 0024's one-code-path rule: the new Upstream's first observed model binds through
 // Rebind like every other binding does).
 //
-// Every field here is a plain value, and every one is applied as written, the zero included: a
-// switch states ALL of them present on the one server binding (serverbinding.go — absent keeps,
-// present replaces), because an absent pin is a fact about the new server rather than a licence to
-// keep the retired one's number. The per-field docs below say what each zero means; the rule that
-// makes the zero land is the binding's.
+// Every field here but one is a plain value, and every one of those is applied as written, the zero
+// included: a switch states ALL of them present on the one server binding (serverbinding.go —
+// absent keeps, present replaces), because an absent pin is a fact about the new server rather than
+// a licence to keep the retired one's number. The per-field docs below say what each zero means; the
+// rule that makes the zero land is the binding's. The exception is StreamIdleTimeout, a pointer
+// whose nil keeps the session's window and whose stated value — 0 included — replaces it.
 type UpstreamSpec struct {
 	// Endpoint is the new Upstream's base URL. Required — errMissingEndpoint stands.
 	Endpoint string
@@ -287,6 +289,14 @@ type UpstreamSpec struct {
 	// rides the switch for the wire's reason: it is a fact about the server being dialled. "" ⇒
 	// the entry names none — applied, not skipped, so the retired server's keys never reach this one.
 	RequestExtra string
+	// StreamIdleTimeout is the new server's stream-idle window — how long a stream from it may stay
+	// silent before the replacement Client cuts it (domain.Config.StreamIdleTimeout): the entry's
+	// own `stream-idle-timeout:`, else the root key, as the caller resolved it. It rides the switch
+	// for the wire's reason, a slow server's silence being a fact about that server, and it bounds
+	// the replacement dial and every delegate fold read off the Config after it. It is the one
+	// POINTER here: nil ⇒ the caller states no window and the session's stands; a stated value
+	// replaces it as written, 0 included, which turns the cut off on the new server.
+	StreamIdleTimeout *time.Duration
 	// Price is the new server's `price:` (ADR 0093 decision 3). It rides the switch for the
 	// passthrough's reason: what a call costs is a fact about the server it goes to, so every call
 	// recorded after the switch is priced at the arrived-at entry's rate and none before it is

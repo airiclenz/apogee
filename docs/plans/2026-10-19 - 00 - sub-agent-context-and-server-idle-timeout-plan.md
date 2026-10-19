@@ -186,7 +186,10 @@ internal/config/configwrite.go — SaveServerEntrySetting
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'StreamIdle|ValidateServers|ServerEntry' ./internal/config/`
 **Commit:** `feat(config): a servers entry may state its own stream-idle-timeout`
 
-## 7. Engine bindings carry a per-server stream-idle window
+## 7. Engine bindings carry a per-server stream-idle window — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): the fold bounds in agent.go (finishAtFault) and subagent.go (foldStoppedChild) already read the Config's StreamIdleTimeout, so they needed no edit — applying the window on the binding is what moves them; the third test ("an unstated window keeps the Config's value") is a table test over the binding (UpstreamSpec, DelegationTarget, and RebindSpec, which states none), beside the existing unstated-window dial test.
+NOTES (2026-10-19): domain/config.go keeps its "host folds in the `stream-idle-timeout:` key" sentence unchanged; the per-entry override is item 8's host behaviour to document.
 
 **What:** Recast at the regression check (2026-10-19).
 **Goal:** a `serverBinding` can state a stream-idle window. Applied to a `domain.Config`, it sets `StreamIdleTimeout`, so the dial (`dialOptions` → `provider.WithStreamIdleTimeout`), the fold bound in `agent.go` and the child fold bound in `subagent.go` all read the bound server's window. `UpstreamSpec` and `DelegationTarget` each carry it; `RebindSpec` does not, because a model change states no dial facts. No comment in `internal/agent` or `internal/domain` calls the stream-idle bound a session fact that is the same on every dial.
