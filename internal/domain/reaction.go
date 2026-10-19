@@ -680,7 +680,7 @@ type Generation struct {
 }
 
 // ObserveRunner is the observe lane's door on the Driver-built Runner (apogee.ReactionRunner): the
-// two methods of it the Agent drives (Config.ObserveRunner).
+// three methods of it the Agent drives (Config.ObserveRunner).
 //
 // Replace is the live-swap door, so a swap of the whole Generation reaches both halves behind one
 // call (ADR 0076 A8). It retires the running list and starts the new one, and refuses a list it
@@ -692,9 +692,17 @@ type Generation struct {
 // TUI crosses runs on the Bubble Tea Update goroutine: it never blocks, never reports — a full
 // queue is counted and stated at the drain, never on the caller's goroutine — and never forwards
 // anything to the Driver's sink, since the notice is no Event.
+//
+// SessionStartedFor is the same door narrowed to the entries named by ids: the top-level Agent calls
+// it when a live swap ARMS `session-started` entries after its boundary was announced but before the
+// session's first user message (a repo entry adopted, or a global one added, before the first
+// prompt), so those entries fire once for the session they joined, with that boundary's start,
+// while every entry that already fired at the boundary hears nothing. An id the running list holds
+// no subscribing entry for fires nothing. It keeps SessionStarted's enqueue-only contract whole.
 type ObserveRunner interface {
 	Replace(list []Reaction) error
 	SessionStarted(start SessionStart)
+	SessionStartedFor(start SessionStart, ids []string)
 }
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what

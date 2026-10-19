@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -4219,6 +4221,184 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 	}
 	if !offCaller.Load() {
 		t.Error("the drop total did not reach Report off the goroutine that called Replace")
+	}
+}
+
+// projectSessionStartedYAML is a Project config proposing one session-started observe reaction.
+const projectSessionStartedYAML = "reactions:\n  - id: primer\n    on: [session-started]\n    run: [\"true\"]\n"
+
+// sessionStartedReload is a live session whose Project config proposes projectSessionStartedYAML,
+// not yet adopted: a real lateEngine bound over a real Runner that starts with no entry, and the
+// applier whose reloadReactions the pane and the adoption-record watcher drive.
+type sessionStartedReload struct {
+	applier     settingsApplier
+	engine      *lateEngine
+	runner      *reactions.Runner
+	path        string
+	projectRoot string
+}
+
+// newSessionStartedReload builds the session over exec and report — the Runner's executor and
+// reporter — and binds it, which announces the construction boundary to a Runner with nothing armed.
+func newSessionStartedReload(t *testing.T, exec reactions.Executor, report func(string)) sessionStartedReload {
+	t.Helper()
+	home, workspace := t.TempDir(), t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "")
+	projectRoot := projectroot.Resolve(workspace, "")
+	projectPath := projectConfigWatchPath(config.Options{ConfigDir: home, Workspace: workspace}, projectRoot)
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	writeSettingsFixture(t, projectPath, projectSessionStartedYAML)
+
+	runner, err := reactions.New(nil, reactions.Options{Workspace: workspace, Exec: exec, Report: report})
+	if err != nil {
+		t.Fatalf("reactions.New: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	if err := bindOverRunner(t, engine, runner, nil); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	applier := fakeApplier(t)
+	applier.engine = engine
+	applier.configPath = path
+	applier.roots.project = projectRoot
+	applier.secretEnv = apogee.NewSecretEnv(nil)
+	return sessionStartedReload{applier: applier, engine: engine, runner: runner, path: path, projectRoot: projectRoot}
+}
+
+// adoptAndReload records the Project config's reaction as adopted — what `apogee project adopt` in
+// another terminal writes — and drives the reload its adoption-record watcher drives.
+func (s sessionStartedReload) adoptAndReload(t *testing.T) {
+	t.Helper()
+	adoptEveryProposal(t, s.path, s.projectRoot)
+	if err := s.applier.reloadReactions(); err != nil {
+		t.Fatalf("reloadReactions: %v", err)
+	}
+}
+
+// drained closes the Runner, so every firing it took has run, and returns what exec recorded.
+func (s sessionStartedReload) drained(t *testing.T, exec *sessionStartedExec) []domain.SeamPayload {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(5*time.Second))
+	defer cancel()
+	if err := s.runner.Close(ctx); err != nil {
+		t.Fatalf("runner.Close: %v", err)
+	}
+	return exec.recorded()
+}
+
+// sessionStartedExec is a reactions.Executor that keeps every payload it runs.
+type sessionStartedExec struct {
+	mu       sync.Mutex
+	payloads []domain.SeamPayload
+}
+
+func (e *sessionStartedExec) Run(_ context.Context, _ domain.Reaction, payload domain.SeamPayload) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.payloads = append(e.payloads, payload)
+	return nil
+}
+
+// recorded returns a copy of the payloads run so far.
+func (e *sessionStartedExec) recorded() []domain.SeamPayload {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.payloads)
+}
+
+// A repo session-started reaction adopted before the session's first prompt fires once for the
+// session it joined, with the boundary's start; a second reload of the unchanged lanes fires
+// nothing more.
+func TestSessionStartedAdoptedBeforeTheFirstPromptFiresForTheSession(t *testing.T) {
+	t.Parallel()
+	exec := &sessionStartedExec{}
+	s := newSessionStartedReload(t, exec, nil)
+
+	s.adoptAndReload(t)
+	if err := s.applier.reloadReactions(); err != nil {
+		t.Fatalf("reloadReactions (unchanged): %v", err)
+	}
+
+	fired := s.drained(t, exec)
+	if len(fired) != 1 {
+		t.Fatalf("the adopted entry fired %d time(s), want once: %+v", len(fired), fired)
+	}
+	if got := fired[0]; got.Reaction != "primer" || got.Event != domain.MomentSessionStarted || got.Start != domain.SessionStartNew {
+		t.Errorf("fired %q/%q with start %q, want primer/session-started/new", got.Reaction, got.Event, got.Start)
+	}
+}
+
+// Adopted after the first prompt, the entry waits for the next boundary: nothing fires for the
+// running session, and the `/clear` that follows fires it once with start clear.
+func TestSessionStartedAdoptedAfterTheFirstPromptWaitsForTheNextBoundary(t *testing.T) {
+	t.Parallel()
+	exec := &sessionStartedExec{}
+	s := newSessionStartedReload(t, exec, nil)
+	if err := s.engine.Submit(apogee.UserInput{Text: "hello"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	s.adoptAndReload(t)
+	if err := s.engine.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
+	fired := s.drained(t, exec)
+	if len(fired) != 1 {
+		t.Fatalf("the adopted entry fired %d time(s), want once, at the clear: %+v", len(fired), fired)
+	}
+	if got := fired[0].Start; got != domain.SessionStartClear {
+		t.Errorf("fired with start %q, want clear — an adoption after the first prompt waits for the next boundary", got)
+	}
+}
+
+// failingGatedExec parks every run until release, then fails it, so the worker reports the failure.
+type failingGatedExec struct{ gate chan struct{} }
+
+func (e failingGatedExec) Run(ctx context.Context, _ domain.Reaction, _ domain.SeamPayload) error {
+	select {
+	case <-e.gate:
+	case <-ctx.Done():
+	}
+	return errors.New("primer failed")
+}
+
+// The reload runs on the UPDATE goroutine — the pane's ⏎ and the adoption-record watcher's fold
+// both land there — and the Runner's reporter is the Bridge, whose send BLOCKS until Update takes
+// the message. So the newly armed entry's firing must run, and report, off the goroutine that
+// reloaded: here its run parks and then fails, and the reload still returns while nothing drains
+// the loop.
+func TestSessionStartedAdoptedFiringNeverRunsOnTheCallersGoroutine(t *testing.T) {
+	t.Parallel()
+	bridge := tui.NewBridge()
+	sender := loopSender{msgs: make(chan tea.Msg)}
+	bridge.Bind(sender)
+	exec := failingGatedExec{gate: make(chan struct{})}
+	s := newSessionStartedReload(t, exec, bridge.NotifyHook)
+	adoptEveryProposal(t, s.path, s.projectRoot)
+
+	done := make(chan error, 1)
+	go func() { done <- s.applier.reloadReactions() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("reloadReactions: %v", err)
+		}
+	case <-time.After(testtime.Budget(3 * time.Second)):
+		t.Fatal("reloadReactions never returned from the Update loop: the newly armed firing ran or reported on its goroutine")
+	}
+
+	close(exec.gate)
+	select {
+	case <-sender.msgs:
+	case <-time.After(testtime.Budget(5 * time.Second)):
+		t.Fatal("the newly armed entry never ran and reported off the caller's goroutine")
 	}
 }
 

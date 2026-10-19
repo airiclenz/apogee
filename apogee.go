@@ -822,9 +822,10 @@ type Reaction = domain.Reaction
 // silently drops the lane it was not about.
 type Generation = domain.Generation
 
-// ObserveRunner is the observe Runner's door — the two methods of a ReactionRunner the Agent
-// drives (Config.ObserveRunner): Replace when a Generation's observe list moves, and the
-// enqueue-only SessionStarted at every top-level Session boundary.
+// ObserveRunner is the observe Runner's door — the three methods of a ReactionRunner the Agent
+// drives (Config.ObserveRunner): Replace when a Generation's observe list moves, the enqueue-only
+// SessionStarted at every top-level Session boundary, and SessionStartedFor, its narrowing to the
+// session-started entries a live swap armed before the session's first user message.
 type ObserveRunner = domain.ObserveRunner
 
 // SessionStart names how a top-level session started — the `start` member of a session-started

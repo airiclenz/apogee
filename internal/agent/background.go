@@ -1174,6 +1174,7 @@ func (a *Agent) Wake(ctx context.Context) (bool, error) {
 	// The queued input carries them now: an abort of the Exchange it opens puts them back held
 	// (Agent.exchangeAborted), a close that keeps it forgets them (Agent.exchangeClosed).
 	a.background.markDelivered(notes)
+	a.window.shut() // an Exchange opened without a typed prompt still ends the pre-first-prompt window
 	return true, nil
 }
 

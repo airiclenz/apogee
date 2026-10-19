@@ -952,3 +952,79 @@ func TestSessionStartedNeverReportsOnTheCallersGoroutine(t *testing.T) {
 		t.Errorf("reported %q, want only the drain's total %q", lines, "reaction primer: dropped 2 events")
 	}
 }
+
+// TestSessionStartedForFiresOnlyTheNamedEntries — the narrowed door fires the session-started
+// entries ids names, with the start on the payload, and no other: not a subscribing entry it leaves
+// out, not an entry of another notice it names, and nothing for an id the set does not run. It
+// forwards nothing to the decorated sink.
+func TestSessionStartedForFiresOnlyTheNamedEntries(t *testing.T) {
+	t.Parallel()
+
+	inner := &recordingSink{}
+	exec := newFakeExecutor()
+	runner, err := New([]domain.Reaction{
+		commandHook("primer", domain.MomentSessionStarted),
+		commandHook("adopted", domain.MomentSessionStarted),
+		commandHook("notify", TurnFinished),
+	}, Options{Inner: inner, Workspace: t.TempDir(), Exec: exec})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runner.SessionStartedFor(domain.SessionStartResume, []string{"adopted", "notify", "absent"})
+	runner.SessionStartedFor(domain.SessionStartResume, nil)
+	closeRunner(t, runner)
+
+	runs := exec.recorded()
+	if len(runs) != 1 {
+		t.Fatalf("ran %d firings, want exactly the named session-started entry: %+v", len(runs), runs)
+	}
+	if got := runs[0]; got.Reaction != "adopted" || got.Event != domain.MomentSessionStarted || got.Start != domain.SessionStartResume {
+		t.Errorf("payload = %q/%q/%q, want adopted/session-started/resume", got.Reaction, got.Event, got.Start)
+	}
+	if len(inner.events) != 0 {
+		t.Errorf("the decorated sink saw %d events, want none — the door never forwards to the Driver", len(inner.events))
+	}
+}
+
+// TestSessionStartedForNeverReportsOnTheCallersGoroutine — the narrowed door is called from a live
+// swap on the TUI's Update goroutine, so like SessionStarted a full queue drops silently there and
+// the total is stated at the drain.
+func TestSessionStartedForNeverReportsOnTheCallersGoroutine(t *testing.T) {
+	t.Parallel()
+
+	var inDoor atomic.Bool
+	log := &reportLog{}
+	report := func(line string) {
+		if inDoor.Load() {
+			t.Errorf("Report(%q) was called while the door ran on the caller's goroutine", line)
+		}
+		log.add(line)
+	}
+	exec := newFakeExecutor()
+	exec.gate = make(chan struct{})
+	runner, err := New([]domain.Reaction{commandHook("adopted", domain.MomentSessionStarted)}, Options{
+		Workspace: t.TempDir(), Exec: exec, Report: report,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// The first firing is dequeued by the worker, which then blocks on the gate; queueDepth more
+	// fill the queue exactly, so the narrowed firing has nowhere to go.
+	runner.SessionStarted(domain.SessionStartNew)
+	awaitStart(t, exec)
+	for i := 0; i < queueDepth; i++ {
+		runner.SessionStarted(domain.SessionStartClear)
+	}
+	inDoor.Store(true)
+	runner.SessionStartedFor(domain.SessionStartClear, []string{"adopted"})
+	inDoor.Store(false)
+
+	close(exec.gate)
+	closeRunner(t, runner)
+
+	if lines := log.all(); len(lines) != 1 || lines[0] != "reaction adopted: dropped 1 events" {
+		t.Errorf("reported %q, want only the drain's total %q", lines, "reaction adopted: dropped 1 events")
+	}
+}

@@ -20,10 +20,18 @@ import (
 )
 
 // startRecordingRunner is a Config.ObserveRunner that keeps every session-started boundary it is
-// told of, in order. Its swap door takes any list.
+// told of, in order, and every narrowed firing of newly armed entries (armedCall). Its swap door
+// takes any list.
 type startRecordingRunner struct {
 	mu     sync.Mutex
 	starts []domain.SessionStart
+	armed  []armedCall
+}
+
+// armedCall is one SessionStartedFor call: the boundary's start and the entry ids it fired.
+type armedCall struct {
+	start domain.SessionStart
+	ids   []string
 }
 
 func (r *startRecordingRunner) Replace([]domain.Reaction) error { return nil }
@@ -32,6 +40,19 @@ func (r *startRecordingRunner) SessionStarted(start domain.SessionStart) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.starts = append(r.starts, start)
+}
+
+func (r *startRecordingRunner) SessionStartedFor(start domain.SessionStart, ids []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.armed = append(r.armed, armedCall{start: start, ids: slices.Clone(ids)})
+}
+
+// armedCalls returns a copy of the narrowed firings made so far.
+func (r *startRecordingRunner) armedCalls() []armedCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.armed)
 }
 
 // recorded returns a copy of the starts announced so far.

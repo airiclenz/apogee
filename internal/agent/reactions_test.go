@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/domain/domaintest"
@@ -1081,4 +1082,213 @@ func TestPostResponseSeamClosesOncePerAttemptAcrossARetry(t *testing.T) {
 		}
 		assertOrder(t, "Fired", closed[0].Fired, []string{"watcher"})
 	})
+}
+
+// ---------------------------------------------------------------------------
+// session-started entries armed before the first prompt (sessionWindow)
+// ---------------------------------------------------------------------------
+
+// sessionStartedEntry is an observe entry subscribing to the session-started notice; project marks
+// it as an adopted repo entry rather than a global one.
+func sessionStartedEntry(id string, project bool) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []domain.Moment{domain.MomentSessionStarted},
+		Handler: domain.ArgvHandler{Argv: []string{"true"}},
+		Timeout: time.Second,
+		Project: project,
+	}
+}
+
+// windowAgent constructs a top-level Agent over a recording Runner, its observe lane seeded with
+// seed, and announces its construction boundary as New does.
+func windowAgent(t *testing.T, seed ...domain.Reaction) (*Agent, *startRecordingRunner) {
+	t.Helper()
+	runner := &startRecordingRunner{}
+	cfg := baseConfig(&recordingSink{})
+	cfg.ObserveRunner = runner
+	cfg.Observe = seed
+	a, err := New(cfg, WithDialer(dialerTo(echoResponder(t, "reply")).dial))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a, runner
+}
+
+// armObserve swaps a's observe lane to list, every other field of the generation kept.
+func armObserve(t *testing.T, a *Agent, list ...domain.Reaction) {
+	t.Helper()
+	gen := a.Generation()
+	gen.Observe = list
+	if err := a.SetReactions(gen); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+}
+
+// TestSessionWindow_AnEntryArmedBeforeTheFirstPromptFiresOnce — an entry a live swap arms before the
+// session's first user message fires once for that session, with the boundary's start, through the
+// narrowed door; a reload of the unchanged list fires nothing more, and an entry added beside it
+// fires alone. A global entry and an adopted repo entry are treated alike.
+func TestSessionWindow_AnEntryArmedBeforeTheFirstPromptFiresOnce(t *testing.T) {
+	t.Parallel()
+
+	for _, project := range []bool{true, false} {
+		a, runner := windowAgent(t)
+		primer := sessionStartedEntry("primer", project)
+
+		armObserve(t, a, primer)
+		armObserve(t, a, primer)
+		armObserve(t, a, primer, sessionStartedEntry("second", project))
+
+		want := []armedCall{
+			{start: domain.SessionStartNew, ids: []string{"primer"}},
+			{start: domain.SessionStartNew, ids: []string{"second"}},
+		}
+		if got := runner.armedCalls(); !slices.EqualFunc(got, want, armedCallEqual) {
+			t.Errorf("project=%v: narrowed firings = %+v, want %+v", project, got, want)
+		}
+		if got := runner.recorded(); !slices.Equal(got, []domain.SessionStart{domain.SessionStartNew}) {
+			t.Errorf("project=%v: boundary announcements = %v, want the construction's alone", project, got)
+		}
+	}
+}
+
+// TestSessionWindow_AnEntryArmedAfterTheFirstPromptWaitsForTheNextBoundary — once the session has
+// sent its first user message, a newly armed entry fires nothing until the next boundary, whose own
+// announcement then reaches it; that boundary reopens the window for the entries armed after it.
+func TestSessionWindow_AnEntryArmedAfterTheFirstPromptWaitsForTheNextBoundary(t *testing.T) {
+	t.Parallel()
+
+	a, runner := windowAgent(t)
+	if err := a.Submit(domain.UserInput{Text: "hello"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	armObserve(t, a, sessionStartedEntry("primer", true))
+	if got := runner.armedCalls(); len(got) != 0 {
+		t.Fatalf("an entry armed after the first prompt fired %+v; want nothing until the next boundary", got)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+	armObserve(t, a, sessionStartedEntry("primer", true), sessionStartedEntry("late", false))
+
+	if got, want := runner.recorded(), []domain.SessionStart{domain.SessionStartNew, domain.SessionStartClear}; !slices.Equal(got, want) {
+		t.Errorf("boundary announcements = %v, want %v", got, want)
+	}
+	want := []armedCall{{start: domain.SessionStartClear, ids: []string{"late"}}}
+	if got := runner.armedCalls(); !slices.EqualFunc(got, want, armedCallEqual) {
+		t.Errorf("narrowed firings = %+v, want only the entry armed after the clear: %+v", got, want)
+	}
+}
+
+// TestSessionWindow_AnEntryRemovedAndAddedBackFiresOnce — "newly armed" is read against the
+// boundary's fired-id set, never the list the swap replaced: an entry removed and added back before
+// the first prompt does not fire twice, and neither does one the boundary's announcement reached.
+func TestSessionWindow_AnEntryRemovedAndAddedBackFiresOnce(t *testing.T) {
+	t.Parallel()
+
+	seeded := sessionStartedEntry("seeded", false)
+	a, runner := windowAgent(t, seeded)
+	primer := sessionStartedEntry("primer", true)
+
+	armObserve(t, a, seeded, primer)
+	armObserve(t, a)
+	armObserve(t, a, seeded, primer)
+
+	want := []armedCall{{start: domain.SessionStartNew, ids: []string{"primer"}}}
+	if got := runner.armedCalls(); !slices.EqualFunc(got, want, armedCallEqual) {
+		t.Errorf("narrowed firings = %+v, want %+v", got, want)
+	}
+}
+
+// TestSessionWindow_EachBoundaryKindOpensTheWindow — a `--resume`d construction, a live restore and
+// a fork restore each open the window with their own start, so an entry armed before the first
+// prompt fires with it.
+func TestSessionWindow_EachBoundaryKindOpensTheWindow(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		boundary func(t *testing.T) (*Agent, *startRecordingRunner)
+		want     domain.SessionStart
+	}{
+		{"a resumed construction", func(t *testing.T) (*Agent, *startRecordingRunner) {
+			runner := &startRecordingRunner{}
+			cfg := baseConfig(&recordingSink{})
+			cfg.ObserveRunner = runner
+			a, err := Resume(cfg, emptySession(t), WithDialer(dialerTo(echoResponder(t, "reply")).dial))
+			if err != nil {
+				t.Fatalf("Resume: %v", err)
+			}
+			t.Cleanup(func() { _ = a.Close() })
+			return a, runner
+		}, domain.SessionStartNew},
+		{"a live restore", func(t *testing.T) (*Agent, *startRecordingRunner) {
+			a, runner := windowAgent(t)
+			if err := a.RestoreSession(emptySession(t)); err != nil {
+				t.Fatalf("RestoreSession: %v", err)
+			}
+			return a, runner
+		}, domain.SessionStartResume},
+		{"a fork restore", func(t *testing.T) (*Agent, *startRecordingRunner) {
+			a, runner := windowAgent(t)
+			a.MarkFork()
+			if err := a.RestoreSession(emptySession(t)); err != nil {
+				t.Fatalf("RestoreSession: %v", err)
+			}
+			return a, runner
+		}, domain.SessionStartFork},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, runner := tc.boundary(t)
+
+			armObserve(t, a, sessionStartedEntry("primer", true))
+
+			want := []armedCall{{start: tc.want, ids: []string{"primer"}}}
+			if got := runner.armedCalls(); !slices.EqualFunc(got, want, armedCallEqual) {
+				t.Errorf("narrowed firings = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestSessionWindow_ADeferredConstructionFiresThroughItsAnnouncement — under DeferSessionStart the
+// window opens only with the Driver's announcement, so an entry a swap arms ahead of it (a late
+// bind's replay) fires through that announcement, never also through the narrowed door.
+func TestSessionWindow_ADeferredConstructionFiresThroughItsAnnouncement(t *testing.T) {
+	t.Parallel()
+
+	runner := &startRecordingRunner{}
+	cfg := baseConfig(&recordingSink{})
+	cfg.ObserveRunner = runner
+	cfg.DeferSessionStart = true
+	a, err := New(cfg, WithDialer(dialerTo(echoResponder(t, "reply")).dial))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	armObserve(t, a, sessionStartedEntry("primer", true))
+	a.AnnounceSessionStart()
+	armObserve(t, a, sessionStartedEntry("primer", true))
+
+	if got := runner.armedCalls(); len(got) != 0 {
+		t.Errorf("narrowed firings = %+v; want none — the announcement reached the entry armed before it", got)
+	}
+	if got := runner.recorded(); !slices.Equal(got, []domain.SessionStart{domain.SessionStartNew}) {
+		t.Errorf("boundary announcements = %v, want the construction's once", got)
+	}
+}
+
+// armedCallEqual compares two narrowed firings by start and ids.
+func armedCallEqual(a, b armedCall) bool {
+	return a.start == b.start && slices.Equal(a.ids, b.ids)
 }

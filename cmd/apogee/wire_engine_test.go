@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -302,20 +303,26 @@ func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
 // handed and what the ENGINE was holding at that instant, which is how the order of the two applies
 // is pinned without a Runner — or the goroutines a Runner drains on — behind it. agent is the Agent
 // that holds it (bindOverRunner), read directly rather than through the holder, whose lock the
-// swap runs under. starts is every session-started boundary it was told of, in order, and
-// handedAtStart how many lists it had been handed when each was announced.
+// swap runs under. starts is every session-started boundary it was told of, in order,
+// handedAtStart how many lists it had been handed when each was announced, and armed the ids of
+// every narrowed firing of newly armed entries.
 type recordingRunner struct {
 	agent         *apogee.Agent
 	lists         [][]domain.Reaction
 	seen          []apogee.Generation
 	starts        []apogee.SessionStart
 	handedAtStart []int
+	armed         [][]string
 	err           error
 }
 
 func (r *recordingRunner) SessionStarted(start apogee.SessionStart) {
 	r.starts = append(r.starts, start)
 	r.handedAtStart = append(r.handedAtStart, len(r.lists))
+}
+
+func (r *recordingRunner) SessionStartedFor(_ apogee.SessionStart, ids []string) {
+	r.armed = append(r.armed, slices.Clone(ids))
 }
 
 func (r *recordingRunner) Replace(list []domain.Reaction) error {

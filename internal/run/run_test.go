@@ -639,13 +639,14 @@ func (p *payloadRecorder) recorded() []domain.SeamPayload {
 	return slices.Clone(p.payloads)
 }
 
-// recordingObserveRunner is a Config.ObserveRunner that keeps every list it is handed and every
-// session-started boundary it is told of, so a test can read which observe lane the Agent passed on
-// and which boundaries it announced. It never refuses. Once swaps and announces on the caller's
+// recordingObserveRunner is a Config.ObserveRunner that keeps every list it is handed, every
+// session-started boundary it is told of and the ids of every narrowed firing of newly armed entries,
+// so a test can read which observe lane the Agent passed on and which boundaries it announced. It never refuses. Once swaps and announces on the caller's
 // goroutine before it returns, so the test reads both without a lock.
 type recordingObserveRunner struct {
 	lists  [][]domain.Reaction
 	starts []domain.SessionStart
+	armed  [][]string
 }
 
 func (r *recordingObserveRunner) Replace(list []domain.Reaction) error {
@@ -655,6 +656,10 @@ func (r *recordingObserveRunner) Replace(list []domain.Reaction) error {
 
 func (r *recordingObserveRunner) SessionStarted(start domain.SessionStart) {
 	r.starts = append(r.starts, start)
+}
+
+func (r *recordingObserveRunner) SessionStartedFor(start domain.SessionStart, ids []string) {
+	r.armed = append(r.armed, slices.Clone(ids))
 }
 
 // TestOncePinsAskerAndPresenterOff proves the pin is Once's, not the caller's: a Spec whose

@@ -178,7 +178,9 @@ type Agent struct {
 	// then the Runner's Replace outside it — and two concurrent swaps interleaving between them
 	// would leave the engine on one generation and the Runner on the other, the half-swapped state
 	// ADR 0076 A8 exists to abolish. genMu alone cannot cover it: the Runner's Replace must not run
-	// under the lock every armed Reaction's Bypass read takes.
+	// under the lock every armed Reaction's Bypass read takes. A boundary's session-started
+	// announcement takes it too (announceSessionStart), so a swap falls wholly before or wholly
+	// after the boundary its newly armed entries are read against (sessionWindow).
 	swapMu sync.Mutex
 
 	// constructionStart makes the construction boundary's session-started notice one-shot
@@ -191,6 +193,11 @@ type Agent struct {
 	// than "resume". The next ClearContext or RestoreSession takes it at its top, whether or not that
 	// boundary succeeds, so a refused fork restore never leaves it set for a later resume.
 	forkNext atomic.Bool
+
+	// window is the current Session boundary's pre-first-prompt window (sessionWindow): opened by
+	// the boundary's session-started announcement, shut by the session's first user message, so a
+	// session-started entry a live swap arms inside it fires for the session it joined.
+	window sessionWindow
 
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
@@ -899,7 +906,11 @@ func (a *Agent) Submit(in domain.UserInput) error {
 	if err := a.checkInputImages(in); err != nil {
 		return err
 	}
-	return a.turns.submit(in)
+	if err := a.turns.submit(in); err != nil {
+		return err
+	}
+	a.window.shut() // the session's first user message ends its pre-first-prompt window
+	return nil
 }
 
 // Step advances the loop exactly one Turn and returns at a quiescent boundary — no
@@ -1630,7 +1641,32 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 	}
 	gen.Sync = scoped
 	a.installGeneration(gen)
-	return a.swapObserve(gen.Observe)
+	if err := a.swapObserve(gen.Observe); err != nil {
+		return err
+	}
+	a.fireNewlyArmed()
+	return nil
+}
+
+// fireNewlyArmed is SetReactions' last act: while the current boundary's pre-first-prompt window is
+// open, it fires the session-started entries the committed observe list holds that have not yet
+// fired at this boundary — and only those, through the Runner's narrowed door
+// (ObserveRunner.SessionStartedFor), with the boundary's own start. Whatever armed them — a repo
+// entry adopted, or a global one added, before the first prompt — they join the session they were
+// armed in. The window's fired-id set is what keeps it to once: an unchanged list, or an entry
+// removed and added back, names no id that has not fired. It is enqueue-only, as every boundary's
+// announcement is.
+func (a *Agent) fireNewlyArmed() {
+	runner := a.cfg.ObserveRunner
+	if runner == nil {
+		return
+	}
+	a.genMu.RLock()
+	list := a.gen.Observe
+	a.genMu.RUnlock()
+	if start, ids := a.window.armed(list); len(ids) > 0 {
+		runner.SessionStartedFor(start, ids)
+	}
 }
 
 // swapObserve is SetReactions' Runner half: it hands list to the observe Runner when it differs
@@ -2099,6 +2135,75 @@ func (a *Agent) MarkFork() {
 		return
 	}
 	a.forkNext.Store(true)
+}
+
+// sessionWindow is one Session boundary's PRE-FIRST-PROMPT window: the span from the boundary's
+// session-started announcement to the session's first user message (Submit, or the Wake that opens
+// an Exchange without one). A session-started entry a live swap arms inside it fires for the
+// session it joined (Agent.fireNewlyArmed); one armed after it waits for the next boundary.
+//
+// fired is the boundary's fired-id set: the ids of the session-started entries the boundary's
+// announcement reached, plus every id fired since through the narrowed door. "Newly armed" is read
+// against it, never against the list the swap replaced, so removing an entry and adding it back
+// inside the window does not fire it twice. The window is per boundary: each announcement reopens
+// it with a fresh set, and the zero value — a constructed Agent before its announcement, a delegate,
+// an Agent holding no Runner — is shut.
+//
+// mu guards it: the boundaries and the swaps that read it hold swapMu as well, but the first user
+// message shuts it from whatever goroutine submits.
+type sessionWindow struct {
+	mu    sync.Mutex
+	open  bool
+	start domain.SessionStart
+	fired map[string]bool
+}
+
+// opened reopens the window for a boundary announced with start, over the observe list the Runner
+// holds at that instant: every session-started entry in it is fired by the announcement itself.
+func (w *sessionWindow) opened(start domain.SessionStart, list []domain.Reaction) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.open, w.start, w.fired = true, start, map[string]bool{}
+	for _, id := range sessionStartedIDs(list) {
+		w.fired[id] = true
+	}
+}
+
+// armed returns the boundary's start and the ids of list's session-started entries not yet fired at
+// this boundary, booking them as fired — nothing while the window is shut.
+func (w *sessionWindow) armed(list []domain.Reaction) (domain.SessionStart, []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.open {
+		return "", nil
+	}
+	var ids []string
+	for _, id := range sessionStartedIDs(list) {
+		if !w.fired[id] {
+			w.fired[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return w.start, ids
+}
+
+// shut ends the window: the session has sent its first user message.
+func (w *sessionWindow) shut() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.open, w.fired = false, nil
+}
+
+// sessionStartedIDs returns the ids of the entries in list that subscribe to the session-started
+// notice, in list order.
+func sessionStartedIDs(list []domain.Reaction) []string {
+	var ids []string
+	for _, r := range list {
+		if slices.Contains(r.On, domain.MomentSessionStarted) {
+			ids = append(ids, r.ID)
+		}
+	}
+	return ids
 }
 
 // InExchange reports whether a multi-Turn Exchange is currently open (mid-flight). It is a

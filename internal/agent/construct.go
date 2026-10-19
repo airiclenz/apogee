@@ -679,11 +679,24 @@ func (a *Agent) announceConstruction() {
 // (Config.ObserveRunner.SessionStarted), exactly once per boundary: each boundary's own call site
 // makes this one call. Only the top-level Agent announces — a delegate starts no session — and an
 // Agent holding no Runner has no one to tell.
+//
+// It also opens the boundary's pre-first-prompt window (sessionWindow) over the observe list the
+// Runner holds, so an entry a later live swap arms before the first user message fires once for
+// this session (fireNewlyArmed). It holds swapMu across the two, so a swap is wholly before the
+// announcement — and fired by it — or wholly after, and read against its fired-id set.
 func (a *Agent) announceSessionStart(start domain.SessionStart) {
 	if a.isDelegate() {
 		return
 	}
-	if runner := a.cfg.ObserveRunner; runner != nil {
-		runner.SessionStarted(start)
+	runner := a.cfg.ObserveRunner
+	if runner == nil {
+		return
 	}
+	a.swapMu.Lock()
+	defer a.swapMu.Unlock()
+	a.genMu.RLock()
+	list := a.gen.Observe
+	a.genMu.RUnlock()
+	a.window.opened(start, list)
+	runner.SessionStarted(start)
 }

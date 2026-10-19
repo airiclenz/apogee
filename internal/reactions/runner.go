@@ -217,7 +217,7 @@ func (r *Runner) Emit(e domain.Event) {
 	// instant, which is what a human correlating two notifications expects.
 	now := r.now().Format(time.RFC3339Nano)
 	for _, f := range firings {
-		r.fanOut(set, f, now, r.noteDrop)
+		r.fanOut(set, f, now, nil, r.noteDrop)
 	}
 }
 
@@ -236,11 +236,34 @@ func (r *Runner) SessionStarted(start domain.SessionStart) {
 	if set == nil || len(set.workers) == 0 || !set.matcher.wants(domain.MomentSessionStarted) {
 		return
 	}
-	r.fanOut(set, sessionStartedFiring(start), r.now().Format(time.RFC3339Nano), countDrop)
+	r.fanOut(set, sessionStartedFiring(start), r.now().Format(time.RFC3339Nano), nil, countDrop)
 }
 
-// fanOut hands one firing to every worker subscribing to its event, stamping the identity fields
-// only the Runner knows. The send is non-blocking by construction: a full queue drops the NEWEST
+// SessionStartedFor is SessionStarted narrowed to the entries ids names (domain.ObserveRunner's
+// newly-armed door): the top-level Agent calls it when a live swap armed session-started entries
+// after the boundary was announced and before the session's first user message, so only those
+// entries fire, each once, with the boundary's start. An id the active set runs no subscribing
+// worker for — an entry scoped to another workspace, or one a later swap already retired — fires
+// nothing. It is enqueue-only exactly as SessionStarted is: no forward, no report, a silent count
+// on a full queue.
+func (r *Runner) SessionStartedFor(start domain.SessionStart, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	set := r.active.Load()
+	if set == nil || len(set.workers) == 0 || !set.matcher.wants(domain.MomentSessionStarted) {
+		return
+	}
+	targets := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		targets[id] = true
+	}
+	r.fanOut(set, sessionStartedFiring(start), r.now().Format(time.RFC3339Nano), targets, countDrop)
+}
+
+// fanOut hands one firing to every worker subscribing to its event — or, when targets is non-nil,
+// to only those of them whose Reaction id it holds — stamping the identity fields only the Runner
+// knows. The send is non-blocking by construction: a full queue drops the NEWEST
 // firing, because the older ones are already the ones a script is working through, and hands its
 // worker to drop — noteDrop for an Emit, countDrop for a door that must not report.
 //
@@ -248,19 +271,19 @@ func (r *Runner) SessionStarted(start domain.SessionStart) {
 // lock tells fanOut whether that generation's queues are still open. A set a drain has already
 // closed takes the firing as a counted drop — silently, because the queue was never full and a
 // reload must not announce one; the total still reaches the drain's final drop line.
-func (r *Runner) fanOut(set *hookSet, f firing, now string, drop func(*worker)) {
+func (r *Runner) fanOut(set *hookSet, f firing, now string, targets map[string]bool, drop func(*worker)) {
 	set.mu.RLock()
 	defer set.mu.RUnlock()
 	if set.closed {
 		for _, w := range set.workers {
-			if w.events[f.Event] {
+			if w.takes(f.Event, targets) {
 				w.dropped.Add(1)
 			}
 		}
 		return
 	}
 	for _, w := range set.workers {
-		if !w.events[f.Event] {
+		if !w.takes(f.Event, targets) {
 			continue
 		}
 		payload := f.Payload
@@ -277,6 +300,12 @@ func (r *Runner) fanOut(set *hookSet, f firing, now string, drop func(*worker)) 
 			drop(w)
 		}
 	}
+}
+
+// takes reports whether w is handed a firing of e: it subscribes to e and, when targets is non-nil,
+// targets names it.
+func (w *worker) takes(e Event, targets map[string]bool) bool {
+	return w.events[e] && (targets == nil || targets[w.hook.ID])
 }
 
 // countDrop counts a dropped firing without reporting it: the total reaches the drain's final drop

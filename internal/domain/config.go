@@ -262,7 +262,9 @@ type Config struct {
 	// Agent never emits an Event through this field. The one other thing it hands it is the
 	// session-started notice (ObserveRunner.SessionStarted): the top-level Agent tells it once per
 	// Session boundary — at the end of New and Resume (unless DeferSessionStart holds that one
-	// back), and after a successful ClearContext or RestoreSession. A delegate never does.
+	// back), and after a successful ClearContext or RestoreSession — and, between a boundary and the
+	// session's first user message, the narrowed notice (ObserveRunner.SessionStartedFor) for the
+	// session-started entries a SetReactions swap newly armed. A delegate never does either.
 	//
 	// nil (the default) holds no Runner: SetReactions still validates and reports the observe lane
 	// but swaps nothing, and no session-started notice is fired, which is what the bench and every
