@@ -103,3 +103,38 @@ func TestMultiFindReplaceDeclaresReplacementsArgRoleAsPayload(t *testing.T) {
 		t.Fatalf("multi_find_and_replace payload keys = %v, want %v", got, want)
 	}
 }
+
+// TestSubAgentContextArgRoleFollowsTheGate pins sub_agent's one gated declaration: `context` is a
+// read source only on the variant that publishes it. TestBuiltinToolArgRolesNameSchemaKeys walks the
+// plain variant, so this is the walk's check for the context variant — the declared key is in its
+// schema — and the reason the plain variant declares nothing for it: a stray `context` there names a
+// key its schema lacks, so the write rules keep inspecting it as they inspect every undeclared one.
+func TestSubAgentContextArgRoleFollowsTheGate(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		tool *SubAgent
+		want []string
+	}{
+		{name: "context variant", tool: NewSubAgentWith(SubAgentOptions{Context: true}), want: []string{"context"}},
+		{name: "plain variant", tool: NewSubAgent()},
+		{name: "seat choice and background", tool: NewSubAgentWith(SubAgentOptions{SeatChoice: true, Background: true})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := domain.ArgKeysWithRole(tc.tool, domain.ArgRoleReadSource)
+
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("read-source keys = %v, want %v", got, tc.want)
+			}
+			properties := schemaProperties(t, tc.tool)
+			for key := range tc.tool.ArgRoles() {
+				if !slices.Contains(properties, key) {
+					t.Errorf("declares %q, but the schema has no such key (keys: %v)", key, properties)
+				}
+			}
+		})
+	}
+}

@@ -556,6 +556,12 @@ func TestSubAgentSchema_EachGateAddsOnlyItsProperty(t *testing.T) {
 		{name: "seat choice", opts: SubAgentOptions{SeatChoice: true}, added: []string{"run_on"}},
 		{name: "background", opts: SubAgentOptions{Background: true}, added: []string{"background"}},
 		{name: "both", opts: SubAgentOptions{SeatChoice: true, Background: true}, added: []string{"background", "run_on"}},
+		{name: "context", opts: SubAgentOptions{Context: true}, added: []string{"context"}},
+		{
+			name:  "all three",
+			opts:  SubAgentOptions{SeatChoice: true, Background: true, Context: true},
+			added: []string{"background", "context", "run_on"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -577,9 +583,80 @@ func TestSubAgentSchema_EachGateAddsOnlyItsProperty(t *testing.T) {
 			if !slices.Equal(added, tc.added) {
 				t.Errorf("added properties = %v, want %v", added, tc.added)
 			}
-			if tool.OffersSeatChoice() != tc.opts.SeatChoice || tool.OffersBackground() != tc.opts.Background {
-				t.Errorf("Offers* = (%v, %v), want (%v, %v)",
-					tool.OffersSeatChoice(), tool.OffersBackground(), tc.opts.SeatChoice, tc.opts.Background)
+			got := SubAgentOptions{
+				SeatChoice: tool.OffersSeatChoice(),
+				Background: tool.OffersBackground(),
+				Context:    tool.OffersContext(),
+			}
+			if got != tc.opts {
+				t.Errorf("Offers* = %+v, want %+v", got, tc.opts)
+			}
+		})
+	}
+}
+
+// TestSubAgentSchema_ContextIsAnOptionalArrayOfPaths pins the published `context` property: an
+// optional array of strings (task stays the only required argument), whose description says the
+// contents arrive ahead of the task — not that the sub-agent is to go and read the files itself.
+func TestSubAgentSchema_ContextIsAnOptionalArrayOfPaths(t *testing.T) {
+	t.Parallel()
+
+	var schema struct {
+		Required   []string                  `json:"required"`
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(NewSubAgentWith(SubAgentOptions{Context: true}).Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+
+	if !slices.Equal(schema.Required, []string{"task"}) {
+		t.Errorf("required = %v, want [task] — context must stay optional", schema.Required)
+	}
+	prop := schema.Properties["context"]
+	if prop["type"] != "array" {
+		t.Errorf("context type = %v, want array", prop["type"])
+	}
+	if items, _ := prop["items"].(map[string]any); items["type"] != "string" {
+		t.Errorf("context items = %v, want strings", prop["items"])
+	}
+	desc, _ := prop["description"].(string)
+	if !strings.Contains(desc, "ahead of its task") || !strings.Contains(desc, "need not read them") {
+		t.Errorf("context description = %q, want it to say the contents arrive ahead of the task", desc)
+	}
+}
+
+// TestSubAgentArgsCarriesContextUndecoded proves `context` crosses the JSON boundary as the raw
+// bytes the call carried, and — the case that matters with the gate off — that a string- or an
+// object-valued `context` still decodes: every SubAgentArgs decoder in the engine and the Drivers
+// keeps accepting the call, and only the recursion point, with the gate on, reads the value.
+func TestSubAgentArgsCarriesContextUndecoded(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		payload     string
+		wantContext string
+	}{
+		{"paths", `{"task":"summarise the repo","context":["a.go","docs/b.md"]}`, `["a.go","docs/b.md"]`},
+		{"string", `{"task":"summarise the repo","context":"a.go"}`, `"a.go"`},
+		{"object", `{"task":"summarise the repo","context":{"path":"a.go"}}`, `{"path":"a.go"}`},
+		{"absent", `{"task":"summarise the repo"}`, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var args SubAgentArgs
+
+			err := json.Unmarshal([]byte(tc.payload), &args)
+
+			if err != nil {
+				t.Fatalf("unmarshal %s: %v", tc.payload, err)
+			}
+			if args.Task != "summarise the repo" {
+				t.Errorf("Task = %q, want the task", args.Task)
+			}
+			if string(args.Context) != tc.wantContext {
+				t.Errorf("Context = %s, want %s", args.Context, tc.wantContext)
 			}
 		})
 	}

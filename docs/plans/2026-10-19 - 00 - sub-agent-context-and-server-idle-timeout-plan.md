@@ -46,7 +46,10 @@
 - Glob patterns, `{{SKILL_DIR}}` expansion inside `context` paths, and re-injecting `context` on a `continue` call that does not restate it.
 - Changing keepalive/idle-reset semantics, and a `/settings` row for per-entry keys.
 
-## 1. sub_agent schema learns the gated `context` argument
+## 1. sub_agent schema learns the gated `context` argument — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): `SubAgentArgs.Context` carries `json:"context,omitempty"` (the item names only the `json.RawMessage` type) so a SubAgentArgs that engine tests build by marshalling the struct never grows a `"context":null` key; decode behaviour is unchanged.
+NOTES (2026-10-19): no CHANGELOG entry — the argument is unreachable until item 2 wires the `sub-agents-context` gate; the user-facing entry belongs with the gate and the render (items 2/4).
 
 **What:** Recast at the regression check (2026-10-19).
 **Goal:** `NewSubAgentWith` with the context option set publishes a `context` property (array of strings, described as the files the child reads before its task). Without the option, the schema is byte-identical to `wantPlainSubAgentSchema`. `SubAgentArgs` carries `context` undecoded (`json.RawMessage`). `ArgRoles()` declares `context` as `domain.ArgRoleReadSource` only when the context option is set.
