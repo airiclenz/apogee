@@ -265,6 +265,12 @@
 # sub-agents-choice: fixed
 
 # =============================================================================
+# Whether a delegation may name files for its sub-agent to start with: on adds a context argument
+# to the sub-agent tool, and apogee reads those files once and hands them to the child ahead of its
+# task; off (the default) leaves the tool as it was. Takes effect at the next start.
+# sub-agents-context: off
+
+# =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).
 #   plan        — read-only, except its own writes into the session scratch dir; no commands
 #   ask-before  — every write outside the scratch dir, command and external reach asks you first (the default)

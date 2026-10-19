@@ -593,6 +593,39 @@ func humanSeatRegistry(extra ...domain.Tool) *domain.ToolRegistry {
 	return reg
 }
 
+// TestSubAgentsContext_NestedChildKeepsTheContextArgument: the `sub-agents-context` gate covers
+// nested children, so the narrowing a child's roster goes through strips `run_on` — a depth-0
+// offer — and keeps `context`. A parent with seat choice and context on hands its child a sub_agent
+// that publishes `context` and no `run_on`.
+func TestSubAgentsContext_NestedChildKeepsTheContextArgument(t *testing.T) {
+	t.Parallel()
+
+	cfg := configWithTools(&recordingSink{},
+		tools.NewSubAgentWith(tools.SubAgentOptions{SeatChoice: true, Context: true}), fakeTool{name: "w"})
+	cfg.Delegation.MaxDepth = 2 // the child keeps sub_agent only under a bound above the default
+	parent, err := newAgent(cfg, scriptedResponder(t))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	roster := parent.defaultSubAgentTools()
+
+	inherited, ok := roster.Lookup(tools.SubAgentToolName)
+	if !ok {
+		t.Fatal("the child's roster has no sub_agent tool")
+	}
+	spawner, ok := inherited.(*tools.SubAgent)
+	if !ok {
+		t.Fatalf("the child's sub_agent is a %T, want *tools.SubAgent", inherited)
+	}
+	if !spawner.OffersContext() || !strings.Contains(string(spawner.Schema()), `"context"`) {
+		t.Errorf("the child's sub_agent dropped `context`; the gate covers nested children: %s", spawner.Schema())
+	}
+	if spawner.OffersSeatChoice() || strings.Contains(string(spawner.Schema()), "run_on") {
+		t.Errorf("the child's sub_agent publishes run_on; the seat is a depth-0 offer: %s", spawner.Schema())
+	}
+}
+
 // TestSubAgent_ChildNeverHoldsTheHumanSeatTools pins the unconditional withholding at BOTH places
 // it is visible: the roster the orchestrator builds a child with, and the menu the child actually
 // sends upstream in a run. ask_user and present_document are the parent's whichever mode it runs

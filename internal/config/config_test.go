@@ -373,6 +373,13 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{SubAgentsChoice: "model"},
 			want: func(o *Options) { o.SubAgentsChoice = SubAgentsChoiceModel },
 		},
+		{
+			// The context gate is file-only beside it and an absent key resolves to off
+			// (wantDefaults' zero), so this case is the other word.
+			name: "sub-agents-context is file-only and defaults off",
+			file: fileConfig{SubAgentsContext: "on"},
+			want: func(o *Options) { o.SubAgentsContext = true },
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -597,6 +604,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
 		"SubAgentsServer":    true,
 		"SubAgentsChoice":    true,
+		"SubAgentsContext":   true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
 		"UseProjectSkills": true, "AutoCompact": true, "PruneToolResults": true,
 		"ToolUseEnforcer": true, "EmptyResponseRecovery": true, "ToolCallRepair": true,
@@ -657,6 +665,7 @@ func everyKeyFileConfig() fileConfig {
 		Mode: "auto", Bypass: boolptr(true), Server: "the-box", Editor: "hx",
 		SubAgentsServer:    "the-box",
 		SubAgentsChoice:    "model",
+		SubAgentsContext:   "on",
 		Servers:            []ServerEntry{{Name: "the-box", Endpoint: "http://localhost:9000"}},
 		Currency:           strptr("EUR"),
 		ConfineToWorkspace: boolptr(false),
@@ -2638,6 +2647,7 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 		{name: "re-stream-budget", file: "re-stream-budget: -1\n", wantErr: `apogee: invalid re-stream-budget "-1": want a count of 0 or more (0 never re-streams; 3 is the default)`},
 		{name: "workflow-wake", file: "workflow-wake: maybe\n", wantErr: `apogee: workflow-wake is one of on, off, not "maybe"`},
 		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: `apogee: invalid cursor-shape: unknown cursor shape "sideways" (known shapes: block, underline, bar)`},
+		{name: "sub-agents-context", file: "sub-agents-context: maybe\n", wantErr: `apogee: sub-agents-context is one of off, on, not "maybe"`},
 		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana" — it takes "fixed" (the sub-agents-server: key alone picks where a delegation runs) or "model" (the top-level model may say run_on per delegation)`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -4624,6 +4634,62 @@ func TestApplyConfigSubAgentsChoice(t *testing.T) {
 			}
 			if opts.SubAgentsChoice != tt.want {
 				t.Errorf("SubAgentsChoice = %q, want %q", opts.SubAgentsChoice, tt.want)
+			}
+		})
+	}
+}
+
+// The context gate resolves to a switch, and an absent key resolves to off: `context` is a
+// model-facing argument, so it ships off until bench evidence turns it on (ADR 0087 D8). A word
+// outside the two — a YAML `true` included — is a startup error naming the key, since a value read
+// as either switch would leave the file saying something the session does not do.
+func TestApplyConfigSubAgentsContext(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		yaml    string
+		want    bool
+		wantErr []string // substrings the startup error must carry; nil ⇒ the config is accepted
+	}{
+		{name: "the key absent resolves to off"},
+		{name: "off stated outright", yaml: "sub-agents-context: off\n"},
+		{name: "on offers the argument", yaml: "sub-agents-context: on\n", want: true},
+		{
+			name:    "a word outside the two errors, naming the key and both values",
+			yaml:    "sub-agents-context: maybe\n",
+			wantErr: []string{"sub-agents-context", "maybe", "off", "on"},
+		},
+		{
+			name:    "a YAML true is not a context word",
+			yaml:    "sub-agents-context: true\n",
+			wantErr: []string{"sub-agents-context", "true"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, tt.yaml)
+			opts := Options{ConfigDir: home}
+
+			err := ApplyConfig(&opts, func(string) bool { return false },
+				func(string) string { return "" }, os.ReadFile, noNotify)
+
+			if len(tt.wantErr) > 0 {
+				if err == nil {
+					t.Fatalf("ApplyConfig with %q: want an error, got nil", tt.yaml)
+				}
+				for _, want := range tt.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %q; want it to contain %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.SubAgentsContext != tt.want {
+				t.Errorf("SubAgentsContext = %v, want %v", opts.SubAgentsContext, tt.want)
 			}
 		})
 	}

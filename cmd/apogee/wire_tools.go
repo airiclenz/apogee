@@ -78,6 +78,13 @@ type toolSetSpec struct {
 	// moving the gate means building again.
 	seatChoice bool
 
+	// subAgentContext is the `sub-agents-context:` gate as the set was built under it: true ⇒ the
+	// set's sub_agent tool publishes `context`, false ⇒ it does not. It belongs to the SET for
+	// seatChoice's reason (tools.HostTools.SubAgentContext is settled at construction), and it never
+	// changes within a session — the key is file-only and not live-editable — so a rebuild for any
+	// other reason carries it forward.
+	subAgentContext bool
+
 	// offersBackground is the Driver's opt-in to background Workflows (ADR 0089 D1, D4) as the set
 	// was built under it: true ⇒ fan_out may publish `background` and the workflow control tool may
 	// be offered, wherever the roster lifts `workflow`; false ⇒ neither, whatever the roster says.
@@ -242,17 +249,21 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // the spec the live holder rebuilds from (toolSetSpec.seatChoice), so a rebuild driven by something
 // else entirely — a reconnect, a model switch — carries the gate this session is actually on.
 //
-// offersBackground arrives beside it for the same reason: whether this Driver offers background
+// subAgentContext arrives beside it for the same reason: `sub-agents-context:` decides whether
+// sub_agent publishes `context`, and no Config field carries it (toolSetSpec.subAgentContext).
+//
+// offersBackground arrives beside them for the same reason: whether this Driver offers background
 // Workflows (ADR 0089 D1) decides fan_out's `background` and the workflow control tool, and no
 // Config field carries it. The TUI passes true (and carries it on toolSetSpec.offersBackground); a
 // headless run and a daemon firing pass false, so neither is offered there whatever the roster says.
 func registryWithMCP(
 	workspace string,
 	cfg apogee.Config,
-	seatChoice, offersBackground bool,
+	seatChoice, subAgentContext, offersBackground bool,
 	mcpTools []apogee.Tool,
 ) *apogee.ToolRegistry {
-	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostToolsOf(cfg, seatChoice, offersBackground))
+	registry := tools.NewDefaultRegistryWithHost(workspace,
+		tools.HostToolsOf(cfg, seatChoice, subAgentContext, offersBackground))
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {
 			fmt.Fprintf(os.Stderr, "apogee: skipping MCP tool %q: %v\n", t.Name(), err)

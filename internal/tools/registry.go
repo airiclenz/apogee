@@ -105,6 +105,14 @@ type HostTools struct {
 	// this flag decides what the model may ASK for, never where the child ends up.
 	SubAgentSeatChoice bool
 
+	// SubAgentContext offers the model the `context` argument on sub_agent — the host's
+	// `sub-agents-context: on` gate. False is the default and the whole of `off`: the schema is the
+	// one built before the argument existed, and a `context` a call carries anyway is ignored. Like
+	// SubAgentSeatChoice it shapes the tool this build carries, never whether it carries it; unlike
+	// it, the argument survives into a child's roster (internal/agent's withoutSeatChoice), so a
+	// nested delegation is offered it too.
+	SubAgentContext bool
+
 	// OffersBackground is the Driver's opt-in to background Workflows (ADR 0089 D1, D4): true only
 	// where a conversation goes on while a workflow runs and something can wake the agent when it
 	// ends — the TUI, or an embedder that set domain.Config.OffersBackground on the engine's own
@@ -156,7 +164,7 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 
 // HostToolsOf composes the HostTools a Config implies — the ONE translation from what the host put
 // on domain.Config into the tool assembly's own configuration, shared by the engine's default roster
-// (internal/agent: seatChoice false, offersBackground from Config.OffersBackground) and the composition
+// (internal/agent: both gates false, offersBackground from Config.OffersBackground) and the composition
 // root's MCP-aware assembly (cmd/apogee).
 // It is one function rather than a literal in each of those places because a field added to
 // HostTools that only one composer filled is how a configured URL deny, credential scrub or read
@@ -181,14 +189,15 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // RosterConflicts), never a refusal to build. SecretEnvVars is the caller-named half of the
 // execution tools' credential scrub (`api-key-env:`, ADR 0047); empty ⇒ apogee's own alone.
 //
-// seatChoice and offersBackground are the two Driver policies this composer takes from its caller
-// rather than from cfg: `sub-agents-choice:` shapes the sub_agent and fan_out schemas this build
-// publishes (ADR 0069), and whether the Driver offers background Workflows decides fan_out's
-// `background` and the workflow tool (ADR 0089 D1). The engine reads no config of its own (ADR
-// 0031), so it passes false for seatChoice and the embedder's Config.OffersBackground opt-in for
-// offersBackground (false unless set), while the composition root passes its own values
-// (offersBackground true for the TUI alone).
-func HostToolsOf(cfg domain.Config, seatChoice, offersBackground bool) HostTools {
+// seatChoice, subAgentContext and offersBackground are the three Driver policies this composer takes
+// from its caller rather than from cfg: `sub-agents-choice:` shapes the sub_agent and fan_out schemas
+// this build publishes (ADR 0069), `sub-agents-context:` decides whether sub_agent publishes
+// `context`, and whether the Driver offers background Workflows decides fan_out's `background` and
+// the workflow tool (ADR 0089 D1). The engine reads no config of its own (ADR 0031), so it passes
+// false for the two gates and the embedder's Config.OffersBackground opt-in for offersBackground
+// (false unless set), while the composition root passes its own values (offersBackground true for
+// the TUI alone).
+func HostToolsOf(cfg domain.Config, seatChoice, subAgentContext, offersBackground bool) HostTools {
 	return HostTools{
 		URLGuard:           security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
 		WebSearchEndpoint:  cfg.WebSearchEndpoint,
@@ -202,6 +211,7 @@ func HostToolsOf(cfg domain.Config, seatChoice, offersBackground bool) HostTools
 		SecretEnvVars:      cfg.SecretEnvVars,
 		SecretEnv:          cfg.SecretEnv,
 		SubAgentSeatChoice: seatChoice,
+		SubAgentContext:    subAgentContext,
 		OffersBackground:   offersBackground,
 	}
 }
@@ -328,9 +338,14 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
-		// sub_agent publishes `run_on` under the seat-choice gate and `background` under fan_out's
-		// (ADR 0094 D1); with neither it is the plain variant every other session sees.
-		NewSubAgentWith(SubAgentOptions{SeatChoice: host.SubAgentSeatChoice, Background: background}),
+		// sub_agent publishes `run_on` under the seat-choice gate, `context` under the
+		// `sub-agents-context` gate and `background` under fan_out's (ADR 0094 D1); with none of them
+		// it is the plain variant every other session sees.
+		NewSubAgentWith(SubAgentOptions{
+			SeatChoice: host.SubAgentSeatChoice,
+			Background: background,
+			Context:    host.SubAgentContext,
+		}),
 		// fan_out (ADR 0087) is registered DEFAULT-OFF beside the recursion point it spawns through,
 		// so it reaches no default menu. It publishes `run_on` under the same seat-choice gate as
 		// sub_agent, and `background` only where the workflow tool is offered (ADR 0089): the Driver

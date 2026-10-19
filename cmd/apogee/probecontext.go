@@ -376,10 +376,11 @@ type probeContextOverlay struct {
 // sends. The fan-out width is the entry's pin or 1, the value a beat that saw one slot would
 // resolve; the effort dialect is the entry's forced one or none — neither reaches the Turn-1 bytes,
 // and both are set so the Config reads as a Firing's would. The tool registry is the one a Firing
-// hands over (firingSeatTools): nil unless `sub-agents-choice: model` publishes the seat. The
-// toolchain probe is WAITED on (hostToolchain.wait) rather than read live: the orientation lists
-// the toolchain roots once the probe has answered, and a table taken a few milliseconds before that
-// would print a number no session ever sends.
+// hands over (firingSeatTools): nil unless `sub-agents-choice: model` publishes the seat or
+// `sub-agents-context: on` publishes `context`. The toolchain probe is WAITED on
+// (hostToolchain.wait) rather than read live: the orientation lists the toolchain roots once the
+// probe has answered, and a table taken a few milliseconds before that would print a number no
+// session ever sends.
 func probeContextConfig(opts config.Options, roots stateRoots, mode domain.Mode, overlay probeContextOverlay) (apogee.Config, error) {
 	bound, err := bindFiringConfig(firingInputs{
 		opts:     opts,
@@ -402,10 +403,10 @@ func probeContextConfig(opts config.Options, roots stateRoots, mode domain.Mode,
 	cfg.ParallelAgents = config.ResolveParallelAgents(int(opts.StartupEntry.ParallelAgents), 0,
 		config.DefaultParallelAgents(opts.StartupEntry))
 	cfg.EffortDialect = domain.EffortDialect(provider.EffortDialectFor(opts.StartupEntry.EffortDialect))
-	// The tool registry a Firing hands its engine under `sub-agents-choice: model` — sub_agent with
-	// `run_on` — built by the composer's own helper, after the scratch mount above, exactly as
-	// firingConfig builds it: the tool-menu row is only the number a headless run sends if the menu
-	// it measures is the one that run publishes.
+	// The tool registry a Firing hands its engine under `sub-agents-choice: model` or
+	// `sub-agents-context: on` — sub_agent with `run_on` or `context` — built by the composer's own
+	// helper, after the scratch mount above, exactly as firingConfig builds it: the tool-menu row is
+	// only the number a headless run sends if the menu it measures is the one that run publishes.
 	cfg.Tools = firingSeatTools(cfg, opts, roots.workspace)
 	hostToolchain.wait()
 	return cfg, nil

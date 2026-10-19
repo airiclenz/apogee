@@ -286,6 +286,8 @@ var (
 	subAgentsChoiceValues = []string{string(SubAgentsChoiceFixed), string(SubAgentsChoiceModel)}
 	// workflow-wake's two words, which live beside Options for sub-agents-choice's reason.
 	workflowWakeValues = []string{WorkflowWakeOn, WorkflowWakeOff}
+	// sub-agents-context's two words, likewise; the default comes first, as sub-agents-choice's does.
+	subAgentsContextValues = []string{SubAgentsContextOff, SubAgentsContextOn}
 )
 
 // KeyRegistry is the table: one row per leaf key of fileConfig, plus one row per structured
@@ -362,6 +364,20 @@ var KeyRegistry = bindRows([]Key{
 		field: checkedField(ParseSubAgentsChoice, spelled[SubAgentsChoice],
 			func(o *Options) *SubAgentsChoice { return &o.SubAgentsChoice },
 			func(fc fileConfig) *string { return nonEmpty(fc.SubAgentsChoice) }),
+	},
+	{
+		// The gate over sub_agent's `context` argument — a model-facing surface, so it ships off (ADR
+		// 0087 D8). It copies workflow-wake's row rather than the one above: not Editable, since the
+		// published schema is settled when the tool set is built and nothing applies a live edit, and
+		// so no Validate hook either. A word outside the two is refused by the row's enum check at the
+		// file pass. No Class: who is offered a model-facing argument is the global config's to say.
+		Path: "sub-agents-context", Kind: KindEnum, Default: SubAgentsContextOff,
+		EnumValues: subAgentsContextValues,
+		Desc: "Whether sub_agent offers the context argument: on = a delegation may name files apogee " +
+			"reads once and hands the child; off = it does not; takes effect at the next start.",
+		field: checkedField(ParseSubAgentsContext, subAgentsContextValue,
+			func(o *Options) *bool { return &o.SubAgentsContext },
+			func(fc fileConfig) *string { return nonEmpty(fc.SubAgentsContext) }),
 	},
 	{
 		Path: "mode", Kind: KindEnum, Default: string(domain.ModeAskBefore), EnumValues: modeValues,

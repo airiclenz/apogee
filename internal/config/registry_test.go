@@ -172,6 +172,23 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		}
 	})
 
+	t.Run("sub-agents-context", func(t *testing.T) {
+		t.Parallel()
+		// Parsed in THIS package for workflow-wake's reason; the row is file-only, so
+		// ParseSubAgentsContext is what a value is admitted by. Both directions, as above.
+		values := enumValues(t, "sub-agents-context")
+		for _, v := range values {
+			if _, err := ParseSubAgentsContext(v); err != nil {
+				t.Errorf("registry offers sub-agents-context %q but ParseSubAgentsContext rejects it: %v", v, err)
+			}
+		}
+		for _, w := range []string{SubAgentsContextOff, SubAgentsContextOn} {
+			if !slices.Contains(values, w) {
+				t.Errorf("%q is a context word the config knows but the registry does not offer it", w)
+			}
+		}
+	})
+
 	t.Run("sub-agents-choice", func(t *testing.T) {
 		t.Parallel()
 		// The one enum whose parse site is in THIS package: who picks a delegation's seat is a fact
@@ -973,6 +990,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 	// read the field name off.
 	owns := map[string]string{
 		"server": "StartupServer", "sub-agents-choice": "SubAgentsChoice", "mode": "Mode",
+		"sub-agents-context": "SubAgentsContext",
 		"system-prompt-text": "SystemPrompt", "system-prompt-file": "SystemPrompt",
 		"use-default-prompt": "UseDefaultPrompt", "context-files.names": "ContextFiles",
 		"confine-to-workspace": "ConfineToWorkspace", "web-search-endpoint": "WebSearchEndpoint",

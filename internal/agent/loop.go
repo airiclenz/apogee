@@ -1954,8 +1954,8 @@ func (a *Agent) maxOutputTokens() int {
 // the one subprocess it runs, a recipe's script stage confined to its workflow folder, is the
 // engine's own call and never a menu entry — amendment 2026-09-27).
 // A sub-agent's registry is already the narrowed one its spawn built — the parent's minus the
-// human-seat tools and the workflow control tool no child gets, with sub_agent and fan_out in
-// their plain variants, minus whatever the call's `tools` argument took away
+// human-seat tools and the workflow control tool no child gets, with sub_agent and fan_out
+// publishing neither `run_on` nor `background`, minus whatever the call's `tools` argument took away
 // (defaultSubAgentTools, withoutSeatChoice, requestedChildTools) — so the child's menu reads that
 // set and needs no filter of its own.
 //

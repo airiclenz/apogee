@@ -564,26 +564,28 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	session.Model = spec.Model
 	cfg.Namer = newFiringNamer(session, effortDialect, routing.target, in.opts.AutoTitle)
 
-	// And the one thing an unattended run cannot get from the engine: the `run_on` argument on
-	// sub_agent, which firingSeatTools assembles under `sub-agents-choice: model` and leaves nil
-	// otherwise. It is built HERE, after the scratch dir above is bound, because the registry copies
-	// ReadMounts by value: one built earlier would carry a read root that never names the dir this
-	// run announces as writable.
+	// And the one thing an unattended run cannot get from the engine: the `run_on` and `context`
+	// arguments on sub_agent, which firingSeatTools assembles under `sub-agents-choice: model` or
+	// `sub-agents-context: on` and leaves nil otherwise. It is built HERE, after the scratch dir
+	// above is bound, because the registry copies ReadMounts by value: one built earlier would carry
+	// a read root that never names the dir this run announces as writable.
 	cfg.Tools = firingSeatTools(cfg, in.opts, in.roots.workspace)
 
 	return cfg, routing, notices, nil
 }
 
 // firingSeatTools is the tool registry an unattended run hands the engine, or nil. It is the one
-// thing such a run cannot get from the engine: the `run_on` argument on sub_agent.
-// `sub-agents-choice:` shapes the published schema rather than any Config field (ADR 0031 — the
-// engine reads no config), so under `model` the roster is assembled here, with the gate on and no
-// MCP tools (a Firing reaches no MCP server, ADR 0034). The gate is read off the Options every
-// Driver already fills rather than off a firingInputs field of its own, so a Driver that filled
-// opts cannot silently leave the seat unpublished.
+// thing such a run cannot get from the engine: the sub_agent schema the two host gates shape —
+// `run_on` under `sub-agents-choice: model`, `context` under `sub-agents-context: on`. Both shape the
+// published schema rather than any Config field (ADR 0031 — the engine reads no config), so when
+// either is on the roster is assembled here, with each gate as configured and no MCP tools (a
+// Firing reaches no MCP server, ADR 0034). The gates are read off the Options every Driver already
+// fills rather than off a firingInputs field of its own, so a Driver that filled opts cannot
+// silently leave either argument unpublished.
 //
-// Under `fixed`, and with the key absent, it returns nil, so Tools stays nil byte-for-byte and
-// run.Once's own nil Asker and Presenter go on shaping the engine's roster exactly as before. That
+// With both off — `fixed`, `off`, or the keys absent — it returns nil, so Tools stays nil
+// byte-for-byte and run.Once's own nil Asker and Presenter go on shaping the engine's roster exactly
+// as before. That
 // is the guard, not an optimisation: a registry handed over on the default path would decide the
 // roster from this Config's delegates rather than from the ones the runner pins.
 //
@@ -599,11 +601,12 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 // copies ReadMounts by value, so one built before the scratch mount exists reads nothing under the
 // dir the run announces.
 func firingSeatTools(cfg apogee.Config, opts config.Options, workspace string) *apogee.ToolRegistry {
-	if opts.SubAgentsChoice != config.SubAgentsChoiceModel {
+	seatChoice := opts.SubAgentsChoice == config.SubAgentsChoiceModel
+	if !seatChoice && !opts.SubAgentsContext {
 		return nil
 	}
 	const offersBackground = false
-	return registryWithMCP(workspace, cfg, true, offersBackground, nil)
+	return registryWithMCP(workspace, cfg, seatChoice, opts.SubAgentsContext, offersBackground, nil)
 }
 
 // firingRouting is where ONE unattended run's delegations go, what its model is told about that far

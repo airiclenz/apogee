@@ -2321,6 +2321,23 @@ runs at that seat's own cap, exactly as above.
 
 See [ADR 0069](../../.capcom/knowledge/decisions/adr-0069.md).
 
+### Handing a delegation files to start from
+
+The root `sub-agents-context:` key adds one optional argument to the sub-agent
+tool: `context`, a list of files a delegation can name for its sub-agent to
+start from.
+
+```yaml
+# ~/.apogee/config.yaml
+sub-agents-context: on      # off (the default) or on
+```
+
+`off` is the default and leaves the sub-agent tool exactly as it was. `on`
+publishes `context` on every sub-agent tool the session builds — a sub-agent's
+own included, and an unattended run's. Any word other than `on` or `off` is
+refused at start-up with the key named. The key lives in `config.yaml` only and
+takes effect at the next start.
+
 ## The upstream API key
 
 A local server usually wants no credentials, but some do: llama.cpp started with

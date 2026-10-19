@@ -1077,6 +1077,12 @@ type fileConfig struct {
 	// feature is opt-in; any other word is refused at startup, since a value that means nothing
 	// would leave the file reading as configured while the session went on choosing for itself.
 	SubAgentsChoice string `yaml:"sub-agents-choice"`
+	// SubAgentsContext says whether sub_agent offers the `context` argument — files the engine reads
+	// once, through the read_file scope, and hands the child ahead of its task: `on`, or `off` (the
+	// default, also what an absent/empty key means). File-only, like the two keys above it. Any other
+	// word — a YAML `true` included — is refused at the file pass by the row's enum check rather than
+	// read as a switch the key does not spell.
+	SubAgentsContext string `yaml:"sub-agents-context"`
 	// Editor names the command an external edit is opened with — the ⏎ jump the /settings pane makes
 	// on a key no field can hold, and any other edit of this file. A top-level scalar beside Server
 	// above, file-only (no flag/env), carried verbatim: `editor: code -w` is split

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"reflect"
@@ -525,6 +526,45 @@ func TestHostToolsSubAgentSeatChoice_ShapesTheRegisteredSubAgent(t *testing.T) {
 	}
 }
 
+// TestHostToolsOfSubAgentContext_ShapesTheRegisteredSubAgent pins the host seam for the
+// `sub-agents-context` gate, through the composer the Drivers build with: the gate changes the
+// sub_agent VARIANT, never the menu, and off is the plain schema byte for byte.
+func TestHostToolsOfSubAgentContext_ShapesTheRegisteredSubAgent(t *testing.T) {
+	t.Parallel()
+
+	for _, offered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("context %v", offered), func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+
+			set := DefaultToolsWithHost(root, HostToolsOf(domain.Config{}, false, offered, false))
+
+			sub := findSubAgent(t, set)
+			if got := sub.OffersContext(); got != offered {
+				t.Errorf("OffersContext = %v, want %v — the registry did not honour the gate", got, offered)
+			}
+			if !offered && string(sub.Schema()) != string(NewSubAgent().Schema()) {
+				t.Errorf("the gate off published %s, want the plain schema", sub.Schema())
+			}
+			if got, want := rosterNamesOf(set), rosterNamesOf(DefaultTools(root)); got != want {
+				t.Errorf("the context gate changed the menu:\n got: %s\nwant: %s", got, want)
+			}
+		})
+	}
+}
+
+// findSubAgent returns the sub_agent tool of a built-in set, failing when there is none.
+func findSubAgent(t *testing.T, set []domain.Tool) *SubAgent {
+	t.Helper()
+	for _, tool := range set {
+		if sub, ok := tool.(*SubAgent); ok {
+			return sub
+		}
+	}
+	t.Fatal("the built-in set carries no sub_agent")
+	return nil
+}
+
 // HostToolsOf is the ONE translation from domain.Config into HostTools, shared by the engine's own
 // default roster (internal/agent) and cmd/apogee's MCP-aware registryWithMCP. Before it existed the
 // two composed the struct by hand, field-identical bar SubAgentSeatChoice, and nothing structural
@@ -534,7 +574,7 @@ func TestHostToolsSubAgentSeatChoice_ShapesTheRegisteredSubAgent(t *testing.T) {
 // quietly stops applying on one of the two paths.
 //
 // So the pin is field-by-field: with every Config field this composer reads set to something
-// non-zero and seat choice on, every field of the struct it returns must come back non-zero — and
+// non-zero and every gate on, every field of the struct it returns must come back non-zero — and
 // every sub-field of its ReadMounts, each mount on its own. A field added to HostTools and missed
 // by the composer fails here.
 func TestHostToolsOfFillsEveryHostField(t *testing.T) {
@@ -557,7 +597,7 @@ func TestHostToolsOfFillsEveryHostField(t *testing.T) {
 			Scratch: func() string { return t.TempDir() },
 			Virtual: func() map[string]fs.FS { return nil },
 		},
-	}, true, true))
+	}, true, true, true))
 	for _, name := range zeroHostFields(host) {
 		t.Errorf("HostToolsOf left HostTools.%s zero for a Config that sets every field it "+
 			"reads — a host policy that stops here is one the operator configured and never got", name)
@@ -588,19 +628,25 @@ func zeroHostFields(host reflect.Value) []string {
 	return zero
 }
 
-// TestHostToolsOfLeavesSeatChoiceToTheCaller pins the two Driver policies this composer takes from
-// its caller rather than from cfg: the engine passes seatChoice false and Config.OffersBackground,
-// the composition root its own values. The argument alone decides — a Config.OffersBackground set
-// the other way does not reach the field — and neither argument reaches the other's field.
+// TestHostToolsOfLeavesSeatChoiceToTheCaller pins the three Driver policies this composer takes
+// from its caller rather than from cfg: the engine passes both gates false and
+// Config.OffersBackground, the composition root its own values. The argument alone decides — a
+// Config.OffersBackground set the other way does not reach the field — and no argument reaches
+// another's field.
 func TestHostToolsOfLeavesSeatChoiceToTheCaller(t *testing.T) {
 	t.Parallel()
 
 	for _, seatChoice := range []bool{false, true} {
-		for _, offersBackground := range []bool{false, true} {
-			host := HostToolsOf(domain.Config{OffersBackground: !offersBackground}, seatChoice, offersBackground)
-			if host.SubAgentSeatChoice != seatChoice || host.OffersBackground != offersBackground {
-				t.Errorf("HostToolsOf(cfg, %v, %v) = seat choice %v, background %v",
-					seatChoice, offersBackground, host.SubAgentSeatChoice, host.OffersBackground)
+		for _, subAgentContext := range []bool{false, true} {
+			for _, offersBackground := range []bool{false, true} {
+				host := HostToolsOf(domain.Config{OffersBackground: !offersBackground},
+					seatChoice, subAgentContext, offersBackground)
+				if host.SubAgentSeatChoice != seatChoice || host.SubAgentContext != subAgentContext ||
+					host.OffersBackground != offersBackground {
+					t.Errorf("HostToolsOf(cfg, %v, %v, %v) = seat choice %v, context %v, background %v",
+						seatChoice, subAgentContext, offersBackground,
+						host.SubAgentSeatChoice, host.SubAgentContext, host.OffersBackground)
+				}
 			}
 		}
 	}
@@ -634,7 +680,7 @@ func TestHostToolsCarriesSecretEnvVars(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := HostToolsOf(tc.cfg, false, false).SecretEnvVars; !slices.Equal(got, tc.want) {
+			if got := HostToolsOf(tc.cfg, false, false, false).SecretEnvVars; !slices.Equal(got, tc.want) {
 				t.Errorf("HostToolsOf().SecretEnvVars = %q, want %q", got, tc.want)
 			}
 		})
@@ -660,7 +706,7 @@ func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
 	t.Run("a configured deny reaches the guard", func(t *testing.T) {
 		t.Parallel()
 
-		guard := HostToolsOf(domain.Config{URLDenyHosts: []string{"Blocked.EXAMPLE."}}, false, false).
+		guard := HostToolsOf(domain.Config{URLDenyHosts: []string{"Blocked.EXAMPLE."}}, false, false, false).
 			URLGuard.WithResolver(publicResolver)
 
 		if err := guard.Check("https://blocked.example/x"); !errors.Is(err, security.ErrURLBlocked) {
@@ -674,7 +720,7 @@ func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
 	t.Run("a configured allow list reaches the guard", func(t *testing.T) {
 		t.Parallel()
 
-		guard := HostToolsOf(domain.Config{URLAllowHosts: []string{"docs.example.com"}}, false, false).
+		guard := HostToolsOf(domain.Config{URLAllowHosts: []string{"docs.example.com"}}, false, false, false).
 			URLGuard.WithResolver(publicResolver)
 
 		if err := guard.Check("https://docs.example.com/x"); err != nil {
@@ -688,7 +734,7 @@ func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
 	t.Run("a config naming no hosts leaves the reach as it was", func(t *testing.T) {
 		t.Parallel()
 
-		guard := HostToolsOf(domain.Config{}, false, false).URLGuard
+		guard := HostToolsOf(domain.Config{}, false, false, false).URLGuard
 		if guard.AllowHosts != nil || guard.DenyHosts != nil {
 			t.Errorf("an unconfigured Config produced host lists: allow=%q deny=%q", guard.AllowHosts, guard.DenyHosts)
 		}

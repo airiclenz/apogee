@@ -115,6 +115,13 @@ type Options struct {
 	// run: an absent key resolves to [SubAgentsChoiceFixed], the behaviour that predates the key.
 	SubAgentsChoice SubAgentsChoice
 
+	// SubAgentsContext is the resolved `sub-agents-context:` key — whether sub_agent publishes the
+	// `context` argument, which names files the engine reads once and hands the child ahead of its
+	// task. File-only like the two keys above it, and off when the key is absent: a model-facing
+	// surface ships off until bench evidence turns it on (ADR 0087 D8). The gate covers every
+	// sub_agent the session builds — a nested child's and a Firing's included.
+	SubAgentsContext bool
+
 	// serverFlagBound says the command being run registers the `--server` flag. Only the root
 	// command does: `apogee headless` and `apogee probe` declare their own flag surface and take
 	// the startup name from `APOGEE_SERVER` / `server:` alone. Exactly one thing reads it — the
@@ -589,6 +596,36 @@ func workflowWakeValue(wake bool) string {
 		return WorkflowWakeOn
 	}
 	return WorkflowWakeOff
+}
+
+// The two words `sub-agents-context:` takes. They are words rather than a YAML bool for
+// workflow-wake's reason: the key names a behaviour — sub_agent offers `context`, or it does not —
+// and the file should say which.
+const (
+	SubAgentsContextOn  = "on"
+	SubAgentsContextOff = "off"
+)
+
+// ParseSubAgentsContext resolves the file's spelling of `sub-agents-context:` into the switch it
+// names, refusing any word outside the two — `true` and `false` included, since a YAML bool is not
+// how the key is spelled. The EMPTY string is the key left out and resolves to off, the default.
+func ParseSubAgentsContext(value string) (bool, error) {
+	switch value {
+	case "", SubAgentsContextOff:
+		return false, nil
+	case SubAgentsContextOn:
+		return true, nil
+	}
+	return false, fmt.Errorf("apogee: invalid sub-agents-context: %q — it takes %q (sub_agent offers "+
+		"the context argument) or %q (it does not)", value, SubAgentsContextOn, SubAgentsContextOff)
+}
+
+// subAgentsContextValue spells the switch the way the file does.
+func subAgentsContextValue(offered bool) string {
+	if offered {
+		return SubAgentsContextOn
+	}
+	return SubAgentsContextOff
 }
 
 // SubAgentsChoice is who gets to pick the server a delegation runs on (ADR 0069) — the `fixed` |

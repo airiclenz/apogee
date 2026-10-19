@@ -1093,7 +1093,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	// is the only place the model can be told it read the menu wrong.
 	//
 	// `run_on` is only ever READ where this Agent's own sub_agent tool published it. A child's tool
-	// is the plain variant (withoutSeatChoice), and so is every tool built under
+	// publishes no `run_on` (withoutSeatChoice), and neither does any tool built under
 	// `sub-agents-choice: fixed`, so a seat named against either is a value the model was never
 	// offered: it is IGNORED rather than honoured or refused, which is the identity rule — below the
 	// first hop a delegation keeps the seat it landed on (ADR 0069 decision 3) — and which keeps a
@@ -2043,8 +2043,8 @@ var topLevelOnlyTools = []string{tools.WorkflowToolName}
 // The result is always ≤ the parent's tools: it is built from the parent registry's own names
 // via Subset, so it can never name a tool the parent lacks (a privilege expansion is
 // structurally impossible — ADR 0005). The tools that do not arrive verbatim are sub_agent and
-// fan_out, and only in the narrowing direction: a parent offering seat choice hands the child the
-// plain sub_agent, so `run_on` is a depth-0 offer (ADR 0069 decision 3), and a parent whose fan_out
+// fan_out, and only in the narrowing direction: a parent offering seat choice hands the child a
+// sub_agent without `run_on`, so `run_on` is a depth-0 offer (ADR 0069 decision 3), and a parent whose fan_out
 // publishes `run_on` or `background` hands the child the plain fan_out, since a background
 // workflow is the top-level Agent's too (withoutSeatChoice, ADR 0089 D1).
 func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
@@ -2131,8 +2131,9 @@ func isRecursionTool(name string) bool {
 	return name == tools.SubAgentToolName || name == tools.FanOutToolName
 }
 
-// withoutSeatChoice returns roster with its sub_agent tool swapped for the PLAIN variant when the
-// one it holds publishes `run_on` or `background`, and its fan_out tool for the PLAIN variant when
+// withoutSeatChoice returns roster with its sub_agent tool swapped for one that publishes neither
+// `run_on` nor `background` — the PLAIN variant, or the context-only one — when the one it holds
+// publishes either, and its fan_out tool for the PLAIN variant when
 // that one publishes `run_on` or `background` — the depth-0-only rule of ADR 0069 decision 3,
 // applied where a child's tool set is built, and ADR 0089 D1's for `background` (ADR 0094 D1 for
 // sub_agent's): a background workflow belongs to the top-level Agent, so on a delegate the argument
@@ -2142,11 +2143,15 @@ func isRecursionTool(name string) bool {
 // than accepting and discarding it is the honest form, because a schema advertising a knob the
 // engine ignores teaches the model a lie about its own leverage.
 //
+// `context` is the one sub_agent argument that survives the swap: the `sub-agents-context` gate
+// covers nested children too, and the files a delegation names are read by the engine wherever
+// the call is made, so the child's sub_agent keeps it when the parent's published it.
+//
 // It is never a privilege change in either direction — both variants are the same recursion point
-// under the same name, and the plain one publishes strictly fewer arguments — so the ADR 0005
-// subset property Subset gives is untouched. A roster whose sub_agent and fan_out are already
-// plain, or which holds neither (the depth bound withheld them, or the parent had no tools), comes
-// back as it went in.
+// under the same name, and the narrowed one publishes no argument the parent's did not — so the ADR
+// 0005 subset property Subset gives is untouched. A roster whose sub_agent and fan_out publish
+// neither `run_on` nor `background`, or which holds neither (the depth bound withheld them, or the
+// parent had no tools), comes back as it went in.
 func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
 	fanOutChoice := publishesFanOutChoice(roster)
 	if !publishesSubAgentChoice(roster) && !fanOutChoice {
@@ -2156,7 +2161,7 @@ func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
 	for _, tool := range roster.All() {
 		switch {
 		case tool.Name() == tools.SubAgentToolName:
-			tool = tools.NewSubAgent()
+			tool = tools.NewSubAgentWith(tools.SubAgentOptions{Context: offersContext(tool)})
 		case tool.Name() == tools.FanOutToolName && fanOutChoice:
 			tool = tools.NewFanOut()
 		}
@@ -2164,6 +2169,13 @@ func withoutSeatChoice(roster *domain.ToolRegistry) *domain.ToolRegistry {
 		_ = plain.Register(tool)
 	}
 	return plain
+}
+
+// offersContext reports whether a sub_agent tool published the `context` argument; a foreign tool
+// under the name reports false.
+func offersContext(tool domain.Tool) bool {
+	spawner, ok := tool.(*tools.SubAgent)
+	return ok && spawner.OffersContext()
 }
 
 // seatChoosingFanOut returns roster's fan_out tool and whether it published the `run_on`

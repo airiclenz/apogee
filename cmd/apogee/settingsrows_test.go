@@ -88,6 +88,8 @@ func fabricatedSettings() config.Options {
 			ShareGroup: "apogee-watch",
 		},
 		Bypass: true,
+		// On, against the gate's off default, so the row is asserted to report the value.
+		SubAgentsContext: true,
 		ModelProfiles: []profiles.Entry{
 			{Pattern: "minimax-m3", Profile: apogee.ModelProfile{
 				Thinking: apogee.ThinkingProfile{Style: apogee.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>"},
@@ -410,6 +412,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"server":                  "rented-box",
 		"sub-agents-server":       "auto (session server)",
 		"sub-agents-choice":       "fixed", // unset in the fixture, so the declared default is in force
+		"sub-agents-context":      "on",    // the enum's own word, never a YAML bool
 		"mode":                    "auto",
 		"system-prompt-text":      "2 lines",
 		"system-prompt-file":      "", // unset, and an editable string row's blank is what the field seeds from

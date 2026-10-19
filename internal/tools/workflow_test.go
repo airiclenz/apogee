@@ -85,10 +85,10 @@ func TestWorkflow_TravelsWithTheDriversBackgroundOptIn(t *testing.T) {
 		{name: "the TUI with workflow lifted", host: HostTools{Enabled: lifted, OffersBackground: true}, want: true},
 		{name: "the TUI without workflow lifted", host: HostTools{Enabled: []string{FanOutToolName}, OffersBackground: true}},
 		{name: "a firing with workflow lifted", host: HostTools{Enabled: lifted}},
-		{name: "the engine's own roster", host: HostToolsOf(domain.Config{EnabledTools: lifted}, false, false)},
+		{name: "the engine's own roster", host: HostToolsOf(domain.Config{EnabledTools: lifted}, false, false, false)},
 		{
 			name: "the engine's roster with the embedder's opt-in",
-			host: HostToolsOf(domain.Config{EnabledTools: lifted, OffersBackground: true}, false, true),
+			host: HostToolsOf(domain.Config{EnabledTools: lifted, OffersBackground: true}, false, false, true),
 			want: true,
 		},
 	}

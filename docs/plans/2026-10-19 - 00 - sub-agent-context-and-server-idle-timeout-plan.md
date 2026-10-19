@@ -64,7 +64,14 @@ NOTES (2026-10-19): no CHANGELOG entry — the argument is unreachable until ite
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSubAgent|TestBuiltinToolArgRoles' ./internal/tools/`
 **Commit:** `feat(tools): sub_agent schema carries a gated context argument`
 
-## 2. Root key `sub-agents-context` gates the argument
+## 2. Root key `sub-agents-context` gates the argument — ✅ DONE (2026-10-19)
+
+NOTES (2026-10-19): tools.HostToolsOf and registryWithMCP take the gate as a new positional bool (`seatChoice, subAgentContext, offersBackground`), next to seatChoice. The engine's own roster (construct.go defaultRoster) passes false.
+NOTES (2026-10-19): withoutSeatChoice now rebuilds a child's sub_agent as `NewSubAgentWith(SubAgentOptions{Context: <parent's>})`, so run_on and background are stripped and context is kept. A roster whose sub_agent publishes only `context` comes back unchanged.
+NOTES (2026-10-19): the settingsrows_test fixture sets SubAgentsContext true (pinned "on"), so the row is shown to report the value rather than the default.
+NOTES (2026-10-19): consequential edit — internal/agent/loop.go: made necessary by withoutSeatChoice keeping `context` (the comment no longer says a child's sub_agent is the "plain variant")
+NOTES (2026-10-19): consequential edit — internal/agent/orientation.go: made necessary by withoutSeatChoice keeping `context` (the comment no longer says a child's sub_agent is the "plain variant")
+NOTES (2026-10-19): consequential edit — cmd/apogee/probecontext.go: made necessary by firingSeatTools now also building under `sub-agents-context: on` (its doc comments named the seat gate alone)
 
 **What:** Recast at the regression check (2026-10-19).
 **Goal:** `sub-agents-context: on` in the global config publishes `context` on every sub_agent tool set (nested children and Firings included), and `off`/absent publishes the plain schema. An invalid value is refused with the key named. The key is file-only and ClassGlobalOnly, with default `off`. The same commit adds the key's entry to `docs/manual/configuration.md`.

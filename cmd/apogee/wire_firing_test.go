@@ -508,20 +508,23 @@ func TestFiringConfigCarriesTheShippedSkillGate(t *testing.T) {
 // runner an Approver, an Asker, a Presenter or an Events sink is how an unattended run acquires a
 // human it does not have (ADR 0033 decision 2).
 //
-// The tool registry stays nil with them on every path but ONE. `sub-agents-choice:` shapes the
-// sub_agent schema rather than any field of the Config the engine reads (ADR 0031), so the only way
-// an unattended run can publish `run_on` is to hand over a roster assembled by the host — which is
-// why the gate is also the guard: under `fixed`, and with the key absent, Tools stays nil
-// byte-for-byte and the engine goes on building its own roster off the delegates run.Once pins.
+// The tool registry stays nil with them on every path but the two gates'. `sub-agents-choice:` and
+// `sub-agents-context:` shape the sub_agent schema rather than any field of the Config the engine
+// reads (ADR 0031), so the only way an unattended run can publish `run_on` or `context` is to hand
+// over a roster assembled by the host — which is why the gates are also the guard: with both off,
+// and with the keys absent, Tools stays nil byte-for-byte and the engine goes on building its own
+// roster off the delegates run.Once pins. Each gate publishes its own argument and not the other's.
 // A Firing reaches no external MCP server either way (ADR 0034), so the assembled registry is the
 // built-in set alone.
 func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name      string
-		choice    config.SubAgentsChoice
-		wantTools bool
+		name        string
+		choice      config.SubAgentsChoice
+		context     bool
+		wantTools   bool
+		wantContext bool
 	}{
 		{name: "the key absent leaves the engine its own roster"},
 		{name: "fixed leaves the engine its own roster", choice: config.SubAgentsChoiceFixed},
@@ -530,12 +533,21 @@ func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 			choice:    config.SubAgentsChoiceModel,
 			wantTools: true,
 		},
+		{
+			name:        "sub-agents-context on hands over a roster that publishes context and no seat",
+			choice:      config.SubAgentsChoiceFixed,
+			context:     true,
+			wantTools:   true,
+			wantContext: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			cfg, _, _, err := firingConfig(context.Background(), firingInputs{
-				opts:     config.Options{Bypass: true, SubAgentsChoice: tc.choice},
+				opts: config.Options{
+					Bypass: true, SubAgentsChoice: tc.choice, SubAgentsContext: tc.context,
+				},
 				entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1},
 				apiKey:   "sk-test",
 				roots:    firingRoots(t),
@@ -552,17 +564,22 @@ func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 				t.Error("the composer wired a delegate run.Once pins for itself")
 			}
 			if got := cfg.Tools != nil; got != tc.wantTools {
-				t.Fatalf("cfg.Tools non-nil = %v, want %v — the seat gate is the only thing that "+
-					"may hand the runner a registry", got, tc.wantTools)
+				t.Fatalf("cfg.Tools non-nil = %v, want %v — the seat and context gates are the only "+
+					"things that may hand the runner a registry", got, tc.wantTools)
 			}
 			if !tc.wantTools {
 				return
 			}
 			// Read off the registry the composer actually returned, never off a fixture: what the
 			// model is offered is the schema this object publishes.
-			if !seatChoiceOffered(t, cfg.Tools) {
-				t.Error("the composed registry publishes no run_on; `model` is the whole of what " +
-					"offers an unattended run's model a seat")
+			wantSeat := tc.choice == config.SubAgentsChoiceModel
+			if got := seatChoiceOffered(t, cfg.Tools); got != wantSeat {
+				t.Errorf("the composed registry publishes run_on = %v, want %v — `model` is the whole "+
+					"of what offers an unattended run's model a seat", got, wantSeat)
+			}
+			if got := contextOffered(t, cfg.Tools); got != tc.wantContext {
+				t.Errorf("the composed registry publishes context = %v, want %v — `sub-agents-context: "+
+					"on` is the whole of what offers it", got, tc.wantContext)
 			}
 		})
 	}

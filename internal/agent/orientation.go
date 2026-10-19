@@ -231,7 +231,7 @@ func (a *Agent) delegationBounds() string {
 //
 // The ROSTER is the gate, and the only one: the bullet is rendered exactly when this Agent's own
 // sub_agent tool published `run_on`, so the model is told about a choice precisely when it has one.
-// A child's tool is the plain variant (withoutSeatChoice) and so is every tool built under
+// A child's tool publishes no `run_on` (withoutSeatChoice), and neither does any tool built under
 // `sub-agents-choice: fixed`, which is why nothing here needs a depth check or a flag of its own —
 // asking the published schema is what keeps the prompt and the tool menu from ever disagreeing.
 //

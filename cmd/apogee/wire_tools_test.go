@@ -27,7 +27,7 @@ func TestRegistryWithMCPThreadsPresenter(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.Presenter = stubPresenter{}
 
-	if _, ok := registryWithMCP(t.TempDir(), cfg, false, false, nil).Lookup("present_document"); !ok {
+	if _, ok := registryWithMCP(t.TempDir(), cfg, false, false, false, nil).Lookup("present_document"); !ok {
 		t.Error("present_document is missing from the MCP registry build despite a configured Presenter")
 	}
 }
@@ -47,7 +47,7 @@ func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.ReadMounts.Roots = func() []string { return []string{extra} }
 
-	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("read_file")
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, false, nil).Lookup("read_file")
 	if !ok {
 		t.Fatal("read_file is missing from the MCP registry build")
 	}
@@ -78,7 +78,7 @@ func TestRegistryWithMCPThreadsVirtualReadRoots(t *testing.T) {
 	if !ok {
 		t.Fatal("the shipped debugging skill did not load")
 	}
-	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("list_dir")
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, false, nil).Lookup("list_dir")
 	if !found {
 		t.Fatal("list_dir is missing from the MCP registry build")
 	}
@@ -106,7 +106,7 @@ func TestRegistryWithMCPThreadsSkillLookup(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.SkillLookup = provider
 
-	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("load_skill")
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, false, nil).Lookup("load_skill")
 	if !found {
 		t.Fatal("load_skill is missing from the MCP registry build")
 	}
@@ -137,7 +137,7 @@ func TestRegistryWithMCPThreadsURLSafetyHosts(t *testing.T) {
 	cfg := validCfg(t)
 	cfg.URLDenyHosts = []string{"Blocked.EXAMPLE."}
 
-	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, nil).Lookup("web_fetch")
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, false, false, nil).Lookup("web_fetch")
 	if !ok {
 		t.Fatal("web_fetch is missing from the MCP registry build")
 	}
@@ -169,7 +169,7 @@ func TestRegistryWithMCPHonoursDisabledTools(t *testing.T) {
 	cfg.DisabledTools = []string{"view_diff", "python_exec"}
 	mcpTool := mcpFixtureTool{name: "docs__search"}
 
-	registry := registryWithMCP(t.TempDir(), cfg, false, false, []apogee.Tool{mcpTool})
+	registry := registryWithMCP(t.TempDir(), cfg, false, false, false, []apogee.Tool{mcpTool})
 
 	for _, name := range []string{"view_diff", "python_exec"} {
 		if _, ok := registry.Lookup(name); ok {
@@ -242,7 +242,7 @@ func TestRegistryWithMCPWalksTheRosterLadder(t *testing.T) {
 			cfg.EnabledTools = tt.enabled
 			cfg.Profile.Tools = tt.profile
 
-			registry := registryWithMCP(t.TempDir(), cfg, false, false, []apogee.Tool{mcpFixtureTool{name: "docs__search"}})
+			registry := registryWithMCP(t.TempDir(), cfg, false, false, false, []apogee.Tool{mcpFixtureTool{name: "docs__search"}})
 
 			for _, name := range append(tt.wantOn, "docs__search") {
 				assertRegistryOffers(t, registry, name, true)
@@ -251,7 +251,7 @@ func TestRegistryWithMCPWalksTheRosterLadder(t *testing.T) {
 				assertRegistryOffers(t, registry, name, false)
 			}
 			if len(tt.wantOff) == 0 {
-				if got, want := len(registry.All()), len(registryWithMCP(t.TempDir(), validCfg(t), false, false, nil).All())+1; got != want {
+				if got, want := len(registry.All()), len(registryWithMCP(t.TempDir(), validCfg(t), false, false, false, nil).All())+1; got != want {
 					t.Errorf("the roster left %d tools, want %d — the lift subtracted something", got, want)
 				}
 			}
@@ -289,8 +289,8 @@ func assertRegistryOffers(t *testing.T, registry *apogee.ToolRegistry, name stri
 func TestRegistryWithMCPCarriesTheSeatChoiceGate(t *testing.T) {
 	t.Parallel()
 
-	plain := registryWithMCP(t.TempDir(), validCfg(t), false, false, nil)
-	offered := registryWithMCP(t.TempDir(), validCfg(t), true, false, nil)
+	plain := registryWithMCP(t.TempDir(), validCfg(t), false, false, false, nil)
+	offered := registryWithMCP(t.TempDir(), validCfg(t), true, false, false, nil)
 
 	if seatChoiceOffered(t, plain) {
 		t.Error("the gate off still published run_on; a session under `fixed` must offer no seat")
@@ -300,6 +300,74 @@ func TestRegistryWithMCPCarriesTheSeatChoiceGate(t *testing.T) {
 	}
 	if got, want := len(plain.All()), len(offered.All()); got != want {
 		t.Errorf("the gate moved the roster: %d tools off, %d on — it may only move a schema", got, want)
+	}
+}
+
+// contextOffered reports whether registry's sub_agent tool publishes `context`, failing when the
+// registry holds no sub_agent.
+func contextOffered(t *testing.T, registry *apogee.ToolRegistry) bool {
+	t.Helper()
+	found, ok := registry.Lookup(tools.SubAgentToolName)
+	if !ok {
+		t.Fatal("the registry holds no sub_agent tool")
+	}
+	sub, ok := found.(*tools.SubAgent)
+	if !ok {
+		t.Fatalf("sub_agent is a %T, want *tools.SubAgent", found)
+	}
+	return sub.OffersContext()
+}
+
+// The `sub-agents-context:` gate reaches this hand-assembly the way the seat-choice gate does — as
+// its own argument, off the tool set's spec — and it changes exactly ONE thing: whether sub_agent
+// published `context`. Off is the plain schema byte for byte, and the roster is the same either way.
+func TestRegistryWithMCPCarriesTheSubAgentsContextGate(t *testing.T) {
+	t.Parallel()
+
+	plain := registryWithMCP(t.TempDir(), validCfg(t), false, false, false, nil)
+	offered := registryWithMCP(t.TempDir(), validCfg(t), false, true, false, nil)
+
+	if contextOffered(t, plain) {
+		t.Error("the gate off still published context; `off` must leave sub_agent as it was")
+	}
+	plainTool, _ := plain.Lookup(tools.SubAgentToolName)
+	if got, want := string(plainTool.Schema()), string(tools.NewSubAgent().Schema()); got != want {
+		t.Errorf("the gate off published %s, want the plain schema %s", got, want)
+	}
+	if !contextOffered(t, offered) {
+		t.Error("the gate on published no context; `on` is the whole of what offers the argument")
+	}
+	if seatChoiceOffered(t, offered) {
+		t.Error("the context gate published run_on; the two gates are independent")
+	}
+	if got, want := len(plain.All()), len(offered.All()); got != want {
+		t.Errorf("the gate moved the roster: %d tools off, %d on — it may only move a schema", got, want)
+	}
+}
+
+// A rebuild carries the context gate the set was built under: a door that moves something else —
+// here the seat-choice gate — must not drop `context`, since the key is not live-editable and
+// nothing else would ever put it back.
+func TestRegistryWithMCPRebuildCarriesTheSubAgentsContextGate(t *testing.T) {
+	t.Parallel()
+
+	workspace, cfg := t.TempDir(), validCfg(t)
+	build := func(spec toolSetSpec) *apogee.ToolRegistry {
+		return registryWithMCP(workspace, cfg, spec.seatChoice, spec.subAgentContext, spec.offersBackground, nil)
+	}
+	spec := toolSetSpec{subAgentContext: true}
+	live := newLiveTools(build(spec), spec, build)
+	spy := &applySettingSpy{}
+
+	if err := live.setSeatChoice(true, spy); err != nil {
+		t.Fatalf("setSeatChoice: %v", err)
+	}
+
+	if len(spy.swaps) != 1 {
+		t.Fatalf("swaps = %d, want the one rebuild", len(spy.swaps))
+	}
+	if !contextOffered(t, spy.swaps[0]) {
+		t.Error("the rebuild dropped context; the set must carry the gate it was built under")
 	}
 }
 
@@ -320,7 +388,7 @@ func (stubHostAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, 
 // leaves every tool name identical while the user's policy quietly stops applying.
 //
 // So the pin is field-by-field rather than by name, on the Config THIS composition root builds
-// (validCfg) with seat choice on: with every field the composer reads set to something non-zero,
+// (validCfg) with every gate on: with every field the composer reads set to something non-zero,
 // EVERY field of the struct it returns must come back non-zero, and every mount of its ReadMounts.
 // TestHostToolsOfFillsEveryHostField (internal/tools) is the same pin on the composer's own side.
 func TestHostToolsForFillsEveryHostField(t *testing.T) {
@@ -342,7 +410,7 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	cfg.ReadMounts.Scratch = func() string { return t.TempDir() }
 	cfg.ReadMounts.Virtual = func() map[string]fs.FS { return nil }
 
-	composed := tools.HostToolsOf(cfg, true, true)
+	composed := tools.HostToolsOf(cfg, true, true, true)
 	if composed.SecretEnv != cfg.SecretEnv {
 		t.Error("HostToolsOf handed the execution tools a different SecretEnv than the Config's — " +
 			"a mid-session widening of the Config's holder would never reach them")
@@ -401,8 +469,8 @@ func backgroundRosterCfg(t *testing.T) apogee.Config {
 func TestRegistryWithMCPCarriesTheBackgroundOptIn(t *testing.T) {
 	t.Parallel()
 
-	firing := registryWithMCP(t.TempDir(), backgroundRosterCfg(t), false, false, nil)
-	live := registryWithMCP(t.TempDir(), backgroundRosterCfg(t), false, true, nil)
+	firing := registryWithMCP(t.TempDir(), backgroundRosterCfg(t), false, false, false, nil)
+	live := registryWithMCP(t.TempDir(), backgroundRosterCfg(t), false, false, true, nil)
 
 	if background, workflow := backgroundPairOffered(t, firing); background || workflow {
 		t.Errorf("without the opt-in: background %v, workflow %v — want neither, whatever the roster says", background, workflow)
@@ -422,7 +490,7 @@ func TestRegistryWithMCPRebuildCarriesTheBackgroundOptIn(t *testing.T) {
 
 	workspace, cfg := t.TempDir(), backgroundRosterCfg(t)
 	build := func(spec toolSetSpec) *apogee.ToolRegistry {
-		return registryWithMCP(workspace, cfg, spec.seatChoice, spec.offersBackground, nil)
+		return registryWithMCP(workspace, cfg, spec.seatChoice, spec.subAgentContext, spec.offersBackground, nil)
 	}
 	spec := toolSetSpec{offersBackground: true}
 	live := newLiveTools(build(spec), spec, build)
