@@ -1,10 +1,12 @@
 ---
 title: "Reactions have no session-start notice for run: entries"
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-10-19 - 00 - session-started-reactions-plan.md
 created: 2026-10-19T16:54:07Z
+closed: 2026-10-19T19:01:25Z
+reason: "Resolved by the session-started-reactions plan (2026-10-19 - 00 - session-started-reactions-plan.md, archived at bcce1b5d): run: entries fire on session-started at every session boundary, documented in docs/manual/reactions.md. Known edge gaps follow in session-window-stays-open, session-window-wake-test and session-advise-timeout-replay."
 ---
 
 None of the eleven Reaction notices fires when a session starts, so a `run:` entry cannot do per-session setup or bookkeeping (log the session, sync a register, warm a cache) the way a Claude Code `SessionStart` hook can. The vocabulary ends at turn, exchange, file, approval, error and seam-closing notices.
