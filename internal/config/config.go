@@ -2189,6 +2189,7 @@ func ValidateServers(servers []ServerEntry) error {
 		}
 		if idle := s.StreamIdleTimeout; idle != "" {
 			if strings.TrimSpace(idle) == "" {
+				//nolint:staticcheck // ST1005: ends with the stream-idle-timeout: key's own colon by design.
 				return fmt.Errorf("apogee: servers: entry %d (%q): stream-idle-timeout: is only whitespace — "+
 					"give how long a reply from this server may sit silent, like 10m or 30s, or 0 to wait for "+
 					"as long as it takes; or remove the key to take the top-level stream-idle-timeout:",
