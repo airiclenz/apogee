@@ -1,10 +1,12 @@
 ---
 title: A timed-out session-start advise run replays after an aborted Exchange
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-19T18:51:04Z
+closed: 2026-10-21T12:34:38Z
+reason: A run reported at a join is dropped there, never replayed after an abort (item 1); resolved by plan 2026-10-21 - 00 - user-session-advice-plan (archived at 51b3a10d)
 ---
 
 The session-start advise lane's join (`joinSessionAdvice`, `internal/agent/sessionadvise.go:212`) reports a run that missed its deadline (`internal/agent/sessionadvise.go:267`) and still takes it into `delivered` (`take`, `internal/agent/sessionadvise.go:89`). When that Exchange aborts, `restoreDelivered` (`internal/agent/sessionadvise.go:98`) puts the run back ahead of `pending`, so the next opening joins it again: it reports the same timeout a second time, or, when the handler has finished in the meantime, attaches its late answer to the next prompt.

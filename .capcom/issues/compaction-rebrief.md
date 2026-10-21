@@ -1,10 +1,12 @@
 ---
 title: No Reaction can re-brief the model after a Compaction
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-21T08:27:54Z
+closed: 2026-10-21T12:34:38Z
+reason: "compaction-finished notice, run:/advise: slot and stale-span strip shipped (items 8-14); resolved by plan 2026-10-21 - 00 - user-session-advice-plan (archived at 51b3a10d)"
 ---
 
 After a Compaction the model loses whatever a session-start briefing told it, or keeps a stale copy in the protected first user message. Claude Code re-runs SessionStart hooks after compaction; apogee fires no Moment at a fold, so no Reaction can re-brief the model (e.g. `capcom prime`).

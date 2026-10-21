@@ -21,3 +21,4 @@ Wanted: an `advise:` entry (command or webhook) on `session-started` whose outpu
 ## Log
 
 - 2026-10-19 Airic Lenz: Plan 2026-10-19 - 00 - session-started-reactions-plan builds the slot and lane for engine-origin Go handlers only. Left to this issue's enable step: the user key's D8 workspace exec fence + redaction on argv/webhook handlers, session-start spans shown in the /advice pane (internal/tui advicepane foldAdvice), and an adopted repo advise entry starting at once when adopted before the first prompt.
+- 2026-10-21 Airic Lenz: User/adopted advise: on session-started shipped by plan 2026-10-21 - 00 - user-session-advice-plan (archived at 51b3a10d), items 3-7, 13-14; left open: deferred item-6 gap (SetReactions after Close starts a run nothing ends) tracked as advise-run-after-close.

@@ -1,10 +1,12 @@
 ---
 title: apogee-sim admission arm for the session-start advise slot
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-19T17:02:11Z
+closed: 2026-10-21T12:34:38Z
+reason: Retired as a gate by adr-0076-amend-1021; resolved by plan 2026-10-21 - 00 - user-session-advice-plan (archived at 51b3a10d)
 ---
 
 ADR 0076 D5 shipped the user advise cell only after an admission arm proved its injection path (slot, fence, cap) is not itself a regression. Session-start advice uses a different path: a fenced block inside the session's next user message, ahead of the prompt (ADR 0076 amendment 2026-10-19). That path is unproven, so the user `advise:` key on `session-started` stays refused until it is measured.
