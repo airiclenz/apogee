@@ -136,7 +136,13 @@ cmd/apogee/e2e_reactions_test.go — TestE2EAdviseLandsAsTheTrailer, TestE2EAdvi
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/run/` and `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EAdvise|ProbeContext' ./cmd/apogee/`
 **Commit:** `feat(run): Firings arm user reactions before the session-started boundary`
 
-## 6. An advise entry armed before the first prompt starts for this session
+## 6. An advise entry armed before the first prompt starts for this session — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): the window's `armed` became `admit`, which runs the caller's fire callback under the window's lock, so a first user message shutting the window concurrently waits until a live-armed advise run is pending — the opening's Step shuts the window before its join reads the lane, so such a run can never slip past the first opening to the second. The window also records the boundary's Turn index, which a live-armed run is started under (the settings goroutine never reads `turns.index`).
+
+NOTES (2026-10-21): `sessionAdviseLane` now holds its context beside its cancel: `replace(runs)` returns the context the boundary's runs run under, and the new `extend(runs)` appends live-armed runs and installs a context and cancel when the boundary started none. `startSessionAdvice` was split into `sessionAdviseSpecs` / `newSessionAdviseRuns` / `launchSessionAdvice`, shared with the new `extendSessionAdvice`, and now returns the ids it started; `announceSessionStart` takes `swapMu` around the advise start too, so the window is seeded with both lanes' ids.
+
+NOTES (2026-10-21): the cmd twin needed its own builder (`newSessionAdviseReload`) beside `newSessionStartedReload`: the advise lane needs a stub upstream to step against, the Agent rooted in the Project's workspace (scopeSync) and confinement off so the entry's command runs on any host.
 
 **What:**
 Depends on items 2 and 4.

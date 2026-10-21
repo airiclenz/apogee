@@ -640,3 +640,181 @@ func TestSessionAdvise_ABoundaryOverABlockedHandlerReturnsAtOnce(t *testing.T) {
 		t.Fatal("a boundary waited on a blocked session-start handler")
 	}
 }
+
+// An advise entry a live swap arms inside the boundary's pre-first-prompt window (sessionWindow)
+// starts for that session and is joined at its first opening, exactly as the boundary's own runs
+// are; armed after the first prompt it waits for the next boundary, and an entry that already ran
+// at the boundary never runs twice — with or without an observe Runner.
+
+// liveAdviceEntry is a user `advise:` entry on session-started whose command prints
+// sessionAdviceText, the shape a repo entry adopted, or a global one added, arms on the live lane.
+func liveAdviceEntry(id string) domain.Reaction {
+	return userAdvise(id, sessionStarted, "/bin/sh", "-c", `printf '%s\n' "`+sessionAdviceText+`"`)
+}
+
+// liveAdviceAgent constructs a top-level Agent through New over responder with no reaction armed —
+// holding a recording observe Runner when withRunner is set — so construction opens its window over
+// empty lanes.
+func liveAdviceAgent(t *testing.T, sink *recordingSink, responder *scriptedUpstream, withRunner bool) *Agent {
+	t.Helper()
+	cfg := baseConfig(sink)
+	if withRunner {
+		cfg.ObserveRunner = &startRecordingRunner{}
+	}
+	return sessionAdviseAgent(t, cfg, responder)
+}
+
+// armSync swaps a's sync lane to list through SetReactions, every other field of the generation
+// kept — what a settings reload hands the Agent.
+func armSync(t *testing.T, a *Agent, list ...domain.Reaction) {
+	t.Helper()
+	gen := a.Generation()
+	gen.Sync = list
+	if err := a.SetReactions(gen); err != nil {
+		t.Fatalf("SetReactions: %v", err)
+	}
+}
+
+// TestSessionWindow_AnAdviseEntryArmedBeforeTheFirstPromptIsFencedAtTheOpening — the entry armed
+// after construction and before the first prompt rides fenced ahead of that prompt, booked once,
+// whether or not the Agent holds an observe Runner.
+func TestSessionWindow_AnAdviseEntryArmedBeforeTheFirstPromptIsFencedAtTheOpening(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		withRunner bool
+	}{
+		{name: "with an observe Runner", withRunner: true},
+		{name: "without an observe Runner", withRunner: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			responder := echoResponder(t, "ok")
+			a := liveAdviceAgent(t, sink, responder, tc.withRunner)
+
+			armSync(t, a, liveAdviceEntry("ci"))
+			runExchange(t, a, "first prompt")
+
+			first := lastUserContent(t, responder.requests()[0])
+			if !strings.HasPrefix(first, userFenceFor("ci")) || strings.Count(first, userFenceFor("ci")) != 1 ||
+				!strings.Contains(first, sessionAdviceText) || !strings.HasSuffix(first, "\n\nfirst prompt") {
+				t.Errorf("first user message = %q, want the live-armed advice fenced once ahead of the prompt", first)
+			}
+			if fired := sessionAdviseFirings(sink, "ci"); len(fired) != 1 {
+				t.Errorf("booked %d firings for the live-armed entry, want 1: %+v", len(fired), fired)
+			}
+		})
+	}
+}
+
+// TestSessionWindow_AnAdviseEntryArmedAfterTheFirstPromptWaitsForTheNextBoundary — once the session
+// has sent its first user message, a newly armed entry starts nothing for it: the second prompt goes
+// out bare, and the clear that follows runs the entry as its own boundary's.
+func TestSessionWindow_AnAdviseEntryArmedAfterTheFirstPromptWaitsForTheNextBoundary(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	responder := echoResponder(t, "ok")
+	a := liveAdviceAgent(t, &recordingSink{}, responder, true)
+
+	runExchange(t, a, "first prompt")
+	armSync(t, a, liveAdviceEntry("ci"))
+	runExchange(t, a, "second prompt")
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+	runExchange(t, a, "third prompt")
+
+	requests := responder.requests()
+	if len(requests) != 3 {
+		t.Fatalf("upstream saw %d requests, want 3", len(requests))
+	}
+	if second := lastUserContent(t, requests[1]); second != "second prompt" {
+		t.Errorf("second user message = %q, want the bare prompt — an entry armed after the first prompt waits", second)
+	}
+	if third := lastUserContent(t, requests[2]); strings.Count(third, userFenceFor("ci")) != 1 {
+		t.Errorf("third user message = %q, want the clear's own run fenced once", third)
+	}
+}
+
+// TestSessionWindow_ReArmingAnAdviseEntryStartsNothing — "newly armed" is read against the
+// boundary's fired-id set: an unchanged reload, and the entry removed and added back, start no
+// second run, so the opening carries one fence and one firing.
+func TestSessionWindow_ReArmingAnAdviseEntryStartsNothing(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	responder := echoResponder(t, "ok")
+	a := liveAdviceAgent(t, sink, responder, true)
+
+	armSync(t, a, liveAdviceEntry("ci"))
+	armSync(t, a, liveAdviceEntry("ci"))
+	armSync(t, a)
+	armSync(t, a, liveAdviceEntry("ci"))
+	runExchange(t, a, "first prompt")
+
+	if got := strings.Count(lastUserContent(t, responder.requests()[0]), userFenceFor("ci")); got != 1 {
+		t.Errorf("the opening carries %d fences for the re-armed entry, want 1", got)
+	}
+	if fired := sessionAdviseFirings(sink, "ci"); len(fired) != 1 {
+		t.Errorf("booked %d firings for the re-armed entry, want 1: %+v", len(fired), fired)
+	}
+}
+
+// TestSessionWindow_AnAdviseEntryArmedAtTheBoundaryRunsOnce — the regression guard: an entry the
+// generation armed before a deferred announcement (lateEngine.Bind's replay) is started by the
+// boundary itself, and an unchanged SetReactions before the first prompt — a `/settings` toggle —
+// starts no second run.
+func TestSessionWindow_AnAdviseEntryArmedAtTheBoundaryRunsOnce(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	responder := echoResponder(t, "ok")
+	cfg := baseConfig(sink)
+	cfg.ObserveRunner = &startRecordingRunner{}
+	cfg.DeferSessionStart = true
+	a := sessionAdviseAgent(t, cfg, responder)
+
+	armSync(t, a, liveAdviceEntry("ci"))
+	a.AnnounceSessionStart()
+	armSync(t, a, liveAdviceEntry("ci"))
+	runExchange(t, a, "first prompt")
+
+	if got := strings.Count(lastUserContent(t, responder.requests()[0]), userFenceFor("ci")); got != 1 {
+		t.Errorf("the opening carries %d fences for the entry armed at the boundary, want 1", got)
+	}
+	if fired := sessionAdviseFirings(sink, "ci"); len(fired) != 1 {
+		t.Errorf("booked %d firings for the entry armed at the boundary, want 1: %+v", len(fired), fired)
+	}
+}
+
+// TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary — a run a live swap started on a boundary that
+// started none of its own is still ended by the next boundary: the lane installed a cancel for it.
+// The engine-origin Go handler is armed through installGeneration, as advise_test.go does, because
+// the live lane refuses that shape at SetReactions.
+func TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary(t *testing.T) {
+	t.Parallel()
+
+	probe, started, ended := blockedUntilCancel()
+	a := liveAdviceAgent(t, &recordingSink{}, echoResponder(t, "ok"), false)
+	gen := a.Generation()
+	gen.Sync = []domain.Reaction{probe.reaction("ci", time.Hour)}
+	a.installGeneration(gen)
+	a.fireNewlyArmed()
+	<-started
+
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
+	select {
+	case <-ended:
+	case <-time.After(testtime.Budget(10 * time.Second)):
+		t.Fatal("the live-armed run was not cancelled by the clear")
+	}
+}

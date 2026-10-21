@@ -29,6 +29,7 @@ import (
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -4331,6 +4332,87 @@ func TestSessionStartedAdoptedBeforeTheFirstPromptFiresForTheSession(t *testing.
 	}
 	if got := fired[0]; got.Reaction != "primer" || got.Event != domain.MomentSessionStarted || got.Start != domain.SessionStartNew {
 		t.Errorf("fired %q/%q with start %q, want primer/session-started/new", got.Reaction, got.Event, got.Start)
+	}
+}
+
+// projectSessionAdviseYAML is a Project config proposing one session-started advise reaction, whose
+// command prints projectAdviceText.
+const (
+	projectAdviceText        = "the repo brief"
+	projectSessionAdviseYAML = "reactions:\n  - id: brief\n    on: [session-started]\n    advise: [sh, -c, 'echo " +
+		projectAdviceText + "']\n"
+)
+
+// newSessionAdviseReload is newSessionStartedReload's advise-lane twin: a live session whose Project
+// config proposes projectSessionAdviseYAML, not yet adopted, bound over upstream and a Runner with
+// nothing armed. The Agent is rooted in the Project's workspace, where the adopted entry is active,
+// and runs unconfined, so the entry's command runs on any host.
+func newSessionAdviseReload(t *testing.T, upstream *stubllm.Server) sessionStartedReload {
+	t.Helper()
+	home, workspace := t.TempDir(), t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "")
+	projectRoot := projectroot.Resolve(workspace, "")
+	projectPath := projectConfigWatchPath(config.Options{ConfigDir: home, Workspace: workspace}, projectRoot)
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
+		t.Fatalf("create the project's .apogee: %v", err)
+	}
+	writeSettingsFixture(t, projectPath, projectSessionAdviseYAML)
+
+	runner, err := reactions.New(nil, reactions.Options{Workspace: workspace, Exec: &sessionStartedExec{}})
+	if err != nil {
+		t.Fatalf("reactions.New: %v", err)
+	}
+	t.Cleanup(func() { _ = runner.Close(context.Background()) })
+	engine := newLateEngine(domain.ModeAskBefore, false)
+	t.Cleanup(func() { _ = engine.Close() })
+	if err := engine.Bind(func() (*apogee.Agent, error) {
+		cfg := validCfg(t)
+		cfg.Endpoint, cfg.Model, cfg.WorkspaceDir = upstream.URL, upstream.Model, workspace
+		cfg.ObserveRunner, cfg.DeferSessionStart = runner, true
+		return apogee.New(cfg)
+	}); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	applier := fakeApplier(t)
+	applier.engine = engine
+	applier.configPath = path
+	applier.roots.project = projectRoot
+	applier.secretEnv = apogee.NewSecretEnv(nil)
+	return sessionStartedReload{applier: applier, engine: engine, runner: runner, path: path, projectRoot: projectRoot}
+}
+
+// A repo session-started ADVISE entry adopted before the session's first prompt starts for the
+// session it joined and rides fenced ahead of that prompt — the advise-lane twin of
+// TestSessionStartedAdoptedBeforeTheFirstPromptFiresForTheSession, a lane the Agent runs itself
+// rather than the Runner. A second reload of the unchanged lanes starts no second run, so the
+// opening carries the fence once.
+func TestSessionStartedAdviseAdoptedBeforeTheFirstPromptBriefsTheSession(t *testing.T) {
+	t.Parallel()
+	upstream := stubllm.New(t, loadScript(t, "hooks"))
+	s := newSessionAdviseReload(t, upstream)
+
+	s.adoptAndReload(t)
+	if err := s.applier.reloadReactions(); err != nil {
+		t.Fatalf("reloadReactions (unchanged): %v", err)
+	}
+	if err := s.engine.Submit(apogee.UserInput{Text: hooksPrompt}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := s.engine.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	opening := openingHandedOn(t, upstream, 0)
+	fence := domain.AdviceFencePrefix + "brief (user origin) at " + string(domain.MomentSessionStarted)
+	if got := strings.Count(opening, fence); got != 1 {
+		t.Errorf("the first request's opening carries the adopted entry's fence %d time(s), want once:\n%s", got, opening)
+	}
+	if !strings.HasPrefix(opening, fence) || !strings.Contains(opening, projectAdviceText) ||
+		!strings.HasSuffix(opening, hooksPrompt) {
+		t.Errorf("the first request's opening is\n%q\nwant the adopted entry's advice fenced ahead of the prompt %q",
+			opening, hooksPrompt)
 	}
 }
 

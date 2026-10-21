@@ -681,31 +681,32 @@ func (a *Agent) announceConstruction() {
 	a.AnnounceSessionStart()
 }
 
-// announceSessionStart hands one Session boundary's session-started notice to the observe Runner
-// (Config.ObserveRunner.SessionStarted), exactly once per boundary: each boundary's own call site
-// makes this one call. Only the top-level Agent announces — a delegate starts no session — and an
-// Agent holding no Runner has no one to tell. Before the Runner is told, the boundary starts its
-// session-start advise runs in the background (startSessionAdvice, sessionadvise.go) — with or
-// without a Runner, since that lane is the engine's own.
+// announceSessionStart is one Session boundary's announcement, made exactly once per boundary: each
+// boundary's own call site makes this one call. Only the top-level Agent announces — a delegate
+// starts no session. It starts the boundary's session-start advise runs in the background
+// (startSessionAdvice, sessionadvise.go) and hands the session-started notice to the observe
+// Runner (Config.ObserveRunner.SessionStarted) when the Agent holds one; the advise lane is the
+// engine's own, so it starts with or without a Runner.
 //
-// It also opens the boundary's pre-first-prompt window (sessionWindow) over the observe list the
-// Runner holds, so an entry a later live swap arms before the first user message fires once for
-// this session (fireNewlyArmed). It holds swapMu across the two, so a swap is wholly before the
-// announcement — and fired by it — or wholly after, and read against its fired-id set.
+// It also opens the boundary's pre-first-prompt window (sessionWindow) over both lanes — the advise
+// runs it started and the session-started entries of the observe list the Runner holds — so an
+// entry a later live swap arms before the first user message runs once for this session
+// (fireNewlyArmed), and one the boundary already ran never runs again. It holds swapMu across all
+// of it, so a swap is wholly before the announcement — and run by it — or wholly after, and read
+// against its fired-id set.
 func (a *Agent) announceSessionStart(start domain.SessionStart) {
 	if a.isDelegate() {
 		return
 	}
-	a.startSessionAdvice(start) // background-only: the boundary never waits on an advise handler
-	runner := a.cfg.ObserveRunner
-	if runner == nil {
-		return
-	}
 	a.swapMu.Lock()
 	defer a.swapMu.Unlock()
+	turn := a.turns.index
+	fired := a.startSessionAdvice(start, turn) // background-only: the boundary never waits on an advise handler
 	a.genMu.RLock()
-	list := a.gen.Observe
+	fired = append(fired, sessionStartedIDs(a.gen.Observe)...)
 	a.genMu.RUnlock()
-	a.window.opened(start, list)
-	runner.SessionStarted(start)
+	a.window.opened(start, turn, fired)
+	if runner := a.cfg.ObserveRunner; runner != nil {
+		runner.SessionStarted(start)
+	}
 }

@@ -34,11 +34,14 @@ import (
 
 // sessionAdviseLane is one Session boundary's background advise runs: the ones still waiting for
 // the session's next opening, and the ones taken into the open Exchange. The zero value is an
-// empty lane. mu guards it: a boundary starts runs from the Driver's goroutine, the join takes them
-// on the loop goroutine, and Close cancels from wherever it is called.
+// empty lane. mu guards it: a boundary starts runs from the Driver's goroutine, a live swap adds
+// the ones it arms inside the boundary's pre-first-prompt window from the settings surface's, the
+// join takes them on the loop goroutine, and Close cancels from wherever it is called.
 type sessionAdviseLane struct {
 	mu sync.Mutex
-	// cancel ends the current boundary's runs: the next boundary and Close call it.
+	// ctx is what the current boundary's runs run under, and cancel ends it: the next boundary and
+	// Close call it. Both are nil while the boundary has started no run.
+	ctx    context.Context
 	cancel context.CancelFunc
 	// pending is the runs no opening has taken yet, in ladder order.
 	pending []*sessionAdviseRun
@@ -63,20 +66,39 @@ type sessionAdviseRun struct {
 	panicked any
 }
 
-// replace installs a boundary's runs and the cancel that ends them, cancelling the previous
-// boundary's first: its unattached results are discarded with it.
-func (l *sessionAdviseLane) replace(cancel context.CancelFunc, runs []*sessionAdviseRun) {
+// replace installs a boundary's runs, cancelling the previous boundary's first: its unattached
+// results are discarded with it. It returns the context the runs must run under, which the next
+// boundary or Close cancels — nil when runs is empty, since the boundary then holds no cancel.
+func (l *sessionAdviseLane) replace(runs []*sessionAdviseRun) context.Context {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.cancel != nil {
 		l.cancel()
 	}
-	l.cancel, l.pending, l.delivered = cancel, runs, nil
+	l.ctx, l.cancel, l.pending, l.delivered = nil, nil, runs, nil
+	if len(runs) > 0 {
+		l.ctx, l.cancel = context.WithCancel(context.Background())
+	}
+	return l.ctx
+}
+
+// extend adds runs a live swap armed after the boundary to the boundary's pending runs, behind the
+// ones already there, and returns the context they must run under: the boundary's own, or — when
+// the boundary started none — a fresh one whose cancel the lane now holds, so the next boundary or
+// Close ends them exactly as it ends the boundary's own.
+func (l *sessionAdviseLane) extend(runs []*sessionAdviseRun) context.Context {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.cancel == nil {
+		l.ctx, l.cancel = context.WithCancel(context.Background())
+	}
+	l.pending = append(l.pending, runs...)
+	return l.ctx
 }
 
 // stop cancels the current boundary's runs and discards them — the agent's shutdown.
 func (l *sessionAdviseLane) stop() {
-	l.replace(nil, nil)
+	l.replace(nil)
 }
 
 // waiting returns the runs no opening has taken yet.
@@ -87,8 +109,10 @@ func (l *sessionAdviseLane) waiting() []*sessionAdviseRun {
 }
 
 // take removes runs from pending, leaving any run pending gained since the read (none can: a
-// boundary refuses while an Exchange is open), and moves only answered — the runs among them the
-// join did not report — into the open Exchange. A reported run is dropped here for good.
+// boundary refuses while an Exchange is open, and a live swap adds runs only inside the
+// pre-first-prompt window, which the opening's Step shut before its join read), and moves only
+// answered — the runs among them the join did not report — into the open Exchange. A reported run
+// is dropped here for good.
 func (l *sessionAdviseLane) take(runs, answered []*sessionAdviseRun) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -116,12 +140,37 @@ func (l *sessionAdviseLane) forgetDelivered() {
 
 // startSessionAdvice is a Session boundary's share of the lane: it cancels the previous boundary's
 // runs and starts, in the background, every armed advise Reaction on session-started that Bypass
-// leaves on (D9), each under its own deadline (sessionAdviseTimeout). It returns at once whatever
-// the handlers do. A delegate starts no session and so starts no runs.
-func (a *Agent) startSessionAdvice(start domain.SessionStart) {
+// leaves on (sessionAdviseSpecs), each under its own deadline (sessionAdviseTimeout), for the
+// boundary announced with start at Turn turn. It returns at once whatever the handlers do, with
+// the ids of the entries it started — the boundary's pre-first-prompt window counts them as fired
+// (sessionWindow). A delegate starts no session and so starts no runs.
+func (a *Agent) startSessionAdvice(start domain.SessionStart, turn int) []string {
 	if a.isDelegate() {
+		return nil
+	}
+	specs := a.sessionAdviseSpecs()
+	runs := newSessionAdviseRuns(specs)
+	a.launchSessionAdvice(a.sessionAdvice.replace(runs), turn, start, runs)
+	return sessionStartedIDs(specs)
+}
+
+// extendSessionAdvice is a live swap's share of the lane: it starts, in the background, the advise
+// entries specs names — armed inside the boundary's pre-first-prompt window and not yet run at it
+// (Agent.fireNewlyArmed) — for the boundary announced with start at Turn turn, and adds them to
+// the boundary's pending runs, so the session's first opening joins them with the boundary's own.
+// Like the boundary, it returns at once whatever the handlers do.
+func (a *Agent) extendSessionAdvice(start domain.SessionStart, turn int, specs []domain.Reaction) {
+	if len(specs) == 0 {
 		return
 	}
+	runs := newSessionAdviseRuns(specs)
+	a.launchSessionAdvice(a.sessionAdvice.extend(runs), turn, start, runs)
+}
+
+// sessionAdviseSpecs returns the armed advise Reactions on session-started that Bypass leaves on
+// (D9), in ladder order: the entries a boundary starts, and the ones a live swap reads for newly
+// armed.
+func (a *Agent) sessionAdviseSpecs() []domain.Reaction {
 	var specs []domain.Reaction
 	for _, r := range a.armedLadder() {
 		if r.spec.Class == domain.ClassAdvise && subscribes(r.spec, domain.MomentSessionStarted) &&
@@ -129,26 +178,35 @@ func (a *Agent) startSessionAdvice(start domain.SessionStart) {
 			specs = append(specs, r.spec)
 		}
 	}
-	if len(specs) == 0 {
-		a.sessionAdvice.replace(nil, nil)
-		return
-	}
+	return specs
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	turn := a.turns.index
+// newSessionAdviseRuns builds one not-yet-started run per spec, its deadline counted from now.
+func newSessionAdviseRuns(specs []domain.Reaction) []*sessionAdviseRun {
 	runs := make([]*sessionAdviseRun, 0, len(specs))
 	for _, r := range specs {
 		timeout := syncTimeout(r)
-		run := &sessionAdviseRun{
+		runs = append(runs, &sessionAdviseRun{
 			spec:     r,
 			deadline: time.Now().Add(timeout),
 			timeout:  timeout,
 			done:     make(chan struct{}),
-		}
-		runs = append(runs, run)
+		})
+	}
+	return runs
+}
+
+// launchSessionAdvice starts each of runs in its own goroutine under ctx — the lane's, which the
+// next boundary or Close cancels.
+func (a *Agent) launchSessionAdvice(
+	ctx context.Context,
+	turn int,
+	start domain.SessionStart,
+	runs []*sessionAdviseRun,
+) {
+	for _, run := range runs {
 		go a.runSessionAdvice(ctx, turn, start, run)
 	}
-	a.sessionAdvice.replace(cancel, runs)
 }
 
 // runSessionAdvice is one run's goroutine: the handler called under the run's deadline, its answer

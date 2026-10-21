@@ -1656,24 +1656,30 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 }
 
 // fireNewlyArmed is SetReactions' last act: while the current boundary's pre-first-prompt window is
-// open, it fires the session-started entries the committed observe list holds that have not yet
-// fired at this boundary — and only those, through the Runner's narrowed door
-// (ObserveRunner.SessionStartedFor), with the boundary's own start. Whatever armed them — a repo
+// open, it runs the session-started entries the committed lanes hold that have not yet run at this
+// boundary — and only those, with the boundary's own start. An advise entry starts in the
+// background and joins the boundary's runs (extendSessionAdvice), so the session's first opening
+// fences its answer; an observe entry fires through the Runner's narrowed door
+// (ObserveRunner.SessionStartedFor), when the Agent holds a Runner. Whatever armed them — a repo
 // entry adopted, or a global one added, before the first prompt — they join the session they were
-// armed in. The window's fired-id set is what keeps it to once: an unchanged list, or an entry
-// removed and added back, names no id that has not fired. It is enqueue-only, as every boundary's
-// announcement is.
+// armed in. The window's fired-id set is what keeps it to once: an unchanged generation, or an
+// entry removed and added back, names no id that has not run. It is enqueue-only, as every
+// boundary's announcement is: neither lane waits on a handler here.
 func (a *Agent) fireNewlyArmed() {
-	runner := a.cfg.ObserveRunner
-	if runner == nil {
-		return
-	}
+	advise := a.sessionAdviseSpecs()
 	a.genMu.RLock()
-	list := a.gen.Observe
+	observe := sessionStartedIDs(a.gen.Observe)
 	a.genMu.RUnlock()
-	if start, ids := a.window.armed(list); len(ids) > 0 {
-		runner.SessionStartedFor(start, ids)
-	}
+	candidates := append(sessionStartedIDs(advise), observe...)
+	a.window.admit(candidates, func(start domain.SessionStart, turn int, ids []string) {
+		a.extendSessionAdvice(start, turn, slices.DeleteFunc(advise, func(r domain.Reaction) bool {
+			return !slices.Contains(ids, r.ID)
+		}))
+		fired := slices.DeleteFunc(observe, func(id string) bool { return !slices.Contains(ids, id) })
+		if runner := a.cfg.ObserveRunner; runner != nil && len(fired) > 0 {
+			runner.SessionStartedFor(start, fired)
+		}
+	})
 }
 
 // swapObserve is SetReactions' Runner half: it hands list to the observe Runner when it differs
@@ -2148,15 +2154,17 @@ func (a *Agent) MarkFork() {
 // session-started announcement to the session's first user message (Submit, or the Wake that opens
 // an Exchange without one) or, for a session restored mid-Exchange or with its input still queued,
 // to the first Step that continues it (Agent.step). A session-started entry a live swap arms inside
-// it fires for the session it joined (Agent.fireNewlyArmed); one armed after it waits for the next
+// it runs for the session it joined (Agent.fireNewlyArmed) — an advise entry fenced at the first
+// opening, an observe entry fired through the Runner; one armed after it waits for the next
 // boundary.
 //
 // fired is the boundary's fired-id set: the ids of the session-started entries the boundary's
-// announcement reached, plus every id fired since through the narrowed door. "Newly armed" is read
-// against it, never against the list the swap replaced, so removing an entry and adding it back
-// inside the window does not fire it twice. The window is per boundary: each announcement reopens
-// it with a fresh set, and the zero value — a constructed Agent before its announcement, a delegate,
-// an Agent holding no Runner — is shut.
+// announcement ran — the advise runs it started and the observe entries it reached — plus every id
+// run since through a live swap. "Newly armed" is read against it, never against the generation
+// the swap replaced, so removing an entry and adding it back inside the window does not run it
+// twice. The window is per boundary: each announcement reopens it with a fresh set, and the zero
+// value — a constructed Agent before its announcement, a delegate — is shut. It opens with or
+// without an observe Runner: the advise lane is the engine's own.
 //
 // mu guards it: the boundaries and the swaps that read it hold swapMu as well, but the first user
 // message shuts it from whatever goroutine submits.
@@ -2164,36 +2172,43 @@ type sessionWindow struct {
 	mu    sync.Mutex
 	open  bool
 	start domain.SessionStart
+	turn  int
 	fired map[string]bool
 }
 
-// opened reopens the window for a boundary announced with start, over the observe list the Runner
-// holds at that instant: every session-started entry in it is fired by the announcement itself.
-func (w *sessionWindow) opened(start domain.SessionStart, list []domain.Reaction) {
+// opened reopens the window for a boundary announced with start at Turn turn, its fired-id set
+// seeded with fired: the ids of the session-started entries the announcement itself ran, in both
+// lanes.
+func (w *sessionWindow) opened(start domain.SessionStart, turn int, fired []string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.open, w.start, w.fired = true, start, map[string]bool{}
-	for _, id := range sessionStartedIDs(list) {
+	w.open, w.start, w.turn, w.fired = true, start, turn, map[string]bool{}
+	for _, id := range fired {
 		w.fired[id] = true
 	}
 }
 
-// armed returns the boundary's start and the ids of list's session-started entries not yet fired at
-// this boundary, booking them as fired — nothing while the window is shut.
-func (w *sessionWindow) armed(list []domain.Reaction) (domain.SessionStart, []string) {
+// admit hands fire the ids among ids not yet run at this boundary, with the boundary's start and
+// Turn, booking them as fired; it calls nothing while the window is shut or when every id has run.
+// fire runs under the window's lock, so a first user message shutting the window concurrently
+// waits for it: whatever fire puts in place is there before the session's first Step, which shuts
+// the window before it joins its opening (Agent.step). fire must therefore only enqueue.
+func (w *sessionWindow) admit(ids []string, fire func(start domain.SessionStart, turn int, ids []string)) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if !w.open {
-		return "", nil
+		return
 	}
-	var ids []string
-	for _, id := range sessionStartedIDs(list) {
+	var fresh []string
+	for _, id := range ids {
 		if !w.fired[id] {
 			w.fired[id] = true
-			ids = append(ids, id)
+			fresh = append(fresh, id)
 		}
 	}
-	return w.start, ids
+	if len(fresh) > 0 {
+		fire(w.start, w.turn, fresh)
+	}
 }
 
 // shut ends the window: the session has sent its first user message, or a Step has continued a
