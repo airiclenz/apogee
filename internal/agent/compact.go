@@ -300,6 +300,11 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 	}
 	a.compacting = true
 	defer func() { a.compacting = false }()
+	// The fold's compaction-finished advise runs start as it begins, so a handler runs while the
+	// summary call does; a fold that ran hands them to the lane (announceCompactionFinished), and
+	// every other end discards them here — stopping a handed-over lane is a no-op.
+	staged := a.startCompactionAdvice(row.fold, turn)
+	defer staged.stop()
 
 	res, err := apogeectx.Compact(ctx, compactCompleter{a: a}, &a.conv, a.compactTranscriptChars())
 	if err != nil {
@@ -330,19 +335,22 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 	if row.saturates && a.historyExceedsAllocation() {
 		a.noteFoldSaturated(turn)
 	}
-	a.announceCompactionFinished(row.fold, turn)
+	a.announceCompactionFinished(row.fold, turn, staged)
 	return foldResult{end: foldEndFolded}
 }
 
 // announceCompactionFinished hands one fold that RAN to the observe Runner's fold door
 // (ObserveRunner.CompactionFinished), which fires the user's compaction-finished entries with the
-// trigger's spelling and the fold's Turn on the payload (ADR 0076, adr-0076-amend-1021b). Only the
-// top-level Agent announces: a delegate's fold reshapes a conversation no user entry is about, so
-// it fires nothing. The door is enqueue-only, so a fold never waits on a fired entry.
-func (a *Agent) announceCompactionFinished(fold domain.CompactionFold, turn int) {
+// trigger's spelling and the fold's Turn on the payload (ADR 0076, adr-0076-amend-1021b), and hands
+// the advise runs the fold staged (startCompactionAdvice) to the compaction lane, in place of an
+// earlier fold's, for the next user-role message to join (sessionadvise.go). Only the top-level
+// Agent announces: a delegate's fold reshapes a conversation no user entry is about, so it fires
+// nothing and staged none. The door is enqueue-only, so a fold never waits on a fired entry.
+func (a *Agent) announceCompactionFinished(fold domain.CompactionFold, turn int, staged *sessionAdviseLane) {
 	if a.isDelegate() {
 		return
 	}
+	a.compactionAdvice.adopt(staged)
 	if runner := a.cfg.ObserveRunner; runner != nil {
 		runner.CompactionFinished(fold, turn)
 	}

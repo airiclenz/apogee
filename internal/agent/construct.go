@@ -184,11 +184,13 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 // (turnLifecycle.closeExchange): the undo journal's closing capture (closeUndoGroup, agent.go), and
 // the workflow finish notes delivered into it are forgotten — the messages carrying them stand, so
 // they are never delivered again (an abort put them back first, exchangeAborted) — and so are the
-// session-start advise runs its opening carried (sessionAdviseLane.forgetDelivered).
+// session-start and compaction advise runs its user messages carried
+// (sessionAdviseLane.forgetDelivered).
 func (a *Agent) exchangeClosed() {
 	a.closeUndoGroup()
 	a.background.forgetDelivered()
 	a.sessionAdvice.forgetDelivered()
+	a.compactionAdvice.forgetDelivered()
 }
 
 // turnRolledBack is the Agent's half of the exchangeObserver contract for a cancelled Turn's
@@ -211,13 +213,14 @@ func (a *Agent) turnRolledBack() {
 // a TakeWorkflowNotes interjection — are held again (backgroundManager.restoreDelivered), since
 // the abort dropped every message that carried them. A note held again may let the Driver's wake
 // open an Exchange on it right after the cancel; that is intended (ADR 0089 D3): nobody read it.
-// The session-start runs its opening took that answered are put back the same way
-// (sessionAdviseLane.restoreDelivered), so the next opening carries their advice instead; a run
-// the join reported (timed out, errored, panicked) was dropped there and stays gone.
+// The session-start and compaction runs its opening or overflow bridge took that answered are put
+// back the same way (sessionAdviseLane.restoreDelivered), so the next opening carries their advice
+// instead; a run the join reported (timed out, errored, panicked) was dropped there and stays gone.
 func (a *Agent) exchangeAborted() {
 	a.retained.rollBackExchange()
 	a.background.restoreDelivered()
 	a.sessionAdvice.restoreDelivered()
+	a.compactionAdvice.restoreDelivered()
 }
 
 // seedTopLevel gives a top-level Agent the fields it owns afresh — the ones a delegate takes from

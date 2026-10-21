@@ -204,6 +204,11 @@ type Agent struct {
 	// the current Session boundary started, joined by the session's next Exchange opening.
 	sessionAdvice sessionAdviseLane
 
+	// compactionAdvice is the compaction lane (sessionadvise.go): the background advise runs the
+	// last top-level fold that ran started, joined by the next user-role message — the next
+	// Exchange's opening, or the overflow bridge of a mid-Exchange fold.
+	compactionAdvice sessionAdviseLane
+
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
 	// follow the modeMu
@@ -852,10 +857,12 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // never reaches them. Each is stopped with its finished items kept, and Close waits for them to
 // end — the ones an earlier ClearContext or RestoreSession stopped without waiting included — before
 // it closes the Consoles; a resumed session starts them again from their folders (ResumeWorkflows).
-// It also cancels the session-start advise runs the last boundary started (sessionadvise.go).
+// It also cancels the session-start advise runs the last boundary started, and the compaction
+// advise runs the last fold started (sessionadvise.go).
 func (a *Agent) Close() error {
 	if !a.isDelegate() {
 		a.sessionAdvice.stop()
+		a.compactionAdvice.stop()
 		a.stopAllBackground()
 		a.background.waitAll()
 	}
@@ -1666,7 +1673,7 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 // entry removed and added back, names no id that has not run. It is enqueue-only, as every
 // boundary's announcement is: neither lane waits on a handler here.
 func (a *Agent) fireNewlyArmed() {
-	advise := a.sessionAdviseSpecs()
+	advise := a.sessionAdviseSpecs(domain.MomentSessionStarted)
 	a.genMu.RLock()
 	observe := sessionStartedIDs(a.gen.Observe)
 	a.genMu.RUnlock()

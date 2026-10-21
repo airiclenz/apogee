@@ -54,9 +54,10 @@
 // appendToolResult (prompts/step-notice.txt, prompts/token-notice.txt). syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
 // advise or gate command is spawned through while the loop waits on it, owning the permit, the
 // class default deadline, the payload document and the failure report so the seams that call it
-// see only (stdout, err). sessionadvise.go is the session-start advise lane (ADR 0076 D6): the
-// advise runs a Session boundary starts in the background and the join that fences their answers
-// ahead of the user's text in the session's next Exchange opening. wire.go is the
+// see only (stdout, err). sessionadvise.go is the session-start and compaction advise lanes (ADR
+// 0076 D6): the advise runs a Session boundary or a fold starts in the background and the join that
+// fences their answers ahead of the next user-role message's text — the next Exchange opening, or a
+// mid-Exchange fold's overflow bridge. wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
 // the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge

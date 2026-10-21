@@ -131,7 +131,8 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		a.conv.Append(opening)
 		// The session-start advise lane joins here, at the one point a new user message enters
 		// the request: the runs the Session boundary started in the background are waited on for
-		// what is left of each deadline and fenced ahead of the user's text in this opening. The
+		// what is left of each deadline and fenced ahead of the user's text in this opening — and
+		// so does the compaction lane, with the runs a fold between Exchanges started. The
 		// runs that answered are taken into the Exchange so an abort puts them back
 		// (exchangeAborted); a run reported here — timed out, errored or panicked — is dropped
 		// here and never reported nor attached again. The wait is ctx-aware —
@@ -393,6 +394,12 @@ func (a *Agent) refold(ctx context.Context, t *turnRun) foldOutcome {
 	r := a.foldFor(ctx, t.turn, foldOverflow)
 	if r.end == foldEndCancelled {
 		return foldCancelled // leave t untouched; the caller routes the cancel
+	}
+	// A fold that ran ended the conversation on the overflow bridge: the compaction lane's advise
+	// runs, started as the fold began, are joined onto it before the request is rebuilt from it, so
+	// the retried request carries the re-brief (joinCompactionAdvice, sessionadvise.go).
+	if r.end == foldEndFolded {
+		a.joinCompactionAdvice(ctx, t.turn)
 	}
 	// Re-derive every value the request depends on from the (possibly folded) conversation.
 	// exchangeStart is re-anchored by the fold itself (compact.go). When nothing was folded the

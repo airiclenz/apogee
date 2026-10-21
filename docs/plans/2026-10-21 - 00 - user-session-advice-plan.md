@@ -234,7 +234,17 @@ internal/domain/conversation.go — Conversation.SetMessageContent; internal/dom
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Advice|Advise' ./internal/domain/`
 **Commit:** `feat(domain): strip one reaction's advice spans from a message`
 
-## 11. Compaction advice re-briefs the model after a fold
+## 11. Compaction advice re-briefs the model after a fold — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): re-derived from the assumption that startSessionAdvice's filter alone takes the Moment — the lane's runs now carry their seam document (sessionAdviseRun.doc), so launch/run/call take no SessionStart, and the compaction lane is a second sessionAdviseLane field (Agent.compactionAdvice) rather than a map keyed by Moment.
+
+NOTES (2026-10-21): a fold stages its runs on a lane of its own (startCompactionAdvice) and hands them over only after a fold that RAN (sessionAdviseLane.adopt, inside item 9's announceCompactionFinished hook); a fault, cancel or skip stops only its own staged runs, so an earlier fold's unjoined runs survive a later skipped /compact.
+
+NOTES (2026-10-21): internal/agent/reactions.go (not in the item's Files) — isAdvice admits compaction-finished, required for the goal's "booked as an advise firing" and for adviceOf to fence the answer at all.
+
+NOTES (2026-10-21): consequential edit — internal/agent/doc.go: made necessary by sessionadvise.go now holding both the session-start and the compaction lanes.
+
+NOTES (2026-10-21): the Tests land in compactadvise_test.go alone; sessionadvise_test.go needed no change (the existing session-start tests pass unchanged over the reshaped lane).
 
 **What:**
 Depends on items 4, 9 and 10.
