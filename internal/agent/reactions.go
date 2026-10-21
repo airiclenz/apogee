@@ -87,6 +87,18 @@ type advice struct {
 	text string
 }
 
+// bookedDetail is the Detail an advise firing is booked under, given the one its handler set: the
+// handler's own when it set one, else the CAPPED text the model reads — never the fence header —
+// so what apogee-sim hashes to attribute an effect is the string the fence carries. Every advise
+// slot books through it (fireLeg at the tool-result seam, attachSessionAdvice at the session-start
+// join), so the same handler's answer books byte-equal wherever it lands.
+func (adv advice) bookedDetail(detail string) string {
+	if detail != "" {
+		return detail
+	}
+	return adv.text
+}
+
 // revisioned is all the dispatcher needs of a seam payload: the working value's mutation
 // counter, read either side of every invocation. All five payloads carry one — the Request, the
 // Conversation, the ToolCallEdit, and the two pair types that forward to theirs
@@ -314,9 +326,7 @@ func (a *Agent) fireLeg(
 		// entry leaves the field empty.
 		if adv, ok := adviceOf(turn, m, r.spec, out); ok {
 			*advised = append(*advised, adv)
-			if out.Detail == "" {
-				out.Detail = adv.text
-			}
+			out.Detail = adv.bookedDetail(out.Detail)
 		}
 
 		a.bookFiring(turn, m, r, out, result, fired)

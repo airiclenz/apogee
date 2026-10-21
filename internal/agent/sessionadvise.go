@@ -261,7 +261,8 @@ func waitForRun(ctx context.Context, run *sessionAdviseRun) bool {
 }
 
 // attachSessionAdvice turns one joined run into what the Driver sees: its capped, fenced advice on
-// the opening at index opening, booked as an advise firing — or, for a run that produced nothing
+// the opening at index opening, booked as an advise firing under the same Detail a tool-result
+// firing books (advice.bookedDetail) — or, for a run that produced nothing
 // usable, the report a sync-lane failure gets (reportReaction) or the ErrorEvent a recovered panic
 // gets (recoverHook). A run still going at its deadline is a timeout. It reports whether the run
 // answered: false for a run it reported, which the join then drops.
@@ -292,6 +293,6 @@ func (a *Agent) attachSessionAdvice(turn, opening int, run *sessionAdviseRun) bo
 	}
 	var result domain.Outcome
 	var fired []string
-	a.bookFiring(turn, m, armedReaction{spec: run.spec}, domain.Outcome{Inject: adv.text, Detail: run.out.Detail}, &result, &fired)
+	a.bookFiring(turn, m, armedReaction{spec: run.spec}, domain.Outcome{Inject: adv.text, Detail: adv.bookedDetail(run.out.Detail)}, &result, &fired)
 	return true
 }

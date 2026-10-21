@@ -106,7 +106,7 @@ internal/config/reactions.go — reactionConfig.entryReactions; internal/config/
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestReaction|Validate' ./internal/domain/` and `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Reaction' ./internal/config/`; `grep -rn 'post-tool-result or file-changed' --include=*.go internal cmd` finds only `cmd/apogee/probecontext.go` (item 5's).
 **Commit:** `feat(reactions): admit advise: on session-started`
 
-## 4. A user's session-start advice is booked with its text
+## 4. A user's session-start advice is booked with its text — ✅ DONE (2026-10-21)
 
 **What:**
 Depends on items 1 and 3.
