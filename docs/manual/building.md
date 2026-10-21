@@ -4,7 +4,7 @@ Not the only way in any more — [Install](../../README.md#install) has Homebrew
 (not live yet: its first submission still awaits review in `microsoft/winget-pkgs`) and prebuilt
 archives — but it stays the shortest path to the tip of `main`.
 
-**Prerequisites:** Go 1.26.9 or later (the toolchain version pinned in `go.mod`).
+**Prerequisites:** Go 1.26.10 or later (the toolchain version pinned in `go.mod`).
 
 ```bash
 git clone https://github.com/airiclenz/apogee.git
