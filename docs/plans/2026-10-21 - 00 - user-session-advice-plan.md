@@ -277,7 +277,11 @@ internal/agent/compact_test.go — overflowTurn, overflowBody; internal/agent/au
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EAdvise' ./cmd/apogee/`
 **Commit:** `test(apogee): headless re-brief after an emergency fold`
 
-## 13. Manual: session-start and compaction advice
+## 13. Manual: session-start and compaction advice — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): the refusal quoted in the `on:` row is the current code text (`advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "turn-finished" is none of them`); the remaining stale-prose grep hits (intro line 19, the `advise:` row, configuration.md's "appended to that call's result") are each now scoped to the tool-call case beside the new session-start/fold wording.
+
+NOTES (2026-10-21): besides the plan's named sites, added the `fold` row to the notice payload table, a `compaction-finished` paragraph after the session-started one, `start`/`fold` rows plus a session-started JSON example to the seam document, and a top-level-only clause to the sub-agent inheritance paragraph in "Where an `advise:` or `gate:` command runs".
 
 **What:**
 Depends on items 3 and 11.

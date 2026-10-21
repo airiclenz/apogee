@@ -898,21 +898,27 @@ cleared or forked) and `compaction-finished` (a compaction fold ran), and the fi
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished` and
 `history-rewrite-finished`. The other two keys are the ones the loop waits on, and each takes the
 same two shapes `run:` does — an argv list, or a webhook mapping whose reply body stands where the
-command's stdout would. An `advise:` reaction — `on: [post-tool-result]`, `[file-changed]` or both,
-default `timeout:` 10s — runs after a tool call finished, and what it prints or answers (secrets
-redacted, capped at 8 KiB) is appended to that call's result inside a fence the model reads and the
-saved session never carries; it is off under `bypass:`, and a command or webhook that fails or
-answers nothing changes nothing:
+command's stdout would. An `advise:` reaction — `on:` any of `post-tool-result`, `file-changed`,
+`session-started` and `compaction-finished`, default `timeout:` 10s — is what the model reads, inside
+a fence apogee writes that the saved session never carries (secrets redacted, capped at 8 KiB). After
+a tool call it runs while the loop waits and its answer is appended to that call's result:
 `advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]` on `[file-changed]` tells the model
-which file it left unformatted. A `gate:` reaction — `on: [pre-tool-exec]` — is asked before a tool
-call runs, as an approval stage ahead of you (under `bypass:` too, default `timeout:` 5s): the
-first line it prints, or its webhook answers, is `allow`, `deny` or `ask`, the rest is its reason.
+which file it left unformatted. On `session-started` it starts in the background at the session
+boundary and its answer is fenced ahead of your next prompt; on `compaction-finished` it starts as
+a fold begins and its answer is fenced ahead of the next user-role message after the fold — your
+next prompt, or the note an emergency fold appends mid-exchange — replacing the briefing that same
+entry left before. Either message waits only for what is left of the entry's `timeout:`:
+`advise: ["capcom", "prime"]` on `[session-started, compaction-finished]` briefs every session with
+the repository's open issues and briefs it again after every fold. It is off under `bypass:`; a
+command or webhook that answers nothing changes nothing, and one that fails changes nothing but is
+reported to you. A `gate:` reaction — `on: [pre-tool-exec]` — is asked before a tool call runs,
+as an approval stage ahead of you (under `bypass:` too, default `timeout:` 5s): the first line it
+prints, or its webhook answers, is `allow`, `deny` or `ask`, the rest is its reason.
 `gate: ["check-tool-call"]` refuses the call with a `deny`, and the model reads only
 `tool call denied by reaction <id>`; an `ask` forces the approval prompt, `reaction <id> asks:
 <reason>`, which an unattended run denies; an answer that is missing, malformed, late or crashed
 counts as `ask`, and an `allow` changes nothing the mode already decided. A Moment a key cannot
-take is refused at startup by a sentence naming the key and what it does take, and `session-started`
-under `advise:` by one saying that session-start advice awaits its admission arm.
+take is refused at startup by a sentence naming the key and what it does take.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -934,6 +940,9 @@ reactions:
   - id: unformatted
     on: [file-changed]
     advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]
+  - id: prime
+    on: [session-started, compaction-finished]
+    advise: ["capcom", "prime"]
   - id: no-force-push
     on: [pre-tool-exec]
     gate: ["check-tool-call"]
