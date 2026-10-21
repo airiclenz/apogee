@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-10-21
+
 - **Fixed:** a `session-started` reaction armed by a live reload after the engine closed no longer starts an `advise:` run that nothing cancels, and no longer fires a `run:` entry: closing the engine now ends the session-started window for both lanes.
 - **Security:** the build now requires Go 1.26.10, clearing the reachable Go standard-library advisory GO-2026-6809 (`crypto/x509`) that `govulncheck` reported against Go 1.26.9.
 - **Fixed:** a session-start advise run that timed out, failed or panicked was reported again — or its late answer attached — at the next opening after the user aborted the first Exchange. A run reported at the join is now dropped there; an abort puts back only the runs that answered.
