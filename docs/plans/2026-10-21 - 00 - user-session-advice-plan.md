@@ -71,7 +71,10 @@ internal/agent/sessionadvise_test.go — TestSessionAdvise_ATimeoutAddsNothingAn
 **Closes:** session-advise-timeout-replay
 **Commit:** `fix(agent): a timed-out session-start advise run never replays after an abort`
 
-## 2. The session-started window shuts on every resumed conversation
+## 2. The session-started window shuts on every resumed conversation — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): re-derived from "the Step path" living in agent.go — both the exported Step and a top-level Run (internal/run drives Run) continue through the unexported step() in internal/agent/loop.go, so the shut sits at the top of step() rather than in Step alone; agent.go carries only the sessionWindow / Agent.window doc updates, and background.go (Wake) needed no change.
+NOTES (2026-10-21): the resume test covers both resumed shapes — a snapshot restored mid-Exchange (InExchange) and one with its input still queued (PendingInput) — as subtests; the Wake test pins existing behaviour (it passes on the base tree), the resume test fails there.
 
 **What:**
 **Goal:** A session resumed mid-Exchange that continues through `Step` shuts its pre-first-prompt window, so a `session-started` entry armed afterwards waits for the next boundary; a test pins that a `Wake` that queues held background notes shuts the window too.

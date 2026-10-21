@@ -195,8 +195,9 @@ type Agent struct {
 	forkNext atomic.Bool
 
 	// window is the current Session boundary's pre-first-prompt window (sessionWindow): opened by
-	// the boundary's session-started announcement, shut by the session's first user message, so a
-	// session-started entry a live swap arms inside it fires for the session it joined.
+	// the boundary's session-started announcement, shut by the session's first user message or its
+	// first Step, so a session-started entry a live swap arms inside it fires for the session it
+	// joined.
 	window sessionWindow
 
 	// sessionAdvice is the session-start advise lane (sessionadvise.go): the background advise runs
@@ -2145,8 +2146,10 @@ func (a *Agent) MarkFork() {
 
 // sessionWindow is one Session boundary's PRE-FIRST-PROMPT window: the span from the boundary's
 // session-started announcement to the session's first user message (Submit, or the Wake that opens
-// an Exchange without one). A session-started entry a live swap arms inside it fires for the
-// session it joined (Agent.fireNewlyArmed); one armed after it waits for the next boundary.
+// an Exchange without one) or, for a session restored mid-Exchange or with its input still queued,
+// to the first Step that continues it (Agent.step). A session-started entry a live swap arms inside
+// it fires for the session it joined (Agent.fireNewlyArmed); one armed after it waits for the next
+// boundary.
 //
 // fired is the boundary's fired-id set: the ids of the session-started entries the boundary's
 // announcement reached, plus every id fired since through the narrowed door. "Newly armed" is read
@@ -2193,7 +2196,8 @@ func (w *sessionWindow) armed(list []domain.Reaction) (domain.SessionStart, []st
 	return w.start, ids
 }
 
-// shut ends the window: the session has sent its first user message.
+// shut ends the window: the session has sent its first user message, or a Step has continued a
+// restored one.
 func (w *sessionWindow) shut() {
 	w.mu.Lock()
 	defer w.mu.Unlock()

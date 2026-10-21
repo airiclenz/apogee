@@ -359,3 +359,65 @@ func TestSessionStartedResumeAfterRefusedForkRestore(t *testing.T) {
 		t.Errorf("announced %v, want the refused fork to announce nothing and the resume after it %v", got, want)
 	}
 }
+
+// TestSessionWindow_AResumedSessionThatStepsShutsItsWindow — a session restored mid-Exchange, or with
+// its input still queued, continues through Step with no Submit and no Wake; that Step shuts its
+// pre-first-prompt window, so an entry a later live swap arms waits for the next boundary rather
+// than firing for a session already past its first prompt.
+func TestSessionWindow_AResumedSessionThatStepsShutsItsWindow(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		state agentState
+	}{
+		{"mid-Exchange", agentState{
+			Conversation: domain.NewConversation([]domain.Message{{Role: domain.RoleUser, Content: "hello"}}),
+			TurnIndex:    1,
+			InExchange:   true,
+		}},
+		{"input still queued", agentState{
+			Conversation: domain.NewConversation(nil),
+			PendingInput: &domain.UserInput{Text: "hello"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, runner := windowAgent(t)
+			if err := a.RestoreSession(cutFixtureSession(t, tc.state)); err != nil {
+				t.Fatalf("RestoreSession: %v", err)
+			}
+			if _, err := a.Step(context.Background()); err != nil {
+				t.Fatalf("Step: %v", err)
+			}
+
+			armObserve(t, a, sessionStartedEntry("primer", true))
+
+			if got, want := runner.recorded(), []domain.SessionStart{domain.SessionStartNew, domain.SessionStartResume}; !slices.Equal(got, want) {
+				t.Errorf("boundary announcements = %v, want %v", got, want)
+			}
+			if got := runner.armedCalls(); len(got) != 0 {
+				t.Errorf("an entry armed after the resumed session stepped fired %+v; want nothing until the next boundary", got)
+			}
+		})
+	}
+}
+
+// TestSessionWindow_AWakeThatQueuesHeldNotesShutsTheWindow — a Wake that queues the held background
+// notes opens an Exchange without a typed prompt, and that ends the pre-first-prompt window as a
+// Submit would: an entry a later live swap arms does not fire for the current session.
+func TestSessionWindow_AWakeThatQueuesHeldNotesShutsTheWindow(t *testing.T) {
+	t.Parallel()
+
+	a, runner := windowAgent(t)
+	a.background.hold("a background workflow finished")
+	if woke, err := a.Wake(context.Background()); err != nil || !woke {
+		t.Fatalf("Wake = %v, %v; want it to queue the held note", woke, err)
+	}
+
+	armObserve(t, a, sessionStartedEntry("primer", false))
+
+	if got := runner.armedCalls(); len(got) != 0 {
+		t.Errorf("an entry armed after the Wake fired %+v; want nothing until the next boundary", got)
+	}
+}
