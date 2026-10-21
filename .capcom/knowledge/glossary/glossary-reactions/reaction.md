@@ -51,15 +51,18 @@ its pinned project files re-checked before every spawn — ADR 0104) —
 `{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv | {url, …}>, gate: <argv | {url, …}>, workspace?, timeout?, enabled?}` —
 resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**
 class, fired by the async lane (`internal/reactions`' own runner) on notices; `advise:` at
-**advise** class, fired by the agent's sync lane at `post-tool-result` or `file-changed` (the latter
-narrowing it to a successful write-tool call), its stdout — or its webhook's reply body —
-secret-redacted (`tools.RedactSecrets`), capped and fenced as the trailer — one **Advice span**; and
+**advise** class, fired at four Moments — by the agent's sync lane at `post-tool-result` or
+`file-changed` (the latter narrowing it to a successful write-tool call), and in the background
+from a **Session boundary** at `session-started` or from a **Compaction** fold at
+`compaction-finished` — its stdout — or its webhook's reply body — secret-redacted
+(`tools.RedactSecrets`), capped and fenced as the trailer on the call's result, or ahead of the next
+user-role message's text at the two notices — one **Advice span**; and
 `gate:` at **gate** class, fired by the sync lane at `pre-tool-exec` only, as the **Gate stage**,
 its stdout's or reply body's first line the verdict. Every action key takes the same two shapes —
 an argv list or a webhook mapping — through one loader path (`handlerFor`); a bare string or a
 mapping key outside `{url, headers, headers-env}` is refused with a sentence naming the key
 (`advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`), as is an `on:` a
-key's class cannot take (a seam under `run:`, a notice under `gate:`, any Moment but the two under
+key's class cannot take (a seam under `run:`, a notice under `gate:`, any Moment but the four under
 `advise:`), and
 `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one

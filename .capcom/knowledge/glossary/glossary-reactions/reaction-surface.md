@@ -17,7 +17,8 @@ reaction takes exactly **one cell**:
 - **observe** — no return; nothing the model sees changes. Runs after the fact, off the loop's
   path, never waited on.
 - **advise** — returns text the model sees: fenced, capped, **fail-open** (no advice is just no
-  advice), landed as a trailer on the closing tool result or at the request's tail, never in the
+  advice), landed as a trailer on the closing tool result, ahead of a user message's text
+  (`session-started`, `compaction-finished`) or at the request's tail, never in the
   system prompt, **ephemeral** on resume, every span on the **provenance ledger**.
 - **gate** — returns allow / deny / ask at `pre-tool-exec` as a stage of the **Approver**, never
   as a seam edit; deny text stays engine-authored. A script saying No is the same act as a human

@@ -21,6 +21,11 @@ results clears what it can at a Turn boundary before the estimate-driven trigger
 a model call is spent only on history that pruning could not relieve. Every trigger asks for the
 same **structured summary**, written from scratch under fixed markdown headings — Goal, Constraints &
 preferences, Progress (Done / In progress), Key decisions, Relevant files, Next steps — with an empty
-section reading `None`; nothing parses it. See
-ADR 0018.
+section reading `None`; nothing parses it. Every top-level fold that ran — estimate-driven,
+emergency or `/compact` — fires the notice **Moment** `compaction-finished` once after it replaced
+the conversation, its payload's `fold` reading `auto`, `emergency` or `manual`; a fold that faulted,
+was cancelled or folded nothing fires none, and a child agent's fold never does. An advise
+**Reaction** on it starts as the fold begins and re-briefs the model ahead of the next user-role
+message — the briefing a session-start entry gave, given again over the folded history. See
+ADR 0018 (2026-10-21 amendment) and ADR 0076.
 _Avoid_: "compression", "truncation" (Compaction is generative and summarises).

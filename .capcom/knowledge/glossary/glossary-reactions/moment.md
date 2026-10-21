@@ -12,7 +12,7 @@ sealed, and there are **thirteen** of them. Eight report a fact of their own: `e
 `session-started` (a top-level session boundary — fresh, resumed, cleared or forked),
 `compaction-finished` (a top-level **Compaction** fold ran — `auto`, `emergency` or `manual`);
 `file-changed`, `session-started` and `compaction-finished` are also Moments an advise **Reaction**
-fires at, beside `post-tool-result`. Five are the
+fires at, beside `post-tool-result` — the four an `advise:` entry takes. Five are the
 **seam-closing** notices — one per seam, spelled `<seam>-finished`: `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished`,
 `history-rewrite-finished` — each reporting that its seam's cascade ran to its end and the loop

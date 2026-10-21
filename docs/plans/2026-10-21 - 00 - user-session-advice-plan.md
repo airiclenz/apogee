@@ -295,7 +295,14 @@ cmd/apogee/docs_env_test.go — TestManualListsEveryEnvironmentOverride; cmd/apo
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Manual' ./internal/domain/`, then `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Manual' ./internal/config/`, then `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestManual' ./cmd/apogee/`; the grep above finds no stale sentence.
 **Commit:** `docs(manual): advise at session start and after a fold`
 
-## 14. Front door, other manual pages and the glossary
+## 14. Front door, other manual pages and the glossary — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): headless.md left untouched — its `reaction_fired` row is generic ("an armed Reaction, at which Moment, and what it did") and does not misstate advise firings at the new Moments, as the item's guard allows.
+
+NOTES (2026-10-21): the acceptance grep already found nothing at the start (the "pending admission" wording had left with item 13, and reaction.md spells the Moments in backticks), so the sweep used the item's wider grep; the stale sites were README's bullet and docs-table row, the manual index row, `/advice`, the probe `--live` paragraph (now says a `session-started` advise entry is the one user Reaction that rides the Turn-1 request), and reaction.md's "post-tool-result or file-changed" / "any Moment but the two" lines.
+
+NOTES (2026-10-21): reaction-surface.md's advise bullet gained the leading-fence landing (`session-started`, `compaction-finished`); its "admission arm" line is current doctrine and stayed.
+
 
 **What:**
 Depends on item 13.

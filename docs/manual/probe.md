@@ -201,8 +201,11 @@ Reactions add their directives only once a request is in flight, so an idle esti
 them: with none armed the table ends on the total row; with one or more armed the offline report
 adds a line saying so, and `--live` sends **twice** — as configured, then under Bypass — and
 prints both counts as `as configured` and `bypass` columns, with the line `Reactions add N tokens
-at Turn 1` stating their difference. On a stock install nothing is armed, so `--live` costs one
-request.
+at Turn 1` stating their difference. Of your own `advise:` entries, only one on `session-started`
+answers before Turn 1: `--live` runs it at the session boundary, as a session would, and its
+briefing rides the `as configured` request; one on `post-tool-result`, `file-changed` or
+`compaction-finished` fires later and adds nothing there. On a stock install nothing is armed, so
+`--live` costs one request.
 
 All five reports are printed with terminal control characters and bidi overrides removed: a
 server you are probing *because* you distrust it — a terminal that answers the measurement
