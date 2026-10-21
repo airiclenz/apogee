@@ -442,6 +442,10 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	cfg.Asker = nil
 	cfg.Presenter = nil
 	cfg.Events = tap
+	// The construction boundary is announced by Once, not by agent.New: the lanes below are armed
+	// first, so the session-start advise lane the announcement starts sees the Firing's own advise
+	// entries and the window it opens holds its observe lane (Agent.AnnounceSessionStart).
+	cfg.DeferSessionStart = true
 
 	a, err := agent.New(cfg)
 	if err != nil {
@@ -450,13 +454,14 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	defer func() { _ = a.Close() }()
 
 	// The two lanes the caller armed (Spec.Generation), installed through the live swap door before
-	// the first Step so a gate answers the run's very first tool call, an advise span reaches its very
-	// first tool result and the observe lane reaches the Config's ObserveRunner. It goes through the
-	// read-edit-hand-back idiom SetReactions documents rather than handing the Spec's value on: only
-	// the two lanes are taken from it, because the generation also carries the Floor enable set,
-	// Bypass and the notice switch that agent.New just seeded from the Config, and the Spec's own
-	// would put them back to their zero — every guard on, Bypass off — under a caller that had
-	// switched them.
+	// the session-started boundary is announced and before the first Step, so a `session-started`
+	// advise answer rides the run's first request, a gate answers its very first tool call, an advise
+	// span reaches its very first tool result and the observe lane reaches the Config's ObserveRunner
+	// ahead of the boundary's notice. It goes through the read-edit-hand-back idiom SetReactions
+	// documents rather than handing the Spec's value on: only the two lanes are taken from it,
+	// because the generation also carries the Floor enable set, Bypass and the notice switch that
+	// agent.New just seeded from the Config, and the Spec's own would put them back to their zero —
+	// every guard on, Bypass off — under a caller that had switched them.
 	//
 	// Two empty lanes are left alone rather than handed over, so a Firing that arms nothing makes no
 	// swap at all. The swap door validates both lanes (Agent.SetReactions) — a Firing whose lanes the
@@ -468,6 +473,8 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 			return Result{}, fmt.Errorf("apogee: arm the firing's reaction lanes: %w", err)
 		}
 	}
+	// Armed, so the session starts: a Firing refused at arming above was never announced.
+	a.AnnounceSessionStart()
 
 	// The record this run will be filed under, HELD from here to return (ADR 0022 D7's live-session
 	// hold), so `apogee undo <id>` — and any other door that asks Store.Hold first — is refused

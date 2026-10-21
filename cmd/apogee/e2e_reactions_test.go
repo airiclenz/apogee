@@ -1107,6 +1107,63 @@ func TestE2EAdviseIsOffUnderBypass(t *testing.T) {
 	}
 }
 
+// TestE2EAdviseSessionStartLeadsTheFirstRequest is the session-start slot's headless journey: an
+// `advise:` entry on `session-started` in the user's own config.yaml runs at the Firing's Session
+// boundary, and what it printed reaches the model fenced AHEAD of the prompt on the run's very
+// first request — the exact leading fence domain.RenderAdvice composes for the entry, its origin,
+// session-started and the Turn the join stamps. It holds only because the Firing arms its lanes
+// before it announces the boundary (run.Once): announced first, the lane would start over an empty
+// ladder and the first request would go out bare.
+func TestE2EAdviseSessionStartLeadsTheFirstRequest(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, _, _ := headlessHooksArgs(t, stub, gatePrompt,
+		adviseConfig(domain.MomentSessionStarted, "echo "+adviseCoachSays),
+		"--format", formatJSON)
+
+	want := domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: adviseCoachName,
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentSessionStarted,
+		Turn:     0,
+		Leading:  true,
+	}, adviseCoachText)
+	if got := openingHandedOn(t, stub, 0); !strings.HasPrefix(got, want) {
+		t.Errorf("the model's first request opened with the user message\n%q\nwant it to start "+
+			"with the leading fence\n%q", got, want)
+	}
+
+	fired := adviseFirings(t, jsonEventLines(t, stdout))
+	if want := []string{adviseCoachText}; !slices.Equal(fired, want) {
+		t.Errorf("the stream booked the advise firings %q; want %q — one firing, carrying the "+
+			"text the model read", fired, want)
+	}
+}
+
+// TestE2EAdviseSessionStartIsOffUnderBypass is the Bypass row for the session-start slot (ADR 0076
+// D9): the same entry under `--bypass` puts no fence anywhere in the first request and books no
+// firing, while the prompt still reaches the model.
+func TestE2EAdviseSessionStartIsOffUnderBypass(t *testing.T) {
+	stub := stubllm.New(t, loadScript(t, "reactions"))
+	stdout, _, _ := headlessHooksArgs(t, stub, gatePrompt,
+		adviseConfig(domain.MomentSessionStarted, "echo "+adviseCoachSays),
+		"--format", formatJSON, "--bypass")
+
+	if got := openingHandedOn(t, stub, 0); !strings.Contains(got, gatePrompt) {
+		t.Fatalf("the model's first request ended on the user message %q, which is not the run's "+
+			"prompt %q", got, gatePrompt)
+	}
+	for i, m := range stub.Requests()[0].Messages {
+		if strings.Contains(m.Content, adviceFenceMark) {
+			t.Errorf("message %d (%s) of the first request carries an advice fence; under Bypass "+
+				"the advise class is off:\n%s", i, m.Role, m.Content)
+		}
+	}
+
+	if fired := adviseFirings(t, jsonEventLines(t, stdout)); len(fired) != 0 {
+		t.Errorf("the stream booked the advise firings %q; want none under Bypass", fired)
+	}
+}
+
 // TestE2EAdviseFileChangedFiresOnTheWriteAlone is the narrowed Moment: an entry on
 // `file-changed` alone runs after a successful write and after nothing else. The script writes and
 // then reads on one prompt, so the two calls sit in one run, and what the command PRINTS is the
@@ -1173,6 +1230,25 @@ func toolResultHandedOn(t *testing.T, stub *stubllm.Server, n int) string {
 	last := messages[len(messages)-1]
 	if last.ToolCallID == "" {
 		t.Fatalf("request %d's last message is a %q message rather than a tool result: %+v",
+			n+1, last.Role, last)
+	}
+	return last.Content
+}
+
+// openingHandedOn is the user message the stub was handed as the LAST message of its request
+// number n (zero-based): on the run's first request, the Exchange's opening — where session-start
+// advice rides, ahead of the prompt.
+func openingHandedOn(t *testing.T, stub *stubllm.Server, n int) string {
+	t.Helper()
+
+	reqs := stub.Requests()
+	if len(reqs) <= n {
+		t.Fatalf("the stub answered %d requests; want at least %d", len(reqs), n+1)
+	}
+	messages := reqs[n].Messages
+	last := messages[len(messages)-1]
+	if last.Role != "user" {
+		t.Fatalf("request %d's last message is a %q message rather than the user's: %+v",
 			n+1, last.Role, last)
 	}
 	return last.Content

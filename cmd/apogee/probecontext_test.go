@@ -277,10 +277,11 @@ func TestProbeContextLiveCarriesTheCachedShare(t *testing.T) {
 // TestProbeContextLiveSendsTwiceWhenReactionsArmed asserts the Reactions delta: a config that arms
 // an advise Reaction makes --live send twice — as configured, then under Bypass on a fresh Agent —
 // and print both measured columns with the delta line, while an observe-only config sends once.
-// The two requests carry the same fixed prompt: a user's advise Reaction fires at post-tool-result
-// or file-changed, neither of which precedes Turn 1, so the wire cannot show the lane armed — the
-// count and the columns are the claim. That the lane IS armed, and on the first Agent only, is
-// read off the Agents themselves in TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly.
+// The two requests carry the same fixed prompt: the advise Reaction here fires at post-tool-result,
+// which comes after Turn 1, so the wire cannot show the lane armed — the count and the columns are
+// the claim. That the lane IS armed, and on the first Agent only, is read off the Agents themselves
+// in TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly; a session-started entry, which does
+// ride Turn 1, is TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1's.
 func TestProbeContextLiveSendsTwiceWhenReactionsArmed(t *testing.T) {
 	t.Parallel()
 	workspace := probeContextWorkspace(t)
@@ -380,6 +381,45 @@ func TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly(t *testing.T) {
 	}
 	if len(bypass.Sync) != 0 {
 		t.Errorf("the Bypass Agent's sync lane holds %d Reaction(s), want none: %+v", len(bypass.Sync), bypass.Sync)
+	}
+}
+
+// TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1 — a user's advise entry on
+// session-started is the one advise Reaction that rides the Turn-1 request, so --live measures it
+// there: the as-configured request's opening starts with the entry's leading fence, and the
+// Bypass request carries no fence at all. It holds only because measureTurn1 arms the lanes before
+// it announces the session-started boundary, as run.Once does.
+func TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1(t *testing.T) {
+	t.Parallel()
+	workspace := probeContextWorkspace(t)
+	stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 800, Completion: 1})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	appendHomeConfig(t, home,
+		"confine-to-workspace: false\n"+
+			"reactions:\n"+
+			"  - id: prime\n    on: [session-started]\n    advise: [sh, -c, 'echo primed']\n")
+
+	runProbeContext(t, home, workspace, stub.URL, "--live")
+
+	reqs := stub.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("the stub saw %d request(s); an advise config sends twice, as configured and under Bypass", len(reqs))
+	}
+	want := domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: "prime",
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentSessionStarted,
+		Turn:     0,
+		Leading:  true,
+	}, "primed\n")
+	configured := reqs[0].Messages
+	if got := configured[len(configured)-1].Content; !strings.HasPrefix(got, want) {
+		t.Errorf("the as-configured Turn-1 opening is\n%q\nwant it to start with the leading fence\n%q", got, want)
+	}
+	for i, m := range reqs[1].Messages {
+		if strings.Contains(m.Content, domain.AdviceFencePrefix) {
+			t.Errorf("message %d (%s) of the Bypass request carries an advice fence:\n%s", i, m.Role, m.Content)
+		}
 	}
 }
 

@@ -120,7 +120,9 @@ internal/agent/syncexec.go — syncTimeout, runSyncArgv; internal/agent/advise_a
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSessionAdvise' ./internal/agent/`
 **Commit:** `feat(agent): a user session-start advise reaches the model and books its text`
 
-## 5. Firings and the probe arm user reactions before the boundary
+## 5. Firings and the probe arm user reactions before the boundary — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): added TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1 (not in the item's Tests line) to prove the probe half of the Goal on the wire; reworded TestProbeContextLiveSendsTwiceWhenReactionsArmed's doc comment, which also claimed no advise precedes Turn 1.
 
 **What:**
 Depends on item 4.

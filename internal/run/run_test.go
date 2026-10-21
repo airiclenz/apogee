@@ -566,6 +566,38 @@ func TestOnceHandsTheSpecsObserveLaneToTheFiringsRunner(t *testing.T) {
 	}
 }
 
+// TestOnceArmsTheLanesBeforeTheSessionStartedBoundary pins the order a Firing keeps: the Spec's
+// lanes go through the swap door — the Runner's Replace — BEFORE the construction boundary's
+// session-started notice is announced, so the session-start advise lane the announcement starts
+// sees the Firing's own advise entries and the boundary's window holds its observe lane. A Firing
+// that announced first would start that lane over an empty ladder and its session-started advice
+// would never reach the first request.
+func TestOnceArmsTheLanesBeforeTheSessionStartedBoundary(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, finalScript("done"))
+	runner := &recordingObserveRunner{}
+	spec := planSpec(up.URL, "do the thing")
+	spec.Config.ObserveRunner = runner
+	spec.Generation = domain.Generation{Observe: []domain.Reaction{{
+		ID:      "notify",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []domain.Moment{domain.MomentSessionStarted},
+		Handler: domain.ArgvHandler{Argv: []string{"true"}},
+		Timeout: time.Second,
+	}}}
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	if want := []string{"replace", "started"}; !slices.Equal(runner.order, want) {
+		t.Errorf("the Runner saw the calls %v, want %v — the lanes armed before the boundary is announced",
+			runner.order, want)
+	}
+}
+
 // TestOnceFiresTheFiringsSessionStartedOnceWithItsSchedule — a Firing is a constructed session, so
 // the Agent Once builds announces one session-started boundary, start "new", through the Runner the
 // Config holds; the Runner stamps the Firing's Schedule on it as on every other notice. The Runner is
@@ -647,15 +679,20 @@ type recordingObserveRunner struct {
 	lists  [][]domain.Reaction
 	starts []domain.SessionStart
 	armed  [][]string
+	// order logs the two calls whose sequence a Firing promises, one word per call: "replace" for
+	// Replace, "started" for SessionStarted.
+	order []string
 }
 
 func (r *recordingObserveRunner) Replace(list []domain.Reaction) error {
 	r.lists = append(r.lists, slices.Clone(list))
+	r.order = append(r.order, "replace")
 	return nil
 }
 
 func (r *recordingObserveRunner) SessionStarted(start domain.SessionStart) {
 	r.starts = append(r.starts, start)
+	r.order = append(r.order, "started")
 }
 
 func (r *recordingObserveRunner) SessionStartedFor(start domain.SessionStart, ids []string) {

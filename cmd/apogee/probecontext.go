@@ -32,9 +32,10 @@ var errProbeContextNeedsEndpoint = errors.New(
 		"config.yaml or APOGEE_SERVER, or pass --endpoint (nothing is sent to it)")
 
 // newProbeAgent constructs the Agent an estimate or a live reading is taken off. A seam because
-// the lane measureTurn1 arms is not on the wire — a user's advise Reaction fires at
-// post-tool-result or file-changed, neither of which precedes Turn 1 — so a test proves it by
-// reading the Generation off the Agents built, and the Agent is closed before the command returns.
+// most of the lane measureTurn1 arms is not on the wire — a user's advise Reaction at
+// post-tool-result or file-changed fires after Turn 1, and only one on session-started rides the
+// Turn-1 request — so a test proves the arming by reading the Generation off the Agents built,
+// and the Agent is closed before the command returns.
 // Package-level, swapped only by a serial test (seams_guard_test.go).
 var newProbeAgent = apogee.New
 
@@ -273,11 +274,13 @@ func (r turn1Reading) column(label string) probe.ContextCostMeasured {
 // The lanes are armed as run.Once arms them (internal/run/run.go): lanes is the Generation the
 // configured list divides into (domain.LanesOf), handed whole; Generation read, Observe and Sync
 // taken from lanes, handed back through SetReactions, so the Floor enable set and Bypass agent.New
-// seeded stay as seeded; two empty lanes make no swap. The observe lane reaches no Runner here —
-// the probe builds none — so only the sync lane moves what the request carries. Under bypass the
-// lanes stay unarmed and Bypass is switched on through the same read-edit-hand-back —
-// liveSettings.setBypass's shape — so the second reading is the first with the model-shaping
-// classes off (ADR 0076 D9) and nothing else moved.
+// seeded stay as seeded; two empty lanes make no swap. They are armed BEFORE the session-started
+// boundary is announced (Config.DeferSessionStart, then AnnounceSessionStart), as run.Once orders
+// it, so a user's session-started advise answer rides the Turn-1 request and is measured there.
+// The observe lane reaches no Runner here — the probe builds none — so only the sync lane moves
+// what the request carries. Under bypass the lanes stay unarmed and Bypass is switched on through
+// the same read-edit-hand-back — liveSettings.setBypass's shape — so the second reading is the
+// first with the model-shaping classes off (ADR 0076 D9) and nothing else moved.
 //
 // The reply ceiling is pinned on the Config: newProjection stamps the loop's own cap on every
 // request, and Context.MaxOutputTokens is the operator's pin for it.
@@ -287,6 +290,7 @@ func measureTurn1(ctx context.Context, cfg apogee.Config, lanes domain.Generatio
 	sink := &turn1Sink{cancel: cancel}
 	cfg.Events = sink
 	cfg.Context.MaxOutputTokens = probeContextLiveReplyCap
+	cfg.DeferSessionStart = true
 
 	a, err := newProbeAgent(cfg)
 	if err != nil {
@@ -305,6 +309,7 @@ func measureTurn1(ctx context.Context, cfg apogee.Config, lanes domain.Generatio
 			return turn1Reading{}, fmt.Errorf("apogee probe context --live: arm the reaction lanes: %w", err)
 		}
 	}
+	a.AnnounceSessionStart()
 
 	if err := a.Submit(apogee.UserInput{Text: probeContextLivePrompt}); err != nil {
 		return turn1Reading{}, fmt.Errorf("apogee probe context --live: %w", err)
