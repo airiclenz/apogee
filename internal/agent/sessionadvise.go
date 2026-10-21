@@ -42,8 +42,10 @@ type sessionAdviseLane struct {
 	cancel context.CancelFunc
 	// pending is the runs no opening has taken yet, in ladder order.
 	pending []*sessionAdviseRun
-	// delivered is the runs taken into the open Exchange: an abort puts them back ahead of pending
-	// (restoreDelivered), a close that keeps the opening forgets them (forgetDelivered).
+	// delivered is the runs taken into the open Exchange that answered: an abort puts them back
+	// ahead of pending (restoreDelivered), a close that keeps the opening forgets them
+	// (forgetDelivered). A run the join reported — timed out, errored or panicked — is never here:
+	// its report is its one outcome, so no later opening reports or attaches it again.
 	delivered []*sessionAdviseRun
 }
 
@@ -84,17 +86,19 @@ func (l *sessionAdviseLane) waiting() []*sessionAdviseRun {
 	return slices.Clone(l.pending)
 }
 
-// take moves runs from pending into the open Exchange, leaving any run pending gained since the
-// read (none can: a boundary refuses while an Exchange is open).
-func (l *sessionAdviseLane) take(runs []*sessionAdviseRun) {
+// take removes runs from pending, leaving any run pending gained since the read (none can: a
+// boundary refuses while an Exchange is open), and moves only answered — the runs among them the
+// join did not report — into the open Exchange. A reported run is dropped here for good.
+func (l *sessionAdviseLane) take(runs, answered []*sessionAdviseRun) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.pending = slices.DeleteFunc(l.pending, func(r *sessionAdviseRun) bool { return slices.Contains(runs, r) })
-	l.delivered = append(l.delivered, runs...)
+	l.delivered = append(l.delivered, answered...)
 }
 
-// restoreDelivered puts the runs an aborted Exchange took back ahead of pending: the abort dropped
-// the opening that carried their advice, so the next opening carries it instead.
+// restoreDelivered puts the runs an aborted Exchange took that answered back ahead of pending: the
+// abort dropped the opening that carried their advice, so the next opening carries it instead. A
+// run the join reported was never taken into the Exchange (take), so it stays gone.
 func (l *sessionAdviseLane) restoreDelivered() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -202,10 +206,12 @@ func (a *Agent) callSessionAdvice(
 
 // joinSessionAdvice is the lane's join, run by step right after an Exchange's opening is appended:
 // it waits for each pending run until it answers or its deadline passes — never longer, so a slow
-// handler costs the first request only what is left of its deadline — then takes the runs into the
-// Exchange and fences each answer, in ladder order, as leading advice on the opening (the last
-// message). A run that failed, panicked or missed its deadline adds nothing and is reported here.
-// Under Bypass (read live, D9) the runs are taken and nothing is attached.
+// handler costs the first request only what is left of its deadline — then fences each answer, in
+// ladder order, as leading advice on the opening (the last message) and takes the runs off pending.
+// A run that failed, panicked or missed its deadline adds nothing, is reported here and is dropped
+// here: only the runs that answered are taken into the Exchange, so an abort puts back only those
+// (restoreDelivered) and a reported run is never reported nor attached again, even when its handler
+// finishes after the join. Under Bypass (read live, D9) the runs are taken and nothing is attached.
 //
 // A cancel during the wait (Esc) ends it at once and takes nothing: the runs stay pending for the
 // next opening, which the cancelled Turn's own exit leaves to the host.
@@ -219,15 +225,14 @@ func (a *Agent) joinSessionAdvice(ctx context.Context, turn int) {
 			return
 		}
 	}
-	a.sessionAdvice.take(runs)
-
 	opening := a.conv.Len() - 1
+	answered := make([]*sessionAdviseRun, 0, len(runs))
 	for _, run := range runs {
-		if a.bypassSkips(run.spec) {
-			continue
+		if a.bypassSkips(run.spec) || a.attachSessionAdvice(turn, opening, run) {
+			answered = append(answered, run)
 		}
-		a.attachSessionAdvice(turn, opening, run)
 	}
+	a.sessionAdvice.take(runs, answered)
 }
 
 // waitForRun waits until run answers or its deadline passes, and reports false when ctx ended the
@@ -258,14 +263,15 @@ func waitForRun(ctx context.Context, run *sessionAdviseRun) bool {
 // attachSessionAdvice turns one joined run into what the Driver sees: its capped, fenced advice on
 // the opening at index opening, booked as an advise firing — or, for a run that produced nothing
 // usable, the report a sync-lane failure gets (reportReaction) or the ErrorEvent a recovered panic
-// gets (recoverHook). A run still going at its deadline is a timeout.
-func (a *Agent) attachSessionAdvice(turn, opening int, run *sessionAdviseRun) {
+// gets (recoverHook). A run still going at its deadline is a timeout. It reports whether the run
+// answered: false for a run it reported, which the join then drops.
+func (a *Agent) attachSessionAdvice(turn, opening int, run *sessionAdviseRun) bool {
 	m := domain.MomentSessionStarted
 	select {
 	case <-run.done:
 	default:
 		a.reportReaction(turn, run.spec.ID, m, fmt.Errorf("no answer within %s: %w", run.timeout, context.DeadlineExceeded))
-		return
+		return false
 	}
 	if run.panicked != nil {
 		a.cfg.Events.Emit(domain.ErrorEvent{
@@ -273,18 +279,19 @@ func (a *Agent) attachSessionAdvice(turn, opening int, run *sessionAdviseRun) {
 			Source:    run.spec.ID,
 			Err:       fmt.Sprintf("panic: %v", run.panicked),
 		})
-		return
+		return false
 	}
 	if run.err != nil {
 		a.reportReaction(turn, run.spec.ID, m, run.err)
-		return
+		return false
 	}
 
 	adv, ok := adviceOf(turn, m, run.spec, run.out)
 	if !ok || !a.conv.AdviseUserMessage(opening, adv.span, adv.text) {
-		return
+		return true
 	}
 	var result domain.Outcome
 	var fired []string
 	a.bookFiring(turn, m, armedReaction{spec: run.spec}, domain.Outcome{Inject: adv.text, Detail: run.out.Detail}, &result, &fired)
+	return true
 }

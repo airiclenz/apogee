@@ -211,8 +211,9 @@ func (a *Agent) turnRolledBack() {
 // a TakeWorkflowNotes interjection — are held again (backgroundManager.restoreDelivered), since
 // the abort dropped every message that carried them. A note held again may let the Driver's wake
 // open an Exchange on it right after the cancel; that is intended (ADR 0089 D3): nobody read it.
-// The session-start advice its opening carried is put back the same way
-// (sessionAdviseLane.restoreDelivered), so the next opening carries it instead.
+// The session-start runs its opening took that answered are put back the same way
+// (sessionAdviseLane.restoreDelivered), so the next opening carries their advice instead; a run
+// the join reported (timed out, errored, panicked) was dropped there and stays gone.
 func (a *Agent) exchangeAborted() {
 	a.retained.rollBackExchange()
 	a.background.restoreDelivered()

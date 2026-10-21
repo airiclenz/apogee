@@ -5,7 +5,8 @@ package agent
 // next Exchange opening joins it — waiting at most what is left of its deadline — and carries its
 // answer fenced ahead of the user's text, booked as an advise firing at the join. A boundary never
 // waits on it, a cancel ends the join's wait, a new boundary cancels the old run, an abort keeps the
-// advice for the next opening, and Bypass, delegates and a failure attach nothing.
+// advice for the next opening but never replays a run the join reported, and Bypass, delegates and
+// a failure attach nothing.
 
 import (
 	"context"
@@ -452,6 +453,134 @@ func TestSessionAdvise_AnAbortedFirstExchangeKeepsTheAdvice(t *testing.T) {
 	if got := lastUserContent(t, responder.requests()[0]); !strings.HasPrefix(got, fenceFor("ci")) ||
 		!strings.HasSuffix(got, "next prompt") {
 		t.Errorf("next opening = %q, want it to carry the advice the abort put back", got)
+	}
+}
+
+// abortAfterTheJoin opens an Exchange on text under a context already cancelled, so the join runs
+// over what the lane holds and the Turn takes the cancel exit before any request, then aborts it.
+func abortAfterTheJoin(t *testing.T, a *Agent, text string) {
+	t.Helper()
+	if err := a.Submit(domain.UserInput{Text: text}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if res, err := a.Step(cancelled); err != nil || res.Status != domain.StatusCancelled {
+		t.Fatalf("Step = %+v, %v; want a cancelled Turn", res, err)
+	}
+	a.AbortExchange()
+}
+
+// reportRecorder collects every line handed to Config.Report.
+type reportRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+// report is the Config.Report hook.
+func (r *reportRecorder) report(msg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, msg)
+}
+
+// all returns a copy of the lines reported so far.
+func (r *reportRecorder) all() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.lines...)
+}
+
+// TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort — a run the join reported as timed out
+// is dropped there: an abort of that Exchange does not put it back, so the next opening neither
+// reports it again nor attaches its answer — even though the handler answered in between.
+func TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseHandler)
+	probe := &sessionAdviseProbe{answer: func(context.Context) (domain.Outcome, error) {
+		<-release // ignores its context, so it answers after its deadline once released
+		return domain.Outcome{Inject: "too late"}, nil
+	}}
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	reports := &reportRecorder{}
+	cfg.Report = reports.report
+	responder := echoResponder(t, "ok")
+	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("wedged", testtime.Fixed(50*time.Millisecond)))
+	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
+		runs := a.sessionAdvice.waiting()
+		return len(runs) == 1 && time.Now().After(runs[0].deadline)
+	}, "the background run's deadline to pass")
+	run := a.sessionAdvice.waiting()[0]
+
+	abortAfterTheJoin(t, a, "aborted prompt")
+	if got := len(reports.all()); got != 1 {
+		t.Fatalf("reported %d lines at the aborted join, want the one timeout", got)
+	}
+	releaseHandler()
+	<-run.done // the handler answers after the join reported it, before the next opening
+	runExchange(t, a, "next prompt")
+
+	if got := lastUserContent(t, responder.requests()[0]); got != "next prompt" {
+		t.Errorf("next opening = %q, want the bare prompt", got)
+	}
+	if got := wireFenceCount(responder.requests()[0], fenceFor("wedged")); got != 0 {
+		t.Errorf("next request carries %d fences for the timed-out run, want none", got)
+	}
+	if got := reports.all(); len(got) != 1 || !strings.Contains(got[0], context.DeadlineExceeded.Error()) {
+		t.Errorf("reported %q, want exactly the one timeout", got)
+	}
+	if fired := sessionAdviseFirings(sink, "wedged"); len(fired) != 1 || fired[0].Action != actionFailed {
+		t.Errorf("booked %+v, want one failed firing", fired)
+	}
+}
+
+// TestSessionAdvise_AnErroredRunIsNeverReplayedAfterAnAbort — a run the join reported as failed is
+// dropped there: the aborted Exchange does not put it back, so the next opening reports nothing
+// more and attaches nothing.
+func TestSessionAdvise_AnErroredRunIsNeverReplayedAfterAnAbort(t *testing.T) {
+	t.Parallel()
+
+	probe := &sessionAdviseProbe{answer: func(context.Context) (domain.Outcome, error) {
+		return domain.Outcome{Inject: "ignored"}, errors.New("ci unreachable")
+	}}
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	reports := &reportRecorder{}
+	cfg.Report = reports.report
+	responder := echoResponder(t, "ok")
+	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("ci", 0))
+	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
+		runs := a.sessionAdvice.waiting()
+		if len(runs) != 1 {
+			return false
+		}
+		select {
+		case <-runs[0].done:
+			return true
+		default:
+			return false
+		}
+	}, "the background run to fail")
+
+	abortAfterTheJoin(t, a, "aborted prompt")
+	if got := a.sessionAdvice.waiting(); len(got) != 0 {
+		t.Fatalf("pending after the abort = %d runs, want the reported run dropped", len(got))
+	}
+	runExchange(t, a, "next prompt")
+
+	if got := lastUserContent(t, responder.requests()[0]); got != "next prompt" {
+		t.Errorf("next opening = %q, want the bare prompt", got)
+	}
+	if got := reports.all(); len(got) != 1 || !strings.HasSuffix(got[0], "ci unreachable") {
+		t.Errorf("reported %q, want exactly the one failure", got)
+	}
+	if fired := sessionAdviseFirings(sink, "ci"); len(fired) != 1 || fired[0].Detail != "ci unreachable" {
+		t.Errorf("booked %+v, want one failed firing carrying the error", fired)
 	}
 }
 

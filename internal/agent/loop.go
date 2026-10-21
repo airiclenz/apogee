@@ -124,8 +124,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		a.conv.Append(opening)
 		// The session-start advise lane joins here, at the one point a new user message enters
 		// the request: the runs the Session boundary started in the background are waited on for
-		// what is left of each deadline and fenced ahead of the user's text in this opening, taken
-		// into the Exchange so an abort puts them back (exchangeAborted). The wait is ctx-aware —
+		// what is left of each deadline and fenced ahead of the user's text in this opening. The
+		// runs that answered are taken into the Exchange so an abort puts them back
+		// (exchangeAborted); a run reported here — timed out, errored or panicked — is dropped
+		// here and never reported nor attached again. The wait is ctx-aware —
 		// a cancel ends it and falls to the cancel exit below, leaving the runs for the next
 		// opening (joinSessionAdvice, sessionadvise.go).
 		a.joinSessionAdvice(ctx, turn)

@@ -51,7 +51,10 @@
 - 14: guard folded
 - 1 (re-check): guard folded — the abort-puts-back comments (loop.go join site) name only runs that delivered advice
 
-## 1. A timed-out session-start run is never joined again
+## 1. A timed-out session-start run is never joined again — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): consequential edit — internal/agent/construct.go: made necessary by restoreDelivered now restoring only the runs that answered (exchangeAborted's doc comment said the opening's session-start advice is put back wholesale)
+NOTES (2026-10-21): a run Bypass skipped at the join is neither reported nor attached, so it still counts as taken into the Exchange and an abort restores it, as before
 
 **What:**
 Recast at the regression check (2026-10-21).
