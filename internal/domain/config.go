@@ -264,11 +264,13 @@ type Config struct {
 	// Session boundary — at the end of New and Resume (unless DeferSessionStart holds that one
 	// back), and after a successful ClearContext or RestoreSession — and, between a boundary and the
 	// session's first user message, the narrowed notice (ObserveRunner.SessionStartedFor) for the
-	// session-started entries a SetReactions swap newly armed. A delegate never does either.
+	// session-started entries a SetReactions swap newly armed. It also hands it the
+	// compaction-finished notice (ObserveRunner.CompactionFinished) once after every fold that ran.
+	// A delegate never does any of these.
 	//
 	// nil (the default) holds no Runner: SetReactions still validates and reports the observe lane
-	// but swaps nothing, and no session-started notice is fired, which is what the bench and every
-	// test that composes a bare Config run.
+	// but swaps nothing, and no session-started or compaction-finished notice is fired, which is
+	// what the bench and every test that composes a bare Config run.
 	ObserveRunner ObserveRunner
 
 	// DeferSessionStart holds the CONSTRUCTION boundary's session-started notice back from New and

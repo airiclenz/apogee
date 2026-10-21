@@ -20,12 +20,19 @@ import (
 )
 
 // startRecordingRunner is a Config.ObserveRunner that keeps every session-started boundary it is
-// told of, in order, and every narrowed firing of newly armed entries (armedCall). Its swap door
-// takes any list.
+// told of, in order, every narrowed firing of newly armed entries (armedCall) and every fold it is
+// told of (foldCall). Its swap door takes any list.
 type startRecordingRunner struct {
 	mu     sync.Mutex
 	starts []domain.SessionStart
 	armed  []armedCall
+	folds  []foldCall
+}
+
+// foldCall is one CompactionFinished call: the trigger's spelling and the fold's Turn.
+type foldCall struct {
+	fold domain.CompactionFold
+	turn int
 }
 
 // armedCall is one SessionStartedFor call: the boundary's start and the entry ids it fired.
@@ -46,6 +53,19 @@ func (r *startRecordingRunner) SessionStartedFor(start domain.SessionStart, ids 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.armed = append(r.armed, armedCall{start: start, ids: slices.Clone(ids)})
+}
+
+func (r *startRecordingRunner) CompactionFinished(fold domain.CompactionFold, turn int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.folds = append(r.folds, foldCall{fold: fold, turn: turn})
+}
+
+// foldCalls returns a copy of the folds announced so far.
+func (r *startRecordingRunner) foldCalls() []foldCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.folds)
 }
 
 // armedCalls returns a copy of the narrowed firings made so far.

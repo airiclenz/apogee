@@ -108,6 +108,21 @@ func TestSeamPayloadEnv(t *testing.T) {
 	}) {
 		t.Errorf("Env() = %q, want the session's start last, after the Schedule", got)
 	}
+
+	folded := domain.SeamPayload{
+		Event:    domain.MomentCompactionFinished,
+		Reaction: "rebrief",
+		Schedule: &domain.ScheduleRef{ID: "nightly"},
+		Fold:     domain.CompactionFoldEmergency,
+	}
+	if got := folded.Env(); !reflect.DeepEqual(got, []string{
+		"APOGEE_REACTION_EVENT=compaction-finished",
+		"APOGEE_REACTION_NAME=rebrief",
+		"APOGEE_REACTION_SCHEDULE_ID=nightly",
+		"APOGEE_REACTION_FOLD=emergency",
+	}) {
+		t.Errorf("Env() = %q, want the fold last, after the Schedule", got)
+	}
 }
 
 // TestSeamPayloadJSONCarriesTheStartOnASessionStartedFiring pins the `start` member: written on a
@@ -132,5 +147,32 @@ func TestSeamPayloadJSONCarriesTheStartOnASessionStartedFiring(t *testing.T) {
 	}
 	if strings.Contains(string(finished), `"start"`) {
 		t.Errorf("turn-finished document = %s, want no start member on a Moment that carries none", finished)
+	}
+}
+
+// TestSeamPayloadJSONCarriesTheFoldAndTurnOnACompactionFinishedFiring pins the `fold` member: written
+// on a compaction-finished document beside the fold's `turn`, in each of its three spellings, and
+// absent from every other Moment's.
+func TestSeamPayloadJSONCarriesTheFoldAndTurnOnACompactionFinishedFiring(t *testing.T) {
+	t.Parallel()
+
+	for _, fold := range []domain.CompactionFold{domain.CompactionFoldAuto, domain.CompactionFoldEmergency, domain.CompactionFoldManual} {
+		folded, err := json.Marshal(domain.SeamPayload{Event: domain.MomentCompactionFinished, Turn: 4, Fold: fold})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		for _, want := range []string{`"turn":4`, `"fold":"` + string(fold) + `"`} {
+			if !strings.Contains(string(folded), want) {
+				t.Errorf("compaction-finished document = %s, want it to carry %s", folded, want)
+			}
+		}
+	}
+
+	started, err := json.Marshal(domain.SeamPayload{Event: domain.MomentSessionStarted, Start: domain.SessionStartNew})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(started), `"fold"`) {
+		t.Errorf("session-started document = %s, want no fold member on a Moment that carries none", started)
 	}
 }

@@ -325,6 +325,8 @@ func (r *recordingRunner) SessionStartedFor(_ apogee.SessionStart, ids []string)
 	r.armed = append(r.armed, slices.Clone(ids))
 }
 
+func (r *recordingRunner) CompactionFinished(apogee.CompactionFold, int) {}
+
 func (r *recordingRunner) Replace(list []domain.Reaction) error {
 	if r.err != nil {
 		return r.err

@@ -261,6 +261,20 @@ func (r *Runner) SessionStartedFor(start domain.SessionStart, ids []string) {
 	r.fanOut(set, sessionStartedFiring(start), r.now().Format(time.RFC3339Nano), targets, countDrop)
 }
 
+// CompactionFinished fires the compaction-finished entries for one fold that ran on the top-level
+// Agent, with fold and turn on the payload (domain.ObserveRunner's fold door). Like SessionStarted
+// it is no Event, so it builds its own firing (compactionFinishedFiring) and fans it out to the
+// entries that subscribe to the notice; an active set with none pays one map lookup. It is
+// enqueue-only for the same reason: `/compact` folds on the Bubble Tea Update goroutine, so
+// nothing is forwarded and a full queue drops the firing silently (countDrop).
+func (r *Runner) CompactionFinished(fold domain.CompactionFold, turn int) {
+	set := r.active.Load()
+	if set == nil || len(set.workers) == 0 || !set.matcher.wants(domain.MomentCompactionFinished) {
+		return
+	}
+	r.fanOut(set, compactionFinishedFiring(fold, turn), r.now().Format(time.RFC3339Nano), nil, countDrop)
+}
+
 // fanOut hands one firing to every worker subscribing to its event — or, when targets is non-nil,
 // to only those of them whose Reaction id it holds — stamping the identity fields only the Runner
 // knows. The send is non-blocking by construction: a full queue drops the NEWEST

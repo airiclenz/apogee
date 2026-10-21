@@ -699,6 +699,8 @@ func (r *recordingObserveRunner) SessionStartedFor(start domain.SessionStart, id
 	r.armed = append(r.armed, slices.Clone(ids))
 }
 
+func (r *recordingObserveRunner) CompactionFinished(domain.CompactionFold, int) {}
+
 // TestOncePinsAskerAndPresenterOff proves the pin is Once's, not the caller's: a Spec whose
 // Config supplies both human-facing delegates still runs with ask_user and present_document
 // unregistered, so nothing inside a Firing can rendezvous with a human.

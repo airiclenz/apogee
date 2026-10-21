@@ -28,6 +28,22 @@ const (
 	SessionStartFork SessionStart = "fork"
 )
 
+// CompactionFold names which trigger ran a compaction fold — the `fold` member of a
+// compaction-finished payload, and the value APOGEE_REACTION_FOLD carries. Its spellings are part
+// of the payload's documented contract.
+type CompactionFold string
+
+const (
+	// CompactionFoldAuto is a fold the history estimate started at a quiescent boundary: the
+	// estimate outgrew its allocation.
+	CompactionFoldAuto CompactionFold = "auto"
+	// CompactionFoldEmergency is a fold an overflow started mid-Exchange: the predictive guard
+	// measured the request past the window, or the server rejected it as too long.
+	CompactionFoldEmergency CompactionFold = "emergency"
+	// CompactionFoldManual is a fold the user asked for (`/compact`).
+	CompactionFoldManual CompactionFold = "manual"
+)
+
 // SeamPayload is the ONE JSON document a fired out-of-process Reaction receives, whichever lane
 // fired it: on stdin for an observe command or a sync-lane advise/gate handler (ADR 0076 D2), as
 // the POST body for an observe webhook. Its field names are a DOCUMENTED CONTRACT: a user's script
@@ -75,6 +91,8 @@ type SeamPayload struct {
 	Schedule *ScheduleRef `json:"schedule,omitempty"`
 	// Start is how the session started. session-started alone.
 	Start SessionStart `json:"start,omitempty"`
+	// Fold is which trigger ran the fold. compaction-finished alone.
+	Fold CompactionFold `json:"fold,omitempty"`
 
 	// Status is the Turn's StepStatus. turn-finished, exchange-finished.
 	Status string `json:"status,omitempty"`
@@ -163,6 +181,7 @@ const (
 	EnvReactionScheduleID   = "APOGEE_REACTION_SCHEDULE_ID"
 	EnvReactionScheduleName = "APOGEE_REACTION_SCHEDULE_NAME"
 	EnvReactionStart        = "APOGEE_REACTION_START"
+	EnvReactionFold         = "APOGEE_REACTION_FOLD"
 )
 
 // Env renders the payload's headline facts as `NAME=value` entries for the fired command's
@@ -170,7 +189,7 @@ const (
 // empty, so a script can test with `[ -n "$APOGEE_REACTION_PATH" ]` and a variable inherited from
 // the user's own environment is not silently blanked by a reaction that has nothing to put there.
 func (p SeamPayload) Env() []string {
-	env := make([]string, 0, 7)
+	env := make([]string, 0, 8)
 	add := func(name, value string) {
 		if value != "" {
 			env = append(env, name+"="+value)
@@ -185,5 +204,6 @@ func (p SeamPayload) Env() []string {
 		add(EnvReactionScheduleName, p.Schedule.Name)
 	}
 	add(EnvReactionStart, string(p.Start))
+	add(EnvReactionFold, string(p.Fold))
 	return env
 }

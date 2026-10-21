@@ -709,7 +709,7 @@ type Generation struct {
 }
 
 // ObserveRunner is the observe lane's door on the Driver-built Runner (apogee.ReactionRunner): the
-// three methods of it the Agent drives (Config.ObserveRunner).
+// four methods of it the Agent drives (Config.ObserveRunner).
 //
 // Replace is the live-swap door, so a swap of the whole Generation reaches both halves behind one
 // call (ADR 0076 A8). It retires the running list and starts the new one, and refuses a list it
@@ -728,10 +728,18 @@ type Generation struct {
 // prompt), so those entries fire once for the session they joined, with that boundary's start,
 // while every entry that already fired at the boundary hears nothing. An id the running list holds
 // no subscribing entry for fires nothing. It keeps SessionStarted's enqueue-only contract whole.
+//
+// CompactionFinished is the fold door: the top-level Agent calls it once after every compaction
+// fold that ran — its Replace done — with which trigger ran it and the Turn it ran at, and the
+// Runner fires its `compaction-finished` entries with both on the payload
+// (MomentCompactionFinished). A fold that faulted, was cancelled or folded nothing calls it not at
+// all, and neither does a delegate's fold. It is enqueue-only for the same reason as
+// SessionStarted: `/compact` folds on the TUI's Update goroutine.
 type ObserveRunner interface {
 	Replace(list []Reaction) error
 	SessionStarted(start SessionStart)
 	SessionStartedFor(start SessionStart, ids []string)
+	CompactionFinished(fold CompactionFold, turn int)
 }
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what

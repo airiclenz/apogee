@@ -829,10 +829,11 @@ type Reaction = domain.Reaction
 // silently drops the lane it was not about.
 type Generation = domain.Generation
 
-// ObserveRunner is the observe Runner's door — the three methods of a ReactionRunner the Agent
+// ObserveRunner is the observe Runner's door — the four methods of a ReactionRunner the Agent
 // drives (Config.ObserveRunner): Replace when a Generation's observe list moves, the enqueue-only
-// SessionStarted at every top-level Session boundary, and SessionStartedFor, its narrowing to the
-// session-started entries a live swap armed before the session's first user message.
+// SessionStarted at every top-level Session boundary, SessionStartedFor, its narrowing to the
+// session-started entries a live swap armed before the session's first user message, and the
+// enqueue-only CompactionFinished after every fold that ran on the top-level Agent.
 type ObserveRunner = domain.ObserveRunner
 
 // SessionStart names how a top-level session started — the `start` member of a session-started
@@ -847,6 +848,18 @@ const (
 	SessionStartResume = domain.SessionStartResume
 	SessionStartClear  = domain.SessionStartClear
 	SessionStartFork   = domain.SessionStartFork
+)
+
+// CompactionFold names which trigger ran a compaction fold — the `fold` member of a
+// compaction-finished payload, handed to ObserveRunner.CompactionFinished.
+type CompactionFold = domain.CompactionFold
+
+// The compaction-finished folds: the estimate-driven fold at a quiescent boundary, the emergency
+// fold an overflow forced mid-Exchange, and the fold the user asked for with `/compact`.
+const (
+	CompactionFoldAuto      = domain.CompactionFoldAuto
+	CompactionFoldEmergency = domain.CompactionFoldEmergency
+	CompactionFoldManual    = domain.CompactionFoldManual
 )
 
 // ----------------------------------------------------------------------------

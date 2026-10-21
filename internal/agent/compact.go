@@ -220,6 +220,9 @@ type foldRow struct {
 	saturates bool
 	// bridge says when the overflow bridge follows a fold that ran.
 	bridge foldBridge
+	// fold is the trigger's spelling on the compaction-finished notice a fold that RAN fires on the
+	// top-level Agent (announceCompactionFinished).
+	fold domain.CompactionFold
 }
 
 // foldTable is the latch table, one row per trigger.
@@ -255,6 +258,7 @@ var foldTable = [...]foldRow{
 		open:    func(a *Agent) bool { return !a.turns.inExchange },
 		refusal: domain.ErrInputPending,
 		bridge:  foldBridgeNever,
+		fold:    domain.CompactionFoldManual,
 	},
 	foldEstimate: {
 		open:       func(a *Agent) bool { return !a.compacting && a.shouldAutoCompact() },
@@ -262,11 +266,13 @@ var foldTable = [...]foldRow{
 		reports:    true,
 		saturates:  true,
 		bridge:     foldBridgeInExchange,
+		fold:       domain.CompactionFoldAuto,
 	},
 	foldOverflow: {
 		open:    func(a *Agent) bool { return a.compactionEnabled() && !a.compacting },
 		reports: true,
 		bridge:  foldBridgeAlways,
+		fold:    domain.CompactionFoldEmergency,
 	},
 }
 
@@ -278,10 +284,11 @@ var foldTable = [...]foldRow{
 //
 // What every fold that RAN leaves behind is done here once: the Replace, the bridge the row asks
 // for, the context-fill notice's ladder re-armed (rearmFillNotice), because the climb it
-// tracked was just folded away and the next result measures a new one. The step- and token-budget
+// tracked was just folded away and the next result measures a new one, and — last — the
+// compaction-finished notice on the top-level Agent (announceCompactionFinished). The step- and token-budget
 // notes need nothing here: each notice's latch is its note's own presence (stepnotice.go), so a
 // note that went with the folded history is simply gone and the next result past its threshold
-// carries it again. A fault leaves the conversation untouched (Compact's guarantee) and a skip folded nothing, so neither re-arms — the
+// carries it again. A fault leaves the conversation untouched (Compact's guarantee) and a skip folded nothing, so neither re-arms nor announces — the
 // ladder still describes the history the model sees. A cancel is not a fault: it masquerades as
 // a stream error, so only ctx can tell them apart, and it ends silently — no latch, no event —
 // because the caller's own stream carries the cancel to a clean boundary. The Turn counter is
@@ -323,7 +330,22 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 	if row.saturates && a.historyExceedsAllocation() {
 		a.noteFoldSaturated(turn)
 	}
+	a.announceCompactionFinished(row.fold, turn)
 	return foldResult{end: foldEndFolded}
+}
+
+// announceCompactionFinished hands one fold that RAN to the observe Runner's fold door
+// (ObserveRunner.CompactionFinished), which fires the user's compaction-finished entries with the
+// trigger's spelling and the fold's Turn on the payload (ADR 0076, adr-0076-amend-1021b). Only the
+// top-level Agent announces: a delegate's fold reshapes a conversation no user entry is about, so
+// it fires nothing. The door is enqueue-only, so a fold never waits on a fired entry.
+func (a *Agent) announceCompactionFinished(fold domain.CompactionFold, turn int) {
+	if a.isDelegate() {
+		return
+	}
+	if runner := a.cfg.ObserveRunner; runner != nil {
+		runner.CompactionFinished(fold, turn)
+	}
 }
 
 // noteFoldSaturated latches the saturation stand-down after a fold that RAN and still left the

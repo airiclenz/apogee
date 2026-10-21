@@ -197,7 +197,15 @@ internal/reactions/hooks.go — ParseEvent, eventList; apogee.go — MomentSessi
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/domain/ ./internal/reactions/` (two light packages, one run) and `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Reaction|Manual' ./internal/config/`; `go build ./...`; `grep -n 'compaction-finished' docs/manual/reactions.md apogee.go` finds the row and the const; `grep -rn 'the-twelve-notices' docs README.md` finds nothing.
 **Commit:** `feat(reactions): compaction-finished joins the Moment vocabulary`
 
-## 9. A fold fires `compaction-finished` through the ObserveRunner
+## 9. A fold fires `compaction-finished` through the ObserveRunner — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): the door is `CompactionFinished(fold CompactionFold, turn int)` rather than the Goal's one-argument `CompactionFinished(apogee.CompactionFold)`. The item's regression guard requires the fold's Turn to pass through the door, so the seam document's `turn` is the fold's Turn and not 0. No manual statement of turn 0 is needed.
+
+NOTES (2026-10-21): each foldTable row now carries its `fold` spelling (manual, auto, emergency). foldFor fires the notice last on the folded path, after the Replace, the bridge and the saturation check, through `Agent.announceCompactionFinished`, which is gated on `!isDelegate()`.
+
+NOTES (2026-10-21): consequential edit — internal/domain/config.go: made necessary by the new ObserveRunner.CompactionFinished door. The Config.ObserveRunner doc listed everything the Agent hands the Runner and said that a nil Runner fires no session-started notice.
+
+NOTES (2026-10-21): the delegate test sets `a.depth = 1` on a newAgent-built Agent, which is the field isDelegate reads. It does not drive a real sub_agent child's fold.
 
 **What:**
 Depends on item 8.

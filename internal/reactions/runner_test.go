@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/reactions/scope"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
 
@@ -1026,5 +1028,73 @@ func TestSessionStartedForNeverReportsOnTheCallersGoroutine(t *testing.T) {
 
 	if lines := log.all(); len(lines) != 1 || lines[0] != "reaction adopted: dropped 1 events" {
 		t.Errorf("reported %q, want only the drain's total %q", lines, "reaction adopted: dropped 1 events")
+	}
+}
+
+// TestCompactionFinishedFiresTheSubscribedEntryWithItsFoldAndTurn — the fold door fires the
+// entries subscribing to compaction-finished and no other, with the fold, the fold's Turn and the
+// Runner's identity stamps on a Depth-0 payload, and hands nothing to the decorated sink: the
+// notice is no Event.
+func TestCompactionFinishedFiresTheSubscribedEntryWithItsFoldAndTurn(t *testing.T) {
+	t.Parallel()
+
+	inner := &recordingSink{}
+	exec := newFakeExecutor()
+	runner, err := New([]domain.Reaction{
+		commandHook("rebrief", domain.MomentCompactionFinished),
+		commandHook("primer", domain.MomentSessionStarted),
+	}, Options{Inner: inner, Workspace: t.TempDir(), Exec: exec})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runner.CompactionFinished(domain.CompactionFoldEmergency, 7)
+	closeRunner(t, runner)
+
+	runs := exec.recorded()
+	if len(runs) != 1 {
+		t.Fatalf("ran %d firings, want exactly the one compaction-finished entry: %+v", len(runs), runs)
+	}
+	got := runs[0]
+	if got.Reaction != "rebrief" || got.Event != domain.MomentCompactionFinished || got.Fold != domain.CompactionFoldEmergency {
+		t.Errorf("payload = %q/%q/%q, want rebrief/compaction-finished/emergency", got.Reaction, got.Event, got.Fold)
+	}
+	if got.Turn != 7 || got.Depth != 0 || got.Start != "" || got.Time == "" {
+		t.Errorf("payload turn/depth/start/time = %d/%d/%q/%q, want 7/0/\"\" and a stamped time",
+			got.Turn, got.Depth, got.Start, got.Time)
+	}
+	if len(inner.events) != 0 {
+		t.Errorf("the decorated sink saw %d events, want none — the door never forwards to the Driver", len(inner.events))
+	}
+}
+
+// TestCompactionFinishedHandsAnArgvEntryTheFold — an argv entry on the notice reads which trigger
+// ran the fold from APOGEE_REACTION_FOLD, through the real command executor.
+func TestCompactionFinishedHandsAnArgvEntryTheFold(t *testing.T) {
+	requireShell(t)
+	t.Parallel()
+
+	dir := t.TempDir()
+	out := filepath.Join(dir, "fold.txt")
+	entry := domain.Reaction{
+		ID:      "rebrief",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{domain.MomentCompactionFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"sh", "-c", `printf '%s' "$` + domain.EnvReactionFold + `" > "$1"`, "sh", out}},
+		Timeout: 10 * time.Second,
+	}
+	runner, err := New([]domain.Reaction{entry}, Options{
+		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	runner.CompactionFinished(domain.CompactionFoldManual, 3)
+	closeRunner(t, runner)
+
+	if got := readFile(t, out); got != string(domain.CompactionFoldManual) {
+		t.Errorf("%s = %q, want %q", domain.EnvReactionFold, got, domain.CompactionFoldManual)
 	}
 }

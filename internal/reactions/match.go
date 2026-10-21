@@ -193,3 +193,11 @@ func firingOf(e Event, payload domain.SeamPayload) firing {
 func sessionStartedFiring(start domain.SessionStart) firing {
 	return firingOf(domain.MomentSessionStarted, domain.SeamPayload{Start: start})
 }
+
+// compactionFinishedFiring builds the compaction-finished notice's firing. Like session-started it
+// is not a match case — the top-level Agent hands it through the Runner's own door
+// (Runner.CompactionFinished) — so it is built from the fold and its Turn alone, at Depth 0: a
+// delegate's fold fires nothing.
+func compactionFinishedFiring(fold domain.CompactionFold, turn int) firing {
+	return firingOf(domain.MomentCompactionFinished, domain.SeamPayload{Turn: turn, Fold: fold})
+}

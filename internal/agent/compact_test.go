@@ -17,6 +17,7 @@ import (
 	"iter"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1359,4 +1360,171 @@ func TestFoldTable(t *testing.T) {
 			})
 		}
 	})
+}
+
+// compactionFinishedAgent builds a top-level Agent holding runner as its observe Runner, over a
+// history far past the 8k window's allocation so every fold row's gate opens.
+func compactionFinishedAgent(t *testing.T, runner domain.ObserveRunner, up *scriptedUpstream) *Agent {
+	t.Helper()
+	cfg := autoCompactConfig(&recordingSink{})
+	cfg.ObserveRunner = runner
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedLargeConv(a)
+	return a
+}
+
+// TestCompactionFinished_EachFoldThatRanFiresOnceWithItsFoldAndTurn — every foldTable row whose fold
+// RAN hands the observe Runner exactly one compaction-finished notice, after the Replace, carrying
+// the row's spelling and the Turn the fold ran at.
+func TestCompactionFinished_EachFoldThatRanFiresOnceWithItsFoldAndTurn(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name       string
+		kind       foldKind
+		inExchange bool
+		want       domain.CompactionFold
+	}{
+		{"on demand", foldOnDemand, false, domain.CompactionFoldManual},
+		{"estimate at an opening", foldEstimate, false, domain.CompactionFoldAuto},
+		{"overflow mid-Exchange", foldOverflow, true, domain.CompactionFoldEmergency},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runner := &startRecordingRunner{}
+			a := compactionFinishedAgent(t, runner, compactSpyResponder(t, "FOLDED-SUMMARY"))
+			if c.inExchange {
+				a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 1})
+			}
+			before := a.conv.Len()
+			if r := a.foldFor(context.Background(), 5, c.kind); r.end != foldEndFolded {
+				t.Fatalf("result = %+v, want a fold that ran", r)
+			}
+			if a.conv.Len() >= before {
+				t.Fatalf("conv.Len() = %d, want fewer than %d: the Replace precedes the notice", a.conv.Len(), before)
+			}
+			if got, want := runner.foldCalls(), []foldCall{{fold: c.want, turn: 5}}; !slices.Equal(got, want) {
+				t.Errorf("announced %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestCompactionFinished_ADrivenFoldCarriesTheAgentsTurn — the two folds a Driver reaches without
+// naming a Turn stamp the Agent's own: /compact (Agent.Compact) its current Turn, and the
+// estimate-driven fold of a Step the Turn that Step runs.
+func TestCompactionFinished_ADrivenFoldCarriesTheAgentsTurn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("compact", func(t *testing.T) {
+		t.Parallel()
+		runner := &startRecordingRunner{}
+		a := compactionFinishedAgent(t, runner, compactSpyResponder(t, "FOLDED-SUMMARY"))
+		a.turns.restore(turnSnapshot{index: 3})
+		if skipped, err := a.Compact(context.Background()); err != nil || skipped {
+			t.Fatalf("Compact = %v, %v; want a fold that ran", skipped, err)
+		}
+		if got, want := runner.foldCalls(), []foldCall{{fold: domain.CompactionFoldManual, turn: 3}}; !slices.Equal(got, want) {
+			t.Errorf("announced %+v, want %+v", got, want)
+		}
+	})
+	t.Run("step", func(t *testing.T) {
+		t.Parallel()
+		runner := &startRecordingRunner{}
+		a := compactionFinishedAgent(t, runner, compactSpyResponder(t, "FOLDED-SUMMARY"))
+		a.turns.restore(turnSnapshot{index: 2})
+		if err := a.Submit(domain.UserInput{Text: "the fresh question"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if _, err := a.Step(context.Background()); err != nil {
+			t.Fatalf("Step: %v", err)
+		}
+		if got, want := runner.foldCalls(), []foldCall{{fold: domain.CompactionFoldAuto, turn: 2}}; !slices.Equal(got, want) {
+			t.Errorf("announced %+v, want %+v", got, want)
+		}
+	})
+}
+
+// TestCompactionFinished_AFoldThatDidNotRunFiresNone — a fold whose gate declined, whose summary
+// call faulted or was cancelled, or which found nothing to fold leaves the conversation as it was,
+// so it announces nothing on any row.
+func TestCompactionFinished_AFoldThatDidNotRunFiresNone(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []foldKind{foldOnDemand, foldEstimate, foldOverflow} {
+		t.Run(fmt.Sprintf("kind %d faulted", kind), func(t *testing.T) {
+			t.Parallel()
+			runner := &startRecordingRunner{}
+			a := compactionFinishedAgent(t, runner, overflowResponder(t)) // every summary call faults
+			if r := a.foldFor(context.Background(), 1, kind); r.end != foldEndFaulted {
+				t.Fatalf("result = %+v, want a faulted fold", r)
+			}
+			if got := runner.foldCalls(); len(got) != 0 {
+				t.Errorf("announced %+v after a faulted fold, want none", got)
+			}
+		})
+		t.Run(fmt.Sprintf("kind %d cancelled", kind), func(t *testing.T) {
+			t.Parallel()
+			runner := &startRecordingRunner{}
+			a := compactionFinishedAgent(t, runner, compactSpyResponder(t, "UNREACHED"))
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			if r := a.foldFor(ctx, 1, kind); r.end != foldEndCancelled {
+				t.Fatalf("result = %+v, want a cancelled fold", r)
+			}
+			if got := runner.foldCalls(); len(got) != 0 {
+				t.Errorf("announced %+v after a cancelled fold, want none", got)
+			}
+		})
+		t.Run(fmt.Sprintf("kind %d skipped", kind), func(t *testing.T) {
+			t.Parallel()
+			runner := &startRecordingRunner{}
+			cfg := autoCompactConfig(&recordingSink{})
+			cfg.ObserveRunner = runner
+			a, err := newAgent(cfg, compactSpyResponder(t, "UNREACHED"))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("x", 40000)}) // over budget, nothing past the prefix
+			if r := a.foldFor(context.Background(), 1, kind); r.end != foldEndDeclined || !r.skipped {
+				t.Fatalf("result = %+v, want declined + skipped", r)
+			}
+			if got := runner.foldCalls(); len(got) != 0 {
+				t.Errorf("announced %+v after a skipped fold, want none", got)
+			}
+		})
+	}
+	t.Run("declined", func(t *testing.T) {
+		t.Parallel()
+		runner := &startRecordingRunner{}
+		a := compactionFinishedAgent(t, runner, compactSpyResponder(t, "UNREACHED"))
+		a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 1})
+		if r := a.foldFor(context.Background(), 1, foldOnDemand); r.end != foldEndDeclined {
+			t.Fatalf("result = %+v, want a declined fold", r)
+		}
+		if got := runner.foldCalls(); len(got) != 0 {
+			t.Errorf("announced %+v after a declined fold, want none", got)
+		}
+	})
+}
+
+// TestCompactionFinished_ADelegateFoldFiresNone — a delegate holds its parent's Config, observe
+// Runner included, yet a fold that ran on it announces nothing: the notice is the top-level
+// Agent's alone.
+func TestCompactionFinished_ADelegateFoldFiresNone(t *testing.T) {
+	t.Parallel()
+
+	runner := &startRecordingRunner{}
+	a := compactionFinishedAgent(t, runner, compactSpyResponder(t, "FOLDED-SUMMARY"))
+	a.depth = 1 // the nesting depth isDelegate reads: this Agent is a child one level down
+	a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 1})
+	if r := a.foldFor(context.Background(), 1, foldOverflow); r.end != foldEndFolded {
+		t.Fatalf("result = %+v, want a fold that ran", r)
+	}
+	if got := runner.foldCalls(); len(got) != 0 {
+		t.Errorf("a delegate's fold announced %+v, want none", got)
+	}
 }
