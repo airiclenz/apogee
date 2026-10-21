@@ -318,8 +318,9 @@ func (SessionStartedFunc) seam() Moment { return MomentSessionStarted }
 // shell, so no quoting or expansion happens on the way. The Moment's payload reaches the command
 // through its environment. It serves three of the user's classes, and the class decides both where
 // it may fire and what its output is worth: observe fires on notices and its output is ignored;
-// advise fires at post-tool-result or file-changed and its stdout becomes the fenced trailer;
-// gate fires at pre-tool-exec and its first stdout line is the verdict.
+// advise fires at post-tool-result, file-changed or session-started and its stdout becomes the
+// fenced trailer — or, at session-started, the session-start advice; gate fires at pre-tool-exec
+// and its first stdout line is the verdict.
 type ArgvHandler struct {
 	// Argv is the command and its arguments. Validate refuses a list whose first element is empty
 	// or blank — there is no program to run — beside the KIND rules that say where the handler's
@@ -332,8 +333,9 @@ type ArgvHandler struct {
 // mapping arms (ADR 0076 D2). It is the out-of-process twin of an ArgvHandler and serves the same
 // three of the user's classes, with the class deciding where it fires and what its reply is worth:
 // observe fires on notices and the reply is discarded — nothing an observe reaction returns reaches
-// the model; advise fires at post-tool-result or file-changed and the reply body becomes the fenced
-// trailer; gate fires at pre-tool-exec and the reply's first line is the verdict.
+// the model; advise fires at post-tool-result, file-changed or session-started and the reply body
+// becomes the fenced trailer — or, at session-started, the session-start advice; gate fires at
+// pre-tool-exec and the reply's first line is the verdict.
 type WebhookHandler struct {
 	// URL is the endpoint the payload is POSTed to.
 	URL string
@@ -566,16 +568,10 @@ func (r Reaction) Validate() error {
 		if async {
 			switch r.Class {
 			case ClassAdvise:
-				if m == MomentSessionStarted {
+				if m != MomentPostToolResult && m != MomentFileChanged && m != MomentSessionStarted {
 					return fmt.Errorf(
-						"%w %q: advise: on %q is pending admission — session-start advice "+
-							"awaits its admission arm",
-						ErrInvalidReaction, r.ID, m,
-					)
-				}
-				if m != MomentPostToolResult && m != MomentFileChanged {
-					return fmt.Errorf(
-						"%w %q: advise: reacts at post-tool-result or file-changed; %q is neither",
+						"%w %q: advise: reacts at post-tool-result, file-changed or session-started; "+
+							"%q is none of them",
 						ErrInvalidReaction, r.ID, m,
 					)
 				}

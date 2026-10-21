@@ -88,7 +88,12 @@ internal/agent/reactions_test.go — windowAgent, TestSessionWindow_AnEntryArmed
 **Closes:** session-window-stays-open; session-window-wake-test
 **Commit:** `fix(agent): a resumed mid-Exchange session shuts its session-started window`
 
-## 3. `advise:` on `session-started` is admitted
+## 3. `advise:` on `session-started` is admitted — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): the config load case is a new test, TestLoadFileConfigAdmitsSessionStartedAdvice (argv `run:`+`advise:` entry plus a webhook `advise:` entry on session-started, both lanes checked), rather than a row in the refusal table
+NOTES (2026-10-21): the ArgvHandler / WebhookHandler doc comments now say an advise answer at session-started becomes the session-start advice rather than the fenced trailer; TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler's doc comment widened and rewrapped the same way
+NOTES (2026-10-21): docs/manual/reactions.md (on: key row line 87, and the "session-started is not one of them yet" paragraph near line 364) still quotes the retired pending-admission refusal and the old advise sentence — left to item 13, which owns that prose and whose Goal requires no sentence naming the admission refusal
+NOTES (2026-10-21): pre-existing — the same test's doc comment says "a webhook stays observe-only", which ADR 0076 D2 / apogee-1d8 made stale (webhooks serve all three user classes); left as is
 
 **What:**
 **Goal:** A `reactions:` entry with `advise:` (argv or webhook) and `on: [session-started]` loads; an entry spelling both `run:` and `advise:` on `[session-started]` loads; the advise refusal for any other non-advise Moment names all three Moments it takes: `advise: reacts at post-tool-result, file-changed or session-started; %q is none of them`.

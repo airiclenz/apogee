@@ -469,10 +469,11 @@ func TestReactionValidateAdmitsASessionStartedHandlerUnderAdviseOnly(t *testing.
 
 // TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler walks the rules the argv and
 // webhook handlers brought in. They key on the handler KIND, not the class alone: an argv handler
-// serves observe on notices, advise at post-tool-result or file-changed and gate at pre-tool-exec,
-// while a webhook stays observe-only and a Go handler keeps the per-seam rule for every class —
-// which is why the bench's class-observe Go reactions still validate. The refusals are pinned by
-// their exact text: they are what a user reads when their `run:` entry names the wrong Moment.
+// serves observe on notices, advise at post-tool-result, file-changed or session-started and gate
+// at pre-tool-exec, while a webhook stays observe-only and a Go handler keeps the per-seam rule for
+// every class — which is why the bench's class-observe Go reactions still validate. The refusals
+// are pinned by their exact text: they are what a user reads when their `run:` entry names the
+// wrong Moment.
 func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 	t.Parallel()
 
@@ -562,7 +563,7 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 			},
 		},
 		{
-			name: "an argv handler advising at session-started is refused pending admission",
+			name: "an argv handler advising at session-started validates",
 			reaction: Reaction{
 				ID:      "primer",
 				Origin:  OriginUser,
@@ -570,10 +571,9 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentSessionStarted},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "primer": advise: on "session-started" is pending admission — session-start advice awaits its admission arm`,
 		},
 		{
-			name: "a webhook handler advising at session-started is refused pending admission",
+			name: "a webhook handler advising at session-started validates",
 			reaction: Reaction{
 				ID:      "primer",
 				Origin:  OriginUser,
@@ -581,7 +581,6 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentFileChanged, MomentSessionStarted},
 				Handler: webhook,
 			},
-			wantErr: `apogee: invalid reaction "primer": advise: on "session-started" is pending admission — session-start advice awaits its admission arm`,
 		},
 		{
 			name: "an argv handler gating at session-started is refused",
@@ -623,7 +622,7 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentTurnFinished},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`,
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed or session-started; "turn-finished" is none of them`,
 		},
 		{
 			name: "an argv handler advising on another seam is refused",
@@ -634,7 +633,7 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentPostToolResult, MomentPreRequest},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result or file-changed; "pre-request" is neither`,
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed or session-started; "pre-request" is none of them`,
 		},
 		{
 			name: "an argv handler gating anywhere else is refused",

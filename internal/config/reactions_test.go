@@ -272,6 +272,80 @@ reactions:
 	}
 }
 
+// `advise:` on `session-started` is admitted (ADR 0076 amendment 1021): an argv or webhook entry
+// on that Moment loads as one advise Reaction on the sync lane, and an entry spelling `run:` beside
+// `advise:` on `[session-started]` loads — session-started is a notice `run:` reacts to and a
+// Moment `advise:` reacts at — as one observe and one advise Reaction of the same id, one per lane.
+func TestLoadFileConfigAdmitsSessionStartedAdvice(t *testing.T) {
+	t.Parallel()
+
+	path := writeReactionsConfig(t, `
+reactions:
+  - id: primer
+    on: [session-started]
+    run: ["./scripts/log-start.sh"]
+    advise: ["capcom", "prime"]
+  - id: briefing
+    on: [session-started]
+    advise:
+      url: https://hooks.example.com/brief
+`)
+
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if len(opts.Reactions) != 3 {
+		t.Fatalf("resolved %d reactions; want the 3 the two entries arm (primer arms two): %+v",
+			len(opts.Reactions), opts.Reactions)
+	}
+
+	primerObserve, primerAdvise, briefing := opts.Reactions[0], opts.Reactions[1], opts.Reactions[2]
+	if primerObserve.ID != "primer" || primerObserve.Class != domain.ClassObserve {
+		t.Errorf("first entry is %q/%s, want the observe reaction %q's `run:` arms",
+			primerObserve.ID, primerObserve.Class, "primer")
+	}
+	if primerAdvise.ID != "primer" || primerAdvise.Class != domain.ClassAdvise {
+		t.Errorf("second entry is %q/%s, want the advise reaction %q's `advise:` arms",
+			primerAdvise.ID, primerAdvise.Class, "primer")
+	}
+	adviseArgv, ok := primerAdvise.Handler.(domain.ArgvHandler)
+	if !ok {
+		t.Fatalf("second handler = %T; want a domain.ArgvHandler for an `advise:` sequence",
+			primerAdvise.Handler)
+	}
+	if !slices.Equal(adviseArgv.Argv, []string{"capcom", "prime"}) {
+		t.Errorf("second argv = %v, want the two elements the sequence spells", adviseArgv.Argv)
+	}
+	for _, reaction := range opts.Reactions {
+		if !slices.Equal(reaction.On, []domain.Moment{domain.MomentSessionStarted}) {
+			t.Errorf("%q/%s fires on %v, want the one session-started Moment its entry spells",
+				reaction.ID, reaction.Class, reaction.On)
+		}
+	}
+
+	if briefing.ID != "briefing" || briefing.Class != domain.ClassAdvise {
+		t.Errorf("third entry is %q/%s, want the advise reaction %q's `advise:` mapping arms",
+			briefing.ID, briefing.Class, "briefing")
+	}
+	webhook, ok := briefing.Handler.(domain.WebhookHandler)
+	if !ok {
+		t.Fatalf("third handler = %T; want a domain.WebhookHandler for an `advise:` mapping",
+			briefing.Handler)
+	}
+	if webhook.URL != "https://hooks.example.com/brief" {
+		t.Errorf("webhook url = %q, want the one the mapping spells", webhook.URL)
+	}
+
+	observe, sync := domain.SplitLanes(opts.Reactions)
+	if got := laneIDs(observe); got != "primer" {
+		t.Errorf("observe lane = %q, want %q — the one `run:`", got, "primer")
+	}
+	if got := laneIDs(sync); got != "primer briefing" {
+		t.Errorf("sync lane = %q, want %q — every `advise:` in file order", got, "primer briefing")
+	}
+}
+
 // An empty or absent block resolves to no Reactions and no error: the lane is dormant by default,
 // exactly as `mcp-servers:` is. A block whose every entry is parked resolves the same way, so a
 // file that keeps its definitions without arming them is indistinguishable from one that has none.
@@ -342,12 +416,7 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 		{
 			name: "advise: reacts at a Moment it cannot take",
 			body: "reactions:\n  - id: coach\n    on: [turn-finished]\n    advise: [\"say-something\"]\n",
-			want: `invalid reaction "coach": advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`,
-		},
-		{
-			name: "advise: on session-started awaits its admission arm",
-			body: "reactions:\n  - id: primer\n    on: [session-started]\n    advise: [\"say-something\"]\n",
-			want: `invalid reaction "primer": advise: on "session-started" is pending admission — session-start advice awaits its admission arm`,
+			want: `invalid reaction "coach": advise: reacts at post-tool-result, file-changed or session-started; "turn-finished" is none of them`,
 		},
 		{
 			name: "gate: reacts at session-started",
