@@ -69,10 +69,16 @@ const (
 // joined the vocabulary after them, and allNotices keeps that order.
 const MomentSessionStarted Moment = "session-started"
 
+// MomentCompactionFinished is the FOLD notice: a standalone notice reporting that a compaction
+// fold ran and replaced the conversation — fired once per fold, whether the estimate, an
+// emergency or a `/compact` started it, and for the top-level Agent only (ADR 0076,
+// adr-0076-amend-1021b). It joined the vocabulary after session-started, and allNotices keeps that order.
+const MomentCompactionFinished Moment = "compaction-finished"
+
 // allSeams is the seam vocabulary in loop order; allNotices is the notice vocabulary in the
 // order internal/reactions reports it — the six standalone notices first, in the order that
 // package already listed them, then the five seam-closing notices in loop order, then
-// session-started. Appending rather than interleaving keeps the spellings a configuration in the
+// session-started, then compaction-finished. Appending rather than interleaving keeps the spellings a configuration in the
 // wild already names at the head of every listing they appear in, so a notice added later goes
 // at the end.
 var (
@@ -96,6 +102,7 @@ var (
 		MomentPostToolResultFinished,
 		MomentHistoryRewriteFinished,
 		MomentSessionStarted,
+		MomentCompactionFinished,
 	}
 )
 
@@ -147,7 +154,7 @@ func (m Moment) Closing() Moment {
 // listing them for a help text or a validation message cannot disturb the vocabulary.
 func Seams() []Moment { return append([]Moment(nil), allSeams...) }
 
-// Notices returns the twelve notice Moments in their documented order, as a fresh copy.
+// Notices returns the thirteen notice Moments in their documented order, as a fresh copy.
 func Notices() []Moment { return append([]Moment(nil), allNotices...) }
 
 // Origin is who a Reaction belongs to — one axis of the Reaction surface matrix (CONTEXT:
@@ -318,9 +325,10 @@ func (SessionStartedFunc) seam() Moment { return MomentSessionStarted }
 // shell, so no quoting or expansion happens on the way. The Moment's payload reaches the command
 // through its environment. It serves three of the user's classes, and the class decides both where
 // it may fire and what its output is worth: observe fires on notices and its output is ignored;
-// advise fires at post-tool-result, file-changed or session-started and its stdout becomes the
-// fenced trailer — or, at session-started, the session-start advice; gate fires at pre-tool-exec
-// and its first stdout line is the verdict.
+// advise fires at post-tool-result, file-changed, session-started or compaction-finished and its
+// stdout becomes the fenced trailer — or, at session-started, the session-start advice, and at
+// compaction-finished, the briefing after a fold; gate fires at pre-tool-exec and its first stdout
+// line is the verdict.
 type ArgvHandler struct {
 	// Argv is the command and its arguments. Validate refuses a list whose first element is empty
 	// or blank — there is no program to run — beside the KIND rules that say where the handler's
@@ -333,9 +341,10 @@ type ArgvHandler struct {
 // mapping arms (ADR 0076 D2). It is the out-of-process twin of an ArgvHandler and serves the same
 // three of the user's classes, with the class deciding where it fires and what its reply is worth:
 // observe fires on notices and the reply is discarded — nothing an observe reaction returns reaches
-// the model; advise fires at post-tool-result, file-changed or session-started and the reply body
-// becomes the fenced trailer — or, at session-started, the session-start advice; gate fires at
-// pre-tool-exec and the reply's first line is the verdict.
+// the model; advise fires at post-tool-result, file-changed, session-started or compaction-finished
+// and the reply body becomes the fenced trailer — or, at session-started, the session-start advice,
+// and at compaction-finished, the briefing after a fold; gate fires at pre-tool-exec and the reply's
+// first line is the verdict.
 type WebhookHandler struct {
 	// URL is the endpoint the payload is POSTed to.
 	URL string
@@ -568,9 +577,11 @@ func (r Reaction) Validate() error {
 		if async {
 			switch r.Class {
 			case ClassAdvise:
-				if m != MomentPostToolResult && m != MomentFileChanged && m != MomentSessionStarted {
+				if m != MomentPostToolResult && m != MomentFileChanged && m != MomentSessionStarted &&
+					m != MomentCompactionFinished {
 					return fmt.Errorf(
-						"%w %q: advise: reacts at post-tool-result, file-changed or session-started; "+
+						"%w %q: advise: reacts at post-tool-result, file-changed, session-started or "+
+							"compaction-finished; "+
 							"%q is none of them",
 						ErrInvalidReaction, r.ID, m,
 					)

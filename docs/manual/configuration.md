@@ -891,10 +891,10 @@ list run directly (no shell; write `["sh", "-c", "…"]` when you want one) or a
 A [Project config](#a-projects-own-config--apogeeconfigyaml) may propose reactions of its own in the
 same shape; each arms only once you adopt it, and runs under the rules that section lists.
 A `run:` reaction is told what already happened, and nothing it prints reaches the model, the
-conversation or the saved session. It takes the twelve notices — the seven standalone notices `exchange-finished`,
+conversation or the saved session. It takes the thirteen notices — the eight standalone notices `exchange-finished`,
 `turn-finished`, `file-changed`, `approval-requested` (raised, before you answer),
-`approval-decided` (its verdict), `error` and `session-started` (a session started, resumed,
-cleared or forked), and the five seam-closing notices `pre-request-finished`,
+`approval-decided` (its verdict), `error`, `session-started` (a session started, resumed,
+cleared or forked) and `compaction-finished` (a compaction fold ran), and the five seam-closing notices `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished` and
 `history-rewrite-finished`. The other two keys are the ones the loop waits on, and each takes the
 same two shapes `run:` does — an argv list, or a webhook mapping whose reply body stands where the

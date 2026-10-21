@@ -9,10 +9,11 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// TestEventsIsTheWholeVocabularyInOrder pins the twelve events and their documented order — the
+// TestEventsIsTheWholeVocabularyInOrder pins the thirteen events and their documented order — the
 // order a config template lists and an error message names them in. The six standalone notices
 // come first, in the order this package has always listed them, then the five seam-closing
-// notices in loop order, then session-started, appended last because it joined last.
+// notices in loop order, then session-started and compaction-finished, appended last because they
+// joined last.
 func TestEventsIsTheWholeVocabularyInOrder(t *testing.T) {
 	t.Parallel()
 
@@ -22,7 +23,7 @@ func TestEventsIsTheWholeVocabularyInOrder(t *testing.T) {
 		"exchange-finished", "turn-finished", "file-changed", "approval-requested",
 		"approval-decided", "error", "pre-request-finished", "post-response-finished",
 		"pre-tool-exec-finished", "post-tool-result-finished", "history-rewrite-finished",
-		"session-started",
+		"session-started", "compaction-finished",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("Events() = %v, want %v", got, want)
@@ -324,12 +325,12 @@ func TestSubscribedEventsIsTheUnion(t *testing.T) {
 	}
 }
 
-// TestEventValuesArePinnedLiterals pins each of the twelve events to its exact spelling. The
+// TestEventValuesArePinnedLiterals pins each of the thirteen events to its exact spelling. The
 // values are a stable contract — they are what a user writes under `events:`, what reaches a
 // fired command as APOGEE_REACTION_EVENT, and the notice Moments of the Reaction core — so
 // re-homing the type behind an alias must not move a single byte. The six this package names
-// are pinned through its own constants; the five seam-closing notices and session-started, which
-// it names none of, are pinned through the core's.
+// are pinned through its own constants; the five seam-closing notices, session-started and
+// compaction-finished, which it names none of, are pinned through the core's.
 func TestEventValuesArePinnedLiterals(t *testing.T) {
 	t.Parallel()
 
@@ -349,6 +350,7 @@ func TestEventValuesArePinnedLiterals(t *testing.T) {
 		{domain.MomentPostToolResultFinished, "post-tool-result-finished"},
 		{domain.MomentHistoryRewriteFinished, "history-rewrite-finished"},
 		{domain.MomentSessionStarted, "session-started"},
+		{domain.MomentCompactionFinished, "compaction-finished"},
 	}
 	for _, pin := range pins {
 		if string(pin.got) != pin.want {
@@ -389,7 +391,7 @@ func TestParseEventErrorTextIsByteIdentical(t *testing.T) {
 	const want = `unknown reaction event "turn-started" — the events are ` +
 		`exchange-finished, turn-finished, file-changed, approval-requested, approval-decided, ` +
 		`error, pre-request-finished, post-response-finished, pre-tool-exec-finished, ` +
-		`post-tool-result-finished, history-rewrite-finished, session-started`
+		`post-tool-result-finished, history-rewrite-finished, session-started, compaction-finished`
 	if err.Error() != want {
 		t.Errorf("ParseEvent error =\n%q\nwant\n%q", err.Error(), want)
 	}

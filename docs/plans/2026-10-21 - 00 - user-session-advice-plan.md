@@ -174,7 +174,17 @@ cmd/apogee/e2e_support_test.go — launchTUIConfigured; internal/tui/autotitle.g
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Advice' ./internal/tui/` and `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2ESessionStarted' ./cmd/apogee/`; the grep above finds no sentence saying advice lands only on a tool result.
 **Commit:** `feat(tui): /advice shows session-start advice`
 
-## 8. The `compaction-finished` notice in the vocabulary
+## 8. The `compaction-finished` notice in the vocabulary — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): the reactions.md `compaction-finished` row sits after `session-started`, with the standalone notices that its prose groups it with ("Eight report something the session did"), not at the end of the table. `allNotices` still appends it last. The row names the `fold` payload values, but the `fold` payload-table row and `APOGEE_REACTION_FOLD` stay item 13's.
+
+NOTES (2026-10-21): reactions.md's `on:` row and the advise prose in configuration.md and reactions.md still state the advise Moments as before ("post-tool-result or file-changed"). Only their notice counts changed here, because item 13 owns that prose.
+
+NOTES (2026-10-21): the default config.yaml notice list drops session-started's stale "(an `advise:` on it is not admitted yet)" while gaining the compaction-finished line beside it. The glossary Moment Note's advise sentence now names file-changed, session-started and compaction-finished, because that sentence was being rewritten for the count anyway.
+
+NOTES (2026-10-21): the acceptance grep `grep -rn 'the-twelve-notices' docs README.md` still matches the plan document itself (docs/plans/…user-session-advice-plan.md, which quotes the old anchor). No manual page or README matches.
+
+NOTES (2026-10-21): a new config test, TestLoadFileConfigAdmitsCompactionFinishedAdvice, loads `run:` + `advise: ["capcom", "prime"]` on `[session-started, compaction-finished]` as one observe and one advise Reaction. A gate-refusal row was added to TestLoadFileConfigRefusesMalformedReactions, and run/advise/gate rows to the domain async-handler validation table.
 
 **What:**
 **Goal:** `domain.Moment` includes the notice `compaction-finished`, appended at the end of the notice list; `run:` and `advise:` entries may subscribe to it, `gate:` refuses it as any notice; the facade re-exports `apogee.MomentCompactionFinished`; every public count follows (thirteen notices, eighteen Moments) and `docs/manual/reactions.md`'s notices table gains its row (fold kinds, top-level only).

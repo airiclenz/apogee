@@ -4,13 +4,15 @@ title: "Moment: a point the loop passes on which a Reaction may fire"
 
 **Moment**:
 A point the loop passes, on which a **Reaction** may fire — `domain.Moment`, one string vocabulary
-of seventeen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and
+of eighteen. A **seam** Moment is in-loop and synchronous, its payload an editable working value, and
 its five are listed in the order a Turn passes them: `pre-request`, `post-response`,
 `pre-tool-exec`, `post-tool-result`, `history-rewrite`. A **notice** Moment is post-hoc, its payload
-sealed, and there are **twelve** of them. Seven report a fact of their own: `exchange-finished`,
+sealed, and there are **thirteen** of them. Eight report a fact of their own: `exchange-finished`,
 `turn-finished`, `file-changed`, `approval-requested`, `approval-decided`, `error`,
-`session-started` (a top-level session boundary — fresh, resumed, cleared or forked); `file-changed`
-is also one of the two Moments an advise **Reaction** fires at, beside `post-tool-result`. Five are the
+`session-started` (a top-level session boundary — fresh, resumed, cleared or forked),
+`compaction-finished` (a top-level **Compaction** fold ran — `auto`, `emergency` or `manual`);
+`file-changed`, `session-started` and `compaction-finished` are also Moments an advise **Reaction**
+fires at, beside `post-tool-result`. Five are the
 **seam-closing** notices — one per seam, spelled `<seam>-finished`: `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished`,
 `history-rewrite-finished` — each reporting that its seam's cascade ran to its end and the loop

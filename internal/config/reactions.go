@@ -80,8 +80,9 @@ const contextFillNoticeKey = "context-fill-notice"
 // entryReactions maps one on-disk entry onto the user-origin Reactions it arms — ONE per action key
 // it spells, all carrying the entry's id, `on:` list and `workspace:` filter, which [domain.SplitLanes]
 // later sends down their own lanes. Because every one of them takes the whole `on:` list, the only
-// combined entries that validate are `run:` beside `advise:` on `file-changed`, `session-started` or
-// both — the two Moments that are each a notice `run:` reacts to and a Moment `advise:` reacts at.
+// combined entries that validate are `run:` beside `advise:` on any of `file-changed`,
+// `session-started` and `compaction-finished` — the three Moments that are each a notice `run:`
+// reacts to and a Moment `advise:` reacts at.
 // `run:` beside `gate:` never validates: `gate:` reacts at `pre-tool-exec` alone, and that is a
 // seam, which `run:` refuses. The id is checked against the names it may not take, every `on:` entry
 // is read as a Moment, each action key is turned into the handler that runs it — every key takes

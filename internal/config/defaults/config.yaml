@@ -1201,7 +1201,7 @@ ui:
 # you. Config-file only, and live in the interactive TUI: save the file and the running session
 # swaps its reactions over (a headless run and the daemon read the list once, at start).
 #
-# The twelve moments a `run:` reacts to are these seven:
+# The thirteen moments a `run:` reacts to are these eight:
 #   exchange-finished  a top-level exchange closed — the model answered, or the loop gave up
 #   turn-finished      every top-level turn boundary, whatever its outcome
 #   file-changed       a workspace write tool succeeded; the payload carries the path it landed on
@@ -1209,7 +1209,9 @@ ui:
 #   approval-decided   that same approval reached its verdict; the payload carries the decision
 #   error              a localised, recovered engine fault
 #   session-started    a session started — fresh, resumed, cleared or forked; the payload's
-#                      `start` says which (an `advise:` on it is not admitted yet)
+#                      `start` says which
+#   compaction-finished a compaction fold ran — automatic, emergency or /compact; the payload's
+#                      `fold` says which (auto, emergency or manual)
 # and the five seam-closing notices pre-request-finished, post-response-finished,
 # pre-tool-exec-finished, post-tool-result-finished and history-rewrite-finished, each reporting
 # that one of the loop's own seams finished passing, with the working value as the pass left it.
@@ -1266,7 +1268,7 @@ ui:
 #
 # reactions:
 #   - id: notify                         # unique; it is what a failure notice names
-#     on: [approval-requested]           # one or more of the twelve moments above (run:)
+#     on: [approval-requested]           # one or more of the thirteen moments above (run:)
 #     run: ["notify-send", "apogee is waiting for an answer"]
 #     timeout: 10s                       # optional; default 30s
 #   - id: ci-bell

@@ -346,6 +346,42 @@ reactions:
 	}
 }
 
+// `compaction-finished` is a notice `run:` reacts to and a Moment `advise:` reacts at (ADR 0076,
+// adr-0076-amend-1021b), so the entry that briefs a session at its start and again after every fold
+// — `run:` beside `advise:` on `[session-started, compaction-finished]` — loads as one observe and
+// one advise Reaction of the same id, each firing on both Moments.
+func TestLoadFileConfigAdmitsCompactionFinishedAdvice(t *testing.T) {
+	t.Parallel()
+
+	path := writeReactionsConfig(t, `
+reactions:
+  - id: primer
+    on: [session-started, compaction-finished]
+    run: ["./scripts/log-brief.sh"]
+    advise: ["capcom", "prime"]
+`)
+
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if len(opts.Reactions) != 2 {
+		t.Fatalf("resolved %d reactions; want the 2 the entry arms: %+v",
+			len(opts.Reactions), opts.Reactions)
+	}
+
+	wantOn := []domain.Moment{domain.MomentSessionStarted, domain.MomentCompactionFinished}
+	for i, wantClass := range []domain.Class{domain.ClassObserve, domain.ClassAdvise} {
+		reaction := opts.Reactions[i]
+		if reaction.ID != "primer" || reaction.Class != wantClass {
+			t.Errorf("entry %d is %q/%s, want %q/%s", i, reaction.ID, reaction.Class, "primer", wantClass)
+		}
+		if !slices.Equal(reaction.On, wantOn) {
+			t.Errorf("%q/%s fires on %v, want %v", reaction.ID, reaction.Class, reaction.On, wantOn)
+		}
+	}
+}
+
 // An empty or absent block resolves to no Reactions and no error: the lane is dormant by default,
 // exactly as `mcp-servers:` is. A block whose every entry is parked resolves the same way, so a
 // file that keeps its definitions without arming them is indistinguishable from one that has none.
@@ -416,12 +452,17 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 		{
 			name: "advise: reacts at a Moment it cannot take",
 			body: "reactions:\n  - id: coach\n    on: [turn-finished]\n    advise: [\"say-something\"]\n",
-			want: `invalid reaction "coach": advise: reacts at post-tool-result, file-changed or session-started; "turn-finished" is none of them`,
+			want: `invalid reaction "coach": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "turn-finished" is none of them`,
 		},
 		{
 			name: "gate: reacts at session-started",
 			body: "reactions:\n  - id: warden\n    on: [session-started]\n    gate: [\"decide\"]\n",
 			want: `invalid reaction "warden": gate: reacts at pre-tool-exec; "session-started" is not it`,
+		},
+		{
+			name: "gate: reacts at compaction-finished",
+			body: "reactions:\n  - id: warden\n    on: [compaction-finished]\n    gate: [\"decide\"]\n",
+			want: `invalid reaction "warden": gate: reacts at pre-tool-exec; "compaction-finished" is not it`,
 		},
 		{
 			name: "gate: is a bare string",

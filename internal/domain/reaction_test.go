@@ -22,7 +22,7 @@ var noopPreRequest = PreRequestFunc(func(context.Context, *Request) (Outcome, er
 	return Outcome{}, nil
 })
 
-// TestMomentValuesArePinnedLiterals pins all seventeen Moment spellings. The strings are the ones a
+// TestMomentValuesArePinnedLiterals pins all eighteen Moment spellings. The strings are the ones a
 // user writes in configuration and an observer reads off a ReactionFiredEvent, so changing one
 // breaks every configuration in the wild — the seams carry the retired hook-point values and the
 // notices the reactions.Event values, unchanged.
@@ -50,6 +50,7 @@ func TestMomentValuesArePinnedLiterals(t *testing.T) {
 		{MomentPostToolResultFinished, "post-tool-result-finished"},
 		{MomentHistoryRewriteFinished, "history-rewrite-finished"},
 		{MomentSessionStarted, "session-started"},
+		{MomentCompactionFinished, "compaction-finished"},
 	}
 
 	for _, c := range cases {
@@ -126,6 +127,7 @@ func TestSeamsAndNoticesReportTheVocabularyAsACopy(t *testing.T) {
 		MomentPostToolResultFinished,
 		MomentHistoryRewriteFinished,
 		MomentSessionStarted,
+		MomentCompactionFinished,
 	}
 
 	seams := Seams()
@@ -181,6 +183,7 @@ func TestMomentIsSeam(t *testing.T) {
 		{MomentPostToolResultFinished, false},
 		{MomentHistoryRewriteFinished, false},
 		{MomentSessionStarted, false},
+		{MomentCompactionFinished, false},
 		{Moment("not-a-moment"), false},
 		{Moment(""), false},
 	}
@@ -469,8 +472,8 @@ func TestReactionValidateAdmitsASessionStartedHandlerUnderAdviseOnly(t *testing.
 
 // TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler walks the rules the argv and
 // webhook handlers brought in. They key on the handler KIND, not the class alone: an argv handler
-// serves observe on notices, advise at post-tool-result, file-changed or session-started and gate
-// at pre-tool-exec, while a webhook stays observe-only and a Go handler keeps the per-seam rule for
+// serves observe on notices, advise at post-tool-result, file-changed, session-started or
+// compaction-finished and gate at pre-tool-exec, while a webhook stays observe-only and a Go handler keeps the per-seam rule for
 // every class — which is why the bench's class-observe Go reactions still validate. The refusals
 // are pinned by their exact text: they are what a user reads when their `run:` entry names the
 // wrong Moment.
@@ -594,6 +597,47 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 			wantErr: `apogee: invalid reaction "warden": gate: reacts at pre-tool-exec; "session-started" is not it`,
 		},
 		{
+			name: "an argv handler on compaction-finished validates",
+			reaction: Reaction{
+				ID:      "folded",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentCompactionFinished},
+				Handler: argv,
+			},
+		},
+		{
+			name: "an argv handler advising at compaction-finished validates",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentSessionStarted, MomentCompactionFinished},
+				Handler: argv,
+			},
+		},
+		{
+			name: "a webhook handler advising at compaction-finished validates",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentCompactionFinished},
+				Handler: webhook,
+			},
+		},
+		{
+			name: "an argv handler gating at compaction-finished is refused",
+			reaction: Reaction{
+				ID:      "warden",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentCompactionFinished},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "warden": gate: reacts at pre-tool-exec; "compaction-finished" is not it`,
+		},
+		{
 			name: "an argv handler advising at post-tool-result validates",
 			reaction: Reaction{
 				ID:      "advise",
@@ -622,7 +666,7 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentTurnFinished},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed or session-started; "turn-finished" is none of them`,
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "turn-finished" is none of them`,
 		},
 		{
 			name: "an argv handler advising on another seam is refused",
@@ -633,7 +677,7 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentPostToolResult, MomentPreRequest},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed or session-started; "pre-request" is none of them`,
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "pre-request" is none of them`,
 		},
 		{
 			name: "an argv handler gating anywhere else is refused",
