@@ -1164,6 +1164,133 @@ func TestE2EAdviseSessionStartIsOffUnderBypass(t *testing.T) {
 	}
 }
 
+// The emergency-fold re-brief journey's prompt, and the fixed text of the overflow bridge a fold
+// mid-Exchange appends (internal/agent/prompts/overflow-bridge.txt) — restated, as the stub script
+// below restates internal/agent's unimportable test turns, because the bridge is what the retried
+// request ends on and the one place the re-brief may ride.
+const (
+	rebriefPrompt     = "Survey this workspace and keep going."
+	rebriefBridgeText = "The conversation above was compacted because the previous request exceeded " +
+		"the model's context window. Continue the task from the summary."
+)
+
+// rebriefScript is the upstream the emergency-fold journey talks to: a list_dir call (so the tail
+// past the protected prefix holds the two messages context.minCompactTail asks for and the fold is
+// not skipped), the llama.cpp 400 for a prompt past the window on the request that hands its
+// result back — the marker the provider's isContextOverflow reads —, the summarizer's reply,
+// matched on its instruction, and the answer to the retried request that ends on the bridge. The
+// opening is matched unanchored because it starts with the session-start fence, not the prompt.
+// Every turn is matched rather than ordered, so anything apogee asks on its own account falls to
+// the repeating fallback instead of spending a turn of the conversation.
+func rebriefScript() stubllm.Script {
+	return stubllm.Script{
+		Model: "rebrief-model",
+		Turns: []stubllm.Turn{
+			{When: &stubllm.Match{System: "compacting a conversation"}, Text: "The workspace was listed."},
+			{
+				When:      &stubllm.Match{LastMessage: regexp.QuoteMeta(rebriefPrompt) + "$"},
+				ToolCalls: []stubllm.ToolCall{{Name: "list_dir", Arguments: `{"path":"."}`}},
+			},
+			{When: &stubllm.Match{ToolResult: "list_dir"}, HTTP: &stubllm.HTTPReply{
+				Status:      http.StatusBadRequest,
+				Body:        `{"error":{"message":"request (57546 tokens) exceeds the available context size (32768 tokens)"}}`,
+				ContentType: "application/json",
+			}},
+			{
+				When: &stubllm.Match{LastMessage: regexp.QuoteMeta(rebriefBridgeText) + "$"},
+				Text: "Carried on after the fold.",
+			},
+			{Repeat: true, Text: "OK."},
+		},
+	}
+}
+
+// TestE2EAdviseReBriefsAfterAnEmergencyFold is the compaction slot's headless journey: one
+// `advise:` entry on both session-started and compaction-finished briefs the run's first request
+// ahead of the prompt, and when the upstream then refuses a request as past its window, the
+// emergency fold re-runs the entry and the retried request ends on the overflow bridge carrying the
+// re-brief ahead of the bridge's fixed text — while the protected prefix's first user message no
+// longer carries the session-start brief the re-brief replaced. The command prints the Moment and
+// the fold it was told, so each fence proves which firing produced it, and the stream books both.
+func TestE2EAdviseReBriefsAfterAnEmergencyFold(t *testing.T) {
+	stub := stubllm.New(t, rebriefScript())
+	script := `echo "$` + domain.EnvReactionEvent + `${` + domain.EnvReactionFold + `:+ $` +
+		domain.EnvReactionFold + `}"`
+	stdout, _, _ := headlessHooksArgs(t, stub, rebriefPrompt,
+		adviseConfigOn([]domain.Moment{domain.MomentSessionStarted, domain.MomentCompactionFinished}, script),
+		"--format", formatJSON)
+
+	briefText := string(domain.MomentSessionStarted) + "\n"
+	brief := domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: adviseCoachName,
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentSessionStarted,
+		Turn:     0,
+		Leading:  true,
+	}, briefText)
+	if got := openingHandedOn(t, stub, 0); !strings.HasPrefix(got, brief) {
+		t.Fatalf("the model's first request opened with the user message\n%q\nwant it to start "+
+			"with the session-start brief\n%q", got, brief)
+	}
+
+	retry := requestEndingIn(t, stub, rebriefBridgeText)
+	rebriefText := string(domain.MomentCompactionFinished) + " " + string(domain.CompactionFoldEmergency) + "\n"
+	rebrief := domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: adviseCoachName,
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentCompactionFinished,
+		Turn:     1,
+		Leading:  true,
+	}, rebriefText)
+	if bridge := retry.Messages[len(retry.Messages)-1]; bridge.Content != rebrief+rebriefBridgeText {
+		t.Errorf("the retried request ended on the bridge\n%q\nwant the re-brief fenced ahead of "+
+			"its fixed text\n%q", bridge.Content, rebrief+rebriefBridgeText)
+	}
+	if first := firstUserMessage(t, retry); !strings.HasSuffix(first, rebriefPrompt) ||
+		strings.Contains(first, adviceFenceMark) {
+		t.Errorf("the retried request's first user message is %q; want the prompt with the "+
+			"session-start brief stripped — the re-brief retires the same entry's stale fence", first)
+	}
+
+	fired := adviseFirings(t, jsonEventLines(t, stdout))
+	if want := []string{briefText, rebriefText}; !slices.Equal(fired, want) {
+		t.Errorf("the stream booked the advise firings %q; want %q — the session-start brief, "+
+			"then the re-brief", fired, want)
+	}
+}
+
+// requestEndingIn is the last request the stub was handed whose last message is a user message
+// ending in suffix.
+func requestEndingIn(t *testing.T, stub *stubllm.Server, suffix string) stubllm.Request {
+	t.Helper()
+
+	reqs := stub.Requests()
+	for i := len(reqs) - 1; i >= 0; i-- {
+		messages := reqs[i].Messages
+		if len(messages) == 0 {
+			continue
+		}
+		if last := messages[len(messages)-1]; last.Role == "user" && strings.HasSuffix(last.Content, suffix) {
+			return reqs[i]
+		}
+	}
+	t.Fatalf("none of the stub's %d requests ended on a user message ending in %q", len(reqs), suffix)
+	return stubllm.Request{}
+}
+
+// firstUserMessage is the content of req's first user message — the protected prefix's.
+func firstUserMessage(t *testing.T, req stubllm.Request) string {
+	t.Helper()
+
+	for _, m := range req.Messages {
+		if m.Role == "user" {
+			return m.Content
+		}
+	}
+	t.Fatalf("request %d carries no user message", req.N)
+	return ""
+}
+
 // TestE2EAdviseFileChangedFiresOnTheWriteAlone is the narrowed Moment: an entry on
 // `file-changed` alone runs after a successful write and after nothing else. The script writes and
 // then reads on one prompt, so the two calls sit in one run, and what the command PRINTS is the
@@ -1209,9 +1336,18 @@ func TestE2EAdviseFileChangedFiresOnTheWriteAlone(t *testing.T) {
 // permit the fence would refuse on a host without confinement capabilities. script is written
 // into a YAML flow scalar, so its single quotes are doubled here.
 func adviseConfig(moment domain.Moment, script string) string {
+	return adviseConfigOn([]domain.Moment{moment}, script)
+}
+
+// adviseConfigOn is [adviseConfig] with the `coach` entry armed at every one of moments.
+func adviseConfigOn(moments []domain.Moment, script string) string {
+	on := make([]string, len(moments))
+	for i, m := range moments {
+		on[i] = string(m)
+	}
 	return "confine-to-workspace: false\n" +
 		hookBlockOf("  - id: "+adviseCoachName+"\n"+
-			"    on: ["+string(moment)+"]\n"+
+			"    on: ["+strings.Join(on, ", ")+"]\n"+
 			"    advise: [sh, -c, '"+strings.ReplaceAll(script, "'", "''")+"']\n")
 }
 

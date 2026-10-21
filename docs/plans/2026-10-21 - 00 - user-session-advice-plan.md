@@ -259,7 +259,11 @@ internal/agent/construct.go — exchangeClosed, exchangeAborted
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'CompactAdvise|TestSessionAdvise|Fold' ./internal/agent/`
 **Commit:** `feat(agent): compaction-finished advice re-briefs the model after a fold`
 
-## 12. Headless journey: re-brief after an emergency fold
+## 12. Headless journey: re-brief after an emergency fold — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): adviseConfig now delegates to a new adviseConfigOn(moments, script), which arms the `coach` entry on several Moments at once; existing callers are unchanged.
+
+NOTES (2026-10-21): the stub script matches every turn (opening unanchored, since it starts with the session-start fence) and restates the overflow bridge's full fixed text from internal/agent/prompts/overflow-bridge.txt as rebriefBridgeText; the advise command prints its Moment and fold so each fence and firing names the firing that produced it.
 
 **What:**
 Depends on items 5 and 11.
