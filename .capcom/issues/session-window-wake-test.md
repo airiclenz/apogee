@@ -3,6 +3,7 @@ title: No test drives the Wake path that shuts the session-started window
 status: open
 type: task
 priority: 3
+plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-19T18:51:04Z
 ---
 

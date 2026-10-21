@@ -34,7 +34,9 @@ reaction takes exactly **one cell**:
 The line the user row draws: a user Reaction may change the model's **view** and may say **No**; it
 may never change the model's **work** or make its **choices**. Of the user row, **observe**,
 **advise** and **gate** ship — a `reactions:` entry's `run:`, `advise:` and `gate:` keys — and
-**shape (view)** is the one reserved cell. **Bypass** switches off the advise
+**shape (view)** is the one reserved cell. A user cell is the user's own extension and opens on a
+new slot without an admission arm once the slot meets ADR 0076's structural bar
+(`adr-0076-amend-1021`); an arm gates only what apogee ships on. **Bypass** switches off the advise
 and shape classes of user and bench-armed origin, plus the engine-origin context-fill notice (the
 one advise builtin), and nothing else. A **Tool** is not a cell: the
 model asks for it by name, and it is admitted on a **replicated** ask across models

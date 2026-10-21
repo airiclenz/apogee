@@ -3,6 +3,7 @@ title: apogee-sim admission arm for the session-start advise slot
 status: open
 type: task
 priority: 3
+plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-19T17:02:11Z
 ---
 
@@ -12,3 +13,7 @@ Wanted: an apogee-sim arm, pre-registered like the stage-3 arm (`../apogee-sim/d
 
 ## Acceptance
 - A pre-registered arm reports a verdict; a pass is recorded where `session-start-advise` can cite it.
+
+## Log
+
+- 2026-10-21 Airic Lenz: 2026-10-21: adr-0076-amend-1021 retires this as a gate; closed by the session-start-advise plan.

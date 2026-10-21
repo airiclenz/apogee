@@ -3,7 +3,8 @@ title: "advise: at session start cannot reach the model"
 status: open
 type: feature
 priority: 2
-deps: [session-started-notice, non-tool-advise-slot, session-advise-admission-arm]
+deps: [session-started-notice]
+plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-19T16:54:07Z
 ---
 

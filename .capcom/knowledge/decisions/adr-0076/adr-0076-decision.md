@@ -72,6 +72,11 @@ Bypass under ADR 0009 on the target class. Passing proves the
 injection path — slot, fence, cap — is not itself a regression. The user advise cell ships only
 after this arm passes; no content arm is required or owned by the bench.
 
+> *Amendment (2026-10-21, `adr-0076-amend-1021`):* an admission arm gates what apogee ships on —
+> engine-origin and bench-armed Reactions, and slots apogee fills by default. A user cell may open
+> on a new slot without one when the slot is role-safe, prefix-preserving, fenced, capped,
+> ephemeral and off under Bypass, its handlers under decision 8's posture.
+
 **6. The advise slot, and the provenance ledger.** Advise text never enters the system prompt. For a
 tool-shaped Moment (`post-tool-result`, `file-changed`) it lands as a fenced **trailer on the
 closing tool result**; for any other Moment it is a fenced user-role message appended at the tail.
@@ -97,7 +102,8 @@ attributes effect by reaction id; `/settings` can show what the model saw this T
 > *Amendment (2026-10-19, `adr-0076-amend-1019`):* for the `session-started` notice the "any other
 > Moment" slot is no appended message: the span is a fenced block inside the session's next user
 > message, ahead of the prompt, ephemeral as above. The user advise cell on it waits for its own
-> decision-5-style admission arm.
+> decision-5-style admission arm. *(Superseded 2026-10-21 by `adr-0076-amend-1021`: the slot
+> meets the structural bar, so the user advise cell on `session-started` is admitted without an arm.)*
 
 **7. Deadlines, cap and failure.** `advise` defaults to **10s** and is **fail-open** — no advice is
 just no advice. `gate` defaults to **5s** (it runs on every tool call) and on timeout or crash

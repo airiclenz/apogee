@@ -3,6 +3,7 @@ title: A timed-out session-start advise run replays after an aborted Exchange
 status: open
 type: bug
 priority: 2
+plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-19T18:51:04Z
 ---
 
