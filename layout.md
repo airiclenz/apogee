@@ -2370,7 +2370,8 @@ here dismisses the panes above it first; the `/advice` pane is asked after this 
 
 **What it shows.** `/advice` opens a bordered pane in the same transcript-side slot holding every
 **advise firing** the session's agents handed their model — the text a user `advise:` reaction
-injected under its `[advice — …]` fence on a tool result, and the context-fill notice's rung — one
+injected under its `[advice — …]` fence, trailing a tool result or, for a `session-started` entry,
+leading the session's first prompt, and the context-fill notice's rung — one
 record per firing, newest last. It is the view for the question the transcript cannot answer because
 the transcript never carried the advice at all: what the model was **told** beside the results it
 read. The engine's own structural notes — the step notice, the token-budget notice, the delegations

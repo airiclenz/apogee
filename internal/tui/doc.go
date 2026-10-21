@@ -551,8 +551,8 @@
 // order, so a fan-out's partial text is never seated between records that completed after it began.
 //
 // advicepane.go is the /advice pane and the board behind it in one file: every advise firing the
-// session's agents handed their model — a user `advise:` entry's capped fenced text, the
-// context-fill notice's rung — folded off domain.ReactionFiredEvent by Action ("advise" and
+// session's agents handed their model — a user `advise:` entry's capped fenced text, whether it
+// trailed a tool result or led the session's first prompt, the context-fill notice's rung — folded off domain.ReactionFiredEvent by Action ("advise" and
 // "notice" alone; a guard's retry or intercept is the debug view's, and the engine's structural
 // notes fire no reaction and are absent), oldest first and bounded to the newest maxAdviceRecords
 // ([Model.foldAdvice], [Model.advice]). The pane reads that board as /thinking reads its own: one

@@ -156,7 +156,11 @@ cmd/apogee/wire_engine.go — lateEngine.Bind; cmd/apogee/wire_settings_test.go 
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSessionAdvise|TestSessionStart|TestSessionWindow' ./internal/agent/` and `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSessionStarted' ./cmd/apogee/`
 **Commit:** `feat(agent): an advise entry armed before the first prompt briefs that session`
 
-## 7. `/advice` shows session-start advice; the TUI journey is driven
+## 7. `/advice` shows session-start advice; the TUI journey is driven — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): no pane code changed — foldAdvice already folds any advise firing; the item is the pane test (TestAdvicePaneShowsASessionStartFiring), the TUI e2e (TestE2ESessionStartedAdviseLeadsTheFirstTurn, auto-title off, Turn 0 as headless stamps it, plus a `/advice` check of the firing row and text) and the comment/spec wording.
+
+NOTES (2026-10-21): a Detail ending in a newline (an `echo` handler's output) paints one empty row after the text in the pane — pre-existing, shared with post-tool-result advise, left as is.
 
 **What:**
 Depends on item 4.

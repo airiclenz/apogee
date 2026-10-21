@@ -143,6 +143,42 @@ func TestAdvicePaneGroupsRowsByRunAndTurn(t *testing.T) {
 	}
 }
 
+// TestAdvicePaneShowsASessionStartFiring pins the session-start slot's firing on the board and in
+// the pane: a user advise entry on session-started — booked by the join that leads the session's
+// first Turn request with its fence (internal/agent, sessionadvise.go) — is folded like any other
+// advise firing, so the pane names it under its run and Turn with the `<reaction> (user origin) @
+// session-started` row and the fenced text it carried, line by line.
+func TestAdvicePaneShowsASessionStartFiring(t *testing.T) {
+	t.Parallel()
+
+	const column = 40
+	fired := advisedAt(runRef{}, 0, adviceActionAdvise, "prime", domain.OriginUser, "primed\nrun capcom ready")
+	fired.Moment = domain.MomentSessionStarted
+
+	m := newTestModel(t).foldEvent(fired)
+
+	want := []adviceRecord{{
+		run: runRef{}, turn: 0, reaction: "prime", origin: domain.OriginUser,
+		moment: domain.MomentSessionStarted, detail: "primed\nrun capcom ready",
+	}}
+	if !reflect.DeepEqual(m.advice, want) {
+		t.Fatalf("board after the session-start firing:\n got %+v\nwant %+v", m.advice, want)
+	}
+	rows, kinds := m.adviceRows(column)
+	got := make([]string, len(rows))
+	for i, row := range rows {
+		got[i] = row[0]
+	}
+	wantRows := []string{"turn 0", "prime (user origin) @ session-started", "primed", "run capcom ready"}
+	if !reflect.DeepEqual(got, wantRows) {
+		t.Errorf("rows:\n got %q\nwant %q", got, wantRows)
+	}
+	wantKinds := []popupRowKind{popupRowHeading, popupRowPlain, popupRowPlain, popupRowPlain}
+	if !reflect.DeepEqual(kinds, wantKinds) {
+		t.Errorf("kinds:\n got %v\nwant %v", kinds, wantKinds)
+	}
+}
+
 // TestAdvicePaneFollowsTheNewestFiring pins the pane's follow under its own name: opened on the
 // tail and following, a firing that lands while it is up is on the window the next frame draws —
 // the last full window ends at the last row — rather than below a frozen one.

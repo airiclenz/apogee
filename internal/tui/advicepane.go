@@ -19,9 +19,11 @@ import (
 // nobody folded.
 //
 // What the pane is FOR: reading what the model was TOLD beside its own reply. An advise reaction
-// speaks to the model inside the tool result it fired on — a user `advise:` entry's fenced text
-// under its `[advice — …]` header, the context-fill notice's rung (ADR 0076 D7, ADR 0077) — and the
-// transcript never shows that text: it is the model's reading, not the human's conversation. The
+// speaks to the model in a fence on a message it reads — a user `advise:` entry's text under its
+// `[advice — …]` header, trailing the tool result a post-tool-result entry fired on or leading the
+// session's first prompt for a session-started one, and the context-fill notice's rung (ADR 0076
+// D7, ADR 0077) — and the transcript never shows that text: it is the model's reading, not the
+// human's conversation. The
 // engine books each of those as a domain.ReactionFiredEvent whose Action is "advise" (an armed
 // advise entry, Detail = the CAPPED text the fence carried — internal/agent/reactions.go) or
 // "notice" (the context-fill notice, Detail = the rung and percent it fired at —
@@ -62,9 +64,10 @@ const adviceEmptyRow = "no advice recorded yet"
 
 // The two ReactionFiredEvent.Action labels the board folds. They are spelled here rather than
 // imported because the TUI does not depend on the agent package: adviceActionAdvise is
-// internal/agent/reactions.go's actionAdvise — an armed advise entry's injection at the
-// tool-result seam — and adviceActionNotice is internal/agent/fillnotice.go's actionNotice, the
-// context-fill notice's own label. TestAdviceBoardFoldsAdviseFiringsInOrder pins both spellings.
+// internal/agent/reactions.go's actionAdvise — an armed advise entry's injection, trailing a tool
+// result or ahead of the session's opening prompt — and adviceActionNotice is
+// internal/agent/fillnotice.go's actionNotice, the context-fill notice's own label.
+// TestAdviceBoardFoldsAdviseFiringsInOrder pins both spellings.
 const (
 	adviceActionAdvise = "advise"
 	adviceActionNotice = "notice"
