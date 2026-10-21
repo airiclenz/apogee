@@ -510,12 +510,15 @@ func TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 	reports := &reportRecorder{}
 	cfg.Report = reports.report
 	responder := echoResponder(t, "ok")
-	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("wedged", testtime.Fixed(50*time.Millisecond)))
+	timeout := testtime.Fixed(50 * time.Millisecond)
+	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("wedged", timeout))
 	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
-		runs := a.sessionAdvice.waiting()
-		return len(runs) == 1 && time.Now().After(runs[0].deadline)
-	}, "the background run's deadline to pass")
+		return len(a.sessionAdvice.waiting()) == 1
+	}, "the background run to be pending")
 	run := a.sessionAdvice.waiting()[0]
+	// The run's deadline was set before it was pending, so an expiry of the same timeout started
+	// now ends no earlier than that deadline.
+	testtime.Eventually(t, testtime.Budget(5*time.Second), testtime.Expiry(timeout), "the background run's deadline to pass")
 
 	abortAfterTheJoin(t, a, "aborted prompt")
 	if got := len(reports.all()); got != 1 {
