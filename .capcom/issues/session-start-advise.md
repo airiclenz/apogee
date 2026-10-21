@@ -1,11 +1,13 @@
 ---
 title: "advise: at session start cannot reach the model"
-status: open
+status: done
 type: feature
 priority: 2
 deps: [session-started-notice]
 plan: 2026-10-21 - 00 - user-session-advice-plan
 created: 2026-10-19T16:54:07Z
+closed: 2026-10-21T15:10:28Z
+reason: "Acceptance met: user/adopted advise: on session-started shipped by plan 2026-10-21 - 00 - user-session-advice-plan (51b3a10d); its remaining Close gap fixed by plan 2026-10-21 - 01 - advise-run-after-close-plan (archived at e8ab6979)."
 ---
 
 A Claude Code `SessionStart` hook's stdout reaches the model's context (e.g. `capcom ready` prints the ready issues and the model starts the session knowing them). apogee has no equivalent: `advise:` reacts only at `post-tool-result` / `file-changed`, landing as a fenced trailer on a tool result, and nothing a `run:` entry prints reaches the model. `system-prompt-layers:` is static text, not command output.

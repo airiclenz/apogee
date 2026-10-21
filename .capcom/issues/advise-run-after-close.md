@@ -1,9 +1,11 @@
 ---
 title: SetReactions after Close starts a session-start advise run nothing ends
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-10-21T12:09:42Z
+closed: 2026-10-21T15:10:28Z
+reason: "Resolved by plan 2026-10-21 - 01 - advise-run-after-close-plan (archived at e8ab6979): Close shuts the session window (817dc5c0) and session-advise started waits are bounded via testtime (d0f0c572)."
 ---
 
 Deferred from the user-session-advice plan run (item 6, commit 39bd22c2).
