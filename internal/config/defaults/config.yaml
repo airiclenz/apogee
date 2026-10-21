@@ -1192,13 +1192,14 @@ ui:
 
 # =============================================================================
 # Reactions: commands and webhooks Apogee runs when a moment closes in a session, advisers whose
-# output the model reads after a tool call, and gates it asks before a tool call runs.
+# output the model reads after a tool call, at a session start or after a fold, and gates it asks
+# before a tool call runs.
 # Default-EMPTY: with no entries listed, nothing runs and nothing is reported. A `run:` reaction is
 # told what already happened, it can change or veto nothing, and nothing it prints ever reaches the
 # model, the conversation or the saved session. Use one to ring a bell for an approval nobody is
 # watching, or to poke a build when a file changed. An `advise:` reaction (below) hands the model
-# a fact about a call that just finished; a `gate:` reaction (below) can deny a call or hand it to
-# you. Config-file only, and live in the interactive TUI: save the file and the running session
+# a fact about a call that just finished, or a briefing at a session start or after a fold; a
+# `gate:` reaction (below) can deny a call or hand it to you. Config-file only, and live in the interactive TUI: save the file and the running session
 # swaps its reactions over (a headless run and the daemon read the list once, at start).
 #
 # The thirteen moments a `run:` reacts to are these eight:
@@ -1245,16 +1246,23 @@ ui:
 # webhook reply that is not a 2xx — counts as ask, never as allow, and allow changes nothing the
 # mode already decided. An ask on a sub_agent call is deferred to the child's own calls.
 #
-# `advise:` is the third action: an argv LIST — or a webhook MAPPING — run AFTER a tool call
-# finished, while the loop waits, with `on: [post-tool-result]` (every call), `[file-changed]` (only
-# a successful workspace write, with the path) or both. The call reaches a command as JSON on stdin
-# and a webhook as the POST body (event, reaction, tool, arguments, result) and what it prints on
-# stdout, or answers in the reply body — every configured secret's value redacted, output past
-# 8 KiB cut — is appended to that call's result inside a fence the model reads:
+# `advise:` is the third action: an argv LIST — or a webhook MAPPING — whose answer the model
+# reads, with `on:` any of post-tool-result, file-changed, session-started and compaction-finished.
+# On `[post-tool-result]` (every call) or `[file-changed]` (only a successful workspace write, with
+# the path) it runs AFTER a tool call finished, while the loop waits. The call reaches a command as
+# JSON on stdin and a webhook as the POST body (event, reaction, tool, arguments, result) and what
+# it prints on stdout, or answers in the reply body — every configured secret's value redacted,
+# output past 8 KiB cut — is appended to that call's result inside a fence the model reads:
 #   [advice — reaction <id> (user origin) at post-tool-result, turn 3] … [end advice — <id>]
 # The header is Apogee's, never the script's, and names the seam the advice was fenced at — the
-# stdin document's `event` is what names the entry's Moment (file-changed). The saved session is
-# written from the result as it stood before the fence, so a resume carries no advice. Default
+# stdin document's `event` is what names the entry's Moment (file-changed). On `[session-started]`
+# it starts in the background at the session boundary and its answer is fenced ahead of your next
+# prompt; on `[compaction-finished]` it starts as a fold begins and its answer is fenced ahead of
+# the next user-role message after the fold — your next prompt, or the note an emergency fold
+# appends mid-exchange — replacing the briefing that same entry left before. Either message waits
+# only for what is left of the entry's `timeout:`, and `advise: ["capcom", "prime"]` on
+# `[session-started, compaction-finished]` briefs every session and briefs it again after every
+# fold. The saved session never carries the fence, so a resume carries no advice. Default
 # `timeout:` 10s, and switched off under bypass:. It is fail-open: a command that prints nothing,
 # fails, times out or cannot be spawned — or a webhook that answers nothing, or with anything but a
 # 2xx — changes nothing and is reported to you, each time. Print facts (the file gofmt would
@@ -1285,8 +1293,11 @@ ui:
 #     gate: ["check-tool-call"]          # prints allow, deny or ask on its first line
 #     timeout: 2s                        # optional; a gate's default is 5s
 #   - id: unformatted
-#     on: [file-changed]                 # an advise: reacts here or at post-tool-result
+#     on: [file-changed]                 # an advise: after a tool call: here or post-tool-result
 #     advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]  # its stdout reaches the model
+#   - id: prime
+#     on: [session-started, compaction-finished]  # briefs each session, again after every fold
+#     advise: ["capcom", "prime"]
 
 # =============================================================================
 # Model profiles: how apogee equips and speaks to a model — the shape its tool calls arrive in, the
