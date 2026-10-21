@@ -46,7 +46,7 @@ internal/agent/sessionadvise_test.go — liveAdviceAgent, blockedUntilCancel; in
 - `go vet ./internal/agent/`
 **Commit:** `fix(agent): Close shuts the session window so a later live swap starts no advise run`
 
-## 2. Bound the session-advise tests' waits on a run's start
+## 2. Bound the session-advise tests' waits on a run's start — ✅ DONE (2026-10-21)
 
 **What:**
 **Goal:** no test in `internal/agent/sessionadvise_test.go` receives from a `blockedUntilCancel` `started` channel without a `internal/testtime` bound; each such wait fails with a message naming what did not start.

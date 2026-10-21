@@ -77,6 +77,17 @@ func blockedUntilCancel() (probe *sessionAdviseProbe, started, ended chan struct
 	return probe, started, ended
 }
 
+// awaitStarted waits, under a testtime budget, for a blockedUntilCancel probe's handler to be called,
+// failing the test with what did not start.
+func awaitStarted(t *testing.T, started <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-started:
+	case <-time.After(testtime.Budget(10 * time.Second)):
+		t.Fatalf("%s never started", what)
+	}
+}
+
 // sessionAdviseAgent constructs a top-level Agent through New — so construction is its first Session
 // boundary — with reactions armed, over responder.
 func sessionAdviseAgent(
@@ -389,7 +400,7 @@ func TestSessionAdvise_EscDuringTheJoinEndsTheWait(t *testing.T) {
 	probe, started, _ := blockedUntilCancel()
 	responder := echoResponder(t, "ok")
 	a := sessionAdviseAgent(t, baseConfig(&recordingSink{}), responder, probe.reaction("ci", time.Hour))
-	<-started
+	awaitStarted(t, started, "the construction boundary's advise run")
 	if err := a.Submit(domain.UserInput{Text: "first prompt"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -594,7 +605,7 @@ func TestSessionAdvise_ABoundaryCancelsThePreviousRun(t *testing.T) {
 
 	probe, started, ended := blockedUntilCancel()
 	a := sessionAdviseAgent(t, baseConfig(&recordingSink{}), echoResponder(t, "ok"), probe.reaction("ci", time.Hour))
-	<-started
+	awaitStarted(t, started, "the construction boundary's advise run")
 
 	if err := a.ClearContext(); err != nil {
 		t.Fatalf("ClearContext: %v", err)
@@ -809,7 +820,7 @@ func TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary(t *testing.T) {
 	gen.Sync = []domain.Reaction{probe.reaction("ci", time.Hour)}
 	a.installGeneration(gen)
 	a.fireNewlyArmed()
-	<-started
+	awaitStarted(t, started, "the live-armed advise run")
 
 	if err := a.ClearContext(); err != nil {
 		t.Fatalf("ClearContext: %v", err)
