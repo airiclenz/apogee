@@ -605,3 +605,99 @@ func recordRoundTrip(t *testing.T, msg Message) string {
 	}
 	return restored.At(0).Content
 }
+
+// TestConversationStripReactionAdviceKeepsTheOthers pins the strip a fresh briefing retires a
+// reaction's earlier one through: the named reaction's leading fences go, and what is left — every
+// other reaction's fence, every trailer and their ledger rows — is byte-for-byte the message that
+// would have been built without the stripped reaction, so its offsets still stand and the prompt
+// still reads bare.
+func TestConversationStripReactionAdviceKeepsTheOthers(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "fix the parser"
+	bare := Message{Role: RoleUser, Content: prompt}
+	orient := func(m Message) Message { return m.WithAdvice(sessionStartSpan("orient"), "read AGENTS.md") }
+	branch := func(m Message) Message { return m.WithAdvice(sessionStartSpan("branch"), "you are on main") }
+	note := func(m Message) Message { return m.WithEngineNote("cancelled", "the launch was cancelled") }
+
+	cases := []struct {
+		name  string
+		msg   Message
+		strip string
+		want  Message
+	}{
+		{name: "the first of two leading spans", msg: branch(orient(bare)), strip: "orient", want: branch(bare)},
+		{name: "the second of two leading spans", msg: branch(orient(bare)), strip: "branch", want: orient(bare)},
+		{name: "every span of the reaction", msg: orient(branch(orient(bare))), strip: "orient", want: branch(bare)},
+		{name: "a leading span ahead of a trailing note", msg: branch(note(orient(bare))), strip: "orient", want: branch(note(bare))},
+		{name: "the only span", msg: orient(bare), strip: "orient", want: bare},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			conv := NewConversation([]Message{{Role: RoleSystem, Content: "be brief"}, tc.msg})
+			before := conv.Revision()
+
+			stripped := conv.StripReactionAdvice(1, tc.strip)
+
+			if !stripped || conv.Revision() != before+1 {
+				t.Errorf("stripped = %v, revision %d -> %d, want true and one bump", stripped, before, conv.Revision())
+			}
+			got := conv.At(1)
+			if got.Content != tc.want.Content {
+				t.Errorf("Content = %q, want %q", got.Content, tc.want.Content)
+			}
+			if !reflect.DeepEqual(got.Advice, tc.want.Advice) {
+				t.Errorf("ledger = %+v, want %+v", got.Advice, tc.want.Advice)
+			}
+			for _, row := range got.Advice {
+				if !got.fenceStands(row) {
+					t.Errorf("row %+v does not stand over %q", row, got.Content)
+				}
+			}
+			if bareText := got.ContentWithoutAdvice(); bareText != prompt {
+				t.Errorf("ContentWithoutAdvice = %q, want %q", bareText, prompt)
+			}
+		})
+	}
+}
+
+// TestConversationStripReactionAdviceRefusesWithoutAStandingSpan pins the no-op side: a reaction
+// with no fence on the message, an empty id, an index past the history and a stale row whose fence
+// a rewrite lost each leave the message and the revision as they were.
+func TestConversationStripReactionAdviceRefusesWithoutAStandingSpan(t *testing.T) {
+	t.Parallel()
+
+	advised := Message{Role: RoleUser, Content: "go"}.WithAdvice(sessionStartSpan("orient"), "read AGENTS.md")
+	stale := advised
+	stale.Content = "go"
+
+	cases := []struct {
+		name     string
+		msg      Message
+		index    int
+		reaction string
+	}{
+		{name: "an absent reaction", msg: advised, index: 0, reaction: "branch"},
+		{name: "an empty reaction id", msg: advised, index: 0, reaction: ""},
+		{name: "an index past the history", msg: advised, index: 1, reaction: "orient"},
+		{name: "a negative index", msg: advised, index: -1, reaction: "orient"},
+		{name: "a row whose fence no longer stands", msg: stale, index: 0, reaction: "orient"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			conv := NewConversation([]Message{tc.msg})
+			before := conv.Revision()
+
+			stripped := conv.StripReactionAdvice(tc.index, tc.reaction)
+
+			if stripped || conv.Revision() != before {
+				t.Errorf("stripped = %v, revision %d -> %d, want no strip and no bump", stripped, before, conv.Revision())
+			}
+			if !reflect.DeepEqual(conv.Messages(), []Message{tc.msg}) {
+				t.Errorf("messages = %+v, want them untouched", conv.Messages())
+			}
+		})
+	}
+}

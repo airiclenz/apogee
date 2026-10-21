@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -202,6 +203,110 @@ func (c *Conversation) AdviseUserMessage(i int, span AdviceSpan, text string) bo
 	c.messages[i] = c.messages[i].WithAdvice(span, text)
 	c.revision++
 	return true
+}
+
+// StripReactionAdvice removes the leading advice fences reaction put on the message at index i
+// (Message.withoutLeadingAdvice), keeping every other reaction's fences, every trailer and every
+// engine note — and their ledger rows, moved with the bytes they fence. It is how a fresh span
+// from one reaction retires that reaction's earlier briefing rather than stacking beside it. It
+// preserves the ledger, which SetMessageContent would drop.
+//
+// It reports whether it stripped: an out-of-range i, an empty reaction id, or a message carrying
+// no standing leading fence of reaction leaves the conversation — and its revision — as it was. A
+// strip bumps the revision like every other mutation.
+func (c *Conversation) StripReactionAdvice(i int, reaction string) bool {
+	if i < 0 || i >= len(c.messages) || reaction == "" {
+		return false
+	}
+	stripped, ok := c.messages[i].withoutLeadingAdvice(reaction)
+	if !ok {
+		return false
+	}
+	c.messages[i] = stripped
+	c.revision++
+	return true
+}
+
+// withoutLeadingAdvice returns a copy of m with reaction's leading fences cut out and reports
+// whether it cut any. A row is cut only where its fence stands (fenceStands), and the range it
+// cuts is Content[Offset:End] — the fence and the blank line after it. Every surviving row past a
+// cut has its Offset (and, for a leading row, its End) shifted back by the bytes cut ahead of it,
+// mirroring withLeadingAdvice, so the remaining leading rows still tile from 0 (leadingEnd) and
+// every trailer still opens where its row says. A surviving row whose fence sat inside a cut range
+// lost its bytes with it and is dropped. The ledger is copied, as WithAdvice copies it, and one the
+// strip empties is nil, as dropStaleAdvice leaves it.
+func (m Message) withoutLeadingAdvice(reaction string) (Message, bool) {
+	var cuts []AdviceSpan
+	for _, row := range m.Advice {
+		if row.Leading && row.Reaction == reaction && m.fenceStands(row) {
+			cuts = append(cuts, row)
+		}
+	}
+	if len(cuts) == 0 {
+		return m, false
+	}
+	cuts = mergeCuts(cuts)
+
+	var content strings.Builder
+	at := 0
+	for _, cut := range cuts {
+		content.WriteString(m.Content[at:cut.Offset])
+		at = cut.End
+	}
+	content.WriteString(m.Content[at:])
+
+	ledger := make([]AdviceSpan, 0, len(m.Advice))
+	for _, row := range m.Advice {
+		if row.Leading && row.Reaction == reaction && m.fenceStands(row) {
+			continue
+		}
+		shift, inside := cutBefore(cuts, row.Offset)
+		if inside {
+			continue
+		}
+		row.Offset -= shift
+		if row.Leading {
+			row.End -= shift
+		}
+		ledger = append(ledger, row)
+	}
+	if len(ledger) == 0 {
+		ledger = nil
+	}
+	m.Content = content.String()
+	m.Advice = ledger
+	return m, true
+}
+
+// mergeCuts orders the leading rows to cut by Offset and folds any that overlap into one range, so
+// a duplicated row is cut once.
+func mergeCuts(cuts []AdviceSpan) []AdviceSpan {
+	slices.SortFunc(cuts, func(a, b AdviceSpan) int { return a.Offset - b.Offset })
+	merged := cuts[:1]
+	for _, cut := range cuts[1:] {
+		last := &merged[len(merged)-1]
+		if cut.Offset < last.End {
+			last.End = max(last.End, cut.End)
+			continue
+		}
+		merged = append(merged, cut)
+	}
+	return merged
+}
+
+// cutBefore is the number of bytes the ordered, disjoint cuts remove ahead of offset, and whether
+// offset itself falls inside one of them.
+func cutBefore(cuts []AdviceSpan, offset int) (shift int, inside bool) {
+	for _, cut := range cuts {
+		if offset < cut.Offset {
+			break
+		}
+		if offset < cut.End {
+			return shift, true
+		}
+		shift += cut.End - cut.Offset
+	}
+	return shift, false
 }
 
 // WithAdvice returns a copy of m whose Content carries text as a rendered advice fence and

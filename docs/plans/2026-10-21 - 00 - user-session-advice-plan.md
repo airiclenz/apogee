@@ -219,7 +219,9 @@ internal/domain/reaction.go — ObserveRunner; internal/domain/seampayload.go �
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Compact|Fold' ./internal/agent/` and `GOMEMLIMIT=2GiB go test -race -count=1 ./internal/reactions/ ./internal/domain/`; `go vet ./internal/run/ ./cmd/apogee/`
 **Commit:** `feat(agent): a fold fires the compaction-finished notice`
 
-## 10. Strip one reaction's advice spans from a message
+## 10. Strip one reaction's advice spans from a message — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): the mutator is `Conversation.StripReactionAdvice(i, reaction) bool`; it cuts only the reaction's LEADING spans (the `Content[Offset:End]` range the item names) — a trailing span of the same reaction has no End and is left in place, which item 11's first-user-message use never meets. An emptied ledger is nil, as dropStaleAdvice leaves it.
 
 **What:**
 **Goal:** `domain` offers stripping the advice spans of one named reaction from a conversation message while keeping every other reaction's spans and their ledger rows consistent; the provenance ledger drops exactly the stripped rows.
