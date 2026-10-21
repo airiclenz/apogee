@@ -195,9 +195,9 @@ type Agent struct {
 	forkNext atomic.Bool
 
 	// window is the current Session boundary's pre-first-prompt window (sessionWindow): opened by
-	// the boundary's session-started announcement, shut by the session's first user message or its
-	// first Step, so a session-started entry a live swap arms inside it fires for the session it
-	// joined.
+	// the boundary's session-started announcement, shut by the session's first user message, its
+	// first Step or Close, so a session-started entry a live swap arms inside it fires for the
+	// session it joined.
 	window sessionWindow
 
 	// sessionAdvice is the session-start advise lane (sessionadvise.go): the background advise runs
@@ -858,9 +858,16 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // end — the ones an earlier ClearContext or RestoreSession stopped without waiting included — before
 // it closes the Consoles; a resumed session starts them again from their folders (ResumeWorkflows).
 // It also cancels the session-start advise runs the last boundary started, and the compaction
-// advise runs the last fold started (sessionadvise.go).
+// advise runs the last fold started (sessionadvise.go) — after it shuts the boundary's
+// pre-first-prompt window (sessionWindow), so a live swap after Close arms a session-started
+// entry for neither lane: no advise run starts and no observe entry reaches the Runner until a
+// later boundary reopens the window. No production Driver swaps after Close: cmd/apogee stops its
+// settings watchers and closes its Reaction Runner before the engine.
 func (a *Agent) Close() error {
 	if !a.isDelegate() {
+		// Shut before the lane stops: admit fires under the window's lock, so shutting first waits
+		// out an in-flight live arm, and the stop that follows cancels whatever it enqueued.
+		a.window.shut()
 		a.sessionAdvice.stop()
 		a.compactionAdvice.stop()
 		a.stopAllBackground()
@@ -2160,7 +2167,8 @@ func (a *Agent) MarkFork() {
 // sessionWindow is one Session boundary's PRE-FIRST-PROMPT window: the span from the boundary's
 // session-started announcement to the session's first user message (Submit, or the Wake that opens
 // an Exchange without one) or, for a session restored mid-Exchange or with its input still queued,
-// to the first Step that continues it (Agent.step). A session-started entry a live swap arms inside
+// to the first Step that continues it (Agent.step) — or to Agent.Close, whichever comes first: a
+// closed Agent's window stays shut for both lanes. A session-started entry a live swap arms inside
 // it runs for the session it joined (Agent.fireNewlyArmed) — an advise entry fenced at the first
 // opening, an observe entry fired through the Runner; one armed after it waits for the next
 // boundary.
@@ -2218,8 +2226,8 @@ func (w *sessionWindow) admit(ids []string, fire func(start domain.SessionStart,
 	}
 }
 
-// shut ends the window: the session has sent its first user message, or a Step has continued a
-// restored one.
+// shut ends the window: the session has sent its first user message, a Step has continued a
+// restored one, or the Agent has closed.
 func (w *sessionWindow) shut() {
 	w.mu.Lock()
 	defer w.mu.Unlock()

@@ -821,3 +821,35 @@ func TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary(t *testing.T) {
 		t.Fatal("the live-armed run was not cancelled by the clear")
 	}
 }
+
+// TestSessionAdvise_ALiveArmAfterCloseStartsNoRun — Close shuts the session window, so a live swap
+// after it arms a session-started entry for neither lane: the advise lane holds no run and starts
+// no handler, and the observe entry SetReactions arms never reaches the Runner. The engine-origin Go
+// handler is armed through installGeneration, as TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary
+// does, because the live lane refuses that shape at SetReactions.
+func TestSessionAdvise_ALiveArmAfterCloseStartsNoRun(t *testing.T) {
+	t.Parallel()
+	probe, _, _ := blockedUntilCancel()
+	a := liveAdviceAgent(t, &recordingSink{}, echoResponder(t, "ok"), true)
+	runner := a.cfg.ObserveRunner.(*startRecordingRunner)
+	t.Cleanup(a.sessionAdvice.stop) // the base tree's leaked run must not outlive the test
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	armObserve(t, a, sessionStartedEntry("primer", false))
+	gen := a.Generation()
+	gen.Sync = []domain.Reaction{probe.reaction("ci", time.Hour)}
+	a.installGeneration(gen)
+	a.fireNewlyArmed()
+
+	if waiting := a.sessionAdvice.waiting(); len(waiting) != 0 {
+		t.Errorf("the advise lane holds %d runs after Close, want none", len(waiting))
+	}
+	if calls := probe.calls(); len(calls) != 0 {
+		t.Errorf("the advise handler ran %d times after Close, want never: %+v", len(calls), calls)
+	}
+	if armed := runner.armedCalls(); len(armed) != 0 {
+		t.Errorf("the Runner was handed %d narrowed firings after Close, want none: %+v", len(armed), armed)
+	}
+}

@@ -27,7 +27,10 @@
 - A Session boundary announced after `Close` (reopening the window) — no Driver does it.
 - Any change to `sessionAdviseLane` semantics beyond what item 1 needs.
 
-## 1. Close shuts the session window
+## 1. Close shuts the session window — ✅ DONE (2026-10-21)
+
+NOTES (2026-10-21): the test arms the observe entry through SetReactions (armObserve) before installing the advise probe, because installGeneration installs only Floor/Bypass/Sync/ContextFillNotice and never the observe lane; the plan's "install a generation arming … an observe entry" read as one installGeneration call would not reach the Runner on the base tree. The test fails on the base tree on both the waiting() and the armedCalls() assertions.
+NOTES (2026-10-21): no CLOSES line — the plan header's `advise-run-after-close` needs item 2's bounded `<-started` wait as well (its second Acceptance bullet), so item 1 alone does not resolve it.
 
 **What:**
 **Goal:** after `Agent.Close` returns on a top-level Agent, a live swap that arms a new `session-started` advise entry (the `fireNewlyArmed` path `SetReactions` takes) leaves the session-advise lane with no pending run and launches no handler.
