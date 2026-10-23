@@ -12,9 +12,10 @@ import "github.com/spf13/cobra"
 // process that runs the schedules declared in ~/.apogee/daemon/schedules.yaml over that same
 // core (ADR 0034). `undo` is the fourth: the revert those two unattended Drivers have nobody
 // to offer, reading one saved session's snapshot store from a fresh process (ADR 0074). `mcp` is
-// the fifth: `apogee mcp login|logout <name>`, the OAuth login of an `auth: oauth` MCP server that
-// a session refreshes but never prompts for once it is running. `project` is the sixth: `apogee
-// project adopt`, the terminal answer to the Allow rules a Project config proposes (ADR 0096 §4).
+// the fifth: `apogee mcp list`, and `apogee mcp login|logout <name>`, the OAuth login of an
+// `auth: oauth` MCP server that a session refreshes but never prompts for once it is running.
+// `project` is the sixth: `apogee project adopt`, the terminal answer to the Allow rules a
+// Project config proposes (ADR 0096 §4).
 // `update` is the seventh: `apogee update`, the explicit upgrade of a release-archive install and
 // the refusal that names every other channel's own upgrade (ADR 0097).
 // `audit-split` is the eighth and the one hidden child: the shipped `audit` recipe's scope split,

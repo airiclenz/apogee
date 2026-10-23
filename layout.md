@@ -537,8 +537,8 @@ undelegated session changes: with one agent asking there is never a second promp
 
 **Inside a pane's own grant the rows come first — except where the prose IS what is being decided.**
 A picker, a browser or a dropdown *is* its rows, and the caption over them takes what they leave; the
-approval prompt reads the same way and can afford to, because its offering is four fixed options and
-every row past them is the reason's. The **ask prompt** is the one surface where rows-first is wrong.
+approval prompt reads the same way and can afford to, because its offering is three to five fixed
+options and every row past them is the reason's. The **ask prompt** is the one surface where rows-first is wrong.
 Its answers are prose the model wrote, and four wrapped ones — a blank line between each pair and one
 more around the block — cost nine lines of the ten an eighty-by-twenty-four window grants the pane,
 so the question itself was left with the single line every seated pane keeps, spent on
@@ -607,7 +607,7 @@ pane did get scrolls around the selection, so the entries outside it are one key
 no marker — and now that a row can wrap, a row is seated whole or not at all, so a window that
 cannot pay for all three lines of an answer shows the answers it can rather than the first two
 thirds of one. The approval prompt at twelve rows is that case and not this one: `❯ Allow` is on
-the screen and the other three options are one ↑ or ↓ away. A window of **zero** rows is the other
+the screen and the other options are one ↑ or ↓ away. A window of **zero** rows is the other
 thing entirely — every choice or entry gone, and the key hint still offering `↑↓ select` to pick
 between them — so those rows are counted onto the title row too, in the **same** marker:
 `saved sessions  (all workspaces)  … (+8 more lines)`. The ask prompt is the pane where that title

@@ -1767,7 +1767,7 @@ extra request, taught that format, came back with a call it parses — and never
 where no listed format reads the model's call, the report quotes the call the model wrote, and that
 shape is what you write `tool-call-pattern:` and `tool-call-example:` from ([how the probe picks
 the format](probe.md)). Editing this block while a session runs swaps the parser on the spot: it is not one
-of the sixteen keys, listed at the top of this page, that wait for the next start.
+of the seventeen keys, listed at the top of this page, that wait for the next start.
 
 ## Keeping the session store bounded — `sessions:`
 

@@ -5,8 +5,8 @@ title: ADR 0100 decision
 1. **One dotdir, `~/.apogee`, on every OS.** Config (`~/.apogee/config.yaml`), the skill
    library, sessions, scratch dirs and every other piece of global state live below it. The
    layout is the same on Linux, macOS and Windows.
-2. **`--config` overrides the root.** It is the one way to move the home, which tests and the
-   e2e harness rely on.
+2. **`--config` overrides the root.** It and the `APOGEE_CONFIG` environment variable (which
+   `--config` beats) are the two ways to move the home, which tests and the e2e harness rely on.
 3. **The Project config is a layer, not a second home.** `<Project root>/.apogee/config.yaml`
    (committable) layers over the global file, and its granting entries are live only by
    Adoption (ADR 0096).

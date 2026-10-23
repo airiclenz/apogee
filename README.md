@@ -254,8 +254,9 @@ The full tour is in [the manual](docs/manual/README.md).
   call you approved and honoured across the whole sub-agent tree, and the prompt shows
   the path a call really resolves to before you answer.
 - **Allow and deny lists for every address a model can choose** — the web tools and MCP
-  endpoints; private and link-local ranges are refused by default. Subprocesses never see
-  your API key.
+  endpoints; private and link-local ranges are refused by default. The tools' subprocesses
+  never see your API key (a global MCP server without `env-allowlist:` and a global `run:`
+  Reaction do inherit your environment — see [SECURITY.md](SECURITY.md)).
 - **`/undo` and `/redo`** — put back everything an exchange changed in your workspace,
   one exchange at a time, with a preview before anything is touched and a skip for any
   file you edited since. apogee images the workspace around each exchange, so a write by
