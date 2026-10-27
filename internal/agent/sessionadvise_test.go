@@ -273,20 +273,6 @@ func TestSessionAdvise_AnErroringHandlerAddsNothing(t *testing.T) {
 	}
 }
 
-// TestSessionAdvise_TheDefaultDeadlineIsTheAdviseClassDefault — a handler whose reaction sets no
-// Timeout runs under domain.DefaultAdviseTimeout.
-func TestSessionAdvise_TheDefaultDeadlineIsTheAdviseClassDefault(t *testing.T) {
-	t.Parallel()
-
-	probe, _, _ := blockedUntilCancel()
-	a := sessionAdviseAgent(t, baseConfig(&recordingSink{}), echoResponder(t, "ok"), probe.reaction("ci", 0))
-
-	runs := a.briefing.lane.waiting()
-	if len(runs) != 1 || runs[0].timeout != domain.DefaultAdviseTimeout {
-		t.Fatalf("runs = %+v, want one under the %s advise default", runs, domain.DefaultAdviseTimeout)
-	}
-}
-
 // TestSessionAdvise_AClearFiresAgain — `/clear` is a boundary: the handler runs again with start
 // "clear" and the cleared session's first prompt carries its advice.
 func TestSessionAdvise_AClearFiresAgain(t *testing.T) {
@@ -426,47 +412,6 @@ func TestSessionAdvise_EscDuringTheJoinEndsTheWait(t *testing.T) {
 	}
 }
 
-// TestSessionAdvise_AnAbortedFirstExchangeKeepsTheAdvice — an Exchange whose opening took the advice
-// and was then aborted puts it back, so the next opening carries it.
-func TestSessionAdvise_AnAbortedFirstExchangeKeepsTheAdvice(t *testing.T) {
-	t.Parallel()
-
-	probe := answering(sessionAdviceText)
-	responder := echoResponder(t, "ok")
-	a := sessionAdviseAgent(t, baseConfig(&recordingSink{}), responder, probe.reaction("ci", 0))
-	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
-		runs := a.briefing.lane.waiting()
-		if len(runs) != 1 {
-			return false
-		}
-		select {
-		case <-runs[0].done:
-			return true
-		default:
-			return false
-		}
-	}, "the background run to answer")
-	if err := a.Submit(domain.UserInput{Text: "aborted prompt"}); err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if res, err := a.Step(cancelled); err != nil || res.Status != domain.StatusCancelled {
-		t.Fatalf("Step = %+v, %v; want a cancelled Turn", res, err)
-	}
-	if !strings.HasPrefix(a.conv.At(0).Content, fenceFor("ci")) {
-		t.Fatalf("aborted opening = %q, want the advice taken into it", a.conv.At(0).Content)
-	}
-
-	a.AbortExchange()
-	runExchange(t, a, "next prompt")
-
-	if got := lastUserContent(t, responder.requests()[0]); !strings.HasPrefix(got, fenceFor("ci")) ||
-		!strings.HasSuffix(got, "next prompt") {
-		t.Errorf("next opening = %q, want it to carry the advice the abort put back", got)
-	}
-}
-
 // abortAfterTheJoin opens an Exchange on text under a context already cancelled, so the join runs
 // over what the lane holds and the Turn takes the cancel exit before any request, then aborts it.
 func abortAfterTheJoin(t *testing.T, a *Agent, text string) {
@@ -512,7 +457,9 @@ func TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 	var releaseOnce sync.Once
 	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(releaseHandler)
+	answered := make(chan struct{})
 	probe := &sessionAdviseProbe{answer: func(context.Context) (domain.Outcome, error) {
+		defer close(answered)
 		<-release // ignores its context, so it answers after its deadline once released
 		return domain.Outcome{Inject: "too late"}, nil
 	}}
@@ -523,12 +470,8 @@ func TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 	responder := echoResponder(t, "ok")
 	timeout := testtime.Fixed(50 * time.Millisecond)
 	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("wedged", timeout))
-	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
-		return len(a.briefing.lane.waiting()) == 1
-	}, "the background run to be pending")
-	run := a.briefing.lane.waiting()[0]
-	// The run's deadline was set before it was pending, so an expiry of the same timeout started
-	// now ends no earlier than that deadline.
+	// The run's deadline was set as New's boundary started it, so an expiry of the same timeout
+	// started now ends no earlier than that deadline.
 	testtime.Eventually(t, testtime.Budget(5*time.Second), testtime.Expiry(timeout), "the background run's deadline to pass")
 
 	abortAfterTheJoin(t, a, "aborted prompt")
@@ -536,7 +479,11 @@ func TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 		t.Fatalf("reported %d lines at the aborted join, want the one timeout", got)
 	}
 	releaseHandler()
-	<-run.done // the handler answers after the join reported it, before the next opening
+	select { // the handler answers after the join reported it, before the next opening
+	case <-answered:
+	case <-time.After(testtime.Budget(10 * time.Second)):
+		t.Fatal("the wedged handler never answered once released")
+	}
 	runExchange(t, a, "next prompt")
 
 	if got := lastUserContent(t, responder.requests()[0]); got != "next prompt" {
@@ -550,51 +497,6 @@ func TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 	}
 	if fired := sessionAdviseFirings(sink, "wedged"); len(fired) != 1 || fired[0].Action != actionFailed {
 		t.Errorf("booked %+v, want one failed firing", fired)
-	}
-}
-
-// TestSessionAdvise_AnErroredRunIsNeverReplayedAfterAnAbort — a run the join reported as failed is
-// dropped there: the aborted Exchange does not put it back, so the next opening reports nothing
-// more and attaches nothing.
-func TestSessionAdvise_AnErroredRunIsNeverReplayedAfterAnAbort(t *testing.T) {
-	t.Parallel()
-
-	probe := &sessionAdviseProbe{answer: func(context.Context) (domain.Outcome, error) {
-		return domain.Outcome{Inject: "ignored"}, errors.New("ci unreachable")
-	}}
-	sink := &recordingSink{}
-	cfg := baseConfig(sink)
-	reports := &reportRecorder{}
-	cfg.Report = reports.report
-	responder := echoResponder(t, "ok")
-	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("ci", 0))
-	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
-		runs := a.briefing.lane.waiting()
-		if len(runs) != 1 {
-			return false
-		}
-		select {
-		case <-runs[0].done:
-			return true
-		default:
-			return false
-		}
-	}, "the background run to fail")
-
-	abortAfterTheJoin(t, a, "aborted prompt")
-	if got := a.briefing.lane.waiting(); len(got) != 0 {
-		t.Fatalf("pending after the abort = %d runs, want the reported run dropped", len(got))
-	}
-	runExchange(t, a, "next prompt")
-
-	if got := lastUserContent(t, responder.requests()[0]); got != "next prompt" {
-		t.Errorf("next opening = %q, want the bare prompt", got)
-	}
-	if got := reports.all(); len(got) != 1 || !strings.HasSuffix(got[0], "ci unreachable") {
-		t.Errorf("reported %q, want exactly the one failure", got)
-	}
-	if fired := sessionAdviseFirings(sink, "ci"); len(fired) != 1 || fired[0].Detail != "ci unreachable" {
-		t.Errorf("booked %+v, want one failed firing carrying the error", fired)
 	}
 }
 
@@ -832,16 +734,16 @@ func TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary(t *testing.T) {
 }
 
 // TestSessionAdvise_ALiveArmAfterCloseStartsNoRun — Close shuts the session window, so a live swap
-// after it arms a session-started entry for neither lane: the advise lane holds no run and starts
-// no handler, and the observe entry SetReactions arms never reaches the Runner. The engine-origin Go
-// handler is armed through installGeneration, as TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary
-// does, because the live lane refuses that shape at SetReactions.
+// after it arms a session-started entry for neither lane: the briefing's opening join lands no run,
+// no handler starts, and the observe entry SetReactions arms never reaches the Runner. The
+// engine-origin Go handler is armed through installGeneration, as
+// TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundary does, because the live lane refuses that
+// shape at SetReactions; it answers at once, so a run wrongly started would be waited for and landed.
 func TestSessionAdvise_ALiveArmAfterCloseStartsNoRun(t *testing.T) {
 	t.Parallel()
-	probe, _, _ := blockedUntilCancel()
+	probe := answering(sessionAdviceText)
 	a := liveAdviceAgent(t, &recordingSink{}, echoResponder(t, "ok"), true)
 	runner := a.cfg.ObserveRunner.(*startRecordingRunner)
-	t.Cleanup(a.briefing.lane.stop) // the base tree's leaked run must not outlive the test
 
 	if err := a.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -852,8 +754,8 @@ func TestSessionAdvise_ALiveArmAfterCloseStartsNoRun(t *testing.T) {
 	a.installGeneration(gen)
 	a.fireNewlyArmed()
 
-	if waiting := a.briefing.lane.waiting(); len(waiting) != 0 {
-		t.Errorf("the advise lane holds %d runs after Close, want none", len(waiting))
+	if landed := joined(a.briefing.joinOpening); len(landed) != 0 {
+		t.Errorf("the opening join landed %v after Close, want no run", landed)
 	}
 	if calls := probe.calls(); len(calls) != 0 {
 		t.Errorf("the advise handler ran %d times after Close, want never: %+v", len(calls), calls)

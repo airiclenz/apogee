@@ -280,7 +280,13 @@ These are the only routes the Agent uses for those transitions. The handler call
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestCompactAdvise|TestSessionAdvise|TestBackground' ./internal/agent/`
 **Commit:** `refactor(agent): the briefing module owns the compaction lane and Exchange ends`
 
-## 12. Briefing tests cross the module's interface
+## 12. Briefing tests cross the module's interface — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): module tests (no Agent) in briefing_test.go drive a bare sessionBriefing through its events with a fake adviseCaller (briefingHandler) and startRecordingRunner. They read a lane only through the module's own joins, using a recording landing (`joined`, which judges each run the way the Agent's landing does). Cases: live arm runs only what the boundary did not; an input or close ends the window; close cancels both lanes' runs; abort/close restore order; a reported run (errored, panicked, timed out) is never replayed; fold adopt/discard/supersede; per-entry deadline else the advise default, on both lanes
+NOTES (2026-10-27): TestSessionAdvise_TheDefaultDeadlineIsTheAdviseClassDefault deleted, superseded by TestBriefing_EachRunRunsUnderItsEntrysTimeoutElseTheAdviseDefault (replace, don't layer)
+NOTES (2026-10-27): moved into briefing_test.go, Agent kept: TestSessionAdvise_AUserEntryTakesItsOwnTimeoutElseTheAdviseDefault, which now reads each run's timeout through a.briefing.joinOpening's landing. Also moved: TestSessionAdvise_AnAbortedFirstExchangeKeepsTheAdvice and TestSessionAdvise_AnErroredRunIsNeverReplayedAfterAnAbort. Both need the boundary's run done before a cancelled opening joins it, which only the lane can tell, so their shared wait became one helper, awaitBoundaryRunDone. The errored test's "pending empty after the abort" check now joins through the module
+NOTES (2026-10-27): rewritten in place, with no lane reads left: TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort syncs on a probe "answered" channel in place of run.done and drops the pending poll, since the run is pending once New returns. TestSessionAdvise_ALiveArmAfterCloseStartsNoRun now uses an answering probe and checks joined(a.briefing.joinOpening). Its t.Cleanup(a.briefing.lane.stop) was dropped because a probe that answers at once cannot leak. TestCompactAdvise_ADelegateFoldStartsNoRun and the faulted/cancelled cases of TestCompactAdvise_AFoldThatDidNotRunDiscardsItsRuns now check joined(a.briefing.joinBridge)
+NOTES (2026-10-27): item 10's TestBriefing_AnInputRacingABoundarySeesItWhole still reads briefing.lane.waiting() in briefing_test.go, as item 10's spec requires ("the lane's pending runs"); it is left unchanged
 
 **What:** Depends on item 11. Test-only.
 **Goal:** `internal/agent/briefing_test.go` tests the module through its methods alone, with no Agent, using the fake `adviseCaller` and the recording ObserveRunner fake. It covers:

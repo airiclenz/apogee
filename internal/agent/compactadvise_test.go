@@ -253,8 +253,8 @@ func TestCompactAdvise_ADelegateFoldStartsNoRun(t *testing.T) {
 	if r := a.foldFor(context.Background(), 1, foldOverflow); r.end != foldEndFolded {
 		t.Fatalf("result = %+v, want a fold that ran", r)
 	}
-	if got := a.briefing.compaction.waiting(); len(got) != 0 {
-		t.Errorf("a delegate's fold left %d runs, want none", len(got))
+	if landed := joined(a.briefing.joinBridge); len(landed) != 0 {
+		t.Errorf("a delegate's fold left %v for the bridge to join, want no run", landed)
 	}
 }
 
@@ -272,8 +272,8 @@ func TestCompactAdvise_AFoldThatDidNotRunDiscardsItsRuns(t *testing.T) {
 		if r := a.foldFor(context.Background(), 1, foldOnDemand); r.end != foldEndFaulted {
 			t.Fatalf("result = %+v, want a faulted fold", r)
 		}
-		if got := a.briefing.compaction.waiting(); len(got) != 0 {
-			t.Errorf("a faulted fold left %d runs, want none", len(got))
+		if landed := joined(a.briefing.joinBridge); len(landed) != 0 {
+			t.Errorf("a faulted fold left %v for the bridge to join, want no run", landed)
 		}
 	})
 	t.Run("cancelled", func(t *testing.T) {
@@ -285,8 +285,8 @@ func TestCompactAdvise_AFoldThatDidNotRunDiscardsItsRuns(t *testing.T) {
 		if r := a.foldFor(ctx, 1, foldOnDemand); r.end != foldEndCancelled {
 			t.Fatalf("result = %+v, want a cancelled fold", r)
 		}
-		if got := a.briefing.compaction.waiting(); len(got) != 0 {
-			t.Errorf("a cancelled fold left %d runs, want none", len(got))
+		if landed := joined(a.briefing.joinBridge); len(landed) != 0 {
+			t.Errorf("a cancelled fold left %v for the bridge to join, want no run", landed)
 		}
 	})
 	t.Run("skipped after a fold that ran", func(t *testing.T) {

@@ -340,42 +340,6 @@ func TestSessionAdvise_AUserHandlerFailsOpen(t *testing.T) {
 	}
 }
 
-// TestSessionAdvise_AUserEntryTakesItsOwnTimeoutElseTheAdviseDefault — an entry's `timeout:` is its
-// run's deadline, and an entry that set none runs under domain.DefaultAdviseTimeout, for a command
-// and a webhook alike.
-func TestSessionAdvise_AUserEntryTakesItsOwnTimeoutElseTheAdviseDefault(t *testing.T) {
-	t.Parallel()
-
-	server := replyWith(t, new(atomic.Int64), http.StatusNoContent, "")
-	own := 3 * time.Second
-	argvOwn := userAdvise("argv-own", sessionStarted, "/bin/sh", "-c", "true")
-	argvOwn.Timeout = own
-	hookOwn := userAdviseWebhook("hook-own", sessionStarted, domain.WebhookHandler{URL: server.URL})
-	hookOwn.Timeout = own
-	a := sessionAdviseAgent(t, baseConfig(&recordingSink{}), echoResponder(t, "ok"),
-		userAdvise("argv-default", sessionStarted, "/bin/sh", "-c", "true"),
-		argvOwn,
-		userAdviseWebhook("hook-default", sessionStarted, domain.WebhookHandler{URL: server.URL}),
-		hookOwn,
-	)
-
-	want := map[string]time.Duration{
-		"argv-default": domain.DefaultAdviseTimeout,
-		"argv-own":     own,
-		"hook-default": domain.DefaultAdviseTimeout,
-		"hook-own":     own,
-	}
-	runs := a.briefing.lane.waiting()
-	if len(runs) != len(want) {
-		t.Fatalf("%d runs waiting, want %d", len(runs), len(want))
-	}
-	for _, run := range runs {
-		if run.timeout != want[run.spec.ID] {
-			t.Errorf("run %s is under %s, want %s", run.spec.ID, run.timeout, want[run.spec.ID])
-		}
-	}
-}
-
 // TestSessionAdvise_AUserEntryIsNeverRunUnderBypass — Bypass switches advise off (D9) before a
 // handler is reached: the command is never spawned and the request never sent.
 func TestSessionAdvise_AUserEntryIsNeverRunUnderBypass(t *testing.T) {
