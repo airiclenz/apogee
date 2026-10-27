@@ -289,6 +289,15 @@ type Config struct {
 	// makes the first swap re-hand that list, which costs one Runner generation and nothing else.
 	Observe []Reaction
 
+	// Sync is the user's sync lane — the CONSTRUCTION SEED of the live Generation's member of the
+	// same name (Generation.Sync), the advise and gate entries a `reactions:` file resolves to. New
+	// and Resume arm it before their session-started announcement, with the checks and the
+	// workspace scoping SetReactions applies to a swapped-in lane, so a session-started advise entry
+	// runs at the construction boundary and a lane SetReactions would refuse fails construction with
+	// the same error. Nil/empty arms nothing; a later SetReactions replaces it whole. A sub-agent
+	// never takes it: a child inherits the lane on Config.Reactions instead.
+	Sync []Reaction
+
 	// BindProjectRun is handed the Agent's fenced runner for an adopted repo reaction's
 	// observe-lane `run:` (ProjectRun, ADR 0104 §8) once the Agent New or Resume builds is in
 	// place — the Driver's Runner is built before that Agent exists, so it reaches the runner

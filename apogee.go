@@ -51,6 +51,7 @@ import (
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/undo"
 	"github.com/airiclenz/apogee/internal/workflow"
 )
 
@@ -69,23 +70,52 @@ import (
 type Agent = agent.Agent
 
 // New constructs an Agent from cfg, validating the Auto/Confinement gate (ADR 0012)
-// and the armed Reaction set (ADR 0076) before returning a ready-to-Step Agent.
+// and the armed Reaction set (ADR 0076) before returning a ready-to-Step Agent. opts carry the
+// construction seed's handles (WithUndoJournal, WithDelegationSeat, WithDelegationTarget), which the
+// Agent applies, after cfg.Sync, before it announces the session; a seed whose lanes SetReactions
+// would refuse fails with a *SeedRefusedError.
 //
-// The Agent it returns records undo in memory, for this process only (ADR 0051). A Driver that
-// wants `/undo` to survive a relaunch — and to cover subprocess and MCP writes — opens the
-// session's snapshot store and injects the journal with Agent.SetJournal before the first
-// Submit (ADR 0074); an engine nobody hands one keeps the in-memory journal, which is a
-// supported configuration rather than a degraded one.
-func New(cfg Config) (*Agent, error) { return agent.New(cfg) }
+// The Agent it returns records undo in memory, for this process only (ADR 0051), unless the seed
+// carries a journal. A Driver that wants `/undo` to survive a relaunch — and to cover subprocess
+// and MCP writes — opens the session's snapshot store and seeds the journal with WithUndoJournal,
+// or injects it with Agent.SetJournal before the first Submit (ADR 0074); an engine nobody hands
+// one keeps the in-memory journal, which is a supported configuration rather than a degraded one.
+func New(cfg Config, opts ...Option) (*Agent, error) { return agent.New(cfg, opts...) }
 
 // Resume reconstructs an Agent from a prior Session snapshot; cfg re-supplies the
-// live delegates and state roots, snap supplies the serializable conversation state.
+// live delegates and state roots, snap supplies the serializable conversation state. It takes the
+// same Options as New and applies the same construction seed in the same order.
 //
 // The undo journal is NOT part of the snapshot — it is host state keyed by session id, outside
 // the session record (ADR 0022 §8) — so a resumed Agent starts on the same in-memory journal New
-// gives, and a Driver re-opens the resumed session's store and injects it with Agent.SetJournal
-// exactly as it does at a fresh start (ADR 0074).
-func Resume(cfg Config, snap Session) (*Agent, error) { return agent.Resume(cfg, snap) }
+// gives, and a Driver re-opens the resumed session's store and seeds it (WithUndoJournal) or
+// injects it with Agent.SetJournal exactly as it does at a fresh start (ADR 0074).
+func Resume(cfg Config, snap Session, opts ...Option) (*Agent, error) {
+	return agent.Resume(cfg, snap, opts...)
+}
+
+// Option configures New or Resume beyond what Config states — the construction seed's handles
+// below. See internal/agent for the contract.
+type Option = agent.Option
+
+// SeedRefusedError is New's and Resume's refusal of a construction seed whose reaction lanes
+// SetReactions would refuse: its sentence is SetReactions' own, and it unwraps to that error, so a
+// Driver tells it from every other construction failure with errors.As.
+type SeedRefusedError = agent.SeedRefusedError
+
+// WithUndoJournal seeds the session's undo journal and the note that says why it is the journal it
+// is (Agent.SetJournal). A nil journal seeds nothing.
+func WithUndoJournal(j *undo.Journal, note string) Option { return agent.WithUndoJournal(j, note) }
+
+// WithDelegationSeat seeds the Sub-agent server facts the orientation block renders
+// (Agent.SetDelegationSeat). nil seeds none.
+func WithDelegationSeat(seat *DelegationSeat) Option { return agent.WithDelegationSeat(seat) }
+
+// WithDelegationTarget seeds the resolved Delegation target (Agent.SetDelegationTarget), applied
+// after the seat so a usable target's far width is the one the model is told. nil seeds none.
+func WithDelegationTarget(target *DelegationTarget) Option {
+	return agent.WithDelegationTarget(target)
+}
 
 // RebindSpec carries the per-model bindings Agent.Rebind swaps in when the Upstream starts
 // serving a different model — the wire model id, its system-prompt template, its context

@@ -140,6 +140,8 @@ var (
 	_ apogee.EventLinesOptions
 	_ apogee.RunStarted
 	_ apogee.RunFinished
+	_ apogee.Option
+	_ apogee.SeedRefusedError
 )
 
 // Forwarding constructors — referenced as values so the facade keeps delegating them.
@@ -153,6 +155,9 @@ var (
 	_ = apogee.NewEventLines
 	_ = apogee.DefaultSystemPrompt
 	_ = apogee.ShippedProfile
+	_ = apogee.WithUndoJournal
+	_ = apogee.WithDelegationSeat
+	_ = apogee.WithDelegationTarget
 )
 
 // Workflow entry points on the engine handle — method values, so an embedder's route onto a

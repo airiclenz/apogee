@@ -753,15 +753,24 @@ func dialProvider(endpoint, model, apiKey string, opts ...provider.Option) provi
 }
 
 // Option configures New or Resume beyond what Config states: the seams a Config cannot carry
-// because they are code, not settings (functional-options pattern; every Option has a default and
-// only a host with a reason overrides it). The root facade forwards none of them — a Driver that
-// needs one reaches this package directly.
+// because they are code, not settings, and the construction seed's handles — the undo journal, the
+// delegation seat and the delegation target — which are live host objects rather than settings
+// (functional-options pattern; every Option has a default and only a host with a reason overrides
+// it). The root facade forwards them: apogee.New and apogee.Resume take the same Options, and
+// apogee.go aliases the seed's constructors for a Driver that reaches the engine through it.
 type Option func(*constructOptions)
 
 // constructOptions is what the Options resolve to before an Agent exists: the values New and
 // Resume read while they build. Its zero value is not usable; resolveOptions seeds the defaults.
+// Every field past dial is a member of the construction seed (applyConstructionSeed), nil meaning
+// the Option was not given and construction's own default stands.
 type constructOptions struct {
 	dial Dialer
+
+	journal  *undo.Journal // the session's undo journal (SetJournal), with undoNote beside it
+	undoNote string
+	seat     *DelegationSeat   // the Sub-agent server's display facts (SetDelegationSeat)
+	target   *DelegationTarget // the resolved Delegation target (SetDelegationTarget)
 }
 
 // WithDialer replaces the Dialer every provider dial of the constructed Agent — and of every
@@ -773,6 +782,48 @@ func WithDialer(dial Dialer) Option {
 		}
 	}
 }
+
+// WithUndoJournal seeds the undo journal the constructed Agent records into, with the note that says
+// why it is the journal it is — what SetJournal installs, applied before construction announces the
+// session. A nil journal is ignored, as SetJournal ignores one: construction's in-memory journal
+// stands.
+func WithUndoJournal(j *undo.Journal, note string) Option {
+	return func(o *constructOptions) {
+		if j != nil {
+			o.journal, o.undoNote = j, note
+		}
+	}
+}
+
+// WithDelegationSeat seeds what the orientation block tells the model about the Sub-agent server —
+// what SetDelegationSeat installs, applied before construction announces the session. nil seeds no
+// seat.
+func WithDelegationSeat(seat *DelegationSeat) Option {
+	return func(o *constructOptions) { o.seat = seat }
+}
+
+// WithDelegationTarget seeds the Delegation target the constructed Agent's spawns route to — what
+// SetDelegationTarget installs, so a usable target states the far width the model is told, applied
+// after the seat (whose door forgets that width) and before construction announces the session. nil
+// seeds no target.
+func WithDelegationTarget(target *DelegationTarget) Option {
+	return func(o *constructOptions) { o.target = target }
+}
+
+// SeedRefusedError is the refusal New and Resume return when the construction seed's reaction lanes
+// (Config.Sync, Config.Observe) are ones SetReactions would refuse. It wraps that same error, so its
+// sentence is SetReactions' sentence word for word and errors.Is still finds
+// domain.ErrInvalidReaction through it; a Driver tells a seed refusal from every other construction
+// failure with errors.As.
+type SeedRefusedError struct {
+	err error
+}
+
+// Error is the wrapped refusal's own sentence.
+func (e *SeedRefusedError) Error() string { return e.err.Error() }
+
+// Unwrap returns the error SetReactions would have returned for the same lanes.
+func (e *SeedRefusedError) Unwrap() error { return e.err }
 
 // resolveOptions applies opts over the defaults.
 func resolveOptions(opts []Option) constructOptions {
@@ -792,10 +843,17 @@ func resolveOptions(opts []Option) constructOptions {
 // unconditionally, since an empty key sends no auth header — under the wire cfg.Wire names
 // (dialOptions) and, only when cfg.Inspector asks for it, the Inspector's wire observer (wireTap).
 //
+// The Agent finishes its own construction from one CONSTRUCTION SEED, applied in one fixed order
+// before the announcement below: the sync lane cfg.Sync names (validated as SetReactions validates a
+// swapped-in lane, then scoped to the workspace — buildAgent), then the undo journal
+// (WithUndoJournal), the delegation seat (WithDelegationSeat) and the delegation target
+// (WithDelegationTarget), so the target's far width is the one the model is told. A seed whose lanes
+// SetReactions would refuse fails construction with a *SeedRefusedError wrapping that same error.
+//
 // Construction is a Session boundary: its last act announces the session-started notice with start
 // "new" to the observe Runner — after the fenced runner is bound, so a repo `run:` the notice fires
-// runs under this Agent's permit — unless cfg.DeferSessionStart leaves that to the Driver
-// (AnnounceSessionStart).
+// runs under this Agent's permit, and after the seed, so a seeded session-started advise entry runs
+// at this boundary — unless cfg.DeferSessionStart leaves that to the Driver (AnnounceSessionStart).
 func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	o := resolveOptions(opts)
 	wire, tap := dialOptions(cfg)
@@ -807,6 +865,7 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	a.ownsUpstream = true // this Agent dialled that client, so Close is the one that tears it down
 	tap.bind(a)
 	a.bindProjectRun()
+	a.applyConstructionSeed(o)
 	a.announceConstruction()
 	return a, nil
 }
@@ -815,9 +874,10 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 // live delegates (Approver, Confiner, EventSink) and state roots again — only the
 // serializable conversation state comes from snap. External connections (MCP,
 // network) reconnect fresh; no server-side state is restored (ADR 0008). It takes the
-// same Options as New: a resumed session dials its own client, through the same seam. Its
-// construction boundary is announced as New's is, with start "new": a resumed START constructs its
-// session afresh, unlike a live RestoreSession.
+// same Options as New: a resumed session dials its own client, through the same seam, and is
+// finished from the same construction seed in the same order. Its construction boundary is announced
+// as New's is, with start "new": a resumed START constructs its session afresh, unlike a live
+// RestoreSession.
 func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, error) {
 	o := resolveOptions(opts)
 	wire, tap := dialOptions(cfg)
@@ -829,7 +889,8 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
 	tap.bind(a)
 	a.bindProjectRun()
-	a.announceConstruction() // as in New: a resumed start is a CONSTRUCTED session, start "new"
+	a.applyConstructionSeed(o) // as in New
+	a.announceConstruction()   // as in New: a resumed start is a CONSTRUCTED session, start "new"
 	return a, nil
 }
 
@@ -1782,8 +1843,8 @@ func (a *Agent) installGeneration(gen domain.Generation) {
 // Generation reports the live Generation this Agent is running — the Floor enable set, Bypass,
 // the notice switch and the sync lane as SetReactions last installed them, and the observe lane
 // as the Runner was last handed it, seeded at construction from cfg.Floor, cfg.Bypass,
-// cfg.ContextFillNotice and cfg.Observe with an empty Sync (Config.Reactions is the OTHER route
-// and is not folded in here).
+// cfg.ContextFillNotice, cfg.Observe and the construction seed's cfg.Sync, scoped to the workspace
+// (Config.Reactions is the OTHER route and is not folded in here).
 //
 // It is the read half of the read-edit-hand-back idiom SetReactions documents, so a caller moving
 // one field carries both lanes through untouched — the observe lane included, which is what keeps

@@ -67,7 +67,11 @@ NOTES (2026-10-27): the amendment also records the plan's ratified Runner.Replac
 **Acceptance:** `capcom check`; `capcom know show "ADR 0076"` lists the 1027 amendment.
 **Commit:** `docs(adr): record the construction seed as distinct from the live swap`
 
-## 2. The engine takes the whole construction seed
+## 2. The engine takes the whole construction seed — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): consequential edit — example_test.go: made necessary by the new apogee.go facade exports (Option, SeedRefusedError, WithUndoJournal, WithDelegationSeat, WithDelegationTarget), added to its compile-time facade pin lists
+NOTES (2026-10-27): the SeedRefusedError wraps the whole seeded-Generation validation, so a refused Config.Observe seed (validated at construction before this item) now also comes back as a SeedRefusedError — same sentence, still errors.Is ErrInvalidReaction
+NOTES (2026-10-27): apogee.WithUndoJournal takes *undo.Journal (internal/undo) — callable from in-module Drivers (cmd/apogee already imports internal/undo); no public alias for the journal type was added
 
 **What:**
 **Goal:** `agent.New` and `agent.Resume` take a construction seed and apply it in one fixed order before they announce session-started. The seed is the Sync lane (`domain.Config.Sync`, beside `Config.Observe`), the delegation seat, the delegation target and the undo journal. A seed `SetReactions` would refuse fails construction with the same error. One construction-order test pins this.

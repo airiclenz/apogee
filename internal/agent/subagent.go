@@ -1857,6 +1857,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	// running is therefore still asked about every call the child makes, which is what makes an
 	// `ask` on a delegation safe to defer to the child.
 	childCfg.Reactions = inheritedReactions(a.cfg.Reactions, gen.Sync)
+	// …which is why the parent's construction seed of that lane (Config.Sync) is NOT carried: the
+	// lane already arrived above, filtered, and a seeded copy would arm it twice.
+	childCfg.Sync = nil
 
 	// ROUTING (ADR 0045). The latch is snapshotted ONCE, here, and everything below reads that one
 	// value: a beat landing mid-spawn must never build half a child from each target. A nil

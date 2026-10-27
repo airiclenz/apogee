@@ -150,14 +150,24 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 		return nil, err
 	}
 	a.armed = armed
-	// The live Generation's last member: the observe list the Runner was built from (cfg.Observe),
-	// what the first swap's list is compared against (SetReactions). The seeded generation is then
-	// validated as a swapped-in one would be, so a bad list fails construction rather than standing
+	// The live Generation's two lanes, seeded: the observe list the Runner was built from
+	// (cfg.Observe), what the first swap's list is compared against (SetReactions), and the sync lane
+	// the construction seed names (cfg.Sync — a delegate's is always empty, childCfg). The seeded
+	// generation is armed in SetReactions' own order: validated UNSCOPED first, as a swapped-in one
+	// would be — so an entry SetReactions refuses fails construction even when its `workspace:` names
+	// another root — and only then is its sync lane scoped to this workspace. A refusal fails
+	// construction with SetReactions' own error, wrapped as a SeedRefusedError, rather than standing
 	// as the lane Generation reports and every read-edit-hand-back swap would be refused over.
 	a.gen.Observe = slices.Clone(cfg.Observe)
+	a.gen.Sync = slices.Clone(cfg.Sync)
 	if err := validateGeneration(a.gen); err != nil {
-		return nil, err
+		return nil, &SeedRefusedError{err: err}
 	}
+	scoped, err := a.scopeSync(a.gen.Sync)
+	if err != nil {
+		return nil, &SeedRefusedError{err: err}
+	}
+	a.gen.Sync = scoped
 
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go). A delegate is NOT
@@ -663,6 +673,22 @@ func validateConfig(cfg domain.Config) error {
 		return errMissingEndpoint
 	}
 	return nil
+}
+
+// applyConstructionSeed is New's and Resume's last step before the announcement: it installs the
+// construction seed's handles in their one fixed order — the undo journal, then the delegation seat,
+// then the delegation target. The seat comes before the target because the seat's door forgets the
+// far width a target states (SetDelegationSeat), so a seed carrying both leaves the target's width
+// as the one the model is told. An Option not given leaves construction's own default standing. The
+// seed's sync lane is not here: buildAgent armed it, with the Generation it belongs to.
+func (a *Agent) applyConstructionSeed(o constructOptions) {
+	a.SetJournal(o.journal, o.undoNote)
+	if o.seat != nil {
+		a.SetDelegationSeat(o.seat)
+	}
+	if o.target != nil {
+		a.SetDelegationTarget(o.target)
+	}
 }
 
 // AnnounceSessionStart announces the construction boundary's session-started notice (start "new")

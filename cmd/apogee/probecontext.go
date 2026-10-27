@@ -36,8 +36,9 @@ var errProbeContextNeedsEndpoint = errors.New(
 // post-tool-result or file-changed fires after Turn 1, and only one on session-started rides the
 // Turn-1 request — so a test proves the arming by reading the Generation off the Agents built,
 // and the Agent is closed before the command returns.
-// Package-level, swapped only by a serial test (seams_guard_test.go).
-var newProbeAgent = apogee.New
+// Package-level, swapped only by a serial test (seams_guard_test.go). It wraps the variadic facade
+// in a closure so the seam keeps the one-argument type its test overrides assign.
+var newProbeAgent = func(cfg apogee.Config) (*apogee.Agent, error) { return apogee.New(cfg) }
 
 // errProbeContextLiveNeedsModel is the refusal when --live has no model to send as: the startup
 // entry names none, --model was not passed, and the server's own listing names no active model —
