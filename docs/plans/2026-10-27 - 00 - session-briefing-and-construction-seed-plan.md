@@ -178,7 +178,10 @@ NOTES (2026-10-27): consequential edit — cmd/apogee/wire_boot_test.go: made ne
 **Acceptance:** `! grep -n 'AnnounceSessionStart\|DeferSessionStart' cmd/apogee/wire_engine.go cmd/apogee/wire_boot.go cmd/apogee/wire_engine_test.go cmd/apogee/wire_settings_test.go`; `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestLateEngine|TestSessionStartedAdopted' ./cmd/apogee/`
 **Commit:** `refactor(wire): lateEngine.Bind seeds the Agent instead of replaying`
 
-## 7. Retire DeferSessionStart and AnnounceSessionStart
+## 7. Retire DeferSessionStart and AnnounceSessionStart — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): announceConstruction and the constructionStart sync.Once went with AnnounceSessionStart: New and Resume now call announceSessionStart(domain.SessionStartNew) directly, as the one-shot guard only existed to arbitrate between construction and the Driver's call.
+NOTES (2026-10-27): TestSessionStart_ADeferredConstructionIsTheDriversToAnnounce became TestSessionStart_ASeededConstructionAnnouncesAtItsEnd (New and Resume, seeded observe list, one "new" announcement, no narrowed firing); TestSessionWindow_ADeferredConstructionFiresThroughItsAnnouncement became TestSessionWindow_ASeededConstructionFiresThroughItsAnnouncement; TestSessionWindow_AnAdviseEntryArmedAtTheBoundaryRunsOnce keeps its name and now seeds the entry through cfg.Sync.
 
 **What:** Depends on items 3, 4 and 6.
 **Goal:** `domain.Config.DeferSessionStart` and `Agent.AnnounceSessionStart` do not exist. Construction always announces session-started at its end. No comment names the deferral.

@@ -167,39 +167,38 @@ func TestSessionStart_ARefusedBoundaryAnnouncesNothing(t *testing.T) {
 	}
 }
 
-// TestSessionStart_ADeferredConstructionIsTheDriversToAnnounce — under Config.DeferSessionStart New
-// announces nothing, the Driver's AnnounceSessionStart announces "new" once, and a second call
-// announces nothing more; without the deferral the Driver's call finds the boundary announced.
-func TestSessionStart_ADeferredConstructionIsTheDriversToAnnounce(t *testing.T) {
+// TestSessionStart_ASeededConstructionAnnouncesAtItsEnd — New and Resume announce the construction
+// boundary themselves, once and with start "new", after the seed: a session-started entry the seed
+// carries is fired by that announcement, never also through the narrowed door.
+func TestSessionStart_ASeededConstructionAnnouncesAtItsEnd(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name     string
-		deferred bool
+		name      string
+		construct func(cfg domain.Config, opts ...Option) (*Agent, error)
 	}{
-		{"deferred to the Driver", true},
-		{"announced by New", false},
+		{"New", New},
+		{"Resume", func(cfg domain.Config, opts ...Option) (*Agent, error) {
+			return Resume(cfg, emptySession(t), opts...)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			runner := &startRecordingRunner{}
 			cfg := baseConfig(&recordingSink{})
 			cfg.ObserveRunner = runner
-			cfg.DeferSessionStart = tc.deferred
-			a, err := New(cfg, WithDialer(dialerTo(echoResponder(t, "reply")).dial))
+			cfg.Observe = []domain.Reaction{sessionStartedEntry("primer", true)}
+			a, err := tc.construct(cfg, WithDialer(dialerTo(echoResponder(t, "reply")).dial))
 			if err != nil {
-				t.Fatalf("New: %v", err)
+				t.Fatalf("%s: %v", tc.name, err)
 			}
 			t.Cleanup(func() { _ = a.Close() })
-			if got := runner.recorded(); tc.deferred && len(got) != 0 {
-				t.Fatalf("a deferred construction announced %v before the Driver did", got)
-			}
-
-			a.AnnounceSessionStart()
-			a.AnnounceSessionStart()
 
 			if got, want := runner.recorded(), []domain.SessionStart{domain.SessionStartNew}; !slices.Equal(got, want) {
 				t.Errorf("announced %v, want the construction boundary once: %v", got, want)
+			}
+			if got := runner.armedCalls(); len(got) != 0 {
+				t.Errorf("narrowed firings = %+v; want none — the seeded entry fires through the announcement", got)
 			}
 		})
 	}

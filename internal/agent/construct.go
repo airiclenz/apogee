@@ -691,25 +691,6 @@ func (a *Agent) applyConstructionSeed(o constructOptions) {
 	}
 }
 
-// AnnounceSessionStart announces the construction boundary's session-started notice (start "new")
-// that Config.DeferSessionStart held back from New or Resume: the Driver calls it once it has
-// installed the Agent, so a session a late bind refused is never announced. It announces at most
-// once per Agent — a second call, or a call on an Agent whose construction already announced, does
-// nothing — and, like every boundary's announcement, it is enqueue-only: it never blocks on the
-// observe Runner and never reaches the Driver's sink.
-func (a *Agent) AnnounceSessionStart() {
-	a.constructionStart.Do(func() { a.announceSessionStart(domain.SessionStartNew) })
-}
-
-// announceConstruction is New's and Resume's end: it announces the construction boundary unless the
-// Driver deferred that to its own AnnounceSessionStart (Config.DeferSessionStart).
-func (a *Agent) announceConstruction() {
-	if a.cfg.DeferSessionStart {
-		return
-	}
-	a.AnnounceSessionStart()
-}
-
 // announceSessionStart is one Session boundary's announcement, made exactly once per boundary: each
 // boundary's own call site makes this one call. Only the top-level Agent announces — a delegate
 // starts no session. It starts the boundary's session-start advise runs in the background

@@ -183,12 +183,6 @@ type Agent struct {
 	// after the boundary its newly armed entries are read against (sessionWindow).
 	swapMu sync.Mutex
 
-	// constructionStart makes the construction boundary's session-started notice one-shot
-	// (announceConstruction): New and Resume announce through it unless the Driver deferred the
-	// notice (Config.DeferSessionStart), and the Driver's AnnounceSessionStart does, so the one
-	// boundary is never announced twice whichever of them gets there.
-	constructionStart sync.Once
-
 	// forkNext is the MarkFork mark: it makes the next RestoreSession announce start "fork" rather
 	// than "resume". The next ClearContext or RestoreSession takes it at its top, whether or not that
 	// boundary succeeds, so a refused fork restore never leaves it set for a later resume.
@@ -853,7 +847,8 @@ func resolveOptions(opts []Option) constructOptions {
 // Construction is a Session boundary: its last act announces the session-started notice with start
 // "new" to the observe Runner — after the fenced runner is bound, so a repo `run:` the notice fires
 // runs under this Agent's permit, and after the seed, so a seeded session-started advise entry runs
-// at this boundary — unless cfg.DeferSessionStart leaves that to the Driver (AnnounceSessionStart).
+// at this boundary. A construction that refuses returns before it, so it announces nothing; a
+// Driver hands New everything that can refuse in the seed, so the Agent it gets back is announced.
 func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	o := resolveOptions(opts)
 	wire, tap := dialOptions(cfg)
@@ -866,7 +861,7 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	tap.bind(a)
 	a.bindProjectRun()
 	a.applyConstructionSeed(o)
-	a.announceConstruction()
+	a.announceSessionStart(domain.SessionStartNew)
 	return a, nil
 }
 
@@ -889,8 +884,8 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
 	tap.bind(a)
 	a.bindProjectRun()
-	a.applyConstructionSeed(o) // as in New
-	a.announceConstruction()   // as in New: a resumed start is a CONSTRUCTED session, start "new"
+	a.applyConstructionSeed(o)                     // as in New
+	a.announceSessionStart(domain.SessionStartNew) // as in New: a resumed start is a CONSTRUCTED session
 	return a, nil
 }
 

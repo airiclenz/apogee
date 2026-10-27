@@ -1260,28 +1260,19 @@ func TestSessionWindow_EachBoundaryKindOpensTheWindow(t *testing.T) {
 	}
 }
 
-// TestSessionWindow_ADeferredConstructionFiresThroughItsAnnouncement — under DeferSessionStart the
-// window opens only with the Driver's announcement, so an entry a swap arms ahead of it (a late
-// bind's replay) fires through that announcement, never also through the narrowed door.
-func TestSessionWindow_ADeferredConstructionFiresThroughItsAnnouncement(t *testing.T) {
+// TestSessionWindow_ASeededConstructionFiresThroughItsAnnouncement — the window opens with the
+// construction's own announcement over the seeded observe list, so an entry the seed carried fires
+// through that announcement, and a swap that re-arms it before the first prompt (a settings reload
+// of the unchanged list) never also fires it through the narrowed door.
+func TestSessionWindow_ASeededConstructionFiresThroughItsAnnouncement(t *testing.T) {
 	t.Parallel()
 
-	runner := &startRecordingRunner{}
-	cfg := baseConfig(&recordingSink{})
-	cfg.ObserveRunner = runner
-	cfg.DeferSessionStart = true
-	a, err := New(cfg, WithDialer(dialerTo(echoResponder(t, "reply")).dial))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	t.Cleanup(func() { _ = a.Close() })
+	a, runner := windowAgent(t, sessionStartedEntry("primer", true))
 
-	armObserve(t, a, sessionStartedEntry("primer", true))
-	a.AnnounceSessionStart()
 	armObserve(t, a, sessionStartedEntry("primer", true))
 
 	if got := runner.armedCalls(); len(got) != 0 {
-		t.Errorf("narrowed firings = %+v; want none — the announcement reached the entry armed before it", got)
+		t.Errorf("narrowed firings = %+v; want none — the announcement reached the seeded entry", got)
 	}
 	if got := runner.recorded(); !slices.Equal(got, []domain.SessionStart{domain.SessionStartNew}) {
 		t.Errorf("boundary announcements = %v, want the construction's once", got)

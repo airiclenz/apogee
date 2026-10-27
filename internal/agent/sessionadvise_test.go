@@ -780,8 +780,8 @@ func TestSessionWindow_ReArmingAnAdviseEntryStartsNothing(t *testing.T) {
 }
 
 // TestSessionWindow_AnAdviseEntryArmedAtTheBoundaryRunsOnce — the regression guard: an entry the
-// generation armed before a deferred announcement (lateEngine.Bind's replay) is started by the
-// boundary itself, and an unchanged SetReactions before the first prompt — a `/settings` toggle —
+// construction seed armed (lateEngine.Bind's seeded generation) is started by the construction's own
+// announcement, and an unchanged SetReactions before the first prompt — a `/settings` toggle —
 // starts no second run.
 func TestSessionWindow_AnAdviseEntryArmedAtTheBoundaryRunsOnce(t *testing.T) {
 	skipWithoutPOSIXShell(t)
@@ -791,11 +791,9 @@ func TestSessionWindow_AnAdviseEntryArmedAtTheBoundaryRunsOnce(t *testing.T) {
 	responder := echoResponder(t, "ok")
 	cfg := baseConfig(sink)
 	cfg.ObserveRunner = &startRecordingRunner{}
-	cfg.DeferSessionStart = true
+	cfg.Sync = []domain.Reaction{liveAdviceEntry("ci")}
 	a := sessionAdviseAgent(t, cfg, responder)
 
-	armSync(t, a, liveAdviceEntry("ci"))
-	a.AnnounceSessionStart()
 	armSync(t, a, liveAdviceEntry("ci"))
 	runExchange(t, a, "first prompt")
 
