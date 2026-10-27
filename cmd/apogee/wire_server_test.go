@@ -469,8 +469,8 @@ func TestLateEngineAppliesPreBindSettingsOnBind(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	cfg.ConfineToWorkspace = true
 	var bound *apogee.Agent
-	if err := engine.Bind(func() (*apogee.Agent, error) {
-		agent, err := apogee.New(cfg)
+	if err := engine.Bind(cfg, func(cfg apogee.Config, opts ...apogee.Option) (*apogee.Agent, error) {
+		agent, err := apogee.New(cfg, opts...)
 		bound = agent
 		return agent, err
 	}); err != nil {
@@ -486,9 +486,9 @@ func TestLateEngineAppliesPreBindSettingsOnBind(t *testing.T) {
 	// Exactly one Agent per session: a second Bind is refused before the constructor runs, so the
 	// one this holder closes at shutdown is the only one that was ever built.
 	built := false
-	if err := engine.Bind(func() (*apogee.Agent, error) {
+	if err := engine.Bind(cfg, func(cfg apogee.Config, opts ...apogee.Option) (*apogee.Agent, error) {
 		built = true
-		return apogee.New(cfg)
+		return apogee.New(cfg, opts...)
 	}); !errors.Is(err, errAlreadyBound) {
 		t.Errorf("second Bind err = %v; want errAlreadyBound", err)
 	}
@@ -1607,9 +1607,9 @@ func TestServerBindHandsTheEphemeralFlagToTheEngine(t *testing.T) {
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
 				keys:   config.NewKeyResolver(""),
-				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+				build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 					handed = cfg
-					return buildAgent(cfg, resumed)
+					return buildAgent(cfg, resumed, opts...)
 				},
 			}
 			if err := binder.bind(tt.entry); err != nil {
@@ -1689,9 +1689,9 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
 				keys:   config.NewKeyResolver(""),
-				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+				build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 					handed = cfg
-					return buildAgent(cfg, resumed)
+					return buildAgent(cfg, resumed, opts...)
 				},
 			}
 			if err := binder.bind(tt.entry); err != nil {
@@ -1765,9 +1765,9 @@ func TestServerBindHandsTheEntrysResponseReserveToTheEngine(t *testing.T) {
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
 				keys:   config.NewKeyResolver(""),
-				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+				build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 					handed = cfg
-					return buildAgent(cfg, resumed)
+					return buildAgent(cfg, resumed, opts...)
 				},
 			}
 			if err := binder.bind(tt.entry); err != nil {
@@ -1825,9 +1825,9 @@ func TestBindServerResolvesTheWorkingWindow(t *testing.T) {
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
 				keys:   config.NewKeyResolver(""),
-				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+				build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 					handed = cfg
-					return buildAgent(cfg, resumed)
+					return buildAgent(cfg, resumed, opts...)
 				},
 			}
 			if err := binder.bind(tt.entry); err != nil {
@@ -1879,9 +1879,9 @@ func TestBindServerCarriesTheEntrysOwnWords(t *testing.T) {
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
 				keys:   config.NewKeyResolver(""),
-				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+				build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 					handed = cfg
-					return buildAgent(cfg, resumed)
+					return buildAgent(cfg, resumed, opts...)
 				},
 			}
 			if err := binder.bind(tt.entry); err != nil {
@@ -1935,9 +1935,9 @@ func TestStartupBindCarriesTheEntrysOwnWords(t *testing.T) {
 		holder: newUpstreamHolder(),
 		caps:   newParallelAgentsCap(engine),
 		keys:   config.NewKeyResolver(""),
-		build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+		build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 			handed = cfg
-			return buildAgent(cfg, resumed)
+			return buildAgent(cfg, resumed, opts...)
 		},
 	}
 	if err := binder.bind(opts.StartupEntry); err != nil {
@@ -2009,9 +2009,9 @@ func TestServerBindHandsTheEntrysStreamIdleWindowToTheEngine(t *testing.T) {
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
 				keys:   config.NewKeyResolver(""),
-				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+				build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 					handed = cfg
-					return buildAgent(cfg, resumed)
+					return buildAgent(cfg, resumed, opts...)
 				},
 			}
 

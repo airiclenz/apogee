@@ -75,7 +75,7 @@ func TestLateEngineRemembersTheDelegationSeatUntilTheBind(t *testing.T) {
 		t.Fatalf("pendingSeat = %+v; want the seat held for the bind", engine.pendingSeat)
 	}
 
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	if err := engine.Bind(validCfg(t), apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestLateEngineBindKeepsTheFarWidthOfThePendingTarget(t *testing.T) {
 	cfg.Tools = roster
 	cfg.SystemPrompt = "You are apogee, a terminal coding agent."
 	cfg.ParallelAgents = sessionWidth
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(cfg) }); err != nil {
+	if err := engine.Bind(cfg, apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
@@ -166,12 +166,12 @@ func TestLateEngineVisionFollowsTheBoundServer(t *testing.T) {
 		}
 
 		var bound *apogee.Agent
-		if err := engine.Bind(func() (*apogee.Agent, error) {
-			cfg := validCfg(t)
-			cfg.Vision = vision
-			cfg.ServerName = "rented.invalid"
-			cfg.ServerEphemeral = true
-			agent, err := apogee.New(cfg)
+		cfg := validCfg(t)
+		cfg.Vision = vision
+		cfg.ServerName = "rented.invalid"
+		cfg.ServerEphemeral = true
+		if err := engine.Bind(cfg, func(cfg apogee.Config, opts ...apogee.Option) (*apogee.Agent, error) {
+			agent, err := apogee.New(cfg, opts...)
 			bound = agent
 			return agent, err
 		}); err != nil {
@@ -205,7 +205,7 @@ func TestLateEngineReplaysThePruneGateAtTheBind(t *testing.T) {
 		t.Fatalf("pendingPrune = %v; want false held for the bind", engine.pendingPrune)
 	}
 
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	if err := engine.Bind(validCfg(t), apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 		t.Fatalf("SetReactions: %v", err)
 	}
 
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	if err := engine.Bind(validCfg(t), apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if got := engine.bound().Generation().Floor; got != want {
@@ -273,12 +273,9 @@ func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
 
 	// Constructed with the switch ON, as the binder constructs a session whose file says so: what
 	// the replay must not do is take it away.
-	construct := func() (*apogee.Agent, error) {
-		cfg := validCfg(t)
-		cfg.ContextFillNotice = true
-		return apogee.New(cfg)
-	}
-	if err := engine.Bind(construct); err != nil {
+	cfg := validCfg(t)
+	cfg.ContextFillNotice = true
+	if err := engine.Bind(cfg, apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if got := engine.bound().Generation(); !got.ContextFillNotice {
@@ -344,12 +341,12 @@ func (r *recordingRunner) Replace(list []domain.Reaction) error {
 // pointed at that Agent before the bind's replay reaches it.
 func bindOverRunner(t *testing.T, engine *lateEngine, runner apogee.ObserveRunner, observe []domain.Reaction) error {
 	t.Helper()
-	return engine.Bind(func() (*apogee.Agent, error) {
-		cfg := validCfg(t)
-		cfg.ObserveRunner = runner
-		cfg.Observe = observe
-		cfg.DeferSessionStart = true
-		agent, err := apogee.New(cfg)
+	cfg := validCfg(t)
+	cfg.ObserveRunner = runner
+	cfg.Observe = observe
+	cfg.DeferSessionStart = true
+	return engine.Bind(cfg, func(cfg apogee.Config, opts ...apogee.Option) (*apogee.Agent, error) {
+		agent, err := apogee.New(cfg, opts...)
 		if witness, ok := runner.(*recordingRunner); ok {
 			witness.agent = agent
 		}
@@ -562,7 +559,7 @@ func TestSetReactionsWithoutARunner(t *testing.T) {
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	if err := engine.Bind(validCfg(t), apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
@@ -657,7 +654,7 @@ func TestLateEngineBindRefusesAPendingGenerationTheEngineWillNotArm(t *testing.T
 	t.Cleanup(func() { _ = engine.Close() })
 	engine.seedReactions(apogee.Generation{Sync: []domain.Reaction{gateReaction("read-cache")}})
 
-	err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) })
+	err := engine.Bind(validCfg(t), apogee.New)
 
 	if !errors.Is(err, apogee.ErrInvalidReaction) {
 		t.Fatalf("Bind err = %v; want the engine's ErrInvalidReaction for a reserved id", err)
@@ -734,7 +731,7 @@ func TestLateEngineRemembersTheUndoJournalUntilTheBind(t *testing.T) {
 	rotated := undo.New()
 	engine.SetJournal(rotated, "")
 
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	if err := engine.Bind(validCfg(t), apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 

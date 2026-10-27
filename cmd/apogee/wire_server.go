@@ -59,7 +59,7 @@ type serverBinder struct {
 	// fields the entry decides are written onto a copy no caller keeps, so the pins resolved below —
 	// the fan-out width, the reply cap, the context window — could each be deleted and every test in
 	// the package would still pass. A test supplies a build that records what it was handed.
-	build func(apogee.Config, *session.Record) (*apogee.Agent, error)
+	build func(apogee.Config, *session.Record, ...apogee.Option) (*apogee.Agent, error)
 }
 
 // bind constructs the engine for entry and points both holders at it. The engine is constructed
@@ -143,8 +143,8 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	if b.build != nil {
 		construct = b.build
 	}
-	if err = b.engine.Bind(func() (*apogee.Agent, error) {
-		agent, err := construct(cfg, b.resumed)
+	if err = b.engine.Bind(cfg, func(cfg apogee.Config, opts ...apogee.Option) (*apogee.Agent, error) {
+		agent, err := construct(cfg, b.resumed, opts...)
 		if err != nil {
 			return nil, friendlyConstructErr(err)
 		}

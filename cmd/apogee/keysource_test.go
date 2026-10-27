@@ -157,9 +157,9 @@ func TestBindResolvesACommandKeySource(t *testing.T) {
 		holder: newUpstreamHolder(),
 		caps:   newParallelAgentsCap(engine),
 		keys:   config.NewKeyResolver(""),
-		build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+		build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 			handed = cfg
-			return buildAgent(cfg, resumed)
+			return buildAgent(cfg, resumed, opts...)
 		},
 	}
 
@@ -195,9 +195,9 @@ func TestBindRefusesWhenTheKeySourceFails(t *testing.T) {
 		holder: newUpstreamHolder(),
 		caps:   newParallelAgentsCap(engine),
 		keys:   config.NewKeyResolver(""),
-		build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+		build: func(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 			built = true
-			return buildAgent(cfg, resumed)
+			return buildAgent(cfg, resumed, opts...)
 		},
 	}
 

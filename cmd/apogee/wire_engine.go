@@ -27,13 +27,14 @@ import (
 
 // buildAgent constructs a fresh Agent, or resumes one from an already-loaded session record when
 // resumed is non-nil (a --resume/--continue start; resolveResume owns the id-or-path lookup and the
-// legacy-file wrapping). Both go through the public apogee surface. A future-version snapshot
+// legacy-file wrapping). Both go through the public apogee surface, and both take the same
+// construction seed: opts are forwarded to New or Resume unchanged. A future-version snapshot
 // surfaces apogee.ErrSessionVersion from Resume, which carries its own clear message.
-func buildAgent(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+func buildAgent(cfg apogee.Config, resumed *session.Record, opts ...apogee.Option) (*apogee.Agent, error) {
 	if resumed == nil {
-		return apogee.New(cfg)
+		return apogee.New(cfg, opts...)
 	}
-	return apogee.Resume(cfg, resumed.Session)
+	return apogee.Resume(cfg, resumed.Session, opts...)
 }
 
 // ----------------------------------------------------------------------------
@@ -197,19 +198,22 @@ func (e *lateEngine) seedReactions(gen apogee.Generation) {
 	e.pendingGeneration = &gen
 }
 
-// Bind constructs the Agent through construct and installs it as this session's engine. The
-// construction happens UNDER the lock, which is what makes "exactly one Agent" a property of the
+// Bind constructs the Agent through construct and installs it as this session's engine. cfg is the
+// base Config the caller assembled; Bind hands it to construct together with the construction
+// Options, so the holder is the one place seed values can be added before the Agent exists — the
+// constructor receives the seed rather than closing over a Config of its own. The construction
+// happens UNDER the lock, which is what makes "exactly one Agent" a property of the
 // type rather than of its callers: a second Bind is refused before construct is ever called, so no
 // engine is ever built that nothing holds. It costs nothing to hold the lock across it — apogee.New
 // reaches no network (startup makes no probe, ADR 0024) — and a failed construction leaves the
 // holder unbound, free to try another server.
-func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
+func (e *lateEngine) Bind(cfg apogee.Config, construct func(apogee.Config, ...apogee.Option) (*apogee.Agent, error)) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.agent != nil {
 		return errAlreadyBound
 	}
-	agent, err := construct()
+	agent, err := construct(cfg)
 	if err != nil {
 		return err
 	}

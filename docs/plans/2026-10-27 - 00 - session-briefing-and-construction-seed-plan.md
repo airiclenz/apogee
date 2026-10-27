@@ -131,7 +131,10 @@ NOTES (2026-10-27): consequential edit — cmd/apogee/probecontext_test.go: made
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestProbeContext' ./cmd/apogee/`
 **Commit:** `refactor(probe): measureTurn1 constructs from the seed`
 
-## 5. lateEngine.Bind takes a seed-aware constructor
+## 5. lateEngine.Bind takes a seed-aware constructor — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): apogee.go left unchanged — item 2 already aliases agent.Option as apogee.Option (plus WithUndoJournal/WithDelegationSeat/WithDelegationTarget), so no non-test cmd/apogee file imports internal/agent.
+NOTES (2026-10-27): shape chosen — `Bind(cfg apogee.Config, construct func(apogee.Config, ...apogee.Option) (*apogee.Agent, error))`; Bind calls construct(cfg) with no Options yet (item 6 adds the seed). Test closures that only built a Config now pass it as the base cfg and `apogee.New` directly; closures that record the built Agent (bound/built/witness) keep a closure that forwards opts.
 
 **What:** Depends on item 2. Mechanical signature step only.
 **Goal:** `lateEngine.Bind`'s constructor argument receives the base `apogee.Config` plus `agent.Option`s, so Bind can add seed values before construction. Behaviour is unchanged.

@@ -61,18 +61,16 @@ func projectRuleWiring(t *testing.T, endpoint string, approver apogee.Approver, 
 		reloadWake:    newReloadWake(),
 	}
 	t.Cleanup(func() { _ = w.engine.Close() })
-	err := w.engine.Bind(func() (*apogee.Agent, error) {
-		return apogee.New(apogee.Config{
-			Endpoint:     endpoint,
-			Model:        "fake",
-			Mode:         domain.ModeAskBefore,
-			Events:       sink,
-			Approver:     approver,
-			Tools:        tools.NewDefaultRegistry(root),
-			WorkspaceDir: root,
-			PinMoved:     w.reloadWake.poke,
-		})
-	})
+	err := w.engine.Bind(apogee.Config{
+		Endpoint:     endpoint,
+		Model:        "fake",
+		Mode:         domain.ModeAskBefore,
+		Events:       sink,
+		Approver:     approver,
+		Tools:        tools.NewDefaultRegistry(root),
+		WorkspaceDir: root,
+		PinMoved:     w.reloadWake.poke,
+	}, apogee.New)
 	if err != nil {
 		t.Fatalf("Bind: %v", err)
 	}

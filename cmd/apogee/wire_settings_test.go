@@ -2898,7 +2898,7 @@ func TestLateEngineBindRefusesAProfileItCannotParse(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetProfile while unbound: %v", err)
 	}
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(cfg) }); err == nil {
+	if err := engine.Bind(cfg, apogee.New); err == nil {
 		t.Fatal("Bind with an unreadable profile succeeded; want the dialect refused")
 	}
 
@@ -2906,7 +2906,7 @@ func TestLateEngineBindRefusesAProfileItCannotParse(t *testing.T) {
 	if err := engine.SetProfile(apogee.ModelProfile{ToolCallFormat: apogee.FormatMarkdownFenced}); err != nil {
 		t.Fatalf("SetProfile after the refused bind: %v", err)
 	}
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(cfg) }); err != nil {
+	if err := engine.Bind(cfg, apogee.New); err != nil {
 		t.Fatalf("Bind after the refused one: %v, want the holder still free", err)
 	}
 }
@@ -4366,12 +4366,10 @@ func newSessionAdviseReload(t *testing.T, upstream *stubllm.Server) sessionStart
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 	engine := newLateEngine(domain.ModeAskBefore, false)
 	t.Cleanup(func() { _ = engine.Close() })
-	if err := engine.Bind(func() (*apogee.Agent, error) {
-		cfg := validCfg(t)
-		cfg.Endpoint, cfg.Model, cfg.WorkspaceDir = upstream.URL, upstream.Model, workspace
-		cfg.ObserveRunner, cfg.DeferSessionStart = runner, true
-		return apogee.New(cfg)
-	}); err != nil {
+	cfg := validCfg(t)
+	cfg.Endpoint, cfg.Model, cfg.WorkspaceDir = upstream.URL, upstream.Model, workspace
+	cfg.ObserveRunner, cfg.DeferSessionStart = runner, true
+	if err := engine.Bind(cfg, apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 

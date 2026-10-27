@@ -501,7 +501,7 @@ func TestLateEngineRemembersTheDelegationTargetUntilTheBind(t *testing.T) {
 		t.Fatalf("pendingDelegation = %+v; want the target held for the bind", engine.pendingDelegation)
 	}
 
-	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(validCfg(t)) }); err != nil {
+	if err := engine.Bind(validCfg(t), apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	// A cleared target is remembered as cleared: nothing usable was resolved, and a later bind must
