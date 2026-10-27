@@ -4010,8 +4010,8 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 		Bypass:  true,
 		Observe: boot,
 	})
-	// And BOUND to an Agent holding the Runner: the seeded generation is replayed onto the Agent the
-	// bind constructs, so the session is running the same Floor and Bypass the `config.Options`
+	// And BOUND to an Agent holding the Runner: the seeded generation is the one the Agent the bind
+	// constructs is built with, so the session is running the same Floor and Bypass the `config.Options`
 	// above report — and Generation() has something to answer with afterwards.
 	if err := bindOverRunner(t, engine, runner, boot); err != nil {
 		t.Fatalf("bind: %v", err)
@@ -4144,8 +4144,8 @@ func TestLiveSettingsGenerationClonesBothLanes(t *testing.T) {
 }
 
 // The settings host's generation is seeded with the `context-fill-notice` switch the session
-// resolved (ADR 0077), beside Bypass and the Floor set: the bind replays this generation over the
-// engine's construction seed, so a host seeded WITHOUT the member would switch the notice off again
+// resolved (ADR 0077), beside Bypass and the Floor set: the bind seeds this generation over the
+// Config's own construction values, so a host seeded WITHOUT the member would switch the notice off again
 // for a session whose file asked for it, while the manual announces the key as working.
 func TestLiveSettingsGenerationCarriesTheContextFillNotice(t *testing.T) {
 	t.Parallel()
@@ -4368,7 +4368,7 @@ func newSessionAdviseReload(t *testing.T, upstream *stubllm.Server) sessionStart
 	t.Cleanup(func() { _ = engine.Close() })
 	cfg := validCfg(t)
 	cfg.Endpoint, cfg.Model, cfg.WorkspaceDir = upstream.URL, upstream.Model, workspace
-	cfg.ObserveRunner, cfg.DeferSessionStart = runner, true
+	cfg.ObserveRunner = runner
 	if err := engine.Bind(cfg, apogee.New); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}

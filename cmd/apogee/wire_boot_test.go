@@ -967,9 +967,9 @@ func TestBootConfigCarriesTheContextFillNotice(t *testing.T) {
 
 // And the whole trip, as the TUI Driver walks it: a home whose file says `context-fill-notice: true`
 // resolves a Config with the switch on, the composition root seeds the engine holder's generation
-// from that Config and binds the startup server (wireSession), and that bind replays the generation
-// over the Agent it constructs — so what the session actually runs has the notice ON. The claim is
-// made on the bound Agent rather than on the Config because the replay is the step that could lose
+// from that Config and binds the startup server (wireSession), and that bind seeds the generation
+// into the Agent it constructs — so what the session actually runs has the notice ON. The claim is
+// made on the bound Agent rather than on the Config because the seed is the step that could lose
 // it: a seed threaded without the member would overwrite the construct-time switch with false and
 // the manual's key would do nothing.
 func TestWireSessionBindsTheContextFillNoticeOntoTheAgent(t *testing.T) {

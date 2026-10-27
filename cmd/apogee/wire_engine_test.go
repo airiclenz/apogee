@@ -93,9 +93,9 @@ func TestLateEngineRemembersTheDelegationSeatUntilTheBind(t *testing.T) {
 	}
 }
 
-// A seat and a target pushed before the bind are replayed onto one Agent, and the two doors do not
+// A seat and a target pushed before the bind are seeded into one Agent, and the two doors do not
 // commute: the seat door FORGETS the far width the engine states to the model, and a usable target
-// STATES it (ADR 0069 decision 6, 2026-09-24 note). Replayed target-first, the seat would wipe the
+// STATES it (ADR 0069 decision 6, 2026-09-24 note). Applied target-first, the seat would wipe the
 // width the target had just stated, and a late-bound session would tell its model the session width
 // until the next heartbeat beat. The width is observed where the model reads it — the orientation's
 // Delegation bounds clause on the first request — with the two widths distinct, so the session
@@ -258,7 +258,7 @@ func TestLateEngineReplaysTheFloorGatesAtTheBind(t *testing.T) {
 
 // The context-fill notice's switch rides the same contract as a field of the same generation (ADR
 // 0077), with the difference the Floor gates do not have: the Agent is constructed with a seed of
-// its own (Config.ContextFillNotice), and the bind's replay lands OVER it. So the replay must carry
+// its own (Config.ContextFillNotice), and the bind's seed lands OVER it. So the seed must carry
 // the member — a generation held without it would switch the notice off again on a session whose
 // file asked for it — and a bound edit must move it the way a Floor edit moves a gate.
 func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
@@ -272,7 +272,7 @@ func TestLateEngineReplaysTheContextFillNoticeAtTheBind(t *testing.T) {
 	}
 
 	// Constructed with the switch ON, as the binder constructs a session whose file says so: what
-	// the replay must not do is take it away.
+	// the seed must not do is take it away.
 	cfg := validCfg(t)
 	cfg.ContextFillNotice = true
 	if err := engine.Bind(cfg, apogee.New); err != nil {
@@ -336,15 +336,15 @@ func (r *recordingRunner) Replace(list []domain.Reaction) error {
 }
 
 // bindOverRunner binds engine to an Agent that holds runner as its observe half, built over
-// observe — the Config fields wire_boot.go fills (Config.ObserveRunner, Config.Observe, and the
-// construction boundary deferred to the bind, Config.DeferSessionStart). A recordingRunner witness is
-// pointed at that Agent before the bind's replay reaches it.
+// observe — the Config fields wire_boot.go fills (Config.ObserveRunner, Config.Observe). A
+// recordingRunner witness is pointed at the Agent the bind constructs, so a swap made after
+// construction records what the engine held; the bind's own hand-over precedes construction and
+// records no engine.
 func bindOverRunner(t *testing.T, engine *lateEngine, runner apogee.ObserveRunner, observe []domain.Reaction) error {
 	t.Helper()
 	cfg := validCfg(t)
 	cfg.ObserveRunner = runner
 	cfg.Observe = observe
-	cfg.DeferSessionStart = true
 	return engine.Bind(cfg, func(cfg apogee.Config, opts ...apogee.Option) (*apogee.Agent, error) {
 		agent, err := apogee.New(cfg, opts...)
 		if witness, ok := runner.(*recordingRunner); ok {
@@ -506,11 +506,11 @@ func TestSetReactionsSkipsTheRunnerWhenObserveIsUnchanged(t *testing.T) {
 	})
 }
 
-// The generation rides the remember-then-install contract the mode and the gates ride: a `/settings`
-// edit committed before a server is chosen must reach the Agent the moment one is built, or the
-// session runs the whole way on the seed its Config carried. The Runner half rides it too: the
-// Agent holds the Runner, so an unbound edit reaches it at the bind's replay and not before — once,
-// engine half first.
+// The generation rides the remember-then-seed contract the gates ride: a `/settings` edit committed
+// before a server is chosen must be the generation the Agent is constructed with, or the session
+// runs the whole way on the seed its Config carried. The Runner half rides it too: an unbound edit
+// reaches the Runner at the bind and not before — once, and BEFORE construction announces the
+// session, so the session-started boundary already finds the Runner holding the session's list.
 func TestLateEngineReplaysThePendingGeneration(t *testing.T) {
 	t.Parallel()
 
@@ -545,8 +545,11 @@ func TestLateEngineReplaysThePendingGeneration(t *testing.T) {
 	if len(runner.lists) != 1 || !reflect.DeepEqual(runner.lists[0], gen.Observe) {
 		t.Fatalf("the Runner was handed %+v; want the held observe list once, at the bind", runner.lists)
 	}
-	if runner.seen[0].Floor != gen.Floor || !runner.seen[0].Bypass {
-		t.Errorf("the engine held %+v when the Runner swapped; want the held generation already applied", runner.seen[0])
+	if want := []apogee.SessionStart{apogee.SessionStartNew}; !reflect.DeepEqual(runner.starts, want) {
+		t.Fatalf("the bind announced %v; want the construction boundary once, %v", runner.starts, want)
+	}
+	if runner.handedAtStart[0] != 1 {
+		t.Errorf("construction announced with %d list(s) handed to the Runner; want the held list already handed", runner.handedAtStart[0])
 	}
 }
 
@@ -608,7 +611,7 @@ func TestSetReactionsReportsTheRunnersRefusal(t *testing.T) {
 
 // The ENGINE's refusal ends the apply before either half moves. A Generation the Agent will not arm
 // — here a sync entry named after a Floor guard — is refused with the engine's own sentence, it is
-// never parked for the bind's replay (a replay would re-install exactly what was refused), and the
+// never parked for the bind's seed (a seed would re-install exactly what was refused), and the
 // Runner is never reached, even though the observe list moved: a swap that installed its Runner half
 // alone would leave the two halves on different generations (ADR 0076 A8). The holder keeps
 // describing what the session is actually running, so the next well-formed apply lands whole.
@@ -645,8 +648,8 @@ func TestSetReactionsRefusedByTheEngineReachesNeitherHalf(t *testing.T) {
 }
 
 // A generation parked while UNBOUND meets no engine to refuse it, so the refusal falls to the bind's
-// replay — on the pendingProfile terms: the Agent is released and the bind fails, naming the entry,
-// rather than a session being installed running a lane the engine would misreport.
+// construction, which the generation seeds — on the pendingProfile terms: the bind fails, naming the
+// entry, rather than a session being installed running a lane the engine would misreport.
 func TestLateEngineBindRefusesAPendingGenerationTheEngineWillNotArm(t *testing.T) {
 	t.Parallel()
 
@@ -664,8 +667,8 @@ func TestLateEngineBindRefusesAPendingGenerationTheEngineWillNotArm(t *testing.T
 	}
 }
 
-// The construction boundary's session-started notice is the bind's to announce, once the Agent is
-// INSTALLED (Config.DeferSessionStart): exactly once, and only after the replay — so an entry the
+// The construction boundary's session-started notice is announced by the Agent the bind constructs:
+// exactly once, and only after the bind handed the Runner the held observe list — so an entry the
 // held generation armed hears of the session that generation belongs to.
 func TestLateEngineBindAnnouncesTheSessionStartOnceInstalled(t *testing.T) {
 	t.Parallel()
@@ -683,26 +686,105 @@ func TestLateEngineBindAnnouncesTheSessionStartOnceInstalled(t *testing.T) {
 		t.Fatalf("the bind announced %v; want the construction boundary once, %v", runner.starts, want)
 	}
 	if runner.handedAtStart[0] != 1 {
-		t.Errorf("the boundary was announced with %d list(s) handed; want it after the replay's one", runner.handedAtStart[0])
+		t.Errorf("the boundary was announced with %d list(s) handed; want it after the bind's one hand-over", runner.handedAtStart[0])
 	}
 }
 
-// A bind that refuses the Agent it built — here a held generation the engine will not arm — never
-// installed a session, so it announces none: the Agent is closed unannounced.
+// A bind whose construction refuses its seed — a held generation the engine will not arm, or a held
+// profile this build cannot parse — constructs no session, so it announces none and installs
+// nothing: every pending value that can refuse is refused before the Agent exists.
 func TestLateEngineBindRefusedAnnouncesNoSessionStart(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		hold    func(t *testing.T, engine *lateEngine)
+		wantErr error
+	}{
+		{
+			name: "a refused generation",
+			hold: func(_ *testing.T, engine *lateEngine) {
+				engine.seedReactions(apogee.Generation{Sync: []domain.Reaction{gateReaction("read-cache")}})
+			},
+			wantErr: apogee.ErrInvalidReaction,
+		},
+		{
+			name: "a refused profile",
+			hold: func(t *testing.T, engine *lateEngine) {
+				if err := engine.SetProfile(apogee.ModelProfile{ToolCallFormat: "no-such-format"}); err != nil {
+					t.Fatalf("SetProfile while unbound: %v; want it held for the bind", err)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			engine := newLateEngine(domain.ModeAskBefore, true)
+			t.Cleanup(func() { _ = engine.Close() })
+			runner := &recordingRunner{}
+			tc.hold(t, engine)
+
+			err := bindOverRunner(t, engine, runner, nil)
+
+			if err == nil {
+				t.Fatalf("Bind err = nil; want the construction's refusal")
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Bind err = %v; want %v", err, tc.wantErr)
+			}
+			if len(runner.starts) != 0 {
+				t.Errorf("a refused bind announced %v; want no session-started for a session never constructed", runner.starts)
+			}
+			if engine.bound() != nil {
+				t.Errorf("an Agent was installed despite the refusal; want the holder left unbound")
+			}
+		})
+	}
+}
+
+// A held generation the Agent would refuse is refused BEFORE its observe list reaches the Runner: a
+// refused bind must not leave the Runner firing a list no Agent was ever constructed with.
+func TestLateEngineBindValidatesThePendingGenerationBeforeTheRunner(t *testing.T) {
 	t.Parallel()
 
 	engine := newLateEngine(domain.ModeAskBefore, true)
 	t.Cleanup(func() { _ = engine.Close() })
 	runner := &recordingRunner{}
-	engine.seedReactions(apogee.Generation{Sync: []domain.Reaction{gateReaction("read-cache")}})
+	// A gate entry is not of the observe class, so the lane rules refuse the observe list.
+	engine.seedReactions(apogee.Generation{Observe: []domain.Reaction{gateReaction("lint")}})
 
 	if err := bindOverRunner(t, engine, runner, nil); !errors.Is(err, apogee.ErrInvalidReaction) {
-		t.Fatalf("Bind err = %v; want the engine's ErrInvalidReaction for a reserved id", err)
+		t.Fatalf("Bind err = %v; want ErrInvalidReaction for an observe list of the wrong class", err)
 	}
+	if len(runner.lists) != 0 {
+		t.Errorf("the Runner was handed %+v; want no Replace for a generation refused before construction", runner.lists)
+	}
+	if engine.bound() != nil {
+		t.Errorf("an Agent was installed despite the refusal; want the holder left unbound")
+	}
+}
 
-	if len(runner.starts) != 0 {
-		t.Errorf("a refused bind announced %v; want no session-started for a session never installed", runner.starts)
+// A construction refused AFTER the bind handed the Runner a moved observe list hands the Runner back
+// the list it was built from: a refused bind moves neither half, so a later bind compares against
+// the list the Runner really holds.
+func TestLateEngineBindRefusedHandsTheRunnerBackItsList(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{}
+	built := []domain.Reaction{observeReaction("built")}
+	// The observe list moved and passes the lane rules; the sync entry named after a Floor guard is
+	// refused only by construction.
+	moved := []domain.Reaction{observeReaction("moved")}
+	engine.seedReactions(apogee.Generation{Observe: moved, Sync: []domain.Reaction{gateReaction("read-cache")}})
+
+	if err := bindOverRunner(t, engine, runner, built); !errors.Is(err, apogee.ErrInvalidReaction) {
+		t.Fatalf("Bind err = %v; want the construction's ErrInvalidReaction for a reserved id", err)
+	}
+	if want := [][]domain.Reaction{moved, built}; !reflect.DeepEqual(runner.lists, want) {
+		t.Errorf("the Runner was handed %+v; want the moved list, then the built list back", runner.lists)
 	}
 }
 

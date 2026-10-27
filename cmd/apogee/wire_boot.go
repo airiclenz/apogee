@@ -274,11 +274,6 @@ func (w *rootWiring) resolveConfig() error {
 	// so the Floor-, Bypass- and sync-only edits a settings row makes never retire it.
 	w.cfg.ObserveRunner = w.hooks
 	w.cfg.Observe = observe
-	// The construction boundary's session-started notice is the late engine's to announce, once its
-	// bind has INSTALLED the Agent (lateEngine.Bind): a bind can still refuse the Agent it built — a
-	// replayed generation or profile the engine will not take — and a session never installed is
-	// never announced.
-	w.cfg.DeferSessionStart = true
 	// The slot the Runner's repo `run:` entries reach the Agent through: every Agent the late
 	// engine builds binds its fenced runner into it, so a rebuilt engine rebinds (ADR 0104 §8).
 	w.cfg.BindProjectRun = projectRuns.bind

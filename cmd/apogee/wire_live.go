@@ -325,9 +325,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The `reactions:` file arms BOTH lanes, so the resolved list is divided there and each half
 	// seeded under its own name: the observe rows the Runner was built from (wire_boot.go), and the
 	// sync rows — advise and gate — the Agent runs inside the loop, which reach it when the bind
-	// replays this generation onto it. That replay is the ONE route the sync lane takes into a
-	// session, which is why nothing writes Config.Reactions: a list written to both would arm every
-	// entry twice.
+	// seeds this generation into the Agent it constructs (Config.Sync). That seed is the ONE route
+	// the sync lane takes into a session, which is why nothing writes Config.Reactions: a list
+	// written to both would arm every entry twice.
 	w.engine.seedReactions(w.live.generation())
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
@@ -362,7 +362,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// tool build.
 	// And the boot session's own journal, opened now that its id is known and pushed onto the
 	// engine holder, so the very first Exchange is imaged — a bind that has not happened yet
-	// applies it the moment it does (lateEngine.pendingJournal).
+	// seeds it into the Agent it constructs (lateEngine.pendingJournal).
 	w.openSessionJournal(ctx, w.host.SessionID())
 
 	// The upstream monitor: one beat every heartbeat.Interval, from inside the running TUI. The

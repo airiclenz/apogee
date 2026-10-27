@@ -147,7 +147,14 @@ NOTES (2026-10-27): shape chosen — `Bind(cfg apogee.Config, construct func(apo
 **Acceptance:** `go build ./... && go vet ./cmd/apogee/ && GOMEMLIMIT=2GiB go test -count=1 -run 'TestLateEngine|TestServer' ./cmd/apogee/`
 **Commit:** `refactor(wire): Bind constructs through a seed-aware constructor`
 
-## 6. lateEngine.Bind seeds instead of replaying
+## 6. lateEngine.Bind seeds instead of replaying — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): Bind now seeds the pending Generation (Floor, Bypass, ContextFillNotice, Observe, Sync), Profile, confine and scratch onto cfg and passes seat, target and journal as Options (seedGeneration / seedConfig / seedOptions). Mode, effort, compaction, prune, context files and Allow rules stay post-construction replays: a session-start run spawns under syncPermitCtx, which reads only ConfineToWorkspace, the scratch dir and the Confiner (dispatch.go). The mode is explicitly not a term there.
+NOTES (2026-10-27): deviation: when construction refuses after Bind has already handed the Runner a changed observe list, Bind now hands the Runner back the list it was built from (restoreRunner). Without that, a refused bind followed by an unbound edit back to the built list would leave the Runner holding a list the next Agent believes it does not hold. This is pinned by the new TestLateEngineBindRefusedHandsTheRunnerBackItsList. If the hand-back itself fails, its error is joined to the construction error.
+NOTES (2026-10-27): new test TestLateEngineBindValidatesThePendingGenerationBeforeTheRunner pins the rule that validation runs before Replace. TestLateEngineBindRefusedAnnouncesNoSessionStart was recast as a two-case table (a refused generation, a refused profile).
+NOTES (2026-10-27): the pre-Replace validation is Generation.Validate plus reactions.ValidateAll, as the plan names. It does not cover the engine-only reserved-id check (refuseReservedIDs is unexported in internal/agent). A sync entry named after a Floor guard therefore reaches the Runner before New refuses it, and restoreRunner then undoes that. validatePendingGeneration repeats internal/run's validateLanes. A shared exported validator in internal/agent would remove both gaps.
+NOTES (2026-10-27): the header's Out-of-scope line already lists only "mode, effort and context files", with no "confine", so no header amendment was needed. The plan document was not edited.
+NOTES (2026-10-27): consequential edit — cmd/apogee/wire_boot_test.go: made necessary by the bind seeding rather than replaying the generation (comment prose only)
 
 **What:** Recast at the regression check (2026-10-27). Depends on items 2 and 5.
 **Goal:** Bind builds the construction seed from its typed pending fields: the whole pending Generation (Floor, Bypass, ContextFillNotice, Observe, Sync), Profile, confine, scratch, seat, target and journal. Every pending value that can refuse is refused before anything is constructed — the observe list by Runner.Replace, everything else by New. After `New` returns, no Bind step can refuse, so a refused bind constructs nothing announced. The seat-before-target replay is gone.

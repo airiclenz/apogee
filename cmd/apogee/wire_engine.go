@@ -10,11 +10,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"slices"
 	"sync"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/undo"
@@ -183,15 +186,15 @@ func newLateEngine(mode apogee.Mode, confineToWorkspace bool) *lateEngine {
 // seedReactions hands the holder the generation the session is already running before any Agent
 // exists — the Floor gates and Bypass the Config was constructed with, the observe list the Runner
 // was built from (the Runner itself rides the Config, wire_boot.go), and the sync lane the bind
-// will arm on the Agent it constructs. The composition root calls it once, right after the holder
+// seeds into the Agent it constructs. The composition root calls it once, right after the holder
 // is made (wire_live.go).
 //
 // It is what makes a PARTIAL edit honest. A settings row that moves one field of the generation
 // hands the WHOLE value back (liveSettings.setBypass, setFloorGuard), so a holder never told
 // where the other fields stood would answer a bypass toggled
 // before the bind by re-enabling every Floor guard the config file switched off. And the bind's
-// replay of it keeps a Floor-only edit off the Runner: its observe list is the one the Agent was
-// constructed with (Config.Observe), so the Agent finds nothing to swap.
+// seed of it keeps a Floor-only edit off the Runner: its observe list is the one the Runner was
+// built from (Config.Observe), so the bind hands the Runner nothing (seedGeneration).
 func (e *lateEngine) seedReactions(gen apogee.Generation) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -207,37 +210,40 @@ func (e *lateEngine) seedReactions(gen apogee.Generation) {
 // engine is ever built that nothing holds. It costs nothing to hold the lock across it — apogee.New
 // reaches no network (startup makes no probe, ADR 0024) — and a failed construction leaves the
 // holder unbound, free to try another server.
+//
+// What the human moved while there was nothing to move it on is the Agent's CONSTRUCTION SEED
+// (ADR 0076): the pending Generation, the profile, the blast radius and the scratch dir ride cfg,
+// and the undo journal, the delegation seat and the delegation target ride the Options — so the
+// Agent finishes its own construction from them, in its own order, before it announces the
+// session-started boundary, and every run that boundary starts reads the session it belongs to.
+// Every pending value that can be REFUSED is refused before anything is announced: the observe
+// list by the Runner (seedGeneration), everything else by construct. Once construct returns, no
+// step below can refuse, so a refused bind constructs no session and announces none.
 func (e *lateEngine) Bind(cfg apogee.Config, construct func(apogee.Config, ...apogee.Option) (*apogee.Agent, error)) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.agent != nil {
 		return errAlreadyBound
 	}
-	agent, err := construct(cfg)
+	restoreRunner, err := e.seedGeneration(&cfg)
 	if err != nil {
 		return err
 	}
-	// What the human may have moved while there was nothing to move it on.
-	agent.SetMode(e.mode)
-	agent.SetConfineToWorkspace(e.confine)
-	agent.SetEffortOverride(e.effort)
-	// The generation the settings surface last installed — the Floor enable set, Bypass and both
-	// lanes in one value — replayed onto the Agent, which swaps both halves: the engine's and, when
-	// the observe list moved off the one the Runner was built from, the Runner's (Config.ObserveRunner).
-	// An edit made while unbound reaches the Runner HERE and no earlier, because the Agent is the one
-	// that holds it. It is also how the file's `advise:` and `gate:` entries FIRST reach a
-	// session's Agent: the composition root seeds them here (wire_live.go) and this replay arms them
-	// on the Agent the bind constructs. It is one of the two remembered values that can be REFUSED
-	// (the other is the profile below): a generation parked while unbound met no engine to arm it,
-	// so a sync entry the engine will not take — one named after a Floor guard, say — or an observe
-	// list the Runner will not take is refused HERE, on the pendingProfile terms: the Agent is
-	// released and the bind fails, naming the entry.
-	if gen := e.pendingGeneration; gen != nil {
-		if err := agent.SetReactions(*gen); err != nil {
-			_ = agent.Close()
-			return err
+	e.seedConfig(&cfg)
+	agent, err := construct(cfg, e.seedOptions()...)
+	if err != nil {
+		if restoreErr := restoreRunner(); restoreErr != nil {
+			return errors.Join(err, restoreErr)
 		}
+		return err
 	}
+	// The settings that stay post-construction replays: none of them is read by a run the
+	// construction boundary starts — a session-start reaction spawns under the blast radius and the
+	// scratch dir alone (the sync permit), never the mode, the effort, the history gates, the
+	// context files or the Allow rules — so applying them after the announcement changes nothing
+	// that boundary does.
+	agent.SetMode(e.mode)
+	agent.SetEffortOverride(e.effort)
 	if e.pendingCompaction != nil {
 		agent.SetCompactionEnabled(*e.pendingCompaction)
 	}
@@ -247,42 +253,97 @@ func (e *lateEngine) Bind(cfg apogee.Config, construct func(apogee.Config, ...ap
 	if c := e.pendingContextFiles; c != nil {
 		agent.SetContextFiles(c.enable, c.names)
 	}
-	// The seat BEFORE the target, and the order is load-bearing (ADR 0069 D6): installing a seat
-	// forgets the far width the engine states to the model (Agent.SetDelegationSeat), and a usable
-	// target is what states it. Replayed the other way round, the seat would wipe the width the
-	// pending target had just stated, and the model would be told the session width until the
-	// next heartbeat beat re-stated the target.
-	if s := e.pendingSeat; s != nil {
-		agent.SetDelegationSeat(s)
-	}
-	if t := e.pendingDelegation; t != nil {
-		agent.SetDelegationTarget(t)
-	}
-	if s := e.pendingScratch; s != nil {
-		agent.SetScratchDir(*s)
-	}
-	if j := e.pendingJournal; j != nil {
-		agent.SetJournal(j.journal, j.note)
-	}
 	if r := e.pendingAllowRules; r != nil {
 		agent.SetAllowRules(*r)
 	}
-	// The other remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
-	// released and the bind fails, which is exactly what a config carrying that profile at launch
-	// does — a session is never installed reading its model's replies in a language it does not have.
-	if p := e.pendingProfile; p != nil {
-		if err := agent.SetProfile(*p); err != nil {
-			_ = agent.Close()
+	e.agent = agent
+	return nil
+}
+
+// seedGeneration writes the Generation the settings surface last installed — the Floor enable set,
+// Bypass, the context-fill notice switch and both lanes in one value — onto cfg as the construction
+// seed (Config.Floor, Bypass, ContextFillNotice, Observe, Sync). It is how the file's `advise:` and
+// `gate:` entries FIRST reach a session's Agent: the composition root seeds them here
+// (seedReactions, wire_live.go), and so is an edit made while unbound. A nil pending Generation
+// leaves cfg as the caller built it.
+//
+// The observe list has a second holder: the Runner cfg.ObserveRunner names, built over cfg.Observe.
+// When the pending list differs from that one, the Runner is handed it (Replace) HERE, before
+// construction — so the Runner already holds the session's list when the Agent announces the
+// session-started boundary — and construction never does. The Generation is validated first
+// (validatePendingGeneration), so a list the Agent would refuse is never swapped into the Runner,
+// and a list the Runner itself refuses (an unresolvable `workspace:`) fails the bind naming it.
+//
+// restoreRunner hands the Runner back the list it was built from, for a construction refused after
+// the hand-over: a refused bind moves neither half, so the next bind compares against the list the
+// Runner really holds. It is a no-op when nothing was handed, and never nil.
+func (e *lateEngine) seedGeneration(cfg *apogee.Config) (restoreRunner func() error, err error) {
+	restoreRunner = func() error { return nil }
+	gen := e.pendingGeneration
+	if gen == nil {
+		return restoreRunner, nil
+	}
+	if runner := cfg.ObserveRunner; runner != nil && !reflect.DeepEqual(cfg.Observe, gen.Observe) {
+		if err := validatePendingGeneration(*gen); err != nil {
+			return nil, err
+		}
+		if err := runner.Replace(gen.Observe); err != nil {
+			return nil, err
+		}
+		built := cfg.Observe
+		restoreRunner = func() error { return runner.Replace(built) }
+	}
+	cfg.Floor, cfg.Bypass, cfg.ContextFillNotice = gen.Floor, gen.Bypass, gen.ContextFillNotice
+	cfg.Observe, cfg.Sync = gen.Observe, gen.Sync
+	return restoreRunner, nil
+}
+
+// validatePendingGeneration is the Agent's lane validation, run over a pending Generation before
+// its observe list is handed to the Runner: the whole-value lane rules (Generation.Validate), then
+// the observe list's own whole-list check (reactions.ValidateAll), its error carried as
+// apogee.ErrInvalidReaction as the Agent's arming step carries it, so the refusal reads as the one
+// construction would have given.
+func validatePendingGeneration(gen apogee.Generation) error {
+	if err := gen.Validate(); err != nil {
+		return err
+	}
+	if err := reactions.ValidateAll(gen.Observe); err != nil {
+		if errors.Is(err, apogee.ErrInvalidReaction) {
 			return err
 		}
+		return fmt.Errorf("%w: %w", apogee.ErrInvalidReaction, err)
 	}
-	e.agent = agent
-	// Installed, so the session has started: the construction boundary's session-started notice is
-	// announced HERE, never by a construction a replay above went on to refuse — the composition
-	// root defers it to this line (Config.DeferSessionStart, wire_boot.go). An Agent built without
-	// the deferral already announced, and this call does nothing.
-	agent.AnnounceSessionStart()
 	return nil
+}
+
+// seedConfig writes the pending settings the construction seed carries on cfg — the blast radius,
+// the session scratch dir a /clear moved and the profile a dialect edit installed — so a
+// session-start reaction the construction boundary spawns runs under the fence the session will,
+// and a profile this build cannot parse fails construction as the file carrying it at launch would.
+// A nil pending value leaves cfg on what the caller built.
+func (e *lateEngine) seedConfig(cfg *apogee.Config) {
+	cfg.ConfineToWorkspace = e.confine
+	if s := e.pendingScratch; s != nil {
+		cfg.ScratchDir = *s
+	}
+	if p := e.pendingProfile; p != nil {
+		cfg.Profile = *p
+	}
+}
+
+// seedOptions is the construction seed's live host objects as Options: the undo journal the
+// session host opened (nil leaves construction's in-memory journal), and the delegation seat and
+// target, which the Agent applies seat first so the target's far width is the one the model is
+// told (ADR 0069 D6).
+func (e *lateEngine) seedOptions() []apogee.Option {
+	opts := []apogee.Option{
+		apogee.WithDelegationSeat(e.pendingSeat),
+		apogee.WithDelegationTarget(e.pendingDelegation),
+	}
+	if j := e.pendingJournal; j != nil {
+		opts = append(opts, apogee.WithUndoJournal(j.journal, j.note))
+	}
+	return opts
 }
 
 // bound reports whether an Agent is installed — the pointer read every method below opens with.
@@ -595,11 +656,11 @@ func (e *lateEngine) SetPruneToolResults(enabled bool) {
 // live-swap door, so nothing downstream can read a half-swapped shape, and both halves are swapped
 // by the Agent behind it (Agent.SetReactions holds the Runner through Config.ObserveRunner): engine
 // first, then the Runner only when the observe list moved. Remembered while unbound for SetMode's
-// reason — the whole generation is replayed at the bind, which is where an unbound edit first
-// reaches the Runner.
+// reason — the whole generation is seeded into the Agent the bind constructs, and the bind is where
+// an unbound edit first reaches the Runner (seedGeneration).
 //
 // The returned error is the Agent's refusal, and it is the sentence the settings row shows the
-// human. A refused generation is never remembered, so it is never parked for the bind's replay: a
+// human. A refused generation is never remembered, so it is never parked for the bind's seed: a
 // Generation the Agent will not arm (a sync entry outside the lane's rules, or named after a
 // builtin) moved neither half, and one whose observe list the Runner would not take (an
 // unresolvable `workspace:`) left the Runner firing what it was firing — and a later identical
@@ -692,14 +753,14 @@ func (e *lateEngine) SwapTools(registry *apogee.ToolRegistry) error {
 }
 
 // SetProfile swaps the dialect the session reads responses in (`model-profiles`, ADR 0037's other
-// idle-only door — the SAME-model half of ADR 0044's two doors, a model change taking Rebind). Unbound it is REMEMBERED and installed at the bind, like the anytime-safe setters
+// idle-only door — the SAME-model half of ADR 0044's two doors, a model change taking Rebind). Unbound it is REMEMBERED and seeded into the Agent the bind constructs (Config.Profile), like the anytime-safe setters
 // above and unlike SwapTools: a tool registry has a carrier across the bind already — Config.Tools,
 // which the composition root holds and hands over — while the profile a bind would otherwise install
 // is the one the process STARTED with, so a pre-bound edit that was only remembered nowhere would be
 // an edit that waits for the next launch, which ADR 0037 exists to abolish.
 //
-// A remembered profile is validated where a bound one is: at the Agent. It is built before anything
-// is submitted, so the only way it can fail there is a dialect this build cannot parse — the same
+// A remembered profile is validated where a bound one is: at the Agent, whose construction refuses
+// it. It is built before anything is submitted, so the only way it can fail there is a dialect this build cannot parse — the same
 // failure the file would have produced at construction had it carried that profile at launch, and it
 // is reported the same way, as a bind that did not happen.
 func (e *lateEngine) SetProfile(profile apogee.ModelProfile) error {
