@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>apogee architecture review</title>
+<script src="https://cdn.tailwindcss.com/3.4.5"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+</script>
+<style>
+  .seam { border-style: dashed !important; }
+  .leak { color: #dc2626; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+  .lbl { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+  .faded { opacity: .45; }
+  .diag { min-height: 300px; }
+  pre.mermaid { background: transparent; display: flex; justify-content: center; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-12">
+
+<header class="space-y-4">
+  <p class="lbl text-slate-500">apogee · v0.28.0 · 2026-10-27</p>
+  <h1 class="font-serif text-4xl">Architecture review: deepening opportunities</h1>
+  <p class="text-sm text-slate-600">Scope: the hot spots since August — <span class="font-mono">internal/agent</span> (Reaction / advise, delegation), <span class="font-mono">cmd/apogee</span> (Driver composition, Adoption), <span class="font-mono">internal/config</span>, <span class="font-mono">internal/mcp</span>. Every cited fix commit and count was checked against the tree.</p>
+  <div class="flex flex-wrap gap-4 text-xs text-slate-600 items-center">
+    <span class="flex items-center gap-2"><span class="inline-block w-6 h-4 border border-slate-500 bg-white"></span>module</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 h-4 border-2 border-dashed border-slate-500"></span>seam</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-red-600"></span><span class="leak">leak / drift</span></span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 h-4 deep rounded"></span>deep module</span>
+  </div>
+  <nav class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 pt-2">
+    <a class="hover:underline" href="#c1">1 · Session briefing is one module</a>
+    <a class="hover:underline" href="#c2">2 · The Agent finishes its own construction</a>
+    <a class="hover:underline" href="#c3">3 · A Project pin is the launch gate</a>
+    <a class="hover:underline" href="#c4">4 · A delegation request is parsed once</a>
+    <a class="hover:underline" href="#c5">5 · One bracket for every delegation ending</a>
+    <a class="hover:underline" href="#c6">6 · Adoption answers from one snapshot</a>
+    <a class="hover:underline" href="#c7">7 · One Driver host for process-scope facilities</a>
+    <a class="hover:underline" href="#c8">8 · One advise call for every advise Moment</a>
+    <a class="hover:underline" href="#c9">9 · One repo-entry pipeline, per-kind descriptors</a>
+    <a class="hover:underline" href="#c10">10 · A delegation offer is one value</a>
+    <a class="hover:underline" href="#c11">11 · Floor guards read declared tool facts</a>
+    <a class="hover:underline" href="#c12">12 · One Event → Entry fold</a>
+  </nav>
+</header>
+
+<section id="candidates" class="space-y-10">
+
+<!-- ============ 1 ============ -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">1 · Session briefing is one module: the window, both advise lanes, the held runs</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">ports &amp; adapters (ObserveRunner)</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/sessionadvise.go</li><li>internal/agent/agent.go (sessionWindow, fireNewlyArmed, Close, Submit)</li>
+    <li>internal/agent/construct.go (announceSessionStart, exchangeClosed/Aborted)</li><li>internal/agent/loop.go (step, refold)</li>
+    <li>internal/agent/background.go (Wake, takeIntoExchange…)</li><li>internal/agent/compact.go (foldFor)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">Before · one state machine, six files, three mutexes</p>
+      <pre class="mermaid">
+flowchart LR
+  Submit --> W
+  Wake --> W
+  step --> W
+  Close -. "missed: 817dc5c0" .-> W
+  resume -. "missed: 125990ed" .-> W
+  W["sessionWindow · window.mu"]
+  fireNewlyArmed --> L1["session lane · lane.mu"]
+  announceSessionStart --> L1
+  foldFor --> L2["compaction lane"]
+  refold --> L2
+  exchangeClosed --> L1 & L2 & BG["background held notes"]
+  L1 -. "839f4dd9: reported run replayed" .-> X[delivered set]
+  tests["11 test reaches into lane.waiting()"] -.-> L1
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class Close,resume,X,tests leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-3">
+      <p class="lbl text-slate-500">After · one call per lifecycle event</p>
+      <div class="flex gap-2 flex-wrap text-xs font-mono">
+        <span class="border rounded px-2 py-1">boundary</span><span class="border rounded px-2 py-1">armed</span><span class="border rounded px-2 py-1">input arrived</span><span class="border rounded px-2 py-1">fold began / ended</span><span class="border rounded px-2 py-1">join(msg)</span><span class="border rounded px-2 py-1">exchange closed / aborted</span><span class="border rounded px-2 py-1">close</span>
+      </div>
+      <div class="text-center text-slate-400">▼</div>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900 flex-1">
+        <p class="lbl text-slate-300 mb-3">Session briefing module</p>
+        <div class="grid grid-cols-2 gap-2 text-xs faded">
+          <div class="border border-slate-400 rounded p-2">pre-first-prompt window</div>
+          <div class="border border-slate-400 rounded p-2">session-started lane</div>
+          <div class="border border-slate-400 rounded p-2">compaction-finished lane</div>
+          <div class="border border-slate-400 rounded p-2">held ledger: take · restore · forget</div>
+          <div class="border border-slate-400 rounded p-2 col-span-2">lock order · shut-before-stop · enqueue-only fire</div>
+        </div>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <div class="seam border-2 border-slate-400 rounded px-2 py-1 flex-1 text-center">ObserveRunner port<br><span class="text-slate-500">reactions.Runner · recording fake</span></div>
+        <div class="seam border-2 border-slate-400 rounded px-2 py-1 flex-1 text-center">handler caller<br><span class="text-slate-500">argv · webhook · Go func</span></div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The pre-first-prompt window and both advise lanes form one lifecycle, but it is driven from ~9 Agent methods, with its invariants held only in comments. Two of the last three <span class="font-mono">fix(agent)</span> commits were transitions a caller forgot.</p>
+  <p><b>Solution.</b> One module owns the window, the session-started and compaction-finished lanes, and their held-for-the-Exchange runs. The Agent passes it the lifecycle events it already sees, and ordering and locking become internal.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>Locality: a new shut site can't forget a transition</li>
+    <li>Tests cross the interface, not <span class="font-mono">lane.waiting()</span></li>
+    <li>Boundary → swap → close sequences tested without an Agent</li>
+    <li>Leverage: one held ledger, three holders</li>
+  </ul>
+  <p class="text-xs text-slate-500">The held ledger shape (pending → delivered → restored/forgotten) appears three times: background.go, and once in each lane. It folds into this module; the background manager embeds the same ledger.</p>
+  <div class="rounded bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">ADR 0076 D6 and its 2026-10-19 / 2026-10-21 amendments: realised as written, no conflict. ADR 0018 D6 (no new Event variant): untouched.</div>
+</article>
+
+<!-- ============ 2 ============ -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">2 · The Agent finishes its own construction from Config</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/domain/config.go (DeferSessionStart, Observe)</li><li>internal/agent/construct.go</li>
+    <li>internal/run/run.go:440-555 (Once)</li><li>cmd/apogee/wire_engine.go (lateEngine.Bind)</li>
+    <li>cmd/apogee/probecontext.go (measureTurn1)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-3">Before · every Driver runs the boot protocol</p>
+      <div class="grid grid-cols-3 gap-2 text-[11px]">
+        <div class="space-y-1"><p class="lbl text-slate-500">run.Once</p>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">DeferSessionStart=true · New</div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">SetReactions(+Sync)</div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">SetJournal</div>
+          <div class="border-l-4 border-red-500 bg-red-50 px-2 py-1">seat <i>before</i> target<br><span class="leak">b0bbeac1</span></div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">AnnounceSessionStart</div></div>
+        <div class="space-y-1"><p class="lbl text-slate-500">lateEngine.Bind</p>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">DeferSessionStart=true · New</div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">replay 10 pending fields</div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">SetJournal</div>
+          <div class="border-l-4 border-red-500 bg-red-50 px-2 py-1">seat <i>before</i> target<br><span class="leak">bb00dfa1</span></div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">AnnounceSessionStart</div></div>
+        <div class="space-y-1"><p class="lbl text-slate-500">measureTurn1</p>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">DeferSessionStart=true · New</div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">Generation → edit → SetReactions</div>
+          <div class="border-l-4 border-red-500 bg-red-50 px-2 py-1">patched by <span class="leak">5ee60135</span></div>
+          <div class="border-l-4 border-slate-400 bg-slate-50 px-2 py-1">AnnounceSessionStart</div></div>
+      </div>
+      <p class="text-xs text-slate-500 mt-3"><span class="font-mono">lateEngine</span>: 61 forwarders over the Agent's 63 exported methods, 48 <span class="font-mono">pending</span> references.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-3">
+      <p class="lbl text-slate-500">After · the seed rides in, the Agent comes out announced</p>
+      <div class="flex gap-2 text-xs">
+        <div class="border rounded px-2 py-1 flex-1 text-center">run.Once</div>
+        <div class="border rounded px-2 py-1 flex-1 text-center">lateEngine<br><span class="text-slate-500">one Config overlay</span></div>
+        <div class="border rounded px-2 py-1 flex-1 text-center">measureTurn1</div>
+        <div class="border border-dashed rounded px-2 py-1 flex-1 text-center text-slate-500">bench / embedder</div>
+      </div>
+      <div class="text-center text-slate-400">▼ Config{Observe, Sync, Seat, Target, Undo journal}</div>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900 flex-1">
+        <p class="lbl text-slate-300 mb-2">agent.New / agent.Resume</p>
+        <ol class="text-xs space-y-1 faded list-decimal pl-4">
+          <li>validate the seed as SetReactions would</li><li>arm both reaction lanes</li><li>journal</li><li>seat, then target</li><li>announce session-started</li>
+        </ol>
+        <p class="text-xs text-slate-300 mt-3">DeferSessionStart · AnnounceSessionStart retire</p>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> Config seeds the Observe half of a Generation but not the Sync half, the delegation seat and target, or the undo journal. So three Drivers each hand-run one order-sensitive sequence, and the same seat-before-target bug was fixed twice on one day.</p>
+  <p><b>Solution.</b> Config carries the whole construction seed, and <span class="font-mono">New</span> applies it in the one correct order before it announces. <span class="font-mono">lateEngine</span> keeps one pending Config overlay instead of ten replayed fields.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>Leverage: every Driver, bench included, gets it free</li>
+    <li>One construction-order test in internal/agent</li>
+    <li>Duplicate seat-before-target tests deleted</li>
+    <li>No new forwarder per live setter</li>
+  </ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">⚠ ADR 0076 A8 ("SetReactions is the one live swap"): a seed at construction is not a swap, but the record should say so explicitly. The stronger variant, an Agent built with no upstream (which deletes <span class="font-mono">lateEngine</span>), reshapes ADR 0036 D3. Strengthens ADR 0031.</div>
+</article>
+
+<!-- ============ 3 ============ -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">3 · A Project pin is the launch gate, not three getters</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/domain/reaction.go (ProjectPin)</li><li>internal/config/execpin.go</li>
+    <li>internal/mcp/transport.go (resolveStdioProgram, PinChangedError)</li><li>internal/agent/syncexec.go (spawnReactionArgv, checkProjectPin)</li>
+    <li>internal/security/execsafety.go (ResolveProjectProgram)</li><li>cmd/apogee/mcp_cmd.go (announceSkippedMCP, cueSkippedMCP)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-3">Before · shallow pin, the protocol copied per caller</p>
+      <div class="flex gap-4 items-end h-56">
+        <div class="flex flex-col items-center gap-1 w-24">
+          <div class="w-full bg-slate-300 h-24 rounded-t flex items-center justify-center text-[10px] text-center">Root · Changed · Programs</div>
+          <div class="w-full bg-slate-700 h-10 rounded-b text-[10px] text-white flex items-center justify-center">impl</div>
+          <p class="lbl text-slate-500">ProjectPin</p>
+        </div>
+        <div class="flex-1 grid grid-cols-2 gap-2 text-[10px]">
+          <div class="border rounded p-2 space-y-0.5"><p class="lbl text-slate-500">mcp</p><p>nil pin? refuse</p><p>Changed()</p><p>moved? <span class="leak">PinChangedError</span></p><p>Dir = Root()</p><p>resolve + admit</p><p class="leak">→ Skipped() → cue</p></div>
+          <div class="border rounded p-2 space-y-0.5"><p class="lbl text-slate-500">agent</p><p>nil pin? refuse</p><p>Changed()</p><p>moved? <span class="leak">fmt.Errorf</span></p><p>Dir = Root()</p><p>resolve + admit</p><p class="leak">→ PinMoved callback</p></div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-500 mt-2">Fixes in pairs: <span class="font-mono">d45e436a</span> (reaction) · <span class="font-mono">82cceef4</span>, <span class="font-mono">cb46e44e</span> (MCP).</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-3">After · one deep operation</p>
+      <div class="flex gap-4 items-end h-56">
+        <div class="flex flex-col items-center gap-1 w-28">
+          <div class="w-full bg-slate-300 h-8 rounded-t flex items-center justify-center text-[10px]">Admit(argv)</div>
+          <div class="w-full deep h-40 rounded-b text-[10px] flex flex-col items-center justify-center gap-1 px-1 text-center">
+            <span>verify files</span><span>resolve argv[0] in fence</span><span>admit programs</span><span>→ program, dir</span><span>or one PinMoved refusal</span>
+          </div>
+          <p class="lbl text-slate-500">ProjectPin</p>
+        </div>
+        <div class="flex-1 space-y-2 text-[11px]">
+          <div class="border rounded p-2">mcp: wrap the refusal</div>
+          <div class="border rounded p-2">agent: wrap the refusal</div>
+          <div class="border border-dashed rounded p-2 text-slate-500">next kind: free</div>
+          <div class="border rounded p-2">re-ask cue hangs off the one refusal type</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> <span class="font-mono">ResolveProjectProgram</span>'s doc says "the caller owns the pin's freshness", so the verify-before-admit invariant lives at two call sites. Each site has its own refusal wording and its own way of cueing a re-ask.</p>
+  <p><b>Solution.</b> The pin gets one operation that verifies, resolves and admits a launch, returning the program and working directory or one typed "pin moved" refusal. The getters go private.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>Locality: fence invariant inside one module</li>
+    <li>One table test over real temp files</li>
+    <li>Two re-ask mechanisms become one</li>
+    <li>Finishes <span class="font-mono">project-program-admit-dup</span> (c3b72b16)</li>
+  </ul>
+  <div class="rounded bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">ADR 0104 §4: follows it. ADR 0031 wire-silence holds: the cue stays a typed error, not an Event.</div>
+</article>
+
+<!-- ============ 4 ============ -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">4 · A delegation request is parsed and validated once</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/subagent.go (runDelegate, delegationLabel, parseDelegationSeat)</li><li>internal/agent/dispatch.go (askedSeat, stepCapFor)</li>
+    <li>internal/agent/workflowcall.go (asksBackground, backgroundSubAgentResult)</li><li>internal/agent/delegationwidth.go</li>
+    <li>internal/tools/sub_agent.go (SubAgentArgs)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">Before · six independent decodes</p>
+      <pre class="mermaid">
+flowchart LR
+  J[("sub_agent args JSON")] --> a[askedSeat]
+  J --> b[stepCapFor]
+  J --> c[runDelegate]
+  J --> d[delegationLabel]
+  J --> e[backgroundSubAgentResult]
+  J --> f[asksBackground]
+  a -. "parse error → default" .-> x1(( ))
+  b -. "parse error → default" .-> x2(( ))
+  d -. "parse error → default" .-> x3(( ))
+  e -. "re-validates, re-reads context" .-> c
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class a,b,d,e leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">After · one request on the dispatch slot</p>
+      <pre class="mermaid">
+flowchart LR
+  J[("args JSON")] --> P["Delegation request<br/>parse · gate seat · narrow roster<br/>step cap · context read once"]
+  O["what this Agent offers"] --> P
+  P -->|refusal, byte-identical| M[model]
+  P --> W[width sizing]
+  P --> L[ledger label]
+  P --> B[blocking run]
+  P --> G[background launch]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:4px;
+  class P deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> <span class="font-mono">SubAgentArgs</span> is decoded at six sites, three of which silently swallow a parse error. The background path re-runs the whole validation "in the blocking call's own words", and <span class="font-mono">runDelegate</span> takes the retained delegate before validating, which is what <span class="font-mono">32c44f71</span> fixed.</p>
+  <p><b>Solution.</b> One module turns (call, offer) into a validated request or a refusal. <span class="font-mono">prepareCall</span> builds it once and every reader takes it from the slot. The retained delegate is taken only after validation passes.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>Table tests: args × offer → request | refusal</li>
+    <li>No scripted upstream to test a refusal</li>
+    <li>Next argument edits one place (cf. 7cf821c9)</li>
+    <li>Parity test collapses to one</li>
+  </ul>
+  <div class="rounded bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">No ADR conflict. Refusal strings are model-facing, so they must stay byte-identical, background prefixes included.</div>
+</article>
+
+<!-- ============ 5 ============ -->
+<article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">5 · One bracket for every way a delegation ends</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/dispatch.go (preemptDelegation, refusePastCeiling, settleCancelledDelegation, stopQueuedDelegation, skipDelegation, runDelegation)</li>
+    <li>internal/agent/subagent.go (runDelegate's deferred block)</li><li>internal/agent/workflowspawn.go (Spawn, spawnSubAgent)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-3">Before · two rules kept by hand at ~9 sites</p>
+      <table class="w-full text-[11px]">
+        <thead><tr class="text-slate-500"><th class="text-left font-normal">ending</th><th>ledger row</th><th>phase pair</th><th>recover</th></tr></thead>
+        <tbody class="divide-y">
+          <tr><td>skipped</td><td class="text-center">hand · <span class="leak">2635ab57</span></td><td class="text-center">hand</td><td class="text-center">—</td></tr>
+          <tr><td>past ceiling</td><td class="text-center">hand</td><td class="text-center">hand</td><td class="text-center">—</td></tr>
+          <tr><td>stopped in queue</td><td class="text-center">hand</td><td class="text-center">hand · <span class="leak">630d59b8</span></td><td class="text-center">—</td></tr>
+          <tr><td>cancelled</td><td class="text-center">hand</td><td class="text-center">hand · <span class="leak">4dd18a08</span></td><td class="text-center">—</td></tr>
+          <tr><td>runDelegation</td><td class="text-center">runDelegate</td><td class="text-center">hand</td><td class="text-center">hand · <span class="leak">27654d54</span></td></tr>
+          <tr><td>spawnSubAgent</td><td class="text-center">copy</td><td class="text-center">copy</td><td class="text-center">copy</td></tr>
+          <tr><td>Spawn</td><td class="text-center">own</td><td class="text-center">own</td><td class="text-center">own</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-3">
+      <p class="lbl text-slate-500">After · callers say what to run, or why it never ran</p>
+      <div class="flex gap-2 text-[11px]">
+        <div class="border rounded px-2 py-1 flex-1 text-center">sub_agent request (#4)</div>
+        <div class="border rounded px-2 py-1 flex-1 text-center">workflow item</div>
+        <div class="border rounded px-2 py-1 flex-1 text-center">never started: skipped · ceiling · queued · cancelled</div>
+      </div>
+      <div class="text-center text-slate-400">▼</div>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900 flex-1">
+        <p class="lbl text-slate-300 mb-2">Delegation bracket</p>
+        <div class="grid grid-cols-2 gap-2 text-xs faded">
+          <div class="border border-slate-400 rounded p-2">run id</div><div class="border border-slate-400 rounded p-2">started / finished pair</div>
+          <div class="border border-slate-400 rounded p-2">recover boundary</div><div class="border border-slate-400 rounded p-2">exactly one ledger row</div>
+          <div class="border border-slate-400 rounded p-2 col-span-2 text-center">runChild (exists)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> "Every delegation books exactly one ledger row" and "every started phase gets one finished phase" are kept by hand at about nine sites. Four fix commits were a site that forgot one.</p>
+  <p><b>Solution.</b> One bracket module around <span class="font-mono">runChild</span> owns the run id, the phase pair, the recover boundary and the ledger row. Each entry point supplies only what to run, or why it never started.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>One table over every ending</li>
+    <li>Fake runner + recording sink, no driven Agent</li>
+    <li>spawnSubAgent copy deleted</li>
+    <li>Locality: bracket rule in one place</li>
+  </ul>
+  <div class="rounded bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">Extends the 2026-10-14 review's #1 (child run bracket), whose <span class="font-mono">runChild</span> covers started runs only. Keeps ADR 0039 D4: the bracket becomes each child's recover boundary.</div>
+</article>
+
+<!-- ============ 6 ============ -->
+<article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">6 · Adoption answers from one snapshot</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>cmd/apogee/projectrules.go (adoptProjectRules, projectRulesHeld, keepHeldEntries, settleAllowRules, holdProposals)</li>
+    <li>cmd/apogee/project_cmd.go (adoptHeldRule)</li><li>cmd/apogee/mcp_cmd.go (refuseUnadoptedRepoServer, proposalTransport)</li>
+    <li>cmd/apogee/wire_settings.go (reconnectMCP, reloadReactions, cloneOptions)</li><li>cmd/apogee/settingsrows.go · headless.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">Before · one TUI "yes" reads the disk up to five times</p>
+      <pre class="mermaid">
+sequenceDiagram
+  participant P as Adoption pane
+  participant C as cmd/apogee
+  participant D as disk + store
+  P->>C: adopt
+  C->>D: projectRulesHeld (LoadLayeredConfig)
+  C->>D: settleAllowRules → resolve
+  C->>D: reconnectMCP → layeredConfig
+  C->>D: reloadReactions → layeredConfig
+  C->>D: write record
+  D-->>C: adoptionWatch → reload again
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">After · answer, then apply the difference</p>
+      <pre class="mermaid">
+sequenceDiagram
+  participant P as pane · project adopt · settings · mcp login · headless
+  participant A as Adoption module
+  participant C as cmd/apogee doors
+  P->>A: Answer(proposals, adopt)
+  A->>A: held check · write record
+  A-->>P: next snapshot
+  P->>C: apply diff(old, new)
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> The ADR 0096 §4 held-check (re-check the file at the moment of the yes) lives in the composition root, at two call sites, and each runs a full layered load. Proposals ride inside <span class="font-mono">config.Options</span>, so <span class="font-mono">cloneOptions</span> needed fix <span class="font-mono">3ff0d39b</span>. The semantics are tested in the heavy cmd/apogee package: projectrules_test.go (1011 lines) and project_cmd_test.go (458).</p>
+  <p><b>Solution.</b> A module in internal/config (or internal/project) produces one immutable snapshot per event, plus an <span class="font-mono">Answer</span> call that does the held check, writes the record and returns the next snapshot. Drivers apply the difference through the existing doors.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>One read per event, one disk state</li>
+    <li>Adoption tests leave the heavy package</li>
+    <li>Leverage: every Driver, same semantics</li>
+    <li><span class="font-mono">cloneOptions</span> loses the Proposal collections</li>
+  </ul>
+  <div class="rounded bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">Extends the 2026-10-14 review's #9 (one project-rule act). No conflict with ADR 0096 or 0104. The largest candidate here: do it after #3.</div>
+</article>
+
+<!-- ============ 7 ============ -->
+<article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">7 · One Driver host for process-scope facilities</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>cmd/apogee/headless.go (runHeadlessBody, 517 lines)</li><li>cmd/apogee/daemonfire.go (newDaemonWiring, fire)</li>
+    <li>cmd/apogee/wire.go · wire_boot.go · wire_live.go</li><li>cmd/apogee/wire_firing.go (firingInputs, raise)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-3">Before · the same preamble, three times, drifting</p>
+      <table class="w-full text-[11px]">
+        <thead><tr class="text-slate-500"><th class="text-left font-normal">step</th><th>TUI</th><th>headless</th><th>daemon</th></tr></thead>
+        <tbody class="divide-y text-center">
+          <tr><td class="text-left">resolveRoots · scratch GC</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td class="text-left">session store + share warning</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td class="text-left">snapshot-dir GC</td><td>✓</td><td class="leak">✗ → 6de72666</td><td class="leak">✗ → 6de72666</td></tr>
+          <tr><td class="text-left">confiner + teardown</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td class="text-left">stats recorder wrap</td><td>✓</td><td>✓</td><td class="leak">✗ → d00f0f9c</td></tr>
+          <tr><td class="text-left">Auto posture · prewarm</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td class="text-left">plaintext-key notices</td><td>?</td><td>✓</td><td>?</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-3">
+      <p class="lbl text-slate-500">After · Drivers differ only in where notices go</p>
+      <div class="flex gap-2 text-xs">
+        <div class="border rounded px-2 py-1 flex-1 text-center">TUI<br><span class="text-slate-500">startupNotices</span></div>
+        <div class="border rounded px-2 py-1 flex-1 text-center">headless<br><span class="text-slate-500">stderr</span></div>
+        <div class="border rounded px-2 py-1 flex-1 text-center">daemon<br><span class="text-slate-500">say-once log</span></div>
+      </div>
+      <div class="text-center text-slate-400">▼ Options + notice sink</div>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900 flex-1">
+        <p class="lbl text-slate-300 mb-2">Driver host</p>
+        <p class="text-xs faded">roots · store · confiner · stats · sweeps · posture notices · close()</p>
+        <div class="seam border-2 border-slate-400 rounded mt-3 p-2 text-xs text-slate-300">then: one event-chain composer (Runner + sink decoration), parameterised by journal position. Today <span class="font-mono">firingInputs</span> has 20 fields, five nil-able and copied under <span class="font-mono">if != nil</span>.</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> Three Drivers each hand-assemble the process-scope preamble, and three fix commits were a Driver missing one step. Each step's test exists once per Driver (TestDaemon… / TestHeadless… pairs in a 4808-line headless_test.go).</p>
+  <p><b>Solution.</b> One module takes resolved Options and a notice sink and returns the roots, store, confiner and stats recorder, with sweeps and posture notices done, plus one <span class="font-mono">close()</span>.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>One test per facility at the host</li>
+    <li>Paired Driver tests deleted</li>
+    <li>A fourth Driver (<span class="font-mono">serve-http-driver</span>) gets it free</li>
+    <li>cmd-internal: no engine change</li>
+  </ul>
+  <div class="rounded bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">No ADR conflict. Keep the ADR 0103 D1 / ADR 0075 D9 sink ordering when the event-chain composer follows.</div>
+</article>
+
+<!-- ============ 8 ============ -->
+<article id="c8" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">8 · One advise call for every advise Moment</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/reactions.go (adviseUser, fireLeg, isAdvice, bookFiring)</li><li>internal/agent/sessionadvise.go (callSessionAdvice, attachSessionAdvice)</li>
+    <li>internal/agent/syncexec.go (runSyncArgv, runSyncWebhook)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-3">Before · two copies that disagree</p>
+      <div class="grid grid-cols-2 gap-3 text-[11px]">
+        <div class="border rounded p-2 space-y-1"><p class="lbl text-slate-500">adviseUser (cascade)</p><p>switch argv · webhook · func</p><p>RedactSecrets</p><p class="leak">error: reported inline, nil returned</p><p class="leak">Detail dropped</p></div>
+        <div class="border rounded p-2 space-y-1"><p class="lbl text-slate-500">callSessionAdvice (lanes)</p><p>switch argv · webhook · func</p><p>RedactSecrets</p><p class="leak">error: returned, reported at join</p><p class="leak">Detail kept</p><p class="leak">bookFiring with dummy out-params</p></div>
+      </div>
+      <p class="text-xs text-slate-500 mt-3"><span class="font-mono">isAdvice</span> hard-codes the three advise Moments.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-3">
+      <p class="lbl text-slate-500">After · call returns a value, landing is separate</p>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900">
+        <p class="lbl text-slate-300 mb-1">Advise call</p>
+        <p class="text-xs faded">(reaction, document) → capped, redacted span | failure to report · emits nothing</p>
+      </div>
+      <div class="text-center text-slate-400">▼</div>
+      <div class="flex gap-2 text-xs">
+        <div class="border rounded px-2 py-1 flex-1 text-center">land trailing on a tool result</div>
+        <div class="border rounded px-2 py-1 flex-1 text-center">land leading on a user message</div>
+      </div>
+      <div class="text-center text-slate-400">▼</div>
+      <div class="border rounded px-2 py-1 text-xs text-center">book the Firing</div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The cascade and the session lanes each invoke an advise reaction their own way, with different error modes and Detail handling. A fifth advise Moment would touch five places.</p>
+  <p><b>Solution.</b> One call answers "run this advise reaction against this document" as a value. A small landing step fences it onto the target message and books it.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6">
+    <li>One table: kind × answer/empty/error/timeout/panic/secret/over-cap</li>
+    <li>ADR 0076 D7 fail-open, cap and redaction in one place</li>
+  </ul>
+  <div class="rounded bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm">No ADR conflict. Sits behind #1's handler-caller seam; cheapest standalone warm-up of the set.</div>
+</article>
+
+<!-- ============ 9 ============ -->
+<article id="c9" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">9 · One repo-entry pipeline, driven by per-kind descriptors</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/config/execlayer.go</li><li>internal/config/layer.go:188-200</li><li>internal/config/execpin.go (execPin, pinFieldOrder)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-3">Before · the pipeline written once per kind</p>
+      <table class="w-full text-[11px] font-mono">
+        <thead><tr class="text-slate-500 font-sans"><th class="text-left font-normal">servers</th><th class="text-left font-normal">reactions</th></tr></thead>
+        <tbody class="divide-y">
+          <tr><td>repoMCPServers</td><td>repoReactionConfigs</td></tr>
+          <tr><td>checkRepoServer</td><td>checkRepoReactionID</td></tr>
+          <tr><td>pinRepoServers</td><td>pinRepoReactions</td></tr>
+          <tr><td>resolveRepoServers</td><td>resolveRepoReactions</td></tr>
+          <tr><td>projectServers</td><td>projectReactionSet</td></tr>
+          <tr><td>globalMCPServers</td><td>globalReactions</td></tr>
+          <tr><td>4 notice consts</td><td>4 notice consts</td></tr>
+        </tbody>
+      </table>
+      <p class="text-xs text-slate-500 mt-2">The tests mirror the pairs; a reflection drift test (22f5a274) guards the hand field list.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-3">
+      <p class="lbl text-slate-500">After</p>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900">
+        <p class="lbl text-slate-300 mb-2">Repo-entry pipeline</p>
+        <p class="text-xs faded">decode → unique handle → global wins → pin → classify → arm when adopted</p>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <div class="seam border-2 border-slate-400 rounded px-2 py-1 flex-1 text-center">server descriptor</div>
+        <div class="seam border-2 border-slate-400 rounded px-2 py-1 flex-1 text-center">reaction descriptor</div>
+        <div class="seam border-2 border-slate-300 rounded px-2 py-1 flex-1 text-center text-slate-400">Allow rules (implicit 3rd)</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> execlayer.go holds two copies of one pipeline. Every security rule in it is written, and tested, twice.</p>
+  <p><b>Solution.</b> One generic pipeline, with each kind supplying a descriptor: block name, handle field, noun, pinned fields and its own extra checks.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6"><li>Paired tests become one table over kinds</li><li>Test surface unchanged (LoadLayeredConfig)</li></ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Security path: do it when a third kind is coming, or together with #6. No ADR conflict.</div>
+</article>
+
+<!-- ============ 10 ============ -->
+<article id="c10" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">10 · A delegation offer is one value, not type-assertion probes</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/subagent.go:2036-2270 (withoutSeatChoice, publishes*, offersContext…)</li><li>internal/agent/workflowcall.go (offersBackground*)</li>
+    <li>internal/agent/resolution.go (planOffersDelegation)</li><li>internal/tools/sub_agent.go · fan_out.go · registry.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  R[tool registry] --> p1["lookup 'sub_agent' · assert *SubAgent"]
+  R --> p2["lookup 'fan_out' · assert *FanOut"]
+  p1 --> b1[publishesSeatChoice]
+  p1 --> b2[offersContext]
+  p1 --> b3[offersBackgroundSubAgent]
+  p2 --> b4[publishesFanOutChoice]
+  b2 --> W["withoutSeatChoice rebuilds descriptors by hand"]
+  W -. "ee14cf6b: context nearly lost" .-> C[child roster]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class W leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  G["host gates · depth · mode"] --> O["Delegation offer"]
+  O --> S1[sub_agent schema bytes]
+  O --> S2[fan_out schema bytes]
+  O --> Q[which options are live]
+  O --> CO["child offer: depth-0 options dropped, context kept, recursion withheld at the limit"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:4px;
+  class O deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> The engine learns what it offers by looking up a tool by name and type-asserting it to read a bool; there are about seven such probes. Each new option grows a bool, an ArgRoles branch, a schema variant and a probe.</p>
+  <p><b>Solution.</b> One offer value per Agent, built with the roster. It renders the schemas and derives the child's offer. #4's parser reads it.</p>
+  <ul class="text-sm list-disc pl-5 grid sm:grid-cols-2 gap-x-6"><li>Table: (parent offer, depth) → child offer + schema bytes</li><li>Child-derivation rule in one place</li></ul>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Must preserve ADR 0005 (child ≤ parent), ADR 0069 D3 (<span class="font-mono">run_on</span> at depth 0), ADR 0094 D1 and ADR 0031 (background is the Driver's opt-in). Schema bytes are model-facing: they must stay identical.</div>
+</article>
+
+<!-- ============ 11 ============ -->
+<article id="c11" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">11 · Floor guards read declared tool facts, not name tables</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-200 text-slate-700">Speculative</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/floor/toolnames.go · conversation.go (toolCallPath)</li><li>internal/domain/hooks.go (ToolDef)</li>
+    <li>internal/tools/workspace_scoped.go</li><li>internal/agent/writedetection_test.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-2 text-xs">
+      <p class="lbl text-slate-500">Before · three copies of "which tools write a file"</p>
+      <div class="border rounded p-2">tools: <span class="font-mono">workspaceScopedWriter</span> marker</div>
+      <div class="border rounded p-2">floor: <span class="font-mono">wave4WriteTools</span> table</div>
+      <div class="border border-red-400 rounded p-2 leak">test: a mirror map, added after copy/move/delete went unnoticed for months</div>
+      <div class="border rounded p-2"><span class="font-mono">toolCallPath</span> guesses from five key spellings; <span class="leak">move_file's source invisible</span></div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag flex flex-col gap-2 text-xs">
+      <p class="lbl text-slate-500">After</p>
+      <div class="deep rounded p-3">ToolDef carries ReadOnly (today) + MutatesFile + path-argument keys, stamped where the menu is built</div>
+      <div class="text-center text-slate-400">▼</div>
+      <div class="border rounded p-2">Floor guards prefer declared facts</div>
+      <div class="border border-dashed rounded p-2 text-slate-500">sim spellings kept as fallback for MCP / bench menus</div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The Floor's view of "this tool writes a named file" is a hand table kept in step by a cross-package pin test.</p>
+  <p><b>Solution.</b> Stamp the fact on <span class="font-mono">ToolDef</span> where the menu is built, as <span class="font-mono">ReadOnly</span> already is. internal/floor still imports only internal/domain.</p>
+  <div class="rounded bg-amber-50 border border-amber-200 px-3 py-2 text-sm">⚠ ADR 0071 clause (c) and the apogee-sim parity pin: any change to a Floor guard's decision on apogee's or the sim's menu needs bench evidence first. Tracking <span class="font-mono">move_file</span>'s source would be such a change.</div>
+</article>
+
+<!-- ============ 12 ============ -->
+<article id="c12" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">12 · One Event → Entry fold for the record</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-200 text-slate-700">Speculative</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/run/transcript.go</li><li>internal/tui/fold.go · transcript.go · transcriptbridge.go</li><li>internal/tui/wireargs.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart LR
+  E[Event stream] --> F1["run fold"]
+  E --> F2["tui fold → entry/toolView → bridge"]
+  F1 --> S[(session codec)]
+  F2 --> S
+  F1 -. "boundArgsFieldCap MIRRORS wireArgsFieldCap" .- F2
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class F1,F2 leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diag">
+      <p class="lbl text-slate-500 mb-2">After</p>
+      <pre class="mermaid">
+flowchart LR
+  E[Event stream] --> N["neutral fold of stream facts"]
+  N --> S[(session codec)]
+  N --> T["tui: Presenter decisions on top"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:4px;
+  class N deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> Two folds turn the Event stream into record entries, and a constant is kept equal by comment. Five commits had to touch both folds.</p>
+  <p><b>Solution.</b> A neutral fold in internal/session (or a sibling package), with the TUI layering its Presenter decisions over it.</p>
+  <div class="rounded bg-slate-50 border border-slate-200 px-3 py-2 text-sm">Speculative: the TUI folds through its own presentation model, so separating stream facts from Presenter decisions may not be clean. ADR 0022 and ADR 0031 support it.</div>
+</article>
+
+<!-- ============ not a candidate ============ -->
+<aside class="rounded-xl border border-dashed border-slate-300 p-6 space-y-2">
+  <p class="lbl text-slate-500">Checked, not a candidate</p>
+  <p class="text-sm"><b>The internal/tui Model.</b> It is ~62k lines behind <span class="font-mono">tui.Run(ctx, Engine, *Bridge, Options)</span>, and all 46 <span class="font-mono">*Msg</span> types are unexported. That is a deep module. Splitting <span class="font-mono">model.go</span> (4964 lines) is an internal-locality question, not an interface one. The one shallow part is <span class="font-mono">lateEngine</span> behind <span class="font-mono">Engine</span>, which #2 addresses.</p>
+  <p class="text-sm"><b>Leaf tools in internal/tools.</b> Already deep: <span class="font-mono">toolSpec</span>/<span class="font-mono">decodeToolArgs</span>, <span class="font-mono">readScope</span>/<span class="font-mono">writeScope</span>, <span class="font-mono">execHost</span>, and gating in one pure <span class="font-mono">resolve()</span>.</p>
+</aside>
+
+</section>
+
+<section id="top-recommendation" class="rounded-xl deep p-8 space-y-3">
+  <p class="lbl text-slate-400">Top recommendation</p>
+  <h2 class="font-serif text-3xl"><a href="#c1" class="hover:underline">1 · Session briefing is one module</a></h2>
+  <p class="text-slate-200">It is the hottest code in the repo, two of its last three fixes were transitions a caller forgot, and its tests already reach below the Agent's interface. Pair it with <a href="#c2" class="underline">#2</a>, since both own the session-started announcement.</p>
+</section>
+
+</main>
+</body>
+</html>
