@@ -36,14 +36,15 @@ import (
 // admitting the user's `advise:` key on session-started stays a validation change only.
 //
 // The compaction lane serves the compaction-finished notice the same way, keyed by its own Moment
-// and holding its own runs (Agent.compactionAdvice). A top-level fold that passes its gate starts
-// each armed advise entry on compaction-finished in the background as the fold BEGINS
-// (startCompactionAdvice), so the handler runs while the summary call does; a fold that ran hands
-// them to the lane after its Replace (sessionAdviseLane.adopt, in place of an earlier fold's), and a
-// fold that faulted, was cancelled or folded nothing discards them. They are joined like the
-// session-start runs, at the next user-role message: the opening of the next Exchange for a fold
-// between Exchanges (joinSessionAdvice, which joins both lanes), or the overflow bridge for a fold
-// mid-Exchange (joinCompactionAdvice) — never the summary, never the system prompt. A
+// and holding its own runs (sessionBriefing.compaction). A top-level fold that passes its gate
+// starts each armed advise entry on compaction-finished in the background as the fold BEGINS
+// (sessionBriefing.foldBegan), so the handler runs while the summary call does; a fold that ran
+// hands them to the lane after its Replace (sessionBriefing.foldEnded, through
+// sessionAdviseLane.adopt, in place of an earlier fold's), and a fold that faulted, was cancelled or
+// folded nothing discards them. They are joined like the session-start runs, at the next user-role
+// message: the opening of the next Exchange for a fold between Exchanges
+// (sessionBriefing.joinOpening, which joins both lanes), or the overflow bridge for a fold
+// mid-Exchange (sessionBriefing.joinBridge) — never the summary, never the system prompt. A
 // compaction-finished answer re-briefs a model whose history was just folded, so when it lands it
 // retires the same reaction's earlier fences from the protected prefix's first user message
 // (retireStaleAdvice). A Session boundary and Close discard both lanes' runs.
@@ -178,23 +179,6 @@ func (l *sessionAdviseLane) forgetDelivered() {
 	l.held.forget()
 }
 
-// startCompactionAdvice is a fold's share of the compaction lane, called as the fold begins: it
-// starts, in the background, every armed advise Reaction on compaction-finished that Bypass leaves
-// on, each under its own deadline, with fold on its document, and returns them staged on a lane of
-// their own. The fold decides their fate once it ends: one that ran hands the staged lane to the
-// compaction lane after its Replace (sessionAdviseLane.adopt), any other end stops it. It returns at
-// once whatever the handlers do. A delegate's fold re-briefs no user entry, so it starts none.
-func (a *Agent) startCompactionAdvice(fold domain.CompactionFold, turn int) *sessionAdviseLane {
-	staged := &sessionAdviseLane{}
-	if a.isDelegate() {
-		return staged
-	}
-	doc := domain.SeamPayload{Event: domain.MomentCompactionFinished, Fold: fold}
-	runs := newSessionAdviseRuns(a.sessionAdviseSpecs(domain.MomentCompactionFinished), doc)
-	a.launchSessionAdvice(staged.replace(runs), turn, runs)
-	return staged
-}
-
 // sessionStartedDoc is the seam document a session-started run is called with.
 func sessionStartedDoc(start domain.SessionStart) domain.SeamPayload {
 	return domain.SeamPayload{Event: domain.MomentSessionStarted, Start: start}
@@ -231,30 +215,7 @@ func newSessionAdviseRuns(specs []domain.Reaction, doc domain.SeamPayload) []*se
 	return runs
 }
 
-// launchSessionAdvice starts each of runs in its own goroutine under ctx — the lane's, which the
-// next boundary or fold, a discarding fold, or Close cancels.
-func (a *Agent) launchSessionAdvice(ctx context.Context, turn int, runs []*sessionAdviseRun) {
-	for _, run := range runs {
-		go a.runSessionAdvice(ctx, turn, run)
-	}
-}
-
-// runSessionAdvice is one run's goroutine: the handler called under the run's deadline, its answer
-// recorded for the join. A panic is recovered here — a goroutine's panic would end the process —
-// and recorded for the join to report, since nothing may be emitted off the loop goroutine.
-func (a *Agent) runSessionAdvice(ctx context.Context, turn int, run *sessionAdviseRun) {
-	defer close(run.done)
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			run.panicked = recovered
-		}
-	}()
-	ctx, cancel := context.WithDeadline(ctx, run.deadline)
-	defer cancel()
-	run.out, run.err = a.callSessionAdvice(ctx, turn, run.doc, run.spec)
-}
-
-// callSessionAdvice dispatches one lane's advise reaction by its handler KIND: a Go handler — a
+// callSessionAdvice is the session briefing's adviseCaller: it dispatches one lane's advise reaction by its handler KIND: a Go handler — a
 // SessionStartedFunc, the one the lanes know — is called directly, a command or a webhook goes
 // through the sync lane's executor with doc, the lane's seam document, and its answer is
 // secret-redacted as adviseUser's is. The Outcome's Inject is the advice; empty is silence.
@@ -286,33 +247,19 @@ func (a *Agent) callSessionAdvice(
 	return domain.Outcome{Inject: tools.RedactSecrets(answer, a.cfg.SecretEnvNames())}, nil
 }
 
-// joinSessionAdvice is the opening's join, run by step right after an Exchange's opening is
-// appended: it joins the session-start lane's runs and then the compaction lane's — a fold between
-// Exchanges re-briefs the model at the opening that follows it — onto the opening (joinAdvice).
-func (a *Agent) joinSessionAdvice(ctx context.Context, turn int) {
-	a.joinAdvice(ctx, turn, &a.briefing.lane, &a.compactionAdvice)
-}
-
-// joinCompactionAdvice is the mid-Exchange fold's join, run by refold right after a fold that ran
-// appended the overflow bridge: it joins the compaction lane's runs onto the bridge (joinAdvice),
-// ahead of its fixed text, so the retried request carries the re-brief.
-func (a *Agent) joinCompactionAdvice(ctx context.Context, turn int) {
-	a.joinAdvice(ctx, turn, &a.compactionAdvice)
-}
-
-// joinAdvice is the lanes' one join, onto the conversation's last message — the user-role message
-// that just entered the request. It waits for each pending run of every lane until it answers or
-// its deadline passes — never longer, so a slow handler costs the request only what is left of its
-// deadline — then fences each answer, lane by lane in ladder order, as leading advice on that
-// message and takes the runs off pending. A run that failed, panicked or missed its deadline adds
+// join is the lanes' one join, onto the user-role message that just entered the request
+// (sessionBriefing.joinOpening, joinBridge). It waits for each pending run of every lane until it
+// answers or its deadline passes — never longer, so a slow handler costs the request only what is
+// left of its deadline — then lands each, lane by lane in ladder order, with land — the Agent's,
+// which fences each answer as leading advice on that message — and takes the runs off pending. A run that failed, panicked or missed its deadline adds
 // nothing, is reported here and is dropped here: only the runs that answered are taken into the
 // Exchange, so an abort puts back only those (restoreDelivered) and a reported run is never
 // reported nor attached again, even when its handler finishes after the join. Under Bypass (read
-// live, D9) the runs are taken and nothing is attached.
+// live, D9) land takes the runs and attaches nothing.
 //
 // A cancel during the wait (Esc) ends it at once and takes nothing: the runs stay pending for the
 // next opening, which the cancelled Turn's own exit leaves to the host.
-func (a *Agent) joinAdvice(ctx context.Context, turn int, lanes ...*sessionAdviseLane) {
+func join(ctx context.Context, land adviceLanding, lanes ...*sessionAdviseLane) {
 	waiting := make([][]*sessionAdviseRun, len(lanes))
 	for i, lane := range lanes {
 		waiting[i] = lane.waiting()
@@ -322,14 +269,13 @@ func (a *Agent) joinAdvice(ctx context.Context, turn int, lanes ...*sessionAdvis
 			}
 		}
 	}
-	target := a.conv.Len() - 1
 	for i, lane := range lanes {
 		if len(waiting[i]) == 0 {
 			continue
 		}
 		answered := make([]*sessionAdviseRun, 0, len(waiting[i]))
 		for _, run := range waiting[i] {
-			if a.bypassSkips(run.spec) || a.attachSessionAdvice(turn, target, run) {
+			if land(run) {
 				answered = append(answered, run)
 			}
 		}
@@ -359,6 +305,15 @@ func waitForRun(ctx context.Context, run *sessionAdviseRun) bool {
 		return true
 	case <-ctx.Done():
 		return false
+	}
+}
+
+// landAdvice is the Agent's landing for a join at Turn turn (adviceLanding): under Bypass (read
+// live, D9) it takes the run and attaches nothing; otherwise it attaches the run on the user-role
+// message that just entered the request, the conversation's last (attachSessionAdvice).
+func (a *Agent) landAdvice(turn int) adviceLanding {
+	return func(run *sessionAdviseRun) bool {
+		return a.bypassSkips(run.spec) || a.attachSessionAdvice(turn, a.conv.Len()-1, run)
 	}
 }
 

@@ -191,14 +191,10 @@ type Agent struct {
 	// briefing is the session briefing (briefing.go): the current Session boundary's pre-first-prompt
 	// window — opened by the boundary's session-started announcement, shut by the session's first
 	// user message, its first Step or Close, so a session-started entry a live swap arms inside it
-	// fires for the session it joined — and the session-start advise lane, whose background runs the
-	// session's next Exchange opening joins.
+	// fires for the session it joined — the session-start advise lane, whose background runs the
+	// session's next Exchange opening joins, and the compaction lane, whose runs the last top-level
+	// fold that ran started, joined by the next user-role message.
 	briefing sessionBriefing
-
-	// compactionAdvice is the compaction lane (sessionadvise.go): the background advise runs the
-	// last top-level fold that ran started, joined by the next user-role message — the next
-	// Exchange's opening, or the overflow bridge of a mid-Exchange fold.
-	compactionAdvice sessionAdviseLane
 
 	// compactionMu, pruneMu and contextFilesMu guard three further settings the settings surface
 	// may swap mid-session (SetCompactionEnabled / SetPruneToolResults / SetContextFiles). They
@@ -910,16 +906,15 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // never reaches them. Each is stopped with its finished items kept, and Close waits for them to
 // end — the ones an earlier ClearContext or RestoreSession stopped without waiting included — before
 // it closes the Consoles; a resumed session starts them again from their folders (ResumeWorkflows).
-// It also cancels the session-start advise runs the last boundary started, and the compaction
-// advise runs the last fold started (sessionadvise.go) — after it shuts the boundary's
-// pre-first-prompt window (sessionBriefing.close), so a live swap after Close arms a session-started
+// It also cancels, through the session briefing (sessionBriefing.close), the session-start advise
+// runs the last boundary started and the compaction advise runs the last fold started — after it
+// shuts the boundary's pre-first-prompt window, so a live swap after Close arms a session-started
 // entry for neither lane: no advise run starts and no observe entry reaches the Runner until a
 // later boundary reopens the window. No production Driver swaps after Close: cmd/apogee stops its
 // settings watchers and closes its Reaction Runner before the engine.
 func (a *Agent) Close() error {
 	if !a.isDelegate() {
-		a.briefing.close() // shuts the window before it stops the session-start lane
-		a.compactionAdvice.stop()
+		a.briefing.close() // shuts the window before it stops the session-start and compaction lanes
 		a.stopAllBackground()
 		a.background.waitAll()
 	}

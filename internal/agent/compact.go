@@ -221,7 +221,7 @@ type foldRow struct {
 	// bridge says when the overflow bridge follows a fold that ran.
 	bridge foldBridge
 	// fold is the trigger's spelling on the compaction-finished notice a fold that RAN fires on the
-	// top-level Agent (announceCompactionFinished).
+	// top-level Agent (sessionBriefing.foldEnded).
 	fold domain.CompactionFold
 }
 
@@ -285,7 +285,7 @@ var foldTable = [...]foldRow{
 // What every fold that RAN leaves behind is done here once: the Replace, the bridge the row asks
 // for, the context-fill notice's ladder re-armed (rearmFillNotice), because the climb it
 // tracked was just folded away and the next result measures a new one, and — last — the
-// compaction-finished notice on the top-level Agent (announceCompactionFinished). The step- and token-budget
+// compaction-finished notice on the top-level Agent (sessionBriefing.foldEnded). The step- and token-budget
 // notes need nothing here: each notice's latch is its note's own presence (stepnotice.go), so a
 // note that went with the folded history is simply gone and the next result past its threshold
 // carries it again. A fault leaves the conversation untouched (Compact's guarantee) and a skip folded nothing, so neither re-arms nor announces — the
@@ -301,10 +301,17 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 	a.compacting = true
 	defer func() { a.compacting = false }()
 	// The fold's compaction-finished advise runs start as it begins, so a handler runs while the
-	// summary call does; a fold that ran hands them to the lane (announceCompactionFinished), and
-	// every other end discards them here — stopping a handed-over lane is a no-op.
-	staged := a.startCompactionAdvice(row.fold, turn)
-	defer staged.stop()
+	// summary call does (sessionBriefing.foldBegan); the fold's end — whichever it is — decides
+	// their fate (sessionBriefing.foldEnded): a fold that ran hands them to the compaction lane and
+	// announces itself to the observe Runner, every other end discards them. Only the top-level
+	// Agent stages: a delegate's fold reshapes a conversation no user entry is about, so it starts
+	// no run and fires nothing.
+	var staged *stagedFold
+	if !a.isDelegate() {
+		staged = a.briefing.foldBegan(row.fold, turn, a.sessionAdviseSpecs(domain.MomentCompactionFinished), a.cfg.ObserveRunner)
+	}
+	ran := false
+	defer func() { a.briefing.foldEnded(staged, ran) }()
 
 	res, err := apogeectx.Compact(ctx, compactCompleter{a: a}, &a.conv, a.compactTranscriptChars())
 	if err != nil {
@@ -335,25 +342,8 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 	if row.saturates && a.historyExceedsAllocation() {
 		a.noteFoldSaturated(turn)
 	}
-	a.announceCompactionFinished(row.fold, turn, staged)
+	ran = true
 	return foldResult{end: foldEndFolded}
-}
-
-// announceCompactionFinished hands one fold that RAN to the observe Runner's fold door
-// (ObserveRunner.CompactionFinished), which fires the user's compaction-finished entries with the
-// trigger's spelling and the fold's Turn on the payload (ADR 0076, adr-0076-amend-1021b), and hands
-// the advise runs the fold staged (startCompactionAdvice) to the compaction lane, in place of an
-// earlier fold's, for the next user-role message to join (sessionadvise.go). Only the top-level
-// Agent announces: a delegate's fold reshapes a conversation no user entry is about, so it fires
-// nothing and staged none. The door is enqueue-only, so a fold never waits on a fired entry.
-func (a *Agent) announceCompactionFinished(fold domain.CompactionFold, turn int, staged *sessionAdviseLane) {
-	if a.isDelegate() {
-		return
-	}
-	a.compactionAdvice.adopt(staged)
-	if runner := a.cfg.ObserveRunner; runner != nil {
-		runner.CompactionFinished(fold, turn)
-	}
 }
 
 // noteFoldSaturated latches the saturation stand-down after a fold that RAN and still left the

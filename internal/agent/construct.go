@@ -195,12 +195,11 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 // the workflow finish notes delivered into it are forgotten — the messages carrying them stand, so
 // they are never delivered again (an abort put them back first, exchangeAborted) — and so are the
 // session-start and compaction advise runs its user messages carried
-// (sessionAdviseLane.forgetDelivered).
+// (sessionBriefing.exchangeClosed).
 func (a *Agent) exchangeClosed() {
 	a.closeUndoGroup()
 	a.background.forgetDelivered()
-	a.briefing.lane.forgetDelivered()
-	a.compactionAdvice.forgetDelivered()
+	a.briefing.exchangeClosed()
 }
 
 // turnRolledBack is the Agent's half of the exchangeObserver contract for a cancelled Turn's
@@ -224,13 +223,12 @@ func (a *Agent) turnRolledBack() {
 // the abort dropped every message that carried them. A note held again may let the Driver's wake
 // open an Exchange on it right after the cancel; that is intended (ADR 0089 D3): nobody read it.
 // The session-start and compaction runs its opening or overflow bridge took that answered are put
-// back the same way (sessionAdviseLane.restoreDelivered), so the next opening carries their advice
+// back the same way (sessionBriefing.exchangeAborted), so the next opening carries their advice
 // instead; a run the join reported (timed out, errored, panicked) was dropped there and stays gone.
 func (a *Agent) exchangeAborted() {
 	a.retained.rollBackExchange()
 	a.background.restoreDelivered()
-	a.briefing.lane.restoreDelivered()
-	a.compactionAdvice.restoreDelivered()
+	a.briefing.exchangeAborted()
 }
 
 // seedTopLevel gives a top-level Agent the fields it owns afresh — the ones a delegate takes from
@@ -243,7 +241,7 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
 	a.journal = undo.New()                                 // the per-Exchange undo record (ADR 0051)
 	a.consoles = console.New()                             // the engine's live Consoles (ADR 0059)
-	a.briefing.launch = a.launchSessionAdvice              // the session briefing starts its advise runs through this Agent's handlers
+	a.briefing.call = a.callSessionAdvice                  // the session briefing's runs call this Agent's handlers
 	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
 	a.workflowLive = a.background.isLive                   // the tree's workflow liveness is this root's background set
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
@@ -694,9 +692,9 @@ func (a *Agent) applyConstructionSeed(o constructOptions) {
 
 // announceSessionStart is one Session boundary's announcement, made exactly once per boundary: each
 // boundary's own call site makes this one call. Only the top-level Agent announces — a delegate
-// starts no session. It discards the compaction lane's runs — the history they would re-brief is
-// gone with the boundary — and hands the session briefing (sessionBriefing.boundaryArmed,
-// briefing.go) the boundary's armed session-started entries: the briefing starts the boundary's
+// starts no session. It hands the session briefing (sessionBriefing.boundaryArmed, briefing.go) the
+// boundary's armed session-started entries: the briefing discards the compaction lane's runs — the
+// history they would re-brief is gone with the boundary —, starts the boundary's
 // session-start advise runs in the background, each under its own deadline (syncTimeout), and
 // hands the session-started notice to the observe Runner (Config.ObserveRunner.SessionStarted)
 // when the Agent holds one; the advise lane is the engine's own, so it starts with or without a
@@ -714,6 +712,5 @@ func (a *Agent) announceSessionStart(start domain.SessionStart) {
 	}
 	a.swapMu.Lock()
 	defer a.swapMu.Unlock()
-	a.compactionAdvice.stop()
 	a.briefing.boundaryArmed(start, a.turns.index, a.sessionStartedArmed()) // background-only: the boundary never waits on an advise handler
 }

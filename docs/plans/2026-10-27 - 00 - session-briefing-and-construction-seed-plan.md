@@ -255,7 +255,11 @@ NOTES (2026-10-27): in TestBriefing_AnInputRacingABoundarySeesItWhole each input
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestSessionAdvise|TestSessionStart|TestSessionWindow|TestSetReactions' ./internal/agent/`; `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestBriefing_AnInputRacingABoundarySeesItWhole' ./internal/agent/`
 **Commit:** `refactor(agent): one session-briefing module owns the window and session lane`
 
-## 11. sessionBriefing owns the compaction lane, the joins and the Exchange ends
+## 11. sessionBriefing owns the compaction lane, the joins and the Exchange ends — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): consequential edit — internal/agent/briefing_test.go: made necessary by replacing the briefing's injected `launch` field with the `call adviseCaller` field (launch/run moved into the module); TestBriefing_AnInputRacingABoundarySeesItWhole now stubs `call` (silentCall) and reads "the window stayed open" as the live arm's run joining the lane; the yielding launch stub is gone, and with the lock moved off the replace the test still failed 3 of 3 runs (passes with it)
+NOTES (2026-10-27): consequential edit — internal/agent/doc.go: made necessary by briefing.go now owning both lanes, their joins and the compaction-finished call (the file map's briefing.go sentence named only the session-start lane)
+NOTES (2026-10-27): shape chosen — foldBegan(fold, turn, advise specs, runner) returns a *stagedFold (fold, turn, runner, staged lane); foldFor keeps the isDelegate gate (nil staged for a delegate, which foldEnded ignores) and ends the fold through one deferred foldEnded(staged, ran); the landing is Agent.landAdvice(turn) (bypassSkips || attachSessionAdvice on the conversation's last message); joinAdvice became the package func join(ctx, land, lanes...); the boundary's compaction-lane discard moved from announceSessionStart into boundaryArmed, and Close's compaction stop into the module's close
 
 **What:** Depends on item 10.
 **Goal:** `sessionBriefing` also owns the compaction-finished lane, and makes the `CompactionFinished` observe call. It exposes these events:

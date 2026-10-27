@@ -137,8 +137,8 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// (exchangeAborted); a run reported here — timed out, errored or panicked — is dropped
 		// here and never reported nor attached again. The wait is ctx-aware —
 		// a cancel ends it and falls to the cancel exit below, leaving the runs for the next
-		// opening (joinSessionAdvice, sessionadvise.go).
-		a.joinSessionAdvice(ctx, turn)
+		// opening (sessionBriefing.joinOpening, briefing.go; the landing is landAdvice).
+		a.briefing.joinOpening(ctx, a.landAdvice(turn))
 		// A cancel that landed while the opening was composed — a recipe launch the user stopped
 		// is the case that matters — ends the Turn here, before any request is sent: the model is
 		// not asked to answer a run the user has just stopped. The rollback boundary is the
@@ -397,9 +397,9 @@ func (a *Agent) refold(ctx context.Context, t *turnRun) foldOutcome {
 	}
 	// A fold that ran ended the conversation on the overflow bridge: the compaction lane's advise
 	// runs, started as the fold began, are joined onto it before the request is rebuilt from it, so
-	// the retried request carries the re-brief (joinCompactionAdvice, sessionadvise.go).
+	// the retried request carries the re-brief (sessionBriefing.joinBridge, briefing.go).
 	if r.end == foldEndFolded {
-		a.joinCompactionAdvice(ctx, t.turn)
+		a.briefing.joinBridge(ctx, a.landAdvice(t.turn))
 	}
 	// Re-derive every value the request depends on from the (possibly folded) conversation.
 	// exchangeStart is re-anchored by the fold itself (compact.go). When nothing was folded the

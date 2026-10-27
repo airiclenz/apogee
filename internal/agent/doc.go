@@ -58,8 +58,8 @@
 // 0076 D6): the advise runs a Session boundary or a fold starts in the background and the join that
 // fences their answers ahead of the next user-role message's text — the next Exchange opening, or a
 // mid-Exchange fold's overflow bridge. briefing.go is sessionBriefing, which owns a Session
-// boundary's pre-first-prompt window and the session-start lane and makes the observe Runner's
-// session-started calls. heldledger.go is heldLedger, the pending → delivered record
+// boundary's pre-first-prompt window, both advise lanes and their joins, and makes the observe
+// Runner's session-started and compaction-finished calls. heldledger.go is heldLedger, the pending → delivered record
 // the advise lanes keep their runs in. wire.go is the
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
