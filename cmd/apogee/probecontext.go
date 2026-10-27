@@ -263,7 +263,7 @@ func (r turn1Reading) column(label string) probe.ContextCostMeasured {
 	return probe.ContextCostMeasured{Label: label, PromptTokens: r.prompt, CachedPromptTokens: r.cached}
 }
 
-// measureTurn1 constructs a fresh Agent on cfg, arms it, Submits the fixed prompt and Steps ONCE:
+// measureTurn1 constructs a fresh Agent on cfg seeded with its lanes, Submits the fixed prompt and Steps ONCE:
 // the Turn ends on the server's Turn-1 usage. What keeps a tool the model might call from running
 // is the ctx cancel, not the mode: turn1Sink cancels the ctx synchronously on the first Depth-0
 // UsageEvent, which streamResponse emits right after Calibrate and BEFORE respondAndReview's
@@ -272,16 +272,16 @@ func (r turn1Reading) column(label string) probe.ContextCostMeasured {
 // and permits scratch writes once ScratchDir is set — and the deny-all Approver the Config carries
 // is belt-and-braces only.
 //
-// The lanes are armed as run.Once arms them (internal/run/run.go): lanes is the Generation the
-// configured list divides into (domain.LanesOf), handed whole; Generation read, Observe and Sync
-// taken from lanes, handed back through SetReactions, so the Floor enable set and Bypass agent.New
-// seeded stay as seeded; two empty lanes make no swap. They are armed BEFORE the session-started
-// boundary is announced (Config.DeferSessionStart, then AnnounceSessionStart), as run.Once orders
-// it, so a user's session-started advise answer rides the Turn-1 request and is measured there.
-// The observe lane reaches no Runner here — the probe builds none — so only the sync lane moves
-// what the request carries. Under bypass the lanes stay unarmed and Bypass is switched on through
-// the same read-edit-hand-back — liveSettings.setBypass's shape — so the second reading is the
-// first with the model-shaping classes off (ADR 0076 D9) and nothing else moved.
+// The lanes are seeded as run.Once seeds them (internal/run/run.go): lanes is the Generation the
+// configured list divides into (domain.LanesOf), and its Observe and Sync ride the Config as the
+// construction seed (Config.Observe, Config.Sync) — only those two, so the Floor enable set and
+// Bypass the caller composed stay as composed; two empty lanes leave the Config's own lanes
+// standing. agent.New arms the seed before it announces the session-started boundary, so a user's
+// session-started advise answer rides the Turn-1 request and is measured there. The observe lane
+// reaches no Runner here — the probe builds none — so only the sync lane moves what the request
+// carries. Under bypass the lanes stay unseeded and Bypass is OR-ed on in the seed — never copied
+// from a zero value — so the second reading is the first with the model-shaping classes off
+// (ADR 0076 D9) and nothing else moved. A seed New refuses keeps the lane refusal's prefix.
 //
 // The reply ceiling is pinned on the Config: newProjection stamps the loop's own cap on every
 // request, and Context.MaxOutputTokens is the operator's pin for it.
@@ -291,26 +291,20 @@ func measureTurn1(ctx context.Context, cfg apogee.Config, lanes domain.Generatio
 	sink := &turn1Sink{cancel: cancel}
 	cfg.Events = sink
 	cfg.Context.MaxOutputTokens = probeContextLiveReplyCap
-	cfg.DeferSessionStart = true
+	if bypass {
+		cfg.Bypass = true
+	} else if len(lanes.Observe) > 0 || len(lanes.Sync) > 0 {
+		cfg.Observe, cfg.Sync = lanes.Observe, lanes.Sync
+	}
 
 	a, err := newProbeAgent(cfg)
 	if err != nil {
+		if refused := (*apogee.SeedRefusedError)(nil); errors.As(err, &refused) {
+			return turn1Reading{}, fmt.Errorf("apogee probe context --live: arm the reaction lanes: %w", err)
+		}
 		return turn1Reading{}, fmt.Errorf("apogee probe context --live: construct the agent: %w", err)
 	}
 	defer func() { _ = a.Close() }()
-
-	if bypass || len(lanes.Observe) > 0 || len(lanes.Sync) > 0 {
-		gen := a.Generation()
-		if bypass {
-			gen.Bypass = true
-		} else {
-			gen.Observe, gen.Sync = lanes.Observe, lanes.Sync
-		}
-		if err := a.SetReactions(gen); err != nil {
-			return turn1Reading{}, fmt.Errorf("apogee probe context --live: arm the reaction lanes: %w", err)
-		}
-	}
-	a.AnnounceSessionStart()
 
 	if err := a.Submit(apogee.UserInput{Text: probeContextLivePrompt}); err != nil {
 		return turn1Reading{}, fmt.Errorf("apogee probe context --live: %w", err)

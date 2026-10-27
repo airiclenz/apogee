@@ -115,7 +115,10 @@ NOTES (2026-10-27): wire_firing_test.go needed no change; TestOnceRefusedAtConst
 **Acceptance:** `! grep -nE 'DeferSessionStart|AnnounceSessionStart|SetReactions\(|SetDelegationSeat\(|SetDelegationTarget\(' internal/run/run.go`; `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestOnce' ./internal/run/`, then `GOMEMLIMIT=2GiB go test -count=1 -run 'TestFiring|TestHeadless' ./cmd/apogee/`
 **Commit:** `refactor(run): Once constructs its Agent from the seed`
 
-## 4. measureTurn1 constructs from the seed
+## 4. measureTurn1 constructs from the seed — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): a seed New refuses (*apogee.SeedRefusedError) keeps the old "apogee probe context --live: arm the reaction lanes:" prefix, as item 3 kept Once's lane prefix; any other New error still reads "construct the agent:"
+NOTES (2026-10-27): consequential edit — cmd/apogee/probecontext_test.go: made necessary by the seed route (TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1's doc comment described arming before the announce)
 
 **What:** Depends on item 2.
 **Goal:** `measureTurn1` (`cmd/apogee/probecontext.go`) builds its probe Agent with the lanes and Bypass on `Config`. It names neither `DeferSessionStart` nor `AnnounceSessionStart` and calls no `SetReactions`.

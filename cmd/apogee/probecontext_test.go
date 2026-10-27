@@ -387,8 +387,9 @@ func TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly(t *testing.T) {
 // TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1 — a user's advise entry on
 // session-started is the one advise Reaction that rides the Turn-1 request, so --live measures it
 // there: the as-configured request's opening starts with the entry's leading fence, and the
-// Bypass request carries no fence at all. It holds only because measureTurn1 arms the lanes before
-// it announces the session-started boundary, as run.Once does.
+// Bypass request carries no fence at all. It holds only because measureTurn1 seeds the lanes into
+// the Agent's construction, which arms them before it announces the session-started boundary, as
+// run.Once does.
 func TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1(t *testing.T) {
 	t.Parallel()
 	workspace := probeContextWorkspace(t)
