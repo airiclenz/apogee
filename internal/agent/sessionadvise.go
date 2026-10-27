@@ -58,13 +58,12 @@ type sessionAdviseLane struct {
 	// Close call it. Both are nil while the boundary has started no run.
 	ctx    context.Context
 	cancel context.CancelFunc
-	// pending is the runs no opening has taken yet, in ladder order.
-	pending []*sessionAdviseRun
-	// delivered is the runs taken into the open Exchange that answered: an abort puts them back
-	// ahead of pending (restoreDelivered), a close that keeps the opening forgets them
-	// (forgetDelivered). A run the join reported — timed out, errored or panicked — is never here:
-	// its report is its one outcome, so no later opening reports or attaches it again.
-	delivered []*sessionAdviseRun
+	// held holds the runs no opening has taken yet, in ladder order, and the ones taken into the
+	// open Exchange that answered: an abort puts those back ahead of pending (restoreDelivered), a
+	// close that keeps the opening forgets them (forgetDelivered). A run the join reported — timed
+	// out, errored or panicked — is never delivered: its report is its one outcome, so no later
+	// opening reports or attaches it again.
+	held heldLedger[*sessionAdviseRun]
 }
 
 // sessionAdviseRun is one entry's background run: the reaction, the seam document it runs with —
@@ -92,7 +91,9 @@ func (l *sessionAdviseLane) replace(runs []*sessionAdviseRun) context.Context {
 	if l.cancel != nil {
 		l.cancel()
 	}
-	l.ctx, l.cancel, l.pending, l.delivered = nil, nil, runs, nil
+	l.ctx, l.cancel = nil, nil
+	l.held.reset()
+	l.held.hold(runs...)
 	if len(runs) > 0 {
 		l.ctx, l.cancel = context.WithCancel(context.Background())
 	}
@@ -109,7 +110,7 @@ func (l *sessionAdviseLane) extend(runs []*sessionAdviseRun) context.Context {
 	if l.cancel == nil {
 		l.ctx, l.cancel = context.WithCancel(context.Background())
 	}
-	l.pending = append(l.pending, runs...)
+	l.held.hold(runs...)
 	return l.ctx
 }
 
@@ -118,8 +119,9 @@ func (l *sessionAdviseLane) extend(runs []*sessionAdviseRun) context.Context {
 // fold's unjoined runs. staged is left empty, so its stop no longer reaches the adopted runs.
 func (l *sessionAdviseLane) adopt(staged *sessionAdviseLane) {
 	staged.mu.Lock()
-	ctx, cancel, runs := staged.ctx, staged.cancel, staged.pending
-	staged.ctx, staged.cancel, staged.pending, staged.delivered = nil, nil, nil, nil
+	ctx, cancel, runs := staged.ctx, staged.cancel, staged.held.pending()
+	staged.ctx, staged.cancel = nil, nil
+	staged.held.reset()
 	staged.mu.Unlock()
 
 	l.mu.Lock()
@@ -127,7 +129,9 @@ func (l *sessionAdviseLane) adopt(staged *sessionAdviseLane) {
 	if l.cancel != nil {
 		l.cancel()
 	}
-	l.ctx, l.cancel, l.pending, l.delivered = ctx, cancel, runs, nil
+	l.ctx, l.cancel = ctx, cancel
+	l.held.reset()
+	l.held.hold(runs...)
 }
 
 // stop cancels the current boundary's runs and discards them — the agent's shutdown, a Session
@@ -140,7 +144,7 @@ func (l *sessionAdviseLane) stop() {
 func (l *sessionAdviseLane) waiting() []*sessionAdviseRun {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return slices.Clone(l.pending)
+	return l.held.pending()
 }
 
 // take removes runs from pending, leaving any run pending gained since the read (none can: a
@@ -153,8 +157,7 @@ func (l *sessionAdviseLane) waiting() []*sessionAdviseRun {
 func (l *sessionAdviseLane) take(runs, answered []*sessionAdviseRun) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.pending = slices.DeleteFunc(l.pending, func(r *sessionAdviseRun) bool { return slices.Contains(runs, r) })
-	l.delivered = append(l.delivered, answered...)
+	l.held.take(runs, func(r *sessionAdviseRun) bool { return slices.Contains(answered, r) })
 }
 
 // restoreDelivered puts the runs an aborted Exchange took that answered back ahead of pending: the
@@ -163,8 +166,7 @@ func (l *sessionAdviseLane) take(runs, answered []*sessionAdviseRun) {
 func (l *sessionAdviseLane) restoreDelivered() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.pending = append(l.delivered, l.pending...)
-	l.delivered = nil
+	l.held.restore()
 }
 
 // forgetDelivered drops the runs an Exchange that closed with its opening kept had taken: their
@@ -172,7 +174,7 @@ func (l *sessionAdviseLane) restoreDelivered() {
 func (l *sessionAdviseLane) forgetDelivered() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.delivered = nil
+	l.held.forget()
 }
 
 // startSessionAdvice is a Session boundary's share of the lanes: it discards the compaction lane's

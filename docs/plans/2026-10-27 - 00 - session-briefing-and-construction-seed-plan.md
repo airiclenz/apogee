@@ -197,7 +197,10 @@ NOTES (2026-10-27): TestSessionStart_ADeferredConstructionIsTheDriversToAnnounce
 **Acceptance:** `! grep -rn 'DeferSessionStart\|AnnounceSessionStart' --include=*.go .`; `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestSessionStart|TestSessionWindow' ./internal/agent/`
 **Commit:** `refactor(agent): construction always announces session-started`
 
-## 8. One generic held ledger for the advise lanes
+## 8. One generic held ledger for the advise lanes — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): consequential edit — internal/agent/doc.go: made necessary by the new heldledger.go (the package's file map, pinned by TestDocMapNamesEveryFile, must name every non-test file)
+NOTES (2026-10-27): the ledger's pending slice is the field `held` (a field cannot share the `pending()` accessor's name), and the lane's ledger field is `held` too; the ledger is `heldLedger[T comparable]` so `take`'s read-set removal tests membership by equality, as the lane's pointer `slices.Contains` did
 
 **What:**
 **Goal:** An unexported generic `heldLedger[T]` in `internal/agent/heldledger.go` holds pending → delivered → restore-to-front / forget. It has `hold`, `take` (a subset take: only the entries a predicate accepts become delivered), `restore`, `forget` and `reset`, plus `pending` and the operations the guard below names. It is unlocked; its owner locks it. `sessionAdviseLane` keeps its pending and delivered runs in it. Lane behaviour is byte-identical.
