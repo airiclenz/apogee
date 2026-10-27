@@ -216,7 +216,9 @@ NOTES (2026-10-27): the ledger's pending slice is the field `held` (a field cann
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestHeldLedger|TestSessionAdvise|TestCompactAdvise' ./internal/agent/`
 **Commit:** `refactor(agent): the advise lanes hold runs in one generic ledger`
 
-## 9. The background manager embeds the held ledger
+## 9. The background manager embeds the held ledger — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): takeNotes and takeIntoExchange share one locked helper, takeLocked, which takes the pending snapshot through the ledger's take with a never/always predicate and keeps today's nil-when-none return; gofmt realigned the three struct fields after the new commented `held` field
 
 **What:** Depends on item 8.
 **Goal:** `backgroundManager`'s held notes and delivered set live in a `heldLedger[string]`. The manager's own extras stay its own: `takeNotes`, `putBack`, `markDelivered`, `heldNotes` serialization, and the clearing in `stopAllBackground`. Its mutex still guards runs, prompts and retiring, and now the ledger. Background behaviour is unchanged, including the serialized note order.

@@ -199,11 +199,12 @@ type backgroundManager struct {
 	restoredNotes []string
 	prompts       []*backgroundPrompt
 	promptID      uint64 // the last id minted for a queued prompt (backgroundPrompt.id)
-	notes         []string
-	delivered     []string // the notes taken into the open Exchange, or the input a Wake queued
-	launched      []keptRun
-	keep          bool
-	retiring      []*backgroundRun
+	// held is the finish notes held for the next user-role message and those taken into the open
+	// Exchange (or the input a Wake queued). It is unlocked: mu guards every call on it.
+	held     heldLedger[string]
+	launched []keptRun
+	keep     bool
+	retiring []*backgroundRun
 }
 
 // backgroundRun is one live background workflow. Everything but running and cancel is fixed at
@@ -413,7 +414,7 @@ func (a *Agent) ResumeWorkflows() error {
 	m.mu.Lock()
 	entries := m.restored
 	m.restored = nil
-	m.notes = append(m.notes, m.restoredNotes...)
+	m.held.hold(m.restoredNotes...)
 	m.restoredNotes = nil
 	m.mu.Unlock()
 
@@ -645,7 +646,7 @@ func (a *Agent) stopAllBackground() {
 	// wakes on those runs' end events nothing to wake on. The record of the notes delivered into an
 	// Exchange still open goes with them: an abort after the stop must not hold again a note of the
 	// session the stop ended.
-	m.notes, m.delivered = nil, nil
+	m.held.reset()
 	m.launched = nil
 	m.mu.Unlock()
 	for _, run := range dropped {
@@ -848,10 +849,11 @@ func (m *backgroundManager) load(entries []workflowEntryJSON, notes []string) {
 func (m *backgroundManager) heldNotes() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.notes)+len(m.restoredNotes) == 0 {
+	notes := m.held.pending()
+	if len(notes)+len(m.restoredNotes) == 0 {
 		return nil
 	}
-	return append(slices.Clone(m.notes), m.restoredNotes...)
+	return append(notes, m.restoredNotes...)
 }
 
 // waitAll waits for every live run and every retiring one to end.
@@ -1303,7 +1305,7 @@ func renderWorkflowNotes(notes []string) string {
 func (m *backgroundManager) hold(note string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.notes = append(m.notes, note)
+	m.held.hold(note)
 }
 
 // holdFinish holds run's finish note as hold does — unless a whole-set stop retired run: its note
@@ -1315,16 +1317,14 @@ func (m *backgroundManager) holdFinish(run *backgroundRun, note string) {
 	if slices.Contains(m.retiring, run) {
 		return
 	}
-	m.notes = append(m.notes, note)
+	m.held.hold(note)
 }
 
 // takeNotes takes every held note, oldest first; nil when none is held.
 func (m *backgroundManager) takeNotes() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	notes := m.notes
-	m.notes = nil
-	return notes
+	return m.takeLocked(func(string) bool { return false })
 }
 
 // putBack returns notes a taker could not deliver to the front of the held ones, ahead of any held
@@ -1332,7 +1332,7 @@ func (m *backgroundManager) takeNotes() []string {
 func (m *backgroundManager) putBack(notes []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.notes = append(slices.Clone(notes), m.notes...)
+	m.held.putBack(notes...)
 }
 
 // takeIntoExchange takes every held note, oldest first, as takeNotes does, and records them as
@@ -1341,9 +1341,17 @@ func (m *backgroundManager) putBack(notes []string) {
 func (m *backgroundManager) takeIntoExchange() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	notes := m.notes
-	m.notes = nil
-	m.delivered = append(m.delivered, notes...)
+	return m.takeLocked(func(string) bool { return true })
+}
+
+// takeLocked takes every held note, oldest first, recording as delivered those delivers accepts;
+// nil when none is held. The caller holds m.mu.
+func (m *backgroundManager) takeLocked(delivers func(string) bool) []string {
+	notes := m.held.pending()
+	if len(notes) == 0 {
+		return nil
+	}
+	m.held.take(notes, delivers)
 	return notes
 }
 
@@ -1352,7 +1360,7 @@ func (m *backgroundManager) takeIntoExchange() []string {
 func (m *backgroundManager) markDelivered(notes []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.delivered = append(m.delivered, notes...)
+	m.held.markDelivered(notes...)
 }
 
 // restoreDelivered puts the notes delivered into an aborted Exchange back at the front of the held
@@ -1361,8 +1369,7 @@ func (m *backgroundManager) markDelivered(notes []string) {
 func (m *backgroundManager) restoreDelivered() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.notes = append(m.delivered, m.notes...)
-	m.delivered = nil
+	m.held.restore()
 }
 
 // forgetDelivered drops the record of the notes delivered into an Exchange that closed with the
@@ -1371,5 +1378,5 @@ func (m *backgroundManager) restoreDelivered() {
 func (m *backgroundManager) forgetDelivered() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.delivered = nil
+	m.held.forget()
 }
