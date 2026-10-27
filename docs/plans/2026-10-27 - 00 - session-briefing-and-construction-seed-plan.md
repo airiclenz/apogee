@@ -91,7 +91,12 @@ NOTES (2026-10-27): apogee.WithUndoJournal takes *undo.Journal (internal/undo) �
 **Acceptance:** `go build ./... && go vet ./cmd/apogee/ && GOMEMLIMIT=2GiB go test -count=1 -run 'TestConstructionSeed|TestSetReactions|TestSubAgent|TestSessionStart' ./internal/agent/`
 **Commit:** `feat(agent): New and Resume apply the whole construction seed`
 
-## 3. run.Once constructs from the seed
+## 3. run.Once constructs from the seed — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): the observe hand-over and its pre-Replace validation live in two new unexported helpers in internal/run/run.go (seedLanes, validateLanes); validateLanes wraps a non-ErrInvalidReaction ValidateAll error as the Agent's validateGeneration does, so the refusal sentence is the one SetReactions gave before; refuseReservedIDs (agent-internal) is left to New's typed seed refusal
+NOTES (2026-10-27): the lane prefix is applied to any *agent.SeedRefusedError from New — so a caller-composed Config.Observe that New refuses (with no Spec lanes) now reads "apogee: arm the firing's reaction lanes:" rather than "apogee: construct the firing's agent:"; no Driver composes that case (firingConfig seeds Config.Observe from the same list as Spec.Generation)
+NOTES (2026-10-27): the observe hand-over (Runner.Replace) now runs before agent.New validates the rest of the Config, so a Firing with a moved observe list and an otherwise-refused Config replaces its own per-Firing Runner before failing; the Firing still fails before its first Step and leaves no lock
+NOTES (2026-10-27): wire_firing_test.go needed no change; TestOnceRefusedAtConstructionLeavesNoLock and TestOnceKeepsTheFarWidthOfTheSpecsTarget are unchanged; added TestOnceSeedsASessionStartedAdviseEntryUnlessBypassed (armed/bypassed rows) and TestOnceRefusesALaneTheEngineWillNotArm (pre-Replace validation row, typed seed-refusal row)
 
 **What:** Recast at the regression check (2026-10-27). Depends on item 2.
 **Goal:** `run.Once` constructs its Agent from one seed, and the Agent comes out announced. That seed is Observe and Sync from the Spec's Generation, and the Spec's delegation seat and target. `Once` names neither `DeferSessionStart` nor `AnnounceSessionStart` and calls no seat, target or `SetReactions` setter at construction.

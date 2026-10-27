@@ -446,8 +446,8 @@ func TestOnceDeniesAGatedActionWithoutParking(t *testing.T) {
 
 // TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep pins the ONE route a `reactions:` file's advise
 // and gate entries take into an unattended run (ADR 0076 A8). A Firing holds no Agent the Driver
-// can reach — Once constructs it — so the lane rides the Spec's Generation and Once installs it
-// through the live swap door before the prompt is submitted. Witnessed at the earliest place it can fail: the
+// can reach — Once constructs it — so the lane rides the Spec's Generation and Once seeds it into the
+// Agent's construction, armed before the prompt is submitted. Witnessed at the earliest place it can fail: the
 // run's VERY FIRST tool call, which the gate must already be answering.
 //
 // A read-only tool in Plan mode is deliberate: the mode ladder runs that class, so a call that
@@ -531,9 +531,10 @@ func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
 }
 
 // TestOnceHandsTheSpecsObserveLaneToTheFiringsRunner pins the other lane of the same route: the
-// Spec carries the Generation whole, and Once hands its observe lane through the same swap door, which
-// passes it to the Runner the Config holds (Config.ObserveRunner) before the prompt is submitted. The
-// Runner was built over nothing, so the one Replace it sees is the Spec's lane and only that.
+// Spec carries the Generation whole, and Once hands its observe lane to the Runner the Config holds
+// (Config.ObserveRunner) before it constructs the Agent, because the lane differs from the list the
+// Runner was built over (Config.Observe). The Runner was built over nothing, so the one Replace it
+// sees is the Spec's lane and only that.
 func TestOnceHandsTheSpecsObserveLaneToTheFiringsRunner(t *testing.T) {
 	t.Parallel()
 
@@ -567,7 +568,7 @@ func TestOnceHandsTheSpecsObserveLaneToTheFiringsRunner(t *testing.T) {
 }
 
 // TestOnceArmsTheLanesBeforeTheSessionStartedBoundary pins the order a Firing keeps: the Spec's
-// lanes go through the swap door — the Runner's Replace — BEFORE the construction boundary's
+// observe lane is handed to the Runner — its Replace — BEFORE the construction boundary's
 // session-started notice is announced, so the session-start advise lane the announcement starts
 // sees the Firing's own advise entries and the boundary's window holds its observe lane. A Firing
 // that announced first would start that lane over an empty ladder and its session-started advice
@@ -602,7 +603,7 @@ func TestOnceArmsTheLanesBeforeTheSessionStartedBoundary(t *testing.T) {
 // the Agent Once builds announces one session-started boundary, start "new", through the Runner the
 // Config holds; the Runner stamps the Firing's Schedule on it as on every other notice. The Runner is
 // built over the Spec's lane and seeded as Config.Observe, as the Firing composer does, so Once's
-// arming swap retires nothing and the one entry fires exactly once.
+// seeding hands the Runner nothing, retires nothing, and the one entry fires exactly once.
 func TestOnceFiresTheFiringsSessionStartedOnceWithItsSchedule(t *testing.T) {
 	t.Parallel()
 
@@ -651,6 +652,142 @@ func TestOnceFiresTheFiringsSessionStartedOnceWithItsSchedule(t *testing.T) {
 	}
 }
 
+// TestOnceSeedsASessionStartedAdviseEntryUnlessBypassed — the Spec's sync lane is seeded into the
+// Agent's construction, so its session-started advise entry is one of the construction boundary's own
+// runs and its answer is fenced ahead of the first prompt. Only the lanes move from the Spec: the
+// Config's Bypass stays as the caller composed it, so a Bypassed Firing's first request carries no
+// advice fence at all. The un-Bypassed row is what makes the Bypassed one mean something — a seed
+// that never armed the entry would pass it by accident.
+func TestOnceSeedsASessionStartedAdviseEntryUnlessBypassed(t *testing.T) {
+	t.Parallel()
+
+	const advice = "the build is red on main"
+	entry := domain.Reaction{
+		ID:      "ci",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassAdvise,
+		On:      []domain.Moment{domain.MomentSessionStarted},
+		Handler: domain.ArgvHandler{Argv: []string{"/bin/sh", "-c", "printf '%s\\n' '" + advice + "'"}},
+		Timeout: 5 * time.Second,
+	}
+
+	for _, tc := range []struct {
+		name      string
+		bypass    bool
+		wantFence bool
+	}{
+		{name: "armed", bypass: false, wantFence: true},
+		{name: "bypassed", bypass: true, wantFence: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			up := stubllm.New(t, finalScript("done"))
+			spec := planSpec(up.URL, "first prompt")
+			spec.Config.WorkspaceDir = t.TempDir()
+			spec.Config.Bypass = tc.bypass
+			spec.Generation = domain.Generation{Sync: []domain.Reaction{entry}}
+
+			ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
+			defer cancel()
+			if _, err := Once(ctx, spec); err != nil {
+				t.Fatalf("Once: %v", err)
+			}
+
+			requests := up.Requests()
+			if len(requests) == 0 {
+				t.Fatal("the Firing sent no request")
+			}
+			first := lastUserText(requests[0])
+			fenced := strings.Contains(first, domain.AdviceFencePrefix+"ci")
+			if fenced != tc.wantFence || strings.Contains(first, advice) != tc.wantFence {
+				t.Errorf("first user message = %q; want the session-started advice fenced = %v", first, tc.wantFence)
+			}
+			if !strings.HasSuffix(first, "first prompt") {
+				t.Errorf("first user message = %q, want it to end with the Firing's prompt", first)
+			}
+		})
+	}
+}
+
+// lastUserText is the content of a request's last user message — the opening an advice fence rides.
+func lastUserText(req stubllm.Request) string {
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == string(domain.RoleUser) {
+			return req.Messages[i].Content
+		}
+	}
+	return ""
+}
+
+// TestOnceRefusesALaneTheEngineWillNotArm — a Firing whose lanes the engine will not arm fails
+// before its first Step, whichever step refused them, under the one prefix a Driver reports a lane
+// refusal by: the validation Once runs before handing the Runner a moved observe list, or agent.New's
+// own seed validation (agent.SeedRefusedError). An observe list the validation refuses never reaches
+// the Runner, and a refused Firing is never announced.
+func TestOnceRefusesALaneTheEngineWillNotArm(t *testing.T) {
+	t.Parallel()
+
+	misfiled := domain.Reaction{
+		ID:      "notify",
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassAdvise,
+		On:      []domain.Moment{domain.MomentTurnFinished},
+		Handler: domain.ArgvHandler{Argv: []string{"true"}},
+		Timeout: time.Second,
+	}
+
+	for _, tc := range []struct {
+		name       string
+		lanes      domain.Generation
+		wantSeeded bool // the refusal is agent.New's typed seed refusal
+	}{
+		{
+			name:  "an observe list the hand-over validation refuses",
+			lanes: domain.Generation{Observe: []domain.Reaction{misfiled}},
+		},
+		{
+			name:       "a sync lane naming a reserved id",
+			lanes:      domain.Generation{Sync: []domain.Reaction{denyingGate(agent.FloorGuardKeys()[0])}},
+			wantSeeded: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			up := stubllm.New(t, finalScript("never reached"))
+			runner := &recordingObserveRunner{}
+			spec := planSpec(up.URL, "do the thing")
+			spec.Config.ObserveRunner = runner
+			spec.Generation = tc.lanes
+
+			_, err := Once(context.Background(), spec)
+			if err == nil {
+				t.Fatal("Once returned no error for lanes the engine will not arm")
+			}
+			if want := "apogee: arm the firing's reaction lanes: "; !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("err = %q, want the prefix %q", err, want)
+			}
+			if !errors.Is(err, domain.ErrInvalidReaction) {
+				t.Errorf("err = %v, want it to carry domain.ErrInvalidReaction", err)
+			}
+			var seeded *agent.SeedRefusedError
+			if got := errors.As(err, &seeded); got != tc.wantSeeded {
+				t.Errorf("errors.As(err, *agent.SeedRefusedError) = %v, want %v", got, tc.wantSeeded)
+			}
+			if len(runner.lists) != 0 {
+				t.Errorf("the Runner was handed %+v, want nothing for a refused Firing", runner.lists)
+			}
+			if len(runner.starts) != 0 {
+				t.Errorf("the Runner was told of the boundaries %v, want none: a refused Firing is never announced", runner.starts)
+			}
+			if n := len(up.Requests()); n != 0 {
+				t.Errorf("the Firing sent %d request(s), want none", n)
+			}
+		})
+	}
+}
+
 // payloadRecorder is a reactions.Executor that keeps every payload it is handed.
 type payloadRecorder struct {
 	mu       sync.Mutex
@@ -673,7 +810,7 @@ func (p *payloadRecorder) recorded() []domain.SeamPayload {
 
 // recordingObserveRunner is a Config.ObserveRunner that keeps every list it is handed, every
 // session-started boundary it is told of and the ids of every narrowed firing of newly armed entries,
-// so a test can read which observe lane the Agent passed on and which boundaries it announced. It never refuses. Once swaps and announces on the caller's
+// so a test can read which observe lane the Agent passed on and which boundaries it announced. It never refuses. Once hands over and announces on the caller's
 // goroutine before it returns, so the test reads both without a lock.
 type recordingObserveRunner struct {
 	lists  [][]domain.Reaction

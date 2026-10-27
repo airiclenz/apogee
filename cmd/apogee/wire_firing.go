@@ -516,8 +516,8 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		cfg.Events = in.hooks
 		// And the same Runner as the Agent's observe half, seeded with the lane it was built over
 		// (Config.ObserveRunner, Config.Observe), as the TUI boot does: the Agent run.Once builds
-		// announces the Firing's session-started boundary through it, and run.Once's arming swap of
-		// that same lane finds nothing moved and retires nothing.
+		// announces the Firing's session-started boundary through it, and run.Once, seeding that same
+		// lane into the Agent's construction, finds nothing moved and hands the Runner nothing.
 		cfg.ObserveRunner = in.hooks
 		cfg.Observe = domain.LanesOf(in.opts.Reactions).Observe
 	}
@@ -984,12 +984,12 @@ func raise(
 		// The configured `currency:` label, written beside the record's usage so its amount is never
 		// read under another label (ADR 0093 decision 6).
 		Currency: in.opts.Currency,
-		// Both lanes of the `reactions:` list this Firing resolved, handed whole and armed on the
-		// Agent run.Once builds before its first Step: a `gate:` answers this run's very first tool
-		// call, and its trouble reaches the same report line the Runner's does (Config.Report,
+		// Both lanes of the `reactions:` list this Firing resolved, handed whole and seeded into the
+		// Agent run.Once builds, armed before its first Step: a `gate:` answers this run's very first
+		// tool call, and its trouble reaches the same report line the Runner's does (Config.Report,
 		// firingConfig). The observe lane is the one the Runner above was built over and seeded with
-		// (Config.ObserveRunner, Config.Observe, set in firingConfig), so the arming swap finds
-		// nothing moved and retires nothing.
+		// (Config.ObserveRunner, Config.Observe, set in firingConfig), so run.Once finds nothing moved
+		// and retires nothing.
 		Generation: lanes,
 		// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
 		// Firing delegates to the `sub-agents-server:` entry exactly as a session does, and both

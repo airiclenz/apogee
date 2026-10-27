@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/refs"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -102,19 +104,20 @@ type Spec struct {
 	// Generation carries the two user lanes this Firing arms — the observe and sync Reactions the
 	// user's `reactions:` file resolved to (ADR 0076 A8) — handed WHOLE, as the Driver's one
 	// division of its list made them (domain.LanesOf). It is the ONE route the lanes take into a
-	// Firing: Once hands both to the Agent's swap door (Agent.SetReactions), which arms the sync lane
-	// inside the loop and passes the observe lane to the Config's ObserveRunner, and a Driver never
-	// writes Config.Reactions — that field is the engine's own construction-time set, and a list
-	// written to both would arm every entry twice.
+	// Firing: Once seeds both into the Agent it constructs (Config.Observe and Config.Sync, the
+	// construction seed agent.New arms before it announces the session), so the sync lane is armed
+	// inside the loop from the first Step, and a Driver never writes Config.Reactions — that field is
+	// the engine's own construction-time set, and a list written to both would arm every entry twice.
 	//
-	// Only Observe and Sync are read. Floor, Bypass and ContextFillNotice come from the Agent Once
-	// builds (Agent.Generation, seeded from the Config), so a Generation that left them at their
-	// zero cannot switch every guard back on under a Config that had switched them off.
+	// Only Observe and Sync are read. Floor, Bypass and ContextFillNotice stay as the caller composed
+	// them on the Config, so a Generation that left them at their zero cannot switch every guard back
+	// on under a Config that had switched them off.
 	//
-	// It is a field of its own rather than part of the Config because a Firing has no
-	// post-construction seam: Once builds the Agent itself, so the only way a Driver can reach
-	// the live swap door is to hand the lanes over here and let Once apply them. Both lanes empty ⇒
-	// nothing is armed and the run is byte-for-byte what it was before this field existed.
+	// It is a field of its own rather than written straight onto the Config because the observe lane
+	// has a second holder: the Config's ObserveRunner, built over the list Config.Observe names. Once
+	// hands the Runner this lane (ObserveRunner.Replace) before construction when it differs from that
+	// list — and only then, because a Replace retires the Runner's running generation. Both lanes
+	// empty ⇒ nothing is armed and the run is byte-for-byte what it was before this field existed.
 	Generation domain.Generation
 
 	// DelegationSeat is what the orientation block TELLS the model about that far seat — the
@@ -397,6 +400,56 @@ func holdRecord(spec Spec) (release func() error, isHeld bool, err error) {
 	return release, true, nil
 }
 
+// lanesRefused opens every error a Firing reports for reaction lanes the engine will not arm, whichever
+// step refused them: the observe hand-over seedLanes makes, or agent.New's own seed validation.
+const lanesRefused = "apogee: arm the firing's reaction lanes"
+
+// seedLanes writes the two user lanes a Firing arms (Spec.Generation) onto cfg as the Agent's
+// construction seed (Config.Observe, Config.Sync) — only those two: Floor, Bypass and
+// ContextFillNotice stay as the caller composed them. Two empty lanes leave cfg untouched, so a
+// Firing that arms nothing seeds nothing.
+//
+// The observe lane has a second holder, the Runner cfg.ObserveRunner names, built over cfg.Observe.
+// When the lane differs from that list — compared as the Agent compares a swapped-in one, every field
+// the Runner builds a worker out of — the Runner is handed it (ObserveRunner.Replace) here, before
+// construction, and New never does. It is validated first, with the checks the Agent's arming step
+// runs over both lanes (domain.Generation.Validate, then reactions.ValidateAll over the observe list),
+// so a list construction would refuse is never swapped into the Runner. Equal lists hand nothing:
+// a Replace retires the Runner's running generation.
+func seedLanes(cfg *domain.Config, lanes domain.Generation) error {
+	if len(lanes.Observe) == 0 && len(lanes.Sync) == 0 {
+		return nil
+	}
+	if runner := cfg.ObserveRunner; runner != nil && !reflect.DeepEqual(cfg.Observe, lanes.Observe) {
+		if err := validateLanes(lanes); err != nil {
+			return err
+		}
+		if err := runner.Replace(lanes.Observe); err != nil {
+			return err
+		}
+	}
+	cfg.Observe, cfg.Sync = lanes.Observe, lanes.Sync
+	return nil
+}
+
+// validateLanes is the arming step's lane validation, run over the two lanes alone before the
+// observe hand-over: the whole-value lane rules, then the observe list's own whole-list check, its
+// error carried as domain.ErrInvalidReaction as the Agent's arming step carries it, so the refusal
+// reads as the one construction would have given.
+func validateLanes(lanes domain.Generation) error {
+	seeded := domain.Generation{Observe: lanes.Observe, Sync: lanes.Sync}
+	if err := seeded.Validate(); err != nil {
+		return err
+	}
+	if err := reactions.ValidateAll(seeded.Observe); err != nil {
+		if errors.Is(err, domain.ErrInvalidReaction) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", domain.ErrInvalidReaction, err)
+	}
+	return nil
+}
+
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
 // FRESH Agent (no state is carried between Firings — ADR 0033, decision 5), submits the
 // prompt, drives the loop to the quiescent boundary, and saves the resulting session
@@ -442,44 +495,34 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	cfg.Asker = nil
 	cfg.Presenter = nil
 	cfg.Events = tap
-	// The construction boundary is announced by Once, not by agent.New: the lanes below are armed
-	// first, so the session-start advise lane the announcement starts sees the Firing's own advise
-	// entries and the window it opens holds its observe lane (Agent.AnnounceSessionStart).
-	cfg.DeferSessionStart = true
-
-	a, err := agent.New(cfg)
+	// The two lanes the caller armed (Spec.Generation), seeded into the Agent's construction with the
+	// caller's routing (the delegation seat and target) — so agent.New arms the sync lane and states
+	// the target's far width before it announces the session-started boundary, a `session-started`
+	// advise answer rides the run's first request, a gate answers its very first tool call, an advise
+	// span reaches its very first tool result and the observe lane reaches the Config's ObserveRunner
+	// ahead of the boundary's notice. Only the two lanes are taken from the Spec (seedLanes).
+	//
+	// A refused lane — from the observe hand-over below or from agent.New's own seed validation
+	// (agent.SeedRefusedError) — fails the Firing before its first Step, rather than running without
+	// it, and the Agent it would have built is never announced.
+	if err := seedLanes(&cfg, spec.Generation); err != nil {
+		return Result{}, fmt.Errorf("%s: %w", lanesRefused, err)
+	}
+	a, err := agent.New(cfg,
+		agent.WithDelegationSeat(spec.DelegationSeat),
+		agent.WithDelegationTarget(spec.DelegationTarget))
 	if err != nil {
+		if refused := (*agent.SeedRefusedError)(nil); errors.As(err, &refused) {
+			return Result{}, fmt.Errorf("%s: %w", lanesRefused, err)
+		}
 		return Result{}, fmt.Errorf("apogee: construct the firing's agent: %w", err)
 	}
 	defer func() { _ = a.Close() }()
 
-	// The two lanes the caller armed (Spec.Generation), installed through the live swap door before
-	// the session-started boundary is announced and before the first Step, so a `session-started`
-	// advise answer rides the run's first request, a gate answers its very first tool call, an advise
-	// span reaches its very first tool result and the observe lane reaches the Config's ObserveRunner
-	// ahead of the boundary's notice. It goes through the read-edit-hand-back idiom SetReactions
-	// documents rather than handing the Spec's value on: only the two lanes are taken from it,
-	// because the generation also carries the Floor enable set, Bypass and the notice switch that
-	// agent.New just seeded from the Config, and the Spec's own would put them back to their zero —
-	// every guard on, Bypass off — under a caller that had switched them.
-	//
-	// Two empty lanes are left alone rather than handed over, so a Firing that arms nothing makes no
-	// swap at all. The swap door validates both lanes (Agent.SetReactions) — a Firing whose lanes the
-	// engine will not arm fails here, before its first Step, rather than running without them.
-	if lanes := spec.Generation; len(lanes.Observe) > 0 || len(lanes.Sync) > 0 {
-		gen := a.Generation()
-		gen.Observe, gen.Sync = lanes.Observe, lanes.Sync
-		if err := a.SetReactions(gen); err != nil {
-			return Result{}, fmt.Errorf("apogee: arm the firing's reaction lanes: %w", err)
-		}
-	}
-	// Armed, so the session starts: a Firing refused at arming above was never announced.
-	a.AnnounceSessionStart()
-
 	// The record this run will be filed under, HELD from here to return (ADR 0022 D7's live-session
 	// hold), so `apogee undo <id>` — and any other door that asks Store.Hold first — is refused
 	// while the Firing can still write that record's journal. It is taken only now, after the
-	// Agent is built and its sync lane armed, so a Firing refused at construction leaves no
+	// Agent is built from its seed, so a Firing refused at construction leaves no
 	// <id>.lock behind; and only when the run has both a Store and a RecordID, so a run that keeps
 	// no record takes no hold and touches no disk.
 	release, isHeld, err := holdRecord(spec)
@@ -537,23 +580,6 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	a.SetJournal(journal, reason)
 
-	// The caller's routing, latched BEFORE the first Turn so the Firing's very first
-	// delegation is already routed — there is no heartbeat here to install it later. Both
-	// fields nil ⇒ neither setter is called and the run is byte-for-byte what it was before
-	// this seam existed.
-	//
-	// The seat BEFORE the target, and the order is load-bearing (ADR 0069 D6): installing a seat
-	// forgets the far width the engine states to the model (Agent.SetDelegationSeat), and a usable
-	// target is what states it. Applied the other way round, the seat would wipe the width the
-	// target had just stated, and with no heartbeat to re-state it the whole Firing would tell its
-	// model the session width.
-	if spec.DelegationSeat != nil {
-		a.SetDelegationSeat(spec.DelegationSeat)
-	}
-	if spec.DelegationTarget != nil {
-		a.SetDelegationTarget(spec.DelegationTarget)
-	}
-
 	// The prompt carries the same @file and /skill grammars a chat message does
 	// (internal/refs), so a Firing's references resolve in the loop exactly as a session's do.
 	in := domain.UserInput{
@@ -561,9 +587,9 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		FileRefs: refs.FileRefs(spec.Prompt),
 		SkillIDs: refs.SkillRefs(spec.Prompt, knownSkillID(spec.Config.Skills)),
 	}
-	// What this Firing is about to put in front of the model at Turn 1, taken HERE — after every
-	// setter above, because the orientation block spells the delegation seat and the menu is
-	// mode-filtered, and before Submit, because the read is idle-only. Every Result below carries
+	// What this Firing is about to put in front of the model at Turn 1, taken HERE — after the
+	// construction seed and the journal above, because the orientation block spells the delegation
+	// seat and the menu is mode-filtered, and before Submit, because the read is idle-only. Every Result below carries
 	// it, the submit-failure exit included.
 	contextCost := a.ContextCost()
 
