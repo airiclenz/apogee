@@ -49,7 +49,9 @@
 - 3 (re-check): recast (Once journal ratified call: New → holdRecord → openRecordJournal → SetJournal, journal dropped from the seed and the snapshot-store removal dropped; Bypass asserted by behaviour; setter/deferral grep in Acceptance; seeded lanes validated before Runner.Replace); yields to internal/run/run.go:479-484 (the hold is taken after the Agent is built)
 - 6 (re-check): guard folded (Goal names Runner.Replace as the observe list's refuser; pending Generation validated before Runner.Replace; wire_live.go replay-prose rule; deferral grep in Acceptance)
 
-## 1. ADR 0076: a construction seed is not a swap
+## 1. ADR 0076: a construction seed is not a swap — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): the amendment also records the plan's ratified Runner.Replace call (a Driver validates and calls Runner.Replace before New when its seeded observe list differs; New never does) as a refinement of A8's "only caller of Runner.Replace", and the Once-journal call (run.Once keeps SetJournal) — both from the plan header's ratified design calls.
 
 **What:**
 **Goal:** ADR 0076 records that seeding both reaction lanes at construction (`Config.Observe`, `Config.Sync`) is not a live swap, and that `SetReactions` stays the one live swap (A8). ADR 0069 records that seat-before-target is structural inside `agent.New`/`agent.Resume`.

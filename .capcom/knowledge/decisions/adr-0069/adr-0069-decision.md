@@ -83,6 +83,13 @@ after the fact, where it costs no cache.
 > A Firing has no heartbeat, so the reverse order, which it had, told the model the session width
 > for the whole run rather than for one beat.
 
+> **Note 2026-10-27 (plan `2026-10-27 - 00`; `adr-0076-amend-1027`).** Seat-before-target is now
+> structural inside `agent.New` and `agent.Resume`: the delegation seat and target ride the
+> construction seed, and construction applies the seed's seat and then its target, before it
+> announces `session-started`, so the first request states the target's width. Drivers no longer
+> order them — `lateEngine.Bind` and `run.Once` seed both instead of applying them after
+> construction, and the two notes above describe the order construction now keeps for them.
+
 **7 — A mixed reply is sized by the smaller cap; a single-seat reply keeps its seat's cap — this
 amends ADR 0039
 decision 3.** One depth-0 reply may now fan out to both seats at once, which ADR 0039 never had to
