@@ -230,7 +230,12 @@ NOTES (2026-10-27): takeNotes and takeIntoExchange share one locked helper, take
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestHeldLedger|TestBackground|TestWake|TestFinishNote|TestSnapshot_RoundTripsAHeld|TestRestoreState_ChecksTheHeldWorkflowNotes|TestSessionWindow_AWake|TestInterject' ./internal/agent/`
 **Commit:** `refactor(agent): background notes share the held ledger`
 
-## 10. sessionBriefing owns the window and the session-started lane
+## 10. sessionBriefing owns the window and the session-started lane — ✅ DONE (2026-10-27)
+
+NOTES (2026-10-27): consequential edit — internal/agent/doc.go: made necessary by the new briefing.go (the package's file map, pinned by TestDocMapNamesEveryFile, must name every non-test file)
+NOTES (2026-10-27): consequential edit — internal/agent/reactions_test.go: made necessary by retiring sessionWindow (a section-divider comment named it; now names sessionBriefing)
+NOTES (2026-10-27): the module takes what the caller read as one sessionArmed value (advise specs, observe ids, and the Runner — read per call from a.cfg.ObserveRunner, as today); its launcher (Agent.launchSessionAdvice) is bound in seedTopLevel; the Agent keeps the compaction-lane discard at the boundary (announceSessionStart stops it before boundaryArmed) and a new sessionStartedArmed helper reads the specs/ids for both announceSessionStart and fireNewlyArmed; startSessionAdvice and extendSessionAdvice are folded into boundaryArmed/liveArmed; sessionstart_test.go needed no change (no reach into the moved symbols)
+NOTES (2026-10-27): in TestBriefing_AnInputRacingABoundarySeesItWhole each input reads the lane's pending runs just BEFORE inputArrived, not right after: a read after it is unsound (an input that shut a still-shut window and then read the runs of a boundary that ran wholly in between would fail the assertion though the boundary was wholly after it); the launch stub yields (runtime.Gosched) to widen the replace→open span, and with the lock moved off the replace the test failed in 2 of 3 runs, passing 3 of 3 with it
 
 **What:** Depends on items 7 and 8.
 **Goal:** An unexported `sessionBriefing` (`internal/agent/briefing.go`, Agent field `briefing`) owns the pre-first-prompt window and the session-started lane. It also makes the `domain.ObserveRunner` session-started calls.

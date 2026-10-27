@@ -365,7 +365,7 @@ func TestSessionAdvise_AUserEntryTakesItsOwnTimeoutElseTheAdviseDefault(t *testi
 		"hook-default": domain.DefaultAdviseTimeout,
 		"hook-own":     own,
 	}
-	runs := a.sessionAdvice.waiting()
+	runs := a.briefing.lane.waiting()
 	if len(runs) != len(want) {
 		t.Fatalf("%d runs waiting, want %d", len(runs), len(want))
 	}

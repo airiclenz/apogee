@@ -281,7 +281,7 @@ func TestSessionAdvise_TheDefaultDeadlineIsTheAdviseClassDefault(t *testing.T) {
 	probe, _, _ := blockedUntilCancel()
 	a := sessionAdviseAgent(t, baseConfig(&recordingSink{}), echoResponder(t, "ok"), probe.reaction("ci", 0))
 
-	runs := a.sessionAdvice.waiting()
+	runs := a.briefing.lane.waiting()
 	if len(runs) != 1 || runs[0].timeout != domain.DefaultAdviseTimeout {
 		t.Fatalf("runs = %+v, want one under the %s advise default", runs, domain.DefaultAdviseTimeout)
 	}
@@ -435,7 +435,7 @@ func TestSessionAdvise_AnAbortedFirstExchangeKeepsTheAdvice(t *testing.T) {
 	responder := echoResponder(t, "ok")
 	a := sessionAdviseAgent(t, baseConfig(&recordingSink{}), responder, probe.reaction("ci", 0))
 	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
-		runs := a.sessionAdvice.waiting()
+		runs := a.briefing.lane.waiting()
 		if len(runs) != 1 {
 			return false
 		}
@@ -524,9 +524,9 @@ func TestSessionAdvise_ATimedOutRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 	timeout := testtime.Fixed(50 * time.Millisecond)
 	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("wedged", timeout))
 	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
-		return len(a.sessionAdvice.waiting()) == 1
+		return len(a.briefing.lane.waiting()) == 1
 	}, "the background run to be pending")
-	run := a.sessionAdvice.waiting()[0]
+	run := a.briefing.lane.waiting()[0]
 	// The run's deadline was set before it was pending, so an expiry of the same timeout started
 	// now ends no earlier than that deadline.
 	testtime.Eventually(t, testtime.Budget(5*time.Second), testtime.Expiry(timeout), "the background run's deadline to pass")
@@ -569,7 +569,7 @@ func TestSessionAdvise_AnErroredRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 	responder := echoResponder(t, "ok")
 	a := sessionAdviseAgent(t, cfg, responder, probe.reaction("ci", 0))
 	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
-		runs := a.sessionAdvice.waiting()
+		runs := a.briefing.lane.waiting()
 		if len(runs) != 1 {
 			return false
 		}
@@ -582,7 +582,7 @@ func TestSessionAdvise_AnErroredRunIsNeverReplayedAfterAnAbort(t *testing.T) {
 	}, "the background run to fail")
 
 	abortAfterTheJoin(t, a, "aborted prompt")
-	if got := a.sessionAdvice.waiting(); len(got) != 0 {
+	if got := a.briefing.lane.waiting(); len(got) != 0 {
 		t.Fatalf("pending after the abort = %d runs, want the reported run dropped", len(got))
 	}
 	runExchange(t, a, "next prompt")
@@ -655,7 +655,7 @@ func TestSessionAdvise_ABoundaryOverABlockedHandlerReturnsAtOnce(t *testing.T) {
 	}
 }
 
-// An advise entry a live swap arms inside the boundary's pre-first-prompt window (sessionWindow)
+// An advise entry a live swap arms inside the boundary's pre-first-prompt window (sessionBriefing)
 // starts for that session and is joined at its first opening, exactly as the boundary's own runs
 // are; armed after the first prompt it waits for the next boundary, and an entry that already ran
 // at the boundary never runs twice — with or without an observe Runner.
@@ -841,7 +841,7 @@ func TestSessionAdvise_ALiveArmAfterCloseStartsNoRun(t *testing.T) {
 	probe, _, _ := blockedUntilCancel()
 	a := liveAdviceAgent(t, &recordingSink{}, echoResponder(t, "ok"), true)
 	runner := a.cfg.ObserveRunner.(*startRecordingRunner)
-	t.Cleanup(a.sessionAdvice.stop) // the base tree's leaked run must not outlive the test
+	t.Cleanup(a.briefing.lane.stop) // the base tree's leaked run must not outlive the test
 
 	if err := a.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -852,7 +852,7 @@ func TestSessionAdvise_ALiveArmAfterCloseStartsNoRun(t *testing.T) {
 	a.installGeneration(gen)
 	a.fireNewlyArmed()
 
-	if waiting := a.sessionAdvice.waiting(); len(waiting) != 0 {
+	if waiting := a.briefing.lane.waiting(); len(waiting) != 0 {
 		t.Errorf("the advise lane holds %d runs after Close, want none", len(waiting))
 	}
 	if calls := probe.calls(); len(calls) != 0 {

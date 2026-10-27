@@ -180,7 +180,7 @@ type Agent struct {
 	// ADR 0076 A8 exists to abolish. genMu alone cannot cover it: the Runner's Replace must not run
 	// under the lock every armed Reaction's Bypass read takes. A boundary's session-started
 	// announcement takes it too (announceSessionStart), so a swap falls wholly before or wholly
-	// after the boundary its newly armed entries are read against (sessionWindow).
+	// after the boundary its newly armed entries are read against (sessionBriefing).
 	swapMu sync.Mutex
 
 	// forkNext is the MarkFork mark: it makes the next RestoreSession announce start "fork" rather
@@ -188,15 +188,12 @@ type Agent struct {
 	// boundary succeeds, so a refused fork restore never leaves it set for a later resume.
 	forkNext atomic.Bool
 
-	// window is the current Session boundary's pre-first-prompt window (sessionWindow): opened by
-	// the boundary's session-started announcement, shut by the session's first user message, its
-	// first Step or Close, so a session-started entry a live swap arms inside it fires for the
-	// session it joined.
-	window sessionWindow
-
-	// sessionAdvice is the session-start advise lane (sessionadvise.go): the background advise runs
-	// the current Session boundary started, joined by the session's next Exchange opening.
-	sessionAdvice sessionAdviseLane
+	// briefing is the session briefing (briefing.go): the current Session boundary's pre-first-prompt
+	// window — opened by the boundary's session-started announcement, shut by the session's first
+	// user message, its first Step or Close, so a session-started entry a live swap arms inside it
+	// fires for the session it joined — and the session-start advise lane, whose background runs the
+	// session's next Exchange opening joins.
+	briefing sessionBriefing
 
 	// compactionAdvice is the compaction lane (sessionadvise.go): the background advise runs the
 	// last top-level fold that ran started, joined by the next user-role message — the next
@@ -915,16 +912,13 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // it closes the Consoles; a resumed session starts them again from their folders (ResumeWorkflows).
 // It also cancels the session-start advise runs the last boundary started, and the compaction
 // advise runs the last fold started (sessionadvise.go) — after it shuts the boundary's
-// pre-first-prompt window (sessionWindow), so a live swap after Close arms a session-started
+// pre-first-prompt window (sessionBriefing.close), so a live swap after Close arms a session-started
 // entry for neither lane: no advise run starts and no observe entry reaches the Runner until a
 // later boundary reopens the window. No production Driver swaps after Close: cmd/apogee stops its
 // settings watchers and closes its Reaction Runner before the engine.
 func (a *Agent) Close() error {
 	if !a.isDelegate() {
-		// Shut before the lane stops: admit fires under the window's lock, so shutting first waits
-		// out an in-flight live arm, and the stop that follows cancels whatever it enqueued.
-		a.window.shut()
-		a.sessionAdvice.stop()
+		a.briefing.close() // shuts the window before it stops the session-start lane
 		a.compactionAdvice.stop()
 		a.stopAllBackground()
 		a.background.waitAll()
@@ -986,7 +980,7 @@ func (a *Agent) Submit(in domain.UserInput) error {
 	if err := a.turns.submit(in); err != nil {
 		return err
 	}
-	a.window.shut() // the session's first user message ends its pre-first-prompt window
+	a.briefing.inputArrived() // the session's first user message ends its pre-first-prompt window
 	return nil
 }
 
@@ -1728,28 +1722,27 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 // fireNewlyArmed is SetReactions' last act: while the current boundary's pre-first-prompt window is
 // open, it runs the session-started entries the committed lanes hold that have not yet run at this
 // boundary — and only those, with the boundary's own start. An advise entry starts in the
-// background and joins the boundary's runs (extendSessionAdvice), so the session's first opening
-// fences its answer; an observe entry fires through the Runner's narrowed door
-// (ObserveRunner.SessionStartedFor), when the Agent holds a Runner. Whatever armed them — a repo
-// entry adopted, or a global one added, before the first prompt — they join the session they were
-// armed in. The window's fired-id set is what keeps it to once: an unchanged generation, or an
-// entry removed and added back, names no id that has not run. It is enqueue-only, as every
-// boundary's announcement is: neither lane waits on a handler here.
+// background and joins the boundary's runs, so the session's first opening fences its answer; an
+// observe entry fires through the Runner's narrowed door (ObserveRunner.SessionStartedFor), when
+// the Agent holds a Runner. Whatever armed them — a repo entry adopted, or a global one added,
+// before the first prompt — they join the session they were armed in. The window's fired-id set is
+// what keeps it to once: an unchanged generation, or an entry removed and added back, names no id
+// that has not run. It reads the armed entries here, under genMu, and hands them to the briefing
+// (sessionBriefing.liveArmed), which never takes genMu. It is enqueue-only, as every boundary's
+// announcement is: neither lane waits on a handler here.
 func (a *Agent) fireNewlyArmed() {
+	a.briefing.liveArmed(a.sessionStartedArmed())
+}
+
+// sessionStartedArmed reads what a boundary or a live swap hands the briefing: the armed advise
+// entries on session-started that Bypass leaves on (sessionAdviseSpecs), the session-started ids of
+// the observe list the Runner holds, and the Runner itself.
+func (a *Agent) sessionStartedArmed() sessionArmed {
 	advise := a.sessionAdviseSpecs(domain.MomentSessionStarted)
 	a.genMu.RLock()
 	observe := sessionStartedIDs(a.gen.Observe)
 	a.genMu.RUnlock()
-	candidates := append(sessionStartedIDs(advise), observe...)
-	a.window.admit(candidates, func(start domain.SessionStart, turn int, ids []string) {
-		a.extendSessionAdvice(start, turn, slices.DeleteFunc(advise, func(r domain.Reaction) bool {
-			return !slices.Contains(ids, r.ID)
-		}))
-		fired := slices.DeleteFunc(observe, func(id string) bool { return !slices.Contains(ids, id) })
-		if runner := a.cfg.ObserveRunner; runner != nil && len(fired) > 0 {
-			runner.SessionStartedFor(start, fired)
-		}
-	})
+	return sessionArmed{advise: advise, observe: observe, runner: a.cfg.ObserveRunner}
 }
 
 // swapObserve is SetReactions' Runner half: it hands list to the observe Runner when it differs
@@ -2218,76 +2211,6 @@ func (a *Agent) MarkFork() {
 		return
 	}
 	a.forkNext.Store(true)
-}
-
-// sessionWindow is one Session boundary's PRE-FIRST-PROMPT window: the span from the boundary's
-// session-started announcement to the session's first user message (Submit, or the Wake that opens
-// an Exchange without one) or, for a session restored mid-Exchange or with its input still queued,
-// to the first Step that continues it (Agent.step) — or to Agent.Close, whichever comes first: a
-// closed Agent's window stays shut for both lanes. A session-started entry a live swap arms inside
-// it runs for the session it joined (Agent.fireNewlyArmed) — an advise entry fenced at the first
-// opening, an observe entry fired through the Runner; one armed after it waits for the next
-// boundary.
-//
-// fired is the boundary's fired-id set: the ids of the session-started entries the boundary's
-// announcement ran — the advise runs it started and the observe entries it reached — plus every id
-// run since through a live swap. "Newly armed" is read against it, never against the generation
-// the swap replaced, so removing an entry and adding it back inside the window does not run it
-// twice. The window is per boundary: each announcement reopens it with a fresh set, and the zero
-// value — a constructed Agent before its announcement, a delegate — is shut. It opens with or
-// without an observe Runner: the advise lane is the engine's own.
-//
-// mu guards it: the boundaries and the swaps that read it hold swapMu as well, but the first user
-// message shuts it from whatever goroutine submits.
-type sessionWindow struct {
-	mu    sync.Mutex
-	open  bool
-	start domain.SessionStart
-	turn  int
-	fired map[string]bool
-}
-
-// opened reopens the window for a boundary announced with start at Turn turn, its fired-id set
-// seeded with fired: the ids of the session-started entries the announcement itself ran, in both
-// lanes.
-func (w *sessionWindow) opened(start domain.SessionStart, turn int, fired []string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.open, w.start, w.turn, w.fired = true, start, turn, map[string]bool{}
-	for _, id := range fired {
-		w.fired[id] = true
-	}
-}
-
-// admit hands fire the ids among ids not yet run at this boundary, with the boundary's start and
-// Turn, booking them as fired; it calls nothing while the window is shut or when every id has run.
-// fire runs under the window's lock, so a first user message shutting the window concurrently
-// waits for it: whatever fire puts in place is there before the session's first Step, which shuts
-// the window before it joins its opening (Agent.step). fire must therefore only enqueue.
-func (w *sessionWindow) admit(ids []string, fire func(start domain.SessionStart, turn int, ids []string)) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if !w.open {
-		return
-	}
-	var fresh []string
-	for _, id := range ids {
-		if !w.fired[id] {
-			w.fired[id] = true
-			fresh = append(fresh, id)
-		}
-	}
-	if len(fresh) > 0 {
-		fire(w.start, w.turn, fresh)
-	}
-}
-
-// shut ends the window: the session has sent its first user message, a Step has continued a
-// restored one, or the Agent has closed.
-func (w *sessionWindow) shut() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.open, w.fired = false, nil
 }
 
 // sessionStartedIDs returns the ids of the entries in list that subscribe to the session-started

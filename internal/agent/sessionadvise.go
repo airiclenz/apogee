@@ -14,7 +14,8 @@ import (
 // The session advise lanes (ADR 0076 D6, 2026-10-19 and 2026-10-21 amendments): ADR 0076's non-tool
 // advise slots, one lane per Moment, each fencing its answers ahead of a user-role message's text.
 //
-// The session-start lane serves the session-started notice. At every top-level Session boundary the agent starts each
+// The session-start lane serves the session-started notice, held by the session briefing
+// (sessionBriefing, briefing.go). At every top-level Session boundary the agent starts each
 // armed advise-class Reaction on session-started in the BACKGROUND, under its deadline (D7); the
 // first request that carries a new user message — the opening of the session's next Exchange —
 // joins them, waiting only for what is left of each entry's deadline, and fences their answers, in
@@ -177,24 +178,6 @@ func (l *sessionAdviseLane) forgetDelivered() {
 	l.held.forget()
 }
 
-// startSessionAdvice is a Session boundary's share of the lanes: it discards the compaction lane's
-// runs — the history they would re-brief is gone with the boundary —, cancels the previous
-// boundary's runs and starts, in the background, every armed advise Reaction on session-started
-// that Bypass leaves on (sessionAdviseSpecs), each under its own deadline (syncTimeout), for the
-// boundary announced with start at Turn turn. It returns at once whatever the handlers do, with
-// the ids of the entries it started — the boundary's pre-first-prompt window counts them as fired
-// (sessionWindow). A delegate starts no session and so starts no runs.
-func (a *Agent) startSessionAdvice(start domain.SessionStart, turn int) []string {
-	if a.isDelegate() {
-		return nil
-	}
-	a.compactionAdvice.stop()
-	specs := a.sessionAdviseSpecs(domain.MomentSessionStarted)
-	runs := newSessionAdviseRuns(specs, sessionStartedDoc(start))
-	a.launchSessionAdvice(a.sessionAdvice.replace(runs), turn, runs)
-	return sessionStartedIDs(specs)
-}
-
 // startCompactionAdvice is a fold's share of the compaction lane, called as the fold begins: it
 // starts, in the background, every armed advise Reaction on compaction-finished that Bypass leaves
 // on, each under its own deadline, with fold on its document, and returns them staged on a lane of
@@ -215,19 +198,6 @@ func (a *Agent) startCompactionAdvice(fold domain.CompactionFold, turn int) *ses
 // sessionStartedDoc is the seam document a session-started run is called with.
 func sessionStartedDoc(start domain.SessionStart) domain.SeamPayload {
 	return domain.SeamPayload{Event: domain.MomentSessionStarted, Start: start}
-}
-
-// extendSessionAdvice is a live swap's share of the lane: it starts, in the background, the advise
-// entries specs names — armed inside the boundary's pre-first-prompt window and not yet run at it
-// (Agent.fireNewlyArmed) — for the boundary announced with start at Turn turn, and adds them to
-// the boundary's pending runs, so the session's first opening joins them with the boundary's own.
-// Like the boundary, it returns at once whatever the handlers do.
-func (a *Agent) extendSessionAdvice(start domain.SessionStart, turn int, specs []domain.Reaction) {
-	if len(specs) == 0 {
-		return
-	}
-	runs := newSessionAdviseRuns(specs, sessionStartedDoc(start))
-	a.launchSessionAdvice(a.sessionAdvice.extend(runs), turn, runs)
 }
 
 // sessionAdviseSpecs returns the armed advise Reactions on m that Bypass leaves on (D9), in ladder
@@ -320,7 +290,7 @@ func (a *Agent) callSessionAdvice(
 // appended: it joins the session-start lane's runs and then the compaction lane's — a fold between
 // Exchanges re-briefs the model at the opening that follows it — onto the opening (joinAdvice).
 func (a *Agent) joinSessionAdvice(ctx context.Context, turn int) {
-	a.joinAdvice(ctx, turn, &a.sessionAdvice, &a.compactionAdvice)
+	a.joinAdvice(ctx, turn, &a.briefing.lane, &a.compactionAdvice)
 }
 
 // joinCompactionAdvice is the mid-Exchange fold's join, run by refold right after a fold that ran

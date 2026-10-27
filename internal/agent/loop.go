@@ -66,11 +66,11 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	ctx = domain.WithPromptSlot(ctx, a.prompts)
 
 	// A Step moves the conversation on, so the session is past its pre-first-prompt window
-	// (sessionWindow) whatever brought it here. Submit and Wake shut it already; this is the one
+	// (sessionBriefing) whatever brought it here. Submit and Wake shut it already; this is the one
 	// site that shuts it for a session restored mid-Exchange or with its input still queued, which
 	// continues through Step with neither — an entry a later swap arms then waits for the next
 	// boundary. Shutting a shut window is a no-op, and a delegate's never opens.
-	a.window.shut()
+	a.briefing.inputArrived()
 
 	// Stale-tool-result Pruning (structural): rewrite tool results the model has finished with into
 	// one-line stubs before this Turn's request is built. It runs BEFORE the fold below because it

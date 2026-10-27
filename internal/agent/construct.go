@@ -199,7 +199,7 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 func (a *Agent) exchangeClosed() {
 	a.closeUndoGroup()
 	a.background.forgetDelivered()
-	a.sessionAdvice.forgetDelivered()
+	a.briefing.lane.forgetDelivered()
 	a.compactionAdvice.forgetDelivered()
 }
 
@@ -229,7 +229,7 @@ func (a *Agent) turnRolledBack() {
 func (a *Agent) exchangeAborted() {
 	a.retained.rollBackExchange()
 	a.background.restoreDelivered()
-	a.sessionAdvice.restoreDelivered()
+	a.briefing.lane.restoreDelivered()
 	a.compactionAdvice.restoreDelivered()
 }
 
@@ -243,6 +243,7 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
 	a.journal = undo.New()                                 // the per-Exchange undo record (ADR 0051)
 	a.consoles = console.New()                             // the engine's live Consoles (ADR 0059)
+	a.briefing.launch = a.launchSessionAdvice              // the session briefing starts its advise runs through this Agent's handlers
 	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
 	a.workflowLive = a.background.isLive                   // the tree's workflow liveness is this root's background set
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
@@ -693,30 +694,26 @@ func (a *Agent) applyConstructionSeed(o constructOptions) {
 
 // announceSessionStart is one Session boundary's announcement, made exactly once per boundary: each
 // boundary's own call site makes this one call. Only the top-level Agent announces — a delegate
-// starts no session. It starts the boundary's session-start advise runs in the background
-// (startSessionAdvice, sessionadvise.go) and hands the session-started notice to the observe
-// Runner (Config.ObserveRunner.SessionStarted) when the Agent holds one; the advise lane is the
-// engine's own, so it starts with or without a Runner.
+// starts no session. It discards the compaction lane's runs — the history they would re-brief is
+// gone with the boundary — and hands the session briefing (sessionBriefing.boundaryArmed,
+// briefing.go) the boundary's armed session-started entries: the briefing starts the boundary's
+// session-start advise runs in the background, each under its own deadline (syncTimeout), and
+// hands the session-started notice to the observe Runner (Config.ObserveRunner.SessionStarted)
+// when the Agent holds one; the advise lane is the engine's own, so it starts with or without a
+// Runner.
 //
-// It also opens the boundary's pre-first-prompt window (sessionWindow) over both lanes — the advise
-// runs it started and the session-started entries of the observe list the Runner holds — so an
-// entry a later live swap arms before the first user message runs once for this session
-// (fireNewlyArmed), and one the boundary already ran never runs again. It holds swapMu across all
-// of it, so a swap is wholly before the announcement — and run by it — or wholly after, and read
-// against its fired-id set.
+// The briefing also opens the boundary's pre-first-prompt window over both lanes — the advise runs
+// it started and the session-started entries of the observe list the Runner holds — so an entry a
+// later live swap arms before the first user message runs once for this session (fireNewlyArmed),
+// and one the boundary already ran never runs again. It holds swapMu across all of it, so a swap is
+// wholly before the announcement — and run by it — or wholly after, and read against its fired-id
+// set.
 func (a *Agent) announceSessionStart(start domain.SessionStart) {
 	if a.isDelegate() {
 		return
 	}
 	a.swapMu.Lock()
 	defer a.swapMu.Unlock()
-	turn := a.turns.index
-	fired := a.startSessionAdvice(start, turn) // background-only: the boundary never waits on an advise handler
-	a.genMu.RLock()
-	fired = append(fired, sessionStartedIDs(a.gen.Observe)...)
-	a.genMu.RUnlock()
-	a.window.opened(start, turn, fired)
-	if runner := a.cfg.ObserveRunner; runner != nil {
-		runner.SessionStarted(start)
-	}
+	a.compactionAdvice.stop()
+	a.briefing.boundaryArmed(start, a.turns.index, a.sessionStartedArmed()) // background-only: the boundary never waits on an advise handler
 }

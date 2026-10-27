@@ -1085,7 +1085,7 @@ func TestPostResponseSeamClosesOncePerAttemptAcrossARetry(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// session-started entries armed before the first prompt (sessionWindow)
+// session-started entries armed before the first prompt (sessionBriefing)
 // ---------------------------------------------------------------------------
 
 // sessionStartedEntry is an observe entry subscribing to the session-started notice; project marks
