@@ -127,7 +127,11 @@ internal/security/execsafety.go — ResolveProjectProgram; internal/agent/syncex
 **Acceptance:** `! grep -rn 'ProjectPin\.\(Root\|Changed\|Programs\)\|Pin\.\(Root\|Changed\|Programs\)' internal cmd docs --exclude-dir=archived --exclude-dir=plans`; `grep -q 'Admit' internal/security/execsafety.go`; `go build ./... && go vet ./internal/... && GOMEMLIMIT=2GiB go test -count=1 -run 'CarriesItsPin|TestAdoptedPin' ./internal/config/`, then `-run TestRepoRun ./internal/agent/`, then `-run TestConnect ./internal/mcp/`
 **Commit:** `refactor(domain): a Project pin exposes only Admit`
 
-## 5. config returns the project offer beside Options
+## 5. config returns the project offer beside Options — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): ProjectOffer, its Clone and the offerOf helper live in execlayer.go beside ProjectProposals; allow.go needed no change (an AllowRule list clones with slices.Clone).
+NOTES (2026-10-28): OverlayProjectOffer answers the zero offer whenever no project layer is taken (no file, nothing stated, or a skipped layer), rather than echoing base's own Proposals; for a global-only base the two are the same.
+NOTES (2026-10-28): any error other than *StartupUndetermined answers the zero offer from ApplyConfigOffer and LoadLayeredOffer.
 
 **What:** Depends on item 4.
 **Goal:** `internal/config` exports a `ProjectOffer` value: the structured `ProjectProposals` plus the Allow lists `Proposed` and `Rejected`. `LoadLayeredOffer`, `OverlayProjectOffer` and `ApplyConfigOffer` return it beside the resolved `Options`, from the same read. The existing functions still fill `Options.Proposals` and `Options.AllowRules.Proposed/Rejected`, and no caller changes.

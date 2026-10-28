@@ -7441,3 +7441,21 @@ func TestCurrencyLoads(t *testing.T) {
 		})
 	}
 }
+
+// ApplyConfigOffer answers the project offer beside the refusal a config naming no startup server
+// earns: *StartupUndetermined still comes back, and the offer is filled from the same read, as
+// opts is.
+func TestApplyConfigOfferFillsTheOfferBesideAnUndeterminedStartup(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := offerFixture(t, "mode: plan\n")
+	opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: projectRoot, ServerFlagBound: true}
+
+	offer, err := ApplyConfigOffer(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify)
+
+	var undetermined *StartupUndetermined
+	if !errors.As(err, &undetermined) {
+		t.Fatalf("err = %v (%T); want a *StartupUndetermined", err, err)
+	}
+	assertOfferOf(t, opts, offer)
+}

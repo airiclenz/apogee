@@ -100,6 +100,36 @@ func cloneProposals(list []domain.Proposal) []domain.Proposal {
 	return out
 }
 
+// ProjectOffer is what a layered load's Project config offers the user to answer: its structured
+// granting entries sorted by the adoption record (Proposals), and its Allow rules no answer is
+// recorded for (Proposed) and the ones the user turned down (Rejected). It is read from the same
+// files as the Options it is returned beside, and equals that Options' Proposals and
+// AllowRules.Proposed/Rejected. Nothing in it grants anything. The zero value is no offer.
+type ProjectOffer struct {
+	Proposals ProjectProposals
+	Proposed  []AllowRule
+	Rejected  []AllowRule
+}
+
+// Clone returns o with every list copied (ProjectProposals.Clone, and each Allow list by value),
+// so the copy shares no backing array with o. A nil list stays nil.
+func (o ProjectOffer) Clone() ProjectOffer {
+	o.Proposals = o.Proposals.Clone()
+	o.Proposed = slices.Clone(o.Proposed)
+	o.Rejected = slices.Clone(o.Rejected)
+	return o
+}
+
+// offerOf is the project offer resolved options carry — their Proposals and their inert Allow
+// lists — copied, so the offer and opts share no backing array.
+func offerOf(opts *Options) ProjectOffer {
+	return ProjectOffer{
+		Proposals: opts.Proposals,
+		Proposed:  opts.AllowRules.Proposed,
+		Rejected:  opts.AllowRules.Rejected,
+	}.Clone()
+}
+
 // projectServers is a Project config's MCP servers resolved by Adoption: the adopted ones as the
 // servers they connect as, and every one as a Proposal.
 type projectServers struct {

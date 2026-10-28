@@ -99,13 +99,22 @@ type projectEntry struct {
 // defect in the project file is a notice and the global file alone answers.
 func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]byte, error),
 	notify func(string)) (Options, error) {
+	o, _, err := LoadLayeredOffer(globalPath, projectRoot, readFile, notify)
+	return o, err
+}
+
+// LoadLayeredOffer is [LoadLayeredConfig] answering, beside the options, the [ProjectOffer] the
+// same read resolved: it equals the options' Proposals and AllowRules.Proposed/Rejected, and shares
+// no backing array with them. An error answers the zero options and the zero offer.
+func LoadLayeredOffer(globalPath, projectRoot string, readFile func(string) ([]byte, error),
+	notify func(string)) (Options, ProjectOffer, error) {
 	fc, stated, err := parseLayeredConfig(globalPath, projectRoot, readFile, notify, false)
 	if err != nil {
-		return Options{}, err
+		return Options{}, ProjectOffer{}, err
 	}
 	var o Options
 	if err := applyFile(&o, fc); err != nil {
-		return Options{}, err
+		return Options{}, ProjectOffer{}, err
 	}
 	o.ProjectKeys = stated.project
 	o.DangerousRules.ProjectAdd = stated.projectDangerous
@@ -113,7 +122,7 @@ func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]
 	o.MCPServers = stated.projectServers.effective(o.MCPServers)
 	o.Reactions = stated.projectReactions.effective(o.Reactions)
 	o.Proposals = stated.proposals()
-	return o, nil
+	return o, offerOf(&o), nil
 }
 
 // layerKeys is which registry paths each file of a layered load stated: global, the keys the global
@@ -249,15 +258,26 @@ func ReadGlobalDocument(configDir string, readFile func(string) ([]byte, error),
 // overlays of one base may run concurrently.
 func OverlayProjectLayer(base Options, global GlobalDocument, projectRoot string,
 	readFile func(string) ([]byte, error), notify func(string)) Options {
+	overlaid, _ := OverlayProjectOffer(base, global, projectRoot, readFile, notify)
+	return overlaid
+}
+
+// OverlayProjectOffer is [OverlayProjectLayer] answering, beside the overlaid options, the
+// [ProjectOffer] the same read resolved: it equals the overlaid options' Proposals and
+// AllowRules.Proposed/Rejected, and shares no backing array with them. When no project layer is
+// taken — no project file, one that states nothing, or one that cannot be layered — the options are
+// base and the offer is the zero value: there is no project to offer anything.
+func OverlayProjectOffer(base Options, global GlobalDocument, projectRoot string,
+	readFile func(string) ([]byte, error), notify func(string)) (Options, ProjectOffer) {
 	var stated layerKeys
 	fc, ok := layerProject(global.data, global.path, projectRoot, readFile, notify, &stated)
 	if !ok {
-		return base
+		return base, ProjectOffer{}
 	}
 	overlaid := base
 	if err := applyProjectRows(&overlaid, fc, base.Overrides); err != nil {
 		notify(fmt.Sprintf(projectSkippedNotice, projectFilePath(projectRoot), sansPrefix{err}.Error()))
-		return base
+		return base, ProjectOffer{}
 	}
 	overlaid.ProjectKeys = stated.project
 	overlaid.DangerousRules.ProjectAdd = stated.projectDangerous
@@ -265,7 +285,7 @@ func OverlayProjectLayer(base Options, global GlobalDocument, projectRoot string
 	overlaid.MCPServers = stated.projectServers.effective(globalMCPServers(base.MCPServers))
 	overlaid.Reactions = stated.projectReactions.effective(globalReactions(base.Reactions))
 	overlaid.Proposals = stated.proposals()
-	return overlaid
+	return overlaid, offerOf(&overlaid)
 }
 
 // applyProjectRows is the file pass (applyFile) narrowed to the keys a Project config may set —

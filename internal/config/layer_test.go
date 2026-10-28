@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/adoption"
 )
 
 // layerFixture writes a global config home and a Project root side by side under one temp dir and
@@ -555,5 +557,142 @@ func TestOverlayProjectLayerLeavesTheBaseUnchanged(t *testing.T) {
 		t.Errorf("base after the overlay: retries %d, tools.disabled %q, deny-hosts %q; want 2, %q, %q",
 			base.WorkflowRetries, disabled[:cap(disabled)], denied[:cap(denied)],
 			before.ToolsDisabled, before.URLDenyHosts)
+	}
+}
+
+// offerProjectYAML is a Project config stating three entries of each kind it may propose: MCP
+// servers, reactions and terminal Allow rules.
+const offerProjectYAML = "mcp-servers:\n" +
+	"  - name: srv-a\n    transport: stdio\n    command: srv-a\n" +
+	"  - name: srv-b\n    transport: stdio\n    command: srv-b\n" +
+	"  - name: srv-c\n    transport: stdio\n    command: srv-c\n" +
+	"reactions:\n" +
+	"  - id: rx-a\n    on: [file-changed]\n    run: [echo, a]\n" +
+	"  - id: rx-b\n    on: [file-changed]\n    run: [echo, b]\n" +
+	"  - id: rx-c\n    on: [file-changed]\n    run: [echo, c]\n" +
+	"allow:\n  terminal: [go test, go vet, go build]\n"
+
+// offerFixture writes global beside offerProjectYAML and records an answer for some of the
+// project's entries: of each kind, the first is adopted, the second rejected and the third left
+// proposed.
+func offerFixture(t *testing.T, global string) (globalPath, projectRoot string) {
+	t.Helper()
+
+	globalPath, projectRoot = layerFixture(t, global, offerProjectYAML)
+	o, _ := loadLayered(t, globalPath, projectRoot)
+	store := adoptionStore(t, globalPath, projectRoot)
+	for _, p := range o.Proposals.Proposed {
+		entry := adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}
+		switch {
+		case strings.HasSuffix(p.Handle, "-a"):
+			if err := store.Adopt(entry); err != nil {
+				t.Fatalf("Adopt %s: %v", p.Handle, err)
+			}
+		case strings.HasSuffix(p.Handle, "-b"):
+			if err := store.Reject(entry); err != nil {
+				t.Fatalf("Reject %s: %v", p.Handle, err)
+			}
+		}
+	}
+	if err := store.Adopt(adoption.Entry{Kind: "terminal", Text: "go test"}); err != nil {
+		t.Fatalf("Adopt go test: %v", err)
+	}
+	if err := store.Reject(adoption.Entry{Kind: "terminal", Text: "go vet"}); err != nil {
+		t.Fatalf("Reject go vet: %v", err)
+	}
+	return globalPath, projectRoot
+}
+
+// assertOfferOf fails unless offer equals the project offer o reports — o's Proposals and its inert
+// Allow lists — holds one adopted, one rejected and one proposed entry of each kind, and shares no
+// backing array with o.
+func assertOfferOf(t *testing.T, o Options, offer ProjectOffer) {
+	t.Helper()
+
+	want := ProjectOffer{Proposals: o.Proposals, Proposed: o.AllowRules.Proposed, Rejected: o.AllowRules.Rejected}
+	if !reflect.DeepEqual(offer, want) {
+		t.Fatalf("offer = %+v\nwant the options' fields %+v", offer, want)
+	}
+	lists := map[string][]string{
+		"adopted":  proposalHandles(offer.Proposals.Adopted),
+		"proposed": proposalHandles(offer.Proposals.Proposed),
+		"rejected": proposalHandles(offer.Proposals.Rejected),
+	}
+	wantLists := map[string][]string{
+		"adopted":  {"srv-a", "rx-a"},
+		"proposed": {"srv-c", "rx-c"},
+		"rejected": {"srv-b", "rx-b"},
+	}
+	if !reflect.DeepEqual(lists, wantLists) {
+		t.Errorf("offer proposals = %q; want %q", lists, wantLists)
+	}
+	if len(offer.Proposed) != 1 || offer.Proposed[0].Text != "go build" ||
+		len(offer.Rejected) != 1 || offer.Rejected[0].Text != "go vet" {
+		t.Errorf("offer allow lists = proposed %+v, rejected %+v; want go build proposed, go vet rejected",
+			offer.Proposed, offer.Rejected)
+	}
+	if &offer.Proposed[0] == &o.AllowRules.Proposed[0] || &offer.Rejected[0] == &o.AllowRules.Rejected[0] ||
+		&offer.Proposals.Proposed[0] == &o.Proposals.Proposed[0] {
+		t.Error("the offer shares a backing array with the options it was returned beside")
+	}
+}
+
+// The layered loaders answer the project offer beside the options, from the same read: the offer
+// is exactly the options' Proposals and inert Allow lists, for a project holding adopted, rejected
+// and proposed entries of every kind.
+func TestLoadLayeredOfferEqualsTheOptionsFields(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := offerFixture(t, "mode: plan\n")
+
+	t.Run("LoadLayeredOffer", func(t *testing.T) {
+		t.Parallel()
+
+		o, offer, err := LoadLayeredOffer(globalPath, projectRoot, os.ReadFile, noNotify)
+		if err != nil {
+			t.Fatalf("LoadLayeredOffer: %v", err)
+		}
+
+		assertOfferOf(t, o, offer)
+		if legacy, _ := loadLayered(t, globalPath, projectRoot); !reflect.DeepEqual(legacy, o) {
+			t.Errorf("LoadLayeredConfig = %+v\nwant the options LoadLayeredOffer answers %+v", legacy, o)
+		}
+	})
+	t.Run("OverlayProjectOffer", func(t *testing.T) {
+		t.Parallel()
+		base := resolveAt(t, globalPath, projectRoot, true)
+		doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
+		if err != nil {
+			t.Fatalf("ReadGlobalDocument: %v", err)
+		}
+
+		overlaid, offer := OverlayProjectOffer(base, doc, projectRoot, os.ReadFile, noNotify)
+
+		assertOfferOf(t, overlaid, offer)
+		legacy := OverlayProjectLayer(base, doc, projectRoot, os.ReadFile, noNotify)
+		if !reflect.DeepEqual(legacy, overlaid) {
+			t.Errorf("OverlayProjectLayer = %+v\nwant the options OverlayProjectOffer answers %+v",
+				legacy, overlaid)
+		}
+	})
+}
+
+// An overlay that takes no project layer — there is no project file — answers the base and an empty
+// offer: there is no project to offer anything.
+func TestOverlayProjectOfferWithoutAProjectFileIsEmpty(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "mode: plan\n", "")
+	base := resolveAt(t, globalPath, projectRoot, true)
+	doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("ReadGlobalDocument: %v", err)
+	}
+
+	overlaid, offer := OverlayProjectOffer(base, doc, projectRoot, os.ReadFile, noNotify)
+
+	if !reflect.DeepEqual(offer, ProjectOffer{}) {
+		t.Errorf("offer = %+v; want the zero offer", offer)
+	}
+	if !reflect.DeepEqual(overlaid, base) {
+		t.Errorf("overlay = %+v\nwant the base %+v", overlaid, base)
 	}
 }

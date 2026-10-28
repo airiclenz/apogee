@@ -3648,12 +3648,22 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 // 7), and it can only do that if the rest of the resolution — the servers list to pick from, the
 // mode, the roots — is standing in opts by the time it reads the refusal.
 func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) string, readFile func(string) ([]byte, error), notify func(string)) error {
+	_, err := ApplyConfigOffer(opts, changed, getenv, readFile, notify)
+	return err
+}
+
+// ApplyConfigOffer is [ApplyConfig] answering, beside the error, the [ProjectOffer] the same read
+// resolved: it equals opts' Proposals and AllowRules.Proposed/Rejected once resolution has written
+// them, and shares no backing array with them. [StartupUndetermined] still comes back LAST with the
+// offer filled, as opts is; any other error answers the zero offer.
+func ApplyConfigOffer(opts *Options, changed func(string) bool, getenv func(string) string,
+	readFile func(string) ([]byte, error), notify func(string)) (ProjectOffer, error) {
 	notices, err := ResolveOptions(opts, changed, getenv, readFile, notify, platform.HostID())
 	for _, n := range notices {
 		notify(n)
 	}
 	if err != nil {
-		return err
+		return ProjectOffer{}, err
 	}
 	// Which server this session starts on. It is the last step of resolution rather than part of it
 	// (ADR 0036): the answer needs the resolved list, the resolved name and the raw invocation
@@ -3737,7 +3747,7 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// Held from the selection step above: everything is resolved, so the caller that can ask a
 	// human has what it needs to ask, and the caller that cannot refuses with the same message it
 	// has always printed.
-	return startupErr
+	return offerOf(opts), startupErr
 }
 
 // startupOverrides carries the raw invocation overrides ADR 0036 detached from the config schema:
