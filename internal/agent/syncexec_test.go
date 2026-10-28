@@ -359,6 +359,18 @@ func (p fakePin) Root() string               { return p.root }
 func (p fakePin) Changed() ([]string, error) { return p.changed, p.err }
 func (p fakePin) Programs() []string         { return p.programs }
 
+// Admit reports the stated check the way the real pin does: a check that could not be made, or
+// any changed file, is a *domain.PinMovedError; otherwise the root and the pinned programs.
+func (p fakePin) Admit() (domain.PinLaunch, error) {
+	if p.err != nil {
+		return domain.PinLaunch{}, &domain.PinMovedError{Err: p.err}
+	}
+	if len(p.changed) > 0 {
+		return domain.PinLaunch{}, &domain.PinMovedError{Files: p.changed}
+	}
+	return domain.PinLaunch{Dir: p.root, Programs: p.programs}, nil
+}
+
 // repoReaction is an adopted repo reaction over the script at root/scripts/fmt.sh, written with
 // body, whose pin reports changed. The argv is the relative spelling a repo writes.
 func repoReaction(t *testing.T, root string, class domain.Class, body string, changed ...string) domain.Reaction {

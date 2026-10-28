@@ -437,6 +437,18 @@ func (p fakeProjectPin) Root() string               { return p.root }
 func (p fakeProjectPin) Changed() ([]string, error) { return p.changed, p.err }
 func (p fakeProjectPin) Programs() []string         { return p.programs }
 
+// Admit reports the stated check the way the real pin does: a check that could not be made, or
+// any changed file, is a *domain.PinMovedError; otherwise the root and the pinned programs.
+func (p fakeProjectPin) Admit() (domain.PinLaunch, error) {
+	if p.err != nil {
+		return domain.PinLaunch{}, &domain.PinMovedError{Err: p.err}
+	}
+	if len(p.changed) > 0 {
+		return domain.PinLaunch{}, &domain.PinMovedError{Files: p.changed}
+	}
+	return domain.PinLaunch{Dir: p.root, Programs: p.programs}, nil
+}
+
 // repoStdioServer plants the fixture server at rel inside a fresh Project root, which is also the
 // workspace the connect fences, and returns a Project stdio config launching it by its absolute
 // path under a pin holding it alone.

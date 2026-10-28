@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/airiclenz/apogee/internal/adoption"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // writeProjectFile writes content to the slash-separated path under root, making its folders.
@@ -422,6 +424,88 @@ func TestVerifyExecPinsNamesAChangedFile(t *testing.T) {
 			t.Error("VerifyExecPins accepted a text that is not a pin")
 		}
 	})
+}
+
+// admitEntryYAML is a repo server whose pin holds two project files: its program and the file its
+// `env:` value loads.
+const admitEntryYAML = "name: docs\ncommand: ./bin/server\nenv: [NODE_OPTIONS=--require ./hook.js]\n"
+
+// adoptedAdmitPin plants admitEntryYAML's two files under a fresh Project root and returns the root
+// with the pin the user adopted the entry under.
+func adoptedAdmitPin(t *testing.T) (string, adoptedPin) {
+	t.Helper()
+	root := t.TempDir()
+	writeProjectFile(t, root, "bin/server", "serve\n")
+	writeProjectFile(t, root, "hook.js", "hook\n")
+	return root, adoptedPin{root: root, text: serverPin(t, root, admitEntryYAML).Text}
+}
+
+// TestAdoptedPinAdmitsAnIntactPin pins the launch an unchanged pin hands its spawn: the Project
+// root, and every pinned file by absolute path, sorted.
+func TestAdoptedPinAdmitsAnIntactPin(t *testing.T) {
+	t.Parallel()
+	root, pin := adoptedAdmitPin(t)
+
+	launch, err := pin.Admit()
+
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	if launch.Dir != root {
+		t.Errorf("Admit Dir = %q, want %q", launch.Dir, root)
+	}
+	want := []string{filepath.Join(root, "bin", "server"), filepath.Join(root, "hook.js")}
+	if !slices.Equal(launch.Programs, want) {
+		t.Errorf("Admit Programs = %v, want %v", launch.Programs, want)
+	}
+}
+
+// TestAdoptedPinAdmitRefusesAChangedFile pins the typed refusal of a pin whose file moved: the
+// moved files by path, and the one sentence every launch kind wraps with its own prefix.
+func TestAdoptedPinAdmitRefusesAChangedFile(t *testing.T) {
+	t.Parallel()
+	root, pin := adoptedAdmitPin(t)
+	writeProjectFile(t, root, "bin/server", "evil\n")
+
+	launch, err := pin.Admit()
+
+	var moved *domain.PinMovedError
+	if !errors.As(err, &moved) {
+		t.Fatalf("Admit error = %v, want a *domain.PinMovedError", err)
+	}
+	if !slices.Equal(moved.Files, []string{"bin/server"}) || moved.Err != nil {
+		t.Errorf("PinMovedError = {Files: %v, Err: %v}, want {Files: [bin/server], Err: nil}", moved.Files, moved.Err)
+	}
+	const want = "bin/server changed since you adopted it; it is proposed again for adoption"
+	if err.Error() != want {
+		t.Errorf("Admit error = %q, want %q", err.Error(), want)
+	}
+	if !reflect.DeepEqual(launch, domain.PinLaunch{}) {
+		t.Errorf("Admit launch = %+v on a refusal, want the zero launch", launch)
+	}
+}
+
+// TestAdoptedPinAdmitRefusesAnUnreadablePin pins that a pin whose files cannot be checked refuses
+// as moved: the same typed refusal, carrying why the check failed, worded as that reason alone.
+func TestAdoptedPinAdmitRefusesAnUnreadablePin(t *testing.T) {
+	t.Parallel()
+	pin := adoptedPin{root: t.TempDir(), text: "not a pin"}
+
+	_, err := pin.Admit()
+
+	var moved *domain.PinMovedError
+	if !errors.As(err, &moved) {
+		t.Fatalf("Admit error = %v, want a *domain.PinMovedError", err)
+	}
+	if moved.Err == nil || len(moved.Files) != 0 {
+		t.Fatalf("PinMovedError = {Files: %v, Err: %v}, want Err set and no Files", moved.Files, moved.Err)
+	}
+	if err.Error() != moved.Err.Error() {
+		t.Errorf("Admit error = %q, want the check's own reason %q", err.Error(), moved.Err.Error())
+	}
+	if !errors.Is(err, moved.Err) {
+		t.Error("PinMovedError does not unwrap to the check's reason")
+	}
 }
 
 // serverPinExempt names the `mcp-servers:` keys a repo server's adoption pin deliberately leaves

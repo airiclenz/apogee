@@ -333,6 +333,20 @@ func (p adoptedPin) Programs() []string {
 	return programs
 }
 
+// Admit is the spawn-time check of the adopted entry (ADR 0104 §4): VerifyExecPins once over the
+// adopted text, and on a match the Project root with the programs that text pins. A moved file, or
+// a pin whose files cannot be checked, is a *domain.PinMovedError.
+func (p adoptedPin) Admit() (domain.PinLaunch, error) {
+	changed, err := VerifyExecPins(p.root, p.text)
+	if err != nil {
+		return domain.PinLaunch{}, &domain.PinMovedError{Err: err}
+	}
+	if len(changed) > 0 {
+		return domain.PinLaunch{}, &domain.PinMovedError{Files: changed}
+	}
+	return domain.PinLaunch{Dir: p.root, Programs: p.Programs()}, nil
+}
+
 // changedSince names what moved between the text an entry was adopted with and its text now: each
 // pinned field whose value differs, in the pane's order (pinFieldOrder), and then each pinned file,
 // by path, whose digest differs or that only one of the two texts holds — a file gone missing

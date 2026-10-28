@@ -49,7 +49,9 @@
 - 11 (second round): guard folded (writer decision per regression-5: `allow` keeps Read/Structure(Options) plus an offer-aware projection field; settingsRows(opts) stays a wrapper; settingsHost.Rows reads the boot offer)
 - 12 (second round): guard folded (writer decision: newLiveSettings' boot seed takes its offer from ApplyConfigOffer)
 
-## 1. ProjectPin gains Admit and one typed refusal
+## 1. ProjectPin gains Admit and one typed refusal — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): adoptedPin.Admit builds PinLaunch.Programs through the existing Programs method (which reads splitPin), so the sorted-programs logic stays in one place.
 
 **What:**
 **Goal:** `domain.ProjectPin` declares `Admit() (domain.PinLaunch, error)`. On success `PinLaunch{Dir, Programs}` holds the Project root and the absolute pinned programs. A changed or unreadable pin returns `*domain.PinMovedError` (`Files []string`, `Err error`, `Unwrap`). Its `Error()` is `"<files joined \", \"> changed since you adopted it; it is proposed again for adoption"` for changed files and `Err.Error()` for an unreadable pin. `config`'s pin implements it. A glossary Note `Project pin` defines the term.

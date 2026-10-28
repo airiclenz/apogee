@@ -500,7 +500,47 @@ type ProjectPin interface {
 	// Programs is the absolute path of every project file the pin holds: the only programs inside
 	// the workspace exec fence the spawn admits.
 	Programs() []string
+	// Admit is the one spawn-time check (ADR 0104 §4): it re-reads the pinned project files once
+	// and returns what the launch may use — the Project root and the pinned programs — or a
+	// *PinMovedError when a file moved since adoption or the files could not be checked. argv[0]
+	// is not resolved here; each launch kind resolves it against PinLaunch.Dir itself.
+	Admit() (PinLaunch, error)
 }
+
+// PinLaunch is what an admitted Project pin hands its launch: the Project root, which is the
+// spawn's working directory and the base its relative argv[0] resolves against, and the absolute
+// path of every project file the pin holds — the only programs inside the workspace exec fence
+// the spawn admits.
+type PinLaunch struct {
+	// Dir is the Project root.
+	Dir string
+	// Programs are the pinned project files by absolute path, sorted.
+	Programs []string
+}
+
+// PinMovedError is the one refusal a Project pin's Admit returns: the pinned project files no
+// longer match what the user adopted, so the entry is proposed again (CONTEXT: Project pin). Files
+// names each file, relative to the Project root, that changed, went missing or is newly named;
+// Err is set instead when the files could not be checked at all, which refuses the launch the
+// same way. Each launch kind wraps it with its own prefix; match it with errors.As.
+type PinMovedError struct {
+	// Files are the moved project files, by the path the pin holds them under.
+	Files []string
+	// Err is why the pin could not be checked, or nil when Files names what moved.
+	Err error
+}
+
+// Error is Err's message for a pin that could not be checked, and otherwise the sentence naming
+// the moved files and that the entry waits on a fresh adoption.
+func (e *PinMovedError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return strings.Join(e.Files, ", ") + " changed since you adopted it; it is proposed again for adoption"
+}
+
+// Unwrap is the reason the pin could not be checked, or nil.
+func (e *PinMovedError) Unwrap() error { return e.Err }
 
 // ProjectRun runs an adopted repo reaction's observe-lane `run:` inside the workspace exec fence
 // (ADR 0104 §8): the Agent's own runner, under the permit its sync lane spawns with, so the
