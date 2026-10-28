@@ -267,7 +267,11 @@ type rootWiring struct {
 	adoptionWatch *filewatch.Watcher
 	// reloadWake is the re-read cue the engine pokes when an adopted repo reaction's pinned files
 	// moved (apogee.Config.PinMoved); the renderer's config wait selects on it beside the watchers.
-	reloadWake    reloadWake
+	reloadWake reloadWake
+	// readFile reads every file an Adoption act's loads read — the held check and the next Snapshot
+	// (project.Answer, project.Load; fileReader). Nil reads the disk; a test counts the act's layered
+	// resolutions through it.
+	readFile      func(string) ([]byte, error)
 	mover         sessionMover
 	launcherPath  *launcherPath
 	launcherSeams launcherWiring

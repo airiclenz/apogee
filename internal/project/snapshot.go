@@ -35,6 +35,14 @@ func Load(globalPath, root string, readFile func(string) ([]byte, error), notify
 	return Snapshot{options: options, offer: offer, entries: EntriesOf(offer)}, nil
 }
 
+// SnapshotOf is the Snapshot of a set already resolved — options and the offer read beside them —
+// with no read of its own: the state a Driver holds in force, for [Diff] against the next [Load].
+// Both are deep-copied, so the Snapshot shares no backing array with the caller's values, and the
+// entries are the offer's (EntriesOf).
+func SnapshotOf(options config.Options, offer config.ProjectOffer) Snapshot {
+	return Snapshot{options: options.Clone(), offer: offer.Clone(), entries: EntriesOf(offer)}
+}
+
 // Options is the resolved options, deep-copied (config.Options.Clone).
 func (s Snapshot) Options() config.Options { return s.options.Clone() }
 

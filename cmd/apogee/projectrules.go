@@ -21,17 +21,19 @@ import (
 // kind of entry the Project config proposes (a Proposal: an Allow rule, a repo MCP server or a repo
 // reaction) — each one write to the Project config or to
 // its adoption record (or both) — and the one act that reaches a global rule, its removal from the
-// global config (the `/settings` *Allow rules* section's) — followed by the same settling: the external-edit baseline is
-// re-taken, because apogee's own write is not an edit the watcher should report back (ADR 0041
-// decision 8), and the effective Allow rules are re-resolved from the files and installed on the
-// session — the live-settings holder and the engine, whose rule set the whole agent tree shares, so
-// a sub-agent already running reads the new rule at its next ordinary gate.
+// global config (the `/settings` *Allow rules* section's) — followed by the same settling: the
+// external-edit baseline is re-taken, because apogee's own write is not an edit the watcher should
+// report back (ADR 0041 decision 8), and the next Snapshot of the files (project.Load, or the one project.Answer returns)
+// is put in force against the one the session holds (installSnapshot): the live-settings holder
+// takes its rules and proposals whole, and only the kinds project.Diff reports moved go further —
+// the effective rules onto the engine, whose rule set the whole agent tree shares, so a sub-agent
+// already running reads the new rule at its next ordinary gate; a moved server or reaction through
+// the same doors a watched re-read applies the layered set by, since apogee's own write re-takes
+// the baseline and no watcher report would carry it.
 //
 // Beside the four answers is the one read the adoption pane asks after a watched change
 // (ProposedRules): the entries the Project config proposes now, resolved exactly as the settling
-// resolves the rules in force. An adopted server or reaction is put into force at once, through the
-// same door a watched re-read applies the layered set by (applyAdoptedKinds): apogee's own write
-// re-takes the baseline, so no watcher report would carry it. And beside that is the live refresh: a watched change to any of the
+// resolves the rules in force. And beside that is the live refresh: a watched change to any of the
 // three files the rules resolve from — the global config, the Project config, the adoption record —
 // that moved them is installed the same way (followReloadedAllowRules), so a hand-edited `allow:`
 // or an `apogee project adopt` in another terminal applies without a restart.
@@ -40,11 +42,11 @@ import (
 // spell it, so none is written. The order of the two writes keeps apogee's own acts from leaving
 // one: an adoption is recorded only after the file holds the rule, and dropped before the file
 // loses it, so a failure part-way leaves a rule PROPOSED — inert. An adoption of a rule the file
-// already held is re-checked against the file at the moment it is answered (projectRulesHeld): an
-// edit that took the rule out since it was offered refuses the yes, and nothing is recorded for it.
-// The yes is pinned to the exact text it answered (adoption.Fingerprint) — a structured entry's
-// canonical pin, files and all — so an edit that lands after the re-check proposes its entry afresh
-// rather than inheriting the answer.
+// already held is re-checked against the file at the moment it is answered (project.Answer's held
+// check): an edit that took the rule out since it was offered refuses the yes, and nothing is
+// recorded for it. The yes is pinned to the exact text it answered (adoption.Fingerprint) — a
+// structured entry's canonical pin, files and all — so an edit that lands after the re-check
+// proposes its entry afresh rather than inheriting the answer.
 
 // AddProjectRule is the "Always in this project…" answer: the rule into the Project config, its
 // exact text adopted, the effective rules settled.
@@ -56,13 +58,13 @@ func (h configHost) AddProjectRule(kind apogee.AllowRuleKind, text string) error
 // adopted server or reaction is put into force at once. An entry the Project config no longer
 // holds as it was offered is refused by name and nothing is recorded for it; the rest are adopted.
 func (h configHost) AdoptRules(proposals []apogee.Proposal) error {
-	return h.w.adoptProjectRules(proposals)
+	return h.w.answerProjectRules(proposals, true)
 }
 
-// RejectRules records the human's rejection of the Project config's proposals, and settles: a rule
-// that was in force leaves the effective set.
+// RejectRules records the human's rejection of the Project config's proposals, and settles: a rule,
+// server or reaction that was in force leaves the session.
 func (h configHost) RejectRules(proposals []apogee.Proposal) error {
-	return h.w.answerProjectRules(proposals, (*adoption.Store).Reject)
+	return h.w.answerProjectRules(proposals, false)
 }
 
 // RemoveRule takes a rule out of the file that holds it — a project rule out of the Project config,
@@ -82,16 +84,18 @@ func (h configHost) ProposedRules() ([]apogee.Proposal, error) {
 }
 
 // addProjectRule writes the rule, adopts it, and settles. A rule the list already holds writes
-// nothing and is adopted all the same.
+// nothing and is adopted all the same. The adoption is recorded with no held check (project.Record):
+// apogee itself just wrote the text into the file.
 //
 // Errors: the writer's refusals (config.AddProjectAllowRule), a store that cannot be opened or
-// written — the rule is then in the file but proposed, and the error says so — and a settling that
-// cannot re-read the config files.
+// written — the rule is then in the file but proposed, the error says so, and the settling still
+// runs, since the file moved — and the settling's.
 func (w *rootWiring) addProjectRule(kind apogee.AllowRuleKind, text string) error {
 	ck, err := project.AllowKind(kind)
 	if err != nil {
 		return err
 	}
+	old := w.inForce()
 	path, err := config.AddProjectAllowRule(w.roots.project, w.workspacesDir(), ck, text)
 	if err != nil {
 		return err
@@ -100,87 +104,53 @@ func (w *rootWiring) addProjectRule(kind apogee.AllowRuleKind, text string) erro
 		// The file moved even though the record did not, so the baseline must follow it.
 		return errors.Join(fmt.Errorf(
 			"apogee: %s holds the rule, but its adoption was not recorded, so it stays proposed: %w", path, err),
-			w.settleAllowRules())
+			w.settleAllowRules(old))
 	}
-	return w.settleAllowRules()
+	return w.settleAllowRules(old)
 }
 
-// answerProjectRules records answer for proposals — every one the Project config's — and settles.
+// answerProjectRules records the human's answer to proposals — every one the Project config's — in
+// one project.Answer, and settles against the snapshot it returns. A yes (adopt) answers the file as
+// it stands: each entry it no longer holds as offered is refused by name and nothing is recorded for
+// it, the rest are adopted all the same. A no (reject) is recorded with no held check.
 //
-// Errors: a refusal naming a proposal that is not one, the store's errors, and the settling's.
-func (w *rootWiring) answerProjectRules(proposals []apogee.Proposal, answer adoptionAnswer) error {
-	entries, err := proposalEntries(proposals)
+// Errors: a refusal naming a proposal that is not one, a store that cannot be opened, a Project
+// config that cannot be re-read for the held check (nothing is recorded then), one refusal per
+// entry the file no longer holds as offered, the store's errors, a next snapshot that cannot be
+// loaded — the answer is recorded then, and nothing is installed — and installSnapshot's: a server
+// or reaction the session could not move onto, the answer recorded, and the next watched re-read
+// or start applies it.
+func (w *rootWiring) answerProjectRules(proposals []apogee.Proposal, adopt bool) error {
+	store, err := w.adoptionStore()
 	if err != nil {
 		return err
 	}
-	if err := w.recordAnswer(entries, answer); err != nil {
-		return err
-	}
-	return w.settleAllowRules()
-}
-
-// adoptProjectRules adopts the proposals — every one the Project config's — it holds at this
-// moment, pin for pin, and settles: the rules in force re-resolved, and an adopted server or
-// reaction put into force (applyAdoptedKinds). Each entry it no longer holds as offered is refused
-// by name, and nothing is recorded for it; the rest are adopted all the same.
-//
-// Errors: a refusal naming a proposal that is not one (nothing is recorded then), a Project config
-// that cannot be re-read (nothing is recorded then), one refusal per entry the file no longer holds
-// as offered, the store's errors, the settling's, and a server or reaction the session could not
-// move onto — the adoption is recorded then, and the next watched re-read or start applies it.
-func (w *rootWiring) adoptProjectRules(proposals []apogee.Proposal) error {
-	entries, err := proposalEntries(proposals)
-	if err != nil {
-		return err
-	}
-	held, err := projectRulesHeld(w.configPath(), w.roots.project)
-	if err != nil {
-		return err
-	}
-	entries, refused := keepHeldEntries(entries, held)
-	if len(entries) == 0 {
+	old := w.inForce()
+	next, notHeld, err := project.Answer(w.configPath(), w.roots.project, w.fileReader(), store, proposals, adopt)
+	refused := notHeldRefusals(notHeld)
+	var stale *project.NextLoadError
+	switch {
+	case errors.As(err, &stale):
+		w.refreshBaseline()
+		return errors.Join(refused, staleRulesError(stale.Err))
+	case err != nil:
+		return errors.Join(refused, err)
+	case len(notHeld) == len(proposals):
+		// Nothing was recorded, so nothing moved and the snapshot in force stands.
 		return refused
 	}
-	if err := w.recordAnswer(entries, (*adoption.Store).Adopt); err != nil {
-		return errors.Join(refused, err)
-	}
-	if err := w.settleAllowRules(); err != nil {
-		return errors.Join(refused, err)
-	}
-	return errors.Join(refused, w.applyAdoptedKinds(entries))
+	w.refreshBaseline()
+	return errors.Join(refused, w.installSnapshot(old, next))
 }
 
-// applyAdoptedKinds puts the adopted servers and reactions among entries into force at once,
-// through the doors a watched re-read of the layered set uses (settingsApplier.reconnectMCP and
-// reloadReactions, ADR 0104 §12): the servers re-dialled from the layered set, the reactions
-// swapped onto their lanes. An Allow rule needs neither — the settling already installed it — and a
-// wiring that holds no live MCP set or engine (a Driver that composes none) has nothing to move.
-//
-// Errors: the reconnect's and the reload's, joined — and a repo server the reconnect skipped for a
-// moved pin, worded as the reconnect's note: the rest of the set landed, but that server is not in
-// force, and the answer's row is the one surface a mid-session adoption reports on.
-func (w *rootWiring) applyAdoptedKinds(entries []adoption.Entry) error {
-	applier := w.settingsApplier()
-	var errs []error
-	if hasEntryKind(entries, config.MCPServerAdoptionKind) && w.mcpSet != nil && w.toolSet != nil {
-		note, err := applier.reconnectMCP()
-		errs = append(errs, err)
-		if note != "" {
-			errs = append(errs, errors.New(note))
-		}
+// notHeldRefusals is one refusal per proposal the Project config no longer holds as it was offered
+// (notHeldError), joined in order — nil when there is none.
+func notHeldRefusals(notHeld []apogee.Proposal) error {
+	refused := make([]error, 0, len(notHeld))
+	for _, p := range notHeld {
+		refused = append(refused, notHeldError(p))
 	}
-	if hasEntryKind(entries, config.ReactionAdoptionKind) && w.engine != nil && w.live != nil {
-		errs = append(errs, applier.reloadReactions())
-	}
-	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("apogee: the adoption is saved, but this session could not apply it: %w", err)
-	}
-	return nil
-}
-
-// hasEntryKind reports whether any of entries is of the Adoption kind kind.
-func hasEntryKind(entries []adoption.Entry, kind string) bool {
-	return slices.ContainsFunc(entries, func(e adoption.Entry) bool { return e.Kind == kind })
+	return errors.Join(refused...)
 }
 
 // projectRulesHeld is the fingerprint (adoption.Fingerprint) of every entry the Project config of
@@ -231,34 +201,19 @@ func isSameFile(path, other string) bool {
 	return err == nil && os.SameFile(a, b)
 }
 
-// keepHeldEntries is entries cut to those whose fingerprint held holds, in order, with one refusal
-// joined per entry cut — nil when none was.
-func keepHeldEntries(entries []adoption.Entry, held map[string]bool) ([]adoption.Entry, error) {
-	kept := make([]adoption.Entry, 0, len(entries))
-	var refused []error
-	for _, e := range entries {
-		if held[adoption.Fingerprint(e)] {
-			kept = append(kept, e)
-			continue
-		}
-		refused = append(refused, notHeldError(e))
-	}
-	return kept, errors.Join(refused...)
-}
-
 // notHeldError is the refusal of an adoption whose exact text the Project config no longer holds —
 // for a server or reaction, an entry an edit changed or took out since it was offered.
-func notHeldError(e adoption.Entry) error {
-	if e.Handle != "" {
+func notHeldError(p apogee.Proposal) error {
+	if p.Kind == apogee.ProposalMCPServer || p.Kind == apogee.ProposalReaction {
 		return fmt.Errorf("apogee: the project config no longer holds the %s entry `%s` as it was offered, "+
-			"so it was not adopted", e.Kind, e.Handle)
+			"so it was not adopted", p.Kind, p.Handle)
 	}
 	return fmt.Errorf("apogee: the project config no longer holds the %s rule `%s`, so it was not adopted",
-		e.Kind, e.Text)
+		p.Kind, p.Text)
 }
 
 // removeProjectRule forgets the rule's answer, then takes it out of the Project config, and
-// settles.
+// settles — on the file-failure path too, since the record moved.
 //
 // Errors: a refusal for a rule that is not a project rule, the store's errors (the file is then
 // untouched), the writer's refusals (the rule is then in the file but proposed, and the error says
@@ -271,6 +226,7 @@ func (w *rootWiring) removeProjectRule(rule apogee.AllowRule) error {
 	if err != nil {
 		return err
 	}
+	old := w.inForce()
 	if err := w.recordAnswer([]adoption.Entry{entry}, (*adoption.Store).Forget); err != nil {
 		return err
 	}
@@ -278,13 +234,14 @@ func (w *rootWiring) removeProjectRule(rule apogee.AllowRule) error {
 		entry.Text); err != nil {
 		// The record moved even though the file did not, so the rules in force must follow it.
 		return errors.Join(fmt.Errorf("apogee: the rule's adoption was dropped, so it no longer applies, "+
-			"but it is still in the project config: %w", err), w.settleAllowRules())
+			"but it is still in the project config: %w", err), w.settleAllowRules(old))
 	}
-	return w.settleAllowRules()
+	return w.settleAllowRules(old)
 }
 
 // removeGlobalRule takes a global rule out of the global config through that file's own splice
-// writer, and settles. A global rule has no adoption record, so the file is the one write.
+// writer, and settles. A global rule has no adoption record, so the file is the one write and
+// nothing is recorded.
 //
 // Errors: a refusal for a rule of a kind the `allow:` key lacks, the writer's refusals (the file is
 // then untouched), and the settling's.
@@ -293,41 +250,137 @@ func (w *rootWiring) removeGlobalRule(rule apogee.AllowRule) error {
 	if err != nil {
 		return err
 	}
+	old := w.inForce()
 	if err := config.RemoveGlobalAllowRule(w.configPath(), kind, rule.Text); err != nil {
 		return err
 	}
-	return w.settleAllowRules()
+	return w.settleAllowRules(old)
 }
 
 // settingKeyAllow is the `allow:` key's registry path — the name a re-read reports the rules moved by.
 const settingKeyAllow = "allow"
 
-// adoptionAnswer is one of the adoption store's three record writes — Adopt, Reject or Forget.
-type adoptionAnswer func(*adoption.Store, ...adoption.Entry) error
+// adoptionStore opens this Project root's adoption record.
+//
+// Errors: adoption.New's — no record directory, or a Project root that cannot be resolved.
+func (w *rootWiring) adoptionStore() (*adoption.Store, error) {
+	return adoption.New(w.workspacesDir(), w.roots.project)
+}
 
-// recordAnswer opens this Project root's adoption record and writes answer for entries into it.
-func (w *rootWiring) recordAnswer(entries []adoption.Entry, answer adoptionAnswer) error {
-	store, err := adoption.New(w.workspacesDir(), w.roots.project)
+// recordAnswer opens this Project root's adoption record and writes reply for entries into it, with
+// no held check (project.Record).
+func (w *rootWiring) recordAnswer(entries []adoption.Entry, reply project.Reply) error {
+	store, err := w.adoptionStore()
 	if err != nil {
 		return err
 	}
-	return answer(store, entries...)
+	return project.Record(store, entries, reply)
 }
 
-// settleAllowRules is the settling every act ends with: the external-edit baseline re-taken, then
-// the effective Allow rules re-resolved from the two files and the adoption record — the resolution
-// a relaunch would make — and installed on the live-settings holder and the engine.
+// settleAllowRules is the settling every file write ends with: the external-edit baseline re-taken,
+// then the next Snapshot loaded from the two files and the adoption record — the resolution a
+// relaunch would make — and put in force against old, the snapshot in force before the write
+// (installSnapshot).
 //
 // Errors: a global config that no longer resolves; nothing is installed then, and the rules in
-// force stay as they were.
-func (w *rootWiring) settleAllowRules() error {
+// force stay as they were. installSnapshot's otherwise.
+func (w *rootWiring) settleAllowRules(old project.Snapshot) error {
+	w.refreshBaseline()
+	next, err := project.Load(w.configPath(), w.roots.project, w.fileReader(), func(string) {})
+	if err != nil {
+		return staleRulesError(err)
+	}
+	return w.installSnapshot(old, next)
+}
+
+// staleRulesError is the refusal of a settling whose next snapshot could not be loaded: the answer
+// or the file write stands, but the rules in force are as they were.
+func staleRulesError(err error) error {
+	return fmt.Errorf("apogee: the answer is saved, but the rules in force could not be refreshed: %w", err)
+}
+
+// refreshBaseline re-takes the external-edit baseline after apogee's own write, which is not an edit
+// the watcher should report back (ADR 0041 decision 8). A wiring with no baseline has none to take.
+func (w *rootWiring) refreshBaseline() {
 	if w.externalEdits != nil {
 		w.externalEdits.refresh()
 	}
-	if err := w.installAllowRules(); err != nil {
-		return fmt.Errorf("apogee: the answer is saved, but the rules in force could not be refreshed: %w", err)
+}
+
+// inForce is the session's in-force state as a Snapshot — the live-settings holder's options with
+// the offer it holds beside them (project.SnapshotOf) — the side an act's settling diffs the next
+// snapshot against. It reads no file. A wiring with no holder holds the empty Snapshot, so every
+// kind the next one holds reads as moved.
+func (w *rootWiring) inForce() project.Snapshot {
+	if w.live == nil {
+		return project.Snapshot{}
+	}
+	opts := w.live.options()
+	return project.SnapshotOf(opts, config.ProjectOffer{
+		Proposals: opts.Proposals,
+		Proposed:  opts.AllowRules.Proposed,
+		Rejected:  opts.AllowRules.Rejected,
+	})
+}
+
+// installSnapshot puts next in force over old. The live-settings holder takes next's effective
+// Allow rules and its offer — the inert rules and the repo proposals — whole, whatever moved: the
+// `/settings` rows list from it. Then only what project.Diff reports moved goes further: the
+// effective rules onto the engine, and a moved server or reaction set through the doors a watched
+// re-read applies the layered set by (applyMovedKinds), each fed next's options and reading no
+// file.
+//
+// Errors: applyMovedKinds'.
+func (w *rootWiring) installSnapshot(old, next project.Snapshot) error {
+	moved := project.Diff(old, next)
+	opts, offer := next.Options(), next.Offer()
+	if w.live != nil {
+		w.live.update(func(o *config.Options) {
+			o.AllowRules = config.AllowRules{Rules: opts.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
+			o.Proposals = offer.Proposals
+		})
+	}
+	if moved.Allow && w.engine != nil {
+		w.engine.SetAllowRules(allowRulesFromOptions(opts))
+	}
+	return w.applyMovedKinds(moved, opts)
+}
+
+// applyMovedKinds puts the servers and reactions of layered into force when moved says their set
+// moved, through the doors a watched re-read of the layered set uses (settingsApplier.reconnectMCPFrom
+// and reloadReactionsFrom, ADR 0104 §12): the servers re-dialled, the reactions swapped onto their
+// lanes. A wiring that holds no live MCP set or engine (a Driver that composes none) has nothing to
+// move.
+//
+// Errors: the reconnect's and the reload's, joined — and a repo server the reconnect skipped for a
+// moved pin, worded as the reconnect's note: the rest of the set landed, but that server is not in
+// force, and the answer's row is the one surface a mid-session adoption reports on.
+func (w *rootWiring) applyMovedKinds(moved project.Moved, layered config.Options) error {
+	applier := w.settingsApplier()
+	var errs []error
+	if moved.Servers && w.mcpSet != nil && w.toolSet != nil {
+		note, err := applier.reconnectMCPFrom(layered)
+		errs = append(errs, err)
+		if note != "" {
+			errs = append(errs, errors.New(note))
+		}
+	}
+	if moved.Reactions && w.engine != nil && w.live != nil {
+		errs = append(errs, applier.reloadReactionsFrom(layered))
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("apogee: the adoption is saved, but this session could not apply it: %w", err)
 	}
 	return nil
+}
+
+// fileReader is what an act's loads read every file through (project.Load, project.Answer): the
+// wiring's readFile seam, or the disk when none is set.
+func (w *rootWiring) fileReader() func(string) ([]byte, error) {
+	if w.readFile != nil {
+		return w.readFile
+	}
+	return os.ReadFile
 }
 
 // followReloadedAllowRules is the live refresh behind a watched re-read (configHost.ReloadConfig):
@@ -424,7 +477,7 @@ func proposalsOf(opts config.Options) []apogee.Proposal {
 }
 
 // layeredOptions is the resolution a relaunch would make of the two config files and the adoption
-// record — what the settling installs and the proposed-rules read reports. The loader's notices are
+// record — what a watched refresh installs and the proposed-rules read reports. The loader's notices are
 // not repeated here: the watched re-read says them (ConfigHost.ReloadConfig).
 func (w *rootWiring) layeredOptions() (config.Options, error) {
 	return loadLayeredOptions(w.configPath(), w.roots.project)
@@ -432,7 +485,7 @@ func (w *rootWiring) layeredOptions() (config.Options, error) {
 
 // loadLayeredOptions is the global config at configPath with the Project config of projectRoot
 // layered over it, sorted by that root's adoption record — the one live reading every re-read of
-// the layered set makes (the Allow-rule settling, and the live reload of the MCP servers and
+// the layered set makes (the watched Allow-rule refresh, and the live reload of the MCP servers and
 // reactions, settingsApplier.layeredConfig). It never migrates, and it drops the loader's notices:
 // the watched re-read says them (ConfigHost.ReloadConfig). A Project config that does not parse is
 // skipped by the loader, so the answer is then the global file alone.
@@ -443,21 +496,6 @@ func loadLayeredOptions(configPath, projectRoot string) (config.Options, error) 
 // workspacesDir is where this run keeps each Project root's adoption record and the Project config
 // writer's lock: `~/.apogee/workspaces`.
 func (w *rootWiring) workspacesDir() string { return config.WorkspacesDir(w.roots.config) }
-
-// proposalEntries is the adoption entries the proposals pin, in order.
-//
-// Errors: proposalEntry's, for the first proposal that has one.
-func proposalEntries(proposals []apogee.Proposal) ([]adoption.Entry, error) {
-	entries := make([]adoption.Entry, 0, len(proposals))
-	for _, p := range proposals {
-		e, err := proposalEntry(p)
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, e)
-	}
-	return entries, nil
-}
 
 // proposalEntry is the adoption entry a proposal pins (project.ProposalEntry).
 func proposalEntry(p apogee.Proposal) (adoption.Entry, error) { return project.ProposalEntry(p) }

@@ -3,6 +3,7 @@ package project
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/adoption"
@@ -143,6 +144,25 @@ func TestSnapshotAccessorsShareNoBackingArray(t *testing.T) {
 	}
 }
 
+// A Snapshot built from a set already in hand is the one Load read it from: Diff finds nothing
+// moved between them, and it shares no backing array with the values it was built from.
+func TestSnapshotOfMatchesTheLoadItWasBuiltFrom(t *testing.T) {
+	t.Parallel()
+	loaded := loadFixture(t)
+	options, offer := loaded.Options(), loaded.Offer()
+
+	built := SnapshotOf(options, offer)
+	options.AllowRules.Rules[0].Text = "edited"
+	offer.Proposals.Adopted[0].Fingerprint = "edited"
+
+	if got := Diff(loaded, built); got != (Moved{}) {
+		t.Errorf("Diff(loaded, SnapshotOf(loaded)) = %+v; want nothing moved", got)
+	}
+	if got, want := built.Entries(), loaded.Entries(); !reflect.DeepEqual(got, want) {
+		t.Errorf("SnapshotOf entries = %+v; want the load's %+v", got, want)
+	}
+}
+
 // adoptedProposal is an adopted entry of kind whose pin is print.
 func adoptedProposal(kind domain.ProposalKind, print string) domain.Proposal {
 	return domain.Proposal{Kind: kind, Handle: print, Text: print, Fingerprint: print}
@@ -180,11 +200,17 @@ func TestSnapshotDiff(t *testing.T) {
 		{"unchanged", base, snapshotOf([]config.AllowRule{globalRule}, nil), Moved{}},
 		{"allow adopted", base, snapshotOf([]config.AllowRule{globalRule, projectRule}, nil), Moved{Allow: true}},
 		{"allow rejected", snapshotOf([]config.AllowRule{globalRule, projectRule}, nil), base, Moved{Allow: true}},
+		{"global rule removed", base, snapshotOf(nil, nil), Moved{Allow: true}},
 		{"server adopted", base, snapshotOf([]config.AllowRule{globalRule}, []domain.Proposal{server}),
 			Moved{Servers: true}},
 		{"server rejected", snapshotOf([]config.AllowRule{globalRule}, []domain.Proposal{server}), base,
 			Moved{Servers: true}},
 		{"server rejected while proposed", base, snapshotOf([]config.AllowRule{globalRule}, nil, server), Moved{}},
+		{"server re-adopted under a new pin",
+			snapshotOf(nil, []domain.Proposal{server}),
+			snapshotOf(nil, []domain.Proposal{{Kind: domain.ProposalMCPServer, Handle: "srv", Text: "srv v2",
+				Fingerprint: "srv v2"}}),
+			Moved{Servers: true}},
 		{"reaction adopted", base, snapshotOf([]config.AllowRule{globalRule}, []domain.Proposal{reaction}),
 			Moved{Reactions: true}},
 		{"reaction rejected", snapshotOf([]config.AllowRule{globalRule}, []domain.Proposal{reaction}), base,

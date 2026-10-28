@@ -273,8 +273,8 @@ func (w *rootWiring) options() tui.Options {
 
 // settingsApplier is the apply half of `/settings` over this wiring's live seams: the one value
 // every key's apply reaches the session through (applySettingFor) — the pane's ⏎, a watched
-// re-read, and an adoption that puts a repo server or reaction into force at once
-// (applyAdoptedKinds). It is built on each ask rather than held, because every member is a pointer
+// re-read, and an answer that moves a repo server or reaction in or out of force at once
+// (applyMovedKinds). It is built on each ask rather than held, because every member is a pointer
 // into live state the wiring owns, so two builds apply to the same session.
 func (w *rootWiring) settingsApplier() settingsApplier {
 	return settingsApplier{

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -241,40 +242,35 @@ func TestProjectRuleAdoptionReadsWhatTheFileProposes(t *testing.T) {
 	}
 }
 
-// An adoption answers the file as it stands, not as it was offered: a proposed rule an edit took out
-// of the Project config while the pane waited is refused by name and stays unanswered, and a rule
-// the file still holds, answered in the same breath, is adopted all the same.
+// An adoption the Project config no longer backs is refused in the session's own words, naming the
+// rule an edit took out of the file while the pane waited — and only that one: the held check
+// itself (which entries are recorded) is project.Answer's, tested there.
 func TestProjectRuleAdoptRefusesARuleTheFileNoLongerHolds(t *testing.T) {
 	t.Parallel()
 	srv := scriptedTerminalModel(t)
 	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
 	host := configHost{w: w}
 	const keptText = "make lint"
-	kept := apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: keptText, Layer: apogee.AllowRuleProject}
 	writeProjectAllow(t, w.roots.project, projectRuleCommand, keptText)
 	proposed, err := host.ProposedRules()
 	if err != nil {
 		t.Fatalf("ProposedRules: %v", err)
 	}
-	if want := []apogee.Proposal{proposalOfRule(echoRule), proposalOfRule(kept)}; !reflect.DeepEqual(proposed, want) {
-		t.Fatalf("ProposedRules = %+v, want %+v", proposed, want)
-	}
 	writeProjectAllow(t, w.roots.project, keptText)
 
 	err = host.AdoptRules(proposed)
 
-	if err == nil || !strings.Contains(err.Error(), "no longer holds the terminal rule `"+projectRuleCommand+"`") {
-		t.Errorf("AdoptRules after the rule left the file = %v, want the refusal naming it", err)
-	}
-	assertRuleRecord(t, w, false, adoption.Proposed)
-	if got := recordedAnswers(t, w.roots.config, w.roots.project, keptText); got[0] != adoption.Adopted {
-		t.Errorf("the rule the file still holds is recorded %q, want %q", got[0], adoption.Adopted)
+	want := "apogee: the project config no longer holds the terminal rule `" + projectRuleCommand +
+		"`, so it was not adopted"
+	if err == nil || err.Error() != want {
+		t.Errorf("AdoptRules after the rule left the file = %v, want exactly the refusal %q", err, want)
 	}
 }
 
 // A global config that no longer resolves cannot stop an adoption the Project config backs: the
-// re-check reads the project file alone, so the yes is recorded, and only the settling that would
-// install it reports the broken global file.
+// answer is recorded (project.Answer's held check reads the project file alone), but the next
+// snapshot cannot be loaded, so the act says so and puts nothing in force — no door runs, and the
+// holder and the engine keep the rules they had.
 func TestProjectRuleAdoptRecordsAHeldRuleWhenTheGlobalConfigDoesNotResolve(t *testing.T) {
 	t.Parallel()
 	srv := scriptedTerminalModel(t)
@@ -284,13 +280,59 @@ func TestProjectRuleAdoptRecordsAHeldRuleWhenTheGlobalConfigDoesNotResolve(t *te
 	if err := os.WriteFile(w.configPath(), []byte("model: [unclosed\n"), 0o600); err != nil {
 		t.Fatalf("break the global config: %v", err)
 	}
+	w.engine.mu.Lock()
+	rulesBefore, generationBefore := w.engine.pendingAllowRules, w.engine.pendingGeneration
+	w.engine.mu.Unlock()
 
 	err := host.AdoptRules([]apogee.Proposal{echoRule.Proposal()})
 
-	if err == nil || !strings.Contains(err.Error(), "the answer is saved") {
-		t.Errorf("AdoptRules over a broken global config = %v, want the settling's error", err)
+	const want = "apogee: the answer is saved, but the rules in force could not be refreshed: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("AdoptRules over a broken global config = %v, want the settling's error %q…", err, want)
 	}
 	assertRuleRecord(t, w, true, adoption.Adopted)
+	w.engine.mu.Lock()
+	rulesAfter, generationAfter := w.engine.pendingAllowRules, w.engine.pendingGeneration
+	w.engine.mu.Unlock()
+	if rulesAfter != rulesBefore || generationAfter != generationBefore {
+		t.Error("a door ran on the engine although the next snapshot could not be loaded")
+	}
+	if got := w.live.allowRules(); len(got.Rules)+len(got.Proposed)+len(got.Rejected) != 0 {
+		t.Errorf("the holder took rules %+v although nothing was loaded", got)
+	}
+}
+
+// One adoption reads the layered config twice through the wiring's readFile seam: once for the held
+// check, once for the next snapshot the session settles into — the doors are fed that snapshot and
+// read nothing of their own.
+func TestProjectRuleAdoptReadsTheLayeredConfigTwice(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	writeProjectAllow(t, w.roots.project, projectRuleCommand)
+	projectPath := config.ProjectFilePath(w.roots.project)
+	var mu sync.Mutex
+	resolutions := 0
+	w.readFile = func(path string) ([]byte, error) {
+		if path == projectPath {
+			mu.Lock()
+			resolutions++
+			mu.Unlock()
+		}
+		return os.ReadFile(path)
+	}
+
+	if err := host.AdoptRules([]apogee.Proposal{echoRule.Proposal()}); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if resolutions != 2 {
+		t.Errorf("the adoption resolved the layered config %d times, want 2 — the held check and the next snapshot",
+			resolutions)
+	}
 }
 
 // Adoption is a question only about what the Project config proposes: a proposal of no kind it
@@ -332,7 +374,7 @@ func writeGlobalRule(t *testing.T, w *rootWiring) {
 	if err != nil {
 		t.Fatalf("write the global rule: %v", err)
 	}
-	if err := w.settleAllowRules(); err != nil {
+	if err := w.settleAllowRules(w.inForce()); err != nil {
 		t.Fatalf("settleAllowRules: %v", err)
 	}
 }
@@ -397,7 +439,7 @@ func TestProjectRuleSettingsSectionListsFromTheLiveHolder(t *testing.T) {
 	if err := os.WriteFile(path, []byte("allow:\n  terminal:\n    - ls\n"), 0o644); err != nil {
 		t.Fatalf("write the project config: %v", err)
 	}
-	if err := w.settleAllowRules(); err != nil {
+	if err := w.settleAllowRules(w.inForce()); err != nil {
 		t.Fatalf("settleAllowRules: %v", err)
 	}
 
@@ -440,6 +482,40 @@ func TestProjectRuleSettingsSectionListsFromTheLiveHolder(t *testing.T) {
 	}
 	if got := ruleRows(settings.Rows()); !reflect.DeepEqual(got, want) {
 		t.Errorf("the section with the project config gone = %v, want %v — Rows reads no disk", got, want)
+	}
+}
+
+// A rejection or a removal replaces the holder's rules whole from the snapshot it settles into, so
+// the section never lists a rule as it stood before the answer: a rejected proposal reads rejected,
+// and a removed project rule leaves no row at all — never a stale "proposed project".
+func TestProjectRuleAnswersReplaceTheHoldersRules(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	settings := settingsHost{allowRules: w.live.allowRules}
+	writeProjectAllow(t, w.roots.project, "ls")
+	if err := w.settleAllowRules(w.inForce()); err != nil {
+		t.Fatalf("settleAllowRules: %v", err)
+	}
+	if got := ruleRows(settings.Rows())["terminal: ls"]; got != "proposed project" {
+		t.Fatalf("the proposed rule's row = %q, want %q", got, "proposed project")
+	}
+	if err := host.AddProjectRule(apogee.AllowRuleTerminal, projectRuleCommand); err != nil {
+		t.Fatalf("AddProjectRule: %v", err)
+	}
+
+	ls := apogee.AllowRule{Kind: apogee.AllowRuleTerminal, Text: "ls", Layer: apogee.AllowRuleProject}
+	if err := host.RejectRules([]apogee.Proposal{ls.Proposal()}); err != nil {
+		t.Fatalf("RejectRules: %v", err)
+	}
+	if err := host.RemoveRule(echoRule); err != nil {
+		t.Fatalf("RemoveRule: %v", err)
+	}
+
+	want := map[string]string{"terminal: ls": "rejected project"}
+	if got := ruleRows(settings.Rows()); !reflect.DeepEqual(got, want) {
+		t.Errorf("the section after the rejection and the removal = %v, want %v", got, want)
 	}
 }
 
@@ -866,8 +942,19 @@ func TestChangedReactionScriptReasksInSession(t *testing.T) {
 	if err := host.AdoptRules(proposed); err != nil {
 		t.Fatalf("AdoptRules of the edited script: %v", err)
 	}
-	if err := run(ctx, adoptedReaction(t, w, "x"), "{}", nil); err != nil {
+	rearmed := adoptedReaction(t, w, "x")
+	if err := run(ctx, rearmed, "{}", nil); err != nil {
 		t.Errorf("the re-adopted reaction: %v, want it armed on the new content", err)
+	}
+	w.engine.mu.Lock()
+	gen := w.engine.pendingGeneration
+	w.engine.mu.Unlock()
+	i := -1
+	if gen != nil {
+		i = slices.IndexFunc(gen.Observe, func(r domain.Reaction) bool { return r.ID == "x" })
+	}
+	if i < 0 || !reflect.DeepEqual(gen.Observe[i].Pin, rearmed.Pin) || reflect.DeepEqual(gen.Observe[i].Pin, armed.Pin) {
+		t.Errorf("the engine's generation after the re-adopt = %+v, want reaction x on the new pin %+v", gen, rearmed.Pin)
 	}
 }
 
@@ -981,6 +1068,39 @@ func TestProjectRuleAdoptsARepoServerTheFileHolds(t *testing.T) {
 		t.Errorf("ProposedRules after adopting = %+v, %v; want none", after, err)
 	}
 	assertNoReloadedKey(t, host)
+}
+
+// Rejecting an adopted repo server moves the server set, but a wiring that holds no live MCP set
+// has no door to move it through: the answer is recorded, the holder lists the server rejected, and
+// nothing else is reached — the reaction lanes stay as they were.
+func TestProjectRuleRejectingAnAdoptedServerWithNoMCPSetReachesNoDoor(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	host := configHost{w: w}
+	writeProjectConfig(t, w.roots.project, projectWikiServerYAML)
+	wiki := proposedOnly(t, host, apogee.ProposalMCPServer)
+	if err := host.AdoptRules(wiki); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+	w.engine.mu.Lock()
+	generationBefore := w.engine.pendingGeneration
+	w.engine.mu.Unlock()
+
+	err := host.RejectRules(wiki)
+
+	if err != nil {
+		t.Fatalf("RejectRules of the adopted server: %v", err)
+	}
+	w.engine.mu.Lock()
+	generationAfter := w.engine.pendingGeneration
+	w.engine.mu.Unlock()
+	if generationAfter != generationBefore {
+		t.Error("rejecting a server swapped the engine's reactions")
+	}
+	if got := w.live.proposals(); len(got.Adopted) != 0 || len(got.Rejected) != 1 || got.Rejected[0].Handle != "wiki" {
+		t.Errorf("the holder's proposals after the rejection = %+v, want wiki rejected", got)
+	}
 }
 
 // A repo reaction the adoption pane adopts is on the running engine's lanes at once — marked as the

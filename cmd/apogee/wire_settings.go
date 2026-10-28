@@ -213,9 +213,10 @@ func (s *liveSettings) update(fn func(*config.Options)) {
 }
 
 // allowRules reports the effective Allow rules and the inert ones beside them as they stand NOW —
-// the resolution installAllowRules last put here (projectrules.go). It is the `/settings` *Allow
-// rules* section's whole source: Rows is asked on every paint and reads no disk, so the section
-// lists from this holder, which every rule act settles into before it returns. The value shares its
+// the resolution an act's settling (installSnapshot) or a watched re-read (installAllowRules) last
+// put here (projectrules.go). It is the `/settings` *Allow rules* section's whole source: Rows is
+// asked on every paint and reads no disk, so the section lists from this holder, which every rule
+// act settles into before it returns. The value shares its
 // lists with the holder; nobody edits them in place, because every writer replaces the field whole.
 // A nil holder — a Driver composed without one — has no rules.
 func (s *liveSettings) allowRules() config.AllowRules {
@@ -228,8 +229,9 @@ func (s *liveSettings) allowRules() config.AllowRules {
 }
 
 // proposals reports the Project config's repo MCP servers and reactions — adopted, proposed and
-// rejected — as they stand NOW: the resolution installAllowRules last put here (projectrules.go),
-// which every adoption act and every watched re-read settles into. It is what the `/settings` repo
+// rejected — as they stand NOW: the resolution installSnapshot or installAllowRules last put here
+// (projectrules.go), which every adoption act and every watched re-read settles into. It is what
+// the `/settings` repo
 // rows under the `mcp-servers` and `reactions` keys list from, for allowRules' reason: Rows is asked
 // on every paint and reads no disk. A nil holder has no proposals.
 func (s *liveSettings) proposals() config.ProjectProposals {
