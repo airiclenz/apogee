@@ -169,7 +169,12 @@ cmd/apogee/wire_settings_test.go — TestCloneOptionsSharesNoCollection; interna
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 ./internal/project/ && capcom check`
 **Commit:** `feat(project): an Adoption snapshot of the project offer`
 
-## 7. Answer: the held check, the record write and the next snapshot
+## 7. Answer: the held check, the record write and the next snapshot — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): consequential edit — internal/project/doc.go: made necessary by the new answer.go (the package doc's file map and summary name Answer and Record).
+NOTES (2026-10-28): cmd/apogee/projectrules.go is listed in **Files:** but needed no edit — per the item's regression guard its projectRulesHeld/keepHeldEntries/recordAnswer copies stay until items 9 and 10 move their callers, and its prose stays true; `isSameFile` is copied (unexported) into internal/project for the held check rather than moved.
+NOTES (2026-10-28): `project.Record(store, entries, reply Reply)` takes a named `Reply` (today's adoptionAnswer shape: `(*adoption.Store).Adopt/Reject/Forget`) and writes nothing for an empty entry list, so Answer's "no entry held, no record file" holds through it; a nil store is a refusal.
+NOTES (2026-10-28): the three outcomes are told apart by type: a held re-read failure is `*project.HeldCheckError` (its text is cmd's "apogee: the project config could not be re-read: …" byte for byte), a store error comes back raw, and a recorded answer whose next load failed is `*project.NextLoadError`; when nothing is recorded `next` is the zero Snapshot (the caller's stands). Answer's loads drop notices (as cmd's loadLayeredOptions does), since the Goal's signature carries no notify. No held-re-read-failure test row: the project-only load turns every project-file defect into a notice, so the path is unreachable from files.
 
 **What:** Recast at the regression check (2026-10-27). Depends on item 6.
 **Goal:** `project.Answer(globalPath, root, readFile, store, entries, adopt)` returns `(next Snapshot, notHeld []domain.Proposal, err error)`. On adopt it re-reads the project file alone, with the record off, and records only the held entries. On reject it records without a held check. It returns the snapshot loaded after the write. A broken global config still records the answer and returns it with the load error. The held-check semantics are tested in `internal/project` over real temp files.

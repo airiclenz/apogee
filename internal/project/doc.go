@@ -1,7 +1,8 @@
 // Package project owns Adoption as a Driver meets it (ADR 0096 §4, ADR 0104): one [Snapshot] of
 // the layered config per event — the global config with the Project config layered over it, sorted
 // by the Project root's adoption record — and the [Diff] between two of them, so a Driver applies
-// only the kinds an answer or an edit moved.
+// only the kinds an answer or an edit moved. An answer goes through [Answer] — the ADR 0096 §4 held
+// check, the record write and the next Snapshot — or, with no held check, through [Record].
 //
 // A Snapshot is read once ([Load]) and never changes: its options, the Project config's offer and
 // the entries that offer asks the user about all come from that one resolution, and every accessor
@@ -12,4 +13,6 @@
 //   - doc.go: this map.
 //   - snapshot.go: Snapshot, Load, Diff, and the entries an answer records (ProposalEntry,
 //     RuleEntry) in the spellings the engine and the `allow:` key use (EngineAllowRules, AllowKind).
+//   - answer.go: Answer and Record, the held check, and the typed errors that tell an answer that was
+//     recorded from one that was not (HeldCheckError, NextLoadError).
 package project
