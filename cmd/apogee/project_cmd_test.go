@@ -177,6 +177,53 @@ func TestProjectCmdAdoptRefusesARuleTheFileNoLongerHolds(t *testing.T) {
 	}
 }
 
+// A global config that stops resolving while the questions wait does not stop the answers: the yes
+// is still recorded (its held check reads the Project config alone), the next question is still
+// asked and its answer recorded, and the closing line is printed — the command holds no snapshot,
+// so the re-read after each write failing is not an error.
+func TestProjectCmdAdoptRecordsAnswersOverAGlobalConfigBrokenMeanwhile(t *testing.T) {
+	t.Parallel()
+	home, workspace := projectAdoptRoots(t)
+	rules := []string{"go test", "make lint"}
+	writeProjectAllow(t, workspace, rules...)
+	input := &scriptedInput{scripts: [][]string{{"y"}, {"r"}}}
+	var once sync.Once
+	cmd := newProjectCommandWith(projectAdoptDeps{
+		terminal: loginTerminal{openInput: func() (cancelreader.CancelReader, error) {
+			once.Do(func() {
+				if err := os.WriteFile(config.FilePath(home), []byte("model: [unclosed\n"), 0o600); err != nil {
+					t.Errorf("break the global config: %v", err)
+				}
+			})
+			return input.open()
+		}},
+		isTerminal: func() bool { return true },
+	})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"adopt", "--config", home, "--workspace", workspace})
+
+	err := cmd.ExecuteContext(context.Background())
+
+	if err != nil {
+		t.Fatalf("project adopt over a global config broken meanwhile: %v\n%s", err, out.String())
+	}
+	want := []adoption.State{adoption.Adopted, adoption.Rejected}
+	got := recordedAnswers(t, home, workspace, rules...)
+	for i := range rules {
+		if got[i] != want[i] {
+			t.Errorf("rule %q is recorded %q, want %q", rules[i], got[i], want[i])
+		}
+	}
+	if !strings.Contains(out.String(), "`make lint`") {
+		t.Errorf("the second rule was not asked about:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "Adopted 1, rejected 1, left 0 proposed.") {
+		t.Errorf("the closing line does not count the answers:\n%s", out.String())
+	}
+}
+
 // With stdin not a terminal there is nobody to ask: the command refuses with the instruction, and
 // nothing is recorded.
 func TestProjectCmdAdoptRefusesANonTerminal(t *testing.T) {

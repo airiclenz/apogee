@@ -232,7 +232,12 @@ cmd/apogee/projectrules_test.go — projectRuleWiring, writeGlobalRule, assertNo
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestProjectRule|TestChangedReactionScript|TestE2EAdoption' ./cmd/apogee/`
 **Commit:** `refactor(cmd): the session answers Adoption through one snapshot`
 
-## 10. apogee project adopt answers through project.Answer
+## 10. apogee project adopt answers through project.Answer — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): resolveProjectAdoption resolves through config.ApplyConfigOffer (per the regression guard, not project.Load) and takes its questions from project.EntriesOf(offer); every answer — the yes and, so that each question goes through one door, the reject too — is given through project.Answer via a new answerProposal helper, which treats *project.NextLoadError as non-fatal (the answer is recorded and nothing is printed, so every CLI string stays byte-identical).
+NOTES (2026-10-28): projectRulesHeld and its cmd copy of isSameFile are deleted from cmd/apogee/projectrules.go with their last caller (internal/project keeps its own isSameFile); proposalsOf stays live (wire_options.go, projectrules.go).
+NOTES (2026-10-28): askProjectRules still checks proposalEntry before printing each question, so a proposal that is not the Project config's is refused before it is asked, as before; adoptHeldRule no longer takes the entry.
+NOTES (2026-10-28): new TestProjectCmdAdoptRecordsAnswersOverAGlobalConfigBrokenMeanwhile (y then r over a global config broken after the questions start) — confirmed it fails when the NextLoadError is not swallowed.
 
 **What:** Depends on item 7.
 **Goal:** `apogee project adopt` resolves through `project.Load` and answers each question through `project.Answer`. Every CLI string is byte-identical, including the summary line.

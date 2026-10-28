@@ -153,54 +153,6 @@ func notHeldRefusals(notHeld []apogee.Proposal) error {
 	return errors.Join(refused...)
 }
 
-// projectRulesHeld is the fingerprint (adoption.Fingerprint) of every entry the Project config of
-// projectRoot holds now — Allow rules, MCP servers and reactions, in force, proposed or rejected
-// alike — read from the file the moment it is asked. Only the project file is read: a global config that does not resolve must not stop an
-// answer about a project rule, and no global rule is one. A Project config that is the global file
-// at globalPath itself holds no project rule, as the layered load treats it.
-//
-// Errors: a project layer that resolves to options the loader refuses.
-func projectRulesHeld(globalPath, projectRoot string) (map[string]bool, error) {
-	path := config.ProjectFilePath(projectRoot)
-	if path == "" || isSameFile(path, globalPath) {
-		return nil, nil
-	}
-	resolved, err := config.LoadLayeredConfig("", projectRoot, os.ReadFile, func(string) {})
-	if err != nil {
-		return nil, fmt.Errorf("apogee: the project config could not be re-read: %w", err)
-	}
-	set := resolved.AllowRules
-	held := make(map[string]bool, len(set.Rules)+len(set.Proposed)+len(set.Rejected))
-	for _, list := range [][]config.AllowRule{set.Rules, set.Proposed, set.Rejected} {
-		for _, r := range list {
-			if r.Layer == config.SourceProject {
-				held[adoption.Fingerprint(adoption.Entry{Kind: string(r.Kind), Text: r.Text})] = true
-			}
-		}
-	}
-	proposals := resolved.Proposals
-	for _, list := range [][]apogee.Proposal{proposals.Adopted, proposals.Proposed, proposals.Rejected} {
-		for _, p := range list {
-			held[p.Fingerprint] = true
-		}
-	}
-	return held, nil
-}
-
-// isSameFile reports whether the paths name one existing file; a path that cannot be read names
-// none.
-func isSameFile(path, other string) bool {
-	if other == "" {
-		return false
-	}
-	a, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	b, err := os.Stat(other)
-	return err == nil && os.SameFile(a, b)
-}
-
 // notHeldError is the refusal of an adoption whose exact text the Project config no longer holds —
 // for a server or reaction, an entry an edit changed or took out since it was offered.
 func notHeldError(p apogee.Proposal) error {

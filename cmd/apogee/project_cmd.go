@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/project"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -107,9 +108,9 @@ func projectAdoptCommand(deps projectAdoptDeps) *cobra.Command {
 }
 
 // projectAdoptTarget is what one `apogee project adopt` asks about: the Project config's path, the
-// entries it proposes (proposalsOf's order — the Allow rules, then the servers and reactions), the
-// record their answers go into, and the Project root and global config path a yes re-reads the
-// file through (projectRulesHeld).
+// entries it proposes (project.EntriesOf's order — the Allow rules, then the servers and
+// reactions), the record their answers go into, and the Project root and global config path each
+// answer is given through (project.Answer).
 type projectAdoptTarget struct {
 	path        string
 	proposed    []apogee.Proposal
@@ -141,11 +142,12 @@ func adoptProjectRules(cmd *cobra.Command, deps projectAdoptDeps, opts *config.O
 
 // resolveProjectAdoption reads the config files the way a session does — flags over the
 // environment over the files — and returns the workspace's Project config with every entry it
-// proposes: its Allow rules, MCP servers and reactions. A run with no Project config, and a Project config that is the global file itself, are
-// refused: there is nothing a project proposes there.
+// proposes: its Allow rules, MCP servers and reactions, taken from the offer the same read
+// resolved (config.ApplyConfigOffer). A run with no Project config, and a Project config that is
+// the global file itself, are refused: there is nothing a project proposes there.
 func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAdoptTarget, error) {
 	notify := func(msg string) { cmd.PrintErrln(msg) }
-	err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify)
+	offer, err := config.ApplyConfigOffer(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify)
 	// A config that names no server yet still resolves every rule; only a session needs a server.
 	var undetermined *config.StartupUndetermined
 	if err != nil && !errors.As(err, &undetermined) {
@@ -161,7 +163,7 @@ func resolveProjectAdoption(cmd *cobra.Command, opts *config.Options) (projectAd
 			"apogee project adopt: %s has no Project config to answer — no .apogee/ folder between it "+
 				"and the repository's top, or that folder is your apogee home", roots.workspace)
 	}
-	proposed := proposalsOf(*opts)
+	proposed := project.EntriesOf(offer)
 	if len(proposed) == 0 {
 		return projectAdoptTarget{path: path}, nil
 	}
@@ -203,17 +205,16 @@ func parseProjectAnswer(reply string) projectAnswer {
 }
 
 // askProjectRules asks about each proposed entry in turn and records each answer before the next
-// question, so a run ended part-way keeps what was already answered. A yes re-reads the Project
-// config first: an entry it no longer holds as offered is refused by name, nothing is recorded for
-// it, and the questions go on. An unreadable reply ends the questions there, leaving the rest
-// proposed.
+// question (project.Answer), so a run ended part-way keeps what was already answered. A yes
+// re-reads the Project config first: an entry it no longer holds as offered is refused by name,
+// nothing is recorded for it, and the questions go on. An unreadable reply ends the questions
+// there, leaving the rest proposed.
 func askProjectRules(ctx context.Context, terminal loginTerminal, target projectAdoptTarget) error {
 	out := terminal.out
 	_, _ = fmt.Fprintf(out, "%s proposes %s:\n", target.path, countSummaryOf(target.proposed))
 	var tally projectAnswerTally
 	for _, proposal := range target.proposed {
-		entry, err := proposalEntry(proposal)
-		if err != nil {
+		if _, err := proposalEntry(proposal); err != nil {
 			return err
 		}
 		printProjectQuestion(out, proposal)
@@ -225,11 +226,11 @@ func askProjectRules(ctx context.Context, terminal loginTerminal, target project
 		}
 		switch parseProjectAnswer(reply) {
 		case answerAdopt:
-			if err := adoptHeldRule(out, target, proposal, entry, &tally); err != nil {
+			if err := adoptHeldRule(out, target, proposal, &tally); err != nil {
 				return err
 			}
 		case answerReject:
-			if err := target.store.Reject(entry); err != nil {
+			if _, err := answerProposal(target, proposal, false); err != nil {
 				return err
 			}
 			tally.rejected++
@@ -263,26 +264,40 @@ func printProjectQuestion(out io.Writer, proposal apogee.Proposal) {
 	_, _ = fmt.Fprintf(out, "  %s", projectQuestionPrompt)
 }
 
-// adoptHeldRule is a yes to proposal, whose adoption entry is entry: adopted when the Project config
-// still holds it as offered, and otherwise refused on out by name with nothing recorded.
+// adoptHeldRule is a yes to proposal: adopted when the Project config still holds it as offered,
+// and otherwise refused on out by name with nothing recorded.
 //
-// Errors: a Project config that cannot be re-read, and the store's.
-func adoptHeldRule(out io.Writer, target projectAdoptTarget, proposal apogee.Proposal, entry adoption.Entry,
+// Errors: a Project config that cannot be re-read (*project.HeldCheckError), and the store's.
+func adoptHeldRule(out io.Writer, target projectAdoptTarget, proposal apogee.Proposal,
 	tally *projectAnswerTally) error {
-	held, err := projectRulesHeld(target.globalPath, target.projectRoot)
+	notHeld, err := answerProposal(target, proposal, true)
 	if err != nil {
 		return err
 	}
-	if !held[adoption.Fingerprint(entry)] {
+	if len(notHeld) > 0 {
 		_, _ = fmt.Fprintf(out, "  %s no longer holds %s, so it was not adopted.\n", target.path, heldName(proposal))
 		tally.gone++
 		return nil
 	}
-	if err := target.store.Adopt(entry); err != nil {
-		return err
-	}
 	tally.adopted++
 	return nil
+}
+
+// answerProposal records the answer to proposal — adopt or reject — through project.Answer, and
+// returns the proposals a yes found the file no longer holds. The command holds no snapshot, so
+// the next one Answer loads is not kept; a global config that no longer resolves after the write
+// (*project.NextLoadError) leaves the answer recorded and is not an error here, so the remaining
+// questions and the closing line go on.
+//
+// Errors: Answer's, but for the post-write load error.
+func answerProposal(target projectAdoptTarget, proposal apogee.Proposal, adopt bool) ([]apogee.Proposal, error) {
+	_, notHeld, err := project.Answer(target.globalPath, target.projectRoot, os.ReadFile, target.store,
+		[]apogee.Proposal{proposal}, adopt)
+	var stale *project.NextLoadError
+	if errors.As(err, &stale) {
+		return notHeld, nil
+	}
+	return notHeld, err
 }
 
 // heldName names proposal in the refusal of a yes the file no longer holds: an Allow rule by its
