@@ -15,5 +15,8 @@ keeps tighter rules than a global one: the global entry of the same name or id w
 server starts on the platform environment floor, a reaction's `run:` is fenced and scrubbed and runs
 in the Project root, a program inside the root runs only when pinned, and only a project-adopted
 Allow rule or a session approval answers a repo server's tools. An adopted script runs whatever it
-contains.
+contains. A **Driver** reads Adoption through one immutable *Adoption snapshot* per event
+(`internal/project`): the layered config, the Project config's offer and the entries it asks about,
+all from one resolution; two snapshots' difference names the kinds — Allow rules, servers,
+reactions — whose in-force set moved, and only those are applied.
 _Avoid_: "trust" (adoption is per entry, never a whole-folder yes), "approval" (that is one call).

@@ -147,7 +147,12 @@ internal/config/execlayer.go — ProjectProposals.Clone; cmd/apogee/root.go — 
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'Offer|TestLayeredConfig|TestOverlayProject|TestRepo|TestAdoptedRepo|TestAllowRules|TestResolveOptions' ./internal/config/`
 **Commit:** `feat(config): the layered loaders return the project offer`
 
-## 6. internal/project: the Adoption snapshot and its diff
+## 6. internal/project: the Adoption snapshot and its diff — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): the pane-order builder is exported as `project.EntriesOf(config.ProjectOffer)` (it reads the offer, not Options, so it survives item 12); cmd's `proposalsOf(opts)` stays as a thin caller that builds the offer from the options' Proposals and AllowRules.Proposed. Entries come back deep-copied (domain.Proposal.Clone), otherwise byte-identical.
+NOTES (2026-10-28): `projectRuleEntry` and `configAllowKind` exported as `project.RuleEntry` and `project.AllowKind`; their three cmd call sites (all in projectrules.go) call the exports directly, and cmd keeps only `proposalEntry` as a one-line caller over `project.ProposalEntry` (still used by project_cmd.go, which this item leaves untouched).
+NOTES (2026-10-28): `Diff` takes `(before, after)` instead of the Goal's `(old, new)` so `new` does not shadow the builtin. Per the header's item-9 decision, `Moved.Allow` compares the whole effective `AllowRules.Rules`; `Servers` and `Reactions` compare the adopted entries' fingerprints as sets (order ignored), so an entry proposed or rejected without ever being in force moves nothing.
+NOTES (2026-10-28): `cloneEach` moved into internal/config with `Options.Clone` (cloneOptions was its only caller). `cloneOptions` now delegates and `TestCloneOptionsSharesNoCollection` passes over it; `wire_settings.go` dropped its now-unused `maps` import.
 
 **What:** Depends on item 5.
 **Goal:** Package `internal/project` exports `Snapshot` (immutable; accessors return copies) built from one resolution: `Options()`, `Offer()` and `Entries()`, the answerable proposals in the pane's order. `Load(globalPath, root, readFile, notify)` builds one. `Diff(old, new) Moved` reports which kinds moved: `Allow`, `Servers`, `Reactions`. The `Adoption` glossary Note names the snapshot.

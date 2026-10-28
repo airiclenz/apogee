@@ -8,6 +8,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -513,6 +514,47 @@ type Options struct {
 	// ApplyConfig fills it, like Overrides; empty when there is no global file, and left empty by
 	// the live block re-reads (LoadFileConfig, LoadLayeredConfig), which project values, not rows.
 	GlobalKeys map[string]bool
+}
+
+// Clone is the one deep copy of an Options: o with every list and map it carries copied, at every
+// depth, so what comes back shares no backing storage with o. A type that carries collections of
+// its own copies them in its own Clone; this method only calls those and copies the flat lists and
+// maps. Nil stays nil wherever o had nil. Interface and func fields (a Reaction's Handler, an
+// adoption Pin) are shared by design. A collection added to Options has to be copied here or in its
+// type.
+func (o Options) Clone() Options {
+	o.Servers = slices.Clone(o.Servers)
+	o.UnconfinedHosts = slices.Clone(o.UnconfinedHosts)
+	o.MCPServers = cloneEach(o.MCPServers, mcp.ServerConfig.Clone)
+	o.Reactions = cloneEach(o.Reactions, domain.Reaction.Clone)
+	o.ToolsDisabled = slices.Clone(o.ToolsDisabled)
+	o.ToolsEnabled = slices.Clone(o.ToolsEnabled)
+	o.URLAllowHosts = slices.Clone(o.URLAllowHosts)
+	o.URLDenyHosts = slices.Clone(o.URLDenyHosts)
+	o.DangerousRules = o.DangerousRules.Clone()
+	o.AllowRules = o.AllowRules.Clone()
+	o.Proposals = o.Proposals.Clone()
+	o.ModelProfiles = cloneEach(o.ModelProfiles, profiles.Entry.Clone)
+	o.SystemPrompt = o.SystemPrompt.Clone()
+	o.ContextFiles = slices.Clone(o.ContextFiles)
+	o.Sessions = o.Sessions.Clone()
+	o.Overrides = maps.Clone(o.Overrides)
+	o.ProjectKeys = maps.Clone(o.ProjectKeys)
+	o.GlobalKeys = maps.Clone(o.GlobalKeys)
+	return o
+}
+
+// cloneEach copies list element by element through clone, so elements that carry collections of
+// their own come back deep-copied too. A nil list stays nil.
+func cloneEach[T any](list []T, clone func(T) T) []T {
+	if list == nil {
+		return nil
+	}
+	out := make([]T, len(list))
+	for i, element := range list {
+		out[i] = clone(element)
+	}
+	return out
 }
 
 // DangerousRuleSet is the `dangerous-rules:` key resolved, split by the source each half came from,

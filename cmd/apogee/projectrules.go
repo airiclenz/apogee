@@ -9,6 +9,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/project"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -87,7 +88,7 @@ func (h configHost) ProposedRules() ([]apogee.Proposal, error) {
 // written — the rule is then in the file but proposed, and the error says so — and a settling that
 // cannot re-read the config files.
 func (w *rootWiring) addProjectRule(kind apogee.AllowRuleKind, text string) error {
-	ck, err := configAllowKind(kind)
+	ck, err := project.AllowKind(kind)
 	if err != nil {
 		return err
 	}
@@ -266,7 +267,7 @@ func (w *rootWiring) removeProjectRule(rule apogee.AllowRule) error {
 	if rule.Layer != apogee.AllowRuleProject {
 		return fmt.Errorf("apogee: the %s is not a project rule; it is not in the project config", rule)
 	}
-	entry, err := projectRuleEntry(rule)
+	entry, err := project.RuleEntry(rule)
 	if err != nil {
 		return err
 	}
@@ -288,7 +289,7 @@ func (w *rootWiring) removeProjectRule(rule apogee.AllowRule) error {
 // Errors: a refusal for a rule of a kind the `allow:` key lacks, the writer's refusals (the file is
 // then untouched), and the settling's.
 func (w *rootWiring) removeGlobalRule(rule apogee.AllowRule) error {
-	kind, err := configAllowKind(rule.Kind)
+	kind, err := project.AllowKind(rule.Kind)
 	if err != nil {
 		return err
 	}
@@ -409,19 +410,10 @@ func (w *rootWiring) proposedRules() ([]apogee.Proposal, error) {
 }
 
 // proposalsOf is everything the resolved options hold proposed, in the order the adoption pane
-// asks about them: the project Allow rules first, each with the fingerprint its answer is recorded
-// under, then the repo MCP servers and reactions.
+// asks about them (project.EntriesOf): the project Allow rules first, then the repo MCP servers and
+// reactions.
 func proposalsOf(opts config.Options) []apogee.Proposal {
-	rules := engineAllowRules(opts.AllowRules.Proposed)
-	proposals := make([]apogee.Proposal, 0, len(rules)+len(opts.Proposals.Proposed))
-	for _, r := range rules {
-		p := r.Proposal()
-		if e, err := projectRuleEntry(r); err == nil {
-			p.Fingerprint = adoption.Fingerprint(e)
-		}
-		proposals = append(proposals, p)
-	}
-	return append(proposals, opts.Proposals.Proposed...)
+	return project.EntriesOf(config.ProjectOffer{Proposals: opts.Proposals, Proposed: opts.AllowRules.Proposed})
 }
 
 // layeredOptions is the resolution a relaunch would make of the two config files and the adoption
@@ -460,47 +452,5 @@ func proposalEntries(proposals []apogee.Proposal) ([]adoption.Entry, error) {
 	return entries, nil
 }
 
-// proposalEntry is the adoption entry a proposal pins: a repo server or reaction by its kind,
-// handle and canonical text — the handle is what the store records the adopted text under, which
-// a later change is named against — and an Allow rule as the project rule it is (projectRuleEntry).
-//
-// Errors: a refusal for a server or reaction with no handle or no pin, and projectRuleEntry's.
-func proposalEntry(p apogee.Proposal) (adoption.Entry, error) {
-	if p.Kind == apogee.ProposalMCPServer || p.Kind == apogee.ProposalReaction {
-		if p.Handle == "" || p.Text == "" {
-			return adoption.Entry{}, fmt.Errorf("apogee: the %s entry has no name or no pin; only an entry "+
-				"the project config proposes is adopted", p.Kind)
-		}
-		return adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}, nil
-	}
-	return projectRuleEntry(apogee.AllowRule{
-		Kind:  apogee.AllowRuleKind(p.Kind),
-		Text:  p.Text,
-		Layer: apogee.AllowRuleProject,
-	})
-}
-
-// projectRuleEntry is the adoption entry a project rule pins.
-//
-// Errors: a refusal for a rule that is not a project rule, or of a kind the `allow:` key lacks.
-func projectRuleEntry(rule apogee.AllowRule) (adoption.Entry, error) {
-	if rule.Layer != apogee.AllowRuleProject {
-		return adoption.Entry{}, fmt.Errorf("apogee: the %s is not a project rule; only those are adopted", rule)
-	}
-	kind, err := configAllowKind(rule.Kind)
-	if err != nil {
-		return adoption.Entry{}, err
-	}
-	return adoption.Entry{Kind: string(kind), Text: rule.Text}, nil
-}
-
-// configAllowKind is the `allow:` list an engine rule kind is written under.
-func configAllowKind(kind apogee.AllowRuleKind) (config.AllowKind, error) {
-	switch kind {
-	case apogee.AllowRuleTerminal:
-		return config.AllowTerminal, nil
-	case apogee.AllowRuleMCPServer:
-		return config.AllowMCPServers, nil
-	}
-	return "", errors.New("apogee: an allow rule is a terminal rule or an MCP-server rule; this one is neither")
-}
+// proposalEntry is the adoption entry a proposal pins (project.ProposalEntry).
+func proposalEntry(p apogee.Proposal) (adoption.Entry, error) { return project.ProposalEntry(p) }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/project"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -246,26 +247,11 @@ func allowRulesFromOptions(opts config.Options) []apogee.AllowRule {
 	return engineAllowRules(opts.AllowRules.Rules)
 }
 
-// engineAllowRules is rules in the engine's spelling, each tagged with the layer it came from — the
-// one conversion the effective set and the proposed one (the adoption pane's) both take. Nil when
-// rules is empty.
+// engineAllowRules is rules in the engine's spelling (project.EngineAllowRules), each tagged with the
+// layer it came from — the one conversion the effective set and the proposed one (the adoption
+// pane's) both take. Nil when rules is empty.
 func engineAllowRules(rules []config.AllowRule) []apogee.AllowRule {
-	if len(rules) == 0 {
-		return nil
-	}
-	out := make([]apogee.AllowRule, len(rules))
-	for i, r := range rules {
-		kind := apogee.AllowRuleTerminal
-		if r.Kind == config.AllowMCPServers {
-			kind = apogee.AllowRuleMCPServer
-		}
-		layer := apogee.AllowRuleGlobal
-		if r.Layer == config.SourceProject {
-			layer = apogee.AllowRuleProject
-		}
-		out[i] = apogee.AllowRule{Kind: kind, Text: r.Text, Layer: layer}
-	}
-	return out
+	return project.EngineAllowRules(rules)
 }
 
 // dangerousRulesFromOptions merges the shipped dangerous-action rules with the `dangerous-rules:`
