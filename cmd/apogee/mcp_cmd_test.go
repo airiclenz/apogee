@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -822,6 +824,62 @@ func TestStartupSkipsARepoServerWhosePinMoved(t *testing.T) {
 	}
 	if !awaitPinWake(t, w) {
 		t.Error("AwaitConfigChange did not return true — the skip must wake the re-read with no watcher moved")
+	}
+}
+
+// A repo server whose pinned script cannot be read when the startup dial checks its pin is skipped
+// as a moved pin is, not fatal: the launch goes on with the global server connected, a startup
+// notice names the server and the failed check — never "proposed again", since the entry is not —
+// and the config wait wakes; the re-read that wake cues drops the server with its refused notice.
+func TestStartupSkipsARepoServerWhosePinIsUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission bits do not stop a read on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file regardless of its mode")
+	}
+	t.Parallel()
+	global := newPingMCPServer(t, "remote")
+	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false), global)
+	w.opts.MCPServers = append(w.opts.MCPServers, adoptedRepoWikiServer(t, w))
+	// After the options resolve: the config load drops a file it cannot read itself.
+	script := filepath.Join(w.roots.project, "bin", "wiki.sh")
+	if err := os.Chmod(script, 0); err != nil {
+		t.Fatalf("chmod bin/wiki.sh: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(script, 0o755) })
+
+	err := w.wireSession(context.Background())
+
+	if err != nil {
+		t.Fatalf("wireSession: %v, want the launch to go on past the skipped repo server", err)
+	}
+	if !hasMCPTool(w, "ping") {
+		t.Error("the global server's tools are missing; a pin skip must spare the rest of the set")
+	}
+	want := "apogee: mcp server wiki skipped — stdio server \"wiki\": refusing to launch — "
+	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0], want) ||
+		!strings.Contains(w.startupNotices[0], "bin/wiki.sh") || strings.Contains(w.startupNotices[0], "proposed again") {
+		t.Errorf("startup notices = %q, want one opening %q naming bin/wiki.sh, never \"proposed again\"", w.startupNotices, want)
+	}
+	if !awaitPinWake(t, w) {
+		t.Error("AwaitConfigChange did not return true — the skip must wake the re-read with no watcher moved")
+	}
+
+	var notices []string
+	reread, err := config.LoadLayeredConfig(w.configPath(), w.roots.project, os.ReadFile,
+		func(n string) { notices = append(notices, n) })
+	if err != nil {
+		t.Fatalf("re-read the layered config: %v", err)
+	}
+	for _, server := range reread.MCPServers {
+		if server.Name == "wiki" {
+			t.Errorf("the re-read kept the unreadable repo server: %+v", server)
+		}
+	}
+	refused := `ignoring mcp-servers entry "wiki": `
+	if !slices.ContainsFunc(notices, func(n string) bool { return strings.Contains(n, refused) }) {
+		t.Errorf("re-read notices = %q, want the refused notice %q", notices, refused)
 	}
 }
 

@@ -526,8 +526,10 @@ func TestConnect_AdmitsARelativeRepoCommand(t *testing.T) {
 
 // TestConnect_RefusesAnUnpinnedOrChangedRepoProgram proves the admission reaches no further than
 // the pin: an in-root program the pin does not hold, a PATH hit inside the root, a pinned program
-// whose content moved since adoption, and a repo server with no pin at all are each refused at
-// connect time — the moved pin as a skip Client.Skipped reports, the others as a failed connect.
+// whose content moved since adoption, a pin whose files could not be checked, and a repo server
+// with no pin at all are each refused at connect time — the moved and the unreadable pin as a skip
+// Client.Skipped reports (the config layer's re-read proposes the changed server again and drops
+// the unreadable one with its refused notice), the others as a failed connect.
 func TestConnect_RefusesAnUnpinnedOrChangedRepoProgram(t *testing.T) {
 	t.Run("unpinned in-root program", func(t *testing.T) {
 		cfg, root, _ := repoStdioServer(t, "bin/mcp-server")
@@ -587,9 +589,29 @@ func TestConnect_RefusesAnUnpinnedOrChangedRepoProgram(t *testing.T) {
 		cfg, root, program := repoStdioServer(t, "bin/mcp-server")
 		cfg.Pin = fakeProjectPin{root: root, programs: []string{program}, err: errors.New("read bin/mcp-server: denied")}
 
-		if c, err := connectOnly(t, cfg, root); err == nil {
-			_ = c.Close()
-			t.Fatal("a repo server whose pin could not be checked connected")
+		c, err := connectOnly(t, cfg, root)
+		if err != nil {
+			t.Fatalf("Connect: %v; want the unreadable pin skipped, not the set failed", err)
+		}
+		defer func() { _ = c.Close() }()
+		if len(c.Tools()) != 0 {
+			t.Fatalf("a repo server whose pin could not be checked surfaced %d tools", len(c.Tools()))
+		}
+		skipped := c.Skipped()
+		if len(skipped) != 1 {
+			t.Fatalf("Skipped() = %+v; want the one repo server", skipped)
+		}
+		var pinMoved *domain.PinMovedError
+		if !errors.As(skipped[0].Err, &pinMoved) || pinMoved.Err == nil {
+			t.Fatalf("skip error = %v; want it to wrap a *domain.PinMovedError carrying the failed check", skipped[0].Err)
+		}
+		for _, want := range []string{cfg.Name, "refusing to launch — read bin/mcp-server: denied"} {
+			if !strings.Contains(skipped[0].Err.Error(), want) {
+				t.Errorf("skip error = %v; want it to name %q", skipped[0].Err, want)
+			}
+		}
+		if strings.Contains(skipped[0].Err.Error(), "proposed again") {
+			t.Errorf("skip error = %v; an unreadable pin is dropped on the re-read, never proposed again", skipped[0].Err)
 		}
 	})
 	t.Run("no pin", func(t *testing.T) {
@@ -642,12 +664,12 @@ func TestConnect_SkipsARepoServerWhosePinMoved(t *testing.T) {
 	if len(skipped) != 1 || skipped[0].Name != "moved" {
 		t.Fatalf("Skipped() = %+v; want the moved repo server alone", skipped)
 	}
-	var pinChanged *PinChangedError
-	if !errors.As(skipped[0].Err, &pinChanged) {
-		t.Fatalf("skip error = %v; want it to wrap a *PinChangedError", skipped[0].Err)
+	var pinMoved *domain.PinMovedError
+	if !errors.As(skipped[0].Err, &pinMoved) {
+		t.Fatalf("skip error = %v; want it to wrap a *domain.PinMovedError", skipped[0].Err)
 	}
-	if pinChanged.Server != "moved" || !slices.Equal(pinChanged.Files, []string{"bin/moved-server"}) {
-		t.Errorf("PinChangedError = %+v; want server moved and file bin/moved-server", pinChanged)
+	if !slices.Equal(pinMoved.Files, []string{"bin/moved-server"}) {
+		t.Errorf("PinMovedError = %+v; want file bin/moved-server", pinMoved)
 	}
 	if !strings.Contains(skipped[0].Err.Error(), "bin/moved-server changed since you adopted it") {
 		t.Errorf("skip error = %v; want the changed-pin refusal naming the file", skipped[0].Err)

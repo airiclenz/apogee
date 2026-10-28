@@ -73,11 +73,12 @@ type liveSession struct {
 // so a half-wired MCP set never reaches the registry. The host decides whether an MCP failure is
 // fatal or a logged degradation; this package does not silently swallow it.
 //
-// The one exception is a Project server whose adoption pin moved (a *PinChangedError): that server
-// is refused before anything launches, the rest of the set still connects and Connect succeeds, and
-// the skip is reported through Client.Skipped rather than swallowed. Such a server waits on the
-// user's fresh adoption, so failing the whole set over it would cost every other server for an
-// edit the config layer already proposes again.
+// The one exception is a Project server whose adoption pin moved or could not be checked (a
+// *domain.PinMovedError from its pin's Admit): that server is refused before anything launches, the
+// rest of the set still connects and Connect succeeds, and the skip is reported through
+// Client.Skipped rather than swallowed. Such a server waits on the config layer's next read — which
+// proposes a changed one again for the user's fresh adoption and drops one whose files it cannot
+// read with its refused notice — so failing the whole set over it would cost every other server.
 //
 // ctx bounds the whole connect sweep (every server's handshake and tools/list) — never the life of
 // a launched stdio server, which is the session's. A duplicate or empty server name is rejected
@@ -167,9 +168,9 @@ func ConnectWith(
 	c := &Client{}
 	for _, cfg := range servers {
 		err := c.connectOne(ctx, host, cfg, guard, workspaceRoot)
-		var pinChanged *PinChangedError
-		if errors.As(err, &pinChanged) {
-			// A moved pin refuses the launch before anything starts, so there is nothing of this
+		var pinMoved *domain.PinMovedError
+		if errors.As(err, &pinMoved) {
+			// A moved or unreadable pin refuses the launch before anything starts, so there is nothing of this
 			// server's to tear down: it is recorded and the sweep goes on (see Connect).
 			c.skipped = append(c.skipped, Denied{Name: cfg.Name, Err: err})
 			continue
@@ -194,7 +195,7 @@ type Denied struct {
 	Name string
 	// Err is why the server was refused: from Admit, ErrEndpointDenied where the host lists closed
 	// it, the missing/unparseable-endpoint refusal otherwise; from Client.Skipped, an error wrapping
-	// the *PinChangedError that names the moved files.
+	// the *domain.PinMovedError that names the moved files (or why they could not be checked).
 	Err error
 }
 
@@ -234,7 +235,7 @@ func Admit(servers []ServerConfig, guard security.URLGuard) (admitted []ServerCo
 
 // connectOne dials a single server, lists its tools, and appends the session and the surfaced
 // tools to the Client. A connect or list failure is returned (the caller rolls the whole set
-// back, or — for a *PinChangedError — skips the server). The session is recorded BEFORE listing tools so a list failure still tears the
+// back, or — for a *domain.PinMovedError — skips the server). The session is recorded BEFORE listing tools so a list failure still tears the
 // just-opened session down on rollback.
 //
 // A stdio server's process joins its teardown inside stdioTransport.Connect, immediately after
@@ -344,8 +345,9 @@ func (c *Client) Tools() []domain.Tool {
 }
 
 // Skipped returns the Project servers this connect left undialled because a file their adoption
-// pinned changed, went missing or is newly named — each by alias, with the error wrapping the
-// *PinChangedError that names the files — in config order. Empty when every server connected. The
+// pinned changed, went missing or is newly named, or the pinned files could not be checked — each
+// by alias, with the error wrapping the *domain.PinMovedError that names the files or the failed
+// check — in config order. Empty when every server connected. The
 // slice is a fresh copy, as Tools' is.
 func (c *Client) Skipped() []Denied {
 	if c == nil || len(c.skipped) == 0 {

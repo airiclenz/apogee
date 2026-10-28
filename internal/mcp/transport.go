@@ -313,21 +313,22 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // The command is resolved on PATH through the exec fence (security.ResolveProgram), so what is
 // launched is an ABSOLUTE program that does not live inside the workspace: a server binary the
 // model could have authored — or a PATH entry pointing into the box — is refused at connect time
-// rather than executed. Connect being all-or-nothing (bar a Project server whose pin moved, which it
-// skips and reports — Client.Skipped), the operator meets that refusal at startup, where every other
+// rather than executed. Connect being all-or-nothing (bar a Project server whose pin moved or could
+// not be checked, which it skips and reports — Client.Skipped), the operator meets that refusal at startup, where every other
 // misconfigured server is met. For a global server cmd.Dir is deliberately NOT
 // set: the server keeps starting in apogee's own working directory, the workspace, which is what
 // filesystem-style MCP servers expect, and with argv[0] an absolute fenced path there is no
 // relative lookup left for the working directory to decide.
 //
-// A Project server (cfg.Project, ADR 0104 §4) is launched only once its pin holds: every project
-// file it was adopted with is re-hashed first, and one that changed, went missing or is newly named
-// refuses the launch with a *PinChangedError (the config layer proposes the server again on its
-// next read). Its relative
-// command carrying a path separator (`./bin/server`) resolves against the Project root, it starts
-// in the Project root, and a program the fence refuses for lying inside the workspace is admitted
-// only when it IS one of the pinned project files — a PATH hit inside the root (`node_modules/.bin`)
-// or any other unpinned in-root program stays refused.
+// A Project server (cfg.Project, ADR 0104 §4) is launched only through its pin's Admit: every
+// project file it was adopted with is re-hashed first, and one that changed, went missing or is
+// newly named — or files that could not be checked at all — refuse the launch with a
+// *domain.PinMovedError (the config layer proposes a changed server again on its next read, and
+// drops one whose files it cannot read with its refused notice). Its relative
+// command carrying a path separator (`./bin/server`) resolves against the admitted PinLaunch.Dir
+// (the Project root), it starts there, and a program the fence refuses for lying inside the
+// workspace is admitted only when it IS one of PinLaunch.Programs — a PATH hit inside the root
+// (`node_modules/.bin`) or any other unpinned in-root program stays refused.
 //
 // The returned ProcessTeardown holds the launched process's whole tree — a POSIX process group, a
 // Windows Job Object — so Client.Close reaps every descendant the server spawned rather than only
@@ -360,15 +361,14 @@ func buildStdioTransport(host Host, cfg ServerConfig, workspaceRoot string) (mcp
 	if strings.TrimSpace(cfg.Command) == "" {
 		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)
 	}
-	program, err := resolveStdioProgram(cfg, workspaceRoot)
+	program, dir, err := resolveStdioProgram(cfg, workspaceRoot)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q: %w", cfg.Name, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, program, cfg.Args...)
-	if cfg.Project {
-		cmd.Dir = cfg.Pin.Root()
-	}
+	// Empty for a global server, which keeps apogee's own working directory (see above).
+	cmd.Dir = dir
 	switch {
 	case cfg.EnvAllowlist != nil:
 		// The opt-in scrub: only the named keys (plus the platform's essentials) reach the child,
@@ -388,47 +388,30 @@ func buildStdioTransport(host Host, cfg ServerConfig, workspaceRoot string) (mcp
 	return &stdioTransport{cmd: cmd, td: td, terminateDuration: host.TerminateDuration}, cmd, td, cancel, nil
 }
 
-// changedPinRefusal is the refusal a Project server's launch earns when a project file it was
-// adopted with moved: the files by path, and that the server waits on a fresh adoption — the config
-// layer proposes it again, naming the same files, the next time it reads the Project config.
-const changedPinRefusal = "refusing to launch — %s changed since you adopted it; it is proposed again for adoption"
-
-// PinChangedError is the refusal a Project server's launch earns when its pin no longer matches:
-// the server's alias and the project files that changed, went missing or are newly named. It is a
-// type rather than a sentinel because a connect does not fail the set over it — ConnectWith skips
-// that one server and reports it through Client.Skipped, and the host words its notice from the
-// files. Its message is changedPinRefusal over those files.
-type PinChangedError struct {
-	// Server is the skipped server's configured alias.
-	Server string
-	// Files are the moved project files, by the path the pin reports them under.
-	Files []string
-}
-
-func (e *PinChangedError) Error() string {
-	return fmt.Sprintf(changedPinRefusal, strings.Join(e.Files, ", "))
-}
-
-// resolveStdioProgram turns cfg.Command into the absolute program a stdio server launches, or the
-// refusal that launch earns: the exec fence (security.ResolveProgram against workspaceRoot) for a
-// global server, and for a Project server first the pin's spawn-time check, then
-// security.ResolveProjectProgram: the fence with the Project root as the base of a relative command
-// and the pinned project files admitted.
-func resolveStdioProgram(cfg ServerConfig, workspaceRoot string) (string, error) {
+// resolveStdioProgram turns cfg.Command into the absolute program a stdio server launches and the
+// directory it starts in, or the refusal that launch earns: the exec fence
+// (security.ResolveProgram against workspaceRoot) for a global server, which keeps apogee's own
+// working directory (dir empty); for a Project server first the pin's Admit — whose
+// *domain.PinMovedError ConnectWith skips the server on — then security.ResolveProjectProgram: the
+// fence with the admitted PinLaunch.Dir as the base of a relative command and the start directory,
+// and PinLaunch.Programs admitted.
+func resolveStdioProgram(cfg ServerConfig, workspaceRoot string) (program, dir string, err error) {
 	if !cfg.Project {
-		return security.ResolveProgram(nil, cfg.Command, workspaceRoot, nil)
+		program, err = security.ResolveProgram(nil, cfg.Command, workspaceRoot, nil)
+		return program, "", err
 	}
 	if cfg.Pin == nil {
-		return "", errors.New("refusing to launch — a project server carries no adoption pin")
+		return "", "", errors.New("refusing to launch — a project server carries no adoption pin")
 	}
-	changed, err := cfg.Pin.Changed()
+	launch, err := cfg.Pin.Admit()
 	if err != nil {
-		return "", fmt.Errorf("refusing to launch — %w", err)
+		return "", "", fmt.Errorf("refusing to launch — %w", err)
 	}
-	if len(changed) > 0 {
-		return "", &PinChangedError{Server: cfg.Name, Files: changed}
+	program, err = security.ResolveProjectProgram(cfg.Command, launch.Dir, workspaceRoot, nil, launch.Programs)
+	if err != nil {
+		return "", "", err
 	}
-	return security.ResolveProjectProgram(cfg.Command, cfg.Pin.Root(), workspaceRoot, nil, cfg.Pin.Programs())
+	return program, launch.Dir, nil
 }
 
 // defaultStdioTerminateDuration is the rung wait a non-positive Host.TerminateDuration maps to:

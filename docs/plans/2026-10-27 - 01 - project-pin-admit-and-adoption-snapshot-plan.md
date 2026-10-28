@@ -69,7 +69,10 @@ internal/mcp/mcp_test.go — fakeProjectPin; internal/agent/syncexec_test.go —
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestAdoptedPin|TestVerifyExecPins' ./internal/config/ && capcom check && capcom know show "Project pin"`
 **Commit:** `feat(domain): a Project pin admits a launch or refuses it as moved`
 
-## 2. The MCP launcher admits through the pin
+## 2. The MCP launcher admits through the pin — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): resolveStdioProgram now returns the start directory beside the program (PinLaunch.Dir for a Project server, empty for a global one), so buildStdioTransport sets cmd.Dir from the admitted launch rather than reading the pin again.
+NOTES (2026-10-28): the manual line changed is docs/manual/configuration.md's MCP login parenthetical (the only manual line describing a repo server's pin skip); the per-spawn bullet there speaks of mismatches only and stays.
 
 **What:** Depends on item 1. Ratified behaviour change: an unreadable pin now skips the server and cues a re-ask.
 **Goal:** `internal/mcp` launches a repo stdio server only through `Pin.Admit`. `ConnectWith` skips a server whose error matches `*domain.PinMovedError` (changed or unreadable) and connects the rest; `mcp.PinChangedError` no longer exists. The startup notice for a changed file is byte-identical: `apogee: mcp server <name> skipped — stdio server "<name>": refusing to launch — <file> changed since you adopted it; it is proposed again for adoption`.

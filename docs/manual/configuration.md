@@ -829,7 +829,9 @@ longer refresh or was issued to another client than its `client-id:` now names. 
 stops with an error naming `apogee mcp login <name>` — connecting is all-or-nothing, so one server
 that cannot log in holds back the rest. (A repo server whose pinned file moved is the one server the
 connect skips rather than fails the set over: a notice names it and the moved file, the rest of the
-set connects, and the server is proposed for adoption again.) Mid-session nothing ever prompts: a reconnect that needs a
+set connects, and the server is proposed for adoption again. One whose pinned file cannot be read is
+skipped the same way, its notice saying why, but it is not proposed again: the config re-read that
+follows drops it with a notice naming the file it could not read.) Mid-session nothing ever prompts: a reconnect that needs a
 login fails, and the `mcp-servers:` row in `/settings` names the same command.
 
 The login always prints the full authorization URL. On a local desktop, `⏎` opens it in your

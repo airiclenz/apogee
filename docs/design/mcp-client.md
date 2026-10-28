@@ -203,9 +203,11 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
 
 - **Connect** is **all-or-nothing**: a later server's failure tears down every already-opened
   session and returns the error, so a half-wired MCP set never reaches the registry and no orphaned
-  stdio process — or process tree — leaks. The one exception is a Project server whose adoption pin
-  moved (`*PinChangedError`): it is refused before anything launches, the rest of the set still
-  connects, and the skip is reported through `Client.Skipped() []Denied`. `workspaceRoot` is the exec fence a stdio server's
+  stdio process — or process tree — leaks. The one exception is a Project server whose pin's `Admit`
+  refuses it (`*domain.PinMovedError` — a pinned file moved, or the files could not be checked at
+  all): it is refused before anything launches, the rest of the set still connects, and the skip is
+  reported through `Client.Skipped() []Denied`. The config re-read that skip cues proposes a changed
+  server again and drops an unreadable one with its refused notice. `workspaceRoot` is the exec fence a stdio server's
   command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
   Close) — a host without MCP pays nothing. Every server's headers must pass `ValidateHeaders` and
   its `auth:` keys `ValidateAuth` (§2),
