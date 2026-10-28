@@ -90,7 +90,10 @@ cmd/apogee/mcp_cmd_test.go — adoptedRepoWikiServer, awaitPinWake; docs/design/
 **Acceptance:** `! grep -rn --exclude-dir=archived 'PinChangedError\|changedPinRefusal' internal/ cmd/ docs/design/`; `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestConnect' ./internal/mcp/`, then `GOMEMLIMIT=2GiB go test -count=1 -run 'SkipsARepoServer' ./cmd/apogee/`
 **Commit:** `fix(mcp): an unreadable repo pin skips the server instead of failing connect`
 
-## 3. The reaction spawner admits through the pin
+## 3. The reaction spawner admits through the pin — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): internal/agent/syncexec_test.go needed no change — its fakePin already implements Admit (item 1) and every TestRepoRun* test passes unchanged, as the item's Tests line requires.
+NOTES (2026-10-28): .capcom/issues/reaction-script-edit-silent.md still cites `changedPinNotice`/`checkProjectPin` at syncexec.go:141-155; left untouched (issue files are not the implementer's to edit) — its line reference is now stale.
 
 **What:** Depends on item 1.
 **Goal:** `internal/agent` spawns a repo reaction only through `Pin.Admit`, and pokes `PinMoved` exactly when the refusal matches `*domain.PinMovedError`. Every refusal string is byte-identical: `apogee: reaction "<id>": refusing to run — <PinMovedError text>`, and the nil-pin refusal unchanged with no poke.

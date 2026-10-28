@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -111,10 +111,10 @@ func (a *Agent) bindProjectRun() {
 // spawnReactionArgv is the one call a user reaction's command reaches tools.RunHookSubprocess
 // through, on a ctx that already carries its permit. A global reaction runs in apogee's own working
 // directory — its payload names the workspace by path — under the workspace program fence. An
-// adopted repo reaction (domain.Reaction.Project) has its pinned project files checked first
-// (checkProjectPin, which cues the Driver on a refusal), then runs with the Project root as its
-// working directory and the base of a relative argv[0], and may run a program inside the fence only
-// when it is one of the files its pin holds (ADR 0104 §4).
+// adopted repo reaction (domain.Reaction.Project) is admitted through its pin first
+// (checkProjectPin, which cues the Driver on a refusal), then runs in the admitted launch's
+// directory — the Project root, also the base of a relative argv[0] — and may run a program inside
+// the fence only when it is one of the programs the launch admits (ADR 0104 §4).
 func (a *Agent) spawnReactionArgv(
 	ctx context.Context,
 	r domain.Reaction,
@@ -126,41 +126,39 @@ func (a *Agent) spawnReactionArgv(
 	dir := ""
 	var opts []tools.HookOption
 	if r.Project {
-		if err := a.checkProjectPin(r); err != nil {
+		launch, err := a.checkProjectPin(r)
+		if err != nil {
 			return "", err
 		}
-		dir = r.Pin.Root()
-		opts = append(opts, tools.AdmitProjectPrograms(dir, r.Pin.Programs()))
+		dir = launch.Dir
+		opts = append(opts, tools.AdmitProjectPrograms(dir, launch.Programs))
 	}
 	return tools.RunHookSubprocess(ctx, argv, dir, a.cfg.WorkspaceDir, a.cfg.SecretEnvNames(), env, timeout, stdin, opts...)
 }
 
-// changedPinNotice is the refusal a repo reaction whose pinned project files moved since adoption
-// earns: the files by path, and that the entry waits on a fresh adoption — the config layer
-// proposes it again, naming the same files, the next time it reads the Project config.
-const changedPinNotice = "apogee: reaction %q: refusing to run — %s changed since you adopted it; " +
-	"it is proposed again for adoption"
-
-// checkProjectPin is the spawn-time check of an adopted repo reaction (ADR 0104 §4): nil when every
-// project file its pin holds is still what the user adopted. A Project reaction with no pin, a pin
-// whose files cannot be read, and a moved file all refuse the spawn — none of them is a command
-// the user said yes to. The last two also tell the Driver (Config.PinMoved): the entry's files
-// are no longer what the user adopted, so the config layer now proposes it again and a pane can
-// ask. A missing pin is no moved file — a re-read would find nothing new to ask about.
-func (a *Agent) checkProjectPin(r domain.Reaction) error {
+// checkProjectPin is the spawn-time check of an adopted repo reaction (ADR 0104 §4): the launch its
+// pin admits when every project file the pin holds is still what the user adopted. A Project
+// reaction with no pin, and any refusal the pin's Admit returns, refuse the spawn — none of them is
+// a command the user said yes to. A *domain.PinMovedError (a moved file, or files that could not be
+// checked) also tells the Driver (Config.PinMoved): the entry's files are no longer what the user
+// adopted, so the config layer now proposes it again and a pane can ask. A missing pin is no moved
+// file — a re-read would find nothing new to ask about.
+func (a *Agent) checkProjectPin(r domain.Reaction) (domain.PinLaunch, error) {
 	if r.Pin == nil {
-		return fmt.Errorf("apogee: reaction %q: refusing to run — a project reaction carries no adoption pin", r.ID)
+		return domain.PinLaunch{}, fmt.Errorf(
+			"apogee: reaction %q: refusing to run — a project reaction carries no adoption pin",
+			r.ID,
+		)
 	}
-	changed, err := r.Pin.Changed()
+	launch, err := r.Pin.Admit()
 	if err != nil {
-		a.notePinMoved()
-		return fmt.Errorf("apogee: reaction %q: refusing to run — %w", r.ID, err)
+		var moved *domain.PinMovedError
+		if errors.As(err, &moved) {
+			a.notePinMoved()
+		}
+		return domain.PinLaunch{}, fmt.Errorf("apogee: reaction %q: refusing to run — %w", r.ID, err)
 	}
-	if len(changed) > 0 {
-		a.notePinMoved()
-		return fmt.Errorf(changedPinNotice, r.ID, strings.Join(changed, ", "))
-	}
-	return nil
+	return launch, nil
 }
 
 // notePinMoved hands the Driver its re-ask cue (Config.PinMoved), when it asked for one.
