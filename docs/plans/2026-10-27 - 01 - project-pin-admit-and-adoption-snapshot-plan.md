@@ -192,7 +192,7 @@ cmd/apogee/projectrules_test.go — TestProjectRuleAdoptRecordsAHeldRuleWhenTheG
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 ./internal/project/`
 **Commit:** `feat(project): Answer does the held check and returns the next snapshot`
 
-## 8. The settings doors take a loaded set
+## 8. The settings doors take a loaded set — ✅ DONE (2026-10-28)
 
 **What:** Depends on item 5.
 **Goal:** `reconnectMCP`, `reloadReactions` and `installAllowRules` each have a form that takes an already-resolved `config.Options` and does not read the disk. The loading forms are thin wrappers over them, and behaviour is unchanged.

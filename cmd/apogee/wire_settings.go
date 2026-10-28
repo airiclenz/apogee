@@ -1951,6 +1951,13 @@ func (a settingsApplier) reconnectMCP() (note string, err error) {
 	if err != nil {
 		return "", err
 	}
+	return a.reconnectMCPFrom(layered)
+}
+
+// reconnectMCPFrom moves the session onto layered's `mcp-servers:` block — reconnectMCP without the
+// read, for a caller that already holds the resolved layered set. It widens the scrub first
+// (widenSecretEnv) and reads no file; the note is the reconnect's.
+func (a settingsApplier) reconnectMCPFrom(layered config.Options) (note string, err error) {
 	a.widenSecretEnv(layered)
 	return a.mcp.reconnect(layered.MCPServers, a.tools, a.engine)
 }
@@ -1980,6 +1987,16 @@ func (a settingsApplier) reloadReactions() error {
 	if err != nil {
 		return err
 	}
+	return a.reloadReactionsFrom(layered)
+}
+
+// reloadReactionsFrom moves the session onto layered's `reactions:` block — reloadReactions without
+// the read, for a caller that already holds the resolved layered set. It reads no file; the scrub
+// widens first, and the holder is written only once the swap has committed.
+//
+// Errors: a Generation the engine will not arm, or a list the Runner will not take; nothing is
+// installed then.
+func (a settingsApplier) reloadReactionsFrom(layered config.Options) error {
 	a.widenSecretEnv(layered)
 	lanes := domain.LanesOf(layered.Reactions)
 	gen := a.live.generation()

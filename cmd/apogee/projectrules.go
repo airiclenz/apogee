@@ -378,6 +378,14 @@ func (w *rootWiring) installAllowRules() error {
 	if err != nil {
 		return err
 	}
+	w.installAllowRulesFrom(resolved)
+	return nil
+}
+
+// installAllowRulesFrom installs resolved's effective Allow rules on the live-settings holder and
+// the engine, with its proposals beside them on the holder (holdProposals) — installAllowRules
+// without the read, for a caller that already holds the resolved layered set. It reads no file.
+func (w *rootWiring) installAllowRulesFrom(resolved config.Options) {
 	w.holdProposals(resolved)
 	if w.live != nil {
 		w.live.update(func(o *config.Options) { o.AllowRules = resolved.AllowRules })
@@ -385,7 +393,6 @@ func (w *rootWiring) installAllowRules() error {
 	if w.engine != nil {
 		w.engine.SetAllowRules(allowRulesFromOptions(resolved))
 	}
-	return nil
 }
 
 // holdProposals installs resolved's repo MCP servers and reactions — adopted, proposed, rejected —
