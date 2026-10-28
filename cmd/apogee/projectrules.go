@@ -19,12 +19,12 @@ import (
 //
 // Four answers the human gives about a project rule — two of them, adopt and reject, about every
 // kind of entry the Project config proposes (a Proposal: an Allow rule, a repo MCP server or a repo
-// reaction) — each one write to the Project config or to
-// its adoption record (or both) — and the one act that reaches a global rule, its removal from the
-// global config (the `/settings` *Allow rules* section's) — followed by the same settling: the
-// external-edit baseline is re-taken, because apogee's own write is not an edit the watcher should
-// report back (ADR 0041 decision 8), and the next Snapshot of the files (project.Load, or the one project.Answer returns)
-// is put in force against the one the session holds (installSnapshot): the live-settings holder
+// reaction) — each one write to the Project config or to its adoption record (or both) — and the
+// one act that reaches a global rule, its removal from the global config (the `/settings` *Allow
+// rules* section's) — followed by the same settling: the external-edit baseline is re-taken,
+// because apogee's own write is not an edit the watcher should report back (ADR 0041 decision 8),
+// and the next Snapshot of the files (project.Load, or the one project.Answer returns) is put in
+// force against the one the session holds (installSnapshot): the live-settings holder
 // takes its rules and proposals whole, and only the kinds project.Diff reports moved go further —
 // the effective rules onto the engine, whose rule set the whole agent tree shares, so a sub-agent
 // already running reads the new rule at its next ordinary gate; a moved server or reaction through
@@ -272,8 +272,9 @@ func (w *rootWiring) inForce() project.Snapshot {
 
 // installSnapshot puts next in force over old. The live-settings holder takes next whole — its
 // effective Allow rules onto the options, the snapshot itself for its offer, the inert rules and
-// the repo proposals (liveSettings.holdInForce) — whatever moved: the `/settings` rows list from it. Then only what project.Diff reports moved goes further: the
-// effective rules onto the engine, and a moved server or reaction set through the doors a watched
+// the repo proposals (liveSettings.holdInForce) — whatever moved: the `/settings` rows list from
+// it. Then only what project.Diff reports moved goes further: the effective rules onto the
+// engine, and a moved server or reaction set through the doors a watched
 // re-read applies the layered set by (applyMovedKinds), each fed next's options and reading no
 // file.
 //

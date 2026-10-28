@@ -54,8 +54,9 @@ func (e *NextLoadError) Unwrap() error { return e.Err }
 // global one shadows held. A no (reject) records without a held check: refusing text the file no
 // longer holds harms nothing.
 //
-// When nothing is recorded — an error before the write, or a yes no entry is held for — next is the
-// zero Snapshot and the caller's own snapshot stands; no record file is opened then.
+// When nothing is recorded before the load — an error before the write, or a yes no entry is held
+// for — next is the zero Snapshot and the caller's own snapshot stands; no record file is opened
+// then. A no with no entries also records nothing (Record), but next is still loaded.
 //
 // Errors, told apart by what was recorded: a proposal that is not the Project config's
 // (ProposalEntry; nothing recorded); a *HeldCheckError (nothing recorded); the store's errors,

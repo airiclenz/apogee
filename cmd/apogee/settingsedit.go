@@ -163,8 +163,9 @@ type fileProjection struct {
 
 // newExternalEdit seeds the baseline from the file as it stands at launch. A projection that cannot
 // be made — a config that has since become unreadable — falls back to the session's own resolution,
-// opts with offer, the Project config's offer it returned beside them, whose rows are never nil: a baseline that exists and is a little stale reports one extra key,
-// where a missing baseline would report none at all and swallow the human's edit whole.
+// opts with offer, the Project config's offer it returned beside them, whose rows are never nil:
+// a baseline that exists and is a little stale reports one extra key, where a missing baseline
+// would report none at all and swallow the human's edit whole.
 // workspace is passed separately from opts because it is the resolved root, not the option: the
 // caller has already turned `--workspace` (or its absence) into an absolute path, and that is the
 // one the editor's program is fenced against. The Project root travels ON opts, as a pin

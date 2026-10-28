@@ -517,9 +517,9 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) (*mcp.Client, error)
 }
 
 // announceSkippedMCP says, as a startup notice, each repo server the startup connect skipped because
-// a project file its adoption pinned moved — naming the server and the files (mcpSkipClause) — and
-// cues the config re-read (cueSkippedMCP). The launch goes on: the global servers and the other
-// adopted ones are connected, and only the server whose files moved waits on a fresh answer.
+// a project file its adoption pinned moved or could not be read — naming the server and the files
+// (mcpSkipClause) — and cues the config re-read (cueSkippedMCP). The launch goes on: the global
+// servers and the other adopted ones are connected; only the skipped server is left out.
 func (w *rootWiring) announceSkippedMCP(skipped []mcp.Denied) {
 	for _, s := range skipped {
 		w.announce("apogee: " + mcpSkipClause(s))
@@ -528,9 +528,10 @@ func (w *rootWiring) announceSkippedMCP(skipped []mcp.Denied) {
 }
 
 // cueSkippedMCP pokes the session's config wake (reloadWake) when a connect skipped any repo server
-// for a moved pin, as a reaction refused for one does (domain.Config.PinMoved): no watched file
-// reported the move, and the re-read it cues is what proposes the server again for the adoption
-// pane at the next idle moment.
+// for a moved or unreadable pin, as a reaction refused for one does (domain.Config.PinMoved): no
+// watched file reported the change. The re-read it cues proposes a server whose pinned files moved
+// again for the adoption pane at the next idle moment, and drops one whose pinned file it cannot
+// read, with a notice naming that file.
 func (w *rootWiring) cueSkippedMCP(skipped []mcp.Denied) {
 	if len(skipped) > 0 {
 		w.reloadWake.poke()
