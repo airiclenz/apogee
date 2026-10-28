@@ -33,7 +33,7 @@ func fakeApplier(t *testing.T) settingsApplier {
 
 	return settingsApplier{
 		engine:     &applySettingSpy{},
-		live:       newLiveSettings(config.Options{}),
+		live:       newLiveSettings(config.Options{}, config.ProjectOffer{}),
 		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
 		rebind:     (&rebindProbe{}).rebind,
 		configPath: path,

@@ -625,7 +625,7 @@ var KeyRegistry = bindRows([]Key{
 		Path: "allow", Kind: KindStructured,
 		Class:     ClassGranting,
 		Desc:      "Commands and MCP servers that run without asking at an ordinary gate; a project config's rules count only once adopted.",
-		Read:      func(o Options) string { return allowRulesSummary(o.AllowRules) },
+		Read:      func(o Options) string { return allowRulesSummary(OfferedAllowRules{Rules: o.AllowRules.Rules}) },
 		Structure: func(o Options) any { return o.AllowRules },
 		ReadOffer: func(o Options, offer ProjectOffer) string {
 			return allowRulesSummary(offeredAllowRules(o, offer))
@@ -1843,8 +1843,8 @@ func (k Key) StructureOf(o Options, offer ProjectOffer) any {
 
 // offeredAllowRules is the `allow` key's whole value with the offer beside the options: the
 // effective rules the options hold, and the proposed and rejected rules the offer holds.
-func offeredAllowRules(o Options, offer ProjectOffer) AllowRules {
-	return AllowRules{Rules: o.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
+func offeredAllowRules(o Options, offer ProjectOffer) OfferedAllowRules {
+	return OfferedAllowRules{Rules: o.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
 }
 
 // admit is the row's admission: the validate hook first — the startup check itself, whose sentence

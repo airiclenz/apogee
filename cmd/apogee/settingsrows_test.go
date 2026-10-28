@@ -105,8 +105,15 @@ func fabricatedSettings() config.Options {
 				{Kind: config.AllowTerminal, Text: "go test", Layer: config.SourceGlobal},
 				{Kind: config.AllowMCPServers, Text: "docs", Layer: config.SourceProject},
 			},
-			Proposed: []config.AllowRule{{Kind: config.AllowTerminal, Text: "make lint", Layer: config.SourceProject}},
 		},
+	}
+}
+
+// fabricatedOffer is the Project config's offer beside fabricatedSettings: one Allow rule proposed,
+// which the `allow` row counts.
+func fabricatedOffer() config.ProjectOffer {
+	return config.ProjectOffer{
+		Proposed: []config.AllowRule{{Kind: config.AllowTerminal, Text: "make lint", Layer: config.SourceProject}},
 	}
 }
 
@@ -319,7 +326,7 @@ func promptSeedFor(t *testing.T, opts config.Options) func() string {
 	t.Helper()
 
 	home := t.TempDir()
-	live := newLiveSettings(opts)
+	live := newLiveSettings(opts, config.ProjectOffer{})
 	return func() string { return live.promptEditorSeed(opts.Model, home) }
 }
 
@@ -405,7 +412,7 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 	t.Parallel()
 
-	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
+	byPath := rowsByPath(t, settingsRowsOffered(fabricatedSettings(), fabricatedOffer()))
 	want := map[string]string{
 		"servers":                 "3 servers",
 		"currency":                "EUR", // a label printed as written, not the USD default
@@ -829,7 +836,7 @@ func layeredSettingsHost(t *testing.T, global, project string) (settingsHost, st
 		configPath:    config.FilePath(home),
 		projectRoot:   projectSaveRoot(opts, root),
 		workspacesDir: config.WorkspacesDir(home),
-		edits:         newExternalEdit(opts, workspace, noEnvironment),
+		edits:         newExternalEdit(opts, config.ProjectOffer{}, workspace, noEnvironment),
 		apply:         func(string, string) (string, error) { return "", nil },
 	}, projectPath
 }
@@ -1125,11 +1132,11 @@ func TestSettingsHostRowsCountTheBootOfferAfterAnInSessionAdopt(t *testing.T) {
 	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
 	writeGlobalRule(t, w)
 	writeProjectConfig(t, w.roots.project, "allow:\n  terminal:\n    - ls\n")
-	boot, err := config.LoadLayeredConfig(w.configPath(), w.roots.project, os.ReadFile, func(string) {})
+	boot, offer, err := config.LoadLayeredOffer(w.configPath(), w.roots.project, os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the boot resolution: %v", err)
 	}
-	w.opts, w.live = boot, newLiveSettings(boot)
+	w.opts, w.offer, w.live = boot, offer, newLiveSettings(boot, offer)
 	settings := settingsHost{opts: w.opts, offer: w.bootSnapshot().Offer(), allowRules: w.live.allowRules}
 	const bootSummary = "1 rule, 1 proposed"
 	if got := rowsByPath(t, settings.Rows())[settingKeyAllow].Value; got != bootSummary {

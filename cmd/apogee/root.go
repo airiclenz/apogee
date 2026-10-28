@@ -90,7 +90,9 @@ func newRootCommandWith(launch launcher, deps rootDeps, subs ...*cobra.Command) 
 			// explicitly set so an unset flag's default never shadows a lower layer.
 			// A soft notice from resolution (a malformed unconfined-hosts entry) prints here,
 			// on stderr before the alt-screen, like the seeding line above.
-			if err := config.ApplyConfig(&opts, changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
+			offer, err := config.ApplyConfigOffer(&opts, changed, os.Getenv, os.ReadFile,
+				func(msg string) { cmd.PrintErrln(msg) })
+			if err != nil {
 				// The one refusal this Driver answers instead of printing: resolution could not say
 				// which server to start on. The TUI can ASK — it has a picker, and a human in front
 				// of it — so it starts pre-bound and gets its engine from the answer (ADR 0036
@@ -106,7 +108,7 @@ func newRootCommandWith(launch launcher, deps rootDeps, subs ...*cobra.Command) 
 			// The TUI now paints immediately and the heartbeat fires its first beat from Init, so
 			// discovery is late and continuous rather than early and once (ADR 0024, decision 8):
 			// the same beat that late-seeds a cold start refreshes a running one.
-			return runRootWith(cmd.Context(), opts, launch, deps)
+			return runRootWith(cmd.Context(), opts, offer, launch, deps)
 		},
 	}
 

@@ -187,7 +187,7 @@ func TestApplySettingModelProfilesResolvesForTheBoundModel(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{})
+	live := newLiveSettings(config.Options{}, config.ProjectOffer{})
 	probe := &rebindProbe{}
 	applier := fakeApplier(t)
 	applier.engine = spy
@@ -283,7 +283,7 @@ func TestApplySettingModelProfilesWithNothingBoundHoldsOnly(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{})
+	live := newLiveSettings(config.Options{}, config.ProjectOffer{})
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.live = live

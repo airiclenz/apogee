@@ -112,10 +112,10 @@ var settingSections = []settingSection{
 // empty while the registry declares a default shows that default — an unset `cursor-shape:` is a
 // block caret, and saying so is the honest answer to "what is this set to".
 //
-// It reads the Project config's offer off opts itself (offerOfOptions); a caller that holds the
-// offer its opts were resolved beside hands both to settingsRowsOffered.
+// It reads opts with no Project config offer beside them; a caller that holds the offer its opts
+// were resolved beside hands both to settingsRowsOffered.
 func settingsRows(opts config.Options) []tui.SettingRow {
-	return settingsRowsOffered(opts, offerOfOptions(opts))
+	return settingsRowsOffered(opts, config.ProjectOffer{})
 }
 
 // settingsRowsOffered is settingsRows with the Project config's offer read beside opts — the offer
@@ -389,7 +389,7 @@ const allowRulesSection = "Allow rules"
 // proposed and the rejected project rules — each carrying its layer as the source mark and where it
 // stands as its value. No rules, no rows: the section is a list of rules, and an empty one has
 // nothing under its header to act on.
-func allowRuleRows(set config.AllowRules) []tui.SettingRow {
+func allowRuleRows(set config.OfferedAllowRules) []tui.SettingRow {
 	rows := make([]tui.SettingRow, 0, len(set.Rules)+len(set.Proposed)+len(set.Rejected))
 	for _, r := range set.Rules {
 		state := tui.SettingRuleAdopted

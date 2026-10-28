@@ -528,7 +528,7 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 
 			var runErr error
 			stderr := captureStderr(t, func() {
-				runErr = runRootWith(context.Background(), opts, rec.launch, deps)
+				runErr = runRootWith(context.Background(), opts, config.ProjectOffer{}, rec.launch, deps)
 			})
 
 			if runErr != nil {

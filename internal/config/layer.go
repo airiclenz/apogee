@@ -104,8 +104,8 @@ func LoadLayeredConfig(globalPath, projectRoot string, readFile func(string) ([]
 }
 
 // LoadLayeredOffer is [LoadLayeredConfig] answering, beside the options, the [ProjectOffer] the
-// same read resolved: it equals the options' Proposals and AllowRules.Proposed/Rejected, and shares
-// no backing array with them. An error answers the zero options and the zero offer.
+// same read resolved — the proposed and rejected entries the options do not carry — built fresh, so
+// it shares no backing array with them. An error answers the zero options and the zero offer.
 func LoadLayeredOffer(globalPath, projectRoot string, readFile func(string) ([]byte, error),
 	notify func(string)) (Options, ProjectOffer, error) {
 	fc, stated, err := parseLayeredConfig(globalPath, projectRoot, readFile, notify, false)
@@ -121,8 +121,7 @@ func LoadLayeredOffer(globalPath, projectRoot string, readFile func(string) ([]b
 	o.AllowRules = stated.projectAllow.effective(o.AllowRules.Rules)
 	o.MCPServers = stated.projectServers.effective(o.MCPServers)
 	o.Reactions = stated.projectReactions.effective(o.Reactions)
-	o.Proposals = stated.proposals()
-	return o, offerOf(&o), nil
+	return o, stated.offer(), nil
 }
 
 // layerKeys is which registry paths each file of a layered load stated: global, the keys the global
@@ -143,10 +142,14 @@ type layerKeys struct {
 	projectReactions projectReactionSet
 }
 
-// proposals is every structured entry the layer proposed, servers first and then reactions, as
-// Options.Proposals reports them. Built fresh.
-func (s layerKeys) proposals() ProjectProposals {
-	return concatProposals(s.projectServers.proposals, s.projectReactions.proposals)
+// offer is the layer's [ProjectOffer]: every structured entry it proposed, servers first and then
+// reactions, and its Allow rules no answer adopts. Built fresh.
+func (s layerKeys) offer() ProjectOffer {
+	return ProjectOffer{
+		Proposals: concatProposals(s.projectServers.proposals, s.projectReactions.proposals),
+		Proposed:  s.projectAllow.proposed,
+		Rejected:  s.projectAllow.rejected,
+	}
 }
 
 // parseLayeredConfig is parseConfigFile for the global file with the Project config of projectRoot
@@ -251,7 +254,7 @@ func ReadGlobalDocument(configDir string, readFile func(string) ([]byte, error),
 // the precedence stays default < global < project < env < flag. Global-only keys are dropped with
 // one notice, a project's `allow:` rules, `mcp-servers:` entries and `reactions:` entries are
 // sorted by the adoption record and only the adopted ones join base's global rules, servers and
-// reactions (Proposals reports them all), and ProjectKeys and DangerousRules.ProjectAdd say what the layer contributed. No project file, one that states nothing, or one that cannot be layered answers base
+// reactions (the offer reports them all), and ProjectKeys and DangerousRules.ProjectAdd say what the layer contributed. No project file, one that states nothing, or one that cannot be layered answers base
 // itself — the last after one notice naming the file. Notices go to notify, which must be non-nil.
 //
 // base is never changed: every field the overlay writes is replaced by a freshly built value, so
@@ -263,8 +266,8 @@ func OverlayProjectLayer(base Options, global GlobalDocument, projectRoot string
 }
 
 // OverlayProjectOffer is [OverlayProjectLayer] answering, beside the overlaid options, the
-// [ProjectOffer] the same read resolved: it equals the overlaid options' Proposals and
-// AllowRules.Proposed/Rejected, and shares no backing array with them. When no project layer is
+// [ProjectOffer] the same read resolved — the proposed and rejected entries the options do not
+// carry — built fresh, so it shares no backing array with them. When no project layer is
 // taken — no project file, one that states nothing, or one that cannot be layered — the options are
 // base and the offer is the zero value: there is no project to offer anything.
 func OverlayProjectOffer(base Options, global GlobalDocument, projectRoot string,
@@ -284,8 +287,7 @@ func OverlayProjectOffer(base Options, global GlobalDocument, projectRoot string
 	overlaid.AllowRules = stated.projectAllow.effective(globalAllowRules(base.AllowRules.Rules))
 	overlaid.MCPServers = stated.projectServers.effective(globalMCPServers(base.MCPServers))
 	overlaid.Reactions = stated.projectReactions.effective(globalReactions(base.Reactions))
-	overlaid.Proposals = stated.proposals()
-	return overlaid, offerOf(&overlaid)
+	return overlaid, stated.offer()
 }
 
 // applyProjectRows is the file pass (applyFile) narrowed to the keys a Project config may set —

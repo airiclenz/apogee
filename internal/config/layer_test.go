@@ -57,6 +57,20 @@ func loadLayered(t *testing.T, globalPath, projectRoot string) (Options, []strin
 	return o, notices
 }
 
+// loadLayeredOffer is loadLayered answering, beside the options and the notices, the Project
+// config's offer the same read resolved (LoadLayeredOffer).
+func loadLayeredOffer(t *testing.T, globalPath, projectRoot string) (Options, ProjectOffer, []string) {
+	t.Helper()
+
+	var notices []string
+	o, offer, err := LoadLayeredOffer(globalPath, projectRoot, os.ReadFile,
+		func(n string) { notices = append(notices, n) })
+	if err != nil {
+		t.Fatalf("LoadLayeredOffer: %v", err)
+	}
+	return o, offer, notices
+}
+
 // A project-param key the project file states outranks the global file's value, and the run
 // records that the project layer supplied it.
 func TestLayeredConfigOverlaysProjectParamKeys(t *testing.T) {
@@ -579,9 +593,9 @@ func offerFixture(t *testing.T, global string) (globalPath, projectRoot string) 
 	t.Helper()
 
 	globalPath, projectRoot = layerFixture(t, global, offerProjectYAML)
-	o, _ := loadLayered(t, globalPath, projectRoot)
+	_, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
 	store := adoptionStore(t, globalPath, projectRoot)
-	for _, p := range o.Proposals.Proposed {
+	for _, p := range offer.Proposals.Proposed {
 		entry := adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}
 		switch {
 		case strings.HasSuffix(p.Handle, "-a"):
@@ -603,16 +617,13 @@ func offerFixture(t *testing.T, global string) (globalPath, projectRoot string) 
 	return globalPath, projectRoot
 }
 
-// assertOfferOf fails unless offer equals the project offer o reports — o's Proposals and its inert
-// Allow lists — holds one adopted, one rejected and one proposed entry of each kind, and shares no
-// backing array with o.
+// assertOfferOf fails unless offer is the project offer of offerFixture's files — one adopted, one
+// rejected and one proposed entry of each kind — and o, the options read beside it, carries only
+// what the adopted entries grant: srv-a among its MCP servers, rx-a among its reactions and `go
+// test` among its effective Allow rules, and none of the proposed or rejected entries.
 func assertOfferOf(t *testing.T, o Options, offer ProjectOffer) {
 	t.Helper()
 
-	want := ProjectOffer{Proposals: o.Proposals, Proposed: o.AllowRules.Proposed, Rejected: o.AllowRules.Rejected}
-	if !reflect.DeepEqual(offer, want) {
-		t.Fatalf("offer = %+v\nwant the options' fields %+v", offer, want)
-	}
 	lists := map[string][]string{
 		"adopted":  proposalHandles(offer.Proposals.Adopted),
 		"proposed": proposalHandles(offer.Proposals.Proposed),
@@ -631,16 +642,22 @@ func assertOfferOf(t *testing.T, o Options, offer ProjectOffer) {
 		t.Errorf("offer allow lists = proposed %+v, rejected %+v; want go build proposed, go vet rejected",
 			offer.Proposed, offer.Rejected)
 	}
-	if &offer.Proposed[0] == &o.AllowRules.Proposed[0] || &offer.Rejected[0] == &o.AllowRules.Rejected[0] ||
-		&offer.Proposals.Proposed[0] == &o.Proposals.Proposed[0] {
-		t.Error("the offer shares a backing array with the options it was returned beside")
+	if got := serverNames(o.MCPServers); !slices.Equal(got, []string{"srv-a (project)"}) {
+		t.Errorf("MCPServers = %q; want the adopted srv-a alone", got)
+	}
+	if got := reactionIDs(o.Reactions); !slices.Equal(got, []string{"rx-a (project)"}) {
+		t.Errorf("Reactions = %q; want the adopted rx-a alone", got)
+	}
+	want := []AllowRule{{Kind: AllowTerminal, Text: "go test", Layer: SourceProject}}
+	if !slices.Equal(o.AllowRules.Rules, want) {
+		t.Errorf("AllowRules.Rules = %+v; want the adopted go test alone", o.AllowRules.Rules)
 	}
 }
 
-// The layered loaders answer the project offer beside the options, from the same read: the offer
-// is exactly the options' Proposals and inert Allow lists, for a project holding adopted, rejected
-// and proposed entries of every kind.
-func TestLoadLayeredOfferEqualsTheOptionsFields(t *testing.T) {
+// The layered loaders answer the project offer beside the options, from the same read, for a
+// project holding adopted, rejected and proposed entries of every kind: the offer lists them all,
+// and the options carry only what the adopted ones grant.
+func TestLayeredLoadersAnswerTheProjectOffer(t *testing.T) {
 	t.Parallel()
 	globalPath, projectRoot := offerFixture(t, "mode: plan\n")
 
@@ -659,7 +676,7 @@ func TestLoadLayeredOfferEqualsTheOptionsFields(t *testing.T) {
 	})
 	t.Run("OverlayProjectOffer", func(t *testing.T) {
 		t.Parallel()
-		base := resolveAt(t, globalPath, projectRoot, true)
+		base, _ := resolveOfferAt(t, globalPath, projectRoot, true)
 		doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
 		if err != nil {
 			t.Fatalf("ReadGlobalDocument: %v", err)
@@ -681,7 +698,7 @@ func TestLoadLayeredOfferEqualsTheOptionsFields(t *testing.T) {
 func TestOverlayProjectOfferWithoutAProjectFileIsEmpty(t *testing.T) {
 	t.Parallel()
 	globalPath, projectRoot := layerFixture(t, "mode: plan\n", "")
-	base := resolveAt(t, globalPath, projectRoot, true)
+	base, _ := resolveOfferAt(t, globalPath, projectRoot, true)
 	doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("ReadGlobalDocument: %v", err)

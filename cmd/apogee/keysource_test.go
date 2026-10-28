@@ -78,7 +78,7 @@ func TestMoveResolvesACommandKeySource(t *testing.T) {
 		agent:  agent,
 		holder: holder,
 		host:   &fakeStamper{},
-		live:   newLiveSettings(config.Options{}),
+		live:   newLiveSettings(config.Options{}, config.ProjectOffer{}),
 		keys:   config.NewKeyResolver(""),
 		caps:   newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
@@ -115,7 +115,7 @@ func TestMoveRefusesWhenTheKeySourceFails(t *testing.T) {
 		agent:  agent,
 		holder: holder,
 		host:   &fakeStamper{},
-		live:   newLiveSettings(config.Options{}),
+		live:   newLiveSettings(config.Options{}, config.ProjectOffer{}),
 		keys:   config.NewKeyResolver(""),
 		caps:   newParallelAgentsCap(&parallelAgentsSpy{}),
 	}

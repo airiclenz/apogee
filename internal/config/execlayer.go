@@ -27,7 +27,7 @@ import (
 // resolved servers or reactions, flagged Project — a stdio server that lists no `env-allowlist:`
 // narrowed to the platform floor (§6), a reaction armed with the `on:`, `timeout:`, `enabled:` and
 // `workspace:` the file states now, since its pin leaves those parameters out (§2); every one is
-// reported on Options.Proposals with what its adoption pane shows.
+// reported on the layered load's ProjectOffer with what its adoption pane shows.
 
 // mcpServersPath is the `mcp-servers:` key's registry path, the granting key whose project entries
 // the layer judges one by one.
@@ -103,8 +103,9 @@ func cloneProposals(list []domain.Proposal) []domain.Proposal {
 // ProjectOffer is what a layered load's Project config offers the user to answer: its structured
 // granting entries sorted by the adoption record (Proposals), and its Allow rules no answer is
 // recorded for (Proposed) and the ones the user turned down (Rejected). It is read from the same
-// files as the Options it is returned beside, and equals that Options' Proposals and
-// AllowRules.Proposed/Rejected. Nothing in it grants anything. The zero value is no offer.
+// files as the Options it is returned beside, which carry none of it: an adopted entry is in their
+// MCPServers, Reactions or AllowRules as well, and a proposed or rejected one is here alone. Nothing
+// in it grants anything. The zero value is no offer.
 type ProjectOffer struct {
 	Proposals ProjectProposals
 	Proposed  []AllowRule
@@ -118,16 +119,6 @@ func (o ProjectOffer) Clone() ProjectOffer {
 	o.Proposed = slices.Clone(o.Proposed)
 	o.Rejected = slices.Clone(o.Rejected)
 	return o
-}
-
-// offerOf is the project offer resolved options carry — their Proposals and their inert Allow
-// lists — copied, so the offer and opts share no backing array.
-func offerOf(opts *Options) ProjectOffer {
-	return ProjectOffer{
-		Proposals: opts.Proposals,
-		Proposed:  opts.AllowRules.Proposed,
-		Rejected:  opts.AllowRules.Rejected,
-	}.Clone()
 }
 
 // projectServers is a Project config's MCP servers resolved by Adoption: the adopted ones as the

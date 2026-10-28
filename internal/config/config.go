@@ -3528,6 +3528,15 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // can name the key and the value.
 func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string) string,
 	readFile func(string) ([]byte, error), notify func(string), hostID string) ([]string, error) {
+	notices, _, err := resolveOptions(opts, changed, getenv, readFile, notify, hostID)
+	return notices, err
+}
+
+// resolveOptions is [ResolveOptions] answering, beside the notices, the [ProjectOffer] the same
+// read resolved — the Project config's proposed and rejected entries, which opts never carries.
+// Any error answers the zero offer.
+func resolveOptions(opts *Options, changed func(string) bool, getenv func(string) string,
+	readFile func(string) ([]byte, error), notify func(string), hostID string) ([]string, ProjectOffer, error) {
 	opts.ConfigDir = resolveConfigDir(opts.ConfigDir, changed, getenv)
 	if !changed("workspace") {
 		if v := getenv(EnvWorkspace); v != "" {
@@ -3547,7 +3556,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	fc, stated, err := parseLayeredConfig(FilePath(opts.ConfigDir), projectRoot, readFile, notify,
 		!opts.LiveReread)
 	if err != nil {
-		return nil, err
+		return nil, ProjectOffer{}, err
 	}
 	// The flag values, before the file pass below overwrites the three fields cobra binds: an unset
 	// flag carries its zero default, so what a flag SAYS is only meaningful together with whether it
@@ -3556,16 +3565,15 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// The file pass refuses a value a key cannot take in the row's own sentence — the same pass,
 	// and the same sentence, a live re-read (LoadFileConfig) refuses it with.
 	if err := applyFile(opts, fc); err != nil {
-		return nil, err
+		return nil, ProjectOffer{}, err
 	}
 	opts.GlobalKeys, opts.ProjectKeys = stated.global, stated.project
 	opts.DangerousRules.ProjectAdd = stated.projectDangerous
 	opts.AllowRules = stated.projectAllow.effective(opts.AllowRules.Rules)
 	opts.MCPServers = stated.projectServers.effective(opts.MCPServers)
 	opts.Reactions = stated.projectReactions.effective(opts.Reactions)
-	opts.Proposals = stated.proposals()
 	if err := applyEnv(opts, getenv); err != nil {
-		return nil, err
+		return nil, ProjectOffer{}, err
 	}
 	applyNoUpdateCheck(opts, getenv)
 	applyFlags(opts, flags, changed)
@@ -3580,20 +3588,20 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// surface as a degraded rung at the first presentation, long after the typo (ADR 0019 §4 degrades
 	// MECHANISM failures, not config).
 	if err := opts.Present.Validate(); err != nil {
-		return notices, err
+		return notices, ProjectOffer{}, err
 	}
 	// A ui block naming a spinner style this build has no animation for is the same kind of loud
 	// startup error: silently resolving it to another style would leave the user staring at a
 	// spinner their config did not ask for, with nothing pointing at the typo.
 	if err := opts.UI.Validate(); err != nil {
-		return notices, err
+		return notices, ProjectOffer{}, err
 	}
 	// A `sessions:` block whose age is not a length of time, or whose count is not a number of
 	// records, is the same kind of loud startup error — and a louder one to get wrong silently: a
 	// retention policy that quietly resolved to "off" is discovered by the disk filling up months
 	// later, with nothing pointing at the typo.
 	if err := opts.Sessions.Validate(); err != nil {
-		return notices, err
+		return notices, ProjectOffer{}, err
 	}
 	// And what only this machine can answer about the block: a watched home that is this apogee's
 	// own, and a share group the machine lacks or the user is not in. A home that cannot be resolved
@@ -3603,7 +3611,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 		ownHome = ""
 	}
 	if err := opts.Sessions.ValidateHost(ownHome); err != nil {
-		return notices, err
+		return notices, ProjectOffer{}, err
 	}
 	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
 	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of
@@ -3611,7 +3619,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// Whether the SELECTED source's file reads and its placeholders are known is
 	// ResolveSystemPrompt's job, after model resolution (ADR 0023).
 	if err := opts.SystemPrompt.Validate(); err != nil {
-		return notices, err
+		return notices, ProjectOffer{}, err
 	}
 	// A context-file NAME that cannot be a workspace file — empty, rooted, drive-scoped, climbing
 	// out with "..", or listed twice — is the same kind of machine-independent defect in the file,
@@ -3621,7 +3629,7 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// today gets switched on months later, by which time the typo has lost its context. Whether the
 	// named files exist is deliberately not asked: discovery is the feature (contextFilesSettings).
 	if err := fc.contextFiles().validate(); err != nil {
-		return notices, err
+		return notices, ProjectOffer{}, err
 	}
 	// A `servers:` entry that could never be switched to — no name, no endpoint, or a name an
 	// earlier entry already took — is refused here for the same reason: it is a defect in the file,
@@ -3629,9 +3637,9 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// the moment of the switch it would surface as an entry that cannot be selected, or a name
 	// resolving to whichever entry happened to come first, long after the line was written.
 	if err := ValidateServers(opts.Servers); err != nil {
-		return notices, err
+		return notices, ProjectOffer{}, err
 	}
-	return notices, nil
+	return notices, stated.offer(), nil
 }
 
 // ApplyConfig is [ResolveOptions] on the live machine plus the step that needs its result: which of
@@ -3653,12 +3661,12 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 }
 
 // ApplyConfigOffer is [ApplyConfig] answering, beside the error, the [ProjectOffer] the same read
-// resolved: it equals opts' Proposals and AllowRules.Proposed/Rejected once resolution has written
-// them, and shares no backing array with them. [StartupUndetermined] still comes back LAST with the
-// offer filled, as opts is; any other error answers the zero offer.
+// resolved — the Project config's proposed and rejected entries, which opts never carries — built
+// fresh, so it shares no backing array with opts. [StartupUndetermined] still comes back LAST with
+// the offer filled, as opts is; any other error answers the zero offer.
 func ApplyConfigOffer(opts *Options, changed func(string) bool, getenv func(string) string,
 	readFile func(string) ([]byte, error), notify func(string)) (ProjectOffer, error) {
-	notices, err := ResolveOptions(opts, changed, getenv, readFile, notify, platform.HostID())
+	notices, offer, err := resolveOptions(opts, changed, getenv, readFile, notify, platform.HostID())
 	for _, n := range notices {
 		notify(n)
 	}
@@ -3747,7 +3755,7 @@ func ApplyConfigOffer(opts *Options, changed func(string) bool, getenv func(stri
 	// Held from the selection step above: everything is resolved, so the caller that can ask a
 	// human has what it needs to ask, and the caller that cannot refuses with the same message it
 	// has always printed.
-	return offerOf(opts), startupErr
+	return offer, startupErr
 }
 
 // startupOverrides carries the raw invocation overrides ADR 0036 detached from the config schema:

@@ -154,8 +154,8 @@ type liveSettings struct {
 	// left it (project.Snapshot): its offer — the repo MCP servers and reactions, adopted, proposed
 	// and rejected, and the Allow rules no answer adopts (proposed) or that the user turned down
 	// (rejected) — which the `/settings` rows list from (allowRules, proposals) and an act's settling
-	// diffs the next snapshot against (rootWiring.inForce). It is held IN PLACE of now's Proposals
-	// and inert Allow lists, which newLiveSettings strips: now carries the effective rules alone.
+	// diffs the next snapshot against (rootWiring.inForce). now carries none of it: config.Options
+	// holds the effective rules alone.
 	// Seeded from the boot resolution, replaced whole by every settling (holdInForce) and every
 	// watched re-read (holdOffer), never written into.
 	adoption project.Snapshot
@@ -178,19 +178,17 @@ type liveSettings struct {
 // two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
 //
-// The Project config's offer is seeded as the Snapshot of the same boot resolution (adoption) —
-// no second read of the files — and now holds none of it.
-func newLiveSettings(opts config.Options) *liveSettings {
+// The Project config's offer is seeded as the Snapshot of the same boot resolution (adoption): opts
+// with offer, the offer that resolution returned beside them (config.ApplyConfigOffer) — no second
+// read of the files.
+func newLiveSettings(opts config.Options, offer config.ProjectOffer) *liveSettings {
 	// Cloned rather than assigned so the overlay's lists are the holder's own from the first
 	// write: a setter replaces a list whole, but a caller that was handed boot elsewhere must never
 	// find its arrays shared with the value this session is running on.
-	now := cloneOptions(opts)
-	now.Proposals = config.ProjectProposals{}
-	now.AllowRules.Proposed, now.AllowRules.Rejected = nil, nil
 	return &liveSettings{
 		boot:     opts,
-		now:      now,
-		adoption: project.SnapshotOf(opts, offerOfOptions(opts)),
+		now:      cloneOptions(opts),
+		adoption: project.SnapshotOf(opts, offer),
 		// The latch a determined startup binds with, seeded rather than pushed: the entry this
 		// session STARTS on is the one resolution holds on options (config.Options.StartupEntry),
 		// and its bind runs before this holder exists. A pre-bound start holds the zero entry, so
@@ -238,14 +236,14 @@ func (s *liveSettings) update(fn func(*config.Options)) {
 // act settles into before it returns. The effective list is shared with the holder; nobody edits it
 // in place, because every writer replaces the field whole. A nil holder — a Driver composed without
 // one — has no rules.
-func (s *liveSettings) allowRules() config.AllowRules {
+func (s *liveSettings) allowRules() config.OfferedAllowRules {
 	if s == nil {
-		return config.AllowRules{}
+		return config.OfferedAllowRules{}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	offer := s.adoption.Offer()
-	return config.AllowRules{Rules: s.now.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
+	return config.OfferedAllowRules{Rules: s.now.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
 }
 
 // proposals reports the Project config's repo MCP servers and reactions — adopted, proposed and

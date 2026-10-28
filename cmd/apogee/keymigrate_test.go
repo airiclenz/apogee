@@ -525,7 +525,7 @@ func TestSubAgentsMigratorRewritesThenRetargets(t *testing.T) {
 	}
 	w := wiringFor(home, entries)
 	w.opts.ConfigDir = home
-	w.externalEdits = newExternalEdit(w.opts, home, func(string) string { return "" })
+	w.externalEdits = newExternalEdit(w.opts, config.ProjectOffer{}, home, func(string) string { return "" })
 	w.delegation = retargetableWiring(t, entries[0], entries,
 		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, &delegationSpy{}, &noticeSpy{})
 	w.prepareSubAgentsMigration()
@@ -570,7 +570,7 @@ func TestSubAgentsMigratorRefusesAnUnknownEntry(t *testing.T) {
 	entries := []config.ServerEntry{{Name: "testbox", Endpoint: "http://127.0.0.1:1111"}}
 	w := wiringFor(home, entries)
 	w.opts.ConfigDir = home
-	w.externalEdits = newExternalEdit(w.opts, home, func(string) string { return "" })
+	w.externalEdits = newExternalEdit(w.opts, config.ProjectOffer{}, home, func(string) string { return "" })
 	w.delegation = retargetableWiring(t, entries[0], entries,
 		heartbeat.Beat{Reachable: true}, &delegationSpy{}, &noticeSpy{})
 	w.subAgentsFlagged = []string{"gone"}

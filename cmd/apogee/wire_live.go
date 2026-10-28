@@ -312,7 +312,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// from a raw override and is therefore in no entry (upstreamChoices), so the way back is always
 	// offered. The verbs in wire_verbs.go resolve a name against THAT list (they need the key and the
 	// hint); the TUI is handed the display-and-identity projection of the same list, in the same order.
-	w.live = newLiveSettings(w.opts)
+	w.live = newLiveSettings(w.opts, w.offer)
 
 	// The generation the Reaction surface's two halves are already running, handed to the holder
 	// that swaps them together through the Agent (the Runner built at boot rides the Config,
@@ -432,7 +432,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// cannot move the layer out from under every other reader of roots.project.
 	editOpts := w.opts
 	editOpts.ProjectRoot, editOpts.ProjectRootPinned = w.roots.project, true
-	w.externalEdits = newExternalEdit(editOpts, w.roots.workspace, os.Getenv)
+	w.externalEdits = newExternalEdit(editOpts, w.offer, w.roots.workspace, os.Getenv)
 
 	// The other trigger for that same round trip (ADR 0041 decision 3): the file itself. An editor's
 	// EXIT can only speak for the editors apogee waits on, and a desktop opener returns before the

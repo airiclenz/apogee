@@ -1011,7 +1011,7 @@ func TestApplySettingServersDrivesTheSubAgentServer(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	launchOpts := config.Options{Servers: []config.ServerEntry{{Name: "local", Endpoint: "http://127.0.0.1:1111"}}}
-	live := newLiveSettings(launchOpts)
+	live := newLiveSettings(launchOpts, config.ProjectOffer{})
 	spy := &delegationSpy{}
 	wiring := &delegationWiring{userProfiles: noProfiles, streamIdleRoot: defaultIdleRoot, engine: spy}
 	applier := fakeApplier(t)

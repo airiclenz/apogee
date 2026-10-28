@@ -763,7 +763,9 @@ func runHeadlessBody(
 
 	// The same resolution a session performs (flag > env > file > default), so a headless run
 	// talks to the server, and runs with the Reactions, a session on this host would.
-	if err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
+	offer, err := config.ApplyConfigOffer(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile,
+		func(msg string) { cmd.PrintErrln(msg) })
+	if err != nil {
 		return run.Result{}, notStarted(err)
 	}
 	// This command's own BOTTOM layer is plan. ApplyConfig's is the interactive ladder's
@@ -795,7 +797,7 @@ func runHeadlessBody(
 	// A reaction the Project config proposes runs nothing until it is adopted, and an unattended run
 	// has nobody to ask, so it is skipped with one line naming it (ADR 0104 §12) — on stderr, where
 	// it cannot contaminate the answer. The adopted ones are already in opts.Reactions and fire.
-	if n := skippedReactionsNotice(roots.project, opts.Proposals); n != "" {
+	if n := skippedReactionsNotice(roots.project, offer.Proposals); n != "" {
 		cmd.PrintErrln(n)
 	}
 
@@ -1293,9 +1295,10 @@ func headlessSummary(res run.Result) string {
 // none of them, and an unattended run has nobody to ask, so it names them and the command that
 // answers them. It is the shared composer behind both unattended Drivers — runHeadlessBody prints it
 // on stderr, daemonWiring.firingOptions logs it once per Project root — and it is composed from
-// Options.Proposals there, never by the loader, so a session and `apogee project adopt`, which ask,
-// say nothing of it. An adopted or rejected reaction, a proposed Allow rule and a proposed server
-// earn no line: the first fires, the second was answered, and the others never fire on their own.
+// the offer the layered load returned there (config.ProjectOffer), never by the loader, so a
+// session and `apogee project adopt`, which ask, say nothing of it. An adopted or rejected
+// reaction, a proposed Allow rule and a proposed server earn no line: the first fires, the second
+// was answered, and the others never fire on their own.
 // Nothing proposed composes "".
 func skippedReactionsNotice(projectRoot string, proposals config.ProjectProposals) string {
 	var names []string

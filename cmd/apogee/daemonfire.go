@@ -361,8 +361,8 @@ func (w *daemonWiring) firingOptions(roots stateRoots) config.Options {
 			_, _ = daemonLogWriter{log: w.log}.Write([]byte(msg))
 		}
 	}
-	opts := config.OverlayProjectLayer(w.opts, w.global, roots.project, os.ReadFile, logOnce)
-	if n := skippedReactionsNotice(roots.project, opts.Proposals); n != "" {
+	opts, offer := config.OverlayProjectOffer(w.opts, w.global, roots.project, os.ReadFile, logOnce)
+	if n := skippedReactionsNotice(roots.project, offer.Proposals); n != "" {
 		logOnce(n)
 	}
 	return opts

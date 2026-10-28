@@ -163,14 +163,15 @@ type fileProjection struct {
 
 // newExternalEdit seeds the baseline from the file as it stands at launch. A projection that cannot
 // be made — a config that has since become unreadable — falls back to the session's own resolution,
-// whose rows are never nil: a baseline that exists and is a little stale reports one extra key,
+// opts with offer, the Project config's offer it returned beside them, whose rows are never nil: a baseline that exists and is a little stale reports one extra key,
 // where a missing baseline would report none at all and swallow the human's edit whole.
 // workspace is passed separately from opts because it is the resolved root, not the option: the
 // caller has already turned `--workspace` (or its absence) into an absolute path, and that is the
 // one the editor's program is fenced against. The Project root travels ON opts, as a pin
 // (config.Options.ProjectRootPinned), because it is the session's boot answer every re-read must
 // reuse; an unpinned opts walks to it from the workspace on each read.
-func newExternalEdit(opts config.Options, workspace string, getenv func(string) string) *externalEdit {
+func newExternalEdit(opts config.Options, offer config.ProjectOffer, workspace string,
+	getenv func(string) string) *externalEdit {
 	e := &externalEdit{
 		opts:       opts,
 		configPath: config.FilePath(opts.ConfigDir),
@@ -181,7 +182,6 @@ func newExternalEdit(opts config.Options, workspace string, getenv func(string) 
 	}
 	projected, err := e.projection()
 	if err != nil {
-		offer := offerOfOptions(opts)
 		projected = fileProjection{rows: settingsRowsOffered(opts, offer), opts: opts, offer: offer}
 	}
 	e.baseline = projected

@@ -156,20 +156,20 @@ func heldPrints(globalPath, root string, readFile func(string) ([]byte, error)) 
 	if path == "" || isSameFile(path, globalPath) {
 		return nil, nil
 	}
-	resolved, err := config.LoadLayeredConfig("", root, readFile, noNotice)
+	resolved, offer, err := config.LoadLayeredOffer("", root, readFile, noNotice)
 	if err != nil {
 		return nil, err
 	}
-	set := resolved.AllowRules
-	held := make(map[string]bool, len(set.Rules)+len(set.Proposed)+len(set.Rejected))
-	for _, list := range [][]config.AllowRule{set.Rules, set.Proposed, set.Rejected} {
+	rules := resolved.AllowRules.Rules
+	held := make(map[string]bool, len(rules)+len(offer.Proposed)+len(offer.Rejected))
+	for _, list := range [][]config.AllowRule{rules, offer.Proposed, offer.Rejected} {
 		for _, r := range list {
 			if r.Layer == config.SourceProject {
 				held[adoption.Fingerprint(adoption.Entry{Kind: string(r.Kind), Text: r.Text})] = true
 			}
 		}
 	}
-	proposals := resolved.Proposals
+	proposals := offer.Proposals
 	for _, list := range [][]domain.Proposal{proposals.Adopted, proposals.Proposed, proposals.Rejected} {
 		for _, p := range list {
 			held[p.Fingerprint] = true

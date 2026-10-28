@@ -394,16 +394,11 @@ type Options struct {
 
 	// AllowRules is the resolved `allow:` key (ADR 0096 §2, §4): the effective Allow rules — the
 	// global file's, live as written, then the Project config's the user adopted — each tagged with
-	// its layer, beside the project rules still proposed or rejected, which grant nothing. File-only,
-	// no flag or env: a rule widens what runs unasked, so only the user's own answers build it.
+	// its layer. The project rules still proposed or rejected grant nothing and are not here: they
+	// are the [ProjectOffer] the layered loaders return beside the options, as are the Project
+	// config's proposed and rejected `mcp-servers:` and `reactions:` entries. File-only, no flag or
+	// env: a rule widens what runs unasked, so only the user's own answers build it.
 	AllowRules AllowRules
-
-	// Proposals is the Project config's structured granting entries — its `mcp-servers:` and
-	// `reactions:` entries (ADR 0104) — sorted by the user's adoption record, each with what its
-	// adoption pane shows. An adopted server is also in MCPServers and an adopted reaction in
-	// Reactions, each flagged Project; a proposed or rejected one is reported here alone and runs
-	// nothing. Empty when no project layer was read.
-	Proposals ProjectProposals
 
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
 	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
@@ -533,7 +528,6 @@ func (o Options) Clone() Options {
 	o.URLDenyHosts = slices.Clone(o.URLDenyHosts)
 	o.DangerousRules = o.DangerousRules.Clone()
 	o.AllowRules = o.AllowRules.Clone()
-	o.Proposals = o.Proposals.Clone()
 	o.ModelProfiles = cloneEach(o.ModelProfiles, profiles.Entry.Clone)
 	o.SystemPrompt = o.SystemPrompt.Clone()
 	o.ContextFiles = slices.Clone(o.ContextFiles)

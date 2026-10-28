@@ -137,7 +137,7 @@ func TestSnapshotAccessorsShareNoBackingArray(t *testing.T) {
 	if got := snapshot.Entries(); got[0].Text == "edited" {
 		t.Error("Entries() shares its list with the snapshot")
 	}
-	if &snapshot.Options().Proposals.Adopted[0] == &snapshot.options.Proposals.Adopted[0] ||
+	if &snapshot.Options().AllowRules.Rules[0] == &snapshot.options.AllowRules.Rules[0] ||
 		&snapshot.Offer().Proposals.Proposed[0] == &snapshot.offer.Proposals.Proposed[0] ||
 		&snapshot.Entries()[0] == &snapshot.entries[0] {
 		t.Error("an accessor hands out the snapshot's own backing array")
@@ -172,11 +172,11 @@ func adoptedProposal(kind domain.ProposalKind, print string) domain.Proposal {
 // adopted, and that both proposes and rejects inert — entries never in force, which Diff must not
 // count.
 func snapshotOf(rules []config.AllowRule, adopted []domain.Proposal, inert ...domain.Proposal) Snapshot {
-	options := config.Options{AllowRules: config.AllowRules{Rules: rules}}
-	options.Proposals = config.ProjectProposals{Adopted: adopted, Proposed: inert, Rejected: inert}
 	return Snapshot{
-		options: options,
-		offer:   config.ProjectOffer{Proposals: options.Proposals.Clone()},
+		options: config.Options{AllowRules: config.AllowRules{Rules: rules}},
+		offer: config.ProjectOffer{
+			Proposals: config.ProjectProposals{Adopted: adopted, Proposed: inert, Rejected: inert}.Clone(),
+		},
 	}
 }
 

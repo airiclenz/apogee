@@ -261,7 +261,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			spy := &applySettingSpy{}
-			live := newLiveSettings(config.Options{ContextFiles: names})
+			live := newLiveSettings(config.Options{ContextFiles: names}, config.ProjectOffer{})
 			applier := fakeApplier(t)
 			applier.engine = spy
 			applier.live = live
@@ -285,7 +285,7 @@ func TestApplySettingDrivesTheRightEngineSeam(t *testing.T) {
 func TestApplySettingCarriesTheOtherHalfOfTheContextFilesBlock(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{}) // a session that launched with the block off
+	live := newLiveSettings(config.Options{}, config.ProjectOffer{}) // a session that launched with the block off
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.live = live
@@ -349,7 +349,7 @@ func TestFloorRowAppliesOneGeneration(t *testing.T) {
 		ReadCache:             true,
 		Bypass:                true,
 		Reactions:             boot,
-	})
+	}, config.ProjectOffer{})
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.live = live
@@ -429,7 +429,7 @@ func TestBypassRowAppliesOneGeneration(t *testing.T) {
 		ToolResultCap:         true,
 		ReadCache:             false,
 		Reactions:             boot,
-	})
+	}, config.ProjectOffer{})
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.live = live
@@ -475,7 +475,7 @@ func TestLiveSettingsGenerationIsDerivedFromTheOverlay(t *testing.T) {
 		ToolResultCap:         true,
 		ReadCache:             true,
 		Reactions:             armed,
-	})
+	}, config.ProjectOffer{})
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.live = live
@@ -533,7 +533,7 @@ func TestContextFillNoticeRowAppliesOneGeneration(t *testing.T) {
 		ReadCache:             false,
 		Bypass:                true,
 		Reactions:             boot,
-	})
+	}, config.ProjectOffer{})
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.live = live
@@ -821,7 +821,7 @@ func TestApplyStreamIdleTimeoutReadsThroughTheOneParser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			live := newLiveSettings(config.Options{StreamIdleTimeout: 2 * time.Minute})
+			live := newLiveSettings(config.Options{StreamIdleTimeout: 2 * time.Minute}, config.ProjectOffer{})
 
 			applier := fakeApplier(t)
 			applier.live = live
@@ -880,7 +880,7 @@ func TestApplyDelegateTimeoutReadsThroughTheOneParser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			live := newLiveSettings(config.Options{DelegateTimeout: 10 * time.Minute})
+			live := newLiveSettings(config.Options{DelegateTimeout: 10 * time.Minute}, config.ProjectOffer{})
 
 			applier := fakeApplier(t)
 			applier.live = live
@@ -937,7 +937,7 @@ func TestApplyMirrorMovesOnlyTheKeysFieldOfTheBlock(t *testing.T) {
 	boot := config.Options{UI: domain.DefaultUIPrefs()}
 	boot.UI.SpinnerColor = false
 	boot.UI.Spinner = domain.SpinnerGlitter
-	live := newLiveSettings(boot)
+	live := newLiveSettings(boot, config.ProjectOffer{})
 
 	applier := fakeApplier(t)
 	applier.live = live
@@ -1037,7 +1037,7 @@ func TestEveryEditableSettingKeyHasAnApply(t *testing.T) {
 func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	t.Parallel()
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{})
+	live := newLiveSettings(config.Options{}, config.ProjectOffer{})
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.live = live
@@ -1115,7 +1115,7 @@ func TestApplySettingSubAgentsChoiceSwapsTheSeatGate(t *testing.T) {
 	workspace := t.TempDir()
 	var built []bool
 	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed})
+	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed}, config.ProjectOffer{})
 	set := newLiveTools(tools.NewDefaultRegistry(workspace), toolSetSpec{},
 		func(spec toolSetSpec) *apogee.ToolRegistry {
 			built = append(built, spec.seatChoice)
@@ -1200,7 +1200,7 @@ func TestApplySettingSubAgentsChoiceSwapRefusalKeepsTheGate(t *testing.T) {
 	t.Parallel()
 	old := apogee.NewToolRegistry()
 	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
-	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed})
+	live := newLiveSettings(config.Options{SubAgentsChoice: config.SubAgentsChoiceFixed}, config.ProjectOffer{})
 	set := newLiveTools(old, toolSetSpec{}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		return tools.NewDefaultRegistryWithHost(t.TempDir(),
 			tools.HostTools{SubAgentSeatChoice: spec.seatChoice})
@@ -1527,7 +1527,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 			if err := os.WriteFile(path, []byte(serversFile), 0o600); err != nil {
 				t.Fatalf("write config: %v", err)
 			}
-			live := newLiveSettings(boot)
+			live := newLiveSettings(boot, config.ProjectOffer{})
 			set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{
 				endpoint:   boot.WebSearchEndpoint,
 				disabled:   boot.ToolsDisabled,
@@ -1612,7 +1612,6 @@ func TestCloneOptionsSharesNoCollection(t *testing.T) {
 			"Options.ModelProfiles[0].Profile.Tools.Enabled",
 			"Options.MCPServers[0].EnvAllowlist",
 			"Options.MCPServers[0].Headers",
-			"Options.Proposals.Adopted[0].Fields[0].Fields[0].Values",
 			"Options.AllowRules.Rules",
 			"Options.DangerousRules.ProjectAdd",
 			"Options.Overrides",
@@ -1746,7 +1745,7 @@ func assertNoSharedCollection(t *testing.T, path string, src, clone reflect.Valu
 func TestRebindInputsCarriesTheToggledToolRoster(t *testing.T) {
 	t.Parallel()
 	boot := config.Options{ToolsDisabled: []string{"python_exec"}}
-	live := newLiveSettings(boot)
+	live := newLiveSettings(boot, config.ProjectOffer{})
 	set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{disabled: boot.ToolsDisabled},
 		func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
 	applier := fakeApplier(t)
@@ -1784,7 +1783,7 @@ func TestRebindInputsCarriesTheToggledToolRoster(t *testing.T) {
 // launched with still says what it said.
 func TestLiveSettingsContextFilesReEnableReinstallsTheNames(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(config.Options{ContextFiles: []string{"AGENTS.md"}})
+	live := newLiveSettings(config.Options{ContextFiles: []string{"AGENTS.md"}}, config.ProjectOffer{})
 
 	if got := live.setContextFilesEnable(false); !slices.Equal(got, []string{"AGENTS.md"}) {
 		t.Errorf("setContextFilesEnable(false) = %v, want the names kept aside", got)
@@ -1821,7 +1820,7 @@ func TestLiveSettingsContextFilesReEnableReinstallsTheNames(t *testing.T) {
 // beat reported, which is what keeps `0` meaning discover-live (ADR 0024) rather than "unknown".
 func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(config.Options{ContextWindow: 4096})
+	live := newLiveSettings(config.Options{ContextWindow: 4096}, config.ProjectOffer{})
 	live.observe(8192, provider.EffortDialectNone) // what the last landed beat could name about the server's own window
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
@@ -1864,7 +1863,7 @@ func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 // it in — and the row is told nothing, because nothing failed.
 func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(config.Options{})
+	live := newLiveSettings(config.Options{}, config.ProjectOffer{})
 	probe := &rebindProbe{}
 	applier := fakeApplier(t)
 	applier.live = live
@@ -1889,7 +1888,7 @@ func TestApplySettingRideIsSilentBeforeAServerIsBound(t *testing.T) {
 // taken it yet. The holder keeps the edit, which is what makes a re-committed edit a retry.
 func TestApplySettingReportsARefusedRebind(t *testing.T) {
 	t.Parallel()
-	live := newLiveSettings(config.Options{})
+	live := newLiveSettings(config.Options{}, config.ProjectOffer{})
 	probe := &rebindProbe{err: errors.New("input pending")}
 	applier := fakeApplier(t)
 	applier.live = live
@@ -1919,7 +1918,7 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 	launchOpts := config.Options{SystemPrompt: config.SystemPromptSettings{
 		Global: config.PromptSource{Text: "the launch prompt"},
 	}}
-	live := newLiveSettings(launchOpts)
+	live := newLiveSettings(launchOpts, config.ProjectOffer{})
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so what the
 	// dispatcher installed there is what the spec carries.
@@ -2205,7 +2204,7 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 					ContextWindow: 4096, WorkingWindow: 8192,
 					DelegateMaxSteps: 7, DelegateFanOutRounds: 9, DelegateMaxDepth: 3, DelegateMaxTokens: 5000,
 					RestreamBudget: 1,
-				})
+				}, config.ProjectOffer{})
 				if got := row.read(live.options()); got == want {
 					t.Fatalf("%s seeded at its Default %d; the seed must differ for the landing to show", row.key, got)
 				}
@@ -2975,7 +2974,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	live := newLiveSettings(config.Options{
 		ContextWindow: 16384, HostAlias: "here",
 		StartupEntry: config.ServerEntry{Name: "here", ContextWindow: 32768},
-	})
+	}, config.ProjectOffer{})
 	if got := live.window(); got != 32768 {
 		t.Fatalf("the bound window = %d; want the startup entry's 32768", got)
 	}
@@ -3043,7 +3042,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 		ContextWindow: 16384, HostAlias: "here",
 		StartupEntry: config.ServerEntry{Name: "here", ContextWindow: 32768},
 	}
-	live := newLiveSettings(launchOpts)
+	live := newLiveSettings(launchOpts, config.ProjectOffer{})
 	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec
@@ -3140,7 +3139,7 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 			live := newLiveSettings(config.Options{
 				ContextWindow: 16384, HostAlias: "here",
 				StartupEntry: config.ServerEntry{Name: "here", ContextWindow: config.TokenCount(tt.entryPin)},
-			})
+			}, config.ProjectOffer{})
 			probe := &rebindProbe{}
 			applier := fakeApplier(t)
 			applier.live = live
@@ -3200,7 +3199,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T
 		ContextWindow: 16384, HostAlias: "here",
 		StartupEntry: config.ServerEntry{Name: "here", MaxOutputTokens: 2048},
 	}
-	live := newLiveSettings(launchOpts)
+	live := newLiveSettings(launchOpts, config.ProjectOffer{})
 	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
@@ -3302,7 +3301,7 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 			live := newLiveSettings(config.Options{
 				HostAlias:    "here",
 				StartupEntry: config.ServerEntry{Name: "here", MaxOutputTokens: config.WholeCount(tt.entryCap)},
-			})
+			}, config.ProjectOffer{})
 			probe := &rebindProbe{}
 			applier := fakeApplier(t)
 			applier.live = live
@@ -3357,7 +3356,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *te
 		ContextWindow: 16384, HostAlias: "here",
 		StartupEntry: config.ServerEntry{Name: "here", ResponseReserve: 0.25},
 	}
-	live := newLiveSettings(launchOpts)
+	live := newLiveSettings(launchOpts, config.ProjectOffer{})
 	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
@@ -3461,7 +3460,7 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 			live := newLiveSettings(config.Options{
 				HostAlias:    "here",
 				StartupEntry: config.ServerEntry{Name: "here", ResponseReserve: tt.entryReserve},
-			})
+			}, config.ProjectOffer{})
 			probe := &rebindProbe{}
 			applier := fakeApplier(t)
 			applier.live = live
@@ -3505,7 +3504,7 @@ func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *t
 	live := newLiveSettings(config.Options{
 		HostAlias:    "here",
 		StartupEntry: config.ServerEntry{Name: "here", ResponseReserve: 0.25},
-	})
+	}, config.ProjectOffer{})
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
 	applier := fakeApplier(t)
@@ -3621,7 +3620,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 			live := newLiveSettings(config.Options{
 				SystemPrompt:     c.prompt,
 				UseDefaultPrompt: c.useDefault,
-			})
+			}, config.ProjectOffer{})
 
 			got := live.promptEditorSeed(bound, t.TempDir())
 
@@ -3633,7 +3632,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 
 	// The answer is the SESSION's, not the launch snapshot's: a prompt installed mid-session stops
 	// the seeding from the moment it lands, which is what makes the row feed safe to re-ask per paint.
-	live := newLiveSettings(config.Options{UseDefaultPrompt: true})
+	live := newLiveSettings(config.Options{UseDefaultPrompt: true}, config.ProjectOffer{})
 	live.setSystemPrompt(config.SystemPromptSettings{Global: config.PromptSource{File: "prompt.md"}}, true)
 	if got := live.promptEditorSeed(bound, t.TempDir()); got != "" {
 		t.Errorf("after a mid-session prompt file the seed is %q; want none", got)
@@ -3641,7 +3640,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 
 	// Layers installed mid-session stop it for the layers' own reason: the run stops sending the
 	// default the moment the first one lands.
-	layered := newLiveSettings(config.Options{UseDefaultPrompt: true})
+	layered := newLiveSettings(config.Options{UseDefaultPrompt: true}, config.ProjectOffer{})
 	layered.setSystemPrompt(config.SystemPromptSettings{
 		Layers: []config.SystemPromptLayer{{Text: "a layer\n"}},
 	}, true)
@@ -3662,7 +3661,7 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 			Models: map[string]config.PromptSource{bound: {File: "prompt.md"}},
 		},
 		UseDefaultPrompt: true,
-	})
+	}, config.ProjectOffer{})
 	if got := perModel.promptEditorSeed(bound, home); got != "" {
 		t.Errorf("a per-model prompt file was read on the render path and seeded %q; want none", got)
 	}
@@ -3706,7 +3705,7 @@ func TestFiringBindingCarriesTheLiveSubAgentsServer(t *testing.T) {
 		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
 		{Name: "other-grunt", Endpoint: "http://127.0.0.1:3333"},
 	}
-	live := newLiveSettings(config.Options{Servers: entries, SubAgentsServer: "grunt"})
+	live := newLiveSettings(config.Options{Servers: entries, SubAgentsServer: "grunt"}, config.ProjectOffer{})
 	wiring := newDelegationWiring(
 		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, defaultIdleRoot, nil,
 		config.NewKeyResolver(""))
@@ -3750,7 +3749,7 @@ func TestFiringBindingHandsOverTheHeldEntry(t *testing.T) {
 		EffortDialect: "reasoning_effort"}
 	live := newLiveSettings(config.Options{
 		Servers: []config.ServerEntry{launch, moved}, StartupEntry: launch, HostAlias: launch.Name,
-	})
+	}, config.ProjectOffer{})
 	bound := upstreamBinding{Endpoint: "http://127.0.0.1:2222", Model: "picked-model"}
 
 	if _, entry := live.firingBinding(bound); entry.Name != "launch" || entry.ContextWindow != 1_000 {
@@ -3885,7 +3884,7 @@ func TestApplySettingReactionsReplacesTheRunnerAndTheProjection(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	live := newLiveSettings(config.Options{Reactions: boot})
+	live := newLiveSettings(config.Options{Reactions: boot}, config.ProjectOffer{})
 	// The REAL door, holder and all: the swap reaches the Runner through the Agent the holder binds,
 	// which holds it (ADR 0076 A8), so what this drives is the composition root's own wiring rather
 	// than a second path into the same Runner.
@@ -3945,7 +3944,7 @@ func TestApplySettingReactionsRefusesABrokenFileWithoutMovingAnything(t *testing
 		t.Fatalf("write config: %v", err)
 	}
 
-	live := newLiveSettings(config.Options{Reactions: boot})
+	live := newLiveSettings(config.Options{Reactions: boot}, config.ProjectOffer{})
 	engine := newLateEngine(domain.ModePlan, false)
 	t.Cleanup(func() { _ = engine.Close() })
 	engine.seedReactions(apogee.Generation{Observe: boot})
@@ -4002,7 +4001,7 @@ func TestReactionsRowReloadSwapsObserveOnly(t *testing.T) {
 		ReadCache:             false,
 		Bypass:                true,
 		Reactions:             boot,
-	})
+	}, config.ProjectOffer{})
 	engine := newLateEngine(domain.ModePlan, false)
 	t.Cleanup(func() { _ = engine.Close() })
 	engine.seedReactions(apogee.Generation{
@@ -4077,7 +4076,7 @@ func TestReactionsRowReloadArmsTheSyncLaneOnTheBoundAgent(t *testing.T) {
 			"  - id: notify\n    on: [turn-finished]\n    run: [apogee-test-hook]\n"+
 			"  - id: warden\n    on: [pre-tool-exec]\n    gate: [/bin/sh, -c, \"echo deny\"]\n")
 
-	live := newLiveSettings(config.Options{Reactions: boot})
+	live := newLiveSettings(config.Options{Reactions: boot}, config.ProjectOffer{})
 	engine := newLateEngine(domain.ModePlan, false)
 	t.Cleanup(func() { _ = engine.Close() })
 	engine.seedReactions(apogee.Generation{Observe: boot})
@@ -4127,7 +4126,7 @@ func TestLiveSettingsGenerationClonesBothLanes(t *testing.T) {
 		Handler: domain.ArgvHandler{Argv: []string{"/bin/sh", "-c", "echo deny"}},
 		Timeout: time.Second,
 	}}
-	live := newLiveSettings(config.Options{Reactions: append(slices.Clone(observe), sync...)})
+	live := newLiveSettings(config.Options{Reactions: append(slices.Clone(observe), sync...)}, config.ProjectOffer{})
 
 	gen := live.generation()
 	if len(gen.Observe) != 1 || len(gen.Sync) != 1 {
@@ -4151,7 +4150,7 @@ func TestLiveSettingsGenerationCarriesTheContextFillNotice(t *testing.T) {
 	t.Parallel()
 
 	for _, want := range []bool{false, true} {
-		live := newLiveSettings(config.Options{ContextFillNotice: want})
+		live := newLiveSettings(config.Options{ContextFillNotice: want}, config.ProjectOffer{})
 		if got := live.generation().ContextFillNotice; got != want {
 			t.Errorf("generation().ContextFillNotice = %v; want the seeded %v", got, want)
 		}

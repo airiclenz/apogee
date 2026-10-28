@@ -275,7 +275,13 @@ cmd/apogee/wire_settings.go — newLiveSettings, liveSettings.allowRules, propos
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'Settings|Watched|Adoption|ExternalEdit' ./cmd/apogee/`, then `GOMEMLIMIT=2GiB go test -count=1 -run 'TestAllowRulesSummary|TestRegistry' ./internal/config/`
 **Commit:** `refactor(cmd): live settings read the Adoption snapshot`
 
-## 12. config.Options carries no proposals
+## 12. config.Options carries no proposals — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): the `allow` key's offer-aware value needs a home for the inert lists once AllowRules carries Rules only — new config.OfferedAllowRules{Rules, Proposed, Rejected}, returned by the registry's StructureOffer, liveSettings.allowRules and taken by allowRulesSummary/allowRuleRows; the loaders build the offer from layerKeys.offer() (offerOf deleted), and ResolveOptions gains an unexported resolveOptions that also answers it, for ApplyConfigOffer.
+NOTES (2026-10-28): the boot offer is threaded from root.go (ApplyConfigOffer) through runRootWith(ctx, opts, offer, launch, deps) onto a new rootWiring.offer field, read by bootSnapshot, newLiveSettings(opts, offer) and newExternalEdit(opts, offer, workspace, getenv); runRoot passes the zero offer; cmd's offerOfOptions is deleted and settingsRows(opts) now wraps settingsRowsOffered with the zero offer.
+NOTES (2026-10-28): consequential edit — internal/project/answer.go: made necessary by removing Options.Proposals/AllowRules.Proposed (heldPrints now reads LoadLayeredOffer's offer).
+NOTES (2026-10-28): consequential edit — cmd/apogee/root.go, cmd/apogee/wire.go, cmd/apogee/projectrules.go, cmd/apogee/settingsedit.go, cmd/apogee/settingsrows.go, cmd/apogee/wire_options.go: made necessary by the boot offer no longer riding Options (signature/field threading, doc comments).
+NOTES (2026-10-28): consequential edit — test call sites of newLiveSettings/newExternalEdit/runRootWith (cmd/apogee/*_test.go listed in FILES) and internal/project/snapshot_test.go: made necessary by the signature changes and removed fields; TestLoadLayeredOfferEqualsTheOptionsFields became TestLayeredLoadersAnswerTheProjectOffer (the options no longer carry the offer, so it asserts the offer's lists and that the options hold only the adopted entries).
 
 **What:** Depends on items 10 and 11.
 **Goal:** `config.Options` has no `Proposals` field, and `AllowRules` carries only the effective `Rules`. `mcp login`/`mcp list`, headless and the daemon read the offer from the `…Offer` loaders. `cloneOptions` clones neither, and its reflection test passes. Every user-facing string is byte-identical, including "proposes reaction \`lint\`; this run skips it".

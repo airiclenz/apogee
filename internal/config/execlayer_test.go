@@ -25,15 +25,15 @@ const projectDocsServerYAML = "mcp-servers:\n  - name: docs\n    transport: stdi
 func adoptProposedServers(t *testing.T, globalPath, projectRoot string) []domain.Proposal {
 	t.Helper()
 
-	o, _ := loadLayered(t, globalPath, projectRoot)
+	_, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
 	store := adoptionStore(t, globalPath, projectRoot)
-	for _, p := range o.Proposals.Proposed {
+	for _, p := range offer.Proposals.Proposed {
 		entry := adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}
 		if err := store.Adopt(entry); err != nil {
 			t.Fatalf("Adopt %s: %v", p.Handle, err)
 		}
 	}
-	return o.Proposals.Proposed
+	return offer.Proposals.Proposed
 }
 
 // serverNames is the names of servers, in order, each marked `(project)` when the Project config
@@ -55,15 +55,15 @@ func TestRepoMCPServerIsInertUntilAdopted(t *testing.T) {
 	t.Parallel()
 	globalPath, projectRoot := layerFixture(t, "", projectDocsServerYAML)
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
 	if len(o.MCPServers) != 0 {
 		t.Errorf("MCPServers = %v; want none — a proposed server connects nothing", serverNames(o.MCPServers))
 	}
-	if len(o.Proposals.Proposed) != 1 || len(o.Proposals.Adopted)+len(o.Proposals.Rejected) != 0 {
-		t.Fatalf("Proposals = %+v; want the one server proposed", o.Proposals)
+	if len(offer.Proposals.Proposed) != 1 || len(offer.Proposals.Adopted)+len(offer.Proposals.Rejected) != 0 {
+		t.Fatalf("Proposals = %+v; want the one server proposed", offer.Proposals)
 	}
-	got := o.Proposals.Proposed[0]
+	got := offer.Proposals.Proposed[0]
 	wantFields := []domain.ProposalField{
 		{Label: "transport", Values: []string{"stdio"}},
 		{Label: "command", Values: []string{"docs-server"}},
@@ -96,9 +96,9 @@ func TestAdoptedRepoMCPServerIsMergedWithProjectFlag(t *testing.T) {
 	project := projectDocsServerYAML +
 		"  - name: lint\n    transport: stdio\n    command: lint-server\n"
 	globalPath, projectRoot := layerFixture(t, global, project)
-	o, _ := loadLayered(t, globalPath, projectRoot)
+	_, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
 	store := adoptionStore(t, globalPath, projectRoot)
-	for _, p := range o.Proposals.Proposed {
+	for _, p := range offer.Proposals.Proposed {
 		entry := adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}
 		answer := store.Adopt
 		if p.Handle == "lint" {
@@ -108,40 +108,40 @@ func TestAdoptedRepoMCPServerIsMergedWithProjectFlag(t *testing.T) {
 			t.Fatalf("answer %s: %v", p.Handle, err)
 		}
 	}
-	resolvers := map[string]func(t *testing.T) Options{
-		"LoadLayeredConfig": func(t *testing.T) Options {
-			resolved, _ := loadLayered(t, globalPath, projectRoot)
-			return resolved
+	resolvers := map[string]func(t *testing.T) (Options, ProjectOffer){
+		"LoadLayeredOffer": func(t *testing.T) (Options, ProjectOffer) {
+			resolved, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
+			return resolved, offer
 		},
-		"ResolveOptions": func(t *testing.T) Options {
-			return resolveAt(t, globalPath, projectRoot, false)
+		"ResolveOptions": func(t *testing.T) (Options, ProjectOffer) {
+			return resolveOfferAt(t, globalPath, projectRoot, false)
 		},
-		"OverlayProjectLayer": func(t *testing.T) Options {
-			base := resolveAt(t, globalPath, projectRoot, true)
+		"OverlayProjectOffer": func(t *testing.T) (Options, ProjectOffer) {
+			base, _ := resolveOfferAt(t, globalPath, projectRoot, true)
 			doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
 			if err != nil {
 				t.Fatalf("ReadGlobalDocument: %v", err)
 			}
-			overlaid := OverlayProjectLayer(base, doc, projectRoot, os.ReadFile, noNotify)
+			overlaid, offer := OverlayProjectOffer(base, doc, projectRoot, os.ReadFile, noNotify)
 			if got := serverNames(base.MCPServers); !slices.Equal(got, []string{"web"}) {
 				t.Errorf("base servers = %q after the overlay; want the base left as it was", got)
 			}
-			return overlaid
+			return overlaid, offer
 		},
 	}
 	for name, resolve := range resolvers {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			resolved := resolve(t)
+			resolved, offer := resolve(t)
 
 			if got, want := serverNames(resolved.MCPServers), []string{"web", "docs (project)"}; !slices.Equal(got, want) {
 				t.Errorf("MCPServers = %q; want %q", got, want)
 			}
-			adopted, rejected := resolved.Proposals.Adopted, resolved.Proposals.Rejected
+			adopted, rejected := offer.Proposals.Adopted, offer.Proposals.Rejected
 			if len(adopted) != 1 || adopted[0].Handle != "docs" || len(rejected) != 1 ||
-				rejected[0].Handle != "lint" || len(resolved.Proposals.Proposed) != 0 {
-				t.Errorf("Proposals = %+v; want docs adopted and lint rejected", resolved.Proposals)
+				rejected[0].Handle != "lint" || len(offer.Proposals.Proposed) != 0 {
+				t.Errorf("Proposals = %+v; want docs adopted and lint rejected", offer.Proposals)
 			}
 			if !resolved.ProjectKeys[mcpServersPath] {
 				t.Errorf("ProjectKeys = %v; want mcp-servers recorded once a project server is live",
@@ -151,17 +151,19 @@ func TestAdoptedRepoMCPServerIsMergedWithProjectFlag(t *testing.T) {
 	}
 }
 
-// resolveAt resolves the options of the home beside globalPath for a workspace at projectRoot, as
-// a Driver's startup does — global-only when globalOnly is set.
-func resolveAt(t *testing.T, globalPath, projectRoot string, globalOnly bool) Options {
+// resolveOfferAt resolves the options of the home beside globalPath for a workspace at projectRoot,
+// as a Driver's startup does — global-only when globalOnly is set — with the Project config's offer
+// the same resolution read beside them.
+func resolveOfferAt(t *testing.T, globalPath, projectRoot string, globalOnly bool) (Options, ProjectOffer) {
 	t.Helper()
 
 	opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: projectRoot, GlobalConfigOnly: globalOnly}
-	if _, err := ResolveOptions(&opts, func(string) bool { return false },
-		func(string) string { return "" }, os.ReadFile, noNotify, testHostID); err != nil {
+	_, offer, err := resolveOptions(&opts, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify, testHostID)
+	if err != nil {
 		t.Fatalf("ResolveOptions: %v", err)
 	}
-	return opts
+	return opts, offer
 }
 
 // A repo server named like one of the user's own is dropped with a notice naming it and never
@@ -171,13 +173,13 @@ func TestRepoMCPServerNameCollisionKeepsTheGlobal(t *testing.T) {
 	global := "mcp-servers:\n  - name: docs\n    transport: sse\n    endpoint: https://docs.example.com\n"
 	globalPath, projectRoot := layerFixture(t, global, projectDocsServerYAML)
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
 	if len(o.MCPServers) != 1 || o.MCPServers[0].Project || o.MCPServers[0].Transport != mcp.TransportSSE {
 		t.Errorf("MCPServers = %+v; want the global docs server alone", o.MCPServers)
 	}
-	if !reflect.DeepEqual(o.Proposals, ProjectProposals{}) {
-		t.Errorf("Proposals = %+v; want none — a shadowed server is never offered", o.Proposals)
+	if !reflect.DeepEqual(offer.Proposals, ProjectProposals{}) {
+		t.Errorf("Proposals = %+v; want none — a shadowed server is never offered", offer.Proposals)
 	}
 	if len(notices) != 1 || !strings.Contains(notices[0], `mcp-servers entry "docs"`) ||
 		!strings.Contains(notices[0], "global config") {
@@ -252,13 +254,13 @@ func TestRepoMCPProposalCarriesTheChangeReason(t *testing.T) {
 	writeLayerFile(t, script, "echo two\n")
 	writeLayerFile(t, projectFilePath(projectRoot), strings.Replace(entry, "%s", "MODE=b", 1))
 
-	o, _ := loadLayered(t, globalPath, projectRoot)
+	o, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
 
-	if len(o.Proposals.Proposed) != 1 || len(o.MCPServers) != 0 {
+	if len(offer.Proposals.Proposed) != 1 || len(o.MCPServers) != 0 {
 		t.Fatalf("Proposals = %+v, MCPServers = %q; want the moved server proposed again and inert",
-			o.Proposals, serverNames(o.MCPServers))
+			offer.Proposals, serverNames(o.MCPServers))
 	}
-	got := o.Proposals.Proposed[0]
+	got := offer.Proposals.Proposed[0]
 	if want := []string{"env", "scripts/serve.sh"}; !slices.Equal(got.Changed, want) {
 		t.Errorf("Changed = %q; want %q", got.Changed, want)
 	}
@@ -311,13 +313,13 @@ func TestRepoMCPServerRefusedAloneKeepsTheTightenOnlyKeys(t *testing.T) {
 			t.Parallel()
 			globalPath, projectRoot := layerFixture(t, "", "tools:\n  disabled: [web_fetch]\n"+tt.servers)
 
-			o, notices := loadLayered(t, globalPath, projectRoot)
+			o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
 			if !slices.Contains(o.ToolsDisabled, "web_fetch") {
 				t.Errorf("tools.disabled = %q; want the project's web_fetch to still apply", o.ToolsDisabled)
 			}
 			var proposed []string
-			for _, p := range o.Proposals.Proposed {
+			for _, p := range offer.Proposals.Proposed {
 				proposed = append(proposed, p.Handle)
 			}
 			if !slices.Equal(proposed, tt.wantProposed) {
@@ -368,15 +370,15 @@ func TestRepoReactionIsInertUntilAdopted(t *testing.T) {
 	global := "reactions:\n  - id: log\n    on: [turn-finished]\n    run: [logger, turn]\n"
 	globalPath, projectRoot := layerFixture(t, global, projectNotifyReactionYAML)
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
 	if got := reactionIDs(o.Reactions); !slices.Equal(got, []string{"log"}) {
 		t.Errorf("Reactions = %q; want the global log alone — a proposed reaction fires nothing", got)
 	}
-	if len(o.Proposals.Proposed) != 1 || len(o.Proposals.Adopted)+len(o.Proposals.Rejected) != 0 {
-		t.Fatalf("Proposals = %+v; want the one reaction proposed", o.Proposals)
+	if len(offer.Proposals.Proposed) != 1 || len(offer.Proposals.Adopted)+len(offer.Proposals.Rejected) != 0 {
+		t.Fatalf("Proposals = %+v; want the one reaction proposed", offer.Proposals)
 	}
-	got := o.Proposals.Proposed[0]
+	got := offer.Proposals.Proposed[0]
 	wantFields := []domain.ProposalField{{Label: "run", Shape: domain.ProposalList, Values: []string{"notify-send", "saved"}}}
 	if got.Kind != domain.ProposalReaction || got.Handle != "notify" || !reflect.DeepEqual(got.Fields, wantFields) {
 		t.Errorf("proposal = %+v; want reaction entry notify with fields %+v", got, wantFields)
@@ -389,37 +391,37 @@ func TestRepoReactionIsInertUntilAdopted(t *testing.T) {
 	}
 
 	adoptProposedServers(t, globalPath, projectRoot)
-	resolvers := map[string]func(t *testing.T) Options{
-		"LoadLayeredConfig": func(t *testing.T) Options {
-			resolved, _ := loadLayered(t, globalPath, projectRoot)
-			return resolved
+	resolvers := map[string]func(t *testing.T) (Options, ProjectOffer){
+		"LoadLayeredOffer": func(t *testing.T) (Options, ProjectOffer) {
+			resolved, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
+			return resolved, offer
 		},
-		"ResolveOptions": func(t *testing.T) Options {
-			return resolveAt(t, globalPath, projectRoot, false)
+		"ResolveOptions": func(t *testing.T) (Options, ProjectOffer) {
+			return resolveOfferAt(t, globalPath, projectRoot, false)
 		},
-		"OverlayProjectLayer": func(t *testing.T) Options {
-			base := resolveAt(t, globalPath, projectRoot, true)
+		"OverlayProjectOffer": func(t *testing.T) (Options, ProjectOffer) {
+			base, _ := resolveOfferAt(t, globalPath, projectRoot, true)
 			doc, err := ReadGlobalDocument(base.ConfigDir, os.ReadFile, noNotify)
 			if err != nil {
 				t.Fatalf("ReadGlobalDocument: %v", err)
 			}
-			overlaid := OverlayProjectLayer(base, doc, projectRoot, os.ReadFile, noNotify)
+			overlaid, offer := OverlayProjectOffer(base, doc, projectRoot, os.ReadFile, noNotify)
 			if got := reactionIDs(base.Reactions); !slices.Equal(got, []string{"log"}) {
 				t.Errorf("base reactions = %q after the overlay; want the base left as it was", got)
 			}
-			return overlaid
+			return overlaid, offer
 		},
 	}
 	for name, resolve := range resolvers {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			resolved := resolve(t)
+			resolved, offer := resolve(t)
 
 			if got, want := reactionIDs(resolved.Reactions), []string{"log", "notify (project)"}; !slices.Equal(got, want) {
 				t.Errorf("Reactions = %q; want %q", got, want)
 			}
-			if got := proposalHandles(resolved.Proposals.Adopted); !slices.Equal(got, []string{"notify"}) {
+			if got := proposalHandles(offer.Proposals.Adopted); !slices.Equal(got, []string{"notify"}) {
 				t.Errorf("adopted = %q; want notify", got)
 			}
 			if !resolved.ProjectKeys[reactionsPath] {
@@ -447,10 +449,10 @@ func TestRepoReactionProposalCarriesItsActionShapes(t *testing.T) {
 		"        Authorization: HOOK_TOKEN\n"
 	globalPath, projectRoot := layerFixture(t, "", project)
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	_, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
-	if len(o.Proposals.Proposed) != 2 {
-		t.Fatalf("Proposals = %+v (notices %q); want both reactions proposed", o.Proposals, notices)
+	if len(offer.Proposals.Proposed) != 2 {
+		t.Fatalf("Proposals = %+v (notices %q); want both reactions proposed", offer.Proposals, notices)
 	}
 	want := [][]domain.ProposalField{
 		{{Label: "run", Shape: domain.ProposalList, Values: []string{`{"url":"https://example.com"}`}}},
@@ -459,7 +461,7 @@ func TestRepoReactionProposalCarriesItsActionShapes(t *testing.T) {
 			{Label: "headers-env", Shape: domain.ProposalMap, Values: []string{"Authorization: HOOK_TOKEN"}},
 		}}},
 	}
-	for i, p := range o.Proposals.Proposed {
+	for i, p := range offer.Proposals.Proposed {
 		if !reflect.DeepEqual(p.Fields, want[i]) {
 			t.Errorf("%s fields = %+v; want %+v", p.Handle, p.Fields, want[i])
 		}
@@ -473,13 +475,13 @@ func TestRepoReactionIDCollisionKeepsTheGlobal(t *testing.T) {
 	global := "reactions:\n  - id: notify\n    on: [turn-finished]\n    run: [logger, turn]\n"
 	globalPath, projectRoot := layerFixture(t, global, projectNotifyReactionYAML)
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
 	if len(o.Reactions) != 1 || o.Reactions[0].Project || o.Reactions[0].On[0] != domain.MomentTurnFinished {
 		t.Errorf("Reactions = %+v; want the global notify alone", o.Reactions)
 	}
-	if !reflect.DeepEqual(o.Proposals, ProjectProposals{}) {
-		t.Errorf("Proposals = %+v; want none — a shadowed reaction is never offered", o.Proposals)
+	if !reflect.DeepEqual(offer.Proposals, ProjectProposals{}) {
+		t.Errorf("Proposals = %+v; want none — a shadowed reaction is never offered", offer.Proposals)
 	}
 	if len(notices) != 1 || !strings.Contains(notices[0], `reactions entry "notify"`) ||
 		!strings.Contains(notices[0], "global config") {
@@ -601,12 +603,12 @@ func TestRepoReactionRefusedAloneKeepsTheRest(t *testing.T) {
 			t.Parallel()
 			globalPath, projectRoot := layerFixture(t, "", "tools:\n  disabled: [web_fetch]\n"+tt.reactions)
 
-			o, notices := loadLayered(t, globalPath, projectRoot)
+			o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
 			if !slices.Contains(o.ToolsDisabled, "web_fetch") {
 				t.Errorf("tools.disabled = %q; want the project's web_fetch to still apply", o.ToolsDisabled)
 			}
-			if got := proposalHandles(o.Proposals.Proposed); !slices.Equal(got, tt.wantProposed) {
+			if got := proposalHandles(offer.Proposals.Proposed); !slices.Equal(got, tt.wantProposed) {
 				t.Errorf("proposed = %q; want %q", got, tt.wantProposed)
 			}
 			if len(notices) != len(tt.wantNotices) {
@@ -627,12 +629,12 @@ func TestRepoReactionRepeatedIDIsRefused(t *testing.T) {
 	project := projectNotifyReactionYAML + "  - id: notify\n    on: [turn-finished]\n    run: [other]\n"
 	globalPath, projectRoot := layerFixture(t, "", project)
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	_, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
-	if len(o.Proposals.Proposed) != 1 {
-		t.Fatalf("Proposals = %+v; want the first notify alone proposed", o.Proposals)
+	if len(offer.Proposals.Proposed) != 1 {
+		t.Fatalf("Proposals = %+v; want the first notify alone proposed", offer.Proposals)
 	}
-	if got := o.Proposals.Proposed[0].Fields; !reflect.DeepEqual(got,
+	if got := offer.Proposals.Proposed[0].Fields; !reflect.DeepEqual(got,
 		[]domain.ProposalField{{Label: "run", Shape: domain.ProposalList, Values: []string{"notify-send", "saved"}}}) {
 		t.Errorf("proposed fields = %+v; want the first entry's", got)
 	}
@@ -652,11 +654,11 @@ func TestAdoptedRepoReactionTakesParameterEditsLive(t *testing.T) {
 		"    on: [turn-finished]\n    run: [notify-send, saved]\n    timeout: 9s\n    workspace: sub\n"+
 		"    enabled: true\n")
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
-	if len(notices) != 0 || len(o.Proposals.Proposed) != 0 || len(o.Reactions) != 1 {
+	if len(notices) != 0 || len(offer.Proposals.Proposed) != 0 || len(o.Reactions) != 1 {
 		t.Fatalf("Reactions = %q, Proposals = %+v, notices = %q; want notify still adopted and live",
-			reactionIDs(o.Reactions), o.Proposals, notices)
+			reactionIDs(o.Reactions), offer.Proposals, notices)
 	}
 	wantWorkspace, err := scope.Resolve(filepath.Join(projectRoot, "sub"))
 	if err != nil {
@@ -669,18 +671,18 @@ func TestAdoptedRepoReactionTakesParameterEditsLive(t *testing.T) {
 	}
 
 	writeLayerFile(t, projectFilePath(projectRoot), projectNotifyReactionYAML+"    enabled: false\n")
-	parked, _ := loadLayered(t, globalPath, projectRoot)
-	if len(parked.Reactions) != 0 || len(parked.Proposals.Adopted) != 1 {
+	parked, parkedOffer, _ := loadLayeredOffer(t, globalPath, projectRoot)
+	if len(parked.Reactions) != 0 || len(parkedOffer.Proposals.Adopted) != 1 {
 		t.Errorf("Reactions = %q, Proposals = %+v; want notify still adopted but parked",
-			reactionIDs(parked.Reactions), parked.Proposals)
+			reactionIDs(parked.Reactions), parkedOffer.Proposals)
 	}
 
 	writeLayerFile(t, projectFilePath(projectRoot), strings.Replace(projectNotifyReactionYAML, "saved", "done", 1))
-	moved, _ := loadLayered(t, globalPath, projectRoot)
-	if len(moved.Reactions) != 0 || len(moved.Proposals.Proposed) != 1 ||
-		!slices.Equal(moved.Proposals.Proposed[0].Changed, []string{"run"}) {
+	moved, movedOffer, _ := loadLayeredOffer(t, globalPath, projectRoot)
+	if len(moved.Reactions) != 0 || len(movedOffer.Proposals.Proposed) != 1 ||
+		!slices.Equal(movedOffer.Proposals.Proposed[0].Changed, []string{"run"}) {
 		t.Errorf("Reactions = %q, Proposals = %+v; want notify proposed again for its run and inert",
-			reactionIDs(moved.Reactions), moved.Proposals)
+			reactionIDs(moved.Reactions), movedOffer.Proposals)
 	}
 }
 

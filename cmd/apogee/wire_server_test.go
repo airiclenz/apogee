@@ -256,7 +256,7 @@ func TestRebindSpecForSelectsPerModelBindings(t *testing.T) {
 func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
 	t.Parallel()
 	launchOpts := config.Options{Endpoint: "http://launch.invalid", APIKey: "launch-key"}
-	live := newLiveSettings(launchOpts)
+	live := newLiveSettings(launchOpts, config.ProjectOffer{})
 	bound := upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model", APIKey: "bound-key"}
 
 	base, _, _ := live.rebindInputs(bound)
@@ -516,7 +516,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
-			live: newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}),
+			live: newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}, config.ProjectOffer{}),
 			keys: config.NewKeyResolver(""),
 			caps: newParallelAgentsCap(widths),
 		},
@@ -1378,7 +1378,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	holder := newUpstreamHolder()
 	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111", APIKey: "old-key", Model: "old-model"},
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
-	live := newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot})
+	live := newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}, config.ProjectOffer{})
 	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
 		keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{})}
 
@@ -1469,7 +1469,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 	holder := newUpstreamHolder()
 	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111", APIKey: "old-key", Model: "old-model"},
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
-	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2})
+	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2}, config.ProjectOffer{})
 	mover := sessionMover{
 		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(""),
 		caps: newParallelAgentsCap(&parallelAgentsSpy{}),
@@ -2038,7 +2038,7 @@ func TestMoveStreamIdleWindowFollowsTheEntry(t *testing.T) {
 	holder := newUpstreamHolder()
 	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111"},
 		heartbeat.NewMonitor("http://old.invalid:1111", "", ""))
-	live := newLiveSettings(config.Options{StreamIdleTimeout: fixtureIdleRoot})
+	live := newLiveSettings(config.Options{StreamIdleTimeout: fixtureIdleRoot}, config.ProjectOffer{})
 	mover := sessionMover{
 		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(""),
 		caps: newParallelAgentsCap(&parallelAgentsSpy{}),

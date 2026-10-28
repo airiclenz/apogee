@@ -56,14 +56,14 @@ func TestAllowRulesFromTheProjectAreProposedUntilAdopted(t *testing.T) {
 	t.Parallel()
 	globalPath, projectRoot := layerFixture(t, "allow:\n  terminal: [make lint]\n", projectAllowYAML)
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
-	want := AllowRules{
+	want := OfferedAllowRules{
 		Rules:    []AllowRule{{Kind: AllowTerminal, Text: "make lint", Layer: SourceGlobal}},
 		Proposed: []AllowRule{projectGoTest, projectDocs},
 	}
-	if !reflect.DeepEqual(o.AllowRules, want) {
-		t.Errorf("AllowRules = %+v; want %+v", o.AllowRules, want)
+	if got := offeredAllowRules(o, offer); !reflect.DeepEqual(got, want) {
+		t.Errorf("allow rules = %+v; want %+v", got, want)
 	}
 	if o.ProjectKeys[allowPath] {
 		t.Errorf("ProjectKeys = %v; a proposed rule contributes nothing to the run", o.ProjectKeys)
@@ -86,17 +86,17 @@ func TestAllowRulesFromTheProjectAreLiveOnceAdopted(t *testing.T) {
 		t.Fatalf("Reject: %v", err)
 	}
 
-	o, _ := loadLayered(t, globalPath, projectRoot)
+	o, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
 
-	want := AllowRules{
+	want := OfferedAllowRules{
 		Rules: []AllowRule{
 			{Kind: AllowTerminal, Text: "make lint", Layer: SourceGlobal},
 			projectGoTest,
 		},
 		Rejected: []AllowRule{projectDocs},
 	}
-	if !reflect.DeepEqual(o.AllowRules, want) {
-		t.Errorf("AllowRules = %+v; want %+v", o.AllowRules, want)
+	if got := offeredAllowRules(o, offer); !reflect.DeepEqual(got, want) {
+		t.Errorf("allow rules = %+v; want %+v", got, want)
 	}
 	if !o.ProjectKeys[allowPath] || o.SourceOf(allowPath) != SourceProject {
 		t.Errorf("ProjectKeys = %v; want `allow` recorded as the project's once a rule of it is live",
@@ -115,11 +115,11 @@ func TestAllowRulesFromTheProjectAreProposedAgainOnceEdited(t *testing.T) {
 	}
 	writeLayerFile(t, projectFilePath(projectRoot), "allow:\n  terminal: ['go  test']\n")
 
-	o, _ := loadLayered(t, globalPath, projectRoot)
+	o, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
 
-	want := AllowRules{Proposed: []AllowRule{{Kind: AllowTerminal, Text: "go  test", Layer: SourceProject}}}
-	if !reflect.DeepEqual(o.AllowRules, want) {
-		t.Errorf("AllowRules = %+v; want %+v", o.AllowRules, want)
+	want := []AllowRule{{Kind: AllowTerminal, Text: "go  test", Layer: SourceProject}}
+	if !reflect.DeepEqual(o.AllowRules, AllowRules{}) || !reflect.DeepEqual(offer.Proposed, want) {
+		t.Errorf("AllowRules = %+v, proposed %+v; want none live and %+v proposed", o.AllowRules, offer.Proposed, want)
 	}
 }
 
@@ -133,10 +133,11 @@ func TestAllowRulesAdoptionIsPinnedToTheKind(t *testing.T) {
 		t.Fatalf("Adopt: %v", err)
 	}
 
-	o, _ := loadLayered(t, globalPath, projectRoot)
+	o, offer, _ := loadLayeredOffer(t, globalPath, projectRoot)
 
-	if len(o.AllowRules.Rules) != 0 || len(o.AllowRules.Proposed) != 1 {
-		t.Errorf("AllowRules = %+v; want the mcp-servers rule proposed, nothing live", o.AllowRules)
+	if len(o.AllowRules.Rules) != 0 || len(offer.Proposed) != 1 {
+		t.Errorf("AllowRules = %+v, proposed %+v; want the mcp-servers rule proposed, nothing live",
+			o.AllowRules, offer.Proposed)
 	}
 }
 
@@ -153,11 +154,11 @@ func TestAllowRulesStayProposedWhenTheRecordIsUnreadable(t *testing.T) {
 		t.Fatalf("corrupt the record: %v", err)
 	}
 
-	o, notices := loadLayered(t, globalPath, projectRoot)
+	o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
-	want := AllowRules{Proposed: []AllowRule{projectGoTest, projectDocs}}
-	if !reflect.DeepEqual(o.AllowRules, want) {
-		t.Errorf("AllowRules = %+v; want %+v", o.AllowRules, want)
+	want := []AllowRule{projectGoTest, projectDocs}
+	if !reflect.DeepEqual(o.AllowRules, AllowRules{}) || !reflect.DeepEqual(offer.Proposed, want) {
+		t.Errorf("AllowRules = %+v, proposed %+v; want none live and %+v proposed", o.AllowRules, offer.Proposed, want)
 	}
 	if len(notices) != 1 || !strings.Contains(notices[0], projectFilePath(projectRoot)) ||
 		!strings.Contains(notices[0], "stay proposed") {
@@ -187,11 +188,11 @@ func TestAllowRulesRefuseABlankRule(t *testing.T) {
 			t.Parallel()
 			globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", "workflow-retries: 5\n"+block)
 
-			o, notices := loadLayered(t, globalPath, projectRoot)
+			o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
 
-			if o.WorkflowRetries != 2 || len(o.AllowRules.Proposed) != 0 {
-				t.Errorf("workflow-retries = %d, AllowRules = %+v; want the global 2 and no project rules",
-					o.WorkflowRetries, o.AllowRules)
+			if o.WorkflowRetries != 2 || len(offer.Proposed) != 0 {
+				t.Errorf("workflow-retries = %d, proposed %+v; want the global 2 and no project rules",
+					o.WorkflowRetries, offer.Proposed)
 			}
 			if len(notices) != 1 || !strings.Contains(notices[0], "the project layer is skipped") {
 				t.Errorf("notices = %q; want one skipping the project layer", notices)
@@ -248,21 +249,21 @@ func TestResolveOptionsResolvesTheEffectiveAllowRules(t *testing.T) {
 	}
 	opts := Options{ConfigDir: filepath.Dir(globalPath), Workspace: projectRoot}
 
-	_, err := ResolveOptions(&opts, func(string) bool { return false }, func(string) string { return "" },
+	_, offer, err := resolveOptions(&opts, func(string) bool { return false }, func(string) string { return "" },
 		os.ReadFile, func(string) {}, testHostID)
 
 	if err != nil {
 		t.Fatalf("ResolveOptions: %v", err)
 	}
-	want := AllowRules{
+	want := OfferedAllowRules{
 		Rules: []AllowRule{
 			{Kind: AllowTerminal, Text: "make lint", Layer: SourceGlobal},
 			projectDocs,
 		},
 		Proposed: []AllowRule{projectGoTest},
 	}
-	if !reflect.DeepEqual(opts.AllowRules, want) {
-		t.Errorf("AllowRules = %+v; want %+v", opts.AllowRules, want)
+	if got := offeredAllowRules(opts, offer); !reflect.DeepEqual(got, want) {
+		t.Errorf("allow rules = %+v; want %+v", got, want)
 	}
 }
 
@@ -284,13 +285,13 @@ func TestAllowRulesSummary(t *testing.T) {
 	rule := AllowRule{Kind: AllowTerminal, Text: "go test", Layer: SourceGlobal}
 	for _, tc := range []struct {
 		name string
-		set  AllowRules
+		set  OfferedAllowRules
 		want string
 	}{
-		{"none", AllowRules{}, ""},
-		{"live only", AllowRules{Rules: []AllowRule{rule, rule}}, "2 rules"},
-		{"proposed only", AllowRules{Proposed: []AllowRule{rule}}, "1 proposed"},
-		{"both", AllowRules{Rules: []AllowRule{rule}, Proposed: []AllowRule{rule}, Rejected: []AllowRule{rule}},
+		{"none", OfferedAllowRules{}, ""},
+		{"live only", OfferedAllowRules{Rules: []AllowRule{rule, rule}}, "2 rules"},
+		{"proposed only", OfferedAllowRules{Proposed: []AllowRule{rule}}, "1 proposed"},
+		{"both", OfferedAllowRules{Rules: []AllowRule{rule}, Proposed: []AllowRule{rule}, Rejected: []AllowRule{rule}},
 			"1 rule, 1 proposed"},
 	} {
 		if got := allowRulesSummary(tc.set); got != tc.want {

@@ -152,7 +152,7 @@ func TestServerStatsSettingsToggleOpensAndStopsTheStore(t *testing.T) {
 
 	home := t.TempDir()
 	rec := newStatsRecorder(serverStatsPath(home), true)
-	live := newLiveSettings(config.Options{ServerStats: true})
+	live := newLiveSettings(config.Options{ServerStats: true}, config.ProjectOffer{})
 	applier := fakeApplier(t)
 	applier.live = live
 	applier.stats = rec
@@ -247,7 +247,7 @@ func TestServerStatsFillBothPickersChoices(t *testing.T) {
 
 	holder := newUpstreamHolder()
 	holder.Bind(upstreamBinding{Endpoint: servers[0].Endpoint, Model: "qwen"}, nil)
-	w := &rootWiring{live: newLiveSettings(config.Options{Servers: servers}), stats: rec, holder: holder}
+	w := &rootWiring{live: newLiveSettings(config.Options{Servers: servers}, config.ProjectOffer{}), stats: rec, holder: holder}
 
 	for name, choices := range map[string][]tui.ServerChoice{
 		"server":     serverHost{w: w}.List(),

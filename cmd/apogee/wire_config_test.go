@@ -335,13 +335,12 @@ func TestProjectConfigMergesTheDangerousRules(t *testing.T) {
 
 // The `allow:` key's effective rules reach the engine in its own spelling, each with the layer it
 // came from — the fact the transcript names when a rule answers a call — and only the effective
-// ones: a proposed or rejected project rule grants nothing, so it never rides the Config.
+// ones: a proposed or rejected project rule grants nothing, and config.Options does not carry it
+// (it is the Project config's offer), so it never rides the Config.
 func TestProjectConfigCarriesTheAllowRules(t *testing.T) {
 	t.Parallel()
 
 	opts := projectionOptions(t)
-	opts.AllowRules.Proposed = []config.AllowRule{{Kind: config.AllowTerminal, Text: "rm", Layer: config.SourceProject}}
-	opts.AllowRules.Rejected = []config.AllowRule{{Kind: config.AllowTerminal, Text: "curl", Layer: config.SourceProject}}
 	roots := firingRoots(t)
 	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
 

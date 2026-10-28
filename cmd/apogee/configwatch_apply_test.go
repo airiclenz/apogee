@@ -67,7 +67,7 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 	writeSettingsFixture(t, path, body)
 	return &watchedConfig{
 		path:  path,
-		edits: newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" }),
+		edits: newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, "", func(string) string { return "" }),
 		await: awaitConfigChangeOn(startConfigWatcher(t, path), nil, nil, nil),
 	}
 }
@@ -102,7 +102,7 @@ func newWatchedLayeredConfig(t *testing.T, global, project string) *watchedConfi
 		path:        path,
 		projectPath: projectPath,
 		projectRoot: projectRoot,
-		edits:       newExternalEdit(opts, workspace, func(string) string { return "" }),
+		edits:       newExternalEdit(opts, config.ProjectOffer{}, workspace, func(string) string { return "" }),
 		await: awaitConfigChangeOn(startConfigWatcher(t, path), startConfigWatcher(t, projectPath),
 			startConfigWatcher(t, adoptionPath), nil),
 	}
@@ -425,18 +425,18 @@ const projectNotifyReactionYAML = "reactions:\n  - id: notify\n    on: [file-cha
 // test when there is none to adopt.
 func adoptEveryProposal(t *testing.T, globalPath, projectRoot string) {
 	t.Helper()
-	o, err := loadLayeredOptions(globalPath, projectRoot)
+	_, offer, err := config.LoadLayeredOffer(globalPath, projectRoot, os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}
-	if len(o.Proposals.Proposed) == 0 {
+	if len(offer.Proposals.Proposed) == 0 {
 		t.Fatal("the Project config proposes nothing to adopt")
 	}
 	store, err := adoption.New(config.WorkspacesDir(filepath.Dir(globalPath)), projectRoot)
 	if err != nil {
 		t.Fatalf("open the adoption record: %v", err)
 	}
-	for _, p := range o.Proposals.Proposed {
+	for _, p := range offer.Proposals.Proposed {
 		if err := store.Adopt(adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}); err != nil {
 			t.Fatalf("Adopt %s: %v", p.Handle, err)
 		}
@@ -567,11 +567,11 @@ func assertSkippedLayerNotice(t *testing.T, reload tui.ConfigReload) {
 // none awaits an answer: the entries that came back did so on the record already kept, unasked.
 func assertStillAdopted(t *testing.T, c *watchedConfig, want int) {
 	t.Helper()
-	o, err := loadLayeredOptions(c.path, c.projectRoot)
+	_, offer, err := config.LoadLayeredOffer(c.path, c.projectRoot, os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}
-	if p := o.Proposals; len(p.Adopted) != want || len(p.Proposed) != 0 || len(p.Rejected) != 0 {
+	if p := offer.Proposals; len(p.Adopted) != want || len(p.Proposed) != 0 || len(p.Rejected) != 0 {
 		t.Errorf("proposals = %+v, want %d adopted and nothing awaiting an answer", p, want)
 	}
 }

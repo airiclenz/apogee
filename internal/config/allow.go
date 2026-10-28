@@ -47,23 +47,28 @@ type AllowRule struct {
 }
 
 // AllowRules is the `allow:` key resolved. Rules is the effective set — every global rule, then
-// every adopted project rule, each in file order — and is the only list that grants anything.
-// Proposed holds the project rules no answer is recorded for, and Rejected the ones the user turned
-// down; both are inert and are reported so a surface can offer or list them. The zero value grants
-// nothing.
+// every adopted project rule, each in file order — and grants. The project rules no answer is
+// recorded for, and the ones the user turned down, are inert and are not here: the layered loaders
+// return them beside the options, in the [ProjectOffer]. The zero value grants nothing.
 type AllowRules struct {
+	Rules []AllowRule
+}
+
+// Clone returns r with its list copied, so the copy shares no backing array with r. A nil list
+// stays nil.
+func (r AllowRules) Clone() AllowRules {
+	r.Rules = slices.Clone(r.Rules)
+	return r
+}
+
+// OfferedAllowRules is the `allow:` key's whole value with the Project config's offer read beside
+// the options: Rules, the effective set the options hold (AllowRules.Rules), then the project rules
+// no answer is recorded for (Proposed) and the ones the user turned down (Rejected), which the offer
+// holds — inert, reported so a surface can offer or list them. The zero value is no rules at all.
+type OfferedAllowRules struct {
 	Rules    []AllowRule
 	Proposed []AllowRule
 	Rejected []AllowRule
-}
-
-// Clone returns r with each of its three lists copied, so the copy shares no backing array with r.
-// A nil list stays nil.
-func (r AllowRules) Clone() AllowRules {
-	r.Rules = slices.Clone(r.Rules)
-	r.Proposed = slices.Clone(r.Proposed)
-	r.Rejected = slices.Clone(r.Rejected)
-	return r
 }
 
 // allowConfig is the on-disk `allow:` block: the terminal word prefixes and the MCP server names
@@ -206,19 +211,19 @@ func projectRulesOf(entries []adoption.Entry) []AllowRule {
 }
 
 // effective is the resolved `allow:` key: the global rules the file pass read, then the adopted
-// project rules, with the rest of the project's rules reported beside them.
+// project rules. The rest of the project's rules are the offer's (layerKeys.offer).
 func (p projectAllowRules) effective(global []AllowRule) AllowRules {
 	rules := make([]AllowRule, 0, len(global)+len(p.adopted))
 	rules = append(append(rules, global...), p.adopted...)
 	if len(rules) == 0 {
 		rules = nil
 	}
-	return AllowRules{Rules: rules, Proposed: p.proposed, Rejected: p.rejected}
+	return AllowRules{Rules: rules}
 }
 
 // allowRulesSummary summarizes `allow:` by what it grants and what waits on an answer — "3 rules,
 // 1 proposed"; empty when there are no rules at all.
-func allowRulesSummary(set AllowRules) string {
+func allowRulesSummary(set OfferedAllowRules) string {
 	parts := make([]string, 0, 2)
 	if live := countSummary(len(set.Rules), "rule"); live != "" {
 		parts = append(parts, live)

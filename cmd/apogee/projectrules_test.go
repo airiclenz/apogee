@@ -57,8 +57,8 @@ func projectRuleWiring(t *testing.T, endpoint string, approver apogee.Approver, 
 	w := &rootWiring{
 		roots:         stateRoots{config: home, workspace: root, project: root},
 		engine:        newLateEngine(domain.ModeAskBefore, false),
-		live:          newLiveSettings(opts),
-		externalEdits: newExternalEdit(opts, root, noEnvironment),
+		live:          newLiveSettings(opts, config.ProjectOffer{}),
+		externalEdits: newExternalEdit(opts, config.ProjectOffer{}, root, noEnvironment),
 		reloadWake:    newReloadWake(),
 	}
 	t.Cleanup(func() { _ = w.engine.Close() })
@@ -524,7 +524,7 @@ func TestProjectRuleAnswersReplaceTheHoldersRules(t *testing.T) {
 // `reactions` keys only; a session with no rules has no section at all.
 func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
 	t.Parallel()
-	set := config.AllowRules{
+	set := config.OfferedAllowRules{
 		Rules: []config.AllowRule{
 			{Kind: config.AllowTerminal, Text: "make", Layer: config.SourceGlobal},
 			{Kind: config.AllowMCPServers, Text: "github", Layer: config.SourceProject},
@@ -537,7 +537,7 @@ func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
 		Proposed: []apogee.Proposal{{Kind: apogee.ProposalReaction, Handle: "fmt"}},
 	}
 	host := settingsHost{
-		allowRules: func() config.AllowRules { return set },
+		allowRules: func() config.OfferedAllowRules { return set },
 		proposals:  func() config.ProjectProposals { return proposals },
 	}
 	rows := host.Rows()
@@ -595,7 +595,7 @@ func TestSettingsHostRowsAppendTheAllowRulesSection(t *testing.T) {
 	}
 
 	if got := len((settingsHost{
-		allowRules: func() config.AllowRules { return config.AllowRules{} },
+		allowRules: func() config.OfferedAllowRules { return config.OfferedAllowRules{} },
 		proposals:  func() config.ProjectProposals { return config.ProjectProposals{} },
 	}).Rows()); got != len(registry) {
 		t.Errorf("rows with no rules = %d, want the %d registry rows alone", got, len(registry))

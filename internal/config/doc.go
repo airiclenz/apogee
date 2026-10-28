@@ -80,7 +80,7 @@
 // relative names against the Project root, and re-checks the pinned files before a spawn. execlayer.go
 // layers a Project config's `mcp-servers:` and `reactions:` entries by Adoption (ADR 0104 §1, §5–§7)
 // — each judged alone, pinned, sorted by the adoption record with the Allow rules, the adopted ones
-// joined to the global servers and reactions and every one reported as a Proposal (Options.Proposals). The one-goroutine
+// joined to the global servers and reactions and every one reported as a Proposal (ProjectOffer.Proposals). The one-goroutine
 // poller that reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows
 // nothing about YAML or this schema, and it has a second caller in the daemon's schedules watch, so
 // it lives in internal/filewatch.

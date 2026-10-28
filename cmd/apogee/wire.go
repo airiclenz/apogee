@@ -119,15 +119,18 @@ const hookCloseGrace = 5 * time.Second
 // runRoot is the root command's body: parse the mode, resolve the state roots, build a
 // Config, construct (or resume) the Agent through the public surface, and launch the UI.
 // Each of those is a named phase over one wiring, and this is the whole sequence. The runner and
-// the confinement backend are the production ones; runRootWith is the same body with both stated.
+// the confinement backend are the production ones, and the Project config offers nothing;
+// runRootWith is the same body with all three stated.
 func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
-	return runRootWith(ctx, opts, launch, rootDeps{})
+	return runRootWith(ctx, opts, config.ProjectOffer{}, launch, rootDeps{})
 }
 
-// runRootWith is runRoot with the host's runner and Confiner constructor stated by the caller
-// (rootDeps). Zero deps resolve to the production values; a driven run hands its own through
+// runRootWith is runRoot with the Project config's offer the resolution of opts returned beside
+// them (config.ApplyConfigOffer), and the host's runner and Confiner constructor stated by the
+// caller (rootDeps). Zero deps resolve to the production values; a driven run hands its own through
 // newRootCommandWith.
-func runRootWith(ctx context.Context, opts config.Options, launch launcher, deps rootDeps) error {
+func runRootWith(ctx context.Context, opts config.Options, offer config.ProjectOffer, launch launcher,
+	deps rootDeps) error {
 	mode, err := domain.ParseMode(opts.Mode)
 	if err != nil {
 		return err
@@ -145,6 +148,7 @@ func runRootWith(ctx context.Context, opts config.Options, launch launcher, deps
 	// The facilities this run owns for its whole life, and — in one defer, before the first
 	// fallible step — the teardown for everything the phases below reach (wire_boot.go).
 	w := newRootWiringWith(opts, mode, roots, deps)
+	w.offer = offer
 	defer w.close()
 
 	// The base Config the session is constructed from, and the sentences this host's confinement
@@ -194,8 +198,12 @@ func runRootWith(ctx context.Context, opts config.Options, launch launcher, deps
 // Nothing outside this file's own phases touches it: the renderer is handed seams (wire_options.go),
 // never the wiring.
 type rootWiring struct {
-	// The launch snapshot and what runRoot resolved from it before anything was built.
+	// The launch snapshot and what runRoot resolved from it before anything was built. offer is the
+	// Project config's offer the launch resolution returned beside opts (config.ApplyConfigOffer):
+	// the proposed and rejected entries opts does not carry, which the adoption pane asks about at
+	// start-up and the `/settings` rows count.
 	opts  config.Options
+	offer config.ProjectOffer
 	mode  apogee.Mode
 	roots stateRoots
 

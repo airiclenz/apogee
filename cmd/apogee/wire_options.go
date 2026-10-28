@@ -462,7 +462,7 @@ type settingsHost struct {
 	// registry's rows (allowRuleRows). It is a func for promptSeed's reason: the answer is the
 	// session's and moves under an open pane, and it reads memory, never the store or a config file,
 	// because Rows is asked on every paint. A nil func lists no rules.
-	allowRules func() config.AllowRules
+	allowRules func() config.OfferedAllowRules
 	// proposals is the Project config's repo MCP servers and reactions as they stand now — the same
 	// holder, settled by every adoption act and every watched re-read — whose rows are spliced in
 	// under the `mcp-servers` and `reactions` keys (spliceRepoEntryRows, ADR 0104 §12). A func for

@@ -422,20 +422,11 @@ func (w *rootWiring) loadSnapshot() (project.Snapshot, error) {
 }
 
 // bootSnapshot is the Snapshot of the resolution this run made at launch — w.opts with the offer
-// read beside it (offerOfOptions) — reading no file: what the adoption pane offers at start-up and
-// what the `/settings` rows, which project the boot options, count the proposed rules from.
+// the same resolution returned beside it (w.offer) — reading no file: what the adoption pane offers
+// at start-up and what the `/settings` rows, which project the boot options, count the proposed
+// rules from.
 func (w *rootWiring) bootSnapshot() project.Snapshot {
-	return project.SnapshotOf(w.opts, offerOfOptions(w.opts))
-}
-
-// offerOfOptions is the Project config's offer resolved options carry — their Proposals and their
-// inert Allow lists — as the config.ProjectOffer the same resolution returned beside them.
-func offerOfOptions(opts config.Options) config.ProjectOffer {
-	return config.ProjectOffer{
-		Proposals: opts.Proposals,
-		Proposed:  opts.AllowRules.Proposed,
-		Rejected:  opts.AllowRules.Rejected,
-	}.Clone()
+	return project.SnapshotOf(w.opts, w.offer)
 }
 
 // layeredOptions is the resolution a relaunch would make of the two config files and the adoption

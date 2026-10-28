@@ -350,7 +350,7 @@ const projectTwoReactionsYAML = "reactions:\n" +
 // yes — and fails the test when one of handles is not proposed.
 func adoptProposalsNamed(t *testing.T, home, projectRoot string, handles ...string) {
 	t.Helper()
-	o, err := loadLayeredOptions(config.FilePath(home), projectRoot)
+	_, offer, err := config.LoadLayeredOffer(config.FilePath(home), projectRoot, os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}
@@ -359,11 +359,11 @@ func adoptProposalsNamed(t *testing.T, home, projectRoot string, handles ...stri
 		t.Fatalf("open the adoption record: %v", err)
 	}
 	for _, handle := range handles {
-		i := slices.IndexFunc(o.Proposals.Proposed, func(p apogee.Proposal) bool { return p.Handle == handle })
+		i := slices.IndexFunc(offer.Proposals.Proposed, func(p apogee.Proposal) bool { return p.Handle == handle })
 		if i < 0 {
-			t.Fatalf("the Project config proposes no entry %q: %+v", handle, o.Proposals.Proposed)
+			t.Fatalf("the Project config proposes no entry %q: %+v", handle, offer.Proposals.Proposed)
 		}
-		p := o.Proposals.Proposed[i]
+		p := offer.Proposals.Proposed[i]
 		if err := store.Adopt(adoption.Entry{Kind: string(p.Kind), Handle: p.Handle, Text: p.Text}); err != nil {
 			t.Fatalf("Adopt %s: %v", handle, err)
 		}
@@ -374,11 +374,11 @@ func adoptProposalsNamed(t *testing.T, home, projectRoot string, handles ...stri
 // Project config's servers and reactions into now.
 func layeredProposals(t *testing.T, home, projectRoot string) config.ProjectProposals {
 	t.Helper()
-	o, err := loadLayeredOptions(config.FilePath(home), projectRoot)
+	_, offer, err := config.LoadLayeredOffer(config.FilePath(home), projectRoot, os.ReadFile, func(string) {})
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}
-	return o.Proposals
+	return offer.Proposals
 }
 
 // projectRunRecorder stands in for the fenced runner a Firing's Agent binds: it records the id of

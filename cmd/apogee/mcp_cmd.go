@@ -203,12 +203,12 @@ const (
 // names no startup LLM server still lists its MCP servers, as `apogee project adopt` still asks.
 func listMCPServers(cmd *cobra.Command, opts *config.Options) error {
 	notify := func(msg string) { cmd.PrintErrln(msg) }
-	err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify)
+	offer, err := config.ApplyConfigOffer(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify)
 	var undetermined *config.StartupUndetermined
 	if err != nil && !errors.As(err, &undetermined) {
 		return err
 	}
-	rows := mcpServerRows(*opts)
+	rows := mcpServerRows(*opts, offer.Proposals)
 	out := cmd.OutOrStdout()
 	if len(rows) == 0 {
 		_, _ = fmt.Fprintln(out, "No MCP servers are configured.")
@@ -224,9 +224,10 @@ func listMCPServers(cmd *cobra.Command, opts *config.Options) error {
 
 // mcpServerRows is every server of opts as `apogee mcp list` prints it: the configured servers in
 // their order — the global ones, then the adopted project ones — then the project ones proposed,
-// then those rejected. A project server's name and transport are the repository's text, so each
-// is stripped to one line before it reaches the terminal.
-func mcpServerRows(opts config.Options) []mcpServerRow {
+// then those rejected, both read from proposals, the Project config's offer read beside opts. A
+// project server's name and transport are the repository's text, so each is stripped to one line
+// before it reaches the terminal.
+func mcpServerRows(opts config.Options, proposals config.ProjectProposals) []mcpServerRow {
 	var rows []mcpServerRow
 	for _, server := range opts.MCPServers {
 		row := mcpServerRow{
@@ -237,8 +238,8 @@ func mcpServerRows(opts config.Options) []mcpServerRow {
 		}
 		rows = append(rows, row.stripped())
 	}
-	rows = appendProposedServerRows(rows, opts.Proposals.Proposed, "proposed")
-	return appendProposedServerRows(rows, opts.Proposals.Rejected, "rejected")
+	rows = appendProposedServerRows(rows, proposals.Proposed, "proposed")
+	return appendProposedServerRows(rows, proposals.Rejected, "rejected")
 }
 
 // appendProposedServerRows appends to rows a project row in state for each repo server among
@@ -296,11 +297,11 @@ func mcpLoginCommand(deps mcpLoginDeps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			roots, err := loadMCPConfig(cmd, &opts)
+			roots, offer, err := loadMCPConfig(cmd, &opts)
 			if err != nil {
 				return err
 			}
-			if err := refuseUnadoptedRepoServer(opts, roots, args[0]); err != nil {
+			if err := refuseUnadoptedRepoServer(opts, offer.Proposals, roots, args[0]); err != nil {
 				return err
 			}
 			server, target, err := oauthServer(opts, roots, args[0])
@@ -380,7 +381,7 @@ func logoutMCPServer(out io.Writer, store *mcpauth.Store, server mcp.ServerConfi
 // ~/.apogee — and returns the `auth: oauth` server it names with where its login lands. An unknown
 // name and a server without `auth: oauth` are refused.
 func resolveOAuthServer(cmd *cobra.Command, opts *config.Options, name string) (mcp.ServerConfig, mcpLoginTarget, error) {
-	roots, err := loadMCPConfig(cmd, opts)
+	roots, _, err := loadMCPConfig(cmd, opts)
 	if err != nil {
 		return mcp.ServerConfig{}, mcpLoginTarget{}, err
 	}
@@ -388,26 +389,33 @@ func resolveOAuthServer(cmd *cobra.Command, opts *config.Options, name string) (
 }
 
 // loadMCPConfig resolves opts from the flags, the environment and the config files the way a
-// session does, and returns the roots they name.
-func loadMCPConfig(cmd *cobra.Command, opts *config.Options) (stateRoots, error) {
+// session does, and returns the roots they name with the Project config's offer the same read
+// resolved (config.ApplyConfigOffer).
+func loadMCPConfig(cmd *cobra.Command, opts *config.Options) (stateRoots, config.ProjectOffer, error) {
 	notify := func(msg string) { cmd.PrintErrln(msg) }
-	if err := config.ApplyConfig(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify); err != nil {
-		return stateRoots{}, err
+	offer, err := config.ApplyConfigOffer(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, notify)
+	if err != nil {
+		return stateRoots{}, config.ProjectOffer{}, err
 	}
-	return resolveRoots(opts.ConfigDir, opts.Workspace)
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	if err != nil {
+		return stateRoots{}, config.ProjectOffer{}, err
+	}
+	return roots, offer, nil
 }
 
 // refuseUnadoptedRepoServer refuses a login to name when it is a repo server the user has not
 // adopted (ADR 0104 §12): a proposed one points at `apogee project adopt`, which asks about it; a
 // rejected one, which that command no longer asks about, at its row in /settings. Any other name
-// passes.
-func refuseUnadoptedRepoServer(opts config.Options, roots stateRoots, name string) error {
+// passes. proposals is the Project config's offer read beside opts.
+func refuseUnadoptedRepoServer(opts config.Options, proposals config.ProjectProposals, roots stateRoots,
+	name string) error {
 	path := projectConfigWatchPath(opts, roots.project)
-	if hasRepoServer(opts.Proposals.Proposed, name) {
+	if hasRepoServer(proposals.Proposed, name) {
 		return fmt.Errorf("apogee mcp: MCP server %q is proposed by the project config %s and not adopted "+
 			"on this machine, so it has no login — run `apogee project adopt` to adopt it first", name, path)
 	}
-	if hasRepoServer(opts.Proposals.Rejected, name) {
+	if hasRepoServer(proposals.Rejected, name) {
 		return fmt.Errorf("apogee mcp: MCP server %q from the project config %s was rejected on this machine, "+
 			"so it has no login — adopt it from its `mcp-servers` row in /settings first", name, path)
 	}
