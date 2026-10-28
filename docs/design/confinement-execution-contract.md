@@ -1506,7 +1506,7 @@ supersedes §10.3 for sync reactions; since 2026-09-15 it is the only permit row
 takes this same row on **both** lanes: its `advise:`/`gate:` as any sync reaction's, and its
 observe-lane `run:` too, which a global `run:` never does (§10.5). Three things are added for it
 alone, in `(*Agent).spawnReactionArgv`: the project files its adoption pin holds are re-checked
-before every spawn (`domain.ProjectPin.Changed`), and a moved, missing or newly named file refuses
+before every spawn (`domain.ProjectPin.Admit`), and a moved, missing or newly named file refuses
 that run with a notice naming the file — the config layer proposes the entry again at its next
 read; it runs with the Project root as its working directory; and the door's admit option
 (`tools.AdmitProjectPrograms`) resolves a relative `argv[0]` against that root and lets through a

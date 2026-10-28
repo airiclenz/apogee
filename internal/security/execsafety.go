@@ -145,8 +145,9 @@ func ResolveProgram(look func(string) (string, error), name, root string, box *d
 // ResolveProgram's, unchanged: an absent program, a relative PATH answer, a program inside the
 // fence that is not pinned. A nil or empty pinned admits nothing.
 //
-// The caller owns the pin's freshness: pinned names files whose content the caller has just
-// checked against what the user adopted, because this function compares paths, never bytes.
+// It compares paths, never bytes: pinned is the PinLaunch.Programs a domain.ProjectPin's Admit
+// just returned, and that Admit — which re-read the pinned files against what the user adopted —
+// is the freshness check this function relies on.
 func ResolveProjectProgram(
 	name, projectRoot, root string,
 	box *domain.ConfinementBox,

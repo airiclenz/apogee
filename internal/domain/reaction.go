@@ -489,17 +489,6 @@ func (r Reaction) Clone() Reaction {
 // Its values must compare by content (reflect.DeepEqual), because the arming step compares one
 // observe lane against the next to decide whether a swap moved anything.
 type ProjectPin interface {
-	// Root is the Project root: the spawn's working directory and the base its relative argv[0]
-	// resolves against.
-	Root() string
-	// Changed re-reads the project files the pin holds and names, relative to Root, each one whose
-	// content changed since adoption, that has gone missing, or that the command now names but
-	// did not when it was adopted — empty when the spawn may go ahead. An error means the files
-	// could not be checked, which a spawn treats as a change.
-	Changed() ([]string, error)
-	// Programs is the absolute path of every project file the pin holds: the only programs inside
-	// the workspace exec fence the spawn admits.
-	Programs() []string
 	// Admit is the one spawn-time check (ADR 0104 §4): it re-reads the pinned project files once
 	// and returns what the launch may use — the Project root and the pinned programs — or a
 	// *PinMovedError when a file moved since adoption or the files could not be checked. argv[0]

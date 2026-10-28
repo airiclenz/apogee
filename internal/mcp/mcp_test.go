@@ -424,18 +424,14 @@ func TestConnect_RefusesAStdioServerInsideTheWorkspace(t *testing.T) {
 }
 
 // fakeProjectPin is a domain.ProjectPin a test states outright: the Project root, the pinned
-// programs, and what Changed reports — the config layer's real pin cannot be built here, since
-// internal/config imports this package.
+// programs, the files its check reports as moved, and whether that check could be made at all —
+// the config layer's real pin cannot be built here, since internal/config imports this package.
 type fakeProjectPin struct {
 	root     string
 	programs []string
 	changed  []string
 	err      error
 }
-
-func (p fakeProjectPin) Root() string               { return p.root }
-func (p fakeProjectPin) Changed() ([]string, error) { return p.changed, p.err }
-func (p fakeProjectPin) Programs() []string         { return p.programs }
 
 // Admit reports the stated check the way the real pin does: a check that could not be made, or
 // any changed file, is a *domain.PinMovedError; otherwise the root and the pinned programs.

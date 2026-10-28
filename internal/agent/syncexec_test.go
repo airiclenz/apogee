@@ -355,10 +355,6 @@ type fakePin struct {
 	err      error
 }
 
-func (p fakePin) Root() string               { return p.root }
-func (p fakePin) Changed() ([]string, error) { return p.changed, p.err }
-func (p fakePin) Programs() []string         { return p.programs }
-
 // Admit reports the stated check the way the real pin does: a check that could not be made, or
 // any changed file, is a *domain.PinMovedError; otherwise the root and the pinned programs.
 func (p fakePin) Admit() (domain.PinLaunch, error) {
@@ -509,7 +505,8 @@ func TestRepoRunRefusalPokesPinMoved(t *testing.T) {
 	}{
 		{name: "changed script", edit: func(*domain.Reaction) {}, want: 2},
 		{name: "unreadable pin", edit: func(r *domain.Reaction) {
-			r.Pin = fakePin{root: r.Pin.Root(), err: errors.New("scripts/fmt.sh: permission denied")}
+			pin := r.Pin.(fakePin)
+			r.Pin = fakePin{root: pin.root, programs: pin.programs, err: errors.New("scripts/fmt.sh: permission denied")}
 		}, want: 2},
 		{name: "no pin", edit: func(r *domain.Reaction) { r.Pin = nil }, want: 0},
 	}

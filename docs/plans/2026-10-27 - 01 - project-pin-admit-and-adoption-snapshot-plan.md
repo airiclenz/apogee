@@ -107,7 +107,10 @@ internal/config/execlayer.go — pinRepoReactions, resolveRepoReactions
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestRepoRun' ./internal/agent/`, then `GOMEMLIMIT=2GiB go test -count=1 -run 'TestChangedReactionScriptReasksInSession' ./cmd/apogee/`
 **Commit:** `refactor(agent): the reaction spawner admits through the Project pin`
 
-## 4. ProjectPin is Admit only
+## 4. ProjectPin is Admit only — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): adoptedPin's Root and Changed getters are inlined away (Admit already read p.root and called VerifyExecPins directly); Programs is kept as the unexported helper programs() that Admit calls.
+NOTES (2026-10-28): TestRepoRunRefusalPokesPinMoved's unreadable-pin row reads the root through a type assertion on its own fakePin (r.Pin.(fakePin).root) rather than through Admit, since that row's pin is already refusing as changed and its Admit returns no launch.
 
 **What:** Depends on items 2 and 3.
 **Goal:** `domain.ProjectPin` declares only `Admit`. No non-test code outside `internal/config` reads a pin's root, changed set or program list. `ResolveProjectProgram`'s doc names `Admit` as the freshness check, instead of saying the caller owns it.
