@@ -251,7 +251,15 @@ cmd/apogee/project_cmd_test.go — runProjectAdopt, TestProjectCmdAdoptRefusesAR
 **Acceptance:** `! grep -n 'func projectRulesHeld' cmd/apogee/*.go`; `go build ./... && GOMEMLIMIT=2GiB go test -count=1 -run 'TestProjectCmd|TestProjectRuleCLIAdoption|TestHeadlessFiresOnlyAdoptedRepoReactions' ./cmd/apogee/`
 **Commit:** `refactor(cmd): apogee project adopt answers through project.Answer`
 
-## 11. The live settings hold the snapshot
+## 11. The live settings hold the snapshot — ✅ DONE (2026-10-28)
+
+NOTES (2026-10-28): the "offer-aware projection field" is a pair on config.Key — ReadOffer and StructureOffer, set on `allow` only (effective rules from Options, Proposed/Rejected from the offer) — read through two new methods, Key.ReadOf and Key.StructureOf, which prefer them and fall back to Read/Structure; `allow` keeps Read/Structure(Options).
+NOTES (2026-10-28): settingsRows(opts) stays a wrapper over the new settingsRowsOffered(opts, offer); one cmd helper, offerOfOptions(opts) (projectrules.go), builds the offer off Options for the wrapper, newLiveSettings' boot seed, rootWiring.bootSnapshot and the newExternalEdit fallback — the one site item 12 repoints.
+NOTES (2026-10-28): liveSettings holds `adoption project.Snapshot` (seeded by project.SnapshotOf from the boot opts, no disk read); newLiveSettings strips now.Proposals and now.AllowRules.Proposed/Rejected; allowRules()/proposals() answer from the held snapshot's offer; new holder methods offer(), holdOffer(snap) (watched re-read that moved no rule) and holdInForce(snap) (settling and watched rule refresh); inForce builds from live.options() + live.offer().
+NOTES (2026-10-28): followReloadedProposals, installAllowRules and proposedRules now load via a new rootWiring.loadSnapshot (project.Load through w.fileReader(), previously os.ReadFile via layeredOptions); installAllowRulesFrom and holdProposals take a project.Snapshot; proposalsOf deleted with its last caller (wire_options.go's ProposedRules now reads bootSnapshot().Entries()).
+NOTES (2026-10-28): settingsHost gains an `offer` field (the boot snapshot's offer, set in wire_options.go); a settingsHost literal without it counts no proposed rules in the `allow` row. fileProjection gains `offer` (projection uses config.ApplyConfigOffer); probe config's resolvedValue takes the offer (config.LoadLayeredOffer).
+NOTES (2026-10-28): rootWiring.layeredOptions has no production caller left (projectrules_test.go and mcp_cmd_test.go still call it, both outside this item's Files) — kept, doc reworded.
+NOTES (2026-10-28): new tests TestExternalEditReloadReportsAllowForAProposedOnlyAddition (addition and a same-summary swap) and TestSettingsHostRowsCountTheBootOfferAfterAnInSessionAdopt.
 
 **What:** Recast at the regression check (2026-10-27). Depends on item 9.
 **Goal:** The live settings holder keeps a `project.Snapshot` in place of `Options.Proposals` and the inert Allow lists. `/settings` rows, `tui.Options.ProposedRules` and the reload followers read the snapshot. Row text is byte-identical.

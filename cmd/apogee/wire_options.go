@@ -49,6 +49,11 @@ func (w *rootWiring) options() tui.Options {
 	// pane's own ⏎ ([tui.SettingsHost.Apply]) reaches every key through (ADR 0037 decision 1).
 	applySetting := applySettingFor(w.settingsApplier())
 
+	// The resolution this run made at launch as a Snapshot (bootSnapshot), read from no file: the
+	// adoption pane's start-up offer, and the offer the `/settings` rows' boot options are counted
+	// beside.
+	boot := w.bootSnapshot()
+
 	return tui.Options{
 		// Both upstream facts are now honestly launch-time-only: Model is the configured pin ("" on
 		// a cold start, where the footer says "connecting…" until the first beat binds one), and
@@ -184,7 +189,7 @@ func (w *rootWiring) options() tui.Options {
 		// the adoption pane to offer; each answer is one call back through the host above
 		// (projectrules.go). Empty with no Project config or nothing in it unanswered, and the
 		// renderer then raises nothing.
-		ProposedRules: proposalsOf(w.opts),
+		ProposedRules: boot.Entries(),
 		// The whole `/settings` seam as one named capability (ADR 0054): the rows the pane shows,
 		// the write and the reset that splice this run's config.yaml, and the apply that puts the
 		// key just persisted into effect. Everything behind it — the registry, the file format, the
@@ -192,6 +197,7 @@ func (w *rootWiring) options() tui.Options {
 		// idiom over rows it did not compose.
 		Settings: settingsHost{
 			opts:       w.opts,
+			offer:      boot.Offer(),
 			live:       w.engine,
 			configPath: configPath,
 			// The Project root a "this project" save writes under — empty where there is no Project
@@ -417,6 +423,11 @@ type settingsHost struct {
 	// first in every row's source mark; which FILE supplies a key is read from edits instead
 	// (layeredOpts), so a mark follows the files on disk.
 	opts config.Options
+	// offer is the Project config's offer of the resolution opts come from — the boot snapshot's
+	// (rootWiring.bootSnapshot), never the live holder's — which the registry rows count beside
+	// opts (settingsRowsOffered): `allow`'s "N rules, M proposed" reads the boot resolution, as every
+	// other row's value does.
+	offer config.ProjectOffer
 	// live is the running session's answer for the two keys the resolution above cannot answer: the
 	// autonomy mode and Auto's blast radius move during a session without the file hearing about it,
 	// so Rows overlays them from the engine (settingsrows.go). nil where there is no engine to ask.
@@ -477,7 +488,7 @@ type settingsHost struct {
 // registry's rows come the *Allow rules* section's, one per rule the session holds now
 // (allowRuleRows) — appended, so the registry's own order and sections stand as they are.
 func (h settingsHost) Rows() []tui.SettingRow {
-	rows := overlayLiveSettings(settingsRows(h.layeredOpts()), h.live)
+	rows := overlayLiveSettings(settingsRowsOffered(h.layeredOpts(), h.offer), h.live)
 	if h.projectRoot == "" {
 		rows = withoutProjectTarget(rows)
 	}

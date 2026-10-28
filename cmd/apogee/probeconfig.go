@@ -101,7 +101,7 @@ func probeProjectRoot() string {
 // so it reaches the report under `notices`.
 func configReport(path, projectRoot string, readFile func(string) ([]byte, error)) (string, error) {
 	var notices []string
-	o, err := config.LoadLayeredConfig(path, projectRoot, readFile,
+	o, offer, err := config.LoadLayeredOffer(path, projectRoot, readFile,
 		func(msg string) { notices = append(notices, msg) })
 	if err != nil && !errors.Is(err, config.ErrRetiredShape) {
 		return "", err
@@ -126,16 +126,18 @@ func configReport(path, projectRoot string, readFile func(string) ([]byte, error
 	lines = append(lines, "  (none)", "", "resolved")
 	width := longestRegistryPath()
 	for _, row := range config.KeyRegistry {
-		lines = append(lines, configField(row.Path, resolvedValue(row, o), width))
+		lines = append(lines, configField(row.Path, resolvedValue(row, o, offer), width))
 	}
 	return strings.Join(lines, "\n"), nil
 }
 
 // resolvedValue is what the `resolved` section prints for one registry row: the value spelled
 // the way the file spells it, the built-in default where the file states nothing, and a mask
-// where the row says its value is not for rendering.
-func resolvedValue(row config.Key, o config.Options) string {
-	value := row.Read(o)
+// where the row says its value is not for rendering. offer is the Project config's offer the same
+// read returned beside o, which a row that counts it (`allow`'s proposed rules) reads from
+// (config.Key.ReadOf).
+func resolvedValue(row config.Key, o config.Options, offer config.ProjectOffer) string {
+	value := row.ReadOf(o, offer)
 	if value == "" {
 		value = row.Default
 	}

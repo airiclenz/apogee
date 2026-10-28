@@ -23,6 +23,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/project"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -149,6 +150,16 @@ type liveSettings struct {
 	// and the whole entry is held because a Firing wants the server, not a resolution of it.
 	entry config.ServerEntry
 
+	// adoption is the Project config's side of the layered set as the last resolution put in force
+	// left it (project.Snapshot): its offer — the repo MCP servers and reactions, adopted, proposed
+	// and rejected, and the Allow rules no answer adopts (proposed) or that the user turned down
+	// (rejected) — which the `/settings` rows list from (allowRules, proposals) and an act's settling
+	// diffs the next snapshot against (rootWiring.inForce). It is held IN PLACE of now's Proposals
+	// and inert Allow lists, which newLiveSettings strips: now carries the effective rules alone.
+	// Seeded from the boot resolution, replaced whole by every settling (holdInForce) and every
+	// watched re-read (holdOffer), never written into.
+	adoption project.Snapshot
+
 	// contextFilesOn and contextFileNames are the `context-files:` block's two keys as the pane
 	// edits them — the named exception to "every key lives on now". The block is two keys and ONE
 	// resolved list, and the engine takes the pair (Agent.SetContextFiles): each key's edit has to
@@ -166,13 +177,20 @@ type liveSettings struct {
 // The context-file PAIR is seeded from the resolved name list, which is the very read the pane's own
 // two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
+//
+// The Project config's offer is seeded as the Snapshot of the same boot resolution (adoption) —
+// no second read of the files — and now holds none of it.
 func newLiveSettings(opts config.Options) *liveSettings {
+	// Cloned rather than assigned so the overlay's lists are the holder's own from the first
+	// write: a setter replaces a list whole, but a caller that was handed boot elsewhere must never
+	// find its arrays shared with the value this session is running on.
+	now := cloneOptions(opts)
+	now.Proposals = config.ProjectProposals{}
+	now.AllowRules.Proposed, now.AllowRules.Rejected = nil, nil
 	return &liveSettings{
-		boot: opts,
-		// Cloned rather than assigned so the overlay's lists are the holder's own from the first
-		// write: a setter replaces a list whole, but a caller that was handed boot elsewhere must never
-		// find its arrays shared with the value this session is running on.
-		now: cloneOptions(opts),
+		boot:     opts,
+		now:      now,
+		adoption: project.SnapshotOf(opts, offerOfOptions(opts)),
 		// The latch a determined startup binds with, seeded rather than pushed: the entry this
 		// session STARTS on is the one resolution holds on options (config.Options.StartupEntry),
 		// and its bind runs before this holder exists. A pre-bound start holds the zero entry, so
@@ -214,18 +232,20 @@ func (s *liveSettings) update(fn func(*config.Options)) {
 
 // allowRules reports the effective Allow rules and the inert ones beside them as they stand NOW —
 // the resolution an act's settling (installSnapshot) or a watched re-read (installAllowRules) last
-// put here (projectrules.go). It is the `/settings` *Allow rules* section's whole source: Rows is
+// put here (projectrules.go): the effective rules off now, the proposed and rejected ones off the
+// held snapshot's offer. It is the `/settings` *Allow rules* section's whole source: Rows is
 // asked on every paint and reads no disk, so the section lists from this holder, which every rule
-// act settles into before it returns. The value shares its
-// lists with the holder; nobody edits them in place, because every writer replaces the field whole.
-// A nil holder — a Driver composed without one — has no rules.
+// act settles into before it returns. The effective list is shared with the holder; nobody edits it
+// in place, because every writer replaces the field whole. A nil holder — a Driver composed without
+// one — has no rules.
 func (s *liveSettings) allowRules() config.AllowRules {
 	if s == nil {
 		return config.AllowRules{}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.now.AllowRules
+	offer := s.adoption.Offer()
+	return config.AllowRules{Rules: s.now.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
 }
 
 // proposals reports the Project config's repo MCP servers and reactions — adopted, proposed and
@@ -233,14 +253,43 @@ func (s *liveSettings) allowRules() config.AllowRules {
 // (projectrules.go), which every adoption act and every watched re-read settles into. It is what
 // the `/settings` repo
 // rows under the `mcp-servers` and `reactions` keys list from, for allowRules' reason: Rows is asked
-// on every paint and reads no disk. A nil holder has no proposals.
+// on every paint and reads no disk. They are the held snapshot's offer's. A nil holder has no
+// proposals.
 func (s *liveSettings) proposals() config.ProjectProposals {
 	if s == nil {
 		return config.ProjectProposals{}
 	}
+	return s.offer().Proposals
+}
+
+// offer is the held snapshot's offer (adoption) — a copy, so the caller shares nothing with the
+// holder. A nil holder offers nothing.
+func (s *liveSettings) offer() config.ProjectOffer {
+	if s == nil {
+		return config.ProjectOffer{}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.now.Proposals
+	return s.adoption.Offer()
+}
+
+// holdOffer replaces the held snapshot whole with snap, whose offer the `/settings` rows list from
+// from now on; now — the effective rules among it — is untouched. It is a watched re-read's refresh
+// of the repo entries on a re-read that moved no Allow rule (rootWiring.holdProposals).
+func (s *liveSettings) holdOffer(snap project.Snapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.adoption = snap
+}
+
+// holdInForce is holdOffer that also puts snap's effective Allow rules on now, under the one lock:
+// a settling's or a watched rule refresh's install (rootWiring.installSnapshot, installAllowRulesFrom).
+func (s *liveSettings) holdInForce(snap project.Snapshot) {
+	rules := snap.Options().AllowRules.Rules
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.adoption = snap
+	s.now.AllowRules = config.AllowRules{Rules: rules}
 }
 
 // pin reports the context-window pin in force right now — what a first binding and a server move

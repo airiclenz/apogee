@@ -224,6 +224,43 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 	}
 }
 
+// A Project config edit that only proposes a rule moves no effective rule, yet the `allow` key is
+// still reported: its summary and its lossless value count the offer read beside the options
+// (config.Key.ReadOf, StructureOf), so the watched refresh re-installs what the `/settings`
+// section lists. A swap of one proposed rule for another keeps the summary ("1 proposed") and is
+// caught by the lossless value alone.
+func TestExternalEditReloadReportsAllowForAProposedOnlyAddition(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, before, after, value string
+	}{
+		{"addition", "workflow-retries: 6\n", "allow:\n  terminal:\n    - ls\n", "1 proposed"},
+		{"swap", "allow:\n  terminal:\n    - ls\n", "allow:\n  terminal:\n    - rm\n", "1 proposed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home, root := t.TempDir(), t.TempDir()
+			writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: ask-before\n")
+			writeProjectConfig(t, root, tc.before)
+			opts := config.Options{ConfigDir: home, Workspace: root, ProjectRoot: root, ProjectRootPinned: true}
+			e := newExternalEdit(opts, root, noEnvironment)
+
+			writeProjectConfig(t, root, tc.after)
+			reload, err := e.changed()
+			if err != nil {
+				t.Fatalf("changed: %v", err)
+			}
+			i := slices.IndexFunc(reload.Applied, func(a tui.AppliedSetting) bool { return a.Path == settingKeyAllow })
+			if i < 0 {
+				t.Fatalf("reload reported %+v; want %s — the proposed rules moved", reload.Applied, settingKeyAllow)
+			}
+			if got := reload.Applied[i].Value; got != tc.value {
+				t.Errorf("reload reported %s = %q, want %q", settingKeyAllow, got, tc.value)
+			}
+		})
+	}
+}
+
 // A text key is reported as the PROSE itself, not as the summary its row shows — the value an
 // in-pane commit of the same key would have carried, so the pane journals and applies one spelling.
 func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {

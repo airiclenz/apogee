@@ -186,6 +186,13 @@ func (c KeyClass) String() string {
 //     summarize alike: repoint the one `mcp-servers:` entry at another machine and the row still
 //     reads "1 server". Its values are compared, never rendered — a `servers:` entry carries an
 //     api-key, and it stays as far from a row as it has always been.
+//   - ReadOffer and StructureOffer are Read and Structure for a key part of whose value is no
+//     Options field but the Project config's offer read beside it ([ProjectOffer]): `allow`, whose
+//     summary counts the proposed rules ("2 rules, 1 proposed") and whose lossless value carries
+//     the proposed and rejected rules, so a re-read that only adds a proposal still moves the key.
+//     A surface that holds the offer beside the options reads through [Key.ReadOf] and
+//     [Key.StructureOf], which prefer them where the row carries them. Nil for every other row,
+//     which keeps its Read and Structure all the same.
 //
 // Set is the INVERSE of Read: it takes a value spelled the way the file spells it and lands it on
 // the same Options field Read answers from, so for every row that has one, Set(Read(o), &o2)
@@ -250,6 +257,9 @@ type Key struct {
 	Structure   func(o Options) any
 	Set         func(value string, o *Options) error
 	Copy        func(dst, src *Options)
+
+	ReadOffer      func(o Options, offer ProjectOffer) string
+	StructureOffer func(o Options, offer ProjectOffer) any
 
 	// field is the row's typed descriptor, nil for a row that writes its projections by hand.
 	field fieldSpec
@@ -617,7 +627,11 @@ var KeyRegistry = bindRows([]Key{
 		Desc:      "Commands and MCP servers that run without asking at an ordinary gate; a project config's rules count only once adopted.",
 		Read:      func(o Options) string { return allowRulesSummary(o.AllowRules) },
 		Structure: func(o Options) any { return o.AllowRules },
-		fromFile:  fileAllowRules,
+		ReadOffer: func(o Options, offer ProjectOffer) string {
+			return allowRulesSummary(offeredAllowRules(o, offer))
+		},
+		StructureOffer: func(o Options, offer ProjectOffer) any { return offeredAllowRules(o, offer) },
+		fromFile:       fileAllowRules,
 	},
 	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
@@ -1801,6 +1815,36 @@ func bindRows(rows []Key) []Key {
 		}
 	}
 	return rows
+}
+
+// ReadOf is the row's value read with the Project config's offer beside the options: ReadOffer
+// where the row carries one, Read otherwise, and the empty value for a row with neither.
+func (k Key) ReadOf(o Options, offer ProjectOffer) string {
+	switch {
+	case k.ReadOffer != nil:
+		return k.ReadOffer(o, offer)
+	case k.Read != nil:
+		return k.Read(o)
+	}
+	return ""
+}
+
+// StructureOf is the row's lossless value with the Project config's offer beside the options:
+// StructureOffer where the row carries one, Structure otherwise, and nil for a row with neither.
+func (k Key) StructureOf(o Options, offer ProjectOffer) any {
+	switch {
+	case k.StructureOffer != nil:
+		return k.StructureOffer(o, offer)
+	case k.Structure != nil:
+		return k.Structure(o)
+	}
+	return nil
+}
+
+// offeredAllowRules is the `allow` key's whole value with the offer beside the options: the
+// effective rules the options hold, and the proposed and rejected rules the offer holds.
+func offeredAllowRules(o Options, offer ProjectOffer) AllowRules {
+	return AllowRules{Rules: o.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
 }
 
 // admit is the row's admission: the validate hook first — the startup check itself, whose sentence

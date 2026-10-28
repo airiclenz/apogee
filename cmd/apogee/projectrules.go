@@ -260,24 +260,19 @@ func (w *rootWiring) refreshBaseline() {
 }
 
 // inForce is the session's in-force state as a Snapshot — the live-settings holder's options with
-// the offer it holds beside them (project.SnapshotOf) — the side an act's settling diffs the next
-// snapshot against. It reads no file. A wiring with no holder holds the empty Snapshot, so every
-// kind the next one holds reads as moved.
+// the offer of the snapshot it holds beside them (project.SnapshotOf) — the side an act's settling
+// diffs the next snapshot against. It reads no file. A wiring with no holder holds the empty
+// Snapshot, so every kind the next one holds reads as moved.
 func (w *rootWiring) inForce() project.Snapshot {
 	if w.live == nil {
 		return project.Snapshot{}
 	}
-	opts := w.live.options()
-	return project.SnapshotOf(opts, config.ProjectOffer{
-		Proposals: opts.Proposals,
-		Proposed:  opts.AllowRules.Proposed,
-		Rejected:  opts.AllowRules.Rejected,
-	})
+	return project.SnapshotOf(w.live.options(), w.live.offer())
 }
 
-// installSnapshot puts next in force over old. The live-settings holder takes next's effective
-// Allow rules and its offer — the inert rules and the repo proposals — whole, whatever moved: the
-// `/settings` rows list from it. Then only what project.Diff reports moved goes further: the
+// installSnapshot puts next in force over old. The live-settings holder takes next whole — its
+// effective Allow rules onto the options, the snapshot itself for its offer, the inert rules and
+// the repo proposals (liveSettings.holdInForce) — whatever moved: the `/settings` rows list from it. Then only what project.Diff reports moved goes further: the
 // effective rules onto the engine, and a moved server or reaction set through the doors a watched
 // re-read applies the layered set by (applyMovedKinds), each fed next's options and reading no
 // file.
@@ -285,12 +280,9 @@ func (w *rootWiring) inForce() project.Snapshot {
 // Errors: applyMovedKinds'.
 func (w *rootWiring) installSnapshot(old, next project.Snapshot) error {
 	moved := project.Diff(old, next)
-	opts, offer := next.Options(), next.Offer()
+	opts := next.Options()
 	if w.live != nil {
-		w.live.update(func(o *config.Options) {
-			o.AllowRules = config.AllowRules{Rules: opts.AllowRules.Rules, Proposed: offer.Proposed, Rejected: offer.Rejected}
-			o.Proposals = offer.Proposals
-		})
+		w.live.holdInForce(next)
 	}
 	if moved.Allow && w.engine != nil {
 		w.engine.SetAllowRules(allowRulesFromOptions(opts))
@@ -359,78 +351,97 @@ func (w *rootWiring) followReloadedAllowRules(reload tui.ConfigReload) tui.Confi
 }
 
 // followReloadedProposals is that refresh for the repo entries alone, on a re-read that moved no
-// Allow rule: the proposals re-resolved and installed on the holder. A resolution that fails leaves
-// them as they were and says so beside the re-read's own notices.
+// Allow rule: the next snapshot loaded and held for its offer (holdProposals). A load that fails
+// leaves them as they were and says so beside the re-read's own notices.
 func (w *rootWiring) followReloadedProposals(reload tui.ConfigReload) tui.ConfigReload {
-	resolved, err := w.layeredOptions()
+	next, err := w.loadSnapshot()
 	if err != nil {
 		reload.Notices = append(reload.Notices, fmt.Sprintf(
 			"apogee: the project config changed on disk, but its listed entries could not be refreshed: %v", err))
 		return reload
 	}
-	w.holdProposals(resolved)
+	w.holdProposals(next)
 	return reload
 }
 
-// installAllowRules re-resolves the effective Allow rules from the two files and the adoption
-// record — the resolution a relaunch would make — and installs them on the live-settings holder and
-// the engine, with the repo servers' and reactions' proposals of the same resolution beside them on
-// the holder (holdProposals).
+// installAllowRules loads the next snapshot of the two files and the adoption record — the
+// resolution a relaunch would make — and installs its effective Allow rules on the live-settings
+// holder and the engine, with the snapshot itself held beside them for its offer
+// (installAllowRulesFrom).
 //
 // Errors: a global config that no longer resolves; nothing is installed then.
 func (w *rootWiring) installAllowRules() error {
-	resolved, err := w.layeredOptions()
+	next, err := w.loadSnapshot()
 	if err != nil {
 		return err
 	}
-	w.installAllowRulesFrom(resolved)
+	w.installAllowRulesFrom(next)
 	return nil
 }
 
-// installAllowRulesFrom installs resolved's effective Allow rules on the live-settings holder and
-// the engine, with its proposals beside them on the holder (holdProposals) — installAllowRules
-// without the read, for a caller that already holds the resolved layered set. It reads no file.
-func (w *rootWiring) installAllowRulesFrom(resolved config.Options) {
-	w.holdProposals(resolved)
+// installAllowRulesFrom installs next's effective Allow rules on the live-settings holder and the
+// engine, the holder taking next whole for its offer (liveSettings.holdInForce) — installAllowRules
+// without the read, for a caller that already holds the snapshot. It reads no file.
+func (w *rootWiring) installAllowRulesFrom(next project.Snapshot) {
 	if w.live != nil {
-		w.live.update(func(o *config.Options) { o.AllowRules = resolved.AllowRules })
+		w.live.holdInForce(next)
 	}
 	if w.engine != nil {
-		w.engine.SetAllowRules(allowRulesFromOptions(resolved))
+		w.engine.SetAllowRules(allowRulesFromOptions(next.Options()))
 	}
 }
 
-// holdProposals installs resolved's repo MCP servers and reactions — adopted, proposed, rejected —
-// on the live-settings holder, which the `/settings` repo rows list from (liveSettings.proposals). A
-// wiring with no holder has nowhere to put them.
-func (w *rootWiring) holdProposals(resolved config.Options) {
+// holdProposals holds next on the live-settings holder for its offer — the repo MCP servers and
+// reactions, adopted, proposed, rejected, which the `/settings` repo rows list from
+// (liveSettings.proposals) — leaving the effective rules in force as they are. A wiring with no
+// holder has nowhere to put them.
+func (w *rootWiring) holdProposals(next project.Snapshot) {
 	if w.live != nil {
-		w.live.update(func(o *config.Options) { o.Proposals = resolved.Proposals })
+		w.live.holdOffer(next)
 	}
 }
 
-// proposedRules re-resolves the two files and the adoption record and reports what comes out
-// proposed (proposalsOf).
+// proposedRules loads the next snapshot of the two files and the adoption record and reports the
+// entries it asks the user to answer (project.Snapshot.Entries).
 //
 // Errors: a global config that no longer resolves.
 func (w *rootWiring) proposedRules() ([]apogee.Proposal, error) {
-	resolved, err := w.layeredOptions()
+	next, err := w.loadSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("apogee: the proposed entries could not be read: %w", err)
 	}
-	return proposalsOf(resolved), nil
+	return next.Entries(), nil
 }
 
-// proposalsOf is everything the resolved options hold proposed, in the order the adoption pane
-// asks about them (project.EntriesOf): the project Allow rules first, then the repo MCP servers and
-// reactions.
-func proposalsOf(opts config.Options) []apogee.Proposal {
-	return project.EntriesOf(config.ProjectOffer{Proposals: opts.Proposals, Proposed: opts.AllowRules.Proposed})
+// loadSnapshot is the next snapshot of the two config files and the adoption record — the
+// resolution a relaunch would make (project.Load), read through the wiring's file reader — that a
+// watched refresh holds and the proposed-entries read reports. The loader's notices are not
+// repeated here: the watched re-read says them (ConfigHost.ReloadConfig).
+func (w *rootWiring) loadSnapshot() (project.Snapshot, error) {
+	return project.Load(w.configPath(), w.roots.project, w.fileReader(), func(string) {})
+}
+
+// bootSnapshot is the Snapshot of the resolution this run made at launch — w.opts with the offer
+// read beside it (offerOfOptions) — reading no file: what the adoption pane offers at start-up and
+// what the `/settings` rows, which project the boot options, count the proposed rules from.
+func (w *rootWiring) bootSnapshot() project.Snapshot {
+	return project.SnapshotOf(w.opts, offerOfOptions(w.opts))
+}
+
+// offerOfOptions is the Project config's offer resolved options carry — their Proposals and their
+// inert Allow lists — as the config.ProjectOffer the same resolution returned beside them.
+func offerOfOptions(opts config.Options) config.ProjectOffer {
+	return config.ProjectOffer{
+		Proposals: opts.Proposals,
+		Proposed:  opts.AllowRules.Proposed,
+		Rejected:  opts.AllowRules.Rejected,
+	}.Clone()
 }
 
 // layeredOptions is the resolution a relaunch would make of the two config files and the adoption
-// record — what a watched refresh installs and the proposed-rules read reports. The loader's notices are
-// not repeated here: the watched re-read says them (ConfigHost.ReloadConfig).
+// record, as the options alone — loadSnapshot without the offer, which a watched refresh and the
+// proposed-entries read load instead. The loader's notices are not repeated here: the watched
+// re-read says them (ConfigHost.ReloadConfig).
 func (w *rootWiring) layeredOptions() (config.Options, error) {
 	return loadLayeredOptions(w.configPath(), w.roots.project)
 }

@@ -111,7 +111,17 @@ var settingSections = []settingSection{
 // mask, a structured key with nothing in it reads "none", and a key whose effective value came out
 // empty while the registry declares a default shows that default — an unset `cursor-shape:` is a
 // block caret, and saying so is the honest answer to "what is this set to".
+//
+// It reads the Project config's offer off opts itself (offerOfOptions); a caller that holds the
+// offer its opts were resolved beside hands both to settingsRowsOffered.
 func settingsRows(opts config.Options) []tui.SettingRow {
+	return settingsRowsOffered(opts, offerOfOptions(opts))
+}
+
+// settingsRowsOffered is settingsRows with the Project config's offer read beside opts — the offer
+// the same resolution returned — which a row whose value counts it (`allow`'s "N rules, M proposed",
+// config.Key.ReadOf) reads from.
+func settingsRowsOffered(opts config.Options, offer config.ProjectOffer) []tui.SettingRow {
 	rows := make([]tui.SettingRow, 0, len(config.KeyRegistry))
 	section := ""
 	next := 0
@@ -125,10 +135,7 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 			section = settingSections[next].Name
 			next++
 		}
-		value := ""
-		if k.Read != nil {
-			value = k.Read(opts)
-		}
+		value := k.ReadOf(opts, offer)
 		switch {
 		case k.Masked && value != "":
 			value = maskedSettingValue

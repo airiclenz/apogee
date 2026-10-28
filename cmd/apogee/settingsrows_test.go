@@ -1114,3 +1114,42 @@ func TestSettingsHostRowsKeepTheConfinementMarksAfterAReload(t *testing.T) {
 		}
 	}
 }
+
+// The registry rows project the BOOT resolution (settingsHost.opts), so the `allow` row counts the
+// boot snapshot's offer beside it, never the live holder's: an in-session adoption moves the
+// *Allow rules* section, which lists from the holder, while the row still reads the summary this
+// run launched with, as every other row's value does.
+func TestSettingsHostRowsCountTheBootOfferAfterAnInSessionAdopt(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	writeGlobalRule(t, w)
+	writeProjectConfig(t, w.roots.project, "allow:\n  terminal:\n    - ls\n")
+	boot, err := config.LoadLayeredConfig(w.configPath(), w.roots.project, os.ReadFile, func(string) {})
+	if err != nil {
+		t.Fatalf("load the boot resolution: %v", err)
+	}
+	w.opts, w.live = boot, newLiveSettings(boot)
+	settings := settingsHost{opts: w.opts, offer: w.bootSnapshot().Offer(), allowRules: w.live.allowRules}
+	const bootSummary = "1 rule, 1 proposed"
+	if got := rowsByPath(t, settings.Rows())[settingKeyAllow].Value; got != bootSummary {
+		t.Fatalf("allow row at boot = %q, want %q", got, bootSummary)
+	}
+
+	host := configHost{w: w}
+	proposed, err := host.ProposedRules()
+	if err != nil {
+		t.Fatalf("ProposedRules: %v", err)
+	}
+	if err := host.AdoptRules(proposed); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+
+	rows := settings.Rows()
+	if got := rowsByPath(t, rows)[settingKeyAllow].Value; got != bootSummary {
+		t.Errorf("allow row after the adoption = %q, want the boot %q", got, bootSummary)
+	}
+	if got := ruleRows(rows)["terminal: ls"]; got != "adopted project" {
+		t.Errorf("the section lists terminal: ls as %q, want adopted project — it lists from the holder", got)
+	}
+}

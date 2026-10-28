@@ -149,9 +149,15 @@ type externalEdit struct {
 // an unknown key above all — kept on the projection for the same reason the values are: a notice
 // is diffed against the baseline (newNotices), so a persistent typo is announced at the save that
 // introduced it and not again on every re-read that follows.
+//
+// offer is the Project config's offer the same reading returned beside opts (config.ProjectOffer):
+// the proposed and rejected entries no Options field is the home of, which the `allow` row counts
+// and its lossless value carries (config.Key.ReadOf, StructureOf), so a re-read that only proposes
+// a rule still reports the key.
 type fileProjection struct {
 	rows    []tui.SettingRow
 	opts    config.Options
+	offer   config.ProjectOffer
 	notices []string
 }
 
@@ -175,7 +181,8 @@ func newExternalEdit(opts config.Options, workspace string, getenv func(string) 
 	}
 	projected, err := e.projection()
 	if err != nil {
-		projected = fileProjection{rows: settingsRows(opts), opts: opts}
+		offer := offerOfOptions(opts)
+		projected = fileProjection{rows: settingsRowsOffered(opts, offer), opts: opts, offer: offer}
 	}
 	e.baseline = projected
 	return e
@@ -344,8 +351,9 @@ func (e *externalEdit) layers() (global, project map[string]bool) {
 // A key whose row shows its whole value is answered by the row — its displayed value, and the prose
 // a text row carries beside it — so it is compared in the same spelling it is displayed in. A key
 // whose row shows a SUMMARY is answered by the lossless value its registry row projects
-// (config.Key.Structure) as well, and the two tests are OR-ed rather than exclusive: the row still
-// catches everything it ever caught, and the structure catches what a summary cannot say. Two
+// (config.Key.StructureOf, with the projection's offer beside its options) as well, and the two
+// tests are OR-ed rather than exclusive: the row still catches everything it ever caught, and the
+// structure catches what a summary cannot say. Two
 // different blocks summarize alike — repoint the one `mcp-servers:` entry at another machine and the
 // row still reads "1 server" — and a diff over summaries would leave that edit sitting in the file
 // waiting for a relaunch, the deferral ADR 0037 exists to abolish.
@@ -353,8 +361,7 @@ func (e *externalEdit) layers() (global, project map[string]bool) {
 // The projection is compared, never rendered: a `servers:` entry carries an api-key, and it stays as
 // far from a row as it has always been (maskedSettingValue).
 func settingChanged(k config.Key, before, after fileProjection, i int) bool {
-	if k.Structure != nil &&
-		!reflect.DeepEqual(k.Structure(before.opts), k.Structure(after.opts)) {
+	if !reflect.DeepEqual(k.StructureOf(before.opts, before.offer), k.StructureOf(after.opts, after.offer)) {
 		return true
 	}
 	return before.rows[i].Value != after.rows[i].Value || before.rows[i].Text != after.rows[i].Text
@@ -404,12 +411,12 @@ func (e *externalEdit) projection() (fileProjection, error) {
 	}
 	var notices []string
 	collect := func(notice string) { notices = append(notices, notice) }
-	err := config.ApplyConfig(&next, noFlagChanged, noEnvironment, os.ReadFile, collect)
+	offer, err := config.ApplyConfigOffer(&next, noFlagChanged, noEnvironment, os.ReadFile, collect)
 	var undetermined *config.StartupUndetermined
 	if err != nil && !errors.As(err, &undetermined) {
 		return fileProjection{}, err
 	}
-	return fileProjection{rows: settingsRows(next), opts: next, notices: notices}, nil
+	return fileProjection{rows: settingsRowsOffered(next, offer), opts: next, offer: offer, notices: notices}, nil
 }
 
 // The two stubs that make ApplyConfig resolve from the FILE alone: no flag was set on this
