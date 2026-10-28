@@ -1,11 +1,13 @@
 ---
 title: One Adoption answer re-reads the layered config up to five times
-status: open
+status: done
 type: task
 priority: 2
 deps: [pin-launch-protocol-copied]
 plan: 2026-10-27 - 01 - project-pin-admit-and-adoption-snapshot-plan
 created: 2026-10-27T20:58:58Z
+closed: 2026-10-28T09:27:59Z
+reason: "Resolved by plan '2026-10-27 - 01 - project-pin-admit-and-adoption-snapshot-plan' (c5e89d6d): internal/project Snapshot/Diff/Answer own the held check and record write; TUI and project adopt answer through it; config.Options carries no proposals"
 ---
 
 The ADR 0096 §4 held check lives in cmd/apogee (projectRulesHeld, adoptHeldRule) and each answer runs several full layered loads (held check, settleAllowRules, reconnectMCP, reloadReactions, then the adoptionWatch reload). Proposals ride inside config.Options, so cloneOptions had to clone them (3ff0d39b). The semantics are tested only in the heavy cmd/apogee package. Architecture review 2026-10-27 item 6.

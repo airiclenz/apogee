@@ -1,10 +1,12 @@
 ---
 title: Each Project pin caller copies the verify-before-launch protocol
-status: open
+status: done
 type: task
 priority: 2
 plan: 2026-10-27 - 01 - project-pin-admit-and-adoption-snapshot-plan
 created: 2026-10-27T20:58:58Z
+closed: 2026-10-28T09:27:59Z
+reason: "Resolved by plan '2026-10-27 - 01 - project-pin-admit-and-adoption-snapshot-plan' (c5e89d6d): ProjectPin is Admit-only with one *domain.PinMovedError refusal used by MCP and reactions; an unreadable pin is refused as moved (re-read drops it, per ratified design call)"
 ---
 
 domain.ProjectPin exposes Root/Changed/Programs, and the MCP stdio launcher (internal/mcp/transport.go resolveStdioProgram) and the reaction spawner (internal/agent/syncexec.go spawnReactionArgv, checkProjectPin) each run "nil? refuse → Changed() → moved-refusal → Dir = Root() → admit Programs()" by hand, with diverging handling of an unreadable pin (MCP aborts the connect set; reactions refuse and cue a re-ask). Fixes came in pairs (d45e436a; 82cceef4, cb46e44e). Architecture review 2026-10-27 item 3.
