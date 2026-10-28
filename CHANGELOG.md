@@ -11,6 +11,7 @@ or Moment is a **minor** bump, not a breaking change.
 
 - **The engine finishes its own construction from one seed.** `agent.New` and `agent.Resume` (and the `apogee.New` / `apogee.Resume` facades, now variadic over `apogee.Option`) take a construction seed and apply it in one fixed order before announcing the session: the sync lane (`Config.Sync`, beside `Config.Observe`), then the undo journal (`WithUndoJournal`), the delegation seat (`WithDelegationSeat`) and the delegation target (`WithDelegationTarget`). A seeded session-started advise entry runs at the construction boundary, and a seed `SetReactions` would refuse fails construction with the same sentence, as a `SeedRefusedError` that unwraps to it.
 - **Construction always announces `session-started`.** Embedder-facing: `apogee.Config.DeferSessionStart` and `Agent.AnnounceSessionStart` are removed. `New` and `Resume` announce the construction boundary (start `new`) as their last act, after the construction seed, so a Driver hands everything that can refuse to construction and never announces a session by hand. This supersedes the `[0.27.0]` entry that shipped the deferral.
+- A repo MCP server whose pinned file cannot be read when it launches is now skipped like one whose pinned file moved, instead of failing the whole connect: the rest of the set connects, a notice names the server and why, and the config re-read that follows drops the server with a notice naming the file it could not read.
 
 ## [0.28.0] — 2026-10-21
 
