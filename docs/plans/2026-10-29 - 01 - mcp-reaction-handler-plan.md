@@ -117,7 +117,12 @@ internal/config/execlayer_test.go — TestRepoReactionRefusedAloneKeepsTheRest, 
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 -run 'Repo|Layer' ./internal/config/`
 **Commit:** `feat(config): a repo mcp: reaction reaches only its own Project servers`
 
-## 5. internal/mcp builds the resolver
+## 5. internal/mcp builds the resolver — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): the exported interface Resolver matches on is `mcp.ReactionTool` (`ServerAlias`, `RemoteName`, `ProjectServer`, `CallText(ctx, args) (string, error)`); Execute and CallText share a new `serverTool.call` (transport, deadline, redaction) and `joinContent` (join + 2 MiB clip); Execute's error-result wordings are byte-identical.
+NOTES (2026-10-29): CallText joins text blocks only — a non-text block is left out rather than rendered as Execute's `[mcp %T content omitted]` line, reading the Goal's "text blocks joined" literally; an isError result with no text reports `mcp: tool reported an error with no text` so a failure never has a blank reason.
+NOTES (2026-10-29): `call` reads a session answer of neither result nor error as an empty result; Execute previously dereferenced `res.IsError` on a nil result (a latent nil-pointer panic), now it renders the no-content note.
+NOTES (2026-10-29): the Acceptance pattern `Resolver|RemoteName|Tool` does not select `TestExecute_CallTimeoutIsErrorResult`; it was run separately (`-run 'Execute'`) and passes unchanged.
 
 Depends on item 2.
 

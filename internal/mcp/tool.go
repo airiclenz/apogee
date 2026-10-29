@@ -209,38 +209,12 @@ func (t serverTool) ExternalEffect() domain.ExternalEffectKind { return domain.E
 // server. Both paths are exercised — the stub in the bench, this live path in this package's
 // in-memory-transport tests.
 func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
-	if err := ctx.Err(); err != nil {
+	res, failure, err := t.call(ctx, call.Arguments)
+	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if t.caller == nil {
-		// A surfaced tool with no live session can never run — surface it as an error result
-		// rather than panicking (defensive: the Client always wires a caller).
-		return domain.ErrorResult(call.ID, "mcp: tool is not connected to a server"), nil
-	}
-
-	params := &mcpsdk.CallToolParams{Name: t.remoteName}
-	if len(call.Arguments) > 0 {
-		params.Arguments = json.RawMessage(call.Arguments)
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, mcpCallTimeout)
-	defer cancel()
-
-	res, err := t.caller.CallTool(callCtx, params)
-	if err != nil {
-		// The caller's own ctx is checked first: its cancellation is the one Go error (ADR 0007).
-		if ctx.Err() != nil {
-			return domain.ToolResult{}, ctx.Err()
-		}
-		// The per-call deadline fired while the caller is still live: the server is too slow or
-		// wedged. Surface it as an error result so the Turn survives.
-		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
-			return domain.ErrorResult(call.ID, fmt.Sprintf("mcp: call timed out after %s", mcpCallTimeout)), nil
-		}
-		// A transport / protocol error (tool missing, server gone) is surfaced to the model as
-		// an error result so the Turn survives and the model can route around it (ADR 0007). The
-		// transport's text can quote the endpoint URL, so it is cut to the bare origin first.
-		return domain.ErrorResult(call.ID, "mcp: call failed: "+t.redactor.Redact(err.Error())), nil
+	if failure != "" {
+		return domain.ErrorResult(call.ID, failure), nil
 	}
 
 	content := renderContent(res)
@@ -248,6 +222,90 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return domain.ErrorResult(call.ID, content), nil
 	}
 	return domain.OKResult(call.ID, content), nil
+}
+
+// RemoteName returns the server's own name for this tool — what CallTool addresses, and what a
+// reaction's `mcp: {tool:}` names (adr-0076-amend-1029). It differs from Name whenever
+// modelToolName sanitised or hashed the qualified name, so a reaction never has to know the
+// model-facing form.
+func (t serverTool) RemoteName() string { return t.remoteName }
+
+// CallText calls the tool for a reaction (adr-0076-amend-1029) over the same transport, per-call
+// deadline and endpoint redaction as Execute, and returns the server's text blocks joined with
+// "\n" — empty when the server returns none, so an empty answer stays silent advice rather than
+// Execute's "(mcp tool returned no content)" note; a non-text block is left out, and the joined
+// text is clipped at maxMCPResultBytes. Every failure is a Go error carrying the server's text:
+// the tool's own isError result, a missed deadline, a transport error and an unconnected tool,
+// worded as Execute's error results are; a cancelled ctx returns ctx's error.
+func (t serverTool) CallText(ctx context.Context, args json.RawMessage) (string, error) {
+	res, failure, err := t.call(ctx, args)
+	if err != nil {
+		return "", err
+	}
+	if failure != "" {
+		return "", errors.New(failure)
+	}
+
+	text := joinContent(res.Content, false)
+	if res.IsError {
+		if text == "" {
+			return "", errors.New(mcpToolErrorWithoutText)
+		}
+		return "", errors.New(text)
+	}
+	return text, nil
+}
+
+// mcpToolErrorWithoutText is CallText's error when the server flags isError but sends no text, so
+// a failed reaction call is never reported with a blank reason.
+const mcpToolErrorWithoutText = "mcp: tool reported an error with no text"
+
+// call forwards args to the server over the live session, bounded by mcpCallTimeout on top of
+// ctx — the transport Execute and CallText share. It returns the server's result; or, when the
+// call failed while ctx is still live, failure: the text Execute surfaces as an error result and
+// CallText as an error (the tool not connected, the deadline missed, a transport error with the
+// endpoint cut to its origin). Only a cancelled ctx is err (ADR 0007). A result returned with an
+// empty failure and nil err is non-nil.
+func (t serverTool) call(ctx context.Context, args json.RawMessage) (res *mcpsdk.CallToolResult, failure string, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
+	if t.caller == nil {
+		// A surfaced tool with no live session can never run — surface it as a failure rather
+		// than panicking (defensive: the Client always wires a caller).
+		return nil, "mcp: tool is not connected to a server", nil
+	}
+
+	params := &mcpsdk.CallToolParams{Name: t.remoteName}
+	if len(args) > 0 {
+		params.Arguments = args
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, mcpCallTimeout)
+	defer cancel()
+
+	res, err = t.caller.CallTool(callCtx, params)
+	if err != nil {
+		// The caller's own ctx is checked first: its cancellation is the one Go error (ADR 0007).
+		if ctx.Err() != nil {
+			return nil, "", ctx.Err()
+		}
+		// The per-call deadline fired while the caller is still live: the server is too slow or
+		// wedged. Surface it as a failure so the Turn survives.
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Sprintf("mcp: call timed out after %s", mcpCallTimeout), nil
+		}
+		// A transport / protocol error (tool missing, server gone) is surfaced as a failure so
+		// the Turn survives and the model can route around it (ADR 0007). The transport's text
+		// can quote the endpoint URL, so it is cut to the bare origin first.
+		return nil, "mcp: call failed: " + t.redactor.Redact(err.Error()), nil
+	}
+	if res == nil {
+		// A session that answers with neither a result nor an error is read as an empty result,
+		// as renderContent always has.
+		res = &mcpsdk.CallToolResult{}
+	}
+	return res, "", nil
 }
 
 // mcpCallTimeout bounds how long one Execute waits on a server before surfacing a timeout error
@@ -284,17 +342,30 @@ func renderContent(res *mcpsdk.CallToolResult) string {
 	if res == nil || len(res.Content) == 0 {
 		return "(mcp tool returned no content)"
 	}
+	return joinContent(res.Content, true)
+}
+
+// joinContent joins content blocks with "\n" and clips the joined text at maxMCPResultBytes,
+// marked — the flattening Execute's result and CallText's answer share. A text block contributes
+// its text verbatim; a non-text block (image, audio, embedded resource) contributes a typed
+// placeholder line when keepNonText is set, and nothing at all otherwise.
+func joinContent(content []mcpsdk.Content, keepNonText bool) string {
 	var b strings.Builder
-	for i, c := range res.Content {
-		if i > 0 {
+	joined := 0
+	for _, c := range content {
+		text, isText := c.(*mcpsdk.TextContent)
+		if !isText && !keepNonText {
+			continue
+		}
+		if joined > 0 {
 			b.WriteString("\n")
 		}
-		switch v := c.(type) {
-		case *mcpsdk.TextContent:
-			b.WriteString(v.Text)
-		default:
-			fmt.Fprintf(&b, "[mcp %T content omitted]", c)
+		joined++
+		if isText {
+			b.WriteString(text.Text)
+			continue
 		}
+		fmt.Fprintf(&b, "[mcp %T content omitted]", c)
 	}
 	return clipText(b.String(), maxMCPResultBytes, mcpResultTruncatedMarker)
 }
@@ -309,9 +380,57 @@ func clipText(text string, limit int, marker string) string {
 	return text[:limit] + fmt.Sprintf(marker, limit)
 }
 
+// ----------------------------------------------------------------------------
+// The reaction resolver — an mcp: handler's server and tool to a call (adr-0076-amend-1029)
+// ----------------------------------------------------------------------------
+
+// ReactionTool is the surface Resolver resolves an mcp: reaction handler over: a surfaced tool
+// that names its server alias and the server's own tool name, says whether that server is an
+// adopted Project config's, and calls itself for a reaction. serverTool satisfies it; Resolver
+// matches on this interface, never on the unexported type, so a Driver's own stand-in tool can
+// resolve the same way.
+type ReactionTool interface {
+	ServerAlias() string
+	RemoteName() string
+	ProjectServer() bool
+	CallText(ctx context.Context, args json.RawMessage) (string, error)
+}
+
+// Resolver builds the domain.MCPResolver a Driver that dials MCP servers injects as Config.MCP. It
+// resolves (server, tool, project) over the tools tools returns — read on every resolution, so a
+// reconnect's new set is seen — matching a ReactionTool by its server alias and the server's own
+// tool name, never the model-facing name. The resolved call is the tool's CallText. It refuses,
+// with an error naming the alias (and the tool): a server no tool comes from (not connected, or
+// left undialled because its adoption pin moved), a tool that server does not advertise, and —
+// when project is set — a match on a server that is not an adopted Project config's own.
+func Resolver(tools func() []domain.Tool) domain.MCPResolver {
+	return func(server, tool string, project bool) (domain.MCPCall, error) {
+		isServerConnected := false
+		for _, candidate := range tools() {
+			reactionTool, ok := candidate.(ReactionTool)
+			if !ok || reactionTool.ServerAlias() != server {
+				continue
+			}
+			isServerConnected = true
+			if reactionTool.RemoteName() != tool {
+				continue
+			}
+			if project && !reactionTool.ProjectServer() {
+				return nil, fmt.Errorf("mcp server %q is not this project's own server", server)
+			}
+			return reactionTool.CallText, nil
+		}
+		if !isServerConnected {
+			return nil, fmt.Errorf("mcp server %q is not connected", server)
+		}
+		return nil, fmt.Errorf("mcp server %q has no tool %q", server, tool)
+	}
+}
+
 // Compile-time proof serverTool satisfies the external-effect tool surface the dispatch
-// disposition classifies as tools.ClassMCP.
+// disposition classifies as tools.ClassMCP, and the surface Resolver resolves a reaction over.
 var (
 	_ domain.Tool               = serverTool{}
 	_ domain.ExternalEffectTool = serverTool{}
+	_ ReactionTool              = serverTool{}
 )

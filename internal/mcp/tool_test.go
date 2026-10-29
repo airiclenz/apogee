@@ -331,3 +331,241 @@ func TestExecute_CancelMidCallIsGoError(t *testing.T) {
 		t.Fatalf("Execute with a ctx cancelled mid-call returned err %v; want context.Canceled", err)
 	}
 }
+
+// reactionStubTool is a ReactionTool that is not a serverTool — the stand-in a Driver's own test
+// tool is — so Resolver is shown to match on the exported interface, not the unexported type.
+type reactionStubTool struct {
+	alias, remote string
+	project       bool
+	answer        string
+}
+
+func (s reactionStubTool) Name() string            { return s.alias + toolNameSeparator + s.remote }
+func (s reactionStubTool) Description() string     { return "a stand-in reaction tool" }
+func (s reactionStubTool) Schema() json.RawMessage { return emptyObjectSchema }
+func (s reactionStubTool) Execute(context.Context, domain.ToolCall) (domain.ToolResult, error) {
+	return domain.ToolResult{}, nil
+}
+func (s reactionStubTool) ServerAlias() string { return s.alias }
+func (s reactionStubTool) RemoteName() string  { return s.remote }
+func (s reactionStubTool) ProjectServer() bool { return s.project }
+func (s reactionStubTool) CallText(context.Context, json.RawMessage) (string, error) {
+	return s.answer, nil
+}
+
+// fixedTools returns a tools func that always reports tools, the shape Resolver reads from.
+func fixedTools(tools ...domain.Tool) func() []domain.Tool {
+	return func() []domain.Tool { return tools }
+}
+
+// textResult is a successful CallToolResult carrying one text block per text.
+func textResult(texts ...string) *mcpsdk.CallToolResult {
+	content := make([]mcpsdk.Content, 0, len(texts))
+	for _, text := range texts {
+		content = append(content, &mcpsdk.TextContent{Text: text})
+	}
+	return &mcpsdk.CallToolResult{Content: content}
+}
+
+// TestServerToolRemoteName asserts RemoteName is the server's own tool name even where the
+// model-facing Name was sanitised and hashed.
+func TestServerToolRemoteName(t *testing.T) {
+	t.Parallel()
+	tool := newServerTool("files", &mcpsdk.Tool{Name: "files.read"}, &fakeCaller{}, nil)
+
+	got := tool.RemoteName()
+
+	if got != "files.read" || tool.Name() == got {
+		t.Fatalf("RemoteName() = %q, Name() = %q; want the server's own name, distinct from the model-facing one", got, tool.Name())
+	}
+}
+
+// TestResolver_ResolvesByAliasAndRemoteName resolves a reaction's (server, tool) to the tool the
+// server advertised under that name, where the model-facing name was sanitised or hashed, and
+// shows the resolved call forwards the arguments and returns the server's text.
+func TestResolver_ResolvesByAliasAndRemoteName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		alias  string
+		remote string
+	}{
+		{name: "dotted name", alias: "files", remote: "files.read"},
+		{name: "80-character qualified name", alias: "srv", remote: strings.Repeat("x", 75)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			caller := &fakeCaller{result: textResult("status: up")}
+			other := newServerTool(tc.alias, &mcpsdk.Tool{Name: "other"}, &fakeCaller{}, nil)
+			target := newServerTool(tc.alias, &mcpsdk.Tool{Name: tc.remote}, caller, nil)
+			resolve := Resolver(fixedTools(other, target))
+
+			call, err := resolve(tc.alias, tc.remote, false)
+			if err != nil {
+				t.Fatalf("resolve(%q, %q): %v", tc.alias, tc.remote, err)
+			}
+			answer, err := call(context.Background(), json.RawMessage(`{"q":1}`))
+
+			if err != nil || answer != "status: up" {
+				t.Fatalf("call = (%q, %v); want (%q, nil)", answer, err, "status: up")
+			}
+			if caller.gotParams == nil || caller.gotParams.Name != tc.remote {
+				t.Fatalf("forwarded params = %+v; want the server's own name %q", caller.gotParams, tc.remote)
+			}
+			if got := string(caller.gotParams.Arguments.(json.RawMessage)); got != `{"q":1}` {
+				t.Errorf("forwarded arguments = %s; want {\"q\":1}", got)
+			}
+		})
+	}
+}
+
+// TestResolver_Refusals covers the resolutions Resolver refuses — a server no tool comes from, a
+// tool the server does not advertise, a project entry naming a global server — and the project
+// entry it accepts, on its own Project server.
+func TestResolver_Refusals(t *testing.T) {
+	t.Parallel()
+	global := newServerTool("launcher", &mcpsdk.Tool{Name: "status"}, &fakeCaller{result: textResult("up")}, nil)
+	own := newServerTool("repo", &mcpsdk.Tool{Name: "status"}, &fakeCaller{result: textResult("up")}, nil)
+	own.project = true
+	resolve := Resolver(fixedTools(global, own))
+	cases := []struct {
+		name    string
+		server  string
+		tool    string
+		project bool
+		wantErr string // "" = resolves
+	}{
+		{name: "unknown server", server: "nope", tool: "status", wantErr: `mcp server "nope" is not connected`},
+		{name: "unknown tool", server: "launcher", tool: "stop", wantErr: `mcp server "launcher" has no tool "stop"`},
+		{name: "project entry on a global server", server: "launcher", tool: "status", project: true, wantErr: `mcp server "launcher" is not this project's own server`},
+		{name: "project entry on its own server", server: "repo", tool: "status", project: true},
+		{name: "global entry on a project server", server: "repo", tool: "status"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			call, err := resolve(tc.server, tc.tool, tc.project)
+
+			if tc.wantErr == "" {
+				if err != nil || call == nil {
+					t.Fatalf("resolve = (%v, %v); want a call", call != nil, err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.wantErr || call != nil {
+				t.Fatalf("resolve = (call %v, %v); want no call and %q", call != nil, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestResolver_ResolvesStubReactionTool shows a tool that is not a serverTool but implements
+// ReactionTool resolves and is called, and a plain domain.Tool on the same alias is passed over.
+func TestResolver_ResolvesStubReactionTool(t *testing.T) {
+	t.Parallel()
+	stub := reactionStubTool{alias: "launcher", remote: "status", answer: "model loaded"}
+	resolve := Resolver(fixedTools(plainTool{}, stub))
+
+	call, err := resolve("launcher", "status", false)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	answer, err := call(context.Background(), nil)
+
+	if err != nil || answer != "model loaded" {
+		t.Fatalf("call = (%q, %v); want (%q, nil)", answer, err, "model loaded")
+	}
+}
+
+// plainTool is a plain domain.Tool with no ReactionTool surface, which Resolver must skip.
+type plainTool struct{}
+
+func (plainTool) Name() string            { return "launcher__status" }
+func (plainTool) Description() string     { return "not a reaction tool" }
+func (plainTool) Schema() json.RawMessage { return emptyObjectSchema }
+func (plainTool) Execute(context.Context, domain.ToolCall) (domain.ToolResult, error) {
+	return domain.ToolResult{}, errors.New("a plain tool must never be reached by Resolver")
+}
+
+// TestResolver_ReadsToolsPerResolution shows Resolver reads its tools func on every resolution,
+// so a reconnect's new tool set is seen without building a new resolver.
+func TestResolver_ReadsToolsPerResolution(t *testing.T) {
+	t.Parallel()
+	var current []domain.Tool
+	resolve := Resolver(func() []domain.Tool { return current })
+	if _, err := resolve("launcher", "status", false); err == nil {
+		t.Fatalf("resolve before connect succeeded; want not connected")
+	}
+
+	current = []domain.Tool{reactionStubTool{alias: "launcher", remote: "status"}}
+	_, err := resolve("launcher", "status", false)
+
+	if err != nil {
+		t.Fatalf("resolve after reconnect: %v; want the new set seen", err)
+	}
+}
+
+// TestServerToolCallText covers the reaction call's answer and failures: text blocks joined with
+// "\n" and non-text blocks left out, empty content as "" (not Execute's placeholder), the tool's
+// isError as an error carrying its text, a transport error as Execute words it, and no caller.
+func TestServerToolCallText(t *testing.T) {
+	t.Parallel()
+	image := &mcpsdk.ImageContent{Data: []byte("x"), MIMEType: "image/png"}
+	cases := []struct {
+		name       string
+		caller     toolCaller
+		wantAnswer string
+		wantErr    string // "" = no error
+	}{
+		{name: "empty content", caller: &fakeCaller{result: &mcpsdk.CallToolResult{}}, wantAnswer: ""},
+		{name: "nil result", caller: &fakeCaller{}, wantAnswer: ""},
+		{name: "text blocks joined, non-text left out", caller: &fakeCaller{result: &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "a"}, image, &mcpsdk.TextContent{Text: "b"}},
+		}}, wantAnswer: "a\nb"},
+		{name: "isError with text", caller: &fakeCaller{result: &mcpsdk.CallToolResult{
+			IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "model not loaded"}},
+		}}, wantErr: "model not loaded"},
+		{name: "isError without text", caller: &fakeCaller{result: &mcpsdk.CallToolResult{IsError: true}}, wantErr: mcpToolErrorWithoutText},
+		{name: "transport error", caller: &fakeCaller{err: errors.New("connection reset")}, wantErr: "mcp: call failed: connection reset"},
+		{name: "no caller", caller: nil, wantErr: "mcp: tool is not connected to a server"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tool := newServerTool("srv", &mcpsdk.Tool{Name: "status"}, tc.caller, nil)
+
+			answer, err := tool.CallText(context.Background(), nil)
+
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("CallText = (%q, %v); want error %q", answer, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || answer != tc.wantAnswer {
+				t.Fatalf("CallText = (%q, %v); want (%q, nil)", answer, err, tc.wantAnswer)
+			}
+		})
+	}
+}
+
+// TestServerToolCallText_CallTimeoutIsError proves a reaction call to a server that never answers
+// returns, past mcpCallTimeout, a Go error naming the deadline in Execute's wording. Not parallel:
+// it shrinks the package-level mcpCallTimeout.
+func TestServerToolCallText_CallTimeoutIsError(t *testing.T) {
+	saved := mcpCallTimeout
+	mcpCallTimeout = testtime.Fixed(100 * time.Millisecond)
+	t.Cleanup(func() { mcpCallTimeout = saved })
+	tool, ok := stallingTool(t).(ReactionTool)
+	if !ok {
+		t.Fatalf("a surfaced server tool does not implement ReactionTool")
+	}
+
+	_, err := tool.CallText(context.Background(), nil)
+
+	if err == nil || err.Error() != "mcp: call timed out after 100ms" {
+		t.Fatalf("CallText past the call deadline = %v; want the timeout error", err)
+	}
+}
