@@ -225,7 +225,11 @@ cmd/apogee/schedule.go — scheduleWiring.fire; cmd/apogee/mcp_cmd_test.go — s
 **Acceptance:** `go build ./cmd/apogee/ && GOMEMLIMIT=2GiB go test -count=1 -run 'Firing|MCP|Resolver' ./cmd/apogee/`
 **Commit:** `feat(apogee): wire the mcp: reaction resolver into the TUI`
 
-## 10. Docs and glossary speak the mcp: handler
+## 10. Docs and glossary speak the mcp: handler — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): reactions.md also gained MCP wording at the payload, seam-document, advise and gate sections and in the "every front-end" sentence (each enumerated the argv/webhook shapes), and its H1 now reads "commands, webhooks and MCP tools"; the repo-scope rule is documented as the load-time drop item 4 shipped (`it names mcp server "<name>", which this Project config does not declare`) plus the resolver's call-time `is not this project's own server`.
+NOTES (2026-10-29): the session-started example names server `llama-launcher`, tool `status` (the names the runner tests use) and shows no `mcp-servers:` entry for it, since apogee does not document how llama-launcher's MCP server is launched.
+NOTES (2026-10-29): the `mcp:` reservation sentences in docs/design/reaction-core-greenfield.md stay as written, each followed by a dated note settling it via adr-0076-amend-1029, so the grep still matches them there as history.
 
 Depends on items 3, 4 and 9.
 

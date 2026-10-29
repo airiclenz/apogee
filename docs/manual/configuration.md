@@ -410,7 +410,7 @@ is. Their pane shows, between the question and the answers, everything adopting 
 server's transport, its command and arguments or its endpoint, its `env:` entries in full as
 `KEY=VALUE`, its `env-allowlist:` (or `not set — the platform floor only`), its `headers:`, the
 **names** of the variables its `headers-env:` and `client-secret-env:` send, its `auth:` and
-`client-id:`; a reaction's `run:`, `advise:` and `gate:` actions, argv or webhook; and every project
+`client-id:`; a reaction's `run:`, `advise:` and `gate:` actions, argv, webhook or MCP tool; and every project
 file the pin holds. A long value wraps and is never cut; a body too tall for the window gives up
 lines, counted, before any answer does, and `apogee project adopt` prints it whole. What is pinned:
 
@@ -900,9 +900,15 @@ conversation or the saved session. It takes the thirteen notices — the eight s
 `approval-decided` (its verdict), `error`, `session-started` (a session started, resumed,
 cleared or forked) and `compaction-finished` (a compaction fold ran), and the five seam-closing notices `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished` and
-`history-rewrite-finished`. The other two keys are the ones the loop waits on, and each takes the
-same two shapes `run:` does — an argv list, or a webhook mapping whose reply body stands where the
-command's stdout would. An `advise:` reaction — `on:` any of `post-tool-result`, `file-changed`,
+`history-rewrite-finished`. Every key takes the same three shapes — an argv list, a webhook mapping
+whose reply body stands where the command's stdout would, or an MCP mapping
+`{mcp: {server:, tool:, args:, payload-arg:}}` that calls a tool on one of your
+[MCP servers](#external-mcp-servers--mcp-servers), whose text stands there instead. An MCP call
+never reaches the Approver, because writing the entry is the approval; only the interactive TUI's
+session connects MCP servers, so `apogee headless`, the daemon and a `/schedule` firing leave such
+an entry inert with one notice, and a Project config's entry may name only a server that same
+Project config declares ([Calling an MCP tool](reactions.md#calling-an-mcp-tool)). The other two
+keys are the ones the loop waits on. An `advise:` reaction — `on:` any of `post-tool-result`, `file-changed`,
 `session-started` and `compaction-finished`, default `timeout:` 10s — is what the model reads, inside
 a fence apogee writes that the saved session never carries (secrets redacted, capped at 8 KiB). After
 a tool call it runs while the loop waits and its answer is appended to that call's result:
@@ -914,10 +920,10 @@ next prompt, or the note an emergency fold appends mid-exchange — replacing th
 entry left before. Either message waits only for what is left of the entry's `timeout:`:
 `advise: ["capcom", "prime"]` on `[session-started, compaction-finished]` briefs every session with
 the repository's open issues and briefs it again after every fold. It is off under `bypass:`; a
-command or webhook that answers nothing changes nothing, and one that fails changes nothing but is
+command, webhook or MCP tool that answers nothing changes nothing, and one that fails changes nothing but is
 reported to you. A `gate:` reaction — `on: [pre-tool-exec]` — is asked before a tool call runs,
 as an approval stage ahead of you (under `bypass:` too, default `timeout:` 5s): the first line it
-prints, or its webhook answers, is `allow`, `deny` or `ask`, the rest is its reason.
+prints, or its webhook or MCP tool answers, is `allow`, `deny` or `ask`, the rest is its reason.
 `gate: ["check-tool-call"]` refuses the call with a `deny`, and the model reads only
 `tool call denied by reaction <id>`; an `ask` forces the approval prompt, `reaction <id> asks:
 <reason>`, which an unattended run denies; an answer that is missing, malformed, late or crashed
@@ -971,7 +977,7 @@ which opens your editor because no row can write a list this shape — and the r
 its reactions over, as it does when the Project config changes or one of its reactions is answered.
 A headless run reads the list once, at start; the daemon reads yours once, and each firing's
 workspace's adopted project reactions at that firing. The full reference —
-every payload field, the exec posture, the webhook contract, the advice fence, the gate protocol,
+every payload field, the exec posture, the webhook contract, the MCP call, the advice fence, the gate protocol,
 `workspace:` matching, and what happens when a reaction fails or falls behind — is on the
 [Reactions](reactions.md) page.
 

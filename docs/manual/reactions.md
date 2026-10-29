@@ -1,13 +1,14 @@
-# Reactions — commands and webhooks on what a session did
+# Reactions — commands, webhooks and MCP tools on what a session did
 
 `reactions:` in `~/.apogee/config.yaml` is a list of Reactions apogee runs when something happens
 in a session — what other tools call a hook. Each entry names the moments it fires on and the
-action it takes: `run:` — an argv list run directly, or a URL the moment is POSTed to as JSON —
-after the moment; `advise:` — a command whose standard output, or a webhook whose reply, the model
-reads inside a fence apogee writes: as a trailer on a tool result, or ahead of your next message
-when a session starts or after a compaction fold; or `gate:` — a command or webhook asked whether a tool
-call may run — before it. Every key takes the same two shapes, an argv list or a webhook mapping;
-the key decides what the answer is worth. The list is empty by default, so a fresh install runs
+action it takes: `run:` — an argv list run directly, a URL the moment is POSTed to as JSON, or a
+tool on one of your MCP servers — after the moment; `advise:` — a command whose standard output, a
+webhook whose reply, or an MCP tool whose answer the model reads inside a fence apogee writes: as a
+trailer on a tool result, or ahead of your next message when a session starts or after a compaction
+fold; or `gate:` — a command, webhook or MCP tool asked whether a tool call may run — before it.
+Every key takes the same three shapes, an argv list, a webhook mapping or an MCP mapping; the key
+decides what the answer is worth. The list is empty by default, so a fresh install runs
 nothing and reports nothing.
 
 A `run:` entry is told what **already happened**. It cannot delay a turn, answer an approval, or
@@ -15,7 +16,7 @@ change anything about the run it is watching, and nothing it prints, returns or 
 the model, the conversation or the saved session — its failure is yours to see and nobody else's.
 It is a [Reaction](../../.capcom/knowledge/glossary.md) of **user** origin and **observe** class: it watches. The
 other two keys are the same origin at the two classes the loop **waits** on. An `advise:` entry
-(class **advise**) runs after a tool call finished, and what it prints — or, as a webhook, answers —
+(class **advise**) runs after a tool call finished, and what it prints — or, as a webhook or an MCP tool, answers —
 is appended to that call's result inside a fence apogee writes, so the model reads it as advice from you and not as the
 tool's own output; on `session-started` or `compaction-finished` it runs in the background instead,
 and its answer is fenced ahead of the text of the next user message the model reads. A `gate:` entry (class **gate**) is asked, before a tool call runs, whether the
@@ -35,7 +36,8 @@ which it supersedes in part, is the reasoning behind the `run:` posture.)
 
 The same list is fired by every front-end — the interactive TUI, a `/schedule` firing inside it,
 [`apogee headless`](headless.md) and an [`apogee daemon`](daemon.md) firing — from one library, so
-an entry means the same thing wherever the run was started from.
+an entry means the same thing wherever the run was started from — save an MCP mapping, which only
+the interactive TUI's own session calls (see [Calling an MCP tool](#calling-an-mcp-tool)).
 
 A repository's own [Project config](configuration.md#a-projects-own-config--apogeeconfigyaml)
 (`.apogee/config.yaml` at its Project root) may carry a `reactions:` list too, in the same shape.
@@ -92,12 +94,12 @@ reactions:
 |---|---|
 | `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id, and so is `context-fill-notice`, the engine's own built-in advise reaction — it is switched with its own top-level key, not with an entry here. |
 | `on:` | Required, at least one. A `run:` entry reacts to the thirteen notices below; an `advise:` entry reacts at `post-tool-result`, `file-changed`, `session-started` or `compaction-finished`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a notice other than `file-changed`, `session-started` or `compaction-finished` under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "turn-finished" is none of them`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
-| `run:` | The entry's observe action, in either of two shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. `advise:` and `gate:` take the same two shapes; anything else — a bare string, a number — is refused at startup by a sentence naming the key: `reaction <id>: run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`. |
+| `run:` | The entry's observe action, in any of three shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. A mapping `{mcp: {server:, tool:, args:, payload-arg:}}` calls a tool on one of your MCP servers (see [Calling an MCP tool](#calling-an-mcp-tool)). `advise:` and `gate:` take the same three shapes; anything else — a bare string, a number — is refused at startup by a sentence naming the key: `reaction <id>: run: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`. |
 | `workspace:` | Optional. Scopes the entry to one workspace; unset means every workspace. |
 | `timeout:` | Optional Go duration (`10s`, `2m`). Default `30s` for `run:`, `10s` for `advise:`, `5s` for `gate:`. Bounds the command run and the POST alike, and one `timeout:` binds every Reaction its entry arms. |
 | `enabled:` | Optional. `enabled: false` **parks** an entry — it stays in the file and is dropped when the file is read, so nothing arms it and the `/settings` summary does not count it. |
-| `gate:` | The entry's gate action, in the two `run:` shapes: an argv list, run directly like a `run:` list, or a webhook mapping `{url:, headers:, headers-env:}` POSTed to like a `run:` webhook — either is asked before a tool call runs, and its `on:` is `[pre-tool-exec]`. The call reaches a command as JSON on **stdin** and a webhook as the **POST body** (`event`, `reaction`, `tool`, `arguments` and the shared fields below), and it answers on **stdout** or in the **reply body**: the first line is `allow`, `deny` or `ask`, and any later lines are the reason, kept to its first 240 runes. It runs as an approval stage ahead of you — under `bypass:` too — with a default `timeout:` of `5s`. The first `deny` ends the call: the model reads `tool call denied by reaction <id>` and never the reason. The first `ask` forces the approval prompt, which reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the [daemon](daemon.md) nobody is there to answer, so the call is denied as `tool call denied by approver`. A gate that printed nothing, printed something else, exited non-zero, timed out or crashed — or a webhook that answered with anything but a 2xx — counts as `ask`, never as `allow`, and an `allow` changes nothing about what the mode already decided. On a `sub_agent` call an `ask` is deferred: the child inherits the gate and is asked on the calls that actually do something. |
-| `advise:` | The entry's third action, in the two `run:` shapes: an argv list run directly like the others, or a webhook mapping `{url:, headers:, headers-env:}` — either fires **after** a tool call finished (`post-tool-result`, `file-changed`), at a session's start (`session-started`) or after a compaction fold (`compaction-finished`), and its `on:` is any of those four. The firing reaches a command as JSON on **stdin** and a webhook as the **POST body** (`event`, `reaction`, the shared fields below, and `tool`, `arguments` and `result` after a tool call, `start` at a session's start, `fold` after a fold), and the command's **stdout** or the webhook's **reply body** — redacted, capped at 8 KiB — is fenced where the model reads it and the saved session never carries it: appended to that call's result after a tool call, set ahead of the next user message's text at a session's start or after a fold. A bare string is refused: `reaction <id>: advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`. Default `timeout:` `10s`; switched off under `bypass:`. See [Advising the model](#advising-the-model). |
+| `gate:` | The entry's gate action, in the three `run:` shapes: an argv list, run directly like a `run:` list, a webhook mapping `{url:, headers:, headers-env:}` POSTed to like a `run:` webhook, or an MCP mapping called like a `run:` one — each is asked before a tool call runs, and its `on:` is `[pre-tool-exec]`. The call reaches a command as JSON on **stdin** and a webhook as the **POST body** (`event`, `reaction`, `tool`, `arguments` and the shared fields below), and it answers on **stdout**, in the **reply body** or in the **tool's text**: the first line is `allow`, `deny` or `ask`, and any later lines are the reason, kept to its first 240 runes. It runs as an approval stage ahead of you — under `bypass:` too — with a default `timeout:` of `5s`. The first `deny` ends the call: the model reads `tool call denied by reaction <id>` and never the reason. The first `ask` forces the approval prompt, which reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the [daemon](daemon.md) nobody is there to answer, so the call is denied as `tool call denied by approver`. A gate that printed nothing, printed something else, exited non-zero, timed out or crashed — or a webhook that answered with anything but a 2xx, or an MCP call that failed — counts as `ask`, never as `allow`, and an `allow` changes nothing about what the mode already decided. On a `sub_agent` call an `ask` is deferred: the child inherits the gate and is asked on the calls that actually do something. |
+| `advise:` | The entry's third action, in the three `run:` shapes: an argv list run directly like the others, a webhook mapping `{url:, headers:, headers-env:}` or an MCP mapping — each fires **after** a tool call finished (`post-tool-result`, `file-changed`), at a session's start (`session-started`) or after a compaction fold (`compaction-finished`), and its `on:` is any of those four. The firing reaches a command as JSON on **stdin**, a webhook as the **POST body** and an MCP tool under its `payload-arg:` (`event`, `reaction`, the shared fields below, and `tool`, `arguments` and `result` after a tool call, `start` at a session's start, `fold` after a fold), and the command's **stdout**, the webhook's **reply body** or the MCP tool's **text** — redacted, capped at 8 KiB — is fenced where the model reads it and the saved session never carries it: appended to that call's result after a tool call, set ahead of the next user message's text at a session's start or after a fold. A bare string is refused: `reaction <id>: advise: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`. Default `timeout:` `10s`; switched off under `bypass:`. See [Advising the model](#advising-the-model). |
 
 An entry may spell more than one action key. Each arms a Reaction of its own under the entry's one
 `id:`, and the whole `on:` list has to suit each of them: `run:` beside `advise:` on
@@ -106,8 +108,10 @@ An entry may spell more than one action key. Each arms a Reaction of its own und
 `gate:` is refused, because `pre-tool-exec` is a seam no `run:` takes and no notice is one. An
 entry that spells no action key at all earns the `run:` sentence. Inside the
 webhook mapping — under whichever key carries it — the three keys above are the whole vocabulary:
-a misspelt `header-env:` is a startup refusal naming that key (`advise: is an argv list or a
-webhook mapping {url:, headers:, headers-env:}`) and not a token that never gets sent. The whole block is checked when the file is
+a misspelt `header-env:` is a startup refusal naming that key (`advise: is an argv list, a webhook
+mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:,
+payload-arg:}}`) and not a token that never gets sent; the same holds for the four keys inside an
+MCP mapping's `mcp:`. The whole block is checked when the file is
 read, and a malformed entry is a startup refusal naming the entry rather than a Reaction that
 silently never fires: a Moment listed twice under `on:`, an argv whose first element is blank, a
 `url:` that is not an absolute `http://` or `https://` URL with a host, and a `headers-env:` value
@@ -173,7 +177,8 @@ sub-agent phase, a session save, a prune or a usage total.
 
 ## The payload
 
-The same JSON document reaches a command on **stdin** and a webhook as the **POST body**. Its
+The same JSON document reaches a command on **stdin**, a webhook as the **POST body** and an MCP
+tool under its `payload-arg:`. Its
 field spellings are a documented contract — a script reads them one by one — and a field that does
 not apply to the notice is omitted rather than sent empty.
 
@@ -238,7 +243,8 @@ working on.
 
 ### The seam document
 
-An `advise:` or `gate:` command reads — and a webhook under either key is POSTed — the **same**
+An `advise:` or `gate:` command reads — and a webhook under either key is POSTed, and an MCP tool
+under either is sent under its `payload-arg:` — the **same**
 document cut to the call itself rather than to a notice about it — or, for an `advise:` entry on
 `session-started` or `compaction-finished`, where there is no call, cut to the boundary or the fold.
 It opens with the shared block above — `event`, `reaction`,
@@ -378,6 +384,72 @@ config](configuration.md#a-projects-own-config--apogeeconfigyaml) may add to. `a
 the global lists once, at start, and each daemon firing adds the `url-safety.deny-hosts` of its own
 workspace's Project config, read at that firing.
 
+## Calling an MCP tool
+
+A mapping whose one key is `mcp:` calls a tool on one of your
+[MCP servers](configuration.md#external-mcp-servers--mcp-servers) when its Moment fires. It takes
+the same place a command or a webhook would, under any of the three keys, and it is how a session
+can open knowing something only a server can tell it — here, which model llama-launcher has
+loaded:
+
+```yaml
+# ~/.apogee/config.yaml
+reactions:
+  - id: loaded-model
+    on: [session-started]
+    advise:
+      mcp:
+        server: llama-launcher
+        tool: status
+```
+
+`server:` is the `name` of an `mcp-servers:` entry and `tool:` is that server's own name for the
+tool — `status`, not the prefixed `llama-launcher__status` the model is offered it as. Both are
+required. `args:` is an optional mapping sent as the tool's arguments, word for word, on every
+call: nothing in it is filled in from the Moment. `payload-arg:` is optional too, and names the
+argument the firing's document travels under — the same JSON a command reads on stdin, sent as an
+object, not as a string. Leave it out and the tool sees `args:` alone. A `payload-arg:` that names a
+key `args:` already holds is refused at startup, so the document never overwrites a static
+argument; so is a blank `server:` or `tool:`, and a key inside `mcp:` other than those four.
+
+**Writing the entry is the approval.** The call never reaches the Approver: you wrote it, so no
+prompt is raised for it in any mode, and an MCP tool that would ask before the model could call it
+in Auto is called here without asking. It is the trust you already give a command you put in
+`run:` — the entry is yours, not the model's. It spawns nothing, so `confine-to-workspace` has
+nothing to fence: the call travels over the connection apogee already holds to that server, under
+the entry's `timeout:` (or its key's default).
+
+**The answer is the tool's text.** The text blocks the tool returns, joined with newlines, stand
+where a command's stdout would: dropped under `run:`, the advice under `advise:` (redacted, capped
+and fenced like any other — see [Advising the model](#advising-the-model)), the verdict's first line
+under `gate:`. A block that is not text is left out, and a tool that returns no text gives empty
+advice, which injects nothing. A call that fails is the handler failing, as a command's non-zero
+exit is: the tool's own `isError` result (reported with its text), a call that outlived the
+deadline, a server that is not connected — never dialled, or left undialled because its adoption
+pin moved — and a tool that server does not advertise. An advise that failed contributes nothing
+and a gate that failed asks; [Where a failure shows](#where-a-failure-shows) says where you read
+it.
+
+**A project's entry may name only its own servers.** A
+[Project config](configuration.md#a-projects-own-config--apogeeconfigyaml) reaction may call a tool
+only on a server that same Project config declares — not on one of yours, and not on a project
+server dropped because one of yours already has its name. An entry that names any other server is
+dropped when the file is read, with a notice saying `it names mcp server "<name>", which this
+Project config does not declare`, and is never offered for adoption; the rest of the Project config
+still applies. Once adopted, the entry's call reaches its server only after you adopted that server
+too — until then it fails as not connected. One of your own entries may name any server the session connected, a project's included. Adoption pins the
+whole `mcp:` mapping, so an edit to its server, tool or arguments asks you again.
+
+**Only the interactive TUI's session calls one.** It is the one front-end that connects your MCP
+servers. [`apogee headless`](headless.md), an [`apogee daemon`](daemon.md) firing, a `/schedule`
+firing raised inside the TUI and `apogee probe context` connect none, and there an MCP entry is
+inert rather than a startup refusal, with one notice per entry: a `run:` or `advise:` one is
+dropped before anything arms it — `reaction "loaded-model": its mcp: handler is inert here — MCP
+servers are not connected in this run` — and a `gate:` one stays armed and asks on every call it
+sees, which an unattended run denies: `reaction "<id>": its mcp: gate cannot run here — MCP servers
+are not connected in this run, so every call it gates is refused`. In the TUI, a `run:` entry that
+fires before the session has connected its servers fails as `MCP servers are not connected yet`.
+
 ## Advising the model
 
 An `advise:` entry is the one kind of Reaction whose output the model reads. It reacts at four
@@ -443,8 +515,10 @@ The command is run like a `run:` list — directly, no shell — with the
 [seam document](#the-seam-document) on **stdin** and the `APOGEE_REACTION_*` facts in its
 environment. A webhook mapping under `advise:` is POSTed like a `run:` webhook, the same document
 as the body, and its **reply body** stands where the command's stdout would — read up to the cap
-below, so a server that streams without end cannot hold the turn's memory. What either answers
-goes through three steps before the model sees it:
+below, so a server that streams without end cannot hold the turn's memory. An MCP mapping under
+`advise:` is called with the document under its `payload-arg:`, and the tool's **text** stands
+there in turn (see [Calling an MCP tool](#calling-an-mcp-tool)). What any of them answers goes
+through three steps before the model sees it:
 
 1. **Redaction.** Every value of a configured secret — the variables your `api-key-env:` entries,
    your webhook `headers-env:` entries and your `mcp-servers:` entries' `headers-env:` and
@@ -483,11 +557,12 @@ attributable to the entry that told it. A gate's every answer is booked the same
 `deferred to the child's calls` for an `ask` on a delegation.
 
 Advise is **fail-open in every direction**, and each of them costs the turn nothing: a command
-that prints nothing — or a webhook whose reply body is empty — injects no fence, so an entry that
+that prints nothing — or a webhook whose reply body is empty, or an MCP tool that returns no
+text — injects no fence, so an entry that
 only sometimes has something to say is silent the rest of the time; one that failed, timed out
 (default `timeout:` `10s`) or could not be spawned — or a webhook that answered with anything but
-a 2xx, could not be reached, or names a `headers-env:` variable that is not set — contributes
-nothing and is reported to you, each time it fails; a `file-changed` entry on a call that changed
+a 2xx, could not be reached, or names a `headers-env:` variable that is not set, or an MCP call
+that failed — contributes nothing and is reported to you, each time it fails; a `file-changed` entry on a call that changed
 no file neither runs nor reports. A `session-started` or `compaction-finished` run is reported when
 the message it was due on joins it, not when it fails: a run still going then is a timeout. Under
 `bypass:` the
@@ -514,7 +589,9 @@ question apogee would put to you. It reacts at `pre-tool-exec` and nowhere else,
 (`tool` and `arguments` name the pending call; there is no `result` yet) and the
 `APOGEE_REACTION_*` facts in its environment; a webhook mapping under `gate:` is POSTed like a
 `run:` webhook with the same document as the body, and its **reply body** (read up to 64 KiB) is
-read exactly as a command's stdout is. It answers on **stdout**, or in the reply body:
+read exactly as a command's stdout is; an MCP mapping under `gate:` is called with the document
+under its `payload-arg:`, and the tool's **text** is read the same way. It answers on **stdout**,
+in the reply body or in the tool's text:
 
 - the **first line** is the verdict — `allow`, `deny` or `ask`;
 - every line after it is the **reason**: blank lines dropped, the rest folded onto one line and
@@ -533,7 +610,7 @@ a gate can say No, never Yes.
 Every answer apogee cannot read **escalates to `ask`**, never to `allow`: an empty stdout, a first
 line that is none of the three words, a non-zero exit, a timeout (default `timeout:` `5s`), a
 command that could not be spawned, a webhook that answered with anything but a 2xx or could not be
-reached — a status code is never a verdict — and the prompt then reads
+reached — a status code is never a verdict — an MCP call that failed, and the prompt then reads
 `reaction <id> asks: did not answer (<error>)`. A gate you armed and apogee cannot run is a
 question, never a silent pass — which is why this is the one user Reaction `bypass:` leaves
 armed: Bypass switches off what shapes the model's view, and a gate shapes nothing the model sees.
@@ -567,7 +644,11 @@ entry is a startup refusal. A `run:` command of your own alone inherits the envi
 adopted project entry's `run:` goes through this door too. None of this
 reaches a **webhook** under either key: nothing is spawned, so there is no permit, no box and no
 scrub — the request leaves over the network under the class deadline, exactly as a `run:` webhook
-does, and `headers-env:` is read at send time from apogee's own environment.
+does, and `headers-env:` is read at send time from apogee's own environment. Nor does any of it
+reach an **MCP mapping** under either key: it too spawns nothing, so it runs with
+`confine-to-workspace` on as it does with it off, on a host that cannot build the box as well — the
+call goes over the connection apogee already holds to the server, under the class deadline, and
+never reaches the Approver (see [Calling an MCP tool](#calling-an-mcp-tool)).
 
 Both keys are inherited by every sub-agent, unconditionally, because a Reaction the parent runs
 with is part of the posture a delegation inherits: an `advise:` fence lands on the child's tool
@@ -637,6 +718,16 @@ contributes nothing, the gate escalates to `ask`. A `session-started` or `compac
 advise is reported when the message it was due on joins it, under that Moment —
 `reaction prime (session-started): no answer within 10s: context deadline exceeded` for one that
 had not answered by its deadline.
+
+An MCP mapping fails the same way, at the same place and under the same prefix. A call that
+reached the tool and failed — its `isError` text, a missed deadline — is reported each time under
+`advise:` or `gate:`, as a command is; one that never reached it — `mcp server "<name>" is not
+connected`, `mcp server "<name>" has no tool "<tool>"` or `mcp server "<name>" is not this
+project's own server` — is reported once per entry, the first time it fires, because a server that is down stays
+down a while and would otherwise report on every call. Under `run:` the once-only fold above holds
+for both. In a front-end that connects no MCP server, the one setup notice
+[Calling an MCP tool](#calling-an-mcp-tool) quotes is the whole report: the entry's firings add
+none.
 
 ## Live reload
 

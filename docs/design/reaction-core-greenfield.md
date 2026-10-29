@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-07 · **Status:** ✅ **Decided** — grilled the same day; §3 and §8 resolved in
 [ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md) (day-one user
-cells observe + advise + gate; user shape(view) and `mcp:` reserved; Bypass = advise + shape off).
+cells observe + advise + gate; user shape(view) and `mcp:` reserved; Bypass = advise + shape off;
+`mcp:` settled 2026-10-29 by [`adr-0076-amend-1029`](../../.capcom/knowledge/decisions/adr-0076/adr-0076-amend-1029.md)).
 Implementation plans: the three staged plans §9.4 links. · **Companion:**
 [hook-talkback-findings.md](hook-talkback-findings.md) (research; the doctrine map) · **Issue:**
 `apogee-575` (done — decided in ADR 0076).
@@ -71,6 +72,9 @@ Reaction { id, origin, class, on: [moments], handler }
 - `class` — what the reaction may do; see the matrix in §3.
 - `handler` — Go func | argv | webhook | `mcp:` server/tool. *(Decided: `mcp:` is **reserved** —
   ADR 0076 D3; the shipped handlers are Go func, argv and webhook.)*
+  > **Amended 2026-10-29 ([`adr-0076-amend-1029`](../../.capcom/knowledge/decisions/adr-0076/adr-0076-amend-1029.md)).** The reservation is settled: `run:`, `advise:`
+  > and `gate:` each accept `{mcp: {server:, tool:, args:, payload-arg:}}`, called with authorship
+  > trust (never through the Approver); a Driver that dials no MCP server leaves the entry inert.
 
 ### 2.3 Two lanes, one dispatcher
 
@@ -120,7 +124,8 @@ roll already models exactly this mapping.
 > entry schema is `id:` / `on:` / `run:` (polymorphic — a sequence is argv, a mapping is a webhook)
 > / `workspace:` / `timeout:` / `enabled:`; stage 3 shipped `advise:`/`gate:` (argv at first; since
 > 2026-09-19 — issue `apogee-1d8`, ADR 0076 D8's dated amendment — both keys take the same two
-> shapes `run:` does, an argv list or a webhook mapping, through one loader path), `advise:` on
+> shapes `run:` does, an argv list or a webhook mapping, through one loader path; since 2026-10-29 —
+> [`adr-0076-amend-1029`](../../.capcom/knowledge/decisions/adr-0076/adr-0076-amend-1029.md) — a third, the `{mcp: …}` mapping), `advise:` on
 > `post-tool-result` or `file-changed` and `gate:` on `pre-tool-exec`, both resolving beside `run:`
 > into one Reaction per key of one id.
 > This supersedes D10's "builtins appear by id with `enabled:`" and the original wording here.
@@ -281,7 +286,8 @@ handoff). Cheaper now, but it adds a fourth idiom on top of three and keeps ever
 2. The stable injection slot: one block before the newest user/tool message, or a dedicated message?
 3. Deadline defaults per class (`advise` and `gate` block the loop).
 4. Whether `mcp:` handlers need their own approval posture or inherit the MCP tool's. *(Resolved:
-   `mcp:` is reserved until a case arrives — ADR 0076 D3.)*
+   `mcp:` is reserved until a case arrives — ADR 0076 D3. Settled 2026-10-29 by
+   [`adr-0076-amend-1029`](../../.capcom/knowledge/decisions/adr-0076/adr-0076-amend-1029.md): neither — authorship trust; the user's entry is the approval.)*
 5. Migration UX for the seven floor booleans and the `hooks:` list — silent, or a one-time notice.
 
 ## 9. Seed material for the plan

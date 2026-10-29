@@ -7,12 +7,17 @@ One `{id, origin, class, on: [Moments], handler}` — the single thing apogee do
 passes a **Moment**, shipped as `domain.Reaction`. Its **origin** is **engine** (a builtin such as
 a Floor guard, or a Go reaction the bench arms in-process through the facade) or
 **user**; its **class** is one column of the **Reaction surface** matrix. Its handler is one of
-eight kinds behind one sealed interface: six Go func types, each naming exactly one **Moment** —
+nine kinds behind one sealed interface: six Go func types, each naming exactly one **Moment** —
 five per-seam types, one per seam, and `SessionStartedFunc`, the session-start advise slot's, which
-`Validate` admits under class advise alone; and two out-of-process kinds a user entry arms —
-an `ArgvHandler` (a command) and a `WebhookHandler` (a POST), each serving observe, advise and
-gate, the class deciding what the reply is worth — whose `On` list spans Moments and is checked
-against the class. `Validate`
+`Validate` admits under class advise alone; and three out-of-process kinds a user entry arms —
+an `ArgvHandler` (a command), a `WebhookHandler` (a POST) and an `MCPHandler` (a call to a tool on a
+connected MCP server), each serving observe, advise and gate, the class deciding what the reply is
+worth — whose `On` list spans Moments and is checked against the class. An `MCPHandler` is pure
+data: the **Driver** injects a `Config.MCP` resolver that turns its server and tool into a call, the
+engine never dials a server, and a Driver that injects none (headless, the daemon, a Firing, the
+bench) leaves it inert with one notice per entry — an advise or observe entry dropped before arming,
+a gate entry armed but escalating every call to ask. Its call never reaches the **Approver**: the
+user authored it, so writing the entry is the approval (`adr-0076-amend-1029`). `Validate`
 refuses an `On` list the handler cannot serve, an origin × class outside the matrix, and a missing
 id, origin, class or handler, and is answered ONCE, where the entry is built (the config layer's
 mapping for a `reactions:` file, the agent's arming step for `Config.Reactions`) — `Generation.Validate`
@@ -48,22 +53,26 @@ carries, and — on the sync lane alone — the call's `arguments` and `result`.
 A **user**-origin Reaction is one entry of the global `reactions:` list, or an **Adopted** entry of a
 **Project config**'s (`domain.Reaction.Project` set; fenced, scrubbed and run in the Project root,
 its pinned project files re-checked before every spawn — ADR 0104) —
-`{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv | {url, …}>, gate: <argv | {url, …}>, workspace?, timeout?, enabled?}` —
+`{id, on: [moments], run: <argv | {url, headers, headers-env} | {mcp: {server, tool, args, payload-arg}}>, advise: <argv | {url, …} | {mcp: …}>, gate: <argv | {url, …} | {mcp: …}>, workspace?, timeout?, enabled?}` —
 resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**
 class, fired by the async lane (`internal/reactions`' own runner) on notices; `advise:` at
 **advise** class, fired at four Moments — by the agent's sync lane at `post-tool-result` or
 `file-changed` (the latter narrowing it to a successful write-tool call), and in the background
 from a **Session boundary** at `session-started` or from a **Compaction** fold at
-`compaction-finished` — its stdout — or its webhook's reply body — secret-redacted
+`compaction-finished` — its stdout — or its webhook's reply body, or its MCP tool's text — secret-redacted
 (`tools.RedactSecrets`), capped and fenced as the trailer on the call's result, or ahead of the next
 user-role message's text at the two notices — one **Advice span**; and
 `gate:` at **gate** class, fired by the sync lane at `pre-tool-exec` only, as the **Gate stage**,
-its stdout's or reply body's first line the verdict. Every action key takes the same two shapes —
-an argv list or a webhook mapping — through one loader path (`handlerFor`); a bare string or a
-mapping key outside `{url, headers, headers-env}` is refused with a sentence naming the key
-(`advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`), as is an `on:` a
+its stdout's, reply body's or tool text's first line the verdict. Every action key takes the same
+three shapes — an argv list, a webhook mapping or an MCP mapping — through one loader path
+(`handlerFor`); a bare string, a mapping key outside `{url, headers, headers-env}`, or an `mcp:`
+key beside any other or one outside `{server, tool, args, payload-arg}` is refused with a sentence
+naming the key (`advise: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp
+mapping {mcp: {server:, tool:, args:, payload-arg:}}`), as is an `on:` a
 key's class cannot take (a seam under `run:`, a notice under `gate:`, any Moment but the four under
-`advise:`), and
+`advise:`); a **Project config**'s entry whose `mcp:` names a server that Project config does not
+itself declare (or declares under a name a global server shadows) is dropped with a notice when the
+file is read, so an adopted entry reaches only its own Project config's servers; and
 `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
 **`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** hands
