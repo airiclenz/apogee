@@ -721,10 +721,10 @@ func lastUserText(req stubllm.Request) string {
 }
 
 // TestOnceRefusesALaneTheEngineWillNotArm — a Firing whose lanes the engine will not arm fails
-// before its first Step, whichever step refused them, under the one prefix a Driver reports a lane
-// refusal by: the validation Once runs before handing the Runner a moved observe list, or agent.New's
-// own seed validation (agent.SeedRefusedError). An observe list the validation refuses never reaches
-// the Runner, and a refused Firing is never announced.
+// before its first Step under the one prefix a Driver reports a lane refusal by. Every lane refusal
+// is the typed seed refusal (agent.SeedRefusedError): Once checks the lanes with the engine's own
+// seed check before handing the Runner a moved observe list, the same check agent.New runs. A seed
+// the check refuses never reaches the Runner, and a refused Firing is never announced.
 func TestOnceRefusesALaneTheEngineWillNotArm(t *testing.T) {
 	t.Parallel()
 
@@ -736,19 +736,32 @@ func TestOnceRefusesALaneTheEngineWillNotArm(t *testing.T) {
 		Handler: domain.ArgvHandler{Argv: []string{"true"}},
 		Timeout: time.Second,
 	}
+	// observable passes the observe lane's own rules, so only the whole-seed check keeps it off the
+	// Runner.
+	observable := misfiled
+	observable.Class = domain.ClassObserve
 
 	for _, tc := range []struct {
 		name       string
 		lanes      domain.Generation
-		wantSeeded bool // the refusal is agent.New's typed seed refusal
+		wantSeeded bool // the refusal is the engine's typed seed refusal
 	}{
 		{
-			name:  "an observe list the hand-over validation refuses",
-			lanes: domain.Generation{Observe: []domain.Reaction{misfiled}},
+			name:       "an observe list the hand-over validation refuses",
+			lanes:      domain.Generation{Observe: []domain.Reaction{misfiled}},
+			wantSeeded: true,
 		},
 		{
 			name:       "a sync lane naming a reserved id",
 			lanes:      domain.Generation{Sync: []domain.Reaction{denyingGate(agent.FloorGuardKeys()[0])}},
+			wantSeeded: true,
+		},
+		{
+			name: "a sync lane naming a reserved id beside a moved observe list",
+			lanes: domain.Generation{
+				Observe: []domain.Reaction{observable},
+				Sync:    []domain.Reaction{denyingGate(agent.FloorGuardKeys()[0])},
+			},
 			wantSeeded: true,
 		},
 	} {

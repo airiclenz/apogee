@@ -10,14 +10,12 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"sync"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/undo"
@@ -270,9 +268,10 @@ func (e *lateEngine) Bind(cfg apogee.Config, construct func(apogee.Config, ...ap
 // The observe list has a second holder: the Runner cfg.ObserveRunner names, built over cfg.Observe.
 // When the pending list differs from that one, the Runner is handed it (Replace) HERE, before
 // construction — so the Runner already holds the session's list when the Agent announces the
-// session-started boundary — and construction never does. The Generation is validated first
-// (validatePendingGeneration), so a list the Agent would refuse is never swapped into the Runner,
-// and a list the Runner itself refuses (an unresolvable `workspace:`) fails the bind naming it.
+// session-started boundary — and construction never does. The seed is checked first with the
+// engine's own seed check (apogee.ValidateSeed, over cfg.WorkspaceDir), so a seed construction would
+// refuse never reaches the Runner and fails the bind with construction's own *SeedRefusedError, and
+// a list the Runner itself refuses (an unresolvable observe `workspace:`) fails the bind naming it.
 //
 // restoreRunner hands the Runner back the list it was built from, for a construction refused after
 // the hand-over: a refused bind moves neither half, so the next bind compares against the list the
@@ -284,7 +283,7 @@ func (e *lateEngine) seedGeneration(cfg *apogee.Config) (restoreRunner func() er
 		return restoreRunner, nil
 	}
 	if runner := cfg.ObserveRunner; runner != nil && !reflect.DeepEqual(cfg.Observe, gen.Observe) {
-		if err := validatePendingGeneration(*gen); err != nil {
+		if err := apogee.ValidateSeed(*gen, cfg.WorkspaceDir); err != nil {
 			return nil, err
 		}
 		if err := runner.Replace(gen.Observe); err != nil {
@@ -296,24 +295,6 @@ func (e *lateEngine) seedGeneration(cfg *apogee.Config) (restoreRunner func() er
 	cfg.Floor, cfg.Bypass, cfg.ContextFillNotice = gen.Floor, gen.Bypass, gen.ContextFillNotice
 	cfg.Observe, cfg.Sync = gen.Observe, gen.Sync
 	return restoreRunner, nil
-}
-
-// validatePendingGeneration is the Agent's lane validation, run over a pending Generation before
-// its observe list is handed to the Runner: the whole-value lane rules (Generation.Validate), then
-// the observe list's own whole-list check (reactions.ValidateAll), its error carried as
-// apogee.ErrInvalidReaction as the Agent's arming step carries it, so the refusal reads as the one
-// construction would have given.
-func validatePendingGeneration(gen apogee.Generation) error {
-	if err := gen.Validate(); err != nil {
-		return err
-	}
-	if err := reactions.ValidateAll(gen.Observe); err != nil {
-		if errors.Is(err, apogee.ErrInvalidReaction) {
-			return err
-		}
-		return fmt.Errorf("%w: %w", apogee.ErrInvalidReaction, err)
-	}
-	return nil
 }
 
 // seedConfig writes the pending settings the construction seed carries on cfg — the blast radius,

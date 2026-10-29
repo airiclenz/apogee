@@ -765,6 +765,36 @@ func TestLateEngineBindValidatesThePendingGenerationBeforeTheRunner(t *testing.T
 	}
 }
 
+// A seed whose sync entry takes a Floor guard's id is refused by the engine's own seed check BEFORE
+// its moved observe list reaches the Runner: the observe list passes the lane rules on its own, so
+// only the whole-seed check keeps it off the Runner, and the bind fails with construction's own
+// typed refusal.
+func TestLateEngineBindRefusesAReservedSyncIDBeforeTheRunner(t *testing.T) {
+	t.Parallel()
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	runner := &recordingRunner{}
+	built := []domain.Reaction{observeReaction("built")}
+	moved := []domain.Reaction{observeReaction("moved")}
+	engine.seedReactions(apogee.Generation{Observe: moved, Sync: []domain.Reaction{gateReaction("read-cache")}})
+
+	err := bindOverRunner(t, engine, runner, built)
+
+	if refused := (*apogee.SeedRefusedError)(nil); !errors.As(err, &refused) {
+		t.Fatalf("Bind err = %v; want a *SeedRefusedError for a sync entry named after a Floor guard", err)
+	}
+	if !errors.Is(err, apogee.ErrInvalidReaction) {
+		t.Errorf("Bind err = %v; want it to carry ErrInvalidReaction", err)
+	}
+	if len(runner.lists) != 0 {
+		t.Errorf("the Runner was handed %+v; want no Replace for a seed the engine refuses", runner.lists)
+	}
+	if engine.bound() != nil {
+		t.Errorf("an Agent was installed despite the refusal; want the holder left unbound")
+	}
+}
+
 // A construction refused AFTER the bind handed the Runner a moved observe list hands the Runner back
 // the list it was built from: a refused bind moves neither half, so a later bind compares against
 // the list the Runner really holds.
@@ -775,13 +805,21 @@ func TestLateEngineBindRefusedHandsTheRunnerBackItsList(t *testing.T) {
 	t.Cleanup(func() { _ = engine.Close() })
 	runner := &recordingRunner{}
 	built := []domain.Reaction{observeReaction("built")}
-	// The observe list moved and passes the lane rules; the sync entry named after a Floor guard is
-	// refused only by construction.
+	// The moved observe list passes the engine's seed check and reaches the Runner; the held profile
+	// lies outside the seed, so construction refuses it after the hand-over.
 	moved := []domain.Reaction{observeReaction("moved")}
-	engine.seedReactions(apogee.Generation{Observe: moved, Sync: []domain.Reaction{gateReaction("read-cache")}})
+	engine.seedReactions(apogee.Generation{Observe: moved})
+	if err := engine.SetProfile(apogee.ModelProfile{ToolCallFormat: "no-such-format"}); err != nil {
+		t.Fatalf("SetProfile while unbound: %v; want it held for the bind", err)
+	}
 
-	if err := bindOverRunner(t, engine, runner, built); !errors.Is(err, apogee.ErrInvalidReaction) {
-		t.Fatalf("Bind err = %v; want the construction's ErrInvalidReaction for a reserved id", err)
+	err := bindOverRunner(t, engine, runner, built)
+
+	if err == nil {
+		t.Fatalf("Bind err = nil; want the construction's refusal of the held profile")
+	}
+	if refused := (*apogee.SeedRefusedError)(nil); errors.As(err, &refused) {
+		t.Fatalf("Bind err = %v; want a construction failure outside the seed, not a seed refusal", err)
 	}
 	if want := [][]domain.Reaction{moved, built}; !reflect.DeepEqual(runner.lists, want) {
 		t.Errorf("the Runner was handed %+v; want the moved list, then the built list back", runner.lists)

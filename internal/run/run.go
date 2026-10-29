@@ -12,7 +12,6 @@ import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
-	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/refs"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -412,16 +411,16 @@ const lanesRefused = "apogee: arm the firing's reaction lanes"
 // The observe lane has a second holder, the Runner cfg.ObserveRunner names, built over cfg.Observe.
 // When the lane differs from that list — compared as the Agent compares a swapped-in one, every field
 // the Runner builds a worker out of — the Runner is handed it (ObserveRunner.Replace) here, before
-// construction, and New never does. It is validated first, with the checks the Agent's arming step
-// runs over both lanes (domain.Generation.Validate, then reactions.ValidateAll over the observe list),
-// so a list construction would refuse is never swapped into the Runner. Equal lists hand nothing:
-// a Replace retires the Runner's running generation.
+// construction, and New never does. The lanes are checked first with the engine's own seed check
+// (agent.ValidateSeed, over cfg.WorkspaceDir), so a seed construction would refuse is never swapped
+// into the Runner and is refused with construction's own *agent.SeedRefusedError. Equal lists hand
+// nothing: a Replace retires the Runner's running generation.
 func seedLanes(cfg *domain.Config, lanes domain.Generation) error {
 	if len(lanes.Observe) == 0 && len(lanes.Sync) == 0 {
 		return nil
 	}
 	if runner := cfg.ObserveRunner; runner != nil && !reflect.DeepEqual(cfg.Observe, lanes.Observe) {
-		if err := validateLanes(lanes); err != nil {
+		if err := agent.ValidateSeed(lanes, cfg.WorkspaceDir); err != nil {
 			return err
 		}
 		if err := runner.Replace(lanes.Observe); err != nil {
@@ -429,24 +428,6 @@ func seedLanes(cfg *domain.Config, lanes domain.Generation) error {
 		}
 	}
 	cfg.Observe, cfg.Sync = lanes.Observe, lanes.Sync
-	return nil
-}
-
-// validateLanes is the arming step's lane validation, run over the two lanes alone before the
-// observe hand-over: the whole-value lane rules, then the observe list's own whole-list check, its
-// error carried as domain.ErrInvalidReaction as the Agent's arming step carries it, so the refusal
-// reads as the one construction would have given.
-func validateLanes(lanes domain.Generation) error {
-	seeded := domain.Generation{Observe: lanes.Observe, Sync: lanes.Sync}
-	if err := seeded.Validate(); err != nil {
-		return err
-	}
-	if err := reactions.ValidateAll(seeded.Observe); err != nil {
-		if errors.Is(err, domain.ErrInvalidReaction) {
-			return err
-		}
-		return fmt.Errorf("%w: %w", domain.ErrInvalidReaction, err)
-	}
 	return nil
 }
 
