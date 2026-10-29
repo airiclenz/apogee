@@ -12,3 +12,4 @@ Stage 3 ships user advise: on post-tool-result and file-changed only, both landi
 ## Log
 
 - 2026-10-21 Airic Lenz: 2026-10-21: adr-0076-amend-1021 — a user cell on this slot needs no admission arm once the slot meets the structural bar (role-safe, prefix-preserving, fenced, capped, ephemeral, off under Bypass); an arm gates only what apogee ships on. No longer a prerequisite of session-start-advise (the session-started slot shipped in v0.27.0).
+- 2026-10-29 Airic Lenz: 2026-10-29: mcp-handler-posture settled (adr-0076-amend-1029) on existing slots; an mcp: handler rides any slot once it exists, so this issue gains no dependency.

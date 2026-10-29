@@ -51,7 +51,7 @@
 - 6 (re-check): guards folded — Goal reworded to the no-report nil-resolver rule; sync-lane comment sweep; supersedes askGate's doc (`internal/agent/gate.go:129-135`)
 - 9 (re-check): recast (writer decision: one shared no-resolver filter for every Firing path and `apogee probe context`; new notice wording); guards folded — Goal names both notices, wireSession-driven TUI test, notices deduped per (id, text), schedule_test.go and mcp_cmd_test.go in Files
 
-## 1. Record the decision as adr-0076-amend-1029
+## 1. Record the decision as adr-0076-amend-1029 — ✅ DONE (2026-10-29)
 
 **What:**
 **Goal:** `capcom know show adr-0076-amend-1029` prints the decision this plan builds; ADR 0076's Status line and reading-order list name it; `non-tool-advise-slot` carries a log line saying it is not unblocked by this work.
