@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -473,7 +474,8 @@ func TestRepoReactionProposalCarriesItsActionShapes(t *testing.T) {
 // for project files — even when a file in the root shares the tool's name — so the pin carries none.
 func TestRepoMCPReactionPinIsStableAcrossLoads(t *testing.T) {
 	t.Parallel()
-	project := "reactions:\n" +
+	project := "mcp-servers:\n  - name: llama\n    transport: stdio\n    command: llama-server\n" +
+		"reactions:\n" +
 		"  - id: launcher\n" +
 		"    on: [session-started]\n" +
 		"    advise:\n" +
@@ -491,11 +493,13 @@ func TestRepoMCPReactionPinIsStableAcrossLoads(t *testing.T) {
 	_, first, firstNotices := loadLayeredOffer(t, globalPath, projectRoot)
 	_, second, _ := loadLayeredOffer(t, globalPath, projectRoot)
 
-	if len(first.Proposals.Proposed) != 1 || len(second.Proposals.Proposed) != 1 {
+	firstReactions := reactionProposals(first.Proposals.Proposed)
+	secondReactions := reactionProposals(second.Proposals.Proposed)
+	if len(firstReactions) != 1 || len(secondReactions) != 1 {
 		t.Fatalf("Proposals = %+v / %+v (notices %q); want the launcher reaction proposed on both loads",
 			first.Proposals, second.Proposals, firstNotices)
 	}
-	a, b := first.Proposals.Proposed[0], second.Proposals.Proposed[0]
+	a, b := firstReactions[0], secondReactions[0]
 	if a.Handle != "launcher" || a.Fingerprint == "" {
 		t.Fatalf("proposal = %+v; want the launcher reaction under a non-empty Fingerprint", a)
 	}
@@ -505,6 +509,105 @@ func TestRepoMCPReactionPinIsStableAcrossLoads(t *testing.T) {
 	}
 	if len(a.Files) != 0 {
 		t.Errorf("Files = %q; want none — an mcp mapping's names are not project files", a.Files)
+	}
+}
+
+// reactionProposals is the reaction proposals among proposals, in order.
+func reactionProposals(proposals []domain.Proposal) []domain.Proposal {
+	var found []domain.Proposal
+	for _, p := range proposals {
+		if p.Kind == domain.ProposalReaction {
+			found = append(found, p)
+		}
+	}
+	return found
+}
+
+// repoMCPReactionYAML is a repo reaction entry, under its `reactions:` key, whose advise handler
+// calls the status tool on server; enabled, when set, is its `enabled:` value.
+func repoMCPReactionYAML(server, enabled string) string {
+	entry := "reactions:\n  - id: launcher\n    on: [session-started]\n"
+	if enabled != "" {
+		entry += "    enabled: " + enabled + "\n"
+	}
+	return entry + "    advise:\n      mcp:\n        server: " + server + "\n        tool: status\n"
+}
+
+// A repo reaction's `mcp:` handler reaches only a server its own Project config declares and does
+// not shadow: naming one only the user's global config connects — even from a parked entry, or
+// through a repo server dropped as shadowing a global name — refuses that entry alone with a notice
+// naming the server, while a global reaction may name any server, a repo one included.
+func TestRepoMCPReactionNamesOnlyItsOwnServers(t *testing.T) {
+	t.Parallel()
+	const globalLlama = "mcp-servers:\n  - name: llama\n    transport: sse\n    endpoint: https://llama.example.com\n"
+	const projectLlama = "mcp-servers:\n  - name: llama\n    transport: stdio\n    command: llama-server\n"
+	tests := []struct {
+		name          string
+		global        string
+		project       string
+		wantProposed  []string
+		wantReactions []string
+		isShadowed    bool
+		isRefused     bool
+	}{
+		{
+			name:         "its own server",
+			project:      projectLlama + repoMCPReactionYAML("llama", ""),
+			wantProposed: []string{"llama", "launcher"},
+		},
+		{
+			name:      "a global-only server",
+			global:    globalLlama,
+			project:   repoMCPReactionYAML("llama", ""),
+			isRefused: true,
+		},
+		{
+			name:      "a global-only server from a parked entry",
+			global:    globalLlama,
+			project:   repoMCPReactionYAML("llama", "false"),
+			isRefused: true,
+		},
+		{
+			name:       "a repo server that shadows a global name",
+			global:     globalLlama,
+			project:    projectLlama + repoMCPReactionYAML("llama", ""),
+			isShadowed: true,
+			isRefused:  true,
+		},
+		{
+			name:          "a global reaction naming a repo server",
+			global:        repoMCPReactionYAML("llama", ""),
+			project:       projectLlama,
+			wantProposed:  []string{"llama"},
+			wantReactions: []string{"launcher"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			globalPath, projectRoot := layerFixture(t, tt.global, tt.project)
+			path := projectFilePath(projectRoot)
+			var wantNotices []string
+			if tt.isShadowed {
+				wantNotices = append(wantNotices, fmt.Sprintf(repoServerShadowedNotice, path, "llama"))
+			}
+			if tt.isRefused {
+				wantNotices = append(wantNotices, fmt.Sprintf(repoReactionRefusedNotice, path, `"launcher"`,
+					`it names mcp server "llama", which this Project config does not declare`))
+			}
+
+			o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
+
+			if got := proposalHandles(offer.Proposals.Proposed); !slices.Equal(got, tt.wantProposed) {
+				t.Errorf("proposed = %q; want %q", got, tt.wantProposed)
+			}
+			if got := reactionIDs(o.Reactions); !slices.Equal(got, tt.wantReactions) {
+				t.Errorf("Reactions = %q; want %q", got, tt.wantReactions)
+			}
+			if !slices.Equal(notices, wantNotices) {
+				t.Errorf("notices = %q; want %q", notices, wantNotices)
+			}
+		})
 	}
 }
 

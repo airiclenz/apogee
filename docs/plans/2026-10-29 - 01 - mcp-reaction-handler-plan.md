@@ -99,7 +99,10 @@ internal/config/execlayer_test.go — TestRepoReactionProposalCarriesItsActionSh
 **Acceptance:** `go vet ./internal/config/ && GOMEMLIMIT=2GiB go test -count=1 -run 'Reaction|Shape|Pin' ./internal/config/`
 **Commit:** `feat(config): reactions: accepts an mcp: handler mapping`
 
-## 4. A repo entry may name only its own Project config's servers
+## 4. A repo entry may name only its own Project config's servers — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): the allowed set is built by a new ownRepoServers (layer.servers less the global names) and passed into pinRepoReactions → repoArmed; pinRepoServers' inline globalNames loop became the shared serverNameSet helper so both read one definition. The check (checkRepoMCPServers) runs after the lane validation and before the parked return.
+NOTES (2026-10-29): TestRepoMCPReactionPinIsStableAcrossLoads (item 3) named an undeclared server `llama`; its fixture now declares a repo `llama` server and it reads the reaction proposals alone (reactionProposals helper), keeping its pin-stability assertions unchanged.
 
 Depends on item 3.
 

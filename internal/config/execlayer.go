@@ -288,7 +288,9 @@ func checkRepoReactionID(id string, seen map[string]bool) error {
 // the checks each lane's owner holds for the global block (validateReactionBlocks), answering the
 // Reactions it arms — none while it is parked by `enabled: false`, though a parked entry is still
 // checked, so it is never offered for adoption in a shape that could not run once switched on.
-func (r reactionConfig) repoArmed(projectRoot string) ([]domain.Reaction, error) {
+// One of those checks is the layer's own: an `mcp:` handler may name only a server in ownServers,
+// the servers its own Project config declares and does not shadow (adr-0076-amend-1029).
+func (r reactionConfig) repoArmed(projectRoot string, ownServers map[string]bool) ([]domain.Reaction, error) {
 	mapped, err := r.entryReactionsIn(projectRoot)
 	if err != nil {
 		return nil, err
@@ -300,10 +302,26 @@ func (r reactionConfig) repoArmed(projectRoot string) ([]domain.Reaction, error)
 	if err := (domain.Generation{Sync: sync}).Validate(); err != nil {
 		return nil, err
 	}
+	if err := checkRepoMCPServers(mapped, ownServers); err != nil {
+		return nil, err
+	}
 	if r.Enabled != nil && !*r.Enabled {
 		return nil, nil
 	}
 	return mapped, nil
+}
+
+// checkRepoMCPServers refuses mapped when one of its `mcp:` handlers names a server outside
+// ownServers: a repo entry reaches only its own Project config's servers, never one the user's
+// global config connects, which the layer was never granted.
+func checkRepoMCPServers(mapped []domain.Reaction, ownServers map[string]bool) error {
+	for _, armed := range mapped {
+		handler, ok := armed.Handler.(domain.MCPHandler)
+		if ok && !ownServers[handler.Server] {
+			return fmt.Errorf("it names mcp server %q, which this Project config does not declare", handler.Server)
+		}
+	}
+	return nil
 }
 
 // pinnedReaction is a repo reaction with the Reactions it arms and the Adoption entry its pin
@@ -314,10 +332,10 @@ type pinnedReaction struct {
 }
 
 // pinRepoReactions maps and pins each of the layer's reactions that no global reaction shadows, in
-// file order. One that cannot be mapped — a `workspace:` outside the Project root among the ways —
-// or pinned is dropped with a notice naming it.
-func pinRepoReactions(layer projectLayer, global []reactionConfig, projectRoot string,
-	notify func(string)) []pinnedReaction {
+// file order. One that cannot be mapped — a `workspace:` outside the Project root, or an `mcp:`
+// server outside ownServers, among the ways — or pinned is dropped with a notice naming it.
+func pinRepoReactions(layer projectLayer, global []reactionConfig, ownServers map[string]bool,
+	projectRoot string, notify func(string)) []pinnedReaction {
 	globalIDs := make(map[string]bool, len(global))
 	for _, r := range global {
 		globalIDs[strings.TrimSpace(r.ID)] = true
@@ -329,7 +347,7 @@ func pinRepoReactions(layer projectLayer, global []reactionConfig, projectRoot s
 			notify(fmt.Sprintf(repoReactionShadowedNotice, layer.path, id))
 			continue
 		}
-		armed, err := r.repoArmed(projectRoot)
+		armed, err := r.repoArmed(projectRoot, ownServers)
 		var entry adoption.Entry
 		if err == nil {
 			entry, err = r.execPin(projectRoot)
@@ -384,7 +402,8 @@ type pinnedServer struct {
 func classifyProjectLayer(layer projectLayer, global fileConfig, workspacesDir, projectRoot string,
 	notify func(string)) (projectAllowRules, projectServers, projectReactionSet) {
 	servers := pinRepoServers(layer, global.MCPServers, projectRoot, notify)
-	pinned := pinRepoReactions(layer, global.Reactions, projectRoot, notify)
+	ownServers := ownRepoServers(layer, global.MCPServers)
+	pinned := pinRepoReactions(layer, global.Reactions, ownServers, projectRoot, notify)
 	entries := slices.Clone(layer.allow)
 	for _, s := range servers {
 		entries = append(entries, s.entry)
@@ -397,13 +416,32 @@ func classifyProjectLayer(layer projectLayer, global fileConfig, workspacesDir, 
 		resolveRepoReactions(pinned, sorted, store, projectRoot)
 }
 
+// serverNameSet is the names of servers, as a set.
+func serverNameSet(servers []mcpServerConfig) map[string]bool {
+	names := make(map[string]bool, len(servers))
+	for _, m := range servers {
+		names[m.Name] = true
+	}
+	return names
+}
+
+// ownRepoServers is the names of the layer's servers that no global server shadows — the servers a
+// repo reaction's `mcp:` handler may name, whether or not the user has adopted them yet.
+func ownRepoServers(layer projectLayer, global []mcpServerConfig) map[string]bool {
+	globalNames := serverNameSet(global)
+	own := make(map[string]bool, len(layer.servers))
+	for _, m := range layer.servers {
+		if !globalNames[m.Name] {
+			own[m.Name] = true
+		}
+	}
+	return own
+}
+
 // pinRepoServers pins each of the layer's servers that no global server shadows, in file order.
 func pinRepoServers(layer projectLayer, global []mcpServerConfig, projectRoot string,
 	notify func(string)) []pinnedServer {
-	globalNames := make(map[string]bool, len(global))
-	for _, m := range global {
-		globalNames[m.Name] = true
-	}
+	globalNames := serverNameSet(global)
 	var servers []pinnedServer
 	for _, m := range layer.servers {
 		if globalNames[m.Name] {
