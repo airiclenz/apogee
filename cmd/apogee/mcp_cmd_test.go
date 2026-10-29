@@ -26,6 +26,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/adoption"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mcpauth"
 	"github.com/airiclenz/apogee/internal/security"
@@ -924,4 +925,52 @@ func hasMCPTool(w *rootWiring, name string) bool {
 		}
 	}
 	return false
+}
+
+// assertMCPAnswer resolves tool on server through resolve and calls it, failing unless the call
+// answers want.
+func assertMCPAnswer(t *testing.T, label string, resolve domain.MCPResolver, server, tool, want string) {
+	t.Helper()
+	if resolve == nil {
+		t.Fatalf("%s: no MCP resolver is wired", label)
+	}
+	call, err := resolve(server, tool, false)
+	if err != nil {
+		t.Fatalf("%s: resolve %s/%s: %v", label, server, tool, err)
+	}
+	got, err := call(context.Background(), json.RawMessage(`{}`))
+	if err != nil || got != want {
+		t.Errorf("%s: %s/%s answered %q, %v; want %q", label, server, tool, got, err, want)
+	}
+}
+
+// A session resolves a user reaction's mcp: handler through its LIVE MCP set (adr-0076-amend-1029):
+// the Config every engine the session builds is copied from (serverBinder) and the observe Runner's
+// executor both reach the server wireSession dialled — the call a session-started advise naming its
+// ping tool makes answers "pong" — and after a mid-session reconnect both resolve against the new set, with no restart.
+func TestSessionResolvesReactionMCPThroughTheLiveSet(t *testing.T) {
+	t.Parallel()
+	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false), newPingMCPServer(t, "llm"))
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	resolvers := map[string]domain.MCPResolver{
+		"the engine Config":           w.binder.cfg.MCP,
+		"the observe Runner executor": w.mcpReactions.resolver(),
+	}
+	for label, resolve := range resolvers {
+		assertMCPAnswer(t, label, resolve, "llm", "ping", "pong")
+	}
+
+	if _, err := w.mcpSet.reconnect([]mcp.ServerConfig{newPingMCPServer(t, "other")}, w.toolSet, &applySettingSpy{}); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+
+	for label, resolve := range resolvers {
+		assertMCPAnswer(t, label, resolve, "other", "ping", "pong")
+		_, err := resolve("llm", "ping", false)
+		if want := `mcp server "llm" is not connected`; err == nil || err.Error() != want {
+			t.Errorf("%s: resolving the server the reconnect dropped = %v, want %q", label, err, want)
+		}
+	}
 }

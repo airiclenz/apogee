@@ -43,6 +43,13 @@ func probeContextWorkspace(t *testing.T) string {
 // flags and returns what it printed on stdout.
 func runProbeContext(t *testing.T, home, workspace, endpoint string, extra ...string) string {
 	t.Helper()
+	out, _ := runProbeContextStreams(t, home, workspace, endpoint, extra...)
+	return out
+}
+
+// runProbeContextStreams is runProbeContext returning what the command printed on stderr as well.
+func runProbeContextStreams(t *testing.T, home, workspace, endpoint string, extra ...string) (string, string) {
+	t.Helper()
 	assertNoAmbientApogeeConfig(t)
 
 	cmd := probeContextCommand()
@@ -55,7 +62,7 @@ func runProbeContext(t *testing.T, home, workspace, endpoint string, extra ...st
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("probe context: %v\nstderr:\n%s", err, errOut.String())
 	}
-	return out.String()
+	return out.String(), errOut.String()
 }
 
 // contextCostRowBytes reads the bytes column of the named row off the printed table, so a test can
@@ -139,6 +146,29 @@ func TestProbeContextNamesArmedReactions(t *testing.T) {
 			t.Errorf("an observe-only config must add no armed line:\n%s", report)
 		}
 	})
+}
+
+// TestProbeContextLeavesAnMCPAdviseEntryInert pins the probe's half of the no-resolver rule
+// (adr-0076-amend-1029): no MCP server is dialled here, so an advise mcp: entry is neither armed nor
+// counted, and the inert notice is printed once on stderr.
+func TestProbeContextLeavesAnMCPAdviseEntryInert(t *testing.T) {
+	t.Parallel()
+	stub := probeContextStub(t)
+	workspace := probeContextWorkspace(t)
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	appendHomeConfig(t, home,
+		"reactions:\n"+
+			"  - id: launcher\n    on: [session-started]\n    advise:\n      mcp:\n        server: llama\n        tool: status\n")
+
+	report, stderr := runProbeContextStreams(t, home, workspace, stub.URL)
+
+	want := `reaction "launcher": its mcp: handler is inert here — MCP servers are not connected in this run`
+	if got := strings.Count(stderr, want); got != 1 {
+		t.Errorf("stderr carries the inert notice %d time(s), want once:\n%s", got, stderr)
+	}
+	if strings.Contains(report, "armed") {
+		t.Errorf("an inert mcp: advise entry was counted armed:\n%s", report)
+	}
 }
 
 // TestProbeContextComposesUnderTheStartupMode asserts the mode reaches the composition: the

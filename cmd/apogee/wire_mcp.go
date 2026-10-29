@@ -8,10 +8,13 @@ package main
 // reached leaves the session on the connections it already has.
 
 import (
+	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 )
 
@@ -51,6 +54,40 @@ func (m *liveMCP) tools() []apogee.Tool {
 		return nil
 	}
 	return m.current.Tools()
+}
+
+// errMCPResolverUnbound refuses an observe reaction's mcp: call that fired before the session dialled
+// its MCP servers: there is no live set to resolve its server against yet.
+var errMCPResolverUnbound = errors.New("MCP servers are not connected yet")
+
+// mcpResolverSlot is the late bind between the session's Reaction Runner and the resolver over its
+// live MCP set (adr-0076-amend-1029). The Runner is built at boot (resolveConfig), before
+// wireSession dials any server, so its executor holds resolver() and wireSession binds the real
+// resolver once the live set exists. It is safe for concurrent use: the Runner's workers resolve
+// through it while the bind may land.
+type mcpResolverSlot struct {
+	resolve atomic.Pointer[domain.MCPResolver]
+}
+
+// bind stores the resolver the Runner's mcp: entries resolve through, replacing any earlier one. A
+// nil slot binds nothing — a wiring whose boot built no Runner.
+func (s *mcpResolverSlot) bind(resolve domain.MCPResolver) {
+	if s == nil {
+		return
+	}
+	s.resolve.Store(&resolve)
+}
+
+// resolver is the domain.MCPResolver the Runner's executor is handed: it resolves through whatever
+// bind stored last, and refuses with errMCPResolverUnbound while nothing is bound.
+func (s *mcpResolverSlot) resolver() domain.MCPResolver {
+	return func(server, tool string, project bool) (domain.MCPCall, error) {
+		bound := s.resolve.Load()
+		if bound == nil {
+			return nil, errMCPResolverUnbound
+		}
+		return (*bound)(server, tool, project)
+	}
 }
 
 // close tears down whatever set the session ended on — the run's own defer, which is why it reads the

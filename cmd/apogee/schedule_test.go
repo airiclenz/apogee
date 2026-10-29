@@ -862,8 +862,10 @@ type scheduleHarness struct {
 	store     *session.Store
 }
 
-// newScheduleHarness composes a Firing against endpoint and puts a Scheduler in front of it.
-func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
+// newScheduleHarness composes a Firing against endpoint and puts a Scheduler in front of it. Each
+// adjust, in order, edits the wiring before the Scheduler takes its fire seam — the session's
+// options or its notice line, say.
+func newScheduleHarness(t *testing.T, endpoint string, adjust ...func(*scheduleWiring)) *scheduleHarness {
 	t.Helper()
 
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
@@ -877,6 +879,9 @@ func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
 		width:   func() int { return 1 },
 		store:   store,
+	}
+	for _, edit := range adjust {
+		edit(&w)
 	}
 
 	clock := &handClock{}
@@ -1539,5 +1544,29 @@ func TestScheduleFiringCarriesTheSessionsSyncLane(t *testing.T) {
 	if stub.spec.Config.Reactions != nil {
 		t.Errorf("Config.Reactions = %+v, want nil — the sync lane takes ONE route into a Firing, "+
 			"and a list written to both would arm every entry twice", stub.spec.Config.Reactions)
+	}
+}
+
+// A `/schedule` Firing dials no MCP server, so its advise mcp: entry is said to be inert on the
+// session's own notice line (scheduleWiring.notifyHook, which reaches raise as firingInputs.report)
+// — the line this Driver tells a Reaction's trouble on, since fire drops raise's notices slice.
+func TestAScheduleFiringReportsAnInertMCPEntry(t *testing.T) {
+	t.Parallel()
+
+	up := firingUpstream(t, "the build is green")
+	notices := &noticeRecorder{}
+	h := newScheduleHarness(t, up.URL, func(w *scheduleWiring) {
+		opts := config.Options{}
+		opts.Reactions = []domain.Reaction{mcpReaction("status", domain.ClassAdvise, domain.MomentSessionStarted, "status")}
+		w.live = newLiveSettings(opts, config.ProjectOffer{})
+		w.notifyHook = notices.report
+	})
+
+	h.fire(t)
+	h.await(t, schedule.EventCompleted)
+
+	want := []string{`reaction "status": its mcp: handler is inert here — MCP servers are not connected in this run`}
+	if got := notices.said(); !slices.Equal(got, want) {
+		t.Errorf("the session's notice line was told %q, want %q", got, want)
 	}
 }

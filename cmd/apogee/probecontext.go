@@ -104,6 +104,10 @@ func probeContextCommand() *cobra.Command {
 			if err := config.ApplyConfig(&opts, cmd.Flags().Changed, os.Getenv, os.ReadFile, func(msg string) { cmd.PrintErrln(msg) }); err != nil {
 				return err
 			}
+			// No MCP server is dialled here, so an mcp: entry is settled as a Firing settles it:
+			// an advise or observe one is neither armed nor counted, and each says so on stderr
+			// beside the config warnings (adr-0076-amend-1029).
+			opts.Reactions = disarmUnconnectedMCP(opts.Reactions, func(msg string) { cmd.PrintErrln(msg) })
 			// The mode the table is composed under — the resolved startup mode unless --mode
 			// says otherwise. It matters: Plan filters the menu (toolMenu, internal/agent) and
 			// adds a bullet to the orientation, so a Plan table and an Auto table differ, and the

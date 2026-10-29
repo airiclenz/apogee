@@ -227,14 +227,20 @@ func (w *rootWiring) resolveConfig() error {
 	// running on the global posture (ADR 0104 §8): the Agent binds its fenced runner into the slot
 	// once the late engine builds it (Config.BindProjectRun, below), and the command runs inside
 	// the workspace exec fence under that Agent's permit.
+	//
+	// An observe entry's `run: mcp:` resolves through mcpReactions, which wireSession binds to the
+	// resolver over the live MCP set once it has dialled the servers (adr-0076-amend-1029): the
+	// Runner exists before any server is connected, and a reconnect is seen without rebuilding it.
 	observe := generationOf(w.opts).Observe
 	webhookGuard := security.NewURLGuard(w.opts.URLAllowHosts, w.opts.URLDenyHosts)
 	projectRuns := &projectRunSlot{}
+	w.mcpReactions = &mcpResolverSlot{}
 	runner, err := reactions.New(observe, reactions.Options{
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
-		Exec:      reactions.DefaultExecutor(w.roots.workspace, webhookGuard, projectRuns.runner(), nil),
+		Exec: reactions.DefaultExecutor(w.roots.workspace, webhookGuard, projectRuns.runner(),
+			w.mcpReactions.resolver()),
 	})
 	if err != nil {
 		return err

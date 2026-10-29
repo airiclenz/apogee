@@ -240,6 +240,10 @@ type rootWiring struct {
 	// built in resolveConfig — before the Config that carries it — and it is the ONE Runner this
 	// session has; a Firing raised inside the session composes its own (wire_firing.go).
 	hooks *reactions.Runner
+	// mcpReactions is the slot hooks' executor resolves an observe reaction's mcp: entry through
+	// (adr-0076-amend-1029): built with hooks in resolveConfig, bound by wireSession to the resolver
+	// over the live MCP set once that set is dialled.
+	mcpReactions *mcpResolverSlot
 	// stats is this session's per-server stats recorder (ADR 0085): the Driver sink that appends
 	// every UpstreamAttemptEvent to ~/.apogee/server-stats.jsonl while `server-stats:` is on. It
 	// decorates hooks as Config.Events, and the `/settings` row opens or stops it live.

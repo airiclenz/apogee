@@ -2151,3 +2151,149 @@ func TestFiringHooksFenceARepoRun(t *testing.T) {
 		t.Error("the repo command ran on the global posture")
 	}
 }
+
+// mcpReaction is a user reaction of class whose handler calls tool on the MCP server alias "llm" at
+// on — the shape a `{mcp: {server: llm, tool: …}}` mapping resolves to.
+func mcpReaction(id string, class domain.Class, on domain.Moment, tool string) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   class,
+		On:      []domain.Moment{on},
+		Handler: domain.MCPHandler{Server: "llm", Tool: tool},
+		Timeout: testtime.Budget(10 * time.Second),
+	}
+}
+
+// noticeRecorder collects the lines a Driver's report seam is told, safe for the Runner's workers.
+type noticeRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+// report is the Driver's report seam (firingInputs.report).
+func (r *noticeRecorder) report(msg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, msg)
+}
+
+// said returns a copy of every line reported so far, oldest first.
+func (r *noticeRecorder) said() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.lines)
+}
+
+// A Firing dials no MCP server (adr-0076-amend-1029), so an advise or observe mcp: entry is dropped
+// before either lane is armed and says so once on the Driver's report line — once per entry, even
+// for one `reactions:` entry whose `run:` and `advise:` both resolve to mcp: Reactions under one id —
+// while a command entry beside it is armed as before and no resolver reaches the run.
+func TestFiringLeavesAdviseAndObserveMCPEntriesInert(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		reactions []domain.Reaction
+		wantSaid  []string
+	}{
+		{
+			name: "an advise and an observe entry",
+			reactions: []domain.Reaction{
+				mcpReaction("status", domain.ClassAdvise, domain.MomentSessionStarted, "status"),
+				mcpReaction("record", domain.ClassObserve, domain.MomentExchangeFinished, "record"),
+			},
+			wantSaid: []string{
+				`reaction "status": its mcp: handler is inert here — MCP servers are not connected in this run`,
+				`reaction "record": its mcp: handler is inert here — MCP servers are not connected in this run`,
+			},
+		},
+		{
+			name: "one entry with both run: and advise: as mcp:",
+			reactions: []domain.Reaction{
+				mcpReaction("both", domain.ClassObserve, domain.MomentSessionStarted, "status"),
+				mcpReaction("both", domain.ClassAdvise, domain.MomentSessionStarted, "status"),
+			},
+			wantSaid: []string{
+				`reaction "both": its mcp: handler is inert here — MCP servers are not connected in this run`,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &stubRunner{res: run.Result{Turns: 1}}
+			in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+			notices := &noticeRecorder{}
+			in.report = notices.report
+			command := domain.Reaction{
+				ID:      "log",
+				Origin:  domain.OriginUser,
+				Class:   domain.ClassObserve,
+				On:      []domain.Moment{domain.MomentExchangeFinished},
+				Handler: domain.ArgvHandler{Argv: []string{"true"}},
+				Timeout: time.Second,
+			}
+			in.opts.Reactions = append(slices.Clone(tt.reactions), command)
+
+			if _, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil, nil); err != nil {
+				t.Fatalf("raise: %v", err)
+			}
+
+			if got := notices.said(); !slices.Equal(got, tt.wantSaid) {
+				t.Errorf("the Driver was told %q, want %q", got, tt.wantSaid)
+			}
+			armed := slices.Concat(stub.spec.Generation.Sync, stub.spec.Generation.Observe, stub.spec.Config.Observe)
+			if slices.ContainsFunc(armed, isMCPReaction) {
+				t.Errorf("an mcp: entry was armed: Generation %+v, Runner list %+v",
+					stub.spec.Generation, stub.spec.Config.Observe)
+			}
+			if !slices.ContainsFunc(stub.spec.Config.Observe, func(r domain.Reaction) bool { return r.ID == "log" }) {
+				t.Errorf("the Runner list %+v lost the command entry beside the dropped mcp: ones",
+					stub.spec.Config.Observe)
+			}
+			if stub.spec.Config.MCP != nil {
+				t.Error("Config.MCP is set on a Firing; no MCP server is dialled, so nothing may resolve one")
+			}
+		})
+	}
+}
+
+// A gate mcp: entry stays armed in a Firing (adr-0076-amend-1029): it is said once on the Driver's
+// report line, and with no server to call every call it sees escalates to an ask, which the
+// Firing's deny-all Approver refuses — so the model's one tool call is denied.
+func TestFiringMCPGateRefusesEveryCallItGates(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{ToolCalls: []stubllm.ToolCall{{Name: "read_file", Arguments: `{"path":"README.md"}`}}},
+		{Repeat: true, Text: "done"},
+	}})
+	in := raiseInputs(t, &stubRunner{}, heartbeat.Beat{Reachable: true, Answered: true})
+	in.entry.Endpoint, in.entry.Model = up.URL, "gate-model"
+	notices := &noticeRecorder{}
+	in.report = notices.report
+	in.opts.Reactions = []domain.Reaction{mcpReaction("warden", domain.ClassGate, domain.MomentPreToolExec, "verdict")}
+	var spec run.Spec
+	in.runner = func(ctx context.Context, s run.Spec) (run.Result, error) {
+		spec = s
+		return run.Once(ctx, s)
+	}
+
+	res, _, err := raise(context.Background(), in, "read the readme", nil, nil, nil, nil)
+
+	if err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+	want := []string{`reaction "warden": its mcp: gate cannot run here — MCP servers are not connected ` +
+		`in this run, so every call it gates is refused`}
+	if got := notices.said(); !slices.Equal(got, want) {
+		t.Errorf("the Driver was told %q, want %q", got, want)
+	}
+	if !slices.ContainsFunc(spec.Generation.Sync, func(r domain.Reaction) bool { return r.ID == "warden" }) {
+		t.Errorf("the sync lane %+v does not arm the gate; a gate mcp: entry must stay armed", spec.Generation.Sync)
+	}
+	if res.Denied != 1 {
+		t.Errorf("Result.Denied = %d, want 1 — the gate must escalate the read to an ask the Firing refuses", res.Denied)
+	}
+}

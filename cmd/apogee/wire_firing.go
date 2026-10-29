@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -880,6 +881,56 @@ func clockNow(c schedule.Clock) func() time.Time {
 	return c.Now
 }
 
+// The two sentences a Driver that dials no MCP server says about a user reaction's mcp: handler
+// (adr-0076-amend-1029), once per entry at setup. An advise or observe entry is dropped before
+// arming; a gate entry stays armed and escalates every call it sees to an ask, which a Firing's
+// deny-all Approver refuses.
+const (
+	inertMCPNotice     = "reaction %q: its mcp: handler is inert here — MCP servers are not connected in this run"
+	inertMCPGateNotice = "reaction %q: its mcp: gate cannot run here — MCP servers are not connected in this " +
+		"run, so every call it gates is refused"
+)
+
+// disarmUnconnectedMCP is the one filter every Driver path that arms reactions without an MCP
+// resolver runs — every Firing (raise: headless, the daemon, the TUI's /schedule) and
+// `apogee probe context` — before it reads the lanes. It returns list without its advise and
+// observe mcp: entries and with its gate mcp: entries kept, and tells report one notice per entry:
+// inertMCPNotice for a dropped one, inertMCPGateNotice for a kept gate. Notices are deduplicated by
+// reaction id and text, because one `reactions:` entry with both `run:` and `advise:` as mcp:
+// resolves to two Reactions under one id. nil report drops the notices; list itself is never
+// modified.
+func disarmUnconnectedMCP(list []domain.Reaction, report func(string)) []domain.Reaction {
+	if !slices.ContainsFunc(list, isMCPReaction) {
+		return list
+	}
+	kept := make([]domain.Reaction, 0, len(list))
+	said := make(map[string]bool)
+	for _, r := range list {
+		if !isMCPReaction(r) {
+			kept = append(kept, r)
+			continue
+		}
+		format := inertMCPNotice
+		if r.Class == domain.ClassGate {
+			format = inertMCPGateNotice
+			kept = append(kept, r)
+		}
+		msg := fmt.Sprintf(format, r.ID)
+		if said[msg] || report == nil {
+			continue
+		}
+		said[msg] = true
+		report(msg)
+	}
+	return kept
+}
+
+// isMCPReaction reports whether r calls a tool on an MCP server.
+func isMCPReaction(r domain.Reaction) bool {
+	_, ok := r.Handler.(domain.MCPHandler)
+	return ok
+}
+
 // raise is the ONE act every unattended Firing is: it takes what a Driver decided (firingInputs, the
 // prompt, the Schedule the run belongs to, the store its record lands in) and does, in this order,
 // everything the three Drivers used to spell out for themselves — divides the `reactions:` list
@@ -935,6 +986,9 @@ func raise(
 	onID func(recordID string),
 	narrate func(recordID string, cfg apogee.Config, sink domain.EventSink) domain.EventSink,
 ) (run.Result, []string, error) {
+	// A Firing dials no MCP server, so its mcp: entries are settled before either lane is read —
+	// here and in firingConfig, which reads the same in.opts (adr-0076-amend-1029).
+	in.opts.Reactions = disarmUnconnectedMCP(in.opts.Reactions, in.report)
 	lanes := domain.LanesOf(in.opts.Reactions)
 	guard := security.NewURLGuard(in.opts.URLAllowHosts, in.opts.URLDenyHosts)
 	projectRuns := &projectRunSlot{}

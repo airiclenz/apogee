@@ -202,7 +202,12 @@ internal/reactions/runner_test.go — fakeExecutor, TestRunnerReportsAFailureOnc
 **Acceptance:** `go build ./... && go vet ./internal/reactions/ && GOMEMLIMIT=2GiB go test -count=1 -run 'Exec|Runner|MCP' ./internal/reactions/`
 **Commit:** `feat(reactions): observe reactions may call an MCP tool`
 
-## 9. The TUI injects the resolver; Firing Drivers leave mcp: inert
+## 9. The TUI injects the resolver; Firing Drivers leave mcp: inert — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): re-derived from "the item-8 executor slot" existing at the header base — item 8 left the TUI's DefaultExecutor resolver nil, so the late-bound slot is a new mcpResolverSlot (wire_mcp.go), held on rootWiring as mcpReactions, built in resolveConfig (wire_boot.go) and bound in wireSession.
+NOTES (2026-10-29): consequential edit — cmd/apogee/wire.go: made necessary by the rootWiring field mcpReactions that carries the slot from resolveConfig to wireSession.
+NOTES (2026-10-29): the TUI test asserts the session-started advise's call at the resolver level (the serverBinder's copied Config.MCP and the Runner executor's slot both answer "pong", then the reconnected set), not by driving an advise through a live engine turn; wire_engine_test.go and wire_helpers_test.go needed no change.
+NOTES (2026-10-29): runProbeContext now delegates to a new runProbeContextStreams helper (stdout and stderr) so the probe test can read the stderr notice; newScheduleHarness gained a variadic wiring-adjust parameter, existing callers unchanged.
 
 Depends on items 5, 6 and 8.
 

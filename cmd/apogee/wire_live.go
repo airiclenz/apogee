@@ -174,6 +174,14 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		w.cueSkippedMCP(client.Skipped())
 		return client, nil
 	})
+	// The resolver a user reaction's mcp: handler calls through (adr-0076-amend-1029), over the live
+	// set rather than this startup snapshot, so a reconnect's servers are what the next firing
+	// resolves against without a restart. It reads w.mcpSet through a closure, never a method value:
+	// the holder is assigned on the line above, and the serverBinder below copies this Config, so
+	// both the sync lanes (Config.MCP) and the observe Runner's executor (mcpReactions) are set here.
+	resolveMCP := mcp.Resolver(func() []apogee.Tool { return w.mcpSet.tools() })
+	w.cfg.MCP = resolveMCP
+	w.mcpReactions.bind(resolveMCP)
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the
 	// composition root has to keep the pointer. The settings surface re-points a live tool in place
