@@ -156,6 +156,9 @@ func (a *Agent) launchRunner(launch workflowLaunch) (builtLaunch, error) {
 			return builtLaunch{}, err
 		}
 		if launch.folder == nil {
+			if err := checkRecipeInputs(recipe); err != nil {
+				return builtLaunch{}, err
+			}
 			inputs, err := completeInputs(recipe.Inputs, launch.inputs)
 			if err != nil {
 				return builtLaunch{}, err

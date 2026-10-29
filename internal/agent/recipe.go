@@ -57,11 +57,11 @@ const (
 // The placeholders a script stage's `run:` is rendered with as it runs, beside the recipe's own
 // inputs: the skill's folder (a copy staged into the workflow folder for a shipped skill, whose
 // `shipped:` address no shell can open), the workflow folder, the split budget a part may hold, and
-// the apogee executable (Config.ApogeeExecutable) — the name workflow.ValidateInputs reserves, so no
-// input shadows it.
+// the apogee executable (Config.ApogeeExecutable). Each is built from the name
+// workflow.ValidateInputs reserves for it, so no input shadows it.
 const (
-	workflowDirPlaceholder = "{workflow_dir}"
-	partBytesPlaceholder   = "{part_bytes}"
+	workflowDirPlaceholder = "{" + workflow.WorkflowDirInputName + "}"
+	partBytesPlaceholder   = "{" + workflow.PartBytesInputName + "}"
 	apogeePlaceholder      = "{" + workflow.ApogeeInputName + "}"
 )
 
@@ -84,10 +84,6 @@ const stagedSkillDir = "skill"
 // afresh rather than re-run.
 const skillFileGoneFormat = "this workflow runs %s/%s, which the /%s skill no longer carries: the workflow was " +
 	"planned by an older apogee; start /%s again"
-
-// The brief placeholders a stage's task is rendered with (workflow's renderBrief): an input by
-// either name is left unbound, so neither is ever shadowed.
-var reservedInputNames = []string{"item", "out"}
 
 // The texts a launch lands after the user's line: the result lines of a run, or why it did not run.
 const (
@@ -267,8 +263,12 @@ func (a *Agent) recipeRefusal(turn int, id string, err error) string {
 
 // bindRecipeInputs binds text to recipe's inputs (workflow.BindInputs) and asks the user for each
 // required input left unbound, in declared order. With no Asker, or an empty answer, the first
-// such input fails the launch with `missing input: <name>`.
+// such input fails the launch with `missing input: <name>`. Declarations checkRecipeInputs refuses
+// fail the launch first, before the user is asked anything.
 func (a *Agent) bindRecipeInputs(ctx context.Context, recipe workflow.Recipe, text string) (map[string]string, error) {
+	if err := checkRecipeInputs(recipe); err != nil {
+		return nil, err
+	}
 	values, missing, err := workflow.BindInputs(recipe.Inputs, text)
 	if err != nil {
 		return nil, err
@@ -315,6 +315,23 @@ func (a *Agent) askUser(ctx context.Context, question string, choices []string) 
 		return "", err
 	}
 	return strings.TrimSpace(answer.Text), nil
+}
+
+// checkRecipeInputs refuses a recipe whose input declarations workflow.ValidateInputs finds
+// wanting — above all one taking a reserved name, whose `{<name>}` binding would shadow a
+// placeholder the workflow fills. The skills loader refuses such a recipe as it loads; this check
+// is the same refusal for one an embedder's RecipeSource serves (ADR 0031), worded in the
+// Problems' own text.
+func checkRecipeInputs(recipe workflow.Recipe) error {
+	problems := workflow.ValidateInputs(recipe.Inputs)
+	if len(problems) == 0 {
+		return nil
+	}
+	messages := make([]string, len(problems))
+	for index, problem := range problems {
+		messages[index] = problem.Message
+	}
+	return errors.New(strings.Join(messages, "; "))
 }
 
 // completeInputs checks keyed inputs against the declarations: an undeclared key is an error, an
@@ -396,13 +413,11 @@ func folderRelativePrompt(prompt, dir string) string {
 }
 
 // inputReplacers are the two renderings of `{<input>}`: the value as written, and the value
-// quoted by quoter for a script's command. A reserved brief placeholder is never an input's.
+// quoted by quoter for a script's command. Every input is bound: a reserved name never reaches
+// here, refused first by checkRecipeInputs.
 func inputReplacers(inputs map[string]string, quoter recipeQuoter) (plain, quoted *strings.Replacer) {
 	var plainPairs, quotedPairs []string
 	for name, value := range inputs {
-		if slices.Contains(reservedInputNames, name) {
-			continue
-		}
 		placeholder := "{" + name + "}"
 		plainPairs = append(plainPairs, placeholder, value)
 		quotedPairs = append(quotedPairs, placeholder, quoter.quote(value))

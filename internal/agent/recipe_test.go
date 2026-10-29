@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"os"
 	"os/exec"
@@ -379,6 +380,58 @@ func TestRecipe_AMissingInputWithNoAskerRunsNothing(t *testing.T) {
 	if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
 		t.Errorf("workflow folders = %v, want none", folders)
 	}
+}
+
+// A recipe an embedder's RecipeSource serves is not checked by the skills loader, so the agent
+// checks its inputs itself before binding: one declaring the reserved `item` is refused with
+// workflow.ValidateInputs' own words — typed as a launch, where a required input would otherwise
+// be asked for, and named by a fan_out call, where it would otherwise bind over the brief's {item}
+// — and no workflow runs.
+func TestRecipe_AReservedInputIsRefusedBeforeBinding(t *testing.T) {
+	t.Parallel()
+
+	const refusal = `input name "item" is reserved`
+	reserved := func() workflow.Recipe {
+		recipe := reviewRecipe()
+		recipe.Inputs = []workflow.InputDecl{{Name: "item", Required: true}}
+		return recipe
+	}
+
+	t.Run("typed launch", func(t *testing.T) {
+		t.Parallel()
+		cfg := recipeConfig(t, &recordingSink{}, reserved())
+		up := reviewUpstream("src")
+		a, err := newAgent(cfg, up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+
+		runInput(t, a, domain.UserInput{Text: "/review", SkillIDs: []string{"review"}})
+
+		if got := up.first(t, "/review"); !strings.Contains(got, "recipe /review could not run: "+refusal) {
+			t.Errorf("the message does not say the input name is reserved:\n%s", got)
+		}
+		if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
+			t.Errorf("workflow folders = %v, want none", folders)
+		}
+	})
+
+	t.Run("fan_out call", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		cfg := recipeConfig(t, sink, reserved())
+		up := recipeFanOutUpstream(`{"recipe":"review","inputs":{"item":"src"}}`)
+
+		runWorkflowParent(t, context.Background(), cfg, up, "please run it")
+
+		got := callResult(t, sink.events, "fo1")
+		if want := fmt.Sprintf(fanOutRecipeFailed, "review", refusal); !got.IsError || !strings.Contains(got.Content, want) {
+			t.Errorf("fan_out result = %+v, want an error containing %q", got, want)
+		}
+		if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
+			t.Errorf("workflow folders = %v, want none for a refused recipe", folders)
+		}
+	})
 }
 
 func TestRecipe_AMidTextReferenceAttachesTheBody(t *testing.T) {
@@ -771,7 +824,7 @@ func TestBindPlanInputs(t *testing.T) {
 			Over: &workflow.ItemSource{Files: "{scope}/*.go"}},
 	}}}
 
-	plan := bindPlanInputs(recipe, map[string]string{"scope": "internal", "focus": "error handling", "item": "x"}, nil)
+	plan := bindPlanInputs(recipe, map[string]string{"scope": "internal", "focus": "error handling"}, nil)
 
 	if plan.Name != "r" {
 		t.Errorf("plan name = %q, want the recipe id", plan.Name)

@@ -994,3 +994,26 @@ func TestWorkflowSpawn_ACompletedSubAgentItemRunsOnceAndTalliesOK(t *testing.T) 
 		t.Errorf("status origin = %q, %v; want %q", status.Origin, err, workflow.OriginSubAgent)
 	}
 }
+
+// A stage's prompt file renders {item} as the item's entries and {out} as its output path — the
+// placeholders workflow reserves under those names.
+func TestWorkflowSpawnerTaskRendersItemAndOut(t *testing.T) {
+	t.Parallel()
+
+	spawner := &workflowSpawner{prompts: fstest.MapFS{
+		"prompts/audit.md": &fstest.MapFile{Data: []byte("audit {item} into {out}")},
+	}}
+	spec := workflow.ItemSpec{
+		Stage:  workflow.Stage{Name: "audit", Kind: workflow.StageFanout, Prompt: "prompts/audit.md"},
+		Item:   workflow.Item{Label: "alpha … beta (2)", Units: []string{"alpha", "beta"}},
+		Output: "results/audit-1.md",
+	}
+
+	got, err := spawner.task(spec)
+	if err != nil {
+		t.Fatalf("task: %v", err)
+	}
+	if want := "audit alpha, beta into results/audit-1.md"; got != want {
+		t.Errorf("task = %q, want %q", got, want)
+	}
+}

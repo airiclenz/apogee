@@ -373,10 +373,10 @@ func (s *workflowSpawner) task(spec workflow.ItemSpec) (string, error) {
 			return "", err
 		}
 		// The placeholders a stage's task renders with (workflow's renderBrief): {item} is the
-		// item's entries, {out} its output path.
+		// item's entries, {out} its output path — each built from the name workflow reserves for it.
 		rendered := strings.NewReplacer(
-			"{item}", strings.Join(spec.Item.Units, ", "),
-			"{out}", spec.Output,
+			"{"+workflow.ItemInputName+"}", strings.Join(spec.Item.Units, ", "),
+			"{"+workflow.OutInputName+"}", spec.Output,
 		).Replace(body)
 		brief = joinParagraphs(brief, rendered)
 	}
