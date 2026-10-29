@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -272,6 +273,82 @@ reactions:
 	}
 }
 
+// mcpShapeSentence is the tail of the shape refusal every action key earns, the three shapes it may
+// take listed together.
+const mcpShapeSentence = "is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping " +
+	"{mcp: {server:, tool:, args:, payload-arg:}}"
+
+// A `run:`, `advise:` or `gate:` mapping whose only key is `mcp:` loads as an MCPHandler carrying
+// the server alias, the server's own tool name, the static args and the payload argument exactly as
+// the entry spells them (adr-0076-amend-1029), under the class its key names.
+func TestLoadFileConfigResolvesMCPMappings(t *testing.T) {
+	t.Parallel()
+
+	path := writeReactionsConfig(t, `
+reactions:
+  - id: tally
+    on: [turn-finished]
+    run:
+      mcp:
+        server: notes
+        tool: append
+        payload-arg: event
+  - id: launcher
+    on: [session-started]
+    advise:
+      mcp:
+        server: llama
+        tool: status
+        args:
+          verbose: true
+          profile: coder
+  - id: warden
+    on: [pre-tool-exec]
+    gate:
+      mcp:
+        server: policy
+        tool: decide
+`)
+
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+
+	want := []struct {
+		id      string
+		class   domain.Class
+		handler domain.MCPHandler
+	}{
+		{id: "tally", class: domain.ClassObserve,
+			handler: domain.MCPHandler{Server: "notes", Tool: "append", PayloadArg: "event"}},
+		{id: "launcher", class: domain.ClassAdvise, handler: domain.MCPHandler{Server: "llama", Tool: "status",
+			Args: map[string]any{"verbose": true, "profile": "coder"}}},
+		{id: "warden", class: domain.ClassGate, handler: domain.MCPHandler{Server: "policy", Tool: "decide"}},
+	}
+	if len(opts.Reactions) != len(want) {
+		t.Fatalf("resolved %d reactions; want the %d the three entries arm: %+v",
+			len(opts.Reactions), len(want), opts.Reactions)
+	}
+	for i, w := range want {
+		got := opts.Reactions[i]
+		if got.ID != w.id || got.Class != w.class {
+			t.Errorf("entry %d is %q/%s; want %q/%s", i, got.ID, got.Class, w.id, w.class)
+		}
+		handler, ok := got.Handler.(domain.MCPHandler)
+		if !ok {
+			t.Errorf("%s handler = %T; want a domain.MCPHandler for an `mcp:` mapping", w.id, got.Handler)
+			continue
+		}
+		if !reflect.DeepEqual(handler, w.handler) {
+			t.Errorf("%s handler = %+v; want %+v", w.id, handler, w.handler)
+		}
+	}
+	if names := ReactionEnvNames(opts); len(names) != 0 {
+		t.Errorf("ReactionEnvNames = %v; want none — an mcp entry reads no environment variable", names)
+	}
+}
+
 // `advise:` on `session-started` is admitted (ADR 0076 amendment 1021): an argv or webhook entry
 // on that Moment loads as one advise Reaction on the sync lane, and an entry spelling `run:` beside
 // `advise:` on `[session-started]` loads — session-started is a notice `run:` reacts to and a
@@ -422,27 +499,27 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 		{
 			name: "run: is a bare string",
 			body: "reactions:\n  - id: notify\n    on: [error]\n    run: notify-send\n",
-			want: `reaction "notify": run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
+			want: `reaction "notify": run: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`,
 		},
 		{
 			name: "run: is absent",
 			body: "reactions:\n  - id: notify\n    on: [error]\n",
-			want: `reaction "notify": run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
+			want: `reaction "notify": run: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`,
 		},
 		{
 			name: "the webhook mapping carries a key it does not have",
 			body: "reactions:\n  - id: notify\n    on: [error]\n    run:\n      url: https://example.com/\n      header-env:\n        A: B\n",
-			want: `reaction "notify": run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
+			want: `reaction "notify": run: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`,
 		},
 		{
 			name: "advise: is a bare string",
 			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise: say-something\n",
-			want: `reaction "coach": advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
+			want: `reaction "coach": advise: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`,
 		},
 		{
 			name: "advise: is a webhook mapping carrying a key it does not have",
 			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise:\n      url: https://example.com/\n      header-env:\n        A: B\n",
-			want: `reaction "coach": advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
+			want: `reaction "coach": advise: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`,
 		},
 		{
 			name: "advise: is an empty argv list",
@@ -465,9 +542,34 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: `invalid reaction "warden": gate: reacts at pre-tool-exec; "compaction-finished" is not it`,
 		},
 		{
+			name: "an mcp mapping carries a key it does not have",
+			body: "reactions:\n  - id: coach\n    on: [session-started]\n    advise:\n      mcp:\n        server: llama\n        tool: status\n        payload_arg: event\n",
+			want: `reaction "coach": advise: ` + mcpShapeSentence,
+		},
+		{
+			name: "an mcp mapping spells url: beside mcp:",
+			body: "reactions:\n  - id: notify\n    on: [error]\n    run:\n      url: https://example.com/\n      mcp:\n        server: llama\n        tool: status\n",
+			want: `reaction "notify": run: ` + mcpShapeSentence,
+		},
+		{
+			name: "mcp: is not a mapping",
+			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate:\n      mcp: llama\n",
+			want: `reaction "warden": gate: ` + mcpShapeSentence,
+		},
+		{
+			name: "an mcp mapping's args: is not a mapping",
+			body: "reactions:\n  - id: coach\n    on: [session-started]\n    advise:\n      mcp:\n        server: llama\n        tool: status\n        args: [verbose]\n",
+			want: `reaction "coach": advise: ` + mcpShapeSentence,
+		},
+		{
+			name: "an mcp mapping's tool: is not text",
+			body: "reactions:\n  - id: notify\n    on: [error]\n    run:\n      mcp:\n        server: llama\n        tool: [status]\n",
+			want: `reaction "notify": run: ` + mcpShapeSentence,
+		},
+		{
 			name: "gate: is a bare string",
 			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate: decide\n",
-			want: `reaction "warden": gate: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
+			want: `reaction "warden": gate: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`,
 		},
 		{
 			name: "gate: is a webhook mapping whose url is not http",
@@ -633,7 +735,7 @@ func TestManualStatesTheFloorGuardCount(t *testing.T) {
 }
 
 // The names a root keeps the `terminal` tool away from: every variable a webhook header is read
-// from, each once, in a stable order — the values come off a map, so an unsorted answer would
+// from — never an argv's or an MCP call's own text — each once, in a stable order — the values come off a map, so an unsorted answer would
 // reorder between runs and make every caller's own output unstable.
 func TestReactionEnvNamesDeduplicatesAndSorts(t *testing.T) {
 	t.Parallel()
@@ -649,6 +751,9 @@ func TestReactionEnvNamesDeduplicatesAndSorts(t *testing.T) {
 			HeadersEnv: map[string]string{"X-Blank": "  "},
 		}},
 		{ID: "run", Handler: domain.ArgvHandler{Argv: []string{"true"}}},
+		{ID: "status", Handler: domain.MCPHandler{
+			Server: "llama", Tool: "status", Args: map[string]any{"token": "TOKEN_C"},
+		}},
 	}}
 
 	got := ReactionEnvNames(opts)

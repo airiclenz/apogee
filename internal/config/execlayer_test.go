@@ -468,6 +468,46 @@ func TestRepoReactionProposalCarriesItsActionShapes(t *testing.T) {
 	}
 }
 
+// A repo reaction's `mcp:` mapping pins whole and pins the same on every load: the entry is
+// Proposed under one Fingerprint across two loads, and its server and tool names are never searched
+// for project files — even when a file in the root shares the tool's name — so the pin carries none.
+func TestRepoMCPReactionPinIsStableAcrossLoads(t *testing.T) {
+	t.Parallel()
+	project := "reactions:\n" +
+		"  - id: launcher\n" +
+		"    on: [session-started]\n" +
+		"    advise:\n" +
+		"      mcp:\n" +
+		"        server: llama\n" +
+		"        tool: status\n" +
+		"        args:\n" +
+		"          verbose: true\n" +
+		"          profile: coder\n" +
+		"          detail: full\n" +
+		"        payload-arg: event\n"
+	globalPath, projectRoot := layerFixture(t, "", project)
+	writeLayerFile(t, filepath.Join(projectRoot, "status"), "#!/bin/sh\n")
+
+	_, first, firstNotices := loadLayeredOffer(t, globalPath, projectRoot)
+	_, second, _ := loadLayeredOffer(t, globalPath, projectRoot)
+
+	if len(first.Proposals.Proposed) != 1 || len(second.Proposals.Proposed) != 1 {
+		t.Fatalf("Proposals = %+v / %+v (notices %q); want the launcher reaction proposed on both loads",
+			first.Proposals, second.Proposals, firstNotices)
+	}
+	a, b := first.Proposals.Proposed[0], second.Proposals.Proposed[0]
+	if a.Handle != "launcher" || a.Fingerprint == "" {
+		t.Fatalf("proposal = %+v; want the launcher reaction under a non-empty Fingerprint", a)
+	}
+	if a.Fingerprint != b.Fingerprint {
+		t.Errorf("Fingerprint moved between loads: %q then %q; want one pin for one unchanged entry",
+			a.Fingerprint, b.Fingerprint)
+	}
+	if len(a.Files) != 0 {
+		t.Errorf("Files = %q; want none — an mcp mapping's names are not project files", a.Files)
+	}
+}
+
 // A repo reaction with the id of one of the user's own is dropped with a notice naming it and never
 // offered: the global entry stands as written.
 func TestRepoReactionIDCollisionKeepsTheGlobal(t *testing.T) {

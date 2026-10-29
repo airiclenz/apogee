@@ -80,7 +80,11 @@ apogee.go — ArgvHandler/WebhookHandler alias block; example_test.go — comple
 **Acceptance:** `go build ./... && go vet ./internal/domain/ . && GOMEMLIMIT=2GiB go test -count=1 -run 'Reaction|Validate' ./internal/domain/`
 **Commit:** `feat(domain): an MCPHandler kind and the resolver a Driver injects`
 
-## 3. Parse the mcp: mapping in reactions:
+## 3. Parse the mcp: mapping in reactions: — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): ReactionEnvNames needed no switch edit — it already type-asserts WebhookHandler, so an MCP entry contributes nothing; only its doc comment says so, and TestReactionEnvNamesDeduplicatesAndSorts gains an MCP row.
+NOTES (2026-10-29): execpin.go untouched as the plan says — pinArgvKeys/textsOf read the mcp mapping as no file; TestRepoMCPReactionPinIsStableAcrossLoads proves it through loadLayeredOffer with a project file named like the tool.
+NOTES (2026-10-29): the old shape sentence still quoted in docs/manual/reactions.md (key table rows for run:/advise:, line ~109) and .capcom/knowledge/glossary/glossary-reactions/reaction.md is left for item 10, whose Files and Approach name exactly those sites.
 
 Depends on item 2.
 

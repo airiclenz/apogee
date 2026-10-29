@@ -237,17 +237,25 @@ func (r reactionConfig) actionKeys() []actionKey {
 }
 
 // handlerFor turns one action key's value into the handler that runs it: a SEQUENCE of strings is
-// the argv of a command run out of process, and a MAPPING is a webhook POST. The three keys share
-// this one path — a webhook advises or gates exactly as a command does, with the class deciding
-// what its reply is worth (ADR 0076 D2, issue apogee-1d8). Anything else — a bare string, a number —
-// is refused with the one sentence that spells both shapes under the key that carried it, since an
-// entry that spelled neither has been written against a schema apogee does not have.
+// the argv of a command run out of process, a MAPPING whose only key is `mcp:` is a call to a tool
+// on a connected MCP server (adr-0076-amend-1029), and any other MAPPING is a webhook POST. The
+// three keys share this one path — a webhook or an MCP tool advises or gates exactly as a command
+// does, with the class deciding what its reply is worth (ADR 0076 D2, issue apogee-1d8). Anything
+// else — a bare string, a number, a mapping spelling `mcp:` beside another key — is refused with the
+// one sentence that spells every shape under the key that carried it, since such an entry has been
+// written against a schema apogee does not have.
 //
 // `headers-env:` maps a header name to the NAME of an environment variable holding its value, on
 // the `api-key-env` precedent, so a token never sits in the config file. No `${VAR}` interpolation
 // exists anywhere in this schema and none is introduced here.
 func handlerFor(id, key string, value any) (domain.Handler, error) {
 	if mapping, ok := value.(map[string]any); ok {
+		if call, isMCP := mapping[mcpMappingKey]; isMCP {
+			if len(mapping) != 1 {
+				return nil, shapeError(id, key)
+			}
+			return mcpFromMapping(id, key, call)
+		}
 		return webhookFromMapping(id, key, mapping)
 	}
 	argv, ok := argvList(value)
@@ -309,6 +317,49 @@ func webhookFromMapping(id, key string, mapping map[string]any) (domain.Handler,
 	return handler, nil
 }
 
+// mcpMappingKey is the one key of an action mapping that makes it an MCP call rather than a webhook.
+const mcpMappingKey = "mcp"
+
+// mcpFromMapping reads the value under an action mapping's `mcp:` key: a mapping of `server:` and
+// `tool:` (text), `args:` (a mapping, sent as the tool's static arguments) and `payload-arg:` (text,
+// the argument the Moment's payload rides under). As with the webhook, an unknown key or a value of
+// the wrong kind is refused with the shape sentence rather than dropped, so a misspelt `payload_arg:`
+// is a startup refusal and not a payload that never gets sent. Blank names and a `payload-arg:` that
+// collides with `args:` are the domain's Validate's refusals, not this reader's.
+func mcpFromMapping(id, key string, value any) (domain.Handler, error) {
+	mapping, ok := value.(map[string]any)
+	if !ok {
+		return nil, shapeError(id, key)
+	}
+	handler := domain.MCPHandler{}
+	for field, raw := range mapping {
+		switch field {
+		case "server", "tool", "payload-arg":
+			text, ok := raw.(string)
+			if !ok {
+				return nil, shapeError(id, key)
+			}
+			switch field {
+			case "server":
+				handler.Server = text
+			case "tool":
+				handler.Tool = text
+			default:
+				handler.PayloadArg = text
+			}
+		case "args":
+			args, ok := raw.(map[string]any)
+			if !ok {
+				return nil, shapeError(id, key)
+			}
+			handler.Args = args
+		default:
+			return nil, shapeError(id, key)
+		}
+	}
+	return handler, nil
+}
+
 // stringMap reads one of the webhook's two header mappings, refusing a value that is not text
 // under the action key that carried the mapping.
 func stringMap(id, key string, value any) (map[string]string, error) {
@@ -327,13 +378,14 @@ func stringMap(id, key string, value any) (map[string]string, error) {
 	return mapped, nil
 }
 
-// shapeError is the one sentence every wrong action-key value earns, spelled once so the two
+// shapeError is the one sentence every wrong action-key value earns, spelled once so the three
 // shapes a user may write are always listed together under the key that carried the value:
-// `run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`, and `advise:` and
-// `gate:` likewise.
+// `run: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping
+// {mcp: {server:, tool:, args:, payload-arg:}}`, and `advise:` and `gate:` likewise.
 func shapeError(id, key string) error {
 	return reactionEntryError(id,
-		"%s: is an argv list or a webhook mapping {url:, headers:, headers-env:}", key)
+		"%s: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping "+
+			"{mcp: {server:, tool:, args:, payload-arg:}}", key)
 }
 
 // resolvedWorkspace reduces this entry's `workspace:` filter to its comparable spelling. An empty
@@ -447,7 +499,7 @@ func projectReactions(o *Options, fc fileConfig) error {
 }
 
 // ReactionEnvNames is every environment variable name the resolved Reactions read a webhook header
-// out of, sorted and deduplicated. A root appends it to the names APIKeyEnvNames already
+// out of, sorted and deduplicated. An argv or MCP entry reads none, so it contributes no name. A root appends it to the names APIKeyEnvNames already
 // contributes to [domain.Config.SecretEnvVars], so the `terminal` tool cannot read a webhook token
 // back out of the environment it inherits. Sorted because the names come off a map, and a set that
 // reordered between runs would make every caller's own output unstable.
