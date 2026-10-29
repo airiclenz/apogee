@@ -486,6 +486,12 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 		Headers:    map[string]string{"Content-Type": "application/json"},
 		HeadersEnv: map[string]string{"Authorization": "APOGEE_WEBHOOK_TOKEN"},
 	}
+	mcp := MCPHandler{
+		Server:     "llm",
+		Tool:       "status",
+		Args:       map[string]any{"verbose": true},
+		PayloadArg: "moment",
+	}
 
 	cases := []struct {
 		name     string
@@ -754,6 +760,69 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 			},
 			wantErr: `apogee: invalid reaction "shaper": run: a command or webhook reacts as class observe, advise or gate, not "shape-work"`,
 		},
+		{
+			name: "an mcp handler on a notice validates",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentTurnFinished},
+				Handler: mcp,
+			},
+		},
+		{
+			name: "an mcp handler advising at session-started validates",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentSessionStarted},
+				Handler: mcp,
+			},
+		},
+		{
+			name: "an mcp handler gating at pre-tool-exec validates",
+			reaction: Reaction{
+				ID:      "gate",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentPreToolExec},
+				Handler: mcp,
+			},
+		},
+		{
+			name: "an mcp handler advising at pre-request is refused",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentPreRequest},
+				Handler: mcp,
+			},
+			wantErr: `apogee: invalid reaction "primer": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "pre-request" is none of them`,
+		},
+		{
+			name: "an mcp handler on a seam is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassObserve,
+				On:      []Moment{MomentPreToolExec},
+				Handler: mcp,
+			},
+			wantErr: `apogee: invalid reaction "notify": run: reacts to notices; "pre-tool-exec" is a seam`,
+		},
+		{
+			name: "an engine-origin mcp handler under a shape class is refused",
+			reaction: Reaction{
+				ID:      "shaper",
+				Origin:  OriginEngine,
+				Class:   ClassShapeView,
+				On:      []Moment{MomentPreRequest},
+				Handler: mcp,
+			},
+			wantErr: `apogee: invalid reaction "shaper": run: an mcp tool reacts as class observe, advise or gate, not "shape-view"`,
+		},
 	}
 
 	for _, c := range cases {
@@ -788,7 +857,8 @@ func unparseableURL() string { return "http://[::1" }
 
 // TestReactionValidateRefusesAnUnrunnableHandler pins the handler-runnability rows of the one
 // table — a command with no program, a webhook whose URL is not an absolute http(s) URL with a
-// host, a header mapped to no environment variable name — on the WHOLE sentence each announces,
+// host, a header mapped to no environment variable name, an MCP tool with a blank server or tool or
+// a payload argument its static arguments already hold — on the WHOLE sentence each announces,
 // key prefix and quoted operand included, so a rewording is a deliberate change here rather than
 // something a tail substring would let through. The command sentence names no config key: the same
 // ArgvHandler reaches Validate from `run:`, `advise:` and `gate:` alike.
@@ -869,6 +939,37 @@ func TestReactionValidateRefusesAnUnrunnableHandler(t *testing.T) {
 			wantErr: `apogee: invalid reaction "notify": headers-env: "Authorization" maps to no environment variable name — ` +
 				"the value is the NAME of the variable holding the header, not the header itself",
 		},
+		{
+			name:     "blank mcp server",
+			reaction: observe(MCPHandler{Server: "  ", Tool: "status"}),
+			wantErr:  `apogee: invalid reaction "notify": run: mcp server is blank`,
+		},
+		{
+			name:     "blank mcp tool",
+			reaction: observe(MCPHandler{Server: "llm"}),
+			wantErr:  `apogee: invalid reaction "notify": run: mcp tool is blank`,
+		},
+		{
+			name: "blank mcp server on the advise lane names advise:",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentSessionStarted},
+				Handler: MCPHandler{Tool: "status"},
+			},
+			wantErr: `apogee: invalid reaction "primer": advise: mcp server is blank`,
+		},
+		{
+			name: "mcp payload-arg colliding with an args key",
+			reaction: observe(MCPHandler{
+				Server:     "llm",
+				Tool:       "status",
+				Args:       map[string]any{"moment": "fixed", "verbose": true},
+				PayloadArg: "moment",
+			}),
+			wantErr: `apogee: invalid reaction "notify": run: mcp payload-arg: "moment" names a key args: already holds`,
+		},
 	}
 
 	for _, c := range cases {
@@ -932,7 +1033,7 @@ func TestValidateHandlerRunnableNamesTheKeyItChecks(t *testing.T) {
 	}
 }
 
-// TestAsyncHandlersNameNoSeam pins the seal's other half: the two async-lane handlers answer the
+// TestAsyncHandlersNameNoSeam pins the seal's other half: the three async-lane handlers answer the
 // ZERO Moment, which is what makes "the handler's seam" a question Validate must not ask of
 // them.
 func TestAsyncHandlersNameNoSeam(t *testing.T) {
@@ -943,6 +1044,9 @@ func TestAsyncHandlersNameNoSeam(t *testing.T) {
 	}
 	if got := (WebhookHandler{URL: "https://example.test"}).seam(); got != "" {
 		t.Errorf("WebhookHandler.seam() = %q, want the zero Moment", got)
+	}
+	if got := (MCPHandler{Server: "llm", Tool: "status"}).seam(); got != "" {
+		t.Errorf("MCPHandler.seam() = %q, want the zero Moment", got)
 	}
 	if got := noopPreRequest.seam(); got != MomentPreRequest {
 		t.Errorf("PreRequestFunc.seam() = %q, want %q", got, MomentPreRequest)

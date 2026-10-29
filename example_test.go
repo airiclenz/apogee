@@ -134,6 +134,9 @@ var (
 	_ apogee.ConfinementBox
 	_ apogee.Session
 	_ apogee.ReactionPayload
+	_ apogee.MCPHandler
+	_ apogee.MCPResolver
+	_ apogee.MCPCall
 	_ apogee.RunnerOptions
 	_ apogee.ReactionRunner
 	_ apogee.EventLines

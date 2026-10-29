@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -297,6 +298,14 @@ type Config struct {
 	// binds nothing, and a Runner left unbound refuses every repo `run:` rather than run it
 	// outside the fence.
 	BindProjectRun func(run ProjectRun)
+
+	// MCP resolves a user reaction's MCPHandler to a call on a connected MCP server
+	// (adr-0076-amend-1029). The engine never imports an MCP client, so a Driver that dials servers
+	// injects this resolver and the reaction lanes call through it. nil (the default) is a Driver
+	// that dials no MCP server — headless, the daemon, the bench and every test that composes a bare
+	// Config — where an MCPHandler entry is inert: an advise entry contributes nothing and a gate
+	// escalates to ask. A sub-agent inherits it with the rest of its parent's Config.
+	MCP MCPResolver
 
 	// PinMoved is told, wire-silently, that an adopted repo reaction's spawn was just refused
 	// because the project files its adoption pin holds moved since the user said yes (or could no
@@ -596,6 +605,20 @@ type Config struct {
 	// always had. The default-on lives in the config key, where the human can see it.
 	UndoSnapshots bool
 }
+
+// MCPResolver turns an MCPHandler's server alias and the server's own tool name into the call a
+// reaction makes (Config.MCP, adr-0076-amend-1029). project is true for an adopted repo reaction:
+// the resolver refuses one whose server is not its own Project config's. A non-nil error — the
+// server not connected, the tool missing, the wrong layer — is a handler failure, reported as one;
+// it is never a load error, since the live server set can change under a loaded configuration.
+type MCPResolver func(server, tool string, project bool) (MCPCall, error)
+
+// MCPCall calls the resolved tool with args — the handler's static arguments plus, under its
+// payload argument, the Moment's SeamPayload object — and returns the tool's text blocks joined as
+// the answer, read as an argv handler's stdout. An empty answer is silence, not a failure. A
+// non-nil error — the tool reporting an error, a transport failure, a missed deadline — is a
+// handler failure carrying the server's text. ctx carries the reaction's deadline.
+type MCPCall func(ctx context.Context, args json.RawMessage) (string, error)
 
 // ServerPrice is one server's Price with its presence typed in (ADR 0093 decisions 2 and 4): Rate
 // is what a call there costs and IsStated says whether the entry has a `price:` at all. The flag is

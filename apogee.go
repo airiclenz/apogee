@@ -825,12 +825,21 @@ type (
 	HistoryRewriteFunc = domain.HistoryRewriteFunc
 )
 
-// The two out-of-process handler types — a command and a webhook. Neither names a Moment the way
-// the six Go func types above do: a command serves the user's observe, advise and gate classes,
-// a webhook serves observe alone.
+// The three out-of-process handler types — a command, a webhook and an MCP tool. None names a
+// Moment the way the six Go func types above do: each serves the user's observe, advise and gate
+// classes, its On list checked against its class.
 type (
 	ArgvHandler    = domain.ArgvHandler
 	WebhookHandler = domain.WebhookHandler
+	MCPHandler     = domain.MCPHandler
+)
+
+// MCPResolver is the Driver-injected resolver (Config.MCP) that turns an MCPHandler's server and
+// tool into an MCPCall; nil leaves every MCPHandler entry inert. MCPCall calls the resolved tool
+// and returns its joined text answer.
+type (
+	MCPResolver = domain.MCPResolver
+	MCPCall     = domain.MCPCall
 )
 
 // ToolResultMoment is the post-tool-result seam's payload: the originating call paired with the

@@ -272,9 +272,8 @@ type Outcome struct {
 // implement it — so Validate can check that the reaction's On list agrees with what its handler
 // can actually be called with. Two kinds share the seal: the six Go func types, each naming
 // exactly one Moment — the five per-seam types and SessionStartedFunc, the session-start advise
-// slot's — and the out-of-process handlers ArgvHandler and WebhookHandler, which name no Moment at
-// all — their On list, checked against their class, says where they fire. An MCP handler is the
-// kind still to join them.
+// slot's — and the out-of-process handlers ArgvHandler, WebhookHandler and MCPHandler, which name
+// no Moment at all — their On list, checked against their class, says where they fire.
 type Handler interface {
 	// seam reports the one Moment a Go handler serves — a seam Moment, or session-started for
 	// SessionStartedFunc — or the ZERO Moment for an out-of-process handler, which names none of
@@ -363,23 +362,53 @@ func (ArgvHandler) seam() Moment { return "" }
 // seam reports the ZERO Moment: a webhook handler reacts to notices, and a notice closes no seam.
 func (WebhookHandler) seam() Moment { return "" }
 
+// MCPHandler calls a tool on a connected MCP server when a Moment fires — what a user's
+// `{mcp: {server:, tool:, args:, payload-arg:}}` mapping arms (adr-0076-amend-1029). It is the
+// third out-of-process kind beside ArgvHandler and WebhookHandler and serves the same three of the
+// user's classes under the same Moment rules: observe fires on notices and the answer is discarded;
+// advise fires at post-tool-result, file-changed, session-started or compaction-finished and the
+// tool's text answer becomes the fenced trailer — or, at session-started, the session-start advice,
+// and at compaction-finished, the briefing after a fold; gate fires at pre-tool-exec and the
+// answer's first line is the verdict. The user authored the call, so it never reaches the Approver.
+//
+// It is pure data: the engine never dials a server. The Driver injects a Config.MCP resolver that
+// turns Server and Tool into a call; a Driver that injects none leaves the handler inert.
+type MCPHandler struct {
+	// Server is the alias of the connected MCP server the tool lives on, as the `mcp_servers:`
+	// configuration names it.
+	Server string
+	// Tool is the server's own name for the tool — not the name the model is offered it under.
+	Tool string
+	// Args are the static arguments the tool is called with, argument name → value. nil sends none
+	// beyond the payload.
+	Args map[string]any
+	// PayloadArg, when set, is the argument name the Moment's SeamPayload JSON object is sent under
+	// beside Args. Empty sends no payload. Validate refuses a name Args already holds, so the payload
+	// can never silently overwrite a static argument.
+	PayloadArg string
+}
+
+// seam reports the ZERO Moment: an MCP handler names no seam — its class and On list decide where
+// it fires.
+func (MCPHandler) seam() Moment { return "" }
+
 // isAsyncHandler reports whether the handler is one of the out-of-process kinds. Validate keys the
 // per-class Moment rules on the handler KIND and not on the class alone, because every class an
 // argv handler takes is also open to a Go handler — the bench arms those — and a Go handler keeps
 // the per-seam rule.
 func isAsyncHandler(h Handler) bool {
 	switch h.(type) {
-	case ArgvHandler, WebhookHandler:
+	case ArgvHandler, WebhookHandler, MCPHandler:
 		return true
 	}
 	return false
 }
 
-// servesClass reports whether an out-of-process handler serves the class. A command and a webhook
-// alike serve three of the user's cells — observe, advise and gate (ADR 0076 D2): a command's
-// stdout and a webhook's reply body are read the same way, as nothing, a trailer or a verdict by
-// class. It answers only for the two out-of-process kinds; a Go handler is never asked, since its
-// rule is the per-seam one.
+// servesClass reports whether an out-of-process handler serves the class. A command, a webhook and
+// an MCP tool alike serve three of the user's cells — observe, advise and gate (ADR 0076 D2): a
+// command's stdout, a webhook's reply body and an MCP tool's text answer are read the same way, as
+// nothing, a trailer or a verdict by class. It answers only for the three out-of-process kinds; a
+// Go handler is never asked, since its rule is the per-seam one.
 func servesClass(h Handler, class Class) bool {
 	if !isAsyncHandler(h) {
 		return false
@@ -541,7 +570,8 @@ type ProjectRun func(ctx context.Context, r Reaction, stdin string, env []string
 // ErrInvalidReaction is wrapped by Reaction.Validate for a reaction the engine will not accept:
 // one with no ID, no origin or class, an origin × class outside the Reaction surface matrix, no
 // handler, an out-of-process handler nothing could run (a command with no program, a webhook whose
-// URL is not an absolute http(s) one or whose header maps to no variable name), an empty or
+// URL is not an absolute http(s) one or whose header maps to no variable name, an MCP tool with a
+// blank server or tool or whose payload argument collides with a static one), an empty or
 // duplicate-bearing On list, or an On entry its handler cannot serve. Match it with errors.Is.
 var ErrInvalidReaction = errors.New("apogee: invalid reaction")
 
@@ -584,15 +614,16 @@ func (r Reaction) Validate() error {
 		)
 	}
 
-	// Both out-of-process kinds serve every class a USER entry can carry, so no configuration can
-	// reach this refusal: it holds for the engine's own arming alone, where an ArgvHandler or a
-	// WebhookHandler under a shape class occupies an allowed cell and would otherwise fail every
-	// Moment with the cascade's wrong-handler error rather than at arming.
+	// Every out-of-process kind serves every class a USER entry can carry, so no configuration can
+	// reach this refusal: it holds for the engine's own arming alone, where an ArgvHandler, a
+	// WebhookHandler or an MCPHandler under a shape class occupies an allowed cell and would
+	// otherwise fail every Moment with the cascade's wrong-handler error rather than at arming.
 	async := isAsyncHandler(r.Handler)
 	if async && !servesClass(r.Handler, r.Class) {
 		return fmt.Errorf(
-			"%w %q: run: a command or webhook reacts as class %s, %s or %s, not %q",
-			ErrInvalidReaction, r.ID, ClassObserve, ClassAdvise, ClassGate, r.Class,
+			"%w %q: run: %s reacts as class %s, %s or %s, not %q",
+			ErrInvalidReaction, r.ID, asyncHandlerNoun(r.Handler),
+			ClassObserve, ClassAdvise, ClassGate, r.Class,
 		)
 	}
 
@@ -650,14 +681,16 @@ func (r Reaction) Validate() error {
 }
 
 // validateHandlerRunnable refuses an out-of-process handler nothing could run: a command whose
-// first element — the program — is empty or blank, and a webhook whose URL is not an absolute
+// first element — the program — is empty or blank, a webhook whose URL is not an absolute
 // http(s) URL with a host or whose header is mapped to a blank environment variable name (a header
-// whose value would silently be the empty string). A Go handler is a func and is always runnable.
+// whose value would silently be the empty string), and an MCP tool whose server or tool is blank or
+// whose payload argument names a key its static arguments already hold. A Go handler is a func and
+// is always runnable.
 //
 // The command sentence names no config key on purpose: an ArgvHandler reaches here from `run:`,
-// `advise:` and `gate:` alike. The webhook sentences name the key a user has to look for, and a
-// Reaction carries no key of its own, so it is derived from the class (handlerKey): the mapping is
-// written under `run:` for observe, `advise:` for advise and `gate:` for gate.
+// `advise:` and `gate:` alike. The webhook and MCP sentences name the key a user has to look for,
+// and a Reaction carries no key of its own, so it is derived from the class (handlerKey): the
+// mapping is written under `run:` for observe, `advise:` for advise and `gate:` for gate.
 func (r Reaction) validateHandlerRunnable() error {
 	key := handlerKey(r.Class)
 	switch handler := r.Handler.(type) {
@@ -692,8 +725,31 @@ func (r Reaction) validateHandlerRunnable() error {
 				)
 			}
 		}
+	case MCPHandler:
+		switch {
+		case strings.TrimSpace(handler.Server) == "":
+			return fmt.Errorf("%w %q: %s mcp server is blank", ErrInvalidReaction, r.ID, key)
+		case strings.TrimSpace(handler.Tool) == "":
+			return fmt.Errorf("%w %q: %s mcp tool is blank", ErrInvalidReaction, r.ID, key)
+		}
+		if _, clash := handler.Args[handler.PayloadArg]; handler.PayloadArg != "" && clash {
+			return fmt.Errorf(
+				"%w %q: %s mcp payload-arg: %q names a key args: already holds",
+				ErrInvalidReaction, r.ID, key, handler.PayloadArg,
+			)
+		}
 	}
 	return nil
+}
+
+// asyncHandlerNoun names an out-of-process handler's kind for the class refusal. A command and a
+// webhook share one phrase — the sentence that refusal has always read — and an MCP tool takes its
+// own, so the refusal never calls an MCP entry a command.
+func asyncHandlerNoun(h Handler) string {
+	if _, ok := h.(MCPHandler); ok {
+		return "an mcp tool"
+	}
+	return "a command or webhook"
 }
 
 // handlerKey is the configuration key an out-of-process handler of the class is written under —

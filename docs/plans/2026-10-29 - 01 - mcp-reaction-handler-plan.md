@@ -64,7 +64,10 @@
 **Acceptance:** `capcom know show adr-0076-amend-1029`; `capcom know show "ADR 0076" | grep -c amend-1029` ≥ 2; `capcom check` reports no problems.
 **Commit:** `docs(decisions): adr-0076-amend-1029 settles the mcp: handler posture`
 
-## 2. domain.MCPHandler and the resolver types
+## 2. domain.MCPHandler and the resolver types — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): the shape-class refusal now picks its noun by kind via a new `asyncHandlerNoun` — argv and webhook keep "a command or webhook" byte-identical; an MCPHandler reads "run: an mcp tool reacts as class observe, advise or gate, not %q".
+NOTES (2026-10-29): MCP runnability refusals read `<key> mcp server is blank`, `<key> mcp tool is blank` and `<key> mcp payload-arg: %q names a key args: already holds`, keyed by handlerKey(class) like the webhook ones; extra test rows pin an observe MCP entry, an MCP entry on a seam, the shape-class refusal and MCPHandler.seam().
 
 **What:**
 **Goal:** `domain.MCPHandler{Server, Tool string; Args map[string]any; PayloadArg string}` is a sealed `Handler` kind serving observe, advise and gate with the same Moment rules as `ArgvHandler`; `Validate` refuses a blank server or tool and a `PayloadArg` that is also a key of `Args`; `domain.Config` carries an optional `MCP domain.MCPResolver`; the root facade re-exports `MCPHandler`, `MCPResolver`, `MCPCall`.
