@@ -181,7 +181,12 @@ internal/agent/sessionadvise_user_test.go — reportLines, TestSessionAdvise_AUs
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 -run 'Advise|SessionAdvice' ./internal/agent/`
 **Commit:** `feat(agent): advise reactions may answer through an MCP tool`
 
-## 8. Async lane: observe entries call MCP
+## 8. Async lane: observe entries call MCP — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): the MCP half lives in exec.go (mcpCaller beside the dispatch) rather than a new file, so no package-map entry was needed; command.go needed no change and is untouched. DefaultExecutor takes a fourth parameter `resolve domain.MCPResolver` (late binding is the caller's closure, as with ProjectRun); wire_boot.go and wire_firing.go pass nil until item 9.
+NOTES (2026-10-29): with a nil resolver the run fails with "MCP servers are not connected in this run" (the plan's inert-notice wording), reported once by the worker's lastFailure suppression; a project entry's pin refusal reads "refusing to run a project reaction that carries no adoption pin" / "refusing to run: <pin error>"; a deadline miss reads "timed out after <timeout>", as a command's does.
+NOTES (2026-10-29): mcpArguments is a small copy of internal/agent/syncexec.go's (same merge of Args plus the document under PayloadArg): internal/reactions cannot import internal/agent, and moving it to internal/domain would edit files outside this item; a later tidy could hoist it onto domain.MCPHandler.
+NOTES (2026-10-29): consequential edit — internal/reactions/doc.go: made necessary by exec.go now holding the MCP action (the package map said exec.go holds "the one JSON encoding both actions send").
 
 Depends on items 2 and 5.
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1085,7 +1086,7 @@ func TestCompactionFinishedHandsAnArgvEntryTheFold(t *testing.T) {
 		Timeout: 10 * time.Second,
 	}
 	runner, err := New([]domain.Reaction{entry}, Options{
-		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil),
+		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil, nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1096,5 +1097,230 @@ func TestCompactionFinishedHandsAnArgvEntryTheFold(t *testing.T) {
 
 	if got := readFile(t, out); got != string(domain.CompactionFoldManual) {
 		t.Errorf("%s = %q, want %q", domain.EnvReactionFold, got, domain.CompactionFoldManual)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// MCP observe entries (adr-0076-amend-1029)
+// ----------------------------------------------------------------------------
+
+// mcpResolverStub is a domain.MCPResolver double: it records what it was asked to resolve and hands
+// back call, or refuses with err.
+type mcpResolverStub struct {
+	mu       sync.Mutex
+	resolved []string
+	projects []bool
+	args     []json.RawMessage
+
+	// call runs in place of the tool; nil records the args and answers with text nobody may read.
+	call func(ctx context.Context, args json.RawMessage) (string, error)
+	err  error
+}
+
+func (s *mcpResolverStub) resolve(server, tool string, project bool) (domain.MCPCall, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resolved = append(s.resolved, server+"/"+tool)
+	s.projects = append(s.projects, project)
+	if s.err != nil {
+		return nil, s.err
+	}
+	return func(ctx context.Context, args json.RawMessage) (string, error) {
+		s.mu.Lock()
+		s.args = append(s.args, args)
+		call := s.call
+		s.mu.Unlock()
+		if call != nil {
+			return call(ctx, args)
+		}
+		return "an observe answer nobody reads", nil
+	}, nil
+}
+
+func (s *mcpResolverStub) snapshot() (resolved []string, projects []bool, args []json.RawMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.resolved), slices.Clone(s.projects), slices.Clone(s.args)
+}
+
+// mcpPinStub is a domain.ProjectPin double that admits or refuses every launch.
+type mcpPinStub struct{ err error }
+
+func (p mcpPinStub) Admit() (domain.PinLaunch, error) {
+	return domain.PinLaunch{Dir: "/project"}, p.err
+}
+
+// mcpHook is an observe entry at turn-finished whose handler calls the llama-launcher status tool.
+func mcpHook(name string, handler domain.MCPHandler) domain.Reaction {
+	return domain.Reaction{
+		ID:      name,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassObserve,
+		On:      []Event{TurnFinished},
+		Handler: handler,
+		Timeout: time.Minute,
+	}
+}
+
+// runMCPHook arms entry on a Runner over DefaultExecutor with resolve, emits turns firings of it and
+// drains, returning the failure lines the Driver was handed.
+func runMCPHook(t *testing.T, entry domain.Reaction, resolve domain.MCPResolver, turns int) []string {
+	t.Helper()
+	dir := t.TempDir()
+	log := &reportLog{}
+	runner, err := New([]domain.Reaction{entry}, Options{
+		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil, resolve), Report: log.add,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for turn := 1; turn <= turns; turn++ {
+		runner.Emit(turnEvent(turn))
+	}
+	closeRunner(t, runner)
+	return log.all()
+}
+
+// TestMCPObserveEntryCallsTheToolWithItsArgsAndThePayloadArg — the observe lane resolves the entry's
+// server and tool as a global entry, sends its static args plus the firing's document under
+// payload-arg, and discards the answer without a report.
+func TestMCPObserveEntryCallsTheToolWithItsArgsAndThePayloadArg(t *testing.T) {
+	t.Parallel()
+
+	stub := &mcpResolverStub{}
+	entry := mcpHook("status", domain.MCPHandler{
+		Server: "llama-launcher", Tool: "status", Args: map[string]any{"verbose": true}, PayloadArg: "moment",
+	})
+
+	lines := runMCPHook(t, entry, stub.resolve, 1)
+
+	if len(lines) != 0 {
+		t.Errorf("reported %v, want nothing — the call succeeded", lines)
+	}
+	resolved, projects, args := stub.snapshot()
+	if len(resolved) != 1 || resolved[0] != "llama-launcher/status" || projects[0] {
+		t.Fatalf("resolved %v (project %v), want llama-launcher/status once as a global entry", resolved, projects)
+	}
+	var sent struct {
+		Verbose bool               `json:"verbose"`
+		Moment  domain.SeamPayload `json:"moment"`
+	}
+	if err := json.Unmarshal(args[0], &sent); err != nil {
+		t.Fatalf("args %s are not a JSON object: %v", args[0], err)
+	}
+	if !sent.Verbose || sent.Moment.Event != TurnFinished || sent.Moment.Reaction != "status" || sent.Moment.Turn != 1 {
+		t.Errorf("args = %s, want verbose plus the turn-finished document under moment", args[0])
+	}
+}
+
+// TestMCPObserveEntryWithNoResolverIsReportedOnce — a Driver that injected no resolver leaves the
+// entry failing as not connected, and the worker's repeat suppression reports that once.
+func TestMCPObserveEntryWithNoResolverIsReportedOnce(t *testing.T) {
+	t.Parallel()
+
+	entry := mcpHook("status", domain.MCPHandler{Server: "llama-launcher", Tool: "status"})
+
+	lines := runMCPHook(t, entry, nil, 3)
+
+	want := "reaction status (turn-finished): MCP servers are not connected in this run"
+	if len(lines) != 1 || lines[0] != want {
+		t.Errorf("reported %v, want exactly %q", lines, want)
+	}
+}
+
+// TestMCPObserveEntryFailuresAreReported — a resolver refusal, the tool's own error and a call that
+// outlives the entry's timeout each reach the Driver as the entry's failure line.
+func TestMCPObserveEntryFailuresAreReported(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		stub    *mcpResolverStub
+		timeout time.Duration
+		want    string
+	}{
+		{
+			name: "resolver refusal",
+			stub: &mcpResolverStub{err: errors.New(`mcp server "llama-launcher" is not connected`)},
+			want: `reaction status (turn-finished): mcp server "llama-launcher" is not connected`,
+		},
+		{
+			name: "tool error",
+			stub: &mcpResolverStub{call: func(context.Context, json.RawMessage) (string, error) {
+				return "", errors.New("mcp tool error: model not loaded")
+			}},
+			want: "reaction status (turn-finished): mcp tool error: model not loaded",
+		},
+		{
+			name: "timeout",
+			stub: &mcpResolverStub{call: func(ctx context.Context, _ json.RawMessage) (string, error) {
+				<-ctx.Done()
+				return "", ctx.Err()
+			}},
+			timeout: testtime.Fixed(20 * time.Millisecond),
+			want:    "reaction status (turn-finished): timed out after " + testtime.Fixed(20*time.Millisecond).String(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			entry := mcpHook("status", domain.MCPHandler{Server: "llama-launcher", Tool: "status"})
+			if tt.timeout > 0 {
+				entry.Timeout = tt.timeout
+			}
+
+			lines := runMCPHook(t, entry, tt.stub.resolve, 1)
+
+			if len(lines) != 1 || lines[0] != tt.want {
+				t.Errorf("reported %v, want exactly %q", lines, tt.want)
+			}
+		})
+	}
+}
+
+// TestMCPObserveProjectEntryPassesItsPinFirst — an adopted repo entry is resolved as a project
+// entry once its pin admits it, and refused before any resolution with no pin or a moved one.
+func TestMCPObserveProjectEntryPassesItsPinFirst(t *testing.T) {
+	t.Parallel()
+
+	moved := &domain.PinMovedError{Err: errors.New("could not read tools/status.sh")}
+	tests := []struct {
+		name        string
+		pin         domain.ProjectPin
+		wantErr     error
+		wantProject bool
+	}{
+		{name: "admitted", pin: mcpPinStub{}, wantProject: true},
+		{name: "nil pin", pin: nil, wantErr: errNoProjectPin},
+		{name: "moved pin", pin: mcpPinStub{err: moved}, wantErr: moved},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &mcpResolverStub{}
+			entry := mcpHook("status", domain.MCPHandler{Server: "repo-tools", Tool: "status"})
+			entry.Project = true
+			entry.Pin = tt.pin
+			exec := DefaultExecutor(t.TempDir(), security.URLGuard{}, nil, stub.resolve)
+
+			err := exec.Run(context.Background(), entry, domain.SeamPayload{Event: TurnFinished})
+
+			resolved, projects, _ := stub.snapshot()
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("Run = %v, want %v", err, tt.wantErr)
+				}
+				if len(resolved) != 0 {
+					t.Errorf("resolved %v, want no resolution before the pin admits the entry", resolved)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if len(projects) != 1 || projects[0] != tt.wantProject {
+				t.Errorf("resolved with project %v, want [%v]", projects, tt.wantProject)
+			}
+		})
 	}
 }

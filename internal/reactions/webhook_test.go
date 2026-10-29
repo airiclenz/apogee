@@ -67,7 +67,7 @@ func TestWebhookSenderPostsTheJSONWithBothKindsOfHeader(t *testing.T) {
 
 	// DefaultExecutor rather than webhookSender directly, so the dispatch on `webhook:` is
 	// exercised by the same test that proves what the endpoint receives.
-	if err := DefaultExecutor("", security.URLGuard{}, nil).Run(context.Background(), hook, payload); err != nil {
+	if err := DefaultExecutor("", security.URLGuard{}, nil, nil).Run(context.Background(), hook, payload); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -214,7 +214,7 @@ func TestDefaultExecutorPostsThroughTheGuardItWasGiven(t *testing.T) {
 		Handler: domain.WebhookHandler{URL: server.URL},
 		Timeout: 10 * time.Second,
 	}
-	exec := DefaultExecutor("", security.NewURLGuard(nil, []string{"127.0.0.1"}), nil)
+	exec := DefaultExecutor("", security.NewURLGuard(nil, []string{"127.0.0.1"}), nil, nil)
 
 	err := exec.Run(context.Background(), hook, domain.SeamPayload{Event: ExchangeFinished})
 

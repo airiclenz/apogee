@@ -772,7 +772,7 @@ func firingHooks(
 		Workspace: workspace,
 		Schedule:  sched,
 		Report:    report,
-		Exec:      reactions.DefaultExecutor(workspace, guard, projectRuns.runner()),
+		Exec:      reactions.DefaultExecutor(workspace, guard, projectRuns.runner(), nil),
 	})
 }
 

@@ -234,7 +234,7 @@ func (w *rootWiring) resolveConfig() error {
 		Inner:     w.bridge.Sink(),
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
-		Exec:      reactions.DefaultExecutor(w.roots.workspace, webhookGuard, projectRuns.runner()),
+		Exec:      reactions.DefaultExecutor(w.roots.workspace, webhookGuard, projectRuns.runner(), nil),
 	})
 	if err != nil {
 		return err

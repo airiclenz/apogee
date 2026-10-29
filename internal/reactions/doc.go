@@ -35,9 +35,10 @@
 // runner.go is the sink decorator itself — the Executor seam, the per-Reaction
 // queues and workers, the Driver-facing failure reporter, and the reload (Replace) and shutdown
 // (Close) paths. exec.go is the production Executor — DefaultExecutor's dispatch onto whichever
-// action the entry configured, and the one JSON encoding both actions send. command.go runs a
-// Reaction's argv through internal/userexec — the api-key-cmd exec posture — with the payload on
-// stdin and the APOGEE_REACTION_* facts in the environment. webhook.go POSTs the same document to a
-// Reaction's URL through internal/webhook — the request the sync lane's `advise:`/`gate:` webhooks
-// share — and discards the reply.
+// action the entry configured, the one JSON encoding every action sends, and the MCP action, which
+// calls the entry's tool through the resolver the Driver injected and discards the answer.
+// command.go runs a Reaction's argv through internal/userexec — the api-key-cmd exec posture — with
+// the payload on stdin and the APOGEE_REACTION_* facts in the environment. webhook.go POSTs the
+// same document to a Reaction's URL through internal/webhook — the request the sync lane's
+// `advise:`/`gate:` webhooks share — and discards the reply.
 package reactions
