@@ -274,9 +274,13 @@ a question you already answered, nor re-runs a script that already produced a re
 `inputs:` declares what the text after `/<id>` fills in. Each entry has a `name` (one word:
 letters, digits, `_` or `-`, starting with a letter), and optionally `required: true`, a `default`
 and a `description`. `{<name>}` then stands for the input's value in a brief, a question, an item
-source, an output path, a context file, or — shell-quoted — a script's command. The name `apogee`
-is reserved for the `{apogee}` placeholder. A run with other inputs is another workflow, with a
-folder of its own.
+source, an output path, a context file, or — shell-quoted — a script's command. A name a
+placeholder already takes is reserved, so no input can shadow it: `apogee`, `workflow_dir`,
+`part_bytes` and `SKILL_DIR` (a script's `{apogee}`, `{workflow_dir}` and `{part_bytes}`, and
+`{{SKILL_DIR}}`), `item` and `out` (a brief's `{item}` and `{out}`), and `claim`, `output` and
+`manifest` (the verify and merge briefs' own). Names compare case-sensitively; a recipe declaring
+a reserved name does not load, and the error says to rename the input. A run with other inputs is
+another workflow, with a folder of its own.
 
 The text binds with no model call:
 

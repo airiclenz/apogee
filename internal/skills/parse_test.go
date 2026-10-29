@@ -734,6 +734,7 @@ func TestParseSkillRecipeRefused(t *testing.T) {
 		{"a nameless input", head + "inputs:\n  - description: d\n" + stage + "---\nbody", "input 1 has no name"},
 		{"an input name with a space", head + "inputs:\n  - name: the scope\n" + stage + "---\nbody", `input name "the scope" is not one word`},
 		{"an input declared twice", head + "inputs:\n  - name: scope\n  - name: scope\n" + stage + "---\nbody", `input "scope" is declared twice`},
+		{"an input taking a placeholder's name", head + "inputs:\n  - name: workflow_dir\n" + stage + "---\nbody", `input name "workflow_dir" is reserved`},
 		// The strict parse fails (a tab indents a mapping key); the lenient scan would recover the
 		// id and summary and load the skill with no recipe — it must not be asked.
 		{"a recipe block that is not YAML", head + "recipe:\n\t- name: find\n---\nbody", "malformed YAML frontmatter in a skill with a recipe"},

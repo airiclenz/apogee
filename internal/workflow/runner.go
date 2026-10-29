@@ -31,10 +31,11 @@ const droppedFormat = "dropped %d duplicate %s: each entry runs once"
 // noteSeparator joins a stage's notes when it has more than one to say.
 const noteSeparator = "; "
 
-// The brief placeholders a stage's task is rendered with.
+// The brief placeholders a stage's task is rendered with, each built from its reserved input name
+// so no recipe input can shadow it.
 const (
-	placeholderItem = "{item}"
-	placeholderOut  = "{out}"
+	placeholderItem = placeholderOpen + ItemInputName + placeholderClose
+	placeholderOut  = placeholderOpen + OutInputName + placeholderClose
 )
 
 // Ending is how a child's run ended, as the Spawner read it off the child.

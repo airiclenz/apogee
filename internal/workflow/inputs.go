@@ -2,8 +2,11 @@ package workflow
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // InputDecl is one input a Recipe declares in its skill's header: the value the user's text fills
@@ -22,18 +25,73 @@ type InputDecl struct {
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
-// ApogeeInputName is the name a recipe input may not take: a script stage's `{apogee}` names the
-// apogee executable, and an input's `{<name>}` is bound before the stage renders it, so an input
-// called apogee would silently replace the binary a stage runs.
-const ApogeeInputName = "apogee"
+// The reserved input names: every placeholder a workflow fills on its own, by name. An input's
+// `{<name>}` is bound before a stage renders its own placeholders, so an input taking one of these
+// names would silently replace what the placeholder names; ValidateInputs refuses each. Names
+// compare case-sensitively, as placeholders do. A new placeholder takes its name from a const here
+// and a role in reservedInputRoles, so it cannot be filled without being reserved.
+const (
+	// ApogeeInputName is a script stage's `{apogee}`: the apogee executable.
+	ApogeeInputName = "apogee"
+	// WorkflowDirInputName is a script stage's `{workflow_dir}`: the workflow folder.
+	WorkflowDirInputName = "workflow_dir"
+	// PartBytesInputName is a script stage's `{part_bytes}`: the split budget a part may hold.
+	PartBytesInputName = "part_bytes"
+	// SkillDirInputName is the name inside domain.SkillDirToken (`{{SKILL_DIR}}`): the skill's own
+	// folder. An input's `{SKILL_DIR}` would rewrite the token's inner braces.
+	SkillDirInputName = "SKILL_DIR"
+	// ItemInputName is a brief's or output path's `{item}`: the item a child works on.
+	ItemInputName = "item"
+	// OutInputName is a brief's `{out}`: the output path a child writes.
+	OutInputName = "out"
+	// ClaimInputName is a verify brief's `{claim}`: the claim a verify child is to refute.
+	ClaimInputName = "claim"
+	// OutputInputName is a verify brief's `{output}`: the output path of the item it checks.
+	OutputInputName = "output"
+	// ManifestInputName is a merge brief's `{manifest}`: the manifest a merge child reads.
+	ManifestInputName = "manifest"
+)
+
+// The braces a single-brace placeholder wraps its reserved name in: `{` + name + `}`.
+const (
+	placeholderOpen  = "{"
+	placeholderClose = "}"
+)
+
+// reservedInputRoles maps each reserved input name to what its placeholder names, in the words
+// its refusal uses.
+var reservedInputRoles = map[string]string{
+	ApogeeInputName:      "a script stage's " + braced(ApogeeInputName) + " names the apogee executable",
+	WorkflowDirInputName: "a script stage's " + braced(WorkflowDirInputName) + " names the workflow folder",
+	PartBytesInputName:   "a script stage's " + braced(PartBytesInputName) + " names the split budget a part may hold",
+	SkillDirInputName:    "a skill's " + domain.SkillDirToken + " names the skill's own folder",
+	ItemInputName:        "a brief's " + braced(ItemInputName) + " names the item a child works on",
+	OutInputName:         "a brief's " + braced(OutInputName) + " names the output path a child writes",
+	ClaimInputName:       "a verify brief's " + braced(ClaimInputName) + " names the claim a verify child is to refute",
+	OutputInputName:      "a verify brief's " + braced(OutputInputName) + " names the output path of the item it checks",
+	ManifestInputName:    "a merge brief's " + braced(ManifestInputName) + " names the manifest a merge child reads",
+}
+
+// braced renders a reserved name as its single-brace placeholder, for a role phrase.
+func braced(name string) string {
+	return placeholderOpen + name + placeholderClose
+}
+
+// ReservedInputNames returns every reserved input name mapped to what its placeholder names — the
+// phrase ValidateInputs' refusal uses. The map is a fresh copy each call; the caller may keep or
+// change it.
+func ReservedInputNames() map[string]string {
+	return maps.Clone(reservedInputRoles)
+}
 
 // inputNameRe is the shape an input name takes: a letter, then letters, digits, `_` or `-`. It
 // keeps a name one `key=value` token — no whitespace, no `=`, no quote.
 var inputNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
 // ValidateInputs reports every way a recipe's input declarations fall short: a missing or
-// malformed name, the reserved name ApogeeInputName, or a name declared twice. Each Problem names the field `inputs` and says how to
-// fix it; an empty result means the declarations are usable.
+// malformed name, a reserved name (ReservedInputNames), or a name declared twice. Each Problem
+// names the field `inputs` and says how to fix it; an empty result means the declarations are
+// usable.
 func ValidateInputs(decls []InputDecl) []Problem {
 	var problems []Problem
 	seen := make(map[string]bool, len(decls))
@@ -48,10 +106,9 @@ func ValidateInputs(decls []InputDecl) []Problem {
 				"input name %q is not one word; start with a letter and use only letters, digits, _ or -",
 				decl.Name,
 			)})
-		case decl.Name == ApogeeInputName:
+		case reservedInputRoles[decl.Name] != "":
 			problems = append(problems, Problem{Field: "inputs", Message: fmt.Sprintf(
-				"input name %q is reserved: a script stage's {%s} names the apogee executable; rename the input",
-				decl.Name, ApogeeInputName,
+				"input name %q is reserved: %s; rename the input", decl.Name, reservedInputRoles[decl.Name],
 			)})
 		case seen[decl.Name]:
 			problems = append(problems, Problem{Field: "inputs", Message: fmt.Sprintf(

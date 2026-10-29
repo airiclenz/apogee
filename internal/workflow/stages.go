@@ -29,11 +29,12 @@ var (
 )
 
 // The engine-brief placeholders beside {item} and {out}: the claim a verify child is to refute,
-// the output path of the item it checks, and the manifest a merge child reads.
+// the output path of the item it checks, and the manifest a merge child reads. Each is built from
+// its reserved input name, so no recipe input can shadow it.
 const (
-	placeholderClaim    = "{claim}"
-	placeholderOutput   = "{output}"
-	placeholderManifest = "{manifest}"
+	placeholderClaim    = placeholderOpen + ClaimInputName + placeholderClose
+	placeholderOutput   = placeholderOpen + OutputInputName + placeholderClose
+	placeholderManifest = placeholderOpen + ManifestInputName + placeholderClose
 )
 
 // The names a merge stage writes in the workflow folder: the report at the top, and each merge

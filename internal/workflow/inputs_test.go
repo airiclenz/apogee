@@ -1,9 +1,12 @@
 package workflow
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // auditInputs are the declarations the cases below bind against: a required scope, then an
@@ -198,12 +201,53 @@ func TestBindInputsRefusesWithAnErrorNamingTheProblem(t *testing.T) {
 func TestValidateInputsReservesTheApogeeName(t *testing.T) {
 	t.Parallel()
 
-	problems := ValidateInputs([]InputDecl{{Name: "scope"}, {Name: ApogeeInputName}})
-
-	if len(problems) != 1 {
-		t.Fatalf("ValidateInputs = %+v, want one problem for the reserved name", problems)
+	reserved := []string{
+		"apogee", "workflow_dir", "part_bytes", "SKILL_DIR", "item", "out", "claim", "output", "manifest",
 	}
-	if got := problems[0]; got.Field != "inputs" || !strings.Contains(got.Message, `"apogee" is reserved`) {
-		t.Errorf("problem = %+v, want the inputs field and a message naming the reserved name", got)
+	if got := ReservedInputNames(); len(got) != len(reserved) {
+		t.Errorf("ReservedInputNames = %v, want exactly the %d names %v", got, len(reserved), reserved)
+	}
+	for _, name := range reserved {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			problems := ValidateInputs([]InputDecl{{Name: "scope"}, {Name: name}})
+
+			if len(problems) != 1 {
+				t.Fatalf("ValidateInputs = %+v, want one problem for the reserved name", problems)
+			}
+			want := fmt.Sprintf("%q is reserved", name)
+			if got := problems[0]; got.Field != "inputs" || !strings.Contains(got.Message, want) {
+				t.Errorf("problem = %+v, want the inputs field and a message containing %s", got, want)
+			}
+		})
+	}
+}
+
+func TestValidateInputsKeepsTheApogeeRefusalWording(t *testing.T) {
+	t.Parallel()
+
+	problems := ValidateInputs([]InputDecl{{Name: ApogeeInputName}})
+
+	const want = `input name "apogee" is reserved: a script stage's {apogee} names the apogee executable; ` +
+		"rename the input"
+	if len(problems) != 1 || problems[0].Message != want {
+		t.Errorf("ValidateInputs = %+v, want the one message %q", problems, want)
+	}
+}
+
+func TestValidateInputsComparesReservedNamesCaseSensitively(t *testing.T) {
+	t.Parallel()
+
+	if problems := ValidateInputs([]InputDecl{{Name: "Workflow_dir"}, {Name: "Item"}}); len(problems) != 0 {
+		t.Errorf("ValidateInputs = %+v, want no problem for a near-miss of a reserved name", problems)
+	}
+}
+
+func TestValidateInputsSkillDirNameMatchesTheDomainToken(t *testing.T) {
+	t.Parallel()
+
+	if want := "{{" + SkillDirInputName + "}}"; domain.SkillDirToken != want {
+		t.Errorf("domain.SkillDirToken = %q, want %q: the reserved name must be the token's own", domain.SkillDirToken, want)
 	}
 }
