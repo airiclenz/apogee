@@ -179,6 +179,54 @@ func TestAdvicePaneShowsASessionStartFiring(t *testing.T) {
 	}
 }
 
+// TestAdvicePaneTrimsADetailsTrailingNewlines pins that a Detail's trailing newlines paint no empty
+// row after its last line, that a blank line inside a Detail still paints, and that a Detail of
+// only newlines leaves its firing row alone — while the board keeps the Detail's bytes as booked.
+func TestAdvicePaneTrimsADetailsTrailingNewlines(t *testing.T) {
+	t.Parallel()
+
+	const column = 40
+	const firing = "prime (user origin) @ post-tool-result"
+	tests := []struct {
+		name     string
+		detail   string
+		wantRows []string
+	}{
+		{name: "one trailing newline", detail: "a\n", wantRows: []string{"turn 0", firing, "a"}},
+		{name: "two trailing newlines", detail: "a\n\n", wantRows: []string{"turn 0", firing, "a"}},
+		{name: "inner blank kept", detail: "a\n\nb\n", wantRows: []string{"turn 0", firing, "a", "", "b"}},
+		{name: "only a newline", detail: "\n", wantRows: []string{"turn 0", firing}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fired := advisedAt(runRef{}, 0, adviceActionAdvise, "prime", domain.OriginUser, tc.detail)
+			m := newTestModel(t).foldEvent(fired)
+
+			if len(m.advice) != 1 || m.advice[0].detail != tc.detail {
+				t.Fatalf("board after the firing: %+v, want one record with detail %q", m.advice, tc.detail)
+			}
+			rows, kinds := m.adviceRows(column)
+			got := make([]string, len(rows))
+			for i, row := range rows {
+				got[i] = row[0]
+			}
+			if !reflect.DeepEqual(got, tc.wantRows) {
+				t.Errorf("rows:\n got %q\nwant %q", got, tc.wantRows)
+			}
+			wantKinds := make([]popupRowKind, len(tc.wantRows))
+			wantKinds[0] = popupRowHeading
+			for i := 1; i < len(wantKinds); i++ {
+				wantKinds[i] = popupRowPlain
+			}
+			if !reflect.DeepEqual(kinds, wantKinds) {
+				t.Errorf("kinds:\n got %v\nwant %v", kinds, wantKinds)
+			}
+		})
+	}
+}
+
 // TestAdvicePaneFollowsTheNewestFiring pins the pane's follow under its own name: opened on the
 // tail and following, a firing that lands while it is up is on the window the next frame draws —
 // the last full window ends at the last row — rather than below a frozen one.

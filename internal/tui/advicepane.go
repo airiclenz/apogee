@@ -156,8 +156,10 @@ func adviceFiringRow(rec adviceRecord) string {
 //
 // The Detail is split on its own newlines FIRST and each line wrapped separately, as the thinking
 // rows are ([Model.thinkingRows]): a line the handler wrote starts flush against the marker column
-// and only a continuation carries the two-space indent, so a wrap reads as a wrap. A firing with an
-// empty Detail is its firing row alone.
+// and only a continuation carries the two-space indent, so a wrap reads as a wrap. A Detail's
+// trailing newlines are dropped before the split, so the empty piece after a final newline paints no
+// row while a blank line inside the Detail still does; a firing whose Detail is empty, or only
+// newlines, is its firing row alone. The trim is the pane's alone: the booked Detail keeps its bytes.
 func (m Model) adviceRows(column int) ([]popupRow, []popupRowKind) {
 	if len(m.advice) == 0 {
 		return []popupRow{{adviceEmptyRow}}, []popupRowKind{popupRowPlain}
@@ -171,10 +173,11 @@ func (m Model) adviceRows(column int) ([]popupRow, []popupRowKind) {
 		}
 		rows = append(rows, popupRow{adviceFiringRow(rec)})
 		kinds = append(kinds, popupRowPlain)
-		if rec.detail == "" {
+		detail := strings.TrimRight(rec.detail, "\n")
+		if detail == "" {
 			continue
 		}
-		for _, line := range strings.Split(rec.detail, "\n") {
+		for _, line := range splitLines(detail) {
 			for _, row := range wrapReadable("", line, column) {
 				rows = append(rows, popupRow{row})
 				kinds = append(kinds, popupRowPlain)
