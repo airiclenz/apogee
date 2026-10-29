@@ -525,9 +525,13 @@ func (a *Agent) endSessionWorkflows() {
 }
 
 // startBackgroundRecipe launches recipe in the background over the inputs text binds, and returns
-// the workflow's id. No one is asked for a missing required input — the conversation may be busy —
-// so one is refused as `missing input: <name>`.
+// the workflow's id. Declarations checkRecipeInputs refuses fail the launch first, so a reserved
+// name is refused as reserved, never as missing. No one is asked for a missing required input — the
+// conversation may be busy — so one is refused as `missing input: <name>`.
 func (a *Agent) startBackgroundRecipe(recipe workflow.Recipe, text string) (string, error) {
+	if err := checkRecipeInputs(recipe); err != nil {
+		return "", err
+	}
 	values, missing, err := workflow.BindInputs(recipe.Inputs, text)
 	if err != nil {
 		return "", err

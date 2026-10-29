@@ -416,6 +416,24 @@ func TestRecipe_AReservedInputIsRefusedBeforeBinding(t *testing.T) {
 		}
 	})
 
+	t.Run("background launch", func(t *testing.T) {
+		t.Parallel()
+		cfg := recipeConfig(t, &recordingSink{}, reserved())
+		a, err := newAgent(cfg, reviewUpstream("src"))
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+
+		id, err := a.StartRecipe(context.Background(), RecipeLaunch{SkillID: "review", Background: true})
+
+		if err == nil || !strings.Contains(err.Error(), refusal) || id != "" {
+			t.Errorf("StartRecipe = %q, %v; want a refusal containing %q", id, err, refusal)
+		}
+		if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
+			t.Errorf("workflow folders = %v, want none", folders)
+		}
+	})
+
 	t.Run("fan_out call", func(t *testing.T) {
 		t.Parallel()
 		sink := &recordingSink{}
