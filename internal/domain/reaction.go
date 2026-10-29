@@ -374,7 +374,7 @@ func (WebhookHandler) seam() Moment { return "" }
 // It is pure data: the engine never dials a server. The Driver injects a Config.MCP resolver that
 // turns Server and Tool into a call; a Driver that injects none leaves the handler inert.
 type MCPHandler struct {
-	// Server is the alias of the connected MCP server the tool lives on, as the `mcp_servers:`
+	// Server is the alias of the connected MCP server the tool lives on, as the `mcp-servers:`
 	// configuration names it.
 	Server string
 	// Tool is the server's own name for the tool — not the name the model is offered it under.
