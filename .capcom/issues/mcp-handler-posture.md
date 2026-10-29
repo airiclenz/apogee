@@ -3,6 +3,7 @@ title: "Decide the mcp: handler posture for Reactions (ADR 0076 D3, reserved)"
 status: open
 type: task
 priority: 3
+plan: 2026-10-29 - 01 - mcp-reaction-handler-plan
 aliases: [apogee-03a]
 created: 2026-09-07T19:50:52Z
 ---
