@@ -157,15 +157,14 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	// would be — so an entry SetReactions refuses fails construction even when its `workspace:` names
 	// another root — and only then is its sync lane scoped to this workspace. A refusal fails
 	// construction with SetReactions' own error, wrapped as a SeedRefusedError, rather than standing
-	// as the lane Generation reports and every read-edit-hand-back swap would be refused over.
+	// as the lane Generation reports and every read-edit-hand-back swap would be refused over. Both
+	// steps are validateSeed — the check ValidateSeed exports — so a Driver that checks the seed
+	// first gets exactly the verdict construction would give.
 	a.gen.Observe = slices.Clone(cfg.Observe)
 	a.gen.Sync = slices.Clone(cfg.Sync)
-	if err := validateGeneration(a.gen); err != nil {
-		return nil, &SeedRefusedError{err: err}
-	}
-	scoped, err := a.scopeSync(a.gen.Sync)
+	scoped, err := validateSeed(a.gen, cfg.WorkspaceDir)
 	if err != nil {
-		return nil, &SeedRefusedError{err: err}
+		return nil, err
 	}
 	a.gen.Sync = scoped
 

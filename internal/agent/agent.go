@@ -812,6 +812,30 @@ func (e *SeedRefusedError) Error() string { return e.err.Error() }
 // Unwrap returns the error SetReactions would have returned for the same lanes.
 func (e *SeedRefusedError) Unwrap() error { return e.err }
 
+// ValidateSeed is the engine's whole check of a construction seed's reaction lanes, exported so a
+// Driver can run it before it hands the same lanes anywhere else (the observe Runner's Replace
+// among them): gen is validated as SetReactions validates a swapped-in Generation — unscoped, both
+// lanes — and only then is its sync lane scoped to workspaceDir. It returns nil, or a
+// *SeedRefusedError whose sentence is exactly the one New and Resume return for the same seed:
+// construction refuses a seed through this check and no other (buildAgent).
+func ValidateSeed(gen domain.Generation, workspaceDir string) error {
+	_, err := validateSeed(gen, workspaceDir)
+	return err
+}
+
+// validateSeed is ValidateSeed returning, beside the verdict, the sync lane scoped to workspaceDir —
+// the list construction arms. A refusal from either step is wrapped as a *SeedRefusedError.
+func validateSeed(gen domain.Generation, workspaceDir string) ([]domain.Reaction, error) {
+	if err := validateGeneration(gen); err != nil {
+		return nil, &SeedRefusedError{err: err}
+	}
+	scoped, err := scopeSync(gen.Sync, workspaceDir)
+	if err != nil {
+		return nil, &SeedRefusedError{err: err}
+	}
+	return scoped, nil
+}
+
 // resolveOptions applies opts over the defaults.
 func resolveOptions(opts []Option) constructOptions {
 	o := constructOptions{dial: dialProvider}
@@ -835,7 +859,8 @@ func resolveOptions(opts []Option) constructOptions {
 // swapped-in lane, then scoped to the workspace — buildAgent), then the undo journal
 // (WithUndoJournal), the delegation seat (WithDelegationSeat) and the delegation target
 // (WithDelegationTarget), so the target's far width is the one the model is told. A seed whose lanes
-// SetReactions would refuse fails construction with a *SeedRefusedError wrapping that same error.
+// SetReactions would refuse fails construction with a *SeedRefusedError wrapping that same error —
+// the verdict ValidateSeed gives a Driver that checks the seed first.
 //
 // Construction is a Session boundary: its last act announces the session-started notice with start
 // "new" to the observe Runner — after the fenced runner is bound, so a repo `run:` the notice fires
@@ -1701,7 +1726,7 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 	if err := validateGeneration(gen); err != nil {
 		return err
 	}
-	scoped, err := a.scopeSync(gen.Sync)
+	scoped, err := scopeSync(gen.Sync, a.cfg.WorkspaceDir)
 	if err != nil {
 		return err
 	}
@@ -1790,16 +1815,16 @@ func validateGeneration(gen domain.Generation) error {
 	return refuseReservedIDs(gen.Sync)
 }
 
-// scopeSync reduces a sync lane to the entries active in this Agent's workspace (scope.ActiveAt):
-// an entry whose `workspace:` names another root is not armed here at all, exactly as the Runner
-// never starts a worker for an observe entry scoped elsewhere. Scoping at the swap rather than per
-// fire keeps the path resolution off the loop, and it means Generation, and every child that
-// inherits the lane from it, carries only what is live here.
-func (a *Agent) scopeSync(list []domain.Reaction) ([]domain.Reaction, error) {
+// scopeSync reduces a sync lane to the entries active in workspaceDir — the Agent's workspace
+// (scope.ActiveAt): an entry whose `workspace:` names another root is not armed here at all, exactly
+// as the Runner never starts a worker for an observe entry scoped elsewhere. Scoping at the swap
+// rather than per fire keeps the path resolution off the loop, and it means Generation, and every
+// child that inherits the lane from it, carries only what is live here.
+func scopeSync(list []domain.Reaction, workspaceDir string) ([]domain.Reaction, error) {
 	if len(list) == 0 {
 		return list, nil
 	}
-	root, err := scope.Resolve(a.cfg.WorkspaceDir)
+	root, err := scope.Resolve(workspaceDir)
 	if err != nil {
 		return nil, err
 	}

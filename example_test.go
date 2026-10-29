@@ -148,6 +148,7 @@ var (
 var (
 	_ = apogee.New
 	_ = apogee.Resume
+	_ = apogee.ValidateSeed
 	_ = apogee.IsReadOnly
 	_ = apogee.NewToolRegistry
 	_ = apogee.DecodeSession

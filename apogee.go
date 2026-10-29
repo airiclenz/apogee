@@ -103,6 +103,14 @@ type Option = agent.Option
 // Driver tells it from every other construction failure with errors.As.
 type SeedRefusedError = agent.SeedRefusedError
 
+// ValidateSeed is the engine's own check of a construction seed's reaction lanes — gen validated as
+// SetReactions validates it, then its sync lane scoped to workspaceDir. It returns nil, or the
+// *SeedRefusedError New and Resume return for the same seed, so a Driver can check a seed before it
+// hands the lanes to anything else. See internal/agent for the contract.
+func ValidateSeed(gen Generation, workspaceDir string) error {
+	return agent.ValidateSeed(gen, workspaceDir)
+}
+
 // WithUndoJournal seeds the session's undo journal and the note that says why it is the journal it
 // is (Agent.SetJournal). A nil journal seeds nothing.
 func WithUndoJournal(j *undo.Journal, note string) Option { return agent.WithUndoJournal(j, note) }
