@@ -876,7 +876,7 @@ func writeReactionScript(t *testing.T, root, body string) {
 // included — failing the test when the config does not arm it.
 func adoptedReaction(t *testing.T, w *rootWiring, id string) domain.Reaction {
 	t.Helper()
-	o, err := w.layeredOptions()
+	o, err := loadLayeredOptions(w.configPath(), w.roots.project)
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}

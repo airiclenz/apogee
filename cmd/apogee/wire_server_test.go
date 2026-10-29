@@ -516,7 +516,8 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
-			live: newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}, config.ProjectOffer{}),
+			live: newLiveSettings(
+				config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}, config.ProjectOffer{}),
 			keys: config.NewKeyResolver(""),
 			caps: newParallelAgentsCap(widths),
 		},
@@ -1378,7 +1379,8 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	holder := newUpstreamHolder()
 	holder.Bind(upstreamBinding{Endpoint: "http://old.invalid:1111", APIKey: "old-key", Model: "old-model"},
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
-	live := newLiveSettings(config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}, config.ProjectOffer{})
+	live := newLiveSettings(
+		config.Options{ContextWindow: 16384, StreamIdleTimeout: fixtureIdleRoot}, config.ProjectOffer{})
 	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
 		keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{})}
 

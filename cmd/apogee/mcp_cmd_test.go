@@ -761,7 +761,7 @@ func adoptedRepoWikiServer(t *testing.T, w *rootWiring) mcp.ServerConfig {
 	writeRepoWikiScript(t, w.roots.project, "exec true")
 	writeProjectConfig(t, w.roots.project, repoWikiServerYAML)
 	adoptEveryProposal(t, w.configPath(), w.roots.project)
-	o, err := w.layeredOptions()
+	o, err := loadLayeredOptions(w.configPath(), w.roots.project)
 	if err != nil {
 		t.Fatalf("load the layered config: %v", err)
 	}
@@ -859,7 +859,8 @@ func TestStartupSkipsARepoServerWhosePinIsUnreadable(t *testing.T) {
 	}
 	want := "apogee: mcp server wiki skipped — stdio server \"wiki\": refusing to launch — "
 	if len(w.startupNotices) != 1 || !strings.HasPrefix(w.startupNotices[0], want) ||
-		!strings.Contains(w.startupNotices[0], "bin/wiki.sh") || strings.Contains(w.startupNotices[0], "proposed again") {
+		!strings.Contains(w.startupNotices[0], "bin/wiki.sh") ||
+		strings.Contains(w.startupNotices[0], "proposed again") {
 		t.Errorf("startup notices = %q, want one opening %q naming bin/wiki.sh, never \"proposed again\"", w.startupNotices, want)
 	}
 	if !awaitPinWake(t, w) {

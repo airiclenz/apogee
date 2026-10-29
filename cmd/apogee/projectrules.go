@@ -430,14 +430,6 @@ func (w *rootWiring) bootSnapshot() project.Snapshot {
 	return project.SnapshotOf(w.opts, w.offer)
 }
 
-// layeredOptions is the resolution a relaunch would make of the two config files and the adoption
-// record, as the options alone — loadSnapshot without the offer, which a watched refresh and the
-// proposed-entries read load instead. The loader's notices are not repeated here: the watched
-// re-read says them (ConfigHost.ReloadConfig).
-func (w *rootWiring) layeredOptions() (config.Options, error) {
-	return loadLayeredOptions(w.configPath(), w.roots.project)
-}
-
 // loadLayeredOptions is the global config at configPath with the Project config of projectRoot
 // layered over it, sorted by that root's adoption record — the one live reading every re-read of
 // the layered set makes (the watched Allow-rule refresh, and the live reload of the MCP servers and

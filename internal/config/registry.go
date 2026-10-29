@@ -623,9 +623,11 @@ var KeyRegistry = bindRows([]Key{
 		// (allow.go, internal/adoption); a global rule is live as written. Structured and file-only,
 		// summarized by how many rules are live and how many wait on an answer.
 		Path: "allow", Kind: KindStructured,
-		Class:     ClassGranting,
-		Desc:      "Commands and MCP servers that run without asking at an ordinary gate; a project config's rules count only once adopted.",
-		Read:      func(o Options) string { return allowRulesSummary(OfferedAllowRules{Rules: o.AllowRules.Rules}) },
+		Class: ClassGranting,
+		Desc:  "Commands and MCP servers that run without asking at an ordinary gate; a project config's rules count only once adopted.",
+		Read: func(o Options) string {
+			return allowRulesSummary(OfferedAllowRules{Rules: o.AllowRules.Rules})
+		},
 		Structure: func(o Options) any { return o.AllowRules },
 		ReadOffer: func(o Options, offer ProjectOffer) string {
 			return allowRulesSummary(offeredAllowRules(o, offer))

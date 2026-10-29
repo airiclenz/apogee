@@ -254,8 +254,10 @@ func ReadGlobalDocument(configDir string, readFile func(string) ([]byte, error),
 // the precedence stays default < global < project < env < flag. Global-only keys are dropped with
 // one notice, a project's `allow:` rules, `mcp-servers:` entries and `reactions:` entries are
 // sorted by the adoption record and only the adopted ones join base's global rules, servers and
-// reactions (the offer reports them all), and ProjectKeys and DangerousRules.ProjectAdd say what the layer contributed. No project file, one that states nothing, or one that cannot be layered answers base
-// itself — the last after one notice naming the file. Notices go to notify, which must be non-nil.
+// reactions (the offer reports them all), and ProjectKeys and DangerousRules.ProjectAdd say what
+// the layer contributed. No project file, one that states nothing, or one that cannot be layered
+// answers base itself — the last after one notice naming the file. Notices go to notify, which must
+// be non-nil.
 //
 // base is never changed: every field the overlay writes is replaced by a freshly built value, so
 // overlays of one base may run concurrently.

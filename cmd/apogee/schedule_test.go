@@ -1446,7 +1446,8 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
 	}}
 
-	live := newLiveSettings(config.Options{Reactions: []domain.Reaction{recorder("boot", bootMarker)}}, config.ProjectOffer{})
+	live := newLiveSettings(
+		config.Options{Reactions: []domain.Reaction{recorder("boot", bootMarker)}}, config.ProjectOffer{})
 	live.setReactionLanes([]domain.Reaction{recorder("reloaded", reloadedMarker)}, nil)
 
 	w := scheduleWiring{

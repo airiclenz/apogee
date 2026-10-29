@@ -314,11 +314,11 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // launched is an ABSOLUTE program that does not live inside the workspace: a server binary the
 // model could have authored — or a PATH entry pointing into the box — is refused at connect time
 // rather than executed. Connect being all-or-nothing (bar a Project server whose pin moved or could
-// not be checked, which it skips and reports — Client.Skipped), the operator meets that refusal at startup, where every other
-// misconfigured server is met. For a global server cmd.Dir is deliberately NOT
-// set: the server keeps starting in apogee's own working directory, the workspace, which is what
-// filesystem-style MCP servers expect, and with argv[0] an absolute fenced path there is no
-// relative lookup left for the working directory to decide.
+// not be checked, which it skips and reports — Client.Skipped), the operator meets that refusal at
+// startup, where every other misconfigured server is met. For a global server cmd.Dir is
+// deliberately NOT set: the server keeps starting in apogee's own working directory, the
+// workspace, which is what filesystem-style MCP servers expect, and with argv[0] an absolute
+// fenced path there is no relative lookup left for the working directory to decide.
 //
 // A Project server (cfg.Project, ADR 0104 §4) is launched only through its pin's Admit: every
 // project file it was adopted with is re-hashed first, and one that changed, went missing or is

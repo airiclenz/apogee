@@ -1,9 +1,11 @@
 ---
 title: rootWiring.layeredOptions has no production caller
-status: open
+status: done
 type: chore
 priority: 3
 created: 2026-10-28T09:17:03Z
+closed: 2026-10-29T07:34:49Z
+reason: rootWiring.layeredOptions deleted; its two test callers call loadLayeredOptions directly
 ---
 
 After plan `2026-10-27 - 01 - project-pin-admit-and-adoption-snapshot-plan` item 11, `rootWiring.layeredOptions` (`cmd/apogee/projectrules.go:437`) is called only from tests (`cmd/apogee/projectrules_test.go:879`, `cmd/apogee/mcp_cmd_test.go:764`); production reads go through `loadLayeredOptions` and the Adoption snapshot.

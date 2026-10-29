@@ -8,7 +8,7 @@ closed: 2026-10-18T20:56:55Z
 reason: resolved by plan 2026-10-18 - 02 - exec-pin-followups-plan (archived at 86afb7c1), item 5
 ---
 
-When a pinned project script an adopted repo reaction runs is edited mid-session, every spawn is refused (`internal/agent/syncexec.go:141-155`, `changedPinNotice`/`checkProjectPin`), and the notice says the entry is proposed again. But the entry is re-proposed only when the config layer next reads the Project config: a script edit triggers no reload, so the adoption pane does not re-ask in-session until the Project config itself (or the adoption record) changes or apogee restarts. The reaction stays refused on every Moment meanwhile.
+When a pinned project script an adopted repo reaction runs is edited mid-session, every spawn is refused (`checkProjectPin` in `internal/agent/syncexec.go`; the `changedPinNotice` helper this once cited became `domain.PinMovedError` in plan `2026-10-27 - 01 - project-pin-admit-and-adoption-snapshot-plan`), and the notice says the entry is proposed again. But the entry is re-proposed only when the config layer next reads the Project config: a script edit triggers no reload, so the adoption pane does not re-ask in-session until the Project config itself (or the adoption record) changes or apogee restarts. The reaction stays refused on every Moment meanwhile.
 
 Deferred out of plan `2026-10-18 - 00 - project-config-exec-keys-plan`.
 

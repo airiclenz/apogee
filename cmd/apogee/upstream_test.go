@@ -1048,7 +1048,8 @@ func TestMoveCarriesTheEntrysWireToTheEngineAndTheBinding(t *testing.T) {
 	switcher := &fakeSwitcher{}
 	mover := sessionMover{
 		agent: switcher, holder: holder, host: &fakeStamper{},
-		live: newLiveSettings(config.Options{}, config.ProjectOffer{}), keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{}),
+		live: newLiveSettings(config.Options{}, config.ProjectOffer{}), keys: config.NewKeyResolver(""),
+		caps: newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 
 	entry := config.ServerEntry{Name: "claude", Endpoint: "http://claude.invalid:2222", APIKey: "sk-claude", Wire: "anthropic"}
@@ -1095,7 +1096,8 @@ func TestMoveCarriesTheEphemeralFlag(t *testing.T) {
 	switcher := &fakeSwitcher{}
 	mover := sessionMover{
 		agent: switcher, holder: holder, host: &fakeStamper{},
-		live: newLiveSettings(config.Options{}, config.ProjectOffer{}), keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{}),
+		live: newLiveSettings(config.Options{}, config.ProjectOffer{}), keys: config.NewKeyResolver(""),
+		caps: newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 	rows := upstreamChoices(config.Options{
 		Endpoint:         "http://rented.invalid:8080",

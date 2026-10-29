@@ -235,8 +235,8 @@ func Admit(servers []ServerConfig, guard security.URLGuard) (admitted []ServerCo
 
 // connectOne dials a single server, lists its tools, and appends the session and the surfaced
 // tools to the Client. A connect or list failure is returned (the caller rolls the whole set
-// back, or — for a *domain.PinMovedError — skips the server). The session is recorded BEFORE listing tools so a list failure still tears the
-// just-opened session down on rollback.
+// back, or — for a *domain.PinMovedError — skips the server). The session is recorded BEFORE
+// listing tools so a list failure still tears the just-opened session down on rollback.
 //
 // A stdio server's process joins its teardown inside stdioTransport.Connect, immediately after
 // Start and before the handshake sends a byte — the same sub-millisecond Windows window the tools

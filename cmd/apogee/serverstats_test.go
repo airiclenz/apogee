@@ -247,7 +247,10 @@ func TestServerStatsFillBothPickersChoices(t *testing.T) {
 
 	holder := newUpstreamHolder()
 	holder.Bind(upstreamBinding{Endpoint: servers[0].Endpoint, Model: "qwen"}, nil)
-	w := &rootWiring{live: newLiveSettings(config.Options{Servers: servers}, config.ProjectOffer{}), stats: rec, holder: holder}
+	w := &rootWiring{
+		live:  newLiveSettings(config.Options{Servers: servers}, config.ProjectOffer{}),
+		stats: rec, holder: holder,
+	}
 
 	for name, choices := range map[string][]tui.ServerChoice{
 		"server":     serverHost{w: w}.List(),

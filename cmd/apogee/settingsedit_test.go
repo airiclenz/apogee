@@ -133,7 +133,8 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 // which editors the machine running the test has installed.
 func specFor(t *testing.T, home string, env map[string]string, key string) tui.EditorCommand {
 	t.Helper()
-	e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, "", func(k string) string { return env[k] })
+	e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, "",
+		func(k string) string { return env[k] })
 	e.goos = "linux"
 	e.look = editorAlwaysFound
 	launch, err := e.spec(key)
@@ -723,7 +724,8 @@ func TestExternalEditBaselineIsTheFileNotTheResolution(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: plan\n")
 	// The session resolved `auto` (an APOGEE_MODE override would do this); the file still says plan.
-	e := newExternalEdit(config.Options{ConfigDir: home, Mode: "auto"}, config.ProjectOffer{}, "", func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home, Mode: "auto"}, config.ProjectOffer{}, "",
+		func(string) string { return "" })
 
 	reload, err := e.changed()
 	if err != nil {
@@ -743,7 +745,8 @@ func TestExternalEditSpecReadsTheEditorTheFileNamesNow(t *testing.T) {
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mode: auto\n")
 	// The startup snapshot names an editor the file no longer does; it must not be consulted.
-	e := newExternalEdit(config.Options{ConfigDir: home, Editor: "stale-editor"}, config.ProjectOffer{}, "", func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home, Editor: "stale-editor"}, config.ProjectOffer{}, "",
+		func(string) string { return "" })
 	e.goos = "linux"
 	e.look = editorAlwaysFound
 
@@ -853,7 +856,8 @@ func TestExternalEditSpecRefusesAnEditorInsideTheWorkspace(t *testing.T) {
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "editor: vim\nmode: auto\n")
 	workspace := t.TempDir()
 	planted := filepath.Join(workspace, "bin", "vim")
-	e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, workspace, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, workspace,
+		func(string) string { return "" })
 	e.goos = "linux"
 	e.look = func(string) (string, error) { return planted, nil }
 
@@ -879,7 +883,8 @@ func TestExternalEditSpecRefusesAnEditorOnARelativePathEntry(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "editor: vim\nmode: auto\n")
-	e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, t.TempDir(), func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, t.TempDir(),
+		func(string) string { return "" })
 	e.goos = "linux"
 	e.look = func(string) (string, error) { return "bin/vim", exec.ErrDot }
 
