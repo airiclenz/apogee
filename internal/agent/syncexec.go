@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -15,8 +17,9 @@ import (
 )
 
 // The SYNC lane's out-of-process executor: the one door a user's `advise:` or `gate:` command is
-// spawned through, and its webhook POSTed through, while the loop waits on it (ADR 0076 D2, D7,
-// D8; docs/design/confinement-execution-contract.md §10.4).
+// spawned through, its webhook POSTed through and its MCP tool called through, while the loop waits
+// on it (ADR 0076 D2, D7, D8, adr-0076-amend-1029; docs/design/confinement-execution-contract.md
+// §10.4).
 //
 // It is deliberately ONE deep module. Everything a sync reaction's command needs settling —
 // which permit it spawns under, whether a confinement box has to be built first, what deadline
@@ -26,7 +29,9 @@ import (
 // exists, and neither should be able to spawn a command any other way. The webhook door beside it
 // (runSyncWebhook) sends the SAME document as the POST body and hands the seam the reply body on
 // the same terms; it takes no permit, because nothing is spawned — the request leaves the process
-// over the network, as the observe lane's webhooks already do.
+// over the network, as the observe lane's webhooks already do. The MCP door (runSyncMCP) sends the
+// same document under the entry's payload argument and hands the seam the tool's text answer, also
+// without a permit: the call travels over the Driver's live server session, and nothing is spawned.
 //
 // An adopted repo reaction's observe-lane `run:` is the one observe command spawned here too
 // (RunProjectReaction, ADR 0104 §8): it runs under the same permit row through the same door, so
@@ -214,9 +219,151 @@ func (a *Agent) runSyncWebhook(
 	return string(reply), nil
 }
 
+// runSyncMCP calls one sync-lane reaction's MCP tool and returns its text answer, which the seam
+// reads exactly as it reads a command's stdout (adr-0076-amend-1029). The arguments are the entry's
+// static Args plus, under its PayloadArg, the document runSyncArgv writes to a command's stdin —
+// identity half stamped here too — as a JSON object, so a tool reads the same fields a script does.
+//
+// The user authored the call, so it never reaches the Approver; nothing is spawned, so no permit is
+// taken and `confine-to-workspace` has nothing to fence; the deadline is the class's (syncTimeout),
+// as it is for a command or a webhook. An adopted repo entry passes its pin first (checkProjectPin),
+// exactly as its command would, and is resolved as a project entry, so the resolver refuses a server
+// its own Project config does not declare.
+//
+// Every failure is one error for the classes to read as they read a command's: an advise reaction
+// contributes nothing, a gate escalates to ask. A failure to RESOLVE the entry — no resolver
+// injected, the server not connected, the tool missing, the wrong layer — comes back as an
+// *mcpUnresolvedError, which reportSyncFailure reports once per entry rather than on every firing:
+// a server that is down stays down for a while, and the call failures that follow a live
+// resolution — the tool's isError, a timeout, a transport failure — are reported every time.
+func (a *Agent) runSyncMCP(
+	ctx context.Context,
+	turn int,
+	r domain.Reaction,
+	doc domain.SeamPayload,
+) (string, error) {
+	handler, ok := r.Handler.(domain.MCPHandler)
+	if !ok {
+		return "", fmt.Errorf("apogee: reaction %q: the sync lane calls an MCP tool, not a %T", r.ID, r.Handler)
+	}
+	resolve := a.cfg.MCP
+	if resolve == nil {
+		return "", &mcpUnresolvedError{}
+	}
+	if r.Project {
+		if _, err := a.checkProjectPin(r); err != nil {
+			return "", err
+		}
+	}
+	call, err := resolve(handler.Server, handler.Tool, r.Project)
+	if err == nil && call == nil {
+		err = errors.New("mcp: the resolver returned no call")
+	}
+	if err != nil {
+		return "", &mcpUnresolvedError{err: err}
+	}
+
+	_, document, err := a.syncDocument(turn, r, doc)
+	if err != nil {
+		return "", err
+	}
+	args, err := mcpArguments(r.ID, handler, document)
+	if err != nil {
+		return "", err
+	}
+
+	timeout := syncTimeout(r)
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	answer, err := call(callCtx, args)
+	if err != nil {
+		if ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("timed out after %s", timeout)
+		}
+		return "", err
+	}
+	return answer, nil
+}
+
+// mcpArguments is the JSON object an MCP reaction's tool is called with: the handler's static Args,
+// and — when it names a PayloadArg — the stamped seam document under that name. Validate refuses a
+// PayloadArg that Args already holds, so at load the payload never overwrites a static argument. An
+// entry with neither sends the empty object.
+func mcpArguments(id string, handler domain.MCPHandler, document []byte) (json.RawMessage, error) {
+	args := make(map[string]any, len(handler.Args)+1)
+	maps.Copy(args, handler.Args)
+	if handler.PayloadArg != "" {
+		args[handler.PayloadArg] = json.RawMessage(document)
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("apogee: reaction %q: mcp args: %w", id, err)
+	}
+	return encoded, nil
+}
+
+// mcpUnresolvedError is runSyncMCP's failure to turn an MCP entry into a call. err is the
+// resolver's refusal; nil means no resolver is injected at all — a Driver that dials no MCP server,
+// whose one notice per entry is the Driver's to give (adr-0076-amend-1029), so reportSyncFailure
+// reports nothing for it.
+type mcpUnresolvedError struct {
+	err error
+}
+
+func (e *mcpUnresolvedError) Error() string {
+	if e.err == nil {
+		return mcpNotConnected
+	}
+	return e.err.Error()
+}
+
+func (e *mcpUnresolvedError) Unwrap() error { return e.err }
+
+// mcpNotConnected is the failure an MCP entry reads in a Driver that dials no MCP server — the
+// reason an unanswered gate's Approval prompt names.
+const mcpNotConnected = "MCP servers are not connected in this run"
+
+// reportSyncFailure is how a sync-lane seam reports a handler failure: reportReaction, behind the
+// MCP resolution rule. A failure from a Driver with no resolver is not reported here at all — the
+// Driver's own notice owns it — and a resolver's refusal is reported the FIRST time an entry meets
+// it on this Agent (mcpUnresolved), since it would otherwise repeat on every firing until the server
+// returns. Every other failure is reported every time.
+func (a *Agent) reportSyncFailure(turn int, r domain.Reaction, m domain.Moment, err error) {
+	var unresolved *mcpUnresolvedError
+	if errors.As(err, &unresolved) && (unresolved.err == nil || !a.mcpUnresolved.first(r.ID)) {
+		return
+	}
+	a.reportReaction(turn, r.ID, m, err)
+}
+
+// reportedOnce is a set of reaction ids, each admitted once. It is safe for concurrent use — a
+// pooled dispatch gates several calls at once — and its zero value is ready, allocated on first use
+// under its own mutex.
+type reportedOnce struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+}
+
+// first reports whether id is new to the set, adding it. A nil set admits every id.
+func (s *reportedOnce) first(id string) bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.seen[id]; ok {
+		return false
+	}
+	if s.seen == nil {
+		s.seen = make(map[string]struct{})
+	}
+	s.seen[id] = struct{}{}
+	return true
+}
+
 // syncDocument stamps the IDENTITY half of one sync-lane document — which reaction fired, when, in
 // which workspace, and at what depth, turn and call id — over the MOMENT's half the seam filled,
-// and renders the JSON both doors send. Those are facts of the firing agent rather than of the
+// and renders the JSON every door sends. Those are facts of the firing agent rather than of the
 // Moment, so a seam that forgets one cannot ship a document that misreports the run. The stamped
 // document is returned beside its encoding because a command's environment (SeamPayload.Env) is
 // derived from the same fields.

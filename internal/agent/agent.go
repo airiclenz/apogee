@@ -443,6 +443,13 @@ type Agent struct {
 	// parent's registry and delivered out of the child's mailbox, by the child's own Run.
 	children childRegistry
 	mailbox  childMailbox
+
+	// mcpUnresolved is the set of reaction ids whose MCP resolution failure — the server not
+	// connected, the tool missing, the wrong layer — this Agent has already reported
+	// (reportSyncFailure, adr-0076-amend-1029): a resolution failure is reported once per entry per
+	// Agent, a call failure every time. Its zero value is ready, because backgroundHost builds an
+	// Agent without New.
+	mcpUnresolved reportedOnce
 	// retained is the set of delegations THIS Agent keeps for the rest of its session, keyed by
 	// delegation name (children.go, ADR 0086 D1): what a continuation is spawned from. Filled by
 	// runSubAgent after a capped, faulted, stopped, continued or named completed child's result is

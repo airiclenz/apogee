@@ -137,7 +137,12 @@ cmd/apogee/wire_helpers_test.go — mcpFixtureTool
 **Acceptance:** `go vet ./internal/mcp/ && GOMEMLIMIT=2GiB go test -count=1 -run 'Resolver|RemoteName|Tool' ./internal/mcp/`
 **Commit:** `feat(mcp): a resolver for mcp: reaction handlers`
 
-## 6. Sync lane: runSyncMCP and the gate
+## 6. Sync lane: runSyncMCP and the gate — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): re-derived from "the Agent's once-set is wired in construct.go/background.go" — the Agent struct lives in internal/agent/agent.go, so the field `mcpUnresolved reportedOnce` is declared there; its zero value is ready (map lazily allocated under its own mutex, nil-receiver-safe), so neither New (construct.go) nor backgroundHost (background.go) needed an edit and both are untouched. A backgroundHost keeps its own set (once per entry per Agent, as the Goal states).
+NOTES (2026-10-29): the report rule lives in one helper, `reportSyncFailure(turn, r, moment, err)` in syncexec.go — askGate calls it now; item 7's adviseUser/attachSessionAdvice should call it instead of reportReaction. runSyncMCP returns `*mcpUnresolvedError` for a nil resolver (err nil, Error() = "MCP servers are not connected in this run", never reported) and for a resolver refusal (reported once per reaction id per Agent).
+NOTES (2026-10-29): when the class deadline expires while the caller's ctx is live, runSyncMCP reports `timed out after <timeout>` (the webhook's wording) rather than the call's raw context error; a resolver returning a nil call with a nil error is treated as a resolution failure ("mcp: the resolver returned no call") rather than a nil-func panic.
+NOTES (2026-10-29): comment sweep beyond the plan's grep: gate.go's file header (unreadable answers), gateDocument's doc, and syncexec.go's syncDocument doc ("both doors" -> "every door") now name the MCP door.
 
 Depends on item 2.
 

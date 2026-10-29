@@ -10,9 +10,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -744,4 +746,196 @@ func TestGateWebhookIgnoresTheStatusCodeAsAVerdict(t *testing.T) {
 			t.Errorf("the tool ran %d times and the Approver was asked %d times, want 0 and 0", ran, len(approver.requests))
 		}
 	})
+}
+
+// userGateMCP is one user-origin `gate:` entry over an MCP tool, as the reactions: file resolves an
+// `{mcp: {server:, tool:}}` mapping (adr-0076-amend-1029).
+func userGateMCP(id string, handler domain.MCPHandler) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassGate,
+		On:      []domain.Moment{domain.MomentPreToolExec},
+		Handler: handler,
+	}
+}
+
+// mcpResolution is one question a resolver was asked.
+type mcpResolution struct {
+	server, tool string
+	project      bool
+}
+
+// stubMCP stands in for the Driver's MCP client (Config.MCP): it records every resolution and every
+// call's arguments, and answers with what the row under test set. block makes the call wait out its
+// context, which is how a deadline is observed without a server.
+type stubMCP struct {
+	answer     string
+	callErr    error
+	resolveErr error
+	block      bool
+
+	mu       sync.Mutex
+	resolved []mcpResolution
+	args     []json.RawMessage
+}
+
+func (s *stubMCP) resolver() domain.MCPResolver {
+	return func(server, tool string, project bool) (domain.MCPCall, error) {
+		s.mu.Lock()
+		s.resolved = append(s.resolved, mcpResolution{server: server, tool: tool, project: project})
+		s.mu.Unlock()
+		if s.resolveErr != nil {
+			return nil, s.resolveErr
+		}
+		return func(ctx context.Context, args json.RawMessage) (string, error) {
+			s.mu.Lock()
+			s.args = append(s.args, args)
+			s.mu.Unlock()
+			if s.block {
+				<-ctx.Done()
+				return "", ctx.Err()
+			}
+			return s.answer, s.callErr
+		}, nil
+	}
+}
+
+func (s *stubMCP) resolutions() []mcpResolution {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]mcpResolution(nil), s.resolved...)
+}
+
+func (s *stubMCP) calls() []json.RawMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]json.RawMessage(nil), s.args...)
+}
+
+// An MCP gate answers through the same protocol as a command: the first line of the tool's text is
+// the verdict and the rest the reason. The call is the user's own, so it never reaches the Approver
+// — only an `ask` does, as the forced Gate every asking reaction earns — and an `allow` leaves the
+// ladder's verdict standing.
+func TestGateMCPAnswersAllowDenyAsk(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		answer    string
+		wantRan   int
+		wantAsks  int
+		wantText  string
+		wantFired string
+	}{
+		{name: "deny", answer: "deny\nforce pushes are off", wantText: "tool call denied by reaction warden", wantFired: "deny"},
+		{name: "ask", answer: "ask\nlooks risky", wantRan: 1, wantAsks: 1, wantText: "main.go", wantFired: "ask"},
+		{name: "allow", answer: "allow", wantRan: 1, wantText: "main.go", wantFired: "allow"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			approver := &gateApprover{decision: domain.ApprovalAllow}
+			ran := 0
+			stub := &stubMCP{answer: tc.answer}
+			a := gateAgent(t, sink, approver, &ran,
+				userGateMCP("warden", domain.MCPHandler{Server: "llama", Tool: "status"}))
+			a.cfg.MCP = stub.resolver()
+
+			result, _ := prepareAndRun(a, readCallOnly())
+
+			if result.Content != tc.wantText {
+				t.Errorf("result = %q, want %q", result.Content, tc.wantText)
+			}
+			if ran != tc.wantRan {
+				t.Errorf("the tool ran %d times, want %d", ran, tc.wantRan)
+			}
+			if len(approver.requests) != tc.wantAsks {
+				t.Fatalf("the Approver was consulted %d times, want %d", len(approver.requests), tc.wantAsks)
+			}
+			if tc.wantAsks == 1 && approver.requests[0].Reason != "reaction warden asks: looks risky" {
+				t.Errorf("Approval reason = %q, want the gate's own reason", approver.requests[0].Reason)
+			}
+			if got := stub.resolutions(); len(got) != 1 || got[0] != (mcpResolution{server: "llama", tool: "status"}) {
+				t.Errorf("resolutions = %+v, want one global resolution of llama/status", got)
+			}
+			if booked := gateFirings(sink, "warden"); len(booked) != 1 || booked[0].Action != tc.wantFired {
+				t.Errorf("firings = %+v, want one %q", booked, tc.wantFired)
+			}
+		})
+	}
+}
+
+// An MCP gate that cannot answer ASKS, as every gate does. What differs is the report: a Driver that
+// dials no MCP server (Config.MCP nil) owns its own notice, so the gate reports nothing; a server the
+// resolver cannot reach is reported once per entry, not on every call; and a call that failed — the
+// tool's error, an unreadable answer, no answer — is reported every time, as a command's is.
+func TestGateMCPFailureEscalatesToAsk(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		stub        *stubMCP
+		wantReports int
+		detail      string
+	}{
+		{name: "no resolver", stub: nil, wantReports: 0, detail: "MCP servers are not connected in this run"},
+		{
+			name:        "a refused resolution",
+			stub:        &stubMCP{resolveErr: errors.New(`mcp server "llama" is not connected`)},
+			wantReports: 1,
+			detail:      `mcp server "llama" is not connected`,
+		},
+		{name: "a failed call", stub: &stubMCP{callErr: errors.New("model not loaded")}, wantReports: 2, detail: "model not loaded"},
+		{name: "an unreadable answer", stub: &stubMCP{answer: "maybe"}, wantReports: 2, detail: `answered "maybe"`},
+		{name: "nothing at all", stub: &stubMCP{}, wantReports: 2, detail: "printed nothing"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			approver := &gateApprover{decision: domain.ApprovalDeny}
+			a := gateAgent(t, sink, approver, nil,
+				userGateMCP("warden", domain.MCPHandler{Server: "llama", Tool: "status"}))
+			if tc.stub != nil {
+				a.cfg.MCP = tc.stub.resolver()
+			}
+			var reported []string
+			a.cfg.Report = func(msg string) { reported = append(reported, msg) }
+
+			prepareAndRun(a, readCallOnly())
+			prepareAndRun(a, readCallOnly())
+
+			if len(approver.requests) != 2 {
+				t.Fatalf("the Approver was consulted %d times, want 2 — every unanswered gate asks", len(approver.requests))
+			}
+			for _, req := range approver.requests {
+				if want := "reaction warden asks: did not answer ("; !strings.HasPrefix(req.Reason, want) || !strings.Contains(req.Reason, tc.detail) {
+					t.Errorf("Approval reason = %q, want it to start %q and name %q", req.Reason, want, tc.detail)
+				}
+			}
+			if len(reported) != tc.wantReports {
+				t.Errorf("reporter lines = %q, want %d", reported, tc.wantReports)
+			}
+			for _, line := range reported {
+				if !strings.HasPrefix(line, "reaction warden (pre-tool-exec): ") {
+					t.Errorf("reporter line = %q, want the sync lane's failure line", line)
+				}
+			}
+			failed := 0
+			for _, f := range gateFirings(sink, "warden") {
+				if f.Action == actionFailed {
+					failed++
+				}
+			}
+			if failed != tc.wantReports {
+				t.Errorf("%d failed firings booked, want %d — one per report", failed, tc.wantReports)
+			}
+		})
+	}
 }

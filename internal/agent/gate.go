@@ -27,9 +27,10 @@ import (
 // pre-approve a call would be a second, unaudited autonomy ladder.
 //
 // Every unreadable answer lands on `ask`, not on `allow`: an empty or unparseable stdout, a
-// non-zero exit, a timeout, a refused permit and a panicking Go handler all end with the human
-// being asked. A gate the user armed and cannot run is a question, never a silent pass — which
-// is the one place the sync lane is NOT fail-open, and is why Bypass leaves gates armed (D9).
+// non-zero exit, a timeout, a refused permit, an MCP tool that could not be reached or reported an
+// error, and a panicking Go handler all end with the human being asked. A gate the user armed and
+// cannot run is a question, never a silent pass — which is the one place the sync lane is NOT
+// fail-open, and is why Bypass leaves gates armed (D9).
 
 const (
 	// gateDenialPrefix opens the model-facing refusal a denied call carries. It is
@@ -129,16 +130,22 @@ func (a *Agent) gateReactions() []domain.Reaction {
 //
 // A gate that could not answer — a command that failed, timed out, was refused a permit or wrote
 // something unreadable, a webhook whose request failed or was answered with a non-2xx or nothing
-// readable, and a Go handler that panicked — is reported once through the sync lane's
-// own reporter (one operator line and one "failed" firing, item 4's shape) and then ASKS, naming
-// the failure so the human reads why they are being asked at all. That escalation is what makes a
-// broken gate safe: the surface a user armed to bound the model cannot be disarmed by breaking it.
+// readable, an MCP tool that could not be resolved, failed or answered nothing readable, and a Go
+// handler that panicked — ASKS, naming the failure so the human reads why they are being asked at
+// all. That escalation is what makes a broken gate safe: the surface a user armed to bound the model
+// cannot be disarmed by breaking it.
+//
+// The failure is reported through the sync lane's own reporter (one operator line and one "failed"
+// firing, item 4's shape) on the terms reportSyncFailure sets (adr-0076-amend-1029): every time, but
+// for an MCP entry that could not be resolved — reported once per entry on this Agent — and for one
+// in a Driver that dials no MCP server, which is not reported here at all: that Driver's own notice
+// owns it, and the ask still names the reason.
 func (a *Agent) askGate(ctx context.Context, turn int, r domain.Reaction, call domain.ToolCall) domain.GateDecision {
 	decision, err := a.gateAnswer(ctx, turn, r, call)
 	if err == nil {
 		return decision
 	}
-	a.reportReaction(turn, r.ID, domain.MomentPreToolExec, err)
+	a.reportSyncFailure(turn, r, domain.MomentPreToolExec, err)
 	return domain.GateDecision{
 		Verdict: domain.GateAsk,
 		Reason:  sanitize.ClampRunes("did not answer ("+err.Error()+")", gateReasonRunes),
@@ -146,12 +153,13 @@ func (a *Agent) askGate(ctx context.Context, turn int, r domain.Reaction, call d
 }
 
 // gateAnswer invokes one gate reaction's handler and reports its decision, or the error that
-// stands in for one. The three handler shapes are the three the domain admits for class gate: a
-// user's command over argv, a user's webhook, and an engine or embedder's Go func reading
-// Outcome.Gate. The two out-of-process kinds answer through the same protocol — the first line of
-// what they wrote is the verdict (parseGateAnswer) — so a webhook's HTTP status is never a verdict:
-// a non-2xx is a failure the caller escalates to ask, and a 2xx with no readable first line is
-// exactly the same question.
+// stands in for one. The four handler shapes are the four the domain admits for class gate: a
+// user's command over argv, a user's webhook, a user's MCP tool, and an engine or embedder's Go func
+// reading Outcome.Gate. The three out-of-process kinds answer through the same protocol — the first
+// line of what they wrote is the verdict (parseGateAnswer) — so a webhook's HTTP status is never a
+// verdict: a non-2xx is a failure the caller escalates to ask, and a 2xx with no readable first line
+// is exactly the same question. An MCP tool's text answer reads the same way, and its isError is a
+// failure, never a deny.
 func (a *Agent) gateAnswer(
 	ctx context.Context,
 	turn int,
@@ -171,6 +179,12 @@ func (a *Agent) gateAnswer(
 			return domain.GateDecision{}, err
 		}
 		return parseGateAnswer(reply)
+	case domain.MCPHandler:
+		answer, err := a.runSyncMCP(ctx, turn, r, gateDocument(call))
+		if err != nil {
+			return domain.GateDecision{}, err
+		}
+		return parseGateAnswer(answer)
 	case domain.PreToolExecFunc:
 		return a.callGateFunc(ctx, turn, r, h, call)
 	default:
@@ -178,8 +192,9 @@ func (a *Agent) gateAnswer(
 	}
 }
 
-// gateDocument is the MOMENT's half of the document a gate's command or webhook receives: the
-// pre-tool-exec Moment, the tool and its arguments. The executor stamps the identity half over it.
+// gateDocument is the MOMENT's half of the document a gate's command, webhook or MCP tool
+// receives: the pre-tool-exec Moment, the tool and its arguments. The executor stamps the identity
+// half over it.
 func gateDocument(call domain.ToolCall) domain.SeamPayload {
 	return domain.SeamPayload{
 		Event: domain.MomentPreToolExec,

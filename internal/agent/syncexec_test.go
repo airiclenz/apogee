@@ -620,3 +620,187 @@ func TestSyncLaneReadsTheReloadedScrub(t *testing.T) {
 		}
 	})
 }
+
+// mcpSyncReaction is one user-origin gate entry over an MCP tool, with the deadline the row needs.
+func mcpSyncReaction(handler domain.MCPHandler, timeout time.Duration) domain.Reaction {
+	r := userGateMCP("probe", handler)
+	r.Timeout = timeout
+	return r
+}
+
+// TestSyncMCPSendsArgsAndThePayload pins the call runSyncMCP makes (adr-0076-amend-1029): the
+// static args, plus the stamped seam document as a JSON object under payload-arg — the same fields a
+// command reads off stdin — and the tool's text handed back as the answer. It runs with
+// confine-to-workspace on over a host that cannot confine, which refuses every command: an MCP call
+// spawns nothing, so it takes no permit and is not refused.
+func TestSyncMCPSendsArgsAndThePayload(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		handler domain.MCPHandler
+		check   func(t *testing.T, args map[string]json.RawMessage)
+	}{
+		{
+			name:    "args and payload",
+			handler: domain.MCPHandler{Server: "llama", Tool: "status", Args: map[string]any{"verbose": true}, PayloadArg: "moment"},
+			check: func(t *testing.T, args map[string]json.RawMessage) {
+				if len(args) != 2 || string(args["verbose"]) != "true" {
+					t.Errorf("args = %s, want verbose:true beside the payload", args)
+				}
+				var doc domain.SeamPayload
+				if err := json.Unmarshal(args["moment"], &doc); err != nil {
+					t.Fatalf("payload under moment is not a SeamPayload object: %v (%s)", err, args["moment"])
+				}
+				if doc.Reaction != "probe" || doc.Event != domain.MomentPreToolExec || doc.Tool != "list_dir" || doc.Turn != 7 {
+					t.Errorf("payload = %+v, want the stamped pre-tool-exec document of reaction probe at turn 7", doc)
+				}
+				if doc.Workspace == "" {
+					t.Error("payload carries no workspace; the identity half was not stamped")
+				}
+			},
+		},
+		{
+			name:    "args alone",
+			handler: domain.MCPHandler{Server: "llama", Tool: "status", Args: map[string]any{"limit": 3}},
+			check: func(t *testing.T, args map[string]json.RawMessage) {
+				if len(args) != 1 || string(args["limit"]) != "3" {
+					t.Errorf("args = %s, want limit:3 and no payload", args)
+				}
+			},
+		},
+		{
+			name:    "nothing",
+			handler: domain.MCPHandler{Server: "llama", Tool: "status"},
+			check: func(t *testing.T, args map[string]json.RawMessage) {
+				if len(args) != 0 {
+					t.Errorf("args = %s, want the empty object", args)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			a := syncAgent(t, &recordingSink{}, &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: false}}, true)
+			stub := &stubMCP{answer: "allow\nloaded"}
+			a.cfg.MCP = stub.resolver()
+
+			answer, err := a.runSyncMCP(context.Background(), 7, mcpSyncReaction(tc.handler, 0), gateDocument(readCallOnly()))
+
+			if err != nil {
+				t.Fatalf("runSyncMCP err = %v, want the tool's answer", err)
+			}
+			if answer != "allow\nloaded" {
+				t.Errorf("answer = %q, want the tool's text verbatim", answer)
+			}
+			calls := stub.calls()
+			if len(calls) != 1 {
+				t.Fatalf("the tool was called %d times, want 1", len(calls))
+			}
+			var args map[string]json.RawMessage
+			if err := json.Unmarshal(calls[0], &args); err != nil {
+				t.Fatalf("args %s are not a JSON object: %v", calls[0], err)
+			}
+			tc.check(t, args)
+		})
+	}
+}
+
+// TestSyncMCPHonoursTheDeadline pins the class deadline on an MCP call: a tool that never answers is
+// cut off at the entry's `timeout:`, and the error says so in the webhook's words.
+func TestSyncMCPHonoursTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	a := syncAgent(t, &recordingSink{}, nil, false)
+	stub := &stubMCP{block: true}
+	a.cfg.MCP = stub.resolver()
+
+	r := mcpSyncReaction(domain.MCPHandler{Server: "llama", Tool: "status"}, 50*time.Millisecond)
+	_, err := a.runSyncMCP(context.Background(), 1, r, gateDocument(readCallOnly()))
+
+	if err == nil || err.Error() != "timed out after 50ms" {
+		t.Errorf("err = %v, want %q", err, "timed out after 50ms")
+	}
+}
+
+// TestSyncMCPProjectPinIsCheckedFirst pins ADR 0104 §4 on an MCP entry: an adopted repo entry is
+// admitted through its pin before anything is resolved, refused like a command when its files moved
+// (cueing the Driver to ask again) or when it carries no pin, and resolved as a project entry when
+// the pin holds, so the resolver can refuse a server that is not its own Project config's.
+func TestSyncMCPProjectPinIsCheckedFirst(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		pin       func(root string) domain.ProjectPin
+		want      string
+		wantPokes int
+	}{
+		{name: "moved pin", pin: func(root string) domain.ProjectPin {
+			return fakePin{root: root, changed: []string{"scripts/fmt.sh"}}
+		}, want: "scripts/fmt.sh changed since you adopted it", wantPokes: 1},
+		{name: "no pin", pin: func(string) domain.ProjectPin { return nil }, want: "carries no adoption pin"},
+		{name: "pin holds", pin: func(root string) domain.ProjectPin { return fakePin{root: root} }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			a := syncAgent(t, &recordingSink{}, nil, false)
+			stub := &stubMCP{answer: "allow"}
+			a.cfg.MCP = stub.resolver()
+			pokes := 0
+			a.cfg.PinMoved = func() { pokes++ }
+			r := mcpSyncReaction(domain.MCPHandler{Server: "repo-tools", Tool: "lint"}, 0)
+			r.Project = true
+			r.Pin = tc.pin(a.cfg.WorkspaceDir)
+
+			_, err := a.runSyncMCP(context.Background(), 1, r, gateDocument(readCallOnly()))
+
+			if pokes != tc.wantPokes {
+				t.Errorf("PinMoved called %d times, want %d", pokes, tc.wantPokes)
+			}
+			if tc.want != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Errorf("err = %v, want it to say %q", err, tc.want)
+				}
+				if got := stub.resolutions(); len(got) != 0 {
+					t.Errorf("resolutions = %+v, want none — a refused pin resolves nothing", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("runSyncMCP err = %v, want the answer", err)
+			}
+			if got := stub.resolutions(); len(got) != 1 || !got[0].project {
+				t.Errorf("resolutions = %+v, want one resolved as a project entry", got)
+			}
+		})
+	}
+}
+
+// TestSyncMCPBackgroundHostReportsAResolutionFailureOnce pins the once-set on the Agent a background
+// workflow runs off: backgroundHost builds it without New, and its gate still reports an unreachable
+// server once across two calls rather than panicking on a set nobody allocated.
+func TestSyncMCPBackgroundHostReportsAResolutionFailureOnce(t *testing.T) {
+	t.Parallel()
+
+	gate := userGateMCP("warden", domain.MCPHandler{Server: "llama", Tool: "status"})
+	a := gateAgent(t, &recordingSink{}, &gateApprover{decision: domain.ApprovalDeny}, nil, gate)
+	var reported []string
+	a.cfg.Report = func(msg string) { reported = append(reported, msg) }
+	a.cfg.MCP = (&stubMCP{resolveErr: errors.New(`mcp server "llama" is not connected`)}).resolver()
+	host := a.backgroundHost()
+
+	for range 2 {
+		if decision := host.askGate(context.Background(), 0, gate, readCallOnly()); decision.Verdict != domain.GateAsk {
+			t.Errorf("verdict = %q, want ask", decision.Verdict)
+		}
+	}
+
+	if len(reported) != 1 {
+		t.Errorf("reporter lines = %q, want one — a resolution failure reports once per entry", reported)
+	}
+}
