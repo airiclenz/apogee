@@ -3,6 +3,7 @@ title: /advice pane paints an empty row after a Detail ending in a newline
 status: open
 type: bug
 priority: 2
+plan: 2026-10-29 - 00 - p2-fixes-plan
 created: 2026-10-29T08:33:23Z
 ---
 

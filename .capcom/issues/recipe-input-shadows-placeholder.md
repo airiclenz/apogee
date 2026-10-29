@@ -3,6 +3,7 @@ title: A recipe input can shadow a script stage's run-time placeholder
 status: open
 type: bug
 priority: 2
+plan: 2026-10-29 - 00 - p2-fixes-plan
 created: 2026-10-29T08:29:25Z
 ---
 

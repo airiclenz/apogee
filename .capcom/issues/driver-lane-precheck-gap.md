@@ -3,6 +3,7 @@ title: Driver lane pre-check skips the engine's reserved-id and scope refusals
 status: open
 type: bug
 priority: 2
+plan: 2026-10-29 - 00 - p2-fixes-plan
 created: 2026-10-29T08:33:23Z
 ---
 
