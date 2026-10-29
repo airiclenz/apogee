@@ -30,10 +30,11 @@ import (
 // wait and leaves the runs for the next opening.
 //
 // The lane dispatches by handler KIND itself rather than through adviseUser, whose default branch
-// refuses everything but a command and a webhook: an engine-origin Go handler (SessionStartedFunc,
-// the shape the bench arms) is called directly, and a command or webhook goes through the sync
-// lane's executor (runSyncArgv / runSyncWebhook) and the secret redaction adviseUser applies, so
-// admitting the user's `advise:` key on session-started stays a validation change only.
+// refuses everything but a command, a webhook and an MCP tool: an engine-origin Go handler
+// (SessionStartedFunc, the shape the bench arms) is called directly, and a command, webhook or MCP
+// tool goes through the sync lane's executor (runSyncArgv / runSyncWebhook / runSyncMCP) and the
+// secret redaction adviseUser applies, so admitting the user's `advise:` key on session-started
+// stays a validation change only.
 //
 // The compaction lane serves the compaction-finished notice the same way, keyed by its own Moment
 // and holding its own runs (sessionBriefing.compaction). A top-level fold that passes its gate
@@ -216,9 +217,11 @@ func newSessionAdviseRuns(specs []domain.Reaction, doc domain.SeamPayload) []*se
 }
 
 // callSessionAdvice is the session briefing's adviseCaller: it dispatches one lane's advise reaction by its handler KIND: a Go handler — a
-// SessionStartedFunc, the one the lanes know — is called directly, a command or a webhook goes
-// through the sync lane's executor with doc, the lane's seam document, and its answer is
-// secret-redacted as adviseUser's is. The Outcome's Inject is the advice; empty is silence.
+// SessionStartedFunc, the one the lanes know — is called directly, a command, a webhook or an MCP
+// tool goes through the sync lane's executor with doc, the lane's seam document, and its answer is
+// secret-redacted as adviseUser's is. The Outcome's Inject is the advice; empty is silence. A
+// failure is only returned — this runs on the boundary's background goroutine, which never reports —
+// and the join reports it (attachSessionAdvice).
 func (a *Agent) callSessionAdvice(
 	ctx context.Context,
 	turn int,
@@ -238,6 +241,8 @@ func (a *Agent) callSessionAdvice(
 		answer, err = a.runSyncArgv(ctx, turn, r, doc)
 	case domain.WebhookHandler:
 		answer, err = a.runSyncWebhook(ctx, turn, r, doc, adviseReplyCap)
+	case domain.MCPHandler:
+		answer, err = a.runSyncMCP(ctx, turn, r, doc)
 	default:
 		return domain.Outcome{}, wrongHandler(doc.Event, r.Handler)
 	}
@@ -321,9 +326,11 @@ func (a *Agent) landAdvice(turn int) adviceLanding {
 // the user message at index target — the reaction's stale fences retired first (retireStaleAdvice)
 // —, booked as an advise firing under the same Detail a tool-result firing books
 // (advice.bookedDetail) — or, for a run that produced nothing usable, the report a sync-lane
-// failure gets (reportReaction) or the ErrorEvent a recovered panic gets (recoverHook), with every
-// earlier fence left standing. A run still going at its deadline is a timeout. It reports whether
-// the run answered: false for a run it reported, which the join then drops.
+// failure gets (reportSyncFailure, which reports an unresolved MCP entry once per entry on this
+// Agent and one in a Driver that dials no MCP server not at all) or the ErrorEvent a recovered panic
+// gets (recoverHook), with every earlier fence left standing. A run still going at its deadline is
+// a timeout. It reports whether the run answered: false for a run that failed, which the join then
+// drops whether or not it was reported.
 func (a *Agent) attachSessionAdvice(turn, target int, run *sessionAdviseRun) bool {
 	m := run.doc.Event
 	select {
@@ -341,7 +348,7 @@ func (a *Agent) attachSessionAdvice(turn, target int, run *sessionAdviseRun) boo
 		return false
 	}
 	if run.err != nil {
-		a.reportReaction(turn, run.spec.ID, m, run.err)
+		a.reportSyncFailure(turn, run.spec, m, run.err)
 		return false
 	}
 

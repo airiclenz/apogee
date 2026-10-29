@@ -160,7 +160,12 @@ internal/agent/background.go — backgroundHost; internal/agent/subagent.go — 
 **Acceptance:** `go vet ./internal/agent/ && GOMEMLIMIT=2GiB go test -count=1 -run 'Gate|SyncMCP' ./internal/agent/`
 **Commit:** `feat(agent): a gate reaction may answer through an MCP tool`
 
-## 7. Advise sites call runSyncMCP
+## 7. Advise sites call runSyncMCP — ✅ DONE (2026-10-29)
+
+NOTES (2026-10-29): adviseUser and attachSessionAdvice now report through item 6's reportSyncFailure (the once-set and the nil-resolver silence) instead of reportReaction; callSessionAdvice only returns the error (boundary goroutine never reports). attachSessionAdvice's deadline-miss report stays reportReaction — a timeout is not a resolution failure.
+NOTES (2026-10-29): an MCP advise answer is not read-bounded like a webhook reply (adviseReplyCap); it is capped downstream at adviceOf like every route, so the span is still capped — only the in-memory answer is unbounded, as the MCP client hands it over.
+NOTES (2026-10-29): comment sweep — adviseUser's doc (kinds and report terms), the post-tool-result invoke comment ("BOTH" -> "ALL THREE" out-of-process kinds), sessionadvise.go's header and callSessionAdvice/attachSessionAdvice docs, and sessionadvise_user_test.go's file header now name the MCP door.
+NOTES (2026-10-29): Bypass is pinned at post-tool-result (TestAdviseMCPIsSkippedUnderBypass); the session lanes filter by class before the handler kind (sessionAdviseSpecs), so no separate session Bypass MCP test was added. The "two firings" resolution-failure test crosses two sessions via ClearContext.
 
 Depends on item 6.
 

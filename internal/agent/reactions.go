@@ -496,16 +496,19 @@ func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) 
 }
 
 // adviseUser is the USER half of the advise slot: one `advise:` entry's command runs out of
-// process, or its webhook is POSTed to, while the loop waits, and what it answered becomes the
-// trailer the model reads (ADR 0076 D2, D6). It is called from the post-tool-result seam alone —
-// the only Moment with a closing tool result to fence a trailer onto — and dispatches on the
-// handler's KIND: a command's standard output and a webhook's reply body are the same text to
-// everything below.
+// process, its webhook is POSTed to, or its MCP tool is called, while the loop waits, and what it
+// answered becomes the trailer the model reads (ADR 0076 D2, D6, adr-0076-amend-1029). It is called
+// from the post-tool-result seam alone — the only Moment with a closing tool result to fence a
+// trailer onto — and dispatches on the handler's KIND: a command's standard output, a webhook's
+// reply body and an MCP tool's text answer are the same text to everything below.
 //
 // It is FAIL-OPEN in both directions it decides (D7), and each of them costs the Turn nothing: a
 // command that failed, timed out or was refused a permit — a webhook whose request failed, timed
-// out, was answered with a non-2xx or named an unset `headers-env:` variable — contributes nothing
-// and is reported once, through the sync lane's own reporter and one "failed" firing; a handler
+// out, was answered with a non-2xx or named an unset `headers-env:` variable — an MCP call that
+// failed or could not be resolved — contributes nothing and is reported on the sync lane's terms
+// (reportSyncFailure: one operator line and one "failed" firing, except that an MCP entry that could
+// not be resolved is reported once per entry on this Agent, and one in a Driver that dials no MCP
+// server not at all — that Driver's own notice owns it); a handler
 // that answered nothing contributes nothing, so an entry that only sometimes has something to say
 // is silent the rest of the time rather than injecting an empty fence. The third silence — a
 // file-changed entry on a call that changed no file — is decided BEFORE this route is reached
@@ -532,11 +535,13 @@ func (a *Agent) adviseUser(
 		answer, err = a.runSyncArgv(ctx, turn, r, doc)
 	case domain.WebhookHandler:
 		answer, err = a.runSyncWebhook(ctx, turn, r, doc, adviseReplyCap)
+	case domain.MCPHandler:
+		answer, err = a.runSyncMCP(ctx, turn, r, doc)
 	default:
 		return domain.Outcome{}, wrongHandler(domain.MomentPostToolResult, r.Handler)
 	}
 	if err != nil {
-		a.reportReaction(turn, r.ID, doc.Event, err)
+		a.reportSyncFailure(turn, r, doc.Event, err)
 		return domain.Outcome{}, nil
 	}
 
@@ -729,8 +734,8 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 				// whole class, so the narrowing that pays for it (hearsCall) has to hold for
 				// the whole class too — a Go advise handler and the user's command alike.
 				// The user's advise cell is then the one route that leaves the process: its
-				// handler is a command or a webhook, not a Go func, so BOTH out-of-process
-				// kinds are dispatched here, before the Go handler assertion, rather than
+				// handler is a command, a webhook or an MCP tool, not a Go func, so ALL THREE
+				// out-of-process kinds are dispatched here, before the Go handler assertion, rather than
 				// failing it — a kind left to fall through would lose every advise trailer
 				// for the call silently (fireCascade returns no advice, firePostToolResult
 				// drops the error).
@@ -740,7 +745,7 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 						return domain.Outcome{}, nil
 					}
 					switch r.Handler.(type) {
-					case domain.ArgvHandler, domain.WebhookHandler:
+					case domain.ArgvHandler, domain.WebhookHandler, domain.MCPHandler:
 						return a.adviseUser(ctx, turn, r, adviseDocument(p, path))
 					}
 				}

@@ -1,7 +1,7 @@
 package agent
 
 // A USER `advise:` entry on session-started (ADR 0076 D6, 2026-10-21 admission amendment): the
-// entry's command or webhook runs through the session-start lane's sync-lane executor, and its
+// entry's command, webhook or MCP tool runs through the session-start lane's sync-lane executor, and its
 // answer lands fenced ahead of the session's first opening — redacted, capped, fail-open, off under
 // Bypass, under its own deadline — booked under the same Detail a post-tool-result firing books.
 // These are the session-started twins of advise_argv_test.go and advise_webhook_test.go, driven
@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -379,4 +380,116 @@ func TestSessionAdvise_AUserEntryIsNeverRunUnderBypass(t *testing.T) {
 			t.Errorf("spawned=%v hits=%d first=%q under Bypass, want neither run and the bare prompt", spawned, hits, first)
 		}
 	})
+}
+
+// TestSessionAdvise_AUserMCPToolLandsFenced — the case adr-0076-amend-1029 was ratified on: an
+// `advise:` entry at session-started calling a llama-launcher status tool. Its text answer lands
+// fenced ahead of the first opening's text, the firing books it, and the tool is called with its
+// static args plus the stamped session-started document under its payload argument.
+func TestSessionAdvise_AUserMCPToolLandsFenced(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	reports := &reportLines{}
+	cfg := baseConfig(sink)
+	cfg.Report = reports.report
+	stub := &stubMCP{answer: sessionAdviceText + "\n"}
+	cfg.MCP = stub.resolver()
+	responder := echoResponder(t, "ok")
+	a := sessionAdviseAgent(t, cfg, responder, userAdviseMCP("llama", sessionStarted, llamaStatus))
+
+	runExchange(t, a, "first prompt")
+
+	first := lastUserContent(t, responder.requests()[0])
+	if !strings.HasPrefix(first, userFenceFor("llama")) || !strings.Contains(first, "]\n"+sessionAdviceText+"\n") ||
+		!strings.HasSuffix(first, "\n\nfirst prompt") {
+		t.Errorf("first user message = %q, want the fenced tool answer ahead of the prompt", first)
+	}
+	fired := sessionAdviseFirings(sink, "llama")
+	if len(fired) != 1 || fired[0].Action != actionAdvise || fired[0].Detail != sessionAdviceText+"\n" {
+		t.Fatalf("booked %+v, want one advise firing booking the answer", fired)
+	}
+	calls := stub.calls()
+	if len(calls) != 1 {
+		t.Fatalf("the tool was called %d times, want 1", len(calls))
+	}
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal(calls[0], &args); err != nil {
+		t.Fatalf("args are not a JSON object: %v (%s)", err, calls[0])
+	}
+	var doc domain.SeamPayload
+	if err := json.Unmarshal(args["moment"], &doc); err != nil {
+		t.Fatalf("payload under moment is not a SeamPayload object: %v (%s)", err, args["moment"])
+	}
+	if string(args["verbose"]) != "true" || doc.Event != domain.MomentSessionStarted || doc.Reaction != "llama" {
+		t.Errorf("args = %s, want verbose:true beside the stamped session-started document of reaction llama", calls[0])
+	}
+	if got := reports.read(); len(got) != 0 {
+		t.Errorf("reported %q, want nothing", got)
+	}
+}
+
+// TestSessionAdvise_AnMCPEntryFailsOpen — an MCP entry that cannot answer adds nothing to either of
+// two sessions' openings, and the join reports it on the sync lane's terms: a Driver that dials no
+// MCP server owns its own notice, so nothing is reported or booked; a resolver's refusal is reported
+// once per entry across both sessions, never from the boundary's background goroutine.
+func TestSessionAdvise_AnMCPEntryFailsOpen(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		stub        *stubMCP
+		wantReports int
+	}{
+		{name: "no resolver", stub: nil, wantReports: 0},
+		{
+			name:        "a resolution failure",
+			stub:        &stubMCP{resolveErr: errors.New(`mcp server "llama" is not connected`)},
+			wantReports: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			reports := &reportLines{}
+			cfg := baseConfig(sink)
+			cfg.Report = reports.report
+			if tc.stub != nil {
+				cfg.MCP = tc.stub.resolver()
+			}
+			responder := echoResponder(t, "ok")
+			a := sessionAdviseAgent(t, cfg, responder, userAdviseMCP("llama", sessionStarted, llamaStatus))
+
+			runExchange(t, a, "first prompt")
+			if err := a.ClearContext(); err != nil {
+				t.Fatalf("ClearContext: %v", err)
+			}
+			runExchange(t, a, "second prompt")
+
+			requests := responder.requests()
+			if len(requests) != 2 {
+				t.Fatalf("sent %d requests, want 2", len(requests))
+			}
+			for i, want := range []string{"first prompt", "second prompt"} {
+				if got := lastUserContent(t, requests[i]); got != want {
+					t.Errorf("opening %d = %q, want the bare prompt", i+1, got)
+				}
+			}
+			got := reports.read()
+			if len(got) != tc.wantReports {
+				t.Fatalf("reported %q, want %d lines", got, tc.wantReports)
+			}
+			for _, line := range got {
+				if !strings.HasPrefix(line, "reaction llama (session-started): ") {
+					t.Errorf("report = %q, want the sync lane's line naming the reaction", line)
+				}
+			}
+			fired := sessionAdviseFirings(sink, "llama")
+			if len(fired) != tc.wantReports {
+				t.Errorf("booked %+v, want %d failed firings", fired, tc.wantReports)
+			}
+		})
+	}
 }

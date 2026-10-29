@@ -9,6 +9,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -269,5 +271,223 @@ func TestAdviseNeverSurvivesASnapshotResume(t *testing.T) {
 	if msg.Content != body || len(msg.Advice) != 0 {
 		t.Errorf("resumed tool message = %q with %d spans, want the bare body and no ledger",
 			msg.Content, len(msg.Advice))
+	}
+}
+
+// userAdviseMCP is one user-origin `advise:` entry over an MCP tool, as the reactions: file resolves
+// an `{mcp: {server:, tool:, args:, payload-arg:}}` mapping (adr-0076-amend-1029).
+func userAdviseMCP(id string, on []domain.Moment, handler domain.MCPHandler) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassAdvise,
+		On:      on,
+		Handler: handler,
+	}
+}
+
+// llamaStatus is the MCP tool the advise tests call: the llama-launcher status case, with a static
+// argument and the seam document under "moment".
+var llamaStatus = domain.MCPHandler{
+	Server:     "llama",
+	Tool:       "status",
+	Args:       map[string]any{"verbose": true},
+	PayloadArg: "moment",
+}
+
+// adviseMCPAgent is adviseArgvAgent with one MCP advise entry on post-tool-result and the given
+// resolver injected as the Driver's MCP client — nil for a Driver that dials no MCP server.
+func adviseMCPAgent(
+	t *testing.T,
+	sink *recordingSink,
+	bypass bool,
+	reported *[]string,
+	resolve domain.MCPResolver,
+) *Agent {
+	t.Helper()
+
+	a := adviseArgvAgent(t, sink, t.TempDir(), bypass, reported,
+		userAdviseMCP("llama", []domain.Moment{domain.MomentPostToolResult}, llamaStatus))
+	a.cfg.MCP = resolve
+	return a
+}
+
+// An MCP advise entry's text answer is the trailer, exactly as a command's stdout is: fenced on the
+// closing tool result, booked under the answer, and the tool is called with its static args plus
+// the stamped post-tool-result document under its payload argument.
+func TestAdviseMCPLandsAsATrailer(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	stub := &stubMCP{answer: "qwen3 loaded\n"}
+	a := adviseMCPAgent(t, sink, false, &reported, stub.resolver())
+
+	call, result := readCall()
+	msg := adviseArgvCall(t, a, call, result)
+
+	if !strings.HasPrefix(msg.Content, "main.go") || !strings.Contains(msg.Content, "qwen3 loaded") ||
+		len(msg.Advice) != 1 || msg.Advice[0].Reaction != "llama" {
+		t.Errorf("committed message = %q with spans %+v, want the body and one llama span carrying the answer",
+			msg.Content, msg.Advice)
+	}
+	fired := firedAdvice(sink)
+	if len(fired) != 1 || fired[0].Action != actionAdvise || fired[0].Detail != "qwen3 loaded\n" {
+		t.Errorf("firings = %+v, want one advise firing booking the answer", fired)
+	}
+	if got := stub.resolutions(); len(got) != 1 || got[0] != (mcpResolution{server: "llama", tool: "status"}) {
+		t.Errorf("resolutions = %+v, want one global resolution of llama/status", got)
+	}
+	calls := stub.calls()
+	if len(calls) != 1 {
+		t.Fatalf("the tool was called %d times, want 1", len(calls))
+	}
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal(calls[0], &args); err != nil {
+		t.Fatalf("args are not a JSON object: %v (%s)", err, calls[0])
+	}
+	var doc domain.SeamPayload
+	if err := json.Unmarshal(args["moment"], &doc); err != nil {
+		t.Fatalf("payload under moment is not a SeamPayload object: %v (%s)", err, args["moment"])
+	}
+	if string(args["verbose"]) != "true" || doc.Event != domain.MomentPostToolResult || doc.Tool != "list_dir" ||
+		doc.Reaction != "llama" {
+		t.Errorf("args = %s, want verbose:true beside the stamped post-tool-result document of reaction llama", calls[0])
+	}
+	if len(reported) != 0 {
+		t.Errorf("reported %q, want nothing", reported)
+	}
+}
+
+// An empty answer is silence, as an empty stdout is: no span, no firing, no report.
+func TestAdviseMCPAnswersNothingOnAnEmptyAnswer(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	a := adviseMCPAgent(t, sink, false, &reported, (&stubMCP{}).resolver())
+
+	call, result := readCall()
+	msg := adviseArgvCall(t, a, call, result)
+
+	if msg.Content != "main.go" || len(msg.Advice) != 0 {
+		t.Errorf("committed message = %q with %d spans, want the bare body and none", msg.Content, len(msg.Advice))
+	}
+	if fired := firedAdvice(sink); len(fired) != 0 || len(reported) != 0 {
+		t.Errorf("firings = %+v, reported = %q, want neither", fired, reported)
+	}
+}
+
+// The answer is redacted before it is fenced or booked: an MCP server is one more place a configured
+// secret's value can come back from.
+func TestAdviseMCPRedactsTheAnswer(t *testing.T) {
+	// No t.Parallel: t.Setenv.
+	t.Setenv("APOGEE_TEST_ADVISE_MCP_SECRET", "hunter2-the-real-one")
+
+	sink := &recordingSink{}
+	var reported []string
+	a := adviseMCPAgent(t, sink, false, &reported, (&stubMCP{answer: "token=hunter2-the-real-one\n"}).resolver())
+	a.cfg.SecretEnvVars = []string{"APOGEE_TEST_ADVISE_MCP_SECRET"}
+
+	call, result := readCall()
+	msg := adviseArgvCall(t, a, call, result)
+
+	if strings.Contains(msg.Content, "hunter2-the-real-one") || !strings.Contains(msg.Content, "token=[redacted]") {
+		t.Errorf("advised content = %q, want the secret's value replaced by [redacted]", msg.Content)
+	}
+	if fired := firedAdvice(sink); len(fired) != 1 || fired[0].Detail != "token=[redacted]\n" {
+		t.Errorf("firings = %+v, want one advise firing whose Detail is already redacted", fired)
+	}
+}
+
+// Bypass switches advise off (D9) before the handler is reached: the tool is never called.
+func TestAdviseMCPIsSkippedUnderBypass(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		bypass    bool
+		wantCalls int
+	}{
+		{name: "Bypass off calls it", bypass: false, wantCalls: 1},
+		{name: "Bypass on never calls it", bypass: true, wantCalls: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var reported []string
+			stub := &stubMCP{answer: "advice\n"}
+			a := adviseMCPAgent(t, &recordingSink{}, tc.bypass, &reported, stub.resolver())
+
+			call, result := readCall()
+			adviseArgvCall(t, a, call, result)
+
+			if got := len(stub.calls()); got != tc.wantCalls {
+				t.Errorf("the tool was called %d times, want %d", got, tc.wantCalls)
+			}
+		})
+	}
+}
+
+// An MCP advise entry that cannot answer FAILS OPEN — the tool result is committed bare — and is
+// reported on the sync lane's terms (reportSyncFailure): a Driver that dials no MCP server owns its
+// own notice, so nothing is reported; a resolver's refusal is reported once per entry however often
+// it fires; a call that fails is reported every time.
+func TestAdviseMCPFailsOpen(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		stub        *stubMCP
+		wantReports int
+	}{
+		{name: "no resolver", stub: nil, wantReports: 0},
+		{
+			name:        "a resolution failure",
+			stub:        &stubMCP{resolveErr: errors.New(`mcp server "llama" is not connected`)},
+			wantReports: 1,
+		},
+		{name: "a failed call", stub: &stubMCP{callErr: errors.New("model not loaded")}, wantReports: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			var reported []string
+			var resolve domain.MCPResolver
+			if tc.stub != nil {
+				resolve = tc.stub.resolver()
+			}
+			a := adviseMCPAgent(t, sink, false, &reported, resolve)
+
+			for range 2 {
+				call, result := readCall()
+				msg := adviseArgvCall(t, a, call, result)
+				if msg.Content != "main.go" || len(msg.Advice) != 0 {
+					t.Errorf("committed message = %q with %d spans, want the bare body and none",
+						msg.Content, len(msg.Advice))
+				}
+			}
+
+			if len(reported) != tc.wantReports {
+				t.Fatalf("reported %q, want %d lines", reported, tc.wantReports)
+			}
+			for _, line := range reported {
+				if !strings.HasPrefix(line, "reaction llama (post-tool-result): ") {
+					t.Errorf("report = %q, want the sync lane's line naming the reaction", line)
+				}
+			}
+			fired := firedAdvice(sink)
+			if len(fired) != tc.wantReports {
+				t.Errorf("firings = %+v, want %d failed firings", fired, tc.wantReports)
+			}
+			for _, f := range fired {
+				if f.Action != actionFailed {
+					t.Errorf("firing = %+v, want Action %q", f, actionFailed)
+				}
+			}
+		})
 	}
 }
