@@ -53,3 +53,9 @@ title: ADR 0080 decision
    repository, a timeout, an unexpected `rev-parse` shape — every failure skips the check for
    that call and the text guard's verdict stands. The pre-check must never fail, slow or
    block a commit the tool itself would have made; it is a floor, not a gate on git's health.
+
+> *Amendment (2026-09-23, `adr-0080-amend-0923`):* decision 6 is **superseded** on two points.
+> One `commitSecretsTimeout` of 30 s bounds the whole pre-check (all four shadow runs), not 2 s
+> per run. A root that resolves no repository is still the silent skip; but once the repository has
+> resolved, an expired budget or a git run failing mid-scan forces the Tier-2 look with the
+> incomplete-scan hint instead of skipping.

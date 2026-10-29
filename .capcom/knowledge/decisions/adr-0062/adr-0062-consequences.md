@@ -21,7 +21,9 @@ title: ADR 0062 consequences
   built from source; it is not in `make dist`, not in the Homebrew formula, and not in the manual's
   install path.
 - **Gating stays boring.** The in-process and PTY e2e tests run in every plain `go test` — no build
-  tags, no `-short` — with the whole e2e set budgeted at ~15 s under `-race`; PTY tests skip on
+  tags, no `-short` — with the whole e2e set budgeted at ~15 s under `-race` at ratification
+  (amended 2026-10-29: measured 121.7 s for 36 tests on 2026-08-28, and the set has grown since;
+  `docs/design/test-drivers.md` §Gates and budgets holds the current figures); PTY tests skip on
   Windows or where no pty is available; judge tests skip without the gate and join `make live-eval`.
 - **Nothing here is a Mechanism.** The kit observes apogee; it never changes what a model sees.
   stubllm replaces the upstream rather than steering it, the drivers add no prompt text, and the

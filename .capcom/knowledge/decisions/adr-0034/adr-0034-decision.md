@@ -33,6 +33,11 @@ made the scheduler runner-agnostic behind an injected seam, so an action type be
 > **Amended 2026-09-27 (ADR 0087 D10).** The reserved `run: workflow:` key arrives as
 > `run: workflow: {recipe, inputs}`: an entry names a Recipe and the scope to run it over, and the
 > daemon starts that Workflow through the same engine library the TUI and headless `--recipe` use.
+>
+> **Amended 2026-08-22 (ADR 0055 D1–D3).** The `run:` block also takes `server:`, which names a
+> `servers:` entry in `config.yaml` (absent: the host's startup default), and `model:`, a per-request
+> model selection that is refused on a launcher-fronted entry. The daemon never actuates the launcher.
+> Decision 10's "name models explicitly or inherit the configured default" reads through this.
 
 ```yaml
 schedules:

@@ -86,4 +86,10 @@ title: ADR 0098 decision
 
 9. **The owner's personal `/cut-release` and `/release-notes` stand aside.** When they find a
    workspace that ships its own release skill, they stop and name it. That guard lives in the
-   personal skill library, not in this repo.
+   personal skill library, not in this repo, and it keys on the skill id: `/cut-release` stands
+   aside on a project skill whose id starts with `release-` but not `release-notes-`,
+   `/release-notes` on one starting with `release-notes-`, found under `.apogee/skills/`,
+   `.claude/skills/`, `.agents/skills/` or `.codex/skills/`. The repo skills keep those prefixes
+   (`release-apogee`, `release-notes-apogee`); a rename outside them silently re-enables the
+   personal skills here (2026-10-11, docs/handoffs/archived/2026-10-11 - 00 -
+   release-automation-in-repo.md).

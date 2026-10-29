@@ -19,7 +19,8 @@ the engine's context-fill notice; the seven Floor guards, `observe` and `gate` s
 (ADR 0076 decision 9,
 `internal/agent/reactions.go`). The floor principle and the control-arm role below stand.)
 
-Bypass is **orthogonal to Agent mode** (Plan / Ask-Before / Auto): any mode can run with or
+Bypass is **orthogonal to Agent mode** (Plan / Ask-Before / Auto at the time; amended 2026-10-29:
+Allow-Edits has since joined them, `domain.ModeAllowEdits`): any mode can run with or
 without Bypass.
 
 Bypass is the **same code path** users can run *and* the bench's **aggregate control arm**:

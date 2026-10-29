@@ -31,3 +31,12 @@ this ADR moves — the record shape, the per-Turn cadence, and the per-layer ver
 - **Records already written by earlier builds are left alone.** There is no retro-pruning of the
   empty `Session <date>` records those builds filed; the browser's `^d` deletes them, consistent
   with "no auto-pruning, manual `^d` only" in the Consequences above.
+
+> **Amended 2026-10-29 (verified against code).** The single predicate is now `worthSaving`
+> (`internal/tui/sessionsave.go`): `hasPrompt` **or** a background workflow still running
+> (`workflowsRunning`). This has held since 2026-09-28 (commit `ad3fee2b`, ADR 0087/0089).
+> A session whose only work is a running Background workflow is saved at quit, because its
+> snapshot entry is what a resume restarts the workflow from. For a session with no workflow
+> running, the gate is still exactly "a prompt exists" (`hasPrompt`, unchanged). `saveSession`
+> is gone: the clean quit and `/clear`|`/new` both schedule through `saveAtIdle`.
+> `persist`, `saveAtIdle` and `progressSave` all answer to `worthSaving`.

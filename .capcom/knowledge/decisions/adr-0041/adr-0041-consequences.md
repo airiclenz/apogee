@@ -12,7 +12,12 @@ title: ADR 0041 consequences
   only "the file changed". Parsing, projection, the diff and the per-key apply stay where they
   already are, reusing the existing baseline diff and dispatcher unchanged — ADR 0011 holds (no YAML
   reaches the renderer) and ADR 0031 holds (the engine is handed resolved values, so any Driver that
-  starts the watcher gets the same live reconfiguration).
+  starts the watcher gets the same live reconfiguration). *(Amended 2026-10-29: the polling type
+  moved out of `cmd/apogee` into `internal/filewatch` on 2026-08-22 (`7410670d`) so the daemon's
+  `schedules.yaml` reload shares it (ADR 0043); one `Watcher` is still one path, and the composition
+  root now holds up to three — `config.yaml`, the Project config (`adr-0041-amend-1010`) and the
+  Project root's adoption record (ADR 0096 §4) — fanned into one wait, `cmd/apogee/wire_live.go`.
+  The package still reads no YAML and applies nothing.)*
 - **The settings registry gains one editable string key with no validator, and a dispatcher case that
   deliberately moves nothing.** `editor` is read off a fresh projection of the file at the moment an
   external edit starts, so the write itself is the whole apply and there is no seam to drive. The case

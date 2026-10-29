@@ -105,3 +105,13 @@ title: "apogee's decision records: one Note per record, with each of its section
 - `adr-0101` — Regressions are never deferred
 - `adr-0102` — A plan owns an issue through the plan field, never a status
 - `adr-0103` — Live sessions are watchable through a Driver-written event journal
+- `adr-0104` — Project config execution keys are adoption-gated entries
+
+> **Note (2026-10-29, knowledge inventory).** Older records point at files that have since moved.
+> Read those pointers through this map; the records keep their spellings as written.
+>
+> - `CONTEXT.md` (removed 2026-10-18, commit 1b25dcec) is the capcom `glossary` Note tree:
+>   `capcom know show "<Term>"`.
+> - `docs/adr/NNNN-<slug>.md` is the `adr-NNNN` Note in this tree: `capcom know show "ADR NNNN"`.
+> - `docs/plans/<name>.md` is `docs/plans/archived/<name>.md` once its plan is done.
+> - A `file.go:NNN` anchor is as of the record's date; look up the symbol it names.

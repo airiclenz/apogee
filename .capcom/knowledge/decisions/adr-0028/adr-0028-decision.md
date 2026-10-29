@@ -72,6 +72,11 @@ call, the Monitor swap, restamping the session host's model to `""` so a save in
 cannot claim the old model — and returns the display facts, including the pinned window, so the
 renderer keeps needing no knowledge of the `context-window:` pin (ADR 0024 decision 6). Both new
 members nil-degrade: no `SwitchServer` and no choices is one situation, answered with one line.
+*(Amended 2026-08-20 by ADR 0054: the bare `Options` funcs named here — `Heartbeat`, `Rebind`,
+`SwitchServer`, and the `Servers` list beside them — were folded into one `ServerHost` interface on
+`Options.Server` (`internal/tui/tui.go`): `Beat`, `Rebind`, `List`, `Switch`, `Bind`,
+`RecordChoice`. The split this decision draws — the TUI owns when, the binary owns everything the
+switch touches — and the nil-degrade both stand unchanged.)*
 
 **5. `servers:` is a file-only config LIST, the startup endpoint is synthesized as a row, and the
 switch is SESSION-scoped.**

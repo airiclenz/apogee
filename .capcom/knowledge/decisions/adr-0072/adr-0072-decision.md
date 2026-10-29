@@ -80,7 +80,10 @@ affordance for a 4B model and a frontier one, it costs one slot, and a new root 
 second way to say what `tools.disabled:` already says.
 
 **7 — A delegation gets its OWN empty list; nothing is inherited and nothing is shared.** A child
-agent is constructed with a fresh `tasklist.New()` (`internal/agent/subagent.go`), so a parent's
+agent is constructed with a fresh `tasklist.New()` (`internal/agent/subagent.go`; amended
+2026-10-29: now `internal/agent/construct.go`, the constructor every Agent is built through, a
+delegate included via `subagent.go`'s `newDelegateAgent`, since the 9613645c refactor), so a
+parent's
 checklist is neither visible to the child nor writable by it, and the child's list dies with the
 child. A delegated task is a different job with a different decomposition; handing the child the
 parent's rows would put work it cannot do on a list it can tick off, and letting two agents write

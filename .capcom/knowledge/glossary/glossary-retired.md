@@ -30,7 +30,9 @@ origin × class policy matrix: **Mechanism** → Reaction (the lab layer
 is deleted; the bench arms an engine-origin Reaction through the facade); **Hook point** → seam
 Moment; **Hook event** → notice Moment (the
 eleven post-hoc spellings, with the old waiting spelling renamed `approval-requested` and the
-five seam-closing notices added in stage 2); **Experimental hook** → bench-armed Reaction.
+five seam-closing notices added in stage 2 — eleven then; `session-started` (ADR 0076 amendment
+2026-10-19) and `compaction-finished` (adr-0076-amend-1021b) have since made it thirteen);
+**Experimental hook** → bench-armed Reaction.
 **Hook** is not retired but demoted to the colloquial alias for a user-origin Reaction, and **Bypass** now reads
 "advise and shape Reactions off" rather than "Mechanisms off".
 

@@ -13,7 +13,11 @@ title: ADR 0027 consequences
 - **`runCommand` may be reached while a worker runs**, for reporting verbs only. ADR 0011's
   engine-call taxonomy is unchanged: the three verbs that can arrive mid-run are boundary-FREE by
   inspection (two synchronous notes and one `SetMode`-class read), and everything else is refused
-  before it gets there.
+  before it gets there. *(Amended 2026-10-29 — since widened: the table's `whileRunning` column
+  (internal/tui/command.go) admits thirteen verbs as of 2026-10-29, among them non-reporting ones
+  that still need no quiescent boundary — the /schedule pair (ADR 0033), /sub-agents-server (ADR
+  0045), /confine's changing form; the rule is now "no engine mutation, no worker of its own, no
+  quiescent boundary needed", and every other verb is queued to the next idle.)*
 - **The value-copied `Model` gains only plain values** — a slice header, ints, bools. ADR 0011's
   no-copy invariant and `TestModelNoBuilderByValue` are untouched.
 - **The caret walk had to become correct on wrapped lines.** Splicing mid-draft made the editor's
@@ -34,4 +38,7 @@ title: ADR 0027 consequences
   accents) and the chip strip leaves the spec with the code.
 - **Two palette entries are now load-bearing for meaning, not decoration**: `colSkill` (violet,
   inherited from the retired chip) and the new `colFileRef` (blue). A future theme change must keep
-  them distinguishable from plain prompt text, or the live validation stops validating.
+  them distinguishable from plain prompt text, or the live validation stops validating. *(Amended
+  2026-10-29 — since ADR 0040 the two constants are gone: they are the colour-scheme roles `skill`
+  and `file-ref` (internal/scheme/scheme.go), and a cross-scheme test keeps them distinguishable in
+  every shipped scheme.)*

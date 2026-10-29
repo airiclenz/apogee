@@ -11,8 +11,9 @@ time drives the Agent; the two communicate only through Bubble Tea's goroutine-s
 launches a `tea.Cmd` that captures the engine and a fresh cancellable `ctx`, `Submit`s, then
 runs the **Step loop** to the Exchange boundary (mirroring the canonical drive loop —
 `Agent.Run` / the bench's `coreagent.Run`), returning a single terminal `Msg`
-(`exchangeDoneMsg` / `cancelledMsg` / `errMsg`). Only **one** worker runs at a time (the
-model refuses input while running), so the Agent is only ever driven from the current
+(`exchangeDoneMsg` / `cancelledMsg` / `errMsg`). Only **one** worker runs at a time (the model
+refuses a second worker while running; amended 2026-10-29: since ADR 0025, input typed mid-run is
+staged as an Interjection, not refused), so the Agent is only ever driven from the current
 worker — the single-goroutine contract holds by construction. Driving via `Step` (not `Run`)
 keeps a clean per-Turn boundary for the status line and snapshots.
 
@@ -20,7 +21,8 @@ keeps a clean per-Turn boundary for the status line and snapshots.
 invariant stands: one worker at a time drives the Agent. But the worker is no longer the only
 thing that holds the engine away from the `Update` loop — a launcher verb restarting the server
 it dials (the actuation latch, ADR 0029), a `/bg` launch reading the Agent off the loop, a
-`/sessions` load, a record write, a deferred quit and a not-yet-bound session do too, and they
+`/sessions` load, a record write, a deferred quit and a not-yet-bound session do too (amended
+2026-10-29: and, since 2026-10-17, a watch of another session, `holdWatching`), and they
 overlap rather than exclude one another. `internal/tui/engineholds.go` records them as one set of
 `engineHold` bits — the `/bg` launch and session-load holds stored in `Model.holds`, the rest
 derived from the fields that already carry them — and `Model.engineHolds` snapshots that set
@@ -47,6 +49,20 @@ Event becomes one Msg, never dropped. If `TokenEvent` flooding later shows queue
 > into one another. Coalescing, never dropping, still holds; the one visible edge is that an
 > escape sequence a provider split across two deltas is stripped whole at the receiving seam.
 
+> **Note (2026-10-19) — `Send` is async only for its caller's goroutine, never for `Update`.**
+> Bubble Tea v2's `Program.Send` is a blocking send on an unbuffered channel (`tea.go`:
+> `msgs: make(chan Msg)`; `select { case <-p.ctx.Done(): case p.msgs <- msg: }`): it returns only
+> once the `Update` loop takes the Msg. So "a deadlock is structurally impossible" holds only for an
+> `Emit` on a worker goroutine. Engine code that `Update` calls synchronously — a Session boundary
+> (`ClearContext`, `RestoreSession`), a reaction reload or Runner swap — must never wait on a
+> goroutine that may be blocked in `Emit` → `p.Send`, and never emit or report through the Driver
+> sink itself (`noteDrop`/`emitReport` → `Bridge.NotifyHook`): either deadlocks the TUI. Enqueue,
+> then report off the caller's goroutine (at drain, or in the background). Pinned by
+> `TestBackground_AClearDoesNotWaitOnABlockedSink` (internal/agent),
+> `TestE2EBackgroundClearDoesNotHang` and `TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine`
+> (cmd/apogee). Source: docs/plans/archived/2026-10-19 - 00 - session-started-reactions-plan.md item
+> 3.
+
 **C3 — Approval is a cross-goroutine rendezvous (`uiApprover`).** `Approve(ctx, req)` sends
 an `approvalReqMsg{req, reply}` to the `Update` loop and blocks on a **buffered** (cap 1)
 reply channel: `select { case d := <-reply: return d, nil; case <-ctx.Done(): return
@@ -62,7 +78,8 @@ This is the most race-prone piece of the seam and carries the heaviest test.
 > worker ctx mechanics of C4 are unchanged.
 
 **C4 — Cancellation is the worker ctx's `CancelFunc`.** When the worker launches, the model
-stores the ctx's `CancelFunc`; the stop key calls it; the in-flight `Step` honours it at the
+stores the ctx's `CancelFunc` (amended 2026-10-29: now a `context.CancelCauseFunc`); the stop key
+calls it; the in-flight `Step` honours it at the
 next boundary and the worker returns `cancelledMsg`, leaving a resumable Session. This is the
 Phase-0-promoted primitive (ADR 0007) — no
 retrofit.

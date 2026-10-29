@@ -29,6 +29,8 @@ field on the codec's own wire type, not persistence of the summary. The edit blo
 > **Amended 2026-10-17 (ADR 0103, `adr-0052-amend-1017`).** "With no wire form of its own" no
 > longer holds: the summary gains a wire mirror owned by `internal/eventjson`, decoded only for
 > live watching. The session record still carries no `ToolSummary` value.
+> *(The transcript codec named here is no longer the TUI's: it moved to `internal/session` when it
+> became Driver-neutral, `adr-0052-amend-0824`.)*
 
 *Amendment (2026-08-31) — `write_file` is a fourth recorder.* Decision 1 named the three edit
 tools because they were the whole of the group on the day it was written. `write_file` now
@@ -65,6 +67,11 @@ step from `diff-add` as its scheme comments already require, so the whole UI spe
 turquoise for came-in/came-off, red for went-out/failed. Gutters and the pane divider wear the
 existing `muted` role; no new scheme keys
 (ADR 0040).
+
+> **Amended 2026-08-22.** The `diff-add` / `diff-del` foreground roles were retired once the
+> background bands (`diff-add-bg` / `diff-del-bg`, `adr-0052-amend-0819`) carried the body-line signal.
+> The turquoise-vs-red pairing and `success`'s place in the turquoise family now sit against
+> `diff-add-bg` (`internal/scheme/schemes/*.yaml`). The marker-column rule above is unchanged.
 
 **5 — Persistence is additive on the transcript codec, and the stacked rows remain what
 `Details` carries.** The codec persists rendered rows (`session.DetailLine`, kind integers pinned);

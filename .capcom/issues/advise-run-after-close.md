@@ -18,3 +18,7 @@ Separately, the item-6 test `TestSessionAdvise_ALiveArmedRunEndsAtTheNextBoundar
 
 - `Close` shuts the session window (or the lane refuses `extend` once stopped for good), so a `SetReactions` after `Close` starts no advise run; a test arms a `session-started` advise entry after `Close` and asserts no run starts.
 - The bare `<-started` receive is bounded through `internal/testtime` (`Budget` / `Eventually`) and fails with a message instead of hanging.
+
+## Log
+
+- 2026-10-29 Airic Lenz: 2026-10-21 (docs/plans/archived/2026-10-21 - 01 - advise-run-after-close-plan.md item 1): Close now shuts the session window before it stops the session-start lane, and that one window gates both lanes — so after Close a live SetReactions starts no session-started advise run AND hands no observe session-started entry to the ObserveRunner. Deliberate: no production Driver swaps after Close (cmd/apogee/wire.go closes the hooks before the engine). A Driver that ever reorders shutdown so a swap can land after Close loses those observe firings too.

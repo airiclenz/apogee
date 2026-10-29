@@ -12,6 +12,13 @@ the messages strictly after it. Per ADR 0010's lowest-layer rule the derivation 
 on domain types, so `internal/domain` is its home; `InjectContext` and `LastUser` route
 through it (or its shared core) with their public behaviour unchanged.
 
+> **Note (2026-10-29, knowledge inventory).** Since 2026-07-27 (Interjection, commit 15971da7) the
+> opening is the last `RoleUser` message that is **not** an Interjection —
+> `domain.lastExchangeOpening` (`internal/domain/exchange.go`), which `CurrentExchange` and
+> `Request.InjectContext` route through, so a mid-Exchange user message moves no boundary. The
+> hooks' `LastUser` deliberately stays the plain role scan over the shared `lastMatchIndex` core: it
+> reports the most recent user message, interjected or not.
+
 **2. The engine derives the boundary; the cached field and its repair math go.** With one
 derivation available, `a.exchangeStart` is redundant while an Exchange is open:
 `AbortExchange`'s rollback target and the S2 repair after a mid-Exchange history rewrite are
@@ -47,6 +54,14 @@ with its Exchange" invariant — called from `completeTurn`'s `StatusExchangeCom
 `abandonTurn`, and `AbortExchange`. `cancelTurn` stays distinct by design: the Exchange
 remains open there, so it truncates-then-restores the deferred queue exactly as F6 specifies.
 Pure concentration — same observable behaviour, one place to read it.
+
+> **Note (2026-10-29, knowledge inventory).** The code has since moved; the invariant has not.
+> `closeExchange` lives on the unexported `turnLifecycle` (`internal/agent/turn.go`), not on the
+> Agent, and the three exit helpers `completeTurn` / `abandonTurn` / `cancelTurn` became one table,
+> `turnLifecycle.end` (2026-07-24, commit 3f1808b6). Its callers are `end`'s `endExchangeDone`,
+> `endAbandoned` and `endStepCapped` rows plus `abort` (`AbortExchange`) and `settle`
+> (`SettleExchange`); `cancelTurn`'s truncate-then-restore is the `endCancelled` row, and
+> `endSettled` likewise leaves the Exchange open.
 
 > **Amended 2026-09-19 (`apogee-2un`, Stage A).** The caller list gains a fourth end:
 > `turnLifecycle.settle`, the engine half of `Agent.SettleExchange`. Where `AbortExchange` rolls

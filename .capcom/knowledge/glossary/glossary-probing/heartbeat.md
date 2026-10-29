@@ -35,7 +35,9 @@ per-server heartbeat Monitor is swapped whole behind the unchanged seam, and the
 switch guesses nothing about the new server and destroys nothing about the session: the
 conversation, Turn counters, mode, approvals and confinement all stand. What a switch *does* carry
 is what the new entry **pins** about its own server — its `context-window:` and its
-`max-output-tokens:` reply ceiling, both facts about the slot rather than about the session, and a
+`max-output-tokens:` reply ceiling (and likewise its `response-reserve:`, `working-window:`,
+`stream-idle-timeout:`, `request-extra:` and `price:`), all facts about the slot rather than about
+the session, and a
 pin is not a guess: the entry's window outranks the global `context-window:` key while the session
 sits there, and an entry pinning neither leaves the window to that global key and the ceiling to the
 engine's own derivation. And the launcher: moving onto an entry that names a llama-launcher config turns the

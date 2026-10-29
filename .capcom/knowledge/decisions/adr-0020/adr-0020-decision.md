@@ -210,3 +210,13 @@ no special case: a below-floor Windows host is exactly today's Windows host.
   `ErrConfinementUnavailable`.
 - **A landmine that is not one:** `t.TempDir()` cleanup still works after the harness labels the
   workspace Low, because the test process is Medium and writing down is permitted.
+
+> **Pointers (2026-10-29).** The file:line references above are as of the decision's date. Today
+> `probe.DegradedNotice` is called from `cmd/apogee/wire_boot.go` (was `wire.go:178`).
+> `ConfinementBox.NetworkAllow` is declared at `internal/domain/confinement.go:157` (was `:65-70`).
+> The §2 restore is an optional-interface `Close()` assertion in the composition root's close path,
+> `cmd/apogee/wire.go`, worded by `platform.ConfinementTeardownNotice`, rather than a `defer`. §7's
+> `cmd /c` arm landed as the per-OS `writeLine`/`nestedWriteLine` in
+> `internal/platform/confinetest/lines_windows.go` and `lines_other.go`, so the battery no longer
+> spells `sh -c` itself. The profile row is `write_under_user_profile_denied`, and `ProbeNetwork`'s
+> `NetworkEgress` guard sits in `probeNetwork`. The decision itself is unchanged.

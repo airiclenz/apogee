@@ -3,7 +3,8 @@ title: ADR 0040 consequences
 ---
 
 - **`internal/tui` no longer owns any color literal.** The package-level palette vars are gone;
-  `newTheme(scheme.Scheme)` builds every style from the 24 roles, and the spinner's blend stops are
+  `newTheme(scheme.Scheme)` builds every style from the 24 roles (29 today — see
+  `adr-0040-amend-0815`), and the spinner's blend stops are
   a `theme` field built per scheme instead of an init-time package var. A grep for `col[A-Z]` in
   `internal/tui` is the standing guard that no new literal creeps back in.
 - **A runtime theme switch now exists**, which makes `paintcache.go`'s standing obligation live: the
@@ -16,8 +17,14 @@ title: ADR 0040 consequences
   validate in the composition root and the renderer is handed a struct — ADR 0031's wire-silence
   shape, and ADR 0011's "no YAML in the renderer" honoured by construction. Any Driver gets color
   schemes from the same door: `Options` carries the resolved `Scheme`, its name, its warnings, and
-  three closures (`ListSchemes`, `ResolveScheme`, `ExportScheme`) that nil-degrade.
-- **The settings registry gains a `kindScheme` row** — `kindServer`'s twin: a dynamic closed
+  three closures (`ListSchemes`, `ResolveScheme`, `ExportScheme`) that nil-degrade. *(Amended
+  2026-10-29: since ADR 0054 the three closures are one `SchemeHost` interface — `List`, `Resolve`
+  (with an `ok bool` for the per-member degrade), `Export` — carried as `Options.Schemes`
+  (`internal/tui/tui.go`) and implemented by `schemeHost` in `cmd/apogee/wire_options.go`; a nil
+  host is the unwired degrade.)*
+- **The settings registry gains a `kindScheme` row** — `kindServer`'s twin *(amended 2026-10-29: the
+  registry now lives in `internal/config/registry.go`, where the pair are `KindScheme` and
+  `KindServer`)*: a dynamic closed
   vocabulary that writes like a string and renders as a picker. The registry's key bijection forces
   the row, and the pane's vocabulary for it is supplied at runtime rather than pinned in the
   registry.

@@ -11,12 +11,18 @@ title: ADR 0019 consequences
   already uses — so the one place a user's command line is parsed (`present.command`) behaves
   identically wherever it appears; it adds **no new dependency**. Under
   ADR 0010 it depends on
-  `internal/domain` downward only, never the root facade.
+  `internal/domain` downward only, never the root facade. *(Since 2026-08-12 (commit 472e44ba) it
+  also imports `internal/security` — `ResolveProgram` and the writable-path argv[0] refusal; today
+  its in-repo imports are `internal/security` alone, plus `shlex`, and still never the root
+  facade.)*
 - **The transcript grows a first-class presentation entry**, visually distinct from tool cards —
   a deliverable is not plumbing. Path and URL are rendered as **plain text on their own lines**,
   never wrapped in markup and not split mid-token if avoidable, because terminal linkification is
   the whole mechanism.
-- **A file-only `present:` config block** (`auto-open`, `command`, `port`, `host`) tunes rungs 1–3.
+- **A `present:` config block** (`auto-open`, `command`, `port`, `host`; since 2026-09-22 also
+  `command-on-model-documents`) tunes rungs 1–3. *(Written as file-only; today the first four are
+  editable in `/settings` and `command-on-model-documents` alone is file-only —
+  `internal/config/registry.go`.)*
   `auto-open: false` disables rung 1 and **never** rung 0. The shipped template documents the
   macOS Local Network gotcha as the first thing to check when a served URL is unreachable.
 - **Skills stay user-authored** (ADR 0002):

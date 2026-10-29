@@ -42,3 +42,10 @@ snapshot, which never held a delegation in flight and holds no retained fold now
 > **Amended 2026-09-27 (ADR 0088 D1–D2).** A cancel no longer rolls the Turn in flight back: it is
 > settled, its finished calls keeping their results, so the record written at idle holds that Turn
 > too. The retained set is no longer restored to its Turn-start value on a cancel.
+
+> **Amended 2026-10-29 (ADR 0086 D1, verified against code).** "For the rest of its own Exchange
+> … cleared as the next Exchange opens" no longer holds: a named delegation stays continuable for
+> the whole session. Only the previous Exchange's delegate ledger is cleared when an Exchange
+> opens (`internal/agent/loop.go`). The retained set is dropped by `/clear` (`ClearContext`), and
+> is restored to its Exchange-open mark only when that Exchange is aborted
+> (`retainedDelegates.markExchange` / `rollBackExchange`, `internal/agent/children.go`).

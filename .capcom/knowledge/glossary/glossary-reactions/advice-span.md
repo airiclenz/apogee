@@ -3,8 +3,9 @@ title: "Advice span: one provenance-ledger row recording an advise Reaction's in
 ---
 
 **Advice span**:
-One row of the **provenance ledger** — `domain.AdviceSpan`, `{reaction, origin, moment, turn,
-offset, leading, end}` — recorded on the message an **advise** **Reaction** advised,
+One row of the **provenance ledger** — `domain.AdviceSpan`,
+`{reaction, origin, moment, turn, offset, topic, leading, end}` — recorded on the message an
+**advise** **Reaction** advised,
 one per injection in the order they landed
 (ADR 0076 D6). On a tool-shaped **Moment** the fence is a trailer on the closing tool result; on
 `session-started` it is a leading fence inside the user message that opens the session's next
@@ -30,6 +31,18 @@ reaction's effect by the span's reaction id; `/advice` shows what the model saw,
 TUI's fourth report pane, fed by the `ReactionFiredEvent` each injection books, never by the ledger
 itself (ADR 0076 D6, 2026-09-20 amendment). Its board is **Driver state** like the Thinking pane's,
 and empties with it at every session boundary (`/clear`, `/new`, a `/sessions` resume, `/fork`).
+
+The same ledger also carries the engine's own **engine notes** (`Message.WithEngineNote`: a capped
+delegate's wrap-up directive, the step and token budget notices, the cut a settled Exchange marks).
+Such a row has `topic` set and origin `engine`, with no reaction, moment or turn, and its fence is
+`[engine — <topic>]` … `[end engine — <topic>]`, never the advice fence. One strip and one staleness
+guard cover both kinds (ADR 0076, 2026-09-19 addendum).
+
+**In a test** (2026-10-21, docs/plans/archived/2026-10-21 - 00 - user-session-advice-plan.md): build
+the expected fence with `domain.RenderAdvice` and the span's real shape — `Leading: true` for
+session-started and compaction-finished advice on a user-role message. Without it `RenderAdvice`
+renders the trailing tool-result form, its blank line on the other side of the fence, and the
+comparison fails.
 _Avoid_: "injection" (the system-prompt fold the trailer replaced), "advice message" (a fence
 inside a tool result or a user message, not a message of its own), "advice history" (nothing
 persists).

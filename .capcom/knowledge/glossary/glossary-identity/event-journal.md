@@ -13,5 +13,10 @@ Interjection, because prompts are not Events. It is born when the record is held
 has a prompt, never under `--no-save`, and it is removed after the final save, before the hold is
 released. The startup sweep removes an orphan whose lock is free. **Watch mode** follows it. The
 engine never sees it: the Driver composes it as a sink. See ADR 0103.
+
+The shared decoder `eventjson.Decode` reads a journal's `run_started` into the headless frame, which
+drops `title` and `entries` without an error; a reader that needs them unmarshals the raw line's
+`data` into `eventjson.JournalStarted`, as Watch mode does (`internal/tui/watch.go`,
+`loadWatchStart`). (2026-10-17, docs/plans/archived/2026-10-17 - 03 - live-session-watch-plan.md.)
 _Avoid_: "log" (it is deleted at release and nothing replays it; the record is the history),
 "event log", "stream file".

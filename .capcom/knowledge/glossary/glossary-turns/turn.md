@@ -6,8 +6,11 @@ title: "Turn: one iteration of the loop around a single primary Upstream call"
 One iteration of the loop — a single *primary* Upstream call and the work that follows it
 (parse → dispatch tools → apply Reactions). Compaction's summarisation call is *internal*
 to a Turn, not a Turn of its own. The unit of self-regulation and of bench measurement. The
-Turn's lifecycle — its opening, its one permitted overflow fold, and its five exits (complete,
-Exchange-complete, abandoned, cancelled, step-capped) — is owned by the loop's `turnLifecycle` module
+Turn's lifecycle — its opening, its one permitted overflow fold, and its six exits (complete,
+Exchange-complete, abandoned, cancelled, settled, step-capped; settled since 2026-09-27, ADR 0088: a
+cancel during tool dispatch keeps the Turn and its finished tool results, while cancelled, which
+rolls the Turn back, is left to a cancel while the reply streams) — is owned by the loop's
+`turnLifecycle` module
 (`internal/agent/turn.go`), the way the Exchange anchors on `ExchangeView`. A Turn also rides out a
 **transient** Upstream fault itself — an in-band 5xx/429, a connection cut mid-reply, a stream
 `stream-idle-timeout` (default **10m**, `0` = off; bytes of any kind are activity) cut for silence

@@ -32,12 +32,14 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
    delegation can return after a dependency bump fixes it upstream.
 5. **The frame is squared in the authority's measure**, not by lipgloss's joins. `squareLine`
    pads or ANSI-aware cuts a line to exactly N columns; `joinScrollbar` and `joinFrame`
-   (`internal/tui/model.go`) replace the `JoinHorizontal`/`JoinVertical` that padded in grapheme
+   (`internal/tui/boxdraw.go`, beside `squareLine`; `model.go` until 2026-08-20) replace the
+   `JoinHorizontal`/`JoinVertical` that padded in grapheme
    width regardless of the authority. Both were load-bearing: the horizontal join is what put
    the bar a column left, and the vertical one — left-aligning by padding to the widest row *it*
    measured — pushed a 24-row frame to 105 columns on an 80-column window once the rows were
    squared. This is what makes `layout.md`'s absolute cap hold at the painted layer.
-   *(Extended 2026-08-03: `drawBox` (`model.go`) is the boxed counterpart of `squareLine`. A
+   *(Extended 2026-08-03: `drawBox` (`boxdraw.go`; `model.go` until 2026-08-20) is the boxed
+   counterpart of `squareLine`. A
    **bordered** surface cannot be squared by a `lipgloss.Style.Width` at all — past its width that
    style wraps rather than pads, folding one composed row into two painted ones — so the pop-up pane
    and the start-up card draw their own rows, border glyphs and padding included. See the last

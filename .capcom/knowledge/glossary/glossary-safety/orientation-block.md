@@ -30,7 +30,11 @@ the Delegations line carries no availability state and moves only on the human d
 those doors and on a cap's first statement — never on a target-down beat (ADR 0069 decision 6,
 superseded in part 2026-09-20) — the way the **Scratch dir** moves at a session boundary (the
 **Mode** gated the scratch line for one day, 2026-09-14, until ADR 0012's second loosen made Plan
-write there too; the mode is no longer an input). A
+write there too). The mode is an input again since 2026-09-15, for one bullet only: in **Plan** a
+**Mode** line names the families the menu withholds (terminal, run_tests, python_exec, web_fetch,
+web_search, http_request, MCP tools) and asks the model to report what it would run — it moves on
+the human's Shift+Tab, the same re-encode `{{mode}}` already pays. The block's last bullet always
+names the `## Workspace context: <name>` headers that follow as project text. A
 fact the session does not have is omitted rather than rendered empty. See
 ADR 0023 §6
 and ADR 0069.

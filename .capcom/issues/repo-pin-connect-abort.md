@@ -17,3 +17,7 @@ Deferred out of plan `2026-10-18 - 00 - project-config-exec-keys-plan`.
 - A repo server whose pin no longer matches at connect is skipped with a notice naming the changed file, and is proposed again; the global servers and the other adopted repo servers still connect and startup proceeds.
 - The same holds on a live-reload reconnect.
 - A test in `internal/mcp/` or `cmd/apogee/` pins it.
+
+## Log
+
+- 2026-10-29 Airic Lenz: 2026-10-18: rootWiring.announce (cmd/apogee/wire_boot.go) is startup-only — stderr plus startupNotices, handed to the TUI once at boot. A mid-session call would write over the alternate screen and never reach the transcript, so a mid-session notice (a reconnect's MCP skip, an adoption) is relayed on the surface showing then: the returned error or row note (applyMovedKinds in projectrules.go, readmitMCP in wire_settings.go). Source: docs/plans/archived/2026-10-18 - 02 - exec-pin-followups-plan.md item 7.

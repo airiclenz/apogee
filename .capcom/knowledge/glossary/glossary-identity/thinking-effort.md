@@ -7,9 +7,13 @@ The **emit-side dial** on the Model profile's thinking axis — `off | low |
 medium | high`, widened by the levels real servers report to `minimal`, `xhigh` and `max` (and
 `none`, which the OpenRouter dialect spells for `off`) — carried to the server in whichever
 **wire dialect** that endpoint speaks: llama.cpp's `chat_template_kwargs`, OpenRouter's
-`reasoning` object, or OpenAI/Groq's top-level `reasoning_effort`. **Absent means send nothing**:
+`reasoning` object, or OpenAI/Groq's top-level `reasoning_effort` — and, on a `wire: anthropic`
+entry, the Messages API's `output_config.effort`, a spelling that wire fixes (no `effort-dialect:`
+may stand beside it; ADR 0078). **Absent means send nothing**:
 the request stays byte-identical, and a model whose template reads no dial simply ignores a sent
-one. Whether the dial exists at all is **detected passively**, from the discovery payloads the
+one. The anthropic wire is the exception: no effort there still sends the no-effort thinking shape
+its model accepts (`thinking: disabled`, or the lowest rung for a model that refuses disabled).
+Whether the dial exists at all is **detected passively**, from the discovery payloads the
 heartbeat already fetches — a `/props` chat template that mentions the kwarg, or a `/v1/models`
 `reasoning` object naming the model's own levels — never by probing; a `servers:` entry's
 `effort-dialect:` key forces the dialect for a provider that advertises no such tell. What the

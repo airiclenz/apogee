@@ -19,4 +19,16 @@ contains. A **Driver** reads Adoption through one immutable *Adoption snapshot* 
 (`internal/project`): the layered config, the Project config's offer and the entries it asks about,
 all from one resolution; two snapshots' difference names the kinds — Allow rules, servers,
 reactions — whose in-force set moved, and only those are applied.
+
+**Answering** (2026-10-27, docs/plans/archived/2026-10-27 - 01 -
+project-pin-admit-and-adoption-snapshot-plan.md): every Driver answers through `project.Answer`. A
+yes answers the file as it stands, not as it was offered: the Project config is re-read alone — no
+global config, so no adoption record — and only the entries it still holds are recorded; the rest
+come back by name as no longer held. Reading no global keeps a broken global config from blocking
+the answer and keeps a repo server that a global one shadows held. A no, an entry apogee itself just
+wrote and a removal's Forget record with no held check (`project.Record`). A yes with nothing held
+writes no record file. Errors say what was recorded: `*project.HeldCheckError` and the store's
+errors mean nothing was; `*project.NextLoadError` means the answer was recorded and only the next
+snapshot failed — `apogee project adopt` carries on past it, the TUI refreshes its baseline and
+reports the rules as stale.
 _Avoid_: "trust" (adoption is per entry, never a whole-folder yes), "approval" (that is one call).

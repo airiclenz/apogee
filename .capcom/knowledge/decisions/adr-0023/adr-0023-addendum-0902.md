@@ -39,3 +39,9 @@ the depth gate opens.
 - **It does not contradict the wrap-up directive.** A capped child's request carries both: the
   wrap-up directive says *this* turn is the last one it gets, the report block says what the final
   reply is **for**. Neither claims the other's reply is the last.
+
+> **Note (2026-09-27, ADR 0087 D3).** A Workflow item's child carries the **workflow finish block**
+> (`workflowFinishBlock`, `internal/agent/workflowspawn.go`) in this block's slot instead: the same
+> opening sentence — so `delegateReportFence` guards both — followed by what its reply is for there,
+> the `finish` receipt and the output file, not a prose report. A plain `sub_agent` delegate still
+> carries the delegate report block.

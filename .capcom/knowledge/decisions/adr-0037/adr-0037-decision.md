@@ -42,7 +42,9 @@ about its own effect again.**
 
 **4. A pane edit outranks an env or flag override for the running session.** The edit applies live
 and persists; the row then notes that the override wins again next time — `· APOGEE_MODE outranks at
-next launch`. Startup precedence (flag > env > file > default) is untouched.
+next
+launch`. Startup precedence (flag > env > file > default) is untouched. (Amended 2026-10-29: ADR 0096 decision 7 splits "file" into project over global — flag > env > project > global > default — and a save to the global file under a value the Project config sets applies nothing new, and the row says `saved
+to global; the project config outranks it` (`settingsOutranksNote`, `internal/tui/settings.go`).)
 
 This reverses ADR 0035 decision 9's second half, which had the overridden row report the override
 *instead of* acting. The pane is where the user is expressing an intent **now**, and a launch-time
@@ -81,7 +83,9 @@ ADR 0035 decision 3**, whose read-only pointer is deleted everywhere.
   (Amended 2026-09-30: the list has moved on. `mechanisms` and `validated-sets` are deleted
   (ADR 0076 A9) and the global `model-profile`
   retired in favour of `model-profiles`; the structured rows today are `servers`, `system-prompt-models`,
-  `system-prompt-layers`, `unconfined-hosts`, `mcp-servers`, `reactions` and `model-profiles` —
+  `system-prompt-layers`, `unconfined-hosts`, `mcp-servers`, `dangerous-rules`, `allow`,
+  `sessions.watch-homes`, `reactions` and `model-profiles` (the three between `mcp-servers` and
+  `reactions` joined in October 2026) —
   the `KindStructured` rows of `internal/config/registry.go`. ADR 0041
   replaced the editor ladder.)
 
@@ -90,7 +94,9 @@ around it: the user already has a text editor they trust, the file is already th
 they hand-edit, and the only thing apogee was failing to do was *notice*. Two bounds keep that honest.
 The jump is offered **only while no run is in flight** (otherwise the row says to wait), because
 suspending the TUI under a landing stream and queueing applies behind a run are two problems bought
-for nothing — a run is finite. And **GlobalOnly confinement keys are skipped silently** on reload even
+for nothing — a run is finite. And **the Interlocked confinement keys are skipped silently** on
+reload (the registry flag was called `GlobalOnly` until 2026-10-10, when ADR 0096 gave that name to
+its project-layer key class; `reloadNeverReports`, `cmd/apogee/settingsedit.go`) even
 when the round-trip changed them: ADR 0012's acknowledgement interlock is a *flow*, and a file edit is
 not that flow, so `/confine` remains the only door that can loosen the fence for a running session.
 

@@ -178,6 +178,12 @@ could otherwise author a reaction that runs on the next reload. This is doctrine
 layer **ships in stage 2** (decision 13), and day one stays the global file plus the per-entry
 `workspace:` filter. This supersedes ADR 0073 decision 5.
 
+> *Amendment (2026-09-08, `adr-0076-amend-0908` A1–A2; 2026-10-10, `adr-0076-amend-1010`):*
+> "builtins appear by id with `enabled:`" is struck — a builtin or Floor-guard id in `reactions:` is
+> a load error naming the top-level boolean. The repo layer shipped as stage 2b (ADR 0096), not in
+> stage 2; its path is `<Project root>/.apogee/config.yaml`, and the "tool write deny list" is a
+> Tier-1 refusal on that file, there being no path deny list.
+
 > *Amendment (2026-10-18, `adr-0076-amend-1018`):* ADR 0104 admits the repo layer's execution keys,
 > `mcp-servers:` among them. For those, a repo entry never overrides a global one by key, the pin is
 > canonical and covers the project files the argv names, and a repo `run:` is fenced.
@@ -186,6 +192,12 @@ layer **ships in stage 2** (decision 13), and day one stays the global file plus
 Floor guard is by definition one top-level file-only boolean — so nothing migrates. A `hooks:` list
 keeps loading through one migration table as an alias for `reactions:`, with a **one-time load
 notice** naming the new form. A `mechanisms:` key gets the retired-roll message.
+
+> *Amendment (2026-09-08, `adr-0076-amend-0908` A6):* the alias is **superseded** — no alias
+> survives in the code. At startup `migrateLegacyConfig` folds a `hooks:` block into
+> `reactions:` in the user's own file (verified fold, timestamped backup, atomic rewrite, one-time
+> note) and strips `mechanisms:`; a live re-read refuses instead, and a file carrying both lists is
+> refused.
 
 **12. Terms.** **Reaction** and **Moment** enter the glossary. **Mechanism**, **Hook point** and
 **Experimental hook** retire (a bench-armed engine-origin reaction is what the last one named).

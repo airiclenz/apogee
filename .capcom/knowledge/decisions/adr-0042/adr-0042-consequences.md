@@ -5,7 +5,11 @@ title: ADR 0042 consequences
 - **A tool that wants an external program owes three things**: a resolution seam that is a package
   var or injected dep (so a test can fake it), a named degraded result the model can act on, and a
   test of the absent path — `autofix_test.go`'s "gracefully absent" case and
-  `TestRunTestsMissingRunnerProgramDegradesGracefully` are the shape.
+  `TestRunTestsMissingRunnerProgramDegradesGracefully` are the shape. *(Amended 2026-10-29:
+  `autofix_test.go` went with the autofix Mechanism in `eaa340de` (2026-09-03); the standing
+  examples are `TestRunTestsMissingRunnerProgramDegradesGracefully`
+  (`internal/tools/run_tests_test.go`) and `TestGit_GracefulWhenAbsent`
+  (`internal/tools/git_test.go`).)*
 
   > **Note 2026-09-30 (architecture review 2026-09-30 #4).** For git, `go vet` and MCP stdio the
   > seam is now always the injected dep, never a package-level variable: `internal/gitexec` has no
@@ -19,6 +23,9 @@ title: ADR 0042 consequences
 - **The policy costs capability, deliberately.** An `io/fs` walk is slower than ripgrep on a large
   tree, and in-process `go/format.Source` fixes less than `goimports`. Both are accepted: the fast
   path is still taken when the program is there, and the floor is a working agent everywhere.
+  *(Amended 2026-10-29: only the search half of this trade remains, and it has no fast path — `grep`
+  and `find_files` never detect ripgrep (decision 3). The `go/format.Source`-behind-`goimports` rung
+  retired with autofix in `eaa340de` (2026-09-03); no non-test code imports `go/format` today.)*
 - **`probe`'s host report is where "what is present here" is answered**
   (ADR 0021),
   not a start-up check — the free half already names the host's capabilities on demand.

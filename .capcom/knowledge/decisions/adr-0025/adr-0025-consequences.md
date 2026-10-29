@@ -12,7 +12,11 @@ title: ADR 0025 consequences
 - **`Interject` is refusable, and both refusals are honest.** No open Exchange ⇒
   `domain.ErrNoOpenExchange` (the caller wanted `Submit`); an input carrying no text, refs or skills
   ⇒ an unexported empty-interjection error, because a blank remark would land as an empty user
-  message wedged after the tool results. On either refusal the conversation is untouched.
+  message wedged after the tool results. On either refusal the conversation is untouched. *(Amended
+  2026-10-29 — since widened: images count as content in the emptiness test, and Interject also
+  refuses an input that would launch a recipe (errRecipeInterjection, ADR 0087) and images the bound
+  server cannot take (checkInputImages). On all four refusals the conversation is still untouched —
+  internal/agent/interject.go.)*
 - **Delivery has fates, and they are documented rather than defended against.** An interjection
   survives a **cancelled Turn** (the rollback boundary is armed after the between-Steps window) and
   rides snapshot/resume with its marker intact. `AbortExchange` **discards** it with the rest of the
@@ -119,7 +123,9 @@ title: ADR 0025 consequences
 keyboard there") still describes the BOX correctly: neither state is editable, `inputEditable()` is
 unchanged, and `a`/`s`/`d` still send their decision on the spot. What has moved is what the
 approval pane does with the two keys beside them. It is a menu (`docs/layout/user-questions-layout.md`,
-`layout.md`): ↑/↓ walk the highlight over `Allow` / `Always allow this session` / `Deny` / `Cancel`,
+`layout.md`): ↑/↓ walk the highlight over `Allow` / `Always allow this session` / `Deny` / `Cancel`
+(amended 2026-10-29: since ADR 0096 also `Always in this project…` (`p`) between the session row and
+Deny; a request's own menu drops rows it cannot honour — internal/tui/approval.go `approvalMenu`),
 and ⏎ **resolves the highlighted row** rather than dismissing anything — Enter-dismiss is the errored
 state's alone. Everything the menu does not claim, PgUp/PgDn included, still falls through to
 `scrollViewport`, so the prompt stays as soft-modal as this decision left it.

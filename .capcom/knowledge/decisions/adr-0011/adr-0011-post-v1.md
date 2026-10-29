@@ -33,6 +33,16 @@ the engine only under one of two conditions.
   worker's dispatch-time read and takes effect at the next tool call. It is the explicit exception
   named in the Agent's own doc — nothing else may be called while a worker is in flight.
 
+  > **Note (2026-10-29, verified against code):** "the single method" and "the one field" were true
+  > when this was written. Since ADR 0037 decision 2 (2026-08-06), `SetMode` is the template for a
+  > class: the Agent's doc (`internal/agent/agent.go`) names an *anytime-goroutine-safe class* of
+  > twelve setters (`SetMode`, `SetConfineToWorkspace`, `SetScratchDir`, `SetReactions`,
+  > `SetCompactionEnabled`, `SetPruneToolResults`, `SetContextFiles`, `SetParallelAgents`,
+  > `SetEffortOverride`, `SetDelegationTarget`, `SetDelegationSeat`, `SetAllowRules`). Each one
+  > moves its live state behind the mutex that guards it; `genMu` covers a compound value (ADR 0076
+  > A8). The rule below is unchanged: a mid-Step call is allowed only as a documented member of that
+  > mutex-guarded class.
+
 **The seam a consumer must copy, precisely stated.** Drive each Exchange from one worker; call the
 context/snapshot seams (`ClearContext`, `Compact`, `AbortExchange`, `Snapshot`) from the `Update`
 goroutine **only where the state machine proves no worker is running**; and add a new mid-`Step`

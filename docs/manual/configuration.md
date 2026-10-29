@@ -356,6 +356,8 @@ global config alone. [`/settings`](commands.md#the-settings-screen--settings) ma
 project supplied `(project)`, and [`apogee probe config`](probe.md), run in the project, shows the
 two files resolved together.
 
+A key written bare (`key:` with no value) states nothing: it neither overrides your global value nor counts as the project setting that key. YAML anchors and aliases (`*name`) work, but merge keys (`<<: *base`) are not followed — a key the project file states only through a merge is not layered, so write it out. (Since 2026-10-10; source: `docs/plans/archived/2026-10-10 - 00 - project-config-and-allow-rules-plan.md`, item NOTES.)
+
 **Who reads it.** A session in the TUI reads and watches it. `apogee headless` reads it for its
 workspace like a session, but asks nothing about it. `apogee daemon` starts on the global file
 alone — the folder it starts in is not the workspace its firings run in — and layers each
@@ -3089,7 +3091,15 @@ A terminal rule matches only when **every** command of the line starts with its 
 allows `go test ./...` and `cd internal && go test -run TestX`, but not `go testify`, not
 `go test && rm x`, and not `go test > out.txt`. A file redirect, `$(…)`, backticks, a heredoc, a
 line apogee cannot parse, a wrapper (`sudo`, `env`, `timeout`, …) or a `NAME=value` prefix always
-asks; a `cd` into a folder inside the workspace counts as matched, any other `cd` asks. There are no
+asks. A rule matches only a line apogee reads exactly as the shell does: plain words, `'…'` and
+`"…"` quoting (no `$`, backtick or backslash inside the double quotes) and a bare `$NAME` or
+`${NAME}`, joined by `;`, `&&`, `||` and `|`. Anything else asks — `~`, the glob characters `*?[]`,
+`#`, `!`, braces, backslashes, a newline, a non-ASCII byte, an empty `''` — so `ls *.go` and `cd ~`
+ask. A shell builtin other than `cd`, `.`, `source`, `echo`, `pwd`, `true` and `false` (`test`,
+`printf`, `export`, …) asks whatever rule names it. A `cd` counts as matched only at the very start
+of the line, with one plain relative folder (no `..`, `~` or `$`), joined to the next command by
+`&&` and landing in an existing folder inside the workspace: `cd .. && go test`, `cd x; go test`
+and `go vet && cd x && go test` ask, and a line of nothing but `cd`s matches no rule. There are no
 wildcards, and no rule applies on Windows `cmd`. File edits get no rules — `allow-edits` is that
 choice. A rule answers only the ordinary prompt — ask-before's, allow-edits', and auto's for a call
 it cannot confine — never a refusal, never the dangerous-action guard's forced prompt, and never a

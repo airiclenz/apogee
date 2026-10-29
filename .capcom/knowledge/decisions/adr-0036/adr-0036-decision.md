@@ -62,7 +62,11 @@ send to file surgery, and the file is not wrong so much as out of date.
 `kindString`, deliberately not `kindEnum`: the registry's enum vocabularies are static lists pinned
 to their parse sites by `TestRegistryEnumValuesMatchParseSites`, and server names are whatever the
 user's file says. Validity is therefore checked **at selection time**, where decision 4 already
-defines what an unmatched name does. The key is editable and restart-required, and it rides the
+defines what an unmatched name does. (Amended 2026-10-29: the row is `KindServer` today, not
+`kindString` — a kind of its own since 2026-08-06, so the `/settings` surface offers the configured
+entries as a picker (ADR 0037 decision 5); the writer still treats it as a plain string, and it is
+still not an enum: `EnumValues` stays empty and validity is checked at selection,
+`internal/config/registry.go`.) The key is editable and restart-required, and it rides the
 ordinary flag > env > file precedence like `mode` and `bypass`. (Amended 2026-09-30: no key is
 restart-gated any more — ADR 0037
 decision 8 retired `RestartRequired`.)

@@ -1511,7 +1511,8 @@ that run with a notice naming the file — the config layer proposes the entry a
 read; it runs with the Project root as its working directory; and the door's admit option
 (`tools.AdmitProjectPrograms`) resolves a relative `argv[0]` against that root and lets through a
 program inside the fence only when it is one of the pinned files. With `confine-to-workspace` off
-the row's first line applies and the repo command runs unfenced, as a global `run:` does.
+the row's first line applies and the repo command runs unfenced, but still through this door,
+with its scrub, ceilings and Project-root working directory, which a global `run:` never takes.
 
 ### 10.5 The hook spawns through the tools funnel (amendment, 2026-08-20)
 

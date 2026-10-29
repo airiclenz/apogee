@@ -50,7 +50,7 @@ observed directly, the proxy below *is* the test, and passing it is what "that i
 | T-19 — the document is handed to the desktop | a logging fake opener installed through `present.Opener.LookPath`; assert the argv and the wording |
 | T-21 — an installed apogee upgrades cleanly | a **post-release** `make release-smoke` (archives, `SHA256SUMS`, `--version`, and `brew upgrade` when `brew` is present) |
 | T-21 — the tag job and its action pins are sound | `actionlint` plus a pin grep (`scripts/check-pins.sh`), both run from `make check` |
-| T-11 — the landlock residual is honest on an older ABI | a dedicated `ubuntu-22.04` CI job running the probe assertions |
+| T-11 — the landlock residual is honest on an older ABI | (amended 2026-10-29) the negative direction only: the `ubuntu-26.04` CI `check` job asserts `probe` discloses no truncate(2) residual on a modern kernel; the positive direction stays a manual step, since GitHub offers no runner on a 5.13–6.1 kernel (was a dedicated `ubuntu-22.04` CI job until 2026-08-28, `b2f9b0c7` — that image runs the 6.8 HWE kernel, so it never exercised the residual) |
 | T-22 — behaviour against a real model | stays env-gated under `make live-eval`; unset means skip, never a silent pass |
 | T-23 — the docs work for a newcomer | a judge-driven agent in a clean container with **only** `README.md` + `docs/manual/`, driving apogee against stubllm and reporting every step that did not work as written |
 

@@ -12,7 +12,10 @@ text** — engine-owned, no config key, not a **Reaction**, so it is on under **
 edit to `system-prompt-text` and no workspace **Context files** can remove it (a context line that
 spells its opening sentence is fenced `[workspace text] `, exactly as a forged orientation header
 is). It is gated on **depth**, not on configuration: every agent below the top level gets it, at any
-depth, routed or unrouted, and a top-level session's first system message is byte-identical without
+depth, routed or unrouted — except a **workflow** item's child, which reports through `finish`
+rather than its final reply and carries the workflow finish block (the same opening sentence, then
+the finish instructions) in its place — and a top-level session's first system message is
+byte-identical without
 it. It **rides along** under the Orientation block's rule — composed in only when a standing system
 message exists anyway — and sits between the orientation and the **Task list** block, ahead of the
 **Context files** blocks, so every engine-owned part still precedes the repo-controlled text. It

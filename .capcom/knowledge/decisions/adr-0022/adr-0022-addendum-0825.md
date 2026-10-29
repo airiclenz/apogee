@@ -80,3 +80,16 @@ running while it runs.
   would supersede part of ADR 0007, reach into ADR 0039's fan-out and change what a bench arm
   compares, so it needs its own grill rather than a clause in this addendum. ADR 0007's
   "the snapshot schema leaves room for a suspended sub-agent" is the door it would come through.
+
+> **Amended 2026-10-29 (ADR 0088 D1, verified against code).** A cancel now *settles* the Turn
+> in flight and never rolls it back: finished calls keep their results, and the idle save after a
+> cancel writes every call closed (`internal/tui/sessionsave.go`, `progressSave` doc). The
+> 2026-09-19 note's "only the cancelled Turn's in-flight work is gone, exactly what
+> `endCancelled` rolled back" now reads: only work that had not finished is lost. "Re-attempts,
+> exactly as a cancelled one does" no longer holds either. Only a record that still holds an open
+> Turn re-attempts on resume, meaning a session killed mid-Turn or one progress-saved
+> mid-delegation. A cancelled Turn resumes closed. The trigger list has grown by one, and a
+> background call is now excluded (`progressSaveTrigger`, `internal/tui/fold.go`): a
+> `SubAgentNamedEvent` also fires a progress save (ADR 0068: a run's generated name is part of
+> the run), and a background `sub_agent` call does not, because the per-Turn snapshot saves its
+> immediate answer.

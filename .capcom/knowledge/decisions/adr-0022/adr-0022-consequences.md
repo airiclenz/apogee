@@ -10,7 +10,9 @@ title: ADR 0022 consequences
   variant of the ADR 0001 snapshot/resume feature. Because `apogee.Agent` is a type alias for
   `agent.Agent`, they are public with no facade delegator.
 - **A fourth persisted surface's story is now settled** alongside config, library, validated, and
-  probe records under `~/.apogee/` — owner-private (`0o700`/`0o600`), versioned, soft on every
+  probe records under `~/.apogee/` (amended 2026-10-29: the library and validated records have since
+  been removed: `internal/library` by plan `2026-09-16 - 01`, Validated sets by ADR 0076 A9; config
+  and probe records remain) — owner-private (`0o700`/`0o600`), versioned, soft on every
   defect, individually deletable.
 - **The user gets continuous autosave, a `/sessions` browser** (list · relative time · N msgs,
   resume/delete/rename, workspace toggle), **`--continue`** (most-recent in this workspace) and

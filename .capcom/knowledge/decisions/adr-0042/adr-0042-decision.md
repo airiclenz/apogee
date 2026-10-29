@@ -29,6 +29,12 @@ at all. The search tools took that further and need no rung above it: `grep` and
 policy named as its canonical optional dependency, is not detected at all because apogee never
 needed it.
 
+*Amended (2026-10-29, ADR 0071):* the `autofix` Mechanism retired outright in v0.20.0, so Decision 2's
+autofix realisation and this decision's autofix example — the in-process `go/format.Source` tail behind
+`goimports` — describe code that no longer exists; read them as the record of their date. Nothing in
+apogee resolves `goimports`, `black` or `rustfmt` any more. The rule stands on the search tools:
+`grep` and `find_files` are still an in-process `io/fs` walk plus `regexp`.
+
 **4. One bounded exception: OS confinement.** Auto mode requires OS-level confinement
 (ADR 0004,
 ADR 0012), and on

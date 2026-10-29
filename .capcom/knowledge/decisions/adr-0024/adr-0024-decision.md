@@ -25,13 +25,18 @@ next tick ten seconds later, which then re-issues the beat command.
 
 Timing the wait from the *landing* rather than from a fixed clock is what makes overlap impossible:
 an observation and its wait are strictly sequential whatever the server's latency (and
-`Discover`'s own five-second timeout keeps a beat strictly shorter than the interval anyway). The
+`Discover`'s own five-second timeout keeps a beat strictly shorter than the interval anyway; since
+2026-09-22 that timeout is `provider.DiscoveryTimeout`, 30 s, and the interval is derived as twice
+it, so the property now holds by construction). The
 chain reuses the spinner's generation counter verbatim (`internal/tui/spinner.go`), so a message
 from a retired chain is inert rather than a second chain.
 
 **3. Startup is fully asynchronous: cold start, late seed and mid-session switch are ONE code
 path.** The synchronous startup discovery is deleted — `RunE` goes `seedDefaultConfig →
-applyConfig → runRoot` and the TUI paints instantly. `Config.Model` may therefore start **empty**:
+applyConfig →
+runRoot` and the TUI paints instantly *(amended 2026-10-29 — the names today: `config.SeedDefaultConfig
+→ config.ApplyConfigOffer →
+runRootWith`, `cmd/apogee/root.go`)*. `Config.Model` may therefore start **empty**:
 `errMissingModel` is dropped from construction and replaced by `errNoModelBound`, a *request-time*
 gate on `Submit`, because a model-less Agent is a legitimate object (it can clear context, restore
 a session, switch mode) right up to the point where a request would have to name a model.
@@ -76,7 +81,12 @@ atomically with the other per-model bindings. Everything else this paragraph lis
 
 **5. Two seams, split by job: the heartbeat OBSERVES, the rebind APPLIES, and the binary owns
 everything in between.** `tui.Options` gains `Heartbeat func(context.Context) heartbeat.Beat` and
-`Rebind func(model string, contextWindow int) (RebindResult, error)`, both nil-able. The renderer
+`Rebind func(model string, contextWindow int) (RebindResult, error)`, both nil-able. *(Amended
+2026-10-29: since 2026-08-20 (ADR 0054) both are methods of one `tui.ServerHost` interface on
+`Options.Server` — `Beat(ctx) heartbeat.Beat` and
+`Rebind(model, contextWindow, effortDialect) (RebindResult, error)`, the dialect added by ADR 0060 —
+and the degrades below read `Server: nil` or `ServerActs.CanObserve` / `CanRebind` false where they
+say `Heartbeat: nil` / `Rebind: nil`. The split of jobs is unchanged.)* The renderer
 decides only **when** — at idle, or at the exchange-terminal boundary — because the *what* is
 config the composition root owns: the per-model system prompt (ADR 0023), the validated set
 (ADR 0016), the manual mechanisms list, and the window pin. `internal/tui` imports
@@ -138,7 +148,9 @@ degrades.** Three rules, in order:
   the single-slot server busy producing that very stream.
 - **A failure before any beat has ever landed is believed at once.** A cold start against a
   stopped server should say so immediately, not after a debounce it has no evidence for.
-- **Otherwise the crossing waits for two consecutive idle failures** (~15–25 s), so one five-second
+- **Otherwise the crossing waits for two consecutive idle failures** (~15–25 s at the cadence of the
+  day; ~90–150 s since 2026-09-22, when the discovery timeout became 30 s and the interval twice it
+  — `offlineFailureThreshold`, `internal/tui/heartbeat.go`), so one five-second
   discovery timeout under load cannot flicker the footer.
 
 Each crossing is noted **exactly once**, both ways (the `saveFailing` fail-once posture). While
@@ -155,4 +167,6 @@ server is called unavailable — but debounces the NOTICE only: routing beats ar
 **8. The beat carries the whole `/v1/models` offering, and nothing renders it.** Each beat stashes
 `AvailableModels` into TUI state. That is the deliberate data layer for the future `/model` picker
 and `/server` switch: the seams (`hb.models`, `RebindSpec`, `Agent.Rebind`) are prepared and
-proven by this work, and the UI is explicitly not built here.
+proven by this work, and the UI is explicitly not built here. *(Note 2026-10-29: it has been since —
+the `/model` picker (2026-07-28, `internal/tui/picker.go`) derives its rows from `hb.models`, and
+`/server` lists `servers:` entries through `ServerHost.List`.)*

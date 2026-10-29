@@ -24,3 +24,12 @@ comments are the contract.
 **Reopens on.** A fourth Driver in `cmd/apogee` — a fourth spelling of the shared six is the
 point at which the sentence-in-kind argument stops paying — or a second boot drift of the
 snapshot-sweep kind, where a step one Driver runs and another silently does not.
+
+> **Note 2026-10-29 (knowledge inventory).** The key-resolver parenthetical above no longer
+> describes the tree. The daemon's `api-key-cmd`-in-Auto gap the bead recorded was closed on
+> 2026-09-16 (e0650310; issue `daemon-api-key-unfenced`, alias apogee-add): the daemon still builds
+> its resolver rootless, but every resolution is fenced against the Firing's own workspace
+> (`KeyResolver.ResolveWithin`, `cmd/apogee/daemonfire.go`). The probe's root has been the
+> workspace since 2026-09-27 (7b9d9469; `cmd/apogee/probe.go`, `cmd/apogee/probemodel.go`), so
+> only the daemon now differs, because it has no one boot-time root. The difference in kind this
+> section relies on still holds for the daemon.

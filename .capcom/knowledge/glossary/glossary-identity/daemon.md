@@ -7,9 +7,11 @@ The always-on **Driver** — `apogee daemon`, an in-repo subcommand (same binary
 the TUI) composing the same scheduler and runner libraries, but holding **durable** Schedules
 read from a declarative `~/.apogee/daemon/schedules.yaml`: validated and atomically swapped on
 change, an invalid file keeps the old set running. Each entry is a **trigger+action envelope**
-— `on:` (v1: a cycle) + `run:` (v1: a prompt with mode, workspace, and an optional named
-server binding) — so webhook triggers and workflow actions arrive later as new keys, never a
-schema break. A daemon Schedule binds to a `servers:` entry by name, may select a model only
+— `on:` (v1: a cycle) + `run:` (a prompt, or since 2026-09-28 a recipe's workflow as
+`run: workflow: {recipe, inputs}` — exactly one — with mode, workspace, an optional named server
+binding and an optional per-request `model:`) — so a webhook trigger arrives later as a new `on:`
+key, never a schema break, as workflow actions already did. A daemon Schedule binds to a `servers:`
+entry by name, may select a model only
 where that is a per-request act, and its Firings **never actuate a local model load**
 (ADR 0055). Its Firings take the
 **Firing** posture unchanged and save into the shared sessions store, so the TUI's `/sessions`

@@ -3,7 +3,9 @@ title: "Settings surface (`/settings`): the full-height pane over the key regist
 ---
 
 **Settings surface** (`/settings`):
-The **full-height pane over the key registry** — the in-app view of `~/.apogee/config.yaml`. The
+The **full-height pane over the key registry** — the in-app view of the resolved config —
+`~/.apogee/config.yaml` layered with the **Project config** (a project-capable key's commit asks
+which of the two files it lands in). The
 **key registry** is one declarative table describing every config key (path, kind, default,
 env-var and flag names, key class, confinement interlock, editability, masking, validation hook,
 one-line description); both the pane and Resolution's multi-source
@@ -26,7 +28,8 @@ boundary the session crosses anyway ("· applies at next clear", the `context-fi
 KV-prefix stability is deliberate); a pane edit **outranks an env/flag override** for the running
 session (the row notes that the override wins again at the next start, startup precedence
 unchanged), and a persist whose apply then failed says so ("saved — live apply failed: …"). The
-ten renderer-owned `ui.*` keys travel as one value, **`domain.UIPrefs`** — the `ui:` block's
+eleven renderer-owned `ui.*` keys (ten until `ui.glyphs`, 2026-10-13) travel as one value,
+**`domain.UIPrefs`** — the `ui:` block's
 schema, homed in `internal/domain` because config and the renderer both name it and import neither
 the other (ADR 0043, 2026-09-20 amendment): resolved by config, carried whole on the renderer's
 Options in the file's own positive polarity, and edited live through its one parser, `UIPrefs.Set`,
@@ -36,8 +39,10 @@ Editing is **hybrid**: simple keys are edited in the pane — a bool toggles, a 
 opens a selection popup, a string or an int opens a real single-line field on its row (cursor keys
 and mouse), the inline system prompt a multi-line field (⏎ inserts a newline, ctrl+s commits) —
 while every key the pane does not write, bar the confinement pair below, takes an **external edit** —
-the six nested structures (`servers`, `system-prompt-models`, `system-prompt-layers`, `mcp-servers`,
-`reactions`, `model-profiles`) and the file-only scalars beside them (`sub-agents-server`,
+every structured key (nine besides `unconfined-hosts`: `servers`, `system-prompt-models`,
+`system-prompt-layers`, `mcp-servers`, `dangerous-rules`, `allow`, `sessions.watch-homes`,
+`reactions`, `model-profiles`) and the file-only scalars beside them (among them
+`sub-agents-server`, `sessions.share-group`,
 `tools.enabled`, the three `workflow-*` keys, `present.command-on-model-documents`): ⏎ opens the
 human's own editor at that key's line, and every changed key is applied through those same two homes (a changed `mcp-servers:`
 **reconnects**, validate-then-commit: the new set is dialled first and the old sessions keep serving
@@ -57,7 +62,8 @@ loosen stays single-homed in **`/confine`**, ADR 0012). Idle-only, and the exter
 offered between runs only.
 
 What makes an edit apply is no longer the editor's exit but the **config watch**: a poll of
-`~/.apogee/config.yaml`'s mtime and size on a ticker, in-process and dependency-free, whose report
+`~/.apogee/config.yaml`'s — and, beside it, the **Project config**'s and its adoption record's —
+mtime and size on a ticker, in-process and dependency-free, whose report
 is one **wait** the renderer parks (the Heartbeat posture) and re-arms per landed report. Any save
 of that file applies live — the pane's own jump, a GUI editor in another window, a `vim` in a second
 terminal — through the same re-read/diff/apply the round trip already used, so the two triggers
@@ -70,8 +76,10 @@ re-read never reports (ADR 0036 decision 2). It **reconciles** the
 standing "apogee never writes your config" claims (seeding never overwrites, Probe prints
 paste-ready YAML, `/model` does not rewrite the file): never *unprompted* — a settings-screen edit
 is a deliberate user act and names the file and entry it changed, the same fence ADR 0012 applies
-to `/confine off --save`. Four keys are written off a gesture outside the pane, each admitted by
-name: `server:` (ADR 0036 decision 2), `launch-profile:` under `remember-model:` (ADR 0048),
+to `/confine off --save`. Keys written off a gesture outside the pane, each admitted by name:
+`server:` (ADR 0036 decision 2), `sub-agents-server:` (the `/sub-agents-server` pick, ADR 0045), an
+entry's `model:` and `launch-profile:` under `remember-model:` (ADR 0048), an entry's `api-key-cmd:`
+on a consented key migration (ADR 0047),
 `ui.task-list-open`, which the transcript's task-list fold records silently — the click or `enter`
 that folds every task-list card also writes the flip, only a failed write is mentioned (ADR 0035,
 2026-09-14 addendum) — and `ui.tools-open`, which the fold of a large `✦ Tools (N calls)` umbrella
@@ -82,6 +90,20 @@ persistence contract) and
 ADR 0037 (the live apply),
 as amended by ADR 0041 (the editor ladder and the
 config watch, superseding 0037's `$VISUAL`→`$EDITOR`→`vi` ladder and its diff-on-exit trigger).
+
+**Adding a key** (2026-09-20, docs/handoffs/archived/2026-09-20 - 00 -
+upstream-stall-resilience-and-fanout-speed.md): a new config key is a four-place change, each place
+pinned by its own guard, and the suite fails in a different package for each one missed — (1) its
+`KeyRegistry` row in `internal/config/registry.go` (`TestRegistryIsBijectionWithFileConfig` ties it
+to `fileConfig`); (2) an active or commented line in the seeded template
+`internal/config/defaults/config.yaml` (`TestTemplateMentionsEveryRegistryKey`), with the registry
+row placed where the template first spells the key (`TestRegistryFollowsTheTemplateOrder`); (3) a
+mention on `docs/manual/configuration.md` (cmd/apogee `TestManualDocumentsEverySettingsKey`); (4)
+for an `Editable` key, an apply — an entry in cmd/apogee's `settingsTable`, in registry order
+(`TestSettingsTableIsInRegistryOrder`), unless the renderer applies it itself
+(`settingKeysAppliedByTheRenderer`) or it is `server` (`TestEveryEditableSettingKeyHasAnApply`).
+Both allowlists (`templateOmitsSetting`, `settingsDocumentedElsewhere`) are empty and take an entry
+only with a stated reason.
 _Avoid_: "settings menu" / "preferences dialog" (it is a pane inside the frame, not a modal
 takeover), "config editor" (it edits declared keys through a verified splice, and hands the file
 itself to the external edit for the rest; it is never a text editor of its own), "auto-sync" (no

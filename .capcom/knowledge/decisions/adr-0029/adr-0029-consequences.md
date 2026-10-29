@@ -23,3 +23,11 @@ title: ADR 0029 consequences
   it); no log tailing inside apogee (unexported by the
   facade; the launcher TUI/CLI/MCP own it); no mid-flight cancel (decision 6); no launcher
   rows in `/server` (decision 2).
+
+> **Note (2026-10-29).** Three of these bullets have been overtaken. The model-profile abstraction
+> called "still unstarted" above has shipped (ADR 0044, `internal/profiles`). The "no auto-`/load`
+> at startup" non-goal was reversed by ADR 0048: a launcher-fronted `servers:` entry's
+> `launch-profile:` is restored at the next interactive start-up through the actuation latch, and
+> the restore yields to any running instance. The `CONTEXT.md` that gained **Launch profile** is now
+> the glossary Note `launch-profile`. The other non-goals stand: no log tailing, no mid-flight
+> cancel, and no launcher rows in `/server`.

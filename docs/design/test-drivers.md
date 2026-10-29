@@ -322,12 +322,24 @@ $ stubllm serve --script cmd/apogee/testdata/stubllm/example.yaml --listen 127.0
 listening http://127.0.0.1:8080
 ```
 
-`serve` plays a fixture at a real address until it is interrupted (Ctrl-C exits 0), so a fixture
-can be driven by hand — `apogee --endpoint http://127.0.0.1:8080` — or by a shell test. The
+`serve` plays a fixture at a real address until it is interrupted (Ctrl-C exits 0), so a fixture can
+be driven by hand — `apogee --endpoint http://127.0.0.1:8080` — or by a shell test. The
 `listening <url>` line is the contract: it is printed once the listener is up, which is what makes
 `--listen 127.0.0.1:0` usable, because an ephemeral port has no other way of being found. A bad
-command line exits **2** with the usage text; a run that started and failed — an unreadable
-script, a taken port — exits **1** with just the error.
+command line exits **2** with the usage text; a run that started and failed — an unreadable script,
+a taken port — exits **1** with just the error. The `listening <url>` line — like `recording …` and
+`capturing …` — is printed on **stderr** (cobra's `cmd.Printf` falls back to stderr, and the binary
+sets no output writer), so a script that waits for it reads stderr, not stdout; the photon demo rig
+waits on the fixed port instead (`ready: {tcp: true}` on 18181) (2026-10-17,
+docs/plans/archived/2026-10-17 - 01 - photon-adoption-prep-plan.md).
+
+Keeping that exit-code split is a matter of where a check runs: `runE` marks every error returned
+from a command's body as a run failure (exit 1), so a usage check the tool makes itself — parsing a
+flag's value, a rule between flags, an environment default — belongs in `PreRunE`, which exits 2
+like Cobra's own flag errors. Cobra checks required flags only after `PreRunE`, so a `PreRunE` calls
+`cmd.ValidateRequiredFlags()` first, or a missing flag is reported as the empty value it leaves;
+`cmd/sessionexpect`, built on the same shape, does both (2026-10-17, docs/plans/archived/2026-10-17
+- 01 - photon-adoption-prep-plan.md).
 
 ### Recording a fixture
 
@@ -344,6 +356,8 @@ recording http://127.0.0.1:1111 -> smoke.yaml
 $ apogee --endpoint http://127.0.0.1:41234        # in another terminal: drive the run you want
 ^C                                                 # back here: the fixture is written on the way out
 ```
+
+Every other request header is forwarded as the client sent it, `Authorization` and `x-api-key` included, so recording a hosted model needs the client to carry its key — and the key reaches that upstream. It never reaches the fixture: a Script keeps no request headers. What the fixture does keep is the upstream URL in its header comment, each request's last message (regexp-quoted) as its turn's `when:` matcher, and an error reply's body verbatim, so read a capture of a real session for prompt content before committing it. (Learned 2026-10-08; source: `docs/handoffs/archived/2026-10-08 - 01 - deepseek capture and next-work queue.md`.)
 
 Each completed `/v1/chat/completions` request becomes one turn, carrying what the reply actually
 did: the content and reasoning deltas re-joined — with `reasoning_field` set when the channel
@@ -375,6 +389,8 @@ replay what it read — and said so rather than dropped silently: when the fixtu
 turn that lost events gets one line on stderr, `turn N: K undecodable stream events dropped`, where
 `N` is the turn's 1-based place in the fixture. A clean recording prints nothing, and the fixture
 itself carries no trace of the loss.
+
+A reply the upstream drops mid-stream is recorded as the fault it was: when a 2xx body ends on an error that is neither EOF nor a cancel and no `[DONE]` arrived, the turn is written as `cut: {after_runes: N}` — the content runes that did arrive — with no `usage` or `finish_reason`, which a cut never carries. A reply that reached `[DONE]`, or that the client stopped reading or cancelled, is recorded clean (2026-10-14, docs/plans/archived/2026-10-14 - 01 - architecture-review-defects-plan.md).
 
 Two fixtures in `cmd/apogee/testdata/stubllm/` are hand-written anyway, and say so at the top of the
 file: one documents the format (`example.yaml`), and `cached-usage.yaml` reports a prefix-cache
@@ -532,6 +548,19 @@ it parses every `_test.go` file, and this kit's non-test files, and fails on a t
 raw literal, and on a hand-rolled wall-clock deadline loop. The exception is marked at the call
 site with `Fixed`, never in an allowlist in the guard.
 
+Four cases the rule meets in practice. An elapsed-time bound that checks a wait returned early stays
+raw: `elapsed > 1500*time.Millisecond` inside a 2000 ms window
+(`internal/tools/console_read_test.go`) would pass the very window it guards if it were scaled, and
+the guard does not judge comparisons, only timed calls. A duration fed to a virtual-time fake stays
+raw too: `cmd/release`'s `testTagTimeout` and `testPollPause` drive a counting sleep, and scaling
+them would turn the pinned "after 30s" into "after 1m0s" under `APOGEE_TEST_SLOW=1`. A count
+multiplying a duration is a literal like any other, so the guard flags
+`Within(2*seatBeat + DefaultTimeout)`; the multiple goes inside the wrapper,
+`Within(testtime.Fixed(2*seatBeat) + DefaultTimeout)`. A production constant is wrapped where the
+test uses it (`testtime.Budget(titleRequestTimeout)`), and the production code stays as it is.
+(2026-10-12, source: docs/plans/archived/2026-10-12 - 02 - test-suite-stability-plan.md, NOTES at
+:185, :253, :345 and Regression guard at :426.)
+
 **`WaitQuiet` is for "the frame has settled", before a capture — never for readiness.** A quiet
 screen is not a ready program: a pane whose keys arm paints nothing, a turn's save lands after its
 last frame, and a screen that has not answered a key yet has been quiet since before the key was
@@ -540,7 +569,7 @@ supposed to produce, or the byte counter moving), the cursor answers a pane arms
 (`WaitCursorAnswers(PaneArmAnswers)`), the idle prompt, or the backend state the next assertion
 reads (the session record, a file on disk). `WaitQuiet(settled)` stays only where a golden or a
 whole-frame read is about to pin the picture, and only after a content wait — a screen that has
-not started painting yet is quiet too.
+not started painting yet is quiet too. In `cmd/apogee`'s e2e tests these signals have house helpers in `e2e_approval_test.go`: `awaitArmed` before a key that answers a pane, `waitIdle` for the idle prompt, and `awaitRecorded` for text reaching the session record. Wait on one before `Quit()`: a quit while a turn is busy cancels the turn, and an idle prompt does not yet mean the record is written, because the idle save is a Cmd queued behind the turn's last frame (`saveAtIdle`). Use `waitIdle` when only idleness matters, and `awaitRecorded` when the test reads the record afterwards. (2026-10-12, source: docs/plans/archived/2026-10-12 - 02 - test-suite-stability-plan.md :496, :502, :517; docs/plans/archived/2026-10-13 - 00 - open-bugs-sweep-plan.md:88.)
 
 `CheckLeaks(t)` is the other guard: called FIRST in a driver test, it fails the test if a goroutine
 from `internal/tui`, bubbletea, `internal/tuitest`, `internal/filewatch`, `internal/heartbeat` or
@@ -789,9 +818,7 @@ which runs nothing, and `keysource_test.go`'s re-invocations of the test binary 
 binary. Building there multiplies one build by every re-exec (+10 s on the package, measured), so
 `TestMain` recognises the fixture's marker argument and skips it.
 
-**The environment is stated, not inherited.** `launchPTY` gives the child `HOME` (the suite's temp
-one), `PATH`, and nothing else, plus the `TERM`/`COLORTERM` the driver appends. An `APOGEE_*`
-variable in the developer's shell cannot reach a driven run.
+**The environment is stated, not inherited.** `launchPTY` gives the child `HOME` and `USERPROFILE` (both the suite's temp home), `PATH`, and `APOGEE_NO_UPDATE_CHECK=1`, and nothing else, plus the `TERM`/`COLORTERM` the driver appends (`ptyEnv`). An `APOGEE_*` variable in the developer's shell cannot reach a driven run. The update-check switch is the one variable the suite sets rather than clears: `TestMain` sets it for every in-process launch too, so no driven run asks the real release server for a newer version (ADR 0097), and `TestSuiteEnvironmentTurnsTheUpdateCheckOff` pins both. A new launch helper or env list must carry it; a test of the enabled path clears it with `t.Setenv(config.EnvNoUpdateCheck, "")` and stays serial. (2026-10-10, docs/plans/archived/2026-10-10 - 00 - windows-channels-and-update-notice-plan.md)
 
 **`ptySession.Relaunch()`** starts the binary again on the same home and workspace under a fresh
 pty — the black-box twin of `e2eSession.Relaunch()`, and the reopen half of every "what did the
@@ -1058,6 +1085,14 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    of its own (the session title, a compaction summary), and an ordered script silently hands
    one of them the turn meant for the user's prompt. End the fixture with one `repeat: true` turn
    for those, and let `AssertConsumed` prove the scripted turns fired.
+   To drive an emergency fold, script three things: a tool-call turn before the overflow, so the
+   tail past the protected prefix holds the two messages `minCompactTail` asks for and the fold is
+   not skipped; an HTTP 400 turn whose body carries a marker the provider's `isContextOverflow`
+   reads (`exceeds the available context` and the rest); and the summary turn, matched on
+   `when: system: "compacting a conversation"`. The internal/agent overflow helpers sit in
+   `_test.go` files and cannot be imported; copy `rebriefScript` in
+   `cmd/apogee/e2e_reactions_test.go`. (2026-10-21, docs/plans/archived/2026-10-21 - 00 -
+   user-session-advice-plan.md)
 3. **Own the home and the workspace.** `launchTUI` — and `launchPTY` for the black-box driver —
    gives the run a `t.TempDir()` home and a `t.TempDir()` workspace and passes both as flags; both
    refuse to run with `APOGEE_CONFIG` set. No test may read or write the real `~/.apogee`.
@@ -1066,6 +1101,14 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    `testtime.Fixed` ([Waiting](#waiting)). A settle (`WaitQuiet`) is for a frame you are about to
    capture whole — a golden, a whole-frame read — never a readiness check, and only ever after a
    content wait, because a screen that has not started painting yet is quiet too.
+   In `cmd/apogee` the readiness waits already have names: `waitIdle` (`e2e_approval_test.go`) waits
+   for the idle prompt, and with it for no pane standing — the wait after an applied note, an
+   approval, a resume or an Esc; `pickerDown` (`e2e_support_test.go`) steps a popup list and returns
+   once the highlight has moved, told by its frame row as well as its text, because two rows can
+   read the same (two sessions under one title); `openLastRun` returns on the run view's breadcrumb
+   (`runViewCrumbHead`). Reuse them rather than writing a text-only cursor check, which never
+   resolves on identical rows. (2026-10-13, source: docs/handoffs/archived/2026-10-13 - 02 -
+   after-test-readiness-and-model-size.md:40-43)
 5. **Assert on cells.** `Frame.Find`, `Frame.Row`, `Frame.Cell(...).Width`, `Frame.StyleRuns`. A
    `Golden` is for a rendering surface whose whole layout is the claim, and always with
    `sess.Redactions()...` — a golden carrying a temp path or today's date churns on every run. The
@@ -1083,6 +1126,11 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    pages (`scrollTranscript`), waiting for each press to actually PAINT before reading the next.
 7. **Close what you open.** Press Esc and then WAIT for the pane to be gone. A test that carries on
    after a pane that never closed types its next command into that pane and fails somewhere else.
+   A transcript note is not a pane: `/skills`, for one, records its catalog as a note
+   (`noteSkillCatalog`), and its text stays in scrollback after Esc, so a `WaitGone` on it never
+   returns. After Esc from a note wait on the idle prompt (`waitIdle`) alone; `WaitGone` on a marker
+   (`closePane`) is for a real pane or a run view's crumb. (2026-10-13, source:
+   docs/plans/archived/2026-10-13 - 01 - test-readiness-and-model-size-plan.md:119)
 8. **Add a judge rubric only for a judgment half** — wording, tone, "reads as one row". Everything
    a cell can settle is settled by a cell.
 9. **Stay inside the budget below, and stay parallel.** Every wait bounded, and `t.Parallel()`
@@ -1258,3 +1306,15 @@ way a driver test lies: **`WaitQuiet` is not a wait for a keypress to land**. Th
 quiet since before the key was sent, so the check passes at once, on a frame the program has not
 answered yet. Wait for the paint the key caused (`awaitRepaint`, or a `WaitText` on what the key
 was supposed to produce) and settle after that.
+
+## Test traps
+
+Traps a test author meets that no guard test names. Each was hit for real.
+
+**A test that runs a file it just wrote.** A parallel neighbour that forks while the file is still open for writing hands that fd to its child, which keeps it until it execs (CLOEXEC closes at exec, not at fork); exec'ing the file in that window fails with ETXTBSY, "text file busy" (Go issue 22315). Either plant the file without opening it for writing — a hard link to the test binary, a copy only where the link fails (`plantKeyCommand` in `internal/config` and `cmd/apogee`) — and stay parallel, or write it and run the test serially (`cmd/apogee/update_test.go`'s archive-swap tests). (2026-10-10, docs/plans/archived/2026-10-10 - 00 - windows-channels-and-update-notice-plan.md)
+
+**Assert a child's environment on the captured spec, not on `env`.** A tool test that pins what environment a subprocess gets (the Allow-rule scrub of `CDPATH`, `BASH_ENV`, `ENV`, `BASH_FUNC_*`; PATH scoping) records the spec with `capturedRunHost` (`internal/tools/exec_host_test.go`) and reads it with `envValue`. Running `env` through the shell instead would pass vacuously on a Debian-family host: its `sh` is dash, which drops `BASH_FUNC_*` from its own children's environment whatever apogee passed it. (2026-10-11, docs/plans/archived/2026-10-11 - 00 - allow-rule-hardening-plan.md)
+
+**A path's announced spelling needs a symlink fixture.** A test of how a tool treats a path's announced spelling versus its real path — a scratch dir or a library root reached through a dotfiles-linked home — needs an explicit symlink in its fixture. On Linux `t.TempDir()` is normally already a real path, so a test built on it alone passes there whatever the code does with the spelling; only macOS's symlinked `/tmp` would catch it. Build the link yourself, as `internal/tools`' `TestReadScopeScratchRootIsLive` does with its `dotfiles-home` link (and the `dotfiles-managed ~/.apogee/skills` fixtures beside it), and take the workspace from `tempRoot`, which resolves `t.TempDir()` to its real path so the fence's own spelling is what the assertions compare against. (2026-10-12, docs/plans/archived/2026-10-12 - 00 - regression-and-doc-truth-plan.md)
+
+**A background workflow in an engine test.** Every approval raised inside a background workflow waits in that workflow's own queue, never at a Driver's prompt, and an `internal/agent` test has no Driver to answer it — so a test that runs a background script stage under ask-before hangs on the queued approval. Run it in `domain.ModeAuto` with `&fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}`, which runs the stage confined with no approval (`TestBackground_RerunFailedRerunsAScriptStageTheTallyDoesNotCount`) (2026-10-14, docs/plans/archived/2026-10-14 - 01 - architecture-review-defects-plan.md).

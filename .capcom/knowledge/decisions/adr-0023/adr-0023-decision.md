@@ -7,7 +7,9 @@ ADR 0064 §2 and this record's own 2026-08-31
 amendment below: **four**. A fourth top-level key, `use-default-prompt:`, joins the three named
 here — a bool, default `true`, gating the embedded-default rung of that record's resolution ladder;
 an explicit `use-default-prompt: false` is the "send no prompt at all" that deleting these keys
-used to spell.)* `system-prompt-text:` (the
+used to spell. *Amended 2026-10-29:* ADR 0067 §1 adds a fifth, `system-prompt-layers:` — an ordered
+list of fragments appended to whichever prompt the ladder selects — so the top-level key set is now
+**five**.)* `system-prompt-text:` (the
 template inline), `system-prompt-file:` (a file holding it), and `system-prompt-models:` (a map of
 model name → an entry reusing the *same two key spellings*, not a bare `text:`/`file:`). There is
 no flag and no environment variable, following the newer-key convention (`present:`, `mechanisms:`,
@@ -23,8 +25,12 @@ Matching is exact string equality against the **resolved** model name — the la
 (ADR 0016) *(Amended 2026-09-30:
 Validated sets are deleted, ADR 0076
 A9; the matching rule stands on its own)* — so selection can
-only happen in the composition root *after* model resolution, and `resolveSystemPrompt` is called
-from `runRoot` for that reason. Replacement is **whole-entry**: an entry setting only
+only happen in the composition root *after* model resolution, and `resolveSystemPrompt` was called
+from `runRoot` for that reason *(until 2026-08-10: it is now `config.ResolveSystemPrompt`, reached
+through `resolveModelBindings` (`cmd/apogee/modelprofile.go`) at startup
+(`rootWiring.resolveConfig`, `cmd/apogee/wire_boot.go`) and on every rebind (`rebindSpecFor`,
+`cmd/apogee/wire_settings.go`) — still after model resolution)*. Replacement is **whole-entry**: an
+entry setting only
 `system-prompt-file` does not inherit the global `system-prompt-text`, because a prompt is one
 document and half of one is not a prompt. An entry naming a model this run is not is never selected
 and its file is **never read** — the `unconfined-hosts` posture
@@ -37,7 +43,8 @@ a `system-prompt-models` entry setting **neither**, is a defect in the file itse
 and an indentation slip respectively — so both are checked at **every** level while config resolves,
 where the message can name the exact key. Whether a file **reads** and whether a template's
 placeholders are **known** are properties of the **selected** source only, checked in
-`resolveSystemPrompt`: refusing to start over a non-matching entry's file, which may exist only on
+`resolveSystemPrompt` (now `config.ResolveSystemPrompt`, `internal/config/config.go`): refusing to
+start over a non-matching entry's file, which may exist only on
 another machine, would make the travelling config of §2 unusable everywhere else. Defense in depth:
 `newAgent` re-validates `Config.SystemPrompt` (the `processing.ParserFor` construction-gate
 precedent), so a Go embedder's typo fails construction loudly instead of shipping raw braces to the

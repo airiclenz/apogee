@@ -13,5 +13,13 @@ Everything it reads is untrusted and passes the TUI's escape stripping. The prom
 fresh one after `--resume`. When the owner ends, a banner says so and the view stays read-only; in
 the watcher's own home ⏎ then resumes through the normal door, and a **Watched home**'s session
 is never resumable. See ADR 0103.
+
+In code, a new Msg case in `Model.fold` needs a watch route in `watchRouteOf` (view, owner or held),
+and a new field `resetSessionView` writes must be parked and restored too. Two guard tests enforce
+this (`TestWatchIsolatesRoutesEveryFoldedMsg`,
+`TestWatchIsolatesParksExactlyTheSessionViewResetSet`), and choosing the route is a design decision.
+Every view swap calls `forgetPaintedFrame`, since the parked and watched transcripts count
+generations apart; no test checks that. (2026-10-17, docs/plans/archived/2026-10-17 - 03 -
+live-session-watch-plan.md.)
 _Avoid_: "attach" (nothing is shared with the owner and nothing flows back), "spectate",
 "mirror".

@@ -20,7 +20,8 @@ returns an error if ever reached, so a mis-wired recursion point fails loudly.
 
 **2 — One orchestrator threads "≤ parent" structurally.** `newChildAgent` builds the nested
 `Agent` from the parent's `Config` with the **same** Mode, Approver, Confiner, and
-`confine-to-workspace` flag (verbatim — never loosened), a tool set that is a `registry.Subset`
+`confine-to-workspace` flag (verbatim — never loosened), a tool set that is a `Subset`
+(`(*domain.ToolRegistry).Subset`; written `registry.Subset` until 2026-10-29)
 of the parent's (`defaultSubAgentTools` — never an expansion; a privilege leak is structurally
 impossible because the subset is built from the parent registry's own names), and Depth =
 parent+1. The nested loop emits through the parent's `EventSink`, and because each `Agent`

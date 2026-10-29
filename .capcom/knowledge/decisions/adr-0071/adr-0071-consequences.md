@@ -2,7 +2,9 @@
 title: ADR 0071 consequences
 ---
 
-- A stock install runs six Floor guards and zero Mechanisms. Where the old default armed two
+- A stock install runs six Floor guards and zero Mechanisms. *(Note 2026-10-29: seven since
+  `tool-call-salvage` joined, `adr-0071-amend-0907`; the Mechanism layer itself is gone, ADR 0076,
+  and with it the `/settings` mechanisms row.)* Where the old default armed two
   off-ramps and nothing else, the shipped posture now includes tool-call repair, the tool-loop
   breaker, the tool-result cap and the read cache — behaviour that previously required a
   hand-written `mechanisms:` block or a Validated set.
@@ -12,7 +14,10 @@ title: ADR 0071 consequences
 - Fourteen rows' source files, tests and assets are deleted. `internal/mechanisms/retired.go`
   carries each retired ID with the release that retired it (`v0.20.0`) and, for a promoted ID, the
   config key that succeeds it — so an old config naming any of the twenty gets a specific message
-  rather than an unknown-ID failure.
+  rather than an unknown-ID failure. *(Note 2026-10-29: `internal/mechanisms` was deleted on
+  2026-09-08 (`e03dee88`); the successor table now lives as `retiredMechanismSuccessors` in
+  `internal/config/configmigrate.go`, and the startup config migration strips the `mechanisms:` key
+  with a notice naming each promoted id's Floor key, rather than refusing it.)*
 - `~/.apogee/library` on disk is never touched, and `internal/library`'s fingerprint and
   probe-record halves stay: they serve Validated sets and `probe model`, not the retired `library`
   Mechanism. *(Note 2026-09-16: Validated sets went with ADR 0076 A9 and `internal/library` with its

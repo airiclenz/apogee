@@ -46,7 +46,8 @@ Three layers:
    forgotten.
 
    (Amended 2026-10-02: the root now also imports `internal/config`, `internal/eventjson`,
-   `internal/profiles`, `internal/reactions` and `internal/workflow` beside `domain` and `agent` —
+   `internal/profiles`, `internal/reactions` and `internal/workflow` beside `domain` and `agent`
+   (amended 2026-10-29: and since 2026-10-27 `internal/undo`, for the `WithUndoJournal` forwarder) —
    each only for aliases and forwarders (`DefaultSystemPrompt`, the shipped-profile lookup, the
    recipe and workflow-plan types, `RunnerOptions`/`ReactionRunner`). It still holds no engine
    logic.)

@@ -39,7 +39,8 @@ file.
 ADR 0043 decision 3; its restart-required
 column retired with ADR 0037 decision 8)* carries a row per config key — path, kind, default, env-var and flag names,
 global-only, restart-required, editability, masking, one-line description — and **both** the pane
-and `resolveSettings`' multi-source precedence read their metadata from it. A reflection guard
+and `resolveSettings`' (since 2026-08-10 `resolveOptions` in `internal/config/config.go`)
+multi-source precedence read their metadata from it. A reflection guard
 asserts a **bijection between registry paths and `fileConfig`'s yaml tags** (structured rows
 terminate descent), so a key added to the schema without a registry row fails the build's tests
 rather than silently going missing from the screen. Drift between a settings UI and its schema is
@@ -80,4 +81,7 @@ like it did.
 
 **10. `api-key` is masked in the list, visible while editing.** `••••` on the row (the pane is
 on-screen in a terminal that gets shared and screenshotted); the characters show while the user is
-typing them, because a masked edit buffer is unusable.
+typing them, because a masked edit buffer is unusable. (Amended 2026-10-29: since ADR 0036 retired
+the top-level `api-key:` on 2026-08-05 no row is masked — the one secret is a `servers:` entry's
+api-key inside a structured block. The `Masked` column survives unused, and a masked row's edit
+buffer starts empty, so the secret is typed whole.)

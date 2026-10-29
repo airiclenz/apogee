@@ -34,11 +34,12 @@ Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the
 **unmarked** message, because exactly one unmarked user message opens an Exchange. A **Skill** or
 a **File reference** named in a staged message is message content and rides the Interjection with
 it; a `/command` is not message content, and which ones may run mid-run is a **per-command**
-policy rather than a blanket "at idle" rule — the reporting verbs (`/version`, `/skills`,
-`/confine` status) and the Schedule pair (`/schedule`, `/schedule-stop`, which touch only the
-scheduler library and never this session's engine —
-ADR 0033) run
-immediately, every other verb is offered *tagged* `— runs at idle` in the menu and, typed or
+policy rather than a blanket "at idle" rule — the reporting verbs (`/version`, `/help`, `/skills`,
+`/usage`, `/inspect`, `/advice`, `/thinking`, `/workflows`, `/confine` status), `/effort`, the
+Schedule pair (`/schedule`, `/schedule-stop`, which touch only the scheduler library and never this
+session's engine — ADR 0033) and `/sub-agents-server` (it moves only where the next delegation
+spawns, ADR 0045) — the verbs `whileRunning` marks in internal/tui/command.go — run immediately,
+every other verb is offered *tagged* `— runs at idle` in the menu and, typed or
 accepted mid-run, is **queued**: it shows as a `queued command: /verb` row in the band above the
 box (below the staged messages; Backspace on an empty box pops it back first), and the queue runs
 FIFO at the next idle — a completion, a stop, or an error's dismissal — before any held or staged

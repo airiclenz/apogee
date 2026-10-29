@@ -37,7 +37,11 @@ whose list can move between the two reads of one keypress still bounds-checks wh
 **6 — The filter LINE rides the surface, not the painter's spec.** Its label, its caret, its two
 blank lines, the budget claim for all three, and the trade a short window makes (the rows shrink, the
 line the human is typing stays) are stated once in `renderList`. A pane states its rows, its title,
-its hint and its slot in the frame; it cannot forget the pads or set them out of step with the claim.
+its hint and its slot in the frame; it cannot forget the pads or set them out of step with the
+claim. *(Superseded in part 2026-10-14 by `adr-0053-amend-1014` rule 5: the filter is no longer a
+line with two blanks and a budget claim — it rides the pane's title row (`overlayFilterTail` →
+`popupSpec.titleTail`, `internal/tui/listsurface.go`) and claims no row. What stands is that it is
+stated in one place.)*
 
 **7 — It is a plain value, embedded.** No lock, no self-pointer, no no-copy type, so it lives inline
 in the `Model` that is copied on every `Update`
@@ -56,3 +60,8 @@ it here would hand it two fields it never reads.
 filter is a `lineEditor`, and a `lineEditor` is a `textarea` — thousands of bytes in a `Model` that
 is copied on every `Update`. Adopting this module must move fields, never multiply them: a pane whose
 sub-lists cannot share one surface holds them as named fields and reuses the editor it already has.
+*(Note 2026-10-29: the premise has eased — since the 2026-10-14 amendment a filter is a
+`copyOnWriteField`, a pointer to its `lineEditor` (`internal/tui/listsurface.go`), so a surface no
+longer carries a whole textarea per copy. The rule that adoption moves fields rather than
+multiplying them stands; the 2026-08-20 amendment's `listCursor` / `listSurface` split is how the
+lists that do not filter adopt the module.)*

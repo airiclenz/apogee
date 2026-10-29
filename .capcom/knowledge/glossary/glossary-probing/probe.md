@@ -15,7 +15,11 @@ drift. The **model battery** (`apogee probe model`) is an **explicit act**: it s
 calls (native tool call, JSON/structured output, multi-step tool chain) and **writes** a probe
 record, so it never fires as a side effect of the bare noun. It prints suggested **model
 profile** knobs as paste-ready YAML and never edits the user's config; `--no-save` runs the
-battery and writes nothing.
+battery and writes nothing. Three more children sit on the free side of that split, read-only like
+the host report: `apogee probe terminal` (measures the terminal by painting on the alternate screen,
+so it must be asked for), `apogee probe config` (what config.yaml says: notices, a pending migration
+and every key's resolved value, never migrating the file) and `apogee probe context` (what apogee
+itself puts in front of the model at Turn 1, ADR 0079, with no request sent).
 _Avoid_: "benchmark" (the battery measures capability, not quality — scoring is the
 bench's job), "health check" (it diagnoses, it does not monitor —
 monitoring is the Heartbeat's job), "auto-configure" (nothing is

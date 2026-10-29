@@ -4,8 +4,10 @@ title: "Edit regions: the typed summary of changed regions an edit tool records 
 
 **Edit regions**:
 The typed summary an edit tool records **at apply time**: each changed region's before/after
-start lines, its removed and inserted lines, and up to three merged unchanged lines of context
-each side — counted from the applied change itself, so a view never re-reads the file or
+start lines, its removed and inserted lines, and up to three unchanged lines of context each side —
+neighbouring changes stay separate regions whose context tiles the lines between them (they merged
+until the ADR 0052 amendment of 2026-08-22) — counted from the applied change itself, so a view
+never re-reads the file or
 re-derives positions from arguments. It rides the **Tool summary** contract unchanged — display
 data, never sent to the model, and no wire form for the summary value outside the eventjson mirror
 that live **Watch mode** decodes (amended 2026-10-17, ADR 0103) — and the region facts are

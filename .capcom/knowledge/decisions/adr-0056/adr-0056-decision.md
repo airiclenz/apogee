@@ -139,6 +139,12 @@ only. /tmp may not be writable."). Per-session constant, KV-cache safe. This rem
 2's hazard inversion: confinement no longer blocks the safe destination while leaving the
 workspace as the only writable ground.
 
+*Note (2026-08-25):* the default-prompt guidance line above was removed three days after it shipped
+(081f560f): the engine-owned **Orientation block** (ADR 0023, amendment 2026-08-25) now names the
+scratch dir and the `/tmp` caveat on every request (`internal/agent/prompts/orientation.txt`), so
+the shipped default prompt (since ADR 0064 the embedded `internal/config/defaults/prompt.txt`)
+carries no scratch line. `{{scratch}}` stays in the closed placeholder set for a user's own prose.
+
 *Note (2026-09-14):* the Orientation block (ADR 0023 §6 amendment) announces the scratch dir in
 every mode but **Plan** — Plan writes nothing (ADR 0012), so a Plan session is told no scratch
 dir rather than a "writable" one it cannot use; a Shift+Tab out of Plan brings the line back on

@@ -14,8 +14,12 @@ and so no route to the OS's mDNS responder, still reaches a server named by its 
 Heartbeat's Rebind half moves it to another configured server
 mid-session (`/server`), unbound until that server's first Beat says what it serves.
 The Upstreams apogee knows are exactly the entries of config's **`servers:` list — the single
-definition of what servers exist** (one entry = a `name`, an `endpoint`, an optional `api-key`, an
-optional `model` discovery hint, an optional `wire`). The `name` is also the **host alias** the footer shows, so no
+definition of what servers exist** (one entry = a `name` and an `endpoint`, plus optional keys: an
+`api-key` (or `api-key-cmd` / `api-key-env`), a `model` discovery hint, a `wire`, and the per-slot
+keys an entry pins about its own server (`context-window`, `max-output-tokens`, `response-reserve`,
+`working-window`, `stream-idle-timeout`, `llama-launcher` / `launch-profile`, `request-extra`,
+`price`, `vision`, …). `config.ServerEntry` is the full list). The `name` is also the **host alias**
+the footer shows, so no
 standalone `host-alias:` key exists. A session starts on the entry the `server:` key names — the
 last one a `/server` switch chose, recorded automatically — and asks with the picker when that key
 is unset or names an entry that is gone; a raw `--endpoint`/`APOGEE_ENDPOINT` override builds an

@@ -22,5 +22,12 @@ serialized only where an entry actually subscribes and never copied or logged ot
 observability costs nothing when nobody is watching. The strings are the contract — they are what a
 configuration names and what reaches an observer on a `ReactionFiredEvent` — and the set grows
 additively.
+
+**The count the manual states** (2026-10-21, docs/plans/archived/2026-10-21 - 00 -
+user-session-advice-plan.md): docs/manual/README.md states how many Moments there are as "the
+<spelled number> Moments", and `TestManualStatesTheMomentCount` (internal/domain) pins it against
+the seams plus the notices. It reads the FIRST "the <word> Moments" in that file, spelled out from
+zero to twenty, so a Moment added or retired fails until the number follows, and any earlier
+sentence there worded "the … Moments" is the one pinned — word other mentions differently.
 _Avoid_: "Hook point" (retired — a seam Moment is what it named), "Hook event" (retired — a notice
 Moment is what it named), "stage", "phase".

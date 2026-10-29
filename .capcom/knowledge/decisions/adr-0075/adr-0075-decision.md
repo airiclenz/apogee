@@ -171,7 +171,11 @@ renders no spurious finished line.
 > **Amended 2026-09-27 (ADR 0088 D2).** A cancelled delegation is no longer one
 > the parent Turn rolls back: a child running under a cancel is stopped exactly as `^x` stops it and
 > its partial result committed, and only a child that never started ends with the not-run result.
-> The bracket rule stands — every cancelled group still emits its `finished` phase.
+> The bracket rule stands — every cancelled group still emits its `finished` phase. (Amended
+> 2026-10-29:) The cancelled status does not: each `finished` phase carries the delegation's Result
+> (its report, its stopped partial result, or the not-run result), the domain's `Cancelled` flag is
+> gone, and the `sub_agent_phase` line keeps `data.cancelled` only as a constant `false` so the
+> `v:2` shape is unchanged (was a true cancelled status from 2026-09-07 until ADR 0088).
 
 **13. `--format` reaches headless only.** The flag is installed in `runHeadless` and nowhere else:
 the daemon composes its Firings through `firingConfig` and `runOnce` directly (`daemonfire.go`;

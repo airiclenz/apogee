@@ -428,6 +428,15 @@ not a log to keep — for a lasting stream of a run, redirect `--format json`. I
 lines happen; if a write fails, `session journal stopped — <reason>` is said once on stderr, the
 journal stops, and the run goes on to its own end.
 
+A run that holds the same session again (a resume, or a second run of that id) truncates the journal
+in place and writes it again from the start; the file is the same one, not a new file. A tool that
+follows a journal therefore cannot detect the restart from the file's identity, or from its size
+dropping below the follower's offset, since the new run can write past that offset between two
+reads. Keep the journal's first line, its `run_started`, which differs on every open through its
+`time`. Start again from byte 0 when that line has changed or can no longer be read in full. A
+journal path that names nothing means the run is ending and removed its journal; it is not a
+restart. (Learned 2026-10-18, docs/plans/archived/2026-10-18 - 00 - watch-mode-fixes-plan.md.)
+
 Like stdout and the record, the journal is **not scrubbed**: it holds every tool argument and result
 the run saw. It is written owner-private (`0600`) unless
 [`sessions.share-group`](configuration.md#keeping-the-session-store-bounded--sessions) shares it

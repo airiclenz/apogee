@@ -26,7 +26,8 @@ idempotently per topic, and reports false otherwise so the caller can fall back 
 The second engine note on this seam is the **delegate ledger** (`[engine — delegations]`,
 2026-09-19, `apogee-clb`): once an Exchange holds two or more delegations or any one that did not
 complete, every request the coordinator builds carries, on its tail, one line per delegation in
-spawn order — `#<n> <name> — <completed|capped|faulted|cancelled|refused>[: <cause>] — output
+spawn order —
+`#<n> <name> — <completed|capped|faulted|cancelled|stopped|refused|skipped>[: <cause>] — output
 <present|missing|none>` — rendered per request from the host's own record of what each child did
 (`internal/agent/children.go`), with output presence read from the filesystem at render time. It
 states facts and asks nothing, is stamped ahead of the wrap-up directive so that directive stays on
@@ -37,3 +38,10 @@ The Rejected row "a dedicated tail message for every advise" is unaffected: the 
 message after the tool result. On a tool-less request the wire degrades the noted tool message to
 user role whole, fence included — that user-role tail is the wire's rendering of one existing
 message, not a new message the engine appended, which is the case the row rejects.
+
+(Amended 2026-10-29 from the code: the outcome set was five words until 2026-09-26. `stopped` is a
+child stopped singly or found running by a Turn cancel (ADR 0086 D4, ADR 0088), so `cancelled` now
+names only a child the cancel reached before it started; `skipped` is a delegation a queued user
+message pre-empted before its child started. A skipped row counts toward neither half of the trigger
+but is listed whenever a note fires, so the spawn indices stay contiguous — `delegationLedger.note`
+in `internal/agent/children.go`.)

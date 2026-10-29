@@ -17,5 +17,7 @@ all — and a bench-armed **Reaction** is measured by the bench rather than poli
 One rule outlived the machinery and never belonged to it: an **empty final response** is a
 **fault**, not a signal. A reply with no visible text and no tool calls is an upstream failure — an
 aggregator's in-band error on an HTTP 200, a stream that ended before its first token — so the Turn
-faults visibly instead of committing a blank assistant message. It indicts the Upstream.
+faults visibly instead of committing a blank assistant message — once the **empty-response
+recovery** Floor guard's retry is spent, or at once when `empty-response-recovery: false` switches
+it off. It indicts the Upstream.
 See Retired terms.

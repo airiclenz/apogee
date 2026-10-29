@@ -137,14 +137,15 @@ slowest package.
 
 Short-lived processes are what bound the suite's memory. A test process grows with the number
 of tests it holds, not just with the test running now. The testing package parks every parallel
-test at its `t.Parallel` call until the serial ones are done, and each parked goroutine keeps the
-stack its test function's frame needs. In `internal/tui` those frames run to hundreds of KB,
-because a `Model` is about 120 KB by value. The race detector then shadows all of that again.
-One race-enabled process per package grew to several GB this way; a chunk holds a fraction of
-the package and gives it all back when it exits. When you add a table of parallel subtests
-whose cases build a `Model`, start each case through `runParallelCase`
-(`internal/tui/sessions_test.go`). It parks the case on a small stack and takes the body's
-frame only when the case runs.
+test at its `t.Parallel` call until the serial ones are done, and each parked goroutine keeps
+the stack its test function's frame needs. In `internal/tui` those frames once ran to hundreds
+of KB, when a `Model` was about 120 KB by value; since 2026-10-13 it is about 22 KB, held under
+32 KiB by `TestModelFitsTheStack`, but a test that builds and renders one still reserves a
+large frame, and the race detector shadows all of that again. One race-enabled process per
+package grew to several GB this way; a chunk holds a fraction of the package and gives it all
+back when it exits. When you add a table of parallel subtests whose cases build a `Model`,
+start each case through `runParallelCase` (`internal/tui/sessions_test.go`). It parks the case
+on a small stack and takes the body's frame only when the case runs.
 
 `GOMEMLIMIT` does not bound a race-enabled test process. It counts only the memory the Go
 runtime manages: the heap and goroutine stacks. The race detector's shadow memory is allocated
@@ -188,6 +189,17 @@ script refuses to run a plan that does not cover every listed test. The seed goe
 suite's shape moves. Refresh it with `make test-timings-seed` after a `make test` on a dev box
 (it copies `.test-timings` into the seed), and commit the result.
 
+The packer's grain is the top-level test: `-run` selects at that grain, so a test and all its
+subtests always run in one chunk, costed as one. A single long table-driven sweep therefore sets
+a critical path that no number of lanes can shorten. When one does, split it into several
+top-level tests over a shared helper, and add a guard test that every case lands in exactly one
+of them, so the union still covers the old sweep; never drop cases to make it fit.
+`TestOverlayHeightQueryMatchesItsRender*`, `TestInputBoxWindowFollowsTheCaretAt*Rows` and
+`TestFrameNeverExceedsTheTerminalHeight*` in `internal/tui` were split this way (141, 136 and 76
+s on a Raspberry Pi 5). A new or renamed test costs a flat 0.1 s until a run has timed it — the
+next run on a dev box, but on CI only once the seed is refreshed. (2026-10-12, source:
+docs/plans/archived/2026-10-12 - 02 - test-suite-stability-plan.md item 21.)
+
 A failing chunk reports the failing tests' full output, just as `go test` does. A process that
 dies of a signal prints no verdict of its own. The script reports the signal and the tests the
 process was running: on Linux, a SIGKILL there is usually the kernel's OOM killer, so check
@@ -223,6 +235,13 @@ virtual addresses, and TSan requires 48 (`FATAL: Found 39 - Supported 48`), so n
 runs on either. An unraced run announces itself on stderr and in its `==>` summary line, and it
 is not the `make check` gate: `make check` refuses to run with `APOGEE_TEST_RACE=0` set. Run
 race-enabled verification on another box.
+
+Go's race detector does not support windows/arm64 either (`go help build` lists the platforms
+it does), so a test run there is unraced: `go test -count=1 -run "^TestX$" ./cmd/apogee/`, and
+`-count=10 -failfast` to confirm a flake is gone by repetition. Run it from PowerShell;
+`cmd.exe` keeps single quotes as part of the argument, so a `-run` pattern there must be
+double-quoted. (2026-10-13, source: docs/handoffs/archived/2026-10-13 - 02 -
+after-test-readiness-and-model-size.md:15-16.)
 
 `APOGEE_REQUIRE_LANDLOCK_NET=1` goes the other way: it makes a skip a failure. The landlock
 network test, `TestLandlockProbeNetwork` in `internal/platform`, normally skips on a host that
@@ -325,6 +344,16 @@ cutting anything.
    is pending is skipped and named, not failed; once that setup lands, running `publish`
    again converges the missing channel.
 
+   When a resumed run finds a release that already carries some archives but no
+   `SHA256SUMS`, it checks each uploaded archive against its own rebuild before uploading
+   the rest. It reads GitHub's per-asset `digest` (`sha256:<hex>`) from
+   `gh api repos/airiclenz/apogee/releases/tags/vX.Y.Z` — `gh release view --json` (gh 2.46)
+   does not carry it. That endpoint answers 404 for a draft release, which is what a failed
+   `gh release create` leaves, so a 404 there means "no digests", not "no release": any
+   archive without a digest is downloaded with `gh release download --pattern <name>` into
+   the run's temporary build directory, never the checkout, and hashed locally. (2026-10-12,
+   docs/plans/archived/2026-10-12 - 00 - publish-unsummed-archives-plan.md)
+
 **The smoke test.** `go run ./cmd/release smoke [vX.Y.Z]` (or
 `make release-smoke [VERSION=vX.Y.Z]`) runs on its own too, against any published release,
 and it is the check that catches a release nobody can install. It checks that the tag is
@@ -383,9 +412,7 @@ It also lints the module itself: `make lint` runs `golangci-lint`'s standard set
 vulnerabilities your code actually reaches; it is the one gate that needs the network, and
 it fails with the tool's own error when the database is unreachable rather than passing
 quietly. Both run in CI too.
-Windows-tagged tests run on a `windows-latest` job; `make check` on a Linux or macOS box
-vets the whole module for Windows (`GOOS=windows go vet ./...`), so every Windows-tagged file
-must compile and vet clean, but it cannot run them.
+CI's `windows-latest` job runs the tests of five trees only — `internal/platform`, `internal/console`, `internal/probe`, `internal/auditsplit` and `cmd/release` — and there is no macOS runner (darwin is only cross-compiled). A Windows-tagged test anywhere else (`internal/tui`, `internal/tools`, `internal/session`, …) is never run, by CI or anyone: `make check` on a Linux or macOS box vets the whole module for Windows (`GOOS=windows go vet ./...`), so every Windows-tagged file must compile and vet clean, but it cannot run them. A new Windows test outside those five trees joins the `test-windows` job in `.github/workflows/ci.yml`. (2026-10-10, docs/plans/archived/2026-10-10 - 01 - audit-split-windows-plan.md)
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` builds the same binary, minus
 one field of provenance: `make build` injects the build number — the commit count, via
@@ -401,6 +428,7 @@ it — the same six targets, but compiling every package, `./...`, to `/dev/null
 rather than a separate artifact. `make dist` needs nothing beyond the Go toolchain: the
 `dist` verb of `cmd/release` packs the archives and writes `SHA256SUMS` with the standard
 library, so it runs the same on Linux, macOS and Windows.
+Each archive's binary also carries a release stamp, `-ldflags -X github.com/airiclenz/apogee.distBuild=release-archive`, which `apogee update` reads to tell a release-archive install from a source build. Because `dist` builds with `-trimpath`, the stamp is not in the embedded build info — `go version -m` never shows it — so check it with `grep -ac release-archive <binary>`. A new `-X` stamp must be read at package initialisation (as `version.go`'s `isDistBuild` is): the linker drops an `-X` variable nothing reachable reads, value and all. (2026-10-10, docs/plans/archived/2026-10-10 - 00 - windows-channels-and-update-notice-plan.md)
 
 **Reading the code?** [`AGENTS.md`](../../AGENTS.md) is the single map: it says where each
 kind of knowledge lives — the glossary (`capcom know show glossary`) for the domain language, the decision records

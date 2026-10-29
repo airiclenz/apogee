@@ -52,8 +52,9 @@ task text; the `sub_agent` description tells the model to pass a file the task n
 `output_path`. The exception is offered only where the child still holds `write_file` and its
 Mode admits a workspace write — a Plan-mode child's wrap-up stays tool-less — so it is never
 announced and then refused. The parent receives a non-error
-result whose first line marks it partial and names the bound that tripped (`step cap`, `token
-budget` or `time limit`) — `[delegate stopped at its <bound>; partial result — engine summary
+result whose first line marks it partial and names the bound that tripped, with the limit applied
+(`step cap (N steps)`, `token budget (N tokens)` or `time limit (D)`) —
+`[delegate stopped at its <bound>; partial result — engine summary
 and closing report follow]` — followed by that body, so Turns of real work are not thrown away,
 and what the parent reads is authored rather than scavenged from whatever the child happened to
 narrate alongside its last tool call. A closing text that is NOT a report is named, never

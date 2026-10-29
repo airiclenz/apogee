@@ -58,7 +58,11 @@ who opened it is not apogee's business. Watching is scoped to **`config.yaml` al
 files (the hot-reload ADR 0040
 declined stays declined; re-selecting a scheme already re-reads it), not skills, not MCP manifests,
 not workspace context files (session-scoped on purpose —
-ADR 0026).
+ADR 0026). *(Amended 2026-10-29: three files are watched today, one `filewatch.Watcher` each fanned
+into one wait — `config.yaml`, the Project config (`adr-0041-amend-1010`) and the Project root's
+adoption record under `~/.apogee/workspaces`, whose re-read installs the Allow rules it settles to
+(ADR 0096 §4), `cmd/apogee/wire_live.go`. The scoping rule — the files the config is resolved from,
+never what the config points at — stands.)*
 
 **6. Terminal editors keep the blocking, TUI-suspending path; everything else is detached.** The nine
 names already known to take a `+<line>` jump — `vi`, `vim`, `nvim`, `nano`, `pico`, `emacs`, `micro`,
@@ -79,7 +83,11 @@ llama-launcher's reason. Unlike llama-launcher, apogee has somewhere to say so: 
 persists across **three consecutive ticks** surfaces **once** as a transcript note, and is not
 repeated until the file parses again. Three, because a single tick landing inside a write is normal
 and self-correcting; once, because a note per tick would be an error scrolling past every second
-while somebody is still typing.
+while somebody is still typing. *(Amended 2026-10-29: what is counted is consecutive unreadable
+RE-READS, not poll ticks — the watcher reports only a settled change (`internal/filewatch`), so a
+broken file nobody saves again is not re-read, and a fix lands on the next save rather than the next
+tick; `configWatchStallReports` and `foldConfigUnreadable`, `internal/tui/settingswatcher.go`. Three
+and once stand.)*
 
 **8. Self-writes must not double-apply, and a watcher apply is an ordinary apply.** The pane's own
 write already applies the key live; **every** apply, from either path, refreshes the baseline, so the

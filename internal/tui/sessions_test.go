@@ -2058,8 +2058,10 @@ func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model
 // waiting rather than for the body.
 //
 // A goroutine's stack holds its function's whole frame from the function's first instruction,
-// and a Model is ~120 KB by value. A t.Run literal that builds and renders one therefore has a
-// frame of a third of a megabyte or more, reserved BEFORE its t.Parallel call parks it. testing
+// and a Model is ~22 KB by value (it was ~120 KB when this was written; TestModelFitsTheStack
+// pins it under 32 KiB). A t.Run literal that builds and renders one holds several copies, so at
+// that size it had a frame of a third of a megabyte or more, reserved BEFORE its t.Parallel call
+// parks it. testing
 // parks every parallel subtest until its parent returns, then queues it behind the package's
 // other parallel tests. So the 1,008 cases of runFrameHeightProperty, when one test ran them all,
 // held ~0.5 GB of stack for most of the package's run, which every GC cycle scanned, and ~1.5 GB

@@ -13,8 +13,11 @@ merged first system message reads **prompt → Orientation block → Delegate re
 directives → tool menu** — the engine's own blocks first, so no workspace text precedes them;
 either configured source alone seeds the message. Content is **data, never a template**: it
 bypasses the placeholder language entirely, so a repo's own `{{braces}}` travel verbatim and can
-never fail startup — the one rewrite is the fence, which prefixes a content line spelling that
-header, that footer or the Orientation block's own header with `[workspace text] `. The read is
+never fail startup — the one rewrite is the fence, which prefixes with `[workspace text] ` any
+content line spelling the standing message's own furniture — that header, that footer, an
+engine-owned block's opening line (Orientation, Delegate report, Task list) or the advice and
+engine-note fences (`standingFences`, derived from the standing-block table, so a new block joins it
+at once). The read is
 **session-scoped** — at construction and at each session boundary
 (`/clear`, `/new`, a restore), never per request and never mid-conversation — so the bytes are
 fixed for a session (the server's prefix cache survives) and an edit lands on the next `/new`; a

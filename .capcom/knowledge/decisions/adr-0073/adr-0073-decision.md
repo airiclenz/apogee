@@ -9,6 +9,13 @@ distinction: a Hook fires after the fact and may not act on the model; a Mechani
 the loop and may. The confinement contract's §10 subprocess permit (`RunHookSubprocess`) governs
 Mechanism-spawned processes and does **not** govern Hooks.
 
+> *Amendment (2026-10-29):* ADR 0076 decision 12 amends the terms: **Hook point** and **Experimental
+> hook** are retired glossary terms (say *seam Moment* and *bench-armed Reaction*), and **Hook**
+> survives only as the colloquial alias for a user-origin **Reaction**. ADR 0076 decision 8 moves
+> the §10 line. A user `advise:` or `gate:` reaction, and an adopted repo reaction's observe-lane
+> `run:`, spawn through `tools.RunHookSubprocess` under a `SubprocessPermit` (contract §10.5). Only
+> a global observe-lane `run:` still runs outside confinement, through `internal/userexec`.
+
 **2. Observe-only, by construction.** A Hook is an `EventSink` decorator. `Emit` returns nothing,
 so a Hook cannot veto, delay or answer. Its stdout, exit code and HTTP response are never fed to
 the model, the conversation, or the Session record. The day someone wants a Hook's output in
@@ -28,7 +35,9 @@ later.
 
 > Stage 2 of ADR 0076 took the
 > additive slot: the waiting spelling above is now `approval-requested`, and six notices joined it —
-> `approval-decided` plus the five seam-closing `<seam>-finished` notices. Eleven notice **Moments**
+> `approval-decided` plus the five seam-closing `<seam>-finished` notices. Thirteen notice
+> **Moments** (eleven until `session-started` joined on 2026-10-19 and `compaction-finished` on
+> 2026-10-21)
 > ship; the "no `pre-*` event, ever" rule is unchanged, because a seam-closing notice reports a pass
 > that is already over.
 
@@ -61,7 +70,9 @@ engine never waits on a Hook.
 `ErrorEvent`, so an `error` Hook cannot fire on its own failure.
 
 > Stage 2 of ADR 0076 keeps the rule and re-words the notice, which now reports `reaction <id>: …`.
-> It covers all eleven notice **Moments**, the five seam-closing ones included: a failure on any of
+> It covers all thirteen notice **Moments** (eleven when written; `session-started` and
+> `compaction-finished` joined in October 2026), the five seam-closing ones included: a failure on
+> any of
 > them still never re-enters the Event stream.
 
 **9. One library, every root.** `internal/hooks`, re-exported on the public facade; wired at the

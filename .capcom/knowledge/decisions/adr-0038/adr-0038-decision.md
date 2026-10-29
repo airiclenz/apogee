@@ -6,7 +6,9 @@ title: ADR 0038 decision
 the shell's own mode back when it stops.** `prepareAltScreenConsole` (`internal/tui/altscreen_windows.go`,
 with a no-op `altscreen_other.go` twin — the `internal/platform/prewarm_*.go` pattern) reads the
 current mode off stdout's console handle and ORs `ENABLE_VIRTUAL_TERMINAL_PROCESSING` and
-`DISABLE_NEWLINE_AUTO_RETURN` onto it. `Run` calls it immediately before `claimAltScreen`, so the
+`DISABLE_NEWLINE_AUTO_RETURN` onto it. `Run` calls it immediately before `claimAltScreen` (amended
+2026-10-29: today `claimTerminalScreen` — `internal/tui/tui.go`, which `Run` calls on a real
+terminal — does), so the
 alternate buffer **inherits** a mode that already agrees with what the renderer assumes, and
 bubbletea's own later `SetConsoleMode` lands on a buffer that is already correct.
 
@@ -14,7 +16,10 @@ Three properties are load-bearing rather than incidental. It is **additive** —
 word is preserved and nothing it does not name is changed. It **cannot fail the run**: a console
 that refuses the mode leaves apogee exactly where it was before the function existed, which is a bug
 we know how to live with and not a reason to refuse to start. And it **returns a restore closure**
-that `Run` defers unconditionally (never nil, a no-op where nothing was changed), because bubbletea
+that `Run` defers unconditionally (amended 2026-10-29: it runs on every path out —
+`claimTerminalScreen` calls it itself when the claim fails, and otherwise folds it into the release
+`Run` defers, after the exit-alt-screen write) (never nil, a no-op where nothing was changed),
+because bubbletea
 samples the output mode for its own restore *after* this call has already changed it: left to
 bubbletea, every apogee session would hand the shell back a console with newline-auto-return
 disabled, and the next program to write a bare `LF` would staircase down the screen.

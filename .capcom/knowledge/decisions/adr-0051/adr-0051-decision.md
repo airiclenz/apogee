@@ -73,6 +73,12 @@ primitives the funnel wrote through (`security.SafeWriteFile` / `SafeRemove`), s
 inherits every symlink and traversal refusal the original write met and can never reach further
 than the write it reverses.
 
+> **Amended 2026-09-22 (spelling only; ADR 0049 amend-0814).** The free `security.SafeWriteFile` /
+> `SafeRemove` mutators are gone: the root and the permit now travel together as one
+> `security.Fence`, each record carries the Fence its write ran under (`undo.Mutation.Fence`), and a
+> restore or removal goes back through that Fence's `WriteFile` / `Remove`
+> (`internal/security/fence.go`). The guarantee is unchanged.
+
 **7 — Two-step confirm, guarded by a generation stamp.** Bare `/undo` prints a preview note in
 the transcript and `/undo confirm` executes it — no modal, because the disclosure is a list of
 paths the human should be able to read at leisure, scroll back to, and compare against what they

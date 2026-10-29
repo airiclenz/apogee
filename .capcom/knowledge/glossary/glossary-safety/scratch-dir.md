@@ -20,6 +20,11 @@ Writable, and readable by every read tool: the announced path is a live read roo
 (the `Scratch` mount of the one `Config.ReadMounts` value, 2026-09-15 — a mount of its own beside
 `Roots`, which stays the announced **library** roots, and `Virtual`, the `shipped:` trees), so what
 the model drafts there it can read back and show.
+A tool set copies `Config.ReadMounts` when it is built (`tools.HostToolsOf`), so every composition
+root binds `ReadMounts.Scratch` before it builds its tools — the TUI as a closure over the engine
+holder it constructs later; bound after, the set carries no scratch root until a rebuild and the
+model cannot read back what it was told to write there (2026-10-14, docs/plans/archived/2026-10-14 -
+01 - architecture-review-defects-plan.md).
 Created `0700` when the session id is minted, follows the **active** session across rotation,
 advertised writable only once it actually exists, and swept by a
 best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe. A **Firing**

@@ -12,10 +12,13 @@ reader has to parse back out. It is a **sealed sum** in `domain`, exactly like a
 marker method is unexported, so an embedder can *read* every variant and *add* none.
 **Optional by construction**, so tools stay an open extension point
 (ADR 0002) — a
-tool that emits none renders from prose exactly as before, and only the **ten** built-ins
+tool that emits none renders from prose exactly as before, and only the **eleven** built-ins
 whose outcome the view used to re-derive carry one (`read_file`, `list_dir`,
 `grep`, `view_diff`, `web_search`, `git_status`, and — as **Edit regions** — the four writing tools
-`write_file`, `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`) — `read_file`'s
+`write_file`, `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`) — plus
+`sub_agent`, whose **DelegationOutcome** (since 2026-10-02) states how the delegated run ended (the
+engine bound it stopped at, a human stop, no report, the count of steered messages) on every result
+for a run the engine started, and on none for a refusal — `read_file`'s
 carries the locate facts too, the substring asked for and the absolute line numbers it fell
 on. The model-facing complement is the **syntax trailer**: the four writing tools append their
 in-process syntax verdict on the bytes they just wrote to the prose half of the same success result

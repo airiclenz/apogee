@@ -80,7 +80,8 @@ human reads waits.
 ADR 0039 D2 as amended 2026-09-19); fallback engaged ⇒ the parent server's
 cap, as today. Guided decomposition's batch width follows the same number — ADR 0039's
 one-width-everywhere rule, with the width now sourced from the server actually holding the
-slots.
+slots. *(Amended 2026-10-29: guided decomposition was retired by ADR 0071 decision 5 — see
+ADR 0014 — so this sentence is history; the cap rule above still bounds every routed fan-out.)*
 
 **6 — The invariant stays untouched because no DEFAULT moves.** Routing is structural, not a
 Mechanism — it steers nothing and executes only calls the model already made, so it is on

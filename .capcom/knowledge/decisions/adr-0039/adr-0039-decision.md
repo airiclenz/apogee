@@ -204,8 +204,10 @@ reshaping the ADR 0011/0031 contract for no gain).
 > `ToolResultEvent` for that delegation carry it as `SpawnRunID`. The TUI now groups and pairs
 > per-child blocks by the run id, the transcript codec persists it beside the call-ID (`runID`,
 > `spawnRunID`, additive members as the call-ID's was), and the headless Event lines carry it
-> (ADR 0075, amended the same day). Per-child usage attribution (`SubAgentUsage`) still brackets by
-> the call-ID; this amendment does not move it. The call-ID stays on every event
+> (ADR 0075, amended the same day). Per-child usage attribution (`SubAgentUsage`) brackets by
+> the run id too, falling back to (depth, call-ID) for a record without one (`internal/run/run.go`,
+> `spawnedRun`). It still bracketed by the call-ID when this note was written and moved the same day
+> (`a02fb5ad`, 2026-09-24). The call-ID stays on every event
 > and keeps naming the tool-call block a run answers. A record or event written before the run id
 > existed falls back to (depth, call-ID). The run id is identity only: it is never sent to a model,
 > and the ids on the wire are never rewritten. Addressing a running child (`InterjectChild`,

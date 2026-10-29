@@ -9,7 +9,8 @@ title: ADR 0065 consequences
   shadowed by a folder any user writes.
 - **The suggestion band works out of the box.** ADR 0061's matcher indexes the shipped skills like
   any others, so a fresh install gets suggestions on its first draft — the feature's first real
-  exercise, and a standing check on the four skills' `triggers:` being written honestly.
+  exercise, and a standing check on the shipped skills' `triggers:` being written honestly (four at
+  ratification; five since `audit` joined, ADR 0087 D6, 2026-09-27).
 - **A shipped body is apogee's text in front of the model, on every upgrade.** Same exposure as ADR
   0064's default prompt and the orientation block, and the same obligation: a bad paragraph reaches
   everyone. The Bypass floor is not engaged — a skill body enters a turn only when invoked — but the

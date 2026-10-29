@@ -280,4 +280,7 @@ Removing `share-group` later makes records and Event journals owner-private agai
 write, but leaves the directories and the existing `.lock` files as the shared run left them; to
 close the share at once, `chmod 700 ~/.apogee ~/.apogee/sessions` and
 `chmod 600 ~/.apogee/sessions/*`. What sharing exposes is set out in
-[SECURITY.md](../../SECURITY.md).
+[SECURITY.md](../../SECURITY.md). `apogee undo` reads no config file, so it never applies
+`share-group`: it leaves an existing `.lock` file's mode and group as they are, and a `.lock` it has
+to create stays owner-private until the owner's next run re-shares it. (2026-10-17,
+docs/plans/archived/2026-10-17 - 03 - live-session-watch-plan.md.)

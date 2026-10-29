@@ -26,8 +26,10 @@ history and in no Session record, and a Reaction's directives and the Model prof
 tool menu fold in **after** it within that one message, as does the engine's
 **Orientation block** (prompt → orientation → delegate block (delegations only) → task list (once
 the model has written one) → context files → directives → tool block). A
-**Sub-agent inherits** it. Distinct from apogee's two **internal** prompts, which it never
-reaches by construction: the Compaction summariser's instruction and the probe battery's. It is
+**Sub-agent inherits** it. Distinct from apogee's **internal** prompts, which it never reaches by
+construction: the Compaction summariser's instruction (and its delegate-fold brief), the probe
+battery's, and the naming call's that titles a **Session** and names a **Delegation**
+(`internal/title/prompts/`). It is
 **config-tier**, part of the Bypass floor in both arms, never a Reaction — and which home a new
 sentence of guidance belongs in (host fact → Orientation block, standing steering → this template,
 floor-wide and failure-shaped → Floor guard, model-gated and measured → Reaction,

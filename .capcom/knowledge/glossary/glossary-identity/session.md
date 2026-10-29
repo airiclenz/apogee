@@ -22,7 +22,9 @@ delegate spend included, and its `Meta.DelegateUsage` counts only the calls the 
 every scrollback entry is persisted: an **ephemeral** entry is display-only — rendered exactly
 like its kind, skipped by the encoder — because it is *re-derived* at each startup or resume
 rather than earned by the conversation. Today those are the start-up box, the `resumed: <title>`
-notice (with its no-scrollback degrade variant and the interrupted-mid-exchange note) and the
+notice (with its no-scrollback degrade variant, the progress-saved note and the
+interrupted-mid-exchange note), the colour-scheme warnings, the start-up confinement notices, the
+routing notice, a Reaction's failure notice, Watch mode's unreadable-record note and the
 `context: …` notice; persisting any of them would append a fresh copy on every resume. The
 record is saved **per-Turn** (at each quiescent boundary, so a crash loses at most one Turn),
 listed and resumed from inside the TUI through the `/sessions` **browser**, and replayed on
@@ -42,7 +44,8 @@ moves to another session), so every door into it from a second instance — `--r
 apogee (pid N) — fork it to work alongside`; the hold guards only against *other* instances, and
 `/fork` is the way to work alongside. *Amended 2026-10-17 (ADR 0103):* `--resume` and the
 browser's ⏎ on a held record now open it in **Watch mode** instead of refusing, and only rename,
-delete and `--continue` refuse. The interactive TUI takes its hold at the first prompt, before
+delete, `--continue` and `apogee undo <id>` refuse, and so does `--resume` on a held record with no
+Event journal beside it. The interactive TUI takes its hold at the first prompt, before
 Turn 1, and while a record is held its Driver writes an **Event journal** beside it. See ADR 0022
 and ADR 0103.
 _Avoid_: "session file" for the Session itself (the *record* is the file; the Session is its

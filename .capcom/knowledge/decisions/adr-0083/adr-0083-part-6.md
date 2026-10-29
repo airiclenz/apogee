@@ -31,3 +31,12 @@ branches become fourteen at the same time — at which point the codec's trait t
 decision 7's seam) grows the answers those sites ask for and the branches fold into it. Or: a
 routed child inheriting the wrong dialect again, the incident that motivated the candidate,
 recurring after ADR 0078's dial seam.
+
+> **Note 2026-10-29 (knowledge inventory).** Since 2026-10-02 two wire branches sit in the engine
+> itself, outside both adapters and outside the tolerated sites listed above:
+> `Agent.replayedThinking` (`internal/agent/wire.go`; signed thinking replays only on the
+> anthropic wire, ADR 0078's 2026-10-02 amendment and ADR 0092) and `compactCompleter.offMeansOff`
+> (`internal/agent/compact.go`; the anthropic wire reads the compaction summary's off rung as "no
+> reasoning"). Both read `provider.WireFor(cfg.Wire)`. This section has not ruled on them: the
+> list above is the tolerated set at this record's HEAD, and whether these two are tolerated, or
+> belong in the codec's trait table (ADR 0078 decision 7), is open.

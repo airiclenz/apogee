@@ -280,7 +280,13 @@
 // runSubprocess itself, over the same subprocess.RunSubprocess execHost.run is in production. A test fakes a field of the host it
 // hands the tool (capturedRunHost, fakeLookHost), never a package var: the package has no
 // function- or platform.Host-typed top-level var, and exec_host_test.go's
-// TestNoPackageLevelExecSeam holds it to none through go/types.
+// TestNoPackageLevelExecSeam holds it to none through go/types. That guard reads every non-test
+// .go file here by extension, blind to build constraints, so this package holds no OS-tagged
+// production file (_windows.go, _other.go, //go:build): an OS-split pair fails its type-check as
+// a redeclaration. Per-OS behaviour lives in internal/platform behind an untagged function, as the
+// console codepage does (consolecp_windows.go / consolecp_other.go, reached through
+// subprocess.SubprocessSpec.DecodeConsoleOutput) (2026-10-11; docs/plans/archived/2026-10-11 - 01 -
+// p1-p2-bugs-plan.md).
 //
 // Network. network.go is the funnel itself — networkTool.do, the single path from a tool to
 // the network — carrying the URLGuard pre-flight, the one per-call deadline, the response cap,
