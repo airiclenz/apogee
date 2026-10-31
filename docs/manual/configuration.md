@@ -1849,7 +1849,8 @@ generated delegation name is shown — is on the [sessions page](sessions.md).
 for the same reason `auto-title:` is: it is keyed to a session without being part of a session
 record. It is a bool that defaults to **true** and is config-file only (no flag, no environment
 variable). With it on, apogee images your workspace around each exchange in a small object database
-of that session's own under `~/.apogee/snapshots/`, so `/undo` survives a relaunch and takes back
+of that session's own under `<home>/snapshots/` — the apogee home being the one `--config` or
+`APOGEE_CONFIG` chooses (default `~/.apogee`) — so `/undo` survives a relaunch and takes back
 every write the exchange made — including the ones apogee never routed itself, such as a command
 `terminal` ran or a file an MCP server wrote. Nothing is ever written inside your workspace, and
 your own repository, index and branches are neither read nor written.

@@ -579,7 +579,8 @@ work would lay an old tree over the work you just asked for.
 
 **It covers the whole workspace, not just apogee's own writes.** Around every exchange
 apogee images your workspace into a small object database of that session's own under
-`~/.apogee/snapshots/`, and the revert reaches every path those two images disagree on.
+`<home>/snapshots/` — the apogee home being the one `--config` or `APOGEE_CONFIG` chooses
+(default `~/.apogee`) — and the revert reaches every path those two images disagree on.
 So a file a `terminal` command wrote, what a `python_exec` script left behind, the
 working-tree changes a git checkout made and a write by an MCP server are all inside
 `/undo`'s reach, alongside the writes apogee's own file tools make. Three kinds of change

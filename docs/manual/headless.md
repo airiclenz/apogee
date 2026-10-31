@@ -69,8 +69,10 @@ The run is saved to
 `~/.apogee/sessions` and shows up in `/sessions` like any other — while it runs, as a `● live` row
 you can [watch](#the-event-journal--what-a-watcher-reads); `--no-save` runs it and
 records nothing — no session record, no Event journal, and no undo snapshot store either, since a store filed
-under a record nothing keeps is one `apogee undo` could never reach. Either way the startup
-sweep still applies whatever bound the `sessions:`
+under a record nothing keeps is one `apogee undo` could never reach: run on such a run's id, it
+finds neither a record nor an undo index and answers with its unknown-id message,
+`no session <id> under <home> — check the id, or pass --config / APOGEE_CONFIG for the home the run used`.
+Either way the startup sweep still applies whatever bound the `sessions:`
 block names — `--no-save` drops this run's own record, not the retention policy, so a host
 driven only headlessly still keeps its store within `max-age` / `max-count`.
 
@@ -188,8 +190,16 @@ pid omitted when it is not known) rather than rewritten under it — and so is a
 run still in flight, which holds its session the same way until it finishes. There
 is no `--workspace` flag and it is refused as unknown: the tree the revert belongs to is
 recorded in the session's own snapshot index, and a workspace given on the command line could
-only disagree with it. A session recorded without snapshots has nothing to revert here and says
-so. The full account of what undo covers is on the
+only disagree with it. An empty answer names its cause, and each is an error (exit non-zero),
+since a revert was asked for and none was made. A session recorded without snapshots
+(`undo-snapshots: false`, or no `git` when it ran) has nothing to revert here and answers
+`session <id> was recorded without undo snapshots (undo-snapshots off, or no git when it ran) —
+nothing under <home>/snapshots`, `<home>` being the apogee home the verb read — the one `--config`
+or `APOGEE_CONFIG` chooses (default `~/.apogee`), which must be the home the run used. An id with
+no session under that home answers `no session <id> under <home> — check the id, or pass --config
+/ APOGEE_CONFIG for the home the run used`, and a journal already walked back to its start (or a
+run that wrote nothing) answers `session <id>: nothing to undo — no agent file writes are recorded
+for this session`. The full account of what undo covers is on the
 [commands page](commands.md#undoing-the-agents-file-writes--undo-and-redo).
 
 A run whose final turn was **abandoned** says so on that same summary line — the stats

@@ -57,7 +57,9 @@ Fix for `undo-empty-unexplained`: every empty answer from `apogee undo` is today
 - `grep -n 'nothing to undo for session' cmd/apogee/` prints nothing
 **Commit:** `fix(undo): name the cause and the home of an empty apogee undo answer`
 
-## 2. The manual spells the snapshot store as <home>/snapshots
+## 2. The manual spells the snapshot store as <home>/snapshots — ✅ DONE (2026-10-31)
+
+NOTES (2026-10-31): the `undo-snapshots:` comment paragraph in `internal/config/defaults/config.yaml` was rewrapped from the edited line to its end to keep the comment width; comment-only, and no rewrapped line starts `# <key>:`
 
 **What:**
 Recast at the regression check (2026-10-31).
