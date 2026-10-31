@@ -3,6 +3,7 @@ title: "apogee undo: 'nothing to undo' names neither the cause nor the home it r
 status: open
 type: bug
 priority: 2
+plan: 2026-10-31 - 00 - empty-answers-name-their-cause-plan.md
 created: 2026-10-30T21:46:47Z
 ---
 
