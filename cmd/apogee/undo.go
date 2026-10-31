@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -74,7 +75,9 @@ func newUndoCommand() *cobra.Command {
 		Long: "apogee undo reverts the last exchange of a saved session — the revert an\n" +
 			"unattended run has nobody to offer. `apogee headless` and the daemon end their\n" +
 			"written-files report with the exact command, and it works from any directory\n" +
-			"and long after the run: the session's snapshots live under ~/.apogee/snapshots.\n\n" +
+			"and long after the run: the session's snapshots live under <home>/snapshots,\n" +
+			"the apogee home being the one --config or APOGEE_CONFIG chooses (default\n" +
+			"~/.apogee) — the same home the run used, or the verb finds nothing.\n\n" +
 			"Two steps, like /undo in the session. `apogee undo <session-id>` PREVIEWS: it\n" +
 			"lists every recorded path with what the revert would do to it — restore, delete,\n" +
 			"or skip with the reason — and closes with the exact confirm line, which carries\n" +
@@ -89,7 +92,10 @@ func newUndoCommand() *cobra.Command {
 			"The workspace is read from the session's own snapshot index — there is no\n" +
 			"--workspace flag, because the recorded paths belong to the tree they were taken\n" +
 			"of. A session recorded without snapshots (undo-snapshots off, or no git on the\n" +
-			"host when it ran) has nothing to revert here, and says so.",
+			"host when it ran) has nothing to revert here, and the verb says so, naming the\n" +
+			"<home>/snapshots it looked under; an id with no session under the home is told\n" +
+			"apart from it and names that home, and a journal walked back to its start says\n" +
+			"no agent file writes are left to revert.",
 		Args:          undoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -150,8 +156,8 @@ func undoGeneration(args []string) (uint64, error) {
 // is open in a live apogee is refused with the hold's own sentence before anything is read — the
 // hold, not the index, is what says whether another process may still persist over this store.
 // Past the hold, the order of refusals is snapshot.OpenStored's: the index is read BEFORE the
-// store is opened, so an id that names no session answers "nothing to undo" without leaving a
-// freshly initialised object database behind under the apogee home. What the hold does leave
+// store is opened, so an id that names no session answers with undoNoIndex's error without leaving
+// a freshly initialised object database behind under the apogee home. What the hold does leave
 // behind is its own `sessions/<id>.lock` — the sessions store's lock file, which only a session
 // delete unlinks — the accepted price of holding first.
 func runUndoVerb(cmd *cobra.Command, id string, confirm bool, generation uint64, configDir string) error {
@@ -190,11 +196,11 @@ func runUndoVerb(cmd *cobra.Command, id string, confirm bool, generation uint64,
 	defer func() { _ = release() }()
 
 	// A session with no index — an id that names none, or a run that recorded nothing — is this
-	// verb's "nothing to undo" rather than a failure; an index that is there and wrong IS one.
+	// verb's empty answer rather than a failure; an index that is there and wrong IS one.
 	journal, reason, err := snapshot.OpenStored(cmd.Context(), gitexec.OS(), roots.config, id)
 	switch {
 	case errors.Is(err, snapshot.ErrNoIndex):
-		return undoNothingToDo(id)
+		return undoNoIndex(session.NewStore(roots.sessions), id, roots)
 	case err != nil:
 		return fmt.Errorf("undo snapshots unavailable: %w", err)
 	case reason != "":
@@ -212,7 +218,7 @@ func runUndoVerb(cmd *cobra.Command, id string, confirm bool, generation uint64,
 func previewUndoVerb(cmd *cobra.Command, journal *undo.Journal, id string) error {
 	step, ok := journal.Preview()
 	if !ok {
-		return undoNothingToDo(id)
+		return undoEmptyJournal(id)
 	}
 
 	printUndoLines(cmd, undoVerbNote("apogee undo "+id, undo.PreviewLines(step),
@@ -234,7 +240,7 @@ func applyUndoVerb(cmd *cobra.Command, journal *undo.Journal, id string, generat
 	report, err := journal.Revert(generation)
 	switch {
 	case errors.Is(err, undo.ErrNothingToUndo):
-		return undoNothingToDo(id)
+		return undoEmptyJournal(id)
 	case errors.Is(err, undo.ErrStaleGeneration):
 		return undoVerbMoved(cmd, journal, id, err)
 	case err != nil:
@@ -247,11 +253,11 @@ func applyUndoVerb(cmd *cobra.Command, journal *undo.Journal, id string, generat
 
 // undoVerbMoved answers a confirm the journal refused as stale: the moved-lead line, then the
 // fresh preview with the stamp a confirm now needs, then the refusal itself as the error. A
-// journal that emptied since the refusal answers "nothing to undo" instead.
+// journal that emptied since the refusal gives the empty-journal answer instead.
 func undoVerbMoved(cmd *cobra.Command, journal *undo.Journal, id string, stale error) error {
 	step, ok := journal.Preview()
 	if !ok {
-		return undoNothingToDo(id)
+		return undoEmptyJournal(id)
 	}
 	printUndoLines(cmd, append([]string{undoVerbMovedLead},
 		undoVerbNote("apogee undo "+id, undo.PreviewLines(step), undoVerbHint(id, step.Generation))...))
@@ -300,11 +306,29 @@ func undoVerbHint(id string, generation uint64) string {
 		" applies this; anything else leaves the files alone"
 }
 
-// undoNothingToDo is the answer to a session with no step left: an unknown id, a run that changed
-// nothing, and a journal already walked back to its start all reach it. It is an ERROR rather than
-// a quiet exit 0, because the caller of this verb asked for a revert and did not get one.
-func undoNothingToDo(id string) error {
-	return fmt.Errorf("nothing to undo for session %s", id)
+// undoNoIndex is the answer to a session with no undo index, told apart by whether the session
+// store holds a record for the id (ADR 0074 decision 2: a thinner answer names its reason). A
+// record means the run happened and kept no snapshots; no record means the id, or the home it was
+// looked up under, is wrong — and an unattended Driver pointed at the wrong home can only see that
+// if the answer names the home it read. Any Load outcome other than a missing file — a record that
+// decodes, or one that is there but unreadable — counts as a record: the file exists, so the id is
+// not the mistake. Both are ERRORS rather than a quiet exit 0, because the caller of this verb
+// asked for a revert and did not get one.
+func undoNoIndex(store *session.Store, id string, roots stateRoots) error {
+	if _, err := store.Load(id); errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("no session %s under %s — check the id, or pass --config / %s "+
+			"for the home the run used", id, roots.config, config.EnvConfig)
+	}
+	return fmt.Errorf("session %s was recorded without undo snapshots "+
+		"(undo-snapshots off, or no git when it ran) — nothing under %s", id, roots.snapshots)
+}
+
+// undoEmptyJournal is the answer to an index whose journal has no step left: a run that wrote
+// nothing, or a journal already walked back to its start. Its wording is internal/undo's own
+// empty-journal line, the one `/undo` shows in the session, so the surfaces cannot drift; it is an
+// error for the same reason undoNoIndex's answers are.
+func undoEmptyJournal(id string) error {
+	return fmt.Errorf("session %s: %s", id, undo.NothingLines("")[0])
 }
 
 // validateUndoID refuses an id that is not a single clean path component, before it is joined onto

@@ -45,7 +45,7 @@ const ReasonNoRecord = "no record kept"
 
 // ErrNoIndex is [OpenStored]'s answer to a session that left no index behind — an id that names no
 // session, or a run that recorded nothing. It is a sentinel rather than a nil journal because the
-// caller's answer to it is a sentence ("nothing to undo"), not a fallback, and errors.Is is how a
+// caller's answer to it is a sentence naming why, not a fallback, and errors.Is is how a
 // Driver tells that case from an index that IS there and cannot be read.
 var ErrNoIndex = errors.New("no undo index for the session")
 

@@ -34,7 +34,10 @@
 - The `.lock` file `session.Store.Hold` creates for an unknown id.
 - `mcp logout`'s no-token message; ADR 0074 decision 1's `~/.apogee/snapshots/` spelling (correct for the default home).
 
-## 1. apogee undo names the cause and the home of an empty answer
+## 1. apogee undo names the cause and the home of an empty answer — ✅ DONE (2026-10-31)
+
+NOTES (2026-10-31): consequential edit — internal/snapshot/journal.go: made necessary by replacing the "nothing to undo" answer to ErrNoIndex (its doc comment quoted that sentence as the caller's answer)
+NOTES (2026-10-31): the snapshot root in the with-record answer is taken from resolveRoots' existing `stateRoots.snapshots` (`<home>/snapshots`), not composed anew in undo.go
 
 **What:**
 Fix for `undo-empty-unexplained`: every empty answer from `apogee undo` is today the bare `nothing to undo for session <id>`.

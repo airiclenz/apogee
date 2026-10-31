@@ -135,10 +135,11 @@ func TestUndoVerbPreviewsThenReverts(t *testing.T) {
 
 	// The step is spent: a second confirm has nothing left, and says so rather than walking into
 	// an exchange the human never previewed — and says so BEFORE the stamp is compared, so the
-	// spent stamp earns the empty-journal answer, not a stale one.
-	if _, err := runUndoCmd(t, home, "s-undo-1", "confirm", "1"); err == nil ||
-		!strings.Contains(err.Error(), "nothing to undo for session s-undo-1") {
-		t.Errorf("a second confirm answered %v, want the empty-journal refusal", err)
+	// spent stamp earns the empty-journal answer, not a stale one. The answer is internal/undo's
+	// own empty-journal line under the session's id, the one `/undo` shows in the session.
+	want := "session s-undo-1: " + undo.NothingLines("")[0]
+	if _, err := runUndoCmd(t, home, "s-undo-1", "confirm", "1"); err == nil || err.Error() != want {
+		t.Errorf("a second confirm answered %v, want the empty-journal refusal %q", err, want)
 	}
 }
 
@@ -214,19 +215,63 @@ func TestUndoVerbRefusesAnIdThatIsNotAPathComponent(t *testing.T) {
 	}
 }
 
-// TestUndoVerbOnAnUnknownSessionSaysNothingToUndo covers the ordinary mistake — a mistyped or swept
-// id — and pins the read-only pledge that goes with it: the index is read before the store is
-// opened, so an id that names nothing leaves no freshly initialised object database behind.
-func TestUndoVerbOnAnUnknownSessionSaysNothingToUndo(t *testing.T) {
+// TestUndoVerbOnAnUnknownSessionNamesTheHome covers the ordinary mistake — a mistyped or swept id,
+// or a home other than the one the run used — and pins the read-only pledge that goes with it: the
+// index is read before the store is opened, so an id that names nothing leaves no freshly
+// initialised object database behind. The answer names the home it read, because that is the one
+// thing an unattended Driver pointed at the wrong home cannot otherwise see.
+func TestUndoVerbOnAnUnknownSessionNamesTheHome(t *testing.T) {
 	home := t.TempDir()
 
 	_, err := runUndoCmd(t, home, "s-never-existed")
 
-	if err == nil || !strings.Contains(err.Error(), "nothing to undo for session s-never-existed") {
-		t.Fatalf("the verb answered %v, want the nothing-to-undo refusal", err)
+	want := "no session s-never-existed under " + home +
+		" — check the id, or pass --config / APOGEE_CONFIG for the home the run used"
+	if err == nil || err.Error() != want {
+		t.Fatalf("the verb answered %v, want %q", err, want)
 	}
 	if _, err := os.Stat(filepath.Join(home, "snapshots", "s-never-existed")); !os.IsNotExist(err) {
 		t.Errorf("an unknown id still opened a store (err %v)", err)
+	}
+}
+
+// TestUndoVerbOnASessionRecordedWithoutSnapshotsNamesTheCause: a session the store holds a record
+// for but that left no undo index ran with `undo-snapshots:` off or without git, and the answer
+// says so — and names the snapshot root it looked under — rather than suggesting the id is wrong.
+func TestUndoVerbOnASessionRecordedWithoutSnapshotsNamesTheCause(t *testing.T) {
+	home := t.TempDir()
+	const id = "20261031T120000Z-abcd"
+	if err := session.NewStore(filepath.Join(home, "sessions")).Save(session.Record{
+		Meta: session.Meta{ID: id, Title: "ran without snapshots"},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err := runUndoCmd(t, home, id)
+
+	want := "session " + id + " was recorded without undo snapshots " +
+		"(undo-snapshots off, or no git when it ran) — nothing under " + filepath.Join(home, "snapshots")
+	if err == nil || err.Error() != want {
+		t.Fatalf("the verb answered %v, want %q", err, want)
+	}
+}
+
+// TestUndoVerbHelpNamesTheHomeSnapshots: the help gives the store against the home --config or
+// APOGEE_CONFIG chooses, never the default home's path alone — a human whose run used another home
+// would otherwise look in the wrong place.
+func TestUndoVerbHelpNamesTheHomeSnapshots(t *testing.T) {
+	help, err := runUndoCmd(t, t.TempDir(), "--help")
+	if err != nil {
+		t.Fatalf("--help failed: %v", err)
+	}
+
+	for _, want := range []string{"<home>/snapshots", "--config or APOGEE_CONFIG chooses"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the help does not name %q: %q", want, help)
+		}
+	}
+	if strings.Contains(help, "~/.apogee/snapshots") {
+		t.Errorf("the help still gives the store as ~/.apogee/snapshots: %q", help)
 	}
 }
 
