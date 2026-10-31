@@ -161,7 +161,8 @@ Project config proposes stays proposed, and nothing is said about it. A firing f
 the rules a project reaction always runs by, and never asks about one: a project reaction still
 proposed is skipped, with one line in the log naming it the first time — again only when the set
 of skipped reactions changes — and pointing at `apogee project adopt`. No firing contacts an MCP
-server, adopted or not. `schedules.yaml` is the
+server, adopted or not, so a reaction whose handler is `mcp:` does nothing, with one log line
+saying so — except an `mcp:` `gate:`, which stays armed and refuses every call it gates. `schedules.yaml` is the
 only file the daemon watches. The seven Floor guards are on for every firing, exactly as they are
 in a session.
 

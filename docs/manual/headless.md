@@ -96,7 +96,9 @@ session or with `apogee project adopt`. The same holds for the Project config's
 always runs by, and skips any still proposed, saying so in one stderr line before the run —
 ``apogee: project config <path> proposes reaction `fmt`; this run skips it until it is adopted —
 answer with `apogee project adopt` in that project``. Its MCP servers, adopted or not, are never
-contacted, like every other.
+contacted, like every other. So a reaction whose handler is `mcp:` does nothing here, with one
+stderr line saying so — except an `mcp:` `gate:`, which stays armed and refuses every call it gates
+([Calling an MCP tool](reactions.md#calling-an-mcp-tool)).
 
 Under the default `--format text`, only the model's answer goes to **stdout**, once, when
 the run is done; everything else — resolution notices, the live narration below, and the

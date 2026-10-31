@@ -1192,9 +1192,9 @@ ui:
 # bypass: false
 
 # =============================================================================
-# Reactions: commands and webhooks Apogee runs when a moment closes in a session, advisers whose
-# output the model reads after a tool call, at a session start or after a fold, and gates it asks
-# before a tool call runs.
+# Reactions: commands, webhooks and MCP tool calls Apogee runs when a moment closes in a session,
+# advisers whose output the model reads after a tool call, at a session start or after a fold, and
+# gates it asks before a tool call runs.
 # Default-EMPTY: with no entries listed, nothing runs and nothing is reported. A `run:` reaction is
 # told what already happened, it can change or veto nothing, and nothing it prints ever reaches the
 # model, the conversation or the saved session. Use one to ring a bell for an approval nobody is
@@ -1272,6 +1272,14 @@ ui:
 # that cannot build one refuses to run them at all. A webhook under either key spawns nothing, so
 # none of that applies to it: the request leaves over the network, as a `run:` webhook's does.
 #
+# Any of the three keys can instead call a tool on one of your MCP servers, with a MAPPING
+# {mcp: {server:, tool:, args:, payload-arg:}} — the server's name, the server's own tool name, and
+# two optional fields: fixed arguments, and the argument the JSON payload travels under. The tool's
+# text stands where a command's stdout would. Writing the entry is the approval, so the call never
+# prompts. Only the interactive TUI connects MCP servers: a headless run, the daemon and /schedule
+# leave such an entry inert with one notice, except an `mcp:` gate, which stays armed there and
+# refuses every call it gates. A Project config's entry may call only a server that same file declares.
+#
 # `hooks:` was this key's earlier name. A config file that still carries one is folded into
 # reactions: at startup, once, and the change is announced with the backup it kept.
 #
@@ -1299,6 +1307,12 @@ ui:
 #   - id: prime
 #     on: [session-started, compaction-finished]  # briefs each session, again after every fold
 #     advise: ["capcom", "prime"]
+#   - id: loaded-model
+#     on: [session-started]              # tells each session which model is loaded
+#     advise:
+#       mcp:
+#         server: llama-launcher         # the name of one of your MCP servers
+#         tool: status                   # the server's own name for the tool
 
 # =============================================================================
 # Model profiles: how apogee equips and speaks to a model — the shape its tool calls arrive in, the

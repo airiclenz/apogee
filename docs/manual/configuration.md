@@ -428,7 +428,8 @@ lines, counted, before any answer does, and `apogee project adopt` prints it who
   named asks again, whoever changed it, and the pane's first line says which:
   `` `scripts/fmt.sh` changed since you adopted it ``. The files are checked again before every
   spawn: a mismatch refuses that run, or that server's launch, with a notice naming the file, and
-  the entry is proposed again.
+  the entry is proposed again. A pinned file that cannot be read is refused the same way, but the
+  entry is then dropped with a notice naming the file instead of being proposed again.
 
 A repo entry also differs from one of yours in what it is let do, before and after adoption:
 
@@ -906,7 +907,8 @@ whose reply body stands where the command's stdout would, or an MCP mapping
 [MCP servers](#external-mcp-servers--mcp-servers), whose text stands there instead. An MCP call
 never reaches the Approver, because writing the entry is the approval; only the interactive TUI's
 session connects MCP servers, so `apogee headless`, the daemon and a `/schedule` firing leave such
-an entry inert with one notice, and a Project config's entry may name only a server that same
+an entry inert with one notice — except a `gate:` one, which stays armed and refuses every call it
+gates — and a Project config's entry may name only a server that same
 Project config declares ([Calling an MCP tool](reactions.md#calling-an-mcp-tool)). The other two
 keys are the ones the loop waits on. An `advise:` reaction — `on:` any of `post-tool-result`, `file-changed`,
 `session-started` and `compaction-finished`, default `timeout:` 10s — is what the model reads, inside

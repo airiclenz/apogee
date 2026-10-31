@@ -207,7 +207,9 @@ that anyone is watching, and nothing flows back to it. The design is
 - **While you watch**, the prompt box reads `watching <title> · read-only · esc back`. Typing to
   the session, sending, a command that would act on it, `shift+tab` and every picker are refused
   with a flash: `read-only — you are watching this session; esc goes back`. The view-only
-  commands still work — `/thinking`, `/help`, `/usage`, `/inspect` and `/version`. Thinking is
+  commands still work — `/thinking`, `/help`, `/usage`, `/inspect` and `/version`. The context
+  gauge shows the watched session's fill against its own context window from the moment you open
+  it, and `/usage` agrees; `esc` back brings your own reading back. Thinking is
   shown only in the `/thinking` pop-up, never inline. Opening a delegation's row opens its run
   view read-only, as it would in your own session. If the record cannot be read, the view says
   `the session record could not be read — showing the live events only` and follows the journal

@@ -229,7 +229,9 @@ parts, one blank line apart, each part a run of labelled fields:
   `endpoint:` is where those values go.
 - **For a reaction**, its pinned actions — `run:`, `advise:` and `gate:`, whichever it sets, in that
   fixed order, each action a part of its own. An argv action shows every element, the program
-  first; a webhook action shows its `url:`, `headers:` and `headers-env:`, in that order. `on:`, `timeout:`, `enabled:` and `workspace:` are not
+  first; a webhook action shows its `url:`, `headers:` and `headers-env:`, in that order; an MCP action
+  shows `mcp:` with `args:`, `payload-arg:`, `server:` and `tool:` under it, sorted by name, and
+  `args:` lists its own entries one level further in. `on:`, `timeout:`, `enabled:` and `workspace:` are not
   shown: they are parameters that change without asking (ADR 0104 §2), and a pane that drew them
   would claim a pin they do not have.
 - **Pinned files**, last: under `pinned files:`, the path (relative to the Project root,

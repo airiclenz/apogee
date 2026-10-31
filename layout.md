@@ -1733,7 +1733,9 @@ no usage yet — falling back to `esc back` where the slot cannot hold it — an
 `enter dismiss` after an error, the
 primed-`ctrl+c` and armed-`esc` lines), and
 the mouse-copy flash. The gauge is the fill of the run the reader is looking at: at the top level the
-session's own agent, inside a run view the viewed run's — its latest reading against the window that
+session's own agent, in a read-only watch the watched run's — lit as the watch opens and measured
+against that run's own context window, with `/usage` agreeing and `esc` back restoring your own —
+inside a run view the viewed run's — its latest reading against the window that
 run filled — and never the parent's there, since a parent's fill above a child's transcript is a
 number about someone else; a stage view lists runs and fills no window, so it states none. At the
 top level the gauge does not wait for the server: until the first usage reading lands — again after
@@ -2392,7 +2394,8 @@ heading row — `turn 4` for the main agent, `repo-scout · turn 2` for a delega
 post-tool-result`, followed by the text it carried, wrapped, every continuation row indented two
 spaces so a wrap reads as a wrap. The text is what the model saw: for a user reaction the fenced
 advice exactly as it was capped for the fence, for the notice the rung it reached (`rung 2 (75%)`).
-A firing that carried no text is its naming row alone. With nothing recorded the pane draws one row —
+A firing that carried no text, or only newlines, is its naming row alone; trailing newlines paint
+no rows. With nothing recorded the pane draws one row —
 `no advice recorded yet` — rather than an empty box.
 
 **The rows are wrapped to the pane's own width**, by the same rule and the same column as the

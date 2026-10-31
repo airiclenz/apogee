@@ -338,7 +338,8 @@ and a relative program resolves against that root. It may run a script inside th
 files are checked again before every spawn, and one that changed, went missing or is newly named
 refuses that run with a notice naming the file, and the entry is proposed again: in the TUI that
 refusal re-reads the config, so the adoption pane asks about the new content at the next idle
-moment — no Project config edit or restart needed — and adopting it arms the reaction again. An
+moment — no Project config edit or restart needed — and adopting it arms the reaction again. A pinned file that cannot be read is refused the same
+way, but the entry is then dropped with a notice naming the file instead of being asked about again. An
 adopted script runs whatever it contains, so read it, and what it calls, before you adopt it.
 
 ## Sending a webhook
@@ -438,7 +439,9 @@ dropped when the file is read, with a notice saying `it names mcp server "<name>
 Project config does not declare`, and is never offered for adoption; the rest of the Project config
 still applies. Once adopted, the entry's call reaches its server only after you adopted that server
 too — until then it fails as not connected. One of your own entries may name any server the session connected, a project's included. Adoption pins the
-whole `mcp:` mapping, so an edit to its server, tool or arguments asks you again.
+whole `mcp:` mapping, so an edit to its server, tool or arguments asks you again. The mapping
+names no file, so no file change re-asks it; if the server's own pin moves, apogee asks about the
+server again, and the entry's calls fail as not connected until you adopt it.
 
 **Only the interactive TUI's session calls one.** It is the one front-end that connects your MCP
 servers. [`apogee headless`](headless.md), an [`apogee daemon`](daemon.md) firing, a `/schedule`
