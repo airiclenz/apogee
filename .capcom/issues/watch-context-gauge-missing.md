@@ -1,11 +1,13 @@
 ---
 title: Watch mode shows no context gauge, and measures a watched fill against the watcher's window
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tui]
 plan: 2026-10-31 - 00 - empty-answers-name-their-cause-plan.md
 created: 2026-10-31T08:16:56Z
+closed: 2026-10-31T10:05:39Z
+reason: "Resolved by plan '2026-10-31 - 00 - empty-answers-name-their-cause-plan' item 4 (archived at 3b0428bd): a watch lights the gauge from the record's CtxUsed and measures against the watched run's context_window"
 ---
 
 Watching a live session (ADR 0103 decision 5, `internal/tui/watch.go`) usually shows no context gauge in the status line, and when it does show one, it measures against the wrong window.

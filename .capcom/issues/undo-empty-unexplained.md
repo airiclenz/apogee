@@ -1,10 +1,12 @@
 ---
 title: "apogee undo: 'nothing to undo' names neither the cause nor the home it read"
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-10-31 - 00 - empty-answers-name-their-cause-plan.md
 created: 2026-10-30T21:46:47Z
+closed: 2026-10-31T10:05:39Z
+reason: "Resolved by plan '2026-10-31 - 00 - empty-answers-name-their-cause-plan' (archived at 3b0428bd): apogee undo names the cause and home of each empty answer, and --help and the manual name <home>/snapshots"
 ---
 
 `apogee undo <session-id>` prints the same bare line, `nothing to undo for session <id>` (`undoNothingToDo`, `cmd/apogee/undo.go`), for every way the verb can come up empty:
