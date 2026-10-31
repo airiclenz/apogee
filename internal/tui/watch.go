@@ -148,6 +148,11 @@ type watchState struct {
 	hasRunFinished bool
 	// ending is the owner's end once the probe found the hold free; past it nothing is read.
 	ending watchEnding
+	// window is the watched run's context window, from the last depth-0, non-maintenance usage
+	// line that named one; 0 until one does, the watcher's own window standing in meanwhile
+	// ([Model.topLevelWindow]). It is the watched run's, so it lives here and never in m.opts,
+	// and leaveWatch drops it with the rest of the watch.
+	window int
 }
 
 // parkedSession is the session view watch mode sets aside: exactly the field set resetSessionView
@@ -219,11 +224,14 @@ type watchItem struct {
 	isFinished bool
 }
 
-// watchStart is a journal's opening frame resolved against the record: the title, and the record's
-// first `entries` entries ready to replay (err when they were wanted and would not read).
+// watchStart is a journal's opening frame resolved against the record: the title, the record's
+// first `entries` entries ready to replay, and the record's last observed context fill
+// (Meta.CtxUsed), which lights the gauge before any journal usage line folds (err when the entries
+// were wanted and would not read).
 type watchStart struct {
 	title   string
 	entries []entry
+	ctxUsed int
 	err     error
 }
 
@@ -290,12 +298,12 @@ func watchSourceOf(live LiveSession, title string) watchSource {
 // banner and nothing is ever polled or probed. A record that will not read paints the watch's
 // unreadable note in its place.
 func readRecordOnly(src watchSource, gen int) watchBatchMsg {
-	entries, err := recordHead(src.recordPath, math.MaxInt)
+	entries, ctxUsed, err := recordHead(src.recordPath, math.MaxInt)
 	return watchBatchMsg{
 		gen:         gen,
 		isOwnerGone: true,
 		items: []watchItem{
-			{start: &watchStart{entries: entries, err: err}},
+			{start: &watchStart{entries: entries, ctxUsed: ctxUsed, err: err}},
 			{isFinished: true},
 		},
 	}
@@ -680,8 +688,8 @@ type journalStartedLine struct {
 	Data eventjson.JournalStarted `json:"data"`
 }
 
-// loadWatchStart resolves a journal's opening frame: its title, and the record's first `entries`
-// entries, decoded and with every call the record stored open closed, as a resume closes them
+// loadWatchStart resolves a journal's opening frame: its title, the record's fill, and the record's
+// first `entries` entries, decoded and with every call the record stored open closed, as a resume closes them
 // (closeInterruptedCalls) — but with none of a resume's notices. The record is read by path,
 // read-only; a store is never opened for it.
 func loadWatchStart(raw []byte, recordPath string) watchStart {
@@ -693,26 +701,27 @@ func loadWatchStart(raw []byte, recordPath string) watchStart {
 	if frame.Data.Entries <= 0 {
 		return start
 	}
-	start.entries, start.err = recordHead(recordPath, frame.Data.Entries)
+	start.entries, start.ctxUsed, start.err = recordHead(recordPath, frame.Data.Entries)
 	return start
 }
 
-// recordHead reads the record at path and returns its first n transcript entries.
-func recordHead(path string, n int) ([]entry, error) {
+// recordHead reads the record at path and returns its first n transcript entries and its last
+// observed context fill (Meta.CtxUsed).
+func recordHead(path string, n int) (entries []entry, ctxUsed int, err error) {
 	if path == "" {
-		return nil, errors.New("watch: no record path")
+		return nil, 0, errors.New("watch: no record path")
 	}
 	record, err := session.NewStore(filepath.Dir(path)).LoadPath(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	entries, err := decodeTranscript(record.Transcript)
+	entries, err = decodeTranscript(record.Transcript)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	entries = entries[:min(n, len(entries))]
 	closeInterruptedCalls(entries)
-	return entries, nil
+	return entries, record.Meta.CtxUsed, nil
 }
 
 // foldWatchPoll answers the follower's tick with the next read. A watch whose owner has ended
@@ -809,9 +818,11 @@ func (m Model) foldWatchItem(item watchItem) Model {
 
 // paintWatchStart (re)paints the watched session from its opening frame: the view is cleared and
 // the record's head replayed directly, with none of replayScrollback's resume notices — the
-// session is not being resumed.
+// session is not being resumed. The gauge relights from the record's fill, as a resume relights it
+// (resumeLoaded), until a journal usage line moves it.
 func (m *Model) paintWatchStart(start watchStart) {
 	m.clearWatchView()
+	m.ctxUsed = start.ctxUsed
 	m.watch.hasRunFinished = false
 	if title := stripEscapes(start.title); title != "" {
 		m.watch.title = title
@@ -827,9 +838,14 @@ func (m *Model) paintWatchStart(start watchStart) {
 // events go to its own state, everything else through the conversation fold. It leaves out what
 // the live case adds for the owner's own run — the progress save, the stall clock, the mouse
 // re-assert and the decision-pane withdrawal — since the watcher saves nothing and runs nothing.
+// What it adds is the watched window: a usage reading that moves the top-level gauge (depth 0, not
+// maintenance) and names its window makes that window the gauge's limit for the rest of the watch.
 func (m Model) foldWatchedEvent(e domain.Event) Model {
 	if m.workflows.owns(e) {
 		return m.foldBackgroundEvent(e)
+	}
+	if usage, ok := e.(domain.UsageEvent); ok && usage.Depth == 0 && !usage.Maintenance && usage.ContextWindow > 0 {
+		m.watch.window = usage.ContextWindow
 	}
 	return m.foldEvent(e)
 }

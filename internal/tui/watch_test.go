@@ -541,6 +541,82 @@ func TestWatchRefusesTheStopKeyInRunViewsAndTheBlockCursor(t *testing.T) {
 	})
 }
 
+// seedRecordCtxUsed rewrites the fixture's record with ctxUsed as its last observed fill
+// (Meta.CtxUsed), leaving the rest of it — and newWatchFixture's own signature — as they are.
+func seedRecordCtxUsed(t *testing.T, f *watchFixture, ctxUsed int) {
+	t.Helper()
+	raw, err := os.ReadFile(f.src.recordPath)
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	var record session.Record
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatalf("unmarshal record: %v", err)
+	}
+	record.Meta.CtxUsed = ctxUsed
+	if raw, err = json.Marshal(record); err != nil {
+		t.Fatalf("marshal record: %v", err)
+	}
+	if err := os.WriteFile(f.src.recordPath, raw, 0o600); err != nil {
+		t.Fatalf("write record: %v", err)
+	}
+}
+
+func TestWatchLightsTheGaugeFromTheWatchedRun(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	seedRecordCtxUsed(t, f, 8000)
+	eng := watchEngine()
+	m := newTestModelEng(t, eng, testOpts)
+	m.ctxUsed = 4000 // the watcher's own reading, parked across the watch
+	m, cmd := m.enterWatch(f.src)
+	m = step(t, m, cmd())
+
+	if got := statusText(t, m); !strings.Contains(got, "8k/32k") {
+		t.Errorf("status line on entry = %q; want the record's fill against the watcher's window (8k/32k)", got)
+	}
+
+	// A sub-agent's and a maintenance reading name other windows; neither moves the gauge.
+	f.emit(
+		domain.UsageEvent{EventBase: domain.EventBase{Depth: 1, RunID: "r1", Turn: 1},
+			PromptTokens: 900, TotalTokens: 1000, ContextWindow: 50000},
+		domain.UsageEvent{EventBase: domain.EventBase{Turn: 1}, Maintenance: true,
+			PromptTokens: 900, TotalTokens: 1000, ContextWindow: 70000},
+	)
+	m = pollWatch(t, m)
+	if got := statusText(t, m); !strings.Contains(got, "8k/32k") {
+		t.Errorf("status line after sub-agent and maintenance readings = %q; want 8k/32k unmoved", got)
+	}
+
+	f.emit(domain.UsageEvent{EventBase: domain.EventBase{Turn: 1},
+		PromptTokens: 64536, CompletionTokens: 1000, TotalTokens: 65536, ContextWindow: 131072,
+		Cumulative: domain.Usage{Calls: 1, PromptTokens: 64536, CompletionTokens: 1000, TotalTokens: 65536}})
+	m = pollWatch(t, m)
+	if got := statusText(t, m); !strings.Contains(got, "64k/128k 50%") {
+		t.Errorf("status line after the usage line = %q; want the watched fill against the watched window (64k/128k 50%%)", got)
+	}
+	rows := m.usageRows()
+	if len(rows) < 2 {
+		t.Fatalf("/usage rows = %q; want a header and the main row", rows)
+	}
+	if main := rows[1]; main[len(main)-1] != "50%" {
+		t.Errorf("/usage main row = %q; want its fill against the gauge's window (50%%)", main)
+	}
+
+	m = step(t, m, keyEsc())
+
+	if m.watch.isActive {
+		t.Fatal("esc did not leave the watch")
+	}
+	if got := statusText(t, m); !strings.Contains(got, "4k/32k") {
+		t.Errorf("status line after esc = %q; want the watcher's own reading and window (4k/32k)", got)
+	}
+	if m.opts.ContextWindow != testOpts.ContextWindow || m.topLevelWindow() != testOpts.ContextWindow {
+		t.Errorf("window after esc = %d (opts %d); want the watcher's own %d",
+			m.topLevelWindow(), m.opts.ContextWindow, testOpts.ContextWindow)
+	}
+}
+
 func TestWatchMakesNoEngineCallAndEscGoesBack(t *testing.T) {
 	t.Parallel()
 	eng := watchEngine()

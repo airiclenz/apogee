@@ -4561,7 +4561,8 @@ func (m Model) statusRight(room int) string {
 // decides WHOSE fill the chrome states: the run the human is looking at.
 //
 // At the top level that is the session's own agent: Used is the latest top-level UsageEvent's
-// total-token count (foldStats). Until the first turn reports usage — or all session on a server
+// total-token count (foldStats), against [Model.topLevelWindow] — the watched run's window in a
+// watch, the session's own otherwise. Until the first turn reports usage — or all session on a server
 // that omits it — the gauge shows the engine's estimate of the next request instead, in the same
 // format prefixed `~` (ctxEstimate, taken at each Turn start), except in stateErrored, where the
 // slot keeps `enter dismiss`. With neither a reading nor an estimate it renders nothing, the static
@@ -4577,10 +4578,11 @@ func (m Model) statusRight(room int) string {
 // ([Model.viewedChild] answers none there).
 func (m Model) contextGauge() string {
 	if !m.inRunView() {
+		limit := m.topLevelWindow()
 		if m.ctxUsed == 0 && m.state != stateErrored {
-			return contextUsage{Used: m.ctxEstimate, Limit: m.opts.ContextWindow, Estimated: true}.view(m.th)
+			return contextUsage{Used: m.ctxEstimate, Limit: limit, Estimated: true}.view(m.th)
 		}
-		return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view(m.th)
+		return contextUsage{Used: m.ctxUsed, Limit: limit}.view(m.th)
 	}
 	head, ok := m.viewedChild()
 	if !ok {
@@ -4591,6 +4593,17 @@ func (m Model) contextGauge() string {
 		limit = m.opts.ContextWindow
 	}
 	return contextUsage{Used: head.ctxUsed, Limit: limit}.view(m.th)
+}
+
+// topLevelWindow is the window the top-level fill is measured against, read by the gauge
+// (contextGauge) and /usage's main row (usageRows) alike so the two never disagree. In a read-only
+// watch it is the watched run's, once a journal usage line has named one (watchState.window);
+// otherwise, and as the watch's fallback, it is the session's own bound window.
+func (m Model) topLevelWindow() int {
+	if m.watch.isActive && m.watch.window > 0 {
+		return m.watch.window
+	}
+	return m.opts.ContextWindow
 }
 
 // contextUsage is the live context-window gauge's data: tokens Used out of the window Limit, and

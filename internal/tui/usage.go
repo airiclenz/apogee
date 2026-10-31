@@ -236,7 +236,7 @@ func (m Model) usageRows() []popupRow {
 	}
 	rows := make([]popupRow, 0, len(subs)+3)
 	rows = append(rows, usageHeaderCells(cols))
-	rows = append(rows, usageRow(usageMainLabel, m.usage, m.ctxUsed, m.opts.ContextWindow, cols))
+	rows = append(rows, usageRow(usageMainLabel, m.usage, m.ctxUsed, m.topLevelWindow(), cols))
 	rows = append(rows, subs...)
 	if delegates.Calls <= 0 {
 		return rows

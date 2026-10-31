@@ -103,7 +103,9 @@ cmd/apogee/root_test.go — newRootCommand; cmd/apogee/testsupport_test.go — u
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Resume|Continue' ./cmd/apogee/`
 **Commit:** `fix(cli): name the sessions dir a --resume or --continue miss searched`
 
-## 4. A watch shows the watched run's context gauge
+## 4. A watch shows the watched run's context gauge — ✅ DONE (2026-10-31)
+
+NOTES (2026-10-31): the record-only watch (`readRecordOnly`, a finished session of a watched home) also relights from the record's `CtxUsed`, since it shares `recordHead`; the test seeds `CtxUsed` through a new `seedRecordCtxUsed` helper, so `newWatchFixture` keeps its signature.
 
 **What:**
 Fix for `watch-context-gauge-missing`: the watch starts with zeroed live stats, never reads the record's fill, and measures against the watcher's own window.
