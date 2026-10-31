@@ -82,7 +82,10 @@ internal/config/defaults_test.go — TestEmbeddedDefaultConfigSetsOnlyTheSystemP
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestEmbeddedDefaultConfig' ./internal/config/` passes (`TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt` parses the embedded `config.yaml` through `LoadFileConfig`)
 **Commit:** `docs(manual): spell the undo snapshot store as <home>/snapshots`
 
-## 3. --resume and --continue misses name the sessions dir they read
+## 3. --resume and --continue misses name the sessions dir they read — ✅ DONE (2026-10-31)
+
+NOTES (2026-10-31): took the plan's accessor route — `session.Store` gained `Dir()` (internal/session/store.go) and both refusals read `store.Dir()`, so `resolveResume`'s signature and its 30 test call sites are unchanged and `wire_live.go` is untouched.
+NOTES (2026-10-31): docs/manual/sessions.md — the `--continue` refusal sentence now says either refusal names the `<home>/sessions` directory it searched (the item's Read first anchor; user-facing help text for the changed messages).
 
 **What:**
 Fix: both misses hide which apogee home they searched, so a wrong `--config` / `APOGEE_CONFIG` reads as a wrong id.

@@ -107,6 +107,57 @@ func TestResolveResumeMissingArg(t *testing.T) {
 	}
 }
 
+// runRootForResumeMiss drives the root command over a fresh `--config` home with args appended,
+// and returns that home's sessions directory and the start's refusal. A miss is refused before the
+// launch, so a launch that does run fails the test.
+func runRootForResumeMiss(t *testing.T, workspace string, args ...string) (string, error) {
+	t.Helper()
+	home := testConfigHome(t, "")
+	rec := &recordingLauncher{}
+	cmd := newRootCommand(rec.launch)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(append([]string{"--config", home, "--workspace", workspace}, args...))
+
+	err := cmd.ExecuteContext(context.Background())
+
+	if rec.called {
+		t.Fatalf("the launcher ran for %v; a miss must refuse the start\n%s", args, out.String())
+	}
+	return filepath.Join(home, "sessions"), err
+}
+
+// A --resume value that is neither an id nor a readable file names the sessions directory it was
+// looked for in, so a start pointed at the wrong home does not read as a wrong id.
+func TestRootResumeMissNamesTheSessionsDir(t *testing.T) {
+	t.Parallel()
+	const missingID = "no-such-session"
+
+	sessions, err := runRootForResumeMiss(t, t.TempDir(), "--resume", missingID)
+
+	want := `apogee: --resume "` + missingID + `": not a known session id under ` + sessions +
+		` (see /sessions) nor a readable session file`
+	if err == nil || err.Error() != want {
+		t.Fatalf("--resume miss: err = %v\nwant %s", err, want)
+	}
+}
+
+// --continue in a workspace with nothing saved names the workspace and the sessions directory it
+// searched, for the same reason.
+func TestRootContinueMissNamesTheSessionsDir(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+
+	sessions, err := runRootForResumeMiss(t, workspace, "--continue")
+
+	want := "apogee: no saved sessions for this workspace (" + workspace + ") under " + sessions +
+		" — start one, or resume another with --resume <id> (see /sessions)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("--continue miss: err = %v\nwant %s", err, want)
+	}
+}
+
 func TestBuildAgentResumeFutureVersion(t *testing.T) {
 	t.Parallel()
 	// A session stamped with a version newer than this build understands must surface

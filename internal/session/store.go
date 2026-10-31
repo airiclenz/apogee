@@ -318,6 +318,11 @@ func NewStore(dir string, opts ...Option) *Store {
 	return s
 }
 
+// Dir names the directory the store reads and writes, exactly as NewStore was given it. It is a
+// name only — it creates and checks nothing — so a caller can say which sessions directory a miss
+// searched (the --resume and --continue refusals) without a second copy of the path.
+func (s *Store) Dir() string { return s.dir }
+
 // Option configures a Store at construction (NewStore).
 type Option func(*Store)
 

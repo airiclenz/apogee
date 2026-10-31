@@ -859,7 +859,9 @@ func resolveWatched(homes []watchedHome, id string) (tui.LiveSession, bool) {
 
 // resolveResumeArg resolves a --resume value: a store id first (the common case — the id shown in
 // /sessions), else a file path (LoadPath, which also wraps a legacy bare envelope). A value that is
-// neither a known id nor a readable file is a friendly error naming both interpretations.
+// neither a known id nor a readable file is a friendly error naming both interpretations and the
+// sessions directory the id was looked for in, so a wrong --config or APOGEE_CONFIG home does not
+// read as a wrong id.
 //
 // A record loaded by PATH keeps its conversation but not its identity: its id is content the file
 // declares rather than a name this store minted, so adopting it would point every later autosave at
@@ -890,7 +892,8 @@ func resolveResumeArg(
 	rec, err := store.LoadPath(arg)
 	if err != nil {
 		return nil, nil, fmt.Errorf(
-			"apogee: --resume %q: not a known session id (see /sessions) nor a readable session file", arg)
+			"apogee: --resume %q: not a known session id under %s (see /sessions) nor a readable session file",
+			arg, store.Dir())
 	}
 	rec.Meta.ID = session.NewID(time.Now())
 	return &rec, nil, nil
@@ -898,8 +901,8 @@ func resolveResumeArg(
 
 // resolveContinue resumes the most recent session recorded for the resolved workspace — the
 // --continue convenience that needs no id. List returns metas newest-first, so the first record
-// whose Workspace matches is the newest; a workspace with none is a friendly error pointing at the
-// alternatives. The newest record is the one --continue means: when another apogee holds it the
+// whose Workspace matches is the newest; a workspace with none is a friendly error naming the
+// sessions directory it searched and pointing at the alternatives. The newest record is the one --continue means: when another apogee holds it the
 // start is refused with the friendly line (probeHold), never skipped to the workspace's next record.
 func resolveContinue(store *session.Store, workspace string) (session.Record, error) {
 	metas, err := store.List()
@@ -919,8 +922,8 @@ func resolveContinue(store *session.Store, workspace string) (session.Record, er
 		}
 	}
 	return session.Record{}, fmt.Errorf(
-		"apogee: no saved sessions for this workspace (%s) — start one, or resume another with "+
-			"--resume <id> (see /sessions)", workspace)
+		"apogee: no saved sessions for this workspace (%s) under %s — start one, or resume another with "+
+			"--resume <id> (see /sessions)", workspace, store.Dir())
 }
 
 // probeHold asks whether the record id may be opened by this run: the live-instance hold is taken

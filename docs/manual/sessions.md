@@ -21,7 +21,9 @@ still remembers.
 - `apogee --continue` resumes this workspace's most recent session; `--resume`
   takes a session id (from `/sessions`) or a file path. The two are mutually exclusive —
   naming both is a flag error — and `--continue` in a workspace with no saved session
-  refuses, naming the workspace and pointing at `--resume <id>`. Resuming also re-opens
+  refuses, naming the workspace and pointing at `--resume <id>`. Either refusal names the
+  `<home>/sessions` directory it searched, so a wrong `--config` or `APOGEE_CONFIG` home
+  shows as the wrong directory rather than reading as a wrong id. Resuming also re-opens
   the session's snapshot store, so
   [`/undo`](commands.md#undoing-the-agents-file-writes--undo-and-redo) still reaches what
   an earlier process wrote. `--resume` on a session another apogee is running watches it
