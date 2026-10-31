@@ -63,7 +63,7 @@ func TestCommandExecutorFeedsThePayloadOnStdinAndTheHookFactsInTheEnvironment(t 
 
 	// DefaultExecutor rather than commandExecutor directly, so the dispatch on `command:` is
 	// exercised by the same test that proves what the command receives.
-	if err := DefaultExecutor(dir, security.URLGuard{}, nil, nil).Run(context.Background(), hook, payload); err != nil {
+	if err := DefaultExecutor(dir, security.URLGuard{}, nil, nil, nil).Run(context.Background(), hook, payload); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestRepoEntryGoesToTheInjectedRunner(t *testing.T) {
 	t.Run("injected", func(t *testing.T) {
 		injected := &recordingProjectRun{}
 
-		err := DefaultExecutor(workspace, security.URLGuard{}, injected.run, nil).Run(context.Background(), hook, payload)
+		err := DefaultExecutor(workspace, security.URLGuard{}, injected.run, nil, nil).Run(context.Background(), hook, payload)
 
 		if err != nil {
 			t.Fatalf("Run: %v", err)
@@ -269,7 +269,7 @@ func TestRepoEntryGoesToTheInjectedRunner(t *testing.T) {
 		}
 	})
 	t.Run("none injected", func(t *testing.T) {
-		err := DefaultExecutor(workspace, security.URLGuard{}, nil, nil).Run(context.Background(), hook, payload)
+		err := DefaultExecutor(workspace, security.URLGuard{}, nil, nil, nil).Run(context.Background(), hook, payload)
 
 		if !errors.Is(err, errNoProjectRunner) {
 			t.Errorf("err = %v, want errNoProjectRunner", err)
@@ -295,7 +295,7 @@ func TestGlobalRunStillRefusesAWorkspaceProgram(t *testing.T) {
 	hook.Handler = domain.ArgvHandler{Argv: []string{program}}
 	injected := &recordingProjectRun{}
 
-	err := DefaultExecutor(workspace, security.URLGuard{}, injected.run, nil).
+	err := DefaultExecutor(workspace, security.URLGuard{}, injected.run, nil, nil).
 		Run(context.Background(), hook, domain.SeamPayload{Event: TurnFinished})
 
 	if !errors.Is(err, security.ErrExecFromWritablePath) {

@@ -31,7 +31,10 @@ in-session.
 - A Firing / headless / daemon cue: those Drivers inject no MCP resolver, so an `mcp:` entry fails as not connected before its pin is read.
 - Changing what the refusal reports or how the Runner suppresses repeat reports.
 
-## 1. Cue `Config.PinMoved` when an observe `mcp:` repo entry's pin has moved
+## 1. Cue `Config.PinMoved` when an observe `mcp:` repo entry's pin has moved — ✅ DONE (2026-10-31)
+
+NOTES (2026-10-31): consequential edit — internal/domain/config.go: made necessary by the observe `mcp:` half now calling Config.PinMoved; its doc said the cue fires only per refused spawn of a `run:` command, now "spawn or call … a command or an `mcp:` tool".
+NOTES (2026-10-31): the new global-entry test makes its resolver fail with a *domain.PinMovedError, so it would bite an implementation that tested the resolver's error rather than the pin's; the bite check (cue call removed) fails the moved-pin subcase with "re-ask cue fired 0 times, want 1".
 
 **Closes:** observe-mcp-pin-cue
 

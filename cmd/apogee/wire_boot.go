@@ -231,6 +231,8 @@ func (w *rootWiring) resolveConfig() error {
 	// An observe entry's `run: mcp:` resolves through mcpReactions, which wireSession binds to the
 	// resolver over the live MCP set once it has dialled the servers (adr-0076-amend-1029): the
 	// Runner exists before any server is connected, and a reconnect is seen without rebuilding it.
+	// Such an entry from the repo that is refused because its pin moved gives the same re-ask cue
+	// the engine gives (Config.PinMoved, below): the session's config wake, reloadWake.poke.
 	observe := generationOf(w.opts).Observe
 	webhookGuard := security.NewURLGuard(w.opts.URLAllowHosts, w.opts.URLDenyHosts)
 	projectRuns := &projectRunSlot{}
@@ -240,7 +242,7 @@ func (w *rootWiring) resolveConfig() error {
 		Workspace: w.roots.workspace,
 		Report:    w.bridge.NotifyHook,
 		Exec: reactions.DefaultExecutor(w.roots.workspace, webhookGuard, projectRuns.runner(),
-			w.mcpReactions.resolver()),
+			w.mcpReactions.resolver(), w.reloadWake.poke),
 	})
 	if err != nil {
 		return err
@@ -290,7 +292,8 @@ func (w *rootWiring) resolveConfig() error {
 	w.cfg.Report = w.bridge.NotifyHook
 	// The re-ask cue (ADR 0104 §4): a repo reaction refused because its pinned files moved wakes
 	// the config wait (reloadWake), whose re-read proposes the entry again for the adoption pane —
-	// no Project config edit and no restart needed.
+	// no Project config edit and no restart needed. The Runner's MCP half, above, holds the same
+	// cue for an observe `mcp:` entry, which never reaches the Agent.
 	w.cfg.PinMoved = w.reloadWake.poke
 	w.cfg.Approver = w.bridge.Approver()
 	w.cfg.Asker = w.bridge.Asker()

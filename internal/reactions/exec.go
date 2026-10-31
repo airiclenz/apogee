@@ -36,6 +36,13 @@ import (
 // fails as not connected — a backstop, since those Drivers drop the entries before arming. The
 // root hands in a late-bound resolver where the Runner is built before the servers connect.
 //
+// pinMoved is the MCP half's re-ask cue (domain.Config.PinMoved, ADR 0104 §4): an adopted repo
+// entry refused because its pin moved, or could no longer be checked, calls it once, so a Driver
+// with an adoption pane re-reads its config and asks about the entry again. The command half needs
+// none of its own — a repo `run:` reaches its pin through project, the Agent's runner, which
+// already cues. The root hands in the same cue it sets as Config.PinMoved; nil drops it. It runs on
+// the Runner's workers, so it must be goroutine-safe and must not block.
+//
 // The returned Executor is safe for concurrent use across every Reaction at the root, which the
 // Executor contract requires.
 func DefaultExecutor(
@@ -43,11 +50,12 @@ func DefaultExecutor(
 	guard security.URLGuard,
 	project domain.ProjectRun,
 	resolve domain.MCPResolver,
+	pinMoved func(),
 ) Executor {
 	return defaultExecutor{
 		command: commandExecutor{workspaceRoot: workspaceRoot, project: project},
 		webhook: webhookSender{guard: guard},
-		mcp:     mcpCaller{resolve: resolve},
+		mcp:     mcpCaller{resolve: resolve, pinMoved: pinMoved},
 	}
 }
 
@@ -80,6 +88,9 @@ type mcpCaller struct {
 	// resolve turns the entry's server and tool into the call; nil means no MCP server is dialled
 	// in this run, and every entry fails as not connected.
 	resolve domain.MCPResolver
+	// pinMoved is the Driver's re-ask cue, called once per call refused for a moved or uncheckable
+	// pin; nil drops it.
+	pinMoved func()
 }
 
 // errMCPNotConnected is an MCP entry's failure in a run whose Driver injected no resolver. The
@@ -93,7 +104,8 @@ var errNoProjectPin = errors.New("refusing to run a project reaction that carrie
 // Run resolves the entry's tool and calls it with the entry's static args plus, under its
 // payload-arg, the firing's document as a JSON object — the same document a command reads on stdin.
 // An adopted repo entry passes its pin first and is resolved as a project entry, so the resolver
-// refuses a server its own Project config does not declare. ctx is already bounded by the entry's
+// refuses a server its own Project config does not declare; a pin refused as moved also cues the
+// Driver (notePinMoved). ctx is already bounded by the entry's
 // Timeout; a call that outlives it is reported as `timed out after <timeout>`, like a command's.
 func (c mcpCaller) Run(ctx context.Context, r domain.Reaction, p domain.SeamPayload) error {
 	handler, ok := r.Handler.(domain.MCPHandler)
@@ -105,6 +117,7 @@ func (c mcpCaller) Run(ctx context.Context, r domain.Reaction, p domain.SeamPayl
 	}
 	if r.Project {
 		if err := admitProjectPin(r); err != nil {
+			c.notePinMoved(err)
 			return err
 		}
 	}
@@ -144,6 +157,17 @@ func admitProjectPin(r domain.Reaction) error {
 		return fmt.Errorf("refusing to run: %w", err)
 	}
 	return nil
+}
+
+// notePinMoved hands the Driver its re-ask cue when err is a pin's *domain.PinMovedError: the
+// entry's files are no longer what the user adopted, so the config layer now proposes it again and
+// a pane can ask. A missing pin is no moved file — a re-read would find nothing new to ask about —
+// so errNoProjectPin does not cue, as the sync lane's check does not.
+func (c mcpCaller) notePinMoved(err error) {
+	var moved *domain.PinMovedError
+	if c.pinMoved != nil && errors.As(err, &moved) {
+		c.pinMoved()
+	}
 }
 
 // mcpArguments is the JSON object an MCP entry's tool is called with: the handler's static Args

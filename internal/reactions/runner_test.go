@@ -1086,7 +1086,7 @@ func TestCompactionFinishedHandsAnArgvEntryTheFold(t *testing.T) {
 		Timeout: 10 * time.Second,
 	}
 	runner, err := New([]domain.Reaction{entry}, Options{
-		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil, nil),
+		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil, nil, nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1169,7 +1169,7 @@ func runMCPHook(t *testing.T, entry domain.Reaction, resolve domain.MCPResolver,
 	dir := t.TempDir()
 	log := &reportLog{}
 	runner, err := New([]domain.Reaction{entry}, Options{
-		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil, resolve), Report: log.add,
+		Workspace: dir, Exec: DefaultExecutor(dir, security.URLGuard{}, nil, resolve, nil), Report: log.add,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -1279,7 +1279,8 @@ func TestMCPObserveEntryFailuresAreReported(t *testing.T) {
 }
 
 // TestMCPObserveProjectEntryPassesItsPinFirst — an adopted repo entry is resolved as a project
-// entry once its pin admits it, and refused before any resolution with no pin or a moved one.
+// entry once its pin admits it, and refused before any resolution with no pin or a moved one; only
+// the moved pin gives the Driver its re-ask cue, once (domain.Config.PinMoved, ADR 0104 §4).
 func TestMCPObserveProjectEntryPassesItsPinFirst(t *testing.T) {
 	t.Parallel()
 
@@ -1289,10 +1290,11 @@ func TestMCPObserveProjectEntryPassesItsPinFirst(t *testing.T) {
 		pin         domain.ProjectPin
 		wantErr     error
 		wantProject bool
+		wantCues    int32
 	}{
 		{name: "admitted", pin: mcpPinStub{}, wantProject: true},
 		{name: "nil pin", pin: nil, wantErr: errNoProjectPin},
-		{name: "moved pin", pin: mcpPinStub{err: moved}, wantErr: moved},
+		{name: "moved pin", pin: mcpPinStub{err: moved}, wantErr: moved, wantCues: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1301,10 +1303,14 @@ func TestMCPObserveProjectEntryPassesItsPinFirst(t *testing.T) {
 			entry := mcpHook("status", domain.MCPHandler{Server: "repo-tools", Tool: "status"})
 			entry.Project = true
 			entry.Pin = tt.pin
-			exec := DefaultExecutor(t.TempDir(), security.URLGuard{}, nil, stub.resolve)
+			var cues atomic.Int32
+			exec := DefaultExecutor(t.TempDir(), security.URLGuard{}, nil, stub.resolve, func() { cues.Add(1) })
 
 			err := exec.Run(context.Background(), entry, domain.SeamPayload{Event: TurnFinished})
 
+			if got := cues.Load(); got != tt.wantCues {
+				t.Errorf("re-ask cue fired %d times, want %d", got, tt.wantCues)
+			}
 			resolved, projects, _ := stub.snapshot()
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
@@ -1322,5 +1328,26 @@ func TestMCPObserveProjectEntryPassesItsPinFirst(t *testing.T) {
 				t.Errorf("resolved with project %v, want [%v]", projects, tt.wantProject)
 			}
 		})
+	}
+}
+
+// TestMCPObserveGlobalEntryNeverCuesPinMoved — a global entry carries no adoption pin, so its
+// refusal never gives the re-ask cue, even when the resolver's own error is a moved pin's.
+func TestMCPObserveGlobalEntryNeverCuesPinMoved(t *testing.T) {
+	t.Parallel()
+
+	moved := &domain.PinMovedError{Err: errors.New("could not read tools/status.sh")}
+	stub := &mcpResolverStub{err: moved}
+	entry := mcpHook("status", domain.MCPHandler{Server: "repo-tools", Tool: "status"})
+	var cues atomic.Int32
+	exec := DefaultExecutor(t.TempDir(), security.URLGuard{}, nil, stub.resolve, func() { cues.Add(1) })
+
+	err := exec.Run(context.Background(), entry, domain.SeamPayload{Event: TurnFinished})
+
+	if !errors.Is(err, moved) {
+		t.Errorf("Run = %v, want the resolver's refusal %v", err, moved)
+	}
+	if got := cues.Load(); got != 0 {
+		t.Errorf("re-ask cue fired %d times for a global entry, want 0", got)
 	}
 }

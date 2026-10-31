@@ -307,18 +307,19 @@ type Config struct {
 	// escalates to ask. A sub-agent inherits it with the rest of its parent's Config.
 	MCP MCPResolver
 
-	// PinMoved is told, wire-silently, that an adopted repo reaction's spawn was just refused
-	// because the project files its adoption pin holds moved since the user said yes (or could no
-	// longer be checked) — ADR 0104 §4. The refusal promises the entry is proposed again; this is
+	// PinMoved is told, wire-silently, that an adopted repo reaction's spawn (or MCP call) was just
+	// refused because the project files its adoption pin holds moved since the user said yes (or
+	// could no longer be checked) — ADR 0104 §4. The refusal promises the entry is proposed again; this is
 	// the cue a Driver with an adoption pane turns into a config re-read, so that pane asks again
 	// at the next idle moment rather than at the next config edit or restart. It carries nothing:
 	// the re-read resolves the Project config afresh and finds the moved entry itself.
 	//
 	// nil (the default) drops the cue: a Driver with no pane — headless, the daemon, the bench,
 	// every test that composes a bare Config — is byte-identical to one built before this field
-	// existed. It is called once per refused spawn, from the loop goroutine for a sync-lane entry
-	// and from the observe lane's workers for a `run:` entry, so it must be goroutine-safe and
-	// must not block. A sub-agent inherits it with the rest of its parent's Config.
+	// existed. It is called once per refused spawn or call, from the loop goroutine for a sync-lane
+	// entry and from the observe lane's workers for a `run:` entry — a command or an `mcp:` tool —
+	// so it must be goroutine-safe and must not block. A sub-agent inherits it with the rest of its
+	// parent's Config.
 	PinMoved func()
 
 	// Skills resolves the user's attached skill IDs (UserInput.SkillIDs) to their injectable

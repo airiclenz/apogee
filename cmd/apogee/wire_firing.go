@@ -770,10 +770,13 @@ func firingHooks(
 		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
 		// wraps THIS Runner rather than being wrapped by it (headless's prune notice), which keeps the
 		// renderer outermost and the Reactions invisible to it.
+		//
+		// The MCP half gets neither a resolver nor a re-ask cue: a Firing dials no MCP server, so an
+		// `mcp:` entry fails as not connected before its pin is ever read.
 		Workspace: workspace,
 		Schedule:  sched,
 		Report:    report,
-		Exec:      reactions.DefaultExecutor(workspace, guard, projectRuns.runner(), nil),
+		Exec:      reactions.DefaultExecutor(workspace, guard, projectRuns.runner(), nil, nil),
 	})
 }
 
