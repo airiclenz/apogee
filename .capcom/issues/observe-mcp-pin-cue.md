@@ -3,6 +3,7 @@ title: "An observe mcp: project entry with a moved pin fires no re-ask cue"
 status: open
 type: bug
 priority: 2
+plan: 2026-10-31 - 00 - observe-mcp-pin-cue-plan
 created: 2026-10-29T19:17:54Z
 ---
 
