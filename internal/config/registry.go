@@ -860,6 +860,44 @@ var KeyRegistry = bindRows([]Key{
 			func(fc fileConfig) *string { return nonEmpty(fc.WorkflowWake) }),
 	},
 	{
+		// A count with all four layers, the first key past server/mode/bypass to carry them: a budget
+		// is a fact about one invocation as much as about a host, so `--max-turns` and the variable
+		// sit above the file. Landed through the row at the file pass, re-stream-budget's reason — a
+		// negative count is refused in the row's sentence rather than read as "no budget", which
+		// would let run on a job somebody meant to bound. Editable, with the hook the file and env
+		// passes refuse through, and startup-only like the delegate-* bounds: only `apogee headless`
+		// reads the key, once per run, so a pane edit reaches the next headless start. The flag pass
+		// copies its value unjudged, so headless refuses a negative flag itself after resolution.
+		Path: "headless-max-turns", Kind: KindInt, Default: "0",
+		EnvVar: EnvHeadlessMaxTurns, FlagName: "max-turns",
+		Editable: true,
+		Validate: validateHeadlessMaxTurns,
+		Desc: "Turns one apogee headless run may take before it stops at a Turn boundary; 0 sets " +
+			"no budget; read by apogee headless only; takes effect at the next start.",
+		field: checkedField(parseHeadlessMaxTurns, strconv.Itoa,
+			func(o *Options) *int { return &o.HeadlessMaxTurns },
+			func(fc fileConfig) *string {
+				if fc.HeadlessMaxTurns == nil {
+					return nil
+				}
+				text := strconv.Itoa(int(*fc.HeadlessMaxTurns))
+				return &text
+			}),
+	},
+	{
+		// A length of time with all four layers, headless-max-turns's posture, spelled the way
+		// delegate-timeout is: a duration prints itself (`1h30m0s`), a spelling the key takes back.
+		Path: "headless-max-wall-time", Kind: KindString, Default: "0",
+		EnvVar: EnvHeadlessMaxWallTime, FlagName: "max-wall-time",
+		Editable: true,
+		Validate: validateHeadlessMaxWallTime,
+		Desc: "Wall-clock time one apogee headless run may take before it stops at a Turn " +
+			"boundary; 0 sets no budget; read by apogee headless only; takes effect at the next start.",
+		field: checkedField(parseHeadlessMaxWallTime, time.Duration.String,
+			func(o *Options) *time.Duration { return &o.HeadlessMaxWallTime },
+			func(fc fileConfig) *string { return fc.HeadlessMaxWallTime }),
+	},
+	{
 		// A switch, undo-snapshots's shape — but live: the per-server stats store is opened or
 		// stopped the moment the pane commits the edit (ADR 0037 decision 8), because nothing about
 		// it is wired into the engine; the Driver's recorder holds it (ADR 0085).
@@ -1552,6 +1590,57 @@ func ParseStreamIdleTimeout(value string) (time.Duration, error) {
 			"as long as the server takes", d)
 	}
 	return d, nil
+}
+
+// parseHeadlessMaxTurns reads a `headless-max-turns:` value into the Turn budget of one headless
+// run: the empty value and `0` set no budget, and text that is not a whole number — or a negative
+// one — is refused with the key named. It is the ONE reading of the key at the file and env passes;
+// a negative budget would stop the run before its first Turn could begin.
+func parseHeadlessMaxTurns(value string) (int, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(text)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("apogee: invalid headless-max-turns %q: want a Turn count of 0 or more "+
+			"(0, the default, sets no Turn budget)", value)
+	}
+	return n, nil
+}
+
+// validateHeadlessMaxTurns refuses a `headless-max-turns:` that is not a Turn count of 0 or more,
+// through the key's one reading (parseHeadlessMaxTurns).
+func validateHeadlessMaxTurns(value string) error {
+	_, err := parseHeadlessMaxTurns(value)
+	return err
+}
+
+// parseHeadlessMaxWallTime reads a `headless-max-wall-time:` value into the wall-clock budget of one
+// headless run, on ParseDelegateTimeout's contract save the default: the empty value and `0` set no
+// budget, and text no duration can be made of — or a negative one — is refused with the key named.
+func parseHeadlessMaxWallTime(value string) (time.Duration, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil {
+		return 0, fmt.Errorf("apogee: invalid headless-max-wall-time %q: want a length of time like 90m "+
+			"or 2h, or 0 to set no wall-time budget", value)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("apogee: invalid headless-max-wall-time %s: want 0 or more, where 0 sets "+
+			"no wall-time budget", d)
+	}
+	return d, nil
+}
+
+// validateHeadlessMaxWallTime refuses a `headless-max-wall-time:` that is not a length of time of 0
+// or more, through the key's one reading (parseHeadlessMaxWallTime).
+func validateHeadlessMaxWallTime(value string) error {
+	_, err := parseHeadlessMaxWallTime(value)
+	return err
 }
 
 // validateStreamIdleTimeout refuses a `stream-idle-timeout:` that is not a length of time to allow,

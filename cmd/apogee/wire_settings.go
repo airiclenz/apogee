@@ -1354,6 +1354,18 @@ var settingsTable = slices.Concat([]settingsEntry{
 		apply: applyMirror,
 	},
 	{
+		key: "headless-max-turns",
+		// Read by `apogee headless` alone, once per run: the apply is the mirror, and the next
+		// headless start reads the file the pane wrote. A Firing this session raises carries no
+		// budget whatever the holder says — only headless's own raise passes one on.
+		apply: applyMirror,
+	},
+	{
+		key: "headless-max-wall-time",
+		// As headless-max-turns above.
+		apply: applyMirror,
+	},
+	{
 		key: "server-stats",
 		// The recorder alone: the store it opens or stops is a Driver sink, never an engine seam,
 		// so the switch is in force at the next upstream attempt (ADR 0037 decision 8).

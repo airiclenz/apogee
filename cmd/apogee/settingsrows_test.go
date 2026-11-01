@@ -461,6 +461,8 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"workflow-retries":        "3",
 		"workflow-continuations":  "0",     // a stated 0 is a value (no continuation), never the default
 		"workflow-wake":           "off",   // the enum's own word, never a YAML bool
+		"headless-max-turns":      "0",     // unset in the fixture: no Turn budget
+		"headless-max-wall-time":  "0s",    // unset, and a duration's zero prints itself
 		"server-stats":            "false", // switched off in the fixture: the row reports the value, never the default
 		"auto-title":              "false",
 		"remember-model":          "true",

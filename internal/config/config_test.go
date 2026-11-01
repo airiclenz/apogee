@@ -461,16 +461,16 @@ func mustApplyFile(t *testing.T, o *Options, fc fileConfig) {
 	}
 }
 
-// The three keys that resolve from more than one source, driven end to end through their registry
+// The five keys that resolve from more than one source, driven end to end through their registry
 // rows: a real fileConfig, a real getenv, a real explicitly-set flag, and the precedence the
-// three produce. The WIRE-FACING names — the variable a user exports, the flag they type — are
+// three sources produce. The WIRE-FACING names — the variable a user exports, the flag they type — are
 // spelled out here as literals rather than read from the row, which is what makes this a test of
 // the rows and not of itself: resolution asks the registry which variable and which flag carry
 // each key, so editing a row's EnvVar or FlagName to anything else means the value this test sets
 // is never seen and the precedence assertions fail.
 //
 // The closing check is the file-only fence for the WHOLE schema, which no case of a precedence
-// table can make any more: exactly these three rows carry an environment or a flag accessor, so
+// table can make any more: exactly these five rows carry an environment or a flag accessor, so
 // every other key of the schema can be read from the config file and from nowhere else. ADR 0012's
 // two global-config-only keys are covered by it like the rest.
 //
@@ -513,6 +513,22 @@ func TestMultiSourceKeysReadTheRegistry(t *testing.T) {
 				}
 				return "false"
 			},
+		},
+		{
+			// The headless budgets: a count and a duration, each spelled here the way its row reads it
+			// back, so the resolved value compares as text.
+			path: "headless-max-turns", envVar: "APOGEE_HEADLESS_MAX_TURNS", flagName: "max-turns",
+			file: "12", env: "20", flag: "30",
+			setFile:  func(fc *fileConfig, v string) { n, _ := strconv.Atoi(v); fc.HeadlessMaxTurns = countptr(n) },
+			setFlag:  func(o *Options, v string) { o.HeadlessMaxTurns, _ = strconv.Atoi(v) },
+			resolved: func(o Options) string { return strconv.Itoa(o.HeadlessMaxTurns) },
+		},
+		{
+			path: "headless-max-wall-time", envVar: "APOGEE_HEADLESS_MAX_WALL_TIME", flagName: "max-wall-time",
+			file: "30m0s", env: "1h0m0s", flag: "1h30m0s",
+			setFile:  func(fc *fileConfig, v string) { fc.HeadlessMaxWallTime = strptr(v) },
+			setFlag:  func(o *Options, v string) { o.HeadlessMaxWallTime = mustParseDuration(v) },
+			resolved: func(o Options) string { return o.HeadlessMaxWallTime.String() },
 		},
 	}
 	for _, tt := range tests {
@@ -623,6 +639,8 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"WorkflowRetries":       true,
 		"WorkflowContinuations": true,
 		"WorkflowWake":          true,
+		"HeadlessMaxTurns":      true,
+		"HeadlessMaxWallTime":   true,
 		"ServerStats":           true,
 		"UseShippedSkills":      true,
 		"UseDefaultPrompt":      true,
@@ -692,6 +710,8 @@ func everyKeyFileConfig() fileConfig {
 		WorkflowRetries:       countptr(3),
 		WorkflowContinuations: countptr(4),
 		WorkflowWake:          "off",
+		HeadlessMaxTurns:      countptr(25),
+		HeadlessMaxWallTime:   strptr("90m"),
 		ServerStats:           boolptr(false),
 		RememberModel:         boolptr(false),
 		UpdateCheck:           boolptr(false),
@@ -2647,6 +2667,8 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 		{name: "stream-idle-timeout", file: "stream-idle-timeout: 5x\n", wantErr: `apogee: invalid stream-idle-timeout "5x": want a length of time like 10m or 30s, or 0 to wait for as long as the server takes`},
 		{name: "re-stream-budget", file: "re-stream-budget: -1\n", wantErr: `apogee: invalid re-stream-budget "-1": want a count of 0 or more (0 never re-streams; 3 is the default)`},
 		{name: "workflow-wake", file: "workflow-wake: maybe\n", wantErr: `apogee: workflow-wake is one of on, off, not "maybe"`},
+		{name: "headless-max-turns", file: "headless-max-turns: -1\n", wantErr: `apogee: invalid headless-max-turns "-1": want a Turn count of 0 or more (0, the default, sets no Turn budget)`},
+		{name: "headless-max-wall-time", file: "headless-max-wall-time: 5x\n", wantErr: `apogee: invalid headless-max-wall-time "5x": want a length of time like 90m or 2h, or 0 to set no wall-time budget`},
 		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: `apogee: invalid cursor-shape: unknown cursor shape "sideways" (known shapes: block, underline, bar)`},
 		{name: "sub-agents-context", file: "sub-agents-context: maybe\n", wantErr: `apogee: sub-agents-context is one of off, on, not "maybe"`},
 		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana" — it takes "fixed" (the sub-agents-server: key alone picks where a delegation runs) or "model" (the top-level model may say run_on per delegation)`},
@@ -2667,6 +2689,57 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 				t.Fatalf("LoadFileConfig error = %v, want the startup sentence %q", liveErr, startupErr)
 			}
 		})
+	}
+}
+
+// The headless budgets are opt-in: a file that leaves them out, and one that writes `0`, both resolve
+// to no budget. A value that is no count or no length of time, or a negative one, is refused before
+// any run could start — from the file and from the variable alike — in a sentence naming the key,
+// rather than read as "no budget", which would let run on a supervised job somebody meant to bound.
+// The flag layer is headless's own to judge (applyFlags copies a flag unjudged), so it is pinned in
+// cmd/apogee.
+func TestHeadlessBudgetsResolveOrRefuse(t *testing.T) {
+	t.Parallel()
+	for _, file := range []string{"", "headless-max-turns: 0\nheadless-max-wall-time: 0\n"} {
+		home := testConfigHome(t, file)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false },
+			func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig over %q: %v", file, err)
+		}
+		if opts.HeadlessMaxTurns != 0 || opts.HeadlessMaxWallTime != 0 {
+			t.Errorf("file %q: budgets = %d turns, %s; want 0 and 0s (no budget)", file,
+				opts.HeadlessMaxTurns, opts.HeadlessMaxWallTime)
+		}
+	}
+
+	for _, tt := range []struct {
+		key, envVar string
+		values      []string
+	}{
+		{"headless-max-turns", "APOGEE_HEADLESS_MAX_TURNS", []string{"-1", "abc", "5x"}},
+		{"headless-max-wall-time", "APOGEE_HEADLESS_MAX_WALL_TIME", []string{"-5m", "abc", "5x"}},
+	} {
+		for _, value := range tt.values {
+			t.Run(tt.key+"="+value, func(t *testing.T) {
+				t.Parallel()
+				env := map[string]string{tt.envVar: value}
+				var o Options
+				mustApplyFile(t, &o, fileConfig{})
+				err := applyEnv(&o, func(name string) string { return env[name] })
+				if err == nil || !strings.Contains(err.Error(), tt.envVar) || !strings.Contains(err.Error(), tt.key) {
+					t.Errorf("%s=%s: error = %v; want a refusal naming %s and %s", tt.envVar, value, err,
+						tt.envVar, tt.key)
+				}
+
+				_, err = LoadFileConfig("config.yaml", func(string) ([]byte, error) {
+					return []byte(tt.key + ": " + value + "\n"), nil
+				}, noNotify)
+				if err == nil || !strings.Contains(err.Error(), value) {
+					t.Errorf("file %s: %s: error = %v; want a refusal quoting the value", tt.key, value, err)
+				}
+			})
+		}
 	}
 }
 

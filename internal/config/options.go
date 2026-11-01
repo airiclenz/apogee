@@ -325,6 +325,16 @@ type Options struct {
 	// apogee.Config.Workflow.Wake as workflowRetries is.
 	WorkflowWake bool
 
+	// headlessMaxTurns is the Turn budget of one `apogee headless` run (default 0 = no budget),
+	// resolved flag (`--max-turns`) over APOGEE_HEADLESS_MAX_TURNS over the file. Only headless reads
+	// it: every other Driver resolves the key and hands it to nothing.
+	HeadlessMaxTurns int
+
+	// headlessMaxWallTime is the wall-clock budget of one `apogee headless` run (default 0 = no
+	// budget), resolved to a DURATION here, delegate-timeout's posture, from `--max-wall-time` over
+	// APOGEE_HEADLESS_MAX_WALL_TIME over the file. Only headless reads it, as headlessMaxTurns.
+	HeadlessMaxWallTime time.Duration
+
 	// serverStats gates the per-server stats store (ADR 0085): on, the Drivers record every
 	// upstream HTTP attempt into ~/.apogee/server-stats.jsonl; off, that file is neither written
 	// nor read. Loaded from the config file only (default true). The composition root opens or

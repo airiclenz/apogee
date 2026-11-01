@@ -508,6 +508,10 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 			"Floor guards and structural reducers stay on (ADR 0076)")
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the prompt and print the answer, but record no session")
+	flags.IntVar(&opts.HeadlessMaxTurns, "max-turns", 0,
+		"stop the run at the first Turn boundary past this many Turns (0: no budget)")
+	flags.DurationVar(&opts.HeadlessMaxWallTime, "max-wall-time", 0,
+		"stop the run at the first Turn boundary past this much wall-clock time, like 90m (0: no budget)")
 	flags.StringVar(&outputFormat, "format", formatText,
 		"what stdout carries: text (the answer) | json (the JSONL Event lines, ADR 0075)")
 	flags.BoolVar(&seams, "seams", false,
@@ -516,6 +520,22 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 		"run this recipe skill as a blocking workflow; the argument is the text its inputs bind from")
 
 	return cmd
+}
+
+// refuseNegativeBudget refuses a negative run budget before anything is built. Only the flag can
+// carry one this far: the file and environment layers refuse a negative budget at resolution,
+// in their rows' own sentences, while the flag pass copies the parsed flag value unjudged — and a
+// negative budget would stop the run before its first Turn could begin.
+func refuseNegativeBudget(o config.Options) error {
+	if o.HeadlessMaxTurns < 0 {
+		return fmt.Errorf("apogee headless: --max-turns %d: want a Turn count of 0 or more "+
+			"(0 sets no Turn budget)", o.HeadlessMaxTurns)
+	}
+	if o.HeadlessMaxWallTime < 0 {
+		return fmt.Errorf("apogee headless: --max-wall-time %s: want a length of time of 0 or more "+
+			"(0 sets no wall-time budget)", o.HeadlessMaxWallTime)
+	}
+	return nil
 }
 
 // headlessArgs is cobra.MaximumNArgs(1) with this command's exit convention attached. The argument
@@ -766,6 +786,9 @@ func runHeadlessBody(
 	offer, err := config.ApplyConfigOffer(opts, cmd.Flags().Changed, os.Getenv, os.ReadFile,
 		func(msg string) { cmd.PrintErrln(msg) })
 	if err != nil {
+		return run.Result{}, notStarted(err)
+	}
+	if err := refuseNegativeBudget(*opts); err != nil {
 		return run.Result{}, notStarted(err)
 	}
 	// This command's own BOTTOM layer is plan. ApplyConfig's is the interactive ladder's

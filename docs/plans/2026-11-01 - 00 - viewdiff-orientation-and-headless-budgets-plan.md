@@ -111,7 +111,15 @@ NOTES (2026-11-01): the zero Budget keeps calling `Agent.Run` untouched; a set B
 
 **Commit:** `feat(run): stop a run at a Turn or wall-time budget between Turns`
 
-## 4. Config keys, env vars and flags for the headless budgets
+## 4. Config keys, env vars and flags for the headless budgets — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): re-derived from "the Options fields go in internal/config/config.go": `Options` lives in internal/config/options.go, so `HeadlessMaxTurns int` / `HeadlessMaxWallTime time.Duration` are declared there; fileConfig fields and the two `EnvHeadless…` constants are in config.go as planned.
+NOTES (2026-11-01): choice stated for the commit: both rows are `Editable: true` with a Validate hook, and each gets a startup-only `applyMirror` case in cmd/apogee/wire_settings.go (Desc ends "takes effect at the next start."). `Editable: false` was tried first and fails TestRegistrySetRefusesWhatValidateRefuses: Set may refuse only what the hook or the kind refuses, so a parse that refuses a negative needs a hook, and a hook needs Editable. The mirror only updates the TUI's holder; item 6 keeps Firings from reading it.
+NOTES (2026-11-01): a negative `--max-turns` / `--max-wall-time` is refused in headless.go by `refuseNegativeBudget` right after `ApplyConfigOffer` (notStarted, exit 2), naming the flag. File and env negatives are refused at resolution by the rows' parsers (`parseHeadlessMaxTurns` / `parseHeadlessMaxWallTime`), which name the key. A malformed file `headless-max-turns:` (`abc`, `5x`) is refused by WholeCount's decoder, which quotes the value and line but not the key, like every other count key.
+NOTES (2026-11-01): consequential edit — internal/config/keyfield.go: made necessary by two more checkedField rows landing through Set at the file pass (the "six" keys comment is now eight).
+NOTES (2026-11-01): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by the two new registry rows (TestSettingsRowsFormatEffectiveValues pins one value per registry key).
+NOTES (2026-11-01): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by the two new startup-only editable rows (added to TestApplySettingAcceptsTheStartupOnlyKeys's table and its doc comment).
+NOTES (2026-11-01): manual: the "Three keys carry all four layers" sentence now says five, the "Seventeen /settings keys" startup-only list says nineteen, "Environment overrides" counts eleven variables and five key-carrying ones, and a new "Headless run budgets" section sits after "Workflow retries". cmd/apogee/e2e_newcomer_test.go still says "the nine `APOGEE_*` variables". It quotes the T-23 rubric word for word, and its Extra already excludes the env half, so it was left as written.
 
 **What:**
 **Goal:** `headless-max-turns` (a whole count) and `headless-max-wall-time` (a Go duration such as `90m`) exist as config keys. They resolve flag (`--max-turns` / `--max-wall-time` on `apogee headless`) over env (`APOGEE_HEADLESS_MAX_TURNS` / `APOGEE_HEADLESS_MAX_WALL_TIME`) over `config.yaml`. Unset or `0` means no budget. A malformed or negative value is refused before the run starts. Both are documented in `docs/manual/configuration.md`, the keys in their table and the env vars in "Environment overrides", whose count word grows by two.

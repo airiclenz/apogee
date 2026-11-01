@@ -8,8 +8,9 @@ for the few keys a project may set and is ignored for every other — see
 [A project's own config](#a-projects-own-config--apogeeconfigyaml). A documented starter `config.yaml` is written to
 `~/.apogee` on first run (your edits are never overwritten): nearly every setting
 is there as a commented example, and the few that ship active carry the value
-apogee already recommends. Three keys carry all four layers —
-`server:` (`--server`, `APOGEE_SERVER`), `mode:` and `bypass:`. Every other key
+apogee already recommends. Five keys carry all four layers —
+`server:` (`--server`, `APOGEE_SERVER`), `mode:`, `bypass:` and the two [headless run
+budgets](#headless-run-budgets), `headless-max-turns:` and `headless-max-wall-time:`. Every other key
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
 model profile, [MCP servers](#external-mcp-servers--mcp-servers), [the web-search
 endpoint](#where-web_search-looks--web-search-endpoint) and the seven Floor-guard
@@ -62,12 +63,14 @@ answer given with `apogee project adopt` in another terminal reaches the running
 rules without a restart.
 Nothing has to be re-entered in the pane: every key that came back
 different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
-for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Seventeen
-`/settings` keys are the exception to "applied now", because they are read only while a session is being wired:
+for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Nineteen
+`/settings` keys are the exception to "applied now", because they are read only while a session — or a
+headless run — is being wired:
 `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five delegation bounds
 (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
 `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, the three workflow keys
-(`workflow-continuations`, `workflow-retries`, `workflow-wake`), `sub-agents-context`, `sessions.max-age` and
+(`workflow-continuations`, `workflow-retries`, `workflow-wake`), the two headless run budgets
+(`headless-max-turns`, `headless-max-wall-time`), `sub-agents-context`, `sessions.max-age` and
 `sessions.max-count` take the save and honour it at the next start, as their `/settings` rows say.
 A few other settings, or parts of them, reach only the next session too, each said where it is
 described: `update-check:`, `dangerous-rules:` (the guard is built when a session starts), the
@@ -483,12 +486,14 @@ writable.
 
 ## Environment overrides
 
-Nine `APOGEE_*` variables are read, and they divide by what each one can reach. Three of them carry
+Eleven `APOGEE_*` variables are read, and they divide by what each one can reach. Five of them carry
 ordinary config keys and so ride the four-layer precedence above — flag, then variable, then file,
 then default: `APOGEE_SERVER` (`--server`) names the `servers:` entry this session starts on,
-`APOGEE_MODE` (`--mode`) the autonomy mode it starts in, and `APOGEE_BYPASS` (`--bypass`) the
-Reactions switch spelled out below. A value one of these cannot parse — `APOGEE_MODE=fast`,
-`APOGEE_BYPASS=maybe` — is a startup **error** naming the variable and the value, never a setting
+`APOGEE_MODE` (`--mode`) the autonomy mode it starts in, `APOGEE_BYPASS` (`--bypass`) the
+Reactions switch spelled out below, and `APOGEE_HEADLESS_MAX_TURNS` (`--max-turns`) and
+`APOGEE_HEADLESS_MAX_WALL_TIME` (`--max-wall-time`) the [headless run budgets](#headless-run-budgets),
+whose flags only `apogee headless` takes. A value one of these cannot parse — `APOGEE_MODE=fast`,
+`APOGEE_BYPASS=maybe`, `APOGEE_HEADLESS_MAX_TURNS=-1` — is a startup **error** naming the variable and the value, never a setting
 that quietly falls back to its default. Being config keys, they appear in `/settings`: a row a
 variable won says which variable won it, and committing an edit to that row applies now and then
 tells you the variable outranks the file again at the next launch.
@@ -1603,6 +1608,29 @@ ends: `on` gives your agent a turn of its own to read the result, `off` shows yo
 finished and lets the result ride on your next message instead. It takes the two words only
 — `true` is refused. All three are read when the session is built, so an edit applies at
 the next start.
+
+## Headless run budgets
+
+**An [`apogee headless`](headless.md) run nobody watches can be bounded**, by the number of Turns it
+takes and by the wall-clock time it runs. Both budgets are opt-in: unset, or `0`, sets none.
+
+```yaml
+# ~/.apogee/config.yaml
+headless-max-turns: 40        # a whole count of Turns
+headless-max-wall-time: 90m   # a length of time, like 90m or 2h
+```
+
+Each budget is checked only **between Turns**: a Turn that has started always finishes, and nothing
+it did is rolled back, so a supervisor's own kill stays the backstop for one overlong Turn. A run
+past either budget stops at that Turn boundary and saves its record; a run whose final Turn ends the
+Exchange inside the budget is an ordinary completion, even when that Turn reached the limit exactly.
+Unlike nearly every other key, both carry all four layers: `--max-turns` over
+`APOGEE_HEADLESS_MAX_TURNS` over `headless-max-turns:`, and `--max-wall-time` over
+`APOGEE_HEADLESS_MAX_WALL_TIME` over `headless-max-wall-time:` — a budget is as much a fact about
+one invocation as about a host. A value that is not a whole count or a length of time, or a
+negative one, is refused before the run starts, from any of the three. Only `apogee headless` reads
+them: the interactive TUI, `apogee daemon` and the runs `/schedule` raises are never bounded by
+them, whatever the file or the environment says.
 
 ## How hard a model thinks — effort
 

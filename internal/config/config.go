@@ -1227,6 +1227,20 @@ type fileConfig struct {
 	// — is refused at the file pass by the row's parse (ParseWorkflowWake) instead of being read as
 	// a switch nobody spelled. It feeds domain.Config.Workflow.Wake.
 	WorkflowWake string `yaml:"workflow-wake"`
+	// HeadlessMaxTurns is the Turn budget of one `apogee headless` run (default 0 = no budget): the
+	// run stops at the first Turn boundary past it. It carries all four layers — `--max-turns`, then
+	// APOGEE_HEADLESS_MAX_TURNS, then this key — because a budget is a fact about one invocation as
+	// much as about a host. A pointer for DelegateMaxSteps's reason, and a negative count is refused
+	// at the file pass by the row (parseHeadlessMaxTurns) rather than read as the default: a budget
+	// that quietly fell back to "none" would let a supervised run go on that someone meant to bound.
+	// Only headless reads it; every other Driver resolves it and passes it on to nothing.
+	HeadlessMaxTurns *WholeCount `yaml:"headless-max-turns"`
+	// HeadlessMaxWallTime is the wall-clock budget of one `apogee headless` run, as time.ParseDuration
+	// spells one (`90m`, `2h`; default 0 = no budget), checked at each Turn boundary like
+	// HeadlessMaxTurns and carried by `--max-wall-time` and APOGEE_HEADLESS_MAX_WALL_TIME the same
+	// way. A string pointer for DelegateTimeout's reason: the row parses the text
+	// (parseHeadlessMaxWallTime) and refuses, quoted as written, text no duration can be made of.
+	HeadlessMaxWallTime *string `yaml:"headless-max-wall-time"`
 	// ServerStats gates the per-server stats store (ADR 0085): with it on, the Drivers append one
 	// line per upstream HTTP attempt to ~/.apogee/server-stats.jsonl and the server pickers read a
 	// summary back; off, the file is neither written nor read, while the UpstreamAttemptEvents
@@ -3344,8 +3358,9 @@ func (lc legacyFileConfig) block() string {
 
 // Environment variable names, prefixed APOGEE_ to namespace the process environment.
 //
-// They fall in four groups. EnvServer/EnvMode/EnvBypass are read through the registry rows their
-// keys carry (Key.EnvVar). EnvConfig/EnvWorkspace are read by ApplyConfig directly, because
+// They fall in four groups. EnvServer/EnvMode/EnvBypass and the two headless budgets
+// (EnvHeadlessMaxTurns/EnvHeadlessMaxWallTime) are read through the registry rows their keys carry
+// (Key.EnvVar). EnvConfig/EnvWorkspace are read by ApplyConfig directly, because
 // they name the roots resolution itself runs in and so cannot be config keys. EnvEndpoint/
 // EnvModel/EnvAPIKey are the raw startup overrides ADR 0036 DETACHED from the schema: they no
 // longer describe config keys — they build or overlay the startup server entry — so they are
@@ -3363,6 +3378,9 @@ const (
 	EnvConfig        = "APOGEE_CONFIG"
 	EnvWorkspace     = "APOGEE_WORKSPACE"
 	EnvNoUpdateCheck = "APOGEE_NO_UPDATE_CHECK"
+
+	EnvHeadlessMaxTurns    = "APOGEE_HEADLESS_MAX_TURNS"
+	EnvHeadlessMaxWallTime = "APOGEE_HEADLESS_MAX_WALL_TIME"
 )
 
 // updateCheckPath is the registry path EnvNoUpdateCheck forces, named once for the two hand-coded

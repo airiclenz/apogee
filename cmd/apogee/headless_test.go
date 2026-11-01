@@ -234,6 +234,35 @@ func TestHeadlessEmptyPromptNeverStartsARun(t *testing.T) {
 	}
 }
 
+// A negative run budget given as a flag is refused before the run starts. The file and the
+// environment variables refuse one at resolution, but the flag pass copies a parsed flag
+// unjudged, so the command judges it itself — exit 2, the runner never called, and the refusal names
+// the flag the caller typed.
+func TestHeadlessRefusesANegativeBudget(t *testing.T) {
+	for _, tc := range []struct{ flag, value string }{
+		{"--max-turns", "-1"},
+		{"--max-wall-time", "-5m"},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			stub := &stubRunner{}
+			_, _, err := headlessRun(t, stub, tc.flag, tc.value, "do a thing")
+
+			if err == nil {
+				t.Fatalf("%s %s was accepted", tc.flag, tc.value)
+			}
+			if code := exitCodeFor(err); code != exitNotStarted {
+				t.Errorf("exit code = %d; want %d", code, exitNotStarted)
+			}
+			if stub.called {
+				t.Errorf("the runner ran under %s %s", tc.flag, tc.value)
+			}
+			if !strings.Contains(err.Error(), tc.flag) {
+				t.Errorf("the refusal does not name %s: %q", tc.flag, err.Error())
+			}
+		})
+	}
+}
+
 // Only plan and auto reach the runner. The other two rungs of the ladder exist to consult a
 // human, and the refusal happens at the flag — before a Confiner is built or a model is bound.
 func TestHeadlessRefusesModesWithNobodyToAsk(t *testing.T) {

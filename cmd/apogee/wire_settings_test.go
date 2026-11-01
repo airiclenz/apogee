@@ -735,7 +735,8 @@ const startupOnlyContract = "takes effect at the next start."
 // with, `undo-snapshots` decides whether the session's undo store is opened while its id is minted,
 // and `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
 // `delegate-timeout`, `stream-idle-timeout`, `re-stream-budget` and `working-window` are fields of the Config the engine was constructed with, so this session
-// genuinely cannot move any of them — but the file the next one starts from HAS moved,
+// genuinely cannot move any of them, while `headless-max-turns` and `headless-max-wall-time` are
+// read by `apogee headless` alone — but the file the next one starts from HAS moved,
 // which is the whole of what the key promises. Refusing would report a failed apply over a
 // save that did exactly that, which is the defect this pins.
 //
@@ -761,6 +762,8 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 		{key: "delegate-timeout", value: "30m"},
 		{key: "stream-idle-timeout", value: "30s"},
 		{key: "re-stream-budget", value: "1"},
+		{key: "headless-max-turns", value: "40"},
+		{key: "headless-max-wall-time", value: "90m"},
 		{key: "working-window", value: "200000"},
 		{key: "undo-snapshots", value: "false"},
 	}
