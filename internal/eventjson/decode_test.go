@@ -51,11 +51,12 @@ func roundTripEvents() []domain.Event {
 			SpawnRunID: "run-7",
 		},
 		domain.ToolResultEvent{
-			EventBase:   topLevelBase,
-			Result:      domain.ToolResult{CallID: "call-4", Content: "wrote a.go", IsError: true},
-			Tool:        "write_file",
-			WriteTarget: "/work/a.go",
-			SpawnRunID:  "run-9",
+			EventBase:       topLevelBase,
+			Result:          domain.ToolResult{CallID: "call-4", Content: "wrote a.go", IsError: true},
+			Tool:            "write_file",
+			WriteTarget:     "/work/a.go",
+			SpawnRunID:      "run-9",
+			EstimatedTokens: 57,
 		},
 		domain.SubAgentPhaseEvent{
 			EventBase: delegatedBase, Phase: domain.SubAgentStarted, StepCap: 30, CapRequested: 50,
@@ -115,6 +116,7 @@ func roundTripEvents() []domain.Event {
 				CostMicros: 1_501_234, PricedCalls: 2, UnpricedCalls: 1,
 			},
 		},
+		domain.ContextEstimateEvent{EventBase: delegatedBase, Tokens: 18342, Calibrated: true},
 		domain.AuditEvent{
 			EventBase: delegatedBase, Tool: "terminal", CallID: "call-audited", Decision: "allow",
 			Reason: "rule", IsError: true,

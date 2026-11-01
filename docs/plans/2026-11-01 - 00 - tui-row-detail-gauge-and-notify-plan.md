@@ -124,7 +124,12 @@ internal/tui/toolpresent_test.go — TestPresentToolCall, TestToolStat, TestTool
 - `grep -n 'fetched_body' docs/manual/headless.md` prints the FetchedBody summary row
 **Commit:** `feat(tools): fetch results carry a FetchedBody summary`
 
-## 4. The context-estimate Event contract
+## 4. The context-estimate Event contract — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): consequential edit — internal/eventjson/writer_test.go: made necessary by `tool_result` lines always writing `data.estimated_tokens`; TestWriterEnvelopeOrderAndNulls pins one tool_result line verbatim, which the plan's Files list did not name.
+NOTES (2026-11-01): consequential edit — .capcom/knowledge/decisions/adr-0075/adr-0075-decision.md: made necessary by the new kind; decision 4's dated count chain ("twenty-four … the list is `Kinds()`") gains a one-sentence pointer to `adr-0075-amend-1101`.
+NOTES (2026-11-01): `TestKindsAreTwentyFour` renamed `TestKindsAreTwentyFive`; no exhaustive `switch` over `domain.Event` outside eventjson lacks a default (Go type switches fall through silently, and each such fold documents "nothing on purpose"), so no case was added there. internal/eventjson/testdata/ needed no change (journal.jsonl carries no tool_result line).
+NOTES (2026-11-01): `capcom check` exits 1 on `AGENTS.md:40: the capcom block is out of date` — pre-existing at HEAD (reproduced in a clean worktree; AGENTS.md untouched since before the plan base), caused by the installed capcom binary; nothing this item changed. `capcom agents` would refresh it, outside this item's scope.
 
 **What:**
 **Goal:** `domain.ContextEstimateEvent{EventBase; Tokens int; Calibrated bool}` exists, along with `domain.ToolResultEvent.EstimatedTokens int` (the estimated tokens that result's content adds). Both are re-exported by the facade. eventjson encodes and decodes them: the new line kind `context_estimate`, and `data.estimated_tokens` on `tool_result`, omitted when 0. `docs/manual/headless.md` documents both. ADR 0075 carries a dated amendment that records the additive kind within the current `v`. Nothing emits them yet.

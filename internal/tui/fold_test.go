@@ -310,6 +310,13 @@ func foldCases() []foldCase {
 			wantStats: statsFold{ctxUsed: 1200},
 		},
 		{
+			name: "ContextEstimateEvent is inert in the TUI for now",
+			// The engine's between-readings context estimate folds to nothing yet: no entry, no
+			// gauge move, no phrase, no progress save. The gauge learns to follow it later; until
+			// then the next UsageEvent is the only thing that moves the fill.
+			event: domain.ContextEstimateEvent{Tokens: 1500, Calibrated: true},
+		},
+		{
 			name: "AuditEvent is inert in the TUI",
 			// Nothing at all: the audit trail is observable through the EventSink for other
 			// hosts (a log shipper), and the transcript deliberately renders none of it.

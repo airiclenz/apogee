@@ -418,6 +418,7 @@ type (
 	RefClippedEvent        = domain.RefClippedEvent
 	MalformedChunksEvent   = domain.MalformedChunksEvent
 	UsageEvent             = domain.UsageEvent
+	ContextEstimateEvent   = domain.ContextEstimateEvent
 	AuditEvent             = domain.AuditEvent
 	WireEvent              = domain.WireEvent
 	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent

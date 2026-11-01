@@ -191,12 +191,17 @@ type ToolCallEvent struct {
 // held a delegation's run id (every leaf call). A sub_agent call a pre-tool-exec Reaction redirected
 // to another tool keeps the id its ToolCallEvent carried, so its result still closes the block that
 // call opened.
+//
+// EstimatedTokens is the engine's estimate of the tokens this result's content adds to the
+// emitting agent's context — the same estimator its ContextEstimateEvent uses. It is 0 where no
+// estimate was made.
 type ToolResultEvent struct {
 	EventBase
-	Result      ToolResult
-	Tool        string
-	WriteTarget string
-	SpawnRunID  string
+	Result          ToolResult
+	Tool            string
+	WriteTarget     string
+	SpawnRunID      string
+	EstimatedTokens int
 }
 
 // SubAgentPhase names the point in a delegation's life that a SubAgentPhaseEvent reports.
@@ -659,6 +664,23 @@ type UsageEvent struct {
 	Maintenance  bool
 	DelegateFold bool
 	ServedModel  string
+}
+
+// ContextEstimateEvent reports the engine's estimate of the EMITTING agent's context fill between
+// two Upstream readings: the last reported reading at that agent's depth (the prompt plus
+// completion of its last non-Maintenance UsageEvent) plus the estimated tokens of every message
+// appended since — before any reading, the agent's own context estimate. It follows the
+// ToolResultEvent of each tool-result append, at the same depth, so a Driver's gauge can move while
+// a step's results land instead of waiting for the next reply's UsageEvent.
+//
+// It is an ESTIMATE and never a reading: the next UsageEvent at the same depth supersedes it, and a
+// reader of the cumulative totals never adds it. Calibrated reports whether the estimator has been
+// calibrated against a real reading yet — false means the figure rests on the uncalibrated
+// chars-per-token default, which a surface may show as rougher.
+type ContextEstimateEvent struct {
+	EventBase
+	Tokens     int
+	Calibrated bool
 }
 
 // AuditEvent surfaces one audit entry — a tool call, the guardrail decision it

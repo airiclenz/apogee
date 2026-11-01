@@ -133,7 +133,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"result":{"call_id":"call-3","content":"4 matches","is_error":false,` +
 				`"summary":{"kind":"matched_lines","total":4}},` +
-				`"tool":"grep","write_target":"","spawn_run_id":""}`,
+				`"tool":"grep","write_target":"","spawn_run_id":"","estimated_tokens":0}`,
 		},
 		{
 			name: "tool_result of a write names its target",
@@ -146,7 +146,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"result":{"call_id":"call-4","content":"wrote docs/notes.md","is_error":false,"summary":null},` +
-				`"tool":"write_file","write_target":"/work/docs/notes.md","spawn_run_id":""}`,
+				`"tool":"write_file","write_target":"/work/docs/notes.md","spawn_run_id":"","estimated_tokens":0}`,
 		},
 		{
 			name: "tool_result of a delegation names the run it answers",
@@ -159,7 +159,20 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"result":{"call_id":"call-5","content":"report","is_error":false,"summary":null},` +
-				`"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.2"}`,
+				`"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.2","estimated_tokens":0}`,
+		},
+		{
+			name: "tool_result carries its token estimate",
+			event: domain.ToolResultEvent{
+				EventBase:       domain.EventBase{Turn: 2},
+				Result:          domain.ToolResult{CallID: "call-6", Content: "a page of text"},
+				Tool:            "fetch",
+				EstimatedTokens: 312,
+			},
+			wantKind: "tool_result",
+			wantBase: domain.EventBase{Turn: 2},
+			wantData: `{"result":{"call_id":"call-6","content":"a page of text","is_error":false,"summary":null},` +
+				`"tool":"fetch","write_target":"","spawn_run_id":"","estimated_tokens":312}`,
 		},
 		{
 			name: "sub_agent_phase started",
@@ -584,6 +597,24 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"cumulative_priced_calls":2}`,
 		},
 		{
+			name: "context_estimate",
+			event: domain.ContextEstimateEvent{
+				EventBase:  domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.2"},
+				Tokens:     18342,
+				Calibrated: true,
+			},
+			wantKind: "context_estimate",
+			wantBase: domain.EventBase{Depth: 1, Turn: 4, CallID: "call-9", RunID: "0badc0de.2"},
+			wantData: `{"tokens":18342,"calibrated":true}`,
+		},
+		{
+			name:     "context_estimate before the estimator is calibrated",
+			event:    domain.ContextEstimateEvent{EventBase: domain.EventBase{Turn: 1}, Tokens: 900},
+			wantKind: "context_estimate",
+			wantBase: domain.EventBase{Turn: 1},
+			wantData: `{"tokens":900,"calibrated":false}`,
+		},
+		{
 			// The envelope takes the SPAWNING delegation's id off the embedded EventBase while
 			// data.call_id carries the AUDITED call — two different facts the variant's shadowing
 			// field would otherwise braid into one.
@@ -762,7 +793,7 @@ func TestEncodeToolSummaryMirror(t *testing.T) {
 				t.Fatalf("Encode ok = %v, json.Marshal err = %v", ok, err)
 			}
 			want := `{"result":{"call_id":"call-1","content":"prose","is_error":false,"summary":` +
-				c.wantSummary + `},"tool":"some_tool","write_target":"","spawn_run_id":""}`
+				c.wantSummary + `},"tool":"some_tool","write_target":"","spawn_run_id":"","estimated_tokens":0}`
 			if string(encoded) != want {
 				t.Errorf("data JSON =\n  %s\nwant\n  %s", encoded, want)
 			}
@@ -1052,6 +1083,7 @@ func TestEncodeMapsEveryEventVariant(t *testing.T) {
 		"RefClippedEvent":        domain.RefClippedEvent{},
 		"MalformedChunksEvent":   domain.MalformedChunksEvent{},
 		"UsageEvent":             domain.UsageEvent{},
+		"ContextEstimateEvent":   domain.ContextEstimateEvent{},
 		"AuditEvent":             domain.AuditEvent{},
 		"WireEvent":              domain.WireEvent{},
 		"UpstreamAttemptEvent":   domain.UpstreamAttemptEvent{},
@@ -1149,16 +1181,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentyFour pins the vocabulary itself — the twenty-two serialized variants, the
+// TestKindsAreTwentyFive pins the vocabulary itself — the twenty-three serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentyFour(t *testing.T) {
+func TestKindsAreTwentyFive(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 24 {
-		t.Fatalf("len(Kinds()) = %d, want 24: %v", len(kinds), kinds)
+	if len(kinds) != 25 {
+		t.Fatalf("len(Kinds()) = %d, want 25: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

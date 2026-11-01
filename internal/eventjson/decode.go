@@ -185,6 +185,9 @@ var eventDecoders = map[string]eventDecoder{
 		return domain.RefClippedEvent{EventBase: base, Ref: d.Ref, Tokens: d.Tokens, Absolute: d.Absolute}, nil
 	}),
 	kindUsage: decodeWith(usageEventFrom),
+	kindContextEstimate: decodeWith(func(base domain.EventBase, d contextEstimateData) (domain.Event, error) {
+		return domain.ContextEstimateEvent{EventBase: base, Tokens: d.Tokens, Calibrated: d.Calibrated}, nil
+	}),
 	kindAudit: decodeWith(func(base domain.EventBase, d auditData) (domain.Event, error) {
 		return domain.AuditEvent{
 			EventBase: base, Tool: d.Tool, CallID: d.CallID, Decision: d.Decision, Reason: d.Reason,
@@ -209,6 +212,7 @@ func toolResultEventFrom(base domain.EventBase, d toolResultData) (domain.Event,
 	}
 	return domain.ToolResultEvent{
 		EventBase: base, Result: result, Tool: d.Tool, WriteTarget: d.WriteTarget, SpawnRunID: d.SpawnRunID,
+		EstimatedTokens: d.EstimatedTokens,
 	}, nil
 }
 

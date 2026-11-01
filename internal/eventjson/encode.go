@@ -6,9 +6,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-four line kinds of ADR 0075 §4 — twenty-two Event variants, workflow_phase (ADR 0087),
-// malformed_chunks and sub_agent_group (ADR 0103 decision 13) the newest, plus the two frames that
-// bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// The twenty-five line kinds of ADR 0075 §4 — twenty-three Event variants, workflow_phase (ADR 0087),
+// malformed_chunks, sub_agent_group (ADR 0103 decision 13) and context_estimate the newest, plus the
+// two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -35,6 +35,7 @@ const (
 	kindWorkflowPhase     = "workflow_phase"
 	kindMalformedChunks   = "malformed_chunks"
 	kindSubAgentGroup     = "sub_agent_group"
+	kindContextEstimate   = "context_estimate"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -79,6 +80,7 @@ func Kinds() []string {
 		kindWorkflowPhase,
 		kindMalformedChunks,
 		kindSubAgentGroup,
+		kindContextEstimate,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -134,10 +136,11 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 		}, true
 	case domain.ToolResultEvent:
 		return kindToolResult, e.EventBase, toolResultData{
-			Result:      toolResultOf(e.Result),
-			Tool:        e.Tool,
-			WriteTarget: e.WriteTarget,
-			SpawnRunID:  e.SpawnRunID,
+			Result:          toolResultOf(e.Result),
+			Tool:            e.Tool,
+			WriteTarget:     e.WriteTarget,
+			SpawnRunID:      e.SpawnRunID,
+			EstimatedTokens: e.EstimatedTokens,
 		}, true
 	case domain.SubAgentPhaseEvent:
 		return kindSubAgentPhase, e.EventBase, subAgentPhaseData{
@@ -185,6 +188,8 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 		return kindRefClipped, e.EventBase, refClippedData{Ref: e.Ref, Tokens: e.Tokens, Absolute: e.Absolute}, true
 	case domain.UsageEvent:
 		return kindUsage, e.EventBase, usageOf(e, currency), true
+	case domain.ContextEstimateEvent:
+		return kindContextEstimate, e.EventBase, contextEstimateData{Tokens: e.Tokens, Calibrated: e.Calibrated}, true
 	case domain.AuditEvent:
 		return kindAudit, e.EventBase, auditData{
 			Tool:     e.Tool,
@@ -264,12 +269,15 @@ type toolCallData struct {
 // under, the path it wrote — "" when the call wrote none — and, for a delegation's result, the
 // run id of the delegation it answers, the same spawn_run_id its tool_call line carried ("" for
 // any other result). The three trailing members joined the line additively (ADR 0075 decision
-// 10), so they sit after the result rather than before it.
+// 10), so they sit after the result rather than before it. estimated_tokens — the engine's
+// estimate of the tokens the result's content adds to the emitting agent's context, 0 where none
+// was made — joined after them on the same terms, so spawn_run_id is no longer last.
 type toolResultData struct {
-	Result      toolResult `json:"result"`
-	Tool        string     `json:"tool"`
-	WriteTarget string     `json:"write_target"`
-	SpawnRunID  string     `json:"spawn_run_id"`
+	Result          toolResult `json:"result"`
+	Tool            string     `json:"tool"`
+	WriteTarget     string     `json:"write_target"`
+	SpawnRunID      string     `json:"spawn_run_id"`
+	EstimatedTokens int        `json:"estimated_tokens"`
 }
 
 // subAgentPhaseData is the sub_agent_phase line: one delegation crossing a lifecycle boundary.
@@ -495,6 +503,15 @@ type refClippedData struct {
 // that still ended successfully skipped — text or a tool call it carried may be missing.
 type malformedChunksData struct {
 	Count int `json:"count"`
+}
+
+// contextEstimateData is the context_estimate line: the engine's estimate of the emitting agent's
+// context fill after a tool-result append — the last reading at that depth plus what was appended
+// since — and whether the estimator had been calibrated against a real reading. The next usage
+// line at the same depth supersedes it.
+type contextEstimateData struct {
+	Tokens     int  `json:"tokens"`
+	Calibrated bool `json:"calibrated"`
 }
 
 // usageData is the usage line: the token accounting an Upstream reply carried, the emitting
