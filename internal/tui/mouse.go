@@ -531,9 +531,11 @@ func (m Model) handleFooterModeClick(pre Model, msg tea.MouseClickMsg) (Model, t
 // handleMouseMotion extends whichever selection is live as the mouse drags with the left button
 // held: head advances while the click-set anchor stays put. A drag never STARTS a selection
 // (only a click does), so at most one of the two is active and they cannot both extend. Motion
-// outside the owning rectangle is ignored so a stray past the edge does not collapse or hijack
-// the selection. CellMotion reports motion only while a button is down, so this fires only
-// mid-drag.
+// outside the owning rectangle never moves the head directly, so a stray past the edge does not
+// collapse or hijack the selection. For the TRANSCRIPT that motion has one meaning of its own:
+// held on the top row, or anywhere below the last, it scrolls the transcript toward the pointer
+// and the head follows the revealed edge line (trackDragEdge). CellMotion reports motion only
+// while a button is down, so this fires only mid-drag.
 //
 // One decoder quirk lands here rather than in handleMouseRelease: some terminals encode the
 // release with the motion bit set (SGR "ESC[<35;x;ym"), which decodes to a BUTTON-LESS motion
@@ -560,8 +562,118 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 		if line, col, ok := m.pointTranscriptRow(msg.X, msg.Y); ok {
 			m.transcriptSel.head = contentCell{line, col}
 		}
+		return m.trackDragEdge(msg.X, msg.Y)
 	}
 	return m, nil
+}
+
+// dragScroll is the edge auto-scroll of a held transcript drag (layout.md, the drag-select rule):
+// while the pointer sits on the transcript's top row with the view scrolled up, or below its last
+// row with more below, a tick loop scrolls toward it and moves the selection head onto each newly
+// revealed edge line. A motion inside the zone only restates where the pointer is; ONE loop runs at a
+// time, and gen numbers it — the release and the pointer leaving the zone bump gen, so a tick still in
+// flight for the old loop is dropped, exactly as a flashClearMsg for a replaced flash is.
+type dragScroll struct {
+	gen     int  // the live loop's generation; a dragScrollTickMsg carrying any other is dropped
+	running bool // a tick for gen is in flight
+	up      bool // the pointer is on the top row (scroll up) rather than below the last (scroll down)
+	past    int  // rows below the transcript's last row, 0 for the row right under it; unused going up
+	x       int  // the pointer's column, where the head lands on each revealed line
+}
+
+// dragScrollTickMsg is one step of the edge auto-scroll loop; gen is the loop that scheduled it
+// (dragScroll.gen).
+type dragScrollTickMsg struct{ gen int }
+
+const (
+	// dragScrollInterval is the edge auto-scroll's step period.
+	dragScrollInterval = 50 * time.Millisecond
+	// dragScrollMaxStep caps the lines one downward step scrolls, however far below the edge the
+	// pointer is held.
+	dragScrollMaxStep = 5
+)
+
+// trackDragEdge reads a transcript drag's motion for the edge auto-scroll. Inside the zone it
+// stores where the pointer is and starts the loop if none is running; anywhere else it retires a
+// running loop. The top row counts only while the view is scrolled up and the rows below the
+// transcript only while there is more below, so a drag at an edge with nothing past it starts nothing.
+func (m Model) trackDragEdge(x, y int) (Model, tea.Cmd) {
+	rows := m.transcriptRows()
+	up := rows > 0 && y <= 0 && m.viewport.YOffset() > 0
+	down := rows > 0 && y >= rows && !m.viewport.AtBottom()
+	if !up && !down {
+		if m.dragScroll.running {
+			m.stopDragScroll()
+		}
+		return m, nil
+	}
+	m.dragScroll.up, m.dragScroll.x = up, x
+	m.dragScroll.past = max(0, y-rows)
+	if m.dragScroll.running {
+		return m, nil // the live loop reads the new distance on its next tick
+	}
+	m.dragScroll.running = true
+	return m, m.dragScrollTick()
+}
+
+// stopDragScroll retires the edge auto-scroll loop: a tick already scheduled for it is dropped.
+func (m *Model) stopDragScroll() {
+	m.dragScroll.gen++
+	m.dragScroll.running = false
+}
+
+// dragScrollTick schedules the live loop's next step.
+func (m Model) dragScrollTick() tea.Cmd {
+	gen := m.dragScroll.gen
+	return tea.Tick(dragScrollInterval, func(time.Time) tea.Msg { return dragScrollTickMsg{gen: gen} })
+}
+
+// foldDragScrollTick takes one edge auto-scroll step: 1 line up, or min(dragScrollMaxStep,
+// 1 + past) lines down, through the tail every user scroll ends on (settleUserScroll), so
+// reaching the bottom resumes following. The head moves onto the newly revealed edge line — going
+// up, the first row the sticky header does not cover, never row 0, which draws the owning prompt.
+// The loop ends at the top or the bottom, and when the button is up or the selection has dropped.
+func (m Model) foldDragScrollTick(msg dragScrollTickMsg) (tea.Model, tea.Cmd) {
+	if msg.gen != m.dragScroll.gen || !m.dragScroll.running {
+		return m, nil
+	}
+	if !m.mousePressed || !m.transcriptSel.active {
+		m.stopDragScroll()
+		return m, nil
+	}
+	before := m.viewport.YOffset()
+	if m.dragScroll.up {
+		m.viewport.ScrollUp(1)
+	} else {
+		m.viewport.ScrollDown(min(dragScrollMaxStep, 1+m.dragScroll.past))
+	}
+	m.settleUserScroll()
+	if m.viewport.YOffset() == before {
+		m.stopDragScroll() // nothing left to reveal: the floor, the top or the bottom
+		return m, nil
+	}
+	if line, ok := m.dragEdgeLine(); ok {
+		m.transcriptSel.head = contentCell{line, clampInt(m.dragScroll.x, 0, m.viewport.Width())}
+	}
+	if (m.dragScroll.up && m.viewport.YOffset() == 0) || (!m.dragScroll.up && m.viewport.AtBottom()) {
+		m.stopDragScroll()
+		return m, nil
+	}
+	return m, m.dragScrollTick()
+}
+
+// dragEdgeLine is the content line the edge auto-scroll just revealed: going up, the first line
+// drawn under the sticky header ([Model.stickyHeaderSpan]); going down, the transcript's last row.
+func (m Model) dragEdgeLine() (int, bool) {
+	line := m.viewport.YOffset() + m.transcriptRows() - 1
+	if m.dragScroll.up {
+		_, count := m.stickyHeaderSpan()
+		line = m.viewport.YOffset() + count
+	}
+	if line < 0 || line >= len(m.lines) {
+		return 0, false
+	}
+	return line, true
 }
 
 // handleMouseRelease finalises a drag on whichever selection is live. A non-empty span is copied
@@ -579,6 +691,7 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 // drag-select like any other, because it never reaches this branch.
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	m.mousePressed = false // the press is over on every path out of here, selection or not
+	m.stopDragScroll()     // and so is any edge auto-scroll it was holding
 	switch {
 	case m.settings.sel.active:
 		// The /settings edit field copies what a release took, exactly as the prompt does: the value is

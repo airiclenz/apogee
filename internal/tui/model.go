@@ -568,6 +568,10 @@ type Model struct {
 	// while a press is genuinely in flight. A plain bool, so it rides the value-copied Model
 	// (ADR 0011).
 	mousePressed bool
+	// dragScroll is the edge auto-scroll of a held transcript drag (mouse.go): where past the
+	// transcript's edge the pointer last sat, and the generation of the one tick loop scrolling
+	// toward it. Plain values, so it rides the value-copied Model (ADR 0011).
+	dragScroll dragScroll
 	// clickArmed is the row the POINTER itself highlighted on a boxed pane, and the whole of what
 	// lets a click activate one: a pane's click handler latches the row here when it moves the
 	// highlight onto it, and activates on the next click only where that click lands on the very row
@@ -1673,6 +1677,11 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case dragScrollTickMsg:
+		// A transcript drag held past the edge scrolls one more step toward the pointer (mouse.go) —
+		// unless the release, or the pointer coming back inside, has retired this loop since.
+		return m.foldDragScrollTick(msg)
+
 	default:
 		// Every other Bubble Tea Msg belongs to a widget: route it to the focused input, which is
 		// the /settings field while the pane has one open (prompteditor.go).
@@ -2215,15 +2224,22 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // hold exactly there, so reading history is not yanked back by the streaming reply. Detach is
 // therefore not a latch: scrolling up detaches, scrolling back down to the bottom resumes
 // following, and on a transcript that fits the window there is nothing to detach from (AtBottom
-// is always true there). This is the ONLY site that sets detached — the funnel every user scroll
-// goes through — which is what keeps a programmatic reposition inside refreshViewport from ever
-// reading as a human scroll.
+// is always true there). Its tail, [Model.settleUserScroll], is the ONLY place a scroll sets
+// detached — the funnel every user scroll goes through, the drag-select edge auto-scroll
+// (mouse.go) included, since that scroll too is the human's pointer — which is what keeps a
+// programmatic reposition inside refreshViewport from ever reading as a human scroll.
 func (m Model) scrollViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
+	m.settleUserScroll()
+	return m, cmd
+}
+
+// settleUserScroll is the tail every user scroll ends on, whatever moved the offset: the short-screen
+// floor first, then the follow policy read off where the view came to rest ([Model.scrollViewport]).
+func (m *Model) settleUserScroll() {
 	m.floorShortScreenOffset()
 	m.detached = !m.viewport.AtBottom()
-	return m, cmd
 }
 
 // submit parses the input through the chat mini-language and routes it: a recognised

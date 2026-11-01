@@ -300,7 +300,13 @@ internal/agent/construct.go — queuedApprover.Approve
 **Closes:** prompt-wait-unannounced
 **Commit:** `feat(tui): notify when an approval, a question or a blurred Turn end waits on the user`
 
-## 11. Drag-select auto-scrolls past the transcript edge
+## 11. Drag-select auto-scrolls past the transcript edge — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): "rows past the edge" counts the row right under the transcript as 0 past (step 1), so the downward step is 1 there and reaches the cap of 5 four rows further down; layout.md states this.
+NOTES (2026-11-01): the edge zone is direction-gated — the top row arms the loop only while the view is scrolled up (YOffset > 0) and the rows below only while the view is not at the bottom — so a drag at an edge with nothing past it schedules no tick.
+NOTES (2026-11-01): scrollViewport's floor-then-detached tail is extracted to `Model.settleUserScroll` so the tick and scrollViewport share one funnel; scrollViewport's "ONLY site that sets detached" comment is rewritten to name the tail.
+NOTES (2026-11-01): the head lands at the pointer's column (clamped to the viewport width) on each revealed line; going down the edge line is `YOffset + transcriptRows − 1`, going up `YOffset + stickyHeaderSpan count`.
+NOTES (2026-11-01): consequential edit — internal/tui/watch.go: made necessary by the new dragScrollTickMsg folded in Model.fold (watchRouteOf must name every folded Msg; routed to the view with the other mouse Msgs).
 
 **What:**
 **Goal:** While a transcript drag-select is held on row 0 with the view scrolled up, the transcript scrolls up 1 line per ~50 ms tick. Held below the transcript's last row, it scrolls down `min(5, 1 + rows past the edge)` lines per tick. Each step moves the selection head to the newly revealed edge line. Scrolling stops on release (which copies the whole selection), when the pointer re-enters the transcript, or at the top or bottom; reaching the bottom resumes following. `layout.md` states the edge rule beside its drag-select rule.

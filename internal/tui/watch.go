@@ -391,7 +391,7 @@ func watchRouteOf(msg tea.Msg) watchRoute {
 		tea.KeyPressMsg, tea.PasteMsg, clipboardImageMsg, clipboardTextMsg,
 		ctrlCResetMsg, escStopResetMsg, tea.CursorPositionMsg,
 		tea.MouseWheelMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg,
-		spinnerTickMsg, skillHintTickMsg, flashClearMsg:
+		spinnerTickMsg, skillHintTickMsg, flashClearMsg, dragScrollTickMsg:
 		return watchRouteView
 	case sessionListMsg, sessionLoadedMsg, workflowsListMsg, workflowItemMsg,
 		settingsEditedMsg, settingsDetachedMsg, approvalReqMsg, approvalArmedMsg, askReqMsg:

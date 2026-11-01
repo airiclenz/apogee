@@ -984,7 +984,13 @@ open. A block that hides
 nothing in either state marks no rows, and a click on it keeps its selection meaning — as a click
 does everywhere else in the transcript. Any drag is a drag-select wherever it starts, marked rows
 included: motion is what arbitrates, exactly as it already separates click-to-position from drag in
-the prompt. After a toggle the clicked row
+the prompt. **A drag held past the transcript's edge scrolls it.** On the top row of a scrolled-up
+view the transcript scrolls up one line every ~50 ms; anywhere below its last row it scrolls down
+`min(5, 1 + rows past the edge)` lines a step, the row right under it counting as none past. Each
+step moves the selection's moving end onto the line just revealed — going up, the first line under
+the sticky prompt, never the prompt it overlays. The scroll stops on release (which copies the whole
+selection, however many screens it spans), when the pointer comes back inside the transcript, and
+at the top or the bottom; reaching the bottom resumes following the tail. After a toggle the clicked row
 keeps its screen position — content grows or shrinks around it, and the line under the cursor never
 moves.
 

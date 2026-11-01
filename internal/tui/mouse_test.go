@@ -6975,3 +6975,251 @@ func TestApprovalClickOnTheRuleFieldSavesNothing(t *testing.T) {
 	default:
 	}
 }
+
+// Drag-select edge auto-scroll (mouse.go, trackDragEdge / foldDragScrollTick). The tick loop is driven by sending dragScrollTickMsg directly: no test here sleeps on the
+// interval, and the Cmd a motion returns is only checked for being there or not.
+
+// dragScrollModel builds a transcript far taller than the screen. withPrompt puts a user prompt at
+// its top, which sticks over row 0 at every offset; without it there is no sticky header at all.
+// The view follows the tail, as a fresh paint leaves it.
+func dragScrollModel(t *testing.T, withPrompt bool) Model {
+	t.Helper()
+	m := newTestModel(t)
+	if withPrompt {
+		m.transcript.addUser("HEADERPROMPT", nil)
+	}
+	for i := 0; i < 60; i++ {
+		m.transcript.commitAssistant(fmt.Sprintf("reply %02d", i), runRef{})
+	}
+	m.refreshViewport()
+	if m.viewport.AtBottom() && m.viewport.YOffset() == 0 {
+		t.Fatal("setup: the transcript must be taller than the screen")
+	}
+	return m
+}
+
+// parkAtTop scrolls the view to the top of the transcript, detached, the way a wheel would.
+func parkAtTop(m Model) Model {
+	m.viewport.SetYOffset(0)
+	m.detached = true
+	return m
+}
+
+// dragTick folds the live loop's next tick and returns the model and the Cmd it scheduled.
+func dragTick(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	return stepCmd(t, m, dragScrollTickMsg{gen: m.dragScroll.gen})
+}
+
+// TestDragScrollUpFromTopRow: a drag held on row 0 of a scrolled-up view scrolls one line per tick
+// and the head lands on the revealed top line.
+func TestDragScrollUpFromTopRow(t *testing.T) {
+	t.Parallel()
+	m := dragScrollModel(t, false)
+	m = step(t, m, leftClick(0, 5))
+	m, cmd := stepCmd(t, m, leftDrag(4, 0))
+	if cmd == nil || !m.dragScroll.running {
+		t.Fatal("a drag held on row 0 of a scrolled-up view started no auto-scroll")
+	}
+	before := m.viewport.YOffset()
+	for i := 1; i <= 3; i++ {
+		m, cmd = dragTick(t, m)
+		if cmd == nil {
+			t.Fatalf("tick %d: the loop stopped short of the top", i)
+		}
+		if got := m.viewport.YOffset(); got != before-i {
+			t.Fatalf("tick %d: offset %d, want %d (1 line per tick)", i, got, before-i)
+		}
+		if want := (contentCell{m.viewport.YOffset(), 4}); m.transcriptSel.head != want {
+			t.Fatalf("tick %d: head %+v, want the revealed top line %+v", i, m.transcriptSel.head, want)
+		}
+	}
+	if !m.detached {
+		t.Fatal("scrolling up off the tail must detach")
+	}
+}
+
+// TestDragScrollDownScalesStep: held below the transcript, each tick scrolls
+// min(5, 1 + rows past the edge) lines and the head lands on the transcript's last row.
+func TestDragScrollDownScalesStep(t *testing.T) {
+	t.Parallel()
+	m := parkAtTop(dragScrollModel(t, false))
+	rows := m.transcriptRows()
+	m = step(t, m, leftClick(0, 2))
+	cases := []struct {
+		y, step int
+	}{
+		{rows, 1},      // the row right under the transcript
+		{rows + 2, 3},  // two rows further: +1 each
+		{rows + 4, 5},  // at the cap
+		{rows + 20, 5}, // far past it, still capped
+	}
+	for _, c := range cases {
+		m = step(t, m, leftDrag(7, c.y))
+		before := m.viewport.YOffset()
+		var cmd tea.Cmd
+		m, cmd = dragTick(t, m)
+		if cmd == nil {
+			t.Fatalf("y=%d: the loop stopped before the bottom", c.y)
+		}
+		if got := m.viewport.YOffset() - before; got != c.step {
+			t.Fatalf("y=%d: scrolled %d lines, want %d", c.y, got, c.step)
+		}
+		if want := (contentCell{m.viewport.YOffset() + rows - 1, 7}); m.transcriptSel.head != want {
+			t.Fatalf("y=%d: head %+v, want the last transcript row %+v", c.y, m.transcriptSel.head, want)
+		}
+	}
+}
+
+// TestDragScrollStopsOnRelease: the release ends the loop — a tick still in flight changes nothing
+// — and copies the whole selection, both screens of it.
+func TestDragScrollStopsOnRelease(t *testing.T) {
+	t.Parallel()
+	m := parkAtTop(dragScrollModel(t, false))
+	rows := m.transcriptRows()
+	w := m.viewport.Width()
+	m = step(t, m, leftClick(0, 0))
+	m = step(t, m, leftDrag(w, rows+4)) // at the right edge, so the head's own line is taken whole
+	for i := 0; i < 4; i++ {
+		m, _ = dragTick(t, m)
+	}
+	staleGen := m.dragScroll.gen
+	m, cmd := stepCmd(t, m, leftRelease(w, rows+4))
+	if cmd == nil {
+		t.Fatal("releasing an auto-scrolled drag copied nothing")
+	}
+	if m.dragScroll.running {
+		t.Fatal("the release left the auto-scroll running")
+	}
+	head := m.transcriptSel.head.line
+	if head < rows {
+		t.Fatalf("precondition: the head (line %d) never left the first screen (%d rows)", head, rows)
+	}
+	last := "" // the last reply the head reached, below the first screen
+	for i := rows; i <= head; i++ {
+		if strings.Contains(m.lines[i], "reply ") {
+			last = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(m.lines[i]), "✦"))
+		}
+	}
+	got := transcriptSelectionText(m.th.measure, m.lines, m.padRows(), m.transcriptSel.anchor, m.transcriptSel.head)
+	if last == "" || !strings.Contains(got, "reply 00") || !strings.Contains(got, last) {
+		t.Fatalf("the copy does not span both screens (want %q too): %q", last, got)
+	}
+	off := m.viewport.YOffset()
+	m, cmd = stepCmd(t, m, dragScrollTickMsg{gen: staleGen})
+	if cmd != nil || m.viewport.YOffset() != off {
+		t.Fatal("a tick scheduled before the release still scrolled")
+	}
+}
+
+// TestDragScrollStaleTickIgnored: the pointer coming back inside the transcript retires the loop,
+// and the tick it had in flight is dropped.
+func TestDragScrollStaleTickIgnored(t *testing.T) {
+	t.Parallel()
+	m := dragScrollModel(t, false)
+	m = step(t, m, leftClick(0, 5))
+	m = step(t, m, leftDrag(0, 0))
+	staleGen := m.dragScroll.gen
+	m = step(t, m, leftDrag(0, 3))
+	if m.dragScroll.running || m.dragScroll.gen == staleGen {
+		t.Fatal("re-entering the transcript did not retire the loop")
+	}
+	off, head := m.viewport.YOffset(), m.transcriptSel.head
+	m, cmd := stepCmd(t, m, dragScrollTickMsg{gen: staleGen})
+	if cmd != nil || m.viewport.YOffset() != off || m.transcriptSel.head != head {
+		t.Fatal("a stale tick scrolled or moved the head")
+	}
+}
+
+// TestDragScrollBottomResumesFollowing: the step that reaches the bottom re-attaches the view to
+// the tail and ends the loop.
+func TestDragScrollBottomResumesFollowing(t *testing.T) {
+	t.Parallel()
+	m := dragScrollModel(t, false)
+	bottom := m.viewport.YOffset()
+	m.viewport.SetYOffset(bottom - 2)
+	m.detached = true
+	rows := m.transcriptRows()
+	m = step(t, m, leftClick(0, 2))
+	m = step(t, m, leftDrag(0, rows+4))
+	m, cmd := dragTick(t, m)
+	if m.viewport.YOffset() != bottom {
+		t.Fatalf("offset %d, want the bottom %d", m.viewport.YOffset(), bottom)
+	}
+	if m.detached {
+		t.Fatal("reaching the bottom must resume following")
+	}
+	if cmd != nil || m.dragScroll.running {
+		t.Fatal("the loop kept running at the bottom")
+	}
+}
+
+// TestDragScrollSingleLoop: motion reports inside the zone within one tick restate the pointer's
+// distance without starting a second loop; the next tick scrolls by the latest distance.
+func TestDragScrollSingleLoop(t *testing.T) {
+	t.Parallel()
+	m := parkAtTop(dragScrollModel(t, false))
+	rows := m.transcriptRows()
+	m = step(t, m, leftClick(0, 2))
+	m, first := stepCmd(t, m, leftDrag(0, rows))
+	if first == nil {
+		t.Fatal("the first motion past the edge started no loop")
+	}
+	gen := m.dragScroll.gen
+	for _, y := range []int{rows + 1, rows + 3} {
+		var cmd tea.Cmd
+		m, cmd = stepCmd(t, m, leftDrag(0, y))
+		if cmd != nil {
+			t.Fatalf("y=%d: a motion inside the zone scheduled a second loop", y)
+		}
+		if m.dragScroll.gen != gen {
+			t.Fatalf("y=%d: a motion inside the zone bumped the generation", y)
+		}
+	}
+	before := m.viewport.YOffset()
+	m, _ = dragTick(t, m)
+	if got := m.viewport.YOffset() - before; got != 4 {
+		t.Fatalf("scrolled %d lines, want 4 (the latest distance)", got)
+	}
+}
+
+// TestDragScrollStopsWhenSpanChanges: a re-render that drops the selection mid-drag ends the loop.
+func TestDragScrollStopsWhenSpanChanges(t *testing.T) {
+	t.Parallel()
+	m := parkAtTop(dragScrollModel(t, false))
+	m = step(t, m, leftClick(0, 0))
+	m = step(t, m, leftDrag(5, 1))
+	m = step(t, m, leftDrag(5, m.transcriptRows()+1))
+	if !m.dragScroll.running {
+		t.Fatal("precondition: no auto-scroll running")
+	}
+	m = step(t, m, tea.WindowSizeMsg{Width: 60, Height: 24}) // a rewrap rewrites the spanned lines
+	if m.transcriptSel.active {
+		t.Fatal("precondition: the rewrap did not drop the selection")
+	}
+	off := m.viewport.YOffset()
+	m, cmd := dragTick(t, m)
+	if cmd != nil || m.dragScroll.running || m.viewport.YOffset() != off {
+		t.Fatal("the loop scrolled on after its selection dropped")
+	}
+}
+
+// TestDragScrollUpUnderStickyHeader: with the owning prompt stuck over row 0, scrolling up moves the
+// head to the first line drawn under the header — the revealed line — never to the prompt.
+func TestDragScrollUpUnderStickyHeader(t *testing.T) {
+	t.Parallel()
+	m := dragScrollModel(t, true)
+	if _, count := m.stickyHeaderSpan(); count == 0 {
+		t.Fatal("setup: no sticky header over the top rows")
+	}
+	m = step(t, m, leftClick(0, 10))
+	m = step(t, m, leftDrag(0, 0))
+	m, _ = dragTick(t, m)
+	_, count := m.stickyHeaderSpan()
+	if want := m.viewport.YOffset() + count; m.transcriptSel.head.line != want {
+		t.Fatalf("head on line %d, want the revealed line %d under the header", m.transcriptSel.head.line, want)
+	}
+	if strings.Contains(m.lines[m.transcriptSel.head.line], "HEADERPROMPT") {
+		t.Fatal("the head landed on the sticky prompt, not the revealed line")
+	}
+}
