@@ -3,6 +3,7 @@ title: The terminal pre-flight refuses a heredoc whose body has an apostrophe
 status: open
 type: bug
 priority: 2
+plan: 2026-11-01 - 00 - heredoc-preflight-plan.md
 created: 2026-11-01T11:30:44Z
 ---
 
