@@ -17,7 +17,9 @@ on:
     # .apogee/** (TestRepoReleaseSkillsLoad), graphics/demo/stage/** (gofmt -l . reads
     # stage's Go). A new test that reads a file dropped here must take it back below, or a
     # push touching only that file goes untested. pull_request stays unfiltered: the PRs this
-    # repo gets are dependabot's, which always touch code.
+    # repo gets are dependabot's, which always touch code. The release gate mirrors this list
+    # (`ciPushPaths` in cmd/release/cifilter.go) to peel commits CI never runs on, and a drift
+    # test fails until the two agree: edit both together, using only `*` and `**` globs.
     paths:
       - '**'
       - '!.capcom/**'

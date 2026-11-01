@@ -214,7 +214,12 @@ internal/tui/model_test.go — TestContextGaugeShowsEstimateUntilFirstReading, T
 **Closes:** fetch-ingest-size-blind
 **Commit:** `feat(tui): the context gauge moves on each tool-result estimate`
 
-## 8. The release gate peels commits CI never runs on
+## 8. The release gate peels commits CI never runs on — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): the ADR 0098 decision item 5 paragraph (adr-0098-decision.md:54) still states the old CHANGELOG/VERSION-only peel and still matches the Acceptance grep; it is deliberately left as written, with the dated amendment blockquote directly under it superseding it, since AGENTS.md says a record's Decision text is corrected by amendment, never rewritten.
+NOTES (2026-11-01): `capcom check` exits 1 on this tree and on the untouched base alike, solely for "AGENTS.md:40: the capcom block is out of date; run capcom agents to refresh it" — pre-existing, unrelated to this item; it reports nothing about the edited ADR Notes.
+NOTES (2026-11-01): the matcher also implements a leading `**/` as zero or more directories (GitHub's reading), a form ci.yml does not use today, pinned by TestCompileGlob; `?`, `+` and `[` stay refused by the drift test.
+NOTES (2026-11-01): the release skill's step 1a now re-runs step 1's block right after the push and carries on when the gate is ok, skipping the CI wait; its `RUN=none` bullet now says a gate still blocked after that re-run means the commit below the prose has no green run either.
 
 **What:**
 **Goal:** The release gate peels a trailing first-parent commit whose every path either is CHANGELOG.md/VERSION or is skipped by `ci.yml`'s `on.push.paths` filter, so a prose-only HEAD clears on the green run below it. Take-back paths (`.capcom/knowledge/decisions/adr-0098.md`, `graphics/demo/stage/**`) are not peeled. A drift test fails when the gate's copy of the filter and `ci.yml` disagree. The gate docs, `status` help, ADR 0098 and the release skill state the widened rule. Fixes defect `release-gate-prose-deadlock`.

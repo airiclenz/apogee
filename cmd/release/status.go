@@ -59,14 +59,14 @@ func newStatusCommand(commands runner) *cobra.Command {
 		Use:   "status [vX.Y.Z]",
 		Short: "Report the release gate, the release baseline and each publish step",
 		Long: "status is read-only apart from fetching origin. It reports the release gate — a clean\n" +
-			"tree, the gate commit (HEAD past its CHANGELOG.md/VERSION-only commits) on origin/main,\n" +
-			"origin/main contained in HEAD, and a successful ci.yml run — naming each condition that\n" +
-			"blocks it; the baseline (the latest published release and the commits since); and the\n" +
-			"highest release tag. It probes each publish step (tag, release, homebrew, scoop,\n" +
-			"winget, smoke) for the version: done, pending, setup-pending or unknown. The version\n" +
-			"defaults to VERSION, whose steps are probed only when it is above the baseline; a bare\n" +
-			"X.Y.Z reads as vX.Y.Z. It exits 0 when the gate clears and 1 when it is blocked or a\n" +
-			"check or probe could not run.",
+			"tree, the gate commit (HEAD past its trailing commits that touch only CHANGELOG.md,\n" +
+			"VERSION or paths ci.yml's push filter skips) on origin/main, origin/main contained in\n" +
+			"HEAD, and a successful ci.yml run — naming each condition that blocks it; the baseline\n" +
+			"(the latest published release and the commits since); and the highest release tag. It\n" +
+			"probes each publish step (tag, release, homebrew, scoop, winget, smoke) for the version:\n" +
+			"done, pending, setup-pending or unknown. The version defaults to VERSION, whose steps are\n" +
+			"probed only when it is above the baseline; a bare X.Y.Z reads as vX.Y.Z. It exits 0 when\n" +
+			"the gate clears and 1 when it is blocked or a check or probe could not run.",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) > 1 {
 				return fmt.Errorf("status takes at most one version, got %d arguments", len(args))

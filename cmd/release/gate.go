@@ -18,9 +18,10 @@ const (
 	shortSHASize = 12
 )
 
-// peelablePaths are the only files a commit may touch for the gate to look past it: the two a
-// cut's own commits write (the changelog rollup and the VERSION bump), and the two every
-// per-feature micro-bump writes.
+// peelablePaths are the files a commit may touch for the gate to look past it beyond those
+// ci.yml's push filter skips: the two a cut's own commits write (the changelog rollup and the
+// VERSION bump), and the two every per-feature micro-bump writes. VERSION is one CI runs on, so
+// it is named here; CHANGELOG.md is skipped by the filter as well.
 var peelablePaths = []string{"CHANGELOG.md", versionFile}
 
 // gateReport is the CI gate's verdict: whether a cut may proceed, the commit it was judged on,
@@ -32,10 +33,12 @@ type gateReport struct {
 }
 
 // checkGate judges the release gate over the checkout in dir. The gate commit G is HEAD with its
-// trailing first-parent commits that touch only CHANGELOG.md and/or VERSION peeled off. The gate
-// clears when the tree is clean, G is on origin/main, origin/main is contained in HEAD, and
-// ci.yml has a successful run for G or for a peeled commit origin/main contains — a push runs CI
-// on its head alone, so a feature pushed with its micro-bump leaves the green run on the bump.
+// trailing first-parent commits peeled off whose every path is CHANGELOG.md, VERSION or one
+// ci.yml's push filter skips — a release's own commits, micro-bumps, and prose CI never runs on.
+// The gate clears when the tree is clean, G is on origin/main, origin/main is contained in HEAD,
+// and ci.yml has a successful run for G or for a peeled commit origin/main contains — a push runs
+// CI on its head alone, so a feature pushed with its micro-bump leaves the green run on the bump,
+// and a prose-only push runs none, leaving the green run on the commit below it.
 // A check that cannot run is a failure too, named with its cause; the gate has no bypass.
 func checkGate(ctx context.Context, commands runner, dir string) gateReport {
 	report := gateReport{Failures: []string{}}
@@ -92,7 +95,7 @@ func checkGate(ctx context.Context, commands runner, dir string) gateReport {
 }
 
 // peelBumps walks HEAD's first-parent line back past every commit whose own changes touch only
-// peelablePaths, and returns the first commit it stops at (the gate commit) and the commits it
+// peelablePaths and paths ci.yml's push filter skips, and returns the first commit it stops at (the gate commit) and the commits it
 // walked past, newest first. It stops at any commit that is not an ordinary one-parent commit — a
 // merge is never peeled — and at one that touches nothing at all.
 func peelBumps(ctx context.Context, commands runner, dir, head string) (string, []string, error) {
@@ -125,14 +128,15 @@ func peelBumps(ctx context.Context, commands runner, dir, head string) (string, 
 }
 
 // touchesOnlyPeelablePaths reports whether the diff-tree path list names at least one path and
-// nothing outside peelablePaths.
+// each one is in peelablePaths or skipped by ci.yml's push filter. A path the filter takes back
+// (an ADR a test stats, the demo stage's Go) is one CI runs on, so it stops the peel.
 func touchesOnlyPeelablePaths(changed string) bool {
 	paths := strings.Fields(changed)
 	if len(paths) == 0 {
 		return false
 	}
 	for _, path := range paths {
-		if !slices.Contains(peelablePaths, path) {
+		if !slices.Contains(peelablePaths, path) && !isSkippedByCI(path) {
 			return false
 		}
 	}

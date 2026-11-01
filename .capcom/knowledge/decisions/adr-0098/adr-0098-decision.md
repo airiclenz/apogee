@@ -63,6 +63,19 @@ title: ADR 0098 decision
    `VERSION`, so the commit that was gated is, in effect, the commit that ships. The gate has no
    bypass: red CI, flaky or not, blocks the release until it is fixed.
 
+   > **Amended 2026-11-01 (`release-gate-prose-deadlock`; plan `2026-11-01 - 00`, item 8).** The
+   > peel also walks past a trailing first-parent commit whose every path is one `ci.yml`'s
+   > `on.push.paths` filter skips, alone or beside `CHANGELOG.md` and `VERSION`. A push touching
+   > only such paths runs no CI, so a prose-only `HEAD` (an issue, a plan) left the gate blocked
+   > with nothing that could ever clear it; it now clears on the green run below it. A path the
+   > filter takes back (`.capcom/knowledge/decisions/adr-0098.md`, `graphics/demo/stage/**`) is
+   > one CI runs on, so it stops the peel; a merge or an empty commit still stops it too. The
+   > gate keeps an ordered copy of the filter in `cmd/release/cifilter.go`, read last match wins
+   > as GitHub reads it, and a drift test fails when that copy and `ci.yml` disagree. This
+   > supersedes the peel rule above and its claim that the commit that was gated is, in effect,
+   > the commit that ships: a peeled prose commit ships ungated, which is safe only because CI
+   > reads none of its paths.
+
 6. **Package manifests are rendered whole from templates in this repo.** The Homebrew formula
    in `airiclenz/homebrew-tap` and the Scoop manifest in `airiclenz/scoop-bucket` are generated
    output. `cmd/release` renders each one from a template kept beside it, filling in the version

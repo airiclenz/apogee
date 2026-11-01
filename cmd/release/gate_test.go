@@ -16,6 +16,7 @@ const (
 	rollupCommit  = "4000000000000000000000000000000000000000"
 	sideCommit    = "5000000000000000000000000000000000000000"
 	mergeCommit   = "6000000000000000000000000000000000000000"
+	proseCommit   = "7000000000000000000000000000000000000000"
 )
 
 // The `git diff-tree -r --name-only <parent> <commit>` outputs the test commits answer with.
@@ -26,6 +27,13 @@ const (
 	rollupPaths  = "CHANGELOG.md\nVERSION\n"
 	featurePaths = "cmd/release/dist.go\ncmd/release/dist_test.go\n"
 	mixedPaths   = "CHANGELOG.md\nREADME.md\n"
+	// prosePaths are all skipped by ci.yml's push filter; takeBackPaths is one the filter
+	// drops by its tree and then takes back, so CI runs on it.
+	prosePaths        = ".capcom/issues/x.md\ndocs/plans/p.md\n"
+	proseAndBumpPaths = ".capcom/issues/x.md\nCHANGELOG.md\nVERSION\n"
+	takeBackPaths     = ".capcom/knowledge/decisions/adr-0098.md\n"
+	proseAndCodePaths = ".capcom/issues/x.md\ncmd/release/gate.go\n"
+	linearProsePaths  = ".capcom/issues/x.md\n"
 )
 
 // fakeCommit is one commit of a fakeRepo: its parents, and the paths it changes against its
@@ -53,14 +61,23 @@ type fakeRepo struct {
 	remote fakeRemote
 }
 
-// linearHistory is root ← feature ← bump ← rollup, each commit with its own path set.
+// linearHistory is root ← feature ← bump ← rollup ← prose, each commit with its own path set;
+// the prose commit changes only a path ci.yml's push filter skips.
 func linearHistory() map[string]fakeCommit {
 	return map[string]fakeCommit{
 		rootCommit:    {},
 		featureCommit: {parents: []string{rootCommit}, changed: featurePaths},
 		bumpCommit:    {parents: []string{featureCommit}, changed: bumpPaths},
 		rollupCommit:  {parents: []string{bumpCommit}, changed: rollupPaths},
+		proseCommit:   {parents: []string{rollupCommit}, changed: linearProsePaths},
 	}
+}
+
+// historyWithHead is linearHistory with one more commit on top of the rollup, changing paths.
+func historyWithHead(paths string) map[string]fakeCommit {
+	history := linearHistory()
+	history[sideCommit] = fakeCommit{parents: []string{rollupCommit}, changed: paths}
+	return history
 }
 
 // exitStatus is a failed command that ran and exited with this status, as exec.ExitError
@@ -143,8 +160,9 @@ func (r fakeRepo) reaches(from, target string) bool {
 }
 
 // TestGatePeelsOnlyTrailingChangelogAndVersionCommits pins how the gate commit is found: HEAD's
-// trailing first-parent commits that touch only CHANGELOG.md and/or VERSION are walked past, the
-// walk stops at the first commit touching anything else, and a merge is never walked past.
+// trailing first-parent commits whose every path is CHANGELOG.md, VERSION or one ci.yml's push
+// filter skips are walked past, the walk stops at the first commit touching anything else — a
+// path the filter takes back included — and a merge is never walked past.
 func TestGatePeelsOnlyTrailingChangelogAndVersionCommits(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +187,10 @@ func TestGatePeelsOnlyTrailingChangelogAndVersionCommits(t *testing.T) {
 		"a root commit at HEAD is the gate":      {commits: linearHistory(), head: rootCommit, want: rootCommit},
 		"a bump onto the root stops at the root": {commits: map[string]fakeCommit{rootCommit: {}, bumpCommit: {parents: []string{rootCommit}, changed: bumpPaths}}, head: bumpCommit, want: rootCommit},
 		"an empty commit is not peeled":          {commits: map[string]fakeCommit{rootCommit: {}, bumpCommit: {parents: []string{rootCommit}}}, head: bumpCommit, want: bumpCommit},
+		"a prose-only commit is peeled":          {commits: historyWithHead(prosePaths), head: sideCommit, want: featureCommit},
+		"prose with a bump is peeled":            {commits: historyWithHead(proseAndBumpPaths), head: sideCommit, want: featureCommit},
+		"a take-back path stops the peel":        {commits: historyWithHead(takeBackPaths), head: sideCommit, want: sideCommit},
+		"prose mixed with code stops the peel":   {commits: historyWithHead(proseAndCodePaths), head: sideCommit, want: sideCommit},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -216,6 +238,10 @@ func TestGateNamesEachFailingCondition(t *testing.T) {
 		},
 		"green run on the peeled bump, none on G clears": {
 			repo:       fakeRepo{head: bumpCommit, originMain: bumpCommit, greenRuns: []string{bumpCommit}},
+			wantCommit: featureCommit,
+		},
+		"a prose-only HEAD clears on its parent's green run": {
+			repo:       fakeRepo{head: proseCommit, originMain: proseCommit, greenRuns: []string{rollupCommit}},
 			wantCommit: featureCommit,
 		},
 		"green run on a peeled commit origin/main lacks does not clear": {

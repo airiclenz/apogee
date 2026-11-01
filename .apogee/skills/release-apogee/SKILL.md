@@ -93,11 +93,15 @@ echo "HEAD=$(git rev-parse HEAD)"
 ```
 
 `NOT_ON_MAIN` → stop and say so. Otherwise name the commits pushed (none
-when HEAD was already on origin/main and only its CI was missing). Then
-find the `ci.yml` run for HEAD and wait for it to finish — GitHub can take a
-while to list a new run, so the loop waits up to 10 minutes for it to
-appear, then the watch runs as long as CI does. Give the shell call a long
-timeout, or run it in the background and wait for it:
+when HEAD was already on origin/main and only its CI was missing), then run
+step 1's block again first. The gate peels trailing commits whose every
+path `ci.yml`'s push filter skips, so a push of prose alone (issues, plans)
+can clear it on the green run already below it: when the gate is now ok,
+carry on from step 1's ledger line and skip the wait. Otherwise find the
+`ci.yml` run for HEAD and wait for it to finish — GitHub can take a while to
+list a new run, so the loop waits up to 10 minutes for it to appear, then
+the watch runs as long as CI does. Give the shell call a long timeout, or
+run it in the background and wait for it:
 
 ```bash
 H="HEAD_VALUE"; ID=""
@@ -112,8 +116,10 @@ echo "RUN=${ID:-none}"
 
 - `RUN=none` → **stop**. No CI run exists for HEAD. The usual cause is a
   push that touched only paths `ci.yml` filters out (`.capcom/**`,
-  `docs/plans/**`, `CHANGELOG.md`, …): CI will never run on it, so the gate
-  stays blocked until a commit CI does run on lands on top. Say that.
+  `docs/plans/**`, `CHANGELOG.md`, …): CI never runs on it, and the gate
+  peels such commits, so a gate still blocked after the re-run means the
+  commit below them has no green run either. Say that, and list the gate's
+  failures verbatim.
 - `CI=red` → **stop**. Relay the failed jobs with
   `gh run view <RUN> --log-failed | tail -n 60 || true`. Red CI blocks the
   release, flaky or not; never re-run a job to get past it.
