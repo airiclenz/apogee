@@ -1306,7 +1306,10 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // twin's detail takes it off (subprocessDetail) — instead of
 // spending the slot on whichever line the output happened to open with. It is laid out through the
 // clean twin's own builder for the same reason (outputBody): that body is output a slot beside it
-// already summarises, and it answers the per-line flood cap exactly as the clean run's does.
+// already summarises, and it answers the per-line flood cap exactly as the clean run's does. A hook
+// that hands back NO output — a command that failed without printing a line — does not leave the
+// code standing alone behind an empty ▶: the body falls back to the failure text the model received,
+// the `cwd:` line off and the marker verbatim (hookedFailureBody).
 //
 // This seam used to record the result's FIRST LINE as the slot's floor everywhere else, on the
 // reading that for a tool failing in prose that line IS the error message. The ratified call on
@@ -1342,12 +1345,28 @@ func (tv *toolView) absorbFailure(result domain.ToolResult) {
 	if p, known := tv.presenter(); known && p.failure != nil {
 		if word, output, ok := p.failure(result); ok {
 			tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + word})
-			tv.Details = tv.Details.with(outputBody(output))
+			tv.Details = tv.Details.with(hookedFailureBody(output, content))
 			return
 		}
 	}
 	tv.Summary = namedSummary(detailLine{Text: erroredSummary})
 	tv.Details = tv.Details.with(failureBody(content))
+}
+
+// hookedFailureBody is the body beneath a slot a failure hook worded: the output the hook handed
+// back, laid out as its clean twin's would be (outputBody). Output that is blank throughout — a
+// command that failed without printing a line, a steered delegation whose fault line went to the
+// slot — leaves nothing there, and a failed row with nothing behind its ▶ hides the one account of
+// the failure the model was given. So the body then falls back to that account itself: the whole
+// result, the `cwd:` line written for the model taken off (domain.StripCwdLine) and every other
+// line — the `[exit code N — fail-fast: …]` marker the slot read its code from among them — verbatim
+// and unclipped, as the fallback failure's body is (failureBody). It is one floor for every hook
+// rather than a reading per tool, so a hook added later cannot leave a failed row blank either.
+func hookedFailureBody(output, content string) []detailLine {
+	if body := outputBody(output); len(body) > 0 {
+		return body
+	}
+	return failureBody(domain.StripCwdLine(content))
 }
 
 // absorbProse fills the two halves from the result's PROSE — the layers that predate the ratified

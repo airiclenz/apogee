@@ -676,6 +676,9 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		content     string
 		wantSummary string
 		wantBody    []string
+		// headsRun marks a delegation: it heads a run of its own and never groups, so the
+		// grouping assertion does not apply to it.
+		headsRun bool
 	}{{
 		name:        "a failed command's slot is its exit code, its output the body",
 		call:        domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"ls -la"}`)},
@@ -697,10 +700,29 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		wantSummary: "error: exit -1",
 		wantBody:    []string{"output was cut short: something the command left running still held the pipe and was killed"},
 	}, {
-		name:        "a failure that printed nothing is the exit code alone",
+		// A failure that printed nothing still has a body: the failure text the model received, so
+		// the row's ▶ opens onto what it was told rather than onto nothing (hookedFailureBody).
+		name:        "a failure that printed nothing opens onto the marker the model was told",
 		call:        domain.ToolCall{ID: "4", Tool: "terminal", Arguments: []byte(`{"command":"false"}`)},
 		content:     "\n[exit code 1]",
 		wantSummary: "error: exit 1",
+		wantBody:    []string{"[exit code 1]"},
+	}, {
+		name:        "python_exec's blank failure opens onto its marker, the cwd line off",
+		call:        domain.ToolCall{ID: "4p", Tool: "python_exec", Arguments: []byte(`{"code":"import sys; sys.exit(3)"}`)},
+		content:     "cwd: /ws\n[exit code 3]",
+		wantSummary: "error: exit 3",
+		wantBody:    []string{"[exit code 3]"},
+	}, {
+		// A steered delegation whose whole text is its fault line hands the slot that line and
+		// nothing back for the body: the body is then the text the parent model received, the
+		// steering notice with it.
+		name:        "a steered delegation with nothing left for the body opens onto its whole result",
+		call:        domain.ToolCall{ID: "4s", Tool: "sub_agent", Arguments: []byte(`{"task":"survey the tests"}`)},
+		content:     envelopeFaultLine + envelopeSteeredOne,
+		wantSummary: "error: " + envelopeFaultLine + " · steered by 1 message",
+		wantBody:    []string{envelopeFaultLine, "", "(the user sent 1 message to this sub-agent while it ran)"},
+		headsRun:    true,
 	}, {
 		// The marker is read at the END of the output, where the tool writes it: output that spells
 		// the phrase itself is a line of the body like any other.
@@ -711,11 +733,13 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		wantBody:    []string{"[exit code 0]"},
 	}, {
 		// The terminal writes WHY a fail-fast line stopped inside the brackets; the slot still
-		// wants the code alone, and the whole marker still comes off the body.
+		// wants the code alone. With nothing printed above it, the marker is the whole account of
+		// the failure the model received, so the body is that marker verbatim, note and all.
 		name:        "a fail-fast note inside the marker still reads as the code",
 		call:        domain.ToolCall{ID: "8", Tool: "terminal", Arguments: []byte(`{"command":"false; echo after"}`)},
-		content:     "\n[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected non-zero exits with `|| true`]",
+		content:     "cwd: /ws\n[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected non-zero exits with `|| true`]",
 		wantSummary: "error: exit 1",
+		wantBody:    []string{"[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected non-zero exits with `|| true`]"},
 	}, {
 		// Under bash the terminal also names the command that stopped the line, on its own line
 		// ABOVE the marker — never inside the brackets, where a `]` from the quoted command would
@@ -787,7 +811,7 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 			}
 			// The output moving under the branch is a body like any other: it changes what the block
 			// SHOWS, never what shape it is, so a failed call still groups with its neighbours.
-			if !groupable(tv) {
+			if !tc.headsRun && !groupable(tv) {
 				t.Error("an errored call must still group with its neighbours")
 			}
 		})
@@ -797,7 +821,8 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 // TestPresentToolCallOutcomeSplit pins which half of the outcome each kind of producer fills —
 // the split the block's shape is read off. A fixed result header is summary-only (it fills the
 // branch row's outcome slot). Free-form command output fills the half its own size dictates:
-// output of one line (including none at all) takes that slot like any other one-line outcome,
+// output of one line takes that slot like any other one-line outcome — a subprocess run that
+// printed none at all keeps its exit code there over a "(no output)" body —
 // while output with more to say is a body beneath the command (docs/layout/tool-layout.md,
 // "Single tool expanded") — and
 // that body now holds every line, since the collapsed shape's remainder is the painter's act.
@@ -848,18 +873,29 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			wantStat:    "exit 0",
 		},
 		{
-			name:        "empty terminal output is the exit code alone",
+			// The slot keeps the exit code; the phrase saying nothing was printed is the body the
+			// row's ▶ opens onto, so an empty run is as openable as a failed one (subprocessDetail).
+			name:        "empty terminal output is the exit code over a (no output) body",
 			call:        domain.ToolCall{ID: "4", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
 			result:      domain.ToolResult{CallID: "4", Content: "\n"},
 			wantSummary: "exit 0",
+			wantBody:    []string{"(no output)"},
 		},
 		{
 			// The `cwd:` line the tool writes for the model (domain.StripCwdLine) is not
 			// output the command printed: `true` still reads "(no output)" with it there.
-			name:        "the cwd line is not output: empty output beneath it is still the exit code alone",
+			name:        "the cwd line is not output: empty output beneath it is still (no output)",
 			call:        domain.ToolCall{ID: "4c", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},
 			result:      domain.ToolResult{CallID: "4c", Content: "cwd: /ws\n"},
 			wantSummary: "exit 0",
+			wantBody:    []string{"(no output)"},
+		},
+		{
+			name:        "python_exec's empty run reads the same way",
+			call:        domain.ToolCall{ID: "4py", Tool: "python_exec", Arguments: []byte(`{"code":"pass"}`)},
+			result:      domain.ToolResult{CallID: "4py", Content: "cwd: /ws\n"},
+			wantSummary: "exit 0",
+			wantBody:    []string{"(no output)"},
 		},
 		{
 			name:        "one line beneath the cwd line still promotes",

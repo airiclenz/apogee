@@ -817,8 +817,18 @@ func subprocessFailure(res domain.ToolResult) (string, string, bool) {
 // subprocessDetail is outputDetail for the same two tools on the SUCCESS route, with the `cwd:`
 // line taken off first for the reason subprocessFailure gives; the one-line promotion and the
 // "(no output)" reading are then decided on the output the command actually printed.
+//
+// "(no output)" is a BODY here rather than outputDetail's slot: these two tools' slot is the exit
+// code (exitCodeStat), which would write over that phrase and leave a row with nothing behind its ▶
+// — and a run that printed nothing is a fact the reader should be able to open the row to confirm,
+// the same row a failed twin opens onto its failure text (hookedFailureBody). The slot keeps
+// `exit 0`; a collapsed lone row counts the one line beside it like any other body.
 func subprocessDetail(content string) toolOutcome {
-	return outputDetail(domain.StripCwdLine(content))
+	output := domain.StripCwdLine(content)
+	if strings.TrimSpace(output) == "" {
+		return toolOutcome{Details: []detailLine{{Text: noOutputPhrase}}}
+	}
+	return outputDetail(output)
 }
 
 // consoleStatusStat words the slot of the three Console calls that report on a live process
@@ -1933,13 +1943,18 @@ func answerLines(content string) []string {
 	return splitLines(trimmed)
 }
 
+// noOutputPhrase is how the block words a run that printed nothing — outputDetail's slot, and the
+// body a subprocess row opens onto (subprocessDetail).
+const noOutputPhrase = "(no output)"
+
 // outputDetail splits free-form output (a command run, a diagnostics report, a sub-agent
 // report) into the half its own size dictates, keeping EVERY line it was given. Which half it
 // fills follows the same rule as every other extractor: output that comes to exactly ONE
 // non-empty-led line — a single-line result, or none at all — is that call's whole outcome and
-// fills the branch row's outcome slot ("┕ true ⋯⋯⋯ (no output)"), which is also what keeps such
-// calls grouping; output with more to say is a body and lays out beneath the target instead,
-// because two lines cannot share a row (docs/layout/tool-layout.md, "Single tool collapsed").
+// fills the branch row's outcome slot ("┕ HEAD ⋯⋯⋯ (no output)" for an empty git_log), which is
+// also what keeps such calls grouping; output with more to say is a body and lays out beneath the
+// target instead, because two lines cannot share a row (docs/layout/tool-layout.md, "Single tool
+// collapsed"). The two subprocess tools word the empty case as a body instead (subprocessDetail).
 //
 // The one-line half is an OFFER, not a settlement: a line too long to share a narrow row with the
 // target is put back into the body by the painter's promote-guard, which is why that half hands over
@@ -1960,7 +1975,7 @@ func answerLines(content string) []string {
 func outputDetail(content string) toolOutcome {
 	body := outputBody(content)
 	if len(body) == 0 {
-		return summaryOnly("(no output)")
+		return summaryOnly(noOutputPhrase)
 	}
 	if len(body) == 1 {
 		// The one-line half is a promotion the painter may still refuse, so the stat travels with
@@ -1996,8 +2011,9 @@ func consoleOpenDetail(content string) toolOutcome {
 
 // outputBody is the body half of that split on its own: free-form output as the lines it lays out
 // as, trailing blank lines and a leading run of them dropped, each under the per-line clip. Output
-// that is blank throughout has no lines at all — the callers word that case themselves, one as
-// "(no output)" and the other as the exit code standing alone (absorbFailure).
+// that is blank throughout has no lines at all — the callers word that case themselves: a clean
+// run as "(no output)" (outputDetail's slot, subprocessDetail's body) and a failure as the text the
+// model received (hookedFailureBody).
 func outputBody(content string) []detailLine {
 	return bodyLines(content, true)
 }

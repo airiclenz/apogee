@@ -87,6 +87,16 @@ closer is drawn today.
   wraps whole — however long its longest line, that body being the only place
   the message is said at all — instead of eating the target off the row. On a type row the slot
   aggregates the run (below).
+  **Failed and empty runs:** a row with a verdict always has a body behind its
+  ▶. A call whose tool worded its own failure (`error: exit 1`) but printed
+  nothing beneath it opens onto the failure text the model received, the `cwd:`
+  line taken off and everything else verbatim — `[exit code 2 — fail-fast: …]`
+  for a terminal line that stopped early; a steered delegation with nothing
+  after its cause opens onto its whole result. A terminal or python_exec run
+  that exited cleanly without printing keeps `exit 0` in the slot and opens onto
+  `(no output)`. Standing alone and collapsed, either counts that one line in
+  the remainder wording below: `exit 0 · +1 more line`, `error: exit 1 · +1 more
+  line`.
   **Remainder:** while a lone call is collapsed the slot also carries the count
   of the body behind it, after the same middle dot the stats use —
   `exit 0 · +3 more lines` — so the block is its header and one row and the
@@ -379,8 +389,8 @@ its body whole while collapsed, and it appears only when the two differ.
 | list_dir | List | path (`· recursive` when set) | `N entries` | the listing |
 | find_files | Find Files | pattern | `N files` | matched paths |
 | grep | Grep | pattern (`· include` glob) | `N hits · M files` | `path:line` matches + context |
-| terminal | Terminal | the command line | `exit 0` | command + output |
-| python_exec | Python | first code line | `exit 0` | code + output |
+| terminal | Terminal | the command line | `exit 0` | command + output; `(no output)` for a clean run that printed nothing, the failure text the model received for a failed one |
+| python_exec | Python | first code line | `exit 0` | code + output; `(no output)` for a clean run that printed nothing, the failure text the model received for a failed one |
 | console_open | Console | the command line | `console N` (`exit N` when the program was already over) | the program's first output |
 | console_send | Console Send | `console N` (`· what was typed` when the input is not empty) | `alive` / `exit N` / `killed` | what the program printed back |
 | console_read | Console Read | `console N` | `alive` / `exit N` / `killed` | the output since the last read |

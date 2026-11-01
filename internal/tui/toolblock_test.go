@@ -524,6 +524,107 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 	}
 }
 
+// blankRunTranscript is a Terminal run whose last two calls printed nothing: one that failed, one
+// that exited cleanly. The first call prints two lines so the group has an ordinary member to
+// read the blank ones against.
+func blankRunTranscript() *transcript {
+	tr := &transcript{}
+	for _, c := range []struct {
+		id, command, content string
+		failed               bool
+	}{
+		{"c1", "go build ./...", "cwd: /ws\nok\nbuilt", false},
+		{"c2", "false", "cwd: /ws\n[exit code 1]", true},
+		{"c3", "true", "cwd: /ws\n", false},
+	} {
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: c.id, Tool: "terminal",
+			Arguments: []byte(`{"command":"` + c.command + `"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: c.id, Content: c.content, IsError: c.failed}})
+	}
+	return tr
+}
+
+// TestGroupMemberWithABlankRunStillOpens is the member row of a run that printed nothing
+// (docs/layout/tool-layout.md, "Failed and empty runs"): a failed one keeps its exit code in the
+// slot and still carries a ▶, opening onto the failure text the model received — the marker, the
+// `cwd:` line off — and a clean one keeps `exit 0` and opens onto "(no output)". Neither row may
+// be a dead end whose caret reveals nothing.
+func TestGroupMemberWithABlankRunStillOpens(t *testing.T) {
+	t.Parallel()
+
+	const width = 80
+	tr := blankRunTranscript()
+	if !tr.setTypeExpanded(0, true) {
+		t.Fatal("setup: entries[0] does not head the umbrella's Terminal type row")
+	}
+	wantCollapsed := strings.Join([]string{
+		"✦ Tools (3 calls) " + glyphExpanded,
+		leaderEdgeRow("  ┕ Terminal (3) ⋯ 1 error", glyphExpanded),
+		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
+		groupMemberLine("  │ ┝ false ⋯ error: exit 1"),
+		groupMemberLine("  │ ┕ true ⋯ exit 0"),
+	}, "\n")
+	if got := renderPlain(tr, width); got != wantCollapsed {
+		t.Errorf("collapsed members mismatch — each blank run keeps its slot and a ▶:\n--- got ---\n%s\n--- want ---\n%s",
+			got, wantCollapsed)
+	}
+
+	if !tr.setExpanded(1, true) || !tr.setExpanded(2, true) {
+		t.Fatal("a blank run's member is not a toggleable block — its ▶ reveals nothing")
+	}
+	wantExpanded := strings.Join([]string{
+		"✦ Tools (3 calls) " + glyphExpanded,
+		leaderEdgeRow("  ┕ Terminal (3) ⋯ 1 error", glyphExpanded),
+		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
+		leaderEdgeRow("  │ ┝ false ⋯ error: exit 1", glyphExpanded),
+		"  │ │ [exit code 1]",
+		memberEdgeRow(t, "  │ │ ", promptSeeLess, width),
+		leaderEdgeRow("  │ ┕ true ⋯ exit 0", glyphExpanded),
+		"  │ │ (no output)",
+		memberEdgeRow(t, "  │ │ ", promptSeeLess, width),
+	}, "\n")
+	if got := renderPlain(tr, width); got != wantExpanded {
+		t.Errorf("expanded members mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, wantExpanded)
+	}
+}
+
+// TestLoneBlankRunCountsItsOneLine is the same two runs standing alone: a lone block hides its body
+// and counts it in the leader row's slot (collapsedRemainder), so the one line a blank run now
+// opens onto is counted beside its exit code — `exit 0 · +1 more line` clean, `error: exit 1 ·
+// +1 more line` failed — in the remainder wording every other collapsed body uses.
+func TestLoneBlankRunCountsItsOneLine(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, command, content string
+		failed                 bool
+		wantRow                string
+	}{
+		{"a clean run that printed nothing", "true", "cwd: /ws\n", false,
+			groupMemberLine("  ┕ true ⋯ exit 0 · +1 more line")},
+		{"a failed run that printed nothing", "false", "cwd: /ws\n[exit code 1]", true,
+			groupMemberLine("  ┕ false ⋯ error: exit 1 · +1 more line")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal",
+				Arguments: []byte(`{"command":"` + tc.command + `"}`)}})
+			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: tc.content, IsError: tc.failed}})
+
+			lines := strings.Split(renderPlain(tr, 80), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("lone block painted %d rows, want its header and one leader row:\n%s",
+					len(lines), strings.Join(lines, "\n"))
+			}
+			if lines[1] != tc.wantRow {
+				t.Errorf("leader row = %q, want %q", lines[1], tc.wantRow)
+			}
+		})
+	}
+}
+
 // TestSeeLessFooterClosesAnOpenBody is the single block's footer at the seam that decides it: an
 // expanded block that painted a body closes it with a right-aligned see less…, and the two blocks a
 // footer would be lying to get none. One hides nothing, so it is no click target at all and a

@@ -46,7 +46,12 @@
 - 6 (round 2): guard folded (writer's decision: item 3's TestToolStat fetch cases rewritten in place; executable `-run` Acceptance with `TestFetchRow`)
 - 6 (writer): the replay estimate is persisted as an omitempty `session.ToolView` field; the ToolView field pins follow
 
-## 1. Failed and empty subprocess rows always reveal a body
+## 1. Failed and empty subprocess rows always reveal a body — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): the blank-output floor lives in a new helper `hookedFailureBody` (toolview.go) that `absorbFailure` calls on the hooked route, and the phrase became the named constant `noOutputPhrase` (toolregistry.go), shared by `outputDetail` and `subprocessDetail`.
+NOTES (2026-11-01): the painted lone-block test is `TestLoneBlankRunCountsItsOneLine` (toolblock_test.go). Its name joins the Acceptance `-run`: `go test -race -count=1 -run 'TestPresentToolCall|TestGroupMember|TestDecliningStat|TestToolStat|TestLoneBlankRun' ./internal/tui/`. The group-member test is `TestGroupMemberWithABlankRunStillOpens`.
+NOTES (2026-11-01): the sub_agent blank-body case sits in `TestPresentToolCallFailedSubprocessNamesItsExitCode` with a `headsRun` flag. A delegation heads its own run and never groups, so the table's groupable assertion skips that case.
+NOTES (2026-11-01): reworded the `outputDetail` doc example ("┕ true ⋯ (no output)" became an empty git_log's "┕ HEAD ⋯ (no output)") because terminal no longer puts that phrase in the slot.
 
 **What:**
 **Goal:** A failed `terminal` / `python_exec` row whose output is blank has a caret and expands to the failure text the model received with the cwd line stripped (the `[exit code N …]` marker verbatim). Any other hooked failure (`sub_agent`'s `delegationFailure`) with a blank body does the same. A clean empty-output run keeps `exit 0` in the slot and expands to `(no output)`. `docs/layout/tool-layout.md` states both rules. Fixes defect `terminal-error-detail-hidden` (python_exec shares it).
