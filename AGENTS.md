@@ -56,6 +56,7 @@ Without a `capcom` binary, install it from https://github.com/airiclenz/capcom#i
 - `capcom finish <id> --reason <text>`: close it and free the Tree lock; it names the issue to work on next
 - `capcom reopen <id> --reason <text>`: undo a close
 - `capcom create --id <slug> --title <title> [--dep <id>]`: file a new issue
+- `capcom apply <file>`: file a linked set of issues in one call, all or none
 - `capcom dep add <id> <dep-id>`: make an issue wait for another; `capcom dep list <id>` shows both sides
 - `capcom list --tree --depth 2`: the outline of the issues
 - `capcom know tree`: the outline of the Knowledge tree; `capcom know show <id>` reads a Note
