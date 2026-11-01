@@ -31,8 +31,10 @@
 // deliberately do not, and that is not an omission to fill in later: quoting a fixed one-line
 // sentence (ask_user, present_document) or compressing
 // free-form output to a first line plus a count (terminal, python_exec, the other git tools,
-// diagnostics, sub_agent) is RENDERING, not scavenging — there is no re-derived fact there for a
-// type to fix. A summary is optional by construction, so ADR 0002's open extension point is
+// diagnostics) is RENDERING, not scavenging — there is no re-derived fact there for a type to
+// fix. sub_agent is the one summary attached outside this package: its tool here is only the
+// recursion point's placeholder, and the engine that runs the delegation attaches its
+// DelegationOutcome (internal/agent, delegationSummary). A summary is optional by construction, so ADR 0002's open extension point is
 // untouched (a tool that emits none renders from its prose exactly as before); it is never
 // persisted and never sent to the model; and an error result never carries one.
 //
