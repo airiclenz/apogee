@@ -1,10 +1,12 @@
 ---
 title: The terminal pre-flight refuses a heredoc whose body has an apostrophe
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-01 - 00 - heredoc-preflight-plan.md
 created: 2026-11-01T11:30:44Z
+closed: 2026-11-01T17:43:46Z
+reason: "Resolved by plan 2026-11-01 - 00 - heredoc-preflight-plan (archived e30ffd8e): POSIX pre-flight now splits the line without its heredoc bodies; tests pin both verdicts."
 ---
 
 On POSIX, `terminal` refuses a valid command line when a heredoc body holds an unpaired quote, and the shell never sees it. For example:
