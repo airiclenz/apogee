@@ -247,6 +247,8 @@ func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
 		return ev.EventBase, true
 	case domain.UsageEvent:
 		return ev.EventBase, true
+	case domain.ContextEstimateEvent:
+		return ev.EventBase, true
 	case domain.AuditEvent:
 		return ev.EventBase, true // the base's CallID, not the audited call's shadowing member
 	default:

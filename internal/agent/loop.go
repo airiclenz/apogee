@@ -1000,6 +1000,9 @@ func firstMalformedCall(calls []domain.ToolCall) *domain.ToolCall {
 // unscanned, so the live stream still ends where it would have unthrottled; the committed message
 // never depends on any of this — collectCompletion strips the full text once, after the drain.
 func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) completion {
+	// The last reading described the request before this one (contextReading).
+	a.reading.forget()
+
 	var content strings.Builder // the observer's own accumulation: the visible/reasoning split is prefix-stable over it
 	emitted := 0                // bytes of stripped visible content already sent as TokenEvents this stream
 	reasoned := 0               // bytes of stripped inline reasoning already sent as ReasoningEvents this stream
@@ -1037,6 +1040,9 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				// guess (TDD §8 #8, plan item 8).
 				st := req.State()
 				a.tokens.Calibrate(domain.PromptChars(st.Messages, st.Tools), u.PromptTokens)
+				// The same report is the reading the tool-result appends of this reply estimate
+				// from (contextReading), so the gauge moves between replies.
+				a.reading.report(u.PromptTokens, u.CompletionTokens)
 				// Surface the server's token accounting so a streaming observer can light up
 				// the context-usage gauge and time the completion for a tokens/sec readout. A
 				// server that omits usage sends no Usage here, so no event fires (events.go).

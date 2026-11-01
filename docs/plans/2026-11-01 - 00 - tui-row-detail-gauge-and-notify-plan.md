@@ -147,7 +147,15 @@ apogee_alias_internal_test.go — TestEveryDomainEventVariantIsAliased; cmd/apog
 **Depends on:** item 3
 **Commit:** `feat(domain): a context_estimate Event and a per-result token estimate`
 
-## 5. The engine emits the estimate at each tool-result append
+## 5. The engine emits the estimate at each tool-result append — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): the reading holds for the reply it came from only — `streamResponse` forgets it as each request starts (`contextReading.forget`) and takes it at `DeltaDone` with usage — so a reply that reports no usage falls back to `ContextEstimate` instead of stacking on a stale reading. This replaces the Goal's "before any reading" with "where the reply the result answers reported no usage"; it is identical whenever a server always or never reports usage, and also covers a clear, restore, fold or server/model switch without a reset at each site. The domain doc, the manual's `context_estimate` row and `adr-0075-amend-1101` were reworded to match.
+NOTES (2026-11-01): the `contextReading` type and `Agent.contextEstimateEvent` live in internal/agent/contextcost.go beside `ContextEstimate`, the composition they fall back to, and the field sits on the Agent struct in internal/agent/agent.go (the plan's Files list named neither, though its approach keeps "a since-reading char counter on the agent"). The estimate measures the committed message (advice and engine-note fences included), so `EstimatedTokens` equals what the following estimate adds.
+NOTES (2026-11-01): consequential edit — internal/agent/doc.go: made necessary by contextcost.go now owning the between-readings estimate (package-map role line).
+NOTES (2026-11-01): consequential edit — internal/domain/events.go: made necessary by the per-reply reading rule (ContextEstimateEvent doc's fallback clause).
+NOTES (2026-11-01): consequential edit — docs/manual/headless.md: made necessary by the per-reply reading rule (the `context_estimate` row's fallback clause).
+NOTES (2026-11-01): consequential edit — .capcom/knowledge/decisions/adr-0075/adr-0075-amend-1101.md: made necessary by the per-reply reading rule (same fallback clause, in the amendment item 4 wrote today).
+NOTES (2026-11-01): the new tests drive `Agent.Run` (one `Step` is one request/dispatch round) and read two different files, since a repeated identical read trips the tool-loop-breaker. `capcom check` still exits 1 on the pre-existing `AGENTS.md:40` capcom-block staleness noted under item 4.
 
 **What:**
 **Goal:** After every tool-result append, the engine emits the `ToolResultEvent` with `EstimatedTokens` set, then a `ContextEstimateEvent` at the same depth. Its Tokens are the last reported context reading at that depth (prompt + completion of the last non-Maintenance usage) plus the estimated tokens of every message appended since. Before any reading it is the Agent's own context estimate. `Calibrated` reports whether the estimator has been calibrated. No Driver logic is added (ADR 0031).

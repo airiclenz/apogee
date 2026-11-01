@@ -550,6 +550,9 @@ func TestToolResultEventCarriesToolAndWriteTarget(t *testing.T) {
 		if ev.Tool != "write_file" {
 			t.Errorf("Tool = %q; want the resolved tool name write_file", ev.Tool)
 		}
+		if ev.EstimatedTokens <= 0 {
+			t.Errorf("EstimatedTokens = %d; want the committed result's estimate, > 0", ev.EstimatedTokens)
+		}
 		// The classification is EvalRealPath's answer, so the expectation walks the same symlinks
 		// (a TempDir under a symlinked /tmp would otherwise disagree on spelling alone).
 		want, err := filepath.EvalSymlinks(filepath.Join(ws, "in.txt"))
@@ -583,7 +586,146 @@ func TestToolResultEventCarriesToolAndWriteTarget(t *testing.T) {
 		if ev.WriteTarget != "" {
 			t.Errorf("WriteTarget = %q; a read is not a write and carries none", ev.WriteTarget)
 		}
+		if ev.EstimatedTokens <= 0 {
+			t.Errorf("EstimatedTokens = %d; want the committed result's estimate, > 0", ev.EstimatedTokens)
+		}
 	})
+}
+
+// estimateProbeSink records every event and, at each ContextEstimateEvent, the Agent's own
+// ContextEstimate taken at that moment. Emit runs on the goroutine driving the Agent, so the
+// idle-only read is safe there and sees exactly the conversation the event was computed over.
+type estimateProbeSink struct {
+	recordingSink
+	agent  *Agent
+	probes []int
+}
+
+func (s *estimateProbeSink) Emit(e domain.Event) {
+	if _, isEstimate := e.(domain.ContextEstimateEvent); isEstimate && s.agent != nil {
+		s.probes = append(s.probes, s.agent.ContextEstimate())
+	}
+	s.recordingSink.Emit(e)
+}
+
+// driveEstimateTurns runs the loop to its end over turns against a workspace holding in.txt and
+// more.txt, with a read_file tool, and returns the probing sink.
+func driveEstimateTurns(t *testing.T, turns ...stubllm.Turn) *estimateProbeSink {
+	t.Helper()
+	ws := t.TempDir()
+	for _, name := range []string{"in.txt", "more.txt"} {
+		if err := os.WriteFile(filepath.Join(ws, name), []byte(strings.Repeat("hello world\n", 40)), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+	sink := &estimateProbeSink{}
+	cfg := autoConfigWS(&sink.recordingSink, &fakeConfiner{caps: capsBoth()}, true, ws,
+		tools.NewReadFile(ws, tools.ReadMounts{}))
+	cfg.Events = sink
+	a, err := newAgent(cfg, scriptedResponder(t, turns...))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	sink.agent = a
+	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return sink
+}
+
+// estimatePair is one tool-result append's two events: the result and the estimate after it.
+type estimatePair struct {
+	result   domain.ToolResultEvent
+	estimate domain.ContextEstimateEvent
+}
+
+// estimatePairsOf pairs each ToolResultEvent with the event right after it, failing unless that
+// event is a ContextEstimateEvent at the same depth, turn and identity.
+func estimatePairsOf(t *testing.T, events []domain.Event) []estimatePair {
+	t.Helper()
+	var pairs []estimatePair
+	for i, e := range events {
+		result, isResult := e.(domain.ToolResultEvent)
+		if !isResult {
+			continue
+		}
+		if i+1 >= len(events) {
+			t.Fatalf("ToolResultEvent %q is the last event; want a ContextEstimateEvent after it", result.Result.CallID)
+		}
+		estimate, isEstimate := events[i+1].(domain.ContextEstimateEvent)
+		if !isEstimate {
+			t.Fatalf("ToolResultEvent %q is followed by %T; want a ContextEstimateEvent", result.Result.CallID, events[i+1])
+		}
+		if estimate.EventBase != result.EventBase {
+			t.Errorf("estimate base = %+v; want the result's own %+v", estimate.EventBase, result.EventBase)
+		}
+		pairs = append(pairs, estimatePair{result: result, estimate: estimate})
+	}
+	return pairs
+}
+
+// TestContextEstimateEventAddsEachResultToTheLastReading pins the estimate between two readings:
+// each tool-result append is followed by a ContextEstimateEvent whose Tokens are the last reply's
+// reported fill (prompt plus completion) plus the result's own estimate, calibrated by that
+// reply's report — and the next reply's reading restarts the count, so the second result is added
+// to the second reading alone.
+func TestContextEstimateEventAddsEachResultToTheLastReading(t *testing.T) {
+	t.Parallel()
+
+	sink := driveEstimateTurns(t,
+		usageToolCallScript("c1", "read_file", `{"path":"in.txt"}`, stubllm.Usage{Prompt: 100, Completion: 20}),
+		usageToolCallScript("c2", "read_file", `{"path":"more.txt"}`, stubllm.Usage{Prompt: 500, Completion: 30}),
+		contentTurn("done"),
+	)
+
+	pairs := estimatePairsOf(t, sink.events)
+	if len(pairs) != 2 {
+		t.Fatalf("got %d tool-result appends; want 2", len(pairs))
+	}
+	for i, reading := range []int{120, 530} {
+		pair := pairs[i]
+		if pair.result.EstimatedTokens <= 0 {
+			t.Errorf("result %d: EstimatedTokens = %d; want > 0", i+1, pair.result.EstimatedTokens)
+		}
+		if want := reading + pair.result.EstimatedTokens; pair.estimate.Tokens != want {
+			t.Errorf("result %d: estimate Tokens = %d; want the reading %d plus the result's %d = %d",
+				i+1, pair.estimate.Tokens, reading, pair.result.EstimatedTokens, want)
+		}
+		if !pair.estimate.Calibrated {
+			t.Errorf("result %d: Calibrated = false; a reported reading calibrates the estimator", i+1)
+		}
+	}
+}
+
+// TestContextEstimateEventWithoutAReadingIsTheAgentsOwnEstimate pins the fallback: a reply that
+// reports no usage leaves no reading, so the estimate after its result is the Agent's own
+// composition (ContextEstimate) at that moment, uncalibrated.
+func TestContextEstimateEventWithoutAReadingIsTheAgentsOwnEstimate(t *testing.T) {
+	t.Parallel()
+
+	sink := driveEstimateTurns(t,
+		toolCallTurn("c1", "read_file", `{"path":"in.txt"}`),
+		contentTurn("done"),
+	)
+
+	pairs := estimatePairsOf(t, sink.events)
+	if len(pairs) != 1 || len(sink.probes) != 1 {
+		t.Fatalf("got %d tool-result appends and %d probes; want 1 of each", len(pairs), len(sink.probes))
+	}
+	estimate := pairs[0].estimate
+	if estimate.Tokens != sink.probes[0] {
+		t.Errorf("estimate Tokens = %d; want the Agent's own ContextEstimate %d", estimate.Tokens, sink.probes[0])
+	}
+	if estimate.Tokens <= pairs[0].result.EstimatedTokens {
+		t.Errorf("estimate Tokens = %d; want more than the result's own %d (the standing surface counts too)",
+			estimate.Tokens, pairs[0].result.EstimatedTokens)
+	}
+	if estimate.Calibrated {
+		t.Error("Calibrated = true; no reply has reported usage, so the estimator is uncalibrated")
+	}
 }
 
 // lastToolResultEventOf returns the last ToolResultEvent the sink recorded, whole — the sibling

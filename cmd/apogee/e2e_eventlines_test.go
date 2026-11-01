@@ -250,8 +250,14 @@ func TestE2EEventLinesGolden(t *testing.T) {
 		// standing prompt's bytes — so its `bytes` and `tokens` members take the same treatment. The
 		// patterns are quote-prefixed, so the `usage` lines' prompt_tokens / total_tokens /
 		// cached_prompt_tokens keys, whose digits the fixture does pin, are untouched.
+		//
+		// A tool_result's estimated_tokens goes through the chars→token ratio the first reply
+		// calibrated against a prompt that spells those paths, and the context_estimate line after
+		// it adds that estimate to the reading — so the first takes its own token and the second's
+		// `tokens` member falls under the `"tokens"` pattern.
 		redactions := append(eventLinesRedactions(workspace),
 			tuitest.Redact(`"standing_tokens":\d+`, `"standing_tokens":"<standing>"`),
+			tuitest.Redact(`"estimated_tokens":\d+`, `"estimated_tokens":"<estimated>"`),
 			tuitest.Redact(`"bytes":\d+`, `"bytes":"<bytes>"`),
 			tuitest.Redact(`"tokens":\d+`, `"tokens":"<tokens>"`))
 		tuitest.GoldenText(t, eventLinesGolden("run"), out, redactions...)

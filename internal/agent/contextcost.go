@@ -81,3 +81,47 @@ func (a *Agent) ContextCost() domain.ContextCost {
 func (a *Agent) ContextEstimate() int {
 	return a.ContextCost().Tokens + a.budget().EstimateTokens(domain.PromptChars(a.conv.Messages(), nil))
 }
+
+// contextReading is one Agent's running context-fill estimate between two Upstream readings
+// (domain.ContextEstimateEvent): the fill the latest reply reported — its prompt plus completion
+// tokens — and the characters of every tool result appended since that reply. A reading holds for
+// the reply it came from and no further: streamResponse forgets it as each request starts, so a
+// reply that reports no usage leaves NO reading rather than a stale one, and the estimate falls back
+// to the Agent's own composition (ContextEstimate). That one rule also covers every wholesale
+// change to the conversation — a clear, a restore, a fold, a server or model switch — since each
+// is followed by a request before the next tool result can land. It is a plain value struct the
+// loop touches only from the goroutine driving its Agent, so it needs no lock.
+type contextReading struct {
+	tokens     int  // the reading's prompt plus completion tokens
+	isReported bool // the latest reply reported usage, so tokens is a reading
+	charsSince int  // the characters of every tool result appended since the reading
+}
+
+// forget drops the reading as a request starts: until that request's reply reports usage, there
+// is none.
+func (r *contextReading) forget() { *r = contextReading{} }
+
+// report takes a reply's server-reported fill as the new reading, restarting the count of what
+// has been appended since.
+func (r *contextReading) report(promptTokens, completionTokens int) {
+	*r = contextReading{tokens: promptTokens + completionTokens, isReported: true}
+}
+
+// appended counts chars more characters committed to the conversation since the reading.
+func (r *contextReading) appended(chars int) { r.charsSince += chars }
+
+// contextEstimateEvent is the ContextEstimateEvent a tool-result append emits: the reading plus the
+// estimated tokens of everything appended since it, through budget's chars→token ratio — or, with
+// no reading, this Agent's own ContextEstimate. It runs on the goroutine driving this Agent, which
+// is what makes ContextEstimate's idle-only read safe here: no other reader is driving it.
+func (a *Agent) contextEstimateEvent(turn int, budget domain.Budget) domain.ContextEstimateEvent {
+	tokens := a.reading.tokens + budget.EstimateTokens(a.reading.charsSince)
+	if !a.reading.isReported {
+		tokens = a.ContextEstimate()
+	}
+	return domain.ContextEstimateEvent{
+		EventBase:  a.base(turn),
+		Tokens:     tokens,
+		Calibrated: a.tokens.Calibrated(),
+	}
+}

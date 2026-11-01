@@ -669,7 +669,8 @@ type UsageEvent struct {
 // ContextEstimateEvent reports the engine's estimate of the EMITTING agent's context fill between
 // two Upstream readings: the last reported reading at that agent's depth (the prompt plus
 // completion of its last non-Maintenance UsageEvent) plus the estimated tokens of every message
-// appended since — before any reading, the agent's own context estimate. It follows the
+// appended since — where the reply the result answers reported no usage, so no reading describes
+// the request it came from, the agent's own context estimate. It follows the
 // ToolResultEvent of each tool-result append, at the same depth, so a Driver's gauge can move while
 // a step's results land instead of waiting for the next reply's UsageEvent.
 //

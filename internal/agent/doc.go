@@ -147,7 +147,8 @@
 // context-file fence is derived from, and the one ride-along-gated walk of it both the seed and
 // the Context cost report take. contextcost.go is that report's producer, Agent.ContextCost:
 // the Turn-1 standing blocks and the tool surface, wire-faithfully, one row per piece with its
-// bytes and token estimate (ADR 0079).
+// bytes and token estimate (ADR 0079) — and of the live estimate beside it: ContextEstimate, and
+// the between-readings contextReading behind each tool-result append's ContextEstimateEvent.
 // contextfiles.go owns the workspace context files' discovery half — the session-scoped cache,
 // its loader, and the construction-time name gate. orientation.go composes the engine-owned
 // orientation block that rides directly after the prompt on that same standing system message,

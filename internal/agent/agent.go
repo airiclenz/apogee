@@ -308,6 +308,13 @@ type Agent struct {
 	// and NOT serialized — a resumed Agent counts from zero.
 	usage usageTally
 
+	// reading is THIS Agent's context-fill estimate between two Upstream readings: the last
+	// reply's reported fill and the characters of every tool result appended since it, behind the
+	// ContextEstimateEvent each tool-result append emits (contextcost.go). Like usage it is touched
+	// only from the goroutine driving this Agent, is per-Session and NOT serialized, and a
+	// sub-agent — a separate Agent — keeps its own.
+	reading contextReading
+
 	// prompts is the ONE prompt surface this Agent's Steps designate on their context
 	// (domain.PromptSlot): the slot every human gate reached under a Step queues on, whatever KIND
 	// of gate it is — an Approval the loop raises itself, or an ask_user question a tool raises one

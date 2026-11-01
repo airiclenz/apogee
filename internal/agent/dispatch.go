@@ -2045,6 +2045,11 @@ func pathWithin(abs, root string) bool {
 // which for a successful read IS a file body, error strings and all. Every route committing a
 // result gets the marker, so the guess is now only ever a legacy-record fallback.
 //
+// The same seam is where the context estimate moves (contextReading): the event carries the
+// committed message's token estimate as EstimatedTokens, and a ContextEstimateEvent at the same
+// depth follows it — on every route, structural and under Bypass too, since it shapes nothing the
+// model sees — so a Driver's gauge tracks a step's results as they land.
+//
 // call is the call the result answers, as the pre-tool-exec Moment left it: its Tool is the
 // resolved name the ToolResultEvent carries. writeTarget is the call's classified write target —
 // the resolved path prepareCall carried from the ladder's one resolution, "" for a call
@@ -2096,16 +2101,23 @@ func (a *Agent) appendToolResult(
 		msg = msg.WithEngineNote(tokenNoticeTopic, text)
 	}
 	a.conv.Append(msg)
+	// The estimate measures the message as committed, trailers included: it is what the context
+	// grew by, and the ContextEstimateEvent that follows counts the same characters.
+	chars := domain.PromptChars([]domain.Message{msg}, nil)
+	a.reading.appended(chars)
+	budget := a.budget()
 	// The event carries the tool's own result, never the trailer: advice is a model-facing
 	// injection, so what an observer records, the transcript shows and the session record keeps is
 	// the output the tool actually produced.
 	a.cfg.Events.Emit(domain.ToolResultEvent{
-		EventBase:   a.base(turn),
-		Result:      result,
-		Tool:        call.Tool,
-		WriteTarget: writeTarget,
-		SpawnRunID:  spawnRunID,
+		EventBase:       a.base(turn),
+		Result:          result,
+		Tool:            call.Tool,
+		WriteTarget:     writeTarget,
+		SpawnRunID:      spawnRunID,
+		EstimatedTokens: budget.EstimateTokens(chars),
 	})
+	a.cfg.Events.Emit(a.contextEstimateEvent(turn, budget))
 }
 
 // structuralFloor is the BOUND behind both structural clamps: the whole History allocation — the
