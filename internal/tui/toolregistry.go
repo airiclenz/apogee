@@ -30,9 +30,13 @@ import (
 // parse a result string to find out what a tool did: prose written for the MODEL is not an
 // interface, and re-deriving facts from it meant a wording change in internal/tools silently
 // degraded a card with no compiler nudge and no failing test in the package that changed. Where
-// the ratified table asks for a fact no typed summary carries and design call 14 forbids growing
-// one, a stat hook does read a header the tool formats deliberately — anchored, and total, so an
-// unrecognised shape falls back to that tool's own first line rather than to a wrong number.
+// the ratified table asks for a fact no typed summary carries, and design call 14 rules out growing
+// one for presentation alone, a stat hook does read a header the tool formats deliberately —
+// anchored, and total, so an unrecognised shape falls back to that tool's own first line rather
+// than to a wrong number. That call yields where a summary carries a fact the TOOL computed and a
+// host would otherwise re-derive from the prose: the two fetch tools' domain.FetchedBody (the
+// status, and whether the body hit the response cap) grew on that ground (plan
+// "2026-11-01 - 00", item 3), so their slot reads the value instead of the result's first line.
 //
 // The two halves stay independent. The wording is the view's own — that several of these
 // lines read like the tool's own header today is what makes the change checkable, not a
@@ -243,11 +247,14 @@ const loadSkillToolName = "load_skill"
 // (docs/layout/tool-layout.md, "Display details per tool"): the label heads the block, the
 // target leads its branch row, and the stat words the right-aligned outcome slot. A cell the
 // table spells `—` is a stat hook returning ("", true) — a deliberately blank slot — and a cell
-// the engine cannot supply without growing a wire (design call 14) is a hook returning false,
-// which leaves the tool's own prose floor in the slot rather than inventing a number.
+// no result carries a fact for (a wire grown for presentation alone is ruled out by design call
+// 14, which the fetch tools' domain.FetchedBody does not breach — it carries facts the tool
+// computed) is a hook returning false, which leaves the tool's own prose floor in the slot rather
+// than inventing a number.
 //
-// Every detail extractor here renders PROSE. The eleven tools that report a typed summary
-// (read_file, git_show, list_dir, grep, view_diff, web_search, git_status, and the four writing tools
+// Every detail extractor here renders PROSE. The thirteen tools that report a typed summary
+// (read_file, git_show, list_dir, grep, view_diff, web_search, git_status, web_fetch, http_request,
+// and the four writing tools
 // write_file, single_find_and_replace, multi_find_and_replace and edit_existing_file) word their slot
 // from that summary through their stat hook — write_file is the one exception, keeping the line
 // count its own REQUEST states (writtenLinesStat) rather than restating the regions it recorded —
@@ -495,12 +502,14 @@ var toolRegistry = map[string]toolPresenter{
 		verb:   "fetching",
 		target: stringArg("url"),
 		detail: firstLineDetail, // "HTTP 200 OK" — the body never floods the chat
+		stat:   fetchedBodyStat,
 	},
 	"http_request": {
 		label:  "HTTP",
 		verb:   "requesting",
 		target: methodURLTarget,
 		detail: firstLineDetail, // "HTTP 200 OK"
+		stat:   fetchedBodyStat,
 	},
 	"web_search": {
 		label:  "Search",
@@ -664,6 +673,21 @@ func searchHitsStat(res domain.ToolResult) (statValue, bool) {
 		return statValue{}, false
 	}
 	return pluralStat(v.Count, "result"), true
+}
+
+// httpStatusPrefix opens a fetch tool's slot, as it opens the status line the tool writes.
+const httpStatusPrefix = "HTTP "
+
+// fetchedBodyStat words the two fetch tools' slot as the status their result's first line names,
+// "HTTP 200 OK" — the very line firstLineDetail quotes for a result carrying no summary, so the
+// slot reads the same whichever path words it. It is clipped as that floor is, since the status
+// text after the code is the server's own choice.
+func fetchedBodyStat(res domain.ToolResult) (statValue, bool) {
+	v, ok := res.Summary.(domain.FetchedBody)
+	if !ok {
+		return statValue{}, false
+	}
+	return plainStat(clipDetail(httpStatusPrefix + v.Status)), true
 }
 
 // diffStatStat words view_diff's slot as the diffstat the tool counted off its own operations. A

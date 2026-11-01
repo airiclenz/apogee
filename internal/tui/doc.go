@@ -831,7 +831,7 @@
 // what made "the rendered output does not change, byte for byte" a checkable oracle for the
 // change, not a contract, and this package may reword without touching a tool.
 // toolsummary_pin_test.go executes for real every summary-bearing tool that needs nothing but a
-// temp workspace — nine of the eleven — and asserts the rendered line, the cross-package pin the
+// temp workspace — eleven of the thirteen — and asserts the rendered line, the cross-package pin the
 // old regexes never had; the other two, git_status and git_show, want a real repository and are
 // pinned against one where they live (internal/tools/git_test.go). sub_agent reports a summary
 // too — domain.DelegationOutcome, how the run ended — and reads it in a resultDetail hook as well as

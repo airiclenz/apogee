@@ -147,7 +147,7 @@ func (t *HTTPRequest) Execute(ctx context.Context, call domain.ToolCall) (domain
 	if msg != "" {
 		return errorResult(call.ID, msg), nil
 	}
-	return okResult(call.ID, renderRequestResult(resp)), nil
+	return okSummary(call.ID, renderRequestResult(resp), fetchedBodyOf(resp)), nil
 }
 
 // applyRequestHeaders filters the caller-supplied headers and returns the header block the

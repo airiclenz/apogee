@@ -112,6 +112,7 @@ var (
 	_ apogee.EditRegion
 	_ apogee.EditRegions
 	_ apogee.SearchHits
+	_ apogee.FetchedBody
 	_ apogee.DelegationOutcome
 	_ apogee.DelegationBound
 	_ apogee.ToolRegistry

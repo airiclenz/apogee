@@ -97,7 +97,13 @@ internal/tui/popup_test.go — TestRenderPopupScrollbarReservesOneColumnWhileOve
 **Closes:** popup-scrollbar-gutter
 **Commit:** `feat(tui): leave a gap column between pop-up content and its scrollbar`
 
-## 3. Fetch results carry a FetchedBody tool summary
+## 3. Fetch results carry a FetchedBody tool summary — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): consequential edit — internal/domain/toolsummary_test.go: made necessary by the new variant (TestToolSummaryVariantsAreSealed count 8 → 9, plus the compile-time membership list)
+NOTES (2026-11-01): internal/tools/doc.go's count now reads THIRTEEN, not TWELVE: the old "TEN" list left out git_show, which attaches a ReadSpan (git.go), so the rewritten list names it; the glossary Tool summary Note's list also gains git_show (its "eleven" counted it but did not name it)
+NOTES (2026-11-01): the toolsummary_pin_test.go cross-package pin now runs web_fetch and http_request against its existing loopback server (9 → 11 cases, "eleven of the thirteen"), and both join TestToolSummaryPinUsesRegisteredToolNames and TestToolStatDeclinesWithoutATypedSummary
+NOTES (2026-11-01): fetchedBodyStat clips "HTTP <Status>" with clipDetail, as the firstLineDetail floor does, because the reason phrase is the server's to choose
+NOTES (2026-11-01): the shared fetchedBodyCases table and fetchedBodyServer helper live in web_fetch_test.go; network_test.go's TestHTTPRequest_AttachesFetchedBodySummary reuses them
 
 **What:**
 Recast at the regression check (2026-11-01).

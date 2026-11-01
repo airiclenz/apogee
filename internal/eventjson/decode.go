@@ -459,6 +459,9 @@ var summaryDecoders = map[string]summaryDecoder{
 			SteeredMessages: s.SteeredMessages,
 		}
 	}),
+	summaryFetchedBody: summaryWith(func(s fetchedBodySummary) domain.ToolSummary {
+		return domain.FetchedBody{Status: s.Status, Truncated: s.Truncated}
+	}),
 }
 
 // toolSummaryFrom rebuilds a Tool summary from the raw bytes toolResult.UnmarshalJSON kept. A null

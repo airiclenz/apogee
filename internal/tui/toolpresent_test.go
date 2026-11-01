@@ -41,7 +41,7 @@ func bodyText(tv toolView) string {
 // "running <raw name>") with its arguments shown verbatim (the approval surface never hides
 // the model's request).
 //
-// The eleven summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
+// The thirteen summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
 // the line comes from the typed outcome rather than from the prose beside it; the "no summary"
 // rows pin the D6 floor, where the same result with no summary degrades to its verbatim first
 // line instead of to a raw dump. Every wantDetail here is unchanged from when the view parsed
@@ -232,6 +232,24 @@ func TestPresentToolCall(t *testing.T) {
 			wantLabel:  "HTTP",
 			wantVerb:   "requesting",
 			wantTarget: "POST https://api.example.com", wantDetail: "HTTP 201 Created",
+		},
+		{
+			name: "web_fetch with a FetchedBody → the same status slot, worded from the summary",
+			call: domain.ToolCall{ID: "22b", Tool: "web_fetch", Arguments: []byte(`{"url":"https://go.dev"}`)},
+			result: domain.ToolResult{CallID: "22b", Content: "HTTP 200 OK\nContent-Type: text/html\n\n<html>…</html>",
+				Summary: domain.FetchedBody{Status: "200 OK"}},
+			wantLabel:  "Fetch",
+			wantVerb:   "fetching",
+			wantTarget: "https://go.dev", wantDetail: "HTTP 200 OK",
+		},
+		{
+			name: "http_request with a FetchedBody → the same status slot, worded from the summary",
+			call: domain.ToolCall{ID: "23b", Tool: "http_request", Arguments: []byte(`{"url":"https://api.example.com","method":"post"}`)},
+			result: domain.ToolResult{CallID: "23b", Content: "HTTP 200 OK\nLocation: /things/1\n\n{}",
+				Summary: domain.FetchedBody{Status: "200 OK", Truncated: true}},
+			wantLabel:  "HTTP",
+			wantVerb:   "requesting",
+			wantTarget: "POST https://api.example.com", wantDetail: "HTTP 200 OK",
 		},
 		{
 			name:       "terminal → Run + the whole output body (the paint compresses it, not the view)",
@@ -1970,6 +1988,8 @@ func TestToolStat(t *testing.T) {
 		{name: "grep words hits", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 3}}, want: "3 hits", wantOK: true},
 		{name: "grep finding nothing is a number", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 0}}, want: "0 hits", wantOK: true},
 		{name: "search words results", tool: "web_search", result: domain.ToolResult{Summary: domain.SearchHits{Count: 1}}, want: "1 result", wantOK: true},
+		{name: "a fetch words its status", tool: "web_fetch", result: domain.ToolResult{Summary: domain.FetchedBody{Status: "200 OK"}}, want: "HTTP 200 OK", wantOK: true},
+		{name: "a request words its status, truncated or not", tool: "http_request", result: domain.ToolResult{Summary: domain.FetchedBody{Status: "404 Not Found", Truncated: true}}, want: "HTTP 404 Not Found", wantOK: true},
 		{name: "diff preview words the typed diffstat", tool: "view_diff", result: domain.ToolResult{Summary: domain.DiffStat{Added: 8, Removed: 3}}, want: "+8 −3", wantOK: true},
 		{name: "a summary-less diff keeps its sentence", tool: "view_diff", result: domain.ToolResult{Content: "No changes detected"}, wantOK: false},
 
@@ -2050,7 +2070,7 @@ func TestToolStat(t *testing.T) {
 func TestToolStatDeclinesWithoutATypedSummary(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"read_file", "list_dir", "grep", "web_search", "view_diff"} {
+	for _, name := range []string{"read_file", "list_dir", "grep", "web_search", "view_diff", "web_fetch", "http_request"} {
 		if _, ok := toolRegistry[name].stat(domain.ToolResult{Content: "prose"}); ok {
 			t.Errorf("%s must decline a summary-less result", name)
 		}

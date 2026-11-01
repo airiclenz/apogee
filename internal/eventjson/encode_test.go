@@ -735,6 +735,16 @@ func TestEncodeToolSummaryMirror(t *testing.T) {
 			wantSummary: `{"kind":"delegation_outcome","bound":"","stopped_by_user":false,` +
 				`"has_no_report":true,"steered_messages":2}`,
 		},
+		{
+			name:        "fetched_body truncated",
+			summary:     domain.FetchedBody{Status: "200 OK", Truncated: true},
+			wantSummary: `{"kind":"fetched_body","status":"200 OK","truncated":true}`,
+		},
+		{
+			name:        "fetched_body whole",
+			summary:     domain.FetchedBody{Status: "404 Not Found"},
+			wantSummary: `{"kind":"fetched_body","status":"404 Not Found","truncated":false}`,
+		},
 	}
 
 	for _, c := range cases {

@@ -696,6 +696,10 @@ type EditRegions = domain.EditRegions
 // SearchHits is web_search's summary: the number of structured results returned.
 type SearchHits = domain.SearchHits
 
+// FetchedBody is web_fetch's and http_request's summary: the status text the result's first
+// line names, and whether the body hit the response cap.
+type FetchedBody = domain.FetchedBody
+
 // DelegationOutcome is sub_agent's summary: the bound that stopped the delegated run, whether
 // the human stopped it, whether it ended without a report, and how many messages the human
 // steered into it.

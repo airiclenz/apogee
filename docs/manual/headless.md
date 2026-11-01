@@ -309,6 +309,7 @@ embedder's own tool. Like every enum here, `kind` is an open set.
 | `changed_files` | `git_status` | `staged`, `unstaged` and `untracked` path counts, full even where the printed list was capped |
 | `edit_regions` | the writing tools | `regions`, in file order: each with `before_start` and `after_start` (1-based, leading context included) and the `leading`, `removed`, `inserted` and `trailing` lines |
 | `search_hits` | `web_search` | `count` of results |
+| `fetched_body` | `web_fetch`, `http_request` | `status`, the status text the result's first line names (`200 OK`); `truncated`, whether the body hit the response cap |
 | `delegation_outcome` | `sub_agent` | `bound` (`step_cap`, `token_budget`, `time_limit`, or `""` when no bound stopped the run), `stopped_by_user`, `has_no_report` and `steered_messages` |
 
 ### `--seams` — the seam closures, on request

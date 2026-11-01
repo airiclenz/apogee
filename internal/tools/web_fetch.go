@@ -75,7 +75,14 @@ func (t *WebFetch) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if msg != "" {
 		return errorResult(call.ID, msg), nil
 	}
-	return okResult(call.ID, renderFetchResult(resp, args.Raw)), nil
+	return okSummary(call.ID, renderFetchResult(resp, args.Raw), fetchedBodyOf(resp)), nil
+}
+
+// fetchedBodyOf is the structured half of a fetch outcome both network tools attach
+// (domain.FetchedBody): the status text their first line names and whether the funnel capped
+// the body. It reads the same netResponse facts the renderers print, so the two halves agree.
+func fetchedBodyOf(resp netResponse) domain.FetchedBody {
+	return domain.FetchedBody{Status: resp.status, Truncated: resp.truncated}
 }
 
 // maxLocationBytes caps the redirect target rendered to the model. The response HEADER block is

@@ -168,6 +168,8 @@ func roundTripSummaries() []domain.ToolSummary {
 		domain.DelegationOutcome{Bound: domain.DelegationStepCap},
 		domain.DelegationOutcome{Bound: domain.DelegationTokenBudget},
 		domain.DelegationOutcome{Bound: domain.DelegationTimeLimit, SteeredMessages: 1},
+		domain.FetchedBody{Status: "200 OK", Truncated: true},
+		domain.FetchedBody{Status: "404 Not Found"},
 	}
 }
 

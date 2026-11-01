@@ -109,3 +109,71 @@ func TestWebFetch_RendersHTMLAsText(t *testing.T) {
 		})
 	}
 }
+
+// fetchedBodyCase is one response a fetch tool's FetchedBody summary is checked against: the
+// status the server answers with, the body size it writes, and the summary the tool must attach.
+type fetchedBodyCase struct {
+	name       string
+	statusCode int
+	bodyBytes  int
+	want       domain.FetchedBody
+}
+
+// fetchedBodyCases covers both halves of the summary for either network tool: a body under the
+// cap is not truncated, one past it is, and the status text is the server's own.
+var fetchedBodyCases = []fetchedBodyCase{
+	{
+		name:       "a body under the cap is not truncated",
+		statusCode: http.StatusOK,
+		bodyBytes:  16,
+		want:       domain.FetchedBody{Status: "200 OK", Truncated: false},
+	},
+	{
+		name:       "a body past the cap is truncated",
+		statusCode: http.StatusOK,
+		bodyBytes:  maxNetworkResponseBytes + 1024,
+		want:       domain.FetchedBody{Status: "200 OK", Truncated: true},
+	},
+	{
+		name:       "a non-2xx status is carried as its text",
+		statusCode: http.StatusNotFound,
+		bodyBytes:  0,
+		want:       domain.FetchedBody{Status: "404 Not Found", Truncated: false},
+	},
+}
+
+// fetchedBodyServer answers every request with tc's status and a body of tc's size.
+func fetchedBodyServer(t *testing.T, tc fetchedBodyCase) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(tc.statusCode)
+		_, _ = w.Write(make([]byte, tc.bodyBytes))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestWebFetch_AttachesFetchedBodySummary: every fetch that received a response attaches a
+// FetchedBody naming the status its first line prints and whether the body hit the cap.
+func TestWebFetch_AttachesFetchedBodySummary(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range fetchedBodyCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := fetchedBodyServer(t, tc)
+
+			res, err := NewWebFetch(loopbackGuard()).Execute(context.Background(), domain.ToolCall{
+				ID: "c1", Tool: "web_fetch", Arguments: jsonArgs(t, map[string]any{"url": srv.URL}),
+			})
+
+			if err != nil {
+				t.Fatalf("Execute Go error: %v", err)
+			}
+			if res.Summary != tc.want {
+				t.Errorf("Summary = %#v, want %#v", res.Summary, tc.want)
+			}
+		})
+	}
+}

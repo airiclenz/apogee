@@ -352,6 +352,31 @@ func TestHTTPRequest_PostsBody(t *testing.T) {
 	}
 }
 
+// TestHTTPRequest_AttachesFetchedBodySummary: every request that received a response attaches
+// the same FetchedBody web_fetch does — the status its first line prints and whether the body
+// hit the cap (fetchedBodyCases, web_fetch_test.go).
+func TestHTTPRequest_AttachesFetchedBodySummary(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range fetchedBodyCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := fetchedBodyServer(t, tc)
+
+			res, err := NewHTTPRequest(loopbackGuard()).Execute(context.Background(), domain.ToolCall{
+				ID: "c1", Tool: "http_request", Arguments: jsonArgs(t, map[string]any{"url": srv.URL}),
+			})
+
+			if err != nil {
+				t.Fatalf("Execute Go error: %v", err)
+			}
+			if res.Summary != tc.want {
+				t.Errorf("Summary = %#v, want %#v", res.Summary, tc.want)
+			}
+		})
+	}
+}
+
 // TestHTTPRequest_HostileResponseHeadersAreRenderedInert is item 13's adversarial treatment over
 // the WHOLE header block http_request renders (its asymmetric twin): every response header is
 // SERVER-chosen text lifted out of the body and into the block the model reads as fact, so a bidi

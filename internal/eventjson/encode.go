@@ -656,6 +656,7 @@ const (
 	summaryEditRegions       = "edit_regions"
 	summarySearchHits        = "search_hits"
 	summaryDelegationOutcome = "delegation_outcome"
+	summaryFetchedBody       = "fetched_body"
 )
 
 // readSpanSummary mirrors domain.ReadSpan: the 1-based inclusive span returned, the file's total
@@ -717,6 +718,14 @@ type editRegion struct {
 type searchHitsSummary struct {
 	Kind  string `json:"kind"`
 	Count int    `json:"count"`
+}
+
+// fetchedBodySummary mirrors domain.FetchedBody: the status text the fetch's first line names and
+// whether the body hit the response cap.
+type fetchedBodySummary struct {
+	Kind      string `json:"kind"`
+	Status    string `json:"status"`
+	Truncated bool   `json:"truncated"`
 }
 
 // delegationOutcomeSummary mirrors domain.DelegationOutcome. Bound is the engine bound the run was
@@ -843,6 +852,8 @@ func toolSummaryOf(summary domain.ToolSummary) any {
 			Kind: summaryDelegationOutcome, Bound: delegationBoundNames[s.Bound],
 			StoppedByUser: s.IsStoppedByUser, HasNoReport: s.HasNoReport, SteeredMessages: s.SteeredMessages,
 		}
+	case domain.FetchedBody:
+		return fetchedBodySummary{Kind: summaryFetchedBody, Status: s.Status, Truncated: s.Truncated}
 	default:
 		return nil
 	}

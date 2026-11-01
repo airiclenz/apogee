@@ -40,7 +40,7 @@ package domain
 // decodes only to paint a live session.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
-// alongside its prose Content. The variants are the eight below; the marker method is
+// alongside its prose Content. The variants are the nine below; the marker method is
 // unexported, so no package outside internal/* can add one.
 type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
@@ -158,6 +158,19 @@ func (e EditRegions) Stat() DiffStat {
 type SearchHits struct{ Count int }
 
 func (SearchHits) isToolSummary() {}
+
+// FetchedBody is web_fetch's and http_request's outcome: the status text the result's first
+// line names after "HTTP " (`200 OK`), and whether the response body hit the network tools'
+// body cap, so the content the model received stops short of the full response. A host reads
+// truncation off the value rather than scanning the content for the tool's marker line. A call
+// that never received a response (a refused URL, a dial or timeout failure) is an error result
+// and carries none.
+type FetchedBody struct {
+	Status    string
+	Truncated bool
+}
+
+func (FetchedBody) isToolSummary() {}
 
 // DelegationBound names the engine bound a delegation was stopped at, when one was. The zero
 // value is DelegationUnbounded: the run ended some other way — on its own boundary, at the

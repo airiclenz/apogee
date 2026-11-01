@@ -51,7 +51,7 @@ const ddgPinPage = `<!DOCTYPE html>
 const pinFileBody = "package main\n\nfunc main() {}"
 
 // TestToolSummariesRenderThroughThePresenter executes for real each summary-bearing tool that
-// needs nothing but a temp workspace — nine of the eleven — and pins the card line the presenter
+// needs nothing but a temp workspace — eleven of the thirteen — and pins the card line the presenter
 // renders from its outcome. Both halves are asserted: that the tool attached a summary at all,
 // and that the view words it the way it always has (the D4 oracle — this card reshaped a seam,
 // it did not change the UI).
@@ -125,6 +125,20 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 			want: "2 results",
 		},
 		{
+			// The two fetch tools against the same loopback server: the slot is the status their
+			// domain.FetchedBody names, so these rows pin that both keep attaching one.
+			name: "web_fetch",
+			tool: tools.NewWebFetch(security.URLGuard{}.DisableIPFloor()),
+			args: `{"url":"` + srv.URL + `"}`,
+			want: "HTTP 200 OK",
+		},
+		{
+			name: "http_request",
+			tool: tools.NewHTTPRequest(security.URLGuard{}.DisableIPFloor()),
+			args: `{"url":"` + srv.URL + `"}`,
+			want: "HTTP 200 OK",
+		},
+		{
 			// The three edit tools word their slot from the regions the APPLY recorded
 			// (editRegionsStat), not from the arguments — so these three rows are also the
 			// pin that the tools keep attaching domain.EditRegions at all.
@@ -147,8 +161,8 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 		},
 	}
 
-	if len(cases) != 9 {
-		t.Fatalf("the pin covers %d tools, want the 9 summary-bearing ones that need no git binary", len(cases))
+	if len(cases) != 11 {
+		t.Fatalf("the pin covers %d tools, want the 11 summary-bearing ones that need no git binary", len(cases))
 	}
 
 	for _, tc := range cases {
@@ -182,7 +196,7 @@ func TestToolSummaryPinUsesRegisteredToolNames(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{
 		"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search",
-		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
+		"web_fetch", "http_request", "single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
 		"git_status", "git_show",
 	} {
 		if _, ok := toolRegistry[name]; !ok {

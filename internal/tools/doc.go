@@ -19,15 +19,17 @@
 // prose half, written for the MODEL, and its wording is free to change. A domain.ToolSummary
 // attached beside it (okSummary, tools.go) is the structured half, written for a HOST — the
 // TUI's tool card today, a headless or bench renderer later — carrying as data the facts the
-// tool already computed for its own header. Exactly TEN built-ins attach one: read_file
-// (ReadSpan), list_dir (ListedEntries), grep (MatchedLines),
+// tool already computed for its own header. Exactly THIRTEEN built-ins attach one: read_file
+// and git_show (ReadSpan), list_dir (ListedEntries), grep (MatchedLines),
 // view_diff (DiffStat), web_search (SearchHits), git_status (ChangedFiles, the three section
-// counts its report states), and the four writing tools
+// counts its report states), web_fetch and http_request (FetchedBody, the status line and
+// whether the body hit the response cap), and the four writing tools
 // write_file, single_find_and_replace, multi_find_and_replace and edit_existing_file
 // (EditRegions, the changed regions of the write they just applied) — the
-// ones whose outcome a host would otherwise have to re-derive from the sentence. The rest
+// ones whose outcome a host would otherwise have to re-derive from the sentence (a fetch's
+// truncation is otherwise only the content's closing marker line). The rest
 // deliberately do not, and that is not an omission to fill in later: quoting a fixed one-line
-// sentence (web_fetch, http_request, ask_user, present_document) or compressing
+// sentence (ask_user, present_document) or compressing
 // free-form output to a first line plus a count (terminal, python_exec, the other git tools,
 // diagnostics, sub_agent) is RENDERING, not scavenging — there is no re-derived fact there for a
 // type to fix. A summary is optional by construction, so ADR 0002's open extension point is
