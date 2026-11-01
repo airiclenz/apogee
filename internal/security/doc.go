@@ -105,7 +105,9 @@
 // option or verb writes (`--output=file`, `uniq in out`, `sed 'w file'`) and drops what a
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
 // its command-line argument (domain.ArgRoleShellCommand) — plus projectConfigTargetsOf, the same
-// reading with git commands and a cp's sources as reads, for Rule.ProjectConfigView.
+// reading with git commands and a cp's sources as reads, for Rule.ProjectConfigView. Its
+// tokenizer's heredoc reading is exported as WithoutHeredocBodies, the line with every heredoc
+// body removed, for the terminal / console_open pre-flight to parse.
 // allowmatch.go reads the same lines for the opposite question — may a persisted yes answer
 // this call? MatchAllowRules decides whether every simple command of a `terminal` line is covered
 // by a word-prefix Allow rule (ADR 0096 §2). A line must first pass an allowlist of constructs

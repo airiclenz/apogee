@@ -421,6 +421,17 @@ type shellTokenizer struct {
 	// directory each open `( … )` subshell restores when it closes.
 	dir      workDir
 	dirStack []workDir
+	// bodySpans, when set, collects the rune span of every heredoc body the line holds, for
+	// WithoutHeredocBodies. A substitution's tokenizer shares its root's list and adds offset,
+	// where its text starts in the root line's runes, so every span is in the root's runes.
+	bodySpans *[]runeSpan
+	offset    int
+}
+
+// runeSpan is the half-open rune range [start, end) of one heredoc body in a command line:
+// its body lines and its closing delimiter line, each with the newline that ends it.
+type runeSpan struct {
+	start, end int
 }
 
 // heredoc is one pending `<<` body: the delimiter line that ends it, and whether its host
@@ -436,9 +447,50 @@ type heredoc struct {
 // command substitutions are appended after the command that hosts them.
 func splitSimpleCommands(command string, dir workDir) []simpleCommand {
 	tk := &shellTokenizer{dir: dir}
+	return tk.split(command)
+}
+
+// split tokenizes command into its simple commands, closing the one the line ends in.
+func (tk *shellTokenizer) split(command string) []simpleCommand {
 	tk.scan(command)
 	tk.endCommand()
 	return tk.commands
+}
+
+// WithoutHeredocBodies returns command with every heredoc body removed: the lines a `<<WORD`,
+// `<<'WORD'`, `<<"WORD"` or `<<-WORD` redirect carries, through its closing delimiter line, at
+// the top level and inside a `$( … )` or backtick substitution. The `<<WORD` operator and every
+// other byte stay as written, and a line with no heredoc comes back unchanged. An unterminated
+// body runs to the end of the line. The terminal and console_open pre-flight reads a line
+// through it, so a body's prose — an apostrophe above all — is never parsed as shell words.
+// It is the shell write view's reading of a heredoc (skipHeredocBodies), not a shell: a
+// `<<<` here-string and a `<<` inside quotes or a comment open no body.
+func WithoutHeredocBodies(command string) string {
+	var spans []runeSpan
+	tk := &shellTokenizer{bodySpans: &spans}
+	tk.split(command)
+	if len(spans) == 0 {
+		return command
+	}
+	// The spans index runes; the cut is made by byte offset so a byte that is not UTF-8
+	// outside every body survives as written. Ranging over a string yields exactly the runes
+	// a []rune conversion does, one per invalid byte included.
+	byteAt := make([]int, 0, len(command)+1)
+	for b := range command {
+		byteAt = append(byteAt, b)
+	}
+	byteAt = append(byteAt, len(command))
+	var kept strings.Builder
+	kept.Grow(len(command))
+	// Spans arrive in line order: each tokenizer records them as its scan advances, and a
+	// substitution's tokenizer runs while its host's scan stands on the substitution.
+	next := 0
+	for _, span := range spans {
+		kept.WriteString(command[byteAt[next]:byteAt[span.start]])
+		next = span.end
+	}
+	kept.WriteString(command[byteAt[next]:])
+	return kept.String()
 }
 
 func (tk *shellTokenizer) scan(s string) {
@@ -543,7 +595,7 @@ func (tk *shellTokenizer) scanBacktick(runes []rune, i int) int {
 	for end < len(runes) && runes[end] != '`' {
 		end++
 	}
-	tk.nest(string(runes[start:end]))
+	tk.nest(runes, start, end)
 	return end
 }
 
@@ -564,7 +616,7 @@ func (tk *shellTokenizer) scanDollar(runes []rune, i int) int {
 				}
 			}
 		}
-		tk.nest(string(runes[i+2 : end]))
+		tk.nest(runes, i+2, end)
 		return end
 	}
 	if i+1 < len(runes) && runes[i+1] == '{' {
@@ -582,10 +634,12 @@ func (tk *shellTokenizer) scanDollar(runes []rune, i int) int {
 
 // nest tokenizes a command substitution's body as commands of its own, appended after the
 // hosting command's own entry once that closes. The body starts where its host stands, and
-// a `cd` inside it moves no command outside it.
-func (tk *shellTokenizer) nest(body string) {
+// a `cd` inside it moves no command outside it. The body is runes[start:end]; the heredoc
+// bodies it holds join the host's spans at their place in the line.
+func (tk *shellTokenizer) nest(runes []rune, start, end int) {
 	tk.wordSubstituted = true
-	tk.flushAfter = append(tk.flushAfter, splitSimpleCommands(body, tk.dir)...)
+	inner := &shellTokenizer{dir: tk.dir, bodySpans: tk.bodySpans, offset: tk.offset + start}
+	tk.flushAfter = append(tk.flushAfter, inner.split(string(runes[start:end]))...)
 }
 
 // scanOutputRedirect consumes a `>`-family operator starting at runes[i] (`>`, `>>`, `>|`,
@@ -656,9 +710,11 @@ func (tk *shellTokenizer) dropFdWord() {
 // skipHeredocBodies advances past every pending heredoc body: line by line from runes[i]
 // (a newline) until each delimiter appears on a line of its own, in order. A body its host
 // reads as a shell script is tokenized as commands of its own, appended after the commands
-// already closed — its host among them. Returns the index of the last rune consumed.
+// already closed — its host among them. Each body's span is recorded when the tokenizer
+// collects them (bodySpans). Returns the index of the last rune consumed.
 func (tk *shellTokenizer) skipHeredocBodies(runes []rune, i int) int {
 	for _, doc := range tk.heredocs {
+		bodyStart := i + 1
 		var body []string
 		for i+1 < len(runes) {
 			end := i + 1
@@ -672,6 +728,11 @@ func (tk *shellTokenizer) skipHeredocBodies(runes []rune, i int) int {
 			}
 			body = append(body, line)
 		}
+		if bodyEnd := min(i+1, len(runes)); tk.bodySpans != nil && bodyEnd > bodyStart {
+			*tk.bodySpans = append(*tk.bodySpans, runeSpan{start: tk.offset + bodyStart, end: tk.offset + bodyEnd})
+		}
+		// A script body's own heredocs lie inside the span just recorded, so its tokenizer
+		// collects none.
 		if doc.script {
 			tk.commands = append(tk.commands, splitSimpleCommands(strings.Join(body, "\n"), doc.dir)...)
 		}

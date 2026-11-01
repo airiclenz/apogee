@@ -280,6 +280,48 @@ func TestShellWriteViewReadsInterpreterHeredocs(t *testing.T) {
 	}
 }
 
+// TestWithoutHeredocBodies pins the line the terminal pre-flight parses: every heredoc body,
+// through its delimiter line, is cut, and every other byte of the line stays as written.
+func TestWithoutHeredocBodies(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, command, want string
+	}{
+		{"unquoted delimiter, quotes in the body", "cat <<EOF > notes.md\nit's a \"test\nEOF\necho done", "cat <<EOF > notes.md\necho done"},
+		{"single-quoted delimiter", "cat <<'EOF'\nit's\nEOF\necho done", "cat <<'EOF'\necho done"},
+		{"double-quoted delimiter, last line", "cat <<\"EOF\"\nsay \"hi\nEOF", "cat <<\"EOF\"\n"},
+		{"tab-stripping delimiter", "cat <<-EOF\n\tit's\n\tEOF\necho done", "cat <<-EOF\necho done"},
+		{"two heredocs on one line", "cat <<A; cat <<'B'\nit's\nA\nsay \"x\nB\necho done", "cat <<A; cat <<'B'\necho done"},
+		{"a heredoc inside $( )", "git commit -m \"$(cat <<'EOF'\nit's done\nEOF\n)\"", "git commit -m \"$(cat <<'EOF'\n)\""},
+		{"a heredoc inside backticks", "echo `cat <<EOF\nit's\nEOF\n` done", "echo `cat <<EOF\n` done"},
+		{"an interpreter's script body, its own heredoc inside", "echo 'a b' && bash <<S\ncat <<X\nhi\nX\nS", "echo 'a b' && bash <<S\n"},
+		{"an unterminated body runs to the end", "cat <<EOF\nit's\nno end", "cat <<EOF\n"},
+		{"multi-byte text around the body", "echo héllo; cat <<EOF\nça n'est\nEOF\necho fin", "echo héllo; cat <<EOF\necho fin"},
+		{"bytes that are not UTF-8 around the body", "echo \xff; cat <<EOF\nit's\nEOF\necho \xfe", "echo \xff; cat <<EOF\necho \xfe"},
+
+		// --- lines with no body: byte-identical ----------------------------------------
+		{"a here-string opens no body", "cat <<<EOF\nEOF", "cat <<<EOF\nEOF"},
+		{"<< inside single quotes opens no body", "echo 'a <<EOF'\nit\nEOF", "echo 'a <<EOF'\nit\nEOF"},
+		{"<< inside a comment opens no body", "echo hi # <<EOF\nit\nEOF", "echo hi # <<EOF\nit\nEOF"},
+		{"no heredoc", "ls -la && echo \"a b\" | wc -l", "ls -la && echo \"a b\" | wc -l"},
+		{"no heredoc, a byte that is not UTF-8", "echo \xff", "echo \xff"},
+		{"an operator with no body after it", "cat <<EOF", "cat <<EOF"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := WithoutHeredocBodies(tc.command)
+
+			if got != tc.want {
+				t.Errorf("WithoutHeredocBodies(%q) = %q, want %q", tc.command, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestProjectConfigControlPlaneTargets pins the project-config write view `write-project-config` reads a
 // command line through (Rule.ProjectConfigView): writeTargetsOf's reading, save that a git command
 // and a cp's sources are reads, and that only rm, rmdir, unlink, mv and ln may name the `.apogee`

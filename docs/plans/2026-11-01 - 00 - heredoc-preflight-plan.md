@@ -32,7 +32,9 @@
 - Any cmd.exe pre-flight (deliberately absent).
 - `windows-journal-remove-check` and every feature/task issue.
 
-## 1. Expose the line with its heredoc bodies removed
+## 1. Expose the line with its heredoc bodies removed — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): each removed body line and the delimiter line take their own terminating newline with them, so the opening `<<WORD` line keeps its newline (`cat <<EOF\nx\nEOF\necho` -> `cat <<EOF\necho`; a delimiter on the last line leaves `cat <<EOF\n`); the interpreter-script tokenizer's spans are dropped (not offset), since they lie inside the body span its parent already records.
 
 **What:**
 **Goal:** `internal/security` exports `WithoutHeredocBodies(command string) string`, which returns `command` with every heredoc body line and its closing delimiter line removed — for `<<WORD`, `<<'WORD'`, `<<"WORD"` and `<<-WORD`, at top level and inside a `$( … )` or backtick substitution — and leaves every other rune of the line untouched; a line with no heredoc comes back byte-identical.
