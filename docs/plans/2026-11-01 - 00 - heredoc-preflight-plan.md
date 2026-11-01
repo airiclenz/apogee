@@ -49,7 +49,9 @@ Also update internal/security/doc.go's map sentence for shellwrites.go ("shellwr
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestWithoutHeredocBodies|TestWriteTargetsOf|TestShellWriteView|TestProjectConfigControlPlaneTargets|TestMatchAllowRules' ./internal/security/`
 **Commit:** `feat(security): expose a command line with its heredoc bodies removed`
 
-## 2. Pre-flight a POSIX line without its heredoc bodies
+## 2. Pre-flight a POSIX line without its heredoc bodies — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): took the plan's sibling-table option — the five heredoc rows live in a new `TestTerminal_PreflightSkipsHeredocBodies` table, so `TestTerminal_PreflightMatchesTheTargetShell`'s doc comment ("every row is a line cmd.exe reads without complaint") stays true unamended.
 
 **What:** fixes `heredoc-preflight-quote`: `preflightCommandLine` runs `shlex.Split` over heredoc bodies and refuses `capcom know add --id x --title y --body-file - <<'EOF2'\ncapcom's store is git-native.\nEOF2` with `could not parse command line: EOF found when expecting closing quote`. Depends on item 1.
 **Goal:** on POSIX, a line whose heredoc body holds an unpaired `'` or `"` passes `preflightCommandLine` and runs through `terminal`, for `<<'EOF'`, `<<EOF` and `<<-EOF`; a line with an unterminated quote in its command words is still refused with `could not parse command line: …`; the cmd.exe path stays unparsed.

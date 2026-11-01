@@ -313,6 +313,67 @@ func TestTerminal_PreflightMatchesTheTargetShell(t *testing.T) {
 	}
 }
 
+// TestTerminal_PreflightSkipsHeredocBodies pins the POSIX verdict on heredoc lines: a body is
+// payload, so an unpaired quote inside one never fails the split, while an unterminated quote
+// in the command words around a body still does. cmd.exe is never pre-parsed, body or not.
+// Every row is an interpreted string: a raw literal's `\n` is two bytes and opens no body.
+func TestTerminal_PreflightSkipsHeredocBodies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		command   string
+		posixFail bool
+	}{
+		{
+			name:      "quoted delimiter, apostrophe in the body",
+			command:   "capcom know add --id x --title y --body-file - <<'EOF2'\ncapcom's store is git-native.\nEOF2",
+			posixFail: false,
+		},
+		{name: "bare delimiter, double quote in the body", command: "cat <<EOF\nshe said \"hi\nEOF", posixFail: false},
+		{name: "tab-stripped delimiter, apostrophe in the body", command: "cat <<-EOF\n\tit's indented\n\tEOF", posixFail: false},
+		{name: "unterminated quote holding the operator", command: "echo \"unterminated <<EOF\nx\nEOF", posixFail: true},
+		{name: "apostrophe in the words after the operator", command: "cat <<EOF don't\nbody\nEOF", posixFail: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := preflightCommandLine(tc.command, false); err != nil {
+				t.Errorf("preflightCommandLine(%q, posix=false) = %v, want nil (cmd.exe is not pre-parsed)", tc.command, err)
+			}
+			err := preflightCommandLine(tc.command, true)
+			if tc.posixFail && err == nil {
+				t.Errorf("preflightCommandLine(%q, posix=true) = nil, want the POSIX splitter's error", tc.command)
+			}
+			if !tc.posixFail && err != nil {
+				t.Errorf("preflightCommandLine(%q, posix=true) = %v, want nil", tc.command, err)
+			}
+		})
+	}
+}
+
+// TestTerminal_HeredocBodyWithApostropheReachesTheShell drives Execute with the line the
+// pre-flight used to refuse: the body's apostrophe must reach the shell, and the shell must
+// print it.
+func TestTerminal_HeredocBodyWithApostropheReachesTheShell(t *testing.T) {
+	t.Parallel()
+	if !hostShellIsPOSIX() {
+		t.Skip("heredoc lines are POSIX sh; cmd.exe is never pre-parsed")
+	}
+
+	const body = "capcom's store is git-native."
+	res, err := executeTerminalLine(t, defaultExecHost(), "cat <<'EOF'\n"+body+"\nEOF")
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if strings.Contains(res.Content, "could not parse") {
+		t.Fatalf("Execute = %q, want no pre-flight parse error for an apostrophe in a heredoc body", res.Content)
+	}
+	if res.IsError || !strings.Contains(res.Content, body) {
+		t.Errorf("Execute = %q (IsError %v), want the body %q printed by the shell", res.Content, res.IsError, body)
+	}
+}
+
 // rawCmdlineHost is platform.Current() with one difference: CommandLine always reports a
 // raw command line — the convention that marks a shell the line is delivered to verbatim
 // (cmd.exe). It is the injected-Windows-rules seam for the pre-flight, and only for it: the

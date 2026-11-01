@@ -12,6 +12,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
@@ -305,11 +306,20 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // pre-parsing (its rules differ per built-in, and a trailing backslash, a caret, a `%VAR%`
 // and an unbalanced quote are all legal), so there is deliberately no cmd pre-flight: cmd
 // reports its own errors, which is strictly better than a wrong second opinion.
+//
+// A heredoc body is payload, not shell words (ADR 0049 note of 2026-09-14), so the POSIX
+// split reads the line with every body removed (security.WithoutHeredocBodies): the prose a
+// `<<'EOF'` carries — `capcom's store is git-native.` — holds an apostrophe shlex would
+// otherwise read as an unterminated quote and refuse a valid line over. The command words
+// around a body are still split, so a line malformed outside every body is refused as before.
+// An interpreter's script body (`bash <<EOF`) is stripped too: the shell reports its own
+// error for a malformed script, and a line the stripping misreads reaches the shell, which
+// is the fail direction a clarity aid takes.
 func preflightCommandLine(command string, posix bool) error {
 	if !posix {
 		return nil
 	}
-	_, err := shlex.Split(command)
+	_, err := shlex.Split(security.WithoutHeredocBodies(command))
 	return err
 }
 
