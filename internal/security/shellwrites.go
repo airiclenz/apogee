@@ -396,6 +396,7 @@ const (
 	pendingOperand pendingWord = iota
 	pendingRedirectTarget
 	pendingHeredocDelimiter
+	pendingTabHeredocDelimiter // a `<<-` delimiter: its body and closing line lose leading tabs
 	pendingSkip
 )
 
@@ -434,11 +435,12 @@ type runeSpan struct {
 	start, end int
 }
 
-// heredoc is one pending `<<` body: the delimiter line that ends it, and whether its host
-// command reads it as a shell script (readsStdinScript), which makes the body commands of
-// its own rather than payload.
+// heredoc is one pending `<<` body: the delimiter line that ends it, whether a `<<-` lets
+// leading tabs precede that delimiter, and whether its host command reads it as a shell
+// script (readsStdinScript), which makes the body commands of its own rather than payload.
 type heredoc struct {
 	delimiter string
+	stripTabs bool
 	script    bool
 	dir       workDir // where the host stands: a script body starts there
 }
@@ -464,7 +466,10 @@ func (tk *shellTokenizer) split(command string) []simpleCommand {
 // body runs to the end of the line. The terminal and console_open pre-flight reads a line
 // through it, so a body's prose — an apostrophe above all — is never parsed as shell words.
 // It is the shell write view's reading of a heredoc (skipHeredocBodies), not a shell: a
-// `<<<` here-string and a `<<` inside quotes or a comment open no body.
+// `<<<` here-string and a `<<` inside quotes or a comment open no body. A `<<` inside a
+// substitution that closes on its own line (`x=$(cat <<EOF)`) keeps the lines below it, as
+// dash — the POSIX sh of Debian-family hosts — runs them as commands where bash reads them as
+// the body; the write view judging them as commands is what lets a guard see what dash runs.
 func WithoutHeredocBodies(command string) string {
 	var spans []runeSpan
 	tk := &shellTokenizer{bodySpans: &spans}
@@ -675,10 +680,11 @@ func (tk *shellTokenizer) scanInputRedirect(runes []rune, i int) int {
 		return i + 2
 	case i+1 < len(runes) && runes[i+1] == '<':
 		i++
+		tk.pending = pendingHeredocDelimiter
 		if i+1 < len(runes) && runes[i+1] == '-' {
 			i++
+			tk.pending = pendingTabHeredocDelimiter
 		}
-		tk.pending = pendingHeredocDelimiter
 		return i
 	case i+1 < len(runes) && runes[i+1] == '>':
 		tk.pending = pendingRedirectTarget
@@ -708,7 +714,9 @@ func (tk *shellTokenizer) dropFdWord() {
 }
 
 // skipHeredocBodies advances past every pending heredoc body: line by line from runes[i]
-// (a newline) until each delimiter appears on a line of its own, in order. A body its host
+// (a newline) until each delimiter appears on a line of its own, in order. The closing line
+// is the delimiter exactly, as sh reads it: a space before or after it leaves the line in
+// the body, and only a `<<-` body may indent it, with tabs alone. A body its host
 // reads as a shell script is tokenized as commands of its own, appended after the commands
 // already closed — its host among them. Each body's span is recorded when the tokenizer
 // collects them (bodySpans). Returns the index of the last rune consumed.
@@ -723,7 +731,7 @@ func (tk *shellTokenizer) skipHeredocBodies(runes []rune, i int) int {
 			}
 			line := string(runes[i+1 : end])
 			i = end
-			if strings.TrimSpace(line) == doc.delimiter {
+			if doc.closes(line) {
 				break
 			}
 			body = append(body, line)
@@ -740,6 +748,14 @@ func (tk *shellTokenizer) skipHeredocBodies(runes []rune, i int) int {
 	tk.heredocs = nil
 	tk.boundHeredocs = 0
 	return i
+}
+
+// closes reports whether line is the one that ends doc's body.
+func (doc heredoc) closes(line string) bool {
+	if doc.stripTabs {
+		line = strings.TrimLeft(line, "\t")
+	}
+	return line == doc.delimiter
 }
 
 func (tk *shellTokenizer) writeRune(r rune) {
@@ -761,8 +777,8 @@ func (tk *shellTokenizer) endWord() {
 	case w == "": // a word that was only a substitution: its commands were nested, nothing is left
 	case tk.pending == pendingRedirectTarget:
 		tk.current.redirectTargets = append(tk.current.redirectTargets, w)
-	case tk.pending == pendingHeredocDelimiter:
-		tk.heredocs = append(tk.heredocs, heredoc{delimiter: w})
+	case tk.pending == pendingHeredocDelimiter, tk.pending == pendingTabHeredocDelimiter:
+		tk.heredocs = append(tk.heredocs, heredoc{delimiter: w, stripTabs: tk.pending == pendingTabHeredocDelimiter})
 	case tk.pending == pendingSkip:
 	default:
 		tk.current.words = append(tk.current.words, w)
