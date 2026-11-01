@@ -2872,3 +2872,23 @@ time and stored on the entry, so a replayed session paints exactly what that sen
 if the skill has since been renamed or deleted, and the render path asks the catalog nothing. The
 `/` menu's `✦` rows stay as described above — there the glyph tells a skill from a command in a
 list of both, which is the one job left to it.
+
+## The terminal hears when apogee waits
+
+A run stopped on the human tells the terminal so, as `ui.notify` says: `bell` writes BEL, `osc9`
+writes an OSC 9 desktop notification — `apogee: approval needed` for an approval pane, `apogee:
+question` for an ask pane — wrapped in tmux's passthrough while `$TMUX` is set, `both` writes the
+two, and `off` writes nothing. It is a write to the terminal, not paint: nothing in the frame
+changes with it.
+
+It fires on the transition into awaiting, once. A request that folds after the human answered one
+in the same Exchange — a queued child's gate behind the one just ruled on — finds them at the
+keyboard and opens silent; the next Exchange's first request notifies again. A background
+workflow's prompt notifies on its first offer only: the re-offer after an esc, and the `^a` open
+from `/workflows` the human asked for, stay silent. The pickers that share the decision latch never
+notify.
+
+A Turn that ends under its own power — `apogee: turn finished`, or `apogee: turn failed` for a
+faulted Exchange or a loop error — notifies only while the terminal reports the window blurred: the
+frame asks for focus reports, and a terminal that sends none never reads as blurred. A stop and a
+`/compact` are the human's own act and stay silent.

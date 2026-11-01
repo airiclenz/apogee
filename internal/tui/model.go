@@ -593,6 +593,17 @@ type Model struct {
 	// the only thing --tui-diag can say about them. A plain int, riding the value-copied Model
 	// (ADR 0011).
 	mouseReasserts int
+	// notifyTmux says $TMUX was set when the Model was built, so an OSC 9 notification is wrapped
+	// for tmux passthrough (notify.go). Read once by newModel; a test sets it.
+	notifyTmux bool
+	// blurred says the terminal last reported the window unfocused (tea.BlurMsg; View asks for the
+	// reports with ReportFocus). The zero value is focused, so a terminal that reports nothing never
+	// reads as blurred and a Turn end there never notifies (notify.go).
+	blurred bool
+	// answeredInExchange says the human answered the conversation's own approval or question
+	// earlier in the running Exchange, so the next one that folds finds them at the keyboard and
+	// opens without a notification (notify.go). finishWorker clears it.
+	answeredInExchange bool
 
 	// Content & layout.
 	transcript transcript
@@ -856,6 +867,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		viewport:     vp,
 		th:           th,
 		state:        stateIdle,
+		notifyTmux:   os.Getenv("TMUX") != "",
 	}
 
 	// Arm the heartbeat's tick chain when the monitor is wired: generation 1 is the chain Init's
@@ -1267,6 +1279,15 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ⇧⏎ can arrive as a chord of its own (prompteditor.go).
 		return m.foldKeyboardEnhancements(msg)
 
+	case tea.FocusMsg:
+		// The terminal's focus reports (View's ReportFocus) decide whether a Turn end notifies.
+		m.blurred = false
+		return m, nil
+
+	case tea.BlurMsg:
+		m.blurred = true
+		return m, nil
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
@@ -1425,8 +1446,12 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// wrote its final answer, with no further boundary to land at — opens the next Exchange
 		// from here, without a second keypress. The commands queued meanwhile run FIRST
 		// (runDeferredCommands), so a queued /clear clears before a queued message lands.
+		// A blurred window is told the Turn ended (notify.go); read before the flush, which may
+		// open the next Exchange.
+		notify := m.notifyTurnEnd(msg.Result.Faulted)
 		cmd := m.finishWorker(stateIdle)
-		return m.drainThenFlush(cmd)
+		next, cmd := m.drainThenFlush(cmd)
+		return next, tea.Batch(cmd, notify)
 
 	case cancelledMsg:
 		// The worker cancelled at a quiescent boundary and has returned, so the engine is the Update
@@ -2534,6 +2559,9 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// and the ticked set that rides with the latter: no path leaves a dead request or a dead checked
 	// set standing (pendingDecision.reset).
 	m.pendingDecision.reset()
+	// And so does the answer that kept the next one silent: the next Exchange's first question
+	// notifies again (notify.go).
+	m.answeredInExchange = false
 	// A question that dies with its Exchange — a stop, a fault — lets go of the box exactly as an
 	// answered one does, so the message it borrowed the box from comes back here too.
 	m.restoreAskDraft()
@@ -2700,7 +2728,7 @@ func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
 	m.transcript.addError("loop", msg.Err.Error(), runRef{})
 	cmd := m.finishWorker(stateErrored)
 	m.noteHeldQueue()
-	return m, cmd
+	return m, tea.Batch(cmd, m.notifyTurnEnd(true)) // a blurred window is told the Turn failed (notify.go)
 }
 
 // quit ends the program. On a clean quit — idle or errored, where the worker has already
@@ -3494,6 +3522,7 @@ func (m Model) View() tea.View {
 	v := tea.NewView(m.joinFrame(rows))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // enable wheel scrolling (Update routes MouseWheelMsg)
+	v.ReportFocus = true                  // a blurred window is told a Turn ended (notify.go)
 	v.Cursor = m.promptCursor()
 	return v
 }

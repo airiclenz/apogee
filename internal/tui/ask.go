@@ -34,6 +34,8 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 		m.askChecked = make([]bool, len(msg.Request.Choices))
 	}
 	latch := m.openDecisionLatch()
+	// The terminal hears that apogee waits on the human (notify.go).
+	notify := m.notifyDecisionOpened(msg.Workflow, notifyQuestionText)
 	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 	// The box is BORROWED, not repossessed: whatever the human was part-way through typing is
 	// stashed and handed back when the question lets go of it (restoreAskDraft). Emptying it
@@ -45,7 +47,7 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	// box back the moment submitAnswer moves the state on.
 	m.sel = fieldSel{} // the input was emptied for the answer; drop any stale selection
 	m.dropRecall()     // and any walk in progress: the box now belongs to the question
-	return m, tea.Batch(m.input.Focus(), latch)
+	return m, tea.Batch(m.input.Focus(), latch, notify)
 }
 
 // askChoiceKey is the ask prompt's keypress half, beside the pane that paints it: while a question
@@ -135,6 +137,8 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	}
 	m.pendingAsk.Reply <- domain.AskAnswer{Text: answer}
 	m.pendingAsk = nil
+	// The next request this Exchange folds finds the human here (notify.go).
+	m.answeredInExchange = true
 	m.askChecked = nil      // the question is answered: no checked set outlives it
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
 	m.approvalDrainMark = 0 // and so does the marker it was waiting on; the next pane asks for its own

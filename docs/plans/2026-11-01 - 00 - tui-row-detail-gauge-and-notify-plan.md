@@ -268,7 +268,16 @@ internal/config/config_test.go — wantUIDefault, everyKeyFileConfig; internal/d
 - `go test -race -count=1 -run TestSettingsApply ./internal/tui/`
 **Commit:** `feat(config): a ui.notify setting`
 
-## 10. Notify when apogee waits on the user
+## 10. Notify when apogee waits on the user — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): the focus flag is `Model.blurred` (zero value focused) rather than a `focused` flag that starts true, so a hand-built or zero Model never reads as blurred; same behaviour.
+NOTES (2026-11-01): "no notify for a request that folds in the same Exchange right after the human answered one" is `Model.answeredInExchange`, set when the human answers the conversation's own approval or question (sendApproval, submitAnswer) and cleared only by finishWorker, so every request after the first answer in an Exchange opens silent, not only the one immediately behind it.
+NOTES (2026-11-01): `$TMUX` is read in newModel (`notifyTmux`); notify tests set it to false explicitly so a suite run inside tmux still sees unwrapped bytes.
+NOTES (2026-11-01): a background prompt offered right after the human answered the previous one is still a first offer and notifies, per the ID-based guard; only the re-offer and the `^a` open are silenced.
+NOTES (2026-11-01): IDEAS.md's item is ticked in the working tree, but IDEAS.md is gitignored (.gitignore:14), so it is not in FILES and the tick cannot be committed.
+NOTES (2026-11-01): consequential edit — internal/tui/doc.go: made necessary by the new notify.go (TestDocMapNamesEveryFile requires every file in the package map).
+NOTES (2026-11-01): consequential edit — docs/manual/configuration.md: made necessary by the blurred Turn-end notify (the `ui.notify` paragraph named only the approval/question prompt; item 9's note flagged it).
+NOTES (2026-11-01): consequential edit — internal/config/defaults/config.yaml: made necessary by the blurred Turn-end notify (the template's `notify` comment, same reason).
 
 **What:**
 **Goal:** Opening an approval prompt or an ask pane notifies per `ui.notify`:

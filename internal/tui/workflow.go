@@ -84,13 +84,15 @@ const receiptOK = "ok"
 
 // backgroundWorkflows is the session's live background workflows as their events fold: each one's
 // view by workflow id, the run id of every run a background run spawned, mapped to its workflow,
-// and the ids of the waiting prompts the human dismissed with esc, which the idle offer skips. The
+// the ids of the waiting prompts the human dismissed with esc, which the idle offer skips, and the
+// ids of the prompts already opened once, whose later opens do not notify (notify.go). The
 // maps are replaced on write, never mutated in place, because the Model is copied by value on every
 // Update and an earlier copy must not see a later fold. The zero value is empty.
 type backgroundWorkflows struct {
 	live      map[string]backgroundWorkflow
 	runs      map[string]string
 	dismissed map[uint64]bool
+	offered   map[uint64]bool
 }
 
 // backgroundWorkflow is one live background workflow: its name, what launched it when that is not a
@@ -173,7 +175,7 @@ func (b backgroundWorkflows) without(id string) backgroundWorkflows {
 }
 
 // synced returns b with every live workflow's waiting count taken from prompts — the engine's queue
-// as it stands — and every dismissed id that is no longer queued forgotten.
+// as it stands — and every dismissed or offered id that is no longer queued forgotten.
 func (b backgroundWorkflows) synced(prompts []domain.WorkflowPrompt) backgroundWorkflows {
 	counts := make(map[string]int, len(prompts))
 	queued := make(map[uint64]bool, len(prompts))
@@ -188,7 +190,9 @@ func (b backgroundWorkflows) synced(prompts []domain.WorkflowPrompt) backgroundW
 	}
 	dismissed := maps.Clone(b.dismissed)
 	maps.DeleteFunc(dismissed, func(id uint64, _ bool) bool { return !queued[id] })
-	b.live, b.dismissed = live, dismissed
+	offered := maps.Clone(b.offered)
+	maps.DeleteFunc(offered, func(id uint64, _ bool) bool { return !queued[id] })
+	b.live, b.dismissed, b.offered = live, dismissed, offered
 	return b
 }
 
@@ -266,6 +270,17 @@ func (b backgroundWorkflows) withDismissed(id uint64) backgroundWorkflows {
 	}
 	dismissed[id] = true
 	b.dismissed = dismissed
+	return b
+}
+
+// withOffered returns b with the prompt id marked as opened once, so no later open of it notifies.
+func (b backgroundWorkflows) withOffered(id uint64) backgroundWorkflows {
+	offered := maps.Clone(b.offered)
+	if offered == nil {
+		offered = make(map[uint64]bool)
+	}
+	offered[id] = true
+	b.offered = offered
 	return b
 }
 
@@ -427,7 +442,9 @@ func offerAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 // offerWaitingPrompt opens the oldest waiting background prompt the human has not dismissed, when
 // the human is idle — the same idle a wake waits for (canWake); until then the offer is held and
 // the next fold asks again. The engine's queue is read once per try, and the waiting counts are
-// synced to it, so a prompt its workflow's stop withdrew stops being counted.
+// synced to it, so a prompt its workflow's stop withdrew stops being counted. A prompt's first
+// offer notifies the terminal; the re-offer after an esc does not (backgroundWorkflows.offered,
+// notify.go).
 func (m Model) offerWaitingPrompt() (Model, tea.Cmd) {
 	if !m.canWake() {
 		return m, nil

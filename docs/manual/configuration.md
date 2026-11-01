@@ -1168,8 +1168,9 @@ prompt has opened, and the run is stopped until you answer. `bell` — the defau
 terminal bell, which most terminals and tmux turn into a sound, a flash or a flagged tab; `osc9`
 sends an OSC 9 desktop notification naming what is waiting, for a terminal that shows one (iTerm2,
 WezTerm and Ghostty among them; inside tmux it is passed through to the outer terminal, which needs
-tmux's `allow-passthrough` on); `both` sends the two, and `off` sends nothing. Any other value is a
-startup error. The switch is live: commit the row in `/settings` and the next prompt signals the
+tmux's `allow-passthrough` on); `both` sends the two, and `off` sends nothing. A turn that
+finishes or fails signals the same way, but only while your terminal reports its window out of
+focus. Any other value is a startup error. The switch is live: commit the row in `/settings` and the next prompt signals the
 new way.
 
 ```yaml

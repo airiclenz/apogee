@@ -378,7 +378,8 @@ func (m Model) workflowsVerb(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // answer returns to idle and resumes no worker. A decision pane mid-Turn belongs to the running
 // Exchange, so it goes only when the session is idle as canWake reads it with this pane taken as
 // closed, and otherwise notes why and opens nothing. A workflow with nothing waiting — by the folded
-// count, or by the engine's queue once read — takes nothing.
+// count, or by the engine's queue once read — takes nothing. The pane it opens rings nothing: the
+// human asked for it (backgroundWorkflows.offered, notify.go).
 func (m Model) answerShownWorkflow() (tea.Model, tea.Cmd) {
 	id := m.workflowsPane.shown
 	if !m.workflows.waits(id) {
@@ -396,7 +397,8 @@ func (m Model) answerShownWorkflow() (tea.Model, tea.Cmd) {
 	if i < 0 {
 		return m, nil
 	}
-	closed.workflows = m.workflows.withoutDismissed(prompts[i].ID)
+	// The human asked for this prompt, so its open does not notify (notify.go).
+	closed.workflows = m.workflows.withoutDismissed(prompts[i].ID).withOffered(prompts[i].ID)
 	return closed.openWorkflowPrompt(prompts[i])
 }
 

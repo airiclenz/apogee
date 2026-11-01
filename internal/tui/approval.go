@@ -177,6 +177,8 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	// and never inside a rule field a previous request left open
 	m.ruleEdit = projectRuleEdit{}
 	latch := m.openDecisionLatch()
+	// The terminal hears that apogee waits on the human (notify.go).
+	notify := m.notifyDecisionOpened(msg.Workflow, notifyApprovalText)
 	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
 	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts.
@@ -184,7 +186,7 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	// the pane for as long as the question stands ([Model.legend]) — and so is the frame: the pane
 	// the decision turns on outranks the draft's extra rows (draftRowsCeiling), and Update's tail
 	// lays out when either height has moved from under its last set ([Model.settle]).
-	return m, latch
+	return m, tea.Batch(latch, notify)
 }
 
 // openDecisionLatch closes the decision latch over the surface the caller has just opened — an
@@ -470,6 +472,8 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 	}
 	m.pending.Reply <- decision
 	m.pending = nil
+	// The next request this Exchange folds finds the human here (notify.go).
+	m.answeredInExchange = true
 	// The rule field belongs to the request just answered.
 	m.ruleEdit = projectRuleEdit{}
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
