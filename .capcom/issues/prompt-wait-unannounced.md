@@ -1,10 +1,12 @@
 ---
 title: apogee never signals that it is waiting on the user (approval, ask, finished Turn)
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:43:53Z
+closed: 2026-11-01T14:08:29Z
+reason: Items 9-10 resolved by plan 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan (archived at 639c3bfc)
 ---
 
 An approval or ask prompt opens silently, and a Turn that finishes while the terminal is in the background says nothing. A user who switched windows has no cue that apogee is blocked on them (IDEAS.md: "Send notification on questions / needed user input").

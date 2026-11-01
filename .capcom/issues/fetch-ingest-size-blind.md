@@ -1,10 +1,12 @@
 ---
 title: Fetch rows hide how much was ingested, and the context gauge lags until the next response
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:19:33Z
+closed: 2026-11-01T14:08:29Z
+reason: Items 3-7 resolved by plan 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan (archived at 639c3bfc)
 ---
 
 The rows for `web_fetch` (and `http_request`) show only the first line, `HTTP 200 OK`, so the user cannot tell how much each fetch put into the context. The context gauge doesn't move when a tool result is appended either. It only moves after the next upstream response. In the reported session, four fetches returned, the gauge stayed at 36k/160k, and the model then thought silently for ~15 min. The user had no way to tell whether a large ingest was the cause.

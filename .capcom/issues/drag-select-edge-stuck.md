@@ -1,10 +1,12 @@
 ---
 title: A drag-select stops at the transcript edge instead of scrolling on
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:43:53Z
+closed: 2026-11-01T14:08:29Z
+reason: Item 11 resolved by plan 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan (archived at 639c3bfc)
 ---
 
 Dragging a selection to the top row (while scrolled up) or below the transcript does nothing: the head keeps its last cell and the viewport never scrolls, so a selection longer than one screen needs wheel scrolling mid-drag. Deferred as polish in docs/plans/archived/tui-input-deepening-plan.md (item 3).

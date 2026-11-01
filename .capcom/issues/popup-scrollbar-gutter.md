@@ -1,10 +1,12 @@
 ---
 title: Pop-up scrollbar sits flush against the content with no gap column
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:19:29Z
+closed: 2026-11-01T14:08:29Z
+reason: Item 2 resolved by plan 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan (archived at 639c3bfc)
 ---
 
 In boxed pop-ups (seen in the /thinking pane), the vertical scrollbar takes the column directly next to the text. Wrapped lines run right up to the bar, which looks cramped. The transcript already leaves a gap here: `layout.md:2-4` says "one column stays free between the text and the scroll bar". The pop-up rule (`layout.md:682-693`) promises no such gap.

@@ -1,10 +1,12 @@
 ---
 title: "A failed Terminal row hides its detail: no caret, and the model's error text never shown"
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:19:20Z
+closed: 2026-11-01T14:08:29Z
+reason: Item 1 resolved by plan 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan (archived at 639c3bfc)
 ---
 
 A Terminal call that fails with empty output (seen: `capcom view x 2>/dev/null | head -60` → `error: exit 2`) renders a row with no expand caret, so the user cannot see why it failed. Its `exit 0` sibling in the same group has a caret.
