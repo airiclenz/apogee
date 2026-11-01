@@ -320,7 +320,7 @@ internal/tui/mouse_test.go — leftClick, leftDrag, leftRelease, TestTranscriptS
 **Closes:** drag-select-edge-stuck
 **Commit:** `feat(tui): auto-scroll a drag-select held past the transcript edge`
 
-## 12. Drop the stale parity TODO tag
+## 12. Drop the stale parity TODO tag — ✅ DONE (2026-11-01)
 
 **What:**
 **Goal:** The package comment of `internal/tui/command.go` carries no `TODO: apogee-code feature parity` tag, and no non-test file in `internal/tui` names that TODO.

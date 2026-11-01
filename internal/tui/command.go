@@ -9,7 +9,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Chat input mini-language — the parse layer (TODO: apogee-code feature parity)
+// Chat input mini-language — the parse layer
 // ----------------------------------------------------------------------------
 //
 // This file is the pure, Model-free parser between the input box and the agent: it
