@@ -278,7 +278,8 @@ which changes shipped, how the notes read, which version to cut.
 **The usual way: run the `release-apogee` skill.** It is canonical under
 `.apogee/skills/release-apogee/`, so apogee loads it as a project skill, and Claude Code
 reaches it through the pointer `.claude/skills/release-apogee/SKILL.md`. It checks the gate
-with `status`, drafts the notes with `release-notes-apogee`, proposes a version for you to
+with `status` — when the gate lacks only a push or a green `ci.yml` run, it pushes `main`'s
+committed work, watches the run and carries on once it is green; red CI stops it — drafts the notes with `release-notes-apogee`, proposes a version for you to
 confirm, makes the two local commits with `prepare`, shows a `publish --dry-run`, and runs
 `publish` only after one explicit confirmation. `release-notes-apogee` on its own is
 read-only: it answers "what shipped since the last release?" and drafts the notes without

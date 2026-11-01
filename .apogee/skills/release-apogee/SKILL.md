@@ -4,7 +4,8 @@ displayName: Release (apogee)
 summary: Cut and publish an apogee release end to end — notes, version, prepare, publish, smoke.
 description: >
   Cuts an apogee release: checks the release gate with `go run ./cmd/release
-  status`, drafts the notes with release-notes-apogee, proposes the version and
+  status` — pushing unpushed work on main and waiting for its CI run to go
+  green when that is all the gate lacks — drafts the notes with release-notes-apogee, proposes the version and
   has the owner confirm it, makes the two local release commits with `prepare`,
   then — after a dry run and one explicit confirmation — runs `publish`, which
   pushes, waits for the CI-made tag, creates the GitHub release and updates
@@ -35,9 +36,12 @@ The optional argument `vX.Y.Z` (a bare `X.Y.Z` reads the same) is a version
 - **One irreversible step: `publish`.** Everything before it is local and
   undone with `git reset --keep HEAD~2`; everything after it is fixed
   forward, never undone.
-- **No bypass.** A blocked gate stops the run. You never tag, push, create a
+- **No bypass.** A blocked gate stops the run, except the two entries step
+  1a clears by pushing and waiting for green CI. You never tag, create a
   GitHub release, or commit to the tap or the bucket by hand — `publish`
-  does all of it, and the tag is made by CI, never by you or `publish`.
+  does all of it, and the tag is made by CI, never by you or `publish`. The
+  one push you make yourself is step 1a's, of work already committed on
+  main; the two `prepare` commits are pushed by `publish`.
 - **Ask with the host's user-question tool** (`ask_user`, `AskUserQuestion`,
   or similar) at every *Ask* below, and wait for the answer. No answer, or a
   host without the tool, means stop — never assume consent.
@@ -65,11 +69,56 @@ pushed. Say so, take vX as the confirmed version, and go to step 6: the notes
 file `<TMP>/release-notes-apogee-vX.md` is reused when it exists (show it and
 *Ask* approval as in step 3), else step 2 runs with the argument vX first.
 
-**Gate.** `gate.ok` false and no resume → **stop**: list every
-`gate.failures` entry verbatim. Fixing them (a dirty tree, an unpushed or
-diverged HEAD, a red or missing `ci.yml` run) is the owner's work; offer
-nothing that skips them. Otherwise print one ledger line: baseline tag,
-publish date, commit count, highest tag.
+**Gate.** `gate.ok` false and no resume → sort the `gate.failures` entries.
+Two kinds are cleared here, by step 1a: `gate commit … is not on origin/main:
+push it first` and `ci.yml has no successful run for …`. Any other entry (a
+dirty tree, `origin/main has commits HEAD does not: pull first`, a check that
+could not run) → **stop**: list every entry verbatim. Fixing those is the
+owner's work; offer nothing that skips them. When every entry is one of the
+two kinds, run step 1a. Once the gate is ok, print one ledger line: baseline
+tag, publish date, commit count, highest tag.
+
+## 1a — Push, then wait for green CI
+
+Only on a blocked gate whose entries are all of step 1's two kinds, and never
+on a resume: the two `prepare` commits are pushed by `publish` alone. No *Ask*
+— the owner asked for the release, and this pushes only work already
+committed on main.
+
+```bash
+test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "NOT_ON_MAIN"; exit 1; }
+git log --oneline origin/main..HEAD
+git push origin main
+echo "HEAD=$(git rev-parse HEAD)"
+```
+
+`NOT_ON_MAIN` → stop and say so. Otherwise name the commits pushed (none
+when HEAD was already on origin/main and only its CI was missing). Then
+find the `ci.yml` run for HEAD and wait for it to finish — GitHub can take a
+while to list a new run, so the loop waits up to 10 minutes for it to
+appear, then the watch runs as long as CI does. Give the shell call a long
+timeout, or run it in the background and wait for it:
+
+```bash
+H="HEAD_VALUE"; ID=""
+for i in $(seq 1 40); do
+  ID="$(gh run list --workflow ci.yml --commit "$H" --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)"
+  [ -n "$ID" ] && break
+  sleep 15
+done
+echo "RUN=${ID:-none}"
+[ -z "$ID" ] || { gh run watch "$ID" --exit-status --interval 30 > /dev/null && echo "CI=green" || echo "CI=red"; }
+```
+
+- `RUN=none` → **stop**. No CI run exists for HEAD. The usual cause is a
+  push that touched only paths `ci.yml` filters out (`.capcom/**`,
+  `docs/plans/**`, `CHANGELOG.md`, …): CI will never run on it, so the gate
+  stays blocked until a commit CI does run on lands on top. Say that.
+- `CI=red` → **stop**. Relay the failed jobs with
+  `gh run view <RUN> --log-failed | tail -n 60 || true`. Red CI blocks the
+  release, flaky or not; never re-run a job to get past it.
+- `CI=green` → run step 1's block again. The gate must now be ok; any entry
+  still listed → **stop** and list them verbatim (never a second push).
 
 ## 2 — Draft the notes
 
@@ -175,6 +224,8 @@ End with the final step table and, in plain words:
 
 ## Hard rules
 
-- Never tag, push, release or update a channel by hand; `publish` alone does.
+- Never tag, release or update a channel by hand; `publish` alone does.
+  Push only in step 1a, only main's committed work, and only once.
 - Never bypass the gate, nor switch versions to get past a failed `publish`.
+  Red CI stops the run; only green CI lets step 1a continue.
 - The owner confirms notes, version and publish — each via the question tool.
