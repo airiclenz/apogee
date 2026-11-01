@@ -337,7 +337,12 @@ binary that wrote it).
 `run_finished` is the whole outcome: `exit_code`, `turns`, `denied`, `faulted`, `fault`, `error`
 (the run's error text, `null` when there was none), `title`, `final_text`, `wrote`,
 `context_files`, `context_cost`, `undo_note`, `saved`, `usage`, `sub_agents`,
-`turn1_prompt_tokens` and `turn1_cached_prompt_tokens`.
+`turn1_prompt_tokens`, `turn1_cached_prompt_tokens` and `budget_stop`.
+
+`budget_stop` is `null` unless the run stopped at a budget, when it is
+`{"budget":"max-turns"|"max-wall-time","limit":"<value>"}` — the budget that ended the run between
+Turns and the limit it was set to, a whole count for `max-turns` and a Go duration (`30m0s`) for
+`max-wall-time`.
 
 `usage` and each `sub_agents` entry carry the token counters — `calls`, `prompt_tokens`,
 `completion_tokens`, `total_tokens`, `cached_prompt_tokens` — and the priced spend beside them:

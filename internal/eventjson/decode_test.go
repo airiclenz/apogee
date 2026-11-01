@@ -193,6 +193,7 @@ var (
 		SubAgents:               []SubAgentUsage{{Used: 1, Limit: 2, Task: "t", Name: "n", Model: "m", Calls: 1, Cost: "0", UnpricedCalls: 1}},
 		Turn1PromptTokens:       11,
 		Turn1CachedPromptTokens: 3,
+		BudgetStop:              &BudgetStop{Budget: "max-turns", Limit: "4"},
 	}
 )
 
@@ -243,6 +244,57 @@ func TestDecodeRoundTripsEveryKind(t *testing.T) {
 		if !seen[kind] {
 			t.Errorf("the round trip covers no %q line", kind)
 		}
+	}
+}
+
+// TestDecodeRoundTripsBudgetStop writes a run_finished frame without and with a budget stop and
+// decodes each back: `budget_stop` is always on the line, `null` on an ordinary exit and the named
+// budget with its limit on a stop, and it reads back exactly as written.
+func TestDecodeRoundTripsBudgetStop(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		stop       *BudgetStop
+		wantMember string
+	}{
+		{name: "ordinary exit", stop: nil, wantMember: `"budget_stop":null}`},
+		{
+			name:       "turn budget",
+			stop:       &BudgetStop{Budget: "max-turns", Limit: "2"},
+			wantMember: `"budget_stop":{"budget":"max-turns","limit":"2"}}`,
+		},
+		{
+			name:       "wall-time budget",
+			stop:       &BudgetStop{Budget: "max-wall-time", Limit: "30m0s"},
+			wantMember: `"budget_stop":{"budget":"max-wall-time","limit":"30m0s"}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			w := New(&out, Options{Session: "sess-9", Now: fixedClock})
+			w.RunFinished(RunFinished{ExitCode: 4, Turns: 2, BudgetStop: tc.stop})
+
+			raw := lines(t, &out)
+			if len(raw) != 1 || !strings.HasSuffix(raw[0], tc.wantMember+"}") {
+				t.Fatalf("wrote %q, want one line ending in %s}", raw, tc.wantMember)
+			}
+			line, err := Decode([]byte(raw[0]))
+			if err != nil {
+				t.Fatalf("Decode(%s): %v", raw[0], err)
+			}
+			// The member alone: the whole frame's round trip is TestDecodeRoundTripsEveryKind's,
+			// over a frame whose every member is set (roundTripFinished).
+			if line.Finished == nil {
+				t.Fatalf("decoded %+v, want a run_finished frame", line)
+			}
+			if got := line.Finished.BudgetStop; !reflect.DeepEqual(got, tc.stop) {
+				t.Errorf("decoded budget_stop %+v, want %+v", got, tc.stop)
+			}
+		})
 	}
 }
 

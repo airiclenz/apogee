@@ -144,7 +144,10 @@ cmd/apogee/wire_settings_test.go — TestEveryEditableSettingKeyHasAnApply, Test
 
 **Commit:** `feat(config): add the headless-max-turns and headless-max-wall-time keys`
 
-## 5. run_finished carries budget_stop
+## 5. run_finished carries budget_stop — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): internal/eventjson/decode.go needed no change — `run_finished` decodes through a plain unmarshal into RunFinished, so the new member reads back with no decoder edit; runFinishedFrame (cmd/apogee/headless.go) is untouched and leaves the member nil until item 6.
+NOTES (2026-11-01): the new TestDecodeRoundTripsBudgetStop compares the decoded `budget_stop` member rather than the whole frame — a sparse frame does not round-trip byte-equal (Usage.Cost is written `0` from empty); the whole-frame round trip stays TestDecodeRoundTripsEveryKind's, whose roundTripFinished now sets BudgetStop.
 
 **What:**
 **Goal:** every `run_finished` Event line has a `budget_stop` member, `null` unless the run stopped at a budget, when it is `{"budget":"<name>","limit":"<value>"}`. The line version stays `2`. The three eventline goldens and the `docs/manual/headless.md` sentence that lists every `run_finished` member include it.

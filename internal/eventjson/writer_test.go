@@ -124,7 +124,7 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 			`"context_files":{"files":null,"standing_tokens":0,"system_share":0},` +
 			`"context_cost":{"rows":null,"bytes":0,"tokens":0,"calibrated":false},"undo_note":"","saved":true,` +
 			`"usage":{"calls":0,"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"cached_prompt_tokens":0,"cost":0,"currency":"","unpriced_calls":0},"sub_agents":null,` +
-			`"turn1_prompt_tokens":0,"turn1_cached_prompt_tokens":0}}`,
+			`"turn1_prompt_tokens":0,"turn1_cached_prompt_tokens":0,"budget_stop":null}}`,
 	}
 
 	got := lines(t, &out)

@@ -295,6 +295,20 @@ type RunFinished struct {
 	// reported no usage, so a consumer reads `turns` before treating a zero as a cost.
 	Turn1PromptTokens       int `json:"turn1_prompt_tokens"`
 	Turn1CachedPromptTokens int `json:"turn1_cached_prompt_tokens"`
+	// BudgetStop names the headless budget that stopped the run at a Turn boundary, and is nil —
+	// written `null` — on every other exit. It is a pointer for the reason Error is: a run either
+	// stopped at a budget or did not, and a zero-valued object would read as a budget with no name.
+	BudgetStop *BudgetStop `json:"budget_stop"`
+}
+
+// BudgetStop is RunFinished's account of a budget stop: which budget ended the run ("max-turns" or
+// "max-wall-time") and the limit it was set to: a whole count ("25") for the Turn budget, a Go
+// duration ("30m0s") for the wall-time one.
+// Both are strings the Driver fills from internal/run's own report, so this package names no
+// budget itself (ADR 0075: the frames are the Driver's to fill).
+type BudgetStop struct {
+	Budget string `json:"budget"`
+	Limit  string `json:"limit"`
 }
 
 // ContextFiles mirrors domain.ContextFilesReport: what the session's workspace context files
