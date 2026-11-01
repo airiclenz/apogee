@@ -88,7 +88,10 @@ The presenter test is a standalone `TestViewDiff…` func in `toolsummary_pin_te
 **Closes:** viewdiff-orientation-header
 **Commit:** `fix(tools): name the current and proposed sides in view_diff output`
 
-## 3. internal/run stops a run at a Turn budget
+## 3. internal/run stops a run at a Turn budget — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): besides the one budget struct (`run.Budget{MaxTurns, MaxWallTime}` on `Spec.Budget`), the stop is reported as a second small exported type, `Result.BudgetStop *BudgetStop{Budget, Limit string}`, with exported name constants `BudgetMaxTurns` ("max-turns") / `BudgetMaxWallTime` ("max-wall-time"), shaped to match item 5's `{"budget":…,"limit":…}` member; the wall-time limit is spelled by `time.Duration.String()` (e.g. `90m` reads `1h30m0s`), so item 6 copies the fields straight through.
+NOTES (2026-11-01): the zero Budget keeps calling `Agent.Run` untouched; a set Budget drives `Agent.Step` (equivalent for a top-level Agent: Run's step cap, time/token bounds, fault fold and mailbox drain are delegate-only) and checks Turns before wall time, reading `Spec.Now` only when a wall-time budget is set; on a hit `Agent.SettleExchange()` closes the Exchange (its cancelled-note is ephemeral, so the saved record carries no marker).
 
 **What:**
 **Goal:** `run.Spec` carries an optional Turn budget and an optional wall-time budget (zero means none). When a Turn completes and the Exchange is not finished, `run.Once` checks both budgets. If either is reached, it ends the Exchange without starting another Turn, keeps every finished Turn, saves the record as it does today, and reports in `run.Result` which budget stopped it and its limit. A run that finishes its Exchange within budget reports no budget stop. No budget set means behaviour is identical to today.

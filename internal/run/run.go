@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -133,6 +134,88 @@ type Spec struct {
 	// held. nil ⇒ no journal: the bench, every test that keeps none, and a Driver that keeps no
 	// record (`--no-save`) all leave it nil, and a run with no Store never calls it either way.
 	Journal JournalOpener
+
+	// Budget bounds how long the Firing may go on, checked only BETWEEN Turns: a Turn that has
+	// started always finishes, and nothing it did is rolled back. Its zero value sets no budget,
+	// and the run is then driven exactly as it always was. Result.BudgetStop reports a stop.
+	Budget Budget
+}
+
+// Budget is a Firing's optional run budget: how many Turns it may take and how much wall time it
+// may spend. Each field's zero (or a negative value, which a Driver refuses before it gets here)
+// means that budget is not set. Once checks both at every Turn boundary the Exchange is not yet
+// finished at; when either is reached it ends the Exchange there, keeping every finished Turn,
+// saves the record as it saves any other, and names the budget on Result.BudgetStop. A Turn that
+// itself ends the Exchange ends the run normally, even one that reached a limit exactly.
+//
+// The fields are Driver-neutral facts about the run (ADR 0031): which Driver sets them, from which
+// flag or key, is that Driver's own business.
+type Budget struct {
+	// MaxTurns is how many Turns the run may take, counted as Result.Turns counts them.
+	MaxTurns int
+	// MaxWallTime is how long the run may go on, measured on Spec.Now from the moment Once was
+	// entered.
+	MaxWallTime time.Duration
+}
+
+// The budget names a BudgetStop carries.
+const (
+	// BudgetMaxTurns names the Turn budget (Budget.MaxTurns).
+	BudgetMaxTurns = "max-turns"
+	// BudgetMaxWallTime names the wall-time budget (Budget.MaxWallTime).
+	BudgetMaxWallTime = "max-wall-time"
+)
+
+// BudgetStop reports the budget that ended a Firing at a Turn boundary: which one, and the limit
+// it was set to.
+type BudgetStop struct {
+	// Budget is BudgetMaxTurns or BudgetMaxWallTime.
+	Budget string
+	// Limit is the limit that was reached, spelled as its budget is: a whole count ("2") for the
+	// Turn budget, a Go duration ("1h30m0s") for the wall-time one.
+	Limit string
+}
+
+// isSet reports whether b sets any budget at all.
+func (b Budget) isSet() bool {
+	return b.MaxTurns > 0 || b.MaxWallTime > 0
+}
+
+// reached returns the budget a run that has finished turns Turns has reached, or nil when it has
+// reached none. The Turn budget is checked first, so a boundary that reaches both names that one.
+// elapsed is read only when the wall-time budget is set, so a run with a Turn budget alone never
+// reads the clock here.
+func (b Budget) reached(turns int, elapsed func() time.Duration) *BudgetStop {
+	if b.MaxTurns > 0 && turns >= b.MaxTurns {
+		return &BudgetStop{Budget: BudgetMaxTurns, Limit: strconv.Itoa(b.MaxTurns)}
+	}
+	if b.MaxWallTime > 0 && elapsed() >= b.MaxWallTime {
+		return &BudgetStop{Budget: BudgetMaxWallTime, Limit: b.MaxWallTime.String()}
+	}
+	return nil
+}
+
+// runWithin drives a to the end of its Exchange. Without a budget it is the Agent's own Run,
+// untouched. With one it drives Step itself — the Step-driving form Run wraps, which for a
+// top-level Agent differs from Run in nothing, since every bound and mailbox Run adds belongs to a
+// delegate — and after each Turn that left the Exchange open it checks the budget. On a hit the
+// Exchange is closed keeping its finished Turns (Agent.SettleExchange), so the record that follows
+// is saved at a clean boundary, and the Turn that reached the budget is the one returned.
+func runWithin(ctx context.Context, a *agent.Agent, b Budget, elapsed func() time.Duration) (domain.StepResult, *BudgetStop, error) {
+	if !b.isSet() {
+		step, err := a.Run(ctx)
+		return step, nil, err
+	}
+	for {
+		step, err := a.Step(ctx)
+		if err != nil || step.Status != domain.StatusTurnComplete {
+			return step, nil, err
+		}
+		if stop := b.reached(step.TurnIndex+1, elapsed); stop != nil {
+			a.SettleExchange()
+			return step, stop, nil
+		}
+	}
 }
 
 // JournalStart is what a Firing's live Event journal opens with: the record it belongs to and the
@@ -272,6 +355,11 @@ type Result struct {
 	// run's error does not carry a stopped or all-blocked workflow, because the Firing itself went
 	// on to its answer, and what such an ending means to its caller is the Driver's to decide.
 	Workflow WorkflowOutcome
+	// BudgetStop names the budget (Spec.Budget) that ended the Firing at a Turn boundary, and its
+	// limit; nil on every other exit, a run that finished its Exchange within budget included. A
+	// budget stop is not an error: Err stays nil, Turns counts the Turns kept, and the record is
+	// saved as it is for any other run.
+	BudgetStop *BudgetStop
 }
 
 // WorkflowOutcome is how a Firing's recipe Workflow ended: its id, the phase it ended on, and how
@@ -433,7 +521,8 @@ func seedLanes(cfg *domain.Config, lanes domain.Generation) error {
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
 // FRESH Agent (no state is carried between Firings — ADR 0033, decision 5), submits the
-// prompt, drives the loop to the quiescent boundary, and saves the resulting session
+// prompt, drives the loop to the quiescent boundary — or, with a Spec.Budget, to the Turn
+// boundary that budget is reached at (Result.BudgetStop) — and saves the resulting session
 // record once, at completion.
 //
 // It returns the Result and an error. The two are deliberately separate: a run failure is
@@ -591,7 +680,8 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 			fmt.Errorf("apogee: submit the firing's prompt: %w", err)
 	}
 
-	step, runErr := a.Run(ctx)
+	elapsed := func() time.Duration { return now().Sub(startedAt) }
+	step, budgetStop, runErr := runWithin(ctx, a, spec.Budget, elapsed)
 	if runErr == nil && step.Status == domain.StatusCancelled {
 		// A cancel is not a loop error, but it IS the reason this Firing has no answer, and
 		// an unattended caller has no event stream to learn that from.
@@ -615,6 +705,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		UndoNote:     reason,
 		Err:          runErr,
 		Workflow:     tap.workflowOutcome(),
+		BudgetStop:   budgetStop,
 	}
 	if spec.Store == nil {
 		return res, runErr

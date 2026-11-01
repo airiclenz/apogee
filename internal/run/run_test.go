@@ -3467,3 +3467,189 @@ func TestOnceCompletesWhenTheJournalFails(t *testing.T) {
 		t.Errorf("the failing journal reported %d time(s); want exactly once: %v", len(reports), reports)
 	}
 }
+
+// toolLoopScript scripts a model that answers every request with one more note_something call,
+// for turns requests, each call under its own id, and has nothing for a request after them — so a
+// run its budget failed to stop reaches the end of the Script and errors instead of passing.
+func toolLoopScript(turns int) stubllm.Script {
+	script := stubllm.Script{}
+	for i := range turns {
+		script.Turns = append(script.Turns, stubllm.Turn{ToolCalls: []stubllm.ToolCall{{
+			ID: fmt.Sprintf("call_%d", i+1), Name: "note_something", Arguments: fmt.Sprintf(`{"note":"n%d"}`, i+1),
+		}}})
+	}
+	return script
+}
+
+// budgetSpec is a Plan Firing against up with note_something registered, so a scripted tool call
+// runs rather than gates.
+func budgetSpec(t *testing.T, up *stubllm.Server) Spec {
+	t.Helper()
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(notingTool{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	spec := planSpec(up.URL, "keep noting")
+	spec.Config.Tools = registry
+	return spec
+}
+
+// steppingClock returns a clock that starts at start and moves on by step every time it is read.
+func steppingClock(start time.Time, step time.Duration) func() time.Time {
+	var mu sync.Mutex
+	next := start
+	return func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		now := next
+		next = next.Add(step)
+		return now
+	}
+}
+
+// countEntries counts the transcript entries of kind.
+func countEntries(entries []session.Entry, kind string) int {
+	n := 0
+	for _, e := range entries {
+		if e.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+// TestOnceStopsAtItsTurnBudget pins the Turn budget: a model that keeps calling tools is stopped
+// once its second Turn completes, no third request is sent, the record is saved with the two
+// Turns it took, and the Result names the budget and its limit — as a stop, not an error.
+func TestOnceStopsAtItsTurnBudget(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, toolLoopScript(3))
+	store := session.NewStore(t.TempDir())
+	spec := budgetSpec(t, up)
+	spec.Store = store
+	spec.Budget = Budget{MaxTurns: 2}
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.Err != nil || res.Faulted {
+		t.Errorf("Result.Err = %v, Faulted = %v; a budget stop is neither", res.Err, res.Faulted)
+	}
+	if want := (&BudgetStop{Budget: BudgetMaxTurns, Limit: "2"}); !reflect.DeepEqual(res.BudgetStop, want) {
+		t.Errorf("Result.BudgetStop = %+v, want %+v", res.BudgetStop, want)
+	}
+	if res.Turns != 2 {
+		t.Errorf("Result.Turns = %d, want 2", res.Turns)
+	}
+	if got := len(up.Requests()); got != 2 {
+		t.Errorf("the stub served %d requests, want 2: no Turn starts past the budget", got)
+	}
+
+	rec, err := store.Load(res.SessionID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entries, err := session.DecodeTranscript(rec.Transcript)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if calls, results := countEntries(entries, session.EntryKindToolCall),
+		countEntries(entries, session.EntryKindToolResult); calls != 2 || results != 2 {
+		t.Errorf("the saved record holds %d tool calls and %d results, want the 2 finished Turns' 2 and 2", calls, results)
+	}
+}
+
+// TestOnceStopsAtItsWallTimeBudgetAtTheNextTurnBoundary pins the wall-time budget on the Spec.Now
+// seam: with a clock that moves a minute per reading and a two-minute budget, the first boundary
+// reads one minute spent and goes on, the second reads two and stops — the Turn under way is never
+// cut, the run ends where it next reaches a boundary.
+func TestOnceStopsAtItsWallTimeBudgetAtTheNextTurnBoundary(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, toolLoopScript(3))
+	spec := budgetSpec(t, up)
+	spec.Now = steppingClock(time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC), time.Minute)
+	spec.Budget = Budget{MaxWallTime: 2 * time.Minute}
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if want := (&BudgetStop{Budget: BudgetMaxWallTime, Limit: "2m0s"}); !reflect.DeepEqual(res.BudgetStop, want) {
+		t.Errorf("Result.BudgetStop = %+v, want %+v", res.BudgetStop, want)
+	}
+	if res.Turns != 2 {
+		t.Errorf("Result.Turns = %d, want 2", res.Turns)
+	}
+	if got := len(up.Requests()); got != 2 {
+		t.Errorf("the stub served %d requests, want 2", got)
+	}
+}
+
+// TestOnceReportsNoBudgetStopWhenTheExchangeEndsOnTheBudgetedTurn pins the boundary case: a run
+// whose final Turn ends the Exchange is a normal completion, even when that Turn reached the
+// Turn budget exactly — the budget is checked only at a boundary another Turn would follow.
+func TestOnceReportsNoBudgetStopWhenTheExchangeEndsOnTheBudgetedTurn(t *testing.T) {
+	t.Parallel()
+
+	script := toolLoopScript(1)
+	script.Turns = append(script.Turns, stubllm.Turn{Text: "all noted"})
+	up := stubllm.New(t, script)
+	spec := budgetSpec(t, up)
+	spec.Budget = Budget{MaxTurns: 2}
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.BudgetStop != nil {
+		t.Errorf("Result.BudgetStop = %+v, want nil: the Exchange finished within budget", res.BudgetStop)
+	}
+	if res.Turns != 2 || res.FinalText != "all noted" {
+		t.Errorf("Result = (Turns %d, FinalText %q), want (2, %q)", res.Turns, res.FinalText, "all noted")
+	}
+}
+
+// TestOnceWithoutABudgetRunsAsBefore pins the zero Budget: the run is the Agent's own Run, so it
+// reports what it always did, and a budget set too wide to be reached changes nothing it reports.
+func TestOnceWithoutABudgetRunsAsBefore(t *testing.T) {
+	t.Parallel()
+
+	run := func(budget Budget) Result {
+		t.Helper()
+		script := toolLoopScript(2)
+		script.Turns = append(script.Turns, stubllm.Turn{Text: "all noted"})
+		up := stubllm.New(t, script)
+		spec := budgetSpec(t, up)
+		spec.Budget = budget
+		res, err := Once(context.Background(), spec)
+		if err != nil {
+			t.Fatalf("Once(%+v): %v", budget, err)
+		}
+		return res
+	}
+
+	unbudgeted := run(Budget{})
+	if unbudgeted.BudgetStop != nil || unbudgeted.Turns != 3 || unbudgeted.FinalText != "all noted" {
+		t.Errorf("zero Budget: Result = (BudgetStop %+v, Turns %d, FinalText %q), want (nil, 3, %q)",
+			unbudgeted.BudgetStop, unbudgeted.Turns, unbudgeted.FinalText, "all noted")
+	}
+	wide := run(Budget{MaxTurns: 10, MaxWallTime: time.Hour})
+	type outcome struct {
+		FinalText     string
+		Turns, Denied int
+		Faulted       bool
+		Err           error
+		BudgetStop    *BudgetStop
+		Usage         Usage
+		Wrote         []string
+	}
+	of := func(r Result) outcome {
+		return outcome{r.FinalText, r.Turns, r.Denied, r.Faulted, r.Err, r.BudgetStop, r.Usage, r.Wrote}
+	}
+	if !reflect.DeepEqual(of(wide), of(unbudgeted)) {
+		t.Errorf("an unreached budget reports %+v, want the unbudgeted run's %+v", of(wide), of(unbudgeted))
+	}
+}
