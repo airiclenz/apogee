@@ -1,11 +1,13 @@
 ---
 title: "apogee headless: user-set wall-time and turn budgets with a distinct exit code"
-status: open
+status: done
 type: feature
 priority: 2
 labels: [feature]
 plan: 2026-11-01 - 00 - viewdiff-orientation-and-headless-budgets-plan
 created: 2026-11-01T19:26:29Z
+closed: 2026-11-01T20:54:16Z
+reason: "Resolved by plan 2026-11-01 - 00 - viewdiff-orientation-and-headless-budgets-plan (items 3-6; archived at c7927534): --max-turns / --max-wall-time (flag > env > config) stop the run between Turns, save the record, print the budget on stderr, exit 4, and run_finished carries budget_stop."
 ---
 
 apogee headless has no run budget: an outer supervisor enforces its cap with SIGTERM, and a SIGKILL after the grace window loses in-flight work and the record. Exit codes today are 0-3. Wanted: optional --max-wall-time and --max-turns (and config keys under the same resolution as other headless settings: flag over APOGEE_* over config.yaml) that, when reached, stop the run at the next safe point, save the record, print a stderr line naming the budget, and exit with a new distinct code (e.g. 4). Reported by Seqcom (request apogee-visible-budgets, run 20261031T1223Z, apogee v0.29.1).
