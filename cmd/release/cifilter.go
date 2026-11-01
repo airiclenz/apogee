@@ -56,9 +56,10 @@ func compilePathsFilter(patterns []string) []filterPattern {
 }
 
 // compileGlob turns a filter glob into an anchored regular expression, as GitHub reads one: `**`
-// matches any run of characters including `/` (and a leading `**/` also matches no directory at
-// all), `*` matches a run within one path segment, and every other character is literal. The
-// `?`, `+` and `[]` forms are not supported; the drift test refuses a ci.yml that uses them.
+// matches any run of characters including `/` (and a `**/`, wherever it stands, also matches no
+// directory at all), `*` matches a run within one path segment, and every other character is
+// literal. The `?`, `+` and `[]` forms are not supported; the drift test refuses a ci.yml that
+// uses them.
 func compileGlob(glob string) *regexp.Regexp {
 	var expression strings.Builder
 	expression.WriteString("^")
