@@ -5,7 +5,7 @@
 │                                                                                                                                          │
 │                                                                                                                                          │
 │   currency                            USD                    (default)  · ⏎ opens $EDITOR                                              ┃ │
-│   server                              probe-target           (global)                                                                  ┃ │
+│   server                              probe-target           (global)                                                                  │ │
 │   sub-agents-server                   auto (session server)  (default)  · ⏎ opens $EDITOR                                              │ │
 │   sub-agents-choice                   fixed                  (default)                                                                 │ │
 │   sub-agents-context                  off                    (default)  · ⏎ opens $EDITOR                                              │ │
