@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 2
 labels: [bug]
+plan: 2026-11-01 - 00 - viewdiff-orientation-and-headless-budgets-plan
 created: 2026-11-01T19:26:29Z
 ---
 
