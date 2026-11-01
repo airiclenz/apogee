@@ -683,9 +683,12 @@ column stay a single column.
 window it was granted paints those same two weights down the last column *inside* its border —
 the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, `/thinking`, `/advice`, the dropdown,
 the approval and ask prompts alike, because a windowed list that gives no sign of what it is holding
-back is the same omission wherever it is drawn. The column is reserved **only while the list
-overflows**: a pane whose rows all fit keeps its full inner width, so the bar appearing is itself
-the statement that there is more, and nothing narrows for a list with nothing to scroll. The thumb
+back is the same omission wherever it is drawn. The rows stop **one blank column short of the bar**,
+the transcript's rule: a row's last glyph, and the selected row's highlight, end before that gap, so
+no text and no highlight runs flush against the stroke. The two columns — the gap and the bar — are
+reserved **only while the list overflows**: a pane whose rows all fit keeps its full inner width, so
+the bar appearing is itself the statement that there is more, and nothing narrows for a list with
+nothing to scroll. The thumb
 is sized and placed from the **rows** — the seated window over the whole list — and drawn in the
 **lines** the row block was painted in, which is what keeps it flush at the top on the first row
 and flush at the bottom on the last even where a row wraps to several lines. `ui.show-scrollbar`
@@ -2330,8 +2333,9 @@ than an empty box.
 **The rows are wrapped to the pane's own width, not to a fixed column.** Popup rows are truncated at
 the border and never re-wrapped, and this pane has no second rendering to recover a cut line from, so
 the wrap column is taken from the width the pane is actually drawn at: its inner width less the two
-cells every row's marker leads with and the scroll bar's column, reserved whether or not the bar is
-drawn so the text does not re-flow the moment the list overflows. A resize recomposes the rows and
+cells every row's marker leads with and the two the scroll bar takes — its own column and the blank
+one before it — reserved whether or not the bar is drawn so the text does not re-flow the moment the
+list overflows. A resize recomposes the rows and
 the scroll offset lands where the same clamp every report applies puts it — or, while the pane is
 following its tail, on the last full window of the rows the resize composed. What it holds is bounded
 rather than complete — a record keeps its last 64 KB, the board its 64 most recent turns and the

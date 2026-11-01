@@ -540,9 +540,9 @@
 // prose with no prefixes, no JSON, no tool-call passages and no ctrl+r toggle, one heading row per
 // record naming the Turn (and the delegate, [Model.runLabel]) and the record's text beneath it. Two
 // rules carry the weight. The rows are composed at the pane's REAL width for that frame
-// ([Model.thinkingWrapColumn]: the inner width less the marker column and the overflow bar's, the
-// bar's reserved whether or not it is drawn), because report rows are TRUNCATED to the inner width
-// and never re-wrapped (popup.go) — a fixed column would cut text off a narrow terminal in the one
+// ([Model.thinkingWrapColumn]: the inner width less the marker column and the overflow bar's two —
+// its own and the blank gap before it — reserved whether or not the bar is drawn), because report
+// rows are TRUNCATED to the inner width and never re-wrapped (popup.go) — a fixed column would cut text off a narrow terminal in the one
 // pane with no raw rendering to recover it from, and the width-dependent row list is exactly the
 // drift [Model.reportSpec]'s clamp already corrects each frame. And the SCOPE is the view's
 // ([Model.inThinkingScope]): the main agent's thinking alone at the top level, the viewed

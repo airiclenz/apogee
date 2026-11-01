@@ -1892,7 +1892,10 @@ const settingsNoteMarkerCells = 2
 // settingsNoteWidth is how many cells the key list leaves a note's TEXT at this terminal width: the
 // pane's inner width, less the marker column every row is led by (popupRowIndent), less each tier
 // before the note with the gutter after it — a tier no row fills collapses away and costs nothing
-// (layoutPopupRow) — less the note's own marker.
+// (layoutPopupRow) — less the note's own marker, and less the overflow bar and the blank column
+// before it (popupScrollbarGutter) while the list overflows with the bar on (popupScrollbarShown):
+// the painter composes an overflowing block that much narrower, and a note sized against the full
+// width would end in the ellipsis this width exists to avoid.
 //
 // Its caller is an apply choosing between a sentence and its first clause (settingsApplyLive): the
 // painter elides an over-wide cell from the right, so a note the column cannot hold ends in an
@@ -1917,6 +1920,10 @@ func (m Model) settingsNoteWidth(rows []SettingRow, pending settingEdit) int {
 			continue
 		}
 		width -= widths[i] + m.th.measure.Width(popupGutter)
+	}
+	spec, _, seated := m.settingsKeyListSpec(rows)
+	if seated && popupScrollbarShown(m.th, spec, popupInnerWidth(m.th, m.width)) {
+		width -= popupScrollbarGutter
 	}
 	return width
 }
@@ -2251,7 +2258,7 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 func (m Model) settingsEnumContent(row SettingRow) listContent {
 	current := m.settingsCurrentValue(row)
 	vocabulary := m.settingsVocabulary(row)
-	width := m.settingsEnumCellWidth(vocabulary)
+	width := m.settingsEnumCellWidth(row, vocabulary)
 	values := make([]popupRow, 0, len(vocabulary))
 	for _, value := range vocabulary {
 		cell := m.settingsEnumValueCell(row, value)
@@ -2305,17 +2312,28 @@ func settingsEnumCurrentCell(th theme, cell string, width int) string {
 // terminal width: the pane's inner width, less the marker column every row is led by
 // (popupRowIndent) and the value column with the gutter after it — the value column being as wide as
 // the widest word in the vocabulary, which is what the painter will measure it at
-// (popupColumnWidths).
+// (popupColumnWidths) — and less the overflow bar and the blank column before it
+// (popupScrollbarGutter) on a window too short for the whole vocabulary with the bar on.
 //
 // It is computed here rather than read back from the painter because the composition happens first:
 // the cell has to know its budget while it is still two strings that can be ordered either way
-// round, and by the time the painter has a line to truncate the ordering is already spent.
-func (m Model) settingsEnumCellWidth(vocabulary []string) int {
+// round, and by the time the painter has a line to truncate the ordering is already spent. Whether
+// the sub-list overflows is asked of the same content with the value cells left out: its rows never
+// wrap (listContent.menuRows), so what a row costs in lines does not depend on what its cell says.
+func (m Model) settingsEnumCellWidth(row SettingRow, vocabulary []string) int {
 	value := 0
+	probe := make([]popupRow, 0, len(vocabulary))
 	for _, v := range vocabulary {
 		value = max(value, m.th.measure.Width(stripEscapes(v)))
+		probe = append(probe, popupRow{stripEscapes(v)})
 	}
-	return popupInnerWidth(m.th, m.width) - popupRowIndent - value - m.th.measure.Width(popupGutter)
+	inner := popupInnerWidth(m.th, m.width)
+	width := inner - popupRowIndent - value - m.th.measure.Width(popupGutter)
+	content := m.settingsSubListContent(row, probe, settingsEnumHint, len(probe))
+	if spec, seated := m.listSpec(content); seated && popupScrollbarShown(m.th, spec, inner) {
+		width -= popupScrollbarGutter
+	}
+	return width
 }
 
 // settingsEnumPrompt is the sub-list's one-line question: the key, then what it is for. Two facts on

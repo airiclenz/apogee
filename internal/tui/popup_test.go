@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -2144,6 +2145,36 @@ func popupBarCell(line string) string {
 	return string(runes[len(runes)-3])
 }
 
+// popupGapCell is the inner cell just LEFT of popupBarCell — the blank field column an overflowing
+// block keeps between its rows and the bar (popupScrollbarGutter), read off the line the same way.
+func popupGapCell(line string) string {
+	runes := []rune(strip(line))
+	if len(runes) < 4 {
+		return ""
+	}
+	return string(runes[len(runes)-4])
+}
+
+// assertPopupBarGap fails for every painted line of out that carries a bar cell without the blank
+// gap column before it, and for a pane that painted no bar at all — the overflow premise every
+// caller of it rests on.
+func assertPopupBarGap(t *testing.T, out string) {
+	t.Helper()
+	bars := 0
+	for i, line := range popupLines(out) {
+		if cell := popupBarCell(line); cell != glyphScrollThumb && cell != glyphScrollTrack {
+			continue
+		}
+		bars++
+		if gap := popupGapCell(line); gap != " " {
+			t.Errorf("line %d: the cell before the bar is %q, want the blank gap: %q", i, gap, strip(line))
+		}
+	}
+	if bars == 0 {
+		t.Errorf("the pane painted no bar, so it did not overflow:\n%s", strip(out))
+	}
+}
+
 // popupBarColumn is the bar glyph of every painted line that carries one, top to bottom — the
 // rendered pane's scrollbar read as a column of cells, so an assertion about the thumb's POSITION
 // does not have to know which painted row the block began on.
@@ -2212,16 +2243,20 @@ func TestRenderPopupScrollbarIsAbsentWhileTheRowsFit(t *testing.T) {
 }
 
 // An OVERFLOWING window paints the bar down the block's last column — one cell per painted row line,
-// none on the title or the hint — and the rows are composed one column narrower to pay for it: a row
-// that fills the pane's inner width exactly is elided with the bar and whole without it. The bar's
-// own cells sit on the pane's black field like every other cell (the black-fill contract).
-func TestRenderPopupScrollbarReservesOneColumnWhileOverflowing(t *testing.T) {
+// none on the title or the hint — with one blank field column between the rows and the bar
+// (popupScrollbarGutter, the transcript's rule), and the rows are composed two columns narrower to
+// pay for both: a row that fills the pane's inner width exactly is elided with the bar and whole
+// without it, and so is a row one column short of it, which a bar with no gap would have seated. The
+// selected row's highlight stops at the rows' width, so the gap is the pane's own field there too.
+// The bar's own cells sit on the pane's black field like every other cell (the black-fill contract).
+func TestRenderPopupScrollbarReservesTwoColumnsWhileOverflowing(t *testing.T) {
 	t.Parallel()
 	th := newTheme(scheme.Default())
 	const width, shown = 60, 3
 	inner := popupInnerWidth(th, width)
 	spec := popupScrollbarSpec(9, shown)
-	spec.rows[1] = popupRow{strings.Repeat("x", inner-popupRowIndent)} // exactly fills the full width
+	spec.rows[1] = popupRow{strings.Repeat("x", inner-popupRowIndent)}                // exactly fills the full width
+	spec.rows[2] = popupRow{strings.Repeat("y", inner-popupRowIndent-scrollbarWidth)} // fits beside a gapless bar
 	off := spec
 	off.scrollbar = false
 
@@ -2229,6 +2264,7 @@ func TestRenderPopupScrollbarReservesOneColumnWhileOverflowing(t *testing.T) {
 	if column := popupBarColumn(out); len(column) != shown {
 		t.Errorf("bar column is %d cells, want one per shown row (%d): %q", len(column), shown, column)
 	}
+	assertPopupBarGap(t, out)
 	for i, line := range popupLines(out) {
 		if w := lipgloss.Width(line); w != width {
 			t.Errorf("line %d is %d cells, want %d: %q", i, w, width, strip(line))
@@ -2237,11 +2273,24 @@ func TestRenderPopupScrollbarReservesOneColumnWhileOverflowing(t *testing.T) {
 			t.Errorf("line %d has a bare (no-background) cell at column %d: %q", i, col, strip(line))
 		}
 	}
-	if wide := popupLineWith(t, out, "xxx"); !strings.Contains(strip(wide), "…") {
-		t.Errorf("the full-width row was not elided into the reserved column: %q", strip(wide))
+	for _, lead := range []string{"xxx", "yyy"} {
+		if wide := popupLineWith(t, out, lead); !strings.Contains(strip(wide), "…") {
+			t.Errorf("the %s row was not elided out of the reserved columns: %q", lead, strip(wide))
+		}
+		if wide := popupLineWith(t, renderPopup(th, off, width), lead); strings.Contains(strip(wide), "…") {
+			t.Errorf("without the bar the %s row should still fit whole: %q", lead, strip(wide))
+		}
 	}
-	if wide := popupLineWith(t, renderPopup(th, off, width), "xxx"); strings.Contains(strip(wide), "…") {
-		t.Errorf("without the bar the same row should still fit whole: %q", strip(wide))
+
+	// The highlight: the selected row's painted line ends on the field-filled gap and then the bar
+	// cell, never on a highlighted cell beside the bar.
+	blackFill := lipgloss.NewStyle().Background(th.surface)
+	block := popupRowLines(th, spec, inner, blackFill)
+	selected := block.lines[block.lead] // row 0 is selected and leads the window
+	gap := blackFill.Render(" ")
+	thumb := blackFill.Render(th.scrollThumb.Render(glyphScrollThumb))
+	if !strings.HasSuffix(selected, gap+thumb) {
+		t.Errorf("the selected row does not end on the field gap and the thumb: %q", selected)
 	}
 }
 
@@ -2553,6 +2602,26 @@ func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
 		}
 	})
 
+	t.Run("an overflowing picker leaves a gap before its bar", func(t *testing.T) {
+		t.Parallel()
+		m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 80, Height: 21})
+		m.picker = picker{open: true, kind: pickerCycle}
+		m.layout()
+		pane := m.renderPicker()
+		// The premise: a window this short leaves part of the offering out, so the bar has a window to
+		// describe.
+		missing := 0
+		for _, row := range m.pickerRows() {
+			if !strings.Contains(strip(pane), row[0]) {
+				missing++
+			}
+		}
+		if missing == 0 {
+			t.Fatalf("the offering fit a 21-row frame, so nothing overflows:\n%s", strip(pane))
+		}
+		assertPopupBarGap(t, pane)
+	})
+
 	t.Run("ui.show-scrollbar off takes the popup's bar with it", func(t *testing.T) {
 		t.Parallel()
 		m := usageModel(t, mainTotals, 8192)
@@ -2620,7 +2689,7 @@ func TestLayoutPopupColumnMatchesTheMeasuredLayout(t *testing.T) {
 // layout: the rows laid out afresh at each width.
 func popupRowLinesTwoPass(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
 	block := popupRowLinesAt(th, spec, popupRowBlocks(th, spec.rows, spec.wrapRows, inner), inner, blackFill)
-	rowInner := inner - scrollbarWidth
+	rowInner := inner - popupScrollbarGutter
 	if !spec.scrollbar || rowInner <= 1 || block.end-block.start >= len(spec.rows) {
 		return block
 	}

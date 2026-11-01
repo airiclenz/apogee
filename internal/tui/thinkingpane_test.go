@@ -232,7 +232,7 @@ func TestThinkingWrapColumnFollowsTheWindow(t *testing.T) {
 	for _, width := range []int{80, 120, 200} {
 		m := newTestModel(t)
 		m.width = width
-		want := popupInnerWidth(m.th, width) - popupRowIndent - scrollbarWidth
+		want := popupInnerWidth(m.th, width) - popupRowIndent - popupScrollbarGutter
 		if got := m.thinkingWrapColumn(); got != want {
 			t.Errorf("width %d: wrap column = %d, want %d", width, got, want)
 		}
@@ -266,6 +266,43 @@ func TestThinkingPaneLosesNoText(t *testing.T) {
 		painted := paintThinkingPane(m)
 		if rest, ok := containsRunesInOrder(painted, text); !ok {
 			t.Errorf("width %d: the painted pane drops the record's text at %q", width, rest)
+		}
+	}
+}
+
+// An OVERFLOWING /thinking pane wraps its rows to the column the bar leaves them: the rows end one
+// blank column short of the bar (popupScrollbarGutter), and the wrap column already stood two
+// columns back from the inner width, so the narrower block cuts no row — not one painted line ends
+// in the painter's ellipsis, at a narrow terminal or a wide one.
+func TestThinkingPaneOverflowingLeavesTheGapAndCutsNoRow(t *testing.T) {
+	t.Parallel()
+
+	text := strings.Repeat("Reasoning that runs on for long enough to wrap across several rows of the pane. ", 12)
+	for _, width := range []int{80, 200} {
+		m := newTestModel(t)
+		m.width = width
+		m.thinking = thinkingBoardWith([]thinkingRecord{{run: runRef{}, turn: 1, text: text}}, nil)
+
+		c := m.thinkingContent()
+		if len(c.rows) <= 4 {
+			t.Fatalf("width %d: precondition: %d rows cannot overflow a 4-row window", width, len(c.rows))
+		}
+		painted := renderPopup(m.th, popupSpec{
+			title:       c.title,
+			body:        c.body,
+			maxBodyRows: -1,
+			rows:        c.rows,
+			rowKinds:    c.kinds,
+			selected:    -1,
+			hint:        c.hint,
+			maxRows:     4,
+			scrollbar:   true,
+		}, m.width)
+		assertPopupBarGap(t, painted)
+		for i, line := range popupLines(painted) {
+			if strings.Contains(strip(line), "…") {
+				t.Errorf("width %d: line %d was cut beside the bar: %q", width, i, strip(line))
+			}
 		}
 	}
 }

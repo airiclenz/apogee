@@ -111,8 +111,10 @@ The list is taller than any terminal, so it **scrolls**: the row window follows 
 section heading is a row like any other — it scrolls away with the rows above the window rather than
 pinning to its top, so a window opened mid-section starts on a key row, not on a label. While the
 list overflows its window and `ui.show-scrollbar` is on, a scroll bar runs down the pane's right-hand
-column, its thumb standing for the rows in view; a list that fits paints no bar and gives up no
-column. The mouse wheel walks the highlight one row per notch, clamping at the first and the last key
+column, its thumb standing for the rows in view, and the rows — the highlight with them — stop one
+blank column short of it, the transcript's rule; a note sized for its column (the `auto` rung's blast
+radius) is sized against the narrower rows while the bar is up, so it still ends on its full stop. A
+list that fits paints no bar and gives up neither column. The mouse wheel walks the highlight one row per notch, clamping at the first and the last key
 where `↑/↓` wrap round.
 
 After `Model profiles` comes one more section, `Allow rules`, whose rows are no registry key's: one

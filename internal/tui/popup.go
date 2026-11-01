@@ -612,11 +612,12 @@ func popupBodyLineSpan(th theme, body string, maxBodyRows, inner int) (lines, hi
 // popupRowLineCount is popupRowLines counted rather than composed: how many lines the row block
 // paints and how many rows it owes the title row a count of. The overflow bar never changes the
 // count — it is drawn down a column of lines already there (popupRowScrollbar) — but a WRAPPING
-// spec's narrower second pass can re-seat the window, so that pass is counted too.
+// spec's narrower second pass can re-seat the window, so that pass is counted too, at the same
+// popupScrollbarGutter narrower the painter composes it.
 func popupRowLineCount(th theme, spec popupSpec, inner int) (lines, hidden int) {
 	heights := popupRowLineHeights(th, spec, inner)
 	seat := popupRowSeat(spec, heights)
-	rowInner := inner - scrollbarWidth
+	rowInner := inner - popupScrollbarGutter
 	if spec.scrollbar && rowInner > 1 && seat.end-seat.start < len(spec.rows) && spec.wrapRows {
 		heights = popupRowLineHeights(th, spec, rowInner)
 		seat = popupRowSeat(spec, heights)
@@ -648,6 +649,28 @@ func popupRowLineHeights(th theme, spec popupSpec, inner int) []int {
 // alone — no rule between them, unlike a markdown table's (mdtable.go) — because a pane already
 // has a border of its own and a second stroke inside it would read as a grid.
 const popupGutter = "  "
+
+// popupScrollbarGutter is what an OVERFLOWING row block gives up at its right edge to the overflow
+// bar (popupRowScrollbar): the bar's own column and one blank field column between it and the rows,
+// so a row's last glyph — and the selected row's highlight — never runs flush against the bar. It
+// is the transcript's rule (bodyRightGutter beside scrollbarWidth, theme.go) on the pop-up surface,
+// and like the bar it is spent only while the window leaves a row out: a block whose rows fit
+// paints at the full inner width.
+const popupScrollbarGutter = scrollbarWidth + bodyRightGutter
+
+// popupScrollbarShown reports whether spec's row block paints the overflow bar at inner — the
+// condition popupRowLines tests, asked without composing the block. It is for a caller that sizes a
+// cell before handing the pane its rows (settingsNoteWidth, settingsEnumCellWidth) and has to know
+// whether the popupScrollbarGutter will come out of the width it is sizing against. A wrapping
+// spec's narrower pass can only cost lines, never win them back (popupRowLines), so a window that
+// overflows at the full width is the whole answer.
+func popupScrollbarShown(th theme, spec popupSpec, inner int) bool {
+	if !spec.scrollbar || inner-popupScrollbarGutter <= 1 {
+		return false
+	}
+	seat := popupRowSeat(spec, popupRowLineHeights(th, spec, inner))
+	return seat.end-seat.start < len(spec.rows)
+}
 
 // layoutPopupRows composes the spec's cell rows into the plain lines the pane paints, one line per
 // row, every column padded to a single width so the columns line up vertically down the pane. The
@@ -872,22 +895,23 @@ type popupRowBlock struct {
 // lines and a three-line answer seats nothing either, and it is counted the same way rather than
 // shown two thirds of.
 //
-// The overflow BAR (popupSpec.scrollbar) is why the composition can run TWICE. The bar's column comes
-// out of the rows' own width, and whether it is reserved at all depends on a window that is not known
-// until the rows have been composed — so the block is composed at the full inner width first, and
-// only a window that left a row out is composed AGAIN one column narrower and painted with the bar
-// down the freed column (popupRowScrollbar). Only a WRAPPING spec lays its rows out again for that
-// pass, because only its rows break to the width they are composed at; a non-wrapping row's laid-out
-// line is the same at any width (the styling pass elides it), so the second pass restyles the first
-// pass's rows at the narrower width. The two passes cannot disagree about the reservation:
-// narrowing a wrapping row can only cost it lines, never win them back, so a window that overflowed
-// at the full width overflows at the narrower one too. A pane too narrow to seat both the bar and a
+// The overflow BAR (popupSpec.scrollbar) is why the composition can run TWICE. The bar's column and
+// the blank column that sets it off from the rows (popupScrollbarGutter) come out of the rows' own
+// width, and whether they are reserved at all depends on a window that is not known until the rows
+// have been composed — so the block is composed at the full inner width first, and only a window
+// that left a row out is composed AGAIN popupScrollbarGutter narrower and painted with the gap and
+// the bar down the freed columns (popupRowScrollbar). Only a WRAPPING spec lays its rows out again
+// for that pass, because only its rows break to the width they are composed at; a non-wrapping
+// row's laid-out line is the same at any width (the styling pass elides it), so the second pass
+// restyles the first pass's rows at the narrower width. The two passes cannot disagree about the
+// reservation: narrowing a wrapping row can only cost it lines, never win them back, so a window
+// that overflowed at the full width overflows at the narrower one too. A pane too narrow to seat both the bar and a
 // row of text keeps its rows: past that floor truncateToWidth draws nothing at all, and a bar beside
 // an empty column would be the pane hiding its content to describe it.
 func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
 	blocks := popupRowBlocks(th, spec.rows, spec.wrapRows, inner)
 	block := popupRowLinesAt(th, spec, blocks, inner, blackFill)
-	rowInner := inner - scrollbarWidth
+	rowInner := inner - popupScrollbarGutter
 	if !spec.scrollbar || rowInner <= 1 || block.end-block.start >= len(spec.rows) {
 		return block
 	}
@@ -897,10 +921,13 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 	return popupRowScrollbar(th, popupRowLinesAt(th, spec, blocks, rowInner, blackFill), len(spec.rows), rowInner, blackFill)
 }
 
-// popupRowScrollbar paints the overflow bar down the last column of a row block composed one column
-// short of the pane's inner width (popupRowLines), and returns the block with the bar folded into its
-// lines. Every ROW line of the block carries a cell of it — the separators between rows as much as
-// the rows themselves — so the bar reads as one stroke down the list rather than as a dashed one.
+// popupRowScrollbar paints the overflow bar down the last column of a row block composed
+// popupScrollbarGutter short of the pane's inner width (popupRowLines), one blank field cell between
+// the rows and the bar, and returns the block with both folded into its lines. The rows — the
+// selected row's highlight with them — stop at rowInner, so the gap reads as the pane's own field
+// and never as more of a row. Every ROW line of the block carries a cell of the bar — the
+// separators between rows as much as the rows themselves — so the bar reads as one stroke down the
+// list rather than as a dashed one.
 //
 // The block's own PAD lines are the exception, and they are the reason the bar is drawn over a slice
 // rather than over every line: those blanks set the list off from the prose above it and the hint
@@ -920,15 +947,17 @@ func popupRowScrollbar(th theme, block popupRowBlock, rows, rowInner int, blackF
 		return block
 	}
 	pos, thumb := scrollbarThumb(block.start, shown, rows, h) // pos: 0 (top) … h-thumb (bottom)
+	gap := strings.Repeat(" ", popupScrollbarGutter-scrollbarWidth)
 	for i := first; i < last; i++ {
 		cell := th.scrollTrack.Render(glyphScrollTrack)
 		if i-first >= pos && i-first < pos+thumb {
 			cell = th.scrollThumb.Render(glyphScrollThumb)
 		}
-		// The line is squared on the pane's own black field before the cell is appended: a row shorter
-		// than the block leaves a gap between its text and the bar, and a bare pad there would show the
-		// terminal's background through it (squareOnField).
-		block.lines[i] = squareOnField(th.measure, blackFill, block.lines[i], rowInner) + blackFill.Render(cell)
+		// The line is squared on the pane's own black field before the gap and the cell are appended: a
+		// row shorter than the block leaves a run between its text and the bar, and a bare pad there
+		// would show the terminal's background through it (squareOnField).
+		row := squareOnField(th.measure, blackFill, block.lines[i], rowInner)
+		block.lines[i] = row + blackFill.Render(gap) + blackFill.Render(cell)
 	}
 	return block
 }

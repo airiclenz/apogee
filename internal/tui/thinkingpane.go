@@ -57,9 +57,10 @@ const minThinkingWrapColumn = 20
 
 // thinkingWrapColumn is the pane's REAL row budget for THIS frame, in runes: the width inside the
 // border (popup.go, popupInnerWidth), less the two-cell marker column every row leads with
-// (popupRowIndent), less the column the overflow bar draws down (scrollbarWidth).
+// (popupRowIndent), less the two the overflow bar takes (popupScrollbarGutter: the bar's column and
+// the blank one that sets it off from the text).
 //
-// The bar's column is reserved WHETHER OR NOT the bar is drawn. It appears exactly when the row
+// Those columns are reserved WHETHER OR NOT the bar is drawn. It appears exactly when the row
 // list outgrows the window, so a column that counted it only then would re-wrap every row of the
 // pane the moment one more row arrived — the text would reflow under the reader mid-scroll for a
 // reason that has nothing to do with the text.
@@ -68,7 +69,7 @@ const minThinkingWrapColumn = 20
 // lands elsewhere in the text. That is the correction [Model.reportSpec]'s clamp already applies on
 // every frame, and it is the price of never cutting a rune off a line the reader cannot get back.
 func (m Model) thinkingWrapColumn() int {
-	return max(popupInnerWidth(m.th, m.width)-popupRowIndent-scrollbarWidth, minThinkingWrapColumn)
+	return max(popupInnerWidth(m.th, m.width)-popupRowIndent-popupScrollbarGutter, minThinkingWrapColumn)
 }
 
 // scopedThinking is the record list the pane speaks for in THIS frame, oldest first, with the

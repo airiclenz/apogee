@@ -1389,10 +1389,14 @@ func TestSettingsPersistedValueAnswersModeFromTheEngine(t *testing.T) {
 // dispatcher (settingsModeModel says the same thing at greater length): a test that takes the auto
 // rung and then re-opens the sub-list reads it holding the rung it just took, which is the situation
 // where the sentence and the "(current)" marker land in one cell.
-func settingsModeEditModel(t *testing.T, log *settingsWriteLog, info ConfinementInfo, confine bool, width int) Model {
+//
+// extra rows follow the mode row in the list, for a test that needs the key list to overflow.
+func settingsModeEditModel(
+	t *testing.T, log *settingsWriteLog, info ConfinementInfo, confine bool, width int, extra ...SettingRow,
+) Model {
 	t.Helper()
 	eng := &fakeEngine{confine: confine}
-	rows := []SettingRow{settingsModeRow()}
+	rows := append([]SettingRow{settingsModeRow()}, extra...)
 	opts := testOpts
 	opts.Confinement = info
 	opts.Settings = fakeSettingsHost{
@@ -1540,6 +1544,48 @@ func TestSettingsEnumCurrentMarkerSurvivesANarrowColumn(t *testing.T) {
 				t.Errorf("auto cell elided = %v, want %v: %q", got, c.elided, cell)
 			}
 		})
+	}
+}
+
+// While the key list OVERFLOWS with the bar on, the painter composes the rows two columns short of
+// the pane's inner width — the bar and the blank column before it (popupScrollbarGutter) — and the
+// note is sized against that narrower block, not the full width: measured at the full width, a
+// sentence landing within those two columns of the note column's edge is chosen whole and painted
+// with its tail elided. The sweep crosses the widths where the two measures disagree (on a one-row
+// list the sentence fills the note column exactly at 109 columns —
+// TestSettingsAutoNoteIsMeasuredAgainstTheMarkedValueColumn below), so one of them is the width the
+// full-width measure got wrong whatever the fixture's columns come to.
+func TestSettingsPaneOverflowingListSizesTheNoteBesideTheBar(t *testing.T) {
+	t.Parallel()
+	// Taller than the 40-row window, so the list scrolls; each key is wider than the section heading,
+	// so the key column is a key's width.
+	filler := make([]SettingRow, 60)
+	for i := range filler {
+		filler[i] = SettingRow{
+			Path: fmt.Sprintf("filler-key-%02d", i), Section: "Autonomy", Kind: SettingString,
+			Value: "v", Default: "v", Editable: true,
+		}
+	}
+	for width := 105; width <= 135; width++ {
+		log := &settingsWriteLog{}
+		m := settingsModeEditModel(t, log, capableHost, true, width, filler...)
+
+		m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
+		m = step(t, m, keyDown())  // allow-edits
+		m = step(t, m, keyDown())  // auto
+		m = step(t, m, keyEnter()) // commit: the key row carries the note
+
+		rendered := m.renderSettings()
+		assertPopupBarGap(t, rendered)
+		note := m.settingsNote(settingsModeRow())
+		if !strings.Contains(strip(rendered), note) {
+			t.Errorf("width %d: the key list does not paint the note %q whole:\n%s", width, note, strip(rendered))
+		}
+		for _, line := range popupLines(rendered) {
+			if interior := popupInterior(line); strings.Contains(interior, "· auto") && strings.Contains(interior, "…") {
+				t.Errorf("width %d: the note was elided beside the bar: %q", width, interior)
+			}
+		}
 	}
 }
 

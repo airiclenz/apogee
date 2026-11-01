@@ -70,7 +70,12 @@ internal/tui/toolpresent_test.go — TestPresentToolCallFailedSubprocessNamesIts
 **Closes:** terminal-error-detail-hidden
 **Commit:** `fix(tui): failed and empty subprocess rows reveal what the model was told`
 
-## 2. Pop-up scrollbar leaves a gap column
+## 2. Pop-up scrollbar leaves a gap column — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): a new helper `popupScrollbarShown` (popup.go) answers popupRowLines' overflow condition without composing the block. `settingsNoteWidth` uses it over `settingsKeyListSpec`. `settingsEnumCellWidth` uses it over `listSpec` of the sub-list content with the value cells left out, and takes the `SettingRow` as a new first parameter to build that content (its one caller, `settingsEnumContent`, passes it).
+NOTES (2026-11-01): `TestRenderPopupScrollbarReservesOneColumnWhileOverflowing` is renamed `TestRenderPopupScrollbarReservesTwoColumnsWhileOverflowing`. It also asserts that a row one column short of the full width is elided, and that the selected row ends on the field-filled gap and then the thumb. The new tests are `TestThinkingPaneOverflowingLeavesTheGapAndCutsNoRow`, the "an overflowing picker leaves a gap before its bar" subtest of `TestPopupCallersPaintTheOverflowBar`, and `TestSettingsPaneOverflowingListSizesTheNoteBesideTheBar`. That last one sweeps widths 105–135 and fails at 118/119 without the settings subtraction. `settingsModeEditModel` takes optional extra rows for it.
+NOTES (2026-11-01): pre-existing, outside this item: `settingsNoteWidth` measures columns over the key rows only. The painter also measures the section heading rows, so a section name wider than every key (a fixture's short keys under "Autonomy") widens the key column past what the note was sized for. Real registry keys are wider than their section names. The new test's filler keys are long to stay clear of it.
+NOTES (2026-11-01): `TestE2ELiveStateFollowsTheRunningSession` passes with `t16-settings-rows.txt` unchanged, and so do the popup e2e tests (`TestE2EPopupFrames|TestE2EPopupClick|TestE2EPickerTypeToFilter`). golangci-lint on ./internal/tui/ reports 0 issues.
 
 **What:**
 **Goal:** Every boxed pop-up whose rows overflow paints one blank column between its content and the scrollbar, and the selected row's highlight stops before that column. A pop-up whose rows fit paints byte-identical to the base. /thinking and /advice always wrap two columns short of the inner width. `layout.md` §pop-ups and `docs/layout/settings-screen-layout.md` state the gap, matching the transcript's rule.
