@@ -5428,3 +5428,29 @@ func TestSettingsFilterMovesNeitherTitleNorHeader(t *testing.T) {
 			note-zeroTitle, strings.Join(plainFrame, "\n"))
 	}
 }
+
+// The painter lays the section headings it interleaves (settingsDisplayRows) into the key column
+// with the keys, so a heading wider than every key under it — "Autonomy" over the lone `mode` row
+// here — widens that column, and the note is sized against the column as painted: measured over the
+// keys alone it is handed the cells the heading takes, and a sentence landing in them is chosen
+// whole and painted with its tail elided. The sweep crosses every width where the two measures
+// disagree.
+func TestSettingsNoteIsMeasuredOverTheSectionHeadings(t *testing.T) {
+	t.Parallel()
+	for width := 100; width <= 130; width++ {
+		log := &settingsWriteLog{}
+		m := settingsModeEditModel(t, log, capableHost, true, width)
+
+		m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
+		m = step(t, m, keyDown())  // allow-edits
+		m = step(t, m, keyDown())  // auto
+		m = step(t, m, keyEnter()) // commit: the key row carries the note
+
+		rendered := strip(m.renderSettings())
+		for _, line := range strings.Split(rendered, "\n") {
+			if strings.Contains(line, "· auto") && strings.Contains(line, "…") {
+				t.Errorf("width %d: the note was elided against the heading-widened key column: %q", width, line)
+			}
+		}
+	}
+}

@@ -1891,7 +1891,7 @@ const settingsNoteMarkerCells = 2
 
 // settingsNoteWidth is how many cells the key list leaves a note's TEXT at this terminal width: the
 // pane's inner width, less the marker column every row is led by (popupRowIndent), less each tier
-// before the note with the gutter after it — a tier no row fills collapses away and costs nothing
+// before the note with the gutter after it (the key tier measured over the section headings too) — a tier no row fills collapses away and costs nothing
 // (layoutPopupRow) — less the note's own marker, and less the overflow bar and the blank column
 // before it (popupScrollbarGutter) while the list overflows with the bar on (popupScrollbarShown):
 // the painter composes an overflowing block that much narrower, and a note sized against the full
@@ -1910,7 +1910,15 @@ const settingsNoteMarkerCells = 2
 // columns never showed it. A zero settingEdit measures the rows exactly as they stand.
 func (m Model) settingsNoteWidth(rows []SettingRow, pending settingEdit) int {
 	cells := make([]popupRow, 0, len(rows))
+	section := ""
 	for _, row := range rows {
+		// The section headings the painter interleaves (settingsDisplayRows) are one-cell rows in the
+		// key column, so they widen it there too: a heading wider than every key under it would
+		// otherwise hand the note cells the painter spends on the heading.
+		if row.Section != "" && row.Section != section {
+			section = row.Section
+			cells = append(cells, popupRow{stripEscapes(row.Section)})
+		}
 		cells = append(cells, m.settingRowCellsPending(row, pending))
 	}
 	widths := popupColumnWidths(m.th, cells)
