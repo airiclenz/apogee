@@ -3,6 +3,7 @@ title: Pop-up scrollbar sits flush against the content with no gap column
 status: open
 type: task
 priority: 3
+plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:19:29Z
 ---
 

@@ -3,6 +3,7 @@ title: "A failed Terminal row hides its detail: no caret, and the model's error 
 status: open
 type: bug
 priority: 2
+plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:19:20Z
 ---
 

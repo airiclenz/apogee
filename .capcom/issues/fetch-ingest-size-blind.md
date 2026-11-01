@@ -3,6 +3,7 @@ title: Fetch rows hide how much was ingested, and the context gauge lags until t
 status: open
 type: feature
 priority: 2
+plan: 2026-11-01 - 00 - tui-row-detail-gauge-and-notify-plan
 created: 2026-11-01T10:19:33Z
 ---
 
