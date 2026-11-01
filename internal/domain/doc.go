@@ -25,8 +25,8 @@
 // with — the spinner styles with their parse, the cursor-shape NAMES with their validator, and
 // the PreboundStart a session begins unbound with — homed here for ParseMode's reason, so the
 // config layer validates a spelling without importing a renderer (ADR 0043). uiprefs.go is the
-// `ui:` block as ONE value — UIPrefs with its defaults, its ten keys in template order, the
-// stall-after and tools-fold-over parsers, Validate, and the one Set every layer that carries the
+// `ui:` block as ONE value — UIPrefs with its defaults, its twelve keys in template order, the
+// glyph-set, notify-mode, stall-after and tools-fold-over parsers, Validate, and the one Set every layer that carries the
 // block lands a key through. session.go is the
 // Session envelope, its SessionVersion and DecodeSession; the opaque State payload inside it
 // belongs to the engine. errors.go is the sentinel errors the root facade re-exports as vars,

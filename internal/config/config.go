@@ -2617,6 +2617,11 @@ type uiConfig struct {
 	// stall-after: yaml's own whole-number parse is the only one there is, and the one judgement
 	// (below zero) is UIPrefs.Validate's.
 	ToolsFoldOver *WholeCount `yaml:"tools-fold-over"`
+	// Notify names how the terminal is told apogee waits on the human — off | bell | osc9 | both.
+	// Empty ⇒ the default (bell): the absent key keeps DefaultUIPrefs' value, even though a zero
+	// UIPrefs.Notify reads as off. A raw string for Spinner's reason: UIPrefs.Validate parses it
+	// once, at startup.
+	Notify string `yaml:"notify"`
 }
 
 // sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with

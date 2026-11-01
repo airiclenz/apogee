@@ -155,6 +155,21 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		}
 	})
 
+	t.Run("ui.notify", func(t *testing.T) {
+		t.Parallel()
+		values := enumValues(t, "ui.notify")
+		for _, v := range values {
+			if _, err := domain.ParseNotifyMode(v); err != nil {
+				t.Errorf("registry offers notify mode %q but domain.ParseNotifyMode rejects it: %v", v, err)
+			}
+		}
+		for _, mode := range domain.NotifyModeNames() {
+			if !slices.Contains(values, string(mode)) {
+				t.Errorf("domain knows notify mode %q but the registry does not offer it", mode)
+			}
+		}
+	})
+
 	t.Run("workflow-wake", func(t *testing.T) {
 		t.Parallel()
 		// Parsed in THIS package, sub-agents-choice's reason below; the row is file-only, so
@@ -484,6 +499,41 @@ func TestToolsOpenRowIsAnEditableBoolDefaultingOff(t *testing.T) {
 	}
 }
 
+// The notify row is an editable enum over the four modes that defaults to the bell. An absent key
+// resolves to that bell, while a zero UIPrefs.Notify reads back as off — the zero value never rings.
+func TestNotifyRowIsAnEditableEnumDefaultingBell(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("ui.notify")
+	if !ok {
+		t.Fatal("no registry row for ui.notify; /settings could not show the key at all")
+	}
+	if row.Kind != KindEnum {
+		t.Errorf("kind = %q, want %q", row.Kind, KindEnum)
+	}
+	if row.Default != "bell" {
+		t.Errorf("default = %q, want \"bell\"", row.Default)
+	}
+	if want := []string{"off", "bell", "osc9", "both"}; !slices.Equal(row.EnumValues, want) {
+		t.Errorf("enum values = %v, want %v", row.EnumValues, want)
+	}
+	if !row.Editable {
+		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
+	}
+
+	var resolved Options
+	mustApplyFile(t, &resolved, fileConfig{})
+	if got := row.Read(resolved); got != "bell" {
+		t.Errorf("read of an unconfigured session = %q, want \"bell\"", got)
+	}
+	if err := row.Validate(""); err != nil {
+		t.Errorf("Validate(\"\") = %v; want the zero value accepted", err)
+	}
+	if got, err := domain.ParseNotifyMode(""); err != nil || got != domain.NotifyOff {
+		t.Errorf("ParseNotifyMode(\"\") = %q, %v; want %q — the zero value never rings", got, err, domain.NotifyOff)
+	}
+}
+
 // The fold threshold's row is an int that defaults to five type rows and is editable, with a
 // validate hook — sessions.max-count's shape — so a value below zero is refused at the keystroke
 // in the same sentence the startup check would use. The row reads back what this session
@@ -693,6 +743,7 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"present.port", "70000", "0-65535"},
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
+		{"ui.notify", "beep", "invalid ui.notify"},
 		{"cursor-shape", "sideways", "invalid cursor-shape"},
 		{"ui.stall-after", "soonish", "invalid ui.stall-after"},
 		{"ui.stall-after", "-5s", "invalid ui.stall-after"},
@@ -767,6 +818,11 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"present.port", "8080"},
 		{"mode", string(domain.ModeAuto)},
 		{"ui.spinner", "glitter"},
+		{"ui.notify", "off"},
+		{"ui.notify", "bell"},
+		{"ui.notify", "osc9"},
+		{"ui.notify", "both"},
+		{"ui.notify", ""},          // the zero value, which a block validated one key at a time carries; it reads as off
 		{"ui.stall-after", "120s"}, // the shipped default, which the settings surface has to be able to write back
 		{"ui.stall-after", "2m"},
 		{"ui.stall-after", "0"}, // the documented spelling of "off" — a zero that is not a refusal
@@ -1018,7 +1074,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"ui.spinner": "UI", "ui.spinner-color": "UI", "ui.glyphs": "UI", "ui.show-scrollbar": "UI",
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
 		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI",
-		"ui.tools-open": "UI", "ui.tools-fold-over": "UI",
+		"ui.tools-open": "UI", "ui.tools-fold-over": "UI", "ui.notify": "UI",
 		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions", "sessions.share-group": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
 		"currency": "Currency",
@@ -1097,7 +1153,7 @@ func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
 		"ui.spinner": "classic", "ui.spinner-color": "false", "ui.glyphs": "safe", "ui.show-scrollbar": "false",
 		"ui.color-scheme": "light", "ui.stall-after": "1m30s", "ui.inspector": "true",
 		"ui.skill-suggestions": "false", "ui.task-list-open": "false", "ui.tools-open": "true",
-		"ui.tools-fold-over": "12",
+		"ui.tools-fold-over": "12", "ui.notify": "both",
 	}
 
 	for _, key := range domain.UIKeys() {

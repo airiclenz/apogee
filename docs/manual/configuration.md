@@ -1093,8 +1093,8 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Ten more keys live under `ui:`. Eight of them change how the screen looks rather than what it
-says; the other two, `ui.inspector` and `ui.stall-after`, come further down.
+Eleven more keys live under `ui:`. Eight of them change how the screen looks rather than what it
+says; the other three, `ui.notify`, `ui.inspector` and `ui.stall-after`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
@@ -1161,6 +1161,21 @@ ui:
   glyphs: safe
   show-scrollbar: false
   color-scheme: light
+```
+
+`ui.notify` is how apogee tells your terminal it is waiting on you — an approval or a question
+prompt has opened, and the run is stopped until you answer. `bell` — the default — rings the
+terminal bell, which most terminals and tmux turn into a sound, a flash or a flagged tab; `osc9`
+sends an OSC 9 desktop notification naming what is waiting, for a terminal that shows one (iTerm2,
+WezTerm and Ghostty among them; inside tmux it is passed through to the outer terminal, which needs
+tmux's `allow-passthrough` on); `both` sends the two, and `off` sends nothing. Any other value is a
+startup error. The switch is live: commit the row in `/settings` and the next prompt signals the
+new way.
+
+```yaml
+# ~/.apogee/config.yaml
+ui:
+  notify: osc9
 ```
 
 `ui.inspector` sits beside them, off by default: on, it captures the raw request and response traffic

@@ -10,8 +10,9 @@ import (
 
 // UIPrefs is the `ui:` block as ONE value: what a Driver is configured to draw — the status-line
 // spinner and its colour loop, the scroll bar, the palette, the quiet threshold, the Inspector's
-// wire capture, the skill-suggestion band, the two fold states the transcript writes back, and the
-// glyph set the screen's symbols are drawn from.
+// wire capture, the skill-suggestion band, the two fold states the transcript writes back, the
+// glyph set the screen's symbols are drawn from, and how the terminal is told apogee waits on the
+// human.
 // It is one struct because the keys describe one subsystem and travel together, from the on-disk
 // block through resolution (internal/config) to the wire (tui.Options) to the live apply — and it
 // lives here, beside the vocabularies its fields are spelled in, so every layer that carries the
@@ -91,6 +92,60 @@ type UIPrefs struct {
 	// so a block assembled field by field with Glyphs left zero (a one-key validation) still
 	// validates. Any other name is refused by [UIPrefs.Validate] naming the key.
 	Glyphs GlyphSet
+	// Notify names how the terminal is told that apogee is waiting on the human: [NotifyBell], an
+	// [NotifyOSC9] desktop notification, [NotifyBoth], or [NotifyOff]. Default bell, which arrives
+	// only through [DefaultUIPrefs] and the shipped template: `""` reads as OFF, unlike Glyphs, so a
+	// zero block — a test harness's, or a Driver that seeds no prefs — never rings the terminal.
+	// Any other name is refused by [UIPrefs.Validate] naming the key.
+	Notify NotifyMode
+}
+
+// NotifyMode names how the terminal is told that apogee waits on the human. The vocabulary is
+// declared once, here, so the config layer validates a `ui.notify:` value against the same names
+// the renderer picks its signal by.
+type NotifyMode string
+
+const (
+	// NotifyOff sends nothing.
+	NotifyOff NotifyMode = "off"
+	// NotifyBell writes the terminal bell (BEL).
+	NotifyBell NotifyMode = "bell"
+	// NotifyOSC9 writes an OSC 9 desktop notification carrying a short text.
+	NotifyOSC9 NotifyMode = "osc9"
+	// NotifyBoth writes the bell and the OSC 9 notification.
+	NotifyBoth NotifyMode = "both"
+)
+
+// DefaultNotifyMode is what a config that names no `ui.notify:` resolves to. It is NOT what `""`
+// parses to — see [ParseNotifyMode].
+const DefaultNotifyMode = NotifyBell
+
+// notifyModeNames is the vocabulary [ParseNotifyMode] accepts, in the order its error lists them.
+var notifyModeNames = []NotifyMode{NotifyOff, NotifyBell, NotifyOSC9, NotifyBoth}
+
+// NotifyModeNames returns the notify modes this build knows, in the order [ParseNotifyMode]'s error
+// lists them. It hands back a fresh slice on every call, as [SpinnerStyleNames] does.
+func NotifyModeNames() []NotifyMode { return slices.Clone(notifyModeNames) }
+
+// ParseNotifyMode maps a value onto a notify mode. "" ⇒ [NotifyOff] — the zero value stays silent,
+// so a block assembled field by field with Notify left zero validates and rings nothing; the
+// shipped default is [DefaultUIPrefs]'s to carry, and [UIPrefs.Set] lands it for `""`. An unknown
+// value is an error naming the modes this build knows. The caller names the key it read the value
+// from, as for [ParseSpinnerStyle].
+func ParseNotifyMode(s string) (NotifyMode, error) {
+	if s == "" {
+		return NotifyOff, nil
+	}
+	for _, mode := range notifyModeNames {
+		if NotifyMode(s) == mode {
+			return mode, nil
+		}
+	}
+	names := make([]string, 0, len(notifyModeNames))
+	for _, mode := range notifyModeNames {
+		names = append(names, string(mode))
+	}
+	return "", fmt.Errorf("unknown notify mode %q (known modes: %s)", s, strings.Join(names, ", "))
 }
 
 // GlyphSet names the set of symbols the screen is drawn with. The vocabulary is declared once,
@@ -162,6 +217,7 @@ const (
 	UIKeyTaskListOpen     = "ui.task-list-open"
 	UIKeyToolsOpen        = "ui.tools-open"
 	UIKeyToolsFoldOver    = "ui.tools-fold-over"
+	UIKeyNotify           = "ui.notify"
 )
 
 // uiKeys is the block's keys in the order the starter template presents them, declared once so a
@@ -169,7 +225,7 @@ const (
 var uiKeys = []string{
 	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
 	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
-	UIKeyToolsFoldOver,
+	UIKeyToolsFoldOver, UIKeyNotify,
 }
 
 // UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
@@ -183,8 +239,8 @@ func UIKeys() []string {
 // DefaultUIPrefs is the `ui:` block with nothing configured: the default spinner style with the
 // colour loop on, the scroll bar shown, the default colour scheme, the shipped quiet threshold,
 // the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
-// umbrella folding past five type rows with large umbrellas starting folded, and the unicode glyph
-// set. Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
+// umbrella folding past five type rows with large umbrellas starting folded, the unicode glyph
+// set, and the terminal bell when apogee waits on the human. Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
 		Spinner:          DefaultSpinnerStyle,
@@ -196,6 +252,7 @@ func DefaultUIPrefs() UIPrefs {
 		TaskListOpen:     true,
 		ToolsFoldOver:    DefaultToolsFoldOver,
 		Glyphs:           DefaultGlyphSet,
+		Notify:           DefaultNotifyMode,
 	}
 }
 
@@ -241,8 +298,8 @@ func ParseToolsFoldOver(text string) (int, error) {
 }
 
 // Validate rejects a block naming a spinner style this build has no animation for, a StallAfter
-// below zero, a ToolsFoldOver below zero, or a glyph set this build does not know — the same four
-// refusals the parsers make, so a block assembled field by field is judged as one read through
+// below zero, a ToolsFoldOver below zero, a glyph set this build does not know, or a notify mode it
+// does not know — the same five refusals the parsers make, so a block assembled field by field is judged as one read through
 // [UIPrefs.Set] would be. Catching them here makes a typo a startup error that names the key; left
 // to the renderer they would silently resolve to some other style, the shipped threshold or the
 // unicode glyphs, and the user would be left wondering why their setting did nothing.
@@ -256,13 +313,16 @@ func (u UIPrefs) Validate() error {
 	if _, err := ParseGlyphSet(string(u.Glyphs)); err != nil {
 		return fmt.Errorf("apogee: invalid ui.glyphs: %w", err)
 	}
+	if _, err := ParseNotifyMode(string(u.Notify)); err != nil {
+		return fmt.Errorf("apogee: invalid ui.notify: %w", err)
+	}
 	return validToolsFoldOver(u.ToolsFoldOver)
 }
 
 // Set lands one key's value, spelled as the config file spells it, onto the block: the text is
 // trimmed, `""` lands that key's default (what a fresh start resolves from a file that does not
 // carry the key), and the value is parsed per key — the spinner through [ParseSpinnerStyle], the
-// glyph set through [ParseGlyphSet], the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
+// glyph set through [ParseGlyphSet], the notify mode through [ParseNotifyMode], the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
 // name as it is. The edit runs on a COPY, [UIPrefs.Validate] judges the copy, and only a copy it
 // accepts is written back: a Set that fails has touched nothing. A key this block does not carry
 // is refused.
@@ -325,6 +385,18 @@ func (u *UIPrefs) land(key, value string) error {
 			return err
 		}
 		u.ToolsFoldOver = n
+	case UIKeyNotify:
+		// `""` lands the shipped default, the contract every key keeps here — not the off that
+		// ParseNotifyMode reads the zero value as.
+		if value == "" {
+			u.Notify = defaults.Notify
+			return nil
+		}
+		mode, err := ParseNotifyMode(value)
+		if err != nil {
+			return fmt.Errorf("apogee: invalid ui.notify: %w", err)
+		}
+		u.Notify = mode
 	default:
 		return fmt.Errorf("apogee: unknown ui key %q", key)
 	}

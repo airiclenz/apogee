@@ -1130,6 +1130,14 @@ update-check: true
 # no umbrella is ever large, so none follows `tools-open`.
 # Defaults: `tools-open: false`, `tools-fold-over: 5`.
 #
+# `notify` is how apogee tells your terminal it is waiting on you — an approval or a question
+# prompt has opened, so the run is stopped until you answer. `bell` rings the terminal bell, which
+# most terminals and tmux turn into a visual or audible cue or a flagged tab. `osc9` sends an OSC 9
+# desktop notification naming what is waiting, for a terminal that shows one (iTerm2, WezTerm and
+# Ghostty among them; inside tmux it is passed through to the outer terminal, which needs tmux's
+# `allow-passthrough` on). `both` sends the two; `off` sends nothing. Default `bell`. Switch live
+# from /settings.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -1142,6 +1150,7 @@ ui:
   task-list-open: true   # false = task-list cards start folded; toggling a card writes this back
   tools-open: false      # true = large Tools umbrellas start open; toggling one writes this back
   tools-fold-over: 5     # type rows an umbrella may show before it folds; 0 = never folds
+  notify: bell           # off | bell | osc9 | both — how the terminal is told apogee waits on you
 
 # =============================================================================
 # Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and

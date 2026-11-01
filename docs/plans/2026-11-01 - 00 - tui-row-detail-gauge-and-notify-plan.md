@@ -245,7 +245,13 @@ cmd/release/status.go — newStatusCommand Long; cmd/release/publish.go — chec
 **Closes:** release-gate-prose-deadlock
 **Commit:** `fix(release): peel trailing commits ci.yml never runs on`
 
-## 9. The `ui.notify` setting
+## 9. The `ui.notify` setting — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): `""` parses as off (`domain.ParseNotifyMode`), so a zero UIPrefs stays silent and validates; `UIPrefs.Set(ui.notify, "")` still lands the shipped default `bell`, the contract every `ui` key keeps for an empty value, and an absent file key keeps DefaultUIPrefs' bell through `nonEmptyName`.
+NOTES (2026-11-01): the template and manual prose describe what the key is for (an approval or question prompt opening; OSC 9 passed through tmux with `allow-passthrough` on) ahead of item 10, which implements it; item 10 may need to add the blurred Turn-end case to that prose.
+NOTES (2026-11-01): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by the new settingsApplyLocal arm (settingKeysAppliedByTheRenderer must name every key the renderer applies itself).
+NOTES (2026-11-01): consequential edit — internal/domain/doc.go: made necessary by the twelfth `ui` key and the new parser (its file map counted the keys and named the parsers).
+NOTES (2026-11-01): the whole-block `domain.UIPrefs{...}` literals in internal/config/config_test.go (eleven sites, not only wantUIDefault) gained `Notify: domain.NotifyBell`; registry_test.go gained a `TestNotifyRowIsAnEditableEnumDefaultingBell` row test, a `ui.notify` arm in TestRegistryEnumValuesMatchParseSites and validator accept/refuse cases.
 
 **What:**
 **Goal:** The config key `ui.notify` exists: an enum `off | bell | osc9 | both`, default `bell`. It is editable in /settings and applies live, appears in the shipped template, and is documented in `docs/manual/configuration.md`'s `ui:` section, with that section's key count corrected. Nothing reads it yet.

@@ -970,6 +970,7 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.task-list-open",
 	"ui.tools-open",
 	"ui.tools-fold-over",
+	"ui.notify",
 	"cursor-shape",
 }
 

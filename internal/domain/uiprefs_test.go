@@ -96,10 +96,16 @@ var uiKeyCases = map[string]uiKeyCase{
 			"-1":   `apogee: invalid ui.tools-fold-over -1: want 0 or more, where 0 never folds a Tools umbrella`,
 		},
 	},
+	UIKeyNotify: {
+		value: "osc9",
+		read:  func(u UIPrefs) any { return u.Notify },
+		want:  NotifyOSC9,
+		bad:   map[string]string{"beep": `apogee: invalid ui.notify: unknown notify mode "beep"`},
+	},
 }
 
 // TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase pins the sweep the other tests run on: the
-// eleven keys in the order the starter template presents them, each with a case above, and a slice
+// twelve keys in the order the starter template presents them, each with a case above, and a slice
 // a caller cannot reorder under this package.
 func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	t.Parallel()
@@ -107,7 +113,7 @@ func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	want := []string{
 		"ui.spinner", "ui.spinner-color", "ui.glyphs", "ui.show-scrollbar", "ui.color-scheme",
 		"ui.stall-after", "ui.inspector", "ui.skill-suggestions", "ui.task-list-open", "ui.tools-open",
-		"ui.tools-fold-over",
+		"ui.tools-fold-over", "ui.notify",
 	}
 	if got := UIKeys(); !slices.Equal(got, want) {
 		t.Errorf("UIKeys() = %v; want the template order %v", got, want)
@@ -226,7 +232,7 @@ func TestParseStallAfterAndToolsFoldOverDefaults(t *testing.T) {
 }
 
 // TestUIPrefsValidateSpeaksTheParsersSentences: a block assembled field by field is refused as a
-// value read through Set would be — the same four sentences.
+// value read through Set would be — the same five sentences.
 func TestUIPrefsValidateSpeaksTheParsersSentences(t *testing.T) {
 	t.Parallel()
 
@@ -242,6 +248,7 @@ func TestUIPrefsValidateSpeaksTheParsersSentences(t *testing.T) {
 		{"a negative wait", UIPrefs{StallAfter: -5 * time.Second}, `apogee: invalid ui.stall-after -5s: want 0 or more`},
 		{"a negative count", UIPrefs{ToolsFoldOver: -1}, `apogee: invalid ui.tools-fold-over -1: want 0 or more`},
 		{"an unknown glyph set", UIPrefs{Glyphs: "ascii"}, `apogee: invalid ui.glyphs: unknown glyph set "ascii" (known sets: unicode, safe)`},
+		{"an unknown notify mode", UIPrefs{Notify: "beep"}, `apogee: invalid ui.notify: unknown notify mode "beep" (known modes: off, bell, osc9, both)`},
 	} {
 		err := tt.u.Validate()
 		if err == nil || !strings.HasPrefix(err.Error(), tt.want) {
@@ -283,6 +290,59 @@ func TestUIPrefsGlyphsDefaultsToUnicodeAndKnowsTwoSets(t *testing.T) {
 		err := u.Validate()
 		if err == nil || !strings.HasPrefix(err.Error(), "apogee: invalid ui.glyphs: ") {
 			t.Errorf("Validate() with Glyphs %q = %v; want refused naming ui.glyphs", bad, err)
+		}
+	}
+}
+
+// TestUIPrefsNotifyDefaultsToBellAndReadsEmptyAsOff: the shipped default is the bell, carried by
+// DefaultUIPrefs alone; `""` parses as off, so a zero block (a test harness's, a hand-built
+// Driver's) stays silent and still validates; Set's `""` lands the shipped default, the contract
+// every key keeps; each of the four modes parses to itself; and any other name is refused naming
+// the key.
+func TestUIPrefsNotifyDefaultsToBellAndReadsEmptyAsOff(t *testing.T) {
+	t.Parallel()
+
+	if got := DefaultUIPrefs().Notify; got != NotifyBell {
+		t.Errorf("DefaultUIPrefs().Notify = %q; want %q", got, NotifyBell)
+	}
+	if err := (UIPrefs{}).Validate(); err != nil {
+		t.Errorf("the zero block does not validate: %v", err)
+	}
+	for _, tt := range []struct {
+		text string
+		want NotifyMode
+	}{
+		{"", NotifyOff},
+		{"off", NotifyOff},
+		{"bell", NotifyBell},
+		{"osc9", NotifyOSC9},
+		{"both", NotifyBoth},
+	} {
+		got, err := ParseNotifyMode(tt.text)
+		if err != nil || got != tt.want {
+			t.Errorf("ParseNotifyMode(%q) = %q, %v; want %q", tt.text, got, err, tt.want)
+		}
+		u := DefaultUIPrefs()
+		u.Notify = NotifyMode(tt.text)
+		if err := u.Validate(); err != nil {
+			t.Errorf("Validate() with Notify %q = %v; want accepted", tt.text, err)
+		}
+	}
+	if got := NotifyModeNames(); !slices.Equal(got, []NotifyMode{NotifyOff, NotifyBell, NotifyOSC9, NotifyBoth}) {
+		t.Errorf("NotifyModeNames() = %v; want off, bell, osc9, both", got)
+	}
+
+	u := UIPrefs{Notify: NotifyBoth}
+	if err := u.Set(UIKeyNotify, ""); err != nil || u.Notify != NotifyBell {
+		t.Errorf(`Set(ui.notify, "") = %v, landing %q; want the shipped default %q`, err, u.Notify, NotifyBell)
+	}
+
+	for _, bad := range []string{"beep", "Bell", "OFF", "osc 9"} {
+		u := DefaultUIPrefs()
+		u.Notify = NotifyMode(bad)
+		err := u.Validate()
+		if err == nil || !strings.HasPrefix(err.Error(), "apogee: invalid ui.notify: ") {
+			t.Errorf("Validate() with Notify %q = %v; want refused naming ui.notify", bad, err)
 		}
 	}
 }

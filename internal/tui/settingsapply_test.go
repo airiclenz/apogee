@@ -98,6 +98,7 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 		domain.UIKeyTaskListOpen:     {settingFalse, "maybe"},
 		domain.UIKeyToolsOpen:        {settingTrue, "maybe"},
 		domain.UIKeyToolsFoldOver:    {"8", "many"},
+		domain.UIKeyNotify:           {string(domain.NotifyOSC9), "beep"},
 	}
 	model := func(t *testing.T, resolves bool) Model {
 		t.Helper()

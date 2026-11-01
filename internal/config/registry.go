@@ -289,6 +289,7 @@ var (
 	modeValues        = []string{string(domain.ModePlan), string(domain.ModeAskBefore), string(domain.ModeAllowEdits), string(domain.ModeAuto)}
 	spinnerValues     = []string{"snake", "glitter", "classic"}
 	glyphsValues      = []string{string(domain.GlyphsUnicode), string(domain.GlyphsSafe)}
+	notifyValues      = []string{string(domain.NotifyOff), string(domain.NotifyBell), string(domain.NotifyOSC9), string(domain.NotifyBoth)}
 	cursorShapeValues = []string{"block", "underline", "bar"}
 	// The one vocabulary internal/domain does not own: who picks a delegation's seat is a fact about
 	// the CONFIG rather than about the agent loop, so the two words live here (options.go) and this
@@ -1127,6 +1128,18 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *int { return countPtr(u.ToolsFoldOver) }),
 	},
 	{
+		Path: "ui.notify", Kind: KindEnum, Default: string(domain.DefaultNotifyMode), EnumValues: notifyValues,
+		Editable: true,
+		Validate: validateNotifyMode,
+		Desc:     "How the terminal is told apogee waits on you: the bell, an OSC 9 desktop notification, both, or off.",
+		// Copied across as the file names it, ui.spinner's posture: UIPrefs.Validate judges the name
+		// at ResolveOptions. An absent key keeps the shipped bell — nonEmptyName leaves the default
+		// standing — though a zero UIPrefs.Notify reads as off.
+		field: uiField(domain.UIKeyNotify, named[domain.NotifyMode], spelled[domain.NotifyMode],
+			func(u *domain.UIPrefs) *domain.NotifyMode { return &u.Notify },
+			func(u *uiConfig) *domain.NotifyMode { return nonEmptyName[domain.NotifyMode](u.Notify) }),
+	},
+	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
 		// posture above, for the same reason: one key is not a vocabulary, and the kind carries the
 		// shape while the hook carries the contract the kind cannot.
@@ -1605,6 +1618,12 @@ func validateSpinnerName(value string) error {
 // itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
 func validateGlyphSetName(value string) error {
 	return domain.UIPrefs{Glyphs: domain.GlyphSet(value)}.Validate()
+}
+
+// validateNotifyMode refuses a notify mode this build does not know, through the startup check
+// itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
+func validateNotifyMode(value string) error {
+	return domain.UIPrefs{Notify: domain.NotifyMode(value)}.Validate()
 }
 
 // validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the

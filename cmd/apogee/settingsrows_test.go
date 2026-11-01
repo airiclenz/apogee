@@ -80,7 +80,7 @@ func fabricatedSettings() config.Options {
 		Present:               config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
 		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, Glyphs: domain.GlyphsSafe, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
-			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3},
+			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, Notify: domain.NotifyBoth},
 		// The retention keys stay unset; the two watch keys are set, so their rows report a value.
 		Sessions: config.SessionSettings{
 			WatchHomes: []config.WatchHome{{Label: "bob", Path: "/home/bob/.apogee"},
@@ -486,6 +486,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.task-list-open":                  "false", // folded in the fixture, for the same reason: the row reports the value
 		"ui.tools-open":                      "true",  // opened in the fixture, against its false default: the row reports the value
 		"ui.tools-fold-over":                 "3",     // a count prints itself, and the fixture's 3 is not the default 5
+		"ui.notify":                          "both",  // both signals in the fixture, against the bell default
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
 		"sessions.max-age":     "0s",
