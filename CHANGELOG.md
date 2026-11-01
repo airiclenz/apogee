@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-11-01
+
 - The TUI's Diff Preview block skips a `view_diff` result's `--- current: <path>` / `+++ proposed: newContent` orientation header: the block paints the same rows and changed regions as before, with no row for the header.
 - **`view_diff` names which side is which.** A rendered diff now opens with `--- current: <path>` and `+++ proposed: newContent`, and the tool description says `- ` lines are the file's current content and `+ ` lines the proposed `newContent`, so a model that passed the before-text as `newContent` can read the mirrored diff for what it is. A path holding a control character is written Go-quoted so the header stays two lines. The over-budget diffstat line names both sides the same way; "No changes detected" is unchanged, and the TUI paints no row for the header. (`viewdiff-orientation-header`)
 - **Two opt-in budgets for `apogee headless` now exist as settings.** `headless-max-turns` (a whole count of Turns) and `headless-max-wall-time` (a length of time like `90m`) are config keys, also set by `APOGEE_HEADLESS_MAX_TURNS` / `APOGEE_HEADLESS_MAX_WALL_TIME` and by `apogee headless --max-turns` / `--max-wall-time`, in that order: flag over variable over `config.yaml`. Unset or `0` sets no budget. A value that is not a count or a length of time, or a negative one, is refused before the run starts (exit 2 from `apogee headless`). Only `apogee headless` reads them. Both are documented in `docs/manual/configuration.md` (*Headless run budgets*) and listed in `/settings`, where an edit takes effect at the next start.
