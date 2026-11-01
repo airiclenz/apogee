@@ -8548,18 +8548,19 @@ func TestContextGaugeEstimateAfterClear(t *testing.T) {
 }
 
 // TestContextGaugeEstimateAfterCompact pins /compact: a landed fold zeroes the estimate with the
-// reading, and the next Turn shows a fresh `~` estimate of the folded history.
+// reading (and the estimate-is-newer flag with both), and the next Turn shows a fresh `~` estimate of the folded history.
 func TestContextGaugeEstimateAfterCompact(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{ctxEstimate: 3000}
 	m := newTestModelEng(t, eng, testOpts)
 	startStubWorker(t, &m) // the /compact worker is in flight
-	m.ctxUsed, m.ctxEstimate = 4200, 3000
+	m.ctxUsed, m.ctxEstimate, m.isEstimateNewer = 4200, 3000, true
 
 	m = step(t, m, compactDoneMsg{})
 
-	if m.ctxUsed != 0 || m.ctxEstimate != 0 {
-		t.Errorf("after /compact ctxUsed, ctxEstimate = %d, %d, want 0, 0", m.ctxUsed, m.ctxEstimate)
+	if m.ctxUsed != 0 || m.ctxEstimate != 0 || m.isEstimateNewer {
+		t.Errorf("after /compact ctxUsed, ctxEstimate, isEstimateNewer = %d, %d, %v, want 0, 0, false",
+			m.ctxUsed, m.ctxEstimate, m.isEstimateNewer)
 	}
 	if g := m.contextGauge(); g != "" {
 		t.Errorf("gauge after /compact = %q, want dark until the next Turn", ansi.Strip(g))

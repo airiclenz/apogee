@@ -648,7 +648,9 @@ func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 	case msg.Skipped:
 		m.transcript.addNote("nothing to compact")
 	default:
-		m.ctxUsed, m.ctxEstimate = 0, 0 // the next Turn start takes a fresh estimate of the folded history
+		// The next Turn start takes a fresh estimate of the folded history; the flag goes with the
+		// readings it ranks, so no stale "estimate is newer" outlives them.
+		m.ctxUsed, m.ctxEstimate, m.isEstimateNewer = 0, 0, false
 		// Under its own kind, so the record can find the fold (transcript.addCompacted). The
 		// maintenance reading the summary call emitted has already folded through foldStats, which
 		// skipped its note because this worker was running — this is the one note /compact leaves.
