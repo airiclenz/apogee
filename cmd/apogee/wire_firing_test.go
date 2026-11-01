@@ -1846,6 +1846,27 @@ func TestRaiseMintsTheIDFromTheFiringsClock(t *testing.T) {
 	})
 }
 
+// The headless run budgets are headless's own: raise builds run.Spec for every Driver, so it must
+// never read the budget keys off the Options it is handed. A TUI, daemon or /schedule Firing raised
+// over Options with both keys set still hands the runner a Spec with no budget; headless copies its
+// budget on in the runner it passes raise (budgetedRunner), which this test does not go through.
+func TestRaiseCarriesNoBudgetFromOptions(t *testing.T) {
+	stub := &stubRunner{res: run.Result{Turns: 1}}
+	in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+	in.opts.HeadlessMaxTurns = 5
+	in.opts.HeadlessMaxWallTime = time.Hour
+
+	if _, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil, nil); err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the runner was never handed the Spec")
+	}
+	if got := stub.spec.Budget; got != (run.Budget{}) {
+		t.Errorf("run.Spec.Budget = %+v; raise carried the headless keys onto a Firing every Driver raises", got)
+	}
+}
+
 // onID fires before the composition and before the gate, so a Driver that stamps the id on a
 // stream stamps it on a refusal's closing frame too (ADR 0075 decision 5) — and a Schedule handed
 // in reaches the runner's Spec, so the record it files is the Schedule's.

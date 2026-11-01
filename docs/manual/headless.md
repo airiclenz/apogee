@@ -216,6 +216,29 @@ thing happened:
 | `1` | the run started — at least one Turn was driven — and failed: a model or tool error, cancellation (Ctrl-C), a record that would not save, a `--recipe` workflow that did not run, was stopped, failed or blocked on every fan-out item |
 | `2` | the run never started — nothing was sent and nothing saved: a usage mistake (an unknown flag, a second argument, an empty prompt, an unknown `--format`, a recipe input left unbound), a configuration that would not load or left no server to start on, a refused mode (`ask-before` or `allow-edits`, or `auto` on a host that cannot confine it), an engine that would not construct or a model that would not bind, a server that did not answer at all |
 | `3` | the run started and reached its boundary, but its final turn was abandoned (a model or upstream fault the loop could not recover) — stdout holds the run's last text, not an answer; the record is saved |
+| `4` | the run started and was stopped between Turns at its `--max-turns` or `--max-wall-time` budget — every finished Turn stands and the record is saved |
+
+## Run budgets — `--max-turns` and `--max-wall-time`
+
+A run nobody watches can be bounded. `--max-turns 20` stops it once it has taken 20 Turns, and
+`--max-wall-time 90m` once it has run for 90 minutes of wall-clock time (any Go duration: `45s`,
+`2h`). Both are opt-in — unset, or `0`, sets no budget — and each also comes from
+`APOGEE_HEADLESS_MAX_TURNS` / `APOGEE_HEADLESS_MAX_WALL_TIME` or the `headless-max-turns:` /
+`headless-max-wall-time:` keys, flag over environment over file
+([Headless run budgets](configuration.md#headless-run-budgets)). A negative or malformed value is
+refused before the run starts, exit `2`.
+
+Each budget is checked only **between Turns**: a Turn that has started always finishes and nothing
+it did is rolled back, so an outer supervisor's kill stays the backstop for one overlong Turn. A
+run past either budget stops at that Turn boundary, saves its record, prints what it has so far as
+any run does, and ends with one stderr line naming the budget and its limit —
+`apogee: run stopped at its max-turns budget (20) (partial run saved as <id>)`, the wall-time
+limit written as a Go duration (`1h30m0s`), and without the saved clause under `--no-save` —
+then exits `4`. Under `--format json` the closing frame carries `exit_code: 4` and the
+[`budget_stop`](#the-two-frames) member. A run whose final Turn ends the Exchange inside the budget
+is an ordinary completion, exit `0`, even when that Turn reached the limit exactly; and a run whose
+final Turn was abandoned exits `3` whatever budget it also reached. Only `apogee headless` reads
+these budgets: the TUI, `apogee daemon` and the runs `/schedule` raises are never bounded by them.
 
 ## Machine-readable output — `--format json`
 

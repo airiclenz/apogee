@@ -2392,6 +2392,73 @@ func TestHeadlessExitCodes(t *testing.T) {
 		}
 	})
 
+	t.Run("a budget stop exits 4 and names the budget and the record", func(t *testing.T) {
+		// run.Once's shape for a budget stop: no error, a saved record, the Turns kept, and the
+		// budget named on Result.BudgetStop. The flag's value is what headless copied onto the Spec.
+		stub := &stubRunner{res: run.Result{
+			SessionID:  "s-5",
+			Turns:      2,
+			BudgetStop: &run.BudgetStop{Budget: run.BudgetMaxTurns, Limit: "2"},
+		}}
+		_, _, err := headlessRun(t, stub, "--max-turns", "2", "a prompt")
+		if err == nil {
+			t.Fatal("a budget stop was reported as a success")
+		}
+		if code := exitCodeFor(err); code != exitBudgetStop {
+			t.Errorf("exit code = %d; want %d", code, exitBudgetStop)
+		}
+		const want = "apogee: run stopped at its max-turns budget (2) (partial run saved as s-5)"
+		if err.Error() != want {
+			t.Errorf("err = %q; want %q", err.Error(), want)
+		}
+		if got := stub.spec.Budget; got != (run.Budget{MaxTurns: 2}) {
+			t.Errorf("run.Spec.Budget = %+v; want the --max-turns value and no wall-time budget", got)
+		}
+	})
+
+	t.Run("a budget stop under --no-save names no record", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			Turns:      1,
+			BudgetStop: &run.BudgetStop{Budget: run.BudgetMaxWallTime, Limit: "30m0s"},
+		}}
+		_, _, err := headlessRun(t, stub, "--no-save", "--max-wall-time", "30m", "a prompt")
+		if code := exitCodeFor(err); err == nil || code != exitBudgetStop {
+			t.Fatalf("err = %v; want exit %d", err, exitBudgetStop)
+		}
+		if want := "apogee: run stopped at its max-wall-time budget (30m0s)"; err.Error() != want {
+			t.Errorf("err = %q; want %q", err.Error(), want)
+		}
+		if got := stub.spec.Budget; got != (run.Budget{MaxWallTime: 30 * time.Minute}) {
+			t.Errorf("run.Spec.Budget = %+v; want the --max-wall-time value alone", got)
+		}
+	})
+
+	t.Run("a run that faulted at its budget exits 3", func(t *testing.T) {
+		// The fault outranks the budget: the run's last words are not an answer, and that is the
+		// first thing a script must hear.
+		stub := &stubRunner{res: run.Result{
+			SessionID:  "s-6",
+			Turns:      2,
+			Faulted:    true,
+			Fault:      "an empty reply",
+			BudgetStop: &run.BudgetStop{Budget: run.BudgetMaxTurns, Limit: "2"},
+		}}
+		_, _, err := headlessRun(t, stub, "--max-turns", "2", "a prompt")
+		if code := exitCodeFor(err); err == nil || code != exitRunFaulted {
+			t.Fatalf("err = %v; want exit %d", err, exitRunFaulted)
+		}
+	})
+
+	t.Run("no budget leaves the Spec unbounded", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{SessionID: "s-7", FinalText: "done", Turns: 1}}
+		if _, _, err := headlessRun(t, stub, "a prompt"); err != nil {
+			t.Fatalf("a completed run returned an error: %v", err)
+		}
+		if got := stub.spec.Budget; got != (run.Budget{}) {
+			t.Errorf("run.Spec.Budget = %+v; want none when no layer set one", got)
+		}
+	})
+
 	t.Run("a save failure after a good run still prints the answer", func(t *testing.T) {
 		// run.Once's own shape for this case: the Result carries the answer and no record id,
 		// and only the returned error reports that the record did not land.
@@ -2745,6 +2812,27 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 		}
 		if data["fault"] != "the model returned an empty reply" {
 			t.Errorf("fault = %v; want the reason the engine reported", data["fault"])
+		}
+	})
+
+	t.Run("a budget stop brackets the budget", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID:  "s-5",
+			Turns:      2,
+			BudgetStop: &run.BudgetStop{Budget: run.BudgetMaxTurns, Limit: "2"},
+		}}
+		out, _, err := headlessRun(t, stub, "--format", "json", "--max-turns", "2", "a prompt")
+		if err == nil {
+			t.Fatal("a budget stop was reported as a success")
+		}
+		_, data := finishedFrame(t, jsonEventLines(t, out))
+		wantExitCode(t, data, exitBudgetStop)
+		want := map[string]any{"budget": "max-turns", "limit": "2"}
+		if got := data["budget_stop"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("budget_stop = %v; want %v", got, want)
+		}
+		if text, _ := data["error"].(string); text != err.Error() {
+			t.Errorf("error = %q; want the stderr line %q", text, err.Error())
 		}
 	})
 
@@ -4835,4 +4923,133 @@ func TestHeadlessUnwritableJournalStillCompletesTheRun(t *testing.T) {
 	if _, err := session.NewStore(filepath.Join(r.home, "sessions")).Load(recordID); err != nil {
 		t.Errorf("the record was not saved past the journal's failure: %v", err)
 	}
+}
+
+// budgetScript is the upstream the real-engine budget tests talk to: three ordered Turns, two of
+// them tool calls that keep the Exchange open and the third the answer, so a Turn budget of 2
+// stops the run at a boundary the model would have gone on from, and the answer is never asked for.
+// The two calls differ — a repeat of the same call with the same arguments is the loop breaker's to
+// answer inside its Turn — and each carries an id of its own, since the stub numbers an unset id by
+// its position in the reply and two one-call replies would both send `call_1`.
+func budgetScript() stubllm.Script {
+	return stubllm.Script{
+		Model: "budget-model",
+		Turns: []stubllm.Turn{
+			{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "list_dir", Arguments: `{"path":"."}`}}},
+			{ToolCalls: []stubllm.ToolCall{{ID: "call_2", Name: "read_file", Arguments: `{"path":"a.txt"}`}}},
+			{Text: budgetAnswer},
+		},
+	}
+}
+
+// budgetAnswer is budgetScript's third Turn: text a stopped run must never print.
+const budgetAnswer = "The file says hello, three Turns in."
+
+// budgetRecordID reads the saved record's id off a budget stop's error, the clause
+// partialRunSuffix wrote.
+var budgetRecordID = regexp.MustCompile(`\(partial run saved as (\S+)\)$`)
+
+// headlessBudgetRun drives one `apogee headless` invocation through runner over budgetScript and a
+// real workspace, and returns both streams, the command's error and the apogee home it ran in. The
+// runner is run.Once, or a wrapper around it; the budget reaches it on the Spec headless builds.
+func headlessBudgetRun(
+	t *testing.T,
+	runner func(context.Context, run.Spec) (run.Result, error),
+	args ...string,
+) (out, errOut, home string, err error) {
+	t.Helper()
+	srv := stubllm.New(t, budgetScript())
+	home = eventLinesHome(t, srv.URL, srv.Model)
+	t.Setenv(config.EnvMode, "")
+
+	cmd := newHeadlessCommandWith(headlessDeps{
+		runner:   runner,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	})
+	var outBuf, errBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs(append([]string{"--config", home, "--workspace", e2eWorkspace(t)}, args...))
+	err = cmd.ExecuteContext(context.Background())
+	return outBuf.String(), errBuf.String(), home, err
+}
+
+// wantBudgetStop asserts a real run's budget stop: exit 4, the error exactly the stderr line main
+// prints (the budget, its limit and the saved record), the answer Turn never reached, and the
+// record it names loadable from the run's home.
+func wantBudgetStop(t *testing.T, out, errOut, home string, err error, line string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("the run was reported as a success; stderr: %s", errOut)
+	}
+	if code := exitCodeFor(err); code != exitBudgetStop {
+		t.Fatalf("exit code = %d (%v); want %d", code, err, exitBudgetStop)
+	}
+	m := budgetRecordID.FindStringSubmatch(err.Error())
+	if m == nil || !strings.HasPrefix(err.Error(), line+" (") {
+		t.Fatalf("err = %q; want %q followed by the saved record", err.Error(), line)
+	}
+	if _, loadErr := session.NewStore(filepath.Join(home, "sessions")).Load(m[1]); loadErr != nil {
+		t.Errorf("the record the stop names was not saved: %v", loadErr)
+	}
+	if strings.Contains(out, budgetAnswer) {
+		t.Errorf("stdout carries the answer Turn the budget should have cut off: %q", out)
+	}
+}
+
+// TestHeadlessStopsAtItsBudget drives the real engine to a budget stop from each layer the budget
+// comes from, and through --format json: the run stops at the Turn boundary the budget falls on,
+// saves its record and exits 4 with the one stderr line that names the budget.
+func TestHeadlessStopsAtItsBudget(t *testing.T) {
+	t.Run("--max-turns 2 stops after two Turns", func(t *testing.T) {
+		out, errOut, home, err := headlessBudgetRun(t, run.Once, "--max-turns", "2", eventLinesPrompt)
+		wantBudgetStop(t, out, errOut, home, err, "apogee: run stopped at its max-turns budget (2)")
+		if !strings.Contains(errOut, "turns: 2") {
+			t.Errorf("the summary does not count the two Turns kept: %q", errOut)
+		}
+	})
+
+	t.Run("APOGEE_HEADLESS_MAX_TURNS stops it without the flag", func(t *testing.T) {
+		t.Setenv(config.EnvHeadlessMaxTurns, "2")
+		out, errOut, home, err := headlessBudgetRun(t, run.Once, eventLinesPrompt)
+		wantBudgetStop(t, out, errOut, home, err, "apogee: run stopped at its max-turns budget (2)")
+	})
+
+	t.Run("--format json carries budget_stop", func(t *testing.T) {
+		out, errOut, _, err := headlessBudgetRun(t, run.Once,
+			"--format", "json", "--max-turns", "2", eventLinesPrompt)
+		if code := exitCodeFor(err); err == nil || code != exitBudgetStop {
+			t.Fatalf("err = %v; want exit %d (stderr: %s)", err, exitBudgetStop, errOut)
+		}
+		_, data := finishedFrame(t, jsonEventLines(t, out))
+		wantExitCode(t, data, exitBudgetStop)
+		want := map[string]any{"budget": "max-turns", "limit": "2"}
+		if got := data["budget_stop"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("budget_stop = %v; want %v", got, want)
+		}
+		if data["saved"] != true {
+			t.Errorf("saved = %v; a budget stop saves its record", data["saved"])
+		}
+	})
+
+	t.Run("--max-wall-time stops it on the run's own clock", func(t *testing.T) {
+		// The clock reaches run.Once through the runner headless is handed, after headless has
+		// copied the budget on: each reading is an hour past the last, so the first Turn boundary
+		// is already past a 30-minute budget.
+		var mu sync.Mutex
+		at := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+		clock := func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			at = at.Add(testtime.Fixed(time.Hour))
+			return at
+		}
+		runner := func(ctx context.Context, s run.Spec) (run.Result, error) {
+			s.Now = clock
+			return run.Once(ctx, s)
+		}
+		out, errOut, home, err := headlessBudgetRun(t, runner, "--max-wall-time", "30m", eventLinesPrompt)
+		wantBudgetStop(t, out, errOut, home, err, "apogee: run stopped at its max-wall-time budget (30m0s)")
+	})
 }

@@ -168,7 +168,11 @@ NOTES (2026-11-01): the new TestDecodeRoundTripsBudgetStop compares the decoded 
 
 **Commit:** `feat(eventjson): add the budget_stop member to run_finished`
 
-## 6. apogee headless stops at its budget with exit 4
+## 6. apogee headless stops at its budget with exit 4 — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): consequential edit — cmd/apogee/headless.go: the runHeadless funnel comment's exit-path count ("sixteen") and the headlessDeps nil-runner sentence were made false by the budget-stop exit and budgetedRunner; both now say seventeen and name the budgeted wrap.
+NOTES (2026-11-01): the help text's budget paragraph names both APOGEE_HEADLESS_MAX_TURNS and APOGEE_HEADLESS_MAX_WALL_TIME in full; a wildcard spelling (APOGEE_HEADLESS_*) is read as a twelfth variable by TestManualListsEveryEnvironmentOverride's source scan.
+NOTES (2026-11-01): the real-engine budget script uses list_dir then read_file with distinct call ids: two identical read_file calls are answered by the loop breaker inside one Turn, and unset ids collide as call_1.
 
 **What:** depends on items 3, 4 and 5.
 **Goal:** with `--max-turns` or `--max-wall-time` set (by any layer), a run that reaches the budget stops at the next Turn boundary with its record saved, and prints one stderr line naming the budget and its limit (e.g. `apogee: run stopped at its max-turns budget (20)`). Record-save reporting follows the existing partial-run path, including `--no-save`. The run exits `4`. Under `--format json`, `run_finished` carries `exit_code: 4` and the `budget_stop` member. `apogee headless --help` and the exit table in `docs/manual/headless.md` list `4` with the other codes, and the manual documents the two budgets.

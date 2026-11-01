@@ -56,6 +56,10 @@ const (
 	// third thing a script must tell apart — the run did not fail (its record saved, its Turns
 	// did their work) and it did not answer either, so neither 0 nor 1 says what happened.
 	exitRunFaulted = 3
+	// exitBudgetStop is a run that started and was stopped at a Turn boundary by a budget the user
+	// set (--max-turns, --max-wall-time or their keys): its finished Turns stand and its record is
+	// saved, but the Exchange was cut short, so it is neither a completion nor a failure.
+	exitBudgetStop = 4
 )
 
 // exitError carries the process exit code an error asks the binary to end with. RunE returns it
@@ -111,7 +115,8 @@ func exitCodeFor(err error) int {
 // the whole package.
 //
 // A nil field is the production value, resolved where it is used and never at construction: a nil
-// runner leaves firingInputs.runner nil and raise runs the Firing through run.Once; a nil confiner
+// runner leaves firingInputs.runner nil and raise runs the Firing through run.Once (or, with a run
+// budget set, budgetedRunner wraps run.Once itself); a nil confiner
 // builds the backend through platform.NewConfiner when the run gets there.
 type headlessDeps struct {
 	// runner is what the Firing runs through once its gates have passed (firingInputs.runner).
@@ -465,13 +470,19 @@ func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 			"a required input it leaves unbound refuses the run, and every ask stage takes\n" +
 			"its default, which its result line says. The model then answers over the\n" +
 			"result lines.\n\n" +
+			"--max-turns and --max-wall-time bound the run; APOGEE_HEADLESS_MAX_TURNS,\n" +
+			"APOGEE_HEADLESS_MAX_WALL_TIME and the headless-max-turns: and\n" +
+			"headless-max-wall-time: keys set them too. Each is checked only between turns,\n" +
+			"so a running turn always finishes, and a run past either stops there, saves\n" +
+			"its record and names the budget on stderr.\n\n" +
 			"Exit codes: 0 the run\n" +
 			"completed, 1 the run started and failed (model or tool error, cancellation, a\n" +
 			"record that would not save, a --recipe workflow that did not run, stopped,\n" +
 			"failed or blocked on every fan-out item), 2 the run never started (usage,\n" +
 			"configuration, a refused mode, a server that did not answer), 3 the run started\n" +
 			"but its final turn was abandoned (stdout holds its last text, not an answer;\n" +
-			"the record is saved).",
+			"the record is saved), 4 the run stopped between turns at its --max-turns or\n" +
+			"--max-wall-time budget (the record is saved).",
 		Args:          headlessArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -554,9 +565,9 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // and — under json — writes the closing frame on whichever path the body left by.
 //
 // The funnel exists because ADR 0075 decision 5 promises EXACTLY ONE `run_finished` on every exit
-// path, and the body has sixteen of them: eleven `notStarted` refusals, a failed run, a --recipe
-// workflow that failed, an abandoned final Turn and a success. Writing the frame at each would be
-// sixteen chances to forget one, and
+// path, and the body has seventeen of them: eleven `notStarted` refusals, a failed run, a --recipe
+// workflow that failed, an abandoned final Turn, a budget stop and a success. Writing the frame at
+// each would be seventeen chances to forget one, and
 // a consumer would meet the omission as an empty stdout it has to interpret. Funnelling makes the
 // promise structural instead, and leaves the body's own control flow — and therefore the text
 // path's every byte — exactly as it was.
@@ -641,6 +652,11 @@ func runFinishedFrame(res run.Result, err error) eventjson.RunFinished {
 		// figures for the run's first call (run.Result.Turn1Usage), zero when none landed.
 		Turn1PromptTokens:       res.Turn1Usage.PromptTokens,
 		Turn1CachedPromptTokens: res.Turn1Usage.CachedPromptTokens,
+	}
+	// The budget that stopped the run, restated from internal/run's own report; nil, written `null`,
+	// on every run no budget stopped.
+	if stop := res.BudgetStop; stop != nil {
+		frame.BudgetStop = &eventjson.BudgetStop{Budget: stop.Budget, Limit: stop.Limit}
 	}
 	if err != nil {
 		frame.ExitCode = exitCodeFor(err)
@@ -1099,7 +1115,11 @@ func runHeadlessBody(
 		mode:     mode,
 		recipe:   launch,
 		report:   reportReaction,
-		runner:   deps.runner,
+		// The user's run budgets ride on this Driver's own runner, never on raise (budgetedRunner).
+		runner: budgetedRunner(deps.runner, run.Budget{
+			MaxTurns:    opts.HeadlessMaxTurns,
+			MaxWallTime: opts.HeadlessMaxWallTime,
+		}),
 		// The per-server stats recorder (ADR 0085): every upstream attempt this run makes is
 		// appended to the home's server-stats.jsonl while `server-stats:` is on. Off, it opens
 		// nothing, so the file is neither read nor written.
@@ -1255,7 +1275,44 @@ func runHeadlessBody(
 		}
 		return res, exitError{code: exitRunFaulted, err: err}
 	}
+	// A budget stop is exit 4, decided AFTER the fault branch: a run whose final Turn was abandoned
+	// exits 3 whatever budget it also reached, because the fault says the run's last words are not
+	// an answer, which a script must hear first. What reaches here is a run that kept every Turn it
+	// finished and was stopped at the boundary a user-set budget fell on. The error is the one
+	// stderr line main prints, so it is not also printed here; like a fault it names the record.
+	if stop := res.BudgetStop; stop != nil {
+		err := fmt.Errorf("apogee: run stopped at its %s budget (%s)", stop.Budget, stop.Limit)
+		if res.SessionID != "" {
+			err = fmt.Errorf("%w %s", err, partialRunSuffix(res.SessionID))
+		}
+		return res, exitError{code: exitBudgetStop, err: err}
+	}
 	return res, nil
+}
+
+// budgetedRunner returns the runner this Driver hands raise, with the user's run budget copied onto
+// the Spec on the way through. The copy lives HERE, in headless's own runner, and never in the
+// Options resolution or in raise: raise builds run.Spec for every Driver, and the TUI, the daemon
+// and the runs /schedule raises are never bounded by these keys, whatever the file or the
+// environment says (docs/manual/configuration.md, Headless run budgets).
+//
+// A zero budget returns next untouched, nil included, so a run with no budget reaches raise exactly
+// as it always has (a nil runner is raise's run.Once). next is called after the copy, so a test that
+// wraps run.Once to inject a clock sees the budget already on the Spec it is handed.
+func budgetedRunner(
+	next func(context.Context, run.Spec) (run.Result, error),
+	budget run.Budget,
+) func(context.Context, run.Spec) (run.Result, error) {
+	if budget == (run.Budget{}) {
+		return next
+	}
+	if next == nil {
+		next = run.Once
+	}
+	return func(ctx context.Context, spec run.Spec) (run.Result, error) {
+		spec.Budget = budget
+		return next(ctx, spec)
+	}
 }
 
 // serialWriter guards one io.Writer with a mutex, so goroutines that narrate at the same time can

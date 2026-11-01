@@ -14,8 +14,8 @@ import (
 )
 
 // headlessExitCodes is every code `apogee headless` can end with: 0 is the success the const
-// block leaves implicit, the rest are its three named outcomes.
-var headlessExitCodes = []int{0, exitRunFailed, exitNotStarted, exitRunFaulted}
+// block leaves implicit, the rest are its four named outcomes.
+var headlessExitCodes = []int{0, exitRunFailed, exitNotStarted, exitRunFaulted, exitBudgetStop}
 
 // manualExitRow matches one body row of the manual's `| Exit | Means |` table, capturing the code.
 var manualExitRow = regexp.MustCompile("(?m)^\\| `(\\d+)` \\|")
