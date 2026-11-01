@@ -301,6 +301,8 @@ func toWireToolView(tv toolView) *session.ToolView {
 		Task:      tv.task,
 		Args:      tv.argsWire,
 		Chars:     tv.chars,
+		// The estimate rides beside the size it was made from, a count like it.
+		EstimatedTokens: tv.estimatedTokens,
 		Summary: session.BranchSummary{
 			DetailLine: session.DetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 			Quoted:     tv.Summary.quoted,
@@ -576,6 +578,8 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 		argsWire: w.Args,
 		// The result's size comes back as the number it is: a count, never display text.
 		chars: w.Chars,
+		// And the estimate beside it, as the count it is; an older record reads zero.
+		estimatedTokens: w.EstimatedTokens,
 		// A value with arithmetic in it has nothing to strip and comes back as the numbers it is.
 		stat:    fromWireStatValue(w.StatValue, w.Stat),
 		task:    w.Task,

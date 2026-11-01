@@ -234,22 +234,22 @@ func TestPresentToolCall(t *testing.T) {
 			wantTarget: "POST https://api.example.com", wantDetail: "HTTP 201 Created",
 		},
 		{
-			name: "web_fetch with a FetchedBody → the same status slot, worded from the summary",
+			name: "web_fetch with a FetchedBody → the status slot, worded from the summary, with the size",
 			call: domain.ToolCall{ID: "22b", Tool: "web_fetch", Arguments: []byte(`{"url":"https://go.dev"}`)},
 			result: domain.ToolResult{CallID: "22b", Content: "HTTP 200 OK\nContent-Type: text/html\n\n<html>…</html>",
 				Summary: domain.FetchedBody{Status: "200 OK"}},
 			wantLabel:  "Fetch",
 			wantVerb:   "fetching",
-			wantTarget: "https://go.dev", wantDetail: "HTTP 200 OK",
+			wantTarget: "https://go.dev", wantDetail: "HTTP 200 OK · 53 B",
 		},
 		{
-			name: "http_request with a FetchedBody → the same status slot, worded from the summary",
+			name: "http_request with a FetchedBody → the status slot with the size, and truncated",
 			call: domain.ToolCall{ID: "23b", Tool: "http_request", Arguments: []byte(`{"url":"https://api.example.com","method":"post"}`)},
 			result: domain.ToolResult{CallID: "23b", Content: "HTTP 200 OK\nLocation: /things/1\n\n{}",
 				Summary: domain.FetchedBody{Status: "200 OK", Truncated: true}},
 			wantLabel:  "HTTP",
 			wantVerb:   "requesting",
-			wantTarget: "POST https://api.example.com", wantDetail: "HTTP 200 OK",
+			wantTarget: "POST https://api.example.com", wantDetail: "HTTP 200 OK · 35 B · truncated",
 		},
 		{
 			name:       "terminal → Run + the whole output body (the paint compresses it, not the view)",
@@ -1988,8 +1988,8 @@ func TestToolStat(t *testing.T) {
 		{name: "grep words hits", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 3}}, want: "3 hits", wantOK: true},
 		{name: "grep finding nothing is a number", tool: "grep", result: domain.ToolResult{Summary: domain.MatchedLines{Total: 0}}, want: "0 hits", wantOK: true},
 		{name: "search words results", tool: "web_search", result: domain.ToolResult{Summary: domain.SearchHits{Count: 1}}, want: "1 result", wantOK: true},
-		{name: "a fetch words its status", tool: "web_fetch", result: domain.ToolResult{Summary: domain.FetchedBody{Status: "200 OK"}}, want: "HTTP 200 OK", wantOK: true},
-		{name: "a request words its status, truncated or not", tool: "http_request", result: domain.ToolResult{Summary: domain.FetchedBody{Status: "404 Not Found", Truncated: true}}, want: "HTTP 404 Not Found", wantOK: true},
+		{name: "a fetch words its status and the size it took in", tool: "web_fetch", result: domain.ToolResult{Content: strings.Repeat("x", 3174), Summary: domain.FetchedBody{Status: "200 OK"}}, want: "HTTP 200 OK · 3.1 KiB", wantOK: true},
+		{name: "a truncated request says so after its size", tool: "http_request", result: domain.ToolResult{Content: strings.Repeat("x", 512), Summary: domain.FetchedBody{Status: "404 Not Found", Truncated: true}}, want: "HTTP 404 Not Found · 512 B · truncated", wantOK: true},
 		{name: "diff preview words the typed diffstat", tool: "view_diff", result: domain.ToolResult{Summary: domain.DiffStat{Added: 8, Removed: 3}}, want: "+8 −3", wantOK: true},
 		{name: "a summary-less diff keeps its sentence", tool: "view_diff", result: domain.ToolResult{Content: "No changes detected"}, wantOK: false},
 
@@ -2059,6 +2059,50 @@ func TestToolStat(t *testing.T) {
 			}
 			if ok && got.spell() != tc.want {
 				t.Errorf("%s stat = %q, want %q", tc.tool, got.spell(), tc.want)
+			}
+		})
+	}
+}
+
+// TestFetchRowTokenStat is the two fetch tools' token-aware slot (toolPresenter.statTokens): the
+// status and the size of the content the model received, the engine's estimate of what that
+// content cost the context spelled as the gauge spells a count, and `truncated` last. A zero
+// estimate — a journal written before the engine estimated — leaves the estimate out and reads
+// exactly as the token-less stat does; a summary-less result declines, keeping the prose floor.
+func TestFetchRowTokenStat(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("x", 3174)
+	cases := []struct {
+		name   string
+		tool   string
+		result domain.ToolResult
+		tokens int
+		want   string
+		wantOK bool
+	}{
+		{name: "a fetch adds its estimate", tool: "web_fetch", result: domain.ToolResult{Content: body, Summary: domain.FetchedBody{Status: "200 OK"}}, tokens: 812, want: "HTTP 200 OK · 3.1 KiB · ~812 tok", wantOK: true},
+		{name: "a large estimate climbs the gauge's ladder", tool: "web_fetch", result: domain.ToolResult{Content: body, Summary: domain.FetchedBody{Status: "200 OK"}}, tokens: 4096, want: "HTTP 200 OK · 3.1 KiB · ~4k tok", wantOK: true},
+		{name: "truncated follows the estimate", tool: "http_request", result: domain.ToolResult{Content: body, Summary: domain.FetchedBody{Status: "200 OK", Truncated: true}}, tokens: 812, want: "HTTP 200 OK · 3.1 KiB · ~812 tok · truncated", wantOK: true},
+		{name: "a zero estimate is left out", tool: "web_fetch", result: domain.ToolResult{Content: body, Summary: domain.FetchedBody{Status: "200 OK"}}, tokens: 0, want: "HTTP 200 OK · 3.1 KiB", wantOK: true},
+		{name: "a zero estimate on a truncated request keeps the mark", tool: "http_request", result: domain.ToolResult{Content: body, Summary: domain.FetchedBody{Status: "200 OK", Truncated: true}}, tokens: 0, want: "HTTP 200 OK · 3.1 KiB · truncated", wantOK: true},
+		{name: "a summary-less result declines", tool: "http_request", result: domain.ToolResult{Content: "HTTP 200 OK\n\n{}"}, tokens: 812, wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := toolRegistry[tc.tool]
+			if p.statTokens == nil {
+				t.Fatalf("%s has no statTokens hook", tc.tool)
+			}
+			got, ok := p.statTokens(tc.result, tc.tokens)
+
+			if ok != tc.wantOK {
+				t.Fatalf("%s statTokens ok = %v, want %v (got %q)", tc.tool, ok, tc.wantOK, got.spell())
+			}
+			if ok && got.spell() != tc.want {
+				t.Errorf("%s statTokens = %q, want %q", tc.tool, got.spell(), tc.want)
 			}
 		})
 	}

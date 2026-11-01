@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/title"
 )
@@ -36,7 +37,9 @@ import (
 // than to a wrong number. That call yields where a summary carries a fact the TOOL computed and a
 // host would otherwise re-derive from the prose: the two fetch tools' domain.FetchedBody (the
 // status, and whether the body hit the response cap) grew on that ground (plan
-// "2026-11-01 - 00", item 3), so their slot reads the value instead of the result's first line.
+// "2026-11-01 - 00", item 3), so their slot reads the value instead of the result's first line —
+// beside the content's size and the token estimate the engine reports on the result's own event
+// (domain.ToolResultEvent.EstimatedTokens; item 6 of that plan), which the statTokens hook reads.
 //
 // The two halves stay independent. The wording is the view's own — that several of these
 // lines read like the tool's own header today is what makes the change checkable, not a
@@ -126,6 +129,15 @@ type toolPresenter struct {
 	// slot as the tool's own words keeps it, and the stat becomes the phrase the promote-guard
 	// swaps in when the row is too narrow for both (toolView.stat, design call 5).
 	stat func(res domain.ToolResult) (statValue, bool)
+
+	// statTokens words the slot in stat's place for a tool whose slot also says what its result
+	// cost the context: the result beside the estimated tokens its content added
+	// (domain.ToolResultEvent.EstimatedTokens, kept on the view as toolView.estimatedTokens). A zero
+	// estimate — a journal written before the engine estimated — is the cue to leave that part out,
+	// so the hook answers what stat would. Its bool means what stat's does. Where both are set this
+	// one runs and stat is the token-less reading of the same slot, which is what the two fetch tools
+	// set them to (fetchedBodyStat, fetchedBodyTokenStat).
+	statTokens func(res domain.ToolResult, tokens int) (statValue, bool)
 
 	// count words the faint `(…)` the HEADER wears beside the label — the umbrella's own
 	// "✦ Tools (7 calls)" shape, worn here by one card about itself: task_list's `(done/total)`.
@@ -498,18 +510,20 @@ var toolRegistry = map[string]toolPresenter{
 		stat:   testVerdictStat,
 	},
 	"web_fetch": {
-		label:  "Fetch",
-		verb:   "fetching",
-		target: stringArg("url"),
-		detail: firstLineDetail, // "HTTP 200 OK" — the body never floods the chat
-		stat:   fetchedBodyStat,
+		label:      "Fetch",
+		verb:       "fetching",
+		target:     stringArg("url"),
+		detail:     firstLineDetail, // "HTTP 200 OK" — the body never floods the chat
+		stat:       fetchedBodyStat,
+		statTokens: fetchedBodyTokenStat,
 	},
 	"http_request": {
-		label:  "HTTP",
-		verb:   "requesting",
-		target: methodURLTarget,
-		detail: firstLineDetail, // "HTTP 200 OK"
-		stat:   fetchedBodyStat,
+		label:      "HTTP",
+		verb:       "requesting",
+		target:     methodURLTarget,
+		detail:     firstLineDetail, // "HTTP 200 OK"
+		stat:       fetchedBodyStat,
+		statTokens: fetchedBodyTokenStat,
 	},
 	"web_search": {
 		label:  "Search",
@@ -678,16 +692,37 @@ func searchHitsStat(res domain.ToolResult) (statValue, bool) {
 // httpStatusPrefix opens a fetch tool's slot, as it opens the status line the tool writes.
 const httpStatusPrefix = "HTTP "
 
-// fetchedBodyStat words the two fetch tools' slot as the status their result's first line names,
-// "HTTP 200 OK" — the very line firstLineDetail quotes for a result carrying no summary, so the
-// slot reads the same whichever path words it. It is clipped as that floor is, since the status
-// text after the code is the server's own choice.
+// fetchedTruncatedCell closes a fetch tool's slot when its body hit the response cap
+// (domain.FetchedBody.Truncated): the model read only the head of what the server sent.
+const fetchedTruncatedCell = "truncated"
+
+// fetchedBodyStat words the two fetch tools' slot without a token estimate: the status their
+// result's first line names, then the size of the content the model received, and `truncated` when
+// the body hit the cap — "HTTP 200 OK · 3.1 KiB". It is fetchedBodyTokenStat at a zero estimate.
 func fetchedBodyStat(res domain.ToolResult) (statValue, bool) {
+	return fetchedBodyTokenStat(res, 0)
+}
+
+// fetchedBodyTokenStat words the two fetch tools' slot as what the fetch put into the context:
+// "HTTP 200 OK · 3.1 KiB · ~1k tok", plus " · truncated". The status is the very line
+// firstLineDetail quotes for a result carrying no summary, so a summary-less result still opens its
+// slot the same way, and it is clipped as that floor is, since the status text after the code is the
+// server's own choice. The size is the byte length of the result's content — the same number
+// toolView.chars records — in the byte format the session notice speaks; the estimate is spelled
+// the way the context gauge spells a count, and left out at zero.
+func fetchedBodyTokenStat(res domain.ToolResult, tokens int) (statValue, bool) {
 	v, ok := res.Summary.(domain.FetchedBody)
 	if !ok {
 		return statValue{}, false
 	}
-	return plainStat(clipDetail(httpStatusPrefix + v.Status)), true
+	cells := []string{clipDetail(httpStatusPrefix + v.Status), format.Bytes(len(res.Content))}
+	if tokens > 0 {
+		cells = append(cells, "~"+format.Tokens(tokens)+" tok")
+	}
+	if v.Truncated {
+		cells = append(cells, fetchedTruncatedCell)
+	}
+	return plainStat(strings.Join(cells, slotSeparator)), true
 }
 
 // diffStatStat words view_diff's slot as the diffstat the tool counted off its own operations. A

@@ -744,7 +744,7 @@ func TestTranscriptCodecReplaysAPromotedSummaryAsShown(t *testing.T) {
 	tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 	tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
 		Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", "", runRef{})
-	tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, "", runRef{})
+	tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, 0, "", runRef{})
 
 	data, err := encodeTranscript(tr)
 	if err != nil {
@@ -788,7 +788,7 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
 			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", "", runRef{})
-		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, "", runRef{})
+		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, 0, "", runRef{})
 		if len(tr.entries) != 1 || !tr.entries[0].tool.Summary.quoted {
 			t.Fatalf("fixture: the promoted output carries no quoted mark to travel (%+v)", tr.entries)
 		}
@@ -830,7 +830,7 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
 			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", "", runRef{})
-		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, "", runRef{})
+		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, 0, "", runRef{})
 
 		data, err := encodeTranscript(tr)
 		if err != nil {
@@ -1459,6 +1459,9 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		wantTool := []string{
 			"Label", "Verb", "Target", "Name", "Solo", "Stat", "StatValue", "Task", "Summary",
 			"Details", "Regions", "RegionFiles", "Args", "Chars",
+			// EstimatedTokens: the engine's estimate beside Chars, so a fetch row's slot keeps the
+			// number it was worded from (tui-row-detail-gauge-and-notify plan, item 6).
+			"EstimatedTokens",
 		}
 		if got := fields(session.ToolView{}); !slices.Equal(got, wantTool) {
 			t.Errorf("session.ToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
@@ -2514,5 +2517,38 @@ func TestTranscriptCodecRoundTripsAWorkflowItemHead(t *testing.T) {
 	}
 	if want := (workflowItemPlace{stage: "items", round: 1, index: 1, attempt: 1}); e.item != want {
 		t.Errorf("replayed place = %+v, want %+v", e.item, want)
+	}
+}
+
+// TestFetchRowSurvivesTheTranscriptCodec pins that a resumed fetch row reads as the live one did: the
+// slot with the size and the estimate comes back from the scrollback record, and so does the
+// estimate itself, as the count it is (session.ToolView.EstimatedTokens).
+func TestFetchRowSurvivesTheTranscriptCodec(t *testing.T) {
+	t.Parallel()
+	live := fetchRowTranscript()
+
+	data, err := encodeTranscript(live)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+
+	replayed := &transcript{entries: got}
+	if live, replayed := renderPlain(live, 80), renderPlain(replayed, 80); replayed != live {
+		t.Errorf("the replayed fetch row reads differently:\n--- replayed ---\n%s\n--- live ---\n%s", replayed, live)
+	}
+	for _, e := range got {
+		if e.kind != entryToolCall {
+			continue
+		}
+		if e.tool.Summary.Text != fetchRowSlot {
+			t.Errorf("replayed slot = %q, want %q", e.tool.Summary.Text, fetchRowSlot)
+		}
+		if e.tool.estimatedTokens != fetchRowEstimate {
+			t.Errorf("replayed estimate = %d, want %d", e.tool.estimatedTokens, fetchRowEstimate)
+		}
 	}
 }

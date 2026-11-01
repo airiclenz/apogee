@@ -675,6 +675,14 @@ type toolView struct {
 	// Nothing paints it; it is the record's number, not the card's. Zero while the call is open.
 	chars int
 
+	// estimatedTokens is what the engine estimated the result's content added to the context
+	// (domain.ToolResultEvent.EstimatedTokens), set beside chars at the same fold
+	// (transcript.addToolResult) and carried on the wire beside it (session.ToolView.EstimatedTokens)
+	// so a record keeps the number its slot was worded from. A presenter's statTokens hook reads it;
+	// zero — a call still open, or a journal from before the engine estimated — leaves the estimate
+	// out of the slot.
+	estimatedTokens int
+
 	// background says this card is a background sub_agent's call (ADR 0094): a sub_agent call that
 	// asked for `background: true` and spawned no run of the conversation's own — its child runs as a
 	// one-item background workflow, whose events never reach the transcript (workflow.go). Such a
@@ -1282,7 +1290,11 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	if !tv.argStat.blank() {
 		tv.applyStat(tv.argStat, true)
 	}
-	if known && p.stat != nil {
+	// A presenter whose slot also says what the result cost the context words it with the estimate
+	// the fold set on the view, in stat's place (toolPresenter.statTokens).
+	if known && p.statTokens != nil {
+		tv.applyStat(p.statTokens(result, tv.estimatedTokens))
+	} else if known && p.stat != nil {
 		tv.applyStat(p.stat(result))
 	}
 	// The header's count is read off the result's lines rather than the result, so the decoder can

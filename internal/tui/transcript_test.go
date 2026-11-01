@@ -4252,7 +4252,7 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 			tr.addToolCall(domain.ToolCall{ID: "t2", Tool: "terminal", Arguments: []byte(`{"command":"ls"}`)}, "", "", runRef{})
 		}},
 		{"addToolResult", func(tr *transcript) {
-			tr.addToolResult(domain.ToolResult{CallID: "t1", Content: "ok"}, "", runRef{})
+			tr.addToolResult(domain.ToolResult{CallID: "t1", Content: "ok"}, 0, "", runRef{})
 		}},
 		{"addSubAgentPhase", func(tr *transcript) { subAgentStarted(tr, "s1", 1) }},
 		{"addSubAgentName", func(tr *transcript) {
@@ -4565,4 +4565,42 @@ func TestTranscriptRendersApprovalAllowedByRule(t *testing.T) {
 
 		assertTranscriptNoESC(t, tr)
 	})
+}
+
+// fetchRowEstimate is the engine's estimate the fetch row fixture's result carries
+// (domain.ToolResultEvent.EstimatedTokens).
+const fetchRowEstimate = 812
+
+// fetchRowTranscript folds one finished web_fetch call through the event seam — its call, then a
+// result carrying a domain.FetchedBody and the engine's estimate — so the row is the one the live
+// fold builds, not a literal.
+func fetchRowTranscript() *transcript {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "f1", Tool: "web_fetch", Arguments: []byte(`{"url":"https://go.dev"}`)},
+	})
+	tr.apply(domain.ToolResultEvent{
+		Result: domain.ToolResult{CallID: "f1",
+			Content: "HTTP 200 OK\n\n" + strings.Repeat("x", 3161),
+			Summary: domain.FetchedBody{Status: "200 OK"}},
+		EstimatedTokens: fetchRowEstimate,
+	})
+	return tr
+}
+
+// fetchRowSlot is the slot fetchRowTranscript's row paints: 3174 bytes of content and the estimate.
+const fetchRowSlot = "HTTP 200 OK · 3.1 KiB · ~812 tok"
+
+// TestFetchRowPaintsTheSizeAndEstimate is a fetch row painted end to end: the result event's
+// estimate reaches the row through the fold (transcript.addToolResult) and the slot reads the
+// status, the size the model took in and that estimate.
+func TestFetchRowPaintsTheSizeAndEstimate(t *testing.T) {
+	t.Parallel()
+	tr := fetchRowTranscript()
+
+	got := renderPlain(tr, 80)
+
+	if want := "┕ https://go.dev ⋯ " + fetchRowSlot; !strings.Contains(got, want) {
+		t.Errorf("the fetch row does not read %q:\n%s", want, got)
+	}
 }

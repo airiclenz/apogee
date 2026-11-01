@@ -404,8 +404,8 @@ its body whole while collapsed, and it appears only when the two differ.
 | git_diff_range | Git Diff | `base...head` | `+A −R` | split/stacked diff, one header row per file section, see `split-diff-layout.md` |
 | view_diff | Diff Preview | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
 | diagnostics | Diagnostics | path | `N issues` / `clean` | one line per issue |
-| http_request | HTTP | METHOD + URL | `status · size` | response headers + body head |
-| web_fetch | Fetch | URL | size | extracted text head |
+| http_request | HTTP | METHOD + URL | `HTTP <status> · <size> · ~<n> tok` — `<size>` the bytes of what the model received, `~<n> tok` the engine's estimate of their tokens (left out on a record with none); `· truncated` last when the body hit the response cap | response headers + body head |
+| web_fetch | Fetch | URL | `HTTP <status> · <size> · ~<n> tok`, `· truncated` last when cut — as http_request | extracted text head |
 | web_search | Search | the query | `N results` | result titles + URLs |
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask User | the question | the human's own answer | question + choices + the answer |

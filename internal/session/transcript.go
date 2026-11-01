@@ -319,21 +319,26 @@ type ImageMark struct {
 // how much each call put into the context without carrying the content itself. Zero for a call
 // still open, for a record written before the member existed, and for a result that carried
 // nothing.
+//
+// EstimatedTokens is the engine's estimate of the tokens that same content added to the context
+// (domain.ToolResultEvent.EstimatedTokens), kept so a replayed card holds the number its slot was
+// worded from. Zero wherever Chars is, and for a record written before the engine estimated.
 type ToolView struct {
-	Label       string          `json:"label,omitempty"`
-	Verb        string          `json:"verb,omitempty"`
-	Target      string          `json:"target,omitempty"`
-	Name        string          `json:"name,omitempty"`
-	Solo        bool            `json:"solo,omitempty"`
-	Stat        string          `json:"stat,omitempty"`
-	StatValue   *StatValue      `json:"statValue,omitempty"`
-	Task        string          `json:"task,omitempty"`
-	Summary     BranchSummary   `json:"summary"`
-	Details     []DetailLine    `json:"details,omitempty"`
-	Regions     []EditRegion    `json:"regions,omitempty"`
-	RegionFiles []string        `json:"regionFiles,omitempty"`
-	Args        json.RawMessage `json:"args,omitempty"`
-	Chars       int             `json:"chars,omitempty"`
+	Label           string          `json:"label,omitempty"`
+	Verb            string          `json:"verb,omitempty"`
+	Target          string          `json:"target,omitempty"`
+	Name            string          `json:"name,omitempty"`
+	Solo            bool            `json:"solo,omitempty"`
+	Stat            string          `json:"stat,omitempty"`
+	StatValue       *StatValue      `json:"statValue,omitempty"`
+	Task            string          `json:"task,omitempty"`
+	Summary         BranchSummary   `json:"summary"`
+	Details         []DetailLine    `json:"details,omitempty"`
+	Regions         []EditRegion    `json:"regions,omitempty"`
+	RegionFiles     []string        `json:"regionFiles,omitempty"`
+	Args            json.RawMessage `json:"args,omitempty"`
+	Chars           int             `json:"chars,omitempty"`
+	EstimatedTokens int             `json:"estimatedTokens,omitempty"`
 }
 
 // DetailLine is one line of a tool card's body. Kind is stored as its underlying integer value, so

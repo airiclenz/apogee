@@ -126,17 +126,20 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 		},
 		{
 			// The two fetch tools against the same loopback server: the slot is the status their
-			// domain.FetchedBody names, so these rows pin that both keep attaching one.
+			// domain.FetchedBody names and the size of the content they returned, so these rows pin
+			// that both keep attaching one. The page is a constant and the one varying header
+			// http_request echoes (Date) is fixed-width, so both sizes are too; no estimate rides a
+			// bare Execute, so none is spoken.
 			name: "web_fetch",
 			tool: tools.NewWebFetch(security.URLGuard{}.DisableIPFloor()),
 			args: `{"url":"` + srv.URL + `"}`,
-			want: "HTTP 200 OK",
+			want: "HTTP 200 OK · 117 B",
 		},
 		{
 			name: "http_request",
 			tool: tools.NewHTTPRequest(security.URLGuard{}.DisableIPFloor()),
 			args: `{"url":"` + srv.URL + `"}`,
-			want: "HTTP 200 OK",
+			want: "HTTP 200 OK · 667 B",
 		},
 		{
 			// The three edit tools word their slot from the regions the APPLY recorded

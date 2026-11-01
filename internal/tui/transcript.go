@@ -1319,7 +1319,7 @@ func (t *transcript) apply(e domain.Event) {
 		t.addToolCall(e.Call, e.ResolvedPath, e.SpawnRunID, run)
 		t.anchorWave(e)
 	case domain.ToolResultEvent:
-		t.addToolResult(e.Result, e.SpawnRunID, runOf(e.EventBase))
+		t.addToolResult(e.Result, e.EstimatedTokens, e.SpawnRunID, runOf(e.EventBase))
 	case domain.SubAgentPhaseEvent:
 		t.addSubAgentPhase(e)
 	case domain.SubAgentNamedEvent:
@@ -1704,7 +1704,9 @@ func (t *transcript) addToolCall(call domain.ToolCall, resolved, spawnRunID stri
 // most recent un-paired tool-call entry with a matching CallID IN THE SAME RUN — the run that
 // emitted the result (run), and for a delegation's result the same spawned run (spawnRunID,
 // domain.ToolResultEvent's) — and enriches that call's view with the result's one-line summary,
-// marking it done. A result the tool flagged as an error (IsError) is a normal in-band outcome the
+// marking it done. estimatedTokens is the engine's estimate of what the result's content added to the
+// context (domain.ToolResultEvent.EstimatedTokens), kept on the view for the slot that speaks it. A
+// result the tool flagged as an error (IsError) is a normal in-band outcome the
 // model reacts to — not a recovered fault (that is ErrorEvent) — so it is summarised, not raised. A
 // result that matches no open call (the defensive orphan case) is appended as a standalone result
 // block so its outcome is not lost.
@@ -1713,7 +1715,7 @@ func (t *transcript) addToolCall(call domain.ToolCall, resolved, spawnRunID stri
 // collide: a child's leaf call may share its id with a sibling delegation's head, and a reply may
 // carry two sub_agent calls under one id. Matching on the id alone closed the wrong block — a
 // sibling's row ticked ✓ while its child was still working.
-func (t *transcript) addToolResult(result domain.ToolResult, spawnRunID string, run runRef) {
+func (t *transcript) addToolResult(result domain.ToolResult, estimatedTokens int, spawnRunID string, run runRef) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		e := &t.entries[i]
 		if e.kind == entryToolCall && !e.done && e.callID == result.CallID && e.run() == run &&
@@ -1723,6 +1725,9 @@ func (t *transcript) addToolResult(result domain.ToolResult, spawnRunID string, 
 			// it, and on every pairing — a delegation's report included, whatever its phase already
 			// folded: the number is the record's (toolView.chars), not the card's.
 			e.tool.chars = len(result.Content)
+			// The engine's estimate of what that content added rides beside it (estimatedTokens), set
+			// before the enrichment below so a slot that speaks the estimate is worded with it.
+			e.tool.estimatedTokens = estimatedTokens
 			// A delegation whose finished phase already folded THIS result into the view is enriched
 			// once and no more (addSubAgentPhase): the fold appends the report's lines to the body
 			// (toolBody.with), so a second one would say the whole report twice. Everything else the

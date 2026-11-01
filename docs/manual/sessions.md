@@ -104,8 +104,10 @@ still remembers.
   carries it), and any other oversize value is stored as its size instead of its bytes.
 - Every entry in a record carries **when it was committed** (`at`, a UTC timestamp),
   and every tool card the **size of what came back** (`chars`, the byte length of the
-  result before the card summarised it) — so a saved run can answer how long a step
-  took and how much each call put into the context. Neither is shown on screen; the
+  result before the card summarised it) beside the engine's **token estimate** of it
+  (`estimatedTokens`) — so a saved run can answer how long a step took and how much
+  each call put into the context. None of these is shown on screen as a field (a fetch
+  card's slot speaks its size and estimate as text, which the record keeps too); the
   order of a record stays the order things happened per run, not clock order, because
   concurrent sub-agents each keep their own stretch. A record written before these
   fields existed reads with them empty. A **compaction** leaves a `compacted` entry at

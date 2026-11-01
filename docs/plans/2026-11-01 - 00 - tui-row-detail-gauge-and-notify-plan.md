@@ -174,7 +174,12 @@ internal/agent/dispatch_test.go — TestToolResultEventCarriesToolAndWriteTarget
 **Depends on:** item 4
 **Commit:** `feat(agent): estimate the context after each tool-result append`
 
-## 6. Fetch rows show the size ingested
+## 6. Fetch rows show the size ingested — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): the estimate is set on the view by a widened `addToolResult(result, estimatedTokens, spawnRunID, run)`; its four test callers (transcriptbridge_test.go ×3, transcript_test.go ×1) pass 0. The fetch presenters keep `stat: fetchedBodyStat` (the token-less slot, `HTTP 200 OK · 3.1 KiB[ · truncated]`) and gain `statTokens: fetchedBodyTokenStat`, which `enrichWithResult` prefers when set; the size is `len(res.Content)` (the same number `toolView.chars` records) and the separator reuses `slotSeparator`.
+NOTES (2026-11-01): the persisted field is `session.ToolView.EstimatedTokens` (`json:"estimatedTokens,omitempty"`), mirrored as `toolView.estimatedTokens`; the session round-trip golden and the undated-record tests were extended rather than new tests added.
+NOTES (2026-11-01): consequential edit — internal/tui/toolsummary_pin_test.go: made necessary by the fetch slot now carrying the content size (the cross-package pin's web_fetch/http_request rows read `HTTP 200 OK · 117 B` / `HTTP 200 OK · 667 B`; the page is a constant and the only varying echoed header, Date, is fixed-width).
+NOTES (2026-11-01): consequential edit — docs/manual/sessions.md: made necessary by the new `estimatedTokens` record field (the paragraph listing `at` and `chars`, and its "Neither is shown on screen" line).
 
 **What:**
 **Goal:** A `web_fetch` / `http_request` row's slot reads `HTTP <status> · <size> · ~<n> tok`, plus ` · truncated` when its FetchedBody says so. `<size>` is the byte length of the result content the model received, in the TUI's existing byte format. `<n>` is the event's EstimatedTokens in the gauge's compact token format, and the `~<n> tok` part is left out when that is 0 (a pre-item journal). Live and replayed rows read the same. The tool-layout.md table rows for both tools are amended.
