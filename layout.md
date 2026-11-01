@@ -1745,7 +1745,11 @@ top level the gauge does not wait for the server: until the first usage reading 
 `/clear` or `/compact` zeroes it, and all session long on a server that reports none — it states the
 engine's own estimate of the next request instead, taken at each Turn start and spelled the same way
 with a `~` in front (`~9k/32k 28%` and its track), so a long first Turn (a Recipe's whole Workflow
-runs before the model's first request) shows a fill rather than a hint. The estimate takes the slot
+runs before the model's first request) shows a fill rather than a hint. Between readings the gauge
+moves too: each time a tool result lands in the top-level conversation the engine estimates the
+grown fill, and the gauge shows that `~` figure over the last reading until the next reply's usage
+reading measures it again (a compaction's maintenance reading does not); a watch follows the
+journal's `context_estimate` lines the same way. The estimate takes the slot
 from `esc×2 cancel` exactly as a reading does, and never from `enter dismiss`; with neither a reading
 nor an estimate the slot falls through to its hint. The armed-`esc` line reads `press esc again to cancel`, and while a pooled
 sub-agent group is in flight in the open Turn it says what the second press would do: `press esc

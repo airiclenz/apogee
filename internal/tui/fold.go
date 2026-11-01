@@ -110,6 +110,10 @@ func usageReading(e domain.UsageEvent) domain.Usage {
 // clock exactly where the last Turn left them, while the cumulative totals take it like any other
 // call, because those tokens were really spent (domain.UsageEvent).
 //
+// A depth-0 ContextEstimateEvent moves the gauge's estimate, never its reading: it sets ctxEstimate
+// and marks it newer than the reading, so the gauge shows `~` until the next non-Maintenance reading
+// clears the mark. A Maintenance reading leaves the mark standing, as it leaves the fill.
+//
 // A PruneEvent moves no reading at all, and deliberately: pruning frees window the NEXT request
 // will show, and the gauge reports what the last reply actually reported. Subtracting the freed
 // tokens here would paint a fill no Upstream has confirmed.
@@ -180,7 +184,7 @@ func (m Model) foldStats(e domain.Event) Model {
 			total = e.PromptTokens + e.CompletionTokens
 		}
 		if total > 0 {
-			m.ctxUsed = total
+			m.ctxUsed, m.isEstimateNewer = total, false // the measured fill supersedes any estimate
 		}
 		if !m.genStart.IsZero() && e.CompletionTokens > 0 {
 			if window := time.Since(m.genStart); window >= throughputWindowFloor {
@@ -190,6 +194,13 @@ func (m Model) foldStats(e domain.Event) Model {
 			}
 		}
 		m.genStart = time.Time{}
+	case domain.ContextEstimateEvent:
+		// The engine's estimate after a tool-result append: the top-level one moves the gauge to `~`
+		// over whatever reading stands, until the next counting reading (above) measures the fill.
+		// A delegate's is its own run's business, as its reading is.
+		if e.Depth == 0 && e.Tokens > 0 {
+			m.ctxEstimate, m.isEstimateNewer = e.Tokens, true
+		}
 	}
 	return m
 }

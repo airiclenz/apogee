@@ -683,21 +683,27 @@ type Model struct {
 // renders nothing rather than a number scheduling jitter made up. All four are plain values, so
 // the whole group rides the value-copied Model (ADR 0011).
 //
-// ctxEstimate is the engine's estimate of the next request's tokens (Engine.ContextEstimate), which
-// the gauge shows prefixed `~` while ctxUsed is still 0 — the first line of a session, the Turns
-// after /clear or /compact, a foreground recipe whose depth-0 agent reports nothing until it ends,
-// and every Turn on a server that omits usage. It is taken at Turn start ([Model.takeContextEstimate])
-// only while no reading exists, and the first real reading replaces it on the gauge.
+// ctxEstimate is an estimate of the conversation's tokens, which the gauge shows prefixed `~`
+// while ctxUsed is still 0 — the first line of a session, the Turns after /clear or /compact, a
+// foreground recipe whose depth-0 agent reports nothing until it ends, and every Turn on a server
+// that omits usage — or while isEstimateNewer says it postdates the reading. It has two sources: the
+// engine's estimate of the next request (Engine.ContextEstimate), taken at Turn start
+// ([Model.takeContextEstimate]) only while no reading exists; and each depth-0
+// domain.ContextEstimateEvent the engine emits after a tool-result append (foldStats), which also
+// sets isEstimateNewer, so the gauge moves while a step's results land rather than waiting for the
+// next reply. The next non-Maintenance depth-0 reading clears the flag and replaces the estimate on
+// the gauge with the measured fill.
 //
 // Its lifetime is one CONVERSATION, which is what separates it from [Model.usage] beside it: these
 // describe the exchange history the engine is still carrying, so the boundaries that discard
 // that history WHOLE drop all four together (reset), while the cumulative accounting is the
 // session's own running total and outlives any single reading.
 type liveStats struct {
-	ctxUsed     int
-	ctxEstimate int
-	genStart    time.Time
-	tokPerSec   float64
+	ctxUsed         int
+	ctxEstimate     int
+	isEstimateNewer bool
+	genStart        time.Time
+	tokPerSec       float64
 }
 
 // reset drops the whole live reading: the gauge goes dark (the estimate with the reading), the
@@ -715,7 +721,8 @@ func (s *liveStats) reset() {
 }
 
 // takeContextEstimate refreshes the `~` gauge's value from the engine while no depth-0 reading
-// exists, and leaves it alone once one does (the reading owns the gauge from then on). It is called
+// exists, and leaves it alone once one does (from then on the gauge is the reading's, or the
+// estimate a ContextEstimateEvent folded after it — foldStats). It is called
 // on the Update goroutine at the three Turn starts — launchExchange, runContinue and wakeIfIdle —
 // just before the worker is dispatched, so the idle-only Engine.ContextEstimate never races a Step.
 func (m *Model) takeContextEstimate() {
@@ -4512,7 +4519,9 @@ const quietQualifier = " · quiet"
 // state-appropriate key hint. Until the first UsageEvent folds a turn's total into ctxUsed (and
 // again after /clear and /compact zero it) the gauge shows the engine's `~` estimate once a Turn
 // start has taken one, and is empty before that — so the hint shows before anything is measured or
-// estimated, and the gauge takes the slot the moment either is. An estimate never takes it from
+// estimated, and the gauge takes the slot the moment either is. A tool-result estimate
+// (ContextEstimateEvent) shows `~` over a standing reading too, until the next reading lands. An
+// estimate never takes it from
 // stateErrored's `enter dismiss` (contextGauge); a real reading does, as it always has. Every branch
 // returns its occupant flush — statusLine appends the trailing margin at one seam, so the whole
 // slot moves together and no branch has to remember an inset of its own. room is the columns the
@@ -4564,9 +4573,11 @@ func (m Model) statusRight(room int) string {
 // total-token count (foldStats), against [Model.topLevelWindow] — the watched run's window in a
 // watch, the session's own otherwise. Until the first turn reports usage — or all session on a server
 // that omits it — the gauge shows the engine's estimate of the next request instead, in the same
-// format prefixed `~` (ctxEstimate, taken at each Turn start), except in stateErrored, where the
-// slot keeps `enter dismiss`. With neither a reading nor an estimate it renders nothing, the static
-// window showing in the footer instead.
+// format prefixed `~` (ctxEstimate, taken at each Turn start). A depth-0 ContextEstimateEvent puts
+// the gauge on its `~` estimate even over a reading (isEstimateNewer, foldStats), until the next
+// non-Maintenance reading measures the fill again. Neither estimate shows in stateErrored, where the
+// slot keeps `enter dismiss` unless a reading stands. With neither a reading nor an estimate it
+// renders nothing, the static window showing in the footer instead.
 //
 // Inside a run view (ADR 0063 D4, amended 2026-09-24) it is the viewed run's: its head's fill as
 // [transcript.applyUsage] froze it, against the window that run actually filled (childWindow) —
@@ -4579,7 +4590,7 @@ func (m Model) statusRight(room int) string {
 func (m Model) contextGauge() string {
 	if !m.inRunView() {
 		limit := m.topLevelWindow()
-		if m.ctxUsed == 0 && m.state != stateErrored {
+		if (m.ctxUsed == 0 || m.isEstimateNewer) && m.state != stateErrored {
 			return contextUsage{Used: m.ctxEstimate, Limit: limit, Estimated: true}.view(m.th)
 		}
 		return contextUsage{Used: m.ctxUsed, Limit: limit}.view(m.th)

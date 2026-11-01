@@ -8499,6 +8499,32 @@ func TestContextGaugeShowsEstimateUntilFirstReading(t *testing.T) {
 	}
 }
 
+// TestContextGaugeMovesOnAToolResultEstimate pins the gauge between readings: a depth-0
+// ContextEstimateEvent puts it on `~<Tokens>` over the standing reading, and the next depth-0
+// UsageEvent replaces that with the measured fill.
+func TestContextGaugeMovesOnAToolResultEstimate(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{ctxEstimate: 3000}, testOpts)
+	m = sendLine(t, m, "hello")
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 4000, CompletionTokens: 200, TotalTokens: 4200}})
+
+	m = step(t, m, eventMsg{Event: domain.ContextEstimateEvent{Tokens: 9000, Calibrated: true}})
+
+	if got := statusCells(t, m); !strings.Contains(got, estimateGauge(9000)) {
+		t.Errorf("status line %q, want the tool-result estimate %q", got, estimateGauge(9000))
+	}
+
+	m = step(t, m, eventMsg{Event: domain.UsageEvent{PromptTokens: 9500, CompletionTokens: 300, TotalTokens: 9800}})
+
+	got := statusCells(t, m)
+	if strings.Contains(got, "~") {
+		t.Errorf("status line %q still shows the `~` estimate after the next reading", got)
+	}
+	if want := format.Tokens(9800) + "/" + format.Tokens(testOpts.ContextWindow); !strings.Contains(got, want) {
+		t.Errorf("status line %q, want the measured fill %q", got, want)
+	}
+}
+
 // TestContextGaugeEstimateAfterClear pins /clear: the idle line right after it shows no stale `~`
 // value, and the next Turn takes a fresh estimate of the cleared conversation.
 func TestContextGaugeEstimateAfterClear(t *testing.T) {
@@ -8553,6 +8579,23 @@ func TestContextGaugeEstimateYieldsToEnterDismiss(t *testing.T) {
 	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{ctxEstimate: 3000}, testOpts)
 	m = sendLine(t, m, "hello")
+
+	m = step(t, m, errMsg{Err: errors.New("upstream unreachable")})
+
+	if m.state != stateErrored {
+		t.Fatalf("state = %v, want errored", m.state)
+	}
+	assertStatusRightTail(t, m, "enter dismiss"+bodyIndent)
+}
+
+// TestContextGaugeToolResultEstimateYieldsToEnterDismiss pins the same precedence for the
+// tool-result estimate: a ContextEstimateEvent folded before the first Turn errors still leaves
+// `enter dismiss` ending the right slot.
+func TestContextGaugeToolResultEstimateYieldsToEnterDismiss(t *testing.T) {
+	t.Parallel()
+	m := newTestModelEng(t, &fakeEngine{ctxEstimate: 3000}, testOpts)
+	m = sendLine(t, m, "hello")
+	m = step(t, m, eventMsg{Event: domain.ContextEstimateEvent{Tokens: 9000}})
 
 	m = step(t, m, errMsg{Err: errors.New("upstream unreachable")})
 

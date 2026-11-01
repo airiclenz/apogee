@@ -22,18 +22,26 @@ const eventsSource = "../domain/events.go"
 // eventBaseType is the embedded marker every Event variant carries (domain/events.go).
 const eventBaseType = "EventBase"
 
-// statsFold is the observable half of foldStats: the three status-line numbers it can move.
+// statsFold is the observable half of foldStats: the status-line numbers it can move.
 // genStarted stands in for the genStart timestamp, which is a wall clock and so cannot be
 // compared against a literal.
 type statsFold struct {
-	ctxUsed    int
-	genStarted bool
-	tokPerSec  float64
+	ctxUsed         int
+	ctxEstimate     int
+	isEstimateNewer bool
+	genStarted      bool
+	tokPerSec       float64
 }
 
 // statsOf snapshots the stats a fold may have moved.
 func statsOf(m Model) statsFold {
-	return statsFold{ctxUsed: m.ctxUsed, genStarted: !m.genStart.IsZero(), tokPerSec: m.tokPerSec}
+	return statsFold{
+		ctxUsed:         m.ctxUsed,
+		ctxEstimate:     m.ctxEstimate,
+		isEstimateNewer: m.isEstimateNewer,
+		genStarted:      !m.genStart.IsZero(),
+		tokPerSec:       m.tokPerSec,
+	}
 }
 
 // foldCase is one Event variant and everything foldEvent does with it on a fresh Model. A row
@@ -310,11 +318,13 @@ func foldCases() []foldCase {
 			wantStats: statsFold{ctxUsed: 1200},
 		},
 		{
-			name: "ContextEstimateEvent is inert in the TUI for now",
-			// The engine's between-readings context estimate folds to nothing yet: no entry, no
-			// gauge move, no phrase, no progress save. The gauge learns to follow it later; until
-			// then the next UsageEvent is the only thing that moves the fill.
-			event: domain.ContextEstimateEvent{Tokens: 1500, Calibrated: true},
+			name: "ContextEstimateEvent at depth 0 moves the gauge's estimate and appends no entry",
+			// The engine's between-readings context estimate is the status line's, like a reading:
+			// it puts the gauge on `~` and marks the estimate newer than the reading, and leaves the
+			// reading itself, the scrollback, the phrase and the progress save alone. The next
+			// counting reading clears the mark (TestFoldStatsEstimateYieldsToTheNextReading).
+			event:     domain.ContextEstimateEvent{Tokens: 1500, Calibrated: true},
+			wantStats: statsFold{ctxEstimate: 1500, isEstimateNewer: true},
 		},
 		{
 			name: "AuditEvent is inert in the TUI",
@@ -718,6 +728,38 @@ func TestFoldStatsSkipsAMaintenanceReadingForTheGaugeAndClock(t *testing.T) {
 	}
 	if m.tokPerSec <= 0 {
 		t.Errorf("tokPerSec = %v, want > 0 — the surviving clock timed the completion", m.tokPerSec)
+	}
+}
+
+// TestFoldStatsEstimateYieldsToTheNextReading pins the tool-result estimate's lifetime on the
+// gauge: a depth-0 ContextEstimateEvent marks its figure newer than the standing reading; a
+// delegate's estimate and a Maintenance reading leave that mark (and the fill) alone; the next
+// counting depth-0 reading clears it and measures the fill.
+func TestFoldStatsEstimateYieldsToTheNextReading(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m = m.foldEvent(mainUsage(1000, 200, 1200, 1000, 200, 1200, 1))
+
+	m = m.foldEvent(domain.ContextEstimateEvent{Tokens: 2600})
+	m = m.foldEvent(domain.ContextEstimateEvent{EventBase: domain.EventBase{Depth: 1, RunID: "r1"}, Tokens: 90000})
+
+	want := statsFold{ctxUsed: 1200, ctxEstimate: 2600, isEstimateNewer: true}
+	if got := statsOf(m); got != want {
+		t.Fatalf("stats after the estimates = %+v, want %+v — a delegate's estimate moves nothing", got, want)
+	}
+
+	maintenance := mainUsage(8000, 400, 8400, 9000, 600, 9600, 2)
+	maintenance.Maintenance = true
+	m = m.foldEvent(maintenance)
+
+	if got := statsOf(m); got != want {
+		t.Errorf("stats after a maintenance reading = %+v, want %+v — it leaves the estimate standing", got, want)
+	}
+
+	m = m.foldEvent(mainUsage(2400, 300, 2700, 11400, 900, 12300, 3))
+
+	if m.isEstimateNewer || m.ctxUsed != 2700 {
+		t.Errorf("after the next reading ctxUsed, isEstimateNewer = %d, %v, want 2700, false", m.ctxUsed, m.isEstimateNewer)
 	}
 }
 

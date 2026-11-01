@@ -603,13 +603,23 @@ func TestWatchLightsTheGaugeFromTheWatchedRun(t *testing.T) {
 		t.Errorf("/usage main row = %q; want its fill against the gauge's window (50%%)", main)
 	}
 
+	// A top-level context_estimate line moves the gauge to `~` over that reading; a delegate's does not.
+	f.emit(
+		domain.ContextEstimateEvent{EventBase: domain.EventBase{Depth: 1, RunID: "r1", Turn: 1}, Tokens: 120000},
+		domain.ContextEstimateEvent{EventBase: domain.EventBase{Turn: 1}, Tokens: 98304, Calibrated: true},
+	)
+	m = pollWatch(t, m)
+	if got := statusText(t, m); !strings.Contains(got, "~96k/128k 75%") {
+		t.Errorf("status line after the estimate line = %q; want the watched estimate (~96k/128k 75%%)", got)
+	}
+
 	m = step(t, m, keyEsc())
 
 	if m.watch.isActive {
 		t.Fatal("esc did not leave the watch")
 	}
-	if got := statusText(t, m); !strings.Contains(got, "4k/32k") {
-		t.Errorf("status line after esc = %q; want the watcher's own reading and window (4k/32k)", got)
+	if got := statusText(t, m); !strings.Contains(got, "4k/32k") || strings.Contains(got, "~") {
+		t.Errorf("status line after esc = %q; want the watcher's own reading and window (4k/32k), no estimate", got)
 	}
 	if m.opts.ContextWindow != testOpts.ContextWindow || m.topLevelWindow() != testOpts.ContextWindow {
 		t.Errorf("window after esc = %d (opts %d); want the watcher's own %d",

@@ -196,7 +196,10 @@ internal/tui/toolpresent_test.go — TestToolStat, TestPresentToolCall; docs/lay
 **Depends on:** items 3, 4
 **Commit:** `feat(tui): fetch rows show bytes and tokens ingested`
 
-## 7. The gauge follows the tool-result estimate
+## 7. The gauge follows the tool-result estimate — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): internal/tui/watch.go needed no change: `foldWatchedEvent` already routes every journal Event through `foldEvent` → `foldStats`, and `clearWatchView` restores a zero `liveStats`, so the watch gauge follows `context_estimate` lines from the foldStats arm alone; only `watch_test.go` was extended (a delegate's estimate ignored, the top-level one shown as `~96k/128k 75%`, no `~` after esc).
+NOTES (2026-11-01): the flag is `liveStats.isEstimateNewer`; it is set only by a depth-0 ContextEstimateEvent with Tokens > 0 and cleared where a non-Maintenance depth-0 reading sets ctxUsed (total > 0). `takeContextEstimate`, `/clear`, restore and the /compact reset are unchanged (the /compact zeroing leaves the flag, which is inert while ctxUsed and ctxEstimate are both 0); `statsFold` in fold_test.go gained `ctxEstimate` and `isEstimateNewer` so the variant table states the new arm.
 
 **What:**
 **Goal:** A depth-0 `ContextEstimateEvent` puts the top-level context gauge on `~<Tokens>`, marked as an estimate the way the Turn-start estimate already is. The next non-Maintenance depth-0 `UsageEvent` replaces it with the measured value. `apogee watch` lights its gauge the same way from the journal's `context_estimate` lines. `layout.md`'s gauge paragraph states it. Closes `fetch-ingest-size-blind` with items 3–6.
