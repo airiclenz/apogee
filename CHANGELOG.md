@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.29.2] — 2026-11-01
+
 - **Failed and empty Terminal/Python rows always open onto something.** A failed `terminal`, `python_exec` or steered `sub_agent` call that printed nothing now has a ▶ that reveals the failure text the model received (the `cwd:` line taken off, the `[exit code N — …]` marker verbatim) instead of an empty body. A clean run that printed nothing keeps `exit 0` in the slot and opens onto `(no output)`. Standing alone and collapsed, both count that line: `exit 0 · +1 more line`, `error: exit 1 · +1 more line`.
 - **Pop-up scroll bars no longer sit flush against the text.** Every boxed pop-up whose list overflows (the picker, `/settings` and its sub-lists, `/usage`, `/inspect`, `/thinking`, `/advice`, the dropdown, the approval and ask prompts) now leaves one blank column between its rows and the scroll bar, matching the transcript. The selected row's highlight stops before that gap. A pop-up whose list fits paints exactly as before. `/thinking` and `/advice` wrap two columns short of the pane's inner width, and the `/settings` `auto` blast-radius note is sized against the narrower rows, so it never ends in a `…` beside the bar.
 - **`web_fetch` and `http_request` results carry a structured summary.** A fetch that received a response now attaches a `FetchedBody` tool summary: the status text its first line names (`200 OK`) and whether the body hit the response cap. Event lines mirror it as the `fetched_body` summary kind (members `status` and `truncated`, listed in `docs/manual/headless.md`), and the root facade re-exports `apogee.FetchedBody`. The TUI's fetch rows read their `HTTP 200 OK` slot from the summary and look exactly as they did before.
