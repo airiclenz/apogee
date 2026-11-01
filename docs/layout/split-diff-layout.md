@@ -40,7 +40,10 @@ are untouched.
 - **File sections.** A body whose diff spans several files (`git_diff_range`
   prints one) paints one muted header row naming the file above that file's
   regions, in the order the tool printed them — in BOTH readings. A body that
-  names no file (the edit tools, `view_diff`) paints no such row. Output the
+  names no file (the edit tools) paints no such row, and neither does
+  `view_diff`: its `--- current: <path>` / `+++ proposed: newContent`
+  orientation header is the tool's words to the model, skipped before the
+  walk, and paints no row in either reading. Output the
   renderer cannot walk whole — a binary or rename-only section, a `--stat` or
   `--name-only` call, git's "No differences found" — keeps the plain output
   rendering it always had, in whole and never mixed with parsed sections.

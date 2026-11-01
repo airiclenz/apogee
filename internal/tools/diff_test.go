@@ -27,6 +27,12 @@ func TestViewDiff_ReportsChanges(t *testing.T) {
 		t.Fatalf("unexpected tool error: %q", result.Content)
 	}
 
+	// The diff opens with the orientation header naming the passed path as the current side.
+	if lines := strings.SplitN(result.Content, "\n", 3); len(lines) < 3 ||
+		lines[0] != "--- current: f.txt" || lines[1] != "+++ proposed: newContent" {
+		t.Errorf("diff does not open with the orientation header for f.txt:\n%s", result.Content)
+	}
+
 	// The middle line changed: it must show as a removal and an addition, with the
 	// unchanged lines as context.
 	if !strings.Contains(result.Content, "- line two") {
@@ -69,6 +75,7 @@ func TestViewDiff_ReportsDiffStat(t *testing.T) {
 	root := t.TempDir()
 	writeTempFile(t, root, "f.txt", "one\ntwo\nthree\n")
 	tool := NewViewDiff(root)
+	const fHeader = "--- current: f.txt\n+++ proposed: newContent\n"
 
 	cases := []struct {
 		name        string
@@ -79,19 +86,19 @@ func TestViewDiff_ReportsDiffStat(t *testing.T) {
 		{
 			name:        "line replaced",
 			newContent:  "one\nTWO\nthree\n",
-			wantContent: "  one\n- two\n+ TWO\n  three\n  ",
+			wantContent: fHeader + "  one\n- two\n+ TWO\n  three\n  ",
 			wantSummary: domain.DiffStat{Added: 1, Removed: 1},
 		},
 		{
 			name:        "pure addition",
 			newContent:  "one\ntwo\nthree\nfour\n",
-			wantContent: "  one\n  two\n  three\n+ four\n  ",
+			wantContent: fHeader + "  one\n  two\n  three\n+ four\n  ",
 			wantSummary: domain.DiffStat{Added: 1},
 		},
 		{
 			name:        "pure deletion",
 			newContent:  "one\nthree\n",
-			wantContent: "  one\n- two\n  three\n  ",
+			wantContent: fHeader + "  one\n- two\n  three\n  ",
 			wantSummary: domain.DiffStat{Removed: 1},
 		},
 	}
@@ -116,7 +123,7 @@ func TestViewDiff_ReportsDiffStat(t *testing.T) {
 			if stat != tc.wantSummary {
 				t.Errorf("Summary = %+v, want %+v", stat, tc.wantSummary)
 			}
-			if added, removed := countDiffTags(result.Content); added != stat.Added || removed != stat.Removed {
+			if added, removed := countDiffTags(strings.TrimPrefix(result.Content, fHeader)); added != stat.Added || removed != stat.Removed {
 				t.Errorf("stat %+v disagrees with the rendered text (+%d -%d)", stat, added, removed)
 			}
 		})
@@ -124,7 +131,8 @@ func TestViewDiff_ReportsDiffStat(t *testing.T) {
 }
 
 // countDiffTags counts the added and removed lines of a rendered diff the way a reader of
-// the text has to — by their leading "+"/"-".
+// the text has to — by their leading "+"/"-". The caller passes the diff without its
+// orientation header, whose "--- " and "+++ " lines are not changed lines.
 func countDiffTags(rendered string) (added, removed int) {
 	for _, line := range strings.Split(rendered, "\n") {
 		switch {
@@ -304,6 +312,14 @@ func TestViewDiff_DegradesOverBudgetToDiffstat(t *testing.T) {
 	if strings.Contains(result.Content, "\n") {
 		t.Errorf("the degraded result rendered diff lines, want the diffstat sentence alone:\n%s", result.Content)
 	}
+	for _, side := range []string{"lines in the proposed newContent", "lines of the current file"} {
+		if !strings.Contains(result.Content, side) {
+			t.Errorf("Content = %q, want the sentence to name %q", result.Content, side)
+		}
+	}
+	if strings.HasPrefix(result.Content, "--- current:") {
+		t.Errorf("Content = %q, want no orientation header on the over-budget sentence", result.Content)
+	}
 	want := domain.DiffStat{Added: lines - 2*shared, Removed: lines - 2*shared}
 	if stat, ok := result.Summary.(domain.DiffStat); !ok || stat != want {
 		t.Errorf("Summary = %#v, want %+v", result.Summary, want)
@@ -417,7 +433,8 @@ func TestViewDiff_NewFileDiffsAgainstEmpty(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("an absent path was refused: %q", result.Content)
 	}
-	if !strings.HasPrefix(result.Content, "+ one\n+ two\n") || strings.Contains(result.Content, "\n- ") {
+	const header = "--- current: new/file.txt\n+++ proposed: newContent\n"
+	if !strings.HasPrefix(result.Content, header+"+ one\n+ two\n") || strings.Contains(result.Content, "\n- ") {
 		t.Errorf("diff = %q, want every line added and nothing removed", result.Content)
 	}
 	stat, ok := result.Summary.(domain.DiffStat)
@@ -426,6 +443,62 @@ func TestViewDiff_NewFileDiffsAgainstEmpty(t *testing.T) {
 	}
 	if stat.Added != 2 || stat.Removed != 0 {
 		t.Errorf("stat = %+v, want 2 added, 0 removed", stat)
+	}
+}
+
+// TestViewDiff_HeaderNamesThePathAsPassed pins the orientation header's path: the argument
+// verbatim when it holds no control character, Go-quoted when it does, so a newline or carriage
+// return in the path never splits the header past its two lines. The paths are absent, so each
+// diffs against empty and the diff after the header adds the one proposed line.
+func TestViewDiff_HeaderNamesThePathAsPassed(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	cases := []struct {
+		name        string
+		path        string
+		wantCurrent string
+	}{
+		{"plain relative path", "dir/new file.txt", "--- current: dir/new file.txt"},
+		{"newline in the path", "a\nb.txt", `--- current: "a\nb.txt"`},
+		{"carriage return in the path", "a\rb.txt", `--- current: "a\rb.txt"`},
+		{"tab in the path", "a\tb.txt", `--- current: "a\tb.txt"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := NewViewDiff(root).Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": tc.path, "newContent": "one"}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("unexpected tool error: %q", result.Content)
+			}
+			lines := strings.SplitN(result.Content, "\n", 3)
+			if len(lines) < 3 || lines[0] != tc.wantCurrent || lines[1] != "+++ proposed: newContent" ||
+				!strings.Contains(lines[2], "+ one") {
+				t.Errorf("Content = %q, want the two header lines %q / %q, then the diff",
+					result.Content, tc.wantCurrent, "+++ proposed: newContent")
+			}
+		})
+	}
+}
+
+// TestViewDiff_DescriptionNamesBothSides: the model learns which side is which from the tool
+// description before it ever reads a diff, in the orientation header's own words.
+func TestViewDiff_DescriptionNamesBothSides(t *testing.T) {
+	t.Parallel()
+
+	description := NewViewDiff(t.TempDir()).Description()
+
+	for _, want := range []string{"--- current: <path>", "+++ proposed: newContent", "current content", "proposed newContent"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("description = %q, want it to name %q", description, want)
+		}
 	}
 }
 

@@ -54,7 +54,10 @@ NOTES (2026-11-01): the `view_diff` slot's `firstLineDetail` floor (used only wh
 
 **Commit:** `feat(tui): skip the view_diff orientation header in its body and regions`
 
-## 2. view_diff names its current and proposed sides
+## 2. view_diff names its current and proposed sides — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): the header goes only on a rendered diff via a new shared predicate `withinDiffBudget` (used by both `unifiedLineDiff` and `Execute`), rather than `Execute` re-spelling the cell-budget comparison; `unifiedLineDiff`'s signature and output are unchanged.
+NOTES (2026-11-01): added `TestViewDiff_HeaderNamesThePathAsPassed` in diff_test.go (plain, newline, CR and tab paths) alongside the planned tests; `TestViewDiffUntaggedBodyRendersPlain`'s fixture sentence in internal/tui keeps the old over-budget wording — it pins any untagged line, so it was left as is.
 
 **What:** fixes `viewdiff-orientation-header` (a model passing the before-text as `newContent` gets a mirrored diff that nothing in the output names). Depends on item 1.
 **Goal:** a non-empty `view_diff` diff opens with `--- current: <path>` and `+++ proposed: newContent`. The tool description states that `- ` lines are the file's current content and `+ ` lines are the proposed `newContent`, in the header's words. The over-budget result stays one line and names both sides. "No changes detected" is unchanged. `docs/manual/commands.md` names the header where it describes view_diff's output; the TUI layout specs say it paints no row.

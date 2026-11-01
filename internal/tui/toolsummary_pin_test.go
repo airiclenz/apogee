@@ -2,10 +2,12 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -213,5 +215,57 @@ func writePinFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// TestViewDiffHeaderNeverPaintsThroughThePresenter drives the exact string the real view_diff
+// emits — orientation header and all — through the presenter. The header is the tool's words to
+// the MODEL, so the block recovers its regions from the diff beneath it and paints no row for
+// either header line (stripViewDiffHeader). The second case is a path holding a newline: the tool
+// writes it Go-quoted so the header stays two lines, and those two lines are stripped the same way.
+func TestViewDiffHeaderNeverPaintsThroughThePresenter(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		path        string
+		existing    bool
+		wantCurrent string
+	}{
+		{name: "existing file", path: "main.go", existing: true, wantCurrent: "--- current: main.go"},
+		{name: "absent path holding a newline", path: "a\nb.txt", wantCurrent: `--- current: "a\nb.txt"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			if tc.existing {
+				writePinFile(t, filepath.Join(root, tc.path), pinFileBody)
+			}
+			args, err := json.Marshal(map[string]string{"path": tc.path, "newContent": "package main\n\nfunc other() {}"})
+			if err != nil {
+				t.Fatalf("marshal args: %v", err)
+			}
+			call := domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: args}
+
+			res, err := tools.NewViewDiff(root).Execute(context.Background(), call)
+			if err != nil || res.IsError {
+				t.Fatalf("Execute = %q, %v; want a rendered diff", res.Content, err)
+			}
+			if lines := strings.SplitN(res.Content, "\n", 3); len(lines) < 3 ||
+				lines[0] != tc.wantCurrent || lines[1] != viewDiffHeaderProposed {
+				t.Fatalf("content = %q, want the two header lines %q / %q first", res.Content, tc.wantCurrent, viewDiffHeaderProposed)
+			}
+
+			tv := presentToolCall(call, "", workspaceRoot{})
+			tv.enrichWithResult(res, workspaceRoot{})
+
+			if len(tv.Regions) == 0 {
+				t.Errorf("regions = none, want them recovered from the diff beneath the header (content %q)", res.Content)
+			}
+			assertNoViewDiffHeaderRow(t, detailTexts(tv.Details.all()))
+		})
 	}
 }

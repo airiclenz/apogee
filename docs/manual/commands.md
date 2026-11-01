@@ -332,6 +332,14 @@ them out of the diff they printed. An overwrite or a fresh create through `write
 reads exactly the way an edit does, and `view_diff` on a path that does not exist yet diffs against
 empty, so the preview of a new file is every line added.
 
+What `view_diff` hands the model opens with two header lines naming which side is which:
+`--- current: <path>` (the path as the model passed it) and `+++ proposed: newContent`. Lines marked
+`-` are the file's current content and lines marked `+` the proposed `newContent`, so a model that
+swapped the two reads the swap in the output itself. A pair too large to diff gets a one-line
+diffstat that names both sides the same way, and identical content still answers "No changes
+detected" with no header. The header is for the model only: the block's own row already names the
+file, so the diff body paints no row for it.
+
 The same regions paint **two ways**. Given room they go side by side: before on the left with its
 own line numbers, after on the right with its own. Below that room they stack instead, each region's
 removed lines above its added ones in a single column. The information is identical — the same

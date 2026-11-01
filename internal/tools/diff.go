@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
 var viewDiffSpec = toolSpec{
 	name:        "view_diff",
-	description: "Show a line-by-line diff between a file's current content and a proposed new content. A path that does not exist yet diffs against empty, so the preview of a new file is every line added.",
+	description: "Show a line-by-line diff between a file's current content and a proposed new content. The diff opens with two header lines, `--- current: <path>` and `+++ proposed: newContent`: lines tagged `- ` are the file's current content and lines tagged `+ ` are the proposed newContent. A path that does not exist yet diffs against empty, so the preview of a new file is every line added.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path", "newContent"],
@@ -54,8 +56,10 @@ func (t *ViewDiff) ArgRoles() map[string]domain.ArgRole {
 // diffs against EMPTY — the preview of a file the model is about to create is every line
 // added, which is what it asked to see — while an oversized file or content, a directory, or a
 // path escape is reported as an IsError result; identical content reports "No changes". A real
-// diff carries its diffstat as a domain.DiffStat summary; the no-changes sentinel carries none,
-// because there is no diff to describe.
+// diff opens with the two-line orientation header (viewDiffHeader) and carries its diffstat as a
+// domain.DiffStat summary; the no-changes sentinel carries neither, because there is no diff to
+// describe, and the over-budget sentence carries no header, because it is prose about a diff
+// rather than one and names both sides inline (overBudgetDiff).
 //
 // Both sides are bounded before any table is built: the old side is read through the same
 // one-handle bounded read the read tools use (readWorkspaceFileBoundedOrAbsent — the workspace
@@ -94,7 +98,32 @@ func (t *ViewDiff) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if diff == "" {
 		return okResult(call.ID, "No changes detected"), nil
 	}
+	if withinDiffBudget(lineCount(string(current)), lineCount(args.NewContent)) {
+		diff = viewDiffHeader(args.Path) + diff
+	}
 	return okSummary(call.ID, diff, stat), nil
+}
+
+// The two lines a rendered view_diff diff opens with, naming which side is which: the "- " lines
+// are the file's current content and the "+ " lines the proposed newContent. Without them a model
+// that passed the before-text as newContent reads a mirrored diff nothing in the output names.
+// internal/tui strips exactly this pair before it paints the diff (stripViewDiffHeader), so the
+// prefixes are spelled the same on both sides of that seam.
+const (
+	viewDiffCurrentPrefix = "--- current: "
+	viewDiffProposedLine  = "+++ proposed: newContent"
+)
+
+// viewDiffHeader returns the orientation header for a diff of path, newline-terminated. The path
+// is the argument exactly as passed, unless it holds a control character: then it is written
+// Go-quoted, so a newline or carriage return in the path can never split the header into more
+// than its two lines.
+func viewDiffHeader(path string) string {
+	shown := path
+	if strings.ContainsFunc(path, unicode.IsControl) {
+		shown = strconv.Quote(path)
+	}
+	return viewDiffCurrentPrefix + shown + "\n" + viewDiffProposedLine + "\n"
 }
 
 // unifiedLineDiff returns a unified-style line diff of old vs new, prefixing each line
@@ -116,7 +145,7 @@ func unifiedLineDiff(oldText, newText string) (string, domain.DiffStat) {
 		return "", domain.DiffStat{}
 	}
 	oldCount, newCount := lineCount(oldText), lineCount(newText)
-	if int64(oldCount)*int64(newCount) > maxDiffTableCells {
+	if !withinDiffBudget(oldCount, newCount) {
 		return overBudgetDiff(oldText, newText, oldCount, newCount)
 	}
 
@@ -139,6 +168,13 @@ func unifiedLineDiff(oldText, newText string) (string, domain.DiffStat) {
 	return strings.TrimRight(b.String(), "\n"), stat
 }
 
+// withinDiffBudget reports whether the LCS table for a pair of these line counts fits
+// maxDiffTableCells — the one test that decides whether unifiedLineDiff renders a diff or
+// degrades to overBudgetDiff's sentence.
+func withinDiffBudget(oldCount, newCount int) bool {
+	return int64(oldCount)*int64(newCount) <= maxDiffTableCells
+}
+
 // overBudgetDiff renders the outcome for a pair too large to diff: the LCS table it would take
 // is refused, and what comes back is the diffstat alone, with a sentence saying so. It is a
 // success result, not an error — the counts are a real answer to "how much changes here?", and
@@ -149,6 +185,10 @@ func unifiedLineDiff(oldText, newText string) (string, domain.DiffStat) {
 // lines survive is exactly the LCS work the cap exists to avoid. That over-counts a pair whose
 // middles partly match and is never an under-count, which is the safe direction for a warning.
 // Both trims scan the raw strings, so nothing proportional to the line count is allocated.
+//
+// The sentence stays one line and names both sides in the orientation header's words — the "+"
+// count is lines in the proposed newContent, the "-" count lines of the current file — because it
+// carries no header of its own: the header announces a rendered diff, and this is not one.
 func overBudgetDiff(oldText, newText string, oldCount, newCount int) (string, domain.DiffStat) {
 	head := commonLinePrefix(oldText, newText)
 	tail := commonLineSuffix(oldText, newText)
@@ -158,8 +198,9 @@ func overBudgetDiff(oldText, newText string, oldCount, newCount int) (string, do
 
 	stat := domain.DiffStat{Added: newCount - head - tail, Removed: oldCount - head - tail}
 	return fmt.Sprintf(
-		"Diff too large to render: %d x %d lines exceeds the %d-cell diff budget. "+
-			"Diffstat only: +%d -%d, counted by trimming the identical head and tail, "+
+		"Diff too large to render: %d x %d lines (current file x proposed newContent) "+
+			"exceeds the %d-cell diff budget. Diffstat only: +%d lines in the proposed newContent, "+
+			"-%d lines of the current file, counted by trimming the identical head and tail, "+
 			"so the counts are an upper bound rather than a rendered diff.",
 		oldCount, newCount, maxDiffTableCells, stat.Added, stat.Removed), stat
 }
