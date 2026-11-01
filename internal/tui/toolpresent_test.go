@@ -958,6 +958,17 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			// the change at the numbers each side of it sits on (viewDiffRegions).
 			wantBody: []string{"1   ctx", "2 - old line", "2 + new line"},
 		},
+		{
+			// The orientation header view_diff opens a rendered diff with is the tool's words to
+			// the model: the body is the very rows the headerless diff above renders, with no row
+			// for either header line (stripViewDiffHeader).
+			name: "view_diff's orientation header paints no row",
+			call: domain.ToolCall{ID: "5h", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)},
+			result: domain.ToolResult{CallID: "5h", Content: "--- current: main.go\n+++ proposed: newContent\n  ctx\n- old line\n+ new line",
+				Summary: domain.DiffStat{Added: 1, Removed: 1}},
+			wantSummary: "+1 −1",
+			wantBody:    []string{"1   ctx", "2 - old line", "2 + new line"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1934,6 +1945,60 @@ func TestViewDiffRecoversItsRegions(t *testing.T) {
 			}
 			if got, want := len(tv.Details.all()), len(stackedDiffLines(tc.want)); got != want {
 				t.Errorf("body has %d rows, want the %d the regions render as", got, want)
+			}
+
+			// The same diff behind view_diff's orientation header recovers the same regions and
+			// paints the same rows: the header is stripped, never walked or painted.
+			headed := viewDiffCard(t, append([]string{viewDiffHeaderCurrent, viewDiffHeaderProposed}, tc.diff...), tc.stat)
+			if got, want := regionsText(headed.Regions), regionsText(tc.want); got != want {
+				t.Errorf("regions behind the header:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			rows, headedRows := detailTexts(tv.Details.all()), detailTexts(headed.Details.all())
+			if !slices.Equal(headedRows, rows) {
+				t.Errorf("rows behind the header = %q, want the headerless rows %q", headedRows, rows)
+			}
+			assertNoViewDiffHeaderRow(t, headedRows)
+		})
+	}
+}
+
+// The orientation header internal/tools' view_diff opens a rendered diff with, spelled as the
+// tool writes it for a call on main.go (viewDiffCard's path).
+const (
+	viewDiffHeaderCurrent  = "--- current: main.go"
+	viewDiffHeaderProposed = "+++ proposed: newContent"
+)
+
+// assertNoViewDiffHeaderRow fails when any painted row still carries a word of the orientation
+// header — the header is the tool's words to the model, never a row of the block.
+func assertNoViewDiffHeaderRow(t *testing.T, rows []string) {
+	t.Helper()
+	for _, row := range rows {
+		if strings.Contains(row, "current:") || strings.Contains(row, "proposed:") {
+			t.Errorf("row %q paints the orientation header; want it stripped", row)
+		}
+	}
+}
+
+// TestViewDiffHalfHeaderRendersAsToday: only the PAIR is view_diff's orientation header. One of its
+// two lines alone, ahead of the diff, is not stripped — the body renders exactly as it did before
+// the header existed: an untagged line ends the region walk (taggedDiffRegions), so the whole
+// output falls to the plain floor line for line (diffBody).
+func TestViewDiffHalfHeaderRendersAsToday(t *testing.T) {
+	t.Parallel()
+
+	diff := []string{"  ctx", "- old line", "+ new line"}
+	for _, header := range []string{viewDiffHeaderCurrent, viewDiffHeaderProposed} {
+		t.Run(header, func(t *testing.T) {
+			t.Parallel()
+
+			lines := append([]string{header}, diff...)
+			tv := viewDiffCard(t, lines, domain.DiffStat{Added: 1, Removed: 1})
+			if len(tv.Regions) != 0 {
+				t.Errorf("regions = %v, want none from a body one header line leaves untagged", tv.Regions)
+			}
+			if got, want := detailTexts(tv.Details.all()), detailTexts(diffBody(strings.Join(lines, "\n"))); !slices.Equal(got, want) {
+				t.Errorf("body = %q, want the plain floor over every line %q", got, want)
 			}
 		})
 	}

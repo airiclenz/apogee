@@ -35,7 +35,9 @@
 - Any default budget; budgets for the TUI or `apogee daemon`.
 - A `serve` Driver, mid-run model fallback.
 
-## 1. TUI skips the view_diff orientation header
+## 1. TUI skips the view_diff orientation header — ✅ DONE (2026-11-01)
+
+NOTES (2026-11-01): the `view_diff` slot's `firstLineDetail` floor (used only when a result carries no DiffStat) still reads the raw first line, so a headed result with no stat would show `--- current: <path>` there; the tool always reports a DiffStat beside a rendered diff, so it is left as is.
 
 **What:**
 **Goal:** a `view_diff` result whose first two lines are `--- current: <path>` and `+++ proposed: newContent` renders the same body and regions as the same diff without them: the header is not painted as a removed/added or context row, and region recovery still succeeds. A body without the header renders exactly as before.

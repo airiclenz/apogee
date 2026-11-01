@@ -45,17 +45,47 @@ import (
 // It is now that tool's FLOOR rather than its usual reading: a body whose lines carry the diff's
 // tags is walked into Edit regions and painted as their rows instead (viewDiffRegions), and what
 // still renders from here is the output that carries none — the over-budget diffstat-only
-// sentence, which is prose about a diff rather than one.
+// sentence, which is prose about a diff rather than one. The orientation header a rendered diff
+// opens with comes off first (stripViewDiffHeader), so it never paints as a removed or added row.
 func viewDiffBody(res domain.ToolResult) []detailLine {
-	return diffBody(res.Content)
+	return diffBody(stripViewDiffHeader(res.Content))
+}
+
+// The two lines view_diff opens a rendered diff with, naming which side is which: the file's
+// current content is the "- " side and the proposed newContent the "+ " side. They are the tool's
+// words to the MODEL — the block's own row already names the file — so this package strips them
+// before reading the diff and paints no row for them (stripViewDiffHeader).
+const (
+	viewDiffCurrentPrefix  = "--- current: "
+	viewDiffProposedPrefix = "+++ proposed: "
+)
+
+// stripViewDiffHeader returns view_diff's output without its orientation header: the first two
+// lines, when the first begins viewDiffCurrentPrefix and the second viewDiffProposedPrefix.
+// Anything else — one header line alone, the header further down, output carrying none — comes
+// back unchanged and renders as it always did.
+//
+// Only those two leading lines can match: every line of the diff itself sits behind a two-cell
+// tag ("  ", "- ", "+ "), and none of those begins "--" or "++".
+func stripViewDiffHeader(content string) string {
+	first, rest, ok := strings.Cut(content, "\n")
+	if !ok || !strings.HasPrefix(first, viewDiffCurrentPrefix) {
+		return content
+	}
+	second, diff, _ := strings.Cut(rest, "\n")
+	if !strings.HasPrefix(second, viewDiffProposedPrefix) {
+		return content
+	}
+	return diff
 }
 
 // diffBody renders view_diff's unified output as the coloured body beneath the row — "+ "
 // lines green, "- " lines red, context plain (layout.md, "A change is coloured the one way wherever
 // a block shows one"; docs/layout/tool-layout.md's per-tool table). Tagging on the
 // leading "+"/"-" is exact here because internal/tools' unifiedLineDiff tags every line "  ",
-// "- " or "+ " and emits no "+++ b/…" / "--- a/…" file header, so a content line that itself
-// starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's cap
+// "- " or "+ ", and the only untagged lines view_diff adds — its "--- current: …" / "+++ proposed:
+// …" orientation header — are stripped before this runs (stripViewDiffHeader), so a content line
+// that itself starts with "+" always arrives behind a tag. It returns every line: the collapsed paint's cap
 // and its remainder marker are the painter's (collapsedBodyRows, collapsedDetails, render.go).
 //
 // It counts NOTHING. The "+A −R" diffstat in the outcome slot of the branch above it comes from
@@ -88,8 +118,8 @@ const diffRegionContext = 3
 
 // The two-cell tags a rendered line diff wears down its left edge: context, removal, addition.
 // Reading them is exact because internal/tools' unifiedLineDiff puts EVERY line behind one of
-// them and emits no "+++ b/…" file header, so a file line that itself begins with "+" always
-// arrives behind a tag of its own.
+// them, and view_diff's orientation header is stripped before the walk (stripViewDiffHeader), so
+// a file line that itself begins with "+" always arrives behind a tag of its own.
 //
 // They are the same two cells the stacked reading paints as its marker column
 // (stackedContextMarker and its pair) and are kept apart from them deliberately: these three are
@@ -112,11 +142,12 @@ const (
 // behaviour change and not a truncation — the diff the MODEL reads is untouched, and the slot's
 // diffstat still counts the whole of it (diffStatStat).
 //
-// It answers as ONE nameless section (diffFileRegions): view_diff diffs a single file and its
-// output never names it, so there is nothing for a header row to say that the block's own row does
+// It answers as ONE nameless section (diffFileRegions): view_diff diffs a single file, and the
+// only place its output names it is the orientation header, which is stripped before the walk
+// (stripViewDiffHeader) — there is nothing for a header row to say that the block's own row does
 // not already say better.
 func viewDiffRegions(res domain.ToolResult) []diffFileRegions {
-	regions := taggedDiffRegions(res.Content)
+	regions := taggedDiffRegions(stripViewDiffHeader(res.Content))
 	if len(regions) == 0 {
 		return nil
 	}

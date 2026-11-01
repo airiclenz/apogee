@@ -505,8 +505,9 @@ type toolView struct {
 	// them: the change itself keeps one home, and either reading regroups the two back into the
 	// file sections it paints (regionFileSections, diffFileRegions).
 	//
-	// It is empty for every source that names no file: the four writing tools, whose block's own row
-	// already names the file they wrote, and view_diff's whole-file body. Such a body paints
+	// It is empty for every source whose file the block's own row already names: the four writing
+	// tools, which wrote that file, and view_diff's whole-file body, whose orientation header names
+	// it too and is stripped before its regions are cut. Such a body paints
 	// exactly as it did before file sections existed — no header row over it.
 	//
 	// The names are tool output like the region lines beside them, and are escape-stripped with
@@ -1480,8 +1481,9 @@ func (tv *toolView) showRegions(regions []domain.EditRegion) {
 // section — a muted header row naming the file, then that file's regions beneath it (ratified
 // call 10).
 //
-// The path is empty when the output names no file: view_diff prints one file's diff and never says
-// which, and an edit tool's recorded regions arrive here as one nameless section too. A nameless
+// The path is empty when the section is about the block's own file: view_diff prints one file's
+// diff and names it only in its orientation header, which is stripped and paints no row, and an
+// edit tool's recorded regions arrive here as one nameless section too. A nameless
 // section paints no header, which is what makes a printed diff of a single file read exactly like
 // the change an edit block shows.
 type diffFileRegions struct {
