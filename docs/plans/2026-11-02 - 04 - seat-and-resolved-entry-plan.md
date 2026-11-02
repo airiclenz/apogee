@@ -56,7 +56,10 @@ Renumbered after the 2026-11-02 check: old→new 1→1, 2→2, 4→3, 5→4, 6�
   - 9: guard folded — Goal qualified for a stated far width; filled on the Firing lander only (TUI answer pinned at 0); a session-seated child's latch carries the root's setters.
   - 13: guard folded — `--title` on `capcom know add`, the bare-`Announce` grep, `adr-0045.md`'s Status line, ADR 0105 decisions 6 and 8 named.
 
-## 1. Pin how the session, Firing and probe doors resolve an entry
+## 1. Pin how the session, Firing and probe doors resolve an entry — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): door C' rebuilds scheduleWiring.fire's inline beat closure in the test (model bound, live.observed(), caps.current(), live.observedDialect()) — the closure is not callable without running raise; the session state it reads is driven through liveSettings.observe and parallelAgentsCap.follow/observe.
+NOTES (2026-11-02): the dialect column for A and B' is the Monitor binding's forced dialect (the session states the forced key there); for B it is what rebindSpecFor states (none — rootWiring.rebind lays the beat's own over the spec), each with its reason in the want.
 
 **What:** test-only; no production change.
 - Matrix: entry pinned/unpinned × root keys set/unset × beat (window, slots, dialect, model) present/absent × forced `effort-dialect:` × keyed/unkeyed.
