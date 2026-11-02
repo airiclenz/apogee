@@ -18,17 +18,19 @@ import (
 // calibrates the estimator and emits a plain UsageEvent; a summary emits a Maintenance-flagged one),
 // and the collector knows neither.
 type completion struct {
-	content   string
-	thinking  string
-	toolCalls []provider.ToolCall
-	finish    domain.FinishReason
-	usage     *provider.Usage // nil when the server omits its accounting
-	served    string          // the model id the server answered with; "" when it sent none
-	failed    bool            // a terminal DeltaError / DeltaContextOverflow arrived
-	overflow  bool            // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
-	retryable bool            // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable in-band, or a mid-stream EOF / net timeout): re-sending the same request can succeed
-	errMsg    string          // the terminal fault message when failed
-	malformed int             // stream chunks the provider could not decode and skipped, as the terminal Done reported them; 0 on a fault (its errMsg names the count)
+	content    string
+	thinking   string
+	toolCalls  []provider.ToolCall
+	finish     domain.FinishReason
+	usage      *provider.Usage        // nil when the server omits its accounting
+	served     string                 // the model id the server answered with; "" when it sent none
+	failed     bool                   // a terminal DeltaError / DeltaContextOverflow arrived
+	overflow   bool                   // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
+	retryable  bool                   // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable in-band, or a mid-stream EOF / net timeout): re-sending the same request can succeed
+	errMsg     string                 // the terminal fault message when failed
+	fault      provider.UpstreamFault // that terminal fault's class (Delta.Fault); the zero class on an overflow and on every reply that did not fail
+	generation uint64                 // the sharedUpstream generation the request was sent at: the holder's generation beside the Responder it streamed over
+	malformed  int                    // stream chunks the provider could not decode and skipped, as the terminal Done reported them; 0 on a fault (its errMsg names the count)
 
 	thinkingBlocks []json.RawMessage // the reply's opaque reasoning blocks (DeltaThinkingBlock), in wire order
 	requested      string            // the model the request named — the one thinkingBlocks are bound to
@@ -53,13 +55,20 @@ type completion struct {
 // caller's call — only the caller owns the Turn, the fold and the events. An overflow never carries
 // it: a prompt too long stays too long.
 //
+// The Upstream is read once, with the holder's generation beside it (sharedUpstream.current), so the
+// completion records which generation the request went out at: a fault on a generation the holder
+// has since been replaced past belongs to the retired Upstream, and the respond phase resends rather
+// than consult the fallback resolver about it. The fault's class (Delta.Fault) rides out on fault for
+// the same caller, which alone decides whether it is the upstream's own failure.
+//
 // Each DeltaThinkingBlock (the anthropic wire's signed reasoning blocks) is kept opaque, in wire
 // order, beside the model req named: a block replays only to the model that produced it, so the
 // completion records which one that was.
 func (a *Agent) collectCompletion(ctx context.Context, req provider.Request, observe func(provider.Delta)) completion {
-	out := completion{requested: req.Model}
+	up, generation := a.upstream.current()
+	out := completion{requested: req.Model, generation: generation}
 	var content, thinking strings.Builder
-	for delta := range a.upstream.responder().Stream(ctx, req) {
+	for delta := range up.Stream(ctx, req) {
 		if observe != nil {
 			observe(delta)
 		}
@@ -91,6 +100,7 @@ func (a *Agent) collectCompletion(ctx context.Context, req provider.Request, obs
 			out.overflow = delta.Kind == provider.DeltaContextOverflow
 			out.errMsg = delta.Err
 			out.retryable = delta.Retryable
+			out.fault = delta.Fault
 		}
 	}
 	// The parse seam's profile split (D5/D6): the inline thinking a delimited profile emits is

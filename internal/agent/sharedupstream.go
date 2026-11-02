@@ -63,3 +63,13 @@ func (s *sharedUpstream) replace(up provider.Responder) uint64 {
 	s.generation++
 	return s.generation
 }
+
+// replacedSince reports whether the holder has been replaced since generation — whether a request
+// sent over the Upstream current() answered at that generation went out on one the holder has
+// since moved off. A fault on such a request is the retired Upstream's, not the current one's, so
+// the respond phase resends on the current Upstream rather than asking the fallback resolver about
+// a server the seat already left (consultFallback).
+func (s *sharedUpstream) replacedSince(generation uint64) bool {
+	_, current := s.current()
+	return current != generation
+}

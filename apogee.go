@@ -50,6 +50,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/undo"
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -124,6 +125,51 @@ func WithDelegationSeat(seat *DelegationSeat) Option { return agent.WithDelegati
 func WithDelegationTarget(target *DelegationTarget) Option {
 	return agent.WithDelegationTarget(target)
 }
+
+// WithFallbackResolver hands the Agent the resolver it consults before it abandons a Turn for a
+// fault that is the upstream's own (UpstreamFault.FallbackEligible). nil — the default — consults
+// none, and the Turn is abandoned as it always was. See internal/agent for the contract.
+func WithFallbackResolver(r FallbackResolver) Option { return agent.WithFallbackResolver(r) }
+
+// FallbackResolver is the Driver-side seam that decides, for one seat, whether a failed upstream
+// recovered, which fallback the seat moves to, or that there is none. See internal/agent for the
+// contract.
+type FallbackResolver = agent.FallbackResolver
+
+// FallbackReport is what the engine tells a FallbackResolver about the fault it would abandon a
+// Turn for.
+type FallbackReport = agent.FallbackReport
+
+// FallbackAnswer is a FallbackResolver's answer: its verdict and, for a switch, the fallback.
+type FallbackAnswer = agent.FallbackAnswer
+
+// FallbackVerdict is the kind of a FallbackAnswer.
+type FallbackVerdict = agent.FallbackVerdict
+
+const (
+	FallbackNone      = agent.FallbackNone
+	FallbackRecovered = agent.FallbackRecovered
+	FallbackSwitch    = agent.FallbackSwitch
+)
+
+// UpstreamFault is the class of one upstream fault — where it came from and, for a status or an
+// in-band error, the code and slug it carried — with the FallbackEligible predicate a resolver is
+// only ever consulted under.
+type UpstreamFault = provider.UpstreamFault
+
+// FaultClass names where an UpstreamFault came from.
+type FaultClass = provider.FaultClass
+
+const (
+	FaultNone      = provider.FaultNone
+	FaultTransport = provider.FaultTransport
+	FaultTimeout   = provider.FaultTimeout
+	FaultStatus    = provider.FaultStatus
+	FaultCut       = provider.FaultCut
+	FaultInBand    = provider.FaultInBand
+	FaultLocal     = provider.FaultLocal
+	FaultCancelled = provider.FaultCancelled
+)
 
 // RebindSpec carries the per-model bindings Agent.Rebind swaps in when the Upstream starts
 // serving a different model — the wire model id, its system-prompt template, its context

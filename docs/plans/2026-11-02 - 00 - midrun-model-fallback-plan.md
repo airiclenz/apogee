@@ -162,7 +162,17 @@ internal/agent/rebind.go — SwitchUpstream, Rebind; internal/agent/collect.go �
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSharedUpstream|TestSwitchUpstream' ./internal/agent/`; `go vet ./internal/agent/`
 **Commit:** `refactor(agent): share one upstream holder between a parent and its unrouted children`
 
-## 6. Engine: the fallback seam and the grace resend
+## 6. Engine: the fallback seam and the grace resend — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): re-derived from turnRun living in loop.go — it lives in internal/agent/turn.go, so the recovered-resend latch (recoveredSpent) is added there.
+
+NOTES (2026-11-02): consequential edit — example_test.go: made necessary by the new public aliases in apogee.go (the compile-time completeness guard names every exported type and forwarding constructor).
+
+NOTES (2026-11-02): the resolver types (FallbackResolver with Resolve(ctx, FallbackReport) FallbackAnswer; FallbackVerdict None/Recovered/Switch; FallbackAnswer{Verdict, Upstream UpstreamSpec, Rebind RebindSpec, Server, Waited, First}) and WithFallbackResolver live in agent.go beside the other Options; the Agent field is set in New/Resume beside dial, not through applyConstructionSeed. The consult logic is consultFallback / faultedOnRetiredUpstream in loop.go; sharedUpstream gains replacedSince(generation); completion carries fault and generation.
+
+NOTES (2026-11-02): a FallbackSwitch answer is read as none (abandon) in this item — the mid-Turn rehome is item 7's. Unrouted children do not yet inherit the parent's resolver (newChildAgentOn, subagent.go — item 7's file); only the Agent built with the Option consults it.
+
+NOTES (2026-11-02): the generation check (faultedOnRetiredUpstream) runs before the re-stream path, so a retired upstream's fault spends no re-stream budget or hold-off; it applies only to FallbackEligible faults and only when a resolver is held.
 
 **What:**
 Recast at the regression check (2026-11-02).

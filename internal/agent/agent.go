@@ -534,6 +534,11 @@ type Agent struct {
 	// (restreamHoldoffFor); 0 reads as defaultRestreamHoldoff. Only a test sets it, to skip the
 	// production second. A child inherits it at spawn, so a test's short wait holds across the tree.
 	restreamHoldoff time.Duration
+	// fallback is the resolver the respond phase consults before it abandons a Turn for a fault
+	// that is the upstream's own (consultFallback, loop.go); nil — every Agent no host handed one —
+	// consults nothing and abandons exactly as before it existed. It is set once, at construction
+	// (WithFallbackResolver), and only read after, so it needs no lock.
+	fallback FallbackResolver
 
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
 	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by
@@ -763,10 +768,11 @@ type Option func(*constructOptions)
 
 // constructOptions is what the Options resolve to before an Agent exists: the values New and
 // Resume read while they build. Its zero value is not usable; resolveOptions seeds the defaults.
-// Every field past dial is a member of the construction seed (applyConstructionSeed), nil meaning
-// the Option was not given and construction's own default stands.
+// Every field past dial and fallback is a member of the construction seed (applyConstructionSeed),
+// nil meaning the Option was not given and construction's own default stands.
 type constructOptions struct {
-	dial Dialer
+	dial     Dialer
+	fallback FallbackResolver // the seat's fallback resolver (WithFallbackResolver); nil consults none
 
 	journal  *undo.Journal // the session's undo journal (SetJournal), with undoNote beside it
 	undoNote string
@@ -809,6 +815,89 @@ func WithDelegationSeat(seat *DelegationSeat) Option {
 // seeds no target.
 func WithDelegationTarget(target *DelegationTarget) Option {
 	return func(o *constructOptions) { o.target = target }
+}
+
+// WithFallbackResolver hands the constructed Agent the resolver it consults before it abandons a
+// Turn for an upstream fault a different server could be expected not to share
+// (provider.UpstreamFault.FallbackEligible). The resolver is the Driver's: it knows the seat's
+// servers, waits out the grace window and walks the fallback list, so the engine reads no config of
+// its own (ADR 0031). nil — the default — consults none, and the Turn is abandoned exactly as it
+// always was.
+func WithFallbackResolver(r FallbackResolver) Option {
+	return func(o *constructOptions) { o.fallback = r }
+}
+
+// FallbackResolver is the Driver-side seam the respond phase consults when a Turn would be
+// abandoned for a fault that is the upstream's own (provider.UpstreamFault.FallbackEligible): after
+// the transient re-stream budget is spent, before the fault surfaces as an ErrorEvent. It is
+// wire-silent — it answers with values, never by streaming — and the engine reads nothing from it
+// but its answer.
+//
+// One resolver instance serves one seat — the session's, or the Sub-agents seat — and every Agent
+// on that seat consults the same instance, so the instance is where the seat's state lives: it runs
+// the grace window and the list walk once per failed upstream (single-flight) and hands every caller
+// reporting a fault on that upstream the same answer, with First true only for the caller whose
+// report ran it; and it remembers that the seat has fallen over, so a later fault on the fallback
+// walks the rest of the list rather than going back. Resolve may block for the whole grace window,
+// and must return promptly once ctx is cancelled — the engine reads a cancelled ctx as the user's
+// cancel, whatever answer comes back. The shared run itself must not die with the caller that
+// started it, so a resolver runs it detached from ctx (context.WithoutCancel, under a backstop of
+// its own) and only each caller's own wait honours that caller's ctx.
+type FallbackResolver interface {
+	Resolve(ctx context.Context, report FallbackReport) FallbackAnswer
+}
+
+// FallbackReport is what the engine tells a FallbackResolver about the fault it would abandon a
+// Turn for.
+type FallbackReport struct {
+	// Server and Model name the upstream the faulted request was sent to — the Agent's bound
+	// `servers:` entry (domain.Config.ServerName, "" when the host names none) and the model the
+	// request named.
+	Server string
+	Model  string
+	// Fault is the fault's class, as the provider classified it on the terminal DeltaError. It is
+	// always FallbackEligible: no other fault reaches a resolver.
+	Fault provider.UpstreamFault
+	// RecoveredSpent reports that this Turn has already spent its one "recovered" resend: the
+	// primary came back once and failed again. The resolver skips the grace window and goes straight
+	// to the list walk, and a FallbackRecovered answer to it is read as FallbackNone — a primary
+	// that flaps cannot loop the Turn.
+	RecoveredSpent bool
+}
+
+// FallbackVerdict is the kind of a FallbackAnswer.
+type FallbackVerdict int
+
+const (
+	// FallbackNone is the zero verdict: nothing to move to — no fallback is live, or the resolver
+	// has nothing to say. The Turn is abandoned exactly as it would be without a resolver.
+	FallbackNone FallbackVerdict = iota
+	// FallbackRecovered says the failed upstream came back inside the grace window: the engine
+	// resends the same request on the same upstream with a fresh re-stream budget, once per Turn.
+	FallbackRecovered
+	// FallbackSwitch says the seat moves to the fallback the answer's Upstream, Rebind and Server
+	// describe.
+	FallbackSwitch
+)
+
+// FallbackAnswer is a FallbackResolver's answer to one FallbackReport.
+type FallbackAnswer struct {
+	// Verdict is what the engine does next.
+	Verdict FallbackVerdict
+	// Upstream, Rebind and Server describe the fallback a FallbackSwitch moves the seat to, resolved
+	// whole by the Driver once the fallback's heartbeat beat: the endpoint and its dial facts, the
+	// per-model bindings for the model that beat observed (what rebindSpecFor builds — prompt
+	// template, model profile, window, output cap), and the fallback's `servers:` entry name in the
+	// human's words. They are zero on every other verdict.
+	Upstream UpstreamSpec
+	Rebind   RebindSpec
+	Server   string
+	// Waited is how long the grace window ran before the resolver answered.
+	Waited time.Duration
+	// First is true only for the caller whose report ran the grace window and the list walk; every
+	// other caller reporting a fault on the same upstream gets the same answer with First false, so
+	// a seat that moves announces the move once however many Agents were on it.
+	First bool
 }
 
 // SeedRefusedError is the refusal New and Resume return when the construction seed's reaction lanes
@@ -890,6 +979,7 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	}
 	a.dial = o.dial       // the seam the dial above crossed is the one every later dial of this Agent crosses
 	a.ownsUpstream = true // this Agent dialled that client, so Close is the one that tears it down
+	a.fallback = o.fallback
 	tap.bind(a)
 	a.bindProjectRun()
 	a.applyConstructionSeed(o)
@@ -914,6 +1004,7 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 	}
 	a.dial = o.dial       // as in New
 	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
+	a.fallback = o.fallback
 	tap.bind(a)
 	a.bindProjectRun()
 	a.applyConstructionSeed(o)                     // as in New

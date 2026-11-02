@@ -176,6 +176,13 @@ type turnRun struct {
 	// budget for the same reason restreamsSpent is: a blip, a cap and a Reaction's Outcome{Retry}
 	// are different remedies, and none may spend another's.
 	capRetrySpent bool
+
+	// recoveredSpent is the one-recovered-resend-per-Turn latch: it flips once the fallback
+	// resolver has answered that the failed upstream came back and the Turn has resent its request
+	// there (consultFallback). A second upstream fault in the same Turn is reported to the resolver
+	// with it set, so the resolver skips the grace window, and a second "recovered" answer is read as
+	// none — a primary that recovers and fails again cannot hold the Turn in a loop.
+	recoveredSpent bool
 }
 
 // turnEnd names the six ways a Turn exits. One row per exit; end() is the whole table.

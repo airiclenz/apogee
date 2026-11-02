@@ -148,6 +148,12 @@ var (
 	_ apogee.RunFinished
 	_ apogee.Option
 	_ apogee.SeedRefusedError
+	_ apogee.FallbackResolver
+	_ apogee.FallbackReport
+	_ apogee.FallbackAnswer
+	_ apogee.FallbackVerdict
+	_ apogee.UpstreamFault
+	_ apogee.FaultClass
 )
 
 // Forwarding constructors — referenced as values so the facade keeps delegating them.
@@ -165,6 +171,7 @@ var (
 	_ = apogee.WithUndoJournal
 	_ = apogee.WithDelegationSeat
 	_ = apogee.WithDelegationTarget
+	_ = apogee.WithFallbackResolver
 )
 
 // Workflow entry points on the engine handle — method values, so an embedder's route onto a

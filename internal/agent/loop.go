@@ -440,7 +440,7 @@ type turnOutcome int
 
 const (
 	turnOK         turnOutcome = iota // a usable response (a nil-safe *Response is returned)
-	turnCancelled                     // ctx was cancelled mid-stream or inside the re-stream hold-off
+	turnCancelled                     // ctx was cancelled mid-stream, inside the re-stream hold-off or during the fallback resolver's wait
 	turnFailed                        // an Upstream fault (already surfaced as an ErrorEvent)
 	turnOverflowed                    // the request did not fit the model's context window — NOT surfaced; the caller owns the ErrorEvent
 )
@@ -531,6 +531,13 @@ func (a *Agent) holdOffRestream(ctx context.Context, n int) bool {
 // re-stream is SILENT, exactly as a recovered overflow fold is; the fault that finds the budget
 // spent, of any class, surfaces as every fault always did.
 //
+// An Agent a host handed a FallbackResolver (WithFallbackResolver) asks it before surfacing a fault
+// that is the upstream's own (consultFallback): the resolver may answer that the primary recovered,
+// and the same request is resent there once per Turn with a fresh re-stream budget; any other answer,
+// any other fault, or no resolver surfaces the fault as above. A fault on an Upstream the Agent's
+// sharedUpstream has since been replaced past is resent on the current one without asking
+// (faultedOnRetiredUpstream).
+//
 // One class of REPLY is re-sent too, at a raised ceiling: a reply the engine's own output cap cut
 // off (FinishLength) that carries reasoning but neither a tool call nor one visible token — a
 // reasoning model that spent the whole cap thinking. Its spend under the cap varies from pass to
@@ -544,7 +551,8 @@ func (a *Agent) holdOffRestream(ctx context.Context, n int) bool {
 // path — a second cut-off faults through reviewedOutcome, naming the raised cap it hit.
 func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Response, turnOutcome, string) {
 	// The Turn's identity and its request, aliased for readability — everything below reads them
-	// unchanged, and the only writes back to t are the re-stream counter and the cap-retry latch.
+	// unchanged, and the only writes back to t are the re-stream counter, the cap-retry latch and the
+	// recovered-resend latch (consultFallback).
 	turn, req := t.turn, t.req
 	for attempt := 0; ; {
 		reply := a.streamResponse(ctx, turn, req)
@@ -554,6 +562,13 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 		if reply.failed {
 			if reply.overflow {
 				return nil, turnOverflowed, reply.errMsg
+			}
+			if a.faultedOnRetiredUpstream(reply) {
+				// The seat moved off the Upstream this request went out on while it streamed, so the
+				// fault is the retired server's: resend on the current one, spending nothing and
+				// asking the resolver nothing — it has already answered for that server.
+				a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
+				continue
 			}
 			if reply.retryable && t.restreamsSpent < a.restreamBudget() {
 				// One of the Turn's budgeted re-streams. Spend the counter first, so a fault past
@@ -579,6 +594,14 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 					// observers to discard is exactly what the rollback drops.
 					return nil, turnCancelled, ""
 				}
+			}
+			switch a.consultFallback(ctx, t, reply) {
+			case fallbackResend:
+				continue
+			case fallbackCancelled:
+				// A cancel during the resolver's wait is a cancel like the one inside the re-stream
+				// hold-off above: roll back and resume, no ErrorEvent.
+				return nil, turnCancelled, ""
 			}
 			a.emitLoopFault(turn, reply.errMsg)
 			return nil, turnFailed, ""
@@ -636,6 +659,58 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 		}
 		return a.reviewedOutcome(t, resp)
 	}
+}
+
+// fallbackStep is what consultFallback leaves the respond phase to do with a fault it would abandon
+// the Turn for.
+type fallbackStep int
+
+const (
+	fallbackAbandon   fallbackStep = iota // surface the fault and abandon the Turn, as with no resolver
+	fallbackResend                        // resend the same request; the reset is already emitted
+	fallbackCancelled                     // ctx was cancelled during the resolver's wait
+)
+
+// faultedOnRetiredUpstream reports whether reply faulted on an Upstream the Agent's sharedUpstream
+// has been replaced past since the request went out — a fault of the server the seat already left,
+// which the resolver has already answered for. Only an Agent with a resolver asks, and only about a
+// fault that would have reached it (FallbackEligible): with no resolver the loop is unchanged.
+func (a *Agent) faultedOnRetiredUpstream(reply completion) bool {
+	return a.fallback != nil && reply.fault.FallbackEligible() && a.upstream.replacedSince(reply.generation)
+}
+
+// consultFallback is the respond phase's last stop before it abandons a Turn for a failed reply: when
+// the Agent holds a FallbackResolver and the fault is the upstream's own (FallbackEligible — the
+// transient re-stream budget already spent on it, or a class that budget never covers), it asks the
+// resolver what to do, telling it whether this Turn has already spent its one recovered resend
+// (t.recoveredSpent). Any other fault, or no resolver, abandons at once, so the loop is exactly what
+// it was without one.
+//
+// A "recovered" answer resends the same request on the same Upstream with a fresh re-stream budget:
+// the latch flips first, so a second fault in this Turn reaches the resolver flagged and a second
+// "recovered" is read as none, and the StreamResetEvent tells observers the partial reply is
+// superseded, as the re-stream path does. A "switch" this loop does not rehome onto, and "none",
+// abandon. A ctx cancelled during the wait is the user's cancel whatever the resolver answered.
+func (a *Agent) consultFallback(ctx context.Context, t *turnRun, reply completion) fallbackStep {
+	if a.fallback == nil || !reply.fault.FallbackEligible() {
+		return fallbackAbandon
+	}
+	answer := a.fallback.Resolve(ctx, FallbackReport{
+		Server:         a.cfg.ServerName,
+		Model:          reply.requested,
+		Fault:          reply.fault,
+		RecoveredSpent: t.recoveredSpent,
+	})
+	if ctx.Err() != nil {
+		return fallbackCancelled
+	}
+	if answer.Verdict != FallbackRecovered || t.recoveredSpent {
+		return fallbackAbandon
+	}
+	t.recoveredSpent = true
+	t.restreamsSpent = 0
+	a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(t.turn)})
+	return fallbackResend
 }
 
 // applyRetry prepares the Turn's next attempt for a retry the caller has already counted, and is
