@@ -79,7 +79,11 @@ cmd/apogee/wire_firing.go — firingConfig; cmd/apogee/schedule.go — scheduleW
 
 **Commit:** `test(cmd): pin how the session, Firing and probe doors resolve a server entry`
 
-## 2. Pin how the fallback and routed doors resolve an entry
+## 2. Pin how the fallback and routed doors resolve an entry — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the unattended D and F landers are built by hand as newFiringFallback / newFiringSeatFallback build them (in.opts, in.roots; routed over the parent firingConfig hands resolveFiringRouting): both constructors bury the lander in a closure with a real Monitor beat, so a stub beat cannot reach them. The TUI landers come from newSessionFallback(...).lander() / .routedLander() with only key and beat overridden.
+NOTES (2026-11-02): added an entryRanks `namedOn` column (the endpoint the namer names an unrouted child on), stated only by the unattended D door, to carry the firing-namer-dead-primary WRONG-at-base row; the width WRONG-at-base row reads the Firing's composed cfg.ParallelAgents. The stub beats rank the entry's forced dialect in, as each Driver's entry Monitor does.
+NOTES (2026-11-02): the routed "parent's window" rank is unreachable in the matrix (a beat that names no model names no window, so the row does not land); TestFallbackLanderRoutedBindsAsTheDelegationTarget keeps covering it.
 
 **What:** test-only; depends on item 1 (same file, same matrix).
 - Doors: D session-seat landing and F routed landing via `fallbackLander.arrive` with a stub beat and key, both Drivers' resolvers; E via `resolveDelegationTarget`.

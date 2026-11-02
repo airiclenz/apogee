@@ -2,9 +2,11 @@ package main
 
 // Characterisation pins of how each engine door resolves a server entry: the session's startup
 // bind (A), its beat-driven rebind (B) and its `/server` move (B'), an unattended Firing (C) and
-// one raised in-session (C'), and the context probe (G). ADR 0083 part 4 keeps one hand-ranked
-// resolution per door rather than a shared entry→engine function, so these tables are what makes a
-// door's drift fail a test: every door runs over the same scenario matrix, and each door's want
+// one raised in-session (C'), the session seat's Server fallback landing (D), a routed spawn's
+// Delegation target (E), the Sub-agents seat's Server fallback landing (F), and the context probe
+// (G). ADR 0083 part 4 keeps one hand-ranked resolution per door rather than a shared entry→engine
+// function, so these tables are what makes a door's drift fail a test: every door runs over the
+// same scenario matrix, and each door's want
 // spells its ranks out by hand — never through the config.Resolve* helpers the doors call — so a
 // door that changes which scope wins changes a row here. Where two doors differ on purpose, the
 // want says why in one line.
@@ -256,6 +258,9 @@ type entryRanks struct {
 	name        string
 	description string
 	ephemeral   bool
+	// namedOn is the endpoint the run's namer names an unrouted child on; only the fallback doors
+	// state it, as only a fallover can leave it on a server the run no longer talks to.
+	namedOn string
 }
 
 // ranksOfConfig reads the ranks off the Config a door constructs the engine from.
@@ -597,4 +602,362 @@ func resolveProbe(t *testing.T, s rankScenario) entryRanks {
 // wantProbe: the entry alone — the probe observes nothing, so a beat moves no rank.
 func wantProbe(s rankScenario) entryRanks {
 	return wantBoundEntry(s)
+}
+
+// The fallback doors' own scenario values: the primary a seat falls over FROM, onto the scenario's
+// entry. It pins everything it states, so the window and reserve share a session or a Firing holds
+// on it — what a routed child keeps from its parent — are the same in every row and on both
+// Drivers.
+const (
+	rankPrimaryName     = "primary"
+	rankPrimaryEndpoint = "http://127.0.0.1:2222"
+	rankPrimaryModel    = "primary-model"
+	rankPrimaryWidth    = 7
+	rankParentWindow    = 100000
+	rankParentReserve   = 0.3
+)
+
+// rankPrimary is the entry the seat is bound to before the fallover: it names the scenario's entry
+// as its one `fallback:`.
+func rankPrimary() config.ServerEntry {
+	return config.ServerEntry{
+		Name:            rankPrimaryName,
+		Endpoint:        rankPrimaryEndpoint,
+		Model:           rankPrimaryModel,
+		ContextWindow:   rankParentWindow,
+		ResponseReserve: rankParentReserve,
+		ParallelAgents:  rankPrimaryWidth,
+		Fallback:        config.NewFallbackList(rankName),
+	}
+}
+
+// fallbackOptions is the scenario's configuration with the run started on the primary, and the
+// scenario's entry listed beside it as the fallback the seat lands on.
+func (s rankScenario) fallbackOptions() config.Options {
+	opts := s.options()
+	opts.Endpoint = rankPrimaryEndpoint
+	opts.HostAlias = rankPrimaryName
+	opts.StartupEntry = rankPrimary()
+	opts.Servers = []config.ServerEntry{rankPrimary(), s.entry()}
+	return opts
+}
+
+// monitored is the beat as the entry's own Monitor reports it: the observation, with the entry's
+// forced `effort-dialect:` ranked over the tell (provider.forceEffortDialect), as every fallback
+// beat and a Sub-agent server's beat are taken through bindingOfEntry's Monitor.
+func (s rankScenario) monitored() heartbeat.Beat {
+	beat := s.observation()
+	if s.forced {
+		beat.EffortSupport = domain.EffortSupport{Dialect: rankForced}
+	}
+	return beat
+}
+
+// monitoredDialect is the entry's forced dialect, else the one the beat saw.
+func (s rankScenario) monitoredDialect() domain.EffortDialect {
+	switch {
+	case s.forced:
+		return rankForced
+	case s.beat:
+		return rankObserved
+	}
+	return domain.EffortDialectNone
+}
+
+// landedModel is the entry's model pin, else the model the beat saw.
+func (s rankScenario) landedModel() string {
+	if s.pinned {
+		return rankEntryModel
+	}
+	return choose(s.beat, rankBeatModel, "")
+}
+
+// landable says the seat can land on the entry at all: a server that answers names no model and
+// the entry pins none, so there is nothing to bind and the walk moves on.
+func (s rankScenario) landable() bool {
+	return s.pinned || s.beat
+}
+
+// landOn drives one Driver's lander onto the scenario's entry, its key and its one beat stubbed —
+// each Driver's own beat is the entry's Monitor (monitored) — and reads off what the seat runs on
+// once the engine has applied the answer (ranksOfLanding). refused says it did not land.
+func landOn(lander fallbackLander, s rankScenario) (fallbackLanding, entryRanks) {
+	lander.key = func(config.ServerEntry) (string, error) { return s.key(), nil }
+	beat := s.monitored()
+	lander.beat = func(context.Context, upstreamBinding) heartbeat.Beat { return beat }
+
+	landing, landed := lander.arrive(context.Background(), rankName)
+	if !landed {
+		return landing, entryRanks{refused: true}
+	}
+	return landing, ranksOfLanding(landing.answer)
+}
+
+// ranksOfLanding reads the binding a FallbackSwitch leaves the seat on, applied as the engine
+// applies it: the switch first, then the rebind over it. The rebind always states the window, the
+// reserve share and the reply cap (rebindSpecFor), so those are its; the working window, the
+// stream-idle window and the seat's words are the switch's alone. No width rides an answer.
+func ranksOfLanding(answer apogee.FallbackAnswer) entryRanks {
+	up, rebind := answer.Upstream, answer.Rebind
+	ranks := entryRanks{
+		window:      rebind.MaxContextTokens,
+		working:     up.WorkingWindow,
+		reserve:     up.ResponseReserveFraction,
+		maxOutput:   up.MaxOutputTokens,
+		dialect:     domain.EffortDialect(rebind.EffortDialect),
+		model:       rebind.Model,
+		name:        up.ServerName,
+		description: up.ServerDescription,
+		ephemeral:   up.ServerEphemeral,
+	}
+	if up.StreamIdleTimeout != nil {
+		ranks.streamIdle = *up.StreamIdleTimeout
+	}
+	if rebind.ResponseReserveFraction != nil {
+		ranks.reserve = *rebind.ResponseReserveFraction
+	}
+	if rebind.MaxOutputTokens != nil {
+		ranks.maxOutput = *rebind.MaxOutputTokens
+	}
+	return ranks
+}
+
+// sessionFallbackOf is the TUI session's seat fallback over the scenario's configuration, the
+// session started on the primary.
+func sessionFallbackOf(t *testing.T, s rankScenario) *sessionFallback {
+	t.Helper()
+	live := newLiveSettings(s.fallbackOptions(), config.ProjectOffer{})
+	return newSessionFallback(live, newUpstreamHolder(), config.NewKeyResolver(""), stateRoots{config: t.TempDir()})
+}
+
+// firingOnPrimary composes the unattended Firing the scenario's fallover happens in: bound to the
+// primary, with the roots its landers resolve against.
+func firingOnPrimary(t *testing.T, s rankScenario) (apogee.Config, firingInputs) {
+	t.Helper()
+	in := firingInputs{
+		opts:     s.fallbackOptions(),
+		entry:    rankPrimary(),
+		roots:    firingRoots(t),
+		confiner: platform.NewDenyConfiner(),
+		mode:     domain.ModePlan,
+		recordID: rankRecordID,
+		beat: func(context.Context, string, string, string, provider.Wire) heartbeat.Beat {
+			return heartbeat.Beat{Reachable: true, Answered: true, ActiveModel: rankPrimaryModel}
+		},
+	}
+	cfg, _, _, err := firingConfig(context.Background(), in)
+	if err != nil {
+		t.Fatalf("firingConfig on the primary: %v", err)
+	}
+	return cfg, in
+}
+
+// TestEntryRankFallbackDoors pins the door a session seat's Server fallback lands through (D), on
+// both Drivers: the TUI's resolver (newSessionFallback) and an unattended Firing's
+// (newFiringFallback).
+func TestEntryRankFallbackDoors(t *testing.T) {
+	t.Parallel()
+
+	runRankDoors(t, []rankDoor{
+		{name: "D TUI session-seat landing", resolve: resolveSessionSeatLanding, want: wantSessionSeatLanding},
+		{name: "D unattended session-seat landing", resolve: resolveFiringSeatLanding, want: wantFiringSeatLanding},
+	})
+}
+
+// resolveSessionSeatLanding lands the TUI session seat's lander on the entry, and reads the width
+// the session's follow of the switch fans out at (sessionMover.arrive: the cap follows the entry).
+func resolveSessionSeatLanding(t *testing.T, s rankScenario) entryRanks {
+	t.Helper()
+	landing, ranks := landOn(sessionFallbackOf(t, s).lander(), s)
+	if ranks.refused {
+		return ranks
+	}
+	ranks.width = newParallelAgentsCap(&parallelAgentsSpy{}).follow(landing.entry)
+	return ranks
+}
+
+// resolveFiringSeatLanding lands a Firing's session-seat lander on the entry — built as
+// newFiringFallback builds it, over the Firing's own Options and roots — and reads, off the run
+// composed on the primary, the width it fans out at and the server its namer names an unrouted
+// child on, neither of which the landing moves.
+func resolveFiringSeatLanding(t *testing.T, s rankScenario) entryRanks {
+	t.Helper()
+	cfg, in := firingOnPrimary(t, s)
+	_, ranks := landOn(fallbackLander{opts: in.opts, roots: in.roots}, s)
+	if ranks.refused {
+		return ranks
+	}
+	ranks.width = cfg.ParallelAgents
+	namer, ok := cfg.Namer.(*delegationNamer)
+	if !ok {
+		t.Fatalf("the Firing's namer is %T, want *delegationNamer", cfg.Namer)
+	}
+	unrouted, _ := namer.upstream(false)
+	ranks.namedOn = unrouted.Endpoint
+	return ranks
+}
+
+// wantSessionLanding: the `/server` move's ranks onto the same entry — every pin over the root key
+// (entryUpstream) — with the rebind's window, the entry's pin over the root's else the window the
+// beat saw, the entry's forced dialect over the beat's, and the entry's model else the beat's. The
+// width is each Driver's own.
+func wantSessionLanding(s rankScenario) entryRanks {
+	if !s.landable() {
+		return entryRanks{refused: true}
+	}
+	return entryRanks{
+		window:      s.observedWindow(),
+		working:     s.working(),
+		reserve:     s.reserve(),
+		maxOutput:   s.maxOutput(),
+		streamIdle:  s.streamIdle(),
+		dialect:     s.monitoredDialect(),
+		model:       s.landedModel(),
+		name:        rankName,
+		description: rankDescription,
+		ephemeral:   true,
+	}
+}
+
+// wantSessionSeatLanding: the session's width follows the entry it arrived on, as a `/server` move's
+// does — the pin, else the entry's floor until the new server's first beat names its slots.
+func wantSessionSeatLanding(s rankScenario) entryRanks {
+	ranks := wantSessionLanding(s)
+	if !ranks.refused {
+		ranks.width = s.width(false)
+	}
+	return ranks
+}
+
+// wantFiringSeatLanding: the session landing's ranks, with what a Firing does not follow.
+func wantFiringSeatLanding(s rankScenario) entryRanks {
+	ranks := wantSessionLanding(s)
+	if ranks.refused {
+		return ranks
+	}
+	// WRONG at base: issue firing-fallover-width-stale, fixed by plan item 9. The answer carries no
+	// width and nothing in a Firing follows the entry, so the run keeps fanning out at the dead
+	// primary's width rather than the fallback entry's.
+	ranks.width = rankPrimaryWidth
+	// WRONG at base: issue firing-namer-dead-primary, fixed by plan item 8. The namer's session
+	// reader is the primary's binding for the whole run, so an unrouted child spawned after the
+	// fallover is named on the dead primary rather than on the fallback it runs on.
+	ranks.namedOn = rankPrimaryEndpoint
+	return ranks
+}
+
+// TestEntryRankRoutedDoors pins the doors a routed child binds a server entry through: a spawn's
+// Delegation target (E), and the Sub-agents seat's Server fallback landing on the entry (F) on both
+// Drivers. Every row states ADR 0045 decision 4: no root `context-window:` or `working-window:`
+// reaches a routed binding — they describe the session's own server — and an entry stating no
+// window or reserve share leaves the child on its parent's.
+func TestEntryRankRoutedDoors(t *testing.T) {
+	t.Parallel()
+
+	runRankDoors(t, []rankDoor{
+		{name: "E routed spawn", resolve: resolveRoutedSpawn, want: wantRoutedSpawn},
+		{name: "F TUI routed landing", resolve: resolveSessionRoutedLanding, want: wantRoutedLanding},
+		{name: "F unattended routed landing", resolve: resolveFiringRoutedLanding, want: wantRoutedLanding},
+	})
+}
+
+// resolveRoutedSpawn resolves the Delegation target both Drivers latch off the Sub-agent server's
+// beat (the TUI's subAgentBeat, a Firing's resolveFiringRouting) — the target as stated, before the
+// engine lays it over the parent's Config.
+func resolveRoutedSpawn(t *testing.T, s rankScenario) entryRanks {
+	t.Helper()
+	target := resolveDelegationTarget(s.entry(), s.key(), s.monitored(), nil, s.options().StreamIdleTimeout)
+	if target == nil {
+		return entryRanks{refused: true}
+	}
+	ranks := entryRanks{
+		window:    target.ContextWindow,
+		working:   target.WorkingWindow,
+		reserve:   target.ResponseReserveFraction,
+		maxOutput: target.MaxOutputTokens,
+		width:     target.ParallelAgents,
+		dialect:   domain.EffortDialect(target.EffortDialect),
+		model:     target.Model,
+		name:      target.ServerName,
+	}
+	if target.StreamIdleTimeout != nil {
+		ranks.streamIdle = *target.StreamIdleTimeout
+	}
+	return ranks
+}
+
+// wantRoutedSpawn: the routed landing's ranks, as a target states them for the engine to lay over
+// the parent.
+func wantRoutedSpawn(s rankScenario) entryRanks {
+	ranks := wantRoutedLanding(s)
+	if ranks.refused {
+		return ranks
+	}
+	// A reserve share the entry does not state is left 0, which the engine reads as "the parent's
+	// stands" (DelegationTarget.binding) — where the landing states the parent's.
+	if !s.pinned {
+		ranks.reserve = 0
+	}
+	// The spawn's width ranks the beat's slots between the pin and the floor (ADR 0039: one width).
+	ranks.width = s.width(true)
+	// A target states no description, so the child keeps its parent's words; and it is always a
+	// configured entry, never the one-run `--endpoint` row (DelegationTarget.binding).
+	ranks.description = ""
+	ranks.ephemeral = false
+	return ranks
+}
+
+// resolveSessionRoutedLanding lands the TUI's Sub-agents seat lander (sessionFallback.routedLander)
+// on the entry, over the window and reserve share the session holds on the primary.
+func resolveSessionRoutedLanding(t *testing.T, s rankScenario) entryRanks {
+	t.Helper()
+	_, ranks := landOn(sessionFallbackOf(t, s).routedLander(), s)
+	return ranks
+}
+
+// resolveFiringRoutedLanding lands a Firing's Sub-agents seat lander on the entry — built as
+// newFiringSeatFallback builds it, over the parent firingConfig hands resolveFiringRouting: the window
+// and reserve share the run bound on the primary.
+func resolveFiringRoutedLanding(t *testing.T, s rankScenario) entryRanks {
+	t.Helper()
+	cfg, in := firingOnPrimary(t, s)
+	_, ranks := landOn(fallbackLander{
+		opts:   in.opts,
+		roots:  in.roots,
+		routed: true,
+		parent: delegationParent{
+			window:  cfg.Context.MaxContextTokens,
+			reserve: cfg.Context.ResponseReserveFraction,
+		},
+	}, s)
+	return ranks
+}
+
+// choosePin is the pin when the entry states one, else the value observed.
+func choosePin(pinned bool, pin, observed int) int {
+	if pinned {
+		return pin
+	}
+	return observed
+}
+
+// wantRoutedLanding: the entry's pins with no root window rank under them — the window pinned, else
+// the beat's, else the parent's; the working window pinned or none; the reserve share pinned, else
+// the parent's — the root stream-idle window under the entry's (the run's default silence bound, no
+// statement about a server), and the session landing's dialect, model and words.
+func wantRoutedLanding(s rankScenario) entryRanks {
+	ranks := wantSessionLanding(s)
+	if ranks.refused {
+		return ranks
+	}
+	// The parent's window is the last rank, under the beat's; no landable row reaches it, as a beat
+	// that names no model names no window either.
+	ranks.window = choosePin(s.pinned, rankEntryWindow, rankBeatWindow)
+	ranks.working, ranks.reserve = 0, rankParentReserve
+	if s.pinned {
+		ranks.working, ranks.reserve = rankEntryWorking, rankEntryReserve
+	}
+	// Width: an answer carries none; a routed child spawned after the landing takes the re-latched
+	// target's (E).
+	return ranks
 }
