@@ -9,6 +9,11 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Fixed:** a Sub-agent server's fallover is now announced (one `upstream_switched` Event per move) on every Driver — headless, the daemon, the bench and an embedder — not only the TUI. The engine claims the announcement itself, once per seat resolver and target server, so `FallbackAnswer` loses its `Announce` field; a resolver of an uncomparable type (a func adapter) is accepted and claims on the moving Agent's own holder. (routed-fallover-unannounced)
+- **Changed:** a routed Sub-agent server's fallover is re-latched by the engine from `FallbackAnswer.Target` on every Driver; the Drivers no longer push the fallback's target themselves, and `run.Spec.BindDelegationLatch` is gone. When every routed caller is cancelled during the grace window, the engine consults the seat's resolver once more on a context free of that cancel to see where the run lands, so a later routed spawn still dials the fallback straight away. An embedder's Sub-agents resolver must let that second consult join the run already in flight.
+- **Fixed:** after an unattended run's own server falls over to a `fallback:` entry, a sub-agent that is not routed to a Sub-agent server is now named on the fallback the run moved to, not on the dead primary (which cost each spawn the naming call's whole timeout).
+- **Fixed:** after an unattended run's own server falls over to a `fallback:` entry, the run now fans its sub-agents out at the fallback entry's `parallel-agents:` width (its pin, else the slots it advertises, else its default), not the dead primary's — so the fan-out ceiling and the delegation bounds the model is told match the server it now runs on.
+
 ## [0.31.0] — 2026-11-02
 
 - A `servers:` entry accepts `fallback:` (an ordered list of other entries' names) and `fallback-after:` (the grace to wait for the failed server first, default `2m`; `0` or negative is refused). A name no entry carries, the entry's own name, or a name listed twice is refused at load with an error naming the entry and the bad name; a one-run `--endpoint` server carries no fallback. The manual documents both keys, what starts a move, the grace, the one-way move and why there is no chaining (ADR 0105).
