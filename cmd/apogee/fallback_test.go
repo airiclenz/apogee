@@ -804,6 +804,16 @@ func TestHeadlessFallbackAppliesTheFallbackRoster(t *testing.T) {
 // seatFollowCheck checks that a Driver's landing hook followed the landing its seat made.
 type seatFollowCheck func(t *testing.T, seat *seatResolver)
 
+// landedTargetCheck checks that a Sub-agents seat's latest landing answered the engine the target on
+// endpoint, carrying the seat's own resolver (FallbackAnswer.Target).
+func landedTargetCheck(t *testing.T, seat *seatResolver, endpoint string) {
+	t.Helper()
+	latest, ok := seat.latestLanding()
+	if got := latest.answer.Target; !ok || got == nil || got.Endpoint != endpoint || got.Fallback != seat {
+		t.Errorf("answered target = %+v (landed %v); want %s's, carrying the seat's resolver", got, ok, endpoint)
+	}
+}
+
 // TestSeatResolverBindsEverySeatAndDriverAlike: the one constructor (newSeatResolver) builds both
 // seats' resolvers on both Drivers, each from its Driver's source as production builds it. On every
 // one a fault on the dead primary walks onto the live backup, the resolver keeps that landing as its
@@ -855,12 +865,10 @@ func TestSeatResolverBindsEverySeatAndDriverAlike(t *testing.T) {
 				wiring := newDelegationWiring("primary", live.serverList, spy, live.modelProfileEntries,
 					live.streamIdlePin, func(string) {}, keys).withFallback(fallback.routedLander)
 				return wiring.fallback, func(t *testing.T, seat *seatResolver) {
-					if len(spy.pushes) == 0 {
-						t.Fatal("the wiring latched nothing at the landing")
-					}
-					got := spy.pushes[len(spy.pushes)-1]
-					if got == nil || got.Endpoint != backup.URL || got.Fallback != seat {
-						t.Errorf("latched target = %+v; want backup's, carrying the seat's resolver", got)
+					landedTargetCheck(t, seat, backup.URL)
+					if len(spy.pushes) != 0 {
+						t.Errorf("the wiring latched %+v at the landing; want the engine to re-latch from the answer",
+							spy.pushes)
 					}
 					if name := wiring.targetName(); name != "backup" {
 						t.Errorf("wiring target = %q; want it re-pointed at backup", name)
@@ -879,14 +887,10 @@ func TestSeatResolverBindsEverySeatAndDriverAlike(t *testing.T) {
 		{
 			name: "unattended Sub-agents seat", kind: subAgentsSeat,
 			build: func(t *testing.T) (*seatResolver, seatFollowCheck) {
-				latch := &delegationLatchSlot{}
-				in := firingInputs{entry: primary, opts: opts, roots: firingRoots(t), delegationLatch: latch}
+				in := firingInputs{entry: primary, opts: opts, roots: firingRoots(t)}
 				source := firingSubAgentsSource(in, keys, newSubAgentServer(primary), "", parent)
 				return newSeatResolver(subAgentsSeat, source), func(t *testing.T, seat *seatResolver) {
-					got, ok := latch.latched()
-					if !ok || got == nil || got.Endpoint != backup.URL || got.Fallback != seat {
-						t.Errorf("latched target = %+v (pushed %v); want backup's, carrying the seat's resolver", got, ok)
-					}
+					landedTargetCheck(t, seat, backup.URL)
 				}
 			},
 		},
@@ -920,7 +924,87 @@ func TestSeatResolverBindsEverySeatAndDriverAlike(t *testing.T) {
 			if answer.Upstream.WorkingWindow != wantWorking {
 				t.Errorf("working window = %d; want %d for this seat", answer.Upstream.WorkingWindow, wantWorking)
 			}
+			if tc.kind == sessionSeat && answer.Target != nil {
+				t.Errorf("a session seat's landing answered target %+v; want none", answer.Target)
+			}
 			followed(t, seat)
+		})
+	}
+}
+
+// TestFallbackResolverLandsTheTargetForCancelledCallers: on both Drivers' Sub-agents seat, a caller
+// whose Resolve is cancelled inside the grace window gets the zero answer, yet the run it started
+// goes on, lands on the backup and commits the backup's Delegation target on the answer, carrying the
+// seat's own resolver — so the engine's consult after the cancel (agent.Agent.consultResolver) joins
+// the run, reads that target and re-latches the tree, with no Driver push.
+func TestFallbackResolverLandsTheTargetForCancelledCallers(t *testing.T) {
+	t.Parallel()
+	backup := stubllm.New(t, stubllm.Script{Model: "backup-model", Turns: []stubllm.Turn{{Text: "unused"}}})
+	primary := config.ServerEntry{Name: "primary", Endpoint: "http://127.0.0.1:1", Model: "primary-model",
+		Fallback: config.NewFallbackList("backup"), FallbackAfter: fallbackTestGrace.String()}
+	opts := config.Options{Servers: []config.ServerEntry{primary, {Name: "backup", Endpoint: backup.URL}}}
+	keys := config.NewKeyResolver("")
+
+	cases := []struct {
+		name  string
+		build func(t *testing.T) *seatResolver
+	}{
+		{
+			name: "TUI Sub-agents seat",
+			build: func(t *testing.T) *seatResolver {
+				live := newLiveSettings(opts, config.ProjectOffer{})
+				live.followEntry(primary)
+				holder := newUpstreamHolder()
+				dial := bindingOfEntry(primary, "")
+				holder.Bind(dial, dial.Monitor())
+				session := newSessionFallback(live, holder, keys, stateRoots{config: t.TempDir(), probe: t.TempDir()})
+				return newDelegationWiring("primary", live.serverList, &delegationSpy{}, live.modelProfileEntries,
+					live.streamIdlePin, func(string) {}, keys).withFallback(session.routedLander).fallback
+			},
+		},
+		{
+			name: "unattended Sub-agents seat",
+			build: func(t *testing.T) *seatResolver {
+				in := firingInputs{entry: primary, opts: opts, roots: firingRoots(t)}
+				return newSeatResolver(subAgentsSeat, firingSubAgentsSource(in, keys, newSubAgentServer(primary), "",
+					delegationParent{window: 200000, reserve: 0.25}))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			seat := tc.build(t)
+			if seat == nil {
+				t.Fatal("a seat whose primary names a fallback got no resolver")
+			}
+			graceEntered, release := make(chan struct{}), make(chan struct{})
+			var firstBeat sync.Once
+			seat.recovered = func(context.Context) bool {
+				firstBeat.Do(func() {
+					close(graceEntered)
+					<-release
+				})
+				return false
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			caller := resolveAsync(ctx, seat.fallbackResolver, primaryReport())
+			<-graceEntered
+			cancel()
+			if answer := awaitAnswer(t, caller); answer.Verdict != apogee.FallbackNone || answer.Target != nil {
+				t.Fatalf("the caller cancelled mid-grace got %+v; want the zero answer", answer)
+			}
+
+			close(release)
+			answer := awaitAnswer(t, resolveAsync(context.Background(), seat.fallbackResolver, primaryReport()))
+
+			if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" {
+				t.Fatalf("the consult after the cancel got %+v; want the run's switch onto backup", answer)
+			}
+			if got := answer.Target; got == nil || got.Endpoint != backup.URL || got.Fallback != seat {
+				t.Errorf("answered target = %+v; want backup's, carrying the seat's resolver", got)
+			}
+			landedTargetCheck(t, seat, backup.URL)
 		})
 	}
 }

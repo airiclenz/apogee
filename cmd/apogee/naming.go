@@ -48,8 +48,8 @@ type delegationNamer struct {
 	// target has ever landed. nil is the same answer for a Driver whose run has no Sub-agent server
 	// at all — a bench, or a Firing composed with no `sub-agents-server:` resolved — and keeps the
 	// fallback one branch rather than two. An unattended run that DID resolve one reads the target it
-	// resolved until its Sub-agents seat falls over, and the target that fallover latched after
-	// (newFiringNamer).
+	// resolved until its Sub-agents seat falls over, and the target that fallover's landing answered
+	// after (newFiringNamer).
 	routed func() (upstreamBinding, provider.EffortDialect, bool)
 	// enabled is the live `auto-title:` switch, seeded from the launch Options and flipped by the
 	// host when the pane or the file moves the key (tui.Options.OnAutoTitle). It is read at call
@@ -83,25 +83,28 @@ func newDelegationNamer(
 // work — and a Firing that fell back to the session server would put an extra call on the expensive
 // box for every spawn, which is precisely the cost that decision exists to avoid.
 //
-// The routed reader is the one thing that can move mid-run: the Sub-agents seat's fallback
-// re-latches the run's Delegation target through latch (firingSubAgentsSource), and the reader
-// follows it, so a child spawned after the fallover is named by the fallback it dials rather than by
-// the dead primary. A latch that carried no target sends naming to the session's binding, as later
-// spawns go to the run's own Upstream. A nil latch — a composition with no slot — answers routed for
-// the whole run.
+// The routed reader is the one thing that can move mid-run: the Sub-agents seat's resolver (seat,
+// the one routed's Fallback carries) answers each landing with the fallback's Delegation target, the
+// engine re-latches the run's tree from it (FallbackAnswer.Target), and the reader follows the
+// resolver's latest landing (seatResolver.latestLanding), so a child spawned after the fallover is
+// named by the fallback it dials rather than by the dead primary. A landing that resolved no target
+// sends naming to the session's binding, as later spawns go to the run's own Upstream. A nil seat —
+// an entry naming no `fallback:` — answers routed for the whole run.
 func newFiringNamer(
 	binding upstreamBinding,
 	dialect provider.EffortDialect,
 	routed *apogee.DelegationTarget,
-	latch *delegationLatchSlot,
+	seat *seatResolver,
 	autoTitle bool,
 ) *delegationNamer {
 	var routedUpstream func() (upstreamBinding, provider.EffortDialect, bool)
-	if routed != nil || latch != nil {
+	if routed != nil || seat != nil {
 		routedUpstream = func() (upstreamBinding, provider.EffortDialect, bool) {
 			target := routed
-			if latched, pushed := latch.latched(); pushed {
-				target = latched
+			if seat != nil {
+				if latest, landed := seat.latestLanding(); landed {
+					target = latest.answer.Target
+				}
 			}
 			if target == nil {
 				return upstreamBinding{}, provider.EffortDialectNone, false

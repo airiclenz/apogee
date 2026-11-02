@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // faultScript is a Responder that plays one scripted Delta sequence per request, in order, and
@@ -1315,6 +1317,71 @@ func TestFallbackRoutedRelatchYieldsToANewerSeat(t *testing.T) {
 				t.Errorf("root's stated width = %d, want %d", got, tc.wantWidth)
 			}
 		})
+	}
+}
+
+// TestFallbackRoutedLandingRelatchesAfterCancelledCallers pins the re-latch's at-once timing past a
+// cancelled wait: every routed caller of the Sub-agents seat's resolver is cancelled inside the grace
+// window and comes back with nothing, yet the run they started goes on and lands. The engine observes
+// that landing and re-latches the tree, so a routed child spawned after it dials the fallback before
+// any beat re-states it — with no Driver push and no holder moved.
+func TestFallbackRoutedLandingRelatchesAfterCancelledCallers(t *testing.T) {
+	t.Parallel()
+	const callers = 2
+	entered := make(chan struct{}, callers+1)
+	landed := make(chan struct{})
+	r := newRelatchRig(t, func(answer FallbackAnswer) FallbackResolver {
+		return &stubResolver{answer: func(ctx context.Context, _ FallbackReport) FallbackAnswer {
+			entered <- struct{}{}
+			select {
+			case <-landed:
+				return answer
+			case <-ctx.Done():
+				return FallbackAnswer{}
+			}
+		}}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan domain.StepResult, callers)
+	for i := range callers {
+		child := r.routedChild(t, fmt.Sprintf("cancelled-%d", i))
+		if err := child.Submit(domain.UserInput{Text: "work"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		go func() {
+			res, _ := child.Step(ctx) // a cancelled Step's error is the user's cancel, not under test
+			results <- res
+		}()
+	}
+	for range callers {
+		<-entered
+	}
+	cancel()
+	for range callers {
+		if res := <-results; res.Status != domain.StatusCancelled {
+			t.Fatalf("a cancelled caller's Step = %+v, want a cancelled Turn", res)
+		}
+	}
+	if got := r.parent.delegationTarget(); got != r.gruntTarget {
+		t.Fatalf("latched target before the landing = %+v, want the grunt's", got)
+	}
+
+	close(landed)
+
+	testtime.Eventually(t, testtime.Budget(5*time.Second), func() bool {
+		return r.parent.delegationTarget() == r.spareTarget
+	}, "the tree to re-latch onto the landed spare")
+	if got := r.parent.statedDelegationWidth(); got != 4 {
+		t.Errorf("root's stated width after the landing = %d, want the spare's 4", got)
+	}
+	next := r.child(t, "next")
+	if next.cfg.Model != spareModel || next.cfg.ServerName != "spare" || len(r.fallbackDials()) != 1 {
+		t.Errorf("spawn after the landing: model=%q server=%q spare dials=%d; want it dialled onto the spare",
+			next.cfg.Model, next.cfg.ServerName, len(r.fallbackDials()))
+	}
+	if got := len(r.switchedEvents()); got != 0 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want 0 — no cancelled caller moved a holder", got)
 	}
 }
 

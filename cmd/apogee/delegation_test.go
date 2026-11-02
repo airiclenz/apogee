@@ -1769,10 +1769,11 @@ func (r *seatFallbackRig) faultOnPrimary(resolver *seatResolver) apogee.Fallback
 
 // TestDelegationFallbackRoutedSeatFallsOverOneWay: the Sub-agents seat's resolver rides every target
 // the wiring latches; once the primary dies past the grace window the seat lands on its own
-// `fallback:`, the fallback's target is latched at once — so a routed child spawned before the next
-// beat dials it — the next beat watches the fallback entry, and a fallback that stops answering
-// still latches nil, so spawns use the session's Upstream. The seat the model is told about never
-// moves (ADR 0069).
+// `fallback:`, and the fallback's target rides the answer (FallbackAnswer.Target) carrying the same
+// resolver — the engine re-latches the tree from it, so a routed child spawned before the next beat
+// dials it, and the wiring pushes nothing itself — the next beat watches the fallback entry, and a
+// fallback that stops answering still latches nil, so spawns use the session's Upstream. The seat
+// the model is told about never moves (ADR 0069).
 func TestDelegationFallbackRoutedSeatFallsOverOneWay(t *testing.T) {
 	t.Parallel()
 	r := newSeatFallbackRig(t)
@@ -1786,14 +1787,18 @@ func TestDelegationFallbackRoutedSeatFallsOverOneWay(t *testing.T) {
 	}
 
 	r.killPrimary()
+	pushes := len(r.spy.pushes)
 	answer := r.faultOnPrimary(resolver)
 
 	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "spare" {
 		t.Fatalf("answer = %+v; want the switch onto spare", answer)
 	}
-	got := r.lastPush(t)
+	got := answer.Target
 	if got == nil || got.Endpoint != seatSpareEndpoint || got.Model != "spare-model" || got.Fallback != resolver {
-		t.Fatalf("target latched at the fallover = %+v; want spare's, carrying the same resolver", got)
+		t.Fatalf("target answered at the fallover = %+v; want spare's, carrying the same resolver", got)
+	}
+	if len(r.spy.pushes) != pushes {
+		t.Errorf("the fallover latched %+v; want the engine, not the wiring, to re-latch", r.spy.pushes[pushes:])
 	}
 	if name := r.wiring.targetName(); name != "spare" || r.wiring.server.entry.Name != "spare" {
 		t.Errorf("wiring target = %q on server %q; want both re-pointed at spare", name, r.wiring.server.entry.Name)
@@ -1817,8 +1822,8 @@ func TestDelegationFallbackRoutedSeatFallsOverOneWay(t *testing.T) {
 
 // TestDelegationFallbackRehomeBindsTheLatchedTargetsWindow: a routed child rehomed onto the seat's
 // fallback binds as a child spawned there after the fallover does — the window, working window and
-// stream-idle window of the target the fallover latched, and the parent's reserve share where the
-// fallback states none — never the session's root pins.
+// stream-idle window of the target the fallover answered (FallbackAnswer.Target), and the parent's
+// reserve share where the fallback states none — never the session's root pins.
 func TestDelegationFallbackRehomeBindsTheLatchedTargetsWindow(t *testing.T) {
 	t.Parallel()
 	r := newSeatFallbackRig(t)
@@ -1829,17 +1834,17 @@ func TestDelegationFallbackRehomeBindsTheLatchedTargetsWindow(t *testing.T) {
 	if answer.Verdict != apogee.FallbackSwitch {
 		t.Fatalf("answer = %+v; want a switch onto spare", answer)
 	}
-	target := r.lastPush(t)
+	target := answer.Target
 	if target == nil || target.Endpoint != seatSpareEndpoint {
-		t.Fatalf("target latched at the fallover = %+v; want spare's", target)
+		t.Fatalf("target answered at the fallover = %+v; want spare's", target)
 	}
 	if answer.Rebind.MaxContextTokens != target.ContextWindow || answer.Upstream.WorkingWindow != target.WorkingWindow {
-		t.Errorf("rehome binds window %d, working %d; the latched target binds %d, %d",
+		t.Errorf("rehome binds window %d, working %d; the answered target binds %d, %d",
 			answer.Rebind.MaxContextTokens, answer.Upstream.WorkingWindow, target.ContextWindow, target.WorkingWindow)
 	}
 	idle := answer.Upstream.StreamIdleTimeout
 	if idle == nil || target.StreamIdleTimeout == nil || *idle != *target.StreamIdleTimeout {
-		t.Errorf("rehome idle window %v; the latched target's %v", idle, target.StreamIdleTimeout)
+		t.Errorf("rehome idle window %v; the answered target's %v", idle, target.StreamIdleTimeout)
 	}
 	reserve := answer.Rebind.ResponseReserveFraction
 	if target.ResponseReserveFraction != 0 || reserve == nil || *reserve != seatParent.reserve {
@@ -1945,8 +1950,8 @@ func TestDelegationFallbackRetargetRearmsTheResolver(t *testing.T) {
 	}
 
 	pushes := len(r.spy.pushes)
-	r.wiring.fallover(retired, fallbackLanding{entry: r.entries[1]})
-	if r.wiring.targetName() != "grunt" || len(r.spy.pushes) != pushes {
-		t.Error("a landing by the retired resolver moved the seat the human picked")
+	target := r.wiring.fallover(retired, fallbackLanding{entry: r.entries[1]})
+	if r.wiring.targetName() != "grunt" || len(r.spy.pushes) != pushes || target != nil {
+		t.Errorf("a landing by the retired resolver moved the seat the human picked (answered target %+v)", target)
 	}
 }

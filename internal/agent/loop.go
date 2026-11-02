@@ -762,7 +762,7 @@ func (a *Agent) consultFallback(ctx context.Context, t *turnRun, reply completio
 	if a.seating.fallback == nil || !reply.fault.FallbackEligible() || a.seating.upstream.isRetired() {
 		return fallbackAbandon
 	}
-	answer := a.seating.fallback.Resolve(ctx, FallbackReport{
+	answer := a.consultResolver(ctx, FallbackReport{
 		Server:         a.cfg.ServerName,
 		Model:          reply.requested,
 		Fault:          reply.fault,

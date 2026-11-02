@@ -167,8 +167,9 @@ type DelegationTarget struct {
 // UpstreamSwitchedEvent per move is claimed here, tree-wide, rather than by any one holder.
 //
 // It also holds what a routed fallover needs to re-latch the seat (relatch): the resolver the latch
-// is armed on, and the root Agent's far-width setter, so the move lands on the tree's one latch and
-// on the root's stated width whichever depth the landing child sits at.
+// is armed on, the root Agent's far-width setter, so the move lands on the tree's one latch and on
+// the root's stated width whichever depth the landing child sits at, and the re-latch claims that
+// let each landing move the latch once.
 type delegationLatch struct {
 	mu     sync.RWMutex
 	target *DelegationTarget
@@ -185,6 +186,11 @@ type delegationLatch struct {
 	// announced holds every routed fallover already announced in this tree, keyed by the seat and
 	// the server it moved to (fallbackClaim); nil until the first claim.
 	announced map[fallbackClaim]struct{}
+	// relatched holds every routed landing already offered to the latch, keyed as announced is but
+	// claimed apart from it: a landing re-latches when its answer is observed (relatch), which a
+	// caller cancelled during the wait does without ever moving a holder or announcing; nil until the
+	// first claim.
+	relatched map[fallbackClaim]struct{}
 }
 
 // comparableResolver reports whether resolver's dynamic value can be compared with == and used as a
@@ -219,13 +225,19 @@ func claimFallbackKey(resolver FallbackResolver, holder *sharedUpstream, server 
 func (l *delegationLatch) claimAnnouncement(key fallbackClaim) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, done := l.announced[key]; done {
+	return claimOnce(&l.announced, key)
+}
+
+// claimOnce records key in claims, making the map on first use, and reports whether this was its
+// first claim. The caller holds the latch's mutex.
+func claimOnce(claims *map[fallbackClaim]struct{}, key fallbackClaim) bool {
+	if _, done := (*claims)[key]; done {
 		return false
 	}
-	if l.announced == nil {
-		l.announced = make(map[fallbackClaim]struct{})
+	if *claims == nil {
+		*claims = make(map[fallbackClaim]struct{})
 	}
-	l.announced[key] = struct{}{}
+	(*claims)[key] = struct{}{}
 	return true
 }
 
@@ -253,17 +265,31 @@ func (l *delegationLatch) disarm() {
 	l.mu.Unlock()
 }
 
-// relatch installs target — a routed fallover's FallbackAnswer.Target — when resolver, the landing
-// child's seat resolver, is the one the latch is armed on, and states target's width on the root
-// (stateWidth). The check and the install are one critical section, so a beat or a
-// `/sub-agents-server` switch landing beside it is wholly before (and decides it) or wholly after.
-// The two resolvers are compared only when both dynamic values are comparable — claimFallbackKey's
-// guard — so an embedder's func adapter never panics the compare; such a seat is never re-latched,
-// since the engine cannot tell its resolver is still the armed one. It reports whether it re-latched.
-func (l *delegationLatch) relatch(resolver FallbackResolver, target *DelegationTarget) bool {
+// isArmedOn reports whether the latch is armed on resolver, under relatch's comparability guard: a
+// resolver whose dynamic value cannot be compared is never armed-on.
+func (l *delegationLatch) isArmedOn(resolver FallbackResolver) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return comparableResolver(l.armed) && comparableResolver(resolver) && l.armed == resolver
+}
+
+// relatch installs target — a routed landing's FallbackAnswer.Target, the landing onto server — when
+// resolver, the landing child's seat resolver, is the one the latch is armed on, and states target's
+// width on the root (stateWidth). Each (resolver, server) landing is offered once (relatched): the
+// first observer of it decides, so a straggler or a later consult of a resolver run that cached its
+// switch moves no latch the tree has re-stated since. The claim, the check and the install are one
+// critical section, so a beat or a `/sub-agents-server` switch landing beside it is wholly before
+// (and decides it) or wholly after. The two resolvers are compared only when both dynamic values are
+// comparable — claimFallbackKey's guard — so an embedder's func adapter never panics the compare or
+// the claim; such a seat is never re-latched, since the engine cannot tell its resolver is still the
+// armed one. It reports whether it re-latched.
+func (l *delegationLatch) relatch(resolver FallbackResolver, server string, target *DelegationTarget) bool {
+	if !comparableResolver(resolver) {
+		return false
+	}
 	l.mu.Lock()
-	armed := l.armed
-	same := comparableResolver(armed) && comparableResolver(resolver) && armed == resolver
+	first := claimOnce(&l.relatched, fallbackClaim{seat: resolver, server: server})
+	same := first && comparableResolver(l.armed) && l.armed == resolver
 	if same {
 		l.install(target)
 	}

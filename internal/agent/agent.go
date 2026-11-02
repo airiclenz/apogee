@@ -841,6 +841,12 @@ func WithFallbackResolver(r FallbackResolver) Option {
 // started it, so a resolver runs it detached from ctx (context.WithoutCancel, under a backstop of
 // its own) and only each caller's own wait honours that caller's ctx.
 //
+// On the Sub-agents seat a caller cancelled during the wait does not end the engine's interest in
+// the run: the engine consults the resolver once more about the same report on a context stripped
+// of that cancel, to observe where the run lands and re-latch the tree from its answer
+// (FallbackAnswer.Target). That consult must join the run still going rather than start another,
+// and returns when the run's backstop ends it.
+//
 // A resolver announces nothing: the engine emits the one UpstreamSwitchedEvent per seat move itself.
 // On the Sub-agents seat, where every routed child moves a holder of its own, it claims that one
 // announcement per (resolver, FallbackAnswer.Server), so a resolver whose dynamic value is
@@ -901,13 +907,16 @@ type FallbackAnswer struct {
 	Waited time.Duration
 	// Target is the Delegation target the fallback makes of the Sub-agents seat, resolved whole by
 	// the Driver from the same beat — the target a host would latch for the fallback had the human
-	// named it. When a routed child's switch lands and is the first landing of this move in the tree
-	// (announcesRehome's claim), the engine re-latches the tree's Delegation target to it and states
-	// its ParallelAgents as the far width on the root, so later spawns route to the fallback rather
-	// than to the dead server. It is honoured only while the landing child's resolver is the one the
-	// latch is armed on (delegationLatch.relatch): a `/sub-agents-server` switch or a relist that
-	// replaced it since makes the answer stale. nil re-latches nothing, and a session-seat answer's
-	// Target is never read.
+	// named it — and carrying the seat's own resolver as its Fallback. When the engine first
+	// observes a routed landing of this move in the tree — a routed child's consult answered with
+	// the switch, or, when every caller was cancelled during the wait, the engine's own consult
+	// joining the run that went on (Agent.consultResolver) — it re-latches the tree's Delegation
+	// target to it and states its ParallelAgents as the far width on the root, so later spawns route
+	// to the fallback rather than to the dead server, with no beat and no Driver push. It is honoured
+	// only while the landing child's resolver is the one the latch is armed on
+	// (delegationLatch.relatch): a `/sub-agents-server` switch or a relist that replaced it since
+	// makes the answer stale. nil re-latches nothing, and a session-seat answer's Target is never
+	// read.
 	Target *DelegationTarget
 }
 

@@ -1213,47 +1213,6 @@ func TestOnceRoutesADelegationToTheSpecsTarget(t *testing.T) {
 	}
 }
 
-// TestOnceBindsTheDelegationLatch: a Driver's late bind (Spec.BindDelegationLatch) is handed the
-// constructed Agent's own setter exactly once, and a target pushed through it re-latches the run —
-// the delegated child is built against the pushed server although the Spec latched none.
-func TestOnceBindsTheDelegationLatch(t *testing.T) {
-	t.Parallel()
-
-	sessionUp := stubllm.New(t, delegatingSession())
-	targetUp := stubllm.New(t, stubllm.Script{Model: "grunt-model", Turns: []stubllm.Turn{
-		{Text: routedSubAnswer},
-	}})
-
-	spec := delegatingSpec(t, sessionUp)
-	binds := 0
-	spec.BindDelegationLatch = func(set func(*agent.DelegationTarget)) {
-		binds++
-		if set == nil {
-			t.Fatal("BindDelegationLatch was handed a nil setter")
-		}
-		set(&agent.DelegationTarget{Endpoint: targetUp.URL, Model: targetUp.Model})
-	}
-
-	res, err := Once(context.Background(), spec)
-	if err != nil {
-		t.Fatalf("Once: %v", err)
-	}
-	if binds != 1 {
-		t.Fatalf("BindDelegationLatch was called %d times, want once", binds)
-	}
-	if res.FinalText != routedAnswer {
-		t.Fatalf("Result.FinalText = %q, want %q — the parent never finished", res.FinalText, routedAnswer)
-	}
-	if got := childRequests(targetUp); got != 1 {
-		t.Errorf("the pushed server answered %d of the child's requests, want 1 — the latch did not "+
-			"reach the Agent (target log %v)", got, targetUp.Requests())
-	}
-	if got := childRequests(sessionUp); got != 0 {
-		t.Errorf("the session server answered %d of the child's requests, want 0 — the child "+
-			"ignored the re-latched target", got)
-	}
-}
-
 // TestOnceWithoutARoutingSpecRunsEveryDelegationOnTheSessionServer is the other half of the
 // seam: both fields nil is what every Firing did before it existed, and a second server standing
 // ready proves the nil is a NO-OP rather than a default that routes somewhere.

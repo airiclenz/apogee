@@ -16,6 +16,7 @@ package agent
 // observed model complete the move through Rebind, so there is still exactly one way to bind.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -465,8 +466,9 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 // while the resolver waited moves nothing and is refused (false), so a background workflow child
 // abandons rather than moving the seat after the human did. A routed child's holder is its own, so on the
 // Sub-agents seat the announcement is the first sibling's to claim the move in the tree-shared
-// delegation latch instead (announcesRehome), and that one claimant also re-latches the tree onto the
-// fallback (relatchDelegation). The binding itself is applied by followUpstream, on this Agent's own goroutine,
+// delegation latch instead (announcesRehome); the tree's re-latch onto the fallback is not the
+// rehome's but the consult's, which observes the landing whether or not a holder moves
+// (consultResolver). The binding itself is applied by followUpstream, on this Agent's own goroutine,
 // when the loop re-arms the request.
 func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	spec, bind := answer.Upstream, answer.Rebind
@@ -499,7 +501,6 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	if !a.announcesRehome(answer) {
 		return true
 	}
-	a.relatchDelegation(answer)
 	a.cfg.Events.Emit(domain.UpstreamSwitchedEvent{
 		EventBase:  a.base(turn),
 		FromServer: a.cfg.ServerName,
@@ -529,21 +530,62 @@ func (a *Agent) announcesRehome(answer FallbackAnswer) bool {
 	return a.delegation.claimAnnouncement(claimFallbackKey(a.seating.fallback, a.seating.upstream, answer.Server))
 }
 
-// relatchDelegation re-latches the tree's Delegation target onto the fallback a routed child's
-// landed move names (FallbackAnswer.Target), and states its width on the root, so the spawns after
-// the move route to the fallback rather than to the dead Sub-agent server. It runs only for the
-// rehome that won announcesRehome's claim — the first landing per (resolver, server) in the tree —
-// so a straggler, or a later consult of a resolver run that cached its switch, moves no latch: the
-// move was latched once, and a target a beat or the human has put there since stands. On the
-// session's seat, or with no Target, it does nothing; and it re-latches only while the landing
-// child's resolver is still the one the latch is armed on (delegationLatch.relatch), so a
-// `/sub-agents-server` switch or a relist made while the resolver waited wins. The engine owns the
-// re-latch, so it lands the same on every Driver (ADR 0031).
-func (a *Agent) relatchDelegation(answer FallbackAnswer) {
-	if answer.Target == nil || a.seating.upstream.seatOf() != domain.UpstreamSeatSubAgents {
+// consultResolver asks the seat's resolver about report — the respond phase's one consult
+// (consultFallback) — and, on the Sub-agents seat, observes where the resolver's run lands, so the
+// tree re-latches onto a fallen-over Sub-agent server when the landing commits rather than only
+// when a routed child applies it. A switch answer re-latches at once (relatchDelegation), whether
+// or not ctx was cancelled as it came back. A wait cancelled before the run answered — the user's
+// Esc, a cancelled Firing caller — leaves the run going, since a resolver runs it detached from every
+// caller (FallbackResolver), so the engine joins it once more on a context free of that cancel
+// (awaitLanding): a routed spawn made after every caller was cancelled still dials the fallback
+// before any beat re-states it, on every Driver (ADR 0031).
+func (a *Agent) consultResolver(ctx context.Context, report FallbackReport) FallbackAnswer {
+	resolver := a.seating.fallback
+	answer := resolver.Resolve(ctx, report)
+	if a.seating.upstream.seatOf() != domain.UpstreamSeatSubAgents {
+		return answer
+	}
+	switch {
+	case answer.Verdict == FallbackSwitch:
+		a.relatchDelegation(resolver, answer)
+	case ctx.Err() != nil:
+		a.awaitLanding(ctx, resolver, report)
+	}
+	return answer
+}
+
+// awaitLanding observes, off the caller's goroutine, where resolver's run for report lands after the
+// caller's own wait was cancelled: it consults resolver again on ctx stripped of its cancel, which
+// joins the run still going (a resolver hands every report on one failed server the run's one
+// answer), and re-latches from a switch. It does nothing unless the latch is still armed on resolver:
+// a seat the human or a relist has moved since has no landing to wait for. The observer ends when the
+// run does, under the backstop a resolver's detached run carries.
+func (a *Agent) awaitLanding(ctx context.Context, resolver FallbackResolver, report FallbackReport) {
+	if !a.delegation.isArmedOn(resolver) {
 		return
 	}
-	a.delegation.relatch(a.seating.fallback, answer.Target)
+	detached := context.WithoutCancel(ctx)
+	go func() {
+		if answer := resolver.Resolve(detached, report); answer.Verdict == FallbackSwitch {
+			a.relatchDelegation(resolver, answer)
+		}
+	}()
+}
+
+// relatchDelegation re-latches the tree's Delegation target onto the fallback a routed landing names
+// (FallbackAnswer.Target), and states its width on the root, so the spawns after the move route to
+// the fallback rather than to the dead Sub-agent server. Only the first observation of each landing
+// per (resolver, server) in the tree is offered to the latch, so a straggler, or a later consult of
+// a resolver run that cached its switch, moves no latch: the move was latched once, and a target a
+// beat or the human has put there since stands. With no Target it does nothing; and it re-latches
+// only while resolver — the landing child's seat resolver — is still the one the latch is armed on
+// (delegationLatch.relatch), so a `/sub-agents-server` switch or a relist made while the resolver
+// waited wins. The engine owns the re-latch, so it lands the same on every Driver (ADR 0031).
+func (a *Agent) relatchDelegation(resolver FallbackResolver, answer FallbackAnswer) {
+	if answer.Target == nil {
+		return
+	}
+	a.delegation.relatch(resolver, answer.Server, answer.Target)
 }
 
 // followUpstream re-applies the seat's rehome binding to this Agent's Config when the sharedUpstream

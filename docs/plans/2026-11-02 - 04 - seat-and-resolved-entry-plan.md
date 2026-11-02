@@ -210,7 +210,16 @@ cmd/apogee/fallback.go — fallbackResolver.Resolve, execute; internal/agent/fal
 
 **Commit:** `refactor(agent): the engine re-latches a fallen-over Sub-agents seat`
 
-## 7. Drivers hand the target over; the latch slot is deleted
+## 7. Drivers hand the target over; the latch slot is deleted — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): re-derived from the assumption that the engine's landing observation sits in rebind.go's rehome: the resolver consult it must observe is loop.go's consultFallback, which now calls rebind.go's new consultResolver (a one-line change in loop.go).
+NOTES (2026-11-02): mechanism for guard (b): consultResolver re-latches from any Sub-agents-seat switch answer (cancelled or not, before the rehome, so a refused rehome still re-latches, as the Driver push did); a wait cancelled before the answer starts awaitLanding, which re-consults the same resolver on context.WithoutCancel (joining the detached run) and re-latches from its switch. It runs only while the latch is armed on that resolver (delegationLatch.isArmedOn).
+NOTES (2026-11-02): the re-latch's once-per-(resolver, server) claim is now its own map (delegationLatch.relatched), separate from item 5's announcement claim, because a cancelled caller re-latches without moving a holder or announcing. relatch(resolver, server, target) claims, checks and installs in one critical section, and claims only for a comparable resolver.
+NOTES (2026-11-02): narrow race: if the run ends without a switch between a caller's cancel and awaitLanding's consult, fallbackResolver has already dropped that run, so the consult starts a new grace window and walk. Its answer is still used only to re-latch.
+NOTES (2026-11-02): seatSource.landed now returns the landing's Delegation target (the session seat's hook returns nil). seatResolver.land sets Target.Fallback to itself, puts the target on the answer, and records the latest landing after the hook so latestLanding carries Target. fallover returns nil when `d.fallback != from` (guard a) and keeps the re-point and the targetBinding/targetDialect record (guard c).
+NOTES (2026-11-02): firingRouting gained `subAgents *seatResolver` (the resolver target.Fallback carries), which newFiringNamer reads in place of the slot.
+NOTES (2026-11-02): a nil target from a landing no longer latches nil, where the Driver push did. This cannot happen: resolveDelegationTarget returns nil only for an unreachable beat or no model, and arrive refuses the landing under the same conditions.
+NOTES (2026-11-02): TestDelegationFallbackRetargetRearmsTheResolver (kept) now also checks that the retired resolver's landing answers nil. TestSeatResolverBindsEverySeatAndDriverAlike now checks that a session-seat landing answers no Target, and its Sub-agents rows read the answered target through the shared helper landedTargetCheck.
 
 **What:**
 Recast at the regression check (2026-11-02).

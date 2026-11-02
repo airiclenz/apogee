@@ -430,9 +430,13 @@ type seatSource struct {
 	// the move: the options, the roots, the key source, the beat, and — for the Sub-agents seat —
 	// what a routed child keeps from its parent (fallbackLander.parent).
 	lander func() fallbackLander
-	// landed is the Driver's landing hook, called with the seat's resolver after each landing is
-	// recorded and before its answer reaches the engine; nil when the Driver follows nothing.
-	landed func(seat *seatResolver, landing fallbackLanding)
+	// landed is the Driver's landing hook, called with the seat's resolver after each landing and
+	// before its answer reaches the engine; nil when the Driver follows nothing. On the Sub-agents
+	// seat it answers the Delegation target the landing makes of the seat — resolved from the
+	// landing's beat as resolveDelegationTarget resolves any target, nil for none — which the
+	// resolver hands the engine as FallbackAnswer.Target, so the engine re-latches the tree (ADR
+	// 0105). A session seat's hook answers nil.
+	landed func(seat *seatResolver, landing fallbackLanding) *apogee.DelegationTarget
 }
 
 // seatResolver is one seat's Server fallback (fallbackResolver) together with the latest landing it
@@ -464,8 +468,12 @@ func newSeatResolver(kind seatKind, src seatSource) *seatResolver {
 }
 
 // land is the resolver's landing act: the source's lander, turned routed on the Sub-agents seat,
-// beats the fallback named and resolves the whole landing; a landing is recorded as the latest and
-// handed to the Driver's hook before its answer goes back to the walk.
+// beats the fallback named and resolves the whole landing; the landing is handed to the Driver's
+// hook, and on the Sub-agents seat the target the hook answers rides the answer
+// (FallbackAnswer.Target) carrying this resolver as its Fallback, so every target the seat's
+// fallover latches consults the one instance. The landing, Target included, is recorded as the
+// latest before its answer goes back to the walk — where it commits for every caller of the run,
+// including the engine's consult after a cancelled one (agent.FallbackResolver).
 func (s *seatResolver) land(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
 	lander := s.src.lander()
 	if s.kind == subAgentsSeat {
@@ -475,12 +483,16 @@ func (s *seatResolver) land(ctx context.Context, name string) (apogee.FallbackAn
 	if !landed {
 		return landing.answer, false
 	}
+	if s.src.landed != nil {
+		target := s.src.landed(s, landing)
+		if s.kind == subAgentsSeat && target != nil {
+			target.Fallback = s
+			landing.answer.Target = target
+		}
+	}
 	s.latestMu.Lock()
 	s.latest, s.hasLanded = landing, true
 	s.latestMu.Unlock()
-	if s.src.landed != nil {
-		s.src.landed(s, landing)
-	}
 	return landing.answer, true
 }
 
@@ -592,7 +604,10 @@ func (f *sessionFallback) resolver() *seatResolver {
 		primary:   entry,
 		recovered: func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
 		lander:    f.lander,
-		landed:    func(_ *seatResolver, landing fallbackLanding) { f.remember(landing) },
+		landed: func(_ *seatResolver, landing fallbackLanding) *apogee.DelegationTarget {
+			f.remember(landing)
+			return nil
+		},
 	})
 	return f.current
 }

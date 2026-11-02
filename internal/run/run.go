@@ -134,15 +134,6 @@ type Spec struct {
 	// fallback servers, this seam only carries the resolver.
 	Fallback agent.FallbackResolver
 
-	// BindDelegationLatch is the late bind a Driver re-latches the Firing's Delegation target
-	// through once the Agent exists: Once hands it the Agent's own SetDelegationTarget right after
-	// construction, and the Driver keeps that setter for a push it cannot make before the run
-	// starts — its Sub-agents seat falling over to a fallback mid-run (ADR 0105), after which a
-	// child spawned later dials the fallback rather than the dead primary. It moves the target and
-	// nothing else: the seat the model is told about stays what DelegationSeat said (ADR 0069). nil
-	// ⇒ nothing is bound, and the target stays what DelegationTarget latched for the whole run.
-	BindDelegationLatch func(set func(*agent.DelegationTarget))
-
 	// Journal opens the Firing's live Event journal (ADR 0103) — the file a watcher follows while
 	// the run is in flight. Once calls it only for a run that HOLDS its record (a Store and a
 	// RecordID, and the hold taken), immediately after the hold, and ends the journal after the
@@ -607,12 +598,6 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		return Result{}, fmt.Errorf("apogee: construct the firing's agent: %w", err)
 	}
 	defer func() { _ = a.Close() }()
-	// The Driver's late bind (Spec.BindDelegationLatch), handed the Agent as soon as it exists and
-	// before its first Step, so a re-latch the Driver pushes mid-run reaches every later spawn.
-	if spec.BindDelegationLatch != nil {
-		spec.BindDelegationLatch(a.SetDelegationTarget)
-	}
-
 	// The record this run will be filed under, HELD from here to return (ADR 0022 D7's live-session
 	// hold), so `apogee undo <id>` — and any other door that asks Store.Hold first — is refused
 	// while the Firing can still write that record's journal. It is taken only now, after the

@@ -304,26 +304,29 @@ func (d *delegationWiring) withFallback(lander func() fallbackLander) *delegatio
 	return d
 }
 
-// fallover re-points the Sub-agents seat at the fallback its resolver just landed on, one-way. The
+// fallover re-points the Sub-agents seat at the fallback its resolver just landed on, one-way, and
+// answers the fallback's Delegation target for the engine to re-latch (seatSource.landed). The
 // wiring's server becomes the fallback entry — its generation advanced, so a beat in flight on the
-// dead primary is dropped — and its target name follows (the file's key, d.configured, is kept), so
-// a relist that leaves the key alone keeps the fallback rather than reinstalling the primary. The
-// fallback's target, resolved from the beat that found it answering, is latched at once under the
-// lock as Retarget's push is, so a routed child spawned before the next beat dials the fallback, not
-// the dead primary; a target that cannot be resolved latches nil, and spawns use the session's
-// Upstream as on any unusable beat (ADR 0045 decision 4, adr-0045-amend-1102). The seat the model is
-// told about does not move: that line moves on the human doors and nowhere else (ADR 0069).
+// dead primary is dropped — and its target name follows (the file's key, d.configured, is kept), so a
+// relist that leaves the key alone keeps the fallback rather than reinstalling the primary. The
+// target, resolved from the beat that found the fallback answering, is not latched here: it rides
+// the resolver's answer (FallbackAnswer.Target) and the engine re-latches the tree from it as the
+// landing commits, so a routed child spawned before the next beat dials the fallback, not the dead
+// primary (adr-0045-amend-1102). Its dial facts are recorded for the routed naming call
+// (routedBinding). A target that cannot be resolved answers nil, which re-latches nothing. The seat
+// the model is told about does not move: that line moves on the human doors and nowhere else (ADR
+// 0069).
 //
 // A landing by a resolver this wiring has since replaced — a human door moved the seat while the
-// walk ran — moves nothing: the human's choice stands.
-func (d *delegationWiring) fallover(from *seatResolver, landing fallbackLanding) {
+// walk ran — moves nothing and answers nil: the human's choice stands.
+func (d *delegationWiring) fallover(from *seatResolver, landing fallbackLanding) *apogee.DelegationTarget {
 	target := resolveDelegationTarget(landing.entry, landing.dial.APIKey, landing.observed,
 		d.userProfiles(), d.streamIdleRoot())
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.fallback != from {
-		return
+		return nil
 	}
 	d.server = newSubAgentServer(landing.entry)
 	d.target = landing.entry.Name
@@ -331,12 +334,11 @@ func (d *delegationWiring) fallover(from *seatResolver, landing fallbackLanding)
 	d.failures = 0
 	d.hasFallenOver = true
 	if target != nil {
-		target.Fallback = from
 		d.targetBinding = bindingOfTarget(target)
 		d.targetDialect = target.EffortDialect
 		d.targetBound = true
 	}
-	d.engine.SetDelegationTarget(target)
+	return target
 }
 
 // delegationSeatOf renders the installed Sub-agent server as the facts the orientation block names
@@ -843,7 +845,7 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 // resolves to at the fault; each landing re-points this wiring at the fallback it landed on
 // (fallover), so the seat's beats watch the fallback from then on. Every landing is routed, whatever
 // lander was wired (newSeatResolver's subAgentsSeat), so a rehomed child binds its window, working
-// window and reserve share as the target fallover latches for later spawns does
+// window and reserve share as the target fallover answers for later spawns does
 // (resolveDelegationTarget), never under the session's root pins. Called with the mutex held.
 func (d *delegationWiring) rearmLocked(server *subAgentServer) {
 	d.fallback = nil

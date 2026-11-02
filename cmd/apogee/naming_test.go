@@ -614,12 +614,12 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 	}
 }
 
-// An unattended run's routed reader follows its Sub-agents seat's fallover: once the seat's
-// fallback re-latches the Delegation target through the run's latch slot, a routed child's naming
-// call goes to the target that landing pushed — never to the dead primary the run resolved at
-// composition. A landing that resolved no target sends naming to the run's own server, as later
-// spawns go; and a run with no slot, or one nothing has pushed through yet, keeps the target it
-// resolved.
+// An unattended run's routed reader follows its Sub-agents seat's fallover: once the seat's resolver
+// lands on a fallback and answers its Delegation target — the target the engine re-latches the run's
+// tree to — a routed child's naming call goes to that target, never to the dead primary the run
+// resolved at composition. A landing that resolved no target sends naming to the run's own server,
+// as later spawns go; and a run with no resolver, or one whose resolver has landed nowhere yet, keeps
+// the target it resolved.
 func TestFiringNamerFollowsTheLatchedSubAgentsTarget(t *testing.T) {
 	t.Parallel()
 
@@ -628,29 +628,30 @@ func TestFiringNamerFollowsTheLatchedSubAgentsTarget(t *testing.T) {
 		EffortDialect: provider.EffortDialectKwargs}
 	session := upstreamBinding{Endpoint: "http://session", Model: "session-model"}
 
-	pushed := func(target *apogee.DelegationTarget) *delegationLatchSlot {
-		slot := &delegationLatchSlot{}
-		slot.push(target)
-		return slot
+	landed := func(target *apogee.DelegationTarget) *seatResolver {
+		seat := &seatResolver{kind: subAgentsSeat}
+		seat.latest = fallbackLanding{answer: apogee.FallbackAnswer{Target: target}}
+		seat.hasLanded = true
+		return seat
 	}
 	for _, tc := range []struct {
 		name        string
-		latch       *delegationLatchSlot
+		seat        *seatResolver
 		wantModel   string
 		wantDialect provider.EffortDialect
 	}{
-		{name: "the pushed target wins", latch: pushed(fallback), wantModel: "backup-model",
+		{name: "the landed target wins", seat: landed(fallback), wantModel: "backup-model",
 			wantDialect: provider.EffortDialectKwargs},
-		{name: "a nil push sends naming to the session", latch: pushed(nil), wantModel: "session-model",
-			wantDialect: provider.EffortDialectNone},
-		{name: "no push keeps the resolved target", latch: &delegationLatchSlot{}, wantModel: "grunt-model",
-			wantDialect: provider.EffortDialectNone},
-		{name: "no slot keeps the resolved target", latch: nil, wantModel: "grunt-model",
+		{name: "a landing with no target sends naming to the session", seat: landed(nil),
+			wantModel: "session-model", wantDialect: provider.EffortDialectNone},
+		{name: "no landing keeps the resolved target", seat: &seatResolver{kind: subAgentsSeat},
+			wantModel: "grunt-model", wantDialect: provider.EffortDialectNone},
+		{name: "no resolver keeps the resolved target", seat: nil, wantModel: "grunt-model",
 			wantDialect: provider.EffortDialectNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			namer := newFiringNamer(session, provider.EffortDialectNone, primary, tc.latch, true)
+			namer := newFiringNamer(session, provider.EffortDialectNone, primary, tc.seat, true)
 
 			binding, dialect := namer.upstream(true)
 			if binding.Model != tc.wantModel {
