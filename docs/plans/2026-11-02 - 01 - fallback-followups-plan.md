@@ -125,7 +125,12 @@ Part of fallover-skips-profile-settle (launcher half; item 7 closes it).
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestTUIFallback' ./cmd/apogee/`
 **Commit:** `fix(tui): a fallover follows the fallback entry's launcher`
 
-## 6. A TUI fallover settles the fallback profile at the Turn boundary
+## 6. A TUI fallover settles the fallback profile at the Turn boundary — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): `Model.followFallback` applies the settle rebind at once when nothing holds the engine (`engineHolds().canRebind()`, the `observeBinding` posture) and stashes it as `pendingRebind` otherwise; the plan's approach only stashed it, which would leave a background workflow's switch under an idle session unsettled until some later release. `TestFallbackSessionSeatSwitchIsNotedAndFollowed` (idle session) therefore now asserts exactly one immediate settle rebind on the observed window and none from the fallback's next beat.
+NOTES (2026-11-02): the ADR amendment is `adr-0105-amend-1102c` (`1102` and `1102b` were taken), amending decision 5 for items 5 and 6; named on ADR 0105's Status line and reading-order list.
+NOTES (2026-11-02): consequential edit — docs/manual/configuration.md: made necessary by the fallback profile settling at the Turn's end (the fallback section's TUI paragraph now says the fallback model's `tools:` roster applies and an unoffered `/effort` level is cleared when the Turn ends).
+NOTES (2026-11-02): the issue `fallover-skips-profile-settle` is closed by item 7 (its `**Closes:**` line); its Firing half remains, so this item lists no CLOSES.
 
 **What:**
 Depends on item 5.

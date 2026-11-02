@@ -71,7 +71,8 @@ type heartbeatState struct {
 	effort domain.EffortSupport
 	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
 	// lands while a worker owns the engine, while a launcher verb owns the server it talks to, or
-	// while a /bg launch is reading the Agent off the loop. It is applied by [Model.releaseEngine],
+	// while a /bg launch is reading the Agent off the loop — and when the session seat falls over to a
+	// fallback server mid-Turn, whose profile settles here ([Model.followFallback]). It is applied by [Model.releaseEngine],
 	// the one release transition finishWorker, foldActuationDone, foldBgStarted and
 	// closeWorkflowPrompt each run, once none of those holds still stands. Latest-wins: a second
 	// change inside the same window replaces the first, so only the newest reality is ever bound.
@@ -630,9 +631,19 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record c
 // observation baseline becomes what the fallback's own beat reported — the next beat off the
 // fallback is then no change, and no second "model changed" note follows the fallback note. Nothing
 // is recorded either: the human chose no server, so the `server:` key keeps the one they did, and
-// a `/server` back to it is a move rather than "already on". A rebind stashed before the switch
-// describes the server the seat left, so it is dropped; and a fresh tick chain is armed, so a beat
-// still in flight against that server lands inert ([Model.heartbeatLive]).
+// a `/server` back to it is a move rather than "already on". A fresh tick chain is armed, so a beat
+// still in flight against the server left lands inert ([Model.heartbeatLive]).
+//
+// What the engine's mid-Turn rehome could NOT do is settle the fallback's profile: the roster swap
+// refuses mid-Exchange, and the effort clear and the profile and hint notices are this host's own
+// (ADR 0060 D8/D9). So the same rebind a `/server` move ends in is run for the fallback at the
+// Turn's end boundary — stashed as the pending rebind, which REPLACES any change stashed before the
+// switch (that one described the server the seat left), and applied by [Model.releaseEngine] once
+// the engine is quiescent; applied at once where nothing holds it, as a background workflow's
+// switch under an idle session finds it. The intent carries the window the fallback's beat
+// OBSERVED, never the bound one: the binary records the rebind's window as the server's own
+// observation, and a pin recorded there would bind the pin after a later `/settings` clear. The
+// model is already the bound one, so the rebind writes no second model-change note.
 //
 // A host with nothing to follow says why in one note and the display stays where it was.
 func (m Model) followFallback(e domain.UpstreamSwitchedEvent) (Model, tea.Cmd) {
@@ -650,11 +661,22 @@ func (m Model) followFallback(e domain.UpstreamSwitchedEvent) (Model, tea.Cmd) {
 	m.opts.ContextWindow = result.ContextWindow
 	m.hb.observedModel, m.hb.observedWindow = result.Model, result.ObservedWindow
 	m.hb.observedDialect = result.ObservedDialect
-	m.hb.pendingRebind = nil
 	m.hb.lastRebindFailed = ""
 	// The box's facts were frozen when it was seeded; restate it so the top of the scrollback names
 	// the server this session is now on ([Model.foldServerSwitch]'s reason).
 	m.transcript.refreshStartup(newStartupView(m.opts))
+	settle := rebindIntent{
+		model:     result.Model,
+		window:    result.ObservedWindow,
+		dialect:   result.ObservedDialect,
+		effort:    result.ObservedEffort,
+		quietSeed: true,
+	}
+	if m.engineHolds().canRebind() {
+		m, _ = m.applyRebind(settle)
+	} else {
+		m.hb.pendingRebind = &settle
+	}
 	if !m.observesUpstream() {
 		return m, nil
 	}

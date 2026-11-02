@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -675,4 +678,79 @@ func TestTUIFallbackFalloverFollowsTheLauncherPath(t *testing.T) {
 // tuiFallbackWant is what the display adopts after the follow onto the backup at endpoint.
 func tuiFallbackWant(endpoint string) tui.ServerFallbackResult {
 	return tui.ServerFallbackResult{Endpoint: endpoint, HostAlias: "backup", Model: "backup-model", ContextWindow: 16384}
+}
+
+// TestTUIFallbackSettlesTheFallbackProfileRoster: a session-seat fallover onto a fallback serving a
+// model whose profile lifts a globally disabled tool leaves the roster where it was — the engine's
+// mid-Turn rehome cannot swap it — and the rebind the display runs at the Turn boundary, from what
+// the follow answers, applies the fallback profile's roster. The follow carries the effort tell the
+// fallback's beat read, which is what that settle judges a live override against.
+func TestTUIFallbackSettlesTheFallbackProfileRoster(t *testing.T) {
+	t.Parallel()
+	backup := stubllm.New(t, stubllm.Script{
+		Model: "model-b",
+		Discovery: stubllm.Discovery{Models: []stubllm.DiscoveredModel{{ID: "model-b",
+			Reasoning: &stubllm.ModelReasoning{SupportedEfforts: []string{"low", "high"}}}}},
+		Turns: []stubllm.Turn{{Text: "unused"}},
+	})
+	primary := config.ServerEntry{Name: "primary", Endpoint: "http://127.0.0.1:1", Model: "model-a",
+		Fallback: config.NewFallbackList("backup"), FallbackAfter: fallbackTestGrace.String()}
+	opts := config.Options{
+		Endpoint:      primary.Endpoint,
+		Model:         primary.Model,
+		HostAlias:     primary.Name,
+		StartupEntry:  primary,
+		Servers:       []config.ServerEntry{primary, {Name: "backup", Endpoint: backup.URL}},
+		Mode:          "ask-before",
+		Workspace:     t.TempDir(),
+		ConfigDir:     t.TempDir(),
+		AutoCompact:   true,
+		ToolsDisabled: []string{"view_diff"},
+		ModelProfiles: []profiles.Entry{{
+			Pattern:     "model-b",
+			Profile:     apogee.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"view_diff"}}},
+			SpellsTools: true,
+		}},
+	}
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+	t.Cleanup(w.close)
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	answer := w.fallback.Resolve(context.Background(), apogee.FallbackReport{Server: "primary", Model: "model-a"})
+	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" || answer.Rebind.Model != "model-b" {
+		t.Fatalf("answer = %+v, want a switch onto backup's model-b", answer)
+	}
+	landing, ok := w.fallback.landing("backup")
+	if !ok {
+		t.Fatal("the landing on backup was not kept for the follow")
+	}
+
+	result, err := w.followFallback("backup")
+	if err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+	if !reflect.DeepEqual(result.ObservedEffort, landing.observed.EffortSupport) ||
+		!slices.Equal(result.ObservedEffort.Efforts, []string{"low", "high"}) {
+		t.Errorf("observed effort = %+v, want the landing's beat (%+v) naming low and high",
+			result.ObservedEffort, landing.observed.EffortSupport)
+	}
+	if liveSetHas(w.toolSet, "view_diff") {
+		t.Fatal("view_diff is on the set before the boundary; the follow itself swapped the roster")
+	}
+
+	if _, err := (serverHost{w: w}).Rebind(result.Model, result.ObservedWindow, result.ObservedDialect); err != nil {
+		t.Fatalf("the boundary rebind onto %s: %v", result.Model, err)
+	}
+
+	if !liveSetHas(w.toolSet, "view_diff") {
+		t.Error("view_diff is missing after the boundary: the fallback profile's roster was never applied")
+	}
 }

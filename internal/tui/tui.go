@@ -1763,6 +1763,11 @@ type ServerFallbackResult struct {
 	// reports exactly that is no change.
 	ObservedWindow  int
 	ObservedDialect domain.EffortDialect
+	// ObservedEffort is the whole effort tell that same beat read for the fallback's model (ADR
+	// 0060): the level set the settle at the Turn boundary judges a live session override against,
+	// so an override the fallback model does not offer is cleared there (D8). The zero value is "no
+	// dial reported", which clears nothing.
+	ObservedEffort domain.EffortSupport
 }
 
 // PreboundReason names why a session started with NO upstream bound — the three answers ADR 0036

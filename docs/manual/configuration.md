@@ -2377,7 +2377,10 @@ In the TUI the move is one line in the transcript —
 `server fallback: <server> (<model>) failed (<fault>); continuing on <fallback> (<model>) after waiting <time>`,
 or `sub-agents server fallback: …` when the moved server is `sub-agents-server`'s — and after a
 move of the session's own server the footer, the heartbeat and the
-[llama-launcher](#local-servers--llama-launcher) commands follow the fallback.
+[llama-launcher](#local-servers--llama-launcher) commands follow the fallback. When that Turn
+ends, the fallback model's profile takes effect as it does after `/server`: its `tools:`
+roster applies, and an `/effort` level the fallback model does not offer is cleared, with a
+note saying so.
 
 **The move is one-way.** apogee never moves back to the first server by itself; in the TUI,
 `/server` moves you back when you want. It moves the whole seat: the session and every

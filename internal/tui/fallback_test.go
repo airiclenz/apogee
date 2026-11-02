@@ -32,10 +32,12 @@ func sessionSwitch(depth int) domain.UpstreamSwitchedEvent {
 }
 
 // fakeFollow stands in for the composition root's follow of a committed fallback: it records every
-// server it was asked to follow and answers with what the binary would have adopted.
+// server it was asked to follow and answers with what the binary would have adopted, which tweak
+// (when set) restates before it is answered.
 type fakeFollow struct {
 	calls []string
 	err   error
+	tweak func(*ServerFallbackResult)
 }
 
 func (f *fakeFollow) follow(name string) (ServerFallbackResult, error) {
@@ -43,13 +45,17 @@ func (f *fakeFollow) follow(name string) (ServerFallbackResult, error) {
 	if f.err != nil {
 		return ServerFallbackResult{}, f.err
 	}
-	return ServerFallbackResult{
+	result := ServerFallbackResult{
 		Endpoint:       "http://remote:8080",
 		HostAlias:      name,
 		Model:          "remote-model",
 		ContextWindow:  fallbackWindow,
 		ObservedWindow: fallbackWindow,
-	}, nil
+	}
+	if f.tweak != nil {
+		f.tweak(&result)
+	}
+	return result, nil
 }
 
 // seededFallback is a ready, idle session on test-host with the switch and the follow seams wired.
@@ -64,7 +70,8 @@ func seededFallback(t *testing.T, follow *fakeFollow) (Model, *fakeSwitch, *fake
 }
 
 // The session seat's switch, whichever agent on the seat hit the fault — the top-level one or an
-// unrouted child — writes one note and is followed: the display adopts the fallback, the next beat
+// unrouted child — writes one note and is followed: the display adopts the fallback, the fallback's
+// profile is settled by one rebind (at once here, where nothing holds the engine), the next beat
 // off it is no change, and `/server test-host` afterwards is a move back rather than "already on".
 func TestFallbackSessionSeatSwitchIsNotedAndFollowed(t *testing.T) {
 	t.Parallel()
@@ -96,12 +103,16 @@ func TestFallbackSessionSeatSwitchIsNotedAndFollowed(t *testing.T) {
 			if cmd == nil {
 				t.Fatal("the follow armed no beat — a beat in flight against the server left would stay live")
 			}
+			settle := []rebindCall{{model: "remote-model", window: fallbackWindow}}
+			if !reflect.DeepEqual(rb.calls, settle) {
+				t.Fatalf("rebind calls = %+v, want the one settle %+v", rb.calls, settle)
+			}
 
 			notesBefore = len(noteTexts(m))
 			m = foldBeatMsg(t, m, upBeat("remote-model", fallbackWindow))
 
-			if len(rb.calls) != 0 {
-				t.Errorf("rebind calls = %v, want none — the fallback's beat is no change", rb.calls)
+			if !reflect.DeepEqual(rb.calls, settle) {
+				t.Errorf("rebind calls = %+v, want only the settle %+v — the fallback's beat is no change", rb.calls, settle)
 			}
 			if got := noteTexts(m)[notesBefore:]; len(got) != 0 {
 				t.Errorf("the fallback's first beat wrote %q, want no second note", got)
@@ -116,6 +127,65 @@ func TestFallbackSessionSeatSwitchIsNotedAndFollowed(t *testing.T) {
 				t.Errorf("HostAlias = %q, want the session moved back to test-host", m.opts.HostAlias)
 			}
 		})
+	}
+}
+
+// A switch that lands mid-Turn settles the fallback's profile at the Turn's end boundary: nothing
+// is rebound while the worker holds the engine, and the Exchange's end runs the one rebind — on the
+// window the fallback's beat OBSERVED, not the pinned one the engine was handed, with the dial it
+// reported — which clears an effort override the fallback model does not offer and writes no
+// second model-change note.
+func TestFallbackSessionSeatSwitchSettlesAtTheBoundary(t *testing.T) {
+	t.Parallel()
+	const observedWindow = 32768
+	effort := domain.EffortSupport{
+		Supported: true, Dialect: domain.EffortDialectReasoning, Efforts: []string{"low"}, Default: "low",
+	}
+	follow := &fakeFollow{tweak: func(r *ServerFallbackResult) {
+		r.ObservedWindow = observedWindow
+		r.ObservedDialect = effort.Dialect
+		r.ObservedEffort = effort
+	}}
+	m, _, rb := seededFallback(t, follow)
+	// The binary binds the entry's pin over the observed window, as rootWiring.rebind does.
+	rb.answer = func(model string, _ int) (RebindResult, error) {
+		return RebindResult{Model: model, ContextWindow: fallbackWindow}, nil
+	}
+	m.eng.SetEffortOverride(domain.EffortHigh)
+	startStubWorker(t, &m)
+	notesBefore := len(noteTexts(m))
+
+	m = step(t, m, eventMsg{Event: sessionSwitch(0)})
+
+	if len(rb.calls) != 0 {
+		t.Fatalf("rebind calls = %+v mid-Turn, want none while the worker holds the engine", rb.calls)
+	}
+	if override, _ := m.eng.ThinkingEffort(); override != domain.EffortHigh {
+		t.Errorf("override = %q mid-Turn, want high kept until the boundary", override)
+	}
+
+	m = step(t, m, exchangeDoneMsg{})
+
+	want := []rebindCall{{model: "remote-model", window: observedWindow, dialect: effort.Dialect}}
+	if !reflect.DeepEqual(rb.calls, want) {
+		t.Errorf("rebind calls = %+v, want the one settle on the observed window %+v", rb.calls, want)
+	}
+	if m.hb.pendingRebind != nil {
+		t.Errorf("pendingRebind = %+v, want it cleared by the boundary", m.hb.pendingRebind)
+	}
+	if m.opts.Model != "remote-model" || m.opts.ContextWindow != fallbackWindow {
+		t.Errorf("opts = {%q %d}, want the fallback's model on its pinned window", m.opts.Model, m.opts.ContextWindow)
+	}
+	if override, _ := m.eng.ThinkingEffort(); override != "" {
+		t.Errorf("override = %q after the boundary, want it cleared — remote-model offers only low", override)
+	}
+	notes := noteTexts(m)[notesBefore:]
+	if n := countNotes(m, "model changed"); n != 0 {
+		t.Errorf("model-change notes = %d, want none — the fallback note already said it; notes = %q", n, notes)
+	}
+	cleared := effortClearedNote(domain.EffortHigh, "", "remote-model", "low")
+	if n := countNotes(m, cleared); n != 1 {
+		t.Errorf("notes = %q, want exactly one %q", notes, cleared)
 	}
 }
 
