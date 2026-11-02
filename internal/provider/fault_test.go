@@ -48,6 +48,24 @@ func TestClassify(t *testing.T) {
 			want:   fault{overflow: true, code: http.StatusBadRequest},
 		},
 		{
+			name:   "400 with the context_length_exceeded code and its message",
+			status: http.StatusBadRequest,
+			text:   `{"error":{"message":"prompt exceeds the context window","type":"invalid_request_error","code":"context_length_exceeded"}}`,
+			want:   fault{overflow: true, code: http.StatusBadRequest},
+		},
+		{
+			name:   "400 with only the context_length_exceeded code",
+			status: http.StatusBadRequest,
+			text:   `{"error":{"message":"request rejected","type":"invalid_request_error","code":"context_length_exceeded"}}`,
+			want:   fault{overflow: true, code: http.StatusBadRequest},
+		},
+		{
+			name:   "400 with only the exceeds-the-context-window message",
+			status: http.StatusBadRequest,
+			text:   `{"error":{"message":"prompt exceeds the context window","type":"invalid_request_error"}}`,
+			want:   fault{overflow: true, code: http.StatusBadRequest},
+		},
+		{
 			name:   "400 without a marker is a plain fault",
 			status: http.StatusBadRequest,
 			text:   "jinja2.exceptions.TemplateError",

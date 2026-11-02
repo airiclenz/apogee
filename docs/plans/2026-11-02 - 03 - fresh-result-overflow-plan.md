@@ -42,7 +42,7 @@
 - The elision marker wording (its `start_line/end_line` hint is misleading for `web_fetch`; separate issue if wanted).
 - `web_fetch`'s 2 MiB transport cap; the `tool-result-cap` guard; `mid-exchange-auto-compaction`.
 
-## 1. Classify `context_length_exceeded` as a context overflow
+## 1. Classify `context_length_exceeded` as a context overflow — ✅ DONE (2026-11-02)
 
 **What:**
 **Goal:** an upstream 400 whose body carries `context_length_exceeded` or "exceeds the context window" classifies as a context overflow (the error reads "apogee: context window exceeded: …"), and every body classified as overflow before still is.

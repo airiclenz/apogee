@@ -741,14 +741,18 @@ func isRetryableStatus(status int) bool {
 }
 
 // isContextOverflow reports whether a 400 body looks like a context-window rejection,
-// matching the markers the TS oracle recognises across server implementations plus the
-// Messages API's "prompt is too long" (its invalid_request_error for an oversized prompt).
+// matching the markers the TS oracle recognises across server implementations, the
+// Messages API's "prompt is too long" (its invalid_request_error for an oversized prompt),
+// and the OpenAI-shaped `context_length_exceeded` code with its "exceeds the context
+// window" message.
 func isContextOverflow(text string) bool {
 	lower := strings.ToLower(text)
 	for _, marker := range []string{
 		"exceed_context_size",
 		"exceeds the available context",
 		"context length exceeded",
+		"context_length_exceeded",
+		"exceeds the context window",
 		"maximum context length",
 		"too many tokens",
 		"prompt is too long",
