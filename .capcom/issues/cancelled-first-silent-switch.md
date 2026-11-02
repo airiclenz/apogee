@@ -1,10 +1,12 @@
 ---
 title: Sub-agents fallover goes unannounced when the First caller is cancelled
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-02 - 01 - fallback-followups-plan
 created: 2026-11-02T14:46:59Z
+closed: 2026-11-02T16:20:10Z
+reason: Resolved by plan 2026-11-02 - 01 - fallback-followups-plan item 9 (archived at 81fc817e)
 ---
 
 fallbackResolver.Resolve hands First only to the caller that started the run, and Agent.announcesRehome emits the Sub-agents-seat UpstreamSwitchedEvent only for First. If that caller's ctx ends during the grace wait (or before it rehomes), its siblings still move with First false and no event is emitted: no TUI note, no headless stderr line, no daemon log line, nothing in the journal. Found in item 11 NOTES of plan 2026-11-02 - 00 - midrun-model-fallback-plan.

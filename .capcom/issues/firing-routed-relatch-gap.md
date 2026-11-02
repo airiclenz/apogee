@@ -16,3 +16,7 @@ Each later routed spawn pays retries against a dead server (up to the dial timeo
 ## Acceptance
 
 - After a Sub-agents-seat fallover in a Firing, a later routed spawn sends nothing to the primary, pinned by a headless test
+
+## Log
+
+- 2026-11-02 Airic Lenz: Plan 2026-11-02 - 01 - fallback-followups-plan item 8 (archived at 81fc817e) landed the Firing re-latch: a later routed spawn dials the fallback for its turns. Still open: the Firing's delegation namer (newFiringNamer) keeps the primary's routed binding, so a later unnamed child still asks the dead primary for its name.

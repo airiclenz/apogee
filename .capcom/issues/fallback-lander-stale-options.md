@@ -1,10 +1,12 @@
 ---
 title: TUI fallback lander reads options snapshotted before a /settings edit
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-02 - 01 - fallback-followups-plan
 created: 2026-11-02T14:12:35Z
+closed: 2026-11-02T16:20:09Z
+reason: Resolved by plan 2026-11-02 - 01 - fallback-followups-plan item 3 (archived at 81fc817e)
 ---
 
 The TUI `sessionFallback` lander snapshots `live.options()` when the resolver is first built (cmd/apogee/fallback.go:513; sessionFallback at cmd/apogee/fallback.go:392-437), so a fallback walk after a `/settings` edit reads stale options. Landed in item 10 (b5511769) of plan 2026-11-02 - 00 - midrun-model-fallback-plan.

@@ -1,10 +1,12 @@
 ---
 title: Background workflow host holds no fallback resolver
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-02 - 01 - fallback-followups-plan
 created: 2026-11-02T14:12:35Z
+closed: 2026-11-02T16:20:09Z
+reason: Resolved by plan 2026-11-02 - 01 - fallback-followups-plan item 2 (archived at 81fc817e)
 ---
 
 A background workflow's host holds no fallback resolver (backgroundHost, internal/agent/background.go:666-681 copies `appliedGen` but no resolver), so a session-seat fault inside a background workflow child is abandoned as before. The child still follows a move another agent made. Deferred from plan 2026-11-02 - 00 - midrun-model-fallback-plan (item 7).
