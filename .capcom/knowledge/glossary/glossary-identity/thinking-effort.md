@@ -15,7 +15,10 @@ one. The anthropic wire is the exception: no effort there still sends the no-eff
 its model accepts (`thinking: disabled`, or the lowest rung for a model that refuses disabled).
 Whether the dial exists at all is **detected passively**, from the discovery payloads the
 heartbeat already fetches — a `/props` chat template that mentions the kwarg, or a `/v1/models`
-`reasoning` object naming the model's own levels — never by probing; a `servers:` entry's
+`reasoning` object naming the model's own levels, whose **shape**, not its presence, picks the
+dialect: OpenRouter's keys (`supported_efforts`, `default_effort`) its `reasoning` object, Splash's
+(`thinks`, `efforts`, `default`) the template kwargs, `thinks: false` no dial, and any other
+object no tell (ADR 0060's 2026-11-02 amendment) — never by probing; a `servers:` entry's
 `effort-dialect:` key forces the dialect for a provider that advertises no such tell. What the
 next request will actually carry reads in the **footer**, and `/effort` opens a **picker** of
 the levels this model reports; on a model with no dial the footer segment and the menu row are

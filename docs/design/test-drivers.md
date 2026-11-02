@@ -126,8 +126,10 @@ scripts the upstream like every other test instead of a handler of its own (ADR 
 
 - `models:` — the list `/v1/models` advertises. Each entry carries exactly the members the client
   reads: `id`, `name`, `display_name`, `context_length`, `n_ctx_train` and the per-model
-  `reasoning:` object (`supported_efforts`, `default_effort`, `mandatory`) whose mere presence is
-  the effort tell — `reasoning: {}` scripts a dial with no vocabulary. Rendered in the OpenAI list
+  `reasoning:` object (`supported_efforts`, `default_effort`, `mandatory`), OpenRouter's shape,
+  whose keys — not its presence — are the effort tell (ADR 0060, amendment of 2026-11-02): naming
+  `supported_efforts` or `default_effort` scripts OpenRouter's dial, and `reasoning: {}` scripts an
+  object that tells nothing, so the `/props` template decides. Rendered in the OpenAI list
   shape (`{object: list, data: [{id, object: model, name, context_length, meta: {n_ctx_train},
   reasoning}]}`), or — when the probe carries the `anthropic-version` header every Messages
   client sends — in the Messages list shape (`{data: [{type: model, id, display_name}], has_more:

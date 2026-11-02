@@ -1659,7 +1659,13 @@ rejects an effort it does not support fails the turn with a message naming this 
 
 **Apogee works out for itself whether the model has a dial at all**, from what the
 heartbeat already asks the server — a llama.cpp chat template that reads the kwarg, or a
-`/v1/models` entry naming that model's own levels. Nothing extra is asked for. When there
+`/v1/models` entry naming that model's own levels. Nothing extra is asked for. On a
+`/v1/models` entry it is the shape of the `reasoning` object that counts, not its presence:
+OpenRouter's keys (`supported_efforts`, `default_effort`) mean OpenRouter's wire and win an
+object that mixes shapes; Splash's keys (`thinks`, `efforts`, `default`) mean the template
+kwargs, with that list and default — and `thinks: false` means no dial, whatever the chat
+template says; any other object, `{}` included, tells apogee nothing, and the chat template
+decides. When there
 is a dial, the effort the next request will carry shows in the status footer and
 `/effort` opens a **picker** of the levels this model reports; when there is none, the
 footer segment is gone and `/effort` is not offered in the command menu — type it anyway
@@ -1671,7 +1677,7 @@ survives a model switch, unless the model you switch to reports a set of levels 
 not include it, in which case it is cleared and the transcript says so.
 
 **Three different wires carry the same dial**, and apogee picks between them from what it
-detected: llama.cpp and other template-driven servers take `chat_template_kwargs`,
+detected: llama.cpp, Splash and other template-driven servers take `chat_template_kwargs`,
 OpenRouter takes a `reasoning` object, and OpenAI's own reasoning endpoints (o-series,
 gpt-5) and Groq take a top-level `reasoning_effort` field. That third one cannot be
 detected — those endpoints advertise nothing that gives it away — and neither can a

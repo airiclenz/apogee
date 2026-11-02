@@ -93,7 +93,10 @@ cmd/apogee/wire_firing_test.go — TestFiringConfigDefaultsItsSeams; cmd/apogee/
 
 **Commit:** `fix(discovery): only an OpenRouter-shaped reasoning object picks the reasoning dialect`
 
-## 3. Record the reasoning-object rule in ADR 0060 and the docs
+## 3. Record the reasoning-object rule in ADR 0060 and the docs — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the amendment Note carries `refs: [internal/provider/discovery.go]` (set with `capcom know add --ref`), which the adr-0043-amend-1010 template does not; `capcom check` passes with it.
+NOTES (2026-11-02): docs/manual/configuration.md also names Splash beside llama.cpp among the template-driven servers that take `chat_template_kwargs` ("Three different wires" paragraph), so the dialect list agrees with the new shape-rule sentence above it.
 
 **What:** docs for item 2. Depends on item 2.
 
