@@ -322,6 +322,139 @@ func TestFallbackLanderBindsTheFallbackEntry(t *testing.T) {
 	}
 }
 
+// TestFallbackLanderRoutedBindsAsTheDelegationTarget: under root pins of 131072 / 65536 / 0.4 / 5m
+// and a fallback entry that pins nothing, a routed landing's effective binding is the target
+// resolveDelegationTarget latches for a spawn on that fallback — its observed window, no working
+// bound, the parent's reserve share where the entry states none, the root idle window — and a beat
+// that names no window binds the parent's, never 0. The session seat's landing still ranks the
+// entry over the root pins.
+func TestFallbackLanderRoutedBindsAsTheDelegationTarget(t *testing.T) {
+	t.Parallel()
+	idleRoot := testtime.Fixed(5 * time.Minute)
+	parent := delegationParent{window: 200000, reserve: 0.25}
+	cases := []struct {
+		name         string
+		isRouted     bool
+		beatWindow   int
+		wantWindow   int
+		wantWorking  int
+		wantReserve  float64
+		isTargetPair bool
+	}{
+		{name: "routed takes the target's binding", isRouted: true, beatWindow: 32768,
+			wantWindow: 32768, wantWorking: 0, wantReserve: parent.reserve, isTargetPair: true},
+		{name: "routed with no observed window takes the parent's", isRouted: true, beatWindow: 0,
+			wantWindow: parent.window, wantWorking: 0, wantReserve: parent.reserve, isTargetPair: true},
+		{name: "session seat resolves over the root pins", isRouted: false, beatWindow: 32768,
+			wantWindow: 131072, wantWorking: 65536, wantReserve: 0.4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			backup := config.ServerEntry{Name: "backup", Endpoint: "http://127.0.0.1:4444"}
+			beat := heartbeat.Beat{Reachable: true, ActiveModel: "backup-model", ContextWindow: tc.beatWindow}
+			lander := fallbackLander{
+				opts: config.Options{ContextWindow: 131072, WorkingWindow: 65536, ResponseReserve: 0.4,
+					StreamIdleTimeout: idleRoot, Servers: []config.ServerEntry{backup}},
+				roots:  stateRoots{config: t.TempDir(), probe: t.TempDir()},
+				key:    func(config.ServerEntry) (string, error) { return "", nil },
+				beat:   func(context.Context, upstreamBinding) heartbeat.Beat { return beat },
+				routed: tc.isRouted,
+				parent: parent,
+			}
+
+			answer, landed := lander.land(context.Background(), "backup")
+
+			if !landed {
+				t.Fatal("the live backup did not land")
+			}
+			reserve := answer.Rebind.ResponseReserveFraction
+			if reserve == nil || *reserve != tc.wantReserve {
+				t.Errorf("reserve = %v, want %v stated", reserve, tc.wantReserve)
+			}
+			if answer.Rebind.MaxContextTokens != tc.wantWindow || answer.Upstream.WorkingWindow != tc.wantWorking {
+				t.Errorf("window %d, working %d; want %d, %d", answer.Rebind.MaxContextTokens,
+					answer.Upstream.WorkingWindow, tc.wantWindow, tc.wantWorking)
+			}
+			idle := answer.Upstream.StreamIdleTimeout
+			if idle == nil || *idle != idleRoot {
+				t.Errorf("stream idle = %v, want the root's %v stated", idle, idleRoot)
+			}
+			if !tc.isTargetPair {
+				return
+			}
+			target := resolveDelegationTarget(backup, "", beat, nil, idleRoot)
+			targetWindow := target.ContextWindow
+			if targetWindow <= 0 {
+				targetWindow = parent.window
+			}
+			if answer.Rebind.MaxContextTokens != targetWindow || answer.Upstream.WorkingWindow != target.WorkingWindow ||
+				*idle != *target.StreamIdleTimeout {
+				t.Errorf("rehome binds window %d, working %d, idle %v; a spawn's target binds %d, %d, %v",
+					answer.Rebind.MaxContextTokens, answer.Upstream.WorkingWindow, *idle,
+					targetWindow, target.WorkingWindow, *target.StreamIdleTimeout)
+			}
+		})
+	}
+}
+
+// TestHeadlessRoutedFallbackTakesNoRootPins: an unattended run's Sub-agents seat lands on its
+// fallback over the window and reserve share the run bound, never under the run's root
+// `context-window:` / `working-window:` / `response-reserve:` pins — the fallback here pins nothing
+// and its beat names no window, so the run's own window is the one a routed child keeps.
+func TestHeadlessRoutedFallbackTakesNoRootPins(t *testing.T) {
+	t.Parallel()
+	spare := stubllm.New(t, stubllm.Script{Model: "spare-model", Turns: []stubllm.Turn{{Text: "unused"}}})
+	grunt := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:1", Model: "grunt-model",
+		Fallback: config.NewFallbackList("spare")}
+	in := firingInputs{
+		opts: config.Options{ContextWindow: 131072, WorkingWindow: 65536, ResponseReserve: 0.4,
+			Servers: []config.ServerEntry{grunt, {Name: "spare", Endpoint: spare.URL}}},
+		roots: firingRoots(t),
+	}
+	parent := delegationParent{window: 200000, reserve: 0.25}
+	resolver := newFiringSeatFallback(in, config.NewKeyResolver(""), newSubAgentServer(grunt), "", parent)
+	if resolver == nil {
+		t.Fatal("a Sub-agent server naming a fallback got no resolver")
+	}
+
+	answer, landed := resolver.land(context.Background(), "spare")
+
+	if !landed {
+		t.Fatal("the live spare did not land")
+	}
+	if answer.Rebind.MaxContextTokens != parent.window || answer.Upstream.WorkingWindow != 0 {
+		t.Errorf("window %d, working %d; want the run's %d and no working bound",
+			answer.Rebind.MaxContextTokens, answer.Upstream.WorkingWindow, parent.window)
+	}
+	reserve := answer.Rebind.ResponseReserveFraction
+	if reserve == nil || *reserve != parent.reserve {
+		t.Errorf("reserve = %v; want the run's %v stated", reserve, parent.reserve)
+	}
+}
+
+// TestTUIFallbackRoutedLanderTakesTheSessionsWindowAndShare: the Sub-agents seat's lander in a
+// session lands routed, over the window the session is bound to — its observed one where nothing
+// pins it — and the reserve share the session's bound entry resolves.
+func TestTUIFallbackRoutedLanderTakesTheSessionsWindowAndShare(t *testing.T) {
+	t.Parallel()
+	seat := newTUIFallbackSeat(t)
+	primary, err := findServer(seat.live.serverList(), "primary")
+	if err != nil {
+		t.Fatalf("find primary: %v", err)
+	}
+	primary.ResponseReserve = 0.3
+	seat.live.followEntry(primary)
+	seat.live.observe(65536, "")
+
+	lander := seat.mover.fallback.routedLander()
+
+	want := delegationParent{window: 65536, reserve: 0.3}
+	if !lander.routed || lander.parent != want {
+		t.Errorf("routed lander = routed %v over %+v; want routed over %+v", lander.routed, lander.parent, want)
+	}
+}
+
 // tuiFallbackSeat is one TUI session seat on primary, falling back to a live backup: the live
 // settings bound to primary, the holder dialled at a port nothing answers, and the session's
 // resolver over both, with the mover that rearms and follows it.

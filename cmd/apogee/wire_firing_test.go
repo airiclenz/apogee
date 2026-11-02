@@ -1414,7 +1414,7 @@ func TestRoutedTargetResolvesTheForcedDialect(t *testing.T) {
 	routing, _ := resolveFiringRouting(context.Background(), firingInputs{
 		opts:  config.Options{Servers: entries, SubAgentsServer: "grunt"},
 		roots: firingRoots(t),
-	}, config.NewKeyResolver(""))
+	}, config.NewKeyResolver(""), delegationParent{})
 	if routing.target == nil {
 		t.Fatal("the Firing's routing resolved no target; want the grunt server")
 	}

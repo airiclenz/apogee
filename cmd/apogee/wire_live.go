@@ -438,10 +438,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	//
 	// Its seat falls over by its OWN entry's `fallback:` list (ADR 0105), resolved against the live
 	// configuration through the session seat's lander, so a move onto a fallback is resolved the same
-	// way whichever seat makes it.
+	// way whichever seat makes it — turned routed (sessionFallback.routedLander), so a rehomed child
+	// binds as its Delegation target binds rather than under the session's root window pins.
 	w.delegation = newDelegationWiring(w.opts.SubAgentsServer,
 		w.live.serverList, w.engine, w.live.modelProfileEntries, w.live.streamIdlePin,
-		w.bridge.NotifyRouting, w.keys).withFallback(w.fallback.lander)
+		w.bridge.NotifyRouting, w.keys).withFallback(w.fallback.routedLander)
 
 	// The `$EDITOR` round trip's own half of the same story (ADR 0037 decision 5): the keys holding a
 	// structure no row can express are edited in the file, and this is what opens it at the right line

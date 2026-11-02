@@ -218,7 +218,8 @@ func (r *fallbackResolver) walk(ctx context.Context, waited time.Duration) apoge
 // holds: the entry, its key, one beat, and the binding that beat makes true.
 type fallbackLander struct {
 	// opts is the resolved configuration: the `servers:` list the names resolve against, the
-	// top-level pins an entry's own pins rank over, and the per-model keys the rebind reads.
+	// top-level pins an entry's own pins rank over on the session seat (pins), and the per-model
+	// keys the rebind reads.
 	opts config.Options
 	// roots are the state roots the per-model prompt files resolve against.
 	roots stateRoots
@@ -226,6 +227,21 @@ type fallbackLander struct {
 	key func(entry config.ServerEntry) (string, error)
 	// beat observes the fallback once, through the Monitor its dial facts build.
 	beat func(ctx context.Context, dial upstreamBinding) heartbeat.Beat
+	// routed says the move is the Sub-agents seat's: the landing binds as resolveDelegationTarget
+	// binds a routed target on the same entry, never under the session's root window pins (pins).
+	routed bool
+	// parent is what a routed child keeps from its parent where the fallback entry states nothing;
+	// read only when routed.
+	parent delegationParent
+}
+
+// delegationParent is what a routed child keeps from its parent where its Delegation target states
+// nothing (DelegationTarget.binding): the window the parent runs on — the last rank of a target's
+// window, after the entry's pin and the observed window — and the response-reserve share the parent
+// resolved, which an entry stating no share of its own leaves standing.
+type delegationParent struct {
+	window  int
+	reserve float64
 }
 
 // fallbackLanding is one move onto a fallback entry, resolved whole: the answer the engine is
@@ -273,8 +289,9 @@ func (l fallbackLander) arrive(ctx context.Context, name string) (fallbackLandin
 		return fallbackLanding{}, false
 	}
 
-	upstream, dial := entryUpstream(entry, apiKey, rootPinsOf(l.opts))
-	rebind, err := l.rebind(entry, apiKey, model, observed)
+	pins := l.pins()
+	upstream, dial := entryUpstream(entry, apiKey, pins)
+	rebind, err := l.rebind(entry, apiKey, model, observed, pins)
 	if err != nil {
 		return fallbackLanding{}, false
 	}
@@ -289,20 +306,23 @@ func (l fallbackLander) arrive(ctx context.Context, name string) (fallbackLandin
 
 // rebind resolves the per-model binding for model on entry, the way an unattended run's bind
 // resolves its own (bindFiringConfig): the configuration overlaid with the entry's endpoint, key,
-// window pin and reserve share, the observed window bound where no pin stands, the entry's forced
-// effort dialect over the one the beat ranked, and the entry's price.
+// and its window pin and reserve share ranked over pins, the observed window bound where no pin
+// stands (observedWindow), the entry's forced effort dialect over the one the beat ranked, and the
+// entry's price.
 func (l fallbackLander) rebind(
 	entry config.ServerEntry,
 	apiKey, model string,
 	observed heartbeat.Beat,
+	pins rootPins,
 ) (apogee.RebindSpec, error) {
 	specOpts := l.opts
 	specOpts.Endpoint = entry.Endpoint
 	specOpts.APIKey = apiKey
-	pinnedWindow := config.ResolveContextWindow(int(entry.ContextWindow), l.opts.ContextWindow)
+	pinnedWindow := config.ResolveContextWindow(int(entry.ContextWindow), pins.contextWindow)
 	specOpts.ContextWindow = pinnedWindow
-	specOpts.ResponseReserve = config.ResolveResponseReserve(entry.ResponseReserve, l.opts.ResponseReserve)
-	spec, _, err := rebindSpecFor(specOpts, l.roots, model, observed.ContextWindow, pinnedWindow, int(entry.MaxOutputTokens))
+	specOpts.ResponseReserve = config.ResolveResponseReserve(entry.ResponseReserve, pins.responseReserve)
+	spec, _, err := rebindSpecFor(specOpts, l.roots, model, l.observedWindow(observed), pinnedWindow,
+		int(entry.MaxOutputTokens))
 	if err != nil {
 		return apogee.RebindSpec{}, err
 	}
@@ -325,6 +345,31 @@ type rootPins struct {
 	workingWindow   int
 	responseReserve float64
 	streamIdle      time.Duration
+}
+
+// pins are the keys the fallback entry's own pins rank over at this landing. The session seat's are
+// the root pins (rootPinsOf). A routed move's are the ranks resolveDelegationTarget binds a routed
+// target by: no root `context-window:` or `working-window:` — those describe the session's own
+// server, never the Sub-agent server's box — the parent's reserve share, and the root
+// `stream-idle-timeout:`, which is the run's default silence bound rather than a statement about any
+// one server.
+func (l fallbackLander) pins() rootPins {
+	root := rootPinsOf(l.opts)
+	if !l.routed {
+		return root
+	}
+	return rootPins{responseReserve: l.parent.reserve, streamIdle: root.streamIdle}
+}
+
+// observedWindow is the window a landing binds where the entry pins none: the one the beat observed,
+// or — on a routed move whose beat named none — the parent's, as a routed spawn keeps it. A routed
+// rehome never states 0 there: the engine applies a rebind's window as present, and 0 would leave the
+// child windowless where a spawn on the same fallback runs in the parent's window.
+func (l fallbackLander) observedWindow(observed heartbeat.Beat) int {
+	if observed.ContextWindow > 0 || !l.routed {
+		return observed.ContextWindow
+	}
+	return l.parent.window
 }
 
 // rootPinsOf is the top-level pins an Options carries.
@@ -412,6 +457,9 @@ type sessionFallback struct {
 	build func(entry config.ServerEntry, land func(context.Context, string) (apogee.FallbackAnswer, bool)) *fallbackResolver
 	// lander resolves one move onto a fallback against the configuration as it stands at the move.
 	lander func() fallbackLander
+	// parent reports what a routed child keeps from the session at the move
+	// (liveSettings.delegationParent), for the Sub-agents seat's lander (routedLander).
+	parent func() delegationParent
 
 	mu sync.Mutex
 	// current is the resolver for the seat's present primary, nil until the first fault after a
@@ -456,6 +504,16 @@ func (f *sessionFallback) resolver() *fallbackResolver {
 		return landing.answer, landed
 	})
 	return f.current
+}
+
+// routedLander is the session seat's lander turned to the Sub-agents seat (delegationWiring's
+// withFallback): the same configuration read at the move, landing as a routed target binds, over
+// the window and the reserve share the session holds at that move.
+func (f *sessionFallback) routedLander() fallbackLander {
+	lander := f.lander()
+	lander.routed = true
+	lander.parent = f.parent()
+	return lander
 }
 
 // remember records a landing, so the follow of the switch it answers can read it.
@@ -521,6 +579,7 @@ func newSessionFallback(
 				},
 			}
 		},
+		parent: live.delegationParent,
 		landed: make(map[string]fallbackLanding),
 	}
 }

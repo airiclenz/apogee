@@ -1682,7 +1682,9 @@ func TestDelegationSeatIsNilWithoutAnEntryToDescribe(t *testing.T) {
 
 // seatFallbackRig is a wiring whose Sub-agent server `grunt` names `spare` as its `fallback:`, with
 // every beat written down: the primary's through the wiring's server beat, the fallback's through the
-// lander, whose landing beats it counts.
+// lander, whose landing beats it counts. The lander resolves under the session's root window pins
+// (seatRootPins) over the parent binding seatParent, and is handed in NOT routed: the seat makes
+// every landing routed itself (seatFallbackFor).
 type seatFallbackRig struct {
 	wiring  *delegationWiring
 	spy     *delegationSpy
@@ -1696,6 +1698,15 @@ type seatFallbackRig struct {
 const (
 	seatGruntEndpoint = "http://127.0.0.1:2222"
 	seatSpareEndpoint = "http://127.0.0.1:3333"
+)
+
+// seatRootPins are the session's top-level `context-window:`, `working-window:` and
+// `response-reserve:` pins the rig's lander resolves under — the root `stream-idle-timeout:` is the
+// wiring's own testIdleRoot — and seatParent the window and reserve share the session holds.
+var (
+	seatRootPins = config.Options{ContextWindow: 131072, WorkingWindow: 65536, ResponseReserve: 0.4,
+		StreamIdleTimeout: testIdleRoot}
+	seatParent = delegationParent{window: 200000, reserve: 0.25}
 )
 
 func newSeatFallbackRig(t *testing.T) *seatFallbackRig {
@@ -1713,10 +1724,13 @@ func newSeatFallbackRig(t *testing.T) *seatFallbackRig {
 	r.wiring.servers = staticServerList(r.entries)
 	roots := stateRoots{config: t.TempDir(), probe: t.TempDir()}
 	r.wiring.withFallback(func() fallbackLander {
+		opts := seatRootPins
+		opts.Servers = r.entries
 		return fallbackLander{
-			opts:  config.Options{Servers: r.entries},
-			roots: roots,
-			key:   func(config.ServerEntry) (string, error) { return "", nil },
+			opts:   opts,
+			parent: seatParent,
+			roots:  roots,
+			key:    func(config.ServerEntry) (string, error) { return "", nil },
 			beat: func(_ context.Context, dial upstreamBinding) heartbeat.Beat {
 				r.mu.Lock()
 				defer r.mu.Unlock()
@@ -1798,6 +1812,39 @@ func TestDelegationFallbackRoutedSeatFallsOverOneWay(t *testing.T) {
 	r.wiring.observe(context.Background())()
 	if got := r.lastPush(t); got != nil {
 		t.Errorf("a beat on a dead fallback latched %+v; want nil, so spawns use the session's Upstream", got)
+	}
+}
+
+// TestDelegationFallbackRehomeBindsTheLatchedTargetsWindow: a routed child rehomed onto the seat's
+// fallback binds as a child spawned there after the fallover does — the window, working window and
+// stream-idle window of the target the fallover latched, and the parent's reserve share where the
+// fallback states none — never the session's root pins.
+func TestDelegationFallbackRehomeBindsTheLatchedTargetsWindow(t *testing.T) {
+	t.Parallel()
+	r := newSeatFallbackRig(t)
+	r.killPrimary()
+
+	answer := r.faultOnPrimary(r.wiring.fallback)
+
+	if answer.Verdict != apogee.FallbackSwitch {
+		t.Fatalf("answer = %+v; want a switch onto spare", answer)
+	}
+	target := r.lastPush(t)
+	if target == nil || target.Endpoint != seatSpareEndpoint {
+		t.Fatalf("target latched at the fallover = %+v; want spare's", target)
+	}
+	if answer.Rebind.MaxContextTokens != target.ContextWindow || answer.Upstream.WorkingWindow != target.WorkingWindow {
+		t.Errorf("rehome binds window %d, working %d; the latched target binds %d, %d",
+			answer.Rebind.MaxContextTokens, answer.Upstream.WorkingWindow, target.ContextWindow, target.WorkingWindow)
+	}
+	idle := answer.Upstream.StreamIdleTimeout
+	if idle == nil || target.StreamIdleTimeout == nil || *idle != *target.StreamIdleTimeout {
+		t.Errorf("rehome idle window %v; the latched target's %v", idle, target.StreamIdleTimeout)
+	}
+	reserve := answer.Rebind.ResponseReserveFraction
+	if target.ResponseReserveFraction != 0 || reserve == nil || *reserve != seatParent.reserve {
+		t.Errorf("rehome reserve %v, target's %v; want the parent's %v where spare states none",
+			reserve, target.ResponseReserveFraction, seatParent.reserve)
 	}
 }
 

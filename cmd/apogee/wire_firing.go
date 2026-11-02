@@ -551,7 +551,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session
 	// resolves and handed back for the Driver to latch through run.Spec. Every way it can fail
 	// leaves the run unrouted with a notice — never an error.
-	routing, routingNotice := resolveFiringRouting(ctx, in, keys)
+	routing, routingNotice := resolveFiringRouting(ctx, in, keys, delegationParent{
+		window:  cfg.Context.MaxContextTokens,
+		reserve: cfg.Context.ResponseReserveFraction,
+	})
 	if routingNotice != "" {
 		notices = append(notices, routingNotice)
 	}
@@ -685,6 +688,10 @@ type firingRouting struct {
 // same key (liveSettings.subAgentsServer), so a `/sub-agents-server` retarget follows the Firings the
 // session raises afterwards.
 //
+// parent is what the run itself bound — its window and its reserve share — which a routed child
+// keeps where its target states nothing, and so what the Sub-agents seat's fallback lands over
+// (newFiringSeatFallback).
+//
 // Nothing here is an error. Every way routing can fail to resolve — no key at all, a name the list
 // does not carry, a key source that would not answer, a server that is unreachable or has no model bound — leaves the target nil, the run
 // delegating to its own Upstream, and ONE notice saying so (delegationStateNotice). That is the same
@@ -695,6 +702,7 @@ func resolveFiringRouting(
 	ctx context.Context,
 	in firingInputs,
 	keys *config.KeyResolver,
+	parent delegationParent,
 ) (firingRouting, string) {
 	name := in.opts.SubAgentsServer
 	if name == "" {
@@ -742,7 +750,7 @@ func resolveFiringRouting(
 	// child of this run consults the one instance: nil when the entry names no `fallback:`, and never
 	// stored as a nil pointer, which the interface would read as a resolver.
 	if target != nil {
-		if resolver := newFiringSeatFallback(in, keys, server, apiKey); resolver != nil {
+		if resolver := newFiringSeatFallback(in, keys, server, apiKey, parent); resolver != nil {
 			target.Fallback = resolver
 		}
 	}
@@ -756,12 +764,15 @@ func resolveFiringRouting(
 // resolved to (apiKey); each fallback's key resolves through the run's one resolver, fenced to the
 // Firing's workspace as the Sub-agent server's own was. An unattended run has no second heartbeat to
 // re-point, so a fallover moves the routed children that fault — a child spawned after it still
-// dials the primary, faults there, and reads the move the run already made.
+// dials the primary, faults there, and reads the move the run already made. Each landing is routed:
+// it binds as resolveDelegationTarget binds a target on the fallback, over parent — the window and
+// reserve share the run itself bound — never under the run's root window pins.
 func newFiringSeatFallback(
 	in firingInputs,
 	keys *config.KeyResolver,
 	server *subAgentServer,
 	apiKey string,
+	parent delegationParent,
 ) *fallbackResolver {
 	entry := server.entry
 	names := entry.Fallback.Names()
@@ -777,6 +788,8 @@ func newFiringSeatFallback(
 		beat: func(ctx context.Context, dial upstreamBinding) heartbeat.Beat {
 			return dial.Monitor().Beat(ctx)
 		},
+		routed: true,
+		parent: parent,
 	}
 	return newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
 		func(ctx context.Context) bool { return server.beat(ctx, apiKey).Reachable },

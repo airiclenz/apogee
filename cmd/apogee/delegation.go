@@ -309,7 +309,10 @@ func (d *delegationWiring) withFallback(lander func() fallbackLander) *delegatio
 // when no lander is wired, no server is installed, or its entry names no `fallback:`. The grace
 // window beats the primary through server's own beat with the key its entry resolves to at the
 // fault; each landing re-points this wiring at the fallback it landed on (fallover), so the seat's
-// beats watch the fallback from then on. Called with the mutex held.
+// beats watch the fallback from then on. Every landing is routed, whatever lander was wired, so a
+// rehomed child binds its window, working window and reserve share as the target fallover latches
+// for later spawns does (resolveDelegationTarget), never under the session's root pins. Called with
+// the mutex held.
 func (d *delegationWiring) seatFallbackFor(server *subAgentServer) *fallbackResolver {
 	if d.lander == nil || server == nil {
 		return nil
@@ -330,7 +333,9 @@ func (d *delegationWiring) seatFallbackFor(server *subAgentServer) *fallbackReso
 			return server.beat(ctx, apiKey).Reachable
 		},
 		func(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
-			landing, landed := lander().arrive(ctx, name)
+			seatLander := lander()
+			seatLander.routed = true
+			landing, landed := seatLander.arrive(ctx, name)
 			if landed {
 				d.fallover(resolver, landing)
 			}

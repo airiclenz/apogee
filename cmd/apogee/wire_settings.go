@@ -367,6 +367,25 @@ func (s *liveSettings) window() int {
 	return config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow)
 }
 
+// delegationParent reports what a routed child keeps from this session where its Delegation target
+// states nothing: the window the session is bound to — the pin in force (window above), else the last
+// window a beat named, the ranks a rebind binds the session's own window by — and the reserve share
+// rebindInputs resolves for the server the session is on. Both under ONE read lock, for rebindInputs'
+// reason: read apart they could describe two instants of a configuration being edited as it is read.
+// A Sub-agents seat fallover reads it at the move (sessionFallback.routedLander).
+func (s *liveSettings) delegationParent() delegationParent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	window := config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow)
+	if window <= 0 {
+		window = s.observedWindow
+	}
+	return delegationParent{
+		window:  window,
+		reserve: config.ResolveResponseReserve(s.entryReserve, s.now.ResponseReserve),
+	}
+}
+
 // observe records what a landed beat reported about the server: the context window, and the effort
 // wire dialect that reaches its thinking-effort dial (ADR 0060).
 //

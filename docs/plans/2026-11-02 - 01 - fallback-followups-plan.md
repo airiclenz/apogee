@@ -89,8 +89,13 @@ Closes the defect that the TUI session seat's fallback walk reads options snapsh
 **Closes:** fallback-lander-stale-options
 **Commit:** `fix(fallback): the TUI walk lands with the options live at the walk`
 
-## 4. A rehomed routed child binds as its Delegation target
+## 4. A rehomed routed child binds as its Delegation target — ✅ DONE (2026-11-02)
 
+NOTES (2026-11-02): the parent facts travel as a `delegationParent{window, reserve}` value on `fallbackLander` beside `routed bool`. In the TUI, `liveSettings.delegationParent` reads them under one lock, and `sessionFallback.routedLander` sets both. `seatFallbackFor` also forces `routed = true` on whatever lander it is handed.
+NOTES (2026-11-02): the TUI parent window is `live.window()` (the pin), else the last observed window. The plan names only `live.window()`, which is 0 on an unpinned session, and the guard says "never 0". A routed spawn on such a session keeps the engine's window, which is the pin, else the observed window.
+NOTES (2026-11-02): in Firings the parent is read off the run's composed Config (`cfg.Context.MaxContextTokens`, `.ResponseReserveFraction`). It is handed to `resolveFiringRouting`, which gained a `parent` parameter, and from there to `newFiringSeatFallback`.
+NOTES (2026-11-02): consequential edit — cmd/apogee/wire_firing_test.go: made necessary by the new `parent` parameter on `resolveFiringRouting` (the one test call passes `delegationParent{}`).
+NOTES (2026-11-02): added `TestTUIFallbackRoutedLanderTakesTheSessionsWindowAndShare` beyond the three planned tests, to cover the new liveSettings accessor through `routedLander`.
 **What:**
 Depends on item 3.
 Closes the defect that a routed child rehomed onto a fallback takes the session's root `context-window:`/`working-window:` pins, unlike a routed spawn on the same fallback.
