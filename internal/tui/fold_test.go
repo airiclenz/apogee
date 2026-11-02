@@ -308,14 +308,16 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
-			name: "UpstreamSwitchedEvent is inert in the TUI for now",
-			// A seat failed over to a fallback server. The TUI does not fold it yet: no entry, no
-			// gauge, no phrase, no progress save. The transcript note and the heartbeat follow are
-			// a later change to this row.
+			name: "UpstreamSwitchedEvent appends the fallback note and moves nothing else",
+			// A seat failed over to a fallback server (ADR 0105): one host note naming both servers
+			// and both models (fallbackNote, pinned in fallback_test.go), and no gauge, no phrase, no
+			// progress save. Following the session seat's switch is the live eventMsg path's, not
+			// this fold's (Model.followFallback), so a watcher of the journal moves nothing.
 			event: domain.UpstreamSwitchedEvent{
 				FromServer: "box", FromModel: "qwen", ToServer: "cloud", ToModel: "sonnet",
 				Fault: "status 503", Seat: domain.UpstreamSeatSession,
 			},
+			wantEntries: 1,
 		},
 		{
 			name: "UsageEvent at depth 0 moves the gauge and appends no entry",

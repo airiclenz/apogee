@@ -736,6 +736,7 @@ type fakeServerHost struct {
 	record   func(name string) (bool, error)
 	beat     func(context.Context) heartbeat.Beat
 	rebind   func(model string, window int, dialect domain.EffortDialect) (RebindResult, error)
+	follow   func(name string) (ServerFallbackResult, error)
 }
 
 // Acts reports exactly the members this fake was wired with, so one nil func is one per-member
@@ -796,6 +797,14 @@ func (h *fakeServerHost) RecordChoice(name string) (bool, error) {
 		return false, nil
 	}
 	return h.record(name)
+}
+
+// FollowFallback answers with an error when nothing was wired — a host with nothing to follow.
+func (h *fakeServerHost) FollowFallback(name string) (ServerFallbackResult, error) {
+	if h.follow == nil {
+		return ServerFallbackResult{}, errors.New("this host follows no fallback")
+	}
+	return h.follow(name)
 }
 
 // serverSeams is the [ServerHost] fake opts carries, created on the spot when it carries none. Every

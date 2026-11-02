@@ -599,15 +599,15 @@ type SchemeHost interface {
 // It is defined here like [SettingsHost], so the renderer selects a server and folds a beat while
 // the composition root owns every endpoint, key, discovery hint and window pin behind them.
 //
-// The split is the same for all six acts: the TUI owns WHEN — the human's pick at idle, the cadence
+// The split is the same for all seven acts: the TUI owns WHEN — the human's pick at idle, the cadence
 // of the tick chain, the quiescent boundary a rebind waits for (ADR 0024) — and the host owns WHAT,
 // because every input to that decision is config the renderer never reads.
 //
 // A nil host means the Upstream seam is unwired whole: nothing to switch to, no way to bind,
 // nothing observing, and nothing recorded — the pre-heartbeat, pre-ADR-0036 behaviour every
-// hand-built test Options has. A host that IS wired but cannot do one of the six says so where the
-// act is: List answers with no servers and RecordChoice with false, which are already exactly the
-// degrades those two have. The other four are acts the renderer decides ABOUT before it decides to
+// hand-built test Options has. A host that IS wired but cannot do one of the seven says so where the
+// act is: List answers with no servers, RecordChoice with false and FollowFallback with an error,
+// which are already exactly the degrades those three have. The other four are acts the renderer decides ABOUT before it decides to
 // perform one — a cadence to open, a picker to raise, a ladder rung to word — so it asks
 // [ServerHost.Acts] first, and a host answering true there is taken at its word.
 type ServerHost interface {
@@ -710,6 +710,17 @@ type ServerHost interface {
 	// [SettingsHost.Write] it is synchronous — one small file, spliced and renamed — and called on the
 	// Update loop.
 	RecordChoice(name string) (recorded bool, err error)
+
+	// FollowFallback follows a Server fallback of the session's own seat (ADR 0105) that the engine
+	// has ALREADY committed mid-Turn — the [domain.UpstreamSwitchedEvent] naming name as the server
+	// the session seat moved to: the binary moves its heartbeat Monitor, the session record's model,
+	// the entry's pins and the fan-out width onto that server, and answers what the display adopts.
+	// The TUI owns WHEN — the event's fold on the Update loop — and nothing else; unlike Switch it
+	// records no choice, because the human made none.
+	//
+	// An error means the host has nothing to follow (the seat never landed on that server, or the
+	// host performs no fallback at all): the session's display stays where it was.
+	FollowFallback(name string) (ServerFallbackResult, error)
 }
 
 // ServerActs is a [ServerHost]'s own answer to which of its acts it actually performs — the
@@ -718,9 +729,10 @@ type ServerHost interface {
 // unwired host, which is what a nil [Options.Server] answers with, so one shape covers both
 // granularities and no caller writes two checks.
 //
-// The other two acts need no flag: [ServerHost.List] says it by naming no servers, and
+// The other three acts need no flag: [ServerHost.List] says it by naming no servers,
 // [ServerHost.RecordChoice] by answering false, which are the same answers those acts give for a
-// list that is empty and a name no `servers:` entry holds.
+// list that is empty and a name no `servers:` entry holds, and [ServerHost.FollowFallback] by
+// answering an error, the answer it gives for a server the seat never landed on.
 type ServerActs struct {
 	// CanObserve is whether anything watches this session's Upstream at all. False opens no tick
 	// chain, folds no beat, refuses no send and leaves the footer with what launch gave it — the
@@ -1733,6 +1745,24 @@ type ServerSwitchResult struct {
 	Endpoint      string // the new Upstream's base URL, adopted by the footer and the start-up box
 	HostAlias     string // the chosen server's name, now the footer's host label
 	ContextWindow int    // the `context-window:` pin that survives the switch; 0 ⇒ unpinned/unknown
+}
+
+// ServerFallbackResult is what the display adopts once the session seat has fallen over to a
+// fallback server ([ServerHost.FollowFallback]): the server it is on now, and — unlike a switch,
+// which unbinds the model — the model and window the engine was bound to in the same step, beside
+// what the fallback's own beat reported, which is the heartbeat's new baseline.
+type ServerFallbackResult struct {
+	Endpoint  string // the fallback's base URL, adopted by the footer and the start-up box
+	HostAlias string // the fallback entry's name, now the footer's host label
+	Model     string // the model the engine was bound to on the fallback
+	// ContextWindow is the window the engine was bound to: the entry's pin, else what the beat
+	// reported; 0 ⇒ unknown.
+	ContextWindow int
+	// ObservedWindow and ObservedDialect are what the beat that found the fallback answering
+	// reported for the server: the baseline the next beat is measured against, so a beat that
+	// reports exactly that is no change.
+	ObservedWindow  int
+	ObservedDialect domain.EffortDialect
 }
 
 // PreboundReason names why a session started with NO upstream bound — the three answers ADR 0036

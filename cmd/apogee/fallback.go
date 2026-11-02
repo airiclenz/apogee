@@ -228,38 +228,63 @@ type fallbackLander struct {
 	beat func(ctx context.Context, dial upstreamBinding) heartbeat.Beat
 }
 
+// fallbackLanding is one move onto a fallback entry, resolved whole: the answer the engine is
+// handed, and what a Driver that observes the session's server needs to follow the move once the
+// engine has made it — the entry, the dial binding its Monitor is built from, and the beat that
+// found it answering (sessionMover.fallover).
+type fallbackLanding struct {
+	answer   apogee.FallbackAnswer
+	entry    config.ServerEntry
+	dial     upstreamBinding
+	observed heartbeat.Beat
+}
+
 // land beats the fallback named and, when it answers with a model to bind, resolves the answer a
-// FallbackSwitch carries: the UpstreamSpec exactly as a `/server` move onto that entry would state it
-// (entryUpstream), and the RebindSpec the beat's model binds there. A name no entry carries, a key
-// source that refuses, a server that does not answer or names no model, and a per-model resolution
-// that fails each leave the seat where it is (false) and the walk moves on.
+// FallbackSwitch carries (arrive, projected onto its answer).
 func (l fallbackLander) land(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
+	landing, ok := l.arrive(ctx, name)
+	return landing.answer, ok
+}
+
+// arrive beats the fallback named and, when it answers with a model to bind, resolves the whole
+// landing: the UpstreamSpec exactly as a `/server` move onto that entry would state it
+// (entryUpstream), the RebindSpec the beat's model binds there, and the dial binding and beat behind
+// them. A name no entry carries, a key source that refuses, a server that does not answer or names
+// no model, and a per-model resolution that fails each leave the seat where it is (false) and the
+// walk moves on.
+func (l fallbackLander) arrive(ctx context.Context, name string) (fallbackLanding, bool) {
 	entry, err := findServer(l.opts.Servers, name)
 	if err != nil {
-		return apogee.FallbackAnswer{}, false
+		return fallbackLanding{}, false
 	}
 	apiKey, err := l.key(entry)
 	if err != nil {
-		return apogee.FallbackAnswer{}, false
+		return fallbackLanding{}, false
 	}
 	observed := l.beat(ctx, bindingOfEntry(entry, apiKey))
 	if !observed.Reachable {
-		return apogee.FallbackAnswer{}, false
+		return fallbackLanding{}, false
 	}
 	model := entry.Model
 	if model == "" {
 		model = observed.ActiveModel
 	}
 	if model == "" {
-		return apogee.FallbackAnswer{}, false
+		return fallbackLanding{}, false
 	}
 
-	upstream, _ := entryUpstream(entry, apiKey, rootPinsOf(l.opts))
+	upstream, dial := entryUpstream(entry, apiKey, rootPinsOf(l.opts))
 	rebind, err := l.rebind(entry, apiKey, model, observed)
 	if err != nil {
-		return apogee.FallbackAnswer{}, false
+		return fallbackLanding{}, false
 	}
-	return apogee.FallbackAnswer{Upstream: upstream, Rebind: rebind, Server: entry.Name}, true
+	dial.Model = model
+	return fallbackLanding{
+		answer:   apogee.FallbackAnswer{Upstream: upstream, Rebind: rebind, Server: entry.Name},
+		entry:    entry,
+		dial:     dial,
+		observed: observed,
+	}, true
 }
 
 // rebind resolves the per-model binding for model on entry, the way an unattended run's bind
@@ -362,4 +387,137 @@ func newFiringFallback(in firingInputs, keys *config.KeyResolver, apiKey, model 
 	return newFallbackResolver(in.entry.Name, names, config.ResolveFallbackAfter(in.entry.FallbackAfter),
 		func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
 		lander.land)
+}
+
+// sessionFallback is the TUI session seat's Server fallback: the ONE apogee.FallbackResolver the
+// session's Agent — and through it every unrouted child — consults for the life of the session,
+// handed in at construction (lateEngine.seedOptions), the pre-bound path's first pick included.
+//
+// It answers for the entry the session is bound to AT FAULT TIME (liveSettings.boundEntry), because
+// a `/server` move can put the session on another entry long after the Agent was built: the first
+// fault builds the per-primary fallbackResolver for that entry, which then owns the seat's
+// single-flight and fallen-over state, and keeps answering after the seat has moved onto one of its
+// fallbacks — one list per seat, walked forward, never back. A human move retires it (rearm), so the
+// next fault is a fresh one on whatever entry the human moved to; an entry with no `fallback:` gets
+// no resolver at all and every fault on it is answered "none" at once, today's behaviour.
+//
+// It also holds the last landing its resolver made, so the TUI's follow of a committed switch
+// (sessionMover.fallover) builds the Monitor, the window and the pins from the very facts the
+// engine was handed rather than resolving the fallback a second time.
+type sessionFallback struct {
+	// bound reports the entry the session is on now (liveSettings.boundEntry).
+	bound func() (config.ServerEntry, bool)
+	// build makes the resolver for a seat whose primary is entry, landing through land; nil when
+	// the entry names no `fallback:`.
+	build func(entry config.ServerEntry, land func(context.Context, string) (apogee.FallbackAnswer, bool)) *fallbackResolver
+	// lander resolves one move onto a fallback against the configuration as it stands at the move.
+	lander func() fallbackLander
+
+	mu sync.Mutex
+	// current is the resolver for the seat's present primary, nil until the first fault after a
+	// bind or a human move.
+	current *fallbackResolver
+	// landed is the last fallback the current resolver moved the seat onto, by entry name.
+	landed map[string]fallbackLanding
+}
+
+// Resolve answers one report through the current primary's resolver, building it on the first
+// fault after a bind or a human move. A session on no configured entry, or on one with no
+// `fallback:`, is answered with the zero answer — the Turn is abandoned exactly as without a
+// resolver.
+func (f *sessionFallback) Resolve(ctx context.Context, report apogee.FallbackReport) apogee.FallbackAnswer {
+	resolver := f.resolver()
+	if resolver == nil {
+		return apogee.FallbackAnswer{}
+	}
+	return resolver.Resolve(ctx, report)
+}
+
+// resolver is the current primary's resolver, built for the bound entry when there is none.
+func (f *sessionFallback) resolver() *fallbackResolver {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.current != nil {
+		return f.current
+	}
+	entry, ok := f.bound()
+	if !ok {
+		return nil
+	}
+	lander := f.lander()
+	f.current = f.build(entry, func(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
+		landing, landed := lander.arrive(ctx, name)
+		if landed {
+			f.remember(landing)
+		}
+		return landing.answer, landed
+	})
+	return f.current
+}
+
+// remember records a landing, so the follow of the switch it answers can read it.
+func (f *sessionFallback) remember(landing fallbackLanding) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.landed[landing.entry.Name] = landing
+}
+
+// landing is the last landing on the fallback named, false when the seat never moved onto it.
+func (f *sessionFallback) landing(name string) (fallbackLanding, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	landing, ok := f.landed[name]
+	return landing, ok
+}
+
+// rearm retires the current resolver and every landing it made: a human move (`/server`, a profile
+// load) has put the session on an entry of its choosing, whose own `fallback:` list — or none —
+// answers the next fault. A nil sessionFallback (a mover a test built without one) rearms nothing.
+func (f *sessionFallback) rearm() {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.current = nil
+	clear(f.landed)
+}
+
+// newSessionFallback is the TUI session seat's resolver over the live settings: the bound entry and
+// the configuration read at fault time, each fallback's key through the session's one key resolver
+// (the source a `/server` move onto it would run), and the primary's grace beats through a Monitor
+// dialled as the session's own binding stands at the fault (holder.Binding).
+func newSessionFallback(
+	live *liveSettings,
+	holder *upstreamHolder,
+	keys *config.KeyResolver,
+	roots stateRoots,
+) *sessionFallback {
+	return &sessionFallback{
+		bound: live.boundEntry,
+		build: func(
+			entry config.ServerEntry,
+			land func(context.Context, string) (apogee.FallbackAnswer, bool),
+		) *fallbackResolver {
+			names := entry.Fallback.Names()
+			if len(names) == 0 {
+				return nil
+			}
+			monitor := holder.Binding().Monitor()
+			return newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
+				func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
+				land)
+		},
+		lander: func() fallbackLander {
+			return fallbackLander{
+				opts:  live.options(),
+				roots: roots,
+				key:   keys.Resolve,
+				beat: func(ctx context.Context, dial upstreamBinding) heartbeat.Beat {
+					return dial.Monitor().Beat(ctx)
+				},
+			}
+		},
+		landed: make(map[string]fallbackLanding),
+	}
 }

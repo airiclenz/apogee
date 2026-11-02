@@ -291,6 +291,9 @@ type rootWiring struct {
 	gate          *idleGate
 	upstream      *upstreamLatch
 	schedules     *schedule.Scheduler
+	// fallback is the session seat's Server fallback resolver (ADR 0105), shared by the engine
+	// holder it seeds and the mover that rearms and follows it.
+	fallback *sessionFallback
 
 	// The resolved `ui.color-scheme:` palette and whatever the resolve complained about.
 	colorScheme         scheme.Scheme

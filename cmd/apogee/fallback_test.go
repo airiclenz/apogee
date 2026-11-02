@@ -13,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // fallbackTestGrace is the grace window the resolver tests wait out: short, because what they
@@ -319,4 +320,131 @@ func TestFallbackLanderBindsTheFallbackEntry(t *testing.T) {
 	if _, landed := lander.land(context.Background(), "nowhere"); landed {
 		t.Error("a name no entry carries landed")
 	}
+}
+
+// tuiFallbackSeat is one TUI session seat on primary, falling back to a live backup: the live
+// settings bound to primary, the holder dialled at a port nothing answers, and the session's
+// resolver over both, with the mover that rearms and follows it.
+type tuiFallbackSeat struct {
+	backup  *stubllm.Server
+	live    *liveSettings
+	holder  *upstreamHolder
+	stamper *fakeStamper
+	caps    *parallelAgentsSpy
+	mover   sessionMover
+}
+
+func newTUIFallbackSeat(t *testing.T) tuiFallbackSeat {
+	t.Helper()
+	backup := stubllm.New(t, stubllm.Script{Model: "backup-model", Turns: []stubllm.Turn{{Text: "unused"}}})
+	primary := config.ServerEntry{Name: "primary", Endpoint: "http://127.0.0.1:1", Model: "primary-model",
+		Fallback: config.NewFallbackList("backup"), FallbackAfter: fallbackTestGrace.String()}
+	opts := config.Options{Servers: []config.ServerEntry{
+		primary,
+		{Name: "backup", Endpoint: backup.URL, ContextWindow: 16384},
+		{Name: "plain", Endpoint: "http://127.0.0.1:2"},
+	}}
+	live := newLiveSettings(opts, config.ProjectOffer{})
+	live.followEntry(primary)
+	holder := newUpstreamHolder()
+	dial := bindingOfEntry(primary, "")
+	holder.Bind(dial, dial.Monitor())
+	keys := config.NewKeyResolver("")
+	stamper, caps := &fakeStamper{}, &parallelAgentsSpy{}
+	fallback := newSessionFallback(live, holder, keys, stateRoots{config: t.TempDir(), probe: t.TempDir()})
+	mover := sessionMover{agent: &fakeSwitcher{}, holder: holder, host: stamper, live: live, keys: keys,
+		caps: newParallelAgentsCap(caps), fallback: fallback}
+	return tuiFallbackSeat{backup: backup, live: live, holder: holder, stamper: stamper, caps: caps, mover: mover}
+}
+
+// TestTUIFallbackResolverAnswersForTheBoundEntry: the session's one resolver answers a fault on the
+// entry the session is bound to — primary's grace runs out and the walk lands on backup — and after
+// a human move onto an entry with no `fallback:` it answers a fault there with "none" at once and
+// has forgotten the landing on backup.
+func TestTUIFallbackResolverAnswersForTheBoundEntry(t *testing.T) {
+	t.Parallel()
+	seat := newTUIFallbackSeat(t)
+	ctx := context.Background()
+
+	answer := seat.mover.fallback.Resolve(ctx, apogee.FallbackReport{Server: "primary", Model: "primary-model"})
+
+	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" || answer.Rebind.Model != "backup-model" {
+		t.Fatalf("answer = %+v, want a switch onto backup's model", answer)
+	}
+	if _, ok := seat.mover.fallback.landing("backup"); !ok {
+		t.Fatal("the landing on backup was not kept for the follow")
+	}
+
+	plain, err := findServer(seat.live.serverList(), "plain")
+	if err != nil {
+		t.Fatalf("find plain: %v", err)
+	}
+	if _, err := seat.mover.move(plain); err != nil {
+		t.Fatalf("move onto plain: %v", err)
+	}
+	answer = seat.mover.fallback.Resolve(ctx, apogee.FallbackReport{Server: "plain"})
+
+	if answer.Verdict != apogee.FallbackNone || answer.Waited != 0 {
+		t.Errorf("answer on plain = %+v, want none at once — plain names no fallback", answer)
+	}
+	if _, ok := seat.mover.fallback.landing("backup"); ok {
+		t.Error("the landing on backup survived a human move")
+	}
+}
+
+// TestTUIFallbackFalloverRunsTheHeartbeatTail: following a committed switch onto backup moves the
+// holder's Monitor and binding onto backup with its model bound, stamps that model on the record,
+// latches backup as the bound entry, re-follows the fan-out width and records backup's observed
+// window — and answers the display the engine's window. A server the seat never landed on is
+// refused and moves nothing.
+func TestTUIFallbackFalloverRunsTheHeartbeatTail(t *testing.T) {
+	t.Parallel()
+	seat := newTUIFallbackSeat(t)
+	ctx := context.Background()
+	if _, err := seat.mover.fallover("backup"); err == nil {
+		t.Fatal("a follow before any landing was accepted")
+	}
+	if got := seat.holder.Binding().Endpoint; got != "http://127.0.0.1:1" {
+		t.Fatalf("the refused follow moved the holder to %q", got)
+	}
+	answer := seat.mover.fallback.Resolve(ctx, apogee.FallbackReport{Server: "primary", Model: "primary-model"})
+	if answer.Verdict != apogee.FallbackSwitch {
+		t.Fatalf("answer = %+v, want a switch", answer)
+	}
+	widths := len(seat.caps.widths)
+
+	result, err := seat.mover.fallover("backup")
+
+	if err != nil {
+		t.Fatalf("fallover: %v", err)
+	}
+	if got := seat.holder.Binding(); got.Endpoint != seat.backup.URL || got.Model != "backup-model" {
+		t.Errorf("holder binding = %+v, want backup with its model bound", got)
+	}
+	if got := seat.holder.Beat(ctx); !got.Reachable {
+		t.Errorf("the holder's beat = %+v, want it observing the live backup", got)
+	}
+	if got := seat.stamper.models; len(got) == 0 || got[len(got)-1] != "backup-model" {
+		t.Errorf("record models = %v, want backup-model stamped last", got)
+	}
+	if entry, ok := seat.live.boundEntry(); !ok || entry.Name != "backup" {
+		t.Errorf("bound entry = %q (%v), want backup", entry.Name, ok)
+	}
+	if len(seat.caps.widths) == widths {
+		t.Error("the fan-out width was not re-followed onto backup")
+	}
+	want := tuiFallbackWant(seat.backup.URL)
+	if result.Endpoint != want.Endpoint || result.HostAlias != want.HostAlias || result.Model != want.Model ||
+		result.ContextWindow != want.ContextWindow {
+		t.Errorf("result = %+v, want %+v", result, want)
+	}
+	if result.ObservedWindow != seat.live.observed() {
+		t.Errorf("observed window %d answered, %d recorded; want the one beat's reading in both",
+			result.ObservedWindow, seat.live.observed())
+	}
+}
+
+// tuiFallbackWant is what the display adopts after the follow onto the backup at endpoint.
+func tuiFallbackWant(endpoint string) tui.ServerFallbackResult {
+	return tui.ServerFallbackResult{Endpoint: endpoint, HostAlias: "backup", Model: "backup-model", ContextWindow: 16384}
 }

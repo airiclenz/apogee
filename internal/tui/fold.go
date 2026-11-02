@@ -56,6 +56,13 @@ func (m Model) foldEvent(e domain.Event) Model {
 	// conversation entry either, and nothing but /inspect reads what this writes.
 	m = m.foldAttempt(e)
 	m.transcript.apply(e)
+	// A seat that fell over to a fallback server is news whichever seat it was: one host note per
+	// switch, naming both servers and both models (fallbackNote). Where the session's own seat moved,
+	// the live path follows it too (Model.followFallback); this fold only says so, which is all a
+	// watcher of the journal may do.
+	if switched, ok := e.(domain.UpstreamSwitchedEvent); ok {
+		m.transcript.addNote(fallbackNote(switched))
+	}
 	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
 	// is a FILL, so it needs the window it fills — and where the reading names none, that window is
 	// a Model fact. It is HANDED in, by the same rule foldActivity is handed its answer below,
@@ -79,6 +86,27 @@ func (m Model) foldEvent(e domain.Event) Model {
 	// rule asks whether a call is still open (a parallel batch holds the tool phrase), and only
 	// the call/result pairing apply performs can answer that.
 	return m.foldActivity(e, m.transcript.hasOpenToolCall())
+}
+
+// fallbackNote words one Server fallback (ADR 0105): which seat moved, the server and model it was
+// on, the fault that failed it, the server and model it continues on, and how long the grace window
+// waited first, rounded to the second as the engine's own sentence rounds it.
+func fallbackNote(e domain.UpstreamSwitchedEvent) string {
+	seat := "server fallback: "
+	if e.Seat == domain.UpstreamSeatSubAgents {
+		seat = "sub-agents server fallback: "
+	}
+	return seat + serverAndModel(e.FromServer, e.FromModel) + " failed (" + e.Fault + "); continuing on " +
+		serverAndModel(e.ToServer, e.ToModel) + " after waiting " + e.Waited.Round(time.Second).String()
+}
+
+// serverAndModel names a server with the model it serves beside it, or the server alone when no
+// model is known.
+func serverAndModel(server, model string) string {
+	if model == "" {
+		return server
+	}
+	return server + " (" + model + ")"
 }
 
 // usageReading is the cumulative half of a UsageEvent as one domain.Usage: the emitting agent's

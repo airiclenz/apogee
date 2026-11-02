@@ -271,7 +271,19 @@ cmd/apogee/daemonfire_test.go — newDaemonFireHarnessOn, stubRunner; cmd/apogee
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 ./internal/run/`; `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestDaemonFallback|TestResumeAfterFallback' ./cmd/apogee/`
 **Commit:** `feat(daemon): log a server fallback and record the fallback's model`
 
-## 10. TUI: fall over with the heartbeat following, and a transcript note
+## 10. TUI: fall over with the heartbeat following, and a transcript note — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): re-derived from the assumption that the TUI could run the heartbeat-follow tail and adopt the fallback's endpoint/model/window from the engine's switch alone — UpstreamSwitchedEvent carries no endpoint or window, so the session seat's resolver (`sessionFallback`, cmd/apogee/fallback.go) keeps the landing it made and a new seventh ServerHost act, `FollowFallback` (internal/tui/tui.go, cmd/apogee/wire_server.go, the test fake in internal/tui/picker_test.go), runs the tail (`sessionMover.fallover` → `arrive`, shared with `move`) on the Update loop from the live eventMsg path (internal/tui/model.go), never from the watcher's fold.
+
+NOTES (2026-11-02): consequential edit — cmd/apogee/wire.go: made necessary by the rootWiring field holding the one session-seat resolver shared by the engine holder and the mover.
+
+NOTES (2026-11-02): consequential edit — internal/tui/picker_test.go: made necessary by the new ServerHost.FollowFallback act (the fake host gains it).
+
+NOTES (2026-11-02): consequential edit — docs/manual/configuration.md: made necessary by the TUI's new fallback note and follow (one paragraph in the `fallback:` section).
+
+NOTES (2026-11-02): the TUI's Server-fallback note goes through foldEvent with Model.addNote (fold.go), not transcript.apply; the cmd/apogee unit tests sit in cmd/apogee/fallback_test.go and the driven TUI tests in cmd/apogee/e2e_fallback_test.go, both named TestTUIFallback* for the Acceptance command.
+
+NOTES (2026-11-02): a fallover does not re-follow the llama-launcher path (switchServer's launcherPath.follow) nor apply the fallback profile's tool roster through the composition root (rootWiring.rebind's toolSet.setProfileRoster); neither is in this item's tail list.
 
 **What:**
 Recast at the regression check (2026-11-02).

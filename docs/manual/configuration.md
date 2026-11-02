@@ -2373,6 +2373,11 @@ is handled the way any too-large request is. If no fallback answers, the Turn en
 does today (`apogee headless` exits 3). A fallback's own `fallback:` list is never followed:
 there is no chaining.
 
+In the TUI the move is one line in the transcript —
+`server fallback: <server> (<model>) failed (<fault>); continuing on <fallback> (<model>) after waiting <time>`,
+or `sub-agents server fallback: …` when the moved server is `sub-agents-server`'s — and after a
+move of the session's own server the footer and the heartbeat follow the fallback.
+
 **The move is one-way.** apogee never moves back to the first server by itself; in the TUI,
 `/server` moves you back when you want. It moves the whole seat: the session and every
 sub-agent running on the session's server move together, and sub-agents sent to

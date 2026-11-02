@@ -138,6 +138,13 @@ type lateEngine struct {
 	// 11). Prompts are not Events (ADR 0025), so the Driver writes them here, and the engine emits
 	// nothing new. nil hears nothing.
 	prompted func(text string, interjection bool)
+
+	// fallback is the session seat's Server fallback resolver (ADR 0105), set once by the
+	// composition root before the first bind and handed to the Agent at construction (seedOptions),
+	// so a pre-bound session's first pick constructs with it exactly as a determined startup does.
+	// It is the one instance the seat has for the session's life: it re-reads the bound entry at
+	// every fault (sessionFallback). nil consults no resolver, which is the Agent without one.
+	fallback *sessionFallback
 }
 
 // sessionJournal is one opened undo journal together with the note that says why it is the journal
@@ -313,9 +320,10 @@ func (e *lateEngine) seedConfig(cfg *apogee.Config) {
 }
 
 // seedOptions is the construction seed's live host objects as Options: the undo journal the
-// session host opened (nil leaves construction's in-memory journal), and the delegation seat and
+// session host opened (nil leaves construction's in-memory journal), the delegation seat and
 // target, which the Agent applies seat first so the target's far width is the one the model is
-// told (ADR 0069 D6).
+// told (ADR 0069 D6), and the session seat's Server fallback resolver (ADR 0105; nil consults
+// none).
 func (e *lateEngine) seedOptions() []apogee.Option {
 	opts := []apogee.Option{
 		apogee.WithDelegationSeat(e.pendingSeat),
@@ -323,6 +331,9 @@ func (e *lateEngine) seedOptions() []apogee.Option {
 	}
 	if j := e.pendingJournal; j != nil {
 		opts = append(opts, apogee.WithUndoJournal(j.journal, j.note))
+	}
+	if e.fallback != nil {
+		opts = append(opts, apogee.WithFallbackResolver(e.fallback))
 	}
 	return opts
 }

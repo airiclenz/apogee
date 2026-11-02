@@ -260,6 +260,11 @@ type sessionMover struct {
 	// the engine switch succeeded. It is REQUIRED: every construction of a sessionMover supplies one,
 	// so the fold carries no nil guard and no arrival can quietly skip the follow.
 	caps *parallelAgentsCap
+	// fallback is the session seat's Server fallback (ADR 0105). A human move retires the resolver
+	// it holds (sessionFallback.rearm), so the next fault answers from the list of the entry the human
+	// moved to; it is also where fallover reads the landing it follows. nil — a mover built without
+	// one — rearms nothing and follows nothing.
+	fallback *sessionFallback
 }
 
 // move re-points the whole session at entry and reports what the display should adopt.
@@ -320,21 +325,10 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	if err := m.agent.SwitchUpstream(spec); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	// The replacement Monitor carries the new entry's forced effort dialect and its wire, the way
-	// the first bind's does: both are per-server facts, so they move with the server (ADR 0060
-	// decision 3, ADR 0078).
-	m.holder.Swap(dial, dial.Monitor())
-	m.host.SetModel("")
-	m.live.followEntry(entry)
-	// And how wide the session may fan out on the server it has just arrived on (ADR 0039): the new
-	// entry's `parallel-agents:` pin becomes the pin and the retired server's observed slot count is
-	// forgotten, because a slot count is a fact about one server. It lives HERE, in the shared fold,
-	// rather than at either caller, because every arrival that is not a bind goes through this move —
-	// a `/server` switch and a profile load alike — and one follow per arrival is the whole rule. An
-	// entry that pins nothing (a profile load's does not) resolves to its default width — 1 for an
-	// unkeyed server, 4 for a keyed one (config.DefaultParallelAgents) — until the new server's own
-	// first beat says how wide it really is.
-	m.caps.follow(entry)
+	m.arrive(entry, dial, "")
+	// A move the human made puts the session on an entry of their choosing: the next fault answers
+	// from that entry's own `fallback:` list, never from the one the session moved off.
+	m.fallback.rearm()
 	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the
 	// very window the engine was just handed, so the gauge and the Budget cannot describe different
 	// servers. Unpinned at both scopes it is 0, the honest "unknown until the first beat binds one"
@@ -343,6 +337,67 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 		Endpoint:      entry.Endpoint,
 		HostAlias:     entry.Name,
 		ContextWindow: window,
+	}, nil
+}
+
+// arrive is the follow every arrival on entry shares once the engine is already on it — a `/server`
+// move or a profile load after its engine switch (move), and a Server fallback the engine made
+// mid-Turn (fallover): the heartbeat, the stored model, the entry's pins and the fan-out width all
+// follow the server the wire is now pointed at. model is what the engine is bound to on arrival:
+// "" for a move, which UNBINDS it until the new server's first beat, and the fallback's for a
+// fallover, which bound it in the same step.
+func (m sessionMover) arrive(entry config.ServerEntry, dial upstreamBinding, model string) {
+	// The replacement Monitor carries the new entry's forced effort dialect and its wire, the way
+	// the first bind's does: both are per-server facts, so they move with the server (ADR 0060
+	// decision 3, ADR 0078).
+	m.holder.Swap(dial, dial.Monitor())
+	if model != "" {
+		// The discovery hint and the binding the out-of-band calls read, restated as a rebind's
+		// commit restates them, so the next beat measures the fallback's model as "nothing new".
+		m.holder.SetModel(model)
+	}
+	m.host.SetModel(model)
+	m.live.followEntry(entry)
+	// And how wide the session may fan out on the server it has just arrived on (ADR 0039): the new
+	// entry's `parallel-agents:` pin becomes the pin and the retired server's observed slot count is
+	// forgotten, because a slot count is a fact about one server. It lives HERE, in the shared fold,
+	// rather than at any caller, because every arrival that is not a bind goes through it — a
+	// `/server` switch, a profile load and a Server fallback alike — and one follow per arrival is
+	// the whole rule. An entry that pins nothing (a profile load's does not) resolves to its default
+	// width — 1 for an unkeyed server, 4 for a keyed one (config.DefaultParallelAgents) — until the
+	// new server's own first beat says how wide it really is.
+	m.caps.follow(entry)
+}
+
+// fallover follows a Server fallback of the session seat (ADR 0105) that the engine has ALREADY
+// committed mid-Turn: the seat's resolver landed on the fallback named, the engine rehomed onto it
+// and bound its model, and this moves everything outside the engine onto the same server (arrive),
+// from the very landing the engine was handed. The landing's beat is also recorded as the server's
+// observation (liveSettings.observe), as a beat-driven rebind records it, so a later `/settings`
+// edit re-states the fallback's window and dial rather than the primary's.
+//
+// It answers what the display adopts — the endpoint, the alias, the model and the window the engine
+// was handed, and the window and dial the fallback's beat reported — and an error when the seat
+// never landed on that name, which leaves everything where it was.
+func (m sessionMover) fallover(name string) (tui.ServerFallbackResult, error) {
+	if m.fallback == nil {
+		return tui.ServerFallbackResult{}, fmt.Errorf("server fallback onto %q: no fallback is wired", name)
+	}
+	landing, ok := m.fallback.landing(name)
+	if !ok {
+		return tui.ServerFallbackResult{}, fmt.Errorf("server fallback onto %q: the seat never landed there", name)
+	}
+	model := landing.answer.Rebind.Model
+	m.arrive(landing.entry, landing.dial, model)
+	dialect := landing.observed.EffortSupport.Dialect
+	m.live.observe(landing.observed.ContextWindow, providerEffortDialect(dialect))
+	return tui.ServerFallbackResult{
+		Endpoint:        landing.entry.Endpoint,
+		HostAlias:       landing.entry.Name,
+		Model:           model,
+		ContextWindow:   landing.answer.Rebind.MaxContextTokens,
+		ObservedWindow:  landing.observed.ContextWindow,
+		ObservedDialect: dialect,
 	}, nil
 }
 

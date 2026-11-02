@@ -618,6 +618,52 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record c
 	return m, beat
 }
 
+// followFallback folds a Server fallback of the session's OWN seat (ADR 0105) into the live session:
+// the engine already rehomed onto the fallback mid-Turn and bound its model, and this has the host
+// follow it ([ServerHost.FollowFallback]) and the display adopt what the host answers. It is the live
+// eventMsg path's alone — a watcher shows the note foldEvent wrote and moves nothing — and it is
+// reached for the session seat whichever agent on it hit the fault; a Sub-agents seat's switch moves
+// no part of the session.
+//
+// Unlike [Model.foldServerSwitch] the model is NOT unbound: the engine bound the fallback's model in
+// the same step it moved, so the Options adopt it with the window the engine was handed, and the
+// observation baseline becomes what the fallback's own beat reported — the next beat off the
+// fallback is then no change, and no second "model changed" note follows the fallback note. Nothing
+// is recorded either: the human chose no server, so the `server:` key keeps the one they did, and
+// a `/server` back to it is a move rather than "already on". A rebind stashed before the switch
+// describes the server the seat left, so it is dropped; and a fresh tick chain is armed, so a beat
+// still in flight against that server lands inert ([Model.heartbeatLive]).
+//
+// A host with nothing to follow says why in one note and the display stays where it was.
+func (m Model) followFallback(e domain.UpstreamSwitchedEvent) (Model, tea.Cmd) {
+	if m.opts.Server == nil {
+		return m, nil
+	}
+	result, err := m.opts.Server.FollowFallback(e.ToServer)
+	if err != nil {
+		m.transcript.addNote("server fallback: the display could not follow " + e.ToServer + ": " + err.Error())
+		return m, nil
+	}
+	m.opts.Endpoint = result.Endpoint
+	m.opts.HostAlias = result.HostAlias
+	m.opts.Model = result.Model
+	m.opts.ContextWindow = result.ContextWindow
+	m.hb.observedModel, m.hb.observedWindow = result.Model, result.ObservedWindow
+	m.hb.observedDialect = result.ObservedDialect
+	m.hb.pendingRebind = nil
+	m.hb.lastRebindFailed = ""
+	// The box's facts were frozen when it was seeded; restate it so the top of the scrollback names
+	// the server this session is now on ([Model.foldServerSwitch]'s reason).
+	m.transcript.refreshStartup(newStartupView(m.opts))
+	if !m.observesUpstream() {
+		return m, nil
+	}
+	// The fresh generation IS the retirement of the chain that observed the server left, so the next
+	// beat is armed — in a statement of its own, per [Model.armBeat].
+	beat := m.armBeat()
+	return m, beat
+}
+
 // serverSwitchNote words a committed switch: the server left, by the label the footer called it, and
 // the one now on the wire — its alias with the endpoint spelled out beside it, because the alias is
 // the human's own word for a URL and the switch is exactly the moment to show which URL it stands

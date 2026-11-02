@@ -1350,6 +1350,14 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// record, a fired mechanism — still counts as life on the stall guard's clock (activity.go).
 		m.noteEngineHeard()
 		m = m.foldEvent(msg.Event)
+		// The session's own seat fell over to a fallback server mid-Turn: the host follows it and the
+		// display adopts it (Model.followFallback, heartbeat.go). Here and not in foldEvent, because a
+		// watcher folds the same Event and must move nothing; a Sub-agents seat moves no part of the
+		// session.
+		var followed tea.Cmd
+		if switched, ok := msg.Event.(domain.UpstreamSwitchedEvent); ok && switched.Seat == domain.UpstreamSeatSession {
+			m, followed = m.followFallback(switched)
+		}
 		// Nothing is laid out here: the fold moved the transcript's generation, and the repaint tail
 		// (settleFrame, deferred above) lays out from that. An Event also feeds the Inspector's ring
 		// (foldWire) and the /usage accounting, and both panes derive their rows — and so their drawn
@@ -1379,9 +1387,9 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A blocking fan_out's phase moves what the open /workflows view lists too (workflows.go).
 		refresh := m.refreshWorkflows(msg.Event)
 		if progressSaveTrigger(msg.Event) {
-			return m, tea.Batch(m.progressSave(), reassert, resumed, refresh)
+			return m, tea.Batch(m.progressSave(), reassert, resumed, refresh, followed)
 		}
-		return m, tea.Batch(reassert, resumed, refresh)
+		return m, tea.Batch(reassert, resumed, refresh, followed)
 
 	case watchPollMsg:
 		// Watch mode's follower asks for its next journal read (watch.go).

@@ -359,3 +359,104 @@ func TestResumeAfterFallbackDialsThePrimary(t *testing.T) {
 		t.Fatalf("the resumed session returned %v; want a clean quit", err)
 	}
 }
+
+// tuiFallbackBeat is the heartbeat the TUI fallback runs beat on: short, so the claim about the
+// beats that follow a switch costs seconds rather than minutes.
+var tuiFallbackBeat = testtime.Fixed(200 * time.Millisecond)
+
+// launchFallbackTUI starts a driven TUI session on home, bound to its `server:` entry, and returns
+// once the session is idle with model bound.
+func launchFallbackTUI(t *testing.T, stub *stubllm.Server, home, model string) (*e2eSession, *tuitest.Driver) {
+	t.Helper()
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOnBeating(t, drv, stub, home, "", tuiFallbackBeat)
+	waitIdle(drv)
+	drv.WaitText(model)
+	return sess, drv
+}
+
+// TestTUIFallbackContinuesTheTurnOnTheFallback: the primary dies under the session's first request,
+// the grace window runs out, and the Turn continues on the fallback — one note naming both servers
+// and both models, the fallback's reply on screen, beats off the fallback that note nothing more,
+// and `/server primary` afterwards a move back rather than "already on".
+func TestTUIFallbackContinuesTheTurnOnTheFallback(t *testing.T) {
+	primary, backup := dyingPrimary(t), backupServer(t)
+	sess, drv := launchFallbackTUI(t, primary, fallbackHome(t, primary, backup), primary.Model)
+
+	submit(drv, upstreamPrompt)
+	killHeldPrimary(t, primary)
+
+	awaitNotice(t, drv, "server fallback: primary (primary-model) failed", tuitest.Within(fallbackRunBudget))
+	awaitNotice(t, drv, "continuing on backup (backup-model)")
+	awaitNotice(t, drv, fallbackAnswer)
+	waitIdle(drv)
+	if got := len(backup.Requests()); got != 1 {
+		t.Errorf("the fallback saw %d requests, want the one resend", got)
+	}
+	probes := len(backup.Probes())
+	testtime.Eventually(t, fallbackRunBudget, func() bool { return len(backup.Probes()) >= probes+2 },
+		"two heartbeats off the fallback")
+	frame := flatten(drv.Frame().String())
+	for _, unwanted := range []string{"model changed", "connected:"} {
+		if strings.Contains(frame, unwanted) {
+			t.Errorf("the frame carries %q after the switch — the fallback's beats are no change:\n%s",
+				unwanted, drv.Frame())
+		}
+	}
+
+	submit(drv, "/server primary")
+
+	awaitNotice(t, drv, "switching server: backup → primary")
+	if strings.Contains(flatten(drv.Frame().String()), "already on primary") {
+		t.Errorf("`/server primary` answered already-on:\n%s", drv.Frame())
+	}
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// TestTUIFallbackOnAnEntryWithoutFallbackIsAbandoned: after `/server plain`, an entry with no
+// `fallback:`, a 503 from plain abandons the Turn as it always has — no switch, nothing sent to the
+// primary's fallback.
+func TestTUIFallbackOnAnEntryWithoutFallbackIsAbandoned(t *testing.T) {
+	primary := stubllm.New(t, stubllm.Script{Model: "primary-model", Turns: []stubllm.Turn{{Text: "unused"}}})
+	backup := backupServer(t)
+	// Every request plain is sent is answered 503, a fault a fallback would take.
+	plain := stubllm.New(t, stubllm.Script{Model: "plain-model", Turns: []stubllm.Turn{{
+		Repeat: true, HTTP: &stubllm.HTTPReply{Status: 503, Body: "plain is overloaded"},
+	}}})
+	home := t.TempDir()
+	writeConfigHome(t, home,
+		"context-window: 32768\n"+
+			"re-stream-budget: 0\n"+
+			"servers:\n"+
+			"  - name: primary\n"+
+			"    endpoint: "+primary.URL+"\n"+
+			"    model: "+primary.Model+"\n"+
+			"    fallback: [backup]\n"+
+			"    fallback-after: "+fallbackGraceForTests.String()+"\n"+
+			"  - name: backup\n"+
+			"    endpoint: "+backup.URL+"\n"+
+			"    model: "+backup.Model+"\n"+
+			"  - name: plain\n"+
+			"    endpoint: "+plain.URL+"\n"+
+			"    model: "+plain.Model+"\n"+
+			"server: primary\n")
+	sess, drv := launchFallbackTUI(t, primary, home, primary.Model)
+	submit(drv, "/server plain")
+	awaitNotice(t, drv, "connected: "+plain.Model)
+
+	submit(drv, upstreamPrompt)
+
+	awaitNotice(t, drv, "upstream HTTP 503", tuitest.Within(fallbackRunBudget))
+	waitIdle(drv)
+	if got := len(backup.Requests()); got != 0 {
+		t.Errorf("the primary's fallback saw %d requests, want none — plain names no fallback", got)
+	}
+	if strings.Contains(flatten(drv.Frame().String()), "server fallback") {
+		t.Errorf("the frame announces a fallback for an entry that names none:\n%s", drv.Frame())
+	}
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}

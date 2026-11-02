@@ -400,6 +400,15 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// is bound, which resolves to 1: the serial floor.
 	w.caps = newParallelAgentsCap(w.engine)
 
+	// The session seat's Server fallback (ADR 0105): the one resolver the session's Agent — and
+	// every unrouted child — consults before it abandons a Turn for a fault that is the upstream's
+	// own. It is installed on the engine holder BEFORE the bind below, so a determined startup and a
+	// pre-bound first pick construct with it alike, and it answers for whichever entry the session
+	// is bound to at the fault (sessionFallback): an entry with no `fallback:` is answered "none" at
+	// once, exactly as before the key existed.
+	w.fallback = newSessionFallback(w.live, w.holder, w.keys, w.roots)
+	w.engine.fallback = w.fallback
+
 	w.binder = serverBinder{cfg: w.cfg, resumed: w.resumed, engine: w.engine, holder: w.holder,
 		caps: w.caps, keys: w.keys}
 	if w.opts.Prebound.Reason == "" {
@@ -481,7 +490,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// a profile load's follow-the-profile: engine switch, Monitor swap, stored model cleared, in order
 	// (see sessionMover.move, which carries the reasoning).
 	w.mover = sessionMover{agent: w.engine, holder: w.holder, host: w.host, live: w.live, keys: w.keys,
-		caps: w.caps}
+		caps: w.caps, fallback: w.fallback}
 
 	// Where "is the llama-launcher integration on, and against which config" lives for this session
 	// (ADR 0029 D4, per-entry since 2026-08-07). It is declared HERE, above the two verbs that

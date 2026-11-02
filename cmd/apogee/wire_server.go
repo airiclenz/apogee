@@ -230,9 +230,10 @@ func (c reloadWake) poke() {
 	}
 }
 
-// serverHost is this binary's [tui.ServerHost]: the six acts over the one Upstream this session is
+// serverHost is this binary's [tui.ServerHost]: the seven acts over the one Upstream this session is
 // on — what it can move to, the two verbs that move or first bind it, the choice each move records,
-// and the observation the display lives off (ADR 0054). It holds the wiring itself rather than six
+// the observation the display lives off (ADR 0054), and the follow of a Server fallback the engine
+// made (ADR 0105). It holds the wiring itself rather than six
 // closures over it, because every act reads live state the wiring owns: the holder the switch
 // re-points, the resolved options the list is projected from, and the binding the rebind starts from.
 //
@@ -313,3 +314,9 @@ func (h serverHost) Bind(name string) (tui.ServerSwitchResult, error) { return h
 // answers whether it wrote: a name in no `servers:` entry is skipped silently, which only this layer
 // can tell.
 func (h serverHost) RecordChoice(name string) (bool, error) { return h.w.recordServerChoice(name) }
+
+// FollowFallback moves everything outside the engine onto the fallback the session seat fell over
+// to mid-Turn (ADR 0105; sessionMover.fallover), from the landing the seat's resolver made.
+func (h serverHost) FollowFallback(name string) (tui.ServerFallbackResult, error) {
+	return h.w.mover.fallover(name)
+}
