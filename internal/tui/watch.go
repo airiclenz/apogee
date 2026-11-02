@@ -841,9 +841,13 @@ func (m *Model) paintWatchStart(start watchStart) {
 // re-assert and the decision-pane withdrawal — since the watcher saves nothing and runs nothing.
 // What it adds is the watched window: a usage reading that moves the top-level gauge (depth 0, not
 // maintenance) and names its window makes that window the gauge's limit for the rest of the watch.
+// A background workflow child's switch of the session's own seat is noted as the live case notes
+// it, and followed nowhere: the server it names is not this process's.
 func (m Model) foldWatchedEvent(e domain.Event) Model {
 	if m.workflows.owns(e) {
-		return m.foldBackgroundEvent(e)
+		m = m.foldBackgroundEvent(e)
+		m.noteWorkflowSessionSwitch(e)
+		return m
 	}
 	if usage, ok := e.(domain.UsageEvent); ok && usage.Depth == 0 && !usage.Maintenance && usage.ContextWindow > 0 {
 		m.watch.window = usage.ContextWindow

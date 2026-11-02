@@ -1337,13 +1337,11 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// this Exchange's life) — workflow.go, ADR 0089.
 		if m.workflows.owns(msg.Event) {
 			m = m.foldBackgroundEvent(msg.Event)
-			// The one background event that is the session's news: a workflow child on the session's
-			// live holder hit the fault and moved the session's OWN seat (ADR 0105), so it is noted
-			// and followed exactly as the conversation's own switch is below. A Sub-agents seat's
-			// switch moves no part of the session.
+			// A workflow child that moved the session's OWN seat is noted
+			// (Model.noteWorkflowSessionSwitch) and followed exactly as the conversation's own switch
+			// is below.
 			var followed tea.Cmd
-			if switched, ok := msg.Event.(domain.UpstreamSwitchedEvent); ok && switched.Seat == domain.UpstreamSeatSession {
-				m.transcript.addNote(fallbackNote(switched))
+			if switched, ok := m.noteWorkflowSessionSwitch(msg.Event); ok {
 				m, followed = m.followFallback(switched)
 			}
 			// A workflow's phase moves what the open /workflows view lists: it re-reads (workflows.go).
@@ -1704,6 +1702,20 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the /settings field while the pane has one open (prompteditor.go).
 		return m.foldWidgetMsg(msg)
 	}
+}
+
+// noteWorkflowSessionSwitch notes the one background event that is the session's news: a workflow
+// child on the session's live holder hit the fault and moved the session's OWN seat (ADR 0105). It
+// reports the switch so the live case can follow it; a watcher, whose journal names a server that is
+// not this process's, notes it and follows nothing. A Sub-agents seat's switch moves no part of the
+// session and is not noted.
+func (m *Model) noteWorkflowSessionSwitch(e domain.Event) (domain.UpstreamSwitchedEvent, bool) {
+	switched, ok := e.(domain.UpstreamSwitchedEvent)
+	if !ok || switched.Seat != domain.UpstreamSeatSession {
+		return domain.UpstreamSwitchedEvent{}, false
+	}
+	m.transcript.addNote(fallbackNote(switched))
+	return switched, true
 }
 
 // ctrlCQuitWindow is the delay of the tick that disarms the Ctrl+C quit gesture. A lone Ctrl+C

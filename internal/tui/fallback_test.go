@@ -273,6 +273,76 @@ func TestFallbackWatchedSwitchIsNotedAndNotFollowed(t *testing.T) {
 	}
 }
 
+// A watcher folds a background workflow child's switch of the session's own seat to the one note the
+// owner's transcript carries, and follows nothing: the server it names is not this process's.
+func TestFallbackWatchedBackgroundSessionSeatSwitchIsNotedAndNotFollowed(t *testing.T) {
+	t.Parallel()
+	follow := &fakeFollow{}
+	m, _, _ := seededFallback(t, follow)
+	m = m.foldWatchedEvent(bgPhase(domain.WorkflowStarted))
+	switched := sessionSwitch(1)
+	switched.EventBase = bgChildBase("run-bg-1")
+	if !m.workflows.owns(switched) {
+		t.Fatal("the background child's switch is not workflow-owned; the test would not reach the owned path")
+	}
+	notesBefore := len(noteTexts(m))
+
+	m = m.foldWatchedEvent(switched)
+
+	if len(follow.calls) != 0 {
+		t.Errorf("follow calls = %v, want none for a watched journal", follow.calls)
+	}
+	want := "server fallback: test-host (test-model) failed (status 503); " +
+		"continuing on remote (remote-model) after waiting 2s"
+	if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("new notes = %q, want only %q", got, want)
+	}
+	if m.opts.HostAlias != "test-host" {
+		t.Errorf("HostAlias = %q, want the display left on test-host", m.opts.HostAlias)
+	}
+}
+
+// A background workflow child's Sub-agents seat switch moves no part of the session: neither the
+// live fold nor a watcher's notes or follows it.
+func TestFallbackBackgroundSubAgentsSeatSwitchIsUnnoted(t *testing.T) {
+	t.Parallel()
+	switched := domain.UpstreamSwitchedEvent{
+		EventBase:  bgChildBase("run-bg-1"),
+		FromServer: "delegate", FromModel: "small",
+		ToServer: "delegate-backup", ToModel: "smaller",
+		Fault: "connection", Waited: 0,
+		Seat: domain.UpstreamSeatSubAgents,
+	}
+	paths := []struct {
+		name string
+		fold func(*testing.T, Model, domain.Event) Model
+	}{
+		{"live", func(t *testing.T, m Model, e domain.Event) Model { return step(t, m, eventMsg{Event: e}) }},
+		{"watched", func(_ *testing.T, m Model, e domain.Event) Model { return m.foldWatchedEvent(e) }},
+	}
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			t.Parallel()
+			follow := &fakeFollow{}
+			m, _, _ := seededFallback(t, follow)
+			m = path.fold(t, m, bgPhase(domain.WorkflowStarted))
+			if !m.workflows.owns(switched) {
+				t.Fatal("the background child's switch is not workflow-owned; the test would not reach the owned path")
+			}
+			notesBefore := len(noteTexts(m))
+
+			m = path.fold(t, m, switched)
+
+			if len(follow.calls) != 0 {
+				t.Errorf("follow calls = %v, want none — a Sub-agents seat is not the session's", follow.calls)
+			}
+			if got := noteTexts(m)[notesBefore:]; len(got) != 0 {
+				t.Errorf("new notes = %q, want none", got)
+			}
+		})
+	}
+}
+
 // A host with nothing to follow says so once beside the fallback note, and the display stays put.
 func TestFallbackFollowRefusedLeavesTheDisplay(t *testing.T) {
 	t.Parallel()

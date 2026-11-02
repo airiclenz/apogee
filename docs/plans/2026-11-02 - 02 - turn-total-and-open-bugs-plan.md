@@ -119,7 +119,9 @@ docs/manual/configuration.md — thinking-effort section ("Apogee works out for 
 
 **Commit:** `docs(adr): ADR 0060 amendment — the reasoning object's shape picks the dialect`
 
-## 4. A watcher notes a workflow-moved session-seat switch
+## 4. A watcher notes a workflow-moved session-seat switch — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): added a second test, TestFallbackBackgroundSubAgentsSeatSwitchIsUnnoted (live and watched subtests), to pin the Goal's "a workflow-owned Sub-agents-seat switch stays unnoted on both paths" clause, which the plan's Tests line did not cover.
 
 **Closes:** watched-workflow-switch-unnoted
 
