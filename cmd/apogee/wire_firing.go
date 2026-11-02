@@ -529,8 +529,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// the same five words on this side of the boundary (internal/agent's toProviderDialect
 	// converts them back at the wire seam, where the provider package holds no domain import).
 	cfg.EffortDialect = domain.EffortDialect(effortDialect)
-	cfg.ParallelAgents = config.ResolveParallelAgents(int(in.entry.ParallelAgents), slots,
-		config.DefaultParallelAgents(in.entry))
+	cfg.ParallelAgents = firingWidth(in.entry, slots)
 
 	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink
 	// (ADR 0073 §2). It is assigned after the literal rather than inside it because a nil
@@ -822,6 +821,15 @@ func resolveFiringRouting(
 	}
 	return firingRouting{target: target, seat: seat, subAgents: subAgents},
 		delegationStateNotice(name, target, "", nil)
+}
+
+// firingWidth is the fan-out width an unattended run binds on entry, whose beat saw slots: the
+// entry's own `parallel-agents:` pin, else the slots, else the entry's floor
+// (config.ResolveParallelAgents, ADR 0039 decision 2). firingConfig binds the primary's with it and
+// the run's session-seat fallover the fallback's (firingSessionSource), so the two cannot rank a
+// width apart.
+func firingWidth(entry config.ServerEntry, slots int) int {
+	return config.ResolveParallelAgents(int(entry.ParallelAgents), slots, config.DefaultParallelAgents(entry))
 }
 
 // firingSubAgentsSource is an unattended run's Sub-agents seat source: the routed counterpart of

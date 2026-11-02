@@ -468,8 +468,9 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 // Sub-agents seat the announcement is the first sibling's to claim the move in the tree-shared
 // delegation latch instead (announcesRehome); the tree's re-latch onto the fallback is not the
 // rehome's but the consult's, which observes the landing whether or not a holder moves
-// (consultResolver). The binding itself is applied by followUpstream, on this Agent's own goroutine,
-// when the loop re-arms the request.
+// (consultResolver). A session-seat move's answered width is stated on the root by the Agent that
+// moved the seat (stateSessionWidth). The binding itself is applied by followUpstream, on this
+// Agent's own goroutine, when the loop re-arms the request.
 func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	spec, bind := answer.Upstream, answer.Rebind
 	if spec.Endpoint == "" || bind.Model == "" {
@@ -498,6 +499,7 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	// Torn down for SwitchUpstream's reason when this Agent owns it. A request a sibling still
 	// streams over it keeps its connection: the teardown closes only idle sockets.
 	_ = a.closeOwnedUpstream(retired)
+	a.stateSessionWidth(answer)
 	if !a.announcesRehome(answer) {
 		return true
 	}
@@ -528,6 +530,22 @@ func (a *Agent) announcesRehome(answer FallbackAnswer) bool {
 		return true
 	}
 	return a.delegation.claimAnnouncement(claimFallbackKey(a.seating.fallback, a.seating.upstream, answer.Server))
+}
+
+// stateSessionWidth applies a landed session-seat rehome's answered width to the root, as
+// SetParallelAgents does, through the root's setter the tree's latch carries (setSessionWidth), so
+// the move lands on the root's stated width and fan-out ceiling whichever Agent of the tree — the
+// root, an unrouted child, a session-seated one — landed it. Only the Agent whose replace moved the
+// seat calls it, so one move states the width once. An answer of 0 (FallbackAnswer.ParallelAgents)
+// and a Sub-agents seat rehome leave the width alone: a routed move states its width as the far
+// width, through the re-latch (relatchDelegation).
+func (a *Agent) stateSessionWidth(answer FallbackAnswer) {
+	if answer.ParallelAgents <= 0 || a.seating.upstream.seatOf() != domain.UpstreamSeatSession {
+		return
+	}
+	if set := a.delegation.setSessionWidth; set != nil {
+		set(answer.ParallelAgents)
+	}
 }
 
 // consultResolver asks the seat's resolver about report — the respond phase's one consult

@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -306,6 +307,76 @@ func TestHeadlessFallbackUnknownNameIsRefused(t *testing.T) {
 	if got := len(primary.Requests()); got != 0 {
 		t.Errorf("the primary saw %d requests, want none", got)
 	}
+}
+
+// TestHeadlessFallbackFansOutAtTheFallbackWidth: the primary pins a fan-out width of 1 and the
+// fallback a width of 3, under one fan-out round. The primary dies under the run's first request,
+// the seat falls over, and the fallback answers the resend with three delegations in one reply. The
+// run fans out at the fallback's width, so its ceiling is 3 and all three children reach the
+// fallback; at the dead primary's width the ceiling would be 1 and two of them would be refused
+// before they started.
+func TestHeadlessFallbackFansOutAtTheFallbackWidth(t *testing.T) {
+	const wrapUp = "The delegates reported."
+	tasks := []string{"Survey the docs", "Survey the tests", "Survey the tools"}
+	calls := make([]stubllm.ToolCall, 0, len(tasks))
+	for i, task := range tasks {
+		calls = append(calls, stubllm.ToolCall{
+			Name: "sub_agent", Arguments: `{"task":"` + task + `","name":"survey ` + strconv.Itoa(i) + `"}`,
+		})
+	}
+	primary := dyingPrimary(t)
+	backup := stubllm.New(t, stubllm.Script{Model: "backup-model", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "sub_agent"}, Repeat: true, Text: wrapUp},
+		{When: &stubllm.Match{LastMessage: "^" + upstreamPrompt}, Repeat: true, ToolCalls: calls},
+		{Repeat: true, Text: "Surveyed."},
+	}})
+	home := t.TempDir()
+	writeConfigHome(t, home,
+		"context-window: 32768\n"+
+			"re-stream-budget: 0\n"+
+			"delegate-fanout-rounds: 1\n"+
+			"servers:\n"+
+			"  - name: primary\n"+
+			"    endpoint: "+primary.URL+"\n"+
+			"    model: "+primary.Model+"\n"+
+			"    parallel-agents: 1\n"+
+			"    fallback: [backup]\n"+
+			"    fallback-after: "+fallbackGraceForTests.String()+"\n"+
+			"  - name: backup\n"+
+			"    endpoint: "+backup.URL+"\n"+
+			"    model: "+backup.Model+"\n"+
+			"    parallel-agents: 3\n"+
+			"server: primary\n")
+
+	done := startHeadless(t, home)
+	killHeldPrimary(t, primary)
+	res := awaitHeadless(t, done)
+
+	if res.err != nil {
+		t.Fatalf("headless: %v (exit %d)\n%s", res.err, exitCodeFor(res.err), res.stderr)
+	}
+	if got := strings.TrimRight(res.stdout, "\n"); got != wrapUp {
+		t.Errorf("stdout = %q, want the wrap-up after the delegations reported", got)
+	}
+	for _, task := range tasks {
+		if got := childRequestsFor(backup, task); got != 1 {
+			t.Errorf("the fallback saw %d requests for %q, want 1 — the fan-out ceiling refused it at the "+
+				"dead primary's width (log %v)", got, task, backup.Requests())
+		}
+	}
+}
+
+// childRequestsFor counts the requests up answered whose last message is task itself: a child's
+// request on its brief. The parent's own requests never qualify, since a refusal or a report that
+// names the task carries more than the task.
+func childRequestsFor(up *stubllm.Server, task string) int {
+	n := 0
+	for _, r := range up.Requests() {
+		if len(r.Messages) > 0 && strings.TrimSpace(r.Messages[len(r.Messages)-1].Content) == task {
+			n++
+		}
+	}
+	return n
 }
 
 // fallbackResumePrompt and fallbackResumeAnswer are the one Exchange a resumed fallen-over session runs, on the

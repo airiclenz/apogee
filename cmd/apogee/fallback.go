@@ -437,6 +437,13 @@ type seatSource struct {
 	// resolver hands the engine as FallbackAnswer.Target, so the engine re-latches the tree (ADR
 	// 0105). A session seat's hook answers nil.
 	landed func(seat *seatResolver, landing fallbackLanding) *apogee.DelegationTarget
+	// width is the session server's fan-out width a session-seat landing makes true, ranked as the
+	// Driver ranked its primary's, which the resolver hands the engine as
+	// FallbackAnswer.ParallelAgents so the engine states it on the root. nil answers 0 — the width
+	// left alone — which is the TUI's: its cap follows the entry the session arrived on itself
+	// (sessionMover.arrive, ADR 0039 decision 2). Never set on the Sub-agents seat, whose width rides
+	// the landing's Delegation target.
+	width func(landing fallbackLanding) int
 }
 
 // seatResolver is one seat's Server fallback (fallbackResolver) together with the latest landing it
@@ -471,7 +478,8 @@ func newSeatResolver(kind seatKind, src seatSource) *seatResolver {
 // beats the fallback named and resolves the whole landing; the landing is handed to the Driver's
 // hook, and on the Sub-agents seat the target the hook answers rides the answer
 // (FallbackAnswer.Target) carrying this resolver as its Fallback, so every target the seat's
-// fallover latches consults the one instance. The landing, Target included, is recorded as the
+// fallover latches consults the one instance; the source's width, when it states one, rides it as
+// FallbackAnswer.ParallelAgents. The landing, Target included, is recorded as the
 // latest before its answer goes back to the walk — where it commits for every caller of the run,
 // including the engine's consult after a cancelled one (agent.FallbackResolver).
 func (s *seatResolver) land(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
@@ -489,6 +497,9 @@ func (s *seatResolver) land(ctx context.Context, name string) (apogee.FallbackAn
 			target.Fallback = s
 			landing.answer.Target = target
 		}
+	}
+	if s.src.width != nil {
+		landing.answer.ParallelAgents = s.src.width(landing)
 	}
 	s.latestMu.Lock()
 	s.latest, s.hasLanded = landing, true
@@ -525,7 +536,10 @@ func firingLander(in firingInputs, keys *config.KeyResolver, parent delegationPa
 // firingSessionSource is an unattended run's session seat source. The primary's grace beats go
 // through one Monitor dialled as the run's own beat is (the entry's dial facts, the key resolved
 // for it, the model the run bound as the discovery hint); nothing follows a landing, the engine's
-// switch being the whole move for a run with no display.
+// switch being the whole move for a run with no display. A landing's answer carries the fallback's
+// fan-out width, ranked off the beat that found it answering as firingConfig ranked the primary's
+// (firingWidth), so the engine re-states the run's width on the move: a Firing has no cap that
+// follows the entry, as a session's does.
 func firingSessionSource(in firingInputs, keys *config.KeyResolver, apiKey, model string) seatSource {
 	primary := bindingOfEntry(in.entry, apiKey)
 	primary.Model = model
@@ -534,6 +548,9 @@ func firingSessionSource(in firingInputs, keys *config.KeyResolver, apiKey, mode
 		primary:   in.entry,
 		recovered: func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
 		lander:    firingLander(in, keys, delegationParent{}),
+		width: func(landing fallbackLanding) int {
+			return firingWidth(landing.entry, landing.observed.TotalSlots)
+		},
 	}
 }
 

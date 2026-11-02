@@ -2032,9 +2032,11 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	// identity rule that keeps a routed child's delegations on the routed server must therefore keep
 	// a session-seated child's on the session server, and sharing the parent's holder would instead
 	// send its grandchildren to the very server the model just steered this branch away from. The
-	// latch is empty and nothing ever writes it: the host pushes to the top-level Agent it built.
+	// latch is empty and nothing ever writes it: the host pushes to the top-level Agent it built. It
+	// still carries the root's width setters (rootBound), since this child speaks over the session's
+	// own holder: a session-seat rehome it lands states the fallback's width on the root.
 	if seat == seatSession {
-		d.latch = &delegationLatch{}
+		d.latch = a.delegation.rootBound()
 	}
 	return newDelegateAgent(childCfg, d)
 }

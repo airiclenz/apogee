@@ -696,7 +696,8 @@ func landOn(lander fallbackLander, s rankScenario) (fallbackLanding, entryRanks)
 // ranksOfLanding reads the binding a FallbackSwitch leaves the seat on, applied as the engine
 // applies it: the switch first, then the rebind over it. The rebind always states the window, the
 // reserve share and the reply cap (rebindSpecFor), so those are its; the working window, the
-// stream-idle window and the seat's words are the switch's alone. No width rides an answer.
+// stream-idle window and the seat's words are the switch's alone. The width is each Driver's own
+// door's to read (FallbackAnswer.ParallelAgents, or the session's cap).
 func ranksOfLanding(answer apogee.FallbackAnswer) entryRanks {
 	up, rebind := answer.Upstream, answer.Rebind
 	ranks := entryRanks{
@@ -754,8 +755,8 @@ func firingOnPrimary(t *testing.T, s rankScenario) (apogee.Config, firingInputs,
 
 // landSeatOn lands the run's own seat resolver on the scenario's entry, its key and its one beat
 // stubbed as landOn stubs a bare lander's, so whatever follows that resolver's latest landing reads
-// the move the engine would have been answered with.
-func landSeatOn(t *testing.T, seat *seatResolver, s rankScenario) {
+// the move the engine would have been answered with, and returns that answer.
+func landSeatOn(t *testing.T, seat *seatResolver, s rankScenario) apogee.FallbackAnswer {
 	t.Helper()
 	if seat == nil {
 		t.Fatal("the run composed no seat resolver; the primary no longer names a `fallback:`")
@@ -768,9 +769,11 @@ func landSeatOn(t *testing.T, seat *seatResolver, s rankScenario) {
 		stubbed.beat = func(context.Context, upstreamBinding) heartbeat.Beat { return beat }
 		return stubbed
 	}
-	if _, landed := seat.land(context.Background(), rankName); !landed {
+	answer, landed := seat.land(context.Background(), rankName)
+	if !landed {
 		t.Fatal("the run's seat resolver refused an entry its bare lander landed on")
 	}
+	return answer
 }
 
 // TestEntryRankFallbackDoors pins the door a session seat's Server fallback lands through (D), on
@@ -798,10 +801,10 @@ func resolveSessionSeatLanding(t *testing.T, s rankScenario) entryRanks {
 }
 
 // resolveFiringSeatLanding lands a Firing's session-seat lander on the entry — built as
-// firingSessionSource builds it, over the Firing's own Options and roots — and reads, off the run
-// composed on the primary, the width it fans out at, which the landing does not move. It then lands
-// the run's own seat resolver on the entry as well and reads the server the run's namer names an
-// unrouted child on once it has.
+// firingSessionSource builds it, over the Firing's own Options and roots. It then lands the run's own
+// seat resolver on the entry as well and reads the width its answer states for the engine to fan out
+// at (FallbackAnswer.ParallelAgents), and the server the run's namer names an unrouted child on once
+// it has.
 func resolveFiringSeatLanding(t *testing.T, s rankScenario) entryRanks {
 	t.Helper()
 	cfg, in, routing := firingOnPrimary(t, s)
@@ -809,8 +812,7 @@ func resolveFiringSeatLanding(t *testing.T, s rankScenario) entryRanks {
 	if ranks.refused {
 		return ranks
 	}
-	ranks.width = cfg.ParallelAgents
-	landSeatOn(t, routing.fallback, s)
+	ranks.width = landSeatOn(t, routing.fallback, s).ParallelAgents
 	namer, ok := cfg.Namer.(*delegationNamer)
 	if !ok {
 		t.Fatalf("the Firing's namer is %T, want *delegationNamer", cfg.Namer)
@@ -858,10 +860,10 @@ func wantFiringSeatLanding(s rankScenario) entryRanks {
 	if ranks.refused {
 		return ranks
 	}
-	// WRONG at base: issue firing-fallover-width-stale, fixed by plan item 9. The answer carries no
-	// width and nothing in a Firing follows the entry, so the run keeps fanning out at the dead
-	// primary's width rather than the fallback entry's.
-	ranks.width = rankPrimaryWidth
+	// The answer states the fallback entry's width, ranked as the run ranked its primary's — the
+	// entry's pin, else the slots the landing's beat saw, else the entry's floor — since nothing in
+	// a Firing follows the entry as a session's cap does.
+	ranks.width = s.width(true)
 	// The namer's session reader follows the seat's latest landing, so an unrouted child spawned
 	// after the fallover is named on the fallback the run now talks to.
 	ranks.namedOn = rankEndpoint

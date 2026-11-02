@@ -169,7 +169,9 @@ type DelegationTarget struct {
 // It also holds what a routed fallover needs to re-latch the seat (relatch): the resolver the latch
 // is armed on, the root Agent's far-width setter, so the move lands on the tree's one latch and on
 // the root's stated width whichever depth the landing child sits at, and the re-latch claims that
-// let each landing move the latch once.
+// let each landing move the latch once. And it carries the root's session-width setter, so a
+// session-seat rehome landed at any depth states the fallback's width on the root
+// (FallbackAnswer.ParallelAgents).
 type delegationLatch struct {
 	mu     sync.RWMutex
 	target *DelegationTarget
@@ -180,9 +182,14 @@ type delegationLatch struct {
 	armed FallbackResolver
 	// stateWidth is the ROOT Agent's far-width setter (stateFarWidth), bound when the root is built
 	// (seedTopLevel) and never written after, so a re-latch from a routed child at any depth states
-	// the far width where the orientation block reads it. nil on a latch no root owns — a
-	// session-seated child's empty one, which nothing ever writes.
+	// the far width where the orientation block reads it. A session-seated child's empty latch
+	// carries the root's too (rootBound), though nothing ever arms that latch to re-latch it.
 	stateWidth func(int)
+	// setSessionWidth is the ROOT Agent's session-width setter (SetParallelAgents), bound and carried
+	// as stateWidth is, so a session-seat rehome landed by any Agent of the tree — a session-seated
+	// child on its own empty latch included — states the fallback's width on the root
+	// (Agent.stateSessionWidth). nil on a latch no root built.
+	setSessionWidth func(int)
 	// announced holds every routed fallover already announced in this tree, keyed by the seat and
 	// the server it moved to (fallbackClaim); nil until the first claim.
 	announced map[fallbackClaim]struct{}
@@ -307,6 +314,19 @@ func (l *delegationLatch) snapshot() *DelegationTarget {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.target
+}
+
+// rootBound is an EMPTY latch of its own — no target, no armed resolver, no claims — that still
+// writes this latch's root widths (stateWidth, setSessionWidth): what a session-seated child is
+// handed, so its nested delegations stay on the session server while a session-seat rehome it lands
+// still reaches the root. The setters are bound once by the root (seedTopLevel) before any child can
+// share the latch and never written after, so they are read here without the lock. A nil latch
+// answers a bare empty one.
+func (l *delegationLatch) rootBound() *delegationLatch {
+	if l == nil {
+		return &delegationLatch{}
+	}
+	return &delegationLatch{stateWidth: l.stateWidth, setSessionWidth: l.setSessionWidth}
 }
 
 // SetDelegationTarget latches the Sub-agent server every delegation in this agent tree routes to,

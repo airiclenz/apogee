@@ -487,7 +487,8 @@ func newTUIFallbackSeat(t *testing.T) tuiFallbackSeat {
 }
 
 // TestTUIFallbackResolverAnswersForTheBoundEntry: the session's one resolver answers a fault on the
-// entry the session is bound to — primary's grace runs out and the walk lands on backup — and after
+// entry the session is bound to — primary's grace runs out and the walk lands on backup, its answer
+// stating no width since the session's cap follows the entry itself — and after
 // a human move onto an entry with no `fallback:` it answers a fault there with "none" at once and
 // has forgotten the landing on backup.
 func TestTUIFallbackResolverAnswersForTheBoundEntry(t *testing.T) {
@@ -499,6 +500,10 @@ func TestTUIFallbackResolverAnswersForTheBoundEntry(t *testing.T) {
 
 	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" || answer.Rebind.Model != "backup-model" {
 		t.Fatalf("answer = %+v, want a switch onto backup's model", answer)
+	}
+	if answer.ParallelAgents != 0 {
+		t.Errorf("answer width = %d, want 0 — the session's cap follows the entry itself (ADR 0039 D2)",
+			answer.ParallelAgents)
 	}
 	if _, ok := seat.mover.fallback.landing("backup"); !ok {
 		t.Fatal("the landing on backup was not kept for the follow")

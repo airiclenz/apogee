@@ -251,8 +251,11 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	// since replaced.
 	treeAllowRules(cfg.Approver).store(cfg.AllowRules)
 	// The tree's latch carries THIS root's far-width setter, bound before any child can share the
-	// latch, so a routed fallover's re-latch at any depth states its width here (relatch).
+	// latch, so a routed fallover's re-latch at any depth states its width here (relatch) — and its
+	// session-width setter, so a session-seat rehome landed at any depth does too
+	// (stateSessionWidth).
 	a.delegation.stateWidth = a.stateFarWidth
+	a.delegation.setSessionWidth = a.SetParallelAgents
 }
 
 // guardsFor is the top-level guardrail bundle cfg asks for: the production breaker, and the

@@ -918,6 +918,15 @@ type FallbackAnswer struct {
 	// makes the answer stale. nil re-latches nothing, and a session-seat answer's Target is never
 	// read.
 	Target *DelegationTarget
+	// ParallelAgents is the session server's fan-out width the fallback makes true, resolved by the
+	// Driver from the same beat as it resolves its primary's — a session-seat answer only. When the
+	// Agent whose rehome moves the session seat lands it, the engine applies the width to the root
+	// as SetParallelAgents does (delegationLatch.setSessionWidth), so the root's stated width and
+	// fan-out ceiling follow the move where no Sub-agent server's far width is stated
+	// (statedDelegationWidth). 0 leaves the width alone — what a Driver that re-states the width
+	// itself on the move answers (the TUI's caps, ADR 0039 decision 2) — and a Sub-agents seat
+	// answer's is never read.
+	ParallelAgents int
 }
 
 // SeedRefusedError is the refusal New and Resume return when the construction seed's reaction lanes

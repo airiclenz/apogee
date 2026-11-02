@@ -275,7 +275,10 @@ cmd/apogee/naming_test.go — TestFiringNamerFollowsTheLatchedSubAgentsTarget; c
 
 **Commit:** `fix(firing): a Firing names unrouted children on the fallback server`
 
-## 9. A Firing fans out at the fallback's width after a fallover
+## 9. A Firing fans out at the fallback's width after a fallover — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the Firing fill is a new `seatSource.width` hook set only by `firingSessionSource` and applied in `seatResolver.land` (never in the shared `fallbackLander.arrive`); the width ladder is one helper, `firingWidth` (wire_firing.go), which `firingConfig` now binds the primary's width with too. The engine applies the answer in `rehome` through a new `Agent.stateSessionWidth` and the latch's `setSessionWidth` (the root's `SetParallelAgents`), and a session-seated child's empty latch is now built by `delegationLatch.rootBound()`, which carries both root setters (stateWidth too, though that latch is never armed).
+NOTES (2026-11-02): the e2e test counts a child's request by its last message being exactly the task (`childRequestsFor`), since `requestsCarrying` also matches the parent's follow-up, whose delegation record names the refused tasks; verified it fails with the fill disabled (2 of 3 children refused at ceiling 1).
 
 **What:**
 Recast at the regression check (2026-11-02).

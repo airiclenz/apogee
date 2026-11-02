@@ -717,6 +717,77 @@ func TestFallbackSwitchByAnUnroutedChildMovesTheSessionSeat(t *testing.T) {
 	}
 }
 
+// TestFallbackSessionSeatRehomeStatesTheAnsweredWidth pins FallbackAnswer.ParallelAgents: the Agent
+// whose rehome moves the session seat states the answered width on the ROOT, whatever depth and
+// latch it sits at — a session-seated child's own empty latch included — so the root's stated width
+// and the fan-out ceiling it enforces follow the move; an answer of 0 leaves the width alone.
+func TestFallbackSessionSeatRehomeStatesTheAnsweredWidth(t *testing.T) {
+	t.Parallel()
+	const (
+		primaryWidth  = 2
+		fallbackWidth = 6
+		rounds        = 2
+	)
+	tests := []struct {
+		name      string
+		answered  int
+		lander    func(t *testing.T, r *seatRig) *Agent
+		wantWidth int
+	}{
+		{
+			name:      "the root lands it",
+			answered:  fallbackWidth,
+			lander:    func(_ *testing.T, r *seatRig) *Agent { return r.parent },
+			wantWidth: fallbackWidth,
+		},
+		{
+			name:      "an unrouted child lands it",
+			answered:  fallbackWidth,
+			lander:    func(t *testing.T, r *seatRig) *Agent { return r.child(t, "unrouted") },
+			wantWidth: fallbackWidth,
+		},
+		{
+			name:      "a session-seated child lands it on its own latch",
+			answered:  fallbackWidth,
+			lander:    func(t *testing.T, r *seatRig) *Agent { return spawnOn(t, r.parent, seatSession) },
+			wantWidth: fallbackWidth,
+		},
+		{
+			name:      "an answer of 0 leaves the width alone",
+			answered:  0,
+			lander:    func(_ *testing.T, r *seatRig) *Agent { return r.parent },
+			wantWidth: primaryWidth,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := newSeatRig(t, func(cfg *domain.Config) {
+				cfg.ParallelAgents = primaryWidth
+				cfg.Delegation.FanOutRounds = rounds
+			})
+			r.resolver.answer = func(context.Context, FallbackReport) FallbackAnswer {
+				answer := spareAnswer()
+				answer.ParallelAgents = tc.answered
+				return answer
+			}
+			lander := tc.lander(t, r)
+
+			stepOnce(t, lander, "work that faults the primary")
+
+			if events := r.switchedEvents(); len(events) != 1 || events[0].Seat != domain.UpstreamSeatSession {
+				t.Fatalf("events = %+v, want one session-seat switch", events)
+			}
+			if got := r.parent.statedDelegationWidth(); got != tc.wantWidth {
+				t.Errorf("root stated width = %d, want %d", got, tc.wantWidth)
+			}
+			if got, want := r.parent.fanOutCeiling(), rounds*tc.wantWidth; got != want {
+				t.Errorf("root fan-out ceiling = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
 // backgroundChild spawns an unrouted child off a background workflow's host of the rig's parent —
 // the launch-time snapshot a background workflow runs off (backgroundHost) — and returns both.
 func (r *seatRig) backgroundChild(t *testing.T, name string) (host, child *Agent) {
