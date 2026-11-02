@@ -96,7 +96,19 @@ internal/config/config_test.go — TestServerEntryRequestExtraRoundTrips, TestAp
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 ./internal/config/`; `go vet ./internal/config/`; `grep -c 'fallback-after:' docs/manual/configuration.md` ≥ 1 and `grep -c 'fallback:' docs/manual/configuration.md` ≥ 1
 **Commit:** `feat(config): fallback and fallback-after keys on a server entry`
 
-## 3. Provider: a fault class on every failed Delta
+## 3. Provider: a fault class on every failed Delta — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the enum is `provider.FaultClass` (string values: transport, timeout, status, cut, in-band, local, cancelled; zero `FaultNone`), carried as `Delta.Fault provider.UpstreamFault{Class, Code, ErrorType}`. The exported type is called `UpstreamFault` so it cannot be confused with the unexported `fault` that `classify` returns. The struct also carries the in-band slug (`ErrorType`) because `FallbackEligible` needs it for `provider_unavailable` and `overloaded_error`.
+
+NOTES (2026-11-02): the item's five classes cover upstream faults only, so two more were added so that every DeltaError gets a class: `FaultLocal`, for the limits apogee enforces itself (marshal failure, text cap, tool-call caps, malformed-only stream, thinking-block encode failure, a line longer than the scanner buffer), and `FaultCancelled`, for a stream the caller's own context ended. Neither is eligible.
+
+NOTES (2026-11-02): the read-fault mapping widens the regression guard's literal "idle → idle, else isTransientReadError → cut". A network timeout on a body read joins the idle cut as `FaultTimeout` (the goal names one "idle/timeout" class). Any non-transient read failure other than bufio.ErrTooLong, such as a connection reset, is `FaultCut` and is eligible, while Retryable stays false for it as before. One helper, `readFault`, does this sorting for both codecs.
+
+NOTES (2026-11-02): a single rule, `isTransientFault(code, errType)`, now decides both classify's retryable verdict and FallbackEligible's status and in-band arms. classify's behaviour is unchanged (TestClassify passes as before), and the rendered "in-band 0:" text is unchanged.
+
+NOTES (2026-11-02): wire_anthropic_stream_test.go was not in Files. Two of its exact-Delta expectations (tool-call count cap, malformed-only stream) gained `Fault: UpstreamFault{Class: FaultLocal}`. This follows directly from the item's new field and is not a change to behaviour.
+
+NOTES (2026-11-02): consequential edit: internal/provider/doc.go. The package map's fault.go line now names UpstreamFault and FallbackEligible, made necessary by the new exported type in fault.go.
 
 **What:**
 **Goal:** every error `provider.Delta` carries a fault class that tells apart: transport (connection failure after retries), idle/timeout, HTTP status with its code, cut stream, in-band error with its code. `Retryable` keeps its current meaning on every path.

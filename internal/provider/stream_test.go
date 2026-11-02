@@ -1756,3 +1756,244 @@ func TestStream_IdleTimeoutOffWaitsForCtx(t *testing.T) {
 		})
 	}
 }
+
+// statusServer returns a server that answers every request with status and a short body.
+func statusServer(status int) (*httptest.Server, func()) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"error":{"message":"refused by the test"}}`)
+	}))
+	return srv, srv.Close
+}
+
+// refusedServer returns the URL of a server that is already closed, so every connection to it
+// is refused, standing in for a server that is down.
+func refusedServer() (*httptest.Server, func()) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	return srv, func() {}
+}
+
+// faultClassStream drives one request through a Client over the server serve starts and returns
+// its terminal delta, failing the test when the stream does not end in a DeltaError.
+func faultClassStream(t *testing.T, serve func() (*httptest.Server, func()), wire Wire) Delta {
+	t.Helper()
+	srv, stop := serve()
+	defer stop()
+
+	const idleWindow = 50 * time.Millisecond
+	client := NewClient(
+		srv.URL,
+		"m",
+		WithWire(wire),
+		WithMaxRetries(0),
+		WithStreamIdleTimeout(idleWindow),
+	)
+	deltas := collectStream(client, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if len(deltas) == 0 || deltas[len(deltas)-1].Kind != DeltaError {
+		t.Fatalf("deltas = %+v, want a stream ending in a DeltaError", deltas)
+	}
+	return deltas[len(deltas)-1]
+}
+
+// TestStream_FaultClass pins the class every failing path puts on its terminal DeltaError, and
+// FallbackEligible's verdict over it: a connection that failed, a timeout, a cut body, a 429 or
+// 5xx status and an in-band error of those classes are the upstream's failure; any other 4xx and
+// a fault apogee raised itself are not. Retryable is checked beside it, unchanged: a status fault
+// stays non-retryable (send already retried it) while being eligible.
+func TestStream_FaultClass(t *testing.T) {
+	t.Parallel()
+
+	const anthropicText = "event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}` + "\n\n"
+	const openaiText = `data: {"choices":[{"delta":{"content":"Hel"}}]}` + "\n\n"
+	sse := func(body string) func() (*httptest.Server, func()) {
+		return func() (*httptest.Server, func()) {
+			srv := sseServer(body)
+			return srv, srv.Close
+		}
+	}
+	cut := func(body string) func() (*httptest.Server, func()) {
+		return func() (*httptest.Server, func()) {
+			srv := cutServer(body)
+			return srv, srv.Close
+		}
+	}
+	hold := func(body string) func() (*httptest.Server, func()) {
+		return func() (*httptest.Server, func()) { return holdServer(body) }
+	}
+	status := func(code int) func() (*httptest.Server, func()) {
+		return func() (*httptest.Server, func()) { return statusServer(code) }
+	}
+
+	tests := []struct {
+		name          string
+		wire          Wire
+		serve         func() (*httptest.Server, func())
+		want          UpstreamFault
+		wantEligible  bool
+		wantRetryable bool
+	}{
+		{
+			name:         "a refused connection is a transport fault",
+			serve:        refusedServer,
+			want:         UpstreamFault{Class: FaultTransport},
+			wantEligible: true,
+		},
+		{
+			name:         "500 is an eligible status",
+			serve:        status(http.StatusInternalServerError),
+			want:         UpstreamFault{Class: FaultStatus, Code: http.StatusInternalServerError},
+			wantEligible: true,
+		},
+		{
+			name:         "529 is an eligible status",
+			serve:        status(529),
+			want:         UpstreamFault{Class: FaultStatus, Code: 529},
+			wantEligible: true,
+		},
+		{
+			name:         "429 is an eligible status",
+			serve:        status(http.StatusTooManyRequests),
+			want:         UpstreamFault{Class: FaultStatus, Code: http.StatusTooManyRequests},
+			wantEligible: true,
+		},
+		{
+			name:  "400 is not eligible",
+			serve: status(http.StatusBadRequest),
+			want:  UpstreamFault{Class: FaultStatus, Code: http.StatusBadRequest},
+		},
+		{
+			name:  "401 is not eligible",
+			serve: status(http.StatusUnauthorized),
+			want:  UpstreamFault{Class: FaultStatus, Code: http.StatusUnauthorized},
+		},
+		{
+			name:  "413 is not eligible",
+			serve: status(http.StatusRequestEntityTooLarge),
+			want:  UpstreamFault{Class: FaultStatus, Code: http.StatusRequestEntityTooLarge},
+		},
+		{
+			name:          "a body cut mid-stream is a cut",
+			serve:         cut(openaiText),
+			want:          UpstreamFault{Class: FaultCut},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name:          "a silent body is the idle cut",
+			serve:         hold(openaiText),
+			want:          UpstreamFault{Class: FaultTimeout},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name:          "a stall before the headers is the idle cut",
+			serve:         hold(""),
+			want:          UpstreamFault{Class: FaultTimeout},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name:          "an in-band 502 is eligible",
+			serve:         sse(`data: {"error":{"message":"upstream died","code":502}}` + "\n\n"),
+			want:          UpstreamFault{Class: FaultInBand, Code: http.StatusBadGateway},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name:  "an in-band provider_unavailable is eligible under a 4xx code",
+			serve: sse(`data: {"error":{"message":"gone","code":404,"error_type":"provider_unavailable"}}` + "\n\n"),
+			want: UpstreamFault{
+				Class:     FaultInBand,
+				Code:      http.StatusNotFound,
+				ErrorType: providerUnavailable,
+			},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name:  "an in-band 400 is not eligible",
+			serve: sse(`data: {"error":{"message":"bad tool schema","code":400}}` + "\n\n"),
+			want:  UpstreamFault{Class: FaultInBand, Code: http.StatusBadRequest},
+		},
+		{
+			name:  "a stream of nothing but malformed chunks is apogee's own fault",
+			serve: sse("data: {not json\n\n"),
+			want:  UpstreamFault{Class: FaultLocal},
+		},
+		{
+			name:          "an anthropic body cut mid-stream is a cut",
+			wire:          WireAnthropic,
+			serve:         cut(anthropicText),
+			want:          UpstreamFault{Class: FaultCut},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name:          "a silent anthropic body is the idle cut",
+			wire:          WireAnthropic,
+			serve:         hold(anthropicText),
+			want:          UpstreamFault{Class: FaultTimeout},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name: "an anthropic in-band overloaded_error is eligible",
+			wire: WireAnthropic,
+			serve: sse("event: error\n" +
+				`data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}` + "\n\n"),
+			want:          UpstreamFault{Class: FaultInBand, ErrorType: anthropicOverloaded},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name: "an anthropic in-band api_error is not eligible",
+			wire: WireAnthropic,
+			serve: sse("event: error\n" +
+				`data: {"type":"error","error":{"type":"api_error","message":"internal"}}` + "\n\n"),
+			want: UpstreamFault{Class: FaultInBand, ErrorType: "api_error"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			fault := faultClassStream(t, tc.serve, tc.wire)
+
+			if fault.Fault != tc.want {
+				t.Errorf("Fault = %+v, want %+v (Err %q)", fault.Fault, tc.want, fault.Err)
+			}
+			if got := fault.Fault.FallbackEligible(); got != tc.wantEligible {
+				t.Errorf("FallbackEligible() = %t, want %t (Err %q)", got, tc.wantEligible, fault.Err)
+			}
+			if fault.Retryable != tc.wantRetryable {
+				t.Errorf("Retryable = %t, want %t (Err %q)", fault.Retryable, tc.wantRetryable, fault.Err)
+			}
+		})
+	}
+}
+
+// TestStream_FaultClassOfACallerCancel pins that a stream the caller's own context ended is
+// classed as cancelled — never the upstream's failure, so never eligible for a fallback.
+func TestStream_FaultClassOfACallerCancel(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(roundTripSSE)
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var terminal Delta
+	for d := range NewClient(srv.URL, "m", WithMaxRetries(0)).Stream(ctx, Request{}) {
+		terminal = d
+	}
+
+	if terminal.Kind != DeltaError || terminal.Fault != (UpstreamFault{Class: FaultCancelled}) {
+		t.Fatalf("terminal delta = %+v, want a DeltaError classed cancelled", terminal)
+	}
+	if terminal.Fault.FallbackEligible() {
+		t.Error("a caller cancel is FallbackEligible; it is never the upstream's failure")
+	}
+}

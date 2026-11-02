@@ -288,6 +288,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment fu
 				Kind:            DeltaError,
 				Err:             fmt.Sprintf(malformedOnlyErrFmt, malformed),
 				MalformedChunks: malformed,
+				Fault:           UpstreamFault{Class: FaultLocal},
 			})
 			return
 		}
@@ -364,6 +365,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment fu
 					"apogee: streamed reply exceeded the %d MiB text limit",
 					maxReplyTextBytes>>20,
 				),
+				Fault: UpstreamFault{Class: FaultLocal},
 			})
 			return
 		}
@@ -375,7 +377,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment fu
 		}
 		for _, frag := range choice.Delta.ToolCalls {
 			if open.fold(frag) {
-				yield(Delta{Kind: DeltaError, Err: open.tripped})
+				yield(Delta{Kind: DeltaError, Err: open.tripped, Fault: UpstreamFault{Class: FaultLocal}})
 				return
 			}
 		}
@@ -394,6 +396,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment fu
 			Err:             fmt.Sprintf("apogee: read stream: %v", err) + malformedChunksNote(malformed),
 			Retryable:       isTransientReadError(err),
 			MalformedChunks: malformed,
+			Fault:           readFault(err),
 		})
 		return
 	}

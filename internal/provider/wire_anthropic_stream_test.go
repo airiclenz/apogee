@@ -235,7 +235,7 @@ func TestAnthropicParseSSE_OpenToolCallCountIsCapped(t *testing.T) {
 
 	got := parseAnthropicSSE(t, anthropicToolUseOpeningsSSE(maxOpenToolCalls+1))
 
-	want := []Delta{{Kind: DeltaError, Err: toolCallCountTripped}}
+	want := []Delta{{Kind: DeltaError, Err: toolCallCountTripped, Fault: UpstreamFault{Class: FaultLocal}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("deltas =\n%s\nwant\n%s", dumpDeltas(got), dumpDeltas(want))
 	}
@@ -395,7 +395,7 @@ func TestAnthropicParseSSE_Edges(t *testing.T) {
 		{
 			name: "a stream of nothing but malformed payloads is a fault",
 			body: "data: {not json\ndata: [DONE]\ndata: {\"type\":\"message_stop\"}\n",
-			want: []Delta{{Kind: DeltaError, Err: "apogee: stream carried no text and no tool calls (2 malformed chunks skipped)", MalformedChunks: 2}},
+			want: []Delta{{Kind: DeltaError, Err: "apogee: stream carried no text and no tool calls (2 malformed chunks skipped)", MalformedChunks: 2, Fault: UpstreamFault{Class: FaultLocal}}},
 		},
 		{
 			name: "a tool_use block without input is the empty object",

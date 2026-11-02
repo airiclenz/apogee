@@ -33,7 +33,8 @@
 //   - attempt.go — the Attempt measurement of one HTTP attempt (ADR 0085), the server identity
 //     a Client is stamped with, endpoint redaction and the per-call request id.
 //   - fault.go — classify: the one place an upstream failure is sorted into its fault class
-//     before the blocking and streaming surfaces render it.
+//     before the blocking and streaming surfaces render it; the UpstreamFault a DeltaError
+//     carries and its FallbackEligible predicate.
 //   - discovery.go — Discover: the /v1/models (and Messages-API model list) probe, the
 //     ModelInfo and EffortSupport it reports, and the discovery and transport errors.
 //   - localdial.go — the shared provider transport whose dialer falls back to mDNS for a

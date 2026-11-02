@@ -80,6 +80,10 @@ type Delta struct {
 	// DeltaContextOverflow — a prompt too long stays too long — nor on the text-cap overflow,
 	// and the provider itself never acts on it, because retrying mid-stream is the loop's call.
 	Retryable bool
+	// Fault is meaningful only on DeltaError: the fault's class, and for a status or an in-band
+	// error the code and slug it carried (UpstreamFault). The Client sets it on every DeltaError
+	// it yields; it never changes Retryable, which keeps its own meaning above.
+	Fault UpstreamFault
 	// MalformedChunks is meaningful on the terminal DeltaDone and DeltaError of a parsed
 	// stream: how many `data:` payloads failed to decode and were skipped. A fault's Err
 	// already names a non-zero count (malformedChunksNote); the field is the same number,
@@ -123,7 +127,11 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		req.Stream = true
 		body, sent, err := c.encode(req)
 		if err != nil {
-			yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: marshal request: %v", err)})
+			yield(Delta{
+				Kind:  DeltaError,
+				Err:   fmt.Sprintf("apogee: marshal request: %v", err),
+				Fault: UpstreamFault{Class: FaultLocal},
+			})
 			return
 		}
 
@@ -165,11 +173,12 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 				Kind:      DeltaError,
 				Err:       fmt.Sprintf("apogee: await response: %v", idleFault(c.streamIdleTimeout)),
 				Retryable: true,
+				Fault:     UpstreamFault{Class: FaultTimeout},
 			})
 			return
 		}
 		if err != nil {
-			yield(Delta{Kind: DeltaError, Err: err.Error()})
+			yield(Delta{Kind: DeltaError, Err: err.Error(), Fault: sendFault(ctx)})
 			return
 		}
 		defer cancel()
@@ -362,7 +371,7 @@ func (c *Client) statusDelta(resp *http.Response, carriedEffort bool) Delta {
 	if f.hinted {
 		message += " " + thinkingEffortHint
 	}
-	return Delta{Kind: DeltaError, Err: message}
+	return Delta{Kind: DeltaError, Err: message, Fault: UpstreamFault{Class: FaultStatus, Code: f.code}}
 }
 
 // inBandErrPrefix opens every in-band fault's text; it is how the attempt recorder tells an
@@ -391,7 +400,12 @@ func (c *Client) inBandErrorDelta(werr wireError, raw string, carriedEffort bool
 	if f.hinted {
 		text += " " + thinkingEffortHint
 	}
-	return Delta{Kind: DeltaError, Err: text, Retryable: f.retryable}
+	return Delta{
+		Kind:      DeltaError,
+		Err:       text,
+		Retryable: f.retryable,
+		Fault:     UpstreamFault{Class: FaultInBand, Code: f.code, ErrorType: werr.ErrorType},
+	}
 }
 
 // malformedOnlyErrFmt is the fault for a stream that decoded nothing the consumer could
@@ -420,8 +434,43 @@ func isTransientReadError(err error) bool {
 	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, errStreamIdle) {
 		return true
 	}
+	return isNetTimeout(err)
+}
+
+// isNetTimeout reports whether err is a network timeout.
+func isNetTimeout(err error) bool {
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// sendFault classifies a send that returned no response: the caller's cancel when ctx ended it
+// (send gives up on a cancelled ctx at once, without spending the retries), otherwise a
+// connection that failed on every attempt. The idle cut of the headers wait is told apart
+// before this is reached (Stream).
+func sendFault(ctx context.Context) UpstreamFault {
+	if ctx.Err() != nil {
+		return UpstreamFault{Class: FaultCancelled}
+	}
+	return UpstreamFault{Class: FaultTransport}
+}
+
+// readFault classifies the body-read fault a codec's scanner reported — the one place both wires
+// sort it, beside the Retryable verdict isTransientReadError gives the same error: the caller's
+// cancel; the idle cut or a network timeout; a line past the scanner's buffer, which is the
+// reply breaking apogee's own limit; and any other failure — the connection dropped mid-chunk or
+// reset — as the stream cut. A cut that isTransientReadError calls non-retryable (a reset) is
+// still the upstream's failure, so the class keeps the two questions apart.
+func readFault(err error) UpstreamFault {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return UpstreamFault{Class: FaultCancelled}
+	case errors.Is(err, errStreamIdle), isNetTimeout(err):
+		return UpstreamFault{Class: FaultTimeout}
+	case errors.Is(err, bufio.ErrTooLong):
+		return UpstreamFault{Class: FaultLocal}
+	default:
+		return UpstreamFault{Class: FaultCut}
+	}
 }
 
 // openToolCalls is the ordered set of tool calls one streamed reply has under accumulation.

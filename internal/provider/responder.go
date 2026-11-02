@@ -15,7 +15,9 @@ import (
 // they arrive (token text, reasoning, accumulated tool calls, a terminal Done/Error), so
 // the loop emits TokenEvents live and reaches the §6 #6 streaming-then-Approval boundary.
 // Faults surface as a terminal Delta rather than a Go error, so the consumer drives a
-// single range loop (matching the TS AsyncIterable). The seam is deliberately streaming-
+// single range loop (matching the TS AsyncIterable); the Client classifies each one on
+// Delta.Fault, and an implementation that classifies nothing leaves it FaultNone, which no
+// caller reads as the upstream's failure (UpstreamFault.FallbackEligible). The seam is deliberately streaming-
 // only — the loop never needs the whole-response Respond, which stays a concrete Client
 // method (model discovery, simple calls) outside the interface so a fake answers one method.
 type Responder interface {

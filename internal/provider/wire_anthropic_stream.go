@@ -90,6 +90,7 @@ func (a *anthropicCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment
 			Err:             fmt.Sprintf("apogee: read stream: %v", err) + malformedChunksNote(s.malformed),
 			Retryable:       isTransientReadError(err),
 			MalformedChunks: s.malformed,
+			Fault:           readFault(err),
 		})
 		return
 	}
@@ -283,7 +284,11 @@ func (s *anthropicStream) stopBlock(ev anthropicEvent) (ended bool) {
 	delete(s.reasoning, *ev.Index)
 	raw, err := block.encode()
 	if err != nil {
-		s.yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: encode thinking block: %v", err)})
+		s.yield(Delta{
+			Kind:  DeltaError,
+			Err:   fmt.Sprintf("apogee: encode thinking block: %v", err),
+			Fault: UpstreamFault{Class: FaultLocal},
+		})
 		return true
 	}
 	entry := reasoningEntry(raw, block.afterText, block.afterCalls, s.prefixDigest)
@@ -328,6 +333,7 @@ func (s *anthropicStream) charge(n int) (ended bool) {
 				"apogee: streamed reply exceeded the %d MiB text limit",
 				maxReplyTextBytes>>20,
 			),
+			Fault: UpstreamFault{Class: FaultLocal},
 		})
 		return true
 	}
@@ -339,7 +345,7 @@ func (s *anthropicStream) charge(n int) (ended bool) {
 // is the set's own (openToolCalls.tripped) so both wires render one message.
 func (s *anthropicStream) foldCall(frag sseToolCall) (ended bool) {
 	if s.open.fold(frag) {
-		s.yield(Delta{Kind: DeltaError, Err: s.open.tripped})
+		s.yield(Delta{Kind: DeltaError, Err: s.open.tripped, Fault: UpstreamFault{Class: FaultLocal}})
 		return true
 	}
 	return false
@@ -403,6 +409,7 @@ func (s *anthropicStream) finish() {
 			Kind:            DeltaError,
 			Err:             fmt.Sprintf(malformedOnlyErrFmt, s.malformed),
 			MalformedChunks: s.malformed,
+			Fault:           UpstreamFault{Class: FaultLocal},
 		})
 		return
 	}

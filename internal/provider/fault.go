@@ -60,9 +60,87 @@ func classify(status int, errType, text string, effort bool) fault {
 	if errType == anthropicRateLimited && f.code == 0 {
 		f.code = http.StatusTooManyRequests
 	}
-	f.retryable = isRetryableStatus(f.code) ||
-		errType == providerUnavailable ||
-		errType == anthropicOverloaded
+	f.retryable = isTransientFault(f.code, errType)
 	f.hinted = effort
 	return f
+}
+
+// isTransientFault reports whether an upstream fault with this code and error-type slug is of a
+// transient class — 429 or 5xx (isRetryableStatus), an aggregator's providerUnavailable, or the
+// Messages API's anthropicOverloaded (its mid-stream 529) — whatever framed it. It is the one
+// rule behind classify's retryable verdict and UpstreamFault.FallbackEligible's status and
+// in-band arms, so the two can never disagree on which class is the upstream's to recover from.
+func isTransientFault(code int, errType string) bool {
+	return isRetryableStatus(code) ||
+		errType == providerUnavailable ||
+		errType == anthropicOverloaded
+}
+
+// FaultClass names where one terminal DeltaError came from. The zero value, FaultNone, is what
+// every non-error Delta carries and what a Responder that classifies nothing (a test fake) leaves
+// on its faults; the Client sets one of the others on every DeltaError it yields.
+type FaultClass string
+
+const (
+	// FaultNone is the zero class: no fault classified.
+	FaultNone FaultClass = ""
+	// FaultTransport is a request that never got a response: every attempt send made failed at
+	// the connection (refused, reset, unresolvable host) and the retry budget is spent.
+	FaultTransport FaultClass = "transport"
+	// FaultTimeout is the idle cut (errStreamIdle — an upstream silent for the whole
+	// WithStreamIdleTimeout window, before its headers or mid-body) or a network timeout on a
+	// body read.
+	FaultTimeout FaultClass = "timeout"
+	// FaultStatus is a non-2xx response; UpstreamFault.Code carries its HTTP status.
+	FaultStatus FaultClass = "status"
+	// FaultCut is a body read that failed before the stream's terminator for a reason other than
+	// a timeout — the connection dropped mid-chunk (io.ErrUnexpectedEOF) or was reset.
+	FaultCut FaultClass = "cut"
+	// FaultInBand is an error member the server sent under a 200; UpstreamFault.Code carries its
+	// numeric code (0 when it sent a slug or none) and UpstreamFault.ErrorType its slug.
+	FaultInBand FaultClass = "in-band"
+	// FaultLocal is a fault apogee raised itself over a request or a reply the upstream did not
+	// fault: a request that would not marshal, a reply past the text cap or the tool-call caps, a
+	// line past the scanner's buffer, a reasoning block that would not encode, or a stream that
+	// decoded nothing but malformed chunks.
+	FaultLocal FaultClass = "local"
+	// FaultCancelled is the caller's context ending the stream, before or after the headers.
+	FaultCancelled FaultClass = "cancelled"
+)
+
+// UpstreamFault is the machine-readable class of one terminal DeltaError (Delta.Fault): where it
+// came from and, for a status or an in-band error, the code and slug it carried. It sits beside
+// Delta.Retryable rather than replacing it: Retryable answers "may this same request be
+// re-streamed on this upstream", and a status fault keeps it false because send already retried
+// it; UpstreamFault answers "what failed", which is what a caller deciding to move off the
+// upstream altogether reads (FallbackEligible).
+type UpstreamFault struct {
+	// Class is where the fault came from.
+	Class FaultClass
+	// Code is the HTTP status of a FaultStatus, or the numeric code of a FaultInBand as the
+	// rendered "in-band <code>:" text names it (an anthropicRateLimited slug's 429 included);
+	// 0 on every other class.
+	Code int
+	// ErrorType is a FaultInBand's error-type slug as the server sent it ("" when it sent none,
+	// and on every other class).
+	ErrorType string
+}
+
+// FallbackEligible reports whether the fault is the upstream's own failure — one that a
+// different server could be expected not to share: a connection that failed after send's
+// retries, the idle cut or a network timeout, a stream cut mid-body, a 429 or 5xx status (529
+// included), or an in-band error of the same transient classes (isTransientFault: 429, 5xx,
+// providerUnavailable, anthropicOverloaded). Every other fault is false — any other 4xx (the
+// request itself is wrong, and a fallback would be sent the same request), a fault apogee raised
+// itself, the caller's cancel, and FaultNone. A context overflow is never a DeltaError, so it
+// never reaches here.
+func (f UpstreamFault) FallbackEligible() bool {
+	switch f.Class {
+	case FaultTransport, FaultTimeout, FaultCut:
+		return true
+	case FaultStatus, FaultInBand:
+		return isTransientFault(f.Code, f.ErrorType)
+	default:
+		return false
+	}
 }
