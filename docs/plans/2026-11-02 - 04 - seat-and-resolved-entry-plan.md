@@ -374,7 +374,9 @@ cmd/apogee/launcher.go — launcherPath.follow; cmd/apogee/fallback_test.go — 
 
 **Commit:** `refactor(cmd): /server and a fallover share one arrival tail`
 
-## 13. Record the engine-owned follow-through
+## 13. Record the engine-owned follow-through — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the prose-rule grep (`delegationLatchSlot|BindDelegationLatch|\bAnnounce\b|announced\.CompareAndSwap|re-?latch` over cmd, internal, docs/manual, docs/design, .capcom/knowledge) found no stale live comment or doc: items 5-12 had already rewritten them to the engine-owned shape, so no code comment was touched.
 
 **What:**
 Recast at the regression check (2026-11-02).
