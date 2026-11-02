@@ -673,7 +673,10 @@ func (a *Agent) stopAllBackground() {
 // The host owns no Upstream and no tool set (it never closes or recomposes either), runs no Turn of
 // its own — its conversation stays empty and its Turn lifecycle idle — and starts its own token
 // estimator, so a Step calibrating this Agent's never races it. Call it where the idle-only
-// mutators cannot run: at an idle boundary or inside a Step.
+// mutators cannot run: at an idle boundary or inside a Step. Every Agent field is classed by how
+// this copy treats it — copied, shared handle, frozen at launch, fresh, or zero by design — in
+// backgroundHostFields, and TestBackgroundHostCoversEveryAgentField (hostcopy_test.go) fails on a
+// field the table does not class, so a field added to Agent is decided here before it ships.
 func (a *Agent) backgroundHost() *Agent {
 	a.parallelAgentsMu.RLock()
 	parallelAgents, farWidth := a.parallelAgents, a.farWidth

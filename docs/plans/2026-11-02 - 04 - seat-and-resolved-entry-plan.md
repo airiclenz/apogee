@@ -304,7 +304,10 @@ cmd/apogee/e2e_fallback_test.go — writeFallbackConfig, startHeadless, awaitHea
 
 **Commit:** `fix(firing): a Firing fans out at the fallback's width after a fallover`
 
-## 10. Guard the background host's copy field by field
+## 10. Guard the background host's copy field by field — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the seat test reuses seat_test.go's existing `spawnOn` helper rather than adding one; the Delegation-latch comparison is "both on the tree's latch, or both on a session-seated child's own empty latch" (rootBound gives every session-seated spawn a fresh one), not pointer equality.
+NOTES (2026-11-02): `guards` is classed a shared handle (its Dangerous/Breaker pointers are the session's), although backgroundHost's doc lists only the idle-only copies by name.
 
 **What:** test-only; depends on item 4.
 - A reflect test over `Agent` fails when a field is absent from an explicit table classing how `backgroundHost` treats it: copied, shared handle, frozen at launch, fresh, or zero by design, each with a one-line reason.
