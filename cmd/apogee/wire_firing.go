@@ -118,7 +118,7 @@ type firingInputs struct {
 	// Runner, or a composition test — binds nothing.
 	projectRuns *projectRunSlot
 	// delegationLatch is the slot the Sub-agents seat's fallback re-latches the run's Delegation
-	// target through on a landing (newFiringSeatFallback): the Agent this Firing builds binds its
+	// target through on a landing (firingSubAgentsSource): the Agent this Firing builds binds its
 	// own setter into it (run.Spec.BindDelegationLatch). nil — a composition test — re-latches
 	// nothing.
 	delegationLatch *delegationLatchSlot
@@ -617,7 +617,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// `fallback:` list — nil when it names none, which leaves the run exactly as it was. Its grace
 	// beats observe the server this run talks to as the beat above did, and each fallback's key
 	// resolves through the run's one resolver.
-	routing.fallback = newFiringFallback(in, keys, apiKey, spec.Model)
+	routing.fallback = newSeatResolver(sessionSeat, firingSessionSource(in, keys, apiKey, spec.Model))
 
 	// And the one thing an unattended run cannot get from the engine: the `run_on` and `context`
 	// arguments on sub_agent, which firingSeatTools assembles under `sub-agents-choice: model` or
@@ -723,7 +723,7 @@ type firingRouting struct {
 	// (run.Spec.Fallback) — nil when the bound entry names no `fallback:`. It rides the routing for
 	// the target's reason: it is where the run's requests go when its own server fails, and a Driver
 	// forwards it rather than reading it.
-	fallback *fallbackResolver
+	fallback *seatResolver
 	// Beat is the ONE observation this run took of its own bound server — the whole Beat rather
 	// than the two fields the composition read off it, so a Driver acting on it can say WHY
 	// (Beat.Failure) and tell a box that is merely rate-limited (Beat.Throttled, Beat.Answered)
@@ -750,7 +750,7 @@ type firingRouting struct {
 //
 // parent is what the run itself bound — its window and its reserve share — which a routed child
 // keeps where its target states nothing, and so what the Sub-agents seat's fallback lands over
-// (newFiringSeatFallback).
+// (firingSubAgentsSource).
 //
 // Nothing here is an error. Every way routing can fail to resolve — no key at all, a name the list
 // does not carry, a key source that would not answer, a server that is unreachable or has no model bound — leaves the target nil, the run
@@ -810,7 +810,8 @@ func resolveFiringRouting(
 	// child of this run consults the one instance: nil when the entry names no `fallback:`, and never
 	// stored as a nil pointer, which the interface would read as a resolver.
 	if target != nil {
-		if resolver := newFiringSeatFallback(in, keys, server, apiKey, parent); resolver != nil {
+		if resolver := newSeatResolver(subAgentsSeat,
+			firingSubAgentsSource(in, keys, server, apiKey, parent)); resolver != nil {
 			target.Fallback = resolver
 		}
 	}
@@ -818,13 +819,13 @@ func resolveFiringRouting(
 		delegationStateNotice(name, target, "", nil)
 }
 
-// newFiringSeatFallback is an unattended run's resolver for its Sub-agents seat, or nil when the
-// Sub-agent server's entry names no `fallback:`: the routed counterpart of newFiringFallback. The
-// primary's grace beats observe the Sub-agent server through its own beat with the key its entry
-// resolved to (apiKey); each fallback's key resolves through the run's one resolver, fenced to the
-// Firing's workspace as the Sub-agent server's own was. Each landing is routed: it binds as
-// resolveDelegationTarget binds a target on the fallback, over parent — the window and reserve
-// share the run itself bound — never under the run's root window pins.
+// firingSubAgentsSource is an unattended run's Sub-agents seat source: the routed counterpart of
+// firingSessionSource. The primary's grace beats observe the Sub-agent server through its own beat
+// with the key its entry resolved to (apiKey); each fallback's key resolves through the run's one
+// resolver, fenced to the Firing's workspace as the Sub-agent server's own was. Each landing is
+// routed (newSeatResolver's subAgentsSeat): it binds as resolveDelegationTarget binds a target on the
+// fallback, over parent — the window and reserve share the run itself bound — never under the run's
+// root window pins.
 //
 // A landing also re-latches the run's Delegation target, as delegationWiring.fallover does for a
 // session: the fallback's target, resolved from the beat that found it answering and carrying this
@@ -834,50 +835,30 @@ func resolveFiringRouting(
 // adr-0045-amend-1102). The run's delegation namer reads the same push (newFiringNamer), so an
 // unnamed later child is named on the box it dials. The seat the model is told about does not move
 // (ADR 0069).
-func newFiringSeatFallback(
+func firingSubAgentsSource(
 	in firingInputs,
 	keys *config.KeyResolver,
 	server *subAgentServer,
 	apiKey string,
 	parent delegationParent,
-) *fallbackResolver {
-	entry := server.entry
-	names := entry.Fallback.Names()
-	if len(names) == 0 {
-		return nil
-	}
-	lander := fallbackLander{
-		opts:  in.opts,
-		roots: in.roots,
-		key: func(entry config.ServerEntry) (string, error) {
-			return keys.ResolveWithin(entry, in.roots.workspace)
-		},
-		beat: func(ctx context.Context, dial upstreamBinding) heartbeat.Beat {
-			return dial.Monitor().Beat(ctx)
-		},
-		routed: true,
-		parent: parent,
-	}
-	var resolver *fallbackResolver
-	resolver = newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
-		func(ctx context.Context) bool { return server.beat(ctx, apiKey).Reachable },
-		func(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
-			landing, landed := lander.arrive(ctx, name)
-			if landed {
-				target := resolveDelegationTarget(landing.entry, landing.dial.APIKey, landing.observed,
-					in.opts.ModelProfiles, in.opts.StreamIdleTimeout)
-				if target != nil {
-					target.Fallback = resolver
-				}
-				in.delegationLatch.push(target)
+) seatSource {
+	return seatSource{
+		primary:   server.entry,
+		recovered: func(ctx context.Context) bool { return server.beat(ctx, apiKey).Reachable },
+		lander:    firingLander(in, keys, parent),
+		landed: func(seat *seatResolver, landing fallbackLanding) {
+			target := resolveDelegationTarget(landing.entry, landing.dial.APIKey, landing.observed,
+				in.opts.ModelProfiles, in.opts.StreamIdleTimeout)
+			if target != nil {
+				target.Fallback = seat
 			}
-			return landing.answer, landed
-		})
-	return resolver
+			in.delegationLatch.push(target)
+		},
+	}
 }
 
 // delegationLatchSlot is the late bind between an unattended run's Sub-agents seat fallback and the
-// Agent whose Delegation target it re-latches (newFiringSeatFallback). The resolver is built at
+// Agent whose Delegation target it re-latches (firingSubAgentsSource). The resolver is built at
 // composition, before run.Once builds that Agent; the Agent, once built, stores its own
 // SetDelegationTarget through bind (run.Spec.BindDelegationLatch). It is safe for concurrent use:
 // a landing pushes from whichever child's walk made it.
@@ -1265,7 +1246,7 @@ func raise(
 		DelegationTarget: routing.target,
 		DelegationSeat:   routing.seat,
 		// The late bind the Sub-agents seat's fallback re-latches that target through once it falls
-		// over (newFiringSeatFallback): the Agent run.Once builds hands its setter to the slot.
+		// over (firingSubAgentsSource): the Agent run.Once builds hands its setter to the slot.
 		BindDelegationLatch: delegationLatch.bind,
 		// The live Event journal a watcher follows while the Firing runs (ADR 0103), opened by
 		// run.Once under the record's hold. A store-less run (`--no-save`) gets none.
@@ -1274,7 +1255,7 @@ func raise(
 	if ref != nil {
 		spec.ScheduleID, spec.ScheduleName = ref.ID, ref.Name
 	}
-	// The run's Server fallback, set only when the bound entry built one: a nil *fallbackResolver
+	// The run's Server fallback, set only when the bound entry built one: a nil *seatResolver
 	// stored in the interface would be a resolver that is not nil, and the engine would consult it.
 	if routing.fallback != nil {
 		spec.Fallback = routing.fallback

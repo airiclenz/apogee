@@ -84,7 +84,7 @@ func newDelegationNamer(
 // box for every spawn, which is precisely the cost that decision exists to avoid.
 //
 // The routed reader is the one thing that can move mid-run: the Sub-agents seat's fallback
-// re-latches the run's Delegation target through latch (newFiringSeatFallback), and the reader
+// re-latches the run's Delegation target through latch (firingSubAgentsSource), and the reader
 // follows it, so a child spawned after the fallover is named by the fallback it dials rather than by
 // the dead primary. A latch that carried no target sends naming to the session's binding, as later
 // spawns go to the run's own Upstream. A nil latch — a composition with no slot — answers routed for

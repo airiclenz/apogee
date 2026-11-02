@@ -462,7 +462,8 @@ func TestHeadlessRoutedFallbackTakesNoRootPins(t *testing.T) {
 		roots: firingRoots(t),
 	}
 	parent := delegationParent{window: 200000, reserve: 0.25}
-	resolver := newFiringSeatFallback(in, config.NewKeyResolver(""), newSubAgentServer(grunt), "", parent)
+	resolver := newSeatResolver(subAgentsSeat,
+		firingSubAgentsSource(in, config.NewKeyResolver(""), newSubAgentServer(grunt), "", parent))
 	if resolver == nil {
 		t.Fatal("a Sub-agent server naming a fallback got no resolver")
 	}
@@ -851,5 +852,129 @@ func TestHeadlessFallbackAppliesTheFallbackRoster(t *testing.T) {
 	}
 	if !slices.Contains(resent[0].Tools, "sub_agent") {
 		t.Errorf("the resent request lost the Driver-built sub_agent: %v", resent[0].Tools)
+	}
+}
+
+// seatFollowCheck checks that a Driver's landing hook followed the landing its seat made.
+type seatFollowCheck func(t *testing.T, seat *seatResolver)
+
+// TestSeatResolverBindsEverySeatAndDriverAlike: the one constructor (newSeatResolver) builds both
+// seats' resolvers on both Drivers, each from its Driver's source as production builds it. On every
+// one a fault on the dead primary walks onto the live backup, the resolver keeps that landing as its
+// latest, and the Driver's landing hook follows it. The session seat binds under the root window
+// pins, the Sub-agents seat routed — no root `working-window:` — whichever Driver built it.
+func TestSeatResolverBindsEverySeatAndDriverAlike(t *testing.T) {
+	t.Parallel()
+	backup := stubllm.New(t, stubllm.Script{Model: "backup-model", Turns: []stubllm.Turn{{Text: "unused"}}})
+	primary := config.ServerEntry{Name: "primary", Endpoint: "http://127.0.0.1:1", Model: "primary-model",
+		Fallback: config.NewFallbackList("backup"), FallbackAfter: fallbackTestGrace.String()}
+	opts := config.Options{ContextWindow: 131072, WorkingWindow: 65536, ResponseReserve: 0.4,
+		Servers: []config.ServerEntry{primary, {Name: "backup", Endpoint: backup.URL}}}
+	keys := config.NewKeyResolver("")
+	parent := delegationParent{window: 200000, reserve: 0.25}
+
+	// tuiSeat is the TUI session on primary: the live settings, the holder dialled at it, and the
+	// session seat's resolver over both.
+	tuiSeat := func(t *testing.T) (*liveSettings, *sessionFallback) {
+		live := newLiveSettings(opts, config.ProjectOffer{})
+		live.followEntry(primary)
+		holder := newUpstreamHolder()
+		dial := bindingOfEntry(primary, "")
+		holder.Bind(dial, dial.Monitor())
+		return live, newSessionFallback(live, holder, keys, stateRoots{config: t.TempDir(), probe: t.TempDir()})
+	}
+
+	cases := []struct {
+		name string
+		kind seatKind
+		// build answers the seat's resolver and a check that the Driver's landing hook followed it.
+		build func(t *testing.T) (*seatResolver, seatFollowCheck)
+	}{
+		{
+			name: "TUI session seat", kind: sessionSeat,
+			build: func(t *testing.T) (*seatResolver, seatFollowCheck) {
+				_, fallback := tuiSeat(t)
+				return fallback.resolver(), func(t *testing.T, _ *seatResolver) {
+					if _, ok := fallback.landing("backup"); !ok {
+						t.Error("the session did not keep the landing on backup for its follow")
+					}
+				}
+			},
+		},
+		{
+			name: "TUI Sub-agents seat", kind: subAgentsSeat,
+			build: func(t *testing.T) (*seatResolver, seatFollowCheck) {
+				live, fallback := tuiSeat(t)
+				spy := &delegationSpy{}
+				wiring := newDelegationWiring("primary", live.serverList, spy, live.modelProfileEntries,
+					live.streamIdlePin, func(string) {}, keys).withFallback(fallback.routedLander)
+				return wiring.fallback, func(t *testing.T, seat *seatResolver) {
+					if len(spy.pushes) == 0 {
+						t.Fatal("the wiring latched nothing at the landing")
+					}
+					got := spy.pushes[len(spy.pushes)-1]
+					if got == nil || got.Endpoint != backup.URL || got.Fallback != seat {
+						t.Errorf("latched target = %+v; want backup's, carrying the seat's resolver", got)
+					}
+					if name := wiring.targetName(); name != "backup" {
+						t.Errorf("wiring target = %q; want it re-pointed at backup", name)
+					}
+				}
+			},
+		},
+		{
+			name: "unattended session seat", kind: sessionSeat,
+			build: func(t *testing.T) (*seatResolver, seatFollowCheck) {
+				in := firingInputs{entry: primary, opts: opts, roots: firingRoots(t)}
+				return newSeatResolver(sessionSeat, firingSessionSource(in, keys, "", "primary-model")),
+					func(*testing.T, *seatResolver) {}
+			},
+		},
+		{
+			name: "unattended Sub-agents seat", kind: subAgentsSeat,
+			build: func(t *testing.T) (*seatResolver, seatFollowCheck) {
+				latch := &delegationLatchSlot{}
+				in := firingInputs{entry: primary, opts: opts, roots: firingRoots(t), delegationLatch: latch}
+				source := firingSubAgentsSource(in, keys, newSubAgentServer(primary), "", parent)
+				return newSeatResolver(subAgentsSeat, source), func(t *testing.T, seat *seatResolver) {
+					got, ok := latch.latched()
+					if !ok || got == nil || got.Endpoint != backup.URL || got.Fallback != seat {
+						t.Errorf("latched target = %+v (pushed %v); want backup's, carrying the seat's resolver", got, ok)
+					}
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			seat, followed := tc.build(t)
+			if seat == nil {
+				t.Fatal("a seat whose primary names a fallback got no resolver")
+			}
+			if _, ok := seat.latestLanding(); ok {
+				t.Fatal("a resolver that has walked nowhere reports a landing")
+			}
+
+			answer := seat.Resolve(context.Background(), primaryReport())
+
+			if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" ||
+				answer.Rebind.Model != "backup-model" {
+				t.Fatalf("answer = %+v; want the switch onto backup's model", answer)
+			}
+			latest, ok := seat.latestLanding()
+			if !ok || latest.entry.Name != "backup" || latest.answer.Upstream.Endpoint != answer.Upstream.Endpoint ||
+				latest.answer.Rebind.Model != answer.Rebind.Model {
+				t.Errorf("latest landing = %+v (landed %v); want the one the engine was answered", latest, ok)
+			}
+			wantWorking := opts.WorkingWindow
+			if tc.kind == subAgentsSeat {
+				wantWorking = 0
+			}
+			if answer.Upstream.WorkingWindow != wantWorking {
+				t.Errorf("working window = %d; want %d for this seat", answer.Upstream.WorkingWindow, wantWorking)
+			}
+			followed(t, seat)
+		})
 	}
 }

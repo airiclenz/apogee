@@ -49,7 +49,7 @@ const fallbackBeatAllowance = 2 * time.Minute
 // there is one list per seat, and no chaining.
 //
 // recovered and land are the two network acts, held as funcs so the single-flight and the list walk
-// are provable without a server; newFiringFallback wires the real ones.
+// are provable without a server; newSeatResolver wires the real ones.
 type fallbackResolver struct {
 	// primary is the name of the entry the seat started on — the only server a grace window is
 	// spent on.
@@ -410,20 +410,99 @@ func entryUpstream(entry config.ServerEntry, apiKey string, root rootPins) (apog
 	return spec, dial
 }
 
-// newFiringFallback is an unattended run's fallback resolver for its session seat, or nil when the
-// bound entry names no `fallback:` — the run is then exactly what it was before the key existed.
-// The primary's grace beats go through one Monitor dialled as the run's own beat is (the entry's
-// dial facts, the key resolved for it, the model the run bound as the discovery hint); each
-// fallback's key resolves through the run's one resolver, fenced to the Firing's own workspace as
-// the bound entry's was (bindFiringConfig).
-func newFiringFallback(in firingInputs, keys *config.KeyResolver, apiKey, model string) *fallbackResolver {
-	names := in.entry.Fallback.Names()
+// seatKind names which of an Agent's two seats a resolver answers for: the session seat, whose
+// requests go to the session's own server, or the Sub-agents seat, whose routed children go to the
+// `sub-agents-server:` entry. It decides how a landing binds — a Sub-agents seat's landing is
+// always routed (fallbackLander.routed) — and nothing else.
+type seatKind int
+
+const (
+	// sessionSeat lands under the root window pins (fallbackLander.pins).
+	sessionSeat seatKind = iota
+	// subAgentsSeat lands as resolveDelegationTarget binds a routed target on the same entry.
+	subAgentsSeat
+)
+
+// seatSource is what one seat's resolver reads from the Driver that builds it: everything that
+// differs between a TUI session (read live, at the move) and an unattended Firing (fixed for the
+// run). newSeatResolver builds every seat's resolver from one, so the two seats on the two Drivers
+// cannot drift apart in how a fallover is walked or bound.
+type seatSource struct {
+	// primary is the entry the seat starts on: its name, its `fallback:` list and its
+	// `fallback-after:` window are the resolver's.
+	primary config.ServerEntry
+	// recovered beats the primary once and reports whether it answers with a usable model list.
+	recovered func(ctx context.Context) bool
+	// lander resolves one move onto a fallback against the configuration as the source holds it at
+	// the move: the options, the roots, the key source, the beat, and — for the Sub-agents seat —
+	// what a routed child keeps from its parent (fallbackLander.parent).
+	lander func() fallbackLander
+	// landed is the Driver's landing hook, called with the seat's resolver after each landing is
+	// recorded and before its answer reaches the engine; nil when the Driver follows nothing.
+	landed func(seat *seatResolver, landing fallbackLanding)
+}
+
+// seatResolver is one seat's Server fallback (fallbackResolver) together with the latest landing it
+// made: the apogee.FallbackResolver every Agent on the seat consults, which also tells a Driver
+// what it last moved the seat onto (latestLanding).
+type seatResolver struct {
+	*fallbackResolver
+	kind seatKind
+	src  seatSource
+
+	latestMu sync.Mutex
+	// latest is the last landing the walk made; hasLanded is false until the first one.
+	latest    fallbackLanding
+	hasLanded bool
+}
+
+// newSeatResolver builds the resolver for one seat of kind from src, or nil when the seat's primary
+// names no `fallback:` — the seat is then exactly what it was before the key existed. It is the one
+// constructor for both seats on every Driver.
+func newSeatResolver(kind seatKind, src seatSource) *seatResolver {
+	names := src.primary.Fallback.Names()
 	if len(names) == 0 {
 		return nil
 	}
-	primary := bindingOfEntry(in.entry, apiKey)
-	primary.Model = model
-	monitor := primary.Monitor()
+	seat := &seatResolver{kind: kind, src: src}
+	seat.fallbackResolver = newFallbackResolver(src.primary.Name, names,
+		config.ResolveFallbackAfter(src.primary.FallbackAfter), src.recovered, seat.land)
+	return seat
+}
+
+// land is the resolver's landing act: the source's lander, turned routed on the Sub-agents seat,
+// beats the fallback named and resolves the whole landing; a landing is recorded as the latest and
+// handed to the Driver's hook before its answer goes back to the walk.
+func (s *seatResolver) land(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
+	lander := s.src.lander()
+	if s.kind == subAgentsSeat {
+		lander.routed = true
+	}
+	landing, landed := lander.arrive(ctx, name)
+	if !landed {
+		return landing.answer, false
+	}
+	s.latestMu.Lock()
+	s.latest, s.hasLanded = landing, true
+	s.latestMu.Unlock()
+	if s.src.landed != nil {
+		s.src.landed(s, landing)
+	}
+	return landing.answer, true
+}
+
+// latestLanding is the last landing the seat's walk made, false until it has made one.
+func (s *seatResolver) latestLanding() (fallbackLanding, bool) {
+	s.latestMu.Lock()
+	defer s.latestMu.Unlock()
+	return s.latest, s.hasLanded
+}
+
+// firingLander is an unattended run's lander: the Firing's own Options and roots, fixed for the run
+// — it has no door to move them — each fallback's key resolved through the run's one resolver,
+// fenced to the Firing's own workspace as the bound entry's was (bindFiringConfig), and parent as
+// what a routed child keeps from the run (read only on the Sub-agents seat).
+func firingLander(in firingInputs, keys *config.KeyResolver, parent delegationParent) func() fallbackLander {
 	lander := fallbackLander{
 		opts:  in.opts,
 		roots: in.roots,
@@ -433,10 +512,24 @@ func newFiringFallback(in firingInputs, keys *config.KeyResolver, apiKey, model 
 		beat: func(ctx context.Context, dial upstreamBinding) heartbeat.Beat {
 			return dial.Monitor().Beat(ctx)
 		},
+		parent: parent,
 	}
-	return newFallbackResolver(in.entry.Name, names, config.ResolveFallbackAfter(in.entry.FallbackAfter),
-		func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
-		lander.land)
+	return func() fallbackLander { return lander }
+}
+
+// firingSessionSource is an unattended run's session seat source. The primary's grace beats go
+// through one Monitor dialled as the run's own beat is (the entry's dial facts, the key resolved
+// for it, the model the run bound as the discovery hint); nothing follows a landing, the engine's
+// switch being the whole move for a run with no display.
+func firingSessionSource(in firingInputs, keys *config.KeyResolver, apiKey, model string) seatSource {
+	primary := bindingOfEntry(in.entry, apiKey)
+	primary.Model = model
+	monitor := primary.Monitor()
+	return seatSource{
+		primary:   in.entry,
+		recovered: func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
+		lander:    firingLander(in, keys, delegationParent{}),
+	}
 }
 
 // sessionFallback is the TUI session seat's Server fallback: the ONE apogee.FallbackResolver the
@@ -445,8 +538,8 @@ func newFiringFallback(in firingInputs, keys *config.KeyResolver, apiKey, model 
 //
 // It answers for the entry the session is bound to AT FAULT TIME (liveSettings.boundEntry), because
 // a `/server` move can put the session on another entry long after the Agent was built: the first
-// fault builds the per-primary fallbackResolver for that entry, which then owns the seat's
-// single-flight and fallen-over state, and keeps answering after the seat has moved onto one of its
+// fault builds the per-primary seat resolver (newSeatResolver) for that entry, which then owns the
+// seat's single-flight and fallen-over state, and keeps answering after the seat has moved onto one of its
 // fallbacks — one list per seat, walked forward, never back. A human move retires it (rearm), so the
 // next fault is a fresh one on whatever entry the human moved to; an entry with no `fallback:` gets
 // no resolver at all and every fault on it is answered "none" at once, today's behaviour.
@@ -457,9 +550,9 @@ func newFiringFallback(in firingInputs, keys *config.KeyResolver, apiKey, model 
 type sessionFallback struct {
 	// bound reports the entry the session is on now (liveSettings.boundEntry).
 	bound func() (config.ServerEntry, bool)
-	// build makes the resolver for a seat whose primary is entry, landing through land; nil when
-	// the entry names no `fallback:`.
-	build func(entry config.ServerEntry, land func(context.Context, string) (apogee.FallbackAnswer, bool)) *fallbackResolver
+	// binding reports the session's dial binding as it stands (upstreamHolder.Binding): the
+	// primary's grace beats go through a Monitor dialled from it at the first fault.
+	binding func() upstreamBinding
 	// lander resolves one move onto a fallback against the configuration as it stands at the move.
 	lander func() fallbackLander
 	// parent reports what a routed child keeps from the session at the move
@@ -469,7 +562,7 @@ type sessionFallback struct {
 	mu sync.Mutex
 	// current is the resolver for the seat's present primary, nil until the first fault after a
 	// bind or a human move.
-	current *fallbackResolver
+	current *seatResolver
 	// landed is the last fallback the current resolver moved the seat onto, by entry name.
 	landed map[string]fallbackLanding
 }
@@ -489,9 +582,9 @@ func (f *sessionFallback) Resolve(ctx context.Context, report apogee.FallbackRep
 // resolver is the current primary's resolver, built for the bound entry when there is none. Each
 // landing reads the configuration as it stands at the walk (f.lander, called per move), not as it
 // stood when the resolver was built: a `/settings` or `servers:` edit made after the first fault
-// reaches the fallback entry, its root pins and its per-model facts — as delegationWiring's
-// seatFallbackFor does for the Sub-agents seat.
-func (f *sessionFallback) resolver() *fallbackResolver {
+// reaches the fallback entry, its root pins and its per-model facts — as the Sub-agents seat's
+// resolver does (delegationWiring.rearmLocked).
+func (f *sessionFallback) resolver() *seatResolver {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.current != nil {
@@ -501,12 +594,12 @@ func (f *sessionFallback) resolver() *fallbackResolver {
 	if !ok {
 		return nil
 	}
-	f.current = f.build(entry, func(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
-		landing, landed := f.lander().arrive(ctx, name)
-		if landed {
-			f.remember(landing)
-		}
-		return landing.answer, landed
+	monitor := f.binding().Monitor()
+	f.current = newSeatResolver(sessionSeat, seatSource{
+		primary:   entry,
+		recovered: func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
+		lander:    f.lander,
+		landed:    func(_ *seatResolver, landing fallbackLanding) { f.remember(landing) },
 	})
 	return f.current
 }
@@ -560,20 +653,8 @@ func newSessionFallback(
 	roots stateRoots,
 ) *sessionFallback {
 	return &sessionFallback{
-		bound: live.boundEntry,
-		build: func(
-			entry config.ServerEntry,
-			land func(context.Context, string) (apogee.FallbackAnswer, bool),
-		) *fallbackResolver {
-			names := entry.Fallback.Names()
-			if len(names) == 0 {
-				return nil
-			}
-			monitor := holder.Binding().Monitor()
-			return newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
-				func(ctx context.Context) bool { return monitor.Beat(ctx).Reachable },
-				land)
-		},
+		bound:   live.boundEntry,
+		binding: holder.Binding,
 		lander: func() fallbackLander {
 			return fallbackLander{
 				opts:  live.options(),

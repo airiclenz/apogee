@@ -101,7 +101,12 @@ cmd/apogee/wire_firing.go — newFiringSeatFallback; cmd/apogee/naming.go — ne
 
 **Commit:** `test(cmd): pin how the fallback and routed doors resolve a server entry`
 
-## 3. One seat-resolver constructor for every seat and Driver
+## 3. One seat-resolver constructor for every seat and Driver — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): `newSeatResolver(kind, src seatSource)` returns a `*seatResolver` that embeds `*fallbackResolver` and records the latest landing (`latestLanding`); the routed flag comes from `kind` (subAgentsSeat). The parent a routed child keeps comes from the source's lander func (`firingLander(in, keys, parent)` on the Firing, `sessionFallback.routedLander` in the TUI), not from a separate source field. Firing sources are `firingSessionSource` (fallback.go) and `firingSubAgentsSource` (wire_firing.go). The TUI Sub-agents seat is built inside `delegationWiring.rearmLocked`, and `withFallback` now calls it.
+NOTES (2026-11-02): `sessionFallback` keeps its per-name `landed` map, which the landing hook feeds, so `sessionMover.fallover(name)` reads exactly what it did at the base. Its `build` closure is replaced by a `binding` reader (holder.Binding). cmd/apogee/wire_live.go needed no edit: `newSessionFallback`'s signature and `withFallback(w.fallback.routedLander)` are unchanged.
+NOTES (2026-11-02): consequential edit — cmd/apogee/entryrank_test.go: made necessary by the removal of newFiringFallback/newFiringSeatFallback (three doc comments re-pointed at firingSessionSource/firingSubAgentsSource)
+NOTES (2026-11-02): consequential edit — cmd/apogee/naming.go: made necessary by the removal of newFiringSeatFallback (doc comment re-pointed at firingSubAgentsSource)
 
 **What:**
 **Goal:** one constructor builds every seat resolver in `cmd/apogee` (both seats, both Drivers) from a TUI-live or Firing-fixed source; each exposes its latest landing; every landing binds as at the base.

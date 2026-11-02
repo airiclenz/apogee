@@ -1684,7 +1684,7 @@ func TestDelegationSeatIsNilWithoutAnEntryToDescribe(t *testing.T) {
 // every beat written down: the primary's through the wiring's server beat, the fallback's through the
 // lander, whose landing beats it counts. The lander resolves under the session's root window pins
 // (seatRootPins) over the parent binding seatParent, and is handed in NOT routed: the seat makes
-// every landing routed itself (seatFallbackFor).
+// every landing routed itself (newSeatResolver's subAgentsSeat).
 type seatFallbackRig struct {
 	wiring  *delegationWiring
 	spy     *delegationSpy
@@ -1760,7 +1760,7 @@ func (r *seatFallbackRig) killPrimary() {
 }
 
 // faultOnPrimary reports one fault on the primary to the seat's resolver.
-func (r *seatFallbackRig) faultOnPrimary(resolver *fallbackResolver) apogee.FallbackAnswer {
+func (r *seatFallbackRig) faultOnPrimary(resolver *seatResolver) apogee.FallbackAnswer {
 	return resolver.Resolve(context.Background(), apogee.FallbackReport{
 		Server: "grunt", Model: "grunt-model",
 		Fault: provider.UpstreamFault{Class: provider.FaultStatus, Code: 503},

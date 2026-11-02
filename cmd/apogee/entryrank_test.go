@@ -754,7 +754,7 @@ func firingOnPrimary(t *testing.T, s rankScenario) (apogee.Config, firingInputs)
 
 // TestEntryRankFallbackDoors pins the door a session seat's Server fallback lands through (D), on
 // both Drivers: the TUI's resolver (newSessionFallback) and an unattended Firing's
-// (newFiringFallback).
+// (firingSessionSource).
 func TestEntryRankFallbackDoors(t *testing.T) {
 	t.Parallel()
 
@@ -777,7 +777,7 @@ func resolveSessionSeatLanding(t *testing.T, s rankScenario) entryRanks {
 }
 
 // resolveFiringSeatLanding lands a Firing's session-seat lander on the entry — built as
-// newFiringFallback builds it, over the Firing's own Options and roots — and reads, off the run
+// firingSessionSource builds it, over the Firing's own Options and roots — and reads, off the run
 // composed on the primary, the width it fans out at and the server its namer names an unrouted
 // child on, neither of which the landing moves.
 func resolveFiringSeatLanding(t *testing.T, s rankScenario) entryRanks {
@@ -916,7 +916,7 @@ func resolveSessionRoutedLanding(t *testing.T, s rankScenario) entryRanks {
 }
 
 // resolveFiringRoutedLanding lands a Firing's Sub-agents seat lander on the entry — built as
-// newFiringSeatFallback builds it, over the parent firingConfig hands resolveFiringRouting: the window
+// firingSubAgentsSource builds it, over the parent firingConfig hands resolveFiringRouting: the window
 // and reserve share the run bound on the primary.
 func resolveFiringRoutedLanding(t *testing.T, s rankScenario) entryRanks {
 	t.Helper()
