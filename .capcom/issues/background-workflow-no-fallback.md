@@ -3,6 +3,7 @@ title: Background workflow host holds no fallback resolver
 status: open
 type: bug
 priority: 3
+plan: 2026-11-02 - 01 - fallback-followups-plan
 created: 2026-11-02T14:12:35Z
 ---
 
