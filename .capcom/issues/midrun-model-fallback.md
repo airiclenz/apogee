@@ -4,6 +4,7 @@ status: open
 type: feature
 priority: 3
 labels: [feature]
+plan: 2026-11-02 - 00 - midrun-model-fallback-plan
 created: 2026-11-01T19:26:29Z
 ---
 
