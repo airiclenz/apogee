@@ -1358,6 +1358,103 @@ func TestLoadProfileMovePreservesTheLauncher(t *testing.T) {
 	}
 }
 
+// A profile load and a `/server` switch reach the SAME mover, but only the switch is an arrival onto
+// a `servers:` entry: on one wiring, the load's move leaves the launcher the session used where it
+// was, while a `/server` onto an entry that names no launcher config — the very next act — switches
+// the integration off through the arrival tail the two kinds of arrival share (arrive).
+func TestProfileLoadLeavesTheLauncherAlone(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:        twoServerConfig(t),
+		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090},
+	}
+	wiring, _, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring.live.setServers([]config.ServerEntry{{Name: "plain", Endpoint: "http://127.0.0.1:7070"}})
+	w := &rootWiring{live: wiring.live, mover: wiring.sessionMover, launcherPath: wiring.path}
+
+	result, err := wiring.load("there", nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if result.Move == nil {
+		t.Fatalf("result = %+v; want a resolved Move — the profile serves another address", result)
+	}
+	if _, err := result.Move(); err != nil {
+		t.Fatalf("committing the resolved move: %v", err)
+	}
+	if got, entry := w.launcherPath.get(), w.launcherPath.entry(); got != "/etc/llama-launcher/config.yaml" || entry != "rig" {
+		t.Errorf("launcher after a profile load = (%q, %q); want the session's own (%q, %q), untouched",
+			got, entry, "/etc/llama-launcher/config.yaml", "rig")
+	}
+
+	if _, err := w.switchServer("plain"); err != nil {
+		t.Fatalf("switchServer: %v", err)
+	}
+	if got, entry := w.launcherPath.get(), w.launcherPath.entry(); got != "" || entry != "" {
+		t.Errorf("launcher after `/server` onto an entry naming none = (%q, %q); want it off", got, entry)
+	}
+}
+
+// Neither kind of arrival installs a launcher it did not reach: a `/server` the engine refuses and a
+// fallover onto a name the seat never landed on both leave the launcher where the session still is.
+// The accepted `/server` onto the same entry is the control that the follow is there to be skipped.
+func TestRefusedArrivalLeavesTheLauncher(t *testing.T) {
+	t.Parallel()
+
+	const primaryPath, backupPath = "/primary/launcher.yaml", "/backup/launcher.yaml"
+	refusal := errors.New("an Exchange is still open")
+	cases := []struct {
+		name   string
+		refuse bool
+		arrive func(w *rootWiring) error
+		want   string
+	}{
+		{name: "refused /server", refuse: true, want: primaryPath, arrive: func(w *rootWiring) error {
+			_, err := w.switchServer("backup")
+			return err
+		}},
+		{name: "fallover the seat never landed", want: primaryPath, arrive: func(w *rootWiring) error {
+			_, err := w.followFallback("backup")
+			return err
+		}},
+		{name: "accepted /server", want: backupPath, arrive: func(w *rootWiring) error {
+			_, err := w.switchServer("backup")
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			seat := newTUIFallbackSeat(t)
+			servers := slices.Clone(seat.live.serverList())
+			for i := range servers {
+				if servers[i].Name == "backup" {
+					servers[i].LlamaLauncher = backupPath
+				}
+			}
+			seat.live.setServers(servers)
+			mover := seat.mover
+			if tc.refuse {
+				mover.agent = &fakeSwitcher{err: refusal}
+			}
+			w := &rootWiring{live: seat.live, mover: mover, launcherPath: newLauncherPath(primaryPath, "primary")}
+
+			err := tc.arrive(w)
+
+			if refused := tc.want == primaryPath; refused != (err != nil) {
+				t.Fatalf("arrival err = %v; want refused %v", err, refused)
+			}
+			if tc.refuse && !errors.Is(err, refusal) {
+				t.Errorf("arrival err = %v; want the engine's own refusal", err)
+			}
+			if got := w.launcherPath.get(); got != tc.want {
+				t.Errorf("launcher path = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The shared move's per-entry token bounds (ADR 0045, ADR 0046)
 // ----------------------------------------------------------------------------

@@ -379,9 +379,9 @@ func (m sessionMover) arrive(entry config.ServerEntry, dial upstreamBinding, mod
 // It answers what the display adopts — the endpoint, the alias, the model and the window the engine
 // was handed, and the window, dial and effort tell the fallback's beat reported (the settle the
 // display runs at the Turn boundary judges a live effort override against that tell, ADR 0060 D8)
-// — beside the entry it arrived on,
-// so the caller's own follow (rootWiring.followFallback) reads the very landing this one did; and an
-// error when the seat never landed on that name, which leaves everything where it was.
+// — beside the entry it arrived on, so the arrival tail it is the step of (rootWiring.followFallback,
+// arrive) reads the very landing this one did; and an error when the seat never landed on that name,
+// which leaves everything where it was.
 func (m sessionMover) fallover(name string) (tui.ServerFallbackResult, config.ServerEntry, error) {
 	if m.fallback == nil {
 		return tui.ServerFallbackResult{}, config.ServerEntry{},

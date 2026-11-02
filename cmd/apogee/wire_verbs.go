@@ -133,38 +133,49 @@ func (w *rootWiring) beat(ctx context.Context) heartbeat.Beat {
 // of its own: the first BEAT is what discovers the new server.
 //
 // All this adds to the shared fold is RESOLUTION, and it comes first: a name that resolves to
-// nothing never reaches the engine, so the session is left exactly where it was.
+// nothing never reaches the engine, so the session is left exactly where it was. Past it, the move
+// is one kind of arrival (arrive): the mover's whole-session move, then the launcher's follow.
 func (w *rootWiring) switchServer(name string) (tui.ServerSwitchResult, error) {
 	entry, err := findServer(w.live.choices(w.opts), name)
 	if err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	result, err := w.mover.move(entry)
-	if err != nil {
-		return tui.ServerSwitchResult{}, err
-	}
-	// The launcher follows the entry the session just moved onto — off when the entry names no
-	// config, on against its own when it does. It is installed HERE, at the switch, and not
-	// inside the shared move: a profile load reaches that move directly and must leave the
-	// integration exactly as it found it (launcherPath.follow carries the reasoning). And it is
-	// installed only after the move SUCCEEDED, so a refused switch leaves the session's launcher
-	// where the session still is.
-	w.launcherPath.follow(entry)
-	return result, nil
+	return arrive(w, func() (tui.ServerSwitchResult, config.ServerEntry, error) {
+		result, err := w.mover.move(entry)
+		return result, entry, err
+	})
 }
 
 // followFallback is the composition root's half of a session-seat Server fallback (ADR 0105): the
-// engine has already rehomed onto the fallback named mid-Turn, the mover follows it with everything
-// the shared arrival touches (sessionMover.fallover), and this adds what `/server` adds on top of
-// that arrival — the launcher follows the fallback's entry, on against its own `llama-launcher:` key
-// or off when it carries none, so `/model`, `/stop-server` and `/unload-model` act on the server the
-// session is now on. As at the switch, the install sits here and never in the shared arrival a
-// profile load also reaches, and only after the follow SUCCEEDED, so a refused one leaves the
-// launcher where the session still is.
+// engine has already rehomed onto the fallback named mid-Turn, and this is the other kind of arrival
+// (arrive) — the mover follows it with everything the shared arrival touches, the landing's
+// observation included (sessionMover.fallover), and the launcher follows the fallback's entry, so
+// `/model`, `/stop-server` and `/unload-model` act on the server the session is now on.
 func (w *rootWiring) followFallback(name string) (tui.ServerFallbackResult, error) {
-	result, entry, err := w.mover.fallover(name)
+	return arrive(w, func() (tui.ServerFallbackResult, config.ServerEntry, error) {
+		return w.mover.fallover(name)
+	})
+}
+
+// arrive is the one tail both kinds of arrival onto a `servers:` entry share — a human `/server`
+// move (switchServer) and a session-seat fallover (followFallback): the mover's step first, then the
+// launcher follows the entry that step arrived on, off when the entry names no config and on against
+// its own `llama-launcher:` key when it does. step is the kind's own mover step, answering what the
+// display adopts beside the entry it reached.
+//
+// The launcher install sits HERE, and never inside the mover's shared fold (sessionMover.arrive): a
+// Launch profile load reaches that fold directly, possibly onto an endpoint no entry names, and must
+// leave the integration exactly as it found it (launcherPath.follow carries the reasoning). And it
+// runs only after the step SUCCEEDED, so a refused arrival leaves the launcher where the session
+// still is.
+//
+// It is a function rather than a rootWiring method only because a method cannot carry the type
+// parameter that lets each kind keep its own result type.
+func arrive[R any](w *rootWiring, step func() (R, config.ServerEntry, error)) (R, error) {
+	result, entry, err := step()
 	if err != nil {
-		return tui.ServerFallbackResult{}, err
+		var none R
+		return none, err
 	}
 	w.launcherPath.follow(entry)
 	return result, nil

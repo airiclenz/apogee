@@ -221,10 +221,10 @@ func (p *launcherPath) set(path, entry string) {
 // fallback — resolves that entry's own key here, so an entry with no key switches the verbs off
 // exactly as one with a key switches them on.
 //
-// It is called by those four sites and NOT by the shared move underneath them (sessionMover.move):
-// a Launch profile load can move the session too, possibly to an endpoint no entry names, and that
-// move must leave the integration as it found it — the session that just used the launcher still
-// has it. Routing the install through the entry rather than the move is what keeps the two apart.
+// It is called for those four — the last two through the one arrival tail they share (arrive) —
+// and NOT by the shared move underneath them (sessionMover.move): a Launch profile load can move
+// the session too, possibly to an endpoint no entry names, and that move must leave the integration
+// as it found it — the session that just used the launcher still has it. Routing the install through the entry rather than the move is what keeps the two apart.
 //
 // The entry's NAME is installed with its path, so the session knows which entry it actuates through
 // for as long as it actuates through one. An entry that switches the integration off contributes no

@@ -349,7 +349,11 @@ internal/agent/subagent_test.go — TestNewChildAgentOn_SessionSeatGetsAnEmptyLa
 
 **Commit:** `refactor(agent): delegates and the background host share one handles value`
 
-## 12. One arrival tail for `/server` and a fallover
+## 12. One arrival tail for `/server` and a fallover — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the arrival tail is a generic package function `arrive[R any](w *rootWiring, step)` rather than a `rootWiring.arrive(kind)` method — a Go method cannot carry the type parameter that lets `/server` (tui.ServerSwitchResult) and a fallover (tui.ServerFallbackResult) keep their own result types; the "kind" is the mover step each caller passes (sessionMover.move, sessionMover.fallover).
+NOTES (2026-11-02): consequential edit — cmd/apogee/launcher.go: made necessary by routing `/server` and the fallover through `arrive` (launcherPath.follow's call-site comment now names the shared tail).
+NOTES (2026-11-02): both new tests landed in cmd/apogee/wire_server_test.go; cmd/apogee/fallback_test.go and cmd/apogee/wire_server.go needed no change (TestTUIFallbackFalloverFollowsTheLauncherPath passes unchanged; serverHost's comments still hold).
 
 **What:**
 **Goal:** `rootWiring.switchServer` and `rootWiring.followFallback` share one arrival tail: the mover step, then (only if it succeeded) the launcher follow; a profile load still leaves the launcher alone.
