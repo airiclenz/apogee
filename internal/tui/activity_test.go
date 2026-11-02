@@ -31,6 +31,16 @@ func backdateActivity(m *Model, at time.Time) {
 	m.acts.put(runRef{}, slot)
 }
 
+// backdateExchange pushes the top-level slot's RUN clock back to at — the origin the Exchange
+// total counts from (Model.totalSuffix) — and leaves every phrase clock where it is, so a test
+// can hold the total and the shown activity's clock at two different readings and tell which one
+// the row is reading where.
+func backdateExchange(m *Model, at time.Time) {
+	slot := m.acts.at(runRef{})
+	slot.since = at
+	m.acts.put(runRef{}, slot)
+}
+
 // TestActivityText proves the phrase every kind renders, that idle says nothing at all, and
 // that a Depth > 0 activity is prefixed with the same sub-agent label the transcript rail uses.
 func TestActivityText(t *testing.T) {

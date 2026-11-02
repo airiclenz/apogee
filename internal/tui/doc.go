@@ -505,8 +505,9 @@
 // twenty minutes) ended in a normal completion — so the row stops at the fact, and drops the
 // qualifier the moment an Event lands. It speaks only for thinking and responding: a silent tool call is the
 // tool taking its time, a stopping worker already answers for itself, and the states waiting on the
-// HUMAN never show it, because the silence there is the human's own. It is also the first thing the
-// left slot gives up on a narrow row, dropped whole rather than truncated (layout.md).
+// HUMAN never show it, because the silence there is the human's own. On a narrow row it is the
+// second thing the left slot gives up, after the Exchange total ([Model.totalSuffix]), dropped
+// whole rather than truncated (layout.md).
 //
 // thinking.go retains what that phrase is ABOUT — the session's thinking, which the /thinking pane
 // reads and nothing else does. The "thinking" above still comes from the ARRIVAL of a

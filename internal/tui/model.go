@@ -4262,6 +4262,28 @@ func (m Model) throughputSuffix() string {
 	return m.th.statusBar.Render(fmt.Sprintf(" · %.0f tok/s", m.tokPerSec))
 }
 
+// exchangeTotalFormat wraps the Exchange's running total (its argument: the formatElapsed clock)
+// where it hangs off the running phrase's own clock (totalSuffix).
+const exchangeTotalFormat = " [total %s]"
+
+// totalSuffix is the status line's " [total 03:15s]" readout while a worker runs: how long the
+// whole Exchange has been going at now, counted from the TOP-LEVEL slot's run clock
+// ([runActivity.since]) — stamped when enterRunning opens that slot, kept by moveActivity through
+// every change of phrase, and cleared with the board when the worker unwinds. It deliberately never
+// reads the shown slot: inside a run view or a delegate fan-out the phrase's own clock counts that
+// child, while the total keeps counting the human's Exchange across all of them. It rides the
+// spinner tick like every other readout on the row, so it needs no timer of its own.
+//
+// It renders nothing while the top-level slot holds no clock — the defensive case activity.elapsed
+// guards for the phrase's clock — rather than a total measured from the epoch.
+func (m Model) totalSuffix(now time.Time) string {
+	since := m.acts.at(runRef{}).since
+	if since.IsZero() {
+		return ""
+	}
+	return m.th.statusBar.Render(fmt.Sprintf(exchangeTotalFormat, formatElapsed(now.Sub(since))))
+}
+
 // statusLine renders what is happening on the left and the live context gauge (or a key hint)
 // on the right, justified across the window. While a worker runs the left slot is the live
 // activity phrase plus an elapsed clock ("⣻ reading · 3s" — the verb carries no target of its
@@ -4297,16 +4319,19 @@ func (m Model) statusLine() string {
 	// slot, the margin and the one-column gap the drop below insists on — because one occupant has
 	// a long and a short form and picks between them by that room (escStopHint); every other
 	// occupant ignores it and is dropped whole below as before.
-	right := m.statusRight(m.width - m.th.measure.Width(left) - len(bodyIndent) - 1)
+	right := m.statusRight(m.rightRoom(left))
 	// The gauge is the one occupant the left slot makes room for: a long phrase — a delegate named
 	// by a 150-character item label — must not cost the row its only reading of the window's fill.
 	// The room comes out of the PHRASE alone (statusLeftBeside); where even the lead and the trail
 	// cannot stand beside it, the slot is composed to the full width and the gauge dropped below as
-	// before. The hints keep that drop rule: they are not a reading the phrase should yield to.
+	// before. The hints keep that drop rule: they are not a reading the phrase should yield to —
+	// but the Exchange total is, so it gives way to them first (yieldTotal).
 	if gauge := m.contextGauge(); right != "" && right == gauge {
 		if reserved, ok := m.statusLeftBeside(gauge); ok {
 			left = reserved
 		}
+	} else if right != "" {
+		left, right = m.yieldTotal(left, right)
 	}
 	if right != "" {
 		right += m.th.statusBar.Render(bodyIndent)
@@ -4321,6 +4346,31 @@ func (m Model) statusLine() string {
 		return squareOnField(m.th.measure, m.th.statusBar, left, max(0, m.width))
 	}
 	return left + m.th.statusBar.Render(strings.Repeat(" ", gap)) + right
+}
+
+// rightRoom is the columns the status line's right slot may spend beside left: the window less the
+// left slot, the right slot's bodyIndent margin and the one-column justify gap statusLine insists on.
+func (m Model) rightRoom(left string) int {
+	return m.width - m.th.measure.Width(left) - len(bodyIndent) - 1
+}
+
+// yieldTotal makes the Exchange total (totalSuffix) give way to a right-slot HINT — the primed
+// ctrl+c and esc hints, a flash, `esc×2 cancel`, a run view's breadcrumb hint. The total is a
+// reading the human can do without for a moment; a hint says what the next key does. So wherever
+// left, carrying the total, would cost the hint its long form (escStopHint, fitBreadcrumbHint) or
+// its place on the row (statusLine's too-narrow drop), the left slot is recomposed without the
+// total and the hint composed again beside it. A left slot with no total to drop, or a hint that
+// already stands whole beside it, comes back unchanged.
+func (m Model) yieldTotal(left, right string) (string, string) {
+	bare := m.statusLeftWithin(m.width, false)
+	if bare == left {
+		return left, right
+	}
+	bareRight := m.statusRight(m.rightRoom(bare))
+	if bareRight == right && m.rightRoom(left) >= m.th.measure.Width(right) {
+		return left, right
+	}
+	return bare, bareRight
 }
 
 // statusLeft composes the status line's left slot to the window's WIDTH: the two-column body lead,
@@ -4341,7 +4391,7 @@ func (m Model) statusLine() string {
 // whole and its separator with it — the slot never reads " · 2 queued" with no phrase in front of
 // the separator.
 func (m Model) statusLeft() string {
-	return m.statusLeftWithin(m.width)
+	return m.statusLeftWithin(m.width, true)
 }
 
 // statusLeftBeside composes the left slot to leave the context gauge its room on the row: the
@@ -4353,22 +4403,26 @@ func (m Model) statusLeft() string {
 // gauge, exactly as it did before the room was reserved.
 func (m Model) statusLeftBeside(gauge string) (string, bool) {
 	width := m.width - m.th.measure.Width(gauge) - len(bodyIndent) - 1
-	left := m.statusLeftWithin(width)
+	left := m.statusLeftWithin(width, true)
 	return left, m.th.measure.Width(left) <= width
 }
 
 // statusLeftWithin is statusLeft composed to width columns rather than to the window's: the same
 // spend order, the phrase trimmed around the lead and the trail. A slot with no phrase is its lead
-// and trail whatever the width, so it can overrun a width narrower than those two.
-func (m Model) statusLeftWithin(width int) string {
+// and trail whatever the width, so it can overrun a width narrower than those two. withTotal is
+// whether a running slot may carry the Exchange total at all (totalSuffix): statusLine composes it
+// without one where the total gives way to a right-slot hint (yieldTotal).
+func (m Model) statusLeftWithin(width int, withTotal bool) string {
 	lead := m.th.statusBar.Render(bodyIndent)
 
-	// qualified is the running slot composed WITH the stall guard's `quiet` qualifier — the same row
-	// one rung richer — and "" in every frame and every state that owes nothing (activity.quiet).
-	// The qualifier sits BETWEEN the activity phrase and its clock, so it cannot be a fragment the
-	// width test appends after the fact: the slot is composed both ways and the width below picks
-	// one, which is also what drops the qualifier whole rather than truncating it — see below.
-	var phrase, qualified string
+	// richer is the running slot's fuller forms, richest first — the same row one or two rungs up
+	// from phrase, which is the plain form — and nil in every other state (runningForms). The rungs
+	// sit INSIDE the phrase (the `quiet` qualifier between the activity and its clock, the total
+	// before the throughput readout), so they cannot be fragments the width test appends after the
+	// fact: the slot is composed every way and the width below picks the first that fits, which is
+	// also what drops a rung whole rather than truncating it — see below.
+	var phrase string
+	var richer []string
 	switch m.state {
 	case stateIdle:
 		// Idle says nothing for itself — the input box below already invites a message — with TWO
@@ -4384,18 +4438,7 @@ func (m Model) statusLeftWithin(width int) string {
 			phrase = m.preboundPhrase()
 		}
 	case stateRunning:
-		now := time.Now()
-		glyph := m.spin.view(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor)
-		spinner, throughput := glyph+m.th.statusBar.Render(" "), m.throughputSuffix()
-		// The row speaks for the run the human is LOOKING at: the top-level conversation, or the
-		// delegation whose run view is open (ADR 0063, runview.go). A stage level is not a run, so
-		// it speaks for the run the stage's workflow stands in (Model.viewedRun) — the stage's items
-		// are that run's children, and the board names them as it does there.
-		view := m.viewedRun()
-		phrase = spinner + m.runningPhrase(view, now, false) + throughput
-		if m.isStalled(view, now) {
-			qualified = spinner + m.runningPhrase(view, now, true) + throughput
-		}
+		phrase, richer = m.runningForms(withTotal)
 	case stateAwaitingApproval:
 		phrase = m.th.statusBar.Render("approval needed")
 	case stateAwaitingAsk:
@@ -4409,12 +4452,15 @@ func (m Model) statusLeftWithin(width int) string {
 
 	queued := m.statusTrail(true)
 	room := width - m.th.measure.Width(lead) - m.th.measure.Width(queued)
-	// The quiet qualifier is the FIRST thing the slot gives up, one rung below the phrase it
-	// qualifies: a row too tight for the qualified form falls back to the plain one, so the
-	// qualifier goes whole and never truncates into "· quie…", which would report neither the
-	// silence nor its own word and would cost the phrase its last columns to say so.
-	if qualified != "" && m.th.measure.Width(qualified) <= room {
-		phrase = qualified
+	// The rungs above the plain phrase are given up whole, richest first: the Exchange total goes
+	// FIRST, then the quiet qualifier, and only then is the plain phrase truncated. Neither rung ever
+	// truncates into "[total 03:…" or "· quie…", which would report neither the fact nor its own
+	// word and would cost the phrase its last columns to say so.
+	for _, form := range richer {
+		if m.th.measure.Width(form) <= room {
+			phrase = form
+			break
+		}
 	}
 	if m.th.measure.Width(phrase) <= room {
 		return lead + phrase + queued
@@ -4423,6 +4469,37 @@ func (m Model) statusLeftWithin(width int) string {
 		return lead + m.statusTrail(false)
 	}
 	return lead + m.th.measure.Truncate(phrase, room, "…") + queued
+}
+
+// runningForms composes the running left slot — the spinner, the phrase with its clock
+// (runningPhrase), the Exchange total (totalSuffix) and the throughput readout — as plain, the form
+// every row can fall back to, and richer, the fuller forms statusLeftWithin tries first, richest
+// first. A stalled row offers quiet+total, then quiet; an unstalled row offers plain+total. Without
+// a total (withTotal false, or a top-level slot with no clock) the total's rungs collapse into the
+// ones below them, so the chain reads exactly as it did before the total existed.
+func (m Model) runningForms(withTotal bool) (plain string, richer []string) {
+	now := time.Now()
+	glyph := m.spin.view(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor)
+	spinner, throughput := glyph+m.th.statusBar.Render(" "), m.throughputSuffix()
+	total := ""
+	if withTotal {
+		total = m.totalSuffix(now)
+	}
+	// The row speaks for the run the human is LOOKING at: the top-level conversation, or the
+	// delegation whose run view is open (ADR 0063, runview.go). A stage level is not a run, so
+	// it speaks for the run the stage's workflow stands in (Model.viewedRun) — the stage's items
+	// are that run's children, and the board names them as it does there. The total alone reads
+	// the top-level slot whatever the view (totalSuffix).
+	view := m.viewedRun()
+	shown := spinner + m.runningPhrase(view, now, false)
+	plain = shown + throughput
+	if m.isStalled(view, now) {
+		quiet := spinner + m.runningPhrase(view, now, true)
+		richer = []string{quiet + total + throughput, quiet + throughput}
+	} else {
+		richer = []string{shown + total + throughput}
+	}
+	return plain, richer
 }
 
 // shownSlot resolves WHICH run the status line speaks for, the slot it renders, and the NAME that

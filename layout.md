@@ -65,7 +65,7 @@
   chat content and the bottom prompt/information section like displayed here.
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-  ⠉⠹ reading · 3s                                              16k/32k 50% █████░░░░░
+  ⠉⠹ reading · 3s [total 01:04s]                               16k/32k 50% █████░░░░░
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                           │
 │ This text box can be multiline. The text edit area auto increases height to         │
@@ -285,9 +285,9 @@ instead of failing a test.
 for disappearing — the `N queued` readout carries the count — and the status line therefore owes
 that readout the same width discipline a pane's title row owes its count (below): the left slot is
 composed **to** the window rather than composed long and clipped to it, so a narrow window sheds
-the activity phrase around the count and never the count off the end of the row. The quiet qualifier
-(below) is one rung lower still — it qualifies the phrase, so it is the first thing the slot gives
-up, and it is dropped whole rather than truncated.
+the activity phrase around the count and never the count off the end of the row. The Exchange total
+and the quiet qualifier (below) are rungs lower still, given up in that order before the phrase
+itself is trimmed: the total first, then the qualifier, each dropped whole rather than truncated.
 
 **A surface still gets its irreducible rows before any other surface gets a comfortable one.** Each
 open pane's four (below) come off the top of the budget, so a passive band can never squeeze out
@@ -1352,7 +1352,7 @@ those rows is a collapsed run, and opening one opens its view.
 ✦ So far a.txt, and it says hello.
 
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
-  ⠉⠹ scout · reading · 3s                                          esc back · ^x stop
+  ⠉⠹ scout · reading · 3s [total 01:04s]                           esc back · ^x stop
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Message scout…  ⏎ send · ↑ recall · esc back                                        │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
@@ -1713,8 +1713,8 @@ one does. It is a fact and not a verdict: a large prompt is legitimately silent 
 so the row reports the silence and says nothing about what it means. Only `thinking` and
 `responding` carry it — a silent tool call is the tool taking its time, and a stop already says what
 it is doing — and the states waiting on a human (an open question, an approval) never do, the
-silence there being the human's own. It is also the first thing the left slot gives up when the row
-is tight, dropped whole rather than truncated.
+silence there being the human's own. When the row is tight it is the second thing the left slot
+gives up, after the Exchange total (below), dropped whole rather than truncated.
 
 **How fast it is generating.** While a Turn runs, the phrase ends in a `· N tok/s` readout in the
 status bar's own colour — `⣻ responding · 12s · 38 tok/s` (`throughputSuffix`). N is the last
@@ -1725,6 +1725,20 @@ so does an unmeasured completion — a window shorter than a quarter of a second
 at all rather than a clamped or invented number — so the row never shows `0 tok/s`. The readout is
 part of the phrase, not a slot of its own: the states waiting on a human, the error and idle never
 carry it, and a row too tight for the whole phrase truncates it from the right with the rest.
+
+**How long the whole Exchange has run.** The activity's clock restarts every time the work changes
+— a new tool call, the reply starting to stream, a delegate taking the row — so beside it the
+running row carries a second, steadier reading: the Exchange's total, `[total 03:15s]`, in the
+status bar's own colour, ahead of the throughput readout — `⣻ responding · 12s [total 03:15s] · 38
+tok/s` (`totalSuffix`). It counts from the moment the human's message went out, read off the
+top-level run's own clock and never the shown slot's, so it keeps counting across every change of
+activity, a delegate fan-out and an open run view alike, and it rides the spinner's tick rather
+than a timer of its own. Only the running state carries it; idle, the states waiting on a human and
+the error read exactly as they did without it. It is the first thing the row gives up: on a tight
+row the left slot drops the total whole before the quiet qualifier and before the phrase is
+trimmed, and it gives way to every hint in the right slot — the primed `ctrl+c` and `esc` hints, a
+flash, `esc×2 cancel`, a run view's `esc back · ^x stop` — so a hint that would stand whole beside
+the plain phrase is never dropped or shortened to keep it.
 
 ---
 

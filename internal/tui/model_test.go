@@ -5693,9 +5693,10 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 }
 
 // TestStatusLineQuietSuffixGivesWayFirst proves the qualifier is paid for out of the row's own
-// width like every other occupant, and that it is the FIRST thing the slot gives up: a window too
-// narrow for both keeps the phrase and its clock whole and drops the word rather than truncating it
-// into "· quie…", which would report neither the silence nor its own word (layout.md).
+// width like every other occupant, and that it goes before the phrase it qualifies — second only to
+// the Exchange total (TestStatusLineExchangeTotalGivesWayFirst): a window too narrow for both keeps
+// the phrase and its clock whole and drops the word rather than truncating it into "· quie…", which
+// would report neither the silence nor its own word (layout.md).
 func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
 	t.Parallel()
 	m := silentFor(guardedRunningModel(t, 90*time.Second), 190*time.Second+500*time.Millisecond)
@@ -5717,6 +5718,251 @@ func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
 	}
 	if w := ansi.StringWidth(m.statusLine()); w != m.width {
 		t.Errorf("status line renders %d columns, want exactly %d", w, m.width)
+	}
+}
+
+// exchangeAge is how long the Exchange in the total tests has been running: a gap that renders
+// "03:15s" unambiguously either side of a second's slack.
+const exchangeAge = 195*time.Second + 500*time.Millisecond
+
+// exchangeTotal is the total readout exchangeAge renders as (totalSuffix).
+const exchangeTotal = "[total 03:15s]"
+
+// unboundedWidth is a width no status line fills: a slot composed to it is composed whole.
+const unboundedWidth = 1 << 10
+
+// runningExchange is a model whose worker is "thinking" on a request just sent, inside an Exchange
+// that began exchangeAge ago — the run clock backdated alone, so the activity's own clock still
+// reads 0s and the two readings on the row cannot be mistaken for each other.
+func runningExchange(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t)
+	m.input.SetValue("hello")
+	m = step(t, m, keyEnter())
+	backdateExchange(&m, time.Now().Add(-exchangeAge))
+	return m
+}
+
+// TestStatusLineExchangeTotal proves the running row's second clock: the whole Exchange's total,
+// counted from the TOP-LEVEL slot's run clock beside the shown activity's own (turn-total-duration).
+// It keeps counting through everything that restarts the activity's clock — a new kind of work, a
+// delegate fan-out speaking for the row — and it is a running-state fact only, so every other
+// state's row is exactly what it was before the total existed.
+func TestStatusLineExchangeTotal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a running row counts the whole Exchange", func(t *testing.T) {
+		t.Parallel()
+		m := runningExchange(t)
+
+		got := statusText(t, m)
+
+		if want := "thinking · 0s " + exchangeTotal; !strings.Contains(got, want) {
+			t.Errorf("status line = %q, want it to contain %q", got, want)
+		}
+	})
+
+	t.Run("the total reads the Exchange while the clock reads the shown activity", func(t *testing.T) {
+		t.Parallel()
+		m := runningExchange(t)
+		backdateActivity(&m, time.Now().Add(-12*time.Second-500*time.Millisecond))
+
+		got := statusText(t, m)
+
+		if want := "thinking · 12s " + exchangeTotal; !strings.Contains(got, want) {
+			t.Errorf("status line = %q, want it to contain %q", got, want)
+		}
+	})
+
+	t.Run("the total survives the activity moving to a new kind", func(t *testing.T) {
+		t.Parallel()
+		m := runningExchange(t)
+
+		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "hi"}})
+
+		if got, want := statusText(t, m), "responding · 0s "+exchangeTotal; !strings.Contains(got, want) {
+			t.Errorf("status line = %q, want it to contain %q", got, want)
+		}
+	})
+
+	t.Run("a delegate fan-out keeps counting the parent's Exchange", func(t *testing.T) {
+		t.Parallel()
+		m := fannedOutModel(t)
+		m.state = stateRunning
+		backdateExchange(&m, time.Now().Add(-exchangeAge))
+
+		got := statusText(t, m)
+
+		if want := "2 sub-agents · working · 0s " + exchangeTotal; !strings.Contains(got, want) {
+			t.Errorf("status line = %q, want it to contain %q", got, want)
+		}
+	})
+
+	t.Run("a top-level slot with no clock renders no total", func(t *testing.T) {
+		t.Parallel()
+		m := runningExchange(t)
+		backdateExchange(&m, time.Time{})
+
+		got := statusText(t, m)
+
+		if strings.Contains(got, "[total") {
+			t.Errorf("status line = %q, want no total measured from a zero clock", got)
+		}
+		if !strings.Contains(got, "thinking · 0s") {
+			t.Errorf("status line = %q, want the running phrase and its clock kept", got)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		state uiState
+	}{
+		{"idle", stateIdle},
+		{"awaiting approval", stateAwaitingApproval},
+		{"awaiting an answer", stateAwaitingAsk},
+		{"errored", stateErrored},
+	} {
+		t.Run(tc.name+" renders as it did without a total", func(t *testing.T) {
+			t.Parallel()
+			m := runningExchange(t)
+			m.state = tc.state
+			bare := m
+			bare.acts = nil
+
+			got := m.statusLine()
+
+			if want := bare.statusLine(); got != want {
+				t.Errorf("status line = %q, want the unchanged %q", got, want)
+			}
+		})
+	}
+}
+
+// TestStatusLineExchangeTotalGivesWayFirst proves the total is the FIRST thing a tight left slot
+// gives up, dropped whole: a stalled row sheds it before the quiet qualifier, and an unstalled row
+// sheds it before the phrase truncates (layout.md).
+func TestStatusLineExchangeTotalGivesWayFirst(t *testing.T) {
+	t.Parallel()
+	totalWidth := len(" " + exchangeTotal)
+
+	t.Run("a stalled row drops the total, then the qualifier", func(t *testing.T) {
+		t.Parallel()
+		m := silentFor(guardedRunningModel(t, 90*time.Second), 190*time.Second+500*time.Millisecond)
+		backdateExchange(&m, time.Now().Add(-exchangeAge))
+		full := strip(m.statusLeftWithin(unboundedWidth, true))
+		if want := "thinking · quiet · 03:10s " + exchangeTotal; !strings.Contains(full, want) {
+			t.Fatalf("left slot = %q, want it to contain %q", full, want)
+		}
+
+		got := strip(m.statusLeftWithin(m.th.measure.Width(full)-1, true))
+
+		if strings.Contains(got, "[total") || !strings.Contains(got, "thinking · quiet · 03:10s") {
+			t.Errorf("left slot one column short = %q, want the total gone and the qualifier kept", got)
+		}
+
+		got = strip(m.statusLeftWithin(m.th.measure.Width(full)-totalWidth-1, true))
+
+		if strings.Contains(got, "quiet") || !strings.Contains(got, "thinking · 03:10s") {
+			t.Errorf("left slot too tight for the qualifier = %q, want the plain phrase and its clock", got)
+		}
+	})
+
+	t.Run("an unstalled row drops the total before it truncates", func(t *testing.T) {
+		t.Parallel()
+		m := runningExchange(t)
+		full := strip(m.statusLeftWithin(unboundedWidth, true))
+
+		got := strip(m.statusLeftWithin(m.th.measure.Width(full)-1, true))
+
+		if strings.Contains(got, "[total") || strings.Contains(got, "…") || !strings.Contains(got, "thinking · 0s") {
+			t.Errorf("left slot one column short = %q, want the plain phrase whole and the total gone", got)
+		}
+
+		got = strip(m.statusLeftWithin(m.th.measure.Width(full)-totalWidth-1, true))
+
+		if strings.Contains(got, "[total") || !strings.HasSuffix(got, "…") {
+			t.Errorf("left slot too tight for the plain phrase = %q, want it truncated with no total", got)
+		}
+	})
+}
+
+// TestStatusLineExchangeTotalGivesWayToHints proves the total yields to every right-slot hint: at a
+// width where the hint stands whole beside the PLAIN phrase, the hint keeps its whole form and its
+// place and the total is the thing that goes — never the hint dropped, nor shortened (the run
+// view's `esc back · ^x stop` to `esc back`) to make room for a reading. Where the row has room for
+// both, both stand.
+func TestStatusLineExchangeTotalGivesWayToHints(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		arm  func(t *testing.T) Model
+		hint string
+	}{
+		{
+			name: "an armed esc",
+			arm: func(t *testing.T) Model {
+				m := runningExchange(t)
+				m.lastEsc = time.Now()
+				return m
+			},
+			hint: escStopHintPlain,
+		},
+		{
+			name: "a primed ctrl+c",
+			arm: func(t *testing.T) Model {
+				m := runningExchange(t)
+				m.lastCtrlC = time.Now()
+				return m
+			},
+			hint: "press ctrl+c again to quit",
+		},
+		{
+			name: "a flash",
+			arm: func(t *testing.T) Model {
+				m := runningExchange(t)
+				m.flash = "copied to clipboard"
+				return m
+			},
+			hint: "copied to clipboard",
+		},
+		{
+			name: "the stop gesture",
+			arm:  runningExchange,
+			hint: "esc×2 cancel",
+		},
+		{
+			name: "a run view's breadcrumb hint",
+			arm: func(t *testing.T) Model {
+				m := modelViewingStampedChild(t, &fakeEngine{}, "run-s1")
+				backdateExchange(&m, time.Now().Add(-exchangeAge))
+				return m
+			},
+			hint: breadcrumbStopHint,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := tc.arm(t)
+			if got := plainSlot(m.statusRight(unboundedWidth)); got != tc.hint {
+				t.Fatalf("setup: the right slot holds %q, want %q", got, tc.hint)
+			}
+			plainWidth := m.th.measure.Width(m.statusLeftWithin(unboundedWidth, false))
+			m.width = plainWidth + m.th.measure.Width(tc.hint) + len(bodyIndent) + 1
+
+			got := statusText(t, m)
+
+			if !strings.HasSuffix(got, tc.hint) || strings.Contains(got, "[total") {
+				t.Errorf("status line = %q, want the whole %q kept and the total gone", got, tc.hint)
+			}
+
+			m.width += len(" " + exchangeTotal)
+			got = statusText(t, m)
+
+			if !strings.HasSuffix(got, tc.hint) || !strings.Contains(got, exchangeTotal) {
+				t.Errorf("status line with room for both = %q, want %q and %q", got, exchangeTotal, tc.hint)
+			}
+		})
 	}
 }
 

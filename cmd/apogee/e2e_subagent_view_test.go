@@ -285,13 +285,15 @@ func runViewRedactions(sess *e2eSession) []tuitest.Redaction {
 const liveStarRow = `(?m)^[✦ ] Read$`
 
 // runningSlot matches the status line's whole live left slot — the spinner's braille phase, the run
-// and phrase it is spinning for, and the seconds it has counted. All three are facts about WHEN the
-// frame was taken rather than about the view, and the slot is redacted whole rather than piecemeal
+// and phrase it is spinning for, the seconds it has counted, and the Exchange total beside them where
+// the row has room for it. All of these are facts about WHEN the frame was taken rather than about
+// the view, and the slot is redacted whole rather than piecemeal
 // because only the whole of it has a stable width: the row is squared to the terminal and its right
 // slot is flush to the edge, so what the phrase and the clock do not spend is spent on the spaces
 // between them. Padding the token back out to the match (tuitest.RedactPadded) therefore lands the
 // same column at every clock width. What the row SAYS is pinned by the assertions above, on cells.
-const runningSlot = `[\x{2800}-\x{28FF}]{2} ` + longDelegate + ` · [a-z]+ · (?:\d+:){0,2}\d+s`
+const runningSlot = `[\x{2800}-\x{28FF}]{2} ` + longDelegate +
+	` · [a-z]+ · (?:\d+:){0,2}\d+s(?: \[total (?:\d+:){0,2}\d+s\])?`
 
 // frameWhen waits until the frame satisfies want and hands back the very frame that did. It is how
 // a claim is made against a run that is still working: such a run animates its status line, so the

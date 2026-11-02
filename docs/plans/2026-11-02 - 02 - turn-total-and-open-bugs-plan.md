@@ -194,7 +194,12 @@ internal/tui/model.go — runningPhrase; internal/tui/sessions.go — relativeTi
 
 **Commit:** `feat(tui): one value-filled elapsed clock format`
 
-## 7. Show the Exchange total beside the elapsed clock
+## 7. Show the Exchange total beside the elapsed clock — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the running slot's forms are composed by a new runningForms helper (plain plus a richest-first list of richer forms) in place of the single `qualified` variable; statusLeftWithin gains a withTotal parameter, and statusLine's hint give-way lives in a new yieldTotal (with a rightRoom helper) — all in internal/tui/model.go.
+NOTES (2026-11-02): consequential edit — internal/tui/doc.go: made necessary by the total now being the first thing the left slot gives up (the quiet qualifier's "first thing" statement is now "second, after the Exchange total").
+NOTES (2026-11-02): consequential edit — cmd/apogee/e2e_subagent_view_test.go: made necessary by the running slot gaining the total; the t17-run-view golden's runningSlot redaction now also swallows an optional ` [total …]`.
+NOTES (2026-11-02): the narrow-width and hint tests compose the left slot directly (statusLeftWithin) or set m.width rather than resizing, so the asserted widths are derived from the rendered plain phrase instead of hard-coded columns.
 
 **Closes:** turn-total-duration
 

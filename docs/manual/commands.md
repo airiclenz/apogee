@@ -254,7 +254,12 @@ delegate spoke last only made it flicker. That merged clock counts from the **ol
 child, so the number you are reading never restarts when a sibling emits. Open a delegation's
 run view and the row speaks for that one run again, as above.
 
-After the clock comes the throughput readout, `· N tok/s`: the last completion's server-reported
+After the clock comes the Exchange's total, `[total 03:15s]`: how long the whole run has gone
+since your message went out. The activity clock restarts whenever the work changes; the total
+keeps counting across every phrase, delegation and run view until the run ends. It is the first
+thing the row drops when it is tight, ahead of `quiet` and of any key hint on the right.
+
+After the total comes the throughput readout, `· N tok/s`: the last completion's server-reported
 token count over that turn's generation window, shown as a whole number. Below one token per
 second it is hidden entirely — which is also how an unmeasurably short window reads. Such a
 window is dominated by scheduling jitter rather than by generation, so it is shown as no reading
