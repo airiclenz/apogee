@@ -97,7 +97,13 @@ internal/agent/filerefs_test.go — TestClampToBound_SharedByToolResultsAndFileR
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestOversizedToolResult|TestClampToBound|TestToolResultCap|TestUnknownWindowClamp|TestToolResultFloor' ./internal/agent/`
 **Commit:** `fix(agent): byte-elide a tool result the line elision cannot bound`
 
-## 4. Bound a fresh tool result by the room left in the request
+## 4. Bound a fresh tool result by the room left in the request — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): turn.go added beyond Files — the results-still-to-append count (`resultsToAppend`) lives on turnLifecycle, the Approach's "Agent/turn state"; set to len(calls) in dispatchTools, decremented in appendToolResult, read as max(n, 1) by the new `Agent.freshResultBound` (dispatch.go). clampToolResult now clamps to freshResultBound; structuralFloor stays the ceiling and the unknown-window value.
+NOTES (2026-11-02): the room is deriveGrowthBounds' bare room with no uncalibratedRoomMargin (the predictive guard doubles the room on an uncalibrated Budget; this bound does not — ADR 0018 §7 "no comfort margin", per the Goal).
+NOTES (2026-11-02): fillnotice_test.go — three subcases (TestContextFillNoticeWindowAndSilence/no_window_is_silence, TestContextFillNoticeIsAbsentWhenOffAndSkippedUnderBypass/{switch_off,Bypass_on}) already failed at 29cc3dee (item 3's byte elision now bounds their single-line bodies, which were sized past the bound); their fixtures were resized under the bound (the no-window body to 12,000 chars; the off/Bypass result to 40%→105% of the line on a 40% history) so the "bare result" length check stays meaningful.
+NOTES (2026-11-02): TestClampToBound_SharedByToolResultsAndFileRefs recast to clampToBound(big, a.refBound(1)) as the plan says; in practice its baseConfig agent has no tool registry (no menu), so the two bounds still coincided at floorWindow — the recast pins the shared rendering independently of the room-left bound.
+NOTES (2026-11-02): the comment sweep also updated loop.go (refBound, resolveFileRefs) and compact.go (the fallback ceiling's readers, the S2 mid-Exchange note); structuralFloor's and appendToolResult's doc comments in dispatch.go now name the room-left bound.
 
 **What:** Recast at the regression check (2026-11-02).
 **Goal:** with a known window, a tool result is committed at no more than its share of the room left — (advertised window − reply reserve, deriveGrowthBounds' room, − estimate of the next request without it) ÷ results of the Turn still to append — clamped to [1/8 of the History allocation, the History allocation]; a result that fits its share is committed whole; with no window known the bound is structuralFloor().

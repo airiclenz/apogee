@@ -51,7 +51,8 @@ const (
 	// It is also the ONE ceiling the other three window-gated growth bounds fall back to — the
 	// predictive guard (requestExceedsWindow, loop.go), the boundary compaction trigger
 	// (historyExceedsAllocation) and the structural tool-result clamp (clampToolResult,
-	// dispatch.go) — rather than each inventing its own default, and the substitution is made at
+	// dispatch.go, whose room-left bound has no room to share without a window and takes this
+	// ceiling whole — freshResultBound) — rather than each inventing its own default, and the substitution is made at
 	// ONE site, deriveGrowthBounds, that all four readers call. With no window there is nothing to
 	// ALLOCATE across a request's parts (context.Allocate returns the zero Allocation for exactly
 	// that reason), so the one meaningful rule left is that nothing the fold can shed — the
@@ -436,8 +437,8 @@ func (a *Agent) shouldAutoCompact() bool {
 	// S2: auto-compaction is Exchange-boundary-only. At the top-of-step() placement inExchange is
 	// false only at an Exchange opening (before pendingInput is consumed), so a mid-Exchange
 	// over-budget Turn (a tool-continuation) defers the fold to the next opening — the
-	// tool-result-cap Floor guard and the loop's structural floor on a single oversized result shape
-	// the request mid-Exchange, and emergencyFold rescues it once the window is actually blown
+	// tool-result-cap Floor guard and the loop's structural bound on a fresh result (its share of
+	// the room left in the request, freshResultBound) shape the request mid-Exchange, and emergencyFold rescues it once the window is actually blown
 	// (ADR 0018). Folding on THIS estimate mid-Exchange would leave the request ending in an
 	// assistant summary; the emergency fold pays for the exception with its user bridge.
 	//

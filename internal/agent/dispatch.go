@@ -74,6 +74,10 @@ const (
 // denied call, a tool error, a recovered tool panic — becomes an error tool-result the
 // model sees on the next Turn, and dispatch continues to the next call (ADR 0007).
 func (a *Agent) dispatchTools(ctx context.Context, turn int, calls []domain.ToolCall) dispatchOutcome {
+	// Every call of the reply is answered by exactly one appendToolResult — a result, a refusal,
+	// a cancel's not-run answer — so the count of results still to append starts at the reply's
+	// width and each append takes one off it (freshResultBound shares the room left by it).
+	a.turns.resultsToAppend = len(calls)
 	leaves, delegations := partitionDispatch(calls, a.offersBackgroundSubAgent())
 	if a.dispatchGroup(ctx, turn, 1, leaves) == dispatchSettled {
 		// A leaf took the cancel, so no delegation of this reply ever started: each is answered
@@ -2034,8 +2038,8 @@ func pathWithin(abs, root string) bool {
 }
 
 // appendToolResult commits a tool result to the conversation as a tool message (linked to
-// its call by ID) and emits the ToolResultEvent observers see, after clamping a pathologically
-// oversized result to the structural floor (clampToolResult). The clamp lands here, at the ONE
+// its call by ID) and emits the ToolResultEvent observers see, after clamping a result past its
+// share of the room left in the request (clampToolResult, freshResultBound). The clamp lands here, at the ONE
 // seam every tool result crosses on its way into history, so no route — a plain call, a Confine
 // verdict's, an approved gate's, a sub-agent delegation's, an error result — can bypass it.
 //
@@ -2080,6 +2084,7 @@ func (a *Agent) appendToolResult(
 	advised []advice,
 ) {
 	result.Content = a.clampToolResult(result.Content)
+	a.turns.resultsToAppend = max(a.turns.resultsToAppend-1, 0)
 	msg := domain.Message{
 		Role:        domain.RoleTool,
 		Content:     result.Content,
@@ -2120,8 +2125,10 @@ func (a *Agent) appendToolResult(
 	a.cfg.Events.Emit(a.contextEstimateEvent(turn, budget))
 }
 
-// structuralFloor is the BOUND behind both structural clamps: the whole History allocation — the
-// most any single body could occupy and still leave the conversation renderable. Content past it
+// structuralFloor is the CEILING behind both structural clamps: the whole History allocation — the
+// most any single body could occupy and still leave the conversation renderable. A reference block
+// is bounded by its share of it (refBound); a tool result by its share of the room left in the
+// request, never above it (freshResultBound), and by exactly it when no window is known. Content past it
 // can never survive ANY reducer, so committing it whole buys nothing and can doom the Turn
 // outright: a fresh giant body IS the most recent message the emergency fold's own summary call
 // must carry, which that call can render only byte-elided to its room (renderBudgetedTranscript) —
@@ -2175,9 +2182,10 @@ func (a *Agent) clampToBound(content string, bound int) string {
 	return apogeectx.ElideToBytes(content, maxChars)
 }
 
-// clampToolResult is the STRUCTURAL floor on a single tool result: a result whose estimated tokens
-// exceed the ENTIRE History allocation is committed to the conversation as the shared elision
-// instead of whole.
+// clampToolResult is the STRUCTURAL bound on a single tool result: a result whose estimated tokens
+// exceed its share of the room left in the request (freshResultBound) — never more than the
+// ENTIRE History allocation — is committed to the conversation as the shared elision instead of
+// whole.
 //
 // It is structural, not a Reaction (ADR 0006's floor): it consults no config and is never
 // disabled under Bypass. The tool-result-cap Floor guard is the
@@ -2195,10 +2203,51 @@ func (a *Agent) clampToBound(content string, bound int) string {
 // A tool result is not the only body with this floor: resolveFileRefs and resolveSkillRefs
 // (loop.go) clamp every @file block and every attached skill body against the same bound, divided
 // across ALL the references of one message (refBound), so an assembled block of references can no
-// more outgrow the allocation than a result can. The seams share structuralFloor and clampToBound
-// because they have one reason to change — the fold's arithmetic.
+// more outgrow the allocation than a result can. The seams share structuralFloor as their ceiling
+// and clampToBound as their rendering because they have one reason to change — the fold's
+// arithmetic.
 func (a *Agent) clampToolResult(content string) string {
-	return a.clampToBound(content, a.structuralFloor())
+	return a.clampToBound(content, a.freshResultBound())
+}
+
+// freshResultFloorDivisor sets the least a fresh tool result is ever bounded to: 1/8 of the
+// History allocation. Below it the result is not starved further — the predictive guard folds
+// the conversation before the next request instead (ADR 0018 §7), which frees the room a share
+// could not.
+const freshResultFloorDivisor = 8
+
+// freshResultBound is the bound, in tokens, a tool result about to be appended is clamped to. With
+// a known window it is the result's share of the room left in the request: the advertised window
+// less the reply reserve — the very room the predictive guard measures (deriveGrowthBounds,
+// requestExceedsWindow) — less the estimate of the next request without the result (the standing
+// system content buildRequest seeds, the conversation, the tool menu), divided across the results
+// of the Turn still to append (turnLifecycle.resultsToAppend, counted by dispatchTools). It is
+// recomputed at each append, so the room a small result leaves unused rolls forward to the next.
+// The share is clamped to [1/8 of the History allocation, the History allocation]: never above
+// the structural ceiling the fold's arithmetic rests on (structuralFloor), and never below the
+// floor, where the predictive fold makes room rather than the result shrinking to nothing.
+//
+// The estimate is the predictive guard's own measure — the Budget's chars-per-token ratio over
+// what the request carries — with no comfort margin (ADR 0018 §7) and no second estimator. It is
+// composed here from its parts rather than through buildRequest, which arms a projection this
+// seam must not build. With no window known the bound is structuralFloor() — the conservative
+// ceiling the fold renders against — exactly as before the room-left bound (ADR 0018 §8).
+//
+// Structural like the clamp it feeds (ADR 0006): no config key, on under Bypass.
+func (a *Agent) freshResultBound() int {
+	b := a.budget()
+	g := deriveGrowthBounds(b)
+	if !g.windowKnown {
+		return g.historyFloor
+	}
+	msgs := a.conv.Messages()
+	if sys := a.standingSystem(); sys != "" {
+		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
+	}
+	left := g.room - b.EstimateTokens(domain.PromptChars(msgs, a.toolMenu()))
+	share := left / max(a.turns.resultsToAppend, 1)
+	floor := max(g.historyFloor/freshResultFloorDivisor, 1)
+	return min(max(share, floor), g.historyFloor)
 }
 
 // errorToolResult builds a tool-level failure result surfaced to the model (IsError) rather

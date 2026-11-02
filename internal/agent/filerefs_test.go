@@ -474,7 +474,10 @@ func TestClampToBound_SharedByToolResultsAndFileRefs(t *testing.T) {
 	big := writeRefFile(t, dir, "big.txt", 400, longFiller)
 
 	a, _ := clampingRefAgent(t, dir)
-	viaToolResult := a.clampToolResult(big) // taken before the Turn, so both readings share one Budget
+	// One explicit bound for both seams: a lone reference's (refBound(1)) — the tool-result seam's
+	// own bound is its share of the room left in the request (freshResultBound), which the default
+	// menu at this window shrinks far below the History allocation a lone reference keeps.
+	viaToolResult := a.clampToBound(big, a.refBound(1)) // taken before the Turn, so both readings share one Budget
 	if viaToolResult == big {
 		t.Fatalf("the payload of %d chars was not clamped at all; the comparison would be vacuous", len(big))
 	}

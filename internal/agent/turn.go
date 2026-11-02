@@ -49,6 +49,13 @@ type turnLifecycle struct {
 	// holds under Bypass.
 	wrapUp bool
 
+	// resultsToAppend counts the tool results of the Turn's dispatch not yet committed: set to the
+	// reply's call count by dispatchTools and taken down by one at every appendToolResult, so a
+	// fresh result's share of the room left (Agent.freshResultBound, dispatch.go) divides it only
+	// across the results still to come. 0 reads as 1 — a result appended outside a counted
+	// dispatch takes the whole room. Transient like wrapUp: neither configured nor serialized.
+	resultsToAppend int
+
 	// compactSat is the saturation latch (S2): a prior automatic fold could not bring the history
 	// under its allocation (an oversized protected prefix), so further automatic folds stand down
 	// until the estimate drops back under it (foldSaturated / autoFoldArmed, compact.go). With no

@@ -8,11 +8,13 @@ package agent
 // tighter tool-result-cap Floor guard still governs what the REQUEST carries.
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // floorWindow is the discovered context window these tests budget against: 8192 tokens ⇒ a
@@ -302,5 +304,212 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 	}
 	if hasGuardFire(sink.events, guardToolResultCap, guardActionCap) {
 		t.Error("an opted-out guard booked a firing")
+	}
+}
+
+// The FRESH-result bound (plan 2026-11-02 - 03, item 4): with a known window a tool result is
+// committed at no more than its share of the room left in the request — the advertised window less
+// the reply reserve, less the estimate of the next request without it — divided across the results
+// of the Turn still to append, clamped to [1/8 of the History allocation, the History allocation].
+// The tests below observe whole-versus-elided at sizes either side of that share.
+
+// requestTokens estimates, the way freshResultBound does, a request carrying msgs: the standing
+// system content buildRequest seeds, msgs, and the tool menu, through the Budget's ratio.
+func requestTokens(a *Agent, msgs []domain.Message) int {
+	if sys := a.standingSystem(); sys != "" {
+		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
+	}
+	return a.budget().EstimateTokens(domain.PromptChars(msgs, a.toolMenu()))
+}
+
+// freshRoom is the advertised room the bound and the predictive guard share: window less reply
+// reserve (deriveGrowthBounds).
+func freshRoom(t *testing.T, a *Agent) int {
+	t.Helper()
+	g := deriveGrowthBounds(a.budget())
+	if !g.windowKnown {
+		t.Fatal("the agent has no known window; the room-left bound does not apply")
+	}
+	return g.room
+}
+
+// singleLine is a one-line body of exactly tokens tokens at a's ratio — the shape only the byte
+// elision can bound, so the marker in a committed result proves the room-left bound bit.
+func singleLine(a *Agent, tokens int) string {
+	return strings.Repeat("j", int(float64(tokens)*a.budget().CharsPerToken))
+}
+
+// committedToolMessages returns the tool messages of a's conversation with the index each sits at.
+func committedToolMessages(a *Agent) (msgs []domain.Message, at []int) {
+	for i := 0; i < a.conv.Len(); i++ {
+		if m := a.conv.At(i); m.Role == domain.RoleTool {
+			msgs, at = append(msgs, m), append(at, i)
+		}
+	}
+	return msgs, at
+}
+
+// parallelProbe is a read-only tool whose result is the body its call's "n" argument names, so one
+// reply's parallel calls can return different sizes.
+func parallelProbe(bodies map[string]string) fakeTool {
+	return fakeTool{name: "probe", readOnly: true, execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+		return domain.ToolResult{CallID: call.ID, Content: bodies[string(call.Arguments)]}, nil
+	}}
+}
+
+// twoCallTurn is a reply carrying two parallel probe calls.
+func twoCallTurn() stubllm.Turn {
+	return stubllm.Turn{ToolCalls: []stubllm.ToolCall{
+		{ID: "c1", Name: "probe", Arguments: `{"n":1}`},
+		{ID: "c2", Name: "probe", Arguments: `{"n":2}`},
+	}}
+}
+
+// TestFreshResultIsBoundedByTheRoomLeft: with the history already filling half the advertised
+// room, a result no larger than the History allocation — so the structural ceiling alone would
+// commit it whole — is over the room left, and is committed under it: the next request's estimate
+// stays within the advertised room.
+func TestFreshResultIsBoundedByTheRoomLeft(t *testing.T) {
+	a, floorChars := floorAgent(t, &recordingSink{})
+	room := freshRoom(t, a)
+	b := a.budget()
+
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: singleLine(a, room/2)})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
+	left := room - requestTokens(a, a.conv.Messages())
+
+	n := 1
+	for len(numberedLines(n+1)) <= floorChars {
+		n++
+	}
+	result := numberedLines(n)
+	if b.EstimateTokens(len(result)) <= left || len(result) > floorChars {
+		t.Fatalf("result of %d tokens must sit over the room left (%d) and within the History allocation (%d)",
+			b.EstimateTokens(len(result)), left, b.History)
+	}
+
+	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: result}, "", nil)
+
+	committed := a.conv.At(a.conv.Len() - 1).Content
+	if got := b.EstimateTokens(len(committed)); got > left {
+		t.Errorf("committed result is %d tokens, want at most the %d left in the request", got, left)
+	}
+	if !strings.Contains(committed, "start_line/end_line") {
+		t.Errorf("the bounded result carries no elision marker:\n%.200s", committed)
+	}
+	if next := requestTokens(a, a.conv.Messages()); next > room {
+		t.Errorf("the next request is estimated at %d tokens, past the advertised room of %d", next, room)
+	}
+}
+
+// TestFreshResultParallelResultsShareTheRoom drives one reply with two parallel calls, each
+// returning a single line between half the room left and the History allocation: the first is
+// committed at no more than half the room (its even share), the second at no more than the room
+// the first left — the bite each side of the share, with the count of results still to append
+// carried from dispatchTools.
+func TestFreshResultParallelResultsShareTheRoom(t *testing.T) {
+	a, _ := floorAgent(t, &recordingSink{})
+	room := freshRoom(t, a)
+	b := a.budget()
+	// The room left once the user line and the reply's two calls ride the request is a little under
+	// room; a body halfway from room/2 to History sits over each share and within the structural
+	// ceiling.
+	size := room/2 + (b.History-room/2)/2
+	if size <= room/2 || size > b.History {
+		t.Fatalf("body of %d tokens must sit between room/2 (%d) and History (%d)", size, room/2, b.History)
+	}
+	body := singleLine(a, size)
+	cfg := configWithTools(&recordingSink{}, parallelProbe(map[string]string{`{"n":1}`: body, `{"n":2}`: body}))
+	cfg.Context.MaxContextTokens = floorWindow
+	a, err := newAgent(cfg, scriptedResponder(t, twoCallTurn(), contentTurn("all done")))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "probe both")
+
+	msgs, at := committedToolMessages(a)
+	if len(msgs) != 2 {
+		t.Fatalf("conversation holds %d tool messages, want 2", len(msgs))
+	}
+	all := a.conv.Messages()
+	leftFirst := room - requestTokens(a, all[:at[0]])
+	leftSecond := room - requestTokens(a, all[:at[1]])
+	if got := b.EstimateTokens(len(msgs[0].Content)); got > leftFirst/2 {
+		t.Errorf("first result committed at %d tokens, want at most its share %d (half of %d left)", got, leftFirst/2, leftFirst)
+	}
+	if got := b.EstimateTokens(len(msgs[1].Content)); got > leftSecond {
+		t.Errorf("second result committed at %d tokens, want at most the %d the first left", got, leftSecond)
+	}
+	for i, m := range msgs {
+		if !strings.Contains(m.Content, "start_line/end_line") {
+			t.Errorf("result %d carries no elision marker; the share did not bite", i+1)
+		}
+	}
+}
+
+// TestFreshResultSmallFirstLeavesItsShareToTheNext: the room a small first result leaves unused
+// rolls forward — a second result between half the room and the room left (and within History)
+// is committed whole.
+func TestFreshResultSmallFirstLeavesItsShareToTheNext(t *testing.T) {
+	a, _ := floorAgent(t, &recordingSink{})
+	room := freshRoom(t, a)
+	b := a.budget()
+	size := room/2 + (b.History-room/2)/2
+	body := singleLine(a, size)
+	cfg := configWithTools(&recordingSink{}, parallelProbe(map[string]string{`{"n":1}`: "ok", `{"n":2}`: body}))
+	cfg.Context.MaxContextTokens = floorWindow
+	a, err := newAgent(cfg, scriptedResponder(t, twoCallTurn(), contentTurn("all done")))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "probe both")
+
+	msgs, at := committedToolMessages(a)
+	if len(msgs) != 2 {
+		t.Fatalf("conversation holds %d tool messages, want 2", len(msgs))
+	}
+	leftSecond := room - requestTokens(a, a.conv.Messages()[:at[1]])
+	if size <= room/2 || size > min(leftSecond, b.History) {
+		t.Fatalf("body of %d tokens must sit between room/2 (%d) and min(room left %d, History %d)", size, room/2, leftSecond, b.History)
+	}
+	if msgs[0].Content != "ok" || msgs[1].Content != body {
+		t.Errorf("results committed at %d and %d chars, want both whole (2 and %d)", len(msgs[0].Content), len(msgs[1].Content), len(body))
+	}
+}
+
+// TestFreshResultNeverBelowTheFloor pins the floor without a bite on the room: with the history
+// already past the advertised room, the bound is 1/8 of the History allocation — not zero — and a
+// result over it is committed within it; the predictive fold, not the clamp, makes the rest of
+// the room.
+func TestFreshResultNeverBelowTheFloor(t *testing.T) {
+	a, _ := floorAgent(t, &recordingSink{})
+	room := freshRoom(t, a)
+	b := a.budget()
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: singleLine(a, room)})
+
+	floor := b.History / freshResultFloorDivisor
+	if got := a.freshResultBound(); got != floor {
+		t.Fatalf("bound with no room left = %d, want the floor %d (History %d / %d)", got, floor, b.History, freshResultFloorDivisor)
+	}
+	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: numberedLines(200)}, "", nil)
+	if got := b.EstimateTokens(len(a.conv.At(a.conv.Len() - 1).Content)); got > floor {
+		t.Errorf("committed result is %d tokens, want at most the floor %d", got, floor)
+	}
+}
+
+// TestFreshResultUnknownWindowKeepsTheStructuralFloor pins the unknown-window case without a bite:
+// with no window there is no room to share, and the bound is structuralFloor() — however full the
+// conversation and however many results are still to append.
+func TestFreshResultUnknownWindowKeepsTheStructuralFloor(t *testing.T) {
+	a, err := newAgent(configWithTools(&recordingSink{}), echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("u", 20_000)})
+	a.turns.resultsToAppend = 4
+	if got, want := a.freshResultBound(), a.structuralFloor(); got != want {
+		t.Errorf("unknown-window bound = %d, want structuralFloor() = %d", got, want)
 	}
 }

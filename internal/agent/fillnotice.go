@@ -54,9 +54,14 @@ var (
 // 100 with no further notice — the fold at the next Turn boundary is the trigger's job. The 90
 // rung adds the wrap-up sentence for a child agent alone (view.Depth() > 0): a main agent's fold
 // waits for the Exchange boundary and its wrap-up is the human's call.
+//
+// The result is measured as appendToolResult will commit it: no longer than the bound its clamp
+// applies (freshResultBound), so a result the clamp elides reads at its committed size rather than
+// its raw one, and the rung reports the fill the model will actually see.
 func (a *Agent) contextFillNotice(_ context.Context, view domain.LoopView, _ domain.ToolCall, result *domain.ToolResultEdit) (domain.Outcome, error) {
-	chars := domain.ConversationChars(view.Conversation()) + len(result.Content())
 	budget := view.Budget()
+	boundChars := int(float64(a.freshResultBound()) * budget.CharsPerToken)
+	chars := domain.ConversationChars(view.Conversation()) + min(len(result.Content()), boundChars)
 	fill := budget.HistoryFill(chars)
 	if fill <= 0 {
 		return domain.Outcome{}, nil

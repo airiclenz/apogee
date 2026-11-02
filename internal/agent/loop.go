@@ -1610,7 +1610,8 @@ const fileRefMaxTokens = 32_000
 // allocation; splitting each list against the whole floor separately would let a message carrying
 // one of each commit twice the allocation the fold can render. It counts the references
 // SUBMITTED, not the ones that resolve: a ref that fails leaves the survivors a stricter bound,
-// never a looser one, and a lone reference keeps the whole floor — the number a tool result gets.
+// never a looser one, and a lone reference keeps the whole floor — the ceiling a tool result's
+// share of the room left is held under (freshResultBound, dispatch.go).
 //
 // Computed ONCE per message by the caller (loop.go's pending-input consumption, Interject) and
 // handed to both resolvers, so the two seams cannot drift into two different arithmetics.
@@ -1657,8 +1658,8 @@ func (a *Agent) clampRef(turn int, ref, content string, bound int) string {
 // extracted document, so the model is told the format, the page count, and that the lines
 // below are read-only before it tries to edit what it cannot write back.
 //
-// Every block carries the same STRUCTURAL floor a tool result has (clampToolResult, dispatch.go):
-// content past its share of the History allocation — or past fileRefMaxTokens, whichever is
+// Every block carries the same STRUCTURAL clamp a tool result has (clampToBound, dispatch.go),
+// against a bound of its own: content past its share of the History allocation — or past fileRefMaxTokens, whichever is
 // smaller — is elided to the shared head/tail-plus-marker shape BEFORE the header is added, so
 // the model still reads which file an elided block came from and, for a document, how many pages
 // it had. The bound is the CALLER'S (refBound), not this function's: one message's attached

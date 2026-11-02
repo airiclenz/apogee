@@ -429,7 +429,9 @@ func TestContextFillNoticeWindowAndSilence(t *testing.T) {
 		// ADVERTISED window and there is none), so it is the measured allocation of 25,165 tokens,
 		// and 55,360 chars = 13.8k tokens = 55%.
 		{name: "working window with no advertised one", working: 32768, body: 55360, wantWindow: "32.8k"},
-		{name: "no window is silence", body: 40000},
+		// Under the unknown-window clamp (compactUnknownWindowTranscriptTokens, 12,288 chars at the
+		// uncalibrated ratio), so the committed body is the whole one and its length proves silence.
+		{name: "no window is silence", body: 12000},
 	}
 
 	for _, tc := range cases {
@@ -506,7 +508,11 @@ func TestContextFillNoticeIsAbsentWhenOffAndSkippedUnderBypass(t *testing.T) {
 			if armed := builtinIDs(a); tc.notice != contains(armed, contextFillNoticeID) {
 				t.Errorf("builtins = %v, want the notice armed = %v", armed, tc.notice)
 			}
-			const body = 15000
+			// The history sits at 40% of the line and the result carries it to 105%: past the line,
+			// yet inside the result's share of the room left, so the clamp commits it whole and the
+			// content length alone proves no trailer rode on it.
+			a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("h", fillCharsAt(t, 40))})
+			body := fillCharsAt(t, 105) - fillCharsAt(t, 40)
 			msg := adviseOneCall(t, a, strings.Repeat("x", body))
 
 			if fired := noticeFirings(sink); len(fired) != 0 || len(msg.Advice) != 0 || len(msg.Content) != body {
@@ -576,5 +582,36 @@ func TestFormatTokens(t *testing.T) {
 		if got := formatTokens(tc.n); got != tc.want {
 			t.Errorf("formatTokens(%d) = %q, want %q", tc.n, got, tc.want)
 		}
+	}
+}
+
+// TestContextFillNoticeMeasuresTheAppliedBound pins that the rung reads the result as it will be
+// committed: min(its raw length, the bound appendToolResult's clamp applies — freshResultBound),
+// not the raw body. With the history at half the advertised room the room-left bound binds under
+// the History allocation, so a raw body of the whole allocation would over-report the fill.
+func TestContextFillNoticeMeasuresTheAppliedBound(t *testing.T) {
+	sink := &recordingSink{}
+	a := fillAgent(t, fillConfig(sink))
+	b := a.budget()
+	room := deriveGrowthBounds(b).room
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("h", int(float64(room/2)*b.CharsPerToken))})
+
+	bound := a.freshResultBound()
+	if bound >= b.History {
+		t.Fatalf("bound = %d, want the room left to bind under the History allocation %d", bound, b.History)
+	}
+	raw := strings.Repeat("x", int(float64(b.History)*b.CharsPerToken))
+	held := domain.PromptChars(a.conv.Messages(), nil) // the measure ConversationChars sums
+	want := int(b.HistoryFill(held+int(float64(bound)*b.CharsPerToken)) * 100)
+	rawPct := int(b.HistoryFill(held+len(raw)) * 100)
+	if want == rawPct {
+		t.Fatalf("applied-bound fill and raw fill both read %d%%; the test proves nothing", want)
+	}
+
+	adviseOneCall(t, a, raw)
+
+	fired := noticeFirings(sink)
+	if len(fired) != 1 || !strings.HasSuffix(fired[0].Detail, fmt.Sprintf("(%d%%)", want)) {
+		t.Errorf("firings = %+v, want one reporting %d%% (the applied bound), not %d%% (the raw body)", fired, want, rawPct)
 	}
 }
