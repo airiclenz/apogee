@@ -738,8 +738,49 @@ func resolveFiringRouting(
 	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends
 	// up routing to a window the other would not.
 	target := resolveDelegationTarget(entry, apiKey, observed, in.opts.ModelProfiles, in.opts.StreamIdleTimeout)
+	// And the Sub-agents seat's own Server fallback (ADR 0105), carried on the target so every routed
+	// child of this run consults the one instance: nil when the entry names no `fallback:`, and never
+	// stored as a nil pointer, which the interface would read as a resolver.
+	if target != nil {
+		if resolver := newFiringSeatFallback(in, keys, server, apiKey); resolver != nil {
+			target.Fallback = resolver
+		}
+	}
 	return firingRouting{target: target, seat: seat},
 		delegationStateNotice(name, target, "", nil)
+}
+
+// newFiringSeatFallback is an unattended run's resolver for its Sub-agents seat, or nil when the
+// Sub-agent server's entry names no `fallback:`: the routed counterpart of newFiringFallback. The
+// primary's grace beats observe the Sub-agent server through its own beat with the key its entry
+// resolved to (apiKey); each fallback's key resolves through the run's one resolver, fenced to the
+// Firing's workspace as the Sub-agent server's own was. An unattended run has no second heartbeat to
+// re-point, so a fallover moves the routed children that fault — a child spawned after it still
+// dials the primary, faults there, and reads the move the run already made.
+func newFiringSeatFallback(
+	in firingInputs,
+	keys *config.KeyResolver,
+	server *subAgentServer,
+	apiKey string,
+) *fallbackResolver {
+	entry := server.entry
+	names := entry.Fallback.Names()
+	if len(names) == 0 {
+		return nil
+	}
+	lander := fallbackLander{
+		opts:  in.opts,
+		roots: in.roots,
+		key: func(entry config.ServerEntry) (string, error) {
+			return keys.ResolveWithin(entry, in.roots.workspace)
+		},
+		beat: func(ctx context.Context, dial upstreamBinding) heartbeat.Beat {
+			return dial.Monitor().Beat(ctx)
+		},
+	}
+	return newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
+		func(ctx context.Context) bool { return server.beat(ctx, apiKey).Reachable },
+		lander.land)
 }
 
 // firingHooks builds the Reaction Runner ONE unattended run fires through (ADR 0073). What it arms

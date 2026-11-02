@@ -141,6 +141,14 @@ type DelegationTarget struct {
 	// inherited value whole: delegations to this server run with this flag whatever the parent's
 	// is. nil inherits the parent's LIVE flag at spawn, which is today's rule.
 	Bypass *bool
+	// Fallback is the Sub-agents seat's Server fallback (ADR 0105): the resolver a routed child
+	// consults before it abandons a Turn for a fault that is this server's own, built by the host
+	// from the flagged entry's own `fallback:` list. It is ONE instance per seat, carried by every
+	// target the host latches for that seat, so N routed siblings faulting on one dead server share
+	// one grace window, one list walk and one UpstreamSwitchedEvent. nil — an entry naming no
+	// `fallback:` — consults none, and a routed child abandons on the fault exactly as before. A
+	// routed child never consults the session's resolver: it is on another seat.
+	Fallback FallbackResolver
 }
 
 // delegationLatch holds the current Delegation target behind an RWMutex. It is a POINTER on the

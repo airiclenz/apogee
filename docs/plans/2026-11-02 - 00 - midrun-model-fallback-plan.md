@@ -298,7 +298,24 @@ cmd/apogee/wire_engine.go — lateEngine.seedOptions; cmd/apogee/wire_settings.g
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFallback' ./internal/tui/`; `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestTUIFallback' ./cmd/apogee/`
 **Commit:** `feat(tui): fall over to a fallback server mid-Turn with a transcript note`
 
-## 11. Sub-agent seat: a routed child follows its own entry, one-way
+## 11. Sub-agent seat: a routed child follows its own entry, one-way — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): re-derived from the assumption that the UpstreamSwitchedEvent is gated on the resolver's `First` flag: item 7 emits it from the Agent whose `sharedUpstream.rehome` replace lands, and each routed child has a holder of its own, so N routed siblings would each emit. `Agent.announcesRehome` in internal/agent/rebind.go now gates the event on `First` on the Sub-agents seat only. The session seat keeps the replace-lands rule. The `FallbackAnswer.First` doc in internal/agent/agent.go is updated to match. This is why rebind.go and agent.go are in FILES although the plan's Files line omits them.
+
+NOTES (2026-11-02): re-derived from the assumption that the wiring can reach a lander: `delegationWiring` is built in cmd/apogee/wire_live.go. It takes the session seat's lander there, through a new `withFallback(w.fallback.lander)`. A Driver that wires no lander (tests, bench) leaves the seat with no fallback.
+
+NOTES (2026-11-02): engine tests TestFallbackRoutedChildConsultsItsTargetsResolver and TestFallbackRoutedSiblingsAnnounceOnce were added in internal/agent/fallback_test.go. The plan's Files line omits that file, but its Acceptance runs `TestFallback` in internal/agent.
+
+NOTES (2026-11-02): consequential edit — docs/manual/configuration.md: made necessary by the Sub-agents seat being one-way until `/sub-agents-server` or a key edit moves it back.
+
+NOTES (2026-11-02): headless has no second heartbeat to re-point. After a fallover, a routed child spawned later still dials the primary, takes one fault there, and then reads the stored switch answer silently. Possible improvement: give run.Spec a seam so the run can re-latch the fallback's target.
+
+NOTES (2026-11-02): edge case: on the Sub-agents seat, if the First caller's ctx is cancelled during the resolver's wait, the other siblings still move but nothing announces it (no event). The session seat is not affected.
+
+NOTES (2026-11-02): a relist that installs a new server re-arms the seat's resolver when the key moved, or when the seat is still on its primary, so an edited `fallback:` list takes effect. A seat that has fallen over keeps its resolver.
+
+NOTES (2026-11-02): test "a routed child spawned between the fallover and the next beat streams from the fallback" is asserted at the latch: the target pushed at the fallover is the fallback's. The engine side, where a spawn dials the latched target's endpoint, is already pinned by existing routed-spawn tests.
+
 
 **What:**
 Recast at the regression check (2026-11-02).

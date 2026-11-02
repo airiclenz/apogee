@@ -460,3 +460,57 @@ func TestTUIFallbackOnAnEntryWithoutFallbackIsAbandoned(t *testing.T) {
 		t.Fatalf("the run returned %v; want a clean quit", err)
 	}
 }
+
+// TestHeadlessRoutedFallback: a headless run whose `sub-agents-server:` entry names a `fallback:`
+// routes its delegation to that entry; the Sub-agent server dies under the child's request, the
+// grace window runs out, and the routed child continues on the entry's own fallback — the session
+// seat, which names none, never moves — so the delegation reports and the run finishes with exit 0,
+// the switch said once on stderr.
+func TestHeadlessRoutedFallback(t *testing.T) {
+	session := stubllm.New(t, stubllm.Script{Model: "session-model", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "sub_agent"}, Repeat: true, Text: "The delegate reported."},
+		{When: &stubllm.Match{LastMessage: "^" + upstreamPrompt}, Repeat: true, ToolCalls: []stubllm.ToolCall{{
+			Name: "sub_agent", Arguments: `{"task":"Survey the workspace","name":"grunt work"}`,
+		}}},
+	}})
+	grunt := dyingPrimary(t)
+	spare := backupServer(t)
+	home := t.TempDir()
+	writeConfigHome(t, home,
+		"context-window: 32768\n"+
+			"re-stream-budget: 0\n"+
+			"sub-agents-server: grunt\n"+
+			"servers:\n"+
+			"  - name: session\n"+
+			"    endpoint: "+session.URL+"\n"+
+			"    model: "+session.Model+"\n"+
+			"  - name: grunt\n"+
+			"    endpoint: "+grunt.URL+"\n"+
+			"    model: "+grunt.Model+"\n"+
+			"    fallback: [backup]\n"+
+			"    fallback-after: "+fallbackGraceForTests.String()+"\n"+
+			"  - name: backup\n"+
+			"    endpoint: "+spare.URL+"\n"+
+			"    model: "+spare.Model+"\n"+
+			"server: session\n")
+
+	done := startHeadless(t, home)
+	killHeldPrimary(t, grunt)
+	res := awaitHeadless(t, done)
+
+	if res.err != nil {
+		t.Fatalf("headless: %v (exit %d)\n%s", res.err, exitCodeFor(res.err), res.stderr)
+	}
+	if got := strings.TrimRight(res.stdout, "\n"); got != "The delegate reported." {
+		t.Errorf("stdout = %q, want the session's wrap-up after the delegation reported", got)
+	}
+	if got := len(spare.Requests()); got != 1 {
+		t.Errorf("the grunt's fallback saw %d requests, want the routed child's one", got)
+	}
+	if got := switchedLines(res.stderr); got != 1 {
+		t.Errorf("stderr carries %d switch lines, want 1:\n%s", got, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "grunt failed") {
+		t.Errorf("the switch line does not name the Sub-agent server:\n%s", res.stderr)
+	}
+}

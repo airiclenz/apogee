@@ -1728,7 +1728,7 @@ type delegation struct {
 	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
 	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
 	upstreamOwned bool                   // a routed spawn dialled its own client and the child closes it; an unrouted one borrows the session's
-	fallback      FallbackResolver       // the seat's Server fallback resolver: the parent's for an unrouted spawn, which is on the parent's seat; nil for a routed one
+	fallback      FallbackResolver       // the seat's Server fallback resolver: the parent's for an unrouted spawn, which is on the parent's seat; the target's own (DelegationTarget.Fallback) for a routed one
 	appliedGen    uint64                 // the holder generation whose binding the child's Config reflects: the parent's APPLIED one for an unrouted spawn (followUpstream), 0 on a routed spawn's fresh holder
 	dial          Dialer                 // the parent's Dialer, inherited: the seam a routed grandchild's client is dialled through (Dialer)
 	tap           *wireTap               // the Inspector seam of a client this spawn BUILT, bound once the child's identity is stamped; nil when unrouted
@@ -1943,11 +1943,11 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	// so it consults the parent's resolver and starts from the generation the parent has APPLIED —
 	// the one its inherited Config reflects — never the holder's current one, so a move the parent
 	// has not followed yet is followed by the child at its first Step. A routed child is on the
-	// Sub-agents seat, a holder of its own at generation zero, and is handed no resolver of the
-	// session's.
+	// Sub-agents seat, a holder of its own at generation zero, and consults the seat's own resolver
+	// the target carries (DelegationTarget.Fallback) — never the session's.
 	fallback, appliedGen := a.fallback, a.appliedGen
 	if target != nil {
-		fallback, appliedGen = nil, 0
+		fallback, appliedGen = target.Fallback, 0
 	}
 
 	// Everything the child is that its Config cannot say is composed HERE, once, as the one value

@@ -2381,7 +2381,9 @@ move of the session's own server the footer and the heartbeat follow the fallbac
 **The move is one-way.** apogee never moves back to the first server by itself; in the TUI,
 `/server` moves you back when you want. It moves the whole seat: the session and every
 sub-agent running on the session's server move together, and sub-agents sent to
-`sub-agents-server` follow that entry's own `fallback:` list. A resumed session starts on
+`sub-agents-server` follow that entry's own `fallback:` list — once that seat has moved, later
+sub-agents go to its fallback too, until `/sub-agents-server` (or an edit of the
+`sub-agents-server:` key) moves it back. A resumed session starts on
 the server you configured, not on the fallback.
 
 A `fallback:` name that no entry has, the entry's own name, or a name listed twice is

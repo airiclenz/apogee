@@ -435,9 +435,13 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The notice seam is the Bridge's, like the scheduler's narration below and for its reason: the
 	// routing state changes on the second heartbeat's own goroutine, which needs a send that is safe
 	// before the program exists and safe from anywhere after it does (tui.Bridge.NotifyRouting).
+	//
+	// Its seat falls over by its OWN entry's `fallback:` list (ADR 0105), resolved against the live
+	// configuration through the session seat's lander, so a move onto a fallback is resolved the same
+	// way whichever seat makes it.
 	w.delegation = newDelegationWiring(w.opts.SubAgentsServer,
 		w.live.serverList, w.engine, w.live.modelProfileEntries, w.live.streamIdlePin,
-		w.bridge.NotifyRouting, w.keys)
+		w.bridge.NotifyRouting, w.keys).withFallback(w.fallback.lander)
 
 	// The `$EDITOR` round trip's own half of the same story (ADR 0037 decision 5): the keys holding a
 	// structure no row can express are edited in the file, and this is what opens it at the right line

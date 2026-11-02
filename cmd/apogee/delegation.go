@@ -218,6 +218,24 @@ type delegationWiring struct {
 	targetBinding upstreamBinding
 	targetDialect provider.EffortDialect
 	targetBound   bool
+	// lander resolves one move of the Sub-agents seat onto a fallback entry against the
+	// configuration as it stands at the move (fallbackLander) — the session seat's own, handed in
+	// by withFallback. nil ⇒ the seat has no Server fallback, whatever its entry's `fallback:` says:
+	// a Driver that wired none (a bench, most tests) routes exactly as before the key existed.
+	lander func() fallbackLander
+	// fallback is the Sub-agents seat's Server fallback (ADR 0105): the ONE resolver every routed
+	// child on this seat consults, carried on every target this wiring latches
+	// (DelegationTarget.Fallback), so N routed siblings faulting on one dead server run one grace
+	// window and one list walk, and announce one move. It is built from the entry the seat is on
+	// when a human door puts it there (seatFallbackFor), and nil when that entry names no
+	// `fallback:` or no lander is wired.
+	fallback *fallbackResolver
+	// hasFallenOver reports that the seat moved off the entry its resolver was built for onto one of
+	// that entry's fallbacks (fallover). From then on the seat is one-way: a `servers:` save that
+	// leaves the key alone keeps the fallback and the resolver that moved there, and only a human
+	// door — `/sub-agents-server` (Retarget) or a save that moves the key (relist) — builds a fresh
+	// resolver, which graces its primary again.
+	hasFallenOver bool
 }
 
 // newDelegationWiring finds the Sub-agent server in the `servers:` list — the one name names,
@@ -271,6 +289,89 @@ func newDelegationWiring(
 	// same as no key at all — because there is no entry whose description to relay.
 	engine.SetDelegationSeat(delegationSeatOf(wiring.server))
 	return wiring
+}
+
+// withFallback wires the Sub-agents seat's Server fallback (ADR 0105): lander resolves a move onto
+// a fallback entry as the session seat's own resolver does (sessionFallback.lander), and the seat's
+// resolver is built at once for the entry the wiring holds. It is called once, at composition, before
+// the first beat; nil leaves the seat without one. It answers the wiring, so a composition reads as
+// one expression.
+func (d *delegationWiring) withFallback(lander func() fallbackLander) *delegationWiring {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lander = lander
+	d.fallback = d.seatFallbackFor(d.server)
+	d.hasFallenOver = false
+	return d
+}
+
+// seatFallbackFor builds the Sub-agents seat's resolver for a seat whose primary is server, or nil
+// when no lander is wired, no server is installed, or its entry names no `fallback:`. The grace
+// window beats the primary through server's own beat with the key its entry resolves to at the
+// fault; each landing re-points this wiring at the fallback it landed on (fallover), so the seat's
+// beats watch the fallback from then on. Called with the mutex held.
+func (d *delegationWiring) seatFallbackFor(server *subAgentServer) *fallbackResolver {
+	if d.lander == nil || server == nil {
+		return nil
+	}
+	entry := server.entry
+	names := entry.Fallback.Names()
+	if len(names) == 0 {
+		return nil
+	}
+	keys, lander := d.keys, d.lander
+	var resolver *fallbackResolver
+	resolver = newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
+		func(ctx context.Context) bool {
+			apiKey, err := keys.Resolve(entry)
+			if err != nil {
+				return false
+			}
+			return server.beat(ctx, apiKey).Reachable
+		},
+		func(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
+			landing, landed := lander().arrive(ctx, name)
+			if landed {
+				d.fallover(resolver, landing)
+			}
+			return landing.answer, landed
+		})
+	return resolver
+}
+
+// fallover re-points the Sub-agents seat at the fallback its resolver just landed on, one-way. The
+// wiring's server becomes the fallback entry — its generation advanced, so a beat in flight on the
+// dead primary is dropped — and its target name follows (the file's key, d.configured, is kept), so
+// a relist that leaves the key alone keeps the fallback rather than reinstalling the primary. The
+// fallback's target, resolved from the beat that found it answering, is latched at once under the
+// lock as Retarget's push is, so a routed child spawned before the next beat dials the fallback, not
+// the dead primary; a target that cannot be resolved latches nil, and spawns use the session's
+// Upstream as on any unusable beat (ADR 0045 decision 4, adr-0045-amend-1102). The seat the model is
+// told about does not move: that line moves on the human doors and nowhere else (ADR 0069).
+//
+// A landing by a resolver this wiring has since replaced — a human door moved the seat while the
+// walk ran — moves nothing: the human's choice stands.
+func (d *delegationWiring) fallover(from *fallbackResolver, landing fallbackLanding) {
+	target := resolveDelegationTarget(landing.entry, landing.dial.APIKey, landing.observed,
+		d.userProfiles(), d.streamIdleRoot())
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fallback != from {
+		return
+	}
+	d.server = newSubAgentServer(landing.entry)
+	d.target = landing.entry.Name
+	d.generation++
+	d.failures = 0
+	d.hasFallenOver = true
+	if target != nil {
+		target.Fallback = from
+		d.targetBinding = bindingOfTarget(target)
+		d.targetDialect = target.EffortDialect
+		d.targetBound = true
+	}
+	d.engine.SetDelegationTarget(target)
 }
 
 // delegationSeatOf renders the installed Sub-agent server as the facts the orientation block names
@@ -516,6 +617,12 @@ func (d *delegationWiring) land(generation int, name string, target *apogee.Dele
 		d.targetBinding = bindingOfTarget(target)
 		d.targetDialect = target.EffortDialect
 		d.targetBound = true
+		// The seat's one resolver rides every target this seat latches (DelegationTarget.Fallback):
+		// a fresh value per beat, so attaching it here mutates nothing already latched. A nil
+		// resolver is never stored, or the interface would hold a resolver that is not nil.
+		if d.fallback != nil {
+			target.Fallback = d.fallback
+		}
 	}
 	d.engine.SetDelegationTarget(target)
 	d.mu.Unlock()
@@ -689,7 +796,11 @@ func (d *delegationWiring) dialectAdvice(name string, target *apogee.DelegationT
 func (d *delegationWiring) relist(name string, entries []config.ServerEntry) error {
 	d.mu.Lock()
 	current, said, target := d.server, d.missingNotice, d.target
-	if name != d.configured {
+	// A save that moves the key is a human door (ADR 0069): it re-points the seat whether or not it
+	// had fallen over, and its resolver is built afresh below, so the seat it lands on graces its
+	// own primary again.
+	hasKeyMoved := name != d.configured
+	if hasKeyMoved {
 		target = name
 	}
 	d.mu.Unlock()
@@ -705,6 +816,11 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 	}
 	if found && current != nil && reflect.DeepEqual(current.entry, entry) {
 		d.adopt(name, target)
+		if hasKeyMoved {
+			d.mu.Lock()
+			d.rearmLocked(current)
+			d.mu.Unlock()
+		}
 		return nil // the edit was somewhere else in the list
 	}
 
@@ -723,6 +839,12 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 	d.generation++
 	d.missingNotice = missing
 	d.configured, d.target = name, target
+	// The seat's resolver is rebuilt for the entry installed — on a key move, and on an edit of a
+	// seat still on its primary, so the edited `fallback:` list is the one walked — and kept on a
+	// seat that has fallen over, whose save about the fallback entry must not undo the move.
+	if hasKeyMoved || !d.hasFallenOver {
+		d.rearmLocked(next)
+	}
 	// The far seat's display facts follow the entry, because they ARE the entry: a re-pointed key
 	// describes another box, an edited entry may have re-worded its own `description:`, and a name
 	// that went missing has nothing left to describe. It is pushed on this path only — the two early
@@ -747,6 +869,14 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 	d.mu.Unlock()
 
 	return nil
+}
+
+// rearmLocked builds the seat's resolver afresh for server and forgets any fallover: the seat is on
+// the entry a human door chose, and that entry's own `fallback:` list — or none — answers its next
+// fault. Called with the mutex held.
+func (d *delegationWiring) rearmLocked(server *subAgentServer) {
+	d.fallback = d.seatFallbackFor(server)
+	d.hasFallenOver = false
 }
 
 // adopt records what a relist that installed NOTHING still learned: the key the file now carries,
@@ -801,6 +931,9 @@ func (d *delegationWiring) Retarget(name string) error {
 	d.mu.Lock()
 	d.server, d.target = next, name
 	d.generation++
+	// A human door: the picked entry's own resolver, fresh, so a seat that had fallen over and is
+	// picked back onto its primary graces that primary again rather than staying fallen over.
+	d.rearmLocked(next)
 	// The seat the model is told about moves WITH the pick, and this is the human door ADR 0069 says
 	// the Delegations line moves on: the description the next request renders is the one belonging to
 	// the entry the delegations now go to, and the opt-out leaves only the session seat named.

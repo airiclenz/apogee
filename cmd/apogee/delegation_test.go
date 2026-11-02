@@ -1679,3 +1679,234 @@ func TestDelegationSeatIsNilWithoutAnEntryToDescribe(t *testing.T) {
 		t.Fatalf("seats = %+v; want the third push to be nil — the entry is gone", stale.seats)
 	}
 }
+
+// seatFallbackRig is a wiring whose Sub-agent server `grunt` names `spare` as its `fallback:`, with
+// every beat written down: the primary's through the wiring's server beat, the fallback's through the
+// lander, whose landing beats it counts.
+type seatFallbackRig struct {
+	wiring  *delegationWiring
+	spy     *delegationSpy
+	entries []config.ServerEntry
+
+	mu         sync.Mutex
+	spare      heartbeat.Beat
+	spareBeats int
+}
+
+const (
+	seatGruntEndpoint = "http://127.0.0.1:2222"
+	seatSpareEndpoint = "http://127.0.0.1:3333"
+)
+
+func newSeatFallbackRig(t *testing.T) *seatFallbackRig {
+	t.Helper()
+	grunt := config.ServerEntry{Name: "grunt", Endpoint: seatGruntEndpoint, Model: "grunt-model",
+		Fallback: config.NewFallbackList("spare"), FallbackAfter: fallbackTestGrace.String()}
+	spare := config.ServerEntry{Name: "spare", Endpoint: seatSpareEndpoint, Model: "spare-model"}
+	r := &seatFallbackRig{
+		spy:     &delegationSpy{},
+		entries: []config.ServerEntry{grunt, spare},
+		spare:   heartbeat.Beat{Reachable: true, ActiveModel: "spare-model", ContextWindow: 8192},
+	}
+	r.wiring = testDelegationWiring(grunt,
+		heartbeat.Beat{Reachable: true, ActiveModel: "grunt-model", ContextWindow: 8192}, r.spy, nil)
+	r.wiring.servers = staticServerList(r.entries)
+	roots := stateRoots{config: t.TempDir(), probe: t.TempDir()}
+	r.wiring.withFallback(func() fallbackLander {
+		return fallbackLander{
+			opts:  config.Options{Servers: r.entries},
+			roots: roots,
+			key:   func(config.ServerEntry) (string, error) { return "", nil },
+			beat: func(_ context.Context, dial upstreamBinding) heartbeat.Beat {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				if dial.Endpoint != seatSpareEndpoint {
+					return heartbeat.Beat{Failure: "not a fallback"}
+				}
+				r.spareBeats++
+				return r.spare
+			},
+		}
+	})
+	return r
+}
+
+// lastPush is the latest target the wiring latched.
+func (r *seatFallbackRig) lastPush(t *testing.T) *apogee.DelegationTarget {
+	t.Helper()
+	if len(r.spy.pushes) == 0 {
+		t.Fatal("the wiring latched nothing")
+	}
+	return r.spy.pushes[len(r.spy.pushes)-1]
+}
+
+// killPrimary makes every grace beat on the primary find it gone.
+func (r *seatFallbackRig) killPrimary() {
+	r.wiring.server.beat = beatSource(heartbeat.Beat{Failure: "connection refused"})
+}
+
+// faultOnPrimary reports one fault on the primary to the seat's resolver.
+func (r *seatFallbackRig) faultOnPrimary(resolver *fallbackResolver) apogee.FallbackAnswer {
+	return resolver.Resolve(context.Background(), apogee.FallbackReport{
+		Server: "grunt", Model: "grunt-model",
+		Fault: provider.UpstreamFault{Class: provider.FaultStatus, Code: 503},
+	})
+}
+
+// TestDelegationFallbackRoutedSeatFallsOverOneWay: the Sub-agents seat's resolver rides every target
+// the wiring latches; once the primary dies past the grace window the seat lands on its own
+// `fallback:`, the fallback's target is latched at once — so a routed child spawned before the next
+// beat dials it — the next beat watches the fallback entry, and a fallback that stops answering
+// still latches nil, so spawns use the session's Upstream. The seat the model is told about never
+// moves (ADR 0069).
+func TestDelegationFallbackRoutedSeatFallsOverOneWay(t *testing.T) {
+	t.Parallel()
+	r := newSeatFallbackRig(t)
+	resolver := r.wiring.fallback
+	if resolver == nil {
+		t.Fatal("a seat whose entry names a fallback has no resolver")
+	}
+	r.wiring.observe(context.Background())()
+	if got := r.lastPush(t); got == nil || got.Fallback != resolver {
+		t.Fatalf("latched target = %+v; want the primary's target carrying the seat's resolver", got)
+	}
+
+	r.killPrimary()
+	answer := r.faultOnPrimary(resolver)
+
+	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "spare" || !answer.First {
+		t.Fatalf("answer = %+v; want the First switch onto spare", answer)
+	}
+	got := r.lastPush(t)
+	if got == nil || got.Endpoint != seatSpareEndpoint || got.Model != "spare-model" || got.Fallback != resolver {
+		t.Fatalf("target latched at the fallover = %+v; want spare's, carrying the same resolver", got)
+	}
+	if name := r.wiring.targetName(); name != "spare" || r.wiring.server.entry.Name != "spare" {
+		t.Errorf("wiring target = %q on server %q; want both re-pointed at spare", name, r.wiring.server.entry.Name)
+	}
+	if len(r.spy.seats) != 0 {
+		t.Errorf("seat pushes = %d; want the fallover to call no SetDelegationSeat", len(r.spy.seats))
+	}
+
+	r.wiring.server.beat = beatSource(heartbeat.Beat{Reachable: true, ActiveModel: "spare-model"})
+	r.wiring.observe(context.Background())()
+	if got := r.lastPush(t); got == nil || got.Endpoint != seatSpareEndpoint || got.Fallback != resolver {
+		t.Errorf("next beat latched %+v; want spare's target, not the dead primary's", got)
+	}
+
+	r.wiring.server.beat = beatSource(heartbeat.Beat{Failure: "connection refused"})
+	r.wiring.observe(context.Background())()
+	if got := r.lastPush(t); got != nil {
+		t.Errorf("a beat on a dead fallback latched %+v; want nil, so spawns use the session's Upstream", got)
+	}
+}
+
+// TestDelegationFallbackSiblingsShareOneGrace: N routed siblings faulting on one dead Sub-agent
+// server consult the one resolver the seat's targets carry, so they run one grace window and one
+// list walk, and exactly one of them is told First — the one that announces the move.
+func TestDelegationFallbackSiblingsShareOneGrace(t *testing.T) {
+	t.Parallel()
+	const n = 4
+	r := newSeatFallbackRig(t)
+	resolver := r.wiring.fallback
+	var primaryBeats sync.Mutex
+	graceBeats := 0
+	r.wiring.server.beat = func(context.Context, string) heartbeat.Beat {
+		primaryBeats.Lock()
+		graceBeats++
+		primaryBeats.Unlock()
+		return heartbeat.Beat{Failure: "connection refused"}
+	}
+
+	answers := make([]apogee.FallbackAnswer, n)
+	var wg sync.WaitGroup
+	for i := range answers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			answers[i] = r.faultOnPrimary(resolver)
+		}()
+	}
+	wg.Wait()
+
+	first := 0
+	for i, answer := range answers {
+		if answer.Verdict != apogee.FallbackSwitch || answer.Server != "spare" {
+			t.Errorf("sibling %d answer = %+v; want the switch onto spare", i, answer)
+		}
+		if answer.First {
+			first++
+		}
+	}
+	if first != 1 {
+		t.Errorf("First answers = %d; want exactly one", first)
+	}
+	r.mu.Lock()
+	landings := r.spareBeats
+	r.mu.Unlock()
+	if landings != 1 {
+		t.Errorf("landing beats on spare = %d; want one list walk", landings)
+	}
+	primaryBeats.Lock()
+	defer primaryBeats.Unlock()
+	if graceBeats > 2 {
+		t.Errorf("grace beats on the primary = %d; want one grace window's worth (at most 2)", graceBeats)
+	}
+}
+
+// TestDelegationFallbackRelistKeepsTheFallback: a `servers:` save that leaves the
+// `sub-agents-server:` key alone, after the seat fell over, keeps the fallback and its resolver —
+// the save never reinstalls the dead primary or unlatches the fallback.
+func TestDelegationFallbackRelistKeepsTheFallback(t *testing.T) {
+	t.Parallel()
+	r := newSeatFallbackRig(t)
+	resolver := r.wiring.fallback
+	r.wiring.configured = "grunt"
+	r.killPrimary()
+	r.faultOnPrimary(resolver)
+	pushes := len(r.spy.pushes)
+
+	if err := r.wiring.relist("grunt", r.entries); err != nil {
+		t.Fatalf("relist: %v", err)
+	}
+
+	if name := r.wiring.targetName(); name != "spare" || r.wiring.server.entry.Name != "spare" {
+		t.Errorf("after the save the target = %q on %q; want spare kept", name, r.wiring.server.entry.Name)
+	}
+	if r.wiring.fallback != resolver || !r.wiring.hasFallenOver {
+		t.Error("the save replaced the fallen-over seat's resolver")
+	}
+	if len(r.spy.pushes) != pushes {
+		t.Errorf("the save latched %+v; want nothing moved", r.spy.pushes[pushes:])
+	}
+}
+
+// TestDelegationFallbackRetargetRearmsTheResolver: `/sub-agents-server grunt` after a fallover is a
+// human door — the seat gets a fresh resolver for grunt, which graces the primary again, while a
+// landing by the retired resolver moves nothing.
+func TestDelegationFallbackRetargetRearmsTheResolver(t *testing.T) {
+	t.Parallel()
+	r := newSeatFallbackRig(t)
+	retired := r.wiring.fallback
+	r.killPrimary()
+	r.faultOnPrimary(retired)
+
+	if err := r.wiring.Retarget("grunt"); err != nil {
+		t.Fatalf("Retarget: %v", err)
+	}
+
+	fresh := r.wiring.fallback
+	if fresh == nil || fresh == retired || fresh.primary != "grunt" || r.wiring.hasFallenOver {
+		t.Fatalf("resolver after the pick = %+v; want a fresh one for grunt, not fallen over", fresh)
+	}
+	fresh.recovered = func(context.Context) bool { return true }
+	if answer := r.faultOnPrimary(fresh); answer.Verdict != apogee.FallbackRecovered {
+		t.Errorf("a fault on grunt after the pick = %+v; want the grace window to find it recovered", answer)
+	}
+
+	pushes := len(r.spy.pushes)
+	r.wiring.fallover(retired, fallbackLanding{entry: r.entries[1]})
+	if r.wiring.targetName() != "grunt" || len(r.spy.pushes) != pushes {
+		t.Error("a landing by the retired resolver moved the seat the human picked")
+	}
+}

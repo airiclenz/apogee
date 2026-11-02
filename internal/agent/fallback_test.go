@@ -909,3 +909,106 @@ func TestFallbackSwitchLeavesARoutedChildOnItsOwnSeat(t *testing.T) {
 		t.Errorf("spare calls = %d, want only the parent's", r.spare.calls())
 	}
 }
+
+// firstOnceResolver is a seat resolver that answers every report with the spare and marks only the
+// first report First, the way the Driver's single-flight resolver does.
+func firstOnceResolver() *stubResolver {
+	var mu sync.Mutex
+	answered := false
+	return &stubResolver{answer: func(context.Context, FallbackReport) FallbackAnswer {
+		mu.Lock()
+		defer mu.Unlock()
+		answer := spareAnswer()
+		answer.First = !answered
+		answered = true
+		return answer
+	}}
+}
+
+// TestFallbackRoutedChildConsultsItsTargetsResolver pins the routed seat's own fallover: a routed
+// child holds the resolver its Delegation target carries — never the session's — reports the
+// Sub-agent server it dials, continues on the fallback, and the one event names the Sub-agents seat.
+func TestFallbackRoutedChildConsultsItsTargetsResolver(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
+	seatResolver := firstOnceResolver()
+	r.parent.SetDelegationTarget(&DelegationTarget{
+		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", Fallback: seatResolver,
+	})
+	routed := r.child(t, "routed")
+	if routed.fallback != seatResolver {
+		t.Fatal("the routed child does not hold its target's resolver")
+	}
+
+	res := stepOnce(t, routed, "routed work")
+
+	if res.Faulted {
+		t.Fatalf("routed child faulted: %+v", res)
+	}
+	if got := r.spare.calls(); got != 1 {
+		t.Errorf("spare calls = %d, want 1", got)
+	}
+	if got := len(r.resolver.seen()); got != 0 {
+		t.Errorf("the session resolver was consulted %d times, want 0", got)
+	}
+	reports := seatResolver.seen()
+	if len(reports) != 1 || reports[0].Server != "grunt" || reports[0].Model != "grunt-model" {
+		t.Errorf("seat resolver reports = %+v, want one on grunt/grunt-model", reports)
+	}
+	events := r.switchedEvents()
+	if len(events) != 1 || events[0].Seat != domain.UpstreamSeatSubAgents ||
+		events[0].FromServer != "grunt" || events[0].ToServer != "spare" {
+		t.Fatalf("switched events = %+v, want one sub-agents grunt → spare", events)
+	}
+	if r.parent.upstream.responder() != r.primary {
+		t.Error("the routed fallover moved the session's seat")
+	}
+}
+
+// TestFallbackRoutedSiblingsAnnounceOnce pins one announcement per Sub-agents seat: N routed
+// siblings, each on a holder of its own, fault on one dead Sub-agent server at once; each moves its
+// own holder onto the fallback and finishes there, and only the First caller announces the move.
+func TestFallbackRoutedSiblingsAnnounceOnce(t *testing.T) {
+	t.Parallel()
+	const n = 3
+	r := newSeatRig(t, nil)
+	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
+	r.parent.SetDelegationTarget(&DelegationTarget{
+		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", Fallback: firstOnceResolver(),
+	})
+	children := make([]*Agent, n)
+	for i := range children {
+		children[i] = r.child(t, "routed")
+		if err := children[i].Submit(domain.UserInput{Text: "work"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	results := make([]domain.StepResult, n)
+	for i, child := range children {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := child.Step(context.Background())
+			if err != nil {
+				t.Errorf("Step: %v", err)
+			}
+			results[i] = res
+		}()
+	}
+	wg.Wait()
+
+	for i, res := range results {
+		if res.Faulted {
+			t.Errorf("routed child %d faulted: %+v", i, res)
+		}
+	}
+	if got := len(r.switchedEvents()); got != 1 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want 1", got)
+	}
+	if got := r.spare.calls(); got != n {
+		t.Errorf("spare calls = %d, want %d", got, n)
+	}
+}

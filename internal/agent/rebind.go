@@ -459,7 +459,8 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 // The move goes into the seat's sharedUpstream, so every Agent on the seat follows it: the
 // holder is replaced only while it is still at the generation the faulted request went out at, so
 // the first Agent to arrive moves the seat and announces it with one UpstreamSwitchedEvent, and an
-// Agent arriving after it dials nothing and simply follows (true). The binding itself is applied by
+// Agent arriving after it dials nothing and simply follows (true). A routed child's holder is its own, so on the
+// Sub-agents seat the announcement is the First caller's instead (announcesRehome). The binding itself is applied by
 // followUpstream, on this Agent's own goroutine, when the loop re-arms the request.
 func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	spec, bind := answer.Upstream, answer.Rebind
@@ -486,6 +487,9 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	// Torn down for SwitchUpstream's reason when this Agent owns it. A request a sibling still
 	// streams over it keeps its connection: the teardown closes only idle sockets.
 	_ = a.closeOwnedUpstream(retired)
+	if !a.announcesRehome(answer) {
+		return true
+	}
 	a.cfg.Events.Emit(domain.UpstreamSwitchedEvent{
 		EventBase:  a.base(turn),
 		FromServer: a.cfg.ServerName,
@@ -497,6 +501,16 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 		Seat:       a.upstream.seatOf(),
 	})
 	return true
+}
+
+// announcesRehome reports whether this Agent's landed rehome is the one that announces the seat's
+// move. On the session's seat every Agent shares one sharedUpstream, so the replace lands once per
+// failed generation and the Agent it landed for announces it. A routed child on the Sub-agents seat
+// speaks over a holder of its own, so every routed sibling's replace lands; there the seat's one
+// announcement is the First caller's — the one whose report ran the shared resolver's grace window
+// and list walk — and every other sibling moves its own holder silently.
+func (a *Agent) announcesRehome(answer FallbackAnswer) bool {
+	return a.upstream.seatOf() == domain.UpstreamSeatSession || answer.First
 }
 
 // followUpstream re-applies the seat's rehome binding to this Agent's Config when the sharedUpstream
