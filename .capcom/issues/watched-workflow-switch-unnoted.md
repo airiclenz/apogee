@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 3
 labels: [fallback]
+plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T16:08:52Z
 ---
 

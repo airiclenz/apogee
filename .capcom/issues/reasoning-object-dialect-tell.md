@@ -3,6 +3,7 @@ title: Any /v1/models reasoning object switches the effort dialect, whatever its
 status: open
 type: bug
 priority: 3
+plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T06:57:58Z
 ---
 

@@ -3,7 +3,7 @@ title: Firings never re-latch the Sub-agents target after a fallover
 status: open
 type: bug
 priority: 3
-plan: 2026-11-02 - 01 - fallback-followups-plan
+plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T14:46:59Z
 ---
 

@@ -1,9 +1,10 @@
 ---
 title: Headless and daemon Firings never bind the served model when no model is configured
-status: open
+status: active
 type: bug
 priority: 1
 labels: [driver-parity]
+plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T06:57:58Z
 ---
 
