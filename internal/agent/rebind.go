@@ -219,7 +219,7 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	// wire model moves only if the Responder is told. It is an optional interface rather than a
 	// widening of the Responder seam: a fake responder in a test simply does not implement it, and
 	// a Responder with no notion of a model id has nothing to rebind.
-	if binder, ok := a.upstream.(interface{ SetModel(string) }); ok {
+	if binder, ok := a.upstream.responder().(interface{ SetModel(string) }); ok {
 		binder.SetModel(spec.Model)
 	}
 	// The dialect the next request expresses its effort in, taken as the spec states it — the zero
@@ -411,8 +411,11 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	// left running — it is not this Agent's to close. The error is dropped deliberately rather than
 	// swallowed: the switch has already committed above, and provider teardown reports nothing a
 	// caller could act on (Client.Close always succeeds), so surfacing it would say the move failed.
-	_ = a.closeOwnedUpstream(a.upstream)
-	a.upstream = a.dial(spec.Endpoint, "", spec.APIKey, opts...)
+	_ = a.closeOwnedUpstream(a.upstream.responder())
+	// A FRESH holder, never a replace of the one this Agent holds: that holder may be shared — with a
+	// background workflow's host that copied it (backgroundHost), which stays on the client it
+	// started with — so the switch moves this Agent alone, as it always has.
+	a.upstream = newSharedUpstream(a.dial(spec.Endpoint, "", spec.APIKey, opts...))
 	a.ownsUpstream = true
 	// The projected Config lands whole — the human's words for the box just dialled move WITH it
 	// (ADR 0069: the orientation block's Delegations line describes the session seat from these,

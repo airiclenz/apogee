@@ -1608,8 +1608,8 @@ func TestUnroutedChildNeverClosesTheParentsClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
-	if child.upstream != provider.Responder(shared) {
-		t.Fatalf("unrouted child Upstream = %T, want the parent's shared responder", child.upstream)
+	if child.upstream.responder() != provider.Responder(shared) {
+		t.Fatalf("unrouted child Upstream = %T, want the parent's shared responder", child.upstream.responder())
 	}
 	if child.ownsUpstream {
 		t.Error("unrouted child claims to own the parent's client")

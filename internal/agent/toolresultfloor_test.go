@@ -99,10 +99,10 @@ func TestOversizedToolResultIsClampedByTheStructuralFloor(t *testing.T) {
 	if len(huge) <= floorChars {
 		t.Fatalf("payload of %d chars does not exceed the floor of %d chars; the test proves nothing", len(huge), floorChars)
 	}
-	a.upstream = scriptedResponder(t,
+	a.upstream = newSharedUpstream(scriptedResponder(t,
 		toolCallTurn("c1", "lookup", `{"q":"everything"}`),
 		contentTurn("all done"),
-	)
+	))
 
 	runExchange(t, a, "read the whole world")
 

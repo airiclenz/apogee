@@ -59,7 +59,7 @@ type completion struct {
 func (a *Agent) collectCompletion(ctx context.Context, req provider.Request, observe func(provider.Delta)) completion {
 	out := completion{requested: req.Model}
 	var content, thinking strings.Builder
-	for delta := range a.upstream.Stream(ctx, req) {
+	for delta := range a.upstream.responder().Stream(ctx, req) {
 		if observe != nil {
 			observe(delta)
 		}

@@ -280,7 +280,7 @@ func assertUpstreamUnmoved(t *testing.T, a *Agent, apiKey string) {
 	if a.cfg.Model != "test-model" {
 		t.Errorf("model = %q after the refusal, want it still bound", a.cfg.Model)
 	}
-	if _, swapped := a.upstream.(*provider.Client); swapped {
+	if _, swapped := a.upstream.responder().(*provider.Client); swapped {
 		t.Error("a refused SwitchUpstream still swapped in a real provider client")
 	}
 }
@@ -320,8 +320,8 @@ func TestSwitchUpstreamClosesTheClientItReplaces(t *testing.T) {
 			if !a.ownsUpstream {
 				t.Error("the session does not own the client the switch dialled — nothing would ever close it")
 			}
-			if _, ok := a.upstream.(*provider.Client); !ok {
-				t.Errorf("Upstream = %T after the switch, want the fresh *provider.Client", a.upstream)
+			if _, ok := a.upstream.responder().(*provider.Client); !ok {
+				t.Errorf("Upstream = %T after the switch, want the fresh *provider.Client", a.upstream.responder())
 			}
 		})
 	}

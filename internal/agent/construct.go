@@ -32,18 +32,18 @@ var (
 // fake. A delegate is built by newDelegateAgent beside it; both are the one construction path
 // (buildAgent) told which of the two it is building.
 func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
-	return buildAgent(cfg, up, nil)
+	return buildAgent(cfg, newSharedUpstream(up), nil) // a top-level Agent reads its Upstream through a holder of its own
 }
 
 // newDelegateAgent constructs a DELEGATE — a sub-agent one nesting level below the parent that
-// composed d (newChildAgentOn, subagent.go) — bound to up, which is the parent's own Upstream or
-// the client a routed spawn dialled. cfg is the parent's Config with the spawn's posture and dial
+// composed d (newChildAgentOn, subagent.go) — bound to up, which is the parent's own Upstream
+// holder, shared by handle, or a fresh one over the client a routed spawn dialled. cfg is the parent's Config with the spawn's posture and dial
 // facts already applied; d is everything else the child is: its identity, its bounds and the
 // handles it shares with the parent. The constructor copies each of those facts into the Agent
 // once, so a child leaves here complete as far as its composer is concerned: newChildAgentOn writes
 // nothing to it afterwards, and only runSubAgent writes the call-derived roster, output target,
 // baseline and step cap after construction (ADR 0083 §3).
-func newDelegateAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent, error) {
+func newDelegateAgent(cfg domain.Config, up *sharedUpstream, d *delegation) (*Agent, error) {
 	return buildAgent(cfg, up, d)
 }
 
@@ -55,7 +55,7 @@ func newDelegateAgent(cfg domain.Config, up provider.Responder, d *delegation) (
 // in exactly two places, both marked below: the fields a top-level Agent owns afresh and a delegate
 // takes from d (seedTopLevel / delegation.seed), and the context-file cache, which only a session
 // boundary fills from disk — a delegate is handed its parent's.
-func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent, error) {
+func buildAgent(cfg domain.Config, up *sharedUpstream, d *delegation) (*Agent, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}

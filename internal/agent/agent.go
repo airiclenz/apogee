@@ -70,7 +70,7 @@ import (
 // forgets that far width (farWidth, below).
 type Agent struct {
 	cfg      domain.Config
-	upstream provider.Responder // provider seam (Decision C): fake in tests, real HTTP via New
+	upstream *sharedUpstream // provider seam (Decision C): fake in tests, real HTTP via New; shared by HANDLE with every unrouted child (sharedupstream.go)
 
 	// dial is the one seam every provider dial this Agent ever makes crosses (Dialer): New and
 	// Resume dial the session's client through it, SwitchUpstream dials the replacement, and a
@@ -958,7 +958,7 @@ func (a *Agent) Close() error {
 		a.background.waitAll()
 	}
 	a.closeConsoles()
-	return a.closeOwnedUpstream(a.upstream)
+	return a.closeOwnedUpstream(a.upstream.responder())
 }
 
 // closeConsoles ends the Consoles this Agent's run is responsible for. Ownership is the Console's

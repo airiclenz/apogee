@@ -661,7 +661,9 @@ func (a *Agent) stopAllBackground() {
 // backgroundHost is the snapshot of this top-level Agent a background workflow runs off (see the file
 // comment): a detached Agent that nothing mutates once it is returned. The idle-only fields — the
 // Config, the Upstream, the tool set, the profile's parsers, the context files, the journal and the
-// effort dialect — are copied as they stand; the lock-guarded live settings are read through their
+// effort dialect — are copied as they stand, the Upstream as the HOLDER this Agent read it through at
+// the copy (sharedupstream.go), so a later server switch, which installs a fresh holder on this Agent,
+// leaves the workflow on the client it started with; the lock-guarded live settings are read through their
 // accessors and frozen, all but the mode, which the host holds as a tighten-only view of this
 // Agent's (liveMode), the way a delegate holds its parent's. The tree's shared handles are shared.
 // The host owns no Upstream and no tool set (it never closes or recomposes either), runs no Turn of

@@ -1891,6 +1891,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	// tap is the Inspector's capture seam for a client this spawn BUILDS (below). An unrouted spawn
 	// builds none — it speaks over the parent's connection, whose tap is already bound to the
 	// parent — so tap stays nil there and binding it is a no-op (wireTap).
+	// The Upstream travels as the parent's HOLDER (sharedupstream.go), not as the Responder it holds
+	// today: an unrouted child reads the very cell its parent reads, so an Upstream put into that cell
+	// later reaches the child at its next request too. A routed spawn gets a holder of its own below.
 	var tap *wireTap
 	upstream := a.upstream
 	// ownsUpstream travels with the client below: a routed spawn DIALS one and hands the child the
@@ -1931,7 +1934,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		routedDialect = target.EffortDialect
 		var opts []provider.Option
 		opts, tap = dialOptions(childCfg)
-		upstream = a.dial(target.Endpoint, target.Model, target.APIKey, opts...)
+		upstream = newSharedUpstream(a.dial(target.Endpoint, target.Model, target.APIKey, opts...))
 		ownsUpstream = true
 	}
 

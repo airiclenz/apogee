@@ -649,7 +649,7 @@ func TestAbortExchange_AfterCancelUnwedges(t *testing.T) {
 
 	// A fresh message runs to completion against a working responder — a clean user→assistant
 	// Exchange with no interleaved/orphaned message from the scrapped one.
-	a.upstream = scriptedResponder(t, contentTurn("hello"))
+	a.upstream = newSharedUpstream(scriptedResponder(t, contentTurn("hello")))
 	if err := a.Submit(domain.UserInput{Text: "start over"}); err != nil {
 		t.Fatalf("Submit after AbortExchange: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestSettleExchange_KeepsFinishedTurnsAndNotesTheCut(t *testing.T) {
 
 	// The next Exchange reads the kept Turn and the cut on the wire.
 	upstream := echoResponder(t, "carrying on")
-	a.upstream = upstream
+	a.upstream = newSharedUpstream(upstream)
 	if err := a.Submit(domain.UserInput{Text: "next"}); err != nil {
 		t.Fatalf("Submit after settle: %v", err)
 	}

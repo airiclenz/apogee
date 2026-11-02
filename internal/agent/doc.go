@@ -129,7 +129,9 @@
 // Run, disarm, the stop verdict and an optional fold of a stopped child — and its teardown,
 // reapChild; sub_agent delegation (runSubAgent) runs its child on it with fold on, the workflow
 // spawner its item children with fold off. rebind.go swaps every per-model binding together when
-// the Upstream's loaded model changes, and moves the session to another server (ADR 0024); serverbinding.go is
+// the Upstream's loaded model changes, and moves the session to another server (ADR 0024);
+// sharedupstream.go is the one holder an Agent reads its Upstream through, shared by handle between
+// a parent and its unrouted children so an Upstream put into it reaches all of them; serverbinding.go is
 // the one presence-typed value a model change, a server switch or a routed target states its
 // bindings as, with the one pure projection onto a Config. setprofile.go is
 // the separate, explicit door for changing the model PROFILE, which Rebind deliberately leaves

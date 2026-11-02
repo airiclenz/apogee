@@ -142,7 +142,13 @@ apogee.go — Event variant alias block (apogee_alias_internal_test.go — TestE
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 ./internal/eventjson/ ./internal/domain/`; `GOMEMLIMIT=2GiB go test -count=1 -run 'TestManualListsEveryEventLineKind|TestHeadlessFormatJSONStreamsEveryEvent' ./cmd/apogee/`; `GOMEMLIMIT=2GiB go test -count=1 -run TestFoldEventCoversEveryEventVariant ./internal/tui/`; `GOMEMLIMIT=2GiB go test -count=1 -run TestEveryDomainEventVariantIsAliased .`
 **Commit:** `feat(eventjson): upstream_switched event kind`
 
-## 5. Engine: a shared seat upstream for a parent and its unrouted children
+## 5. Engine: a shared seat upstream for a parent and its unrouted children — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): consequential edit — internal/agent/doc.go: made necessary by the new sharedupstream.go (TestDocMapNamesEveryFile requires every file in the doc.go map)
+
+NOTES (2026-11-02): buildAgent and newDelegateAgent now take the *sharedUpstream holder; newAgent keeps its provider.Responder parameter and wraps it, so test callers and resumeAgent are unchanged. The holder exposes responder(), current() (Responder + generation under one lock) and replace() (bumps and returns the generation); reads are nil-safe for bare &Agent{} test literals.
+
+NOTES (2026-11-02): seat_test.go needed no change — its holder-identity comparisons (child.upstream == parent.upstream) still compile and now assert the stronger shared-by-handle fact; the switch/background-host test is named TestSharedUpstreamSwitchLeavesBackgroundHost so the acceptance pattern runs it.
 
 **What:**
 Recast at the regression check (2026-11-02).
