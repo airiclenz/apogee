@@ -1,0 +1,188 @@
+package agent
+
+// Loop-level pins for the Seqcom overflow (plan 2026-11-02 - 03, item 5; issue
+// fresh-result-overflow, Seqcom run 20261102T1700Z): one `web_fetch` returned a whole model list as
+// a single minified JSON line, the next request overflowed the window, the server answered
+// HTTP 400 `context_length_exceeded`, and the Turn was abandoned. These drive that Exchange end to
+// end through the real provider client: the fresh result is byte-elided to the room left so the
+// next request fits, and when the server still refuses it with the verbatim Seqcom body, ADR 0018's
+// one emergency fold runs and the retried request completes the Turn.
+
+import (
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/stubllm"
+)
+
+// seqcomOverflowBody is the 400 body the Seqcom run's server sent, verbatim — the
+// context_length_exceeded shape the provider now classes a context overflow.
+const seqcomOverflowBody = `{"error":{"message":"prompt exceeds the context window","type":"invalid_request_error","code":"context_length_exceeded"}}`
+
+// elisionMarkerMark is the stable substring of the shared head/tail elision marker a clamped tool
+// result carries.
+const elisionMarkerMark = "start_line/end_line"
+
+// seqcomOverflowTurn answers one request with the Seqcom run's HTTP 400.
+func seqcomOverflowTurn() stubllm.Turn {
+	return stubllm.Turn{HTTP: &stubllm.HTTPReply{
+		Status:      http.StatusBadRequest,
+		Body:        seqcomOverflowBody,
+		ContentType: "application/json",
+	}}
+}
+
+// modelListLine is a model list as one minified JSON line, twice floorWindow tokens long at the
+// uncalibrated 4 chars/token — the shape of the OpenRouter `/api/v1/models` document the Seqcom
+// run fetched, which the line elision cannot shrink.
+func modelListLine() string {
+	entry := `{"id":"vendor/model","context_length":131072},`
+	return `{"data":[` + strings.Repeat(entry, 2*floorWindow*4/len(entry)+1) + `{"id":"last"}]}`
+}
+
+// seqcomAgent is an Agent at floorWindow with Compaction on and only a `web_fetch` tool that
+// returns body — no default menu, so the room left in the request is what bounds the result.
+func seqcomAgent(t *testing.T, sink domain.EventSink, body string, up *scriptedUpstream) *Agent {
+	t.Helper()
+	cfg := configWithTools(sink, fakeTool{name: "web_fetch", readOnly: true, result: body})
+	cfg.Context.MaxContextTokens = floorWindow
+	cfg.Context.CompactionEnabled = true
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	b := a.budget()
+	if got := b.EstimateTokens(len(body)); got <= b.Window || strings.Contains(body, "\n") {
+		t.Fatalf("test setup: body is %d tokens (want one line past the %d-token window)", got, b.Window)
+	}
+	return a
+}
+
+// wireToolMessage returns the content of the tool message a logged request carried.
+func wireToolMessage(t *testing.T, req stubllm.Request) string {
+	t.Helper()
+	for _, m := range req.Messages {
+		if m.Role == string(domain.RoleTool) {
+			return m.Content
+		}
+	}
+	t.Fatalf("request %d carried no tool message", req.N)
+	return ""
+}
+
+// wireTokens estimates a logged request's size through a's Budget: every message's content and
+// tool-call arguments.
+func wireTokens(a *Agent, req stubllm.Request) int {
+	chars := 0
+	for _, m := range req.Messages {
+		chars += len(m.Content)
+		for _, c := range m.ToolCalls {
+			chars += len(c.Name) + len(c.Arguments)
+		}
+	}
+	return a.budget().EstimateTokens(chars)
+}
+
+// TestFreshOversizedResultFitsTheNextRequest: a tool result larger than the whole window is
+// committed byte-elided to the room left, so the request that carries it is estimated within the
+// advertised room — no fold needed, no overflow — and the Turn completes.
+func TestFreshOversizedResultFitsTheNextRequest(t *testing.T) {
+	sink := &recordingSink{}
+	up := scriptResponder(t, stubllm.Script{Turns: []stubllm.Turn{
+		summaryTurn("UNEXPECTED-SUMMARY"),
+		toolCallTurn("c1", "web_fetch", `{"url":"https://openrouter.ai/api/v1/models"}`),
+		contentTurn("all done"),
+	}})
+	body := modelListLine()
+	a := seqcomAgent(t, sink, body, up)
+	room := freshRoom(t, a)
+
+	res := runExchange(t, a, "list the models")
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("the Exchange surfaced %d ErrorEvent(s) %v; want none", len(errs), errs)
+	}
+	if n := up.summaryCalls(); n != 0 {
+		t.Errorf("summarizer calls = %d, want 0 — the bound alone keeps the request within the room", n)
+	}
+	mains := up.mains()
+	if len(mains) != 2 {
+		t.Fatalf("main requests = %d, want 2 (the tool call and the continuation)", len(mains))
+	}
+
+	msgs, at := committedToolMessages(a)
+	if len(msgs) != 1 {
+		t.Fatalf("conversation holds %d tool messages, want 1", len(msgs))
+	}
+	if !strings.Contains(msgs[0].Content, elisionMarkerMark) || len(msgs[0].Content) >= len(body) {
+		t.Errorf("committed result is %d of %d chars and carries no elision marker", len(msgs[0].Content), len(body))
+	}
+	if next := requestTokens(a, a.conv.Messages()[:at[0]+1]); next > room {
+		t.Errorf("the request carrying the result is estimated at %d tokens, past the advertised room of %d", next, room)
+	}
+	wire := wireToolMessage(t, mains[1])
+	if !strings.Contains(wire, elisionMarkerMark) {
+		t.Errorf("the continuation's tool message carries no elision marker:\n%.200s", wire)
+	}
+	if got, window := wireTokens(a, mains[1]), a.budget().Window; got > window {
+		t.Errorf("the continuation carried %d tokens, past the %d-token window", got, window)
+	}
+}
+
+// TestSeqcomOverflowBodyFoldsAndRetries: the server refuses the continuation that carries the
+// bounded result with the verbatim Seqcom 400 — an estimator off from the server's tokenizer —
+// and the Turn is not abandoned: one emergency fold runs, its summary call fits its budget and
+// carries the elided result, and the retried request completes the Exchange.
+func TestSeqcomOverflowBodyFoldsAndRetries(t *testing.T) {
+	sink := &recordingSink{}
+	up := scriptResponder(t, stubllm.Script{Turns: []stubllm.Turn{
+		summaryTurn("EMERGENCY-SUMMARY"),
+		toolCallTurn("c1", "web_fetch", `{"url":"https://openrouter.ai/api/v1/models"}`),
+		seqcomOverflowTurn(),
+		contentTurn("recovered reply"),
+	}})
+	a := seqcomAgent(t, sink, modelListLine(), up)
+
+	res := runExchange(t, a, "list the models")
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("recovery surfaced %d ErrorEvent(s) %v; the Turn must not be abandoned", len(errs), errs)
+	}
+	if n := up.summaryCalls(); n != 1 {
+		t.Fatalf("summarizer calls = %d, want exactly 1 emergency fold", n)
+	}
+	mains := up.mains()
+	if len(mains) != 3 {
+		t.Fatalf("main requests = %d, want 3 (the tool call, the refused continuation, the retry)", len(mains))
+	}
+	if wire := wireToolMessage(t, mains[1]); !strings.Contains(wire, elisionMarkerMark) {
+		t.Errorf("the refused continuation's tool message carries no elision marker:\n%.200s", wire)
+	}
+	assertRequestTemplateLegal(t, mains[2])
+
+	summary := up.lastSummary()
+	budget := a.budget().Window - compactMaxTokens
+	if got := wireTokens(a, summary); got > budget {
+		t.Errorf("the summary call carried %d tokens, past its budget of %d (window less the summary's reply reserve)", got, budget)
+	}
+	carries := false
+	for _, m := range summary.Messages {
+		carries = carries || strings.Contains(m.Content, elisionMarkerMark)
+	}
+	if !carries {
+		t.Error("the summary call's transcript carries no elision marker; the elided result did not reach the fold")
+	}
+
+	last := a.conv.At(a.conv.Len() - 1)
+	if last.Role != domain.RoleAssistant || last.Content != "recovered reply" {
+		t.Errorf("the retried request's reply did not land: last message %+v (roles %s)", last, convRoles(a))
+	}
+}

@@ -121,7 +121,9 @@ internal/agent/filerefs_test.go — TestClampToBound_SharedByToolResultsAndFileR
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestOversizedToolResult|TestToolResultCap|TestFreshResult|TestUnknownWindowClamp|TestFloorGuard_ToolResultCap|TestClampToBound|TestContextFillNotice|TestToolResultFloor|TestKnownWindowIgnores|TestSubAgent_ChildFolds' ./internal/agent/`
 **Commit:** `fix(agent): bound a fresh tool result by the room left in the request`
 
-## 5. Loop-level pins for the Seqcom overflow
+## 5. Loop-level pins for the Seqcom overflow — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the window is floorWindow (8192) rather than a smaller one: HistoryCap floors the fold's transcript budget at this size, and item 4's tests already size against it; the result is one minified line of ~2× the window. The fresh-result test also pins zero summarizer calls (the bound alone keeps the continuation within the advertised room, so the predictive guard does not fold). "Summary request under its budget" is asserted as the summary call's estimated tokens ≤ window − compactMaxTokens (the summary's reply reserve). Mutation check: with item 1's classifier change reverted, TestSeqcomOverflowBodyFoldsAndRetries fails (0 summarizer calls).
 
 **What:** test-only. Depends on items 1, 2 and 4. In `internal/agent/` (harness `scriptedUpstream`, `stubllm` turns, `cfg.Context.MaxContextTokens` set small):
 - **Fresh result:** a stub model with a small window, a `toolCallTurn` whose result is one minified line larger than the window → the next request's estimate is under the window and the tool message carries the elision marker; the Turn completes.
