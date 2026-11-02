@@ -207,6 +207,14 @@ saved like any other firing, and the record holds what the run last said rather 
 its prompt. The daemon keeps running and still exits `0`; only `apogee headless` turns that into
 an exit code (`3`).
 
+A firing bound to a `servers:` entry with a `fallback:` list survives that server failing mid-run
+(see [configuration](configuration.md)). When the run moves to a fallback, the log says so the
+moment it happens, one line per switch: `switched  nightly-audit — apogee: primary failed
+(connection refused); continuing on backup (backup-model) after waiting 2m0s`. A switch of the
+sub-agents server's seat is marked `nightly-audit (sub-agents)`. The saved record names the model
+the run finished on — the fallback's after a session switch, never after a sub-agents one — and
+resuming it starts on the entry's configured server again, not on the fallback.
+
 ## The unit that runs it — `apogee daemon install`
 
 `apogee daemon install` writes the unit that makes this host run `apogee daemon` for

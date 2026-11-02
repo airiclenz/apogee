@@ -460,8 +460,10 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	//
 	// No skills catalog and no width source: a daemon holds no longer-lived provider to share and
 	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
-	// answer with. No onID and no narrate either: a daemon stamps the id on no stream, and the
-	// record raise files under it is the account a supervisor opens.
+	// answer with. No onID: a daemon stamps the id on no stream, and the record raise files under it
+	// is the account a supervisor opens. The narrate hook is the one Event the daemon says as it
+	// happens — a Server fallback's switch (ADR 0105), one log line per switch (daemonSwitchSink) —
+	// and it wraps whatever sink the composition built rather than replacing it.
 	//
 	// A `run: workflow:` entry runs its recipe as `apogee headless --recipe` does: the launch rides
 	// firingInputs.recipe, its id and inputs text read off the ENTRY, and raise is handed no prompt —
@@ -489,7 +491,10 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		// The daemon's one stats recorder, so this Firing's upstream attempts land in the home's
 		// server-stats.jsonl exactly as a headless run's or a session's do (ADR 0085).
 		stats: w.stats,
-	}, prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
+	}, prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil,
+		func(_ string, _ apogee.Config, sink domain.EventSink) domain.EventSink {
+			return daemonSwitchSink{inner: sink, schedule: entry.Name, log: w.log}
+		})
 	// What the composition had to say about this binding — a model the server never advertised, a
 	// rebind that had to degrade — reaches the daemon LOG, which is this Driver's whole user
 	// interface (ADR 0034 decision 10). The session record still carries the run; what it cannot
@@ -625,6 +630,44 @@ func (w *daemonWiring) serverFor(entry daemon.Entry) (config.ServerEntry, error)
 	return config.ServerEntry{}, fmt.Errorf("apogee: daemon: the %q schedule binds to server %q, which no servers: "+
 		"entry in config.yaml answers to — the daemon reads config.yaml once at startup, so restart it after "+
 		"editing that list", entry.Name, named)
+}
+
+// daemonSwitchSink is the daemon's one live narration of a Firing's Event stream: it logs one line
+// per [domain.UpstreamSwitchedEvent] (daemonSwitchLine) and forwards every Event, the switch
+// included, to the sink it wraps (nil ⇒ nothing to forward to). Everything else a Firing has to say
+// reaches the log after it lands, off its Result; a switch is said as it happens because the run
+// goes on, on another server, and a supervisor reading the journal mid-run must not find the
+// primary's name standing for a run that left it.
+type daemonSwitchSink struct {
+	inner    domain.EventSink
+	schedule string
+	log      *daemonLog
+}
+
+var _ domain.EventSink = daemonSwitchSink{}
+
+// Emit logs a switch and forwards the event.
+func (s daemonSwitchSink) Emit(e domain.Event) {
+	if ev, ok := e.(domain.UpstreamSwitchedEvent); ok {
+		s.log.line("%s", daemonSwitchLine(s.schedule, ev))
+	}
+	if s.inner != nil {
+		s.inner.Emit(e)
+	}
+}
+
+// daemonSwitchLine is the log line for one switch: the `switched` verb in the lifecycle lines'
+// column, the schedule it happened in, and the event's own sentence (UpstreamSwitchedEvent.Notice),
+// escape-stripped to one line — the model it names is the fallback server's to report. The notice
+// names both servers; a routed Sub-agents seat's switch is marked `(sub-agents)` after the schedule,
+// because it moved the delegations routed to the sub-agents server and not the session the record
+// is filed under — the record's model moves only on a session seat's switch (internal/run).
+func daemonSwitchLine(schedule string, ev domain.UpstreamSwitchedEvent) string {
+	where := schedule
+	if ev.Seat == domain.UpstreamSeatSubAgents {
+		where += " (sub-agents)"
+	}
+	return fmt.Sprintf("%-9s %s — %s", "switched", where, sanitize.StripEscapesToLine(ev.Notice()))
 }
 
 // daemonLogWriter is the daemon log seen as an [io.Writer], for the one caller that narrates

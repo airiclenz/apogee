@@ -246,7 +246,17 @@ cmd/apogee/headless.go — narrationSink.narrate; cmd/apogee/e2e_upstream_test.g
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFallback|TestHeadlessFallback' ./cmd/apogee/`
 **Commit:** `feat(headless): fall over to a server entry's fallback mid-run`
 
-## 9. Records and daemon: the model after a switch, and the log line
+## 9. Records and daemon: the model after a switch, and the log line — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the record's model is a new `eventTap.recordModel`, seeded from the bound model and moved by `noteSwitch` only when `Seat == "session"` and the event names a model. `tap.model`, the child yardstick, is left untouched. `Meta.Model` reads it through `boundModel()`.
+
+NOTES (2026-11-02): `transcriptFold.fold` also records a switch as a note entry: the event's `Notice()`, run through `sanitize.StripEscapesToLine` because the model name comes from the fallback server. The plan listed transcript.go under Files without naming the change. The test lives in run_test.go (`TestEventTapFoldsTheSwitchIntoTheScrollback`), which keeps it inside the item's file list.
+
+NOTES (2026-11-02): the daemon line comes from a `daemonSwitchSink` passed as `raise`'s `narrate` hook. It wraps the composition's sink and forwards every event. The wording is `switched  <schedule> — <notice>`, plus ` (sub-agents)` after the schedule for a Sub-agents seat. The notice is escape-stripped. The comment in `fire` that said the daemon passes no narrate was updated to match.
+
+NOTES (2026-11-02): `fallbackHome` in e2e_fallback_test.go was split so `writeFallbackConfig` can rewrite the same home with a revived primary. `TestResumeAfterFallbackDialsThePrimary` resumes in the TUI (`--resume`), since headless has no resume flag. The resume constants are named `fallbackResume*` because `resumePrompt` already exists in e2e_usage_test.go.
+
+NOTES (2026-11-02): consequential edit — docs/manual/daemon.md: made necessary by the new `switched` daemon log line (the manual lists the lines the log carries)
 
 **What:**
 Recast at the regression check (2026-11-02).

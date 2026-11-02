@@ -3653,3 +3653,95 @@ func TestOnceWithoutABudgetRunsAsBefore(t *testing.T) {
 		t.Errorf("an unreached budget reports %+v, want the unbudgeted run's %+v", of(wide), of(unbudgeted))
 	}
 }
+
+// switchedTo is the UpstreamSwitchedEvent a seat's Server fallback announces (ADR 0105): the seat
+// moved from the primary entry onto backup's model, reported by an agent at depth.
+func switchedTo(depth int, seat domain.UpstreamSeat, toModel string) domain.UpstreamSwitchedEvent {
+	return domain.UpstreamSwitchedEvent{
+		EventBase:  domain.EventBase{Depth: depth},
+		FromServer: "primary",
+		FromModel:  "primary-model",
+		ToServer:   "backup",
+		ToModel:    toModel,
+		Fault:      "connection refused",
+		Waited:     2 * time.Minute,
+		Seat:       seat,
+	}
+}
+
+// TestEventTapRecordsTheSessionFallbacksModel pins the record's model after a session seat fails
+// over: the fallback's, the model the run finished on — whether the top-level agent hit the fault or
+// an unrouted child did (Depth 1), because the seat is read off the event, never its depth.
+func TestEventTapRecordsTheSessionFallbacksModel(t *testing.T) {
+	t.Parallel()
+
+	for _, depth := range []int{0, 1} {
+		tap := &eventTap{model: "primary-model", recordModel: "primary-model"}
+		tap.Emit(switchedTo(depth, domain.UpstreamSeatSession, "backup-model"))
+
+		if got := tap.boundModel(); got != "backup-model" {
+			t.Errorf("depth %d: the record names %q after a session switch, want the fallback's %q",
+				depth, got, "backup-model")
+		}
+		if tap.model != "primary-model" {
+			t.Errorf("depth %d: the child yardstick moved to %q, want it left on the bound %q",
+				depth, tap.model, "primary-model")
+		}
+	}
+}
+
+// TestEventTapKeepsTheRecordModelOnASubAgentsSwitch pins the other seat: a routed Sub-agents seat
+// that fails over moves neither the record's model nor the yardstick a child's model is measured
+// against, so a child on the switched seat still reports its own model.
+func TestEventTapKeepsTheRecordModelOnASubAgentsSwitch(t *testing.T) {
+	t.Parallel()
+
+	tap := &eventTap{window: 32000, model: "primary-model", recordModel: "primary-model"}
+	tap.Emit(subAgentCall(0, "call_1", "audit the issues"))
+	tap.Emit(switchedTo(1, domain.UpstreamSeatSubAgents, "grunt-backup"))
+	usage := usageAt(1, "call_1", 3000)
+	usage.Model = "grunt-backup"
+	tap.Emit(usage)
+	tap.Emit(toolResult(0, "call_1"))
+
+	if got := tap.boundModel(); got != "primary-model" {
+		t.Errorf("the record names %q after a sub-agents switch, want the bound %q", got, "primary-model")
+	}
+	want := []SubAgentUsage{{Used: 3000, Limit: 32000, Task: "audit the issues", Model: "grunt-backup"}}
+	if runs := tap.subAgentRuns(); !slices.Equal(runs, want) {
+		t.Errorf("subAgentRuns() = %+v, want %+v", runs, want)
+	}
+}
+
+// TestEventTapKeepsTheRecordModelOnASwitchNamingNone: a switch that names no model leaves the
+// record on the last model it knew rather than blanking it.
+func TestEventTapKeepsTheRecordModelOnASwitchNamingNone(t *testing.T) {
+	t.Parallel()
+
+	tap := &eventTap{model: "primary-model", recordModel: "primary-model"}
+	tap.Emit(switchedTo(0, domain.UpstreamSeatSession, ""))
+
+	if got := tap.boundModel(); got != "primary-model" {
+		t.Errorf("the record names %q after a switch naming no model, want the bound %q", got, "primary-model")
+	}
+}
+
+// TestEventTapFoldsTheSwitchIntoTheScrollback pins the note a switch leaves in the record's
+// scrollback: the event's own sentence, escape-stripped to one line, so a record replays the same
+// words the headless stderr and the daemon log carry.
+func TestEventTapFoldsTheSwitchIntoTheScrollback(t *testing.T) {
+	t.Parallel()
+
+	tap := &eventTap{scrollback: newTranscriptFold("")}
+	tap.Emit(switchedTo(0, domain.UpstreamSeatSession, "backup\x1b[31m-model"))
+
+	entries := tap.scrollback.entries
+	if len(entries) != 1 {
+		t.Fatalf("the fold wrote %d entries, want the switch note alone: %+v", len(entries), entries)
+	}
+	const want = "apogee: primary failed (connection refused); continuing on backup (backup-model) after waiting 2m0s"
+	if entries[0].Kind != session.EntryKindNote || entries[0].Text != want {
+		t.Errorf("switch entry = %s/%q, want %s reading %q",
+			entries[0].Kind, entries[0].Text, session.EntryKindNote, want)
+	}
+}

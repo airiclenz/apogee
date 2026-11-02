@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
@@ -1437,5 +1438,122 @@ func TestDaemonFiringSkipsAProposedRepoReactionWithOneNotice(t *testing.T) {
 	if !strings.Contains(logged, "proposes reaction `lint`; this run skips it") ||
 		strings.Contains(logged, "wiki") {
 		t.Errorf("the skipped-reaction line does not name lint alone:\n%s", logged)
+	}
+}
+
+// TestDaemonFallbackLogsTheSwitchAndFilesTheFallbacksModel drives a real Firing (run.Once) bound to
+// a `servers:` entry whose `fallback:` names a second server, built the way runDaemon builds its
+// wiring: the home's config.yaml resolved by ApplyConfig, every entry at its own endpoint. The
+// primary dies under the run's first request (killHeldPrimary, e2e_fallback_test.go), the grace
+// window runs out, and the run finishes on the backup — so the daemon log carries exactly one
+// `switched` line naming the schedule and the event's sentence, and the saved record names the
+// backup's model, the one the run finished on.
+func TestDaemonFallbackLogsTheSwitchAndFilesTheFallbacksModel(t *testing.T) {
+	primary, backup := dyingPrimary(t), backupServer(t)
+	home := fallbackHome(t, primary, backup)
+	opts := config.Options{ConfigDir: home, GlobalConfigOnly: true}
+	if err := config.ApplyConfig(&opts, func(string) bool { return false },
+		os.Getenv, os.ReadFile, func(string) {}); err != nil {
+		t.Fatalf("resolve the config: %v", err)
+	}
+	logged := &bytes.Buffer{}
+	wiring, err := newDaemonWiring(opts, &daemonLog{out: logged, now: time.Now}, daemonDeps{
+		runner:   run.Once,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	})
+	if err != nil {
+		t.Fatalf("newDaemonWiring: %v", err)
+	}
+	entry := entryFor(t, "nightly", daemon.Action{})
+	wiring.adopt([]daemon.Entry{entry})
+
+	type fired struct {
+		out schedule.Outcome
+		err error
+	}
+	done := make(chan fired, 1)
+	go func() {
+		out, err := wiring.fire(context.Background(), schedule.Firing{
+			ScheduleID: "sched-1", ScheduleName: entry.Name, Prompt: entry.Run.Prompt, Mode: entry.Run.Mode,
+		})
+		done <- fired{out: out, err: err}
+	}()
+	killHeldPrimary(t, primary)
+	var res fired
+	select {
+	case res = <-done:
+	case <-time.After(fallbackRunBudget):
+		t.Fatalf("the firing did not finish within %s", fallbackRunBudget)
+	}
+	if res.err != nil {
+		t.Fatalf("fire: %v\nlog:\n%s", res.err, logged)
+	}
+
+	var switched []string
+	for _, line := range strings.Split(logged.String(), "\n") {
+		if strings.Contains(line, " switched  ") {
+			switched = append(switched, line)
+		}
+	}
+	const want = " switched  nightly — apogee: primary failed ("
+	if len(switched) != 1 || !strings.Contains(switched[0], want) ||
+		!strings.Contains(switched[0], "continuing on backup (backup-model) after waiting ") {
+		t.Errorf("the daemon log carries switch lines %q, want one reading %q…%q\nlog:\n%s",
+			switched, want, "continuing on backup (backup-model)", logged)
+	}
+
+	rec, err := session.NewStore(filepath.Join(home, sessionsDirName)).Load(res.out.RecordID)
+	if err != nil {
+		t.Fatalf("load the firing's record %q: %v", res.out.RecordID, err)
+	}
+	if rec.Meta.Model != backup.Model {
+		t.Errorf("the record names model %q, want the fallback's %q", rec.Meta.Model, backup.Model)
+	}
+}
+
+// TestDaemonFallbackLineNamesTheSeat pins daemonSwitchLine's wording for both seats: a session
+// seat's switch is the schedule and the event's sentence; a routed Sub-agents seat's is marked
+// `(sub-agents)`, the notice naming the sub-agents server it left. Either way the sentence is
+// escape-stripped to one line, and the sink forwards the event to the one it wraps.
+func TestDaemonFallbackLineNamesTheSeat(t *testing.T) {
+	stamp := time.Date(2026, 11, 2, 3, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		ev   domain.UpstreamSwitchedEvent
+		want string
+	}{{
+		name: "session",
+		ev: domain.UpstreamSwitchedEvent{FromServer: "primary", ToServer: "backup", ToModel: "backup-model",
+			Fault: "connection refused", Waited: 2 * time.Minute, Seat: domain.UpstreamSeatSession},
+		want: "switched  nightly — apogee: primary failed (connection refused); continuing on backup " +
+			"(backup-model) after waiting 2m0s",
+	}, {
+		name: "sub-agents",
+		ev: domain.UpstreamSwitchedEvent{EventBase: domain.EventBase{Depth: 1}, FromServer: "grunt",
+			ToServer: "grunt-spare", ToModel: "small\x1b[2J\nmodel", Fault: "HTTP 503", Waited: 30 * time.Second,
+			Seat: domain.UpstreamSeatSubAgents},
+		want: "switched  nightly (sub-agents) — apogee: grunt failed (HTTP 503); continuing on grunt-spare " +
+			"(small model) after waiting 30s",
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logged := &bytes.Buffer{}
+			var forwarded []domain.Event
+			sink := daemonSwitchSink{
+				inner:    sinkFunc(func(e domain.Event) { forwarded = append(forwarded, e) }),
+				schedule: "nightly",
+				log:      &daemonLog{out: logged, now: func() time.Time { return stamp }},
+			}
+			sink.Emit(tc.ev)
+			sink.Emit(domain.MessageEvent{Text: "not a switch"})
+
+			wantLog := stamp.Format(daemonTimeFormat) + " " + tc.want + "\n"
+			if got := logged.String(); got != wantLog {
+				t.Errorf("the daemon log reads %q, want %q", got, wantLog)
+			}
+			if len(forwarded) != 2 {
+				t.Errorf("the sink forwarded %d events, want both", len(forwarded))
+			}
+		})
 	}
 }

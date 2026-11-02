@@ -562,6 +562,8 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		inner:  spec.Config.Events,
 		window: spec.Config.Context.MaxContextTokens,
 		model:  spec.Config.Model,
+		// The record is filed under the bound model until the session seat fails over (noteSwitch).
+		recordModel: spec.Config.Model,
 		// The scrollback is seeded with the prompt about to be submitted: the engine reports no
 		// event for a submission, so the fold cannot learn the run's first line from the stream.
 		scrollback: newTranscriptFold(spec.line()),
@@ -739,7 +741,7 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 			CreatedAt:     startedAt.UTC(),
 			UpdatedAt:     finishedAt,
 			Workspace:     cfg.WorkspaceDir,
-			Model:         cfg.Model,
+			Model:         tap.boundModel(),
 			ScheduleID:    spec.ScheduleID,
 			ScheduleName:  spec.ScheduleName,
 			UserMsgs:      1, // a Firing submits exactly one prompt
@@ -916,6 +918,14 @@ type eventTap struct {
 	// against, never a value reported on its own. It is what makes SubAgentUsage.Model mean
 	// "different from the session's" rather than "whatever this run used".
 	model string
+	// recordModel is the model the saved record names (Meta.Model): the Firing's bound model until
+	// the SESSION seat fails over to a Server fallback (ADR 0105), then the fallback's — the model
+	// the run finished on. Only a "session" switch moves it, whichever agent on that seat hit the
+	// fault (an unrouted child moves the session seat too); a "sub-agents" switch moves a routed
+	// seat the record does not name. It is held apart from model on purpose: model stays the
+	// yardstick SubAgentUsage.Model is measured against. A resume reads neither — it starts on the
+	// configured primary (ADR 0028 D5). Guarded by mu.
+	recordModel string
 	// scrollback is the Firing's own transcript fold — the entries the saved record replays from
 	// (transcript.go). It carries its own lock, so nothing here takes the tap's for it.
 	scrollback *transcriptFold
@@ -1002,6 +1012,8 @@ func (t *eventTap) Emit(e domain.Event) {
 		t.noteItemPhase(ev)
 	case domain.WorkflowPhaseEvent:
 		t.noteWorkflowPhase(ev)
+	case domain.UpstreamSwitchedEvent:
+		t.noteSwitch(ev)
 	case domain.ToolResultEvent:
 		// The run the result answers is what identifies it as the delegation's: only the result
 		// closing the run that opened the bracket closes it.
@@ -1014,6 +1026,27 @@ func (t *eventTap) Emit(e domain.Event) {
 	if inner != nil {
 		inner.Emit(e)
 	}
+}
+
+// noteSwitch moves the record's model onto the fallback a SESSION seat switched to ([eventTap.recordModel]).
+// The seat is read off the event, never its depth: an unrouted sub-agent that hit the fault moved the
+// session's seat, and a routed Sub-agents seat's switch leaves the record's model where it was. A
+// switch that named no model leaves it too — the record keeps the last model it knew.
+func (t *eventTap) noteSwitch(ev domain.UpstreamSwitchedEvent) {
+	if ev.Seat != domain.UpstreamSeatSession || ev.ToModel == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.recordModel = ev.ToModel
+}
+
+// boundModel is the model the saved record names: the bound one, or the fallback's after a session
+// seat switch ([eventTap.noteSwitch]).
+func (t *eventTap) boundModel() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.recordModel
 }
 
 // attach puts the Firing's live Event journal in the tap's forward path, ahead of the caller's

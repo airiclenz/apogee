@@ -14,14 +14,18 @@ import (
 	"encoding/json"
 	"net"
 	"net/url"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
+	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
 // fallbackGraceForTests is the `fallback-after:` the e2e runs wait out: what they claim is that the
@@ -64,6 +68,15 @@ func backupServer(t *testing.T) *stubllm.Server {
 func fallbackHome(t *testing.T, primary, backup *stubllm.Server) string {
 	t.Helper()
 	home := t.TempDir()
+	writeFallbackConfig(t, home, primary, backup)
+	return home
+}
+
+// writeFallbackConfig writes home's config.yaml: the startup entry `primary` at primary's endpoint,
+// falling back to `backup` at backup's. Rewriting it over a home that already holds records is how
+// a test points the same entry names at fresh servers.
+func writeFallbackConfig(t *testing.T, home string, primary, backup *stubllm.Server) {
+	t.Helper()
 	writeConfigHome(t, home,
 		"context-window: 32768\n"+
 			"re-stream-budget: 0\n"+
@@ -77,7 +90,6 @@ func fallbackHome(t *testing.T, primary, backup *stubllm.Server) string {
 			"    endpoint: "+backup.URL+"\n"+
 			"    model: "+backup.Model+"\n"+
 			"server: primary\n")
-	return home
 }
 
 // startHeadless runs `apogee headless` against home on its own goroutine, with the real runner.
@@ -289,5 +301,61 @@ func TestHeadlessFallbackUnknownNameIsRefused(t *testing.T) {
 	}
 	if got := len(primary.Requests()); got != 0 {
 		t.Errorf("the primary saw %d requests, want none", got)
+	}
+}
+
+// fallbackResumePrompt and fallbackResumeAnswer are the one Exchange a resumed fallen-over session runs, on the
+// primary the config names.
+const (
+	fallbackResumePrompt = "Carry on from where the backup left off."
+	fallbackResumeAnswer = "Picked up on the primary again."
+)
+
+// TestResumeAfterFallbackDialsThePrimary: a run that fell over to the backup is saved naming the
+// backup's model — the model it finished on — yet resuming it starts on the configured primary
+// (ADR 0028 D5): the fallover is the run's, never the record's server. The primary that died is
+// replaced by a fresh one under the same entry name, and the resumed session's prompt goes to it
+// while the backup sees nothing past the run's one resend.
+func TestResumeAfterFallbackDialsThePrimary(t *testing.T) {
+	primary, backup := dyingPrimary(t), backupServer(t)
+	home := fallbackHome(t, primary, backup)
+	done := startHeadless(t, home)
+
+	killHeldPrimary(t, primary)
+	if res := awaitHeadless(t, done); res.err != nil {
+		t.Fatalf("headless: %v (exit %d)\n%s", res.err, exitCodeFor(res.err), res.stderr)
+	}
+	metas, err := session.NewStore(filepath.Join(home, sessionsDirName)).List()
+	if err != nil || len(metas) != 1 {
+		t.Fatalf("the sessions dir lists %d records (%v), want the fallen-over run's one", len(metas), err)
+	}
+	if got := metas[0].Model; got != backup.Model {
+		t.Errorf("the record names model %q, want the fallback's %q", got, backup.Model)
+	}
+
+	revived := stubllm.New(t, stubllm.Script{Model: primary.Model, Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: "^" + fallbackResumePrompt}, Repeat: true, Text: fallbackResumeAnswer},
+		// Anything else — a title or a Mechanism's own call — so the script never runs dry.
+		{Repeat: true, Text: "Nothing else to add."},
+	}})
+	writeFallbackConfig(t, home, revived, backup)
+
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOn(t, drv, revived, home, "", "--resume", metas[0].ID)
+	waitIdle(drv)
+	submit(drv, fallbackResumePrompt)
+	drv.WaitText(fallbackResumeAnswer)
+	waitIdle(drv)
+
+	if !slices.ContainsFunc(revived.Requests(), func(r stubllm.Request) bool {
+		return strings.Contains(string(r.Body), fallbackResumePrompt)
+	}) {
+		t.Errorf("the revived primary never saw the resumed prompt; it saw %d requests", len(revived.Requests()))
+	}
+	if got := len(backup.Requests()); got != 1 {
+		t.Errorf("the backup saw %d requests, want only the run's one resend", got)
+	}
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the resumed session returned %v; want a clean quit", err)
 	}
 }

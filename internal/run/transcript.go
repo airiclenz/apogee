@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -110,6 +111,11 @@ func (f *transcriptFold) fold(e domain.Event) {
 		// reader of the record is told it may be missing text. Worded by the event itself
 		// (MalformedChunksEvent.Notice), as the clip above is.
 		f.appendText(session.EntryKindNote, ev.Notice(), ev.EventBase)
+	case domain.UpstreamSwitchedEvent:
+		// A note too: the run went on, on another server (ADR 0105), and the reader of the record is
+		// told where and why — the event's own sentence, every Driver's wording. Escape-stripped to
+		// one line because the model it names is the fallback server's to report.
+		f.appendText(session.EntryKindNote, sanitize.StripEscapesToLine(ev.Notice()), ev.EventBase)
 	}
 }
 
