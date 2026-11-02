@@ -130,7 +130,7 @@ func (realLauncher) unload(backend, addr string) (*llamalauncher.StopResult, err
 //   - anything else ⇒ that path, `~` expanded, and on regardless of whether the file exists.
 //
 // A resolved path is installed by whatever puts the session ON a server — startup entry selection,
-// a bind, a `/server` switch — and NOT by a launcher profile load that moves the session, possibly
+// a bind, a `/server` switch, a session-seat Server fallback — and NOT by a launcher profile load that moves the session, possibly
 // to an endpoint no entry names: that move must leave the integration as it found it, so the
 // session that just used the launcher still has it.
 func entryLauncherPath(value string) (string, bool) {
@@ -217,11 +217,11 @@ func (p *launcherPath) set(path, entry string) {
 
 // follow installs the launcher config this entry names, and is the whole of "the integration
 // follows the session's server": whatever puts the session ON a `servers:` entry — startup
-// selection, the first bind out of a pre-bound start, a `/server` switch — resolves that entry's
-// own key here, so an entry with no key switches the verbs off exactly as one with a key switches
-// them on.
+// selection, the first bind out of a pre-bound start, a `/server` switch, a session-seat Server
+// fallback — resolves that entry's own key here, so an entry with no key switches the verbs off
+// exactly as one with a key switches them on.
 //
-// It is called by those three sites and NOT by the shared move underneath them (sessionMover.move):
+// It is called by those four sites and NOT by the shared move underneath them (sessionMover.move):
 // a Launch profile load can move the session too, possibly to an endpoint no entry names, and that
 // move must leave the integration as it found it — the session that just used the launcher still
 // has it. Routing the install through the entry rather than the move is what keeps the two apart.

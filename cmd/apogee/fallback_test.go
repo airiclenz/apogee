@@ -534,7 +534,7 @@ func TestTUIFallbackFalloverRunsTheHeartbeatTail(t *testing.T) {
 	t.Parallel()
 	seat := newTUIFallbackSeat(t)
 	ctx := context.Background()
-	if _, err := seat.mover.fallover("backup"); err == nil {
+	if _, _, err := seat.mover.fallover("backup"); err == nil {
 		t.Fatal("a follow before any landing was accepted")
 	}
 	if got := seat.holder.Binding().Endpoint; got != "http://127.0.0.1:1" {
@@ -546,7 +546,7 @@ func TestTUIFallbackFalloverRunsTheHeartbeatTail(t *testing.T) {
 	}
 	widths := len(seat.caps.widths)
 
-	result, err := seat.mover.fallover("backup")
+	result, _, err := seat.mover.fallover("backup")
 
 	if err != nil {
 		t.Fatalf("fallover: %v", err)
@@ -609,12 +609,66 @@ func TestTUIFallbackLandsWithOptionsEditedAfterTheResolverWasBuilt(t *testing.T)
 	if answer.Upstream.WorkingWindow != 4096 {
 		t.Errorf("working window = %d, want the edited root 4096", answer.Upstream.WorkingWindow)
 	}
-	result, err := seat.mover.fallover("backup")
+	result, _, err := seat.mover.fallover("backup")
 	if err != nil {
 		t.Fatalf("fallover: %v", err)
 	}
 	if result.ContextWindow != 32768 {
 		t.Errorf("follow reports window %d, want the edited pin 32768", result.ContextWindow)
+	}
+}
+
+// TestTUIFallbackFalloverFollowsTheLauncherPath: a session-seat fallover installs the launcher the
+// fallback's entry names, exactly as `/server` onto it would — off when the fallback carries no
+// `llama-launcher:` key though the primary did, and on against the fallback's own config when it
+// carries one. A refused follow leaves the launcher where the session still is.
+func TestTUIFallbackFalloverFollowsTheLauncherPath(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		launcher  string
+		wantPath  string
+		wantEntry string
+	}{
+		{name: "plain fallback switches the launcher off", launcher: "", wantPath: "", wantEntry: ""},
+		{name: "launcher-fronted fallback names its own config", launcher: "/fallback/launcher.yaml",
+			wantPath: "/fallback/launcher.yaml", wantEntry: "backup"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			seat := newTUIFallbackSeat(t)
+			servers := slices.Clone(seat.live.serverList())
+			for i := range servers {
+				if servers[i].Name == "backup" {
+					servers[i].LlamaLauncher = tc.launcher
+				}
+			}
+			seat.live.setServers(servers)
+			w := &rootWiring{mover: seat.mover, launcherPath: newLauncherPath("/primary/launcher.yaml", "primary")}
+			if _, err := w.followFallback("backup"); err == nil {
+				t.Fatal("a follow before any landing was accepted")
+			}
+			if got := w.launcherPath.get(); got != "/primary/launcher.yaml" {
+				t.Fatalf("the refused follow moved the launcher path to %q", got)
+			}
+			answer := seat.mover.fallback.Resolve(context.Background(),
+				apogee.FallbackReport{Server: "primary", Model: "primary-model"})
+			if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" {
+				t.Fatalf("answer = %+v, want a switch onto backup", answer)
+			}
+
+			if _, err := w.followFallback("backup"); err != nil {
+				t.Fatalf("follow: %v", err)
+			}
+
+			if got := w.launcherPath.get(); got != tc.wantPath {
+				t.Errorf("launcher path = %q, want %q", got, tc.wantPath)
+			}
+			if got := w.launcherPath.entry(); got != tc.wantEntry {
+				t.Errorf("actuating entry = %q, want %q", got, tc.wantEntry)
+			}
+		})
 	}
 }
 

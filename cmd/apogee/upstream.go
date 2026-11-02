@@ -377,15 +377,18 @@ func (m sessionMover) arrive(entry config.ServerEntry, dial upstreamBinding, mod
 // edit re-states the fallback's window and dial rather than the primary's.
 //
 // It answers what the display adopts — the endpoint, the alias, the model and the window the engine
-// was handed, and the window and dial the fallback's beat reported — and an error when the seat
-// never landed on that name, which leaves everything where it was.
-func (m sessionMover) fallover(name string) (tui.ServerFallbackResult, error) {
+// was handed, and the window and dial the fallback's beat reported — beside the entry it arrived on,
+// so the caller's own follow (rootWiring.followFallback) reads the very landing this one did; and an
+// error when the seat never landed on that name, which leaves everything where it was.
+func (m sessionMover) fallover(name string) (tui.ServerFallbackResult, config.ServerEntry, error) {
 	if m.fallback == nil {
-		return tui.ServerFallbackResult{}, fmt.Errorf("server fallback onto %q: no fallback is wired", name)
+		return tui.ServerFallbackResult{}, config.ServerEntry{},
+			fmt.Errorf("server fallback onto %q: no fallback is wired", name)
 	}
 	landing, ok := m.fallback.landing(name)
 	if !ok {
-		return tui.ServerFallbackResult{}, fmt.Errorf("server fallback onto %q: the seat never landed there", name)
+		return tui.ServerFallbackResult{}, config.ServerEntry{},
+			fmt.Errorf("server fallback onto %q: the seat never landed there", name)
 	}
 	model := landing.answer.Rebind.Model
 	m.arrive(landing.entry, landing.dial, model)
@@ -398,7 +401,7 @@ func (m sessionMover) fallover(name string) (tui.ServerFallbackResult, error) {
 		ContextWindow:   landing.answer.Rebind.MaxContextTokens,
 		ObservedWindow:  landing.observed.ContextWindow,
 		ObservedDialect: dialect,
-	}, nil
+	}, landing.entry, nil
 }
 
 // upstreamChoices assembles the servers this session can be switched to: the `servers:` list

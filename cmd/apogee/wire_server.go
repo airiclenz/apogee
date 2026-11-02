@@ -316,7 +316,7 @@ func (h serverHost) Bind(name string) (tui.ServerSwitchResult, error) { return h
 func (h serverHost) RecordChoice(name string) (bool, error) { return h.w.recordServerChoice(name) }
 
 // FollowFallback moves everything outside the engine onto the fallback the session seat fell over
-// to mid-Turn (ADR 0105; sessionMover.fallover), from the landing the seat's resolver made.
+// to mid-Turn (ADR 0105; rootWiring.followFallback), from the landing the seat's resolver made.
 func (h serverHost) FollowFallback(name string) (tui.ServerFallbackResult, error) {
-	return h.w.mover.fallover(name)
+	return h.w.followFallback(name)
 }

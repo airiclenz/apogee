@@ -153,6 +153,23 @@ func (w *rootWiring) switchServer(name string) (tui.ServerSwitchResult, error) {
 	return result, nil
 }
 
+// followFallback is the composition root's half of a session-seat Server fallback (ADR 0105): the
+// engine has already rehomed onto the fallback named mid-Turn, the mover follows it with everything
+// the shared arrival touches (sessionMover.fallover), and this adds what `/server` adds on top of
+// that arrival — the launcher follows the fallback's entry, on against its own `llama-launcher:` key
+// or off when it carries none, so `/model`, `/stop-server` and `/unload-model` act on the server the
+// session is now on. As at the switch, the install sits here and never in the shared arrival a
+// profile load also reaches, and only after the follow SUCCEEDED, so a refused one leaves the
+// launcher where the session still is.
+func (w *rootWiring) followFallback(name string) (tui.ServerFallbackResult, error) {
+	result, entry, err := w.mover.fallover(name)
+	if err != nil {
+		return tui.ServerFallbackResult{}, err
+	}
+	w.launcherPath.follow(entry)
+	return result, nil
+}
+
 // recordServerChoice is the composition root's half of ADR 0036 decision 2 — the `server:` key this
 // session's last deliberate choice becomes, so the NEXT session starts where this one ended without
 // asking. It is spliced into the same config.yaml every other write goes through (the ADR 0035

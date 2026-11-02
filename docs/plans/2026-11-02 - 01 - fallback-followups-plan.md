@@ -109,8 +109,11 @@ Closes the defect that a routed child rehomed onto a fallback takes the session'
 **Closes:** routed-rehome-root-pins
 **Commit:** `fix(delegation): a rehomed routed child binds as its Delegation target`
 
-## 5. A TUI fallover follows the launcher path
+## 5. A TUI fallover follows the launcher path — ✅ DONE (2026-11-02)
 
+NOTES (2026-11-02): `sessionMover.fallover` now returns the landing's entry beside its result (the plan's "fallover returns it" option), so `rootWiring.followFallback` follows the very landing the mover arrived on rather than reading the landing a second time; the three existing `fallover` call sites in fallback_test.go take the extra return.
+NOTES (2026-11-02): consequential edit — cmd/apogee/launcher.go: made necessary by followFallback installing the launcher path (the `launcherPath.follow` and `entryLauncherPath` comments enumerated the install sites as three; now four, naming the session-seat Server fallback).
+NOTES (2026-11-02): consequential edit — docs/manual/configuration.md: made necessary by the launcher following a fallover (the fallback section said only the footer and heartbeat follow; the llama-launcher section's "The launcher follows the session" paragraph now names a server fallback).
 **What:**
 Depends on item 4.
 Part of fallover-skips-profile-settle (launcher half; item 7 closes it).

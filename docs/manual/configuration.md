@@ -2376,7 +2376,8 @@ there is no chaining.
 In the TUI the move is one line in the transcript —
 `server fallback: <server> (<model>) failed (<fault>); continuing on <fallback> (<model>) after waiting <time>`,
 or `sub-agents server fallback: …` when the moved server is `sub-agents-server`'s — and after a
-move of the session's own server the footer and the heartbeat follow the fallback.
+move of the session's own server the footer, the heartbeat and the
+[llama-launcher](#local-servers--llama-launcher) commands follow the fallback.
 
 **The move is one-way.** apogee never moves back to the first server by itself; in the TUI,
 `/server` moves you back when you want. It moves the whole seat: the session and every
@@ -2676,7 +2677,10 @@ servers:
 **The launcher follows the session.** While you are on an entry that carries the key,
 `/model` answers from the launcher's side and the other two verbs act on that server;
 `/server` onto any other entry — the rented box above, an OpenRouter — and the same
-`/model` goes back to listing what *that* server advertises. This is the point of the
+`/model` goes back to listing what *that* server advertises. A
+[server fallback](#moving-to-another-server-when-one-fails--fallback) moves it the same way:
+once the session's server has moved, the three verbs act on the fallback's own launcher, or
+on none when its entry has no key. This is the point of the
 key living on the entry: one config can hold a machine you launch models on and a remote
 provider whose model list you would rather not lose. Coming home is the two steps it
 looks like: `/server workstation`, then `/model`.
