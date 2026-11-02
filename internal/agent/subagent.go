@@ -1485,7 +1485,7 @@ func (a *Agent) startDelegationNaming(ctx context.Context, turn int, callID stri
 	// handed, and the Turn the event is stamped with (turn, the delegation's site's). The goroutine below then touches nothing of
 	// this Agent's or the child's loop state — it writes one field through the child's lock and
 	// emits one event.
-	req := domain.DelegationNaming{Task: sub.task, Routed: sub.ownsUpstream}
+	req := domain.DelegationNaming{Task: sub.task, Routed: sub.seating.ownsUpstream}
 	runID := sub.runID
 	nctx, cancel := context.WithCancel(ctx)
 	wg.Add(1)
@@ -1727,9 +1727,7 @@ type delegation struct {
 
 	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
 	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
-	upstreamOwned bool                   // a routed spawn dialled its own client and the child closes it; an unrouted one borrows the session's
-	fallback      FallbackResolver       // the seat's Server fallback resolver: the parent's for an unrouted spawn, which is on the parent's seat; the target's own (DelegationTarget.Fallback) for a routed one
-	appliedGen    uint64                 // the holder generation whose binding the child's Config reflects: the parent's APPLIED one for an unrouted spawn (followUpstream), 0 on a routed spawn's fresh holder
+	seating       seatBinding            // the child's seat, whole: the parent's inherited by an unrouted spawn (seatBinding.inherit), a fresh owned holder on the target's own resolver for a routed one (ownedSeat)
 	dial          Dialer                 // the parent's Dialer, inherited: the seam a routed grandchild's client is dialled through (Dialer)
 	tap           *wireTap               // the Inspector seam of a client this spawn BUILT, bound once the child's identity is stamped; nil when unrouted
 
@@ -1901,11 +1899,13 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	// The Upstream travels as the parent's HOLDER (sharedupstream.go), not as the Responder it holds
 	// today: an unrouted child reads the very cell its parent reads, so an Upstream put into that cell
 	// later reaches the child at its next request too. A routed spawn gets a holder of its own below.
+	// The seat travels whole (seatBinding): the Server fallback travels with it (ADR 0105), so an
+	// unrouted child is on its parent's seat — the parent's holder and resolver, from the generation
+	// the parent has APPLIED, owning nothing (inherit) — while a routed child is on the Sub-agents
+	// seat, a holder of its own at generation zero whose client it DIALS and may tear down, consulting
+	// the seat's own resolver the target carries (DelegationTarget.Fallback), never the session's.
 	var tap *wireTap
-	upstream := a.upstream
-	// ownsUpstream travels with the client below: a routed spawn DIALS one and hands the child the
-	// right to tear it down, an unrouted spawn borrows the session's and hands over nothing.
-	ownsUpstream := false
+	seating := a.seating.inherit()
 	// The routed server's effort dialect, kept out of the block below because the value it settles
 	// is composed after it (delegation.effortDialect). The zero is the honest "this spawn is not
 	// routed, or its target names no dialect" — both leave the parent's shape standing.
@@ -1941,18 +1941,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		routedDialect = target.EffortDialect
 		var opts []provider.Option
 		opts, tap = dialOptions(childCfg)
-		upstream = newSharedUpstreamOn(domain.UpstreamSeatSubAgents, a.dial(target.Endpoint, target.Model, target.APIKey, opts...))
-		ownsUpstream = true
-	}
-	// The Server fallback travels with the seat (ADR 0105): an unrouted child is on its parent's seat,
-	// so it consults the parent's resolver and starts from the generation the parent has APPLIED —
-	// the one its inherited Config reflects — never the holder's current one, so a move the parent
-	// has not followed yet is followed by the child at its first Step. A routed child is on the
-	// Sub-agents seat, a holder of its own at generation zero, and consults the seat's own resolver
-	// the target carries (DelegationTarget.Fallback) — never the session's.
-	fallback, appliedGen := a.fallback, a.appliedGen
-	if target != nil {
-		fallback, appliedGen = target.Fallback, 0
+		seating = ownedSeat(newSharedUpstreamOn(domain.UpstreamSeatSubAgents, a.dial(target.Endpoint, target.Model, target.APIKey, opts...)), target.Fallback)
 	}
 
 	// Everything the child is that its Config cannot say is composed HERE, once, as the one value
@@ -2002,9 +1991,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		// leaves the parent's standing, which is exactly what a routed child spoke before the spawn
 		// could tell the difference.
 		effortDialect: a.effortDialect,
-		upstreamOwned: ownsUpstream,
-		fallback:      fallback,
-		appliedGen:    appliedGen,
+		seating:       seating,
 		dial:          a.dial,
 		tap:           tap,
 		// The Console privilege key, minted by the registry that compares it rather than taken from
@@ -2049,7 +2036,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	if seat == seatSession {
 		d.latch = &delegationLatch{}
 	}
-	return newDelegateAgent(childCfg, upstream, d)
+	return newDelegateAgent(childCfg, d)
 }
 
 // childWithheldTools are the two tools NO sub-agent is offered, at any depth and under any `tools`

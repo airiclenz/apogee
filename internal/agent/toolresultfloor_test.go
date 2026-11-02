@@ -101,7 +101,7 @@ func TestOversizedToolResultIsClampedByTheStructuralFloor(t *testing.T) {
 	if len(huge) <= floorChars {
 		t.Fatalf("payload of %d chars does not exceed the floor of %d chars; the test proves nothing", len(huge), floorChars)
 	}
-	a.upstream = newSharedUpstream(scriptedResponder(t,
+	a.seating.upstream = newSharedUpstream(scriptedResponder(t,
 		toolCallTurn("c1", "lookup", `{"q":"everything"}`),
 		contentTurn("all done"),
 	))
@@ -195,7 +195,7 @@ func TestToolResultFloorByteElidesALongSingleLineResult(t *testing.T) {
 	if len(minified) < 4*floorWindow || strings.Contains(minified, "\n") {
 		t.Fatalf("payload is %d chars (want one line of at least %d); the test proves nothing", len(minified), 4*floorWindow)
 	}
-	a.upstream = newSharedUpstream(scriptedResponder(t,
+	a.seating.upstream = newSharedUpstream(scriptedResponder(t,
 		toolCallTurn("c1", "fetch", `{"url":"https://example.test/api"}`),
 		contentTurn("all done"),
 	))

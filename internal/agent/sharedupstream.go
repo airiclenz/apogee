@@ -14,7 +14,7 @@ import (
 // one each of them streams from at its next request.
 //
 // It holds the Responder and nothing about who may close it: ownership stays per Agent
-// (Agent.ownsUpstream), so an unrouted child that shares the holder still never closes the
+// (seatBinding.ownsUpstream), so an unrouted child that shares the holder still never closes the
 // session's client. A server switch installs a FRESH holder for the switching Agent rather than
 // replacing this one (SwitchUpstream), which leaves a detached reader that copied the old holder —
 // a background workflow's host (backgroundHost) — on the client it started with.
@@ -25,7 +25,7 @@ import (
 //
 // bound is the binding the latest replacement came with: the fallback a Server fallback rehome moved
 // the seat onto (rehome), nil after a bare replace and before any. Every Agent on the holder notes
-// the generation whose binding its own Config reflects (Agent.appliedGen) and re-applies bound on its
+// the generation whose binding its own Config reflects (seatBinding.appliedGen) and re-applies bound on its
 // own goroutine when the holder has moved past it (Agent.followUpstream), so the parent and every
 // unrouted child speak to the fallback with the fallback's window, model, profile and dialect.
 //
@@ -192,4 +192,59 @@ func (s *sharedUpstream) binding() (uint64, *rehomeBinding) {
 func (s *sharedUpstream) replacedSince(generation uint64) bool {
 	_, current := s.current()
 	return current != generation
+}
+
+// seatBinding is an Agent's place on a seat, held as ONE value so the four facts that make it up
+// move together: the holder it reads its Upstream through, the Server fallback resolver it consults
+// when that Upstream faults (consultFallback, loop.go; nil consults none), the holder generation whose
+// binding its Config reflects, and whether it dialled the client in the holder. Every place an Agent
+// is built or switched assigns it whole, from one of the three constructors below, so no door can
+// move the holder and forget the resolver or the generation beside it.
+//
+// The seat holds STATE, not a shared Responder: a routed child is on a holder of its own and keeps
+// its own client and Inspector tap (wireTap), and the retired flag a server switch sets lives on
+// the holder (sharedUpstream.retire), which every Agent that copied it reads.
+type seatBinding struct {
+	// upstream is the holder (sharedupstream.go): an Agent's own for a top-level Agent and a routed
+	// child, shared by HANDLE with every unrouted child and a background workflow's host.
+	upstream *sharedUpstream
+	// fallback is the resolver the respond phase consults before it abandons a Turn for a fault
+	// that is the upstream's own (consultFallback, loop.go); nil — every Agent no host handed one —
+	// consults nothing and abandons exactly as before it existed. It is written only where the seat
+	// is assigned and only read after, so it needs no lock.
+	fallback FallbackResolver
+	// appliedGen is the holder generation whose binding this Agent's Config reflects: the holder's
+	// binding is re-applied, on this Agent's own goroutine, when the holder has moved past it
+	// (followUpstream). Only the goroutine driving this Agent reads or writes it.
+	appliedGen uint64
+	// ownsUpstream says whether THIS Agent dialled the client in upstream and is therefore the one
+	// allowed to tear it down. An unrouted child, a background host and the fake Responder a test
+	// injects through newAgent own nothing. Close and SwitchUpstream consult it before closing, so a
+	// shared client outlives every child that borrowed it and is closed exactly once — by its owner.
+	ownsUpstream bool
+}
+
+// ownedSeat is the seat of an Agent that dialled the client in up itself — New and Resume for the
+// session, a ROUTED spawn for the Sub-agents seat (the target's own resolver,
+// DelegationTarget.Fallback, never the session's): it owns the client, consults fallback, and
+// starts at generation zero, which is where a fresh holder is.
+func ownedSeat(up *sharedUpstream, fallback FallbackResolver) seatBinding {
+	return seatBinding{upstream: up, fallback: fallback, ownsUpstream: true}
+}
+
+// inherit is the seat of an Agent that sits on s's seat without dialling anything — an unrouted
+// child, or a background workflow's host: the same holder and resolver, so a fault on it falls over
+// with the seat (ADR 0105), and the generation s has APPLIED, never the holder's current one, since
+// the inheritor starts from a Config that reflects exactly that generation — a move s has not
+// followed yet is followed at the inheritor's first Step. It owns nothing, so it never closes the
+// client out from under the Agent still speaking over it.
+func (s seatBinding) inherit() seatBinding {
+	return seatBinding{upstream: s.upstream, fallback: s.fallback, appliedGen: s.appliedGen}
+}
+
+// switched is the seat a server switch (SwitchUpstream) moves s onto: up, a fresh holder this Agent
+// dialled, owned and at generation zero — and s's resolver KEPT, since a switch moves the seat to
+// another server and never takes away the fallover the host armed for it.
+func (s seatBinding) switched(up *sharedUpstream) seatBinding {
+	return ownedSeat(up, s.fallback)
 }

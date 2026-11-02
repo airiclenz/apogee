@@ -1602,16 +1602,16 @@ func TestUnroutedChildNeverClosesTheParentsClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	parent.ownsUpstream = true // what New does for a session that dialled its own client
+	parent.seating.ownsUpstream = true // what New does for a session that dialled its own client
 
 	child, err := parent.newChildAgent("c1", "summarise the repo", "")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
-	if child.upstream.responder() != provider.Responder(shared) {
-		t.Fatalf("unrouted child Upstream = %T, want the parent's shared responder", child.upstream.responder())
+	if child.seating.upstream.responder() != provider.Responder(shared) {
+		t.Fatalf("unrouted child Upstream = %T, want the parent's shared responder", child.seating.upstream.responder())
 	}
-	if child.ownsUpstream {
+	if child.seating.ownsUpstream {
 		t.Error("unrouted child claims to own the parent's client")
 	}
 
@@ -2719,8 +2719,8 @@ func TestNewChildAgent_IsBuiltFromOneDelegationValue(t *testing.T) {
 	if !child.midExchangeCompaction {
 		t.Error("a delegate folds mid-Exchange; the contract is set at construction")
 	}
-	if child.ownsUpstream || child.seatFallback {
-		t.Errorf("unrouted default-seat child: ownsUpstream = %v, seatFallback = %v, want both false", child.ownsUpstream, child.seatFallback)
+	if child.seating.ownsUpstream || child.seatFallback {
+		t.Errorf("unrouted default-seat child: ownsUpstream = %v, seatFallback = %v, want both false", child.seating.ownsUpstream, child.seatFallback)
 	}
 	if child.consoleOwner == "" {
 		t.Error("child.consoleOwner is empty; a delegate carries the engine-minted Console privilege key")

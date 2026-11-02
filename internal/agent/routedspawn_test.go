@@ -91,14 +91,14 @@ func TestRoutedSpawnBuildsFromTheTarget(t *testing.T) {
 	}
 	// The child dials the Sub-agent server itself: a client built from the target, never the
 	// session's responder. The parent's own Upstream is untouched by the routing.
-	if child.upstream.responder() == nil {
+	if child.seating.upstream.responder() == nil {
 		t.Fatal("routed child has no Upstream")
 	}
-	if child.upstream.responder() == parent.upstream.responder() {
+	if child.seating.upstream.responder() == parent.seating.upstream.responder() {
 		t.Error("routed child reuses the parent's Upstream responder, want its own client on the target")
 	}
-	if _, ok := parent.upstream.responder().(*scriptedUpstream); !ok {
-		t.Errorf("parent Upstream = %T after a routed spawn, want its own scripted upstream untouched", parent.upstream.responder())
+	if _, ok := parent.seating.upstream.responder().(*scriptedUpstream); !ok {
+		t.Errorf("parent Upstream = %T after a routed spawn, want its own scripted upstream untouched", parent.seating.upstream.responder())
 	}
 	// The profile rides the routing (ADR 0044/0045): the child's stripper is the target model's,
 	// so a delimited thinking channel leaves the visible content in the CHILD even though the
@@ -136,7 +136,7 @@ func TestUnroutedSpawnInheritsTheParent(t *testing.T) {
 		t.Errorf("unrouted child window = %d, want the parent's %d",
 			child.cfg.Context.MaxContextTokens, parent.cfg.Context.MaxContextTokens)
 	}
-	if child.upstream != parent.upstream {
+	if child.seating.upstream != parent.seating.upstream {
 		t.Error("unrouted child does not share the parent's Upstream responder, want today's path verbatim")
 	}
 }
@@ -357,15 +357,15 @@ func TestLatchSwapReachesOnlyLaterSpawns(t *testing.T) {
 	parent.SetDelegationTarget(nil) // the Sub-agent server went away
 	after := spawn(t, parent)
 
-	if before.cfg.Model != parent.cfg.Model || before.upstream != parent.upstream {
+	if before.cfg.Model != parent.cfg.Model || before.seating.upstream != parent.seating.upstream {
 		t.Errorf("child spawned BEFORE the target was latched = model %q, want the parent's %q on the parent's Upstream",
 			before.cfg.Model, parent.cfg.Model)
 	}
-	if during.cfg.Model != "cheap-4b" || during.upstream.responder() == parent.upstream.responder() {
+	if during.cfg.Model != "cheap-4b" || during.seating.upstream.responder() == parent.seating.upstream.responder() {
 		t.Errorf("child spawned WHILE the target was latched = model %q on the parent's Upstream (%v), want the routed cheap-4b on its own",
-			during.cfg.Model, during.upstream.responder() == parent.upstream.responder())
+			during.cfg.Model, during.seating.upstream.responder() == parent.seating.upstream.responder())
 	}
-	if after.cfg.Model != parent.cfg.Model || after.upstream != parent.upstream {
+	if after.cfg.Model != parent.cfg.Model || after.seating.upstream != parent.seating.upstream {
 		t.Errorf("child spawned AFTER the clearing push = model %q, want the parent's %q on the parent's Upstream",
 			after.cfg.Model, parent.cfg.Model)
 	}
@@ -388,13 +388,13 @@ func TestRoutedSpawnClosesItsOwnClient(t *testing.T) {
 
 	child := spawn(t, parent)
 
-	if child.upstream.responder() != dialled {
-		t.Fatalf("routed child Upstream = %T, want the client the spawn dialled through the Dialer", child.upstream.responder())
+	if child.seating.upstream.responder() != dialled {
+		t.Fatalf("routed child Upstream = %T, want the client the spawn dialled through the Dialer", child.seating.upstream.responder())
 	}
-	if !child.ownsUpstream {
+	if !child.seating.ownsUpstream {
 		t.Fatal("routed child does not own the client it dialled — nothing would ever close it")
 	}
-	if parent.ownsUpstream {
+	if parent.seating.ownsUpstream {
 		t.Error("routing gave the parent ownership of a client it did not build")
 	}
 

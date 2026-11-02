@@ -65,7 +65,7 @@ type completion struct {
 // order, beside the model req named: a block replays only to the model that produced it, so the
 // completion records which one that was.
 func (a *Agent) collectCompletion(ctx context.Context, req provider.Request, observe func(provider.Delta)) completion {
-	up, generation := a.upstream.current()
+	up, generation := a.seating.upstream.current()
 	out := completion{requested: req.Model, generation: generation}
 	var content, thinking strings.Builder
 	for delta := range up.Stream(ctx, req) {

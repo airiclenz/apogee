@@ -280,7 +280,7 @@ func assertUpstreamUnmoved(t *testing.T, a *Agent, apiKey string) {
 	if a.cfg.Model != "test-model" {
 		t.Errorf("model = %q after the refusal, want it still bound", a.cfg.Model)
 	}
-	if _, swapped := a.upstream.responder().(*provider.Client); swapped {
+	if _, swapped := a.seating.upstream.responder().(*provider.Client); swapped {
 		t.Error("a refused SwitchUpstream still swapped in a real provider client")
 	}
 }
@@ -309,7 +309,7 @@ func TestSwitchUpstreamClosesTheClientItReplaces(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
-			a.ownsUpstream = tc.owns
+			a.seating.ownsUpstream = tc.owns
 
 			if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://new.local:1234"}); err != nil {
 				t.Fatalf("SwitchUpstream: %v", err)
@@ -317,11 +317,11 @@ func TestSwitchUpstreamClosesTheClientItReplaces(t *testing.T) {
 			if retired.closes != tc.wantCloses {
 				t.Errorf("retired client closed %d times, want %d", retired.closes, tc.wantCloses)
 			}
-			if !a.ownsUpstream {
+			if !a.seating.ownsUpstream {
 				t.Error("the session does not own the client the switch dialled — nothing would ever close it")
 			}
-			if _, ok := a.upstream.responder().(*provider.Client); !ok {
-				t.Errorf("Upstream = %T after the switch, want the fresh *provider.Client", a.upstream.responder())
+			if _, ok := a.seating.upstream.responder().(*provider.Client); !ok {
+				t.Errorf("Upstream = %T after the switch, want the fresh *provider.Client", a.seating.upstream.responder())
 			}
 		})
 	}

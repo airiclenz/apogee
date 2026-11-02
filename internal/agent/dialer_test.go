@@ -126,10 +126,10 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if a.upstream.responder() != session {
-		t.Fatalf("New bound %T as the Upstream, want the Responder the Dialer answered the session dial with", a.upstream.responder())
+	if a.seating.upstream.responder() != session {
+		t.Fatalf("New bound %T as the Upstream, want the Responder the Dialer answered the session dial with", a.seating.upstream.responder())
 	}
-	if !a.ownsUpstream {
+	if !a.seating.ownsUpstream {
 		t.Error("New left the dialled client unowned; Close would never tear it down")
 	}
 
@@ -137,24 +137,24 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	target.ServerName = "grunt-box"
 	a.SetDelegationTarget(target)
 	child := spawn(t, a)
-	if child.upstream.responder() != grunt {
-		t.Errorf("routed child Upstream = %T, want the Responder the Dialer answered the target dial with", child.upstream.responder())
+	if child.seating.upstream.responder() != grunt {
+		t.Errorf("routed child Upstream = %T, want the Responder the Dialer answered the target dial with", child.seating.upstream.responder())
 	}
-	if !child.ownsUpstream {
+	if !child.seating.ownsUpstream {
 		t.Error("routed child does not own the client the Dialer handed it")
 	}
 	// The grandchild is the inheritance proof: its routed dial can only reach the fake through the
 	// Dialer the child took from its parent.
 	grandchild := spawn(t, child)
-	if grandchild.upstream.responder() != grunt {
-		t.Errorf("routed grandchild Upstream = %T, want the inherited Dialer's answer", grandchild.upstream.responder())
+	if grandchild.seating.upstream.responder() != grunt {
+		t.Errorf("routed grandchild Upstream = %T, want the inherited Dialer's answer", grandchild.seating.upstream.responder())
 	}
 
 	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: switchedEndpoint, APIKey: "new-key", Wire: "anthropic", ServerName: "elsewhere-box"}); err != nil {
 		t.Fatalf("SwitchUpstream: %v", err)
 	}
-	if a.upstream.responder() != switched {
-		t.Errorf("Upstream after the switch = %T, want the Responder the Dialer answered the switch with", a.upstream.responder())
+	if a.seating.upstream.responder() != switched {
+		t.Errorf("Upstream after the switch = %T, want the Responder the Dialer answered the switch with", a.seating.upstream.responder())
 	}
 	if a.cfg.Wire != "anthropic" {
 		t.Errorf("Config.Wire after the switch = %q, want the spec's %q mirrored, so a later dial speaks it", a.cfg.Wire, "anthropic")
@@ -280,8 +280,8 @@ func TestResumeDialsThroughTheDialer(t *testing.T) {
 		t.Fatalf("Resume: %v", err)
 	}
 
-	if b.upstream.responder() != resumed {
-		t.Errorf("Resume bound %T as the Upstream, want the Dialer's answer", b.upstream.responder())
+	if b.seating.upstream.responder() != resumed {
+		t.Errorf("Resume bound %T as the Upstream, want the Dialer's answer", b.seating.upstream.responder())
 	}
 	want := []dialRecord{{endpoint: cfg.Endpoint, model: cfg.Model, apiKey: "resumed-key", wire: provider.WireOpenAI, idle: cfg.StreamIdleTimeout, idEndpoint: cfg.Endpoint}}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
@@ -303,8 +303,8 @@ func TestWithDialerNilKeepsTheDefault(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = a.Close() })
 
-	if _, ok := a.upstream.responder().(*provider.Client); !ok {
-		t.Errorf("Upstream = %T under WithDialer(nil), want the default provider client", a.upstream.responder())
+	if _, ok := a.seating.upstream.responder().(*provider.Client); !ok {
+		t.Errorf("Upstream = %T under WithDialer(nil), want the default provider client", a.seating.upstream.responder())
 	}
 	if a.dial == nil {
 		t.Error("the Agent holds no Dialer; its next switch or routed spawn would panic")

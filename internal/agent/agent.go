@@ -69,8 +69,12 @@ import (
 // latch and, for a usable target, states the far width; SetDelegationSeat moves the seat and
 // forgets that far width (farWidth, below).
 type Agent struct {
-	cfg      domain.Config
-	upstream *sharedUpstream // provider seam (Decision C): fake in tests, real HTTP via New; shared by HANDLE with every unrouted child (sharedupstream.go)
+	cfg domain.Config
+	// seating is this Agent's place on its seat — the Upstream holder (the provider seam, Decision C:
+	// fake in tests, real HTTP via New; shared by HANDLE with every unrouted child), the Server fallback
+	// resolver, the applied holder generation and whether this Agent owns the client — held as one
+	// value and assigned whole wherever the Agent is built or switched (seatBinding, sharedupstream.go).
+	seating seatBinding
 
 	// dial is the one seam every provider dial this Agent ever makes crosses (Dialer): New and
 	// Resume dial the session's client through it, SwitchUpstream dials the replacement, and a
@@ -104,14 +108,6 @@ type Agent struct {
 
 	tools  *domain.ToolRegistry // resolved tool set (Config.Tools, or the default registry composed over the roster ladder)
 	guards security.Guards      // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
-
-	// ownsUpstream says whether THIS Agent dialled the client in upstream and is therefore the one
-	// allowed to tear it down. New, Resume, SwitchUpstream and a ROUTED spawn each build a client of
-	// their own and set it; a plain spawn speaks over the PARENT's client (newChildAgent) and leaves
-	// it false, as does the fake Responder a test injects through newAgent. Close and SwitchUpstream
-	// consult it before closing, so a shared client outlives every child that borrowed it and is
-	// closed exactly once — by its owner.
-	ownsUpstream bool
 
 	// ownsToolSet says whether the ENGINE composed the tool set in tools — resolveTools' default
 	// branch, the build's menu with the roster ladder applied (ADR 0057) — and may therefore
@@ -534,18 +530,6 @@ type Agent struct {
 	// (restreamHoldoffFor); 0 reads as defaultRestreamHoldoff. Only a test sets it, to skip the
 	// production second. A child inherits it at spawn, so a test's short wait holds across the tree.
 	restreamHoldoff time.Duration
-	// fallback is the resolver the respond phase consults before it abandons a Turn for a fault
-	// that is the upstream's own (consultFallback, loop.go); nil — every Agent no host handed one —
-	// consults nothing and abandons exactly as before it existed. It is set once, at construction
-	// (WithFallbackResolver), and only read after, so it needs no lock. An unrouted child inherits
-	// its parent's at spawn, since it is on its parent's seat (newChildAgentOn).
-	fallback FallbackResolver
-	// appliedGen is the sharedUpstream generation whose binding this Agent's Config reflects: the
-	// holder's binding is re-applied, on this Agent's own goroutine, when the holder has moved past
-	// it (followUpstream). An unrouted child inherits its parent's APPLIED generation at spawn — never
-	// the holder's current one — since it inherits the parent's Config, which reflects exactly that
-	// generation. Only the goroutine driving this Agent reads or writes it.
-	appliedGen uint64
 	// bindMu guards the Config cells a Server fallback rehome writes mid-Turn (applyRehome) against
 	// the exported accessors a Driver calls from its own goroutine while a Step runs (Vision,
 	// VisionRefusal, ThinkingEffort, SetAllowRules, SetReactions). The loop's own cfg reads run on
@@ -997,9 +981,8 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.dial = o.dial       // the seam the dial above crossed is the one every later dial of this Agent crosses
-	a.ownsUpstream = true // this Agent dialled that client, so Close is the one that tears it down
-	a.fallback = o.fallback
+	a.dial = o.dial                                       // the seam the dial above crossed is the one every later dial of this Agent crosses
+	a.seating = ownedSeat(a.seating.upstream, o.fallback) // this Agent dialled that client, so Close is the one that tears it down
 	tap.bind(a)
 	a.bindProjectRun()
 	a.applyConstructionSeed(o)
@@ -1022,9 +1005,8 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 	if err != nil {
 		return nil, err
 	}
-	a.dial = o.dial       // as in New
-	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
-	a.fallback = o.fallback
+	a.dial = o.dial                                       // as in New
+	a.seating = ownedSeat(a.seating.upstream, o.fallback) // as in New: a resumed session dials its own client and owns it
 	tap.bind(a)
 	a.bindProjectRun()
 	a.applyConstructionSeed(o)                     // as in New
@@ -1069,7 +1051,7 @@ func (a *Agent) Close() error {
 		a.background.waitAll()
 	}
 	a.closeConsoles()
-	return a.closeOwnedUpstream(a.upstream.responder())
+	return a.closeOwnedUpstream(a.seating.upstream.responder())
 }
 
 // closeConsoles ends the Consoles this Agent's run is responsible for. Ownership is the Console's
@@ -1091,7 +1073,7 @@ func (a *Agent) closeConsoles() {
 // the io.Closer seam provider.Client satisfies and no in-process fake does. It is the single
 // teardown path: Close applies it to the current Upstream, SwitchUpstream to the one it retires.
 func (a *Agent) closeOwnedUpstream(up provider.Responder) error {
-	if !a.ownsUpstream {
+	if !a.seating.ownsUpstream {
 		return nil
 	}
 	closer, ok := up.(io.Closer)

@@ -1469,7 +1469,7 @@ func TestBackground_AWorkflowKeptAcrossAScratchMoveIsListedAndResumesFromItsHome
 
 	cfg := a.cfg
 	cfg.ScratchDir = a.ScratchDir()
-	b, err := resumeAgent(cfg, snap, a.upstream.responder())
+	b, err := resumeAgent(cfg, snap, a.seating.upstream.responder())
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}

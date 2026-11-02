@@ -730,8 +730,8 @@ const (
 // rehomePending reports whether the Agent's sharedUpstream carries a rehome binding this Agent has
 // not applied yet — a fallback another Agent on the seat moved it onto (followUpstream).
 func (a *Agent) rehomePending() bool {
-	gen, b := a.upstream.binding()
-	return b != nil && gen != a.appliedGen
+	gen, b := a.seating.upstream.binding()
+	return b != nil && gen != a.seating.appliedGen
 }
 
 // faultedOnRetiredUpstream reports whether reply faulted on an Upstream the Agent's sharedUpstream
@@ -739,7 +739,7 @@ func (a *Agent) rehomePending() bool {
 // which the resolver has already answered for. Only an Agent with a resolver asks, and only about a
 // fault that would have reached it (FallbackEligible): with no resolver the loop is unchanged.
 func (a *Agent) faultedOnRetiredUpstream(reply completion) bool {
-	return a.fallback != nil && reply.fault.FallbackEligible() && a.upstream.replacedSince(reply.generation)
+	return a.seating.fallback != nil && reply.fault.FallbackEligible() && a.seating.upstream.replacedSince(reply.generation)
 }
 
 // consultFallback is the respond phase's last stop before it abandons a Turn for a failed reply: when
@@ -759,10 +759,10 @@ func (a *Agent) faultedOnRetiredUpstream(reply completion) bool {
 // leaves step to re-arm the request for it; a switch whose answer cannot be applied, and "none",
 // abandon. A ctx cancelled during the wait is the user's cancel whatever the resolver answered.
 func (a *Agent) consultFallback(ctx context.Context, t *turnRun, reply completion) fallbackStep {
-	if a.fallback == nil || !reply.fault.FallbackEligible() || a.upstream.isRetired() {
+	if a.seating.fallback == nil || !reply.fault.FallbackEligible() || a.seating.upstream.isRetired() {
 		return fallbackAbandon
 	}
-	answer := a.fallback.Resolve(ctx, FallbackReport{
+	answer := a.seating.fallback.Resolve(ctx, FallbackReport{
 		Server:         a.cfg.ServerName,
 		Model:          reply.requested,
 		Fault:          reply.fault,

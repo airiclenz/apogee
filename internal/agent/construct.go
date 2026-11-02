@@ -32,19 +32,19 @@ var (
 // fake. A delegate is built by newDelegateAgent beside it; both are the one construction path
 // (buildAgent) told which of the two it is building.
 func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
-	return buildAgent(cfg, newSharedUpstream(up), nil) // a top-level Agent reads its Upstream through a holder of its own
+	return buildAgent(cfg, seatBinding{upstream: newSharedUpstream(up)}, nil) // a top-level Agent reads its Upstream through a holder of its own; New and Resume own its client (ownedSeat)
 }
 
 // newDelegateAgent constructs a DELEGATE — a sub-agent one nesting level below the parent that
-// composed d (newChildAgentOn, subagent.go) — bound to up, which is the parent's own Upstream
-// holder, shared by handle, or a fresh one over the client a routed spawn dialled. cfg is the parent's Config with the spawn's posture and dial
+// composed d (newChildAgentOn, subagent.go) — on the seat d carries: the parent's own, inherited
+// with its Upstream holder shared by handle, or a fresh one over the client a routed spawn dialled. cfg is the parent's Config with the spawn's posture and dial
 // facts already applied; d is everything else the child is: its identity, its bounds and the
 // handles it shares with the parent. The constructor copies each of those facts into the Agent
 // once, so a child leaves here complete as far as its composer is concerned: newChildAgentOn writes
 // nothing to it afterwards, and only runSubAgent writes the call-derived roster, output target,
 // baseline and step cap after construction (ADR 0083 §3).
-func newDelegateAgent(cfg domain.Config, up *sharedUpstream, d *delegation) (*Agent, error) {
-	return buildAgent(cfg, up, d)
+func newDelegateAgent(cfg domain.Config, d *delegation) (*Agent, error) {
+	return buildAgent(cfg, d.seating, d)
 }
 
 // buildAgent is the one construction path behind newAgent (d == nil) and newDelegateAgent (d set).
@@ -54,8 +54,10 @@ func newDelegateAgent(cfg domain.Config, up *sharedUpstream, d *delegation) (*Ag
 // against the engine's own builtins once those exist (ADR 0076 D1). The two kinds of Agent differ
 // in exactly two places, both marked below: the fields a top-level Agent owns afresh and a delegate
 // takes from d (seedTopLevel / delegation.seed), and the context-file cache, which only a session
-// boundary fills from disk — a delegate is handed its parent's.
-func buildAgent(cfg domain.Config, up *sharedUpstream, d *delegation) (*Agent, error) {
+// boundary fills from disk — a delegate is handed its parent's. seating is the seat the Agent is
+// built on, assigned whole: a holder of its own for newAgent, the one the delegation composed for a
+// delegate (seatBinding).
+func buildAgent(cfg domain.Config, seating seatBinding, d *delegation) (*Agent, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -107,7 +109,7 @@ func buildAgent(cfg domain.Config, up *sharedUpstream, d *delegation) (*Agent, e
 
 	a := &Agent{
 		cfg:                cfg,
-		upstream:           up,
+		seating:            seating, // the seat whole, as its constructor composed it (seatBinding)
 		tools:              resolveTools(cfg),
 		ownsToolSet:        composesDefaultRoster(cfg),                                                                        // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
 		mode:               cfg.Mode,                                                                                          // seed the live, swappable mode from the construction config
@@ -336,10 +338,7 @@ func (d *delegation) seed(a *Agent) {
 	a.cancelFoldBound = d.cancelFoldBound
 	a.restreamHoldoff = d.restreamHoldoff
 	a.effortDialect = d.effortDialect
-	a.dial = d.dial                  // the parent's seam, so a grandchild's routed dial crosses the same one the host injected
-	a.ownsUpstream = d.upstreamOwned // a routed child closes the client it dialled; an unrouted one must never close the session's out from under the parent still speaking over it (Agent.Close)
-	a.fallback = d.fallback          // the seat's resolver: an unrouted child consults its parent's (ADR 0105)
-	a.appliedGen = d.appliedGen      // the generation the inherited Config reflects (followUpstream)
+	a.dial = d.dial // the parent's seam, so a grandchild's routed dial crosses the same one the host injected
 	a.guards = d.guards
 	a.contextFiles = d.contextFiles
 	a.liveMode = d.parentLiveMode

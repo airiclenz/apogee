@@ -127,7 +127,11 @@ cmd/apogee/wire_live.go — newSessionFallback call; cmd/apogee/upstream.go — 
 
 **Commit:** `refactor(cmd): one constructor builds every seat's fallback resolver`
 
-## 4. The engine holds an Agent's seat as one value
+## 4. The engine holds an Agent's seat as one value — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): re-derived from "delegation.seed assigns the seat": buildAgent now takes the seat whole (`seatBinding`) and assigns it once in the Agent literal — newAgent passes a holder of its own, newDelegateAgent(cfg, d) passes d.seating (its separate `up` parameter is dropped) — so seed no longer copies upstream/fallback/appliedGen field by field.
+NOTES (2026-11-02): the constructors are `ownedSeat(up, resolver)` (fresh owned holder at generation 0 — serves New, Resume and a routed spawn with target.Fallback), `seatBinding.inherit()` (unrouted child, background host) and `seatBinding.switched(up)` (SwitchUpstream: ownedSeat keeping the resolver); the Agent field is `seating`, the type lives in sharedupstream.go so the doc.go package map needs no new file.
+NOTES (2026-11-02): consequential edit — internal/agent/background_test.go, internal/agent/dialer_test.go, internal/agent/routedspawn_test.go, internal/agent/seat_test.go, internal/agent/statemachine_test.go, internal/agent/toolresultfloor_test.go: made necessary by moving .upstream/.appliedGen/.ownsUpstream/.fallback into Agent.seating (readers moved with the value, per the item's guard).
 
 **What:**
 **Goal:** an Agent's seat (holder, resolver, applied generation, owns-upstream) is one unexported `internal/agent` value, assigned whole wherever an Agent is built or switched.

@@ -68,10 +68,10 @@ func TestSeat_SessionAskRunsOnTheParentUnderALatchedTarget(t *testing.T) {
 
 	child := spawnOn(t, parent, seatSession)
 
-	if child.upstream != parent.upstream {
+	if child.seating.upstream != parent.seating.upstream {
 		t.Error("session-seated child does not share the parent's Upstream responder, want the unrouted path verbatim")
 	}
-	if child.ownsUpstream {
+	if child.seating.ownsUpstream {
 		t.Error("session-seated child claims to own its Upstream; it borrowed the parent's and must never close it")
 	}
 	if child.cfg.Endpoint != parent.cfg.Endpoint || child.cfg.Model != parent.cfg.Model {
@@ -109,7 +109,7 @@ func TestSeat_SubAgentsServerAskRoutes(t *testing.T) {
 		t.Errorf("routed child dial facts = %q/%q, want the target's %q/%q",
 			child.cfg.Endpoint, child.cfg.Model, target.Endpoint, target.Model)
 	}
-	if child.upstream == parent.upstream || !child.ownsUpstream {
+	if child.seating.upstream == parent.seating.upstream || !child.seating.ownsUpstream {
 		t.Error("routed child did not dial a client of its own, want the routed spawn's own Upstream")
 	}
 	if child.seatFallback {
@@ -129,7 +129,7 @@ func TestSeat_SubAgentsServerAskFallsBackToTheSession(t *testing.T) {
 
 	child := spawnOn(t, parent, seatSubAgentsServer)
 
-	if child.upstream != parent.upstream || child.ownsUpstream {
+	if child.seating.upstream != parent.seating.upstream || child.seating.ownsUpstream {
 		t.Error("fallen-back child did not take the parent's Upstream, want ADR 0045 §4's fallback verbatim")
 	}
 	if !child.seatFallback {
@@ -252,7 +252,7 @@ func TestSeat_SessionSeatedChildDelegatesOnTheSessionServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nested newChildAgent: %v", err)
 	}
-	if grandchild.upstream != parent.upstream || grandchild.ownsUpstream {
+	if grandchild.seating.upstream != parent.seating.upstream || grandchild.seating.ownsUpstream {
 		t.Error("a session-seated child's nested delegation routed away, want it on the session server the branch was put on")
 	}
 

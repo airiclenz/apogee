@@ -661,11 +661,11 @@ func (a *Agent) stopAllBackground() {
 // backgroundHost is the snapshot of this top-level Agent a background workflow runs off (see the file
 // comment): a detached Agent that nothing mutates once it is returned. The idle-only fields — the
 // Config, the Upstream, the tool set, the profile's parsers, the context files, the journal and the
-// effort dialect — are copied as they stand, the Upstream as the HOLDER this Agent read it through at
-// the copy (sharedupstream.go), so a later server switch, which installs a fresh holder on this Agent,
+// effort dialect — are copied as they stand, the Upstream as the seat this Agent is on, inherited
+// whole (seatBinding.inherit): the HOLDER this Agent read it through at the copy (sharedupstream.go), so a later server switch, which installs a fresh holder on this Agent,
 // leaves the workflow on the client it started with, while a Server fallback rehome, which moves the
 // holder itself, reaches the workflow's children too (followUpstream, from the copied appliedGen).
-// The session seat's fallback resolver is copied beside the holder, so a child on it that hits the
+// The session seat's fallback resolver comes with the seat, so a child on it that hits the
 // fault falls over with the seat; once a server switch has retired the holder, that child abandons
 // instead (consultFallback). The lock-guarded live settings are read through their
 // accessors and frozen, all but the mode, which the host holds as a tighten-only view of this
@@ -680,9 +680,7 @@ func (a *Agent) backgroundHost() *Agent {
 	a.parallelAgentsMu.RUnlock()
 	host := &Agent{
 		cfg:                a.cfg,
-		upstream:           a.upstream,
-		appliedGen:         a.appliedGen, // the generation the copied Config reflects, so the host's children follow only a later rehome (followUpstream)
-		fallback:           a.fallback,   // the session seat's resolver, so an unrouted child on the copied holder falls over with the seat
+		seating:            a.seating.inherit(), // the copied holder, the session seat's resolver (an unrouted child on it falls over with the seat) and the generation the copied Config reflects (the host's children follow only a later rehome), owning nothing
 		dial:               a.dial,
 		builtins:           a.builtinLadder(),
 		armed:              a.armed,

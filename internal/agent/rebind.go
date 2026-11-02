@@ -230,7 +230,7 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	// wire model moves only if the Responder is told. It is an optional interface rather than a
 	// widening of the Responder seam: a fake responder in a test simply does not implement it, and
 	// a Responder with no notion of a model id has nothing to rebind.
-	if binder, ok := a.upstream.responder().(interface{ SetModel(string) }); ok {
+	if binder, ok := a.seating.upstream.responder().(interface{ SetModel(string) }); ok {
 		binder.SetModel(spec.Model)
 	}
 	// The dialect the next request expresses its effort in, taken as the spec states it — the zero
@@ -422,19 +422,18 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	// left running — it is not this Agent's to close. The error is dropped deliberately rather than
 	// swallowed: the switch has already committed above, and provider teardown reports nothing a
 	// caller could act on (Client.Close always succeeds), so surfacing it would say the move failed.
-	_ = a.closeOwnedUpstream(a.upstream.responder())
+	_ = a.closeOwnedUpstream(a.seating.upstream.responder())
 	// The holder left behind is retired first: a background workflow child still reading it falls
 	// over no more, so a fault there abandons rather than moving the seat after the human did.
-	a.upstream.retire()
+	a.seating.upstream.retire()
 	// A FRESH holder, never a replace of the one this Agent holds: that holder may be shared — with a
 	// background workflow's host that copied it (backgroundHost), which stays on the client it
 	// started with — so the switch moves this Agent alone, as it always has. It stays on the seat
 	// the old one named, and at generation zero it carries no rehome binding, so the generation this
-	// Agent has applied starts over with it (followUpstream). A seat that had fallen over is moved
-	// back by exactly this door (adr-0028-amend-1102).
-	a.upstream = newSharedUpstreamOn(a.upstream.seatOf(), a.dial(spec.Endpoint, "", spec.APIKey, opts...))
-	a.ownsUpstream = true
-	a.appliedGen = 0
+	// Agent has applied starts over with it (followUpstream). The seat's resolver is kept (switched):
+	// a switch moves the seat to another server and never disarms its fallover. A seat that had
+	// fallen over is moved back by exactly this door (adr-0028-amend-1102).
+	a.seating = a.seating.switched(newSharedUpstreamOn(a.seating.upstream.seatOf(), a.dial(spec.Endpoint, "", spec.APIKey, opts...)))
 	// The projected Config lands whole — the human's words for the box just dialled move WITH it
 	// (ADR 0069: the orientation block's Delegations line describes the session seat from these,
 	// and an empty spec field clears rather than keeps, since the retired server's name describes
@@ -483,7 +482,7 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	// Dialled under the ARRIVED-AT Config, as SwitchUpstream dials: the wire, the idle window and the
 	// passthrough are the fallback's.
 	opts, tap := dialOptions(b.applyTo(a.cfg))
-	retired, outcome := a.upstream.rehome(reply.generation, b, func() provider.Responder {
+	retired, outcome := a.seating.upstream.rehome(reply.generation, b, func() provider.Responder {
 		return a.dial(spec.Endpoint, bind.Model, spec.APIKey, opts...)
 	})
 	switch outcome {
@@ -507,7 +506,7 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 		ToModel:    bind.Model,
 		Fault:      faultLabel(reply.fault),
 		Waited:     answer.Waited,
-		Seat:       a.upstream.seatOf(),
+		Seat:       a.seating.upstream.seatOf(),
 	})
 	return true
 }
@@ -520,7 +519,7 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 // replace moved, so a caller cancelled before it moved anything never spends the claim — and every
 // other sibling moves its own holder silently.
 func (a *Agent) announcesRehome(answer FallbackAnswer) bool {
-	return a.upstream.seatOf() == domain.UpstreamSeatSession || (answer.Announce != nil && answer.Announce())
+	return a.seating.upstream.seatOf() == domain.UpstreamSeatSession || (answer.Announce != nil && answer.Announce())
 }
 
 // followUpstream re-applies the seat's rehome binding to this Agent's Config when the sharedUpstream
@@ -531,11 +530,11 @@ func (a *Agent) announcesRehome(answer FallbackAnswer) bool {
 // fallback's window, model, profile, parsers and effort dialect, never the primary's. A move with no
 // binding (a bare replace) only advances appliedGen.
 func (a *Agent) followUpstream() bool {
-	gen, b := a.upstream.binding()
-	if gen == a.appliedGen {
+	gen, b := a.seating.upstream.binding()
+	if gen == a.seating.appliedGen {
 		return false
 	}
-	a.appliedGen = gen
+	a.seating.appliedGen = gen
 	if b == nil {
 		return false
 	}

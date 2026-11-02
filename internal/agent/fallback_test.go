@@ -114,7 +114,7 @@ func newFallbackAgent(t *testing.T, sink domain.EventSink, responder provider.Re
 		t.Fatalf("newAgent: %v", err)
 	}
 	shortRestreamHoldoff(t, a)
-	a.fallback = resolver
+	a.seating.fallback = resolver
 	return a
 }
 
@@ -320,7 +320,7 @@ func TestFallbackFaultOnARetiredUpstreamResendsWithoutTheResolver(t *testing.T) 
 	}}
 	resolver := resolverAnswering(FallbackNone)
 	a := newFallbackAgent(t, sink, retired, resolver)
-	retired.before = func(int) { a.upstream.replace(current) } // the seat moves while the request streams
+	retired.before = func(int) { a.seating.upstream.replace(current) } // the seat moves while the request streams
 
 	resp, outcome, _ := respondOnce(t, a)
 
@@ -502,7 +502,7 @@ func newSeatRig(t *testing.T, edit func(*domain.Config)) *seatRig {
 		t.Fatalf("newAgent: %v", err)
 	}
 	shortRestreamHoldoff(t, parent)
-	parent.fallback = r.resolver
+	parent.seating.fallback = r.resolver
 	parent.dial = r.dialer.dial
 	r.parent = parent
 	return r
@@ -679,7 +679,7 @@ func TestFallbackSwitchByAnUnroutedChildMovesTheSessionSeat(t *testing.T) {
 	t.Parallel()
 	r := newSeatRig(t, func(cfg *domain.Config) { cfg.Context.CompactionEnabled = true })
 	child := r.child(t, "trigger")
-	if child.fallback != r.resolver {
+	if child.seating.fallback != r.resolver {
 		t.Fatal("the unrouted child did not inherit the session's resolver")
 	}
 
@@ -748,7 +748,7 @@ func TestFallbackBackgroundChildConsultsTheSessionResolver(t *testing.T) {
 	t.Parallel()
 	r := newSeatRig(t, nil)
 	host, child := r.backgroundChild(t, "item")
-	if host.fallback != r.resolver || child.fallback != r.resolver {
+	if host.seating.fallback != r.resolver || child.seating.fallback != r.resolver {
 		t.Fatal("the background host or its child did not carry the session's resolver")
 	}
 
@@ -864,8 +864,8 @@ func TestFallbackSwitchFollowedByEveryAgentOnTheSeat(t *testing.T) {
 	stepOnce(t, r.child(t, "trigger"), "move the seat")
 
 	late := r.child(t, "late")
-	if late.appliedGen != r.parent.appliedGen || late.appliedGen != 0 {
-		t.Fatalf("late child appliedGen = %d, parent's = %d; want the parent's applied 0", late.appliedGen, r.parent.appliedGen)
+	if late.seating.appliedGen != r.parent.seating.appliedGen || late.seating.appliedGen != 0 {
+		t.Fatalf("late child appliedGen = %d, parent's = %d; want the parent's applied 0", late.seating.appliedGen, r.parent.seating.appliedGen)
 	}
 	for name, child := range map[string]*Agent{"early": early, "late": late} {
 		stepOnce(t, child, "work on the seat")
@@ -878,12 +878,12 @@ func TestFallbackSwitchFollowedByEveryAgentOnTheSeat(t *testing.T) {
 	}
 
 	stepOnce(t, r.parent, "the parent follows")
-	if r.parent.appliedGen != 1 {
-		t.Fatalf("parent appliedGen = %d after its Step, want 1", r.parent.appliedGen)
+	if r.parent.seating.appliedGen != 1 {
+		t.Fatalf("parent appliedGen = %d after its Step, want 1", r.parent.seating.appliedGen)
 	}
 	bound := r.child(t, "bound")
-	if bound.appliedGen != 1 || bound.cfg.Model != spareModel {
-		t.Errorf("child spawned after the follow: appliedGen=%d model=%q, want 1 and %q", bound.appliedGen, bound.cfg.Model, spareModel)
+	if bound.seating.appliedGen != 1 || bound.cfg.Model != spareModel {
+		t.Errorf("child spawned after the follow: appliedGen=%d model=%q, want 1 and %q", bound.seating.appliedGen, bound.cfg.Model, spareModel)
 	}
 	if r.primary.calls() != 1 {
 		t.Errorf("primary calls = %d, want only the trigger's", r.primary.calls())
@@ -973,8 +973,8 @@ func TestFallbackSwitchSiblingSentOnThePrimaryResendsOnTheFallback(t *testing.T)
 	if got := r.lastSpareModel(t); got != spareModel {
 		t.Errorf("sibling resend model = %q, want %q", got, spareModel)
 	}
-	if sibling.cfg.ServerName != "spare" || sibling.appliedGen != 1 {
-		t.Errorf("sibling server=%q appliedGen=%d, want spare and 1", sibling.cfg.ServerName, sibling.appliedGen)
+	if sibling.cfg.ServerName != "spare" || sibling.seating.appliedGen != 1 {
+		t.Errorf("sibling server=%q appliedGen=%d, want spare and 1", sibling.cfg.ServerName, sibling.seating.appliedGen)
 	}
 	if r.primary.calls() != 2 || r.spare.calls() != 2 {
 		t.Errorf("calls primary=%d spare=%d, want 2 each", r.primary.calls(), r.spare.calls())
@@ -1027,11 +1027,11 @@ func TestFallbackSwitchLeavesARoutedChildOnItsOwnSeat(t *testing.T) {
 	r := newSeatRig(t, nil)
 	r.parent.SetDelegationTarget(&DelegationTarget{Endpoint: seatGruntEndpoint, Model: "grunt-model"})
 	routed := r.child(t, "routed")
-	if routed.upstream == r.parent.upstream || routed.upstream.seatOf() != domain.UpstreamSeatSubAgents {
+	if routed.seating.upstream == r.parent.seating.upstream || routed.seating.upstream.seatOf() != domain.UpstreamSeatSubAgents {
 		t.Fatalf("routed child seat = %q on the parent's holder = %v; want a Sub-agents holder of its own",
-			routed.upstream.seatOf(), routed.upstream == r.parent.upstream)
+			routed.seating.upstream.seatOf(), routed.seating.upstream == r.parent.seating.upstream)
 	}
-	if routed.fallback != nil {
+	if routed.seating.fallback != nil {
 		t.Error("the routed child holds the session's resolver")
 	}
 
@@ -1041,8 +1041,8 @@ func TestFallbackSwitchLeavesARoutedChildOnItsOwnSeat(t *testing.T) {
 	if r.grunt.calls() != 1 || r.grunt.sent()[0].Model != "grunt-model" {
 		t.Errorf("grunt calls = %d, want 1 on grunt-model", r.grunt.calls())
 	}
-	if routed.cfg.Model != "grunt-model" || routed.appliedGen != 0 {
-		t.Errorf("routed child model=%q appliedGen=%d, want grunt-model and 0", routed.cfg.Model, routed.appliedGen)
+	if routed.cfg.Model != "grunt-model" || routed.seating.appliedGen != 0 {
+		t.Errorf("routed child model=%q appliedGen=%d, want grunt-model and 0", routed.cfg.Model, routed.seating.appliedGen)
 	}
 	if r.spare.calls() != 1 {
 		t.Errorf("spare calls = %d, want only the parent's", r.spare.calls())
@@ -1078,7 +1078,7 @@ func TestFallbackRoutedChildConsultsItsTargetsResolver(t *testing.T) {
 		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", Fallback: seatResolver,
 	})
 	routed := r.child(t, "routed")
-	if routed.fallback != seatResolver {
+	if routed.seating.fallback != seatResolver {
 		t.Fatal("the routed child does not hold its target's resolver")
 	}
 
@@ -1102,7 +1102,7 @@ func TestFallbackRoutedChildConsultsItsTargetsResolver(t *testing.T) {
 		events[0].FromServer != "grunt" || events[0].ToServer != "spare" {
 		t.Fatalf("switched events = %+v, want one sub-agents grunt → spare", events)
 	}
-	if r.parent.upstream.responder() != r.primary {
+	if r.parent.seating.upstream.responder() != r.primary {
 		t.Error("the routed fallover moved the session's seat")
 	}
 }
