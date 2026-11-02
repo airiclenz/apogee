@@ -546,6 +546,23 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"count":2}`,
 		},
 		{
+			name: "upstream_switched",
+			event: domain.UpstreamSwitchedEvent{
+				EventBase:  domain.EventBase{Turn: 5, Depth: 1, CallID: "call-9", RunID: "run-c"},
+				FromServer: "box",
+				FromModel:  "qwen",
+				ToServer:   "cloud",
+				ToModel:    "sonnet",
+				Fault:      "status 503",
+				Waited:     2*time.Minute + 1500*time.Microsecond,
+				Seat:       domain.UpstreamSeatSession,
+			},
+			wantKind: "upstream_switched",
+			wantBase: domain.EventBase{Turn: 5, Depth: 1, CallID: "call-9", RunID: "run-c"},
+			wantData: `{"from_server":"box","from_model":"qwen","to_server":"cloud","to_model":"sonnet",` +
+				`"fault":"status 503","waited_ms":120001,"seat":"session"}`,
+		},
+		{
 			name: "usage",
 			event: domain.UsageEvent{
 				EventBase:          domain.EventBase{Turn: 2},
@@ -1088,6 +1105,7 @@ func TestEncodeMapsEveryEventVariant(t *testing.T) {
 		"WireEvent":              domain.WireEvent{},
 		"UpstreamAttemptEvent":   domain.UpstreamAttemptEvent{},
 		"WorkflowPhaseEvent":     domain.WorkflowPhaseEvent{},
+		"UpstreamSwitchedEvent":  domain.UpstreamSwitchedEvent{},
 	}
 	declared := declaredEventVariants(t)
 	known := make(map[string]bool, len(Kinds()))
@@ -1181,16 +1199,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentyFive pins the vocabulary itself — the twenty-three serialized variants, the
+// TestKindsAreTwentySix pins the vocabulary itself — the twenty-four serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentyFive(t *testing.T) {
+func TestKindsAreTwentySix(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 25 {
-		t.Fatalf("len(Kinds()) = %d, want 25: %v", len(kinds), kinds)
+	if len(kinds) != 26 {
+		t.Fatalf("len(Kinds()) = %d, want 26: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

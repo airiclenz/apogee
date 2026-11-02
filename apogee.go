@@ -423,6 +423,16 @@ type (
 	WireEvent              = domain.WireEvent
 	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent
 	WorkflowPhaseEvent     = domain.WorkflowPhaseEvent
+	UpstreamSwitchedEvent  = domain.UpstreamSwitchedEvent
+)
+
+// UpstreamSeat is the seat an UpstreamSwitchedEvent moved.
+type UpstreamSeat = domain.UpstreamSeat
+
+// The two seats a fallback switch can move.
+const (
+	UpstreamSeatSession   = domain.UpstreamSeatSession
+	UpstreamSeatSubAgents = domain.UpstreamSeatSubAgents
 )
 
 // SubAgentPhase is the phase a SubAgentPhaseEvent reports.

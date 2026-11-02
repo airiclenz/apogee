@@ -121,7 +121,13 @@ internal/provider/wire_anthropic_stream.go — anthropicCodec.parseSSE, anthropi
 **Acceptance:** `GOMEMLIMIT=2GiB go test -count=1 ./internal/provider/`
 **Commit:** `feat(provider): classify upstream faults on the failing delta`
 
-## 4. Event: `upstream_switched`
+## 4. Event: `upstream_switched` — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): `Seat` is typed — `domain.UpstreamSeat` with `UpstreamSeatSession` ("session") and `UpstreamSeatSubAgents` ("sub-agents"), aliased in apogee.go beside the event (house pattern of `SubAgentPhase`); the line's `seat` member carries the plain string. `Waited` travels as `data.waited_ms` (whole milliseconds, as `upstream_attempt`'s clocks), and `Notice()` rounds it to the second.
+
+NOTES (2026-11-02): `TestKindsAreTwentyFive` renamed `TestKindsAreTwentySix`; a `TestUpstreamSwitchedEventNoticeNamesBothServers` test pins the Notice sentence (internal/domain/events_test.go, not on the item's Files line); decode round trip carries both seat values and `lossyView` truncates `Waited` to the millisecond.
+
+NOTES (2026-11-02): consequential edit — internal/eventjson/decode.go: Decode's doc comment on lossy points now names `UpstreamSwitchedEvent.Waited`'s millisecond truncation, made necessary by the new decoder.
 
 **What:**
 Recast at the regression check (2026-11-02).

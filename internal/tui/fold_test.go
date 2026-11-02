@@ -308,6 +308,16 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
+			name: "UpstreamSwitchedEvent is inert in the TUI for now",
+			// A seat failed over to a fallback server. The TUI does not fold it yet: no entry, no
+			// gauge, no phrase, no progress save. The transcript note and the heartbeat follow are
+			// a later change to this row.
+			event: domain.UpstreamSwitchedEvent{
+				FromServer: "box", FromModel: "qwen", ToServer: "cloud", ToModel: "sonnet",
+				Fault: "status 503", Seat: domain.UpstreamSeatSession,
+			},
+		},
+		{
 			name: "UsageEvent at depth 0 moves the gauge and appends no entry",
 			// The top-level reading is the status line's: it lights the gauge and nothing in the
 			// scrollback. A sub-agent's reading (Depth > 0) appends no entry either — it lands ON

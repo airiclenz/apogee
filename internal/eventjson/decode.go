@@ -56,11 +56,11 @@ type Line struct {
 // Encoding then decoding returns the original Event except where the line never carried the fact
 // or carries it in a lossy form: SeamClosedEvent.Value, an image's bytes and a usage line's
 // currency label are not on the line, and a sub_agent_phase line's constant `cancelled` has no
-// field to land in; UpstreamAttemptEvent durations come back truncated to whole milliseconds; a
-// nil Fired comes back as an empty slice and nil receipt Fields as an empty map, while empty Rules
-// and Images come back nil; argument JSON comes back compacted and HTML-escaped, a null one as
-// nil; MalformedArguments.Err comes back as an error carrying only the text, its sentinel chain
-// not rebuilt; a Tool summary of an unknown kind comes back nil.
+// field to land in; UpstreamAttemptEvent durations and UpstreamSwitchedEvent.Waited come back
+// truncated to whole milliseconds; a nil Fired comes back as an empty slice and nil receipt Fields
+// as an empty map, while empty Rules and Images come back nil; argument JSON comes back compacted
+// and HTML-escaped, a null one as nil; MalformedArguments.Err comes back as an error carrying only
+// the text, its sentinel chain not rebuilt; a Tool summary of an unknown kind comes back nil.
 //
 // Decoded text is not sanitized: a reader that paints it strips it at the view.
 func Decode(line []byte) (Line, error) {
@@ -202,6 +202,7 @@ var eventDecoders = map[string]eventDecoder{
 	kindMalformedChunks: decodeWith(func(base domain.EventBase, d malformedChunksData) (domain.Event, error) {
 		return domain.MalformedChunksEvent{EventBase: base, Count: d.Count}, nil
 	}),
+	kindUpstreamSwitched: decodeWith(upstreamSwitchedEventFrom),
 }
 
 // toolResultEventFrom rebuilds a domain.ToolResultEvent, its Tool summary included.
@@ -311,6 +312,21 @@ func upstreamAttemptEventFrom(base domain.EventBase, d upstreamAttemptData) (dom
 		Duration:     time.Duration(d.DurationMs) * time.Millisecond,
 		OutputTokens: d.OutputTokens,
 		Outcome:      d.Outcome,
+	}, nil
+}
+
+// upstreamSwitchedEventFrom rebuilds a domain.UpstreamSwitchedEvent; Waited is the whole
+// milliseconds the line carries.
+func upstreamSwitchedEventFrom(base domain.EventBase, d upstreamSwitchedData) (domain.Event, error) {
+	return domain.UpstreamSwitchedEvent{
+		EventBase:  base,
+		FromServer: d.FromServer,
+		FromModel:  d.FromModel,
+		ToServer:   d.ToServer,
+		ToModel:    d.ToModel,
+		Fault:      d.Fault,
+		Waited:     time.Duration(d.WaitedMs) * time.Millisecond,
+		Seat:       domain.UpstreamSeat(d.Seat),
 	}, nil
 }
 

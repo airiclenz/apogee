@@ -145,6 +145,14 @@ func roundTripEvents() []domain.Event {
 			Tally: &domain.WorkflowTally{OK: 1, Partial: 2, Blocked: 3, Unfinished: 4},
 		},
 		domain.MalformedChunksEvent{EventBase: topLevelBase, Count: 2},
+		domain.UpstreamSwitchedEvent{
+			EventBase: topLevelBase, FromServer: "box", FromModel: "qwen", ToServer: "cloud", ToModel: "sonnet",
+			Fault: "status 503", Waited: 2*time.Minute + 1500*time.Microsecond, Seat: domain.UpstreamSeatSession,
+		},
+		domain.UpstreamSwitchedEvent{
+			EventBase: delegatedBase, FromServer: "helpers", FromModel: "small", ToServer: "spare", ToModel: "tiny",
+			Fault: "transport", Seat: domain.UpstreamSeatSubAgents,
+		},
 	}
 }
 
@@ -367,6 +375,9 @@ func lossyView(event domain.Event) domain.Event {
 	case domain.UpstreamAttemptEvent:
 		e.TTFB, e.TTFT = e.TTFB.Truncate(time.Millisecond), e.TTFT.Truncate(time.Millisecond)
 		e.Last, e.Duration = e.Last.Truncate(time.Millisecond), e.Duration.Truncate(time.Millisecond)
+		return e
+	case domain.UpstreamSwitchedEvent:
+		e.Waited = e.Waited.Truncate(time.Millisecond)
 		return e
 	case domain.WorkflowPhaseEvent:
 		if len(e.Receipt.Fields) == 0 {

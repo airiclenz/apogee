@@ -6,9 +6,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-five line kinds of ADR 0075 §4 — twenty-three Event variants, workflow_phase (ADR 0087),
-// malformed_chunks, sub_agent_group (ADR 0103 decision 13) and context_estimate the newest, plus the
-// two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// The twenty-six line kinds of ADR 0075 §4 — twenty-four Event variants, workflow_phase (ADR 0087),
+// malformed_chunks, sub_agent_group (ADR 0103 decision 13), context_estimate and upstream_switched
+// (adr-0075-amend-1102) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -36,6 +36,7 @@ const (
 	kindMalformedChunks   = "malformed_chunks"
 	kindSubAgentGroup     = "sub_agent_group"
 	kindContextEstimate   = "context_estimate"
+	kindUpstreamSwitched  = "upstream_switched"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -81,6 +82,7 @@ func Kinds() []string {
 		kindMalformedChunks,
 		kindSubAgentGroup,
 		kindContextEstimate,
+		kindUpstreamSwitched,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -221,6 +223,16 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 		return kindWorkflowPhase, e.EventBase, workflowPhaseOf(e), true
 	case domain.MalformedChunksEvent:
 		return kindMalformedChunks, e.EventBase, malformedChunksData{Count: e.Count}, true
+	case domain.UpstreamSwitchedEvent:
+		return kindUpstreamSwitched, e.EventBase, upstreamSwitchedData{
+			FromServer: e.FromServer,
+			FromModel:  e.FromModel,
+			ToServer:   e.ToServer,
+			ToModel:    e.ToModel,
+			Fault:      e.Fault,
+			WaitedMs:   e.Waited.Milliseconds(),
+			Seat:       string(e.Seat),
+		}, true
 	default:
 		return "", domain.EventBase{}, nil, false
 	}
@@ -623,6 +635,21 @@ type upstreamAttemptData struct {
 	DurationMs   int64  `json:"duration_ms"`
 	OutputTokens int    `json:"output_tokens"`
 	Outcome      string `json:"outcome"`
+}
+
+// upstreamSwitchedData is the upstream_switched line: a seat's Upstream failed over to a fallback
+// server. from_server/from_model name the entry and model it was on, to_server/to_model the
+// fallback it moved to, fault the fault that triggered the switch, waited_ms the grace window it
+// waited first in whole milliseconds, and seat which seat moved — "session" (the session's own
+// Upstream, whichever agent on it faulted) or "sub-agents" (a routed Sub-agents seat).
+type upstreamSwitchedData struct {
+	FromServer string `json:"from_server"`
+	FromModel  string `json:"from_model"`
+	ToServer   string `json:"to_server"`
+	ToModel    string `json:"to_model"`
+	Fault      string `json:"fault"`
+	WaitedMs   int64  `json:"waited_ms"`
+	Seat       string `json:"seat"`
 }
 
 // The nested mirrors. A domain struct that rides inside a variant gets its own tagged shape here

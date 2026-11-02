@@ -66,6 +66,8 @@ var (
 	_ apogee.PruneEvent
 	_ apogee.RefClippedEvent
 	_ apogee.MalformedChunksEvent
+	_ apogee.UpstreamSwitchedEvent
+	_ apogee.UpstreamSeat
 	_ apogee.UsageEvent
 	_ apogee.AuditEvent
 	_ apogee.WireEvent

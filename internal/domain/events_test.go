@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestAuditEventCallIDShadowsTheSpawningCall pins the one name collision in the Event set. Every
 // variant promotes EventBase.CallID — the sub_agent call that spawned the emitting agent — but AuditEvent also reports a call of its own (the audited one) under the same
@@ -93,6 +96,25 @@ func TestSubAgentNamedEventCarriesTheChildRunsIdentity(t *testing.T) {
 	}
 	if ev.EventBase == sibling.EventBase {
 		t.Error("two members of one fan-out share an EventBase; the rename cannot be attributed")
+	}
+}
+
+// TestUpstreamSwitchedEventNoticeNamesBothServers pins the one sentence every Driver shows for a
+// seat that failed over: the failed server and its fault, the fallback and its model, and the wait
+// rounded to the second.
+func TestUpstreamSwitchedEventNoticeNamesBothServers(t *testing.T) {
+	t.Parallel()
+
+	event := UpstreamSwitchedEvent{
+		FromServer: "box", FromModel: "qwen", ToServer: "cloud", ToModel: "sonnet",
+		Fault: "status 503", Waited: 2*time.Minute + 400*time.Millisecond, Seat: UpstreamSeatSession,
+	}
+
+	got := event.Notice()
+
+	want := "apogee: box failed (status 503); continuing on cloud (sonnet) after waiting 2m0s"
+	if got != want {
+		t.Errorf("Notice() = %q, want %q", got, want)
 	}
 }
 

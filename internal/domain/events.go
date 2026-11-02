@@ -789,6 +789,48 @@ type UpstreamAttemptEvent struct {
 	Outcome string
 }
 
+// UpstreamSeat names which shared Upstream an UpstreamSwitchedEvent moved.
+type UpstreamSeat string
+
+const (
+	// UpstreamSeatSession is the session's own Upstream — the one the top-level agent and every
+	// unrouted sub-agent share — whichever agent on it hit the fault.
+	UpstreamSeatSession UpstreamSeat = "session"
+	// UpstreamSeatSubAgents is a routed Sub-agents seat: the Upstream a sub-agents-server entry
+	// gives the delegations routed to it.
+	UpstreamSeatSubAgents UpstreamSeat = "sub-agents"
+)
+
+// UpstreamSwitchedEvent reports that a seat's Upstream failed over to a fallback server (ADR 0105; a
+// `servers:` entry's `fallback:` list): the entry's server faulted with a fault a different server
+// could be expected not to share, it did not recover within the entry's `fallback-after:` grace
+// window, and every agent on that seat now continues on the named fallback. A seat switches
+// one-way and once — it never moves back by itself — so one switch is one event, however many
+// agents share the seat.
+//
+// FromServer and FromModel name the entry and model the seat was on; ToServer and ToModel the
+// fallback it moved to. Fault is a short label of the fault that triggered the switch. Waited is
+// how long the grace window ran before the switch — the time spent waiting for the primary to
+// recover. Seat names the seat that moved, never the emitter's depth: an unrouted sub-agent that
+// hit the fault moves the session's seat. Notice renders the one sentence every Driver shows.
+type UpstreamSwitchedEvent struct {
+	EventBase
+	FromServer string
+	FromModel  string
+	ToServer   string
+	ToModel    string
+	Fault      string
+	Waited     time.Duration
+	Seat       UpstreamSeat
+}
+
+// Notice is the human-facing sentence for one switch: which server failed and how, where the run
+// continues, and how long it waited first, rounded to the second.
+func (e UpstreamSwitchedEvent) Notice() string {
+	return fmt.Sprintf("apogee: %s failed (%s); continuing on %s (%s) after waiting %s",
+		e.FromServer, e.Fault, e.ToServer, e.ToModel, e.Waited.Round(time.Second))
+}
+
 // WorkflowPhase names the point in a Workflow's life that a WorkflowPhaseEvent reports.
 type WorkflowPhase string
 
