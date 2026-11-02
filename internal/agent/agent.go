@@ -849,8 +849,8 @@ func WithFallbackResolver(r FallbackResolver) Option {
 // One resolver instance serves one seat — the session's, or the Sub-agents seat — and every Agent
 // on that seat consults the same instance, so the instance is where the seat's state lives: it runs
 // the grace window and the list walk once per failed upstream (single-flight) and hands every caller
-// reporting a fault on that upstream the same answer, with First true only for the caller whose
-// report ran it; and it remembers that the seat has fallen over, so a later fault on the fallback
+// reporting a fault on that upstream the same answer, whose Announce the first caller to apply a
+// switch claims, once per run; and it remembers that the seat has fallen over, so a later fault on the fallback
 // walks the rest of the list rather than going back. Resolve may block for the whole grace window,
 // and must return promptly once ctx is cancelled — the engine reads a cancelled ctx as the user's
 // cancel, whatever answer comes back. The shared run itself must not die with the caller that
@@ -907,15 +907,17 @@ type FallbackAnswer struct {
 	Server   string
 	// Waited is how long the grace window ran before the resolver answered.
 	Waited time.Duration
-	// First is true only for the caller whose report ran the grace window and the list walk; every
-	// other caller reporting a fault on the same upstream gets the same answer with First false. On
-	// the session's seat the engine's one UpstreamSwitchedEvent per move does not hang on it: the
-	// seat's sharedUpstream is replaced once per failed generation (sharedUpstream.rehome), and the
-	// Agent whose replace lands is the one that announces the move — so a First caller cancelled
-	// before it moved the seat still leaves exactly one announcement. On the Sub-agents seat every
-	// routed child speaks over a holder of its own, so every sibling's replace lands, and the one
-	// announcement is the First caller's (Agent.announcesRehome).
-	First bool
+	// Announce claims the move's one announcement: it reports true to exactly one call across every
+	// answer one resolver run hands out — the first claim, whichever caller makes it — and false to
+	// every later one; nil on an answer that carries no run (a cancelled caller's zero answer). On the
+	// session's seat the engine's one UpstreamSwitchedEvent per move does not hang on it: the seat's
+	// sharedUpstream is replaced once per failed generation (sharedUpstream.rehome), and the Agent
+	// whose replace lands is the one that announces the move. On the Sub-agents seat every routed
+	// child speaks over a holder of its own, so every sibling's replace lands, and the one
+	// announcement is the first sibling's to claim Announce once its replace moved
+	// (Agent.announcesRehome) — so a caller that started the run and was cancelled before it moved
+	// anything still leaves exactly one announcement, from a sibling.
+	Announce func() bool
 }
 
 // SeedRefusedError is the refusal New and Resume return when the construction seed's reaction lanes

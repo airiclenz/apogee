@@ -179,7 +179,7 @@ Depends on item 4.
 **Closes:** firing-routed-relatch-gap
 **Commit:** `fix(headless): Firings re-latch the Sub-agents target after a fallover`
 
-## 9. The first sibling to apply a Sub-agents switch announces it
+## 9. The first sibling to apply a Sub-agents switch announces it — ✅ DONE (2026-11-02)
 
 **What:**
 Depends on item 8.

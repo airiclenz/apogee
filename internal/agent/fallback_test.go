@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -100,7 +101,7 @@ func (r *stubResolver) seen() []FallbackReport {
 // resolverAnswering is a stubResolver that gives every report the same verdict.
 func resolverAnswering(verdict FallbackVerdict) *stubResolver {
 	return &stubResolver{answer: func(context.Context, FallbackReport) FallbackAnswer {
-		return FallbackAnswer{Verdict: verdict, First: true}
+		return FallbackAnswer{Verdict: verdict, Announce: alwaysAnnounces}
 	}}
 }
 
@@ -275,7 +276,7 @@ func TestFallbackCancelDuringResolverWaitIsACancel(t *testing.T) {
 	resolver := &stubResolver{answer: func(waitCtx context.Context, _ FallbackReport) FallbackAnswer {
 		cancel() // the user's Esc, landing inside the wait
 		<-waitCtx.Done()
-		return FallbackAnswer{Verdict: FallbackRecovered, First: true}
+		return FallbackAnswer{Verdict: FallbackRecovered, Announce: alwaysAnnounces}
 	}}
 	a := newFallbackAgent(t, sink, responder, resolver)
 	if err := a.Submit(domain.UserInput{Text: "ask the model"}); err != nil {
@@ -449,11 +450,15 @@ func spareAnswer() FallbackAnswer {
 			Model: spareModel, SystemPrompt: sparePrompt, MaxContextTokens: spareWindow,
 			Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Effort: domain.EffortLow}},
 		},
-		Server: "spare",
-		Waited: 3 * time.Second,
-		First:  true,
+		Server:   "spare",
+		Waited:   3 * time.Second,
+		Announce: alwaysAnnounces,
 	}
 }
+
+// alwaysAnnounces is an Announce whose every claim succeeds: a stub answer standing for a run whose
+// one caller always claims the announcement.
+func alwaysAnnounces() bool { return true }
 
 type seatRig struct {
 	sink                  *recordingSink
@@ -1044,19 +1049,21 @@ func TestFallbackSwitchLeavesARoutedChildOnItsOwnSeat(t *testing.T) {
 	}
 }
 
-// firstOnceResolver is a seat resolver that answers every report with the spare and marks only the
-// first report First, the way the Driver's single-flight resolver does.
+// firstOnceResolver is a seat resolver that answers every report with the spare and hands every
+// answer the same claim-once Announce, the way the Driver's single-flight resolver does for one run.
 func firstOnceResolver() *stubResolver {
-	var mu sync.Mutex
-	answered := false
+	announce := claimOnce()
 	return &stubResolver{answer: func(context.Context, FallbackReport) FallbackAnswer {
-		mu.Lock()
-		defer mu.Unlock()
 		answer := spareAnswer()
-		answer.First = !answered
-		answered = true
+		answer.Announce = announce
 		return answer
 	}}
+}
+
+// claimOnce is an Announce that reports true to its first call only, across every goroutine.
+func claimOnce() func() bool {
+	var announced atomic.Bool
+	return func() bool { return announced.CompareAndSwap(false, true) }
 }
 
 // TestFallbackRoutedChildConsultsItsTargetsResolver pins the routed seat's own fallover: a routed
@@ -1102,7 +1109,7 @@ func TestFallbackRoutedChildConsultsItsTargetsResolver(t *testing.T) {
 
 // TestFallbackRoutedSiblingsAnnounceOnce pins one announcement per Sub-agents seat: N routed
 // siblings, each on a holder of its own, fault on one dead Sub-agent server at once; each moves its
-// own holder onto the fallback and finishes there, and only the First caller announces the move.
+// own holder onto the fallback and finishes there, and only the first to claim Announce announces it.
 func TestFallbackRoutedSiblingsAnnounceOnce(t *testing.T) {
 	t.Parallel()
 	const n = 3
@@ -1144,6 +1151,87 @@ func TestFallbackRoutedSiblingsAnnounceOnce(t *testing.T) {
 	}
 	if got := r.spare.calls(); got != n {
 		t.Errorf("spare calls = %d, want %d", got, n)
+	}
+}
+
+// TestFallbackRoutedSiblingsAnnounceWhenFirstIsCancelled pins the announcement past a cancelled
+// starter: the routed child whose report started the seat's resolver run is cancelled inside the
+// grace window and comes back with nothing, so it moves nothing — and the move its siblings apply is
+// still announced exactly once, by the first sibling to claim it, never by nobody.
+func TestFallbackRoutedSiblingsAnnounceWhenFirstIsCancelled(t *testing.T) {
+	t.Parallel()
+	const siblings = 2
+	r := newSeatRig(t, nil)
+	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
+	announce := claimOnce()
+	var arrivals atomic.Int32
+	graceStarted := make(chan struct{})
+	starterGone := make(chan struct{})
+	joined := make(chan struct{}, siblings)
+	r.parent.SetDelegationTarget(&DelegationTarget{
+		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt",
+		Fallback: &stubResolver{answer: func(ctx context.Context, _ FallbackReport) FallbackAnswer {
+			if arrivals.Add(1) == 1 {
+				close(graceStarted)
+				<-ctx.Done() // the starter's cancel, landing inside the grace window
+				close(starterGone)
+				return FallbackAnswer{}
+			}
+			joined <- struct{}{}
+			<-starterGone
+			answer := spareAnswer()
+			answer.Announce = announce
+			return answer
+		}},
+	})
+	starter := r.child(t, "starter")
+	if err := starter.Submit(domain.UserInput{Text: "work"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	starterCtx, cancelStarter := context.WithCancel(context.Background())
+	defer cancelStarter()
+	starterDone := make(chan struct{})
+	go func() {
+		defer close(starterDone)
+		_, _ = starter.Step(starterCtx) // a cancelled Step's result is the user's cancel, not under test
+	}()
+	<-graceStarted
+
+	var wg sync.WaitGroup
+	results := make([]domain.StepResult, siblings)
+	for i := range results {
+		child := r.child(t, "routed")
+		if err := child.Submit(domain.UserInput{Text: "work"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := child.Step(context.Background())
+			if err != nil {
+				t.Errorf("Step: %v", err)
+			}
+			results[i] = res
+		}()
+	}
+	for range siblings {
+		<-joined
+	}
+	cancelStarter()
+	<-starterDone
+	wg.Wait()
+
+	for i, res := range results {
+		if res.Faulted {
+			t.Errorf("routed sibling %d faulted: %+v", i, res)
+		}
+	}
+	events := r.switchedEvents()
+	if len(events) != 1 || events[0].Seat != domain.UpstreamSeatSubAgents || events[0].ToServer != "spare" {
+		t.Fatalf("switched events = %+v, want one sub-agents move onto spare", events)
+	}
+	if got := r.spare.calls(); got != siblings {
+		t.Errorf("spare calls = %d, want %d — the cancelled starter moved nothing", got, siblings)
 	}
 }
 

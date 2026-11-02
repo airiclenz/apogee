@@ -465,8 +465,9 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 // Agent arriving after it dials nothing and simply follows (true). A holder a server switch retired
 // while the resolver waited moves nothing and is refused (false), so a background workflow child
 // abandons rather than moving the seat after the human did. A routed child's holder is its own, so on the
-// Sub-agents seat the announcement is the First caller's instead (announcesRehome). The binding itself is applied by
-// followUpstream, on this Agent's own goroutine, when the loop re-arms the request.
+// Sub-agents seat the announcement is the first sibling's to claim the answer's Announce instead
+// (announcesRehome). The binding itself is applied by followUpstream, on this Agent's own goroutine,
+// when the loop re-arms the request.
 func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	spec, bind := answer.Upstream, answer.Rebind
 	if spec.Endpoint == "" || bind.Model == "" {
@@ -515,10 +516,11 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 // move. On the session's seat every Agent shares one sharedUpstream, so the replace lands once per
 // failed generation and the Agent it landed for announces it. A routed child on the Sub-agents seat
 // speaks over a holder of its own, so every routed sibling's replace lands; there the seat's one
-// announcement is the First caller's — the one whose report ran the shared resolver's grace window
-// and list walk — and every other sibling moves its own holder silently.
+// announcement is the first sibling's to claim the answer's Announce — called only here, after its
+// replace moved, so a caller cancelled before it moved anything never spends the claim — and every
+// other sibling moves its own holder silently.
 func (a *Agent) announcesRehome(answer FallbackAnswer) bool {
-	return a.upstream.seatOf() == domain.UpstreamSeatSession || answer.First
+	return a.upstream.seatOf() == domain.UpstreamSeatSession || (answer.Announce != nil && answer.Announce())
 }
 
 // followUpstream re-applies the seat's rehome binding to this Agent's Config when the sharedUpstream
