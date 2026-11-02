@@ -3,6 +3,7 @@ title: Seqcom overflow loop pins miss the fold elision and room-left share
 status: open
 type: task
 priority: 3
+plan: 2026-11-02 - 05 - request-room-and-delegate-bounds-plan.md
 created: 2026-11-02T18:50:12Z
 ---
 

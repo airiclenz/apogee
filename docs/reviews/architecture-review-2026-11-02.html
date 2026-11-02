@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review for apogee</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+</script>
+<style>
+  .seam { border-style: dashed; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #e2e8f0; }
+  .lbl { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+  .leak { color: #dc2626; }
+  pre.mermaid { background: transparent; }
+  .diagram { min-height: 260px; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-6xl mx-auto px-4 sm:px-6 py-12 space-y-12">
+
+<header class="space-y-4">
+  <h1 class="font-serif text-4xl">apogee: architecture review</h1>
+  <p class="text-sm text-slate-500">2026-11-02 · scope: hot spots since the 2026-10-27 review (161 commits): server fallback, <span class="font-mono">cmd/apogee</span> Firing wiring, the context-window fixes, watch mode</p>
+  <div class="flex flex-wrap gap-4 text-xs text-slate-600">
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 border-2 border-slate-500 bg-white"></span>module</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-dashed border-slate-500"></span>seam</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-red-600"></span>leakage / duplicate</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 deep rounded-sm"></span>deep module</span>
+  </div>
+  <p class="text-xs text-slate-500">Excludes the 30 candidates of the 2026-10-14 and 2026-10-27 reviews. Where one of those is only half done, the card says so.</p>
+</header>
+
+<section id="candidates" class="space-y-10">
+
+<!-- 1 ─────────────────────────────────────────── -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">1 · The seat owns its fallover</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process · resolver port, two adapters</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/sharedupstream.go</li><li>internal/agent/rebind.go</li>
+    <li>internal/agent/loop.go (consultFallback)</li><li>internal/agent/background.go</li>
+    <li>internal/agent/subagent.go</li><li>cmd/apogee/fallback.go</li>
+    <li>cmd/apogee/wire_firing.go (delegationLatchSlot, newFiringSeatFallback)</li><li>cmd/apogee/delegation.go (seatFallbackFor)</li>
+    <li>internal/run/run.go (Spec.BindDelegationLatch)</li><li>cmd/apogee/naming.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">Before</div>
+<pre class="mermaid">
+flowchart LR
+  R[Driver resolver] -- Announce CAS --> A[Agent.rehome]
+  R -- push --> L[delegationLatchSlot]
+  L --> B[BindDelegationLatch]
+  B --> T[SetDelegationTarget]
+  A -. copies by hand .-> H[holder]
+  A -. copies by hand .-> F[fallback field]
+  A -. copies by hand .-> G[appliedGen]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class L,B,F,G leak
+</pre></div>
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">After</div>
+<pre class="mermaid">
+flowchart LR
+  R[Driver resolver adapter] --> S[Seat: holder + resolver + binding + one announcement]
+  A[Agent] -- joins --> S
+  C[routed spawn] -- reads binding --> S
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a,stroke-width:3px;
+  class S deep
+</pre></div>
+  </div>
+  <p><b>Problem:</b> ADR 0105 names a <i>seat</i>, but no module owns one. The resolver, <span class="font-mono">appliedGen</span> and the retired flag are copied field by field at every spawn site. The Sub-agents seat's "move once, announce once, re-latch later spawns" is rebuilt in Driver code, twice.</p>
+  <p><b>Solution:</b> the seat becomes the engine's unit. A child joins a seat and inherits all of it, and a routed spawn dials the seat's current binding. The four hand-rolled resolver constructors collapse into one, keyed by seat kind, with two option-source adapters (TUI live, Firing fixed).</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>Locality: six bug tickets in one week land in one module</li>
+    <li>Delete the latch slot, BindDelegationLatch, Announce</li>
+    <li>Leverage: bench and daemon re-latch for free</li>
+    <li>Seat tests prove re-latch and announce-once directly</li>
+  </ul>
+  <p class="text-xs text-slate-500">Evidence: <span class="font-mono">background-workflow-no-fallback</span> (backgroundHost copied the holder and <span class="font-mono">appliedGen</span>, not the resolver), <span class="font-mono">firing-routed-relatch-gap</span>, <span class="font-mono">fallback-lander-stale-options</span>, <span class="font-mono">routed-rehome-root-pins</span>, 715c380e (the namer dialled the dead primary).</p>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Reopens the writer's call in fallback-followups plan 01 ("Firing re-latch: Driver-side"). This is not an owner ruling. It keeps ADR 0105 D8, since the resolver is still injected per seat.</div>
+</article>
+
+<!-- 2 ─────────────────────────────────────────── -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">2 · A server entry is resolved once, for every engine door</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>cmd/apogee/wire_firing.go (bindFiringConfig, firingConfig)</li><li>cmd/apogee/wire_server.go (serverBinder.bind)</li>
+    <li>cmd/apogee/fallback.go (rebind, entryUpstream, rootPins)</li><li>cmd/apogee/delegation.go (resolveDelegationTarget)</li>
+    <li>cmd/apogee/wire_settings.go (entry* caches, firingBinding)</li><li>cmd/apogee/wire_boot.go, probecontext.go, dial.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">Before: the same ranks spelled ~7 times</div>
+<pre class="mermaid">
+flowchart LR
+  E[servers: entry] --> F[bindFiringConfig]
+  E --> S[serverBinder.bind]
+  E --> R[fallbackLander.rebind]
+  E --> D[resolveDelegationTarget]
+  E --> L[liveSettings.entry*]
+  F --> C1[Config]
+  S --> C2[UpstreamSpec]
+  R --> C3[RebindSpec]
+  D --> C4[DelegationTarget]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class F,S,R,D,L leak
+</pre></div>
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">After</div>
+<pre class="mermaid">
+flowchart LR
+  E[entry] --> X[Resolved entry: window, reserve, cap, idle, dialect, model]
+  O[root options] --> X
+  B[observed beat] --> X
+  X --> C1[Config]
+  X --> C2[UpstreamSpec]
+  X --> C3[RebindSpec]
+  X --> C4[DelegationTarget]
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a,stroke-width:3px;
+  class X deep
+</pre></div>
+  </div>
+  <p><b>Problem:</b> the "entry pin over root key" rule (for window, working window, reserve, max output, stream idle and parallel agents), "forced dialect over observed" and "served model when unconfigured" are each re-spelled at every door, and the spellings already drift. Of the 58 commits to <span class="font-mono">wire_firing.go</span>, 17 are fixes, most of them a Firing catching up (26a4469b, 3fa87fdc, f2050377).</p>
+  <p><b>Solution:</b> one resolution from (entry, root options, observed beat, model), with the per-door rank differences (routed vs top level) stated in one place. Each engine door is fed by a projection of it. The session holds the resolved entry instead of caching fields.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>A new entry key: 1 file, not 8–10</li>
+    <li>Delete rootPins, rebindInputs, firingBinding's scrub</li>
+    <li>One rank table test replaces per-door asserts</li>
+  </ul>
+  <p class="text-xs text-slate-500">The dial half is already unified (<span class="font-mono">upstreamBinding</span>, dial.go); the budget, model and width half never was. Pairs with #1: the seat holds a resolved entry.</p>
+</article>
+
+<!-- 3 ─────────────────────────────────────────── -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">3 · One request-room module: one measure, one fit</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/dispatch.go (freshResultBound, clampToBound, appendToolResult)</li><li>internal/agent/loop.go (requestExceedsWindow, refBound, budget)</li>
+    <li>internal/agent/compact.go (deriveGrowthBounds)</li><li>internal/agent/contextcost.go (ContextEstimate)</li>
+    <li>internal/agent/fillnotice.go</li><li>internal/context/compact.go (elideNewestMessage)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram space-y-3"><div class="lbl text-slate-500">Before: four measures, four fits</div>
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        <div class="space-y-1"><div class="lbl text-slate-400">measure "what the next request weighs"</div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">requestExceedsWindow</div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">freshResultBound</div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">ContextEstimate</div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">contextEstimateEvent</div>
+        </div>
+        <div class="space-y-1"><div class="lbl text-slate-400">fit content under a bound</div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">clampToBound <span class="text-slate-400">lines→bytes</span></div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">elideNewestMessage <span class="text-slate-400">bytes</span></div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">CapToolResults <span class="text-slate-400">lines</span></div>
+          <div class="border border-red-400 rounded px-2 py-1 font-mono">delegate ElideMiddle</div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-500">One standing render per call: 4–8 renders per tool result.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram flex flex-col justify-center"><div class="lbl text-slate-500 mb-2">After</div>
+      <div class="deep rounded-lg p-4 border-4 border-slate-900 space-y-2">
+        <div class="font-semibold">Request room <span class="text-xs text-slate-400 font-normal">(built once per append from Budget + one standing render)</span></div>
+        <div class="grid grid-cols-3 gap-2 text-xs">
+          <div class="rounded bg-slate-700/60 px-2 py-1">weight now</div>
+          <div class="rounded bg-slate-700/60 px-2 py-1">room for N bodies of kind K</div>
+          <div class="rounded bg-slate-700/60 px-2 py-1">fit content, trailers counted inside</div>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 mt-3 text-xs font-mono text-slate-600">
+        <span class="border rounded px-2">appendToolResult</span><span class="border rounded px-2">refBound</span><span class="border rounded px-2">fill notice</span><span class="border rounded px-2">estimate Event</span><span class="border rounded px-2">fold</span>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem:</b> the three overflow fixes (d9c32bef, 29cc3dee, b55a9736) each landed in a different copy. <span class="font-mono">freshResultBound</span>'s comment says it is "composed here from its parts rather than through buildRequest", which goes against ADR 0018 amend-1102's "no second estimator". Trailers are added after the clamp, so a committed result can exceed its bound. <span class="font-mono">@file</span> blocks get a share of the allocation and ignore the room left.</p>
+  <p><b>Solution:</b> one module answers the request's weight now, the room left for the next body of a kind, and fits content under that bound. Every seam asks it; the fill notice and the estimate Event read its last measure.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>Locality: the next overflow fix lands once</li>
+    <li>Tests stop copying the formula (<span class="font-mono">requestTokens</span>)</li>
+    <li>Fewer standing renders on Pi-class boxes</li>
+    <li>Table tests with no Agent</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Leave the <span class="font-mono">CapToolResults</span> Floor guard out of the shared fit. It deliberately leaves a "few very long lines" result whole, for sim parity, and changing that would test ADR 0071 clause (c). The module covers the structural seams: ADR 0006, 0018 D7/D8, 0084.</div>
+</article>
+
+<!-- 4 ─────────────────────────────────────────── -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">4 · A run projection the watch holds a second copy of</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/tui/watch.go</li><li>internal/tui/model.go (5,139 lines)</li>
+    <li>internal/tui/fold.go</li><li>internal/tui/schedule.go (quiescent)</li>
+    <li>internal/tui/commandrun.go, runview.go, picker.go, blockcursor.go</li><li>internal/tui/sessions.go (resumeLoaded)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram"><div class="lbl text-slate-500 mb-2">Before: the view is ~23 loose fields, swapped in place</div>
+      <div class="flex gap-3 items-end h-52">
+        <div class="flex flex-col items-center w-1/3"><div class="w-full bg-slate-300 border border-slate-500" style="height:11rem"></div><div class="lbl mt-1 text-slate-500">Model interface<br>104 fields · 714 methods</div></div>
+        <div class="flex-1 space-y-1 text-xs">
+          <div class="border border-red-400 rounded px-2 py-1">park / restore / reset: 4 field lists</div>
+          <div class="border border-red-400 rounded px-2 py-1">2 AST guard tests keep them in sync</div>
+          <div class="border border-red-400 rounded px-2 py-1">fold eventMsg ‖ foldWatchedEvent</div>
+          <div class="border border-red-400 rounded px-2 py-1">markRunning ‖ watchRunning</div>
+          <div class="border border-red-400 rounded px-2 py-1">11 <span class="font-mono">watch.isActive</span> gates</div>
+        </div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram"><div class="lbl text-slate-500 mb-2">After</div>
+<pre class="mermaid">
+flowchart LR
+  LV[live owner adapter: save, stall, fallback] --> P[run projection: apply Event]
+  J[journal follower] --> P2[second projection]
+  P --> M[Model: projection in view]
+  P2 --> M
+  M --> RO[one read-only gate]
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a,stroke-width:3px;
+  class P,P2 deep
+</pre></div>
+  </div>
+  <p><b>Problem:</b> every per-run fact gets wired twice: the gauge in a watch (1b6e4c7c), the seat note (b089fca2), focus reports (0fe6af06). The glossary's <i>Watch mode</i> Note names the two sync guards as standing chores, plus a <span class="font-mono">forgetPaintedFrame</span> rule that no test checks. <span class="text-red-700">Probable bug:</span> <span class="font-mono">fold.go:74</span> calls <span class="font-mono">applyUsage(e, m.opts.ContextWindow, m.opts.Model)</span>, which measures a watched child against the watcher's model.</p>
+  <p><b>Solution:</b> a run-projection value that owns its transcript, boards, accounting, fill, run state and bound model/window, with <span class="font-mono">apply(Event)</span> as its interface. The live session wraps it with an owner adapter. Entering a watch points the Model at a second projection. /clear and resume become seeds of the value.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>Delete park/restore/reset and both AST guards</li>
+    <li>Watch tests: apply Events, read the gauge</li>
+    <li>Finishes 2026-10-14 #14 (seat in one operation)</li>
+  </ul>
+  <p class="text-xs text-slate-500">ADR 0011 holds (the parts are already copy-safe). ADR 0103 holds (the watch stays read-only and holds no Engine).</p>
+</article>
+
+<!-- 5 ─────────────────────────────────────────── -->
+<article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">5 · The observe-lane Reaction host is one library module</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>cmd/apogee/wire_boot.go (resolveConfig ~225–290)</li><li>cmd/apogee/wire_firing.go (firingHooks, projectRunSlot, disarmUnconnectedMCP)</li>
+    <li>cmd/apogee/wire_mcp.go, wire.go (hookCloseGrace)</li><li>apogee.go (NewReactionRunner), internal/reactions/exec.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">Before: the protocol, reproduced per Driver</div>
+<pre class="mermaid">
+flowchart LR
+  WB[wire_boot] --> RN[reactions.New]
+  WB --> SL[projectRunSlot]
+  RA[raise] --> FH[firingHooks] --> RN
+  RA --> DM[disarmUnconnectedMCP]
+  WB --> CF[Config: 6 fields]
+  RA --> CF
+  BN[bench] -. no MCP notice .-> CF
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class SL,FH,DM,BN leak
+</pre></div>
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">After</div>
+<pre class="mermaid">
+flowchart LR
+  WB[wire_boot] --> H[Observe host: runner, late bind, MCP disarm, close grace]
+  RA[raise] --> H
+  BN[bench] --> H
+  H --> CF[Config]
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a,stroke-width:3px;
+  class H deep
+</pre></div>
+  </div>
+  <p><b>Problem:</b> every Reaction feature edits both <span class="font-mono">wire_boot.go</span> and <span class="font-mono">wire_firing.go</span> (30327feb, d45e436a, 47aa3a8e, 0d06beab, 57bba370, 2d9e79e6). The safety parts, <span class="font-mono">errProjectRunUnbound</span> and the MCP disarm with one notice per entry, live only in package main. A bench that composes the facade gets neither.</p>
+  <p><b>Solution:</b> <span class="font-mono">internal/reactions</span> owns a host the Driver builds once. It fills its Config fields, owns the project-run late bind, disarms unconnected <span class="font-mono">mcp:</span> entries with notices, and closes within the grace. It stays Driver-instantiated.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>Leverage: one host, three Drivers</li>
+    <li>Safety stops living only in package main</li>
+    <li>Wiring asserts move into one suite</li>
+  </ul>
+  <p class="text-xs text-slate-500">ADR 0073 / 0076 A8 hold, since the observe lane stays Driver-side. This serves the ADR 0031 clause that nothing safety-relevant lives in only one Driver.</p>
+</article>
+
+<!-- 6 ─────────────────────────────────────────── -->
+<article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">6 · One arrival for the session seat, not an Event relayed back</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/tui/model.go (~1340–1370, 1712)</li><li>internal/tui/heartbeat.go, tui.go (FollowFallback)</li>
+    <li>cmd/apogee/wire_verbs.go (switchServer, followFallback)</li><li>cmd/apogee/upstream.go (move, arrive, fallover)</li>
+    <li>cmd/apogee/fallback.go (remember, landing)</li><li>internal/run/run.go (noteSwitch)</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">Before: the renderer issues the command</div>
+<pre class="mermaid">
+sequenceDiagram
+  participant E as Engine
+  participant T as tui.Model
+  participant W as rootWiring
+  participant S as sessionMover
+  E->>T: UpstreamSwitchedEvent
+  T->>W: FollowFallback
+  W->>S: fallover(name)
+  S->>S: lookup landed, arrive
+  T->>T: pendingRebind
+  T->>W: rebind at boundary
+</pre></div>
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">After</div>
+<pre class="mermaid">
+sequenceDiagram
+  participant E as Engine
+  participant A as Arrival
+  participant T as tui.Model
+  E->>A: landed(entry, fallover)
+  A->>A: holder, caps, launcher, roster
+  E->>T: UpstreamSwitchedEvent (report only)
+</pre></div>
+  </div>
+  <p><b>Problem:</b> <span class="font-mono">/server</span> and a fallover each list the arrival's steps on their own. <span class="font-mono">fallover-skips-profile-settle</span> was one tail forgetting the launcher and the settle. Firings make the same roster decision by a second mechanism (<span class="font-mono">ToolsForRoster</span> in <span class="font-mono">applyRehome</span>).</p>
+  <p><b>Solution:</b> one arrival module in <span class="font-mono">cmd/apogee</span> with one entry point, taking (entry, human move or fallover). It runs the tail in a fixed order. The resolver's landing hook commits a fallover to it, and the TUI only renders.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>Delete FollowFallback and the landed lookup</li>
+    <li>One door replaces the hand-built seat rig</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">This changes the settle timing in ADR 0105 amend-1102c, and ADR 0028 D3 must hold (<span class="font-mono">/server</span> stays idle-only). Do #1 first, since the seat's landing hook is what drives this.</div>
+</article>
+
+<!-- 7 ─────────────────────────────────────────── -->
+<article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">7 · A delegate's bounds are one table</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/agent.go (delegateBound, delegateBoundHit, boundErrText)</li><li>internal/agent/subagent.go (capHeadFormats, 9 format constants)</li>
+    <li>internal/agent/workflowspawn.go (wrapUpFinishDirective)</li><li>internal/agent/stepnotice.go, construct.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram"><div class="lbl text-slate-500 mb-2">Before: 5 <span class="font-mono normal-case">switch a.capHit</span> sites × 3 files</div>
+      <div class="space-y-1 text-xs font-mono">
+        <div class="border-l-4 border-red-400 pl-2 py-1 bg-red-50">Run → delegateBoundHit</div>
+        <div class="border-l-4 border-red-400 pl-2 py-1 bg-red-50">finishAtStepCap → boundErrText</div>
+        <div class="border-l-4 border-red-400 pl-2 py-1 bg-red-50">delegationResult → capHeadFormats</div>
+        <div class="border-l-4 border-red-400 pl-2 py-1 bg-red-50">wfSpawn → wrapUpFinishDirective</div>
+        <div class="border-l-4 border-red-400 pl-2 py-1 bg-red-50">appendToolResult → step/token notice</div>
+      </div>
+      <p class="text-xs text-slate-500 mt-2">Time has no ¾ notice, and nothing says whether that is deliberate.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram"><div class="lbl text-slate-500 mb-2">After: one row per bound</div>
+      <table class="w-full text-xs border-4 border-slate-900">
+        <thead class="deep"><tr><th class="p-1 text-left">bound</th><th class="p-1">hit</th><th class="p-1">¾ notice</th><th class="p-1">error</th><th class="p-1">result head</th><th class="p-1">wrap-up</th></tr></thead>
+        <tbody class="font-mono">
+          <tr class="border-t"><td class="p-1">steps</td><td class="text-center">✓</td><td class="text-center">✓</td><td class="text-center">✓</td><td class="text-center">✓</td><td class="text-center">✓</td></tr>
+          <tr class="border-t"><td class="p-1">tokens</td><td class="text-center">✓</td><td class="text-center">✓</td><td class="text-center">✓</td><td class="text-center">✓</td><td class="text-center">✓</td></tr>
+          <tr class="border-t"><td class="p-1">time</td><td class="text-center">✓</td><td class="text-center text-amber-600">?</td><td class="text-center">✓</td><td class="text-center">✓</td><td class="text-center">✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p><b>Problem:</b> each bound's facts are scattered across five switches. A fourth bound, such as spend, would touch about eight sites. Six bound fields sit on the ~90-field Agent at zero for every top-level run.</p>
+  <p><b>Solution:</b> a delegate-limits value, seeded once from the delegation, that answers "which bound tripped", "is a notice due" and "word it for surface X".</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5"><li>Wording and thresholds become row tests</li><li>No driven child run needed</li></ul>
+</article>
+
+<!-- 8 ─────────────────────────────────────────── -->
+<article id="c8" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">8 · The background host is built through construction</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/agent/background.go:677 (backgroundHost)</li><li>internal/agent/construct.go (buildAgent, delegation.seed)</li>
+    <li>internal/agent/subagent.go (delegation{…})</li><li>internal/agent/agent.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">Before</div>
+<pre class="mermaid">
+flowchart LR
+  BA[buildAgent] --> AG[Agent]
+  DS[delegation.seed] --> AG
+  BH[backgroundHost: ~40-field literal] -.-> AG
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class BH leak
+</pre></div>
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">After</div>
+<pre class="mermaid">
+flowchart LR
+  TC[Tree context: shared handles + frozen live settings] --> BA[buildAgent]
+  DS[delegation] --> TC
+  BH[backgroundHost] --> TC
+  BA --> AG[Agent]
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a,stroke-width:3px;
+  class BA deep
+</pre></div>
+  </div>
+  <p><b>Problem:</b> <span class="font-mono">backgroundHost</span> hand-builds <span class="font-mono">&amp;Agent{…}</span> outside <span class="font-mono">buildAgent</span>. Any new field silently defaults to zero, and no test guards the copy. <span class="font-mono">background-workflow-no-fallback</span> was one such miss. This is the half-done part of 2026-10-27 #2 ("the Agent finishes its own construction").</p>
+  <p><b>Solution:</b> one tree-context value carries the shared handles. Both the delegation seed and the background host take it, so every Agent is built in one place.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5"><li>One "host sees what a delegate sees" test</li><li>Shrinks with #1 (the seat is one handle)</li></ul>
+  <p class="text-xs text-slate-500">ADR 0089: launch-time snapshot semantics must hold.</p>
+</article>
+
+<!-- 9 ─────────────────────────────────────────── -->
+<article id="c9" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">9 · One context-fill value for every run, top level included</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700 grid sm:grid-cols-2 gap-x-6">
+    <li>internal/tui/model.go (contextGauge, topLevelWindow, liveStats)</li><li>internal/tui/fold.go (foldStats)</li>
+    <li>internal/tui/transcript.go (applyUsage, childWindow)</li><li>internal/tui/usage.go, subagentblock.go</li>
+  </ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">Before</div>
+<pre class="mermaid">
+flowchart LR
+  FS[foldStats depth 0] --> LS[liveStats]
+  AU[applyUsage depth over 0] --> H[entry.ctxUsed / ctxLimit]
+  OPT[opts.ContextWindow] --> G[contextGauge: 2 branches]
+  W[watch.window] --> G
+  LS --> G
+  H --> G
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class OPT,W leak
+</pre></div>
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">After</div>
+<pre class="mermaid">
+flowchart LR
+  E[Usage + Estimate Events] --> F[run fill value]
+  F --> TOP[session's fill]
+  F --> HD[each run head's fill]
+  TOP --> G[gauge]
+  HD --> G
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a,stroke-width:3px;
+  class F deep
+</pre></div>
+  </div>
+  <p><b>Problem:</b> the top level ignores the window every <span class="font-mono">UsageEvent</span> already carries. That is why 1b6e4c7c had to invent <span class="font-mono">topLevelWindow</span>. Estimate moves (54ff2438) reach depth 0 only, so a run view never shows <span class="font-mono">~</span>.</p>
+  <p><b>Solution:</b> one fill value folds readings and estimates, owns its window (the reading's own, seeded by the bound window) and renders the gauge. It falls out of #4 if that lands first.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5"><li>Gauge rules become table tests, with no Model</li></ul>
+  <p class="text-xs text-slate-500">Open rule: a rebind that changes the window before the next reading. ADR 0063 D4, 0045.</p>
+</article>
+
+<!-- 10 ─────────────────────────────────────────── -->
+<article id="c10" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">10 · The status line is one priority fit, like the footer</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-200 text-slate-700">Speculative</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700"><li>internal/tui/model.go (statusLine, statusLeftWithin, statusLeftBeside, yieldTotal, statusRight) · internal/tui/footerfit.go</li></ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 diagram space-y-1"><div class="lbl text-slate-500 mb-1">Before: render, measure, re-render</div>
+      <div class="h-9 border-l-4 border-slate-400 pl-2 text-xs flex items-center">render left</div>
+      <div class="h-9 border-l-4 border-slate-400 pl-2 text-xs flex items-center">measure → render right in room left</div>
+      <div class="h-9 border-l-4 border-red-400 pl-2 text-xs flex items-center">yieldTotal: re-render both</div>
+      <div class="h-9 border-l-4 border-red-400 pl-2 text-xs flex items-center">statusLeftBeside: re-render narrower</div>
+      <div class="h-9 border-l-4 border-slate-400 pl-2 text-xs flex items-center">compare strings</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4 diagram space-y-1"><div class="lbl text-slate-500 mb-1">After</div>
+      <div class="h-9 border-l-4 border-slate-400 pl-2 text-xs flex items-center">status facts value (plain)</div>
+      <div class="h-24 deep border-l-8 border-slate-900 pl-3 text-sm flex items-center rounded-r">statusFit: one priority order, measured by th.measure</div>
+      <div class="h-9 border-l-4 border-slate-400 pl-2 text-xs flex items-center">paint</div>
+    </div>
+  </div>
+  <p><b>Problem:</b> fitting is trial and error. fd39159d added a third re-render. Tests need a full Model (<span class="font-mono">statusText(t, m)</span>, 29 uses).</p>
+  <p><b>Solution:</b> a plain input value and a pure priority fit, as <span class="font-mono">footerInput</span>/<span class="font-mono">footerFit</span> already are.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5"><li>Width tables without a Model</li></ul>
+  <p class="text-xs text-slate-500">ADR 0030: there is one width authority.</p>
+</article>
+
+<!-- 11 ─────────────────────────────────────────── -->
+<article id="c11" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-2">11 · One engine composition for the session and the Firing</h2>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-200 text-slate-700">Speculative</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process + local-substitutable</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-700"><li>cmd/apogee/wire_boot.go, wire_live.go (wireSession ~500 lines), wire_firing.go (firingConfig, firingSeatTools, firingRosterBuilder), modelprofile.go</li></ul>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">Before</div>
+<pre class="mermaid">
+flowchart LR
+  PC[projectConfig] --> S1[resolveConfig + wireSession]
+  PC --> F1[bindFiringConfig + firingConfig]
+  MB[resolveModelBindings] --> S1
+  MB --> F1
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class S1,F1 leak
+</pre></div>
+    <div class="rounded-lg border border-slate-200 p-3 diagram"><div class="lbl text-slate-500 mb-1">After</div>
+<pre class="mermaid">
+flowchart LR
+  X[resolved entry #2 + observe host #5] --> C[Compose]
+  C --> S[session + live setters]
+  C --> R[run.Once]
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a,stroke-width:3px;
+  class C deep
+</pre></div>
+  </div>
+  <p><b>Problem:</b> what remains once #2 and #5 land. The model-facing prompt and profile resolution, the roster and window-from-beat live only in package main (ADR 0031 invariant 4).</p>
+  <p><b>Solution:</b> one composer beside <span class="font-mono">internal/run</span>. The Firing uses it one-shot, and the session uses it and then applies its live setters.</p>
+  <p class="text-xs text-slate-500">Risk: <span class="font-mono">lateEngine</span> and the live setters may resist a one-shot composer. Revisit after #2 and #5.</p>
+</article>
+
+</section>
+
+<section id="top-recommendation" class="rounded-2xl deep p-8 space-y-3">
+  <div class="lbl text-emerald-300">Top recommendation</div>
+  <h2 class="font-serif text-3xl"><a href="#c1" class="underline decoration-emerald-400 underline-offset-4">1 · The seat owns its fallover</a></h2>
+  <p class="text-slate-300">It is the hottest area: six follow-up bugs in the week the feature shipped, each one a Driver or spawn site forgetting a step the seat should own. It also makes every Driver, the bench included, correct by construction (ADR 0031). #2 follows naturally, since the seat then holds a resolved entry. #6 and #8 shrink once both land.</p>
+</section>
+
+</main>
+</body>
+</html>
