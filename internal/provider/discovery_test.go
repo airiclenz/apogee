@@ -519,11 +519,17 @@ func TestDiscover_SendsAuth(t *testing.T) {
 // Effort detection is PASSIVE (ADR 0060): the two payloads discovery already fetches carry the
 // tell, and nothing here calls the model. A /props chat template that mentions the dial proves it
 // exists but names no vocabulary; a /v1/models `reasoning` object both proves it and states the
-// vocabulary; neither is indistinguishable from a model with no dial and stays the zero value.
+// vocabulary, its SHAPE naming the dialect (OpenRouter's keys, or Splash's); neither is
+// indistinguishable from a model with no dial and stays the zero value.
 func TestDiscover_EffortSupport(t *testing.T) {
 	t.Parallel()
 
 	const plainModels = `{"data":[{"id":"m","context_length":32768}]}`
+	const kwargsProps = `{"chat_template":"{% if reasoning_effort %}...{% endif %}"}`
+	// Splash 1.5's own shape of the object, as it served it on 2026-11-02.
+	const splashModels = `{"data":[{"id":"m","context_length":32768,` +
+		`"reasoning":{"thinks":true,"efforts":["low","medium","xhigh"],"default":"medium"}}]}`
+	const splashNoDialModels = `{"data":[{"id":"m","context_length":32768,"reasoning":{"thinks":false}}]}`
 	const reasoningModels = `{"data":[{"id":"m","context_length":32768,` +
 		`"reasoning":{"supported_efforts":["low","medium","high"],"default_effort":"medium"}}]}`
 	// The two shapes below are the payload https://openrouter.ai/api/v1/models actually served on
@@ -567,10 +573,56 @@ func TestDiscover_EffortSupport(t *testing.T) {
 			},
 		},
 		{
-			name:   "bare reasoning object still means supported",
+			name:   "bare reasoning object is no tell",
 			models: `{"data":[{"id":"m","context_length":32768,"reasoning":{}}]}`,
 			props:  "",
-			want:   EffortSupport{Supported: true, Dialect: EffortDialectReasoning},
+			want:   EffortSupport{},
+		},
+		{
+			name:   "bare reasoning object falls through to the /props template",
+			models: `{"data":[{"id":"m","context_length":32768,"reasoning":{}}]}`,
+			props:  kwargsProps,
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectKwargs},
+		},
+		{
+			name:   "an object of unrecognised keys is no tell either",
+			models: `{"data":[{"id":"m","context_length":32768,"reasoning":{"default_enabled":true}}]}`,
+			props:  "",
+			want:   EffortSupport{},
+		},
+		{
+			name:   "Splash-shaped object ⇒ kwargs dialect with its efforts and default",
+			models: splashModels,
+			props:  "",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectKwargs,
+				Efforts:   []string{"low", "medium", "xhigh"},
+				Default:   "medium",
+			},
+		},
+		{
+			name:   "Splash's thinks:false ⇒ unsupported",
+			models: splashNoDialModels,
+			props:  "",
+			want:   EffortSupport{},
+		},
+		{
+			name:   "Splash's thinks:false is final: a kwargs /props template does not overrule it",
+			models: splashNoDialModels,
+			props:  kwargsProps,
+			want:   EffortSupport{},
+		},
+		{
+			name: "OpenRouter keys win an object that also carries Splash's",
+			models: `{"data":[{"id":"m","context_length":32768,"reasoning":` +
+				`{"supported_efforts":["low","high"],"thinks":false,"efforts":["max"],"default":"max"}}]}`,
+			props: "",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "high"},
+			},
 		},
 		{
 			name:   "neither tell ⇒ unsupported",
@@ -824,6 +876,8 @@ func TestDiscover_ForcedEffortDialect(t *testing.T) {
 	const mandatoryModels = `{"data":[{"id":"m","context_length":32768,` +
 		`"reasoning":{"mandatory":true,"default_enabled":true,` +
 		`"supported_efforts":["max","high","low"],"default_effort":"max"}}]}`
+	const splashModels = `{"data":[{"id":"m","context_length":32768,` +
+		`"reasoning":{"thinks":true,"efforts":["low","medium","xhigh"],"default":"medium"}}]}`
 
 	tests := []struct {
 		name   string
@@ -896,6 +950,17 @@ func TestDiscover_ForcedEffortDialect(t *testing.T) {
 			forced: EffortDialectOpenAI,
 			models: mandatoryModels,
 			want:   EffortSupport{Supported: true, Dialect: EffortDialectOpenAI, Mandatory: true},
+		},
+		{
+			name:   "forcing kwargs on a Splash-shaped object keeps its efforts and default",
+			forced: EffortDialectKwargs,
+			models: splashModels,
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectKwargs,
+				Efforts:   []string{"low", "medium", "xhigh"},
+				Default:   "medium",
+			},
 		},
 		{
 			name:   "off forced over a model that cannot stop thinking ⇒ the zero verdict anyway",

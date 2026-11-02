@@ -20,7 +20,7 @@ type modelsReply struct {
 // optional ones internal/provider reads — OpenRouter's `name`, `context_length` and
 // `reasoning`, llama.cpp's `meta.n_ctx_train`. The optional members are omitted when unset so
 // a Script that names only an id renders the minimal entry a plain OpenAI server sends, and
-// `reasoning` is a pointer because its PRESENCE is the tell the client reads.
+// `reasoning` is a pointer so that an absent object and an empty `{}` render apart.
 type modelEntry struct {
 	ID            string         `json:"id"`
 	Object        string         `json:"object"`

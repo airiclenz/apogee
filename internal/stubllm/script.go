@@ -92,7 +92,7 @@ type Discovery struct {
 // internal/provider reads off a real entry: the id, the two spellings of a display name (the
 // OpenAI-shaped `name`, the Messages API's `display_name`), the two spellings of a context
 // window (OpenRouter's `context_length`, llama.cpp's `meta.n_ctx_train`) and the per-model
-// `reasoning` object whose presence is the thinking-effort tell.
+// `reasoning` object whose OpenRouter-shaped keys are the thinking-effort tell.
 type DiscoveredModel struct {
 	ID            string          `yaml:"id"`
 	Name          string          `yaml:"name,omitempty"`
@@ -102,10 +102,11 @@ type DiscoveredModel struct {
 	Reasoning     *ModelReasoning `yaml:"reasoning,omitempty"`
 }
 
-// ModelReasoning is the per-model `reasoning` object an OpenRouter-shaped entry carries. Its
-// presence alone says the model has a thinking-effort dial, so an empty `reasoning: {}` is a
-// meaningful thing to script; the members name the dial's vocabulary, its default and whether
-// the model cannot be asked to skip it.
+// ModelReasoning is the per-model `reasoning` object an OpenRouter-shaped entry carries. Its keys,
+// not its presence, are the thinking-effort tell: an object naming `supported_efforts` or
+// `default_effort` says the model has OpenRouter's dial, while an empty `reasoning: {}` scripts an
+// object that tells nothing, which a client must read as no tell. The members name the dial's
+// vocabulary, its default and whether the model cannot be asked to skip it.
 type ModelReasoning struct {
 	SupportedEfforts []string `yaml:"supported_efforts,omitempty"`
 	DefaultEffort    string   `yaml:"default_effort,omitempty"`

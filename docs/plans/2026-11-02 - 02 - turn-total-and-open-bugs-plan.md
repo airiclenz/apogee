@@ -64,7 +64,10 @@ cmd/apogee/daemonfire_test.go — TestDaemonFireSendsToALauncherFrontedServerAsI
 
 **Commit:** `fix(headless): Firings bind the served model when none is configured`
 
-## 2. Only an OpenRouter-shaped reasoning object picks the reasoning dialect
+## 2. Only an OpenRouter-shaped reasoning object picks the reasoning dialect — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): re-derived from the assumption that `modelReasoning` is extended with Splash's fields — it is replaced by two shape structs (`openRouterReasoning`, `splashReasoning`) decoded in separate passes after a key-presence classification (`carriesAny`), so a Splash key of an unexpected type cannot cost an OpenRouter object its tell; `mandatory` moved into `reasoningMandatory` (still its own best-effort pass, OpenRouter shape only).
+NOTES (2026-11-02): `decodeReasoning`/`reasoningFor`/`effortSupport`/`toModelInfo`/`discoverModels` now also return whether the entry told anything, and `Discover` falls through to the `/props` template only when it did not (was: when the answer was unsupported) — this is what makes `thinks: false` final; a key whose value is JSON null counts as absent.
 
 **Closes:** reasoning-object-dialect-tell
 

@@ -769,8 +769,9 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 		// forced writes the bound entry with `effort-dialect: off`; unforced takes the default
 		// startup server.
 		forced bool
-		// reasoning advertises the model with a `reasoning` object — the tell discovery reads the
-		// reasoning dialect from (internal/provider); false is a server with no tell.
+		// reasoning advertises the model with an OpenRouter-shaped `reasoning` object (it names
+		// `supported_efforts`) — the tell discovery reads the reasoning dialect from
+		// (internal/provider); false is a server with no tell.
 		reasoning bool
 		want      domain.EffortDialect
 	}{
@@ -794,7 +795,7 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			model := stubllm.DiscoveredModel{ID: headlessBeatModel}
 			if tc.reasoning {
-				model.Reasoning = &stubllm.ModelReasoning{}
+				model.Reasoning = &stubllm.ModelReasoning{SupportedEfforts: []string{"low", "high"}}
 			}
 			srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
 				Models: []stubllm.DiscoveredModel{model},

@@ -38,8 +38,8 @@ type DiscoveredModel struct {
 	// not the active one.
 	//
 	// The zero value is both "no dial" and "no tell to read", exactly as on ModelInfo: an entry
-	// without a `reasoning` object says nothing, and a caller must treat that as unknown rather than
-	// as a refusal. The /props chat template is deliberately NOT folded in here — it describes the
+	// whose `reasoning` object is absent or carries no recognised shape says nothing, and a caller
+	// must treat that as unknown rather than as a refusal. The /props chat template is deliberately NOT folded in here — it describes the
 	// one model the server has LOADED, so it can only answer for the active one.
 	EffortSupport EffortSupport
 }
@@ -113,9 +113,11 @@ type ModelInfo struct {
 // It is detected PASSIVELY, from the two payloads discovery already fetches, never from a probe
 // call (ADR 0050's rejected bind-time probe, re-affirmed by ADR 0060): llama.cpp's GET /props
 // carries the chat template, and an OpenAI-shaped GET /v1/models may carry a per-model `reasoning`
-// object. Neither tell present is indistinguishable from a model with no dial, and both resolve to
-// the zero value: Supported false, EffortDialectNone, no vocabulary, no default — which keeps the
-// wire byte-identical for a caller that asks for nothing (ADR 0031).
+// object. That object's SHAPE, never its mere presence, is the tell — more than one server writes
+// the field, each meaning its own dialect (see decodeReasoning) — and an object of no recognised
+// shape is no tell at all. Neither tell present is indistinguishable from a model with no dial, and
+// both resolve to the zero value: Supported false, EffortDialectNone, no vocabulary, no default —
+// which keeps the wire byte-identical for a caller that asks for nothing (ADR 0031).
 //
 // A server whose entry FORCES a dialect (WithEffortDialect) is answered from that instead, because
 // the providers the key exists for advertise no tell at all: the forced value fills this same
@@ -170,7 +172,7 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 		return c.discoverAnthropic(ctx)
 	}
 
-	info, err := c.discoverModels(ctx)
+	info, modelsTold, err := c.discoverModels(ctx)
 	if err != nil {
 		return ModelInfo{}, err
 	}
@@ -182,8 +184,10 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	info.TotalSlots = slots
 	// The /v1/models `reasoning` object wins when both tells appear: a server that advertises the
 	// structured field is speaking the more specific dialect, and its own template may still
-	// mention the kwarg it no longer reads.
-	if !info.EffortSupport.Supported {
+	// mention the kwarg it no longer reads. That includes the object that says NO — Splash's
+	// `thinks: false` is the server's own answer for the model, so a template that mentions the
+	// kwarg does not overrule it. Only an entry that told nothing falls through to the template.
+	if !modelsTold {
 		info.EffortSupport = templateEffort
 	}
 	// And a dialect the server's own entry FORCED outranks both tells: it is there precisely
@@ -209,7 +213,7 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 // a forced `effort-dialect:` is deliberately not consulted: the config loader refuses the key on an
 // anthropic entry, so there is never one to apply.
 func (c *Client) discoverAnthropic(ctx context.Context) (ModelInfo, error) {
-	info, err := c.discoverModels(ctx)
+	info, _, err := c.discoverModels(ctx)
 	if err != nil {
 		return ModelInfo{}, err
 	}
@@ -322,39 +326,41 @@ func (e *TransportError) Unwrap() error { return e.err }
 // the list shape — `{data:[{id,…}]}` — is the same on both, differing only in the fields the
 // entries carry (see modelsResponse). The body is read through the same maxResponseBodyBytes limit
 // Respond applies, so an oversized list is cut mid-JSON and fails as the existing decode error rather
-// than being buffered into memory whole.
-func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
+// than being buffered into memory whole. effortTold reports whether the entry describing the active
+// model carried a thinking-effort tell at all — even one that says the model has no dial — which is
+// what decides whether the /props template may still answer for it (see Discover).
+func (c *Client) discoverModels(ctx context.Context) (info ModelInfo, effortTold bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+modelsPath, nil)
 	if err != nil {
 		// A malformed base URL never reaches the wire either, so it is the same finding as a refused
 		// dial: nothing answered.
-		return ModelInfo{}, &TransportError{err: fmt.Errorf("apogee: build discovery request: %w", err)}
+		return ModelInfo{}, false, &TransportError{err: fmt.Errorf("apogee: build discovery request: %w", err)}
 	}
 	c.setAuth(req.Header)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return ModelInfo{}, &TransportError{err: fmt.Errorf("apogee: model discovery: %w", err)}
+		return ModelInfo{}, false, &TransportError{err: fmt.Errorf("apogee: model discovery: %w", err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return ModelInfo{}, &discoveryStatusError{status: &StatusError{Code: resp.StatusCode}}
+		return ModelInfo{}, false, &discoveryStatusError{status: &StatusError{Code: resp.StatusCode}}
 	}
 
 	var decoded modelsResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&decoded); err != nil {
-		return ModelInfo{}, fmt.Errorf("apogee: decode models: %w", err)
+		return ModelInfo{}, false, fmt.Errorf("apogee: decode models: %w", err)
 	}
 
-	info := decoded.toModelInfo(c.activeModel())
+	info, effortTold = decoded.toModelInfo(c.activeModel())
 	// An empty list is only fatal when nothing was configured: with a hint there is still a
 	// model to run (trusted as configured), and the list being empty is the server's problem
 	// to report on the next completion.
 	if info.ActiveModel == "" {
-		return ModelInfo{}, errors.New("apogee: model discovery: server returned no models")
+		return ModelInfo{}, false, errors.New("apogee: model discovery: server returned no models")
 	}
-	return info, nil
+	return info, effortTold, nil
 }
 
 // discoverProps probes llama.cpp's GET /props for the three facts it reports about how the server
@@ -466,18 +472,28 @@ type modelsResponse struct {
 	} `json:"data"`
 }
 
-// modelReasoning is the per-model `reasoning` object an OpenRouter-shaped /v1/models entry carries.
-// Its mere PRESENCE is the tell (see EffortSupport): a server that describes the dial at all
-// supports it, even when it names neither a vocabulary nor a default — so the entry holds the field
-// raw and decodeReasoning distinguishes an absent object from an empty one.
+// openRouterReasoning is OpenRouter's shape of the per-model `reasoning` object a /v1/models entry
+// may carry: the level vocabulary under `supported_efforts` and the default under `default_effort`.
+// Either key is the tell for OpenRouter's request dialect (see decodeReasoning); the field name
+// alone is not, because other servers write a `reasoning` object of their own.
 // The `mandatory` flag it may also carry — reasoning this model cannot be asked to skip, as
 // https://openrouter.ai/api/v1/models reports for z-ai/glm-5.3-flash and z-ai/glm-5.3 but not for
 // z-ai/glm-5.2 — is deliberately NOT a tagged field here: decodeReasoning reads it in a pass of its
 // own so that a server writing something other than a boolean there costs only the flag.
-type modelReasoning struct {
+type openRouterReasoning struct {
 	SupportedEfforts []string `json:"supported_efforts"`
 	DefaultEffort    string   `json:"default_effort"`
-	Mandatory        bool     `json:"-"`
+}
+
+// splashReasoning is Splash's shape of the same `reasoning` object: `thinks` says whether the
+// model has a dial at all, `efforts` names its levels and `default` the one it uses unasked.
+// Splash reads the dial through chat_template_kwargs, never through OpenRouter's request object,
+// so this shape picks EffortDialectKwargs. Thinks is a pointer because only an EXPLICIT false is
+// the server saying "no dial"; an object that names levels without it still describes one.
+type splashReasoning struct {
+	Thinks  *bool    `json:"thinks"`
+	Efforts []string `json:"efforts"`
+	Default string   `json:"default"`
 }
 
 // jsonNullLiteral is the encoding of an explicit JSON null, which a raw field carries as bytes
@@ -488,8 +504,8 @@ const jsonNullLiteral = "null"
 // the active model from hint (the configured model) per resolveHint. Every advertised entry is
 // read for its own thinking-effort tell per effortSupport, and the resolved active model once
 // more — the same rule twice, so an entry and the active model can never disagree about the
-// model they both describe.
-func (r modelsResponse) toModelInfo(hint string) ModelInfo {
+// model they both describe. effortTold reports whether the active model's entry told anything.
+func (r modelsResponse) toModelInfo(hint string) (info ModelInfo, effortTold bool) {
 	var models []DiscoveredModel
 	for _, m := range r.Data {
 		if m.ID == "" {
@@ -503,81 +519,127 @@ func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 		if displayName == "" {
 			displayName = m.DisplayName
 		}
+		support, _ := r.effortSupport(m.ID)
 		models = append(models, DiscoveredModel{
 			ID:            m.ID,
 			DisplayName:   displayName,
 			ContextWindow: contextWindow,
-			EffortSupport: r.effortSupport(m.ID),
+			EffortSupport: support,
 		})
 	}
 
-	info := ModelInfo{AvailableModels: models}
+	info = ModelInfo{AvailableModels: models}
 	info.ActiveModel, info.ContextWindow, info.Resolution = resolveHint(models, hint)
-	info.EffortSupport = r.effortSupport(info.ActiveModel)
-	return info
+	info.EffortSupport, effortTold = r.effortSupport(info.ActiveModel)
+	return info, effortTold
 }
 
 // effortSupport reports what the advertised entry describing the active model says about its
 // thinking-effort dial. It resolves that entry the way resolveHint sources the context window — the
 // exact id, else the base slug before the first ':' of a routing variant — so a variant that the
 // server does not list separately inherits the base model's answer instead of reading as a model
-// with no dial. No entry, or an entry with no `reasoning` object, is the zero value: unsupported.
-func (r modelsResponse) effortSupport(active string) EffortSupport {
-	reasoning := r.reasoningFor(active)
-	if reasoning == nil {
+// with no dial. told reports whether the entry carried a tell at all: no entry, or an entry whose
+// `reasoning` object is absent or of no recognised shape, is the zero value with told false.
+func (r modelsResponse) effortSupport(active string) (support EffortSupport, told bool) {
+	support, told = r.reasoningFor(active)
+	if !told {
 		if base, _, hasVariant := strings.Cut(active, ":"); hasVariant {
-			reasoning = r.reasoningFor(base)
+			support, told = r.reasoningFor(base)
 		}
 	}
-	if reasoning == nil {
-		return EffortSupport{}
-	}
-	return EffortSupport{
-		Supported: true,
-		Dialect:   EffortDialectReasoning,
-		Efforts:   reasoning.SupportedEfforts,
-		Default:   reasoning.DefaultEffort,
-		Mandatory: reasoning.Mandatory,
-	}
+	return support, told
 }
 
-// reasoningFor returns the `reasoning` object of the entry with exactly this id, and nil when no
-// entry has it or the entry carries none. An empty id matches nothing: an id-less entry is dropped
-// from the advertised list, so it must not answer for an unresolved active model either.
-func (r modelsResponse) reasoningFor(id string) *modelReasoning {
+// reasoningFor reads the `reasoning` object of the entry with exactly this id per decodeReasoning,
+// and reports no tell when no entry has the id. An empty id matches nothing: an id-less entry is
+// dropped from the advertised list, so it must not answer for an unresolved active model either.
+func (r modelsResponse) reasoningFor(id string) (support EffortSupport, told bool) {
 	if id == "" {
-		return nil
+		return EffortSupport{}, false
 	}
 	for _, m := range r.Data {
 		if m.ID == id {
 			return decodeReasoning(m.Reasoning)
 		}
 	}
-	return nil
+	return EffortSupport{}, false
 }
 
-// decodeReasoning decodes one entry's raw `reasoning` value into the object it should be. An
-// absent, null or malformed value yields nil: the field is a passive tell, so a server that writes
-// something unexpected there reads as "no tell" and never fails the discovery that surrounds it.
-func decodeReasoning(raw json.RawMessage) *modelReasoning {
+// decodeReasoning reads one entry's raw `reasoning` value for the thinking-effort tell. The KEYS
+// the object carries decide what it means, because the field name is shared by servers that read
+// different request dialects (ADR 0060, amended 2026-11-02):
+//
+//   - `supported_efforts` or `default_effort` is OpenRouter's shape: EffortDialectReasoning with that
+//     vocabulary and default. It wins an object that also carries Splash's keys.
+//   - otherwise `thinks`, `efforts` or `default` is Splash's shape: EffortDialectKwargs with its
+//     `efforts` and `default` — or, when `thinks` is an explicit false, the zero answer, told: the
+//     server has said the model has no dial, and that is final.
+//   - any other object, `{}` included, states nothing and is no tell.
+//
+// An absent, null or malformed value is no tell either: the field is a passive tell, so a server
+// that writes something unexpected there never fails the discovery that surrounds it. A key whose
+// value is null counts as absent.
+func decodeReasoning(raw json.RawMessage) (support EffortSupport, told bool) {
 	if len(raw) == 0 || string(raw) == jsonNullLiteral {
-		return nil
+		return EffortSupport{}, false
 	}
-	var reasoning modelReasoning
-	if err := json.Unmarshal(raw, &reasoning); err != nil {
-		return nil
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return EffortSupport{}, false
 	}
-	// `mandatory` is read separately, and its failure is deliberately swallowed rather than
-	// returned: decoding it alongside the vocabulary would let a non-boolean value fail the WHOLE
-	// object, which reads as "no tell" and takes the dial off the menu entirely. One unexpected
-	// flag must cost the flag, never the dial.
+	switch {
+	case carriesAny(keys, "supported_efforts", "default_effort"):
+		var reasoning openRouterReasoning
+		if err := json.Unmarshal(raw, &reasoning); err != nil {
+			return EffortSupport{}, false
+		}
+		return EffortSupport{
+			Supported: true,
+			Dialect:   EffortDialectReasoning,
+			Efforts:   reasoning.SupportedEfforts,
+			Default:   reasoning.DefaultEffort,
+			Mandatory: reasoningMandatory(raw),
+		}, true
+	case carriesAny(keys, "thinks", "efforts", "default"):
+		var reasoning splashReasoning
+		if err := json.Unmarshal(raw, &reasoning); err != nil {
+			return EffortSupport{}, false
+		}
+		if reasoning.Thinks != nil && !*reasoning.Thinks {
+			return EffortSupport{}, true
+		}
+		return EffortSupport{
+			Supported: true,
+			Dialect:   EffortDialectKwargs,
+			Efforts:   reasoning.Efforts,
+			Default:   reasoning.Default,
+		}, true
+	}
+	return EffortSupport{}, false
+}
+
+// carriesAny reports whether the decoded object carries any of these keys with a non-null value.
+func carriesAny(keys map[string]json.RawMessage, names ...string) bool {
+	for _, name := range names {
+		if value, ok := keys[name]; ok && string(value) != jsonNullLiteral {
+			return true
+		}
+	}
+	return false
+}
+
+// reasoningMandatory reads OpenRouter's `mandatory` flag off the raw object. It is read in a pass
+// of its own, and its failure is deliberately swallowed rather than returned: decoding it alongside
+// the vocabulary would let a non-boolean value fail the WHOLE object, which reads as "no tell" and
+// takes the dial off the menu entirely. One unexpected flag must cost the flag, never the dial.
+func reasoningMandatory(raw json.RawMessage) bool {
 	var flag struct {
 		Mandatory bool `json:"mandatory"`
 	}
-	if err := json.Unmarshal(raw, &flag); err == nil {
-		reasoning.Mandatory = flag.Mandatory
+	if err := json.Unmarshal(raw, &flag); err != nil {
+		return false
 	}
-	return &reasoning
+	return flag.Mandatory
 }
 
 // resolveHint resolves the configured model id against the advertised list and reports the

@@ -152,10 +152,13 @@ const (
 	// historical chat_template_kwargs mapping.
 	EffortDialectNone EffortDialect = ""
 	// EffortDialectKwargs is llama.cpp's: the intent rides inside `chat_template_kwargs`, which
-	// the server forwards into the chat template.
+	// the server forwards into the chat template. Discovery also picks it for Splash, whose
+	// /v1/models `reasoning` object (`thinks`/`efforts`/`default`) describes a dial it reads there.
 	EffortDialectKwargs EffortDialect = "kwargs"
 	// EffortDialectReasoning is OpenRouter's: a top-level `reasoning` object carrying either an
-	// effort level or an `enabled: false` switch.
+	// effort level or an `enabled: false` switch. Discovery picks it only for a /v1/models
+	// `reasoning` object of OpenRouter's own shape (`supported_efforts` or `default_effort`), never
+	// for the field name alone — other servers write a `reasoning` object of their own.
 	EffortDialectReasoning EffortDialect = "reasoning"
 	// EffortDialectOpenAI is OpenAI's and Groq's: a top-level `reasoning_effort` string. Note the
 	// spelling collision — this is a FIELD of the request body, whereas llama.cpp reads a

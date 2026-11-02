@@ -449,15 +449,16 @@ func TestFiringConfigMountsNoEscapingSkillRoot(t *testing.T) {
 // the entry's own source, a fresh catalog is built from the roots, and the width and the effort
 // dialect both come off the one-shot beat observeServer takes of the REAL server — so the upstream
 // is a scripted one that advertises both, and what it advertises is what the Config must carry. The
-// dialect it advertises is the one discovery can observe: a per-model `reasoning` object is the
-// OpenRouter tell (provider.EffortDialectReasoning); `openai` has no tell and is forced-only. Those
+// dialect it advertises is the one discovery can observe: a per-model `reasoning` object naming
+// OpenRouter's `supported_efforts` is the OpenRouter tell (provider.EffortDialectReasoning); `openai`
+// has no tell and is forced-only. Those
 // defaults are what headless and the daemon rely on — they have no longer-lived facility to share —
 // so a change of default is a change to two Drivers at once.
 func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	roots := firingRoots(t)
 
 	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
-		Models: []stubllm.DiscoveredModel{{ID: "entry-model", Reasoning: &stubllm.ModelReasoning{}}},
+		Models: []stubllm.DiscoveredModel{{ID: "entry-model", Reasoning: &stubllm.ModelReasoning{SupportedEfforts: []string{"low", "high"}}}},
 		Props:  &stubllm.Props{TotalSlots: 4},
 	}})
 
