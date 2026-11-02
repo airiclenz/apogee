@@ -12,11 +12,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -512,5 +516,135 @@ func TestHeadlessRoutedFallback(t *testing.T) {
 	}
 	if !strings.Contains(res.stderr, "grunt failed") {
 		t.Errorf("the switch line does not name the Sub-agent server:\n%s", res.stderr)
+	}
+}
+
+// fallingGrunt is a Sub-agent server that stays listening for the whole run: it answers discovery
+// until its first chat request, cuts that request's stream, and from then on answers 503 to
+// everything — so the grace window's beats find it down while a request that still reaches it is
+// counted rather than refused at the port.
+type fallingGrunt struct {
+	server *httptest.Server
+	dead   atomic.Bool
+	chats  atomic.Int32
+}
+
+// newFallingGrunt starts a fallingGrunt advertising model.
+func newFallingGrunt(t *testing.T, model string) *fallingGrunt {
+	t.Helper()
+	g := &fallingGrunt{}
+	g.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions" {
+			g.chats.Add(1)
+			if g.dead.Swap(true) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			g.cut(w, model)
+			return
+		}
+		if g.dead.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"`+model+`","object":"model"}]}`)
+	}))
+	t.Cleanup(g.server.Close)
+	return g
+}
+
+// cut starts a stream, sends one content delta and drops the connection without an ending.
+func (g *fallingGrunt) cut(w http.ResponseWriter, model string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, `data: {"id":"cut","object":"chat.completion.chunk","model":"`+model+
+		`","choices":[{"index":0,"delta":{"content":"The"}}]}`+"\n\n")
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		panic(http.ErrAbortHandler)
+	}
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	_ = conn.Close()
+}
+
+// requestsCarrying counts the requests up answered whose last message carries text.
+func requestsCarrying(up *stubllm.Server, text string) int {
+	n := 0
+	for _, r := range up.Requests() {
+		if len(r.Messages) > 0 && strings.Contains(r.Messages[len(r.Messages)-1].Content, text) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestHeadlessRoutedFallbackRelatchesLaterSpawns: a headless run delegates twice, one after the
+// other, to a `sub-agents-server:` entry naming a `fallback:`. The Sub-agent server fails under the
+// first child, the seat falls over, and the run re-latches its Delegation target on the fallback —
+// so the second child dials the fallback directly and the dead primary sees no request after the
+// first one.
+func TestHeadlessRoutedFallbackRelatchesLaterSpawns(t *testing.T) {
+	const secondTask = "Survey the tests"
+	session := stubllm.New(t, stubllm.Script{Model: "session-model", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "sub_agent"}, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_second", Name: "sub_agent", Arguments: `{"task":"` + secondTask + `","name":"second survey"}`,
+		}}},
+		{When: &stubllm.Match{ToolResult: "sub_agent"}, Repeat: true, Text: "Both delegates reported."},
+		{When: &stubllm.Match{LastMessage: "^" + upstreamPrompt}, Repeat: true, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_first", Name: "sub_agent", Arguments: `{"task":"Survey the workspace","name":"first survey"}`,
+		}}},
+	}})
+	grunt := newFallingGrunt(t, "grunt-model")
+	spare := stubllm.New(t, stubllm.Script{Model: "backup-model", Turns: []stubllm.Turn{
+		{Repeat: true, Text: fallbackAnswer},
+	}})
+	home := t.TempDir()
+	writeConfigHome(t, home,
+		"context-window: 32768\n"+
+			"re-stream-budget: 0\n"+
+			"sub-agents-server: grunt\n"+
+			"servers:\n"+
+			"  - name: session\n"+
+			"    endpoint: "+session.URL+"\n"+
+			"    model: "+session.Model+"\n"+
+			"  - name: grunt\n"+
+			"    endpoint: "+grunt.server.URL+"\n"+
+			"    model: grunt-model\n"+
+			"    fallback: [backup]\n"+
+			"    fallback-after: "+fallbackGraceForTests.String()+"\n"+
+			"  - name: backup\n"+
+			"    endpoint: "+spare.URL+"\n"+
+			"    model: "+spare.Model+"\n"+
+			"server: session\n")
+
+	res := awaitHeadless(t, startHeadless(t, home))
+
+	if res.err != nil {
+		t.Fatalf("headless: %v (exit %d)\n%s", res.err, exitCodeFor(res.err), res.stderr)
+	}
+	if got := strings.TrimRight(res.stdout, "\n"); got != "Both delegates reported." {
+		t.Errorf("stdout = %q, want the session's wrap-up after both delegations reported", got)
+	}
+	if got := grunt.chats.Load(); got != 1 {
+		t.Errorf("the dead Sub-agent server saw %d chat requests, want 1 — a child spawned after the "+
+			"fallover dialled it instead of the re-latched fallback", got)
+	}
+	if got := requestsCarrying(spare, secondTask); got != 1 {
+		t.Errorf("the fallback saw %d of the second child's requests, want 1 (log %v)", got, spare.Requests())
+	}
+	if got := len(spare.Requests()); got != 2 {
+		t.Errorf("the fallback saw %d requests, want 2 — the first child's resend and the second child's one",
+			got)
 	}
 }

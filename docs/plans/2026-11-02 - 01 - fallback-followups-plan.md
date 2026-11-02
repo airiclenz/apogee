@@ -161,7 +161,11 @@ Depends on item 6.
 **Closes:** fallover-skips-profile-settle
 **Commit:** `fix(fallback): a Firing's own tool set takes the fallback profile roster`
 
-## 8. Firings re-latch the Sub-agents target after a fallover
+## 8. Firings re-latch the Sub-agents target after a fallover — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the late-bind slot (delegationLatchSlot) rides firingInputs beside projectRuns rather than firingRouting: raise builds both slots before composition, newFiringSeatFallback reads it off `in` (signature unchanged, a nil slot drops the push), and raise hands its bind to run.Spec.BindDelegationLatch.
+NOTES (2026-11-02): the fallingGrunt test server cuts its first chat stream rather than answering 503, because the provider's HTTP retry policy re-sends a 503 and the dead server's chat count would no longer read 1; every request after that one, discovery included, gets 503. With the push disabled the test fails (the dead server saw 4 chat requests).
+NOTES (2026-11-02): docs/manual/configuration.md ("once that seat has moved, later sub-agents go to its fallback too") and adr-0045-amend-1102 already describe the shipped behaviour, so no doc edit was needed.
 
 **What:**
 Depends on item 4.

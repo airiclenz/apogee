@@ -117,6 +117,11 @@ type firingInputs struct {
 	// Agent this Firing builds binds its fenced runner into it (Config.BindProjectRun). nil — no
 	// Runner, or a composition test — binds nothing.
 	projectRuns *projectRunSlot
+	// delegationLatch is the slot the Sub-agents seat's fallback re-latches the run's Delegation
+	// target through on a landing (newFiringSeatFallback): the Agent this Firing builds binds its
+	// own setter into it (run.Spec.BindDelegationLatch). nil — a composition test — re-latches
+	// nothing.
+	delegationLatch *delegationLatchSlot
 	// report is where a SYNC-lane reaction's trouble is said out loud — a `gate:` or `advise:`
 	// command that failed, timed out or could not be spawned (domain.Config.Report). It is the SAME
 	// function the Driver hands its Runner for the observe lane's failures, so one `reactions:`
@@ -788,11 +793,16 @@ func resolveFiringRouting(
 // Sub-agent server's entry names no `fallback:`: the routed counterpart of newFiringFallback. The
 // primary's grace beats observe the Sub-agent server through its own beat with the key its entry
 // resolved to (apiKey); each fallback's key resolves through the run's one resolver, fenced to the
-// Firing's workspace as the Sub-agent server's own was. An unattended run has no second heartbeat to
-// re-point, so a fallover moves the routed children that fault — a child spawned after it still
-// dials the primary, faults there, and reads the move the run already made. Each landing is routed:
-// it binds as resolveDelegationTarget binds a target on the fallback, over parent — the window and
-// reserve share the run itself bound — never under the run's root window pins.
+// Firing's workspace as the Sub-agent server's own was. Each landing is routed: it binds as
+// resolveDelegationTarget binds a target on the fallback, over parent — the window and reserve
+// share the run itself bound — never under the run's root window pins.
+//
+// A landing also re-latches the run's Delegation target, as delegationWiring.fallover does for a
+// session: the fallback's target, resolved from the beat that found it answering and carrying this
+// same resolver, is pushed through in.delegationLatch, so a routed child spawned after the fallover
+// dials the fallback directly and sends nothing to the dead primary. A target that cannot be
+// resolved pushes nil, and later spawns use the run's own Upstream (ADR 0045 decision 4,
+// adr-0045-amend-1102). The seat the model is told about does not move (ADR 0069).
 func newFiringSeatFallback(
 	in firingInputs,
 	keys *config.KeyResolver,
@@ -817,9 +827,47 @@ func newFiringSeatFallback(
 		routed: true,
 		parent: parent,
 	}
-	return newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
+	var resolver *fallbackResolver
+	resolver = newFallbackResolver(entry.Name, names, config.ResolveFallbackAfter(entry.FallbackAfter),
 		func(ctx context.Context) bool { return server.beat(ctx, apiKey).Reachable },
-		lander.land)
+		func(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
+			landing, landed := lander.arrive(ctx, name)
+			if landed {
+				target := resolveDelegationTarget(landing.entry, landing.dial.APIKey, landing.observed,
+					in.opts.ModelProfiles, in.opts.StreamIdleTimeout)
+				if target != nil {
+					target.Fallback = resolver
+				}
+				in.delegationLatch.push(target)
+			}
+			return landing.answer, landed
+		})
+	return resolver
+}
+
+// delegationLatchSlot is the late bind between an unattended run's Sub-agents seat fallback and the
+// Agent whose Delegation target it re-latches (newFiringSeatFallback). The resolver is built at
+// composition, before run.Once builds that Agent; the Agent, once built, stores its own
+// SetDelegationTarget through bind (run.Spec.BindDelegationLatch). It is safe for concurrent use:
+// a landing pushes from whichever child's walk made it.
+type delegationLatchSlot struct {
+	set atomic.Pointer[func(*apogee.DelegationTarget)]
+}
+
+// bind stores the Agent's setter, replacing any earlier one.
+func (s *delegationLatchSlot) bind(set func(*apogee.DelegationTarget)) {
+	s.set.Store(&set)
+}
+
+// push latches target on the bound Agent. A nil slot, or one no Agent has bound yet, drops it: there
+// is no run whose later spawns it could reach.
+func (s *delegationLatchSlot) push(target *apogee.DelegationTarget) {
+	if s == nil {
+		return
+	}
+	if set := s.set.Load(); set != nil {
+		(*set)(target)
+	}
 }
 
 // firingHooks builds the Reaction Runner ONE unattended run fires through (ADR 0073). What it arms
@@ -1087,6 +1135,7 @@ func raise(
 	lanes := domain.LanesOf(in.opts.Reactions)
 	guard := security.NewURLGuard(in.opts.URLAllowHosts, in.opts.URLDenyHosts)
 	projectRuns := &projectRunSlot{}
+	delegationLatch := &delegationLatchSlot{}
 	hookRunner, err := firingHooks(lanes.Observe, in.roots.workspace, guard, ref, in.report, projectRuns)
 	if err != nil {
 		return run.Result{}, nil, errNotStarted{Stage: stageCompose, Err: err}
@@ -1098,6 +1147,7 @@ func raise(
 	}()
 	in.hooks = hookRunner
 	in.projectRuns = projectRuns
+	in.delegationLatch = delegationLatch
 
 	now := in.now
 	if now == nil {
@@ -1145,6 +1195,9 @@ func raise(
 		// fields are nil when no key named one — the unrouted floor every Firing had before.
 		DelegationTarget: routing.target,
 		DelegationSeat:   routing.seat,
+		// The late bind the Sub-agents seat's fallback re-latches that target through once it falls
+		// over (newFiringSeatFallback): the Agent run.Once builds hands its setter to the slot.
+		BindDelegationLatch: delegationLatch.bind,
 		// The live Event journal a watcher follows while the Firing runs (ADR 0103), opened by
 		// run.Once under the record's hold. A store-less run (`--no-save`) gets none.
 		Journal: firingJournal(store, in.report),
