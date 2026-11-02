@@ -1,11 +1,13 @@
 ---
 title: Headless and daemon Firings never bind the served model when no model is configured
-status: active
+status: done
 type: bug
 priority: 1
 labels: [driver-parity]
 plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T06:57:58Z
+closed: 2026-11-02T17:41:50Z
+reason: "Resolved by plan 2026-11-02 - 02 - turn-total-and-open-bugs-plan (archived at 103e5b64), item 1: unpinned Firings bind the beat's served model; no-model beat refuses exit 2"
 ---
 
 On a `servers:` entry with no `model:` (and no --model / APOGEE_MODEL), `apogee headless "…"` exits 2 in about 1 ms with:

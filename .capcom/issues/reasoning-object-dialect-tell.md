@@ -1,10 +1,12 @@
 ---
 title: Any /v1/models reasoning object switches the effort dialect, whatever its shape
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T06:57:58Z
+closed: 2026-11-02T17:41:50Z
+reason: "Resolved by plan 2026-11-02 - 02 - turn-total-and-open-bugs-plan (archived at 103e5b64), items 2-3: only an OpenRouter-shaped reasoning object picks the reasoning dialect; Splash shape reads kwargs/efforts/default; ADR 0060 amended"
 ---
 
 `modelsResponse.effortSupport` (internal/provider/discovery.go) treats the mere presence of a per-model `reasoning` object as OpenRouter's tell and picks `EffortDialectReasoning`. Splash 1.5 now advertises its own shape there:

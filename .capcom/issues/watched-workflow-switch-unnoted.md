@@ -1,11 +1,13 @@
 ---
 title: A watcher writes no fallback note for a workflow-moved session seat
-status: open
+status: done
 type: bug
 priority: 3
 labels: [fallback]
 plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T16:08:52Z
+closed: 2026-11-02T17:41:50Z
+reason: "Resolved by plan 2026-11-02 - 02 - turn-total-and-open-bugs-plan (archived at 103e5b64), item 4: foldWatchedEvent notes a workflow-owned session-seat switch once and follows nothing"
 ---
 
 Since a background workflow child can move the session's own seat onto its `fallback:` (plan 2026-11-02 - 01 - fallback-followups-plan, item 2, 37ca5e97), the live eventMsg case notes that switch: internal/tui/model.go:1345 adds fallbackNote for a workflow-owned UpstreamSwitchedEvent on UpstreamSeatSession. A watcher of the same journal does not: internal/tui/watch.go:845 (foldWatchedEvent) routes every workflow-owned event to foldBackgroundEvent and returns, so the session-seat switch reaches the watcher's Inspector rings but writes no "server fallback:" note in its transcript. The conversation's own session-seat switch is noted for a watcher (TestFallbackWatchedSwitchIsNotedAndNotFollowed, internal/tui/fallback_test.go:258).

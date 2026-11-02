@@ -1,10 +1,12 @@
 ---
 title: Show the ongoing turn's total duration beside the elapsed clock
-status: open
+status: done
 type: task
 priority: 2
 plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T15:11:18Z
+closed: 2026-11-02T17:41:50Z
+reason: "Resolved by plan 2026-11-02 - 02 - turn-total-and-open-bugs-plan (archived at 103e5b64), items 6-7: value-filled clock format and [total …] beside the elapsed clock"
 ---
 
 **What**

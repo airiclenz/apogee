@@ -1,10 +1,12 @@
 ---
 title: Firings never re-latch the Sub-agents target after a fallover
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-02 - 02 - turn-total-and-open-bugs-plan
 created: 2026-11-02T14:46:59Z
+closed: 2026-11-02T17:41:50Z
+reason: "Resolved by plan 2026-11-02 - 02 - turn-total-and-open-bugs-plan (archived at 103e5b64), item 5: the Firing namer follows the re-latched Sub-agents target"
 ---
 
 resolveFiringRouting (cmd/apogee/wire_firing.go) builds the Delegation target once and newFiringSeatFallback lands with no re-latch hook, so in headless, daemon and session-raised Firings every routed child spawned after a Sub-agents-seat fallover dials the dead primary, retries, faults, then silently reads the cached switch. The TUI's delegationWiring.fallover pushes the fallback's target. Found in item 11 NOTES of plan 2026-11-02 - 00 - midrun-model-fallback-plan.
