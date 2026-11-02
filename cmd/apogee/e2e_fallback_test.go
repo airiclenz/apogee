@@ -648,3 +648,60 @@ func TestHeadlessRoutedFallbackRelatchesLaterSpawns(t *testing.T) {
 			got)
 	}
 }
+
+// TestHeadlessRoutedFallbackNamesLaterSpawnsOnTheFallback: the sibling of
+// TestHeadlessRoutedFallbackRelatchesLaterSpawns whose second `sub_agent` call names nothing, so
+// the run asks its delegation namer for a name. The namer follows the re-latched target as the
+// spawn does: the naming call goes to the fallback, and the dead primary still sees no request
+// after the first child's.
+func TestHeadlessRoutedFallbackNamesLaterSpawnsOnTheFallback(t *testing.T) {
+	const secondTask = "Survey the tests"
+	session := stubllm.New(t, stubllm.Script{Model: "session-model", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "sub_agent"}, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_second", Name: "sub_agent", Arguments: `{"task":"` + secondTask + `"}`,
+		}}},
+		{When: &stubllm.Match{ToolResult: "sub_agent"}, Repeat: true, Text: "Both delegates reported."},
+		{When: &stubllm.Match{LastMessage: "^" + upstreamPrompt}, Repeat: true, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_first", Name: "sub_agent", Arguments: `{"task":"Survey the workspace","name":"first survey"}`,
+		}}},
+	}})
+	grunt := newFallingGrunt(t, "grunt-model")
+	spare := stubllm.New(t, stubllm.Script{Model: "backup-model", Turns: []stubllm.Turn{
+		{Repeat: true, Text: fallbackAnswer},
+	}})
+	home := t.TempDir()
+	writeConfigHome(t, home,
+		"context-window: 32768\n"+
+			"re-stream-budget: 0\n"+
+			"sub-agents-server: grunt\n"+
+			"servers:\n"+
+			"  - name: session\n"+
+			"    endpoint: "+session.URL+"\n"+
+			"    model: "+session.Model+"\n"+
+			"  - name: grunt\n"+
+			"    endpoint: "+grunt.server.URL+"\n"+
+			"    model: grunt-model\n"+
+			"    fallback: [backup]\n"+
+			"    fallback-after: "+fallbackGraceForTests.String()+"\n"+
+			"  - name: backup\n"+
+			"    endpoint: "+spare.URL+"\n"+
+			"    model: "+spare.Model+"\n"+
+			"server: session\n")
+
+	res := awaitHeadless(t, startHeadless(t, home))
+
+	if res.err != nil {
+		t.Fatalf("headless: %v (exit %d)\n%s", res.err, exitCodeFor(res.err), res.stderr)
+	}
+	if got := strings.TrimRight(res.stdout, "\n"); got != "Both delegates reported." {
+		t.Errorf("stdout = %q, want the session's wrap-up after both delegations reported", got)
+	}
+	if got := grunt.chats.Load(); got != 1 {
+		t.Errorf("the dead Sub-agent server saw %d chat requests, want 1 — the unnamed second child's "+
+			"naming call or its turn dialled it instead of the re-latched fallback", got)
+	}
+	if got := requestsCarrying(spare, secondTask); got != 2 {
+		t.Errorf("the fallback saw %d requests carrying the second child's task, want 2 — its naming call "+
+			"and its one turn (log %v)", got, spare.Requests())
+	}
+}

@@ -601,15 +601,16 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 
 	// And the namer an unnamed delegation is named by (ADR 0068), so a Firing's saved record reads
 	// the same way a session's transcript does rather than carrying a wall of task first lines
-	// (ADR 0031's Driver parity). Both of its Upstreams are constants for the run — the run's own
-	// server, and the Sub-agent server resolved just above when one was named — because an unattended
-	// run has no live door to move either through; the gate is `auto-title:` as it stood at startup
-	// for the same reason. The session binding is the entry's dial facts, so a naming call speaks the
+	// (ADR 0031's Driver parity). Its session Upstream is a constant for the run — the run's own
+	// server, which an unattended run has no live door to move — and its routed one starts on the
+	// Sub-agent server resolved just above when one was named, then follows the Sub-agents seat's
+	// fallover through the latch slot (newFiringNamer); the gate is `auto-title:` as it stood at
+	// startup, there being no door to flip it through either. The session binding is the entry's dial facts, so a naming call speaks the
 	// protocol this entry speaks and sends the keys every other request to it sends — on the model the
 	// Driver overlaid (spec.Model), which is the one this run talks to, not the entry's own pin.
 	session := bindingOfEntry(in.entry, apiKey)
 	session.Model = spec.Model
-	cfg.Namer = newFiringNamer(session, effortDialect, routing.target, in.opts.AutoTitle)
+	cfg.Namer = newFiringNamer(session, effortDialect, routing.target, in.delegationLatch, in.opts.AutoTitle)
 
 	// And the Server fallback of the run's own seat (ADR 0105): the resolver the engine consults
 	// before it abandons a Turn for a fault that is this server's own, built from the bound entry's
@@ -830,7 +831,9 @@ func resolveFiringRouting(
 // same resolver, is pushed through in.delegationLatch, so a routed child spawned after the fallover
 // dials the fallback directly and sends nothing to the dead primary. A target that cannot be
 // resolved pushes nil, and later spawns use the run's own Upstream (ADR 0045 decision 4,
-// adr-0045-amend-1102). The seat the model is told about does not move (ADR 0069).
+// adr-0045-amend-1102). The run's delegation namer reads the same push (newFiringNamer), so an
+// unnamed later child is named on the box it dials. The seat the model is told about does not move
+// (ADR 0069).
 func newFiringSeatFallback(
 	in firingInputs,
 	keys *config.KeyResolver,
@@ -878,8 +881,17 @@ func newFiringSeatFallback(
 // composition, before run.Once builds that Agent; the Agent, once built, stores its own
 // SetDelegationTarget through bind (run.Spec.BindDelegationLatch). It is safe for concurrent use:
 // a landing pushes from whichever child's walk made it.
+//
+// The Agent is not its only reader. The run's delegation namer (newFiringNamer) reads the last
+// pushed target through latched, so an unnamed child spawned after the fallover is named by the
+// fallback it now dials rather than by the dead primary — the same box-follows-the-work rule a
+// session's namer keeps through delegationWiring.routedBinding.
 type delegationLatchSlot struct {
 	set atomic.Pointer[func(*apogee.DelegationTarget)]
+	// last is the target the latest push carried, nil until one has been pushed. It points at a nil
+	// target when the latest landing could not resolve one, which is an answer of its own: later
+	// spawns use the run's own Upstream, and so does their naming call.
+	last atomic.Pointer[*apogee.DelegationTarget]
 }
 
 // bind stores the Agent's setter, replacing any earlier one.
@@ -887,15 +899,30 @@ func (s *delegationLatchSlot) bind(set func(*apogee.DelegationTarget)) {
 	s.set.Store(&set)
 }
 
-// push latches target on the bound Agent. A nil slot, or one no Agent has bound yet, drops it: there
-// is no run whose later spawns it could reach.
+// push latches target on the bound Agent and records it for latched. A nil slot drops it, and one no
+// Agent has bound yet latches nothing on an Agent: there is no run whose later spawns it could
+// reach. The record is kept either way, since the landing has said the primary is down.
 func (s *delegationLatchSlot) push(target *apogee.DelegationTarget) {
 	if s == nil {
 		return
 	}
+	s.last.Store(&target)
 	if set := s.set.Load(); set != nil {
 		(*set)(target)
 	}
+}
+
+// latched answers the target the latest push carried — nil when that landing resolved none — and
+// false while nothing has been pushed, or on a nil slot.
+func (s *delegationLatchSlot) latched() (*apogee.DelegationTarget, bool) {
+	if s == nil {
+		return nil, false
+	}
+	last := s.last.Load()
+	if last == nil {
+		return nil, false
+	}
+	return *last, true
 }
 
 // firingHooks builds the Reaction Runner ONE unattended run fires through (ADR 0073). What it arms

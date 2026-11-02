@@ -613,3 +613,52 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 			sessionCall.Model, sessionCall.Authorization)
 	}
 }
+
+// An unattended run's routed reader follows its Sub-agents seat's fallover: once the seat's
+// fallback re-latches the Delegation target through the run's latch slot, a routed child's naming
+// call goes to the target that landing pushed — never to the dead primary the run resolved at
+// composition. A landing that resolved no target sends naming to the run's own server, as later
+// spawns go; and a run with no slot, or one nothing has pushed through yet, keeps the target it
+// resolved.
+func TestFiringNamerFollowsTheLatchedSubAgentsTarget(t *testing.T) {
+	t.Parallel()
+
+	primary := &apogee.DelegationTarget{Endpoint: "http://grunt", Model: "grunt-model"}
+	fallback := &apogee.DelegationTarget{Endpoint: "http://backup", Model: "backup-model",
+		EffortDialect: provider.EffortDialectKwargs}
+	session := upstreamBinding{Endpoint: "http://session", Model: "session-model"}
+
+	pushed := func(target *apogee.DelegationTarget) *delegationLatchSlot {
+		slot := &delegationLatchSlot{}
+		slot.push(target)
+		return slot
+	}
+	for _, tc := range []struct {
+		name        string
+		latch       *delegationLatchSlot
+		wantModel   string
+		wantDialect provider.EffortDialect
+	}{
+		{name: "the pushed target wins", latch: pushed(fallback), wantModel: "backup-model",
+			wantDialect: provider.EffortDialectKwargs},
+		{name: "a nil push sends naming to the session", latch: pushed(nil), wantModel: "session-model",
+			wantDialect: provider.EffortDialectNone},
+		{name: "no push keeps the resolved target", latch: &delegationLatchSlot{}, wantModel: "grunt-model",
+			wantDialect: provider.EffortDialectNone},
+		{name: "no slot keeps the resolved target", latch: nil, wantModel: "grunt-model",
+			wantDialect: provider.EffortDialectNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			namer := newFiringNamer(session, provider.EffortDialectNone, primary, tc.latch, true)
+
+			binding, dialect := namer.upstream(true)
+			if binding.Model != tc.wantModel {
+				t.Errorf("routed naming call bound to %q; want %q", binding.Model, tc.wantModel)
+			}
+			if dialect != tc.wantDialect {
+				t.Errorf("routed naming dialect = %v; want %v", dialect, tc.wantDialect)
+			}
+		})
+	}
+}

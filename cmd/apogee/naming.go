@@ -47,8 +47,9 @@ type delegationNamer struct {
 	// routed answers the Sub-agent server's last-landed binding and dialect, and false when no
 	// target has ever landed. nil is the same answer for a Driver whose run has no Sub-agent server
 	// at all — a bench, or a Firing composed with no `sub-agents-server:` resolved — and keeps the
-	// fallback one branch rather than two. An unattended run that DID resolve one reads a constant
-	// here, since nothing can move it mid-run (newFiringNamer).
+	// fallback one branch rather than two. An unattended run that DID resolve one reads the target it
+	// resolved until its Sub-agents seat falls over, and the target that fallover latched after
+	// (newFiringNamer).
 	routed func() (upstreamBinding, provider.EffortDialect, bool)
 	// enabled is the live `auto-title:` switch, seeded from the launch Options and flipped by the
 	// host when the pane or the file moves the key (tui.Options.OnAutoTitle). It is read at call
@@ -70,27 +71,42 @@ func newDelegationNamer(
 	return namer
 }
 
-// newFiringNamer builds the namer an unattended run carries: both servers are bound before the run
-// starts and neither moves, so each reader collapses to a constant and the gate is whatever
+// newFiringNamer builds the namer an unattended run carries. Its session server is bound before the
+// run starts and never moves, so that reader collapses to a constant, and the gate is whatever
 // `auto-title:` said at startup. A Firing has no live settings door to flip any of it through —
-// there is no pane and no session — which is exactly why the values are read once here and the same
-// atomic still answers at call time.
+// there is no pane and no session — which is exactly why those values are read once here and the
+// same atomic still answers at call time.
 //
 // routed is the Sub-agent server this run resolved (firingConfig), and nil when it resolved none. It
 // is passed rather than left out because ADR 0068 decision 2 is the whole point of the reader: a
 // routed child's grunt box is already warm for this run, so it answers the question about its own
 // work — and a Firing that fell back to the session server would put an extra call on the expensive
 // box for every spawn, which is precisely the cost that decision exists to avoid.
+//
+// The routed reader is the one thing that can move mid-run: the Sub-agents seat's fallback
+// re-latches the run's Delegation target through latch (newFiringSeatFallback), and the reader
+// follows it, so a child spawned after the fallover is named by the fallback it dials rather than by
+// the dead primary. A latch that carried no target sends naming to the session's binding, as later
+// spawns go to the run's own Upstream. A nil latch — a composition with no slot — answers routed for
+// the whole run.
 func newFiringNamer(
 	binding upstreamBinding,
 	dialect provider.EffortDialect,
 	routed *apogee.DelegationTarget,
+	latch *delegationLatchSlot,
 	autoTitle bool,
 ) *delegationNamer {
 	var routedUpstream func() (upstreamBinding, provider.EffortDialect, bool)
-	if routed != nil {
+	if routed != nil || latch != nil {
 		routedUpstream = func() (upstreamBinding, provider.EffortDialect, bool) {
-			return bindingOfTarget(routed), routed.EffortDialect, true
+			target := routed
+			if latched, pushed := latch.latched(); pushed {
+				target = latched
+			}
+			if target == nil {
+				return upstreamBinding{}, provider.EffortDialectNone, false
+			}
+			return bindingOfTarget(target), target.EffortDialect, true
 		}
 	}
 	return newDelegationNamer(

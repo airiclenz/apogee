@@ -143,7 +143,9 @@ internal/tui/workflow.go — foldBackgroundEvent; internal/tui/fallback_test.go 
 
 **Commit:** `fix(tui): a watcher notes a workflow-moved session-seat switch`
 
-## 5. The Firing namer follows the re-latched Sub-agents target
+## 5. The Firing namer follows the re-latched Sub-agents target — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): delegationLatchSlot.push records the pushed target even before an Agent has bound the slot (the landing says the primary is down); the Agent setter is still called only once bound.
 
 **Closes:** firing-routed-relatch-gap
 
