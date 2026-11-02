@@ -152,7 +152,11 @@ internal/agent/agent.go — New, Resume; internal/agent/loop.go — consultFallb
 
 **Commit:** `refactor(agent): an Agent's seat is one value`
 
-## 5. The engine announces a routed fallover once, on every Driver
+## 5. The engine announces a routed fallover once, on every Driver — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the claim key's comparability test is `reflect.ValueOf(r).Comparable()`, not the plan's `reflect.TypeOf(r).Comparable()`: the Type form reports true for a struct holding an interface field whose dynamic value is a func, which would still panic the hash; the Value form checks the dynamic contents.
+NOTES (2026-11-02): the claim set lives on `delegationLatch` (`announced map[fallbackClaim]struct{}`, `claimFallbackKey`, `claimAnnouncement`), under the latch's own mutex; the session seat's announce-on-landed-replace is unchanged.
+NOTES (2026-11-02): the test helper `firstOnceResolver` (and `claimOnce`, `alwaysAnnounces`) is renamed/removed: with no claim left to hand out it is now `spareSeatResolver`, a plain spare-answering stub; `claimsAnnounce` is removed from cmd/apogee/fallback_test.go and its assertions dropped from the resolver and delegation tests.
 
 **What:**
 **Goal:** a routed fallover emits exactly one `upstream_switched` Event per seat move with any resolver; `FallbackAnswer` has no `Announce` field.

@@ -102,18 +102,12 @@ func awaitAnswer(t *testing.T, ch <-chan apogee.FallbackAnswer) apogee.FallbackA
 	}
 }
 
-// claimsAnnounce claims answer's announcement, false when it carries none.
-func claimsAnnounce(answer apogee.FallbackAnswer) bool {
-	return answer.Announce != nil && answer.Announce()
-}
-
 func primaryReport() apogee.FallbackReport {
 	return apogee.FallbackReport{Server: "primary", Model: "primary-model"}
 }
 
 // TestFallbackResolverSharesOneRunAcrossCallers: concurrent and later reports of a fault on the
-// same failed upstream cost one grace window and one walk, all read the same answer, and the run's
-// one announcement is claimed by exactly one of them.
+// same failed upstream cost one grace window and one walk, and all read the same answer.
 func TestFallbackResolverSharesOneRunAcrossCallers(t *testing.T) {
 	seat := newFakeSeat("backup")
 	seat.landGate = make(chan struct{})
@@ -133,60 +127,16 @@ func TestFallbackResolverSharesOneRunAcrossCallers(t *testing.T) {
 	}
 	got = append(got, r.Resolve(context.Background(), primaryReport()))
 
-	claims := 0
 	for i, answer := range got {
 		if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" {
-			t.Errorf("answer %d = %+v, want the switch to backup", i, answer)
+			t.Errorf("answer %d = %+v, want the one run's switch to backup", i, answer)
 		}
-		if claimsAnnounce(answer) {
-			claims++
-		}
-	}
-	if claims != 1 {
-		t.Errorf("%d answers claimed the announcement, want exactly 1", claims)
 	}
 	if lands := seat.lands(); len(lands) != 1 {
 		t.Errorf("the fallback was landed %d times (%v), want one walk", len(lands), lands)
 	}
 	if got[0].Waited < fallbackTestGrace {
 		t.Errorf("Waited = %s, want at least the grace window %s", got[0].Waited, fallbackTestGrace)
-	}
-}
-
-// TestFallbackResolverAnnounceIsClaimedOnce: every answer one run hands out shares one claim, so
-// concurrent claims from every caller's answer yield exactly one announcement.
-func TestFallbackResolverAnnounceIsClaimedOnce(t *testing.T) {
-	seat := newFakeSeat("backup")
-	r := seat.resolver("backup")
-	report := primaryReport()
-	report.RecoveredSpent = true
-
-	const callers = 8
-	answers := make([]apogee.FallbackAnswer, callers)
-	for i := range answers {
-		answers[i] = r.Resolve(context.Background(), report)
-		if answers[i].Verdict != apogee.FallbackSwitch || answers[i].Announce == nil {
-			t.Fatalf("answer %d = %+v, want the one run's switch to backup", i, answers[i])
-		}
-	}
-	var claims atomic.Int32
-	var wg sync.WaitGroup
-	for _, answer := range answers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if answer.Announce() {
-				claims.Add(1)
-			}
-		}()
-	}
-	wg.Wait()
-
-	if got := claims.Load(); got != 1 {
-		t.Errorf("%d concurrent claims succeeded, want exactly 1", got)
-	}
-	if lands := seat.lands(); len(lands) != 1 {
-		t.Errorf("landed %v, want the one run", lands)
 	}
 }
 
@@ -200,14 +150,14 @@ func TestFallbackResolverPrimaryBackWithinGraceIsRecovered(t *testing.T) {
 
 	answer := r.Resolve(context.Background(), primaryReport())
 
-	if answer.Verdict != apogee.FallbackRecovered || !claimsAnnounce(answer) {
-		t.Errorf("answer = %+v, want a recovered that claims its run's announcement", answer)
+	if answer.Verdict != apogee.FallbackRecovered {
+		t.Errorf("answer = %+v, want a recovered", answer)
 	}
 	if lands := seat.lands(); len(lands) != 0 {
 		t.Errorf("fallbacks landed %v, want none — the primary came back", lands)
 	}
 	again := r.Resolve(context.Background(), primaryReport())
-	if again.Verdict != apogee.FallbackRecovered || !claimsAnnounce(again) || seat.beats.Load() != 2 {
+	if again.Verdict != apogee.FallbackRecovered || seat.beats.Load() != 2 {
 		t.Errorf("a later failure got %+v after %d beats, want a fresh run's recovered on a second beat",
 			again, seat.beats.Load())
 	}
@@ -259,12 +209,9 @@ func TestFallbackResolverWalksForwardNeverBack(t *testing.T) {
 	if lands, want := seat.lands(), []string{"first", "second", "third"}; !slices.Equal(lands, want) {
 		t.Errorf("landed %v, want %v — forward only", lands, want)
 	}
-	if !claimsAnnounce(moved) {
-		t.Fatal("the run's first claim was refused")
-	}
 	late := r.Resolve(context.Background(), primaryReport())
-	if late.Verdict != apogee.FallbackSwitch || late.Server != "second" || claimsAnnounce(late) {
-		t.Errorf("a late report on the primary got %+v, want the cached switch to second, already announced", late)
+	if late.Verdict != apogee.FallbackSwitch || late.Server != "second" {
+		t.Errorf("a late report on the primary got %+v, want the cached switch to second", late)
 	}
 }
 
@@ -285,8 +232,7 @@ func TestFallbackResolverAllDownAbandons(t *testing.T) {
 
 // TestFallbackResolverRunOutlivesTheFirstCallersCancel: the caller that started the run is
 // cancelled mid-run and comes back with nothing, a waiter on its own live ctx still gets the run's
-// answer — with the announcement the cancelled starter never claimed still its to claim — and a
-// waiter whose own ctx is cancelled stops waiting.
+// answer, and a waiter whose own ctx is cancelled stops waiting.
 func TestFallbackResolverRunOutlivesTheFirstCallersCancel(t *testing.T) {
 	seat := newFakeSeat("backup")
 	seat.landGate = make(chan struct{})
@@ -298,7 +244,7 @@ func TestFallbackResolverRunOutlivesTheFirstCallersCancel(t *testing.T) {
 	first := resolveAsync(firstCtx, r, report)
 	<-seat.landEntered
 	cancelFirst()
-	if answer := awaitAnswer(t, first); answer.Verdict != apogee.FallbackNone || answer.Announce != nil {
+	if answer := awaitAnswer(t, first); answer.Verdict != apogee.FallbackNone {
 		t.Errorf("the cancelled first caller got %+v, want the zero answer", answer)
 	}
 
@@ -311,8 +257,8 @@ func TestFallbackResolverRunOutlivesTheFirstCallersCancel(t *testing.T) {
 	waiter := resolveAsync(context.Background(), r, report)
 	close(seat.landGate)
 	answer := awaitAnswer(t, waiter)
-	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" || !claimsAnnounce(answer) {
-		t.Errorf("the waiter got %+v, want the run's switch to backup with its announcement unclaimed", answer)
+	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" {
+		t.Errorf("the waiter got %+v, want the run's switch to backup", answer)
 	}
 	if lands := seat.lands(); len(lands) != 1 {
 		t.Errorf("landed %v, want the one run", lands)

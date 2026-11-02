@@ -464,8 +464,8 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 // Agent arriving after it dials nothing and simply follows (true). A holder a server switch retired
 // while the resolver waited moves nothing and is refused (false), so a background workflow child
 // abandons rather than moving the seat after the human did. A routed child's holder is its own, so on the
-// Sub-agents seat the announcement is the first sibling's to claim the answer's Announce instead
-// (announcesRehome). The binding itself is applied by followUpstream, on this Agent's own goroutine,
+// Sub-agents seat the announcement is the first sibling's to claim the move in the tree-shared
+// delegation latch instead (announcesRehome). The binding itself is applied by followUpstream, on this Agent's own goroutine,
 // when the loop re-arms the request.
 func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	spec, bind := answer.Upstream, answer.Rebind
@@ -515,11 +515,16 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 // move. On the session's seat every Agent shares one sharedUpstream, so the replace lands once per
 // failed generation and the Agent it landed for announces it. A routed child on the Sub-agents seat
 // speaks over a holder of its own, so every routed sibling's replace lands; there the seat's one
-// announcement is the first sibling's to claim the answer's Announce — called only here, after its
-// replace moved, so a caller cancelled before it moved anything never spends the claim — and every
-// other sibling moves its own holder silently.
+// announcement is the first sibling's to claim the move — keyed by the seat's resolver and the
+// server it moved to (claimFallbackKey) — in the delegation latch the whole tree shares, claimed
+// only here, after its replace moved, so a caller cancelled before it moved anything never spends
+// the claim; every other sibling moves its own holder silently. The engine owns the claim, so a
+// routed fallover is announced exactly once whatever resolver the Driver handed it (ADR 0031).
 func (a *Agent) announcesRehome(answer FallbackAnswer) bool {
-	return a.seating.upstream.seatOf() == domain.UpstreamSeatSession || (answer.Announce != nil && answer.Announce())
+	if a.seating.upstream.seatOf() == domain.UpstreamSeatSession {
+		return true
+	}
+	return a.delegation.claimAnnouncement(claimFallbackKey(a.seating.fallback, a.seating.upstream, answer.Server))
 }
 
 // followUpstream re-applies the seat's rehome binding to this Agent's Config when the sharedUpstream

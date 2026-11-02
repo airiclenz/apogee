@@ -21,7 +21,6 @@ package main
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee"
@@ -83,9 +82,6 @@ type fallbackResolver struct {
 type fallbackRun struct {
 	done   chan struct{}
 	answer apogee.FallbackAnswer
-	// announced is the run's one announcement claim: the first caller whose answer's Announce
-	// claims it announces the move, whoever started the run.
-	announced atomic.Bool
 }
 
 // newFallbackResolver builds the resolver for a seat on primary whose `fallback:` list is names.
@@ -109,9 +105,8 @@ func newFallbackResolver(
 
 // Resolve answers one report. The first report on a failed server starts the run; every report on
 // that server — concurrent, or later once the run moved the seat — waits for and shares the same
-// answer, whose Announce claims the run's one announcement for the first caller that applies the
-// move — not for whichever report started the run, which may be cancelled before it moves anything.
-// The run itself is detached from the caller that started it, so that caller's cancel never fails
+// answer; the engine, not the resolver, announces the move once (agent.FallbackResolver). The run
+// itself is detached from the caller that started it, so that caller's cancel never fails
 // the others; each caller's own wait still ends at once when its ctx does, with the zero answer (the
 // engine reads a cancelled ctx as the user's cancel whatever comes back).
 func (r *fallbackResolver) Resolve(ctx context.Context, report apogee.FallbackReport) apogee.FallbackAnswer {
@@ -129,9 +124,7 @@ func (r *fallbackResolver) Resolve(ctx context.Context, report apogee.FallbackRe
 	case <-ctx.Done():
 		return apogee.FallbackAnswer{}
 	}
-	answer := run.answer
-	answer.Announce = func() bool { return run.announced.CompareAndSwap(false, true) }
-	return answer
+	return run.answer
 }
 
 // execute runs the grace window and the list walk for report, on a context that keeps the starting

@@ -21,6 +21,7 @@ package agent
 // the seat decided — by the spawn itself, in subagent.go.
 
 import (
+	"reflect"
 	"sync"
 	"time"
 
@@ -160,9 +161,51 @@ type DelegationTarget struct {
 // heartbeat goroutine and read by every goroutine that spawns a child — including the workers of
 // a depth-0 fan-out, which spawn AT ONCE (ADR 0039) — so the shared-mutable-state rule applies
 // and the holder owns the lock for it.
+//
+// Being the one value a whole tree shares, it also holds the Sub-agents seat's announcement claims
+// (claimAnnouncement): every routed sibling moves a holder of its own, so the seat's one
+// UpstreamSwitchedEvent per move is claimed here, tree-wide, rather than by any one holder.
 type delegationLatch struct {
 	mu     sync.RWMutex
 	target *DelegationTarget
+	// announced holds every routed fallover already announced in this tree, keyed by the seat and
+	// the server it moved to (fallbackClaim); nil until the first claim.
+	announced map[fallbackClaim]struct{}
+}
+
+// fallbackClaim keys one routed fallover's announcement: the Sub-agents seat that moved and the
+// `servers:` entry it moved to (FallbackAnswer.Server).
+type fallbackClaim struct {
+	// seat stands for the seat that moved: its FallbackResolver — one instance serves one seat — when
+	// that value can be a map key, else the moving Agent's own holder, so a resolver of an
+	// uncomparable dynamic type (a func adapter, a struct holding a slice) never panics the hash.
+	seat   any
+	server string
+}
+
+// claimFallbackKey builds the claim key for a move onto server by a seat consulting resolver over
+// holder: keyed on the resolver when its dynamic value is comparable (reflect.Value.Comparable,
+// which also looks inside an interface field), else on the holder.
+func claimFallbackKey(resolver FallbackResolver, holder *sharedUpstream, server string) fallbackClaim {
+	if resolver != nil && reflect.ValueOf(resolver).Comparable() {
+		return fallbackClaim{seat: resolver, server: server}
+	}
+	return fallbackClaim{seat: holder, server: server}
+}
+
+// claimAnnouncement reports true to the first claim of key in this tree and false to every later
+// one, across every goroutine.
+func (l *delegationLatch) claimAnnouncement(key fallbackClaim) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, done := l.announced[key]; done {
+		return false
+	}
+	if l.announced == nil {
+		l.announced = make(map[fallbackClaim]struct{})
+	}
+	l.announced[key] = struct{}{}
+	return true
 }
 
 // set installs target as the current one, nil clearing it.

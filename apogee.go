@@ -132,8 +132,11 @@ func WithDelegationTarget(target *DelegationTarget) Option {
 func WithFallbackResolver(r FallbackResolver) Option { return agent.WithFallbackResolver(r) }
 
 // FallbackResolver is the Driver-side seam that decides, for one seat, whether a failed upstream
-// recovered, which fallback the seat moves to, or that there is none. See internal/agent for the
-// contract.
+// recovered, which fallback the seat moves to, or that there is none. It announces nothing: the
+// engine emits one UpstreamSwitchedEvent per seat move whatever resolver it is handed, claiming a
+// Sub-agents seat's move once per (resolver, FallbackAnswer.Server) — on the resolver itself when
+// its dynamic value is comparable, else on each moving Agent's own holder, so a func adapter is
+// accepted and never panics. See internal/agent for the contract.
 type FallbackResolver = agent.FallbackResolver
 
 // FallbackReport is what the engine tells a FallbackResolver about the fault it would abandon a

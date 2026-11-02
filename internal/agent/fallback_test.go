@@ -101,7 +101,7 @@ func (r *stubResolver) seen() []FallbackReport {
 // resolverAnswering is a stubResolver that gives every report the same verdict.
 func resolverAnswering(verdict FallbackVerdict) *stubResolver {
 	return &stubResolver{answer: func(context.Context, FallbackReport) FallbackAnswer {
-		return FallbackAnswer{Verdict: verdict, Announce: alwaysAnnounces}
+		return FallbackAnswer{Verdict: verdict}
 	}}
 }
 
@@ -276,7 +276,7 @@ func TestFallbackCancelDuringResolverWaitIsACancel(t *testing.T) {
 	resolver := &stubResolver{answer: func(waitCtx context.Context, _ FallbackReport) FallbackAnswer {
 		cancel() // the user's Esc, landing inside the wait
 		<-waitCtx.Done()
-		return FallbackAnswer{Verdict: FallbackRecovered, Announce: alwaysAnnounces}
+		return FallbackAnswer{Verdict: FallbackRecovered}
 	}}
 	a := newFallbackAgent(t, sink, responder, resolver)
 	if err := a.Submit(domain.UserInput{Text: "ask the model"}); err != nil {
@@ -450,15 +450,10 @@ func spareAnswer() FallbackAnswer {
 			Model: spareModel, SystemPrompt: sparePrompt, MaxContextTokens: spareWindow,
 			Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Effort: domain.EffortLow}},
 		},
-		Server:   "spare",
-		Waited:   3 * time.Second,
-		Announce: alwaysAnnounces,
+		Server: "spare",
+		Waited: 3 * time.Second,
 	}
 }
-
-// alwaysAnnounces is an Announce whose every claim succeeds: a stub answer standing for a run whose
-// one caller always claims the announcement.
-func alwaysAnnounces() bool { return true }
 
 type seatRig struct {
 	sink                  *recordingSink
@@ -1049,21 +1044,13 @@ func TestFallbackSwitchLeavesARoutedChildOnItsOwnSeat(t *testing.T) {
 	}
 }
 
-// firstOnceResolver is a seat resolver that answers every report with the spare and hands every
-// answer the same claim-once Announce, the way the Driver's single-flight resolver does for one run.
-func firstOnceResolver() *stubResolver {
-	announce := claimOnce()
+// spareSeatResolver is a seat resolver that answers every report with the spare, the way the
+// Driver's single-flight resolver hands every caller of one run the same answer. It claims nothing:
+// the engine announces the seat's move once (Agent.announcesRehome).
+func spareSeatResolver() *stubResolver {
 	return &stubResolver{answer: func(context.Context, FallbackReport) FallbackAnswer {
-		answer := spareAnswer()
-		answer.Announce = announce
-		return answer
+		return spareAnswer()
 	}}
-}
-
-// claimOnce is an Announce that reports true to its first call only, across every goroutine.
-func claimOnce() func() bool {
-	var announced atomic.Bool
-	return func() bool { return announced.CompareAndSwap(false, true) }
 }
 
 // TestFallbackRoutedChildConsultsItsTargetsResolver pins the routed seat's own fallover: a routed
@@ -1073,7 +1060,7 @@ func TestFallbackRoutedChildConsultsItsTargetsResolver(t *testing.T) {
 	t.Parallel()
 	r := newSeatRig(t, nil)
 	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
-	seatResolver := firstOnceResolver()
+	seatResolver := spareSeatResolver()
 	r.parent.SetDelegationTarget(&DelegationTarget{
 		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", Fallback: seatResolver,
 	})
@@ -1107,16 +1094,76 @@ func TestFallbackRoutedChildConsultsItsTargetsResolver(t *testing.T) {
 	}
 }
 
+// TestFallbackRoutedSwitchAnnouncedWithAResolverThatSetsNoClaim pins the engine-owned
+// announcement (routed-fallover-unannounced): a Sub-agents seat whose resolver answers a plain
+// switch — no claim of any kind, as a bench or embedder resolver does — still announces its move
+// with exactly one event, and a later routed child landing the same move onto the same server
+// adds none.
+func TestFallbackRoutedSwitchAnnouncedWithAResolverThatSetsNoClaim(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
+	r.parent.SetDelegationTarget(&DelegationTarget{
+		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", Fallback: spareSeatResolver(),
+	})
+
+	for _, name := range []string{"first", "later"} {
+		if res := stepOnce(t, r.child(t, name), name+" work"); res.Faulted {
+			t.Fatalf("routed child %s faulted: %+v", name, res)
+		}
+	}
+
+	events := r.switchedEvents()
+	if len(events) != 1 || events[0].Seat != domain.UpstreamSeatSubAgents ||
+		events[0].FromServer != "grunt" || events[0].ToServer != "spare" {
+		t.Fatalf("switched events = %+v, want one sub-agents grunt → spare", events)
+	}
+	if got := r.spare.calls(); got != 2 {
+		t.Errorf("spare calls = %d, want both children's", got)
+	}
+}
+
+// resolverFunc adapts a function to FallbackResolver: an embedder's resolver whose dynamic type is a
+// func, so it cannot be a map key.
+type resolverFunc func(ctx context.Context, report FallbackReport) FallbackAnswer
+
+func (f resolverFunc) Resolve(ctx context.Context, report FallbackReport) FallbackAnswer {
+	return f(ctx, report)
+}
+
+// TestFallbackRoutedSwitchAnnouncedWithAnUncomparableResolver pins the claim key's comparability
+// guard: a routed child whose seat resolver is a func adapter moves onto the fallback and announces
+// it with one event — the claim keys on its holder — and never panics hashing the resolver.
+func TestFallbackRoutedSwitchAnnouncedWithAnUncomparableResolver(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
+	r.parent.SetDelegationTarget(&DelegationTarget{
+		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt",
+		Fallback: resolverFunc(func(context.Context, FallbackReport) FallbackAnswer { return spareAnswer() }),
+	})
+
+	res := stepOnce(t, r.child(t, "routed"), "routed work")
+
+	if res.Faulted {
+		t.Fatalf("routed child faulted: %+v", res)
+	}
+	events := r.switchedEvents()
+	if len(events) != 1 || events[0].Seat != domain.UpstreamSeatSubAgents || events[0].ToServer != "spare" {
+		t.Fatalf("switched events = %+v, want one sub-agents move onto spare", events)
+	}
+}
+
 // TestFallbackRoutedSiblingsAnnounceOnce pins one announcement per Sub-agents seat: N routed
 // siblings, each on a holder of its own, fault on one dead Sub-agent server at once; each moves its
-// own holder onto the fallback and finishes there, and only the first to claim Announce announces it.
+// own holder onto the fallback and finishes there, and only the first to claim the move announces it.
 func TestFallbackRoutedSiblingsAnnounceOnce(t *testing.T) {
 	t.Parallel()
 	const n = 3
 	r := newSeatRig(t, nil)
 	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
 	r.parent.SetDelegationTarget(&DelegationTarget{
-		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", Fallback: firstOnceResolver(),
+		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", Fallback: spareSeatResolver(),
 	})
 	children := make([]*Agent, n)
 	for i := range children {
@@ -1163,7 +1210,6 @@ func TestFallbackRoutedSiblingsAnnounceWhenFirstIsCancelled(t *testing.T) {
 	const siblings = 2
 	r := newSeatRig(t, nil)
 	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
-	announce := claimOnce()
 	var arrivals atomic.Int32
 	graceStarted := make(chan struct{})
 	starterGone := make(chan struct{})
@@ -1179,9 +1225,7 @@ func TestFallbackRoutedSiblingsAnnounceWhenFirstIsCancelled(t *testing.T) {
 			}
 			joined <- struct{}{}
 			<-starterGone
-			answer := spareAnswer()
-			answer.Announce = announce
-			return answer
+			return spareAnswer()
 		}},
 	})
 	starter := r.child(t, "starter")

@@ -1788,8 +1788,8 @@ func TestDelegationFallbackRoutedSeatFallsOverOneWay(t *testing.T) {
 	r.killPrimary()
 	answer := r.faultOnPrimary(resolver)
 
-	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "spare" || !claimsAnnounce(answer) {
-		t.Fatalf("answer = %+v; want the switch onto spare, its announcement unclaimed", answer)
+	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "spare" {
+		t.Fatalf("answer = %+v; want the switch onto spare", answer)
 	}
 	got := r.lastPush(t)
 	if got == nil || got.Endpoint != seatSpareEndpoint || got.Model != "spare-model" || got.Fallback != resolver {
@@ -1850,7 +1850,7 @@ func TestDelegationFallbackRehomeBindsTheLatchedTargetsWindow(t *testing.T) {
 
 // TestDelegationFallbackSiblingsShareOneGrace: N routed siblings faulting on one dead Sub-agent
 // server consult the one resolver the seat's targets carry, so they run one grace window and one
-// list walk, and exactly one of them claims the run's announcement — the one that announces the move.
+// list walk, and every one of them reads the run's one answer.
 func TestDelegationFallbackSiblingsShareOneGrace(t *testing.T) {
 	t.Parallel()
 	const n = 4
@@ -1876,17 +1876,10 @@ func TestDelegationFallbackSiblingsShareOneGrace(t *testing.T) {
 	}
 	wg.Wait()
 
-	first := 0
 	for i, answer := range answers {
 		if answer.Verdict != apogee.FallbackSwitch || answer.Server != "spare" {
 			t.Errorf("sibling %d answer = %+v; want the switch onto spare", i, answer)
 		}
-		if claimsAnnounce(answer) {
-			first++
-		}
-	}
-	if first != 1 {
-		t.Errorf("announcement claims = %d; want exactly one", first)
 	}
 	r.mu.Lock()
 	landings := r.spareBeats
