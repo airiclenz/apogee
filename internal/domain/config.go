@@ -239,9 +239,9 @@ type Config struct {
 	// Extension points. nil ⇒ the built-in defaults.
 	Tools *ToolRegistry // open extension point (ADR 0002)
 
-	// ToolsForRoster is the host's builder for the set it injected through Tools, called with a
-	// Model profile's roster axis when a Server fallback rehome (ADR 0105) binds a profile whose
-	// roster differs from the one the set was built under. It is the one exception to "an injected
+	// ToolsForRoster is the host's builder for the set it injected through Tools, called with the
+	// bound Model profile's roster axis at every Server fallback rehome (ADR 0105), whether or not
+	// that roster differs from the one the set was built under. It is the one exception to "an injected
 	// Tools is the host's verbatim" (ADR 0057 bounds, amended 2026-11-02): the HOST rebuilds its own
 	// assembly under the fallback's roster, so the engine still composes nothing over a host set.
 	//
