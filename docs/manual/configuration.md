@@ -2357,9 +2357,9 @@ reloading its model.
 [re-stream budget](#the-context-window-and-the-reply-stream) is spent: the server cannot be
 reached, the connection drops, the request times out or the stream goes silent past
 `stream-idle-timeout:`, or the server answers with a 5xx, 429 or 529 (Anthropic's
-`overloaded_error` counts as 529). Any other 4xx (400, 401, 403, 413, …), a reply too large
-for the window, and an empty or capped reply never start a move, because another server
-would not fix them.
+`overloaded_error` counts as 529, and its `api_error` as a 500). Any other 4xx (400, 401,
+403, 413, …), a reply too large for the window, and an empty or capped reply never start a
+move, because another server would not fix them.
 
 **First, a wait.** apogee asks the failed server, as the heartbeat does, for up to
 `fallback-after:`. If it answers in that time, the failed request is sent to it again and

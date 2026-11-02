@@ -2,6 +2,7 @@ package stubllm
 
 import (
 	"encoding/json"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -251,5 +252,34 @@ func assertJSONEqual(t *testing.T, got, want string) {
 	}
 	if !reflect.DeepEqual(gotValue, wantValue) {
 		t.Errorf("replayed blocks =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestAnthropicSlugRendersAPIErrorOnlyFor500 pins that a scripted in-band error renders as
+// api_error only for a 500: the provider reads api_error as the transient 500 it stands for, so
+// an unlisted 4xx renders as the terminal invalid request class it is on the chat wire, and
+// every other 5xx as the overloaded class.
+func TestAnthropicSlugRendersAPIErrorOnlyFor500(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		code int
+		want string
+	}{
+		{name: "500 is api_error", code: http.StatusInternalServerError, want: slugAPI},
+		{name: "an unlisted 4xx is the invalid request class", code: http.StatusUnprocessableEntity, want: slugInvalidRequest},
+		{name: "another 5xx is the overloaded class", code: http.StatusServiceUnavailable, want: slugOverloaded},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := anthropicSlug(tc.code)
+
+			if got != tc.want {
+				t.Errorf("anthropicSlug(%d) = %q, want %q", tc.code, got, tc.want)
+			}
+		})
 	}
 }

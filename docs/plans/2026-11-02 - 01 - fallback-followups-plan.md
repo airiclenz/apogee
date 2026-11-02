@@ -39,7 +39,11 @@
 - 8: decision applied, guard folded
 - 9: guard folded
 
-## 1. Anthropic in-band api_error counts as 500
+## 1. Anthropic in-band api_error counts as 500 — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): classify maps the slug through a small `slugStatus` switch (rate_limit_error → 429, api_error → 500, else 0) instead of a second `if` beside the rate_limit one, so the two slug-to-status mappings live in one place; behaviour is exactly the plan's.
+NOTES (2026-11-02): TestStream_FaultClass keeps a non-eligible anthropic in-band row by adding an `authentication_error` case beside the recast api_error row, mirroring the move of "any other class" to authentication_error in TestAnthropicParseSSE_InBandError.
+NOTES (2026-11-02): ADR amendment filed as `adr-0105-amend-1102` (via `capcom know add --parent adr-0105`), named on ADR 0105's Status line and appended to its reading-order list.
 
 **What:**
 Closes the defect that a mid-stream Anthropic `api_error` (that wire's 500) is neither retryable nor Server-fallback eligible.

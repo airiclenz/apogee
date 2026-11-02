@@ -1949,11 +1949,24 @@ func TestStream_FaultClass(t *testing.T) {
 			wantRetryable: true,
 		},
 		{
-			name: "an anthropic in-band api_error is not eligible",
+			name: "an anthropic in-band api_error is the eligible 500 it stands for",
 			wire: WireAnthropic,
 			serve: sse("event: error\n" +
 				`data: {"type":"error","error":{"type":"api_error","message":"internal"}}` + "\n\n"),
-			want: UpstreamFault{Class: FaultInBand, ErrorType: "api_error"},
+			want: UpstreamFault{
+				Class:     FaultInBand,
+				Code:      http.StatusInternalServerError,
+				ErrorType: anthropicAPIError,
+			},
+			wantEligible:  true,
+			wantRetryable: true,
+		},
+		{
+			name: "an anthropic in-band authentication_error is not eligible",
+			wire: WireAnthropic,
+			serve: sse("event: error\n" +
+				`data: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}` + "\n\n"),
+			want: UpstreamFault{Class: FaultInBand, ErrorType: "authentication_error"},
 		},
 	}
 	for _, tc := range tests {

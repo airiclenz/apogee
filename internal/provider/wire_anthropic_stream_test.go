@@ -309,8 +309,9 @@ data: {"type":"message_stop"}
 
 // TestAnthropicParseSSE_InBandError pins the error event: the text streamed before it stands,
 // the terminal Delta is the fault the Messages slug classifies to — an overloaded_error is
-// retryable, a rate_limit_error is the 429 it stands for, an invalid_request_error saying the
-// prompt is too long is the context overflow — and no accumulated tool call is emitted.
+// retryable, a rate_limit_error and an api_error are the 429 and 500 they stand for, an
+// invalid_request_error saying the prompt is too long is the context overflow, any other slug is
+// a plain terminal fault — and no accumulated tool call is emitted.
 func TestAnthropicParseSSE_InBandError(t *testing.T) {
 	t.Parallel()
 
@@ -348,8 +349,15 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
 			wantErr:  "apogee: upstream in-band error 0: ",
 		},
 		{
+			name:          "api_error is the 500 it stands for",
+			event:         `{"type":"error","error":{"type":"api_error","message":"internal"}}`,
+			wantKind:      DeltaError,
+			wantRetryable: true,
+			wantErr:       "apogee: upstream in-band error 500: ",
+		},
+		{
 			name:     "any other class is a plain terminal fault",
-			event:    `{"type":"error","error":{"type":"api_error","message":"internal"}}`,
+			event:    `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`,
 			wantKind: DeltaError,
 			wantErr:  "apogee: upstream in-band error 0: ",
 		},

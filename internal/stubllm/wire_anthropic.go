@@ -364,7 +364,9 @@ const (
 // classes the real API names for them; a 500 is the plain api_error; every other 5xx — the
 // default 502 included — is the overloaded class, so an `error` turn a fixture scripts as
 // retryable is retryable on this wire too (internal/provider's classify reads exactly that
-// slug as transient).
+// slug as transient). Any other code below 500 — a 409, 418 or 422 — is the invalid request
+// class, never api_error: classify reads api_error as the 500 it stands for, so rendering it
+// for a 4xx would turn a fault the chat wire keeps terminal into a retryable one here.
 func anthropicSlug(code int) string {
 	switch code {
 	case http.StatusBadRequest:
@@ -385,7 +387,7 @@ func anthropicSlug(code int) string {
 	if code >= http.StatusInternalServerError {
 		return slugOverloaded
 	}
-	return slugAPI
+	return slugInvalidRequest
 }
 
 // anthropicWire is the error member this scripted error reaches the Messages wire as.

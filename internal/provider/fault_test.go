@@ -127,6 +127,13 @@ func TestClassify(t *testing.T) {
 			want:    fault{code: http.StatusTooManyRequests, retryable: true},
 		},
 		{
+			name:    "an in-band anthropic api_error is the 500 it stands for",
+			status:  0,
+			errType: anthropicAPIError,
+			text:    "Internal server error",
+			want:    fault{code: http.StatusInternalServerError, retryable: true},
+		},
+		{
 			name:    "a rate_limit_error that arrived with a status keeps that status",
 			status:  http.StatusTooManyRequests,
 			errType: anthropicRateLimited,
