@@ -238,7 +238,7 @@ that route too.
 
 The dark row just above the prompt box is the status line, and while the model works its left
 slot answers one question: what is happening *right now*. It reads as an activity phrase and an
-elapsed clock — `thinking · 4s`, and past a minute `thinking · 1m 12s`. Seven phrases cover
+elapsed clock — `thinking · 4s`, and past a minute `thinking · 01:12s`. Seven phrases cover
 everything a run does: **thinking** while a request is in flight or reasoning is arriving,
 **responding** while the visible reply streams, the **tool's own label** while a call is open
 (`reading`, `writing`, `searching`, `running` — the verb alone, since the tool-call block a line

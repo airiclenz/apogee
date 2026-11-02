@@ -1702,7 +1702,7 @@ turning it off is for.
 
 **When the phrase says nothing is happening.** A spinner keeps turning whether or not the engine is
 still answering, so a running phrase gains a qualifier once the engine has gone silent: the
-`thinking · 21m 03s` of a moment ago reads `thinking · quiet · 21m 03s`, with the inserted `· quiet`
+`thinking · 21:03s` of a moment ago reads `thinking · quiet · 21:03s`, with the inserted `· quiet`
 in the scheme's amber `warning` role. The row keeps ONE clock, and it is the activity's: in the case
 this was built for nothing arrived after the request went out, so the silence and the phrase are the
 same span and a second duration behind the word would state that one fact twice — and the clock

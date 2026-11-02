@@ -497,7 +497,7 @@
 // reports), the seam that keeps a fresh Exchange from inheriting the silence of the one before it. Nothing on a timer touches it:
 // a heartbeat or a spinner frame proves the TUI is alive, which was never the question. Once the
 // gap to now passes the `ui.stall-after` threshold, statusLine qualifies the phrase with a bare
-// amber " · quiet" in front of the activity's own clock — "thinking · quiet · 21m 03s"
+// amber " · quiet" in front of the activity's own clock — "thinking · quiet · 21:03s"
 // ([Model.runningPhrase], activity.quiet holds the rule). One clock, not two: the silence and the
 // activity are the same span in the case the guard was built for, so the qualifier says only THAT
 // nothing is arriving. It is a FACT and never a verdict — a large prompt is legitimately silent

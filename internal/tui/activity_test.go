@@ -127,9 +127,9 @@ func TestToolActivityVerb(t *testing.T) {
 // The elapsed clock
 // ----------------------------------------------------------------------------
 
-// TestFormatElapsed pins the clock's two forms and the minute boundary between them: bare
-// seconds below a minute, "Nm SSs" with zero-padded seconds above it, and no hour form (a long
-// call keeps counting minutes).
+// TestFormatElapsed pins the clock's value-filled forms and the boundaries between them: bare
+// seconds below a minute, "MM:SSs" below an hour and "HH:MM:SSs" past it — each showing only the
+// spots that carry a value, every spot after the first zero-padded, always closing on "s".
 func TestFormatElapsed(t *testing.T) {
 	t.Parallel()
 
@@ -141,13 +141,14 @@ func TestFormatElapsed(t *testing.T) {
 		{d: 0, want: "0s"},
 		{d: 900 * time.Millisecond, want: "0s"}, // sub-second truncates, never rounds up
 		{d: 3 * time.Second, want: "3s"},
-		{d: 59 * time.Second, want: "59s"},
-		{d: 60 * time.Second, want: "1m 00s"},
-		{d: 61 * time.Second, want: "1m 01s"},
-		{d: 64 * time.Second, want: "1m 04s"},
-		{d: 599 * time.Second, want: "9m 59s"},
-		{d: 3600 * time.Second, want: "60m 00s"},
-		{d: 3661 * time.Second, want: "61m 01s"},
+		{d: 15 * time.Second, want: "15s"},
+		{d: 59*time.Second + 999*time.Millisecond, want: "59s"},
+		{d: time.Minute, want: "01:00s"},
+		{d: 3*time.Minute + 15*time.Second, want: "03:15s"},
+		{d: 59*time.Minute + 59*time.Second, want: "59:59s"},
+		{d: time.Hour, want: "01:00:00s"},
+		{d: time.Hour + 2*time.Minute + 15*time.Second, want: "01:02:15s"},
+		{d: 100 * time.Hour, want: "100:00:00s"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.want, func(t *testing.T) {
@@ -565,7 +566,7 @@ func TestStatusPhraseMergesConcurrentDelegates(t *testing.T) {
 	}
 	// The clock is read off the OLDEST live slot, so the assertion states the whole row.
 	at := m.acts.at(runRef{depth: 1, spawn: "s1"}).since.Add(90 * time.Second)
-	const want = "2 sub-agents · working · 1m 30s"
+	const want = "2 sub-agents · working · 01:30s"
 	if got := strip(m.runningPhrase(runRef{}, at, false)); got != want {
 		t.Fatalf("top-level phrase under a fan-out = %q, want %q", got, want)
 	}

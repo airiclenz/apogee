@@ -488,7 +488,7 @@ type Model struct {
 	// for (2026-08-14) had NO events at all — plus a move to an activity kind the guard watches, the
 	// launch of a worker whose request is away but unanswered (moveActivity, isQuietWatched). It is the quiet clock the stall guard reads: once the gap to now
 	// crosses [Options.UI].StallAfter the status line qualifies the running phrase with a bare `quiet`
-	// in front of the activity's own clock — "thinking · quiet · 2m 59s" (runningPhrase,
+	// in front of the activity's own clock — "thinking · quiet · 02:59s" (runningPhrase,
 	// activity.quiet) — and the silence's own length is shown nowhere. Nothing on a timer touches
 	// it: a heartbeat or a spinner frame proves the TUI is alive, not the engine. A plain time.Time,
 	// safe in the value-copied Model (ADR 0011).
@@ -4494,7 +4494,7 @@ func (m Model) quietClock(run runRef, slot runActivity) time.Time {
 
 // runningPhrase composes the running left slot's styled text: the activity phrase, the stall
 // guard's bare `quiet` qualifier when quiet says the row owes it, and the clock counting THIS
-// activity — "thinking · quiet · 2m 59s" while the engine is silent, "thinking · 12s" in every
+// activity — "thinking · quiet · 02:59s" while the engine is silent, "thinking · 12s" in every
 // frame that owes nothing. There is ONE clock either way, and it is the ACTIVITY's: it counts
 // continuously and never jumps backwards when the qualifier appears or clears. The guard's own
 // span is not shown at all, because in the case it was built for — an engine that never spoke

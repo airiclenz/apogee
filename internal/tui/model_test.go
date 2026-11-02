@@ -5400,8 +5400,8 @@ func TestBottomRuleHairlineRow(t *testing.T) {
 }
 
 // elapsedPattern matches the clock the status line hangs off the activity phrase
-// ("· 0s", "· 1m 04s").
-var elapsedPattern = regexp.MustCompile(`· (\d+m )?\d+s`)
+// ("· 0s", "· 01:04s", "· 01:02:15s").
+var elapsedPattern = regexp.MustCompile(`· (\d+:){0,2}\d+s`)
 
 // statusText renders the model's status line with its styling stripped, so a test asserts on
 // the words rather than on the black-field escapes.
@@ -5494,7 +5494,7 @@ func silentFor(m Model, quiet time.Duration) Model {
 func TestStatusLineQuietSuffix(t *testing.T) {
 	t.Parallel()
 	const after = 90 * time.Second
-	// A gap that renders unambiguously either side of a second's slack: "3m 10s".
+	// A gap that renders unambiguously either side of a second's slack: "03:10s".
 	const quiet = 190*time.Second + 500*time.Millisecond
 
 	t.Run("below the threshold the row says nothing about it", func(t *testing.T) {
@@ -5513,11 +5513,11 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 		t.Parallel()
 		m := silentFor(guardedRunningModel(t, after), quiet)
 		got := statusText(t, m)
-		if want := "thinking · quiet · 3m 10s"; !strings.Contains(got, want) {
+		if want := "thinking · quiet · 03:10s"; !strings.Contains(got, want) {
 			t.Errorf("status line = %q, want it to contain %q", got, want)
 		}
 		// The word carries no clock of its own: the one duration on the row is the activity's.
-		if strings.Contains(got, "quiet 3m 10s") {
+		if strings.Contains(got, "quiet 03:10s") {
 			t.Errorf("status line = %q, want no second clock hung off the qualifier", got)
 		}
 		// The fact is a QUALIFIER on a running phrase, so it carries the amber warning tint rather
@@ -5527,7 +5527,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 		}
 		// ...and the tint stops there: the clock is the activity's, not the guard's, so it stays on
 		// the bar's own field rather than inside the amber run.
-		if tinted := m.th.statusWarning.Render(quietQualifier + " · 3m 10s"); strings.Contains(m.statusLine(), tinted) {
+		if tinted := m.th.statusWarning.Render(quietQualifier + " · 03:10s"); strings.Contains(m.statusLine(), tinted) {
 			t.Errorf("status line paints the clock inside the warning tint: %q", m.statusLine())
 		}
 	})
@@ -5572,7 +5572,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	t.Run("a streaming reasoning channel never surfaces it", func(t *testing.T) {
 		t.Parallel()
 		// Chunks a shade under the threshold apart: the tightest stream that still never trips the
-		// guard, over a turn eight of those gaps long (~11m 52s, near eight times `after`).
+		// guard, over a turn eight of those gaps long (~11:52s, near eight times `after`).
 		const gap = after - time.Second
 		const rounds = 8
 
@@ -5699,7 +5699,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
 	t.Parallel()
 	m := silentFor(guardedRunningModel(t, 90*time.Second), 190*time.Second+500*time.Millisecond)
-	if got := statusText(t, m); !strings.Contains(got, "thinking · quiet · 3m 10s") {
+	if got := statusText(t, m); !strings.Contains(got, "thinking · quiet · 03:10s") {
 		t.Fatalf("status line = %q, want the qualifier painted at a full-width window", got)
 	}
 	if got := ansi.StringWidth(m.statusLine()); got != m.width {
@@ -5712,7 +5712,7 @@ func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
 	if strings.Contains(got, "quiet") {
 		t.Errorf("status line at 24 columns = %q, want the qualifier dropped whole", got)
 	}
-	if !strings.Contains(got, "thinking · 3m 10s") {
+	if !strings.Contains(got, "thinking · 03:10s") {
 		t.Errorf("status line at 24 columns = %q, want the phrase and its clock kept intact", got)
 	}
 	if w := ansi.StringWidth(m.statusLine()); w != m.width {

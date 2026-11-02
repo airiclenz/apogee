@@ -169,7 +169,10 @@ cmd/apogee/e2e_fallback_test.go — TestHeadlessRoutedFallbackRelatchesLaterSpaw
 
 **Commit:** `fix(headless): the Firing namer follows the re-latched Sub-agents target`
 
-## 6. One value-filled clock format
+## 6. One value-filled clock format — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): formatElapsed gains a secondsPerHour constant beside secondsPerMinute (now one const block); the clamp relativeTime cites is kept unchanged.
+NOTES (2026-11-02): consequential edit — cmd/apogee/e2e_subagent_view_test.go: made necessary by the new value-filled clock format; runningSlot now matches `(?:\d+:){0,2}\d+s` in place of `(?:\d+m )?\d+s`.
 
 **What:** first half of turn-total-duration. `formatElapsed` (`internal/tui/activity.go`) supersedes its deliberate no-hour `#s` / `#m ##s` form.
 

@@ -291,7 +291,7 @@ const liveStarRow = `(?m)^[✦ ] Read$`
 // slot is flush to the edge, so what the phrase and the clock do not spend is spent on the spaces
 // between them. Padding the token back out to the match (tuitest.RedactPadded) therefore lands the
 // same column at every clock width. What the row SAYS is pinned by the assertions above, on cells.
-const runningSlot = `[\x{2800}-\x{28FF}]{2} ` + longDelegate + ` · [a-z]+ · (?:\d+m )?\d+s`
+const runningSlot = `[\x{2800}-\x{28FF}]{2} ` + longDelegate + ` · [a-z]+ · (?:\d+:){0,2}\d+s`
 
 // frameWhen waits until the frame satisfies want and hands back the very frame that did. It is how
 // a claim is made against a run that is still working: such a run animates its status line, so the

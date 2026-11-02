@@ -1703,7 +1703,7 @@ error naming the entry and the key. See
 A model that thinks for a long time can also go silent. `ui.stall-after` — a duration
 written the way Go spells one (`90s`, `2m`), default `120s`, `0` turns it off — sets how
 long the engine may say nothing before the status line adds a warning-tinted `quiet`
-qualifier to its running phrase: `thinking · quiet · 12m`. It reports a fact, not a
+qualifier to its running phrase: `thinking · quiet · 12:00s`. It reports a fact, not a
 verdict — nothing has arrived in that long — and any engine event clears it.
 
 ## The cursor and the external editor

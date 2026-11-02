@@ -1101,7 +1101,7 @@ update-check: true
 #
 # `stall-after` is how long the engine may go completely silent, mid-turn, before the status line
 # says so: past it the running phrase gains a bare `quiet` in front of its clock — `thinking · quiet
-# · 21m 03s` — with the `· quiet` in the scheme's warning colour, and it disappears the moment the
+# · 21:03s` — with the `· quiet` in the scheme's warning colour, and it disappears the moment the
 # next event arrives. The clock stays the activity's own and there is only ever one of it. It is a
 # report, never a verdict — a 43k-token prompt on a big local model is legitimately silent for a
 # minute or two, and apogee cannot tell that from a server that has died, so it reports the one

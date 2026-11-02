@@ -267,7 +267,7 @@ func (k activityKind) isQuietWatched() bool {
 // threshold, where 0 turns the guard off entirely.
 //
 // It answers WHETHER and deliberately not how long. The row spends the fact as a bare `quiet`
-// qualifier in front of the activity's own clock — "thinking · quiet · 2m 59s" (runningPhrase,
+// qualifier in front of the activity's own clock — "thinking · quiet · 02:59s" (runningPhrase,
 // model.go) — because the silence and the activity are the same span in the case the guard was
 // built for (an engine that never spoke at all), where two clocks read as one fact stated twice.
 // A silence duration returned here and painted nowhere would only invite that second clock back.
@@ -289,22 +289,32 @@ func (a activity) quiet(lastEvent, now time.Time, after time.Duration) bool {
 	return now.Sub(lastEvent) >= after
 }
 
-// secondsPerMinute is the elapsed clock's rollover point (formatElapsed).
-const secondsPerMinute = 60
+// secondsPerMinute and secondsPerHour are the elapsed clock's rollover points (formatElapsed).
+const (
+	secondsPerMinute = 60
+	secondsPerHour   = 60 * secondsPerMinute
+)
 
-// formatElapsed renders a duration as the status line's compact clock: "3s" below a minute,
-// "1m 04s" above it (zero-padded seconds, so the readout does not jitter in width as it
-// counts). There is deliberately no hour form — a long-running call simply keeps counting
-// minutes ("60m 00s"), which stays unambiguous without a third format to parse at a glance.
+// formatElapsed renders a duration as the status line's compact clock, showing only the spots
+// that carry a value and always closing on the seconds unit: "15s" below a minute, "03:15s" below
+// an hour, "01:02:15s" past it ("100:00:00s" once the hours outgrow two digits). Every spot after
+// the first is zero-padded, so the readout does not jitter in width as it counts within a form.
+// A negative duration (a clock that moved backwards) clamps to "0s" and a sub-second remainder
+// truncates, never rounds up.
 func formatElapsed(d time.Duration) string {
 	secs := int(d / time.Second)
 	if secs < 0 {
 		secs = 0
 	}
-	if secs < secondsPerMinute {
+	switch {
+	case secs < secondsPerMinute:
 		return fmt.Sprintf("%ds", secs)
+	case secs < secondsPerHour:
+		return fmt.Sprintf("%02d:%02ds", secs/secondsPerMinute, secs%secondsPerMinute)
+	default:
+		return fmt.Sprintf("%02d:%02d:%02ds",
+			secs/secondsPerHour, secs%secondsPerHour/secondsPerMinute, secs%secondsPerMinute)
 	}
-	return fmt.Sprintf("%dm %02ds", secs/secondsPerMinute, secs%secondsPerMinute)
 }
 
 // toolActivityVerb builds the actTool phrase for a call from the presentation registry: the tool's
