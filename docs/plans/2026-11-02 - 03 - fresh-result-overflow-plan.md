@@ -138,7 +138,11 @@ internal/agent/harness_test.go — scriptResponder, toolCallTurn
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFreshOversizedResult|TestSeqcomOverflowBody|TestOverflowRecovery' ./internal/agent/`
 **Commit:** `test(agent): pin the fresh-result overflow and the Seqcom overflow body`
 
-## 6. Docs and knowledge follow the room-left bound
+## 6. Docs and knowledge follow the room-left bound — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): adr-0018-amend-1102 also supersedes the adr-0018-consequences clause "`internal/provider` unmodified (its classification was already correct)", which item 1's `context_length_exceeded` classification made false; and decision 8's premise that the fold keeps the most recent message unconditionally (item 2).
+NOTES (2026-11-02): sweep (`grep -rn "History allocation\|line-based\|structural floor" docs .capcom/knowledge`) — the remaining live hits (glossary budget, file-reference, skill, step-cap, context-fill-notice, pruning) describe the History ceiling, the reference floor's shared rendering or unrelated floors and stay accurate; ADR text (0018 decision/consequences, 0084, 0077) is corrected by the amendment, not rewritten.
+NOTES (2026-11-02): the manual had no prior sentence on the structural floor, so §"Keeping the window from overflowing — compaction and pruning" gained one paragraph stating the room-left, byte-elided bound in user terms.
 
 **What:**
 **Goal:** every doc and Knowledge Note that describes the structural tool-result floor states the room-left, byte-elided bound, and ADR 0018 records the change by a dated amendment.

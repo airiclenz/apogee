@@ -1229,6 +1229,19 @@ it stays on even under `--bypass` — so it is on by default; set the file-only
 `auto-compact:` key to `false` to manage the window yourself with `/compact` instead,
 which opts out of the recovery too.
 
+A single tool result is bounded as it arrives, so one huge result — a whole minified web
+page, a giant log — cannot overflow the next request on its own. When the window is known,
+a result larger than its share of the room the request has left (the window, less the
+reply reserve, less everything else the request already carries) is cut to that share:
+apogee keeps its start and its end and puts `[truncated to fit the context budget …]` in
+the middle, cutting by whole lines where that is enough and by characters where it is not
+(a few very long lines). Several results from one turn share the room evenly, and a small
+one passes its unused share on to the next. A result is never cut below an eighth of the
+history's budgeted share; past that point the conversation is folded instead. With no
+window known, a result is cut only when it exceeds the whole of the history's share. This
+bound is structural — no key, and it stays on under `--bypass`; the `tool-result-cap:`
+Floor guard is a separate, tighter trim of *older* results in the outgoing request.
+
 Every fold — automatic, overflow recovery or `/compact` — writes the summary under the
 same fixed headings, in this order: **Goal**, **Constraints & preferences**, **Progress**
 (with **Done** and **In progress**), **Key decisions**, **Relevant files** and **Next
