@@ -1670,9 +1670,9 @@ func (a *Agent) clampRef(turn int, ref, content string, bound int) string {
 // it consults no config and is never disabled under Bypass.
 // Like the tool floor it edits the conversation itself — the raw block never reaches history, and
 // so never reaches a snapshot or the rendered transcript. That is the price of a floor every later
-// reducer can rely on, and it is why the emergency fold's keep-the-most-recent-message rule can no
-// longer be defeated by one reference: the block the fold cannot shed is now bounded by
-// construction. The marker's "re-read with start_line/end_line" hint is actionable here, because
+// reducer can rely on, and it is why one reference can no longer defeat the emergency fold, which
+// never sheds the most recent message (it only byte-elides one too big for its transcript, as a
+// last resort): the block the fold cannot shed is now bounded by construction. The marker's "re-read with start_line/end_line" hint is actionable here, because
 // read_file reaches the very same file.
 //
 // Document EXTRACTION is bounded by that same clamp budget rather than by the raw-read ceiling
@@ -1919,9 +1919,9 @@ func (a *Agent) readFileRef(ref string) ([]byte, error) {
 // past its share of the History allocation is elided to the shared head/tail-plus-marker shape
 // BEFORE the header and the files: line are added, so the model still reads which skill an elided
 // block came from and where its bundled files live. A skill body is instruction text a human
-// wrote, but nothing bounds its size — a SKILL.md is any file on disk — and the fold's
-// keep-the-most-recent-message rule cannot shed the message a skill block rides in, so an
-// unclamped body could wedge the very Turn it was invoked to steer. The bound arrives from the
+// wrote, but nothing bounds its size — a SKILL.md is any file on disk — and the emergency fold
+// never sheds the most recent message a skill block rides in (it only byte-elides it, as a last
+// resort), so an unclamped body could wedge the very Turn it was invoked to steer. The bound arrives from the
 // caller (refBound), shared with the @file blocks of the same message and capped at
 // fileRefMaxTokens like them; a clipped body is reported as the same note (clampRef).
 // {{SKILL_DIR}} is expanded BEFORE the clamp measures the body: the model is bounded against the
