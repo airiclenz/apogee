@@ -1154,6 +1154,170 @@ func TestFallbackRoutedSwitchAnnouncedWithAnUncomparableResolver(t *testing.T) {
 	}
 }
 
+// relatchRig is a seat rig whose Sub-agent server (the grunt) is dead and whose Sub-agents seat
+// resolver answers every report with a switch to the spare that names the spare's own Delegation
+// target, four slots wide — the target a Driver resolves for the fallback from the same beat. The
+// grunt target is latched on the parent, two slots wide, carrying that one resolver.
+type relatchRig struct {
+	*seatRig
+	resolver    FallbackResolver
+	gruntTarget *DelegationTarget
+	spareTarget *DelegationTarget
+}
+
+// newRelatchRig builds the rig over resolver, or over a stubResolver answering spareTarget when
+// resolverFor is nil. resolverFor is handed the answer the resolver gives.
+func newRelatchRig(t *testing.T, resolverFor func(answer FallbackAnswer) FallbackResolver) *relatchRig {
+	t.Helper()
+	r := &relatchRig{seatRig: newSeatRig(t, nil)}
+	r.grunt.turns = [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}
+	r.spareTarget = &DelegationTarget{Endpoint: seatSpareEndpoint, Model: spareModel, ServerName: "spare", ParallelAgents: 4}
+	answer := spareAnswer()
+	answer.Target = r.spareTarget
+	if resolverFor == nil {
+		resolverFor = func(answer FallbackAnswer) FallbackResolver {
+			return &stubResolver{answer: func(context.Context, FallbackReport) FallbackAnswer { return answer }}
+		}
+	}
+	r.resolver = resolverFor(answer)
+	r.spareTarget.Fallback = r.resolver
+	r.gruntTarget = &DelegationTarget{
+		Endpoint: seatGruntEndpoint, Model: "grunt-model", ServerName: "grunt", ParallelAgents: 2, Fallback: r.resolver,
+	}
+	r.parent.SetDelegationTarget(r.gruntTarget)
+	return r
+}
+
+// routedChild spawns a routed child of the rig's parent and pins that it sits on the grunt's seat.
+func (r *relatchRig) routedChild(t *testing.T, name string) *Agent {
+	t.Helper()
+	child := r.child(t, name)
+	if child.seating.upstream.seatOf() != domain.UpstreamSeatSubAgents || child.cfg.Model != "grunt-model" {
+		t.Fatalf("child %s seat = %q on %q; want the Sub-agents seat on grunt-model",
+			name, child.seating.upstream.seatOf(), child.cfg.Model)
+	}
+	return child
+}
+
+// moveOnto steps child through the grunt's fault onto the spare.
+func moveOnto(t *testing.T, child *Agent, name string) {
+	t.Helper()
+	if res := stepOnce(t, child, name+" work"); res.Faulted {
+		t.Fatalf("routed child %s faulted: %+v", name, res)
+	}
+}
+
+// TestFallbackRoutedRehomeRelatchesTheTreeAndStatesTheFarWidth pins the engine-owned re-latch: a
+// routed child's landed move onto the fallback re-latches the tree's Delegation target to the
+// answer's Target and states its width on the ROOT — the child is a delegate, so a width stated on
+// it would tell the model nothing — so the next spawn routes to the fallback, not the dead server.
+func TestFallbackRoutedRehomeRelatchesTheTreeAndStatesTheFarWidth(t *testing.T) {
+	t.Parallel()
+	r := newRelatchRig(t, nil)
+	if got := r.parent.statedDelegationWidth(); got != 2 {
+		t.Fatalf("stated width before the move = %d, want the grunt's 2", got)
+	}
+
+	moveOnto(t, r.routedChild(t, "first"), "first")
+
+	if got := r.parent.delegationTarget(); got != r.spareTarget {
+		t.Fatalf("latched target after the move = %+v, want the answer's spare target", got)
+	}
+	if got := r.parent.statedDelegationWidth(); got != 4 {
+		t.Errorf("root's stated width after the move = %d, want the spare's 4", got)
+	}
+	next := r.child(t, "next")
+	if next.cfg.Model != spareModel || next.cfg.ServerName != "spare" || next.seating.fallback != r.resolver {
+		t.Errorf("spawn after the move: model=%q server=%q same resolver=%v; want the spare under the seat's resolver",
+			next.cfg.Model, next.cfg.ServerName, next.seating.fallback == r.resolver)
+	}
+	if got := len(r.switchedEvents()); got != 1 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want 1", got)
+	}
+}
+
+// TestFallbackRoutedRelatchYieldsToANewerSeat pins the re-latch guard: the latch is armed on the
+// resolver of the last usable target latched, so a target-down beat (nil) between the spawn and the
+// landing still re-latches, while the human's `/sub-agents-server` door or a relist onto another
+// resolver made meanwhile wins; a later consult of the resolver's cached switch — a straggler on
+// the dead server — moves no latch the tree has since re-stated; and a seat whose resolver cannot
+// be compared is never re-latched, and never panics.
+func TestFallbackRoutedRelatchYieldsToANewerSeat(t *testing.T) {
+	t.Parallel()
+	otherResolver := spareSeatResolver()
+	relisted := &DelegationTarget{Endpoint: "http://other.local:4444", Model: "other-model", ParallelAgents: 3, Fallback: otherResolver}
+	cases := []struct {
+		name string
+		// resolverFor builds the seat's resolver; nil uses the rig's comparable stub.
+		resolverFor func(answer FallbackAnswer) FallbackResolver
+		// between runs after the routed child is spawned and before it steps onto the fault.
+		between func(t *testing.T, r *relatchRig)
+		// want is the target the tree latches once the step is done.
+		want func(r *relatchRig) *DelegationTarget
+		// wantWidth is the root's stated width once the step is done.
+		wantWidth int
+	}{
+		{
+			name:      "a target-down beat between spawn and landing re-latches",
+			between:   func(_ *testing.T, r *relatchRig) { r.parent.SetDelegationTarget(nil) },
+			want:      func(r *relatchRig) *DelegationTarget { return r.spareTarget },
+			wantWidth: 4,
+		},
+		{
+			name:      "a sub-agents-server switch between spawn and landing does not",
+			between:   func(_ *testing.T, r *relatchRig) { r.parent.SetDelegationSeat(&DelegationSeat{Name: "other"}) },
+			want:      func(r *relatchRig) *DelegationTarget { return r.gruntTarget },
+			wantWidth: 1,
+		},
+		{
+			name:      "a relist onto another resolver between spawn and landing does not",
+			between:   func(_ *testing.T, r *relatchRig) { r.parent.SetDelegationTarget(relisted) },
+			want:      func(*relatchRig) *DelegationTarget { return relisted },
+			wantWidth: 3,
+		},
+		{
+			name: "a straggler consulting the cached switch moves no latch",
+			between: func(t *testing.T, r *relatchRig) {
+				moveOnto(t, r.routedChild(t, "first"), "first")
+				if got := r.parent.delegationTarget(); got != r.spareTarget {
+					t.Fatalf("the first landing latched %+v, want the spare target", got)
+				}
+				// A beat re-states the grunt while the straggler is still on it.
+				r.parent.SetDelegationTarget(r.gruntTarget)
+			},
+			want:      func(r *relatchRig) *DelegationTarget { return r.gruntTarget },
+			wantWidth: 2,
+		},
+		{
+			name: "an uncomparable resolver is never re-latched and never panics",
+			resolverFor: func(answer FallbackAnswer) FallbackResolver {
+				return resolverFunc(func(context.Context, FallbackReport) FallbackAnswer { return answer })
+			},
+			want:      func(r *relatchRig) *DelegationTarget { return r.gruntTarget },
+			wantWidth: 2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := newRelatchRig(t, tc.resolverFor)
+			child := r.routedChild(t, "routed")
+			if tc.between != nil {
+				tc.between(t, r)
+			}
+
+			moveOnto(t, child, "routed")
+
+			if got, want := r.parent.delegationTarget(), tc.want(r); got != want {
+				t.Errorf("latched target = %+v, want %+v", got, want)
+			}
+			if got := r.parent.statedDelegationWidth(); got != tc.wantWidth {
+				t.Errorf("root's stated width = %d, want %d", got, tc.wantWidth)
+			}
+		})
+	}
+}
+
 // TestFallbackRoutedSiblingsAnnounceOnce pins one announcement per Sub-agents seat: N routed
 // siblings, each on a holder of its own, fault on one dead Sub-agent server at once; each moves its
 // own holder onto the fallback and finishes there, and only the first to claim the move announces it.

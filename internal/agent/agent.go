@@ -899,6 +899,16 @@ type FallbackAnswer struct {
 	Server   string
 	// Waited is how long the grace window ran before the resolver answered.
 	Waited time.Duration
+	// Target is the Delegation target the fallback makes of the Sub-agents seat, resolved whole by
+	// the Driver from the same beat — the target a host would latch for the fallback had the human
+	// named it. When a routed child's switch lands and is the first landing of this move in the tree
+	// (announcesRehome's claim), the engine re-latches the tree's Delegation target to it and states
+	// its ParallelAgents as the far width on the root, so later spawns route to the fallback rather
+	// than to the dead server. It is honoured only while the landing child's resolver is the one the
+	// latch is armed on (delegationLatch.relatch): a `/sub-agents-server` switch or a relist that
+	// replaced it since makes the answer stale. nil re-latches nothing, and a session-seat answer's
+	// Target is never read.
+	Target *DelegationTarget
 }
 
 // SeedRefusedError is the refusal New and Resume return when the construction seed's reaction lanes

@@ -63,11 +63,17 @@ type DelegationSeat struct {
 // delegations no longer go to, and the session width answers until the new server's first beat
 // states its own. A target-down beat never forgets it — that is what keeps the stated number off
 // the heartbeat's clock.
+//
+// For the same reason it DISARMS the latch (delegationLatch.disarm): a routed fallover the old seat's
+// resolver is still landing describes a move off a server delegations no longer go to, so it must
+// not re-latch the tree onto that server's fallback (FallbackAnswer.Target). The new server's first
+// usable target arms the latch again.
 func (a *Agent) SetDelegationSeat(seat *DelegationSeat) {
 	a.seatMu.Lock()
 	a.seat = seat
 	a.seatMu.Unlock()
 	a.forgetFarWidth()
+	a.delegation.disarm()
 }
 
 // subAgentsSeat snapshots the installed Sub-agent-server facts for one render, nil meaning none is

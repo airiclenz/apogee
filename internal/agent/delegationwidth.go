@@ -21,8 +21,9 @@ import "github.com/airiclenz/apogee/internal/domain"
 // stated width's doors are the human's and a cap's first statement: SetParallelAgents (a
 // `/server` switch, a heartbeat that discovers the session server's slots), a non-nil
 // SetDelegationTarget (the far server's cap, stated once and then re-stated identically each
-// beat) and SetDelegationSeat (`/sub-agents-server`, which forgets the far width so the next
-// beat states the new server's). A target-down beat — SetDelegationTarget(nil) — is deliberately
+// beat), a routed fallover's re-latch (delegationLatch.relatch: the Sub-agents seat moved to its
+// fallback, whose cap is stated on the root) and SetDelegationSeat (`/sub-agents-server`, which
+// forgets the far width so the next beat states the new server's). A target-down beat — SetDelegationTarget(nil) — is deliberately
 // not a door: the far width stands across it, so a flapping far server cannot flap the number.
 // stateFarWidth and forgetFarWidth below are the far width's only writers.
 

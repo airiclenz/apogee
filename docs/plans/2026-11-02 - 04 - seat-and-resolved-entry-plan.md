@@ -180,7 +180,11 @@ internal/agent/fallback_test.go — claimOnce, TestFallbackRoutedSiblingsAnnounc
 
 **Commit:** `fix(agent): the engine announces a routed fallover once, on every Driver`
 
-## 6. The engine re-latches a fallen-over Sub-agents seat
+## 6. The engine re-latches a fallen-over Sub-agents seat — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the root's far-width setter is bound at the end of seedTopLevel (`a.delegation.stateWidth = a.stateFarWidth`), not in the `&delegationLatch{}` literal, so gofmt does not realign the block of trailing comments above it.
+NOTES (2026-11-02): the comparability guard is one helper (`comparableResolver`, delegationtarget.go), now shared by item 5's `claimFallbackKey` and the new `delegationLatch.relatch`; a seat whose resolver is uncomparable is never re-latched (identity with the armed resolver cannot be established), and never panics.
+NOTES (2026-11-02): no Driver fills `FallbackAnswer.Target` yet (cmd/apogee is outside this item's Files; item 7 hands it over), so this item changes no shipped behaviour; the Driver pushes stand. A Driver that calls `SetDelegationSeat` after its first `SetDelegationTarget` leaves the latch disarmed until its next usable beat re-arms it.
 
 **What:**
 Recast at the regression check (2026-11-02).

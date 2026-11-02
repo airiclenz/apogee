@@ -165,12 +165,33 @@ type DelegationTarget struct {
 // Being the one value a whole tree shares, it also holds the Sub-agents seat's announcement claims
 // (claimAnnouncement): every routed sibling moves a holder of its own, so the seat's one
 // UpstreamSwitchedEvent per move is claimed here, tree-wide, rather than by any one holder.
+//
+// It also holds what a routed fallover needs to re-latch the seat (relatch): the resolver the latch
+// is armed on, and the root Agent's far-width setter, so the move lands on the tree's one latch and
+// on the root's stated width whichever depth the landing child sits at.
 type delegationLatch struct {
 	mu     sync.RWMutex
 	target *DelegationTarget
+	// armed is the Sub-agents seat resolver a routed fallover may re-latch for: the Fallback of the
+	// last non-nil target latched. A nil latch — a target-down beat, which the dead primary's beats
+	// are before the grace ends — leaves it standing; the human's `/sub-agents-server` door clears it
+	// (disarm), and a relist that latches a target carrying another resolver re-arms it on that one.
+	armed FallbackResolver
+	// stateWidth is the ROOT Agent's far-width setter (stateFarWidth), bound when the root is built
+	// (seedTopLevel) and never written after, so a re-latch from a routed child at any depth states
+	// the far width where the orientation block reads it. nil on a latch no root owns — a
+	// session-seated child's empty one, which nothing ever writes.
+	stateWidth func(int)
 	// announced holds every routed fallover already announced in this tree, keyed by the seat and
 	// the server it moved to (fallbackClaim); nil until the first claim.
 	announced map[fallbackClaim]struct{}
+}
+
+// comparableResolver reports whether resolver's dynamic value can be compared with == and used as a
+// map key without panicking (reflect.Value.Comparable, which also looks inside an interface field).
+// A nil resolver is not: there is nothing to compare.
+func comparableResolver(resolver FallbackResolver) bool {
+	return resolver != nil && reflect.ValueOf(resolver).Comparable()
 }
 
 // fallbackClaim keys one routed fallover's announcement: the Sub-agents seat that moved and the
@@ -187,7 +208,7 @@ type fallbackClaim struct {
 // holder: keyed on the resolver when its dynamic value is comparable (reflect.Value.Comparable,
 // which also looks inside an interface field), else on the holder.
 func claimFallbackKey(resolver FallbackResolver, holder *sharedUpstream, server string) fallbackClaim {
-	if resolver != nil && reflect.ValueOf(resolver).Comparable() {
+	if comparableResolver(resolver) {
 		return fallbackClaim{seat: resolver, server: server}
 	}
 	return fallbackClaim{seat: holder, server: server}
@@ -208,11 +229,49 @@ func (l *delegationLatch) claimAnnouncement(key fallbackClaim) bool {
 	return true
 }
 
-// set installs target as the current one, nil clearing it.
+// set installs target as the current one, nil clearing it. A non-nil target arms the latch on its
+// resolver; a nil one leaves the armed resolver standing.
 func (l *delegationLatch) set(target *DelegationTarget) {
 	l.mu.Lock()
-	l.target = target
+	l.install(target)
 	l.mu.Unlock()
+}
+
+// install is set's body, for a caller already holding mu.
+func (l *delegationLatch) install(target *DelegationTarget) {
+	l.target = target
+	if target != nil {
+		l.armed = target.Fallback
+	}
+}
+
+// disarm clears the armed resolver, so no routed fallover re-latches until a host latches a usable
+// target again — what the human's `/sub-agents-server` door does (SetDelegationSeat).
+func (l *delegationLatch) disarm() {
+	l.mu.Lock()
+	l.armed = nil
+	l.mu.Unlock()
+}
+
+// relatch installs target — a routed fallover's FallbackAnswer.Target — when resolver, the landing
+// child's seat resolver, is the one the latch is armed on, and states target's width on the root
+// (stateWidth). The check and the install are one critical section, so a beat or a
+// `/sub-agents-server` switch landing beside it is wholly before (and decides it) or wholly after.
+// The two resolvers are compared only when both dynamic values are comparable — claimFallbackKey's
+// guard — so an embedder's func adapter never panics the compare; such a seat is never re-latched,
+// since the engine cannot tell its resolver is still the armed one. It reports whether it re-latched.
+func (l *delegationLatch) relatch(resolver FallbackResolver, target *DelegationTarget) bool {
+	l.mu.Lock()
+	armed := l.armed
+	same := comparableResolver(armed) && comparableResolver(resolver) && armed == resolver
+	if same {
+		l.install(target)
+	}
+	l.mu.Unlock()
+	if same && l.stateWidth != nil {
+		l.stateWidth(target.ParallelAgents)
+	}
+	return same
 }
 
 // snapshot reports the currently latched target under the read lock, nil meaning none. The value
