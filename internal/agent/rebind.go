@@ -8,16 +8,21 @@ package agent
 // (Config.Model may start empty, errNoModelBound guards Submit) is what lets a session start
 // before any model is known at all.
 //
+// The Server fallback rehome lives here too (rehome, followUpstream): the one move that is not
+// idle-only (adr-0028-amend-1102), applied by the loop itself at the request boundary.
+//
 // SwitchUpstream lives here too: moving the session to another SERVER is the same lifecycle
 // concern one level up — it leaves the session unbound and lets the new Upstream's first
 // observed model complete the move through Rebind, so there is still exactly one way to bind.
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/provider"
 )
@@ -156,7 +161,9 @@ type RebindSpec struct {
 // discipline IS the synchronization — the loop's cfg reads all run inside Step/Compact on the
 // host's worker goroutine, and the boundary the host crosses to call this establishes
 // happens-before in both directions — so the hot loop needs no lock (ADR 0011's idle-only
-// engine-call class, extended).
+// engine-call class, extended). The class has one exception, the Server fallback rehome (rehome,
+// adr-0028-amend-1102), which the loop applies to itself mid-Turn; a seat that fell over is followed
+// here before the spec lands.
 //
 // Validate-then-commit: every binding the spec carries is validated BEFORE anything is mutated,
 // so a spec the new model cannot satisfy leaves every existing binding, and the whole
@@ -186,6 +193,10 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	if spec.Model == "" {
 		return errRebindMissingModel
 	}
+	// A seat that fell over while this Agent last stepped is followed first, so the spec lands on
+	// the fallback's binding and a later Step does not put the fallback's stale binding back over
+	// it (followUpstream).
+	a.followUpstream()
 	if err := prompt.Validate(spec.SystemPrompt); err != nil {
 		return err
 	}
@@ -414,9 +425,13 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	_ = a.closeOwnedUpstream(a.upstream.responder())
 	// A FRESH holder, never a replace of the one this Agent holds: that holder may be shared — with a
 	// background workflow's host that copied it (backgroundHost), which stays on the client it
-	// started with — so the switch moves this Agent alone, as it always has.
-	a.upstream = newSharedUpstream(a.dial(spec.Endpoint, "", spec.APIKey, opts...))
+	// started with — so the switch moves this Agent alone, as it always has. It stays on the seat
+	// the old one named, and at generation zero it carries no rehome binding, so the generation this
+	// Agent has applied starts over with it (followUpstream). A seat that had fallen over is moved
+	// back by exactly this door (adr-0028-amend-1102).
+	a.upstream = newSharedUpstreamOn(a.upstream.seatOf(), a.dial(spec.Endpoint, "", spec.APIKey, opts...))
 	a.ownsUpstream = true
+	a.appliedGen = 0
 	// The projected Config lands whole — the human's words for the box just dialled move WITH it
 	// (ADR 0069: the orientation block's Delegations line describes the session seat from these,
 	// and an empty spec field clears rather than keeps, since the retired server's name describes
@@ -424,4 +439,119 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.cfg = arrived
 	a.recalibrate()
 	return nil
+}
+
+// rehome is the Server fallback move (ADR 0105): the fallback a FallbackSwitch answer names becomes
+// the Upstream of this Agent's seat, mid-Turn. It is the ONE exception to the idle-only class that
+// Rebind and SwitchUpstream belong to (adr-0028-amend-1102, amending ADR 0028 decision 3; ADR 0011):
+// the request it moves has already failed and its partial reply is discarded, and the loop applies
+// the move itself at the request boundary (respondAndReview → step), so nothing in flight is
+// re-pointed underneath itself and the loop's un-mutexed cfg reads stay on the goroutine that
+// writes them.
+//
+// It shares SwitchUpstream's shape — a fresh client dialled from the arrived-at Config's dial
+// options, the Inspector's capture re-armed onto it, the retired client torn down when this Agent
+// owns it — and binds the model in the same step through the answer's RebindSpec, which the Driver
+// resolved from one beat on the fallback. Everything is validated before anything moves: an answer
+// with no endpoint, no model, an invalid prompt template or a profile the parse seam cannot
+// translate is refused (false) and the Turn is abandoned as with no resolver.
+//
+// The move goes into the seat's sharedUpstream, so every Agent on the seat follows it: the
+// holder is replaced only while it is still at the generation the faulted request went out at, so
+// the first Agent to arrive moves the seat and announces it with one UpstreamSwitchedEvent, and an
+// Agent arriving after it dials nothing and simply follows (true). The binding itself is applied by
+// followUpstream, on this Agent's own goroutine, when the loop re-arms the request.
+func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
+	spec, bind := answer.Upstream, answer.Rebind
+	if spec.Endpoint == "" || bind.Model == "" {
+		return false
+	}
+	if err := prompt.Validate(bind.SystemPrompt); err != nil {
+		return false
+	}
+	if _, _, err := processing.ParserFor(bind.Profile); err != nil {
+		return false
+	}
+	b := &rehomeBinding{upstream: spec, rebind: bind}
+	// Dialled under the ARRIVED-AT Config, as SwitchUpstream dials: the wire, the idle window and the
+	// passthrough are the fallback's.
+	opts, tap := dialOptions(b.applyTo(a.cfg))
+	retired, moved := a.upstream.rehome(reply.generation, b, func() provider.Responder {
+		return a.dial(spec.Endpoint, bind.Model, spec.APIKey, opts...)
+	})
+	if !moved {
+		return true // another Agent on the seat moved it first; this one follows that move
+	}
+	tap.bind(a)
+	// Torn down for SwitchUpstream's reason when this Agent owns it. A request a sibling still
+	// streams over it keeps its connection: the teardown closes only idle sockets.
+	_ = a.closeOwnedUpstream(retired)
+	a.cfg.Events.Emit(domain.UpstreamSwitchedEvent{
+		EventBase:  a.base(turn),
+		FromServer: a.cfg.ServerName,
+		FromModel:  reply.requested,
+		ToServer:   answer.Server,
+		ToModel:    bind.Model,
+		Fault:      faultLabel(reply.fault),
+		Waited:     answer.Waited,
+		Seat:       a.upstream.seatOf(),
+	})
+	return true
+}
+
+// followUpstream re-applies the seat's rehome binding to this Agent's Config when the sharedUpstream
+// has moved past the generation this Agent last applied (appliedGen), and reports whether it applied
+// one. It runs on the Agent's own goroutine — at the top of every Step, before Pruning and
+// Compaction judge the history against the window, and when the respond phase re-arms a request
+// after a rehome — so the parent and every sibling on the seat speak to the fallback with the
+// fallback's window, model, profile, parsers and effort dialect, never the primary's. A move with no
+// binding (a bare replace) only advances appliedGen.
+func (a *Agent) followUpstream() bool {
+	gen, b := a.upstream.binding()
+	if gen == a.appliedGen {
+		return false
+	}
+	a.appliedGen = gen
+	if b == nil {
+		return false
+	}
+	a.applyRehome(b)
+	return true
+}
+
+// applyRehome commits a rehome binding to this Agent: the Config as the fallback states it, the
+// profile's parse-seam collaborators and tool roster, and the server's effort dialect, then the
+// recalibration every move makes. The commit is taken under bindMu, the lock the exported accessors a
+// Driver calls mid-Turn read under. The profile was validated by the Agent that moved the seat
+// (rehome), so the translation cannot fail here; were it to, every binding stands.
+func (a *Agent) applyRehome(b *rehomeBinding) {
+	next := b.applyTo(a.cfg)
+	textParser, stripper, err := processing.ParserFor(b.rebind.Profile)
+	if err != nil {
+		return
+	}
+	a.bindMu.Lock()
+	a.cfg = next
+	a.textParser = textParser
+	a.stripper = stripper
+	a.applyRoster()
+	a.effortDialect = b.rebind.EffortDialect
+	a.bindMu.Unlock()
+	a.recalibrate()
+}
+
+// faultLabel is the short label an UpstreamSwitchedEvent names its triggering fault by: the class,
+// with the HTTP status of a status fault ("status 503") and the code or slug of an in-band one
+// ("in-band 529", "in-band overloaded_error").
+func faultLabel(f provider.UpstreamFault) string {
+	switch {
+	case f.Class == provider.FaultStatus:
+		return fmt.Sprintf("status %d", f.Code)
+	case f.Class == provider.FaultInBand && f.Code != 0:
+		return fmt.Sprintf("in-band %d", f.Code)
+	case f.Class == provider.FaultInBand && f.ErrorType != "":
+		return "in-band " + f.ErrorType
+	default:
+		return string(f.Class)
+	}
 }

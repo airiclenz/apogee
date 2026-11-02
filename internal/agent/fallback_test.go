@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -15,16 +17,18 @@ import (
 // request's stream with that request's index — the hook a test uses to move the sharedUpstream
 // while a request is in flight.
 type faultScript struct {
-	mu     sync.Mutex
-	turns  [][]provider.Delta
-	n      int
-	before func(call int)
+	mu       sync.Mutex
+	turns    [][]provider.Delta
+	n        int
+	before   func(call int)
+	requests []provider.Request
 }
 
-func (s *faultScript) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
+func (s *faultScript) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
 	s.mu.Lock()
 	call := s.n
 	s.n++
+	s.requests = append(s.requests, req)
 	deltas := s.turns[min(call, len(s.turns)-1)]
 	s.mu.Unlock()
 	return func(yield func(provider.Delta) bool) {
@@ -44,6 +48,13 @@ func (s *faultScript) calls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.n
+}
+
+// sent returns a copy of every request the script has been sent, in order.
+func (s *faultScript) sent() []provider.Request {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]provider.Request(nil), s.requests...)
 }
 
 // faultDeltas is a request that ends on a terminal DeltaError of class fault, never Retryable, so
@@ -409,5 +420,492 @@ func TestFallbackResolverSeededThroughNew(t *testing.T) {
 	}
 	if got := len(resolver.seen()); got != 1 {
 		t.Errorf("resolver reports = %d, want 1", got)
+	}
+}
+
+// The seat rig: a primary server that answers 503 to every request, a "spare" fallback that answers
+// with text, a "grunt" Sub-agent server, and a parent Agent on the primary holding a resolver that
+// moves the seat to the spare.
+const (
+	seatPrimaryEndpoint = "http://primary.local:1111"
+	seatSpareEndpoint   = "http://spare.local:2222"
+	seatGruntEndpoint   = "http://grunt.local:3333"
+	spareModel          = "spare-model"
+	sparePrompt         = "You are on the SPARE server."
+	spareWindow         = 8192
+)
+
+// spareAnswer is the FallbackSwitch answer that moves a seat to the spare: its dial facts and the
+// bindings for the model its beat observed.
+func spareAnswer() FallbackAnswer {
+	return FallbackAnswer{
+		Verdict: FallbackSwitch,
+		Upstream: UpstreamSpec{
+			Endpoint: seatSpareEndpoint, APIKey: "spare-key", ServerName: "spare",
+			Vision: true, MaxContextTokens: spareWindow,
+		},
+		Rebind: RebindSpec{
+			Model: spareModel, SystemPrompt: sparePrompt, MaxContextTokens: spareWindow,
+			Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Effort: domain.EffortLow}},
+		},
+		Server: "spare",
+		Waited: 3 * time.Second,
+		First:  true,
+	}
+}
+
+type seatRig struct {
+	sink                  *recordingSink
+	primary, spare, grunt *faultScript
+	dialer                *fakeDialer
+	resolver              *stubResolver
+	parent                *Agent
+}
+
+// newSeatRig builds the rig; edit, when set, adjusts the parent's Config first.
+func newSeatRig(t *testing.T, edit func(*domain.Config)) *seatRig {
+	t.Helper()
+	r := &seatRig{
+		sink:    &recordingSink{},
+		primary: &faultScript{turns: [][]provider.Delta{faultDeltas(provider.UpstreamFault{Class: provider.FaultStatus, Code: 503})}},
+		spare:   &faultScript{turns: [][]provider.Delta{replyDeltas("from the spare")}},
+		grunt:   &faultScript{turns: [][]provider.Delta{replyDeltas("from the grunt")}},
+		resolver: &stubResolver{answer: func(context.Context, FallbackReport) FallbackAnswer {
+			return spareAnswer()
+		}},
+	}
+	r.dialer = dialerAnswering(func(endpoint string) provider.Responder {
+		switch endpoint {
+		case seatSpareEndpoint:
+			return r.spare
+		case seatGruntEndpoint:
+			return r.grunt
+		default:
+			return r.primary
+		}
+	})
+	cfg := baseConfig(r.sink)
+	cfg.Endpoint = seatPrimaryEndpoint
+	cfg.ServerName = "box"
+	cfg.Context.MaxContextTokens = 1_000_000
+	if edit != nil {
+		edit(&cfg)
+	}
+	parent, err := newAgent(cfg, r.primary)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	shortRestreamHoldoff(t, parent)
+	parent.fallback = r.resolver
+	parent.dial = r.dialer.dial
+	r.parent = parent
+	return r
+}
+
+// child spawns an unrouted child of the rig's parent.
+func (r *seatRig) child(t *testing.T, name string) *Agent {
+	t.Helper()
+	child, err := r.parent.newChildAgent("call_"+name, "the delegated task "+name, name)
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	return child
+}
+
+// switchedEvents returns every UpstreamSwitchedEvent the rig's sink recorded.
+func (r *seatRig) switchedEvents() []domain.UpstreamSwitchedEvent {
+	var out []domain.UpstreamSwitchedEvent
+	for _, e := range r.sink.events {
+		if ev, ok := e.(domain.UpstreamSwitchedEvent); ok {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// lastSpareModel is the model the spare's latest request named.
+func (r *seatRig) lastSpareModel(t *testing.T) string {
+	t.Helper()
+	sent := r.spare.sent()
+	if len(sent) == 0 {
+		t.Fatal("the spare was sent no request")
+	}
+	return sent[len(sent)-1].Model
+}
+
+// fallbackDials counts the dials of the spare's endpoint.
+func (r *seatRig) fallbackDials() []dialRecord {
+	var out []dialRecord
+	for _, d := range r.dialer.dialled() {
+		if d.endpoint == seatSpareEndpoint {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// countingPreRequest is an armed pre-request Reaction that counts its firings.
+func countingPreRequest(n *int) domain.Reaction {
+	return domain.Reaction{
+		ID:     "count-pre-request",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPreRequest},
+		Handler: domain.PreRequestFunc(func(context.Context, *domain.Request) (domain.Outcome, error) {
+			*n++
+			return domain.Outcome{}, nil
+		}),
+	}
+}
+
+// TestFallbackSwitchRehomesTheTurnOntoTheFallback pins the mid-Turn rehome: a FallbackSwitch answer
+// discards the failed reply, dials the fallback once, binds its model, prompt, window and profile,
+// re-arms the request — the pre-request Moment fires again and the deferred correction rides the
+// resend — and the Turn completes on the fallback, announced by one UpstreamSwitchedEvent.
+func TestFallbackSwitchRehomesTheTurnOntoTheFallback(t *testing.T) {
+	t.Parallel()
+	preRequests := 0
+	r := newSeatRig(t, nil)
+	r.parent.cfg.Reactions = nil
+	r.parent.installGeneration(domain.Generation{Sync: []domain.Reaction{countingPreRequest(&preRequests)}})
+	r.parent.conv.Defer("DEFERRED-CORRECTION")
+
+	res := stepOnce(t, r.parent, "ask the model")
+
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Fatalf("result = %+v, want a completed, unfaulted Exchange", res)
+	}
+	if r.primary.calls() != 1 || r.spare.calls() != 1 {
+		t.Fatalf("calls primary=%d spare=%d, want 1 each", r.primary.calls(), r.spare.calls())
+	}
+	req := r.spare.sent()[0]
+	if req.Model != spareModel {
+		t.Errorf("resent request model = %q, want %q", req.Model, spareModel)
+	}
+	if len(req.Messages) == 0 || !strings.Contains(req.Messages[0].Content, sparePrompt) {
+		t.Errorf("resent request does not lead with the fallback's system prompt: %+v", req.Messages)
+	}
+	if !requestCarries(req, "DEFERRED-CORRECTION") {
+		t.Error("the deferred correction did not survive into the resent request")
+	}
+	if preRequests != 2 {
+		t.Errorf("pre-request Moment fired %d times, want 2 — once per request", preRequests)
+	}
+	if got := r.parent.cfg; got.ServerName != "spare" || got.Model != spareModel || got.Context.MaxContextTokens != spareWindow {
+		t.Errorf("bound server=%q model=%q window=%d, want the spare's", got.ServerName, got.Model, got.Context.MaxContextTokens)
+	}
+	if _, profile := r.parent.ThinkingEffort(); profile != domain.EffortLow {
+		t.Errorf("profile effort = %q, want the RebindSpec profile's %q", profile, domain.EffortLow)
+	}
+	if !r.parent.Vision() {
+		t.Error("Vision() = false, want the spare's vision opt-in")
+	}
+	dials := r.fallbackDials()
+	if len(dials) != 1 || dials[0].model != spareModel || dials[0].apiKey != "spare-key" {
+		t.Errorf("fallback dials = %+v, want one, with the spare's model and key", dials)
+	}
+	events := r.switchedEvents()
+	if len(events) != 1 {
+		t.Fatalf("UpstreamSwitchedEvents = %d, want 1", len(events))
+	}
+	want := domain.UpstreamSwitchedEvent{
+		EventBase:  events[0].EventBase,
+		FromServer: "box", FromModel: testModel, ToServer: "spare", ToModel: spareModel,
+		Fault: "status 503", Waited: 3 * time.Second, Seat: domain.UpstreamSeatSession,
+	}
+	if events[0] != want || events[0].Depth != 0 {
+		t.Errorf("event = %+v, want %+v at depth 0", events[0], want)
+	}
+	if countEvents[domain.StreamResetEvent](r.sink.events) == 0 {
+		t.Error("no StreamResetEvent: the failed reply's partial was never discarded")
+	}
+	if errs := errorEvents(r.sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %v, want none", errs)
+	}
+	if reports := r.resolver.seen(); len(reports) != 1 || reports[0].Server != "box" || reports[0].Model != testModel {
+		t.Errorf("resolver reports = %+v, want one about box/%s", reports, testModel)
+	}
+}
+
+// requestCarries reports whether any message of req contains text.
+func requestCarries(req provider.Request, text string) bool {
+	for _, m := range req.Messages {
+		if strings.Contains(m.Content, text) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFallbackSwitchItCannotApplyAbandonsTheTurn pins validate-before-move: a switch answer naming
+// no model moves nothing — no dial, no event — and the Turn is abandoned as with no resolver.
+func TestFallbackSwitchItCannotApplyAbandonsTheTurn(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	r.resolver.answer = func(context.Context, FallbackReport) FallbackAnswer {
+		answer := spareAnswer()
+		answer.Rebind.Model = ""
+		return answer
+	}
+
+	_, outcome, _ := respondOnce(t, r.parent)
+
+	if outcome != turnFailed {
+		t.Fatalf("outcome = %v, want turnFailed", outcome)
+	}
+	if dials := r.fallbackDials(); len(dials) != 0 {
+		t.Errorf("fallback dials = %+v, want none", dials)
+	}
+	if n := len(r.switchedEvents()); n != 0 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want none", n)
+	}
+	if got := len(errorEvents(r.sink.events)); got != 1 {
+		t.Errorf("ErrorEvents = %d, want 1", got)
+	}
+}
+
+// TestFallbackSwitchByAnUnroutedChildMovesTheSessionSeat pins the shared seat: an unrouted child
+// that hits the fault moves the SESSION's Upstream (Seat "session", whatever the emitter's depth),
+// and the parent's next Step binds the fallback before its boundary fold — the fold is judged
+// against the fallback's window, the request names the fallback's model, and the primary hears
+// nothing more.
+func TestFallbackSwitchByAnUnroutedChildMovesTheSessionSeat(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, func(cfg *domain.Config) { cfg.Context.CompactionEnabled = true })
+	child := r.child(t, "trigger")
+	if child.fallback != r.resolver {
+		t.Fatal("the unrouted child did not inherit the session's resolver")
+	}
+
+	stepOnce(t, child, "delegated work")
+
+	events := r.switchedEvents()
+	if len(events) != 1 || events[0].Seat != domain.UpstreamSeatSession || events[0].Depth != 1 {
+		t.Fatalf("events = %+v, want one session-seat switch emitted at depth 1", events)
+	}
+	if got := r.lastSpareModel(t); got != spareModel {
+		t.Errorf("child resend model = %q, want %q", got, spareModel)
+	}
+
+	// Primary window 1,000,000: this history fits it. The spare's 8192 does not.
+	seedLargeConv(r.parent)
+	seeded := r.parent.conv.Len()
+	sentBefore := r.spare.calls()
+
+	stepOnce(t, r.parent, "the parent's next question")
+
+	if r.parent.conv.Len() > seeded {
+		t.Errorf("conv.Len() = %d after the Step, want a fold below the seeded %d — the boundary fold was judged against the primary's window", r.parent.conv.Len(), seeded)
+	}
+	if r.spare.calls() != sentBefore+2 {
+		t.Errorf("spare calls = %d, want %d — the fold's summary and the Turn's request", r.spare.calls(), sentBefore+2)
+	}
+	if got := r.lastSpareModel(t); got != spareModel {
+		t.Errorf("parent request model = %q, want %q", got, spareModel)
+	}
+	if r.parent.cfg.Context.MaxContextTokens != spareWindow {
+		t.Errorf("parent window = %d, want the spare's %d", r.parent.cfg.Context.MaxContextTokens, spareWindow)
+	}
+	if r.primary.calls() != 1 {
+		t.Errorf("primary calls = %d, want only the child's faulted one", r.primary.calls())
+	}
+	if n := len(r.switchedEvents()); n != 1 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want still 1", n)
+	}
+}
+
+// TestFallbackSwitchFollowedByEveryAgentOnTheSeat pins the followers: a child spawned before the
+// move and one spawned after it — from a parent that has not stepped since, so it carries the
+// parent's APPLIED generation rather than the holder's — both stream from the fallback with its
+// model, and a child spawned once the parent has followed starts already bound.
+func TestFallbackSwitchFollowedByEveryAgentOnTheSeat(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	early := r.child(t, "early")
+	stepOnce(t, r.child(t, "trigger"), "move the seat")
+
+	late := r.child(t, "late")
+	if late.appliedGen != r.parent.appliedGen || late.appliedGen != 0 {
+		t.Fatalf("late child appliedGen = %d, parent's = %d; want the parent's applied 0", late.appliedGen, r.parent.appliedGen)
+	}
+	for name, child := range map[string]*Agent{"early": early, "late": late} {
+		stepOnce(t, child, "work on the seat")
+		if got := r.lastSpareModel(t); got != spareModel {
+			t.Errorf("%s child request model = %q, want %q", name, got, spareModel)
+		}
+		if child.cfg.ServerName != "spare" {
+			t.Errorf("%s child server = %q, want spare", name, child.cfg.ServerName)
+		}
+	}
+
+	stepOnce(t, r.parent, "the parent follows")
+	if r.parent.appliedGen != 1 {
+		t.Fatalf("parent appliedGen = %d after its Step, want 1", r.parent.appliedGen)
+	}
+	bound := r.child(t, "bound")
+	if bound.appliedGen != 1 || bound.cfg.Model != spareModel {
+		t.Errorf("child spawned after the follow: appliedGen=%d model=%q, want 1 and %q", bound.appliedGen, bound.cfg.Model, spareModel)
+	}
+	if r.primary.calls() != 1 {
+		t.Errorf("primary calls = %d, want only the trigger's", r.primary.calls())
+	}
+	if n := len(r.switchedEvents()); n != 1 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want 1", n)
+	}
+}
+
+// TestFallbackSwitchAnnouncedOnceForManyAgentsOnOneSeat pins one announcement per move: N agents on
+// one sharedUpstream fault on the same generation at once, the seat is dialled and moved once, one
+// UpstreamSwitchedEvent is emitted, and every agent finishes on the fallback.
+func TestFallbackSwitchAnnouncedOnceForManyAgentsOnOneSeat(t *testing.T) {
+	t.Parallel()
+	const n = 3
+	r := newSeatRig(t, nil)
+	var arrived sync.WaitGroup
+	arrived.Add(n)
+	release := make(chan struct{})
+	r.primary.before = func(int) {
+		arrived.Done()
+		<-release
+	}
+	children := make([]*Agent, n)
+	for i := range children {
+		children[i] = r.child(t, "sibling")
+		if err := children[i].Submit(domain.UserInput{Text: "work"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+	}
+	go func() {
+		arrived.Wait()
+		close(release)
+	}()
+
+	var wg sync.WaitGroup
+	results := make([]domain.StepResult, n)
+	for i, child := range children {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := child.Step(context.Background())
+			if err != nil {
+				t.Errorf("Step: %v", err)
+			}
+			results[i] = res
+		}()
+	}
+	wg.Wait()
+
+	for i, res := range results {
+		if res.Faulted {
+			t.Errorf("child %d faulted: %+v", i, res)
+		}
+	}
+	if got := len(r.switchedEvents()); got != 1 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want 1", got)
+	}
+	if dials := r.fallbackDials(); len(dials) != 1 {
+		t.Errorf("fallback dials = %d, want 1", len(dials))
+	}
+	if r.primary.calls() != n || r.spare.calls() != n {
+		t.Errorf("calls primary=%d spare=%d, want %d each", r.primary.calls(), r.spare.calls(), n)
+	}
+}
+
+// TestFallbackSwitchSiblingSentOnThePrimaryResendsOnTheFallback pins the generation guard across a
+// move: a sibling whose request went out on the primary before another agent moved the seat, and
+// which faults after, resends on the fallback with the fallback's binding — without asking the
+// resolver, which already answered for the primary.
+func TestFallbackSwitchSiblingSentOnThePrimaryResendsOnTheFallback(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	sibling := r.child(t, "sibling")
+	mover := r.child(t, "mover")
+	r.primary.before = func(call int) {
+		if call == 0 {
+			stepOnce(t, mover, "move the seat while the sibling streams")
+		}
+	}
+
+	stepOnce(t, sibling, "sent on the primary")
+
+	if got := len(r.resolver.seen()); got != 1 {
+		t.Errorf("resolver reports = %d, want 1 — the mover's; the sibling's fault asks nothing", got)
+	}
+	if got := r.lastSpareModel(t); got != spareModel {
+		t.Errorf("sibling resend model = %q, want %q", got, spareModel)
+	}
+	if sibling.cfg.ServerName != "spare" || sibling.appliedGen != 1 {
+		t.Errorf("sibling server=%q appliedGen=%d, want spare and 1", sibling.cfg.ServerName, sibling.appliedGen)
+	}
+	if r.primary.calls() != 2 || r.spare.calls() != 2 {
+		t.Errorf("calls primary=%d spare=%d, want 2 each", r.primary.calls(), r.spare.calls())
+	}
+	if n := len(r.switchedEvents()); n != 1 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want 1", n)
+	}
+	if errs := errorEvents(r.sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %v, want none", errs)
+	}
+}
+
+// TestFallbackSwitchAccessorReadsRaceTheRehomeCleanly pins the rehome's guard: the accessors a
+// Driver calls from its own goroutine while a Step runs read the binding the rehome writes
+// mid-Turn, and -race finds nothing.
+func TestFallbackSwitchAccessorReadsRaceTheRehomeCleanly(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = r.parent.Vision()
+			_ = r.parent.VisionRefusal()
+			_, _ = r.parent.ThinkingEffort()
+			r.parent.SetAllowRules(nil)
+		}
+	}()
+
+	stepOnce(t, r.parent, "ask the model")
+	close(stop)
+	<-done
+
+	if !r.parent.Vision() {
+		t.Error("Vision() = false after the rehome, want the spare's opt-in")
+	}
+}
+
+// TestFallbackSwitchLeavesARoutedChildOnItsOwnSeat pins the seat boundary: a routed child speaks
+// over a holder of its own on the Sub-agents seat, holds none of the session's resolver, and stays
+// on its routed server when the session's seat moves.
+func TestFallbackSwitchLeavesARoutedChildOnItsOwnSeat(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	r.parent.SetDelegationTarget(&DelegationTarget{Endpoint: seatGruntEndpoint, Model: "grunt-model"})
+	routed := r.child(t, "routed")
+	if routed.upstream == r.parent.upstream || routed.upstream.seatOf() != domain.UpstreamSeatSubAgents {
+		t.Fatalf("routed child seat = %q on the parent's holder = %v; want a Sub-agents holder of its own",
+			routed.upstream.seatOf(), routed.upstream == r.parent.upstream)
+	}
+	if routed.fallback != nil {
+		t.Error("the routed child holds the session's resolver")
+	}
+
+	stepOnce(t, r.parent, "move the session seat")
+	stepOnce(t, routed, "routed work")
+
+	if r.grunt.calls() != 1 || r.grunt.sent()[0].Model != "grunt-model" {
+		t.Errorf("grunt calls = %d, want 1 on grunt-model", r.grunt.calls())
+	}
+	if routed.cfg.Model != "grunt-model" || routed.appliedGen != 0 {
+		t.Errorf("routed child model=%q appliedGen=%d, want grunt-model and 0", routed.cfg.Model, routed.appliedGen)
+	}
+	if r.spare.calls() != 1 {
+		t.Errorf("spare calls = %d, want only the parent's", r.spare.calls())
 	}
 }

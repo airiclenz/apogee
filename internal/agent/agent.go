@@ -537,8 +537,21 @@ type Agent struct {
 	// fallback is the resolver the respond phase consults before it abandons a Turn for a fault
 	// that is the upstream's own (consultFallback, loop.go); nil — every Agent no host handed one —
 	// consults nothing and abandons exactly as before it existed. It is set once, at construction
-	// (WithFallbackResolver), and only read after, so it needs no lock.
+	// (WithFallbackResolver), and only read after, so it needs no lock. An unrouted child inherits
+	// its parent's at spawn, since it is on its parent's seat (newChildAgentOn).
 	fallback FallbackResolver
+	// appliedGen is the sharedUpstream generation whose binding this Agent's Config reflects: the
+	// holder's binding is re-applied, on this Agent's own goroutine, when the holder has moved past
+	// it (followUpstream). An unrouted child inherits its parent's APPLIED generation at spawn — never
+	// the holder's current one — since it inherits the parent's Config, which reflects exactly that
+	// generation. Only the goroutine driving this Agent reads or writes it.
+	appliedGen uint64
+	// bindMu guards the Config cells a Server fallback rehome writes mid-Turn (applyRehome) against
+	// the exported accessors a Driver calls from its own goroutine while a Step runs (Vision,
+	// VisionRefusal, ThinkingEffort, SetAllowRules, SetReactions). The loop's own cfg reads run on
+	// the goroutine that writes, so they take no lock; every other cfg write is idle-only (ADR 0011)
+	// and needs none either.
+	bindMu sync.RWMutex
 
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
 	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by
@@ -895,8 +908,11 @@ type FallbackAnswer struct {
 	// Waited is how long the grace window ran before the resolver answered.
 	Waited time.Duration
 	// First is true only for the caller whose report ran the grace window and the list walk; every
-	// other caller reporting a fault on the same upstream gets the same answer with First false, so
-	// a seat that moves announces the move once however many Agents were on it.
+	// other caller reporting a fault on the same upstream gets the same answer with First false. The
+	// engine's one UpstreamSwitchedEvent per move does not hang on it: the seat's sharedUpstream is
+	// replaced once per failed generation (sharedUpstream.rehome), and the Agent whose replace lands
+	// is the one that announces the move — so a First caller cancelled before it moved the seat
+	// still leaves exactly one announcement.
 	First bool
 }
 
@@ -1470,17 +1486,22 @@ func (a *Agent) SetMode(m domain.Mode) {
 
 // Vision reports whether the bound server accepts image input (Config.Vision) — what a host asks
 // before it attaches an image to the next message, so an attach the engine would refuse is never
-// made. The flag moves only with a server switch, which runs at a quiescent boundary on the same
-// goroutine that asks, so the read needs no lock.
+// made. The flag moves with a server switch, which runs at a quiescent boundary on the same
+// goroutine that asks, and with a Server fallback rehome, which runs mid-Turn on the worker
+// goroutine (adr-0028-amend-1102) — so the read takes the rehome's lock (bindMu).
 func (a *Agent) Vision() bool {
+	a.bindMu.RLock()
+	defer a.bindMu.RUnlock()
 	return a.cfg.Vision
 }
 
 // VisionRefusal is the refusal an image meets on the bound server when it does not accept images
 // (visionRefusal) — the wording Submit, Interject and an image @ref give, served so a host that
 // refuses an attach before the engine sees it says exactly what the engine would. It reads the
-// binding without a lock for Vision's reason.
+// binding under the rehome's lock for Vision's reason.
 func (a *Agent) VisionRefusal() string {
+	a.bindMu.RLock()
+	defer a.bindMu.RUnlock()
 	return a.visionRefusal()
 }
 
@@ -1503,7 +1524,10 @@ func (a *Agent) ConfineToWorkspace() bool {
 // ordinary gate any of them reaches — a sub-agent already mid-flight included — reads the new set.
 // An Agent configured with no Approver has no gate for a rule to answer, and the call is a no-op.
 func (a *Agent) SetAllowRules(rules []domain.AllowRule) {
-	treeAllowRules(a.cfg.Approver).store(rules)
+	a.bindMu.RLock()
+	approver := a.cfg.Approver // read under the rehome's lock: a Step may be rehoming this Agent's Config
+	a.bindMu.RUnlock()
+	treeAllowRules(approver).store(rules)
 }
 
 // allowRuleSet is the agent tree's effective Allow rules, guarded because SetAllowRules may land
@@ -1831,7 +1855,10 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 	if err := validateGeneration(gen); err != nil {
 		return err
 	}
-	scoped, err := scopeSync(gen.Sync, a.cfg.WorkspaceDir)
+	a.bindMu.RLock()
+	workspace := a.cfg.WorkspaceDir // under the rehome's lock: this runs while a Step may be rehoming the Config
+	a.bindMu.RUnlock()
+	scoped, err := scopeSync(gen.Sync, workspace)
 	if err != nil {
 		return err
 	}
@@ -1867,7 +1894,10 @@ func (a *Agent) sessionStartedArmed() sessionArmed {
 	a.genMu.RLock()
 	observe := sessionStartedIDs(a.gen.Observe)
 	a.genMu.RUnlock()
-	return sessionArmed{advise: advise, observe: observe, runner: a.cfg.ObserveRunner}
+	a.bindMu.RLock()
+	runner := a.cfg.ObserveRunner // under the rehome's lock, for SetReactions' reason
+	a.bindMu.RUnlock()
+	return sessionArmed{advise: advise, observe: observe, runner: runner}
 }
 
 // swapObserve is SetReactions' Runner half: it hands list to the observe Runner when it differs
@@ -1877,7 +1907,10 @@ func (a *Agent) sessionStartedArmed() sessionArmed {
 // handler is an interface over values carrying maps, which no comparison operator reaches. A nil
 // Runner has nothing to swap, so the lane is recorded as handed.
 func (a *Agent) swapObserve(list []domain.Reaction) error {
-	if runner := a.cfg.ObserveRunner; runner != nil {
+	a.bindMu.RLock()
+	runner := a.cfg.ObserveRunner // under the rehome's lock, for SetReactions' reason
+	a.bindMu.RUnlock()
+	if runner != nil {
 		a.genMu.RLock()
 		moved := !reflect.DeepEqual(a.gen.Observe, list)
 		a.genMu.RUnlock()
@@ -2139,11 +2172,14 @@ func (a *Agent) SetEffortOverride(e domain.ThinkingEffort) {
 // different when the user asked for it than when the profile did; the EFFECTIVE value is the
 // override when non-empty, else the profile's, the one order the projection resolves in.
 //
-// The profile half is read without a lock, which is safe for the same reason every other cfg read
-// is: cfg.Profile moves only through the idle-only doors (SetProfile, Rebind) the host itself
-// drives, so it is never written while a Step is running (ADR 0011's idle-only engine-call class).
+// The profile half moves through the idle-only doors (SetProfile, Rebind) the host itself drives
+// and through one that is not: a Server fallback rehome binds the fallback's profile mid-Turn on the
+// worker goroutine (adr-0028-amend-1102). So it is read under the rehome's lock (bindMu).
 func (a *Agent) ThinkingEffort() (override, profile domain.ThinkingEffort) {
-	return a.effortOverrideValue(), a.cfg.Profile.Thinking.Effort
+	a.bindMu.RLock()
+	profile = a.cfg.Profile.Thinking.Effort
+	a.bindMu.RUnlock()
+	return a.effortOverrideValue(), profile
 }
 
 // effortOverrideValue reports the live session override under the lock, so the per-request read is

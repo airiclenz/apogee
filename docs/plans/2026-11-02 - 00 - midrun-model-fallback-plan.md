@@ -188,7 +188,19 @@ internal/agent/subagent.go — newChildAgentOn
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFallback' ./internal/agent/`
 **Commit:** `feat(agent): consult a fallback resolver before abandoning a Turn on an upstream fault`
 
-## 7. Engine: mid-Turn rehome onto the fallback
+## 7. Engine: mid-Turn rehome onto the fallback — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): re-derived from the delegation's fields being seeded in subagent.go: `delegation.seed` lives in internal/agent/construct.go, so the child's inherited `fallback` and `appliedGen` are seeded there.
+
+NOTES (2026-11-02): backgroundHost (internal/agent/background.go) copies the new `appliedGen` field, and its doc says a rehome reaches the workflow's children. Without the copy, a background workflow's children would re-apply the holder's rehome binding over a later Rebind. The host still holds no resolver (see DEFER).
+
+NOTES (2026-11-02): the UpstreamSwitchedEvent is emitted by the Agent whose `sharedUpstream.rehome` replace lands. That replace is a compare-and-swap on the faulted generation, so the dial happens once. The answer's `First` flag is not read: a First caller cancelled before it moves the seat still leaves exactly one event. The `First` field doc says so.
+
+NOTES (2026-11-02): the switch reaches `step` as a new outcome, `turnSwitched`. `rearmAfterRehome` restores the deferred corrections, follows the binding (`followUpstream`), resets the re-stream budget, re-arms, runs the predictive fold when it is due (even if this Turn already folded, since the window is new) and fires the pre-request Moment. A retired-generation fault also takes `turnSwitched` when the holder carries a binding the Agent has not applied yet. A bare replace still resends inline.
+
+NOTES (2026-11-02): the fallback is dialled with the RebindSpec's model directly rather than dialled with "" and then given SetModel. Rebind now runs `followUpstream` first, so an idle heartbeat Rebind lands on the fallback's binding and a later Step does not undo it.
+
+NOTES (2026-11-02): when a child does the rehome, the retired primary client is not closed, because only an owning Agent closes and the child does not own it. Its idle sockets stay open until the process exits. The Inspector tap of the new client is also bound to the child that did the rehome, not the session's root Agent.
 
 **What:**
 Recast at the regression check (2026-11-02).

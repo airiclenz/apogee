@@ -72,6 +72,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// boundary. Shutting a shut window is a no-op, and a delegate's never opens.
 	a.briefing.inputArrived()
 
+	// A Server fallback rehome another Agent on this seat made since this one last stepped is
+	// followed HERE, before Pruning and Compaction judge the history against the window and before
+	// the request is armed, so the boundary fold is judged against the fallback's window and this
+	// Turn's request speaks the fallback's model and dialect (followUpstream).
+	a.followUpstream()
+
 	// Stale-tool-result Pruning (structural): rewrite tool results the model has finished with into
 	// one-line stubs before this Turn's request is built. It runs BEFORE the fold below because it
 	// is the cheap, non-generative half of the reducer pair — a history pruning can relieve never
@@ -228,6 +234,17 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		if outcome == turnCancelled {
 			return a.turns.end(t, endCancelled), nil
 		}
+		if outcome == turnSwitched {
+			// The seat's Upstream moved to a fallback (ADR 0105), by this Agent or by another on the
+			// same seat: the partial reply is already discarded (StreamResetEvent), so the request is
+			// re-armed for the new binding exactly as refold re-arms it after a fold — the drained
+			// corrections re-queued, the fallback's binding applied, the request rebuilt against it —
+			// and resent with a fresh re-stream budget, since the budget spent was the primary's.
+			if end, done := a.rearmAfterRehome(ctx, t); done {
+				return a.turns.end(t, end), nil
+			}
+			continue
+		}
 		if outcome != turnOverflowed || t.foldSpent {
 			// A plain Upstream fault (respondAndReview already surfaced it), or an overflow with
 			// this Turn's one fold already spent. The overflow's ErrorEvent is withheld at the
@@ -365,6 +382,34 @@ func (a *Agent) armRequest(t *turnRun) {
 	t.deferredFloor = a.conv.DeferredLen()
 }
 
+// rearmAfterRehome re-derives the Turn's request after its seat's Upstream moved to a fallback
+// (turnSwitched), mirroring the folded branch of the respond loop: the drained corrections go back
+// on the queue, the fallback's binding is applied (followUpstream), the request is rebuilt against
+// it (armRequest), a request the fallback's — possibly smaller — window cannot hold is folded first
+// through the predictive guard (ADR 0018), and the pre-request Moment runs again over the rebuilt
+// request, since it runs per REQUEST. It returns the end to route to and true when the Turn ends
+// here — a cancel during the fold, or a pre-request fault, with its pre-request semantics — and
+// false when the request is ready to resend.
+func (a *Agent) rearmAfterRehome(ctx context.Context, t *turnRun) (turnEnd, bool) {
+	a.turns.restoreDeferred(t.deferred)
+	a.followUpstream()
+	t.restreamsSpent = 0
+	a.armRequest(t)
+	if a.predictiveFoldDue(t.req) {
+		switch a.refold(ctx, t) {
+		case foldCancelled:
+			return endCancelled, true
+		case foldFolded:
+			a.latchPredictiveSaturation(t.turn)
+		case foldDeclined:
+		}
+	}
+	if _, err := a.fire(ctx, domain.MomentPreRequest, t.req); err != nil {
+		return endAbandoned, true
+	}
+	return 0, false
+}
+
 // foldOutcome classifies refold's result for the caller's routing.
 type foldOutcome int
 
@@ -443,6 +488,7 @@ const (
 	turnCancelled                     // ctx was cancelled mid-stream, inside the re-stream hold-off or during the fallback resolver's wait
 	turnFailed                        // an Upstream fault (already surfaced as an ErrorEvent)
 	turnOverflowed                    // the request did not fit the model's context window — NOT surfaced; the caller owns the ErrorEvent
+	turnSwitched                      // the seat's Upstream moved to a fallback (or this Agent must follow a move made on it): the caller re-arms the request for the new binding and resends — NOT surfaced
 )
 
 // defaultRestreamBudget is how many times one Turn re-sends its request after a transient
@@ -566,8 +612,14 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			if a.faultedOnRetiredUpstream(reply) {
 				// The seat moved off the Upstream this request went out on while it streamed, so the
 				// fault is the retired server's: resend on the current one, spending nothing and
-				// asking the resolver nothing — it has already answered for that server.
+				// asking the resolver nothing — it has already answered for that server. A move that
+				// carried a fallback binding this Agent has not applied yet goes back to step, which
+				// re-arms the request for it (turnSwitched): the request was built for the primary's
+				// window, model and profile.
 				a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
+				if a.rehomePending() {
+					return nil, turnSwitched, ""
+				}
 				continue
 			}
 			if reply.retryable && t.restreamsSpent < a.restreamBudget() {
@@ -598,6 +650,9 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			switch a.consultFallback(ctx, t, reply) {
 			case fallbackResend:
 				continue
+			case fallbackSwitched:
+				// The seat moved to a fallback: step re-arms the request for it and resends.
+				return nil, turnSwitched, ""
 			case fallbackCancelled:
 				// A cancel during the resolver's wait is a cancel like the one inside the re-stream
 				// hold-off above: roll back and resume, no ErrorEvent.
@@ -669,7 +724,15 @@ const (
 	fallbackAbandon   fallbackStep = iota // surface the fault and abandon the Turn, as with no resolver
 	fallbackResend                        // resend the same request; the reset is already emitted
 	fallbackCancelled                     // ctx was cancelled during the resolver's wait
+	fallbackSwitched                      // the seat moved to a fallback (rehome); the reset is already emitted, and step re-arms the request
 )
+
+// rehomePending reports whether the Agent's sharedUpstream carries a rehome binding this Agent has
+// not applied yet — a fallback another Agent on the seat moved it onto (followUpstream).
+func (a *Agent) rehomePending() bool {
+	gen, b := a.upstream.binding()
+	return b != nil && gen != a.appliedGen
+}
 
 // faultedOnRetiredUpstream reports whether reply faulted on an Upstream the Agent's sharedUpstream
 // has been replaced past since the request went out — a fault of the server the seat already left,
@@ -689,7 +752,9 @@ func (a *Agent) faultedOnRetiredUpstream(reply completion) bool {
 // A "recovered" answer resends the same request on the same Upstream with a fresh re-stream budget:
 // the latch flips first, so a second fault in this Turn reaches the resolver flagged and a second
 // "recovered" is read as none, and the StreamResetEvent tells observers the partial reply is
-// superseded, as the re-stream path does. A "switch" this loop does not rehome onto, and "none",
+// superseded, as the re-stream path does. A "switch" rehomes the seat onto the fallback the answer
+// names (rehome) — whatever the recovered latch says, since the move is to another server — and
+// leaves step to re-arm the request for it; a switch whose answer cannot be applied, and "none",
 // abandon. A ctx cancelled during the wait is the user's cancel whatever the resolver answered.
 func (a *Agent) consultFallback(ctx context.Context, t *turnRun, reply completion) fallbackStep {
 	if a.fallback == nil || !reply.fault.FallbackEligible() {
@@ -703,6 +768,13 @@ func (a *Agent) consultFallback(ctx context.Context, t *turnRun, reply completio
 	})
 	if ctx.Err() != nil {
 		return fallbackCancelled
+	}
+	if answer.Verdict == FallbackSwitch {
+		if !a.rehome(t.turn, reply, answer) {
+			return fallbackAbandon
+		}
+		a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(t.turn)})
+		return fallbackSwitched
 	}
 	if answer.Verdict != FallbackRecovered || t.recoveredSpent {
 		return fallbackAbandon

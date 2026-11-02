@@ -338,6 +338,8 @@ func (d *delegation) seed(a *Agent) {
 	a.effortDialect = d.effortDialect
 	a.dial = d.dial                  // the parent's seam, so a grandchild's routed dial crosses the same one the host injected
 	a.ownsUpstream = d.upstreamOwned // a routed child closes the client it dialled; an unrouted one must never close the session's out from under the parent still speaking over it (Agent.Close)
+	a.fallback = d.fallback          // the seat's resolver: an unrouted child consults its parent's (ADR 0105)
+	a.appliedGen = d.appliedGen      // the generation the inherited Config reflects (followUpstream)
 	a.guards = d.guards
 	a.contextFiles = d.contextFiles
 	a.liveMode = d.parentLiveMode
