@@ -732,7 +732,7 @@ func sessionFallbackOf(t *testing.T, s rankScenario) *sessionFallback {
 
 // firingOnPrimary composes the unattended Firing the scenario's fallover happens in: bound to the
 // primary, with the roots its landers resolve against.
-func firingOnPrimary(t *testing.T, s rankScenario) (apogee.Config, firingInputs) {
+func firingOnPrimary(t *testing.T, s rankScenario) (apogee.Config, firingInputs, firingRouting) {
 	t.Helper()
 	in := firingInputs{
 		opts:     s.fallbackOptions(),
@@ -745,11 +745,32 @@ func firingOnPrimary(t *testing.T, s rankScenario) (apogee.Config, firingInputs)
 			return heartbeat.Beat{Reachable: true, Answered: true, ActiveModel: rankPrimaryModel}
 		},
 	}
-	cfg, _, _, err := firingConfig(context.Background(), in)
+	cfg, routing, _, err := firingConfig(context.Background(), in)
 	if err != nil {
 		t.Fatalf("firingConfig on the primary: %v", err)
 	}
-	return cfg, in
+	return cfg, in, routing
+}
+
+// landSeatOn lands the run's own seat resolver on the scenario's entry, its key and its one beat
+// stubbed as landOn stubs a bare lander's, so whatever follows that resolver's latest landing reads
+// the move the engine would have been answered with.
+func landSeatOn(t *testing.T, seat *seatResolver, s rankScenario) {
+	t.Helper()
+	if seat == nil {
+		t.Fatal("the run composed no seat resolver; the primary no longer names a `fallback:`")
+	}
+	lander := seat.src.lander
+	seat.src.lander = func() fallbackLander {
+		stubbed := lander()
+		stubbed.key = func(config.ServerEntry) (string, error) { return s.key(), nil }
+		beat := s.monitored()
+		stubbed.beat = func(context.Context, upstreamBinding) heartbeat.Beat { return beat }
+		return stubbed
+	}
+	if _, landed := seat.land(context.Background(), rankName); !landed {
+		t.Fatal("the run's seat resolver refused an entry its bare lander landed on")
+	}
 }
 
 // TestEntryRankFallbackDoors pins the door a session seat's Server fallback lands through (D), on
@@ -778,16 +799,18 @@ func resolveSessionSeatLanding(t *testing.T, s rankScenario) entryRanks {
 
 // resolveFiringSeatLanding lands a Firing's session-seat lander on the entry — built as
 // firingSessionSource builds it, over the Firing's own Options and roots — and reads, off the run
-// composed on the primary, the width it fans out at and the server its namer names an unrouted
-// child on, neither of which the landing moves.
+// composed on the primary, the width it fans out at, which the landing does not move. It then lands
+// the run's own seat resolver on the entry as well and reads the server the run's namer names an
+// unrouted child on once it has.
 func resolveFiringSeatLanding(t *testing.T, s rankScenario) entryRanks {
 	t.Helper()
-	cfg, in := firingOnPrimary(t, s)
+	cfg, in, routing := firingOnPrimary(t, s)
 	_, ranks := landOn(fallbackLander{opts: in.opts, roots: in.roots}, s)
 	if ranks.refused {
 		return ranks
 	}
 	ranks.width = cfg.ParallelAgents
+	landSeatOn(t, routing.fallback, s)
 	namer, ok := cfg.Namer.(*delegationNamer)
 	if !ok {
 		t.Fatalf("the Firing's namer is %T, want *delegationNamer", cfg.Namer)
@@ -839,10 +862,9 @@ func wantFiringSeatLanding(s rankScenario) entryRanks {
 	// width and nothing in a Firing follows the entry, so the run keeps fanning out at the dead
 	// primary's width rather than the fallback entry's.
 	ranks.width = rankPrimaryWidth
-	// WRONG at base: issue firing-namer-dead-primary, fixed by plan item 8. The namer's session
-	// reader is the primary's binding for the whole run, so an unrouted child spawned after the
-	// fallover is named on the dead primary rather than on the fallback it runs on.
-	ranks.namedOn = rankPrimaryEndpoint
+	// The namer's session reader follows the seat's latest landing, so an unrouted child spawned
+	// after the fallover is named on the fallback the run now talks to.
+	ranks.namedOn = rankEndpoint
 	return ranks
 }
 
@@ -920,7 +942,7 @@ func resolveSessionRoutedLanding(t *testing.T, s rankScenario) entryRanks {
 // and reserve share the run bound on the primary.
 func resolveFiringRoutedLanding(t *testing.T, s rankScenario) entryRanks {
 	t.Helper()
-	cfg, in := firingOnPrimary(t, s)
+	cfg, in, _ := firingOnPrimary(t, s)
 	_, ranks := landOn(fallbackLander{
 		opts:   in.opts,
 		roots:  in.roots,

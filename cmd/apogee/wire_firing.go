@@ -594,25 +594,28 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	routing.Beat = beat
 	routing.Reachable = beat.Failure == ""
 
-	// And the namer an unnamed delegation is named by (ADR 0068), so a Firing's saved record reads
-	// the same way a session's transcript does rather than carrying a wall of task first lines
-	// (ADR 0031's Driver parity). Its session Upstream is a constant for the run — the run's own
-	// server, which an unattended run has no live door to move — and its routed one starts on the
-	// Sub-agent server resolved just above when one was named, then follows the Sub-agents seat's
-	// fallover through that seat's resolver's latest landing (newFiringNamer); the gate is `auto-title:` as it stood at
-	// startup, there being no door to flip it through either. The session binding is the entry's dial facts, so a naming call speaks the
-	// protocol this entry speaks and sends the keys every other request to it sends — on the model the
-	// Driver overlaid (spec.Model), which is the one this run talks to, not the entry's own pin.
-	session := bindingOfEntry(in.entry, apiKey)
-	session.Model = spec.Model
-	cfg.Namer = newFiringNamer(session, effortDialect, routing.target, routing.subAgents, in.opts.AutoTitle)
-
 	// And the Server fallback of the run's own seat (ADR 0105): the resolver the engine consults
 	// before it abandons a Turn for a fault that is this server's own, built from the bound entry's
 	// `fallback:` list — nil when it names none, which leaves the run exactly as it was. Its grace
 	// beats observe the server this run talks to as the beat above did, and each fallback's key
 	// resolves through the run's one resolver.
 	routing.fallback = newSeatResolver(sessionSeat, firingSessionSource(in, keys, apiKey, spec.Model))
+
+	// And the namer an unnamed delegation is named by (ADR 0068), so a Firing's saved record reads
+	// the same way a session's transcript does rather than carrying a wall of task first lines
+	// (ADR 0031's Driver parity). It composes after the seat's Server fallback above because its
+	// session Upstream follows that seat: it starts on the run's own server and, once the resolver
+	// lands, reads its latest landing — the server the engine rehomed the run onto (newFiringNamer).
+	// Its routed one starts on the Sub-agent server resolved further up when one was named, then
+	// follows the Sub-agents seat's fallover through that seat's resolver's latest landing the same
+	// way; the gate is `auto-title:` as it stood at startup, there being no door to flip it through.
+	// The session binding is the entry's dial facts, so a naming call speaks the protocol this entry
+	// speaks and sends the keys every other request to it sends — on the model the Driver overlaid
+	// (spec.Model), which is the one this run talks to, not the entry's own pin.
+	session := bindingOfEntry(in.entry, apiKey)
+	session.Model = spec.Model
+	cfg.Namer = newFiringNamer(session, effortDialect, routing.fallback, routing.target, routing.subAgents,
+		in.opts.AutoTitle)
 
 	// And the one thing an unattended run cannot get from the engine: the `run_on` and `context`
 	// arguments on sub_agent, which firingSeatTools assembles under `sub-agents-choice: model` or
@@ -722,7 +725,8 @@ type firingRouting struct {
 	// fallback is the Server fallback of the run's own seat (ADR 0105), handed to the run's Agent
 	// (run.Spec.Fallback) — nil when the bound entry names no `fallback:`. It rides the routing for
 	// the target's reason: it is where the run's requests go when its own server fails, and a Driver
-	// forwards it rather than reading it.
+	// forwards it rather than reading it. The run's delegation namer follows its landings too
+	// (newFiringNamer), so an unrouted child is named on the server the run fell over to.
 	fallback *seatResolver
 	// Beat is the ONE observation this run took of its own bound server — the whole Beat rather
 	// than the two fields the composition read off it, so a Driver acting on it can say WHY

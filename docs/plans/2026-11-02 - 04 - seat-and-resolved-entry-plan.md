@@ -250,7 +250,11 @@ cmd/apogee/e2e_fallback_test.go — TestHeadlessRoutedFallbackRelatchesLaterSpaw
 
 **Commit:** `refactor(cmd): Drivers put the fallen-over target on the answer`
 
-## 8. A Firing names unrouted children on the fallback
+## 8. A Firing names unrouted children on the fallback — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): newFiringNamer gains a `fallback *seatResolver` parameter (the run's own seat resolver, routing.fallback); its session reader answers the resolver's latest landing's dial binding and rebind dialect, else the bound binding and dialect. firingConfig now builds routing.fallback before the namer; the firingRouting.fallback field comment names the namer as a follower.
+NOTES (2026-11-02): entryrank_test.go — firingOnPrimary also returns the composed firingRouting, and a new landSeatOn helper lands the run's own seat resolver (key and beat stubbed as landOn stubs them) so the unattended D row reads the namer after a real landing; the row's `WRONG at base` namedOn now pins the fallback entry's endpoint (rankEndpoint).
+NOTES (2026-11-02): TestFiringNamerFollowsTheSessionSeatFallover drives firingConfig end to end with a scripted fallback upstream; confirmed it and the D unattended rank rows fail with the session reader's fallback branch disabled.
 
 **What:**
 **Goal:** after a session-seat fallover a Firing names unrouted children through the fallback's binding and dialect.

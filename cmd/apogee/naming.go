@@ -71,11 +71,17 @@ func newDelegationNamer(
 	return namer
 }
 
-// newFiringNamer builds the namer an unattended run carries. Its session server is bound before the
-// run starts and never moves, so that reader collapses to a constant, and the gate is whatever
-// `auto-title:` said at startup. A Firing has no live settings door to flip any of it through —
-// there is no pane and no session — which is exactly why those values are read once here and the
-// same atomic still answers at call time.
+// newFiringNamer builds the namer an unattended run carries. Its session server is the one the run
+// was bound to, and the gate is whatever `auto-title:` said at startup. A Firing has no live
+// settings door to flip either through — there is no pane and no session — which is exactly why
+// those values are read once here and the same atomic still answers at call time.
+//
+// The session reader moves with one thing only: the run's own seat falling over. fallback is that
+// seat's resolver (firingRouting.fallback), nil when the bound entry names no `fallback:`; once it
+// lands, the engine rehomes the run onto the fallback, and the reader answers the latest landing's
+// dial binding and the dialect its rebind bound (seatResolver.latestLanding), so an unrouted child
+// spawned after the fallover is named on the server the run now talks to rather than on the dead
+// primary. A seat never walks back to its primary, so the latest landing is where the run stays.
 //
 // routed is the Sub-agent server this run resolved (firingConfig), and nil when it resolved none. It
 // is passed rather than left out because ADR 0068 decision 2 is the whole point of the reader: a
@@ -83,16 +89,17 @@ func newDelegationNamer(
 // work — and a Firing that fell back to the session server would put an extra call on the expensive
 // box for every spawn, which is precisely the cost that decision exists to avoid.
 //
-// The routed reader is the one thing that can move mid-run: the Sub-agents seat's resolver (seat,
-// the one routed's Fallback carries) answers each landing with the fallback's Delegation target, the
+// The routed reader follows the Sub-agents seat the same way: that seat's resolver (seat, the one
+// routed's Fallback carries) answers each landing with the fallback's Delegation target, the
 // engine re-latches the run's tree from it (FallbackAnswer.Target), and the reader follows the
 // resolver's latest landing (seatResolver.latestLanding), so a child spawned after the fallover is
 // named by the fallback it dials rather than by the dead primary. A landing that resolved no target
-// sends naming to the session's binding, as later spawns go to the run's own Upstream. A nil seat —
+// sends naming to the session reader, as later spawns go to the run's own Upstream. A nil seat —
 // an entry naming no `fallback:` — answers routed for the whole run.
 func newFiringNamer(
 	binding upstreamBinding,
 	dialect provider.EffortDialect,
+	fallback *seatResolver,
 	routed *apogee.DelegationTarget,
 	seat *seatResolver,
 	autoTitle bool,
@@ -112,9 +119,15 @@ func newFiringNamer(
 			return bindingOfTarget(target), target.EffortDialect, true
 		}
 	}
-	return newDelegationNamer(
-		func() (upstreamBinding, provider.EffortDialect) { return binding, dialect },
-		routedUpstream, autoTitle)
+	session := func() (upstreamBinding, provider.EffortDialect) {
+		if fallback != nil {
+			if latest, landed := fallback.latestLanding(); landed {
+				return latest.dial, latest.answer.Rebind.EffortDialect
+			}
+		}
+		return binding, dialect
+	}
+	return newDelegationNamer(session, routedUpstream, autoTitle)
 }
 
 // setEnabled flips the `auto-title:` gate. It is the host's half of [tui.Options.OnAutoTitle], and

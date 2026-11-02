@@ -651,7 +651,7 @@ func TestFiringNamerFollowsTheLatchedSubAgentsTarget(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			namer := newFiringNamer(session, provider.EffortDialectNone, primary, tc.seat, true)
+			namer := newFiringNamer(session, provider.EffortDialectNone, nil, primary, tc.seat, true)
 
 			binding, dialect := namer.upstream(true)
 			if binding.Model != tc.wantModel {
@@ -661,5 +661,70 @@ func TestFiringNamerFollowsTheLatchedSubAgentsTarget(t *testing.T) {
 				t.Errorf("routed naming dialect = %v; want %v", dialect, tc.wantDialect)
 			}
 		})
+	}
+}
+
+// An unattended run's session reader follows its own seat's fallover: once the run's Server
+// fallback lands on a fallback, the engine rehomes the run there, and an UNROUTED child's naming
+// call must go to that server too — never to the dead primary the run was bound to at composition,
+// which would spend the call's whole timeout on a box that is not answering.
+//
+// The fallback is a scripted upstream: the run's own resolver beats it for real to land, and the
+// same box then answers the naming call with its one Turn. It requires its own key, so the call
+// carrying the fallback's key is proven by the call succeeding at all.
+func TestFiringNamerFollowsTheSessionSeatFallover(t *testing.T) {
+	primary, primaryCall := titleServer(t, "primary name")
+	backup := stubllm.New(t, stubllm.Script{
+		Model: "backup-model",
+		Turns: []stubllm.Turn{{Text: "backup name"}},
+	}, stubllm.WithAPIKey("sk-backup"))
+
+	entry := config.ServerEntry{Name: "box", Endpoint: primary.URL, Model: "entry-model",
+		Fallback: config.NewFallbackList("backup")}
+	backupEntry := config.ServerEntry{
+		Name:     "backup",
+		Endpoint: backup.URL,
+		Model:    "backup-model",
+		APIKey:   "sk-backup",
+	}
+
+	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{
+			Bypass:    true,
+			AutoTitle: true,
+			Servers:   []config.ServerEntry{entry, backupEntry},
+		},
+		entry:    entry,
+		apiKey:   "sk-firing",
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		// The run's own beat, handed over: its server is a naming stub that decodes every body as a
+		// naming call and would fail the test on the beat's empty GET. The fallback is beaten for real.
+		beat: func(context.Context, string, string, string, provider.Wire) heartbeat.Beat {
+			return heartbeat.Beat{Reachable: true, Answered: true}
+		},
+		recordID: "2026-11-02T10-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	if routing.fallback == nil {
+		t.Fatal("the composer built no seat resolver; the fixture no longer names a `fallback:`")
+	}
+	if _, landed := routing.fallback.land(context.Background(), "backup"); !landed {
+		t.Fatal("the run's seat resolver did not land on the fallback")
+	}
+
+	if _, err := cfg.Namer.NameDelegation(context.Background(),
+		domain.DelegationNaming{Task: "grep every config key"}); err != nil {
+		t.Fatalf("NameDelegation for an unrouted child: %v", err)
+	}
+	if calls := backup.Requests(); len(calls) != 1 || calls[0].Model != "backup-model" {
+		t.Errorf("the fallback saw %v; want exactly one naming call addressed to its own model", calls)
+	}
+	if primaryCall.Model != "" {
+		t.Errorf("the dead primary saw an unrouted child's naming call (model %q); want the fallback "+
+			"the run fell over to", primaryCall.Model)
 	}
 }
