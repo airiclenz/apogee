@@ -433,7 +433,11 @@ func (f *sessionFallback) Resolve(ctx context.Context, report apogee.FallbackRep
 	return resolver.Resolve(ctx, report)
 }
 
-// resolver is the current primary's resolver, built for the bound entry when there is none.
+// resolver is the current primary's resolver, built for the bound entry when there is none. Each
+// landing reads the configuration as it stands at the walk (f.lander, called per move), not as it
+// stood when the resolver was built: a `/settings` or `servers:` edit made after the first fault
+// reaches the fallback entry, its root pins and its per-model facts — as delegationWiring's
+// seatFallbackFor does for the Sub-agents seat.
 func (f *sessionFallback) resolver() *fallbackResolver {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -444,9 +448,8 @@ func (f *sessionFallback) resolver() *fallbackResolver {
 	if !ok {
 		return nil
 	}
-	lander := f.lander()
 	f.current = f.build(entry, func(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
-		landing, landed := lander.arrive(ctx, name)
+		landing, landed := f.lander().arrive(ctx, name)
 		if landed {
 			f.remember(landing)
 		}

@@ -444,6 +444,47 @@ func TestTUIFallbackFalloverRunsTheHeartbeatTail(t *testing.T) {
 	}
 }
 
+// TestTUIFallbackLandsWithOptionsEditedAfterTheResolverWasBuilt: a walk lands on the configuration
+// as it stands at the walk, not as it stood when the seat's resolver was built — a `servers:` edit
+// that re-pins backup's window and a `/settings` edit that moves the root working window, both made
+// after the build, are what the answer states and what the follow reports.
+func TestTUIFallbackLandsWithOptionsEditedAfterTheResolverWasBuilt(t *testing.T) {
+	t.Parallel()
+	seat := newTUIFallbackSeat(t)
+	ctx := context.Background()
+	if seat.mover.fallback.resolver() == nil {
+		t.Fatal("no resolver was built for primary")
+	}
+	servers := slices.Clone(seat.live.serverList())
+	for i := range servers {
+		if servers[i].Name == "backup" {
+			servers[i].ContextWindow = 32768
+		}
+	}
+	seat.live.setServers(servers)
+	seat.live.update(func(opts *config.Options) { opts.WorkingWindow = 4096 })
+
+	answer := seat.mover.fallback.Resolve(ctx, apogee.FallbackReport{Server: "primary", Model: "primary-model"})
+
+	if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" {
+		t.Fatalf("answer = %+v, want a switch onto backup", answer)
+	}
+	if answer.Upstream.MaxContextTokens != 32768 || answer.Rebind.MaxContextTokens != 32768 {
+		t.Errorf("upstream window %d, rebind window %d; want the edited pin 32768 in both",
+			answer.Upstream.MaxContextTokens, answer.Rebind.MaxContextTokens)
+	}
+	if answer.Upstream.WorkingWindow != 4096 {
+		t.Errorf("working window = %d, want the edited root 4096", answer.Upstream.WorkingWindow)
+	}
+	result, err := seat.mover.fallover("backup")
+	if err != nil {
+		t.Fatalf("fallover: %v", err)
+	}
+	if result.ContextWindow != 32768 {
+		t.Errorf("follow reports window %d, want the edited pin 32768", result.ContextWindow)
+	}
+}
+
 // tuiFallbackWant is what the display adopts after the follow onto the backup at endpoint.
 func tuiFallbackWant(endpoint string) tui.ServerFallbackResult {
 	return tui.ServerFallbackResult{Endpoint: endpoint, HostAlias: "backup", Model: "backup-model", ContextWindow: 16384}

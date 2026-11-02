@@ -75,8 +75,9 @@ Closes the defect that a session-seat fault in a background workflow child is ab
 **Closes:** background-workflow-no-fallback
 **Commit:** `fix(agent): background workflow children fall over with the session seat`
 
-## 3. The TUI fallback walk lands with live options
+## 3. The TUI fallback walk lands with live options — ✅ DONE (2026-11-02)
 
+NOTES (2026-11-02): the new test was confirmed to fail on the unfixed fallback.go (windows 16384, working window 0) and to pass with the fix; `go build ./cmd/apogee/` refreshed the git-ignored `/apogee` binary at the repo root.
 **What:**
 Closes the defect that the TUI session seat's fallback walk reads options snapshotted when its resolver was built, ignoring later `/settings` and `servers:` edits.
 **Goal:** a session-seat fallback walk resolves the fallback entry, root pins and per-model facts from the options live at the moment of the walk.
