@@ -2157,18 +2157,22 @@ func (a *Agent) structuralFloor() int {
 // shape the tool-result-cap guard renders), so the model reads ONE "the middle was dropped, re-read the
 // range" idiom whichever seam produced it. Content within bound is returned untouched.
 //
-// It never GROWS content: a pathological few-very-long-lines body the head/tail form cannot shrink
-// is left whole (the same check the tool-result-cap guard applies).
+// The line elision keeps whole head and tail lines, so a body of a few very long lines (minified
+// JSON, a one-line page) comes out of it still over bound — or longer than it went in. Such a body
+// is byte-elided instead (context.ElideToBytes, the same marker) to the bound in characters, so
+// the result is within bound for any input shape; content the line elision already brings under
+// bound comes back exactly as that elision renders it.
 func (a *Agent) clampToBound(content string, bound int) string {
 	b := a.budget()
 	if b.EstimateTokens(len(content)) <= bound {
 		return content
 	}
-	clamped := apogeectx.TruncateToolResult(content, int(float64(bound)*b.CharsPerToken))
-	if len(clamped) >= len(content) {
-		return content
+	maxChars := int(float64(bound) * b.CharsPerToken)
+	clamped := apogeectx.TruncateToolResult(content, maxChars)
+	if b.EstimateTokens(len(clamped)) <= bound {
+		return clamped
 	}
-	return clamped
+	return apogeectx.ElideToBytes(content, maxChars)
 }
 
 // clampToolResult is the STRUCTURAL floor on a single tool result: a result whose estimated tokens

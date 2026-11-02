@@ -77,7 +77,10 @@ internal/agent/compact.go — compactTranscriptChars
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Compact|BudgetedTranscript|ElideMiddle|ElideToBytes' ./internal/context/`
 **Commit:** `fix(context): byte-elide an oversized newest message in the fold transcript`
 
-## 3. The structural clamp falls back to byte elision
+## 3. The structural clamp falls back to byte elision — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the byte fallback elides the ORIGINAL content (not the line-elided rendering), so the result carries one marker; it fires whenever the line elision's output is still over the bound, which also covers the old "would grow" case.
+NOTES (2026-11-02): loop.go's resolveFileRefs comment still calls the fold's rule "keep-the-most-recent-message" — item 2's sweep scope, left as is (still broadly accurate: the clamp bounds the block before the fold sees it).
 
 **What:** Recast at the regression check (2026-11-02).
 **Goal:** `Agent.clampToBound` returns content within its bound for any input shape: a few very long lines (minified JSON) come back byte-elided with the elision marker; content the line elision already brings under the bound comes back exactly as today.

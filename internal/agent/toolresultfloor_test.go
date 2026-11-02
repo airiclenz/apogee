@@ -132,9 +132,10 @@ func TestOversizedToolResultIsClampedByTheStructuralFloor(t *testing.T) {
 	}
 }
 
-// TestToolResultFloorLeavesEverythingElseVerbatim pins the floor's inert cases: a result under the
-// History allocation, a result under the conservative ceiling an unknown window falls back to, and
-// a pathological single-line body the head/tail form cannot shrink (never grown).
+// TestToolResultFloorLeavesEverythingElseVerbatim pins the floor's inert cases — a result under the
+// History allocation and a result under the conservative ceiling an unknown window falls back to —
+// and the one shape the line elision cannot bound: a single enormous line, which is byte-elided to
+// the floor with the marker instead of passing whole (2026-11-02).
 func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 	sink := &recordingSink{}
 	a, floorChars := floorAgent(t, sink)
@@ -143,7 +144,7 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 	if len(underTheFloor) >= floorChars {
 		t.Fatalf("payload of %d chars is not under the floor of %d chars", len(underTheFloor), floorChars)
 	}
-	unshrinkable := strings.Repeat("x", floorChars+1) // one enormous line: head+tail+marker is LONGER
+	unshrinkable := strings.Repeat("x", floorChars+1) // one enormous line: the line elision's head+tail+marker is LONGER
 
 	noWindow, ceilingChars := unknownWindowAgent(t, &recordingSink{})
 	underTheCeiling := numberedLines(20)
@@ -158,7 +159,6 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 	}{
 		{"under the History allocation", a, underTheFloor},
 		{"unknown window, under the assumed ceiling", noWindow, underTheCeiling},
-		{"single line the head/tail form cannot shrink", a, unshrinkable},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -166,6 +166,57 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 				t.Errorf("result was altered (%d chars in, %d out); want it verbatim", len(tc.content), len(got))
 			}
 		})
+	}
+
+	t.Run("single line the head/tail form cannot shrink", func(t *testing.T) {
+		got := a.clampToolResult(unshrinkable)
+		if len(got) > floorChars {
+			t.Errorf("clamped result is %d chars, want at most the floor of %d chars", len(got), floorChars)
+		}
+		if !strings.Contains(got, "start_line/end_line") {
+			t.Errorf("byte-elided result missing the elision marker:\n%.200s", got)
+		}
+		if !strings.HasPrefix(got, "xxxx") || !strings.HasSuffix(got, "xxxx") {
+			t.Errorf("head and tail not both kept around the marker: %.60q ... %.60q", got, got[max(0, len(got)-60):])
+		}
+	})
+}
+
+// TestToolResultFloorByteElidesALongSingleLineResult drives a REAL Exchange whose tool returns one
+// line four times floorWindow characters long — the minified-JSON shape the line elision cannot
+// shrink — and proves the floor still bounds it on the way into the conversation: the committed
+// tool message is under the structural floor and carries the elision marker.
+func TestToolResultFloorByteElidesALongSingleLineResult(t *testing.T) {
+	sink := &recordingSink{}
+	minified := `{"items":[` + strings.Repeat(`{"id":1,"name":"entry"},`, 4*floorWindow/24) + `{"id":0}]}`
+	a, floorChars := floorAgent(t, sink, fakeTool{name: "fetch", readOnly: true, result: minified})
+	if len(minified) < 4*floorWindow || strings.Contains(minified, "\n") {
+		t.Fatalf("payload is %d chars (want one line of at least %d); the test proves nothing", len(minified), 4*floorWindow)
+	}
+	a.upstream = newSharedUpstream(scriptedResponder(t,
+		toolCallTurn("c1", "fetch", `{"url":"https://example.test/api"}`),
+		contentTurn("all done"),
+	))
+
+	runExchange(t, a, "fetch the whole api")
+
+	committed := ""
+	for i := 0; i < a.conv.Len(); i++ {
+		if m := a.conv.At(i); m.Role == domain.RoleTool {
+			committed = m.Content
+		}
+	}
+	if committed == "" {
+		t.Fatal("no tool message reached the conversation")
+	}
+	if len(committed) > floorChars {
+		t.Errorf("committed tool result is %d chars, want at most the floor of %d chars", len(committed), floorChars)
+	}
+	if !strings.Contains(committed, "start_line/end_line") {
+		t.Errorf("byte-elided result missing the elision marker:\n%.200s", committed)
+	}
+	if !strings.HasPrefix(committed, `{"items":[`) || !strings.HasSuffix(committed, `{"id":0}]}`) {
+		t.Errorf("head and tail not both kept: %.60q ... %.60q", committed, committed[max(0, len(committed)-60):])
 	}
 }
 
