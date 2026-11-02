@@ -1643,6 +1643,21 @@ type UnconfinedHost struct {
 // already in the history goes to that server as an `[image omitted: <name>]` line instead. It is
 // never detected — a server's `/props` does not say whether the model it serves reads images.
 //
+// Fallback is the entry's ordered list of stand-in servers (`fallback:`, ADR 0105): the names of
+// other `servers:` entries a seat on THIS server moves to, first live one first, when this server
+// fails mid-Turn for an upstream fault and does not come back within FallbackAfter. It is held as a
+// comparable FallbackList rather than a slice for RequestExtra's reason — ServerEntry is compared
+// with `!=` — and ValidateServers refuses a name no entry carries, the entry's own name and a name
+// listed twice. The list is read on the failed entry alone: a fallback's own `fallback:` is never
+// followed, so the walk cannot chain or loop.
+//
+// FallbackAfter is the grace (`fallback-after:`) a failed seat waits for this server to answer its
+// heartbeat again before it moves to the first fallback, as the raw text the file wrote: "" is the
+// key absent, which ParseFallbackAfter reads as two minutes. Unlike `stream-idle-timeout:` a 0 is
+// not a value here — a grace of nothing would move the seat on the first blip the re-stream budget
+// already rides out — so 0 and a negative length are refused. It means nothing without a
+// `fallback:` list and is then simply never read.
+//
 // Ephemeral marks the entry a raw `--endpoint`/`APOGEE_ENDPOINT` override builds for one run (ADR
 // 0036 decision 6), and the `/server` row synthesized from it (upstreamChoices): an entry that is
 // nowhere in `servers:`, so advice that names the file has to tell the user to add one. It is never
@@ -1670,6 +1685,8 @@ type ServerEntry struct {
 	RequestExtra      RequestExtra `yaml:"request-extra,omitempty"`
 	Price             Price        `yaml:"price,omitempty"`
 	Vision            bool         `yaml:"vision,omitempty"`
+	Fallback          FallbackList `yaml:"fallback,omitempty"`
+	FallbackAfter     string       `yaml:"fallback-after,omitempty"`
 	Ephemeral         bool         `yaml:"-"`
 }
 
@@ -1744,6 +1761,147 @@ func (e *requestExtraError) Error() string {
 // would change what the session is rather than add a provider knob beside it (ADR 0085).
 var requestExtraReservedKeys = []string{
 	"model", "messages", "stream", "stream_options", "tools", "system",
+}
+
+// FallbackList is a server entry's `fallback:` list as the rest of apogee holds it: the canonical
+// JSON array of the names the file wrote, each trimmed, in the file's order — or "" when the key is
+// absent. It is a comparable string rather than a []string for RequestExtra's reason: ServerEntry,
+// and every value the list is later copied onto (the engine's Config, a delegation target, an
+// upstream spec), is compared with `!=`, and a slice field would make each of those comparisons a
+// compile error. JSON rather than a joined string with a separator because a server's name is free
+// text, so no separator character is one a name cannot hold. Names reads it back.
+//
+// Being a string KIND keeps the unknown-key walk (unknownkeys.go) from descending into it, as it
+// does for RequestExtra.
+type FallbackList string
+
+// NewFallbackList builds the list from names in the order given, each trimmed — the constructor a
+// caller holding the names in memory uses, and the one the decoder below canonicalises through. No
+// names is the absent list.
+func NewFallbackList(names ...string) FallbackList {
+	if len(names) == 0 {
+		return ""
+	}
+	trimmed := make([]string, len(names))
+	for i, name := range names {
+		trimmed[i] = strings.TrimSpace(name)
+	}
+	canonical, err := json.Marshal(trimmed)
+	if err != nil {
+		return "" // unreachable: a []string always marshals
+	}
+	return FallbackList(canonical)
+}
+
+// Names returns the fallback servers' names in the order they are tried, or nil for the absent
+// list. A value that is not a JSON array of strings — only a hand-built FallbackList can carry one,
+// and ValidateServers refuses it — reads as nil too, so a reader never walks a list it cannot trust.
+func (f FallbackList) Names() []string {
+	names, err := f.parse()
+	if err != nil {
+		return nil
+	}
+	return names
+}
+
+// parse reads the canonical JSON back, refusing a value that is not an array of strings.
+func (f FallbackList) parse() ([]string, error) {
+	if f == "" {
+		return nil, nil
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(f), &names); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// UnmarshalYAML accepts exactly a non-empty sequence of scalars, each a server name that is not
+// only whitespace. Any other shape — a lone scalar, a mapping, an empty list, a nested list or a
+// null item — is refused as a fallbackError, which ServerEntry.UnmarshalYAML completes with the
+// entry's name. Whether a name names a server is ValidateServers' question, since only the whole
+// list of entries can answer it.
+//
+// An explicit `null` never reaches here — yaml.v3 short-circuits it before it looks for an
+// Unmarshaler — so ServerEntry.UnmarshalYAML refuses that one itself.
+func (f *FallbackList) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	if node.Kind != yaml.SequenceNode {
+		return &fallbackError{line: node.Line, reason: "is not a list — write the names of the servers to " +
+			"move to, in the order to try them, as a list (fallback: [backup]), or remove the key"}
+	}
+	if len(node.Content) == 0 {
+		return &fallbackError{line: node.Line, reason: "is empty — name at least one other servers: entry " +
+			"to move to, or remove the key"}
+	}
+	names := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		item = resolveAlias(item)
+		if item.Kind != yaml.ScalarNode || item.ShortTag() == "!!null" || strings.TrimSpace(item.Value) == "" {
+			return &fallbackError{line: item.Line, reason: "holds an item that is not a server name — " +
+				"each item is the name of another servers: entry"}
+		}
+		names = append(names, item.Value)
+	}
+	*f = NewFallbackList(names...)
+	return nil
+}
+
+// MarshalYAML writes the list back as the YAML sequence it was read from, so a ServerEntry that is
+// re-rendered into a config file round-trips instead of landing as a JSON string the decoder above
+// would refuse. "" never reaches here under the field's omitempty; it renders as null anyway.
+func (f FallbackList) MarshalYAML() (any, error) {
+	if f == "" {
+		return nil, nil
+	}
+	names, err := f.parse()
+	if err != nil {
+		return nil, fmt.Errorf("fallback: %w", err)
+	}
+	return names, nil
+}
+
+// fallbackError is a `fallback:` refusal still missing the entry it belongs to, for
+// requestExtraError's reason.
+type fallbackError struct {
+	line   int
+	reason string
+}
+
+func (e *fallbackError) Error() string {
+	return fmt.Sprintf("fallback: (line %d) %s", e.line, e.reason)
+}
+
+// validateFallback refuses a `fallback:` list that names something no fallover could move to: a name
+// no `servers:` entry carries (known holds every entry's name), the entry's own name, and a name
+// listed twice. Each refusal names the bad name. It also refuses a value that is not a list of
+// names, which only a hand-built entry can carry — the decoder produces nothing else.
+func validateFallback(self string, list FallbackList, known map[string]struct{}) error {
+	names, err := list.parse()
+	if err != nil {
+		return errors.New("is not a list of server names — write the names of the servers to move to, " +
+			"as a list, or remove the key")
+	}
+	listed := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		switch _, isRepeat := listed[name]; {
+		case strings.TrimSpace(name) == "":
+			return errors.New("holds a name that is only whitespace — each item is the name of another " +
+				"servers: entry")
+		case name == self:
+			return fmt.Errorf("names %q, this entry itself — a server cannot stand in for itself, so "+
+				"name another servers: entry", name)
+		case isRepeat:
+			return fmt.Errorf("names %q twice — each fallback is tried once, in order, so list it once",
+				name)
+		}
+		if _, ok := known[name]; !ok {
+			return fmt.Errorf("names %q, which no servers: entry is called — give the name of another "+
+				"entry in servers:, or remove it from the list", name)
+		}
+		listed[name] = struct{}{}
+	}
+	return nil
 }
 
 // Price is a server entry's `price:` block: what one million tokens cost on that server, in the
@@ -1917,9 +2075,9 @@ func isPriceRate(rate float64) bool {
 	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate >= 0
 }
 
-// UnmarshalYAML decodes a `servers:` entry and names the entry in a `request-extra:` or `price:`
-// refusal, which the fields' own Unmarshalers cannot do. Every other decode error passes through
-// untouched.
+// UnmarshalYAML decodes a `servers:` entry and names the entry in a `request-extra:`, `price:` or
+// `fallback:` refusal, which the fields' own Unmarshalers cannot do. Every other decode error passes
+// through untouched.
 func (e *ServerEntry) UnmarshalYAML(node *yaml.Node) error {
 	type plain ServerEntry
 	if err := node.Decode((*plain)(e)); err != nil {
@@ -1930,6 +2088,10 @@ func (e *ServerEntry) UnmarshalYAML(node *yaml.Node) error {
 		var price *priceError
 		if errors.As(err, &price) {
 			return fmt.Errorf("servers: entry %q: %w", entryNameOf(node), price)
+		}
+		var fallback *fallbackError
+		if errors.As(err, &fallback) {
+			return fmt.Errorf("servers: entry %q: %w", entryNameOf(node), fallback)
 		}
 		return err
 	}
@@ -1942,6 +2104,11 @@ func (e *ServerEntry) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("servers: entry %q: %w", entryNameOf(node),
 			&priceError{line: value.Line, reason: "is empty — give the input and output rates per 1M " +
 				"tokens, or remove the key"})
+	}
+	if value, ok := mappingValue(node, "fallback"); ok && value.ShortTag() == "!!null" {
+		return fmt.Errorf("servers: entry %q: %w", entryNameOf(node),
+			&fallbackError{line: value.Line, reason: "is empty — name at least one other servers: entry " +
+				"to move to, or remove the key"})
 	}
 	return nil
 }
@@ -2102,11 +2269,24 @@ func canonicaliseServers(fc *fileConfig) {
 // shape — a mapping of the three rate keys, each a number — is the decoder's refusal
 // (Price.UnmarshalYAML), for request-extra's reason.
 //
+// The entry's optional `fallback:` list (ADR 0105) is checked for the three defects only the whole
+// list of entries can see (validateFallback): a name no entry carries, the entry's own name, and a
+// name listed twice — each refusal naming the entry and the bad name. Whether a fallback ANSWERS is
+// not asked, for the reason no endpoint is probed here. Its `fallback-after:` grace is refused when
+// it is only whitespace or is not a length of time above 0 (ParseFallbackAfter). The list's SHAPE —
+// a non-empty list of names — is the decoder's refusal (FallbackList.UnmarshalYAML).
+//
 // What it deliberately does NOT check is the delegation posture: `bypass:` is legal
 // on every entry, because which one takes the delegations is the root `sub-agents-server:` key's
 // answer and that key moves in a running session (`/sub-agents-server`). A posture written on an
 // entry nothing currently delegates to is a description of that server, not a defect in the file.
 func ValidateServers(servers []ServerEntry) error {
+	// Every entry's name, gathered before the walk below, because a `fallback:` may name an entry
+	// listed after its own.
+	known := make(map[string]struct{}, len(servers))
+	for _, s := range servers {
+		known[s.Name] = struct{}{}
+	}
 	seen := make(map[string]struct{}, len(servers))
 	for i, s := range servers {
 		if strings.TrimSpace(s.Name) == "" {
@@ -2234,6 +2414,21 @@ func ValidateServers(servers []ServerEntry) error {
 		}
 		if err := validatePrice(s.Price); err != nil {
 			return fmt.Errorf("apogee: servers: entry %d (%q): price: %w", i+1, s.Name, err)
+		}
+		if err := validateFallback(s.Name, s.Fallback, known); err != nil {
+			return fmt.Errorf("apogee: servers: entry %d (%q): fallback: %w", i+1, s.Name, err)
+		}
+		if after := s.FallbackAfter; after != "" {
+			if strings.TrimSpace(after) == "" {
+				//nolint:staticcheck // ST1005: ends with the fallback-after: key's own colon by design.
+				return fmt.Errorf("apogee: servers: entry %d (%q): fallback-after: is only whitespace — give "+
+					"how long to wait for this server to answer again before moving to a fallback, like 2m "+
+					"or 90s; or remove the key, which waits %s", i+1, s.Name, defaultFallbackAfterText)
+			}
+			if _, err := ParseFallbackAfter(after); err != nil {
+				return fmt.Errorf("apogee: servers: entry %d (%q): fallback-after: %s", i+1, s.Name,
+					strings.TrimPrefix(err.Error(), "apogee: "))
+			}
 		}
 	}
 	return nil
@@ -2482,6 +2677,48 @@ func ResolveStreamIdleTimeout(entry string, root time.Duration) time.Duration {
 		return root
 	}
 	return window
+}
+
+// defaultFallbackAfterText is the built-in grace a failed seat waits for its server to answer the
+// heartbeat again before it moves to the entry's first fallback, as the config file spells it;
+// defaultFallbackAfter is the same grace resolved. Two minutes outlasts a model reload or a brief
+// network drop on the slowest box apogee is built for, which is the blip a switch should not answer.
+const defaultFallbackAfterText = "2m"
+
+var defaultFallbackAfter = mustParseDuration(defaultFallbackAfterText)
+
+// ParseFallbackAfter reads a server entry's `fallback-after:` value into the grace it allows: the
+// empty value is the default (an absent key's reading), and text no duration can be made of — or a
+// duration of 0 or less — is refused with the key named. A 0 is refused rather than read as "no
+// grace": the re-stream budget has already ridden out the blips by the time the grace starts, and a
+// seat that moved on the next one would leave a server that was merely reloading. It is the ONE
+// reading of the key, shared by ValidateServers and ResolveFallbackAfter.
+func ParseFallbackAfter(value string) (time.Duration, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return defaultFallbackAfter, nil
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil {
+		return 0, fmt.Errorf("apogee: invalid fallback-after %q: want a length of time like 2m or 90s", value)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("apogee: invalid fallback-after %s: want more than 0 — it is how long to "+
+			"wait for this server to answer again before moving to a fallback", d)
+	}
+	return d, nil
+}
+
+// ResolveFallbackAfter answers the grace a seat on a `servers:` entry waits before it moves to the
+// entry's first fallback. entry is that entry's own `fallback-after:` text ("" when the key is
+// absent). The entry is guarded rather than trusted — ValidateServers refuses a value that does not
+// parse at startup — so one that still fails to parse resolves to the default instead of being spent.
+func ResolveFallbackAfter(entry string) time.Duration {
+	grace, err := ParseFallbackAfter(entry)
+	if err != nil {
+		return defaultFallbackAfter
+	}
+	return grace
 }
 
 // presentConfig is the on-disk schema for the `present:` block (ADR 0019). It mirrors

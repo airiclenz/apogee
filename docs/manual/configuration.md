@@ -1972,8 +1972,10 @@ which lets apogee start, switch and stop that server itself — [below](#local-s
 rather than how the server itself behaves — further down this section — and so
 is `request-extra`, fields added to every request body sent to that server
 ([below](#extra-fields-in-every-request--request-extra)), `price`, what that
-server charges per million tokens ([below](#pricing--price-and-currency)), and
-`vision`, whether the model there reads images ([below](#images--vision)).
+server charges per million tokens ([below](#pricing--price-and-currency)),
+`vision`, whether the model there reads images ([below](#images--vision)), and
+`fallback` with `fallback-after`, the servers to move to when this one fails mid-Turn
+([below](#moving-to-another-server-when-one-fails--fallback)).
 
 **A `.local` endpoint works in every build.** An `endpoint` may name a host by its
 mDNS `.local` name — `http://Apollo-II.local:1111` — and the release binaries reach it
@@ -2324,6 +2326,62 @@ Images already in the conversation stay there when you move to a server without
 `[image omitted: <name>]` in place of each one, and a later move back to a server
 with `vision: true` sends the images again. A sub-agent routed to another server
 follows that server's `vision:`.
+
+### Moving to another server when one fails — `fallback:`
+
+A server entry can name other entries to move to when that server fails in the middle of
+a Turn, so the Turn goes on instead of being abandoned. It is off unless you set it: an
+entry without `fallback:` behaves exactly as before.
+
+```yaml
+servers:
+  - name: workstation
+    endpoint: http://192.168.64.1:1111
+    fallback: [rented-box, claude]   # tried in this order
+    fallback-after: 5m               # how long to wait for workstation first; default 2m
+  - name: rented-box
+    endpoint: https://llm.example.com
+    api-key-env: RENTED_API_KEY
+  - name: claude
+    endpoint: https://api.anthropic.com
+    api-key-env: ANTHROPIC_API_KEY
+    wire: anthropic
+```
+
+`fallback:` is a list of the names of other `servers:` entries, in the order to try them.
+`fallback-after:` is a length of time like `2m` or `90s`, at a default of **2m**; `0` or
+a negative length is refused, because a wait of nothing would leave a server that is only
+reloading its model.
+
+**What starts a move.** Only a fault that would end the Turn today, and only once the
+[re-stream budget](#the-context-window-and-the-reply-stream) is spent: the server cannot be
+reached, the connection drops, the request times out or the stream goes silent past
+`stream-idle-timeout:`, or the server answers with a 5xx, 429 or 529 (Anthropic's
+`overloaded_error` counts as 529). Any other 4xx (400, 401, 403, 413, …), a reply too large
+for the window, and an empty or capped reply never start a move, because another server
+would not fix them.
+
+**First, a wait.** apogee asks the failed server, as the heartbeat does, for up to
+`fallback-after:`. If it answers in that time, the failed request is sent to it again and
+nothing moves. That happens at most once per Turn: a second failure in the same Turn skips
+the wait.
+
+**Then the move.** apogee tries the list in order, one heartbeat each, and moves to the
+first server that answers. The partial reply is dropped, the session takes that server's
+model, and the failed request is sent there again. A fallback with a smaller context window
+is handled the way any too-large request is. If no fallback answers, the Turn ends as it
+does today (`apogee headless` exits 3). A fallback's own `fallback:` list is never followed:
+there is no chaining.
+
+**The move is one-way.** apogee never moves back to the first server by itself; in the TUI,
+`/server` moves you back when you want. It moves the whole seat: the session and every
+sub-agent running on the session's server move together, and sub-agents sent to
+`sub-agents-server` follow that entry's own `fallback:` list. A resumed session starts on
+the server you configured, not on the fallback.
+
+A `fallback:` name that no entry has, the entry's own name, or a name listed twice is
+refused when the config loads, with an error naming the entry and the bad name. A server
+you start with `--endpoint` has no entry, so it has no fallback.
 
 ### How fast each server answers — the picker summary
 

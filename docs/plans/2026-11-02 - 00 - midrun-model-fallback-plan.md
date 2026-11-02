@@ -77,7 +77,13 @@ NOTES (2026-11-02): consequential edit — .capcom/knowledge/decisions.md: made 
 **Acceptance:** `capcom check` reports no problems; `capcom know show "ADR 0028" --with-children | grep -c amend-1102` ≥ 1, and the same for ADR 0085, ADR 0045 and ADR 0075; `capcom know show "Server fallback"` prints the Note.
 **Commit:** `docs(adr): record per-entry server fallback`
 
-## 2. Config: `fallback:` and `fallback-after:` on a server entry
+## 2. Config: `fallback:` and `fallback-after:` on a server entry — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): `FallbackList` holds the canonical JSON array of trimmed names (not a separator-joined string) because a server name is free text, so no separator is safe; it mirrors `RequestExtra` (own `UnmarshalYAML`/`MarshalYAML`, string kind so the unknown-key walk does not descend), with `NewFallbackList(names...)` and `Names()` for later items to reuse. `ServerEntry` stays comparable; the existing `!=` sites compile unchanged.
+
+NOTES (2026-11-02): the decoder also refuses shapes the plan did not enumerate — a lone scalar, a mapping, an empty list, `null`, and a null/blank/nested item — on the `request-extra:`/`price:` precedent; a `fallback-after:` with no `fallback:` list is accepted (never read), and a whitespace-only `fallback-after:` is refused as `stream-idle-timeout:`'s is.
+
+NOTES (2026-11-02): `ParseFallbackAfter`/`ResolveFallbackAfter` live in config.go (beside `ResolveStreamIdleTimeout`) rather than registry.go, since `fallback-after:` is an entry key, not a registry row; `ResolveFallbackAfter` has no production caller yet — it is for the resolver of item 8.
 
 **What:**
 **Goal:** a `servers:` entry accepts `fallback:` (list of server names) and `fallback-after:` (a duration, default `2m`, `0` or negative refused); `ValidateServers` refuses an unknown name, the entry's own name, or a duplicate, naming the entry and the bad name; a one-run `--endpoint` entry carries no fallback; the manual documents both keys.

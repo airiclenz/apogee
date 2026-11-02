@@ -7533,3 +7533,252 @@ func TestApplyConfigOfferFillsTheOfferBesideAnUndeterminedStartup(t *testing.T) 
 	}
 	assertOfferOf(t, opts, offer)
 }
+
+// A `fallback:` list decodes into the canonical FallbackList — names trimmed, file order kept — and
+// Names reads them back; every shape no list of server names can have is refused at the decode,
+// naming the entry, and an absent key is the empty list.
+func TestServerEntryFallbackDecodes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		given     string
+		wantNames []string
+		wantAfter string
+		wantErr   string
+	}{
+		{name: "the key absent", given: "{name: box, endpoint: http://h}"},
+		{name: "one fallback", given: "{name: box, endpoint: http://h, fallback: [backup]}",
+			wantNames: []string{"backup"}},
+		{name: "an ordered list", given: "{name: box, endpoint: http://h, fallback: [second, first]}",
+			wantNames: []string{"second", "first"}},
+		{name: "names trimmed", given: `{name: box, endpoint: http://h, fallback: [" backup "]}`,
+			wantNames: []string{"backup"}},
+		{name: "a name holding a comma", given: `{name: box, endpoint: http://h, fallback: ["a, b"]}`,
+			wantNames: []string{"a, b"}},
+		{name: "a grace of its own", given: "{name: box, endpoint: http://h, fallback: [b], fallback-after: 90s}",
+			wantNames: []string{"b"}, wantAfter: "90s"},
+		{name: "a lone scalar", given: "{name: box, endpoint: http://h, fallback: backup}",
+			wantErr: `servers: entry "box": fallback: (line 1) is not a list`},
+		{name: "a mapping", given: "{name: box, endpoint: http://h, fallback: {a: b}}",
+			wantErr: `servers: entry "box": fallback: (line 1) is not a list`},
+		{name: "an empty list", given: "{name: box, endpoint: http://h, fallback: []}",
+			wantErr: `servers: entry "box": fallback: (line 1) is empty`},
+		{name: "an explicit null", given: "{name: box, endpoint: http://h, fallback: null}",
+			wantErr: `servers: entry "box": fallback: (line 1) is empty`},
+		{name: "a null item", given: "{name: box, endpoint: http://h, fallback: [a, null]}",
+			wantErr: `servers: entry "box": fallback: (line 1) holds an item that is not a server name`},
+		{name: "a blank item", given: `{name: box, endpoint: http://h, fallback: ["  "]}`,
+			wantErr: `servers: entry "box": fallback: (line 1) holds an item that is not a server name`},
+		{name: "a nested list", given: "{name: box, endpoint: http://h, fallback: [[a]]}",
+			wantErr: `servers: entry "box": fallback: (line 1) holds an item that is not a server name`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var entry ServerEntry
+			err := yaml.Unmarshal([]byte(tt.given), &entry)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("decoded %q as %+v; want a refusal", tt.given, entry)
+				}
+				if !strings.HasPrefix(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q; want it to start %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("yaml.Unmarshal(%q): %v", tt.given, err)
+			}
+			if got := entry.Fallback.Names(); !slices.Equal(got, tt.wantNames) {
+				t.Errorf("Fallback.Names() = %q; want %q", got, tt.wantNames)
+			}
+			if entry.Fallback != NewFallbackList(tt.wantNames...) {
+				t.Errorf("Fallback = %q; want the canonical %q", entry.Fallback, NewFallbackList(tt.wantNames...))
+			}
+			if entry.FallbackAfter != tt.wantAfter {
+				t.Errorf("FallbackAfter = %q; want %q", entry.FallbackAfter, tt.wantAfter)
+			}
+		})
+	}
+}
+
+// A `fallback-after:` grace reads as a length of time above 0, the absent key as two minutes; a 0,
+// a negative length and text that is no duration are refused with the key named.
+func TestParseFallbackAfter(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value   string
+		want    time.Duration
+		wantErr string
+	}{
+		{value: "", want: 2 * time.Minute},
+		{value: "  ", want: 2 * time.Minute},
+		{value: "90s", want: 90 * time.Second},
+		{value: "10m", want: 10 * time.Minute},
+		{value: "0", wantErr: "apogee: invalid fallback-after 0s: want more than 0"},
+		{value: "0s", wantErr: "apogee: invalid fallback-after 0s: want more than 0"},
+		{value: "-5s", wantErr: "apogee: invalid fallback-after -5s: want more than 0"},
+		{value: "soon", wantErr: `apogee: invalid fallback-after "soon": want a length of time like 2m or 90s`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseFallbackAfter(tt.value)
+			if tt.wantErr != "" {
+				if err == nil || !strings.HasPrefix(err.Error(), tt.wantErr) {
+					t.Fatalf("ParseFallbackAfter(%q) = %v, %v; want an error starting %q", tt.value, got, err, tt.wantErr)
+				}
+				if resolved := ResolveFallbackAfter(tt.value); resolved != 2*time.Minute {
+					t.Errorf("ResolveFallbackAfter(%q) = %v; want the 2m default for a value that does not parse",
+						tt.value, resolved)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("ParseFallbackAfter(%q) = %v, %v; want %v", tt.value, got, err, tt.want)
+			}
+			if resolved := ResolveFallbackAfter(tt.value); resolved != tt.want {
+				t.Errorf("ResolveFallbackAfter(%q) = %v; want %v", tt.value, resolved, tt.want)
+			}
+		})
+	}
+}
+
+// ValidateServers refuses a `fallback:` that names a server no entry carries, the entry itself, or
+// one server twice, and a `fallback-after:` that is not a grace above 0 — each refusal naming the
+// entry and the bad value. A fallback listed after its entry is still known.
+func TestValidateServersRefusesABadFallback(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fallback FallbackList
+		after    string
+		wantErr  string
+	}{
+		{name: "the keys absent"},
+		{name: "a fallback listed later", fallback: NewFallbackList("backup")},
+		{name: "two fallbacks in order", fallback: NewFallbackList("cloud", "backup")},
+		{name: "a grace of its own", fallback: NewFallbackList("backup"), after: "5m"},
+		{name: "a grace with no list", after: "5m"},
+		{name: "an unknown name", fallback: NewFallbackList("backup", "nowhere"),
+			wantErr: `fallback: names "nowhere", which no servers: entry is called`},
+		{name: "the entry itself", fallback: NewFallbackList("primary"),
+			wantErr: `fallback: names "primary", this entry itself`},
+		{name: "a name twice", fallback: NewFallbackList("backup", "cloud", "backup"),
+			wantErr: `fallback: names "backup" twice`},
+		{name: "a hand-built value that is no list", fallback: FallbackList("backup"),
+			wantErr: "fallback: is not a list of server names"},
+		{name: "a hand-built blank name", fallback: FallbackList(`[""]`),
+			wantErr: "fallback: holds a name that is only whitespace"},
+		{name: "a grace of 0", fallback: NewFallbackList("backup"), after: "0",
+			wantErr: "fallback-after: invalid fallback-after 0s: want more than 0"},
+		{name: "a negative grace", fallback: NewFallbackList("backup"), after: "-1m",
+			wantErr: "fallback-after: invalid fallback-after -1m0s: want more than 0"},
+		{name: "a grace that is no length", fallback: NewFallbackList("backup"), after: "later",
+			wantErr: `fallback-after: invalid fallback-after "later": want a length of time`},
+		{name: "a whitespace grace", fallback: NewFallbackList("backup"), after: "  ",
+			wantErr: "fallback-after: is only whitespace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateServers([]ServerEntry{
+				{Name: "primary", Endpoint: "http://127.0.0.1:1111", Fallback: tt.fallback, FallbackAfter: tt.after},
+				{Name: "backup", Endpoint: "http://127.0.0.1:2222"},
+				{Name: "cloud", Endpoint: "https://llm.example.com"},
+			})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateServers refused fallback %q / fallback-after %q — %v", tt.fallback, tt.after, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateServers accepted fallback %q / fallback-after %q; want a refusal", tt.fallback, tt.after)
+			}
+			want := `apogee: servers: entry 1 ("primary"): ` + tt.wantErr
+			if !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("error = %q; want it to start %q", err, want)
+			}
+		})
+	}
+}
+
+// A bad `fallback:` in the file is refused at load, the way every other entry defect is, so a
+// Driver never starts on a list that names a server it could not move to.
+func TestApplyConfigRefusesAnUnknownFallback(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\n"+
+		"    fallback: [nowhere]\nserver: testbox\n")
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify)
+	if err == nil {
+		t.Fatal("ApplyConfig accepted a fallback: naming no servers: entry; want a refusal")
+	}
+	if want := `servers: entry 1 ("testbox"): fallback: names "nowhere"`; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q; want it to contain %q", err, want)
+	}
+}
+
+// The one-run `--endpoint` entry is in no file, so it carries no fallback list and no grace, even
+// when the configured startup entry has both.
+func TestApplyConfigEphemeralEntryHasNoFallback(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\n"+
+		"    fallback: [backup]\n    fallback-after: 5m\n  - name: backup\n    endpoint: http://127.0.0.1:2222\n"+
+		"server: testbox\n")
+	opts := Options{ConfigDir: home}
+	getenv := func(name string) string {
+		if name == EnvEndpoint {
+			return "http://rented.example:8080/v1"
+		}
+		return ""
+	}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if !opts.StartupEntry.Ephemeral {
+		t.Fatal("StartupEntry.Ephemeral = false; want the override's one-run entry")
+	}
+	if opts.StartupEntry.Fallback != "" || opts.StartupEntry.FallbackAfter != "" {
+		t.Errorf("ephemeral entry carries fallback %q / fallback-after %q; want neither",
+			opts.StartupEntry.Fallback, opts.StartupEntry.FallbackAfter)
+	}
+}
+
+// A `fallback:` list round-trips through the YAML writer as the list it was read from — never as
+// the JSON string it is held as — an entry without one renders no key, and the field keeps
+// ServerEntry comparable: two entries that differ only in their list are told apart with `!=`.
+func TestServerEntryFallbackRoundTrips(t *testing.T) {
+	t.Parallel()
+	in := ServerEntry{Name: "box", Endpoint: "http://h", Fallback: NewFallbackList("cloud", "backup"),
+		FallbackAfter: "90s"}
+	out, err := yaml.Marshal([]ServerEntry{in})
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(out), `'[`) || !strings.Contains(string(out), "fallback:\n") ||
+		!strings.Contains(string(out), "- cloud\n") {
+		t.Fatalf("rendered %q; want fallback as a YAML list", out)
+	}
+	var back []ServerEntry
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("yaml.Unmarshal of the rendered entry: %v", err)
+	}
+	if len(back) != 1 || back[0] != in {
+		t.Errorf("round trip = %+v; want %+v", back, in)
+	}
+	reordered := in
+	reordered.Fallback = NewFallbackList("backup", "cloud")
+	if reordered == in {
+		t.Error("entries with differently ordered fallback lists compare equal; the order is the walk")
+	}
+	plain, err := yaml.Marshal([]ServerEntry{{Name: "box", Endpoint: "http://h"}})
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(plain), "fallback") {
+		t.Errorf("an entry with no fallback rendered %q", plain)
+	}
+}
