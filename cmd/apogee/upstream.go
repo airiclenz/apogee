@@ -285,22 +285,6 @@ type sessionMover struct {
 // binding that server's observation over the number its entry pinned, and the fan-out cap follows
 // the entry the way every other arrival makes it follow (ADR 0039).
 func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, error) {
-	// What this server bounds the session to, resolved BEFORE anything is mutated so the engine and
-	// the display adopt one number: the entry's own window pin outranks the top-level key, which
-	// itself survives a move (config.ResolveContextWindow), and the reply cap is the entry's as
-	// written — an unpinned entry sends 0 and the engine derives its own cap from the window (ADR
-	// 0046).
-	window := config.ResolveContextWindow(int(entry.ContextWindow), m.live.pin())
-	// And how the new server splits it: that entry's own `response-reserve:` over the top-level key,
-	// which survives a move the way the window pin does (config.ResolveResponseReserve). Resolved
-	// here, with the window, so the engine takes one statement about one server — 0 at both scopes
-	// hands the split back to the engine's own built-in share.
-	reserve := config.ResolveResponseReserve(entry.ResponseReserve, m.live.reservePin())
-	// And the room inside that window the session works in on the new server: that entry's own
-	// `working-window:` over the top-level key, which survives a move the way the pin does
-	// (config.ResolveWorkingWindow). Resolved here, with the window, so the engine takes one
-	// statement about one server — 0 at both scopes leaves the whole advertised window as the room.
-	working := config.ResolveWorkingWindow(int(entry.WorkingWindow), m.live.workingPin())
 	// The key that server takes, resolved from the source its entry names and resolved FIRST, in
 	// front of the engine's own validate-then-commit switch: a source that refuses is one more way
 	// this move cannot be made, and it must fail like the others — with the session still on the
@@ -309,34 +293,30 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	if err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	// The arrived-at entry's dial facts, one binding for the engine's switch and the holder's swap
-	// below. The switch takes its endpoint, its key, the protocol it speaks (ADR 0078) — so the
-	// engine's replacement client dials it the way this entry's Monitor does; a wire is a fact about
-	// the server, and it moves with the endpoint for the key's reason — and its `request-extra:`
-	// passthrough (ADR 0085), "" included: the replacement client merges THIS server's keys and
-	// never the retired one's. Its `price:` rides the same binding (ADR 0093), the unpriced zero
-	// included, so the calls after the move are priced at the server they now go to.
-	dial := bindingOfEntry(entry, apiKey)
-	// And how long a stream from that server may sit silent: the entry's own `stream-idle-timeout:`
-	// over the root key as the session holds it now (config.ResolveStreamIdleTimeout, the ranks the
-	// window pin above spells), so a move off an entry that overrode it lands back on the root and
-	// a `/settings` edit of the root takes effect here. It rides the binding, so the switch below
-	// states it — a nil there would leave the retired server's window cutting this one's streams.
-	dial.StreamIdleTimeout = config.ResolveStreamIdleTimeout(entry.StreamIdleTimeout, m.live.streamIdlePin())
-	spec := dial.upstreamSpec()
-	// The arrived-at server in the HUMAN's words, so the orientation block names the session seat by
-	// the entry the session is on NOW when the model is offered a seat to choose (ADR 0069). They
-	// ride the switch for the pins' reason: the entry is in hand here, and a session that moved to
-	// another box must not go on describing the one it left.
-	spec.ServerName = entry.Name
-	spec.ServerDescription = entry.Description
-	// And whether that entry is the one-run `--endpoint` row rather than a `servers:` entry, for the
-	// name's reason: a move back to the override row states it, a move to a configured entry clears it.
-	spec.ServerEphemeral = entry.Ephemeral
-	spec.MaxContextTokens = window
-	spec.WorkingWindow = working
-	spec.MaxOutputTokens = int(entry.MaxOutputTokens)
-	spec.ResponseReserveFraction = reserve
+	// What this server bounds the session to, and the rest of the switch the engine takes, resolved
+	// BEFORE anything is mutated so the engine and the display adopt one statement about one server
+	// (entryUpstream, the resolution a Server fallback shares). The entry's own pins outrank the
+	// top-level keys, which survive a move and are read off the live settings at MOVE time, since
+	// ADR 0037 a `/settings` edit can have changed them since the session started: the window and
+	// the working window, the `response-reserve:` share of the first (0 at both scopes hands the
+	// split back to the engine's own built-in share) and how long a stream from that server may sit
+	// silent — stated always, so the retired server's window never cuts this one's streams. The
+	// reply cap is the entry's as written — an unpinned entry sends 0 and the engine derives its own
+	// cap from the window (ADR 0046).
+	//
+	// The dial binding the spec was projected from is the one the holder's swap below takes: the
+	// entry's endpoint, its key, the protocol it speaks (ADR 0078), its `request-extra:` passthrough
+	// (ADR 0085), "" included, so the replacement client merges THIS server's keys and never the
+	// retired one's, and its `price:` (ADR 0093), the unpriced zero included. The arrived-at server
+	// rides the spec in the HUMAN's words, so the orientation block names the session seat by the
+	// entry the session is on NOW (ADR 0069), with whether it is the one-run `--endpoint` row.
+	spec, dial := entryUpstream(entry, apiKey, rootPins{
+		contextWindow:   m.live.pin(),
+		workingWindow:   m.live.workingPin(),
+		responseReserve: m.live.reservePin(),
+		streamIdle:      m.live.streamIdlePin(),
+	})
+	window := spec.MaxContextTokens
 	if err := m.agent.SwitchUpstream(spec); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}

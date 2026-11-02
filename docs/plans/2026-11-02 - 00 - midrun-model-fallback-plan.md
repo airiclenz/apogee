@@ -216,7 +216,23 @@ internal/domain/events.go — EventBase; internal/agent/subagent.go — newChild
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFallback|TestSwitchUpstream' ./internal/agent/`; `grep -n 'func (a \*Agent) [A-Z]' internal/agent/*.go` — every accessor whose body reads `a.cfg` and that a Driver calls mid-Turn takes the rehome's guard
 **Commit:** `feat(agent): rehome the shared upstream onto its fallback mid-Turn and resend`
 
-## 8. Drivers: the shared fallback resolver, wired for headless
+## 8. Drivers: the shared fallback resolver, wired for headless — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the resolver lives in cmd/apogee/fallback.go as `fallbackResolver`, one instance per seat. It is built by `newFiringFallback` (nil when the entry names no `fallback:`) and carried on `firingRouting.fallback`, so headless, the daemon and a session-raised Firing get it through `firingConfig`. `raise` sets `run.Spec.Fallback` only for a non-nil resolver, which avoids a typed-nil interface. `run.Once` passes it through `agent.WithFallbackResolver`.
+
+NOTES (2026-11-02): single-flight is keyed by the failed server's name. A run that ended in a switch stays cached, so a late report on the server the seat left reads the same answer with First false. A run that ended recovered or none is dropped once answered, so a later failure of that server starts fresh. The list position (`next`) and the `fallen` flag only move forward on a switch. A walk that lands nowhere leaves the position where it was.
+
+NOTES (2026-11-02): the grace window beats the primary with the `Reachable` predicate (a usable model list), polling every 5 s (`fallbackGracePoll`) or less when the window has less time left. The first beat goes out at once. The shared run is detached with `context.WithoutCancel` under a backstop of the grace window plus 2 minutes per list entry (`fallbackBeatAllowance`).
+
+NOTES (2026-11-02): the UpstreamSpec resolution was factored out of `sessionMover.move` into `entryUpstream(entry, apiKey, rootPins)` in fallback.go, and `move` now calls it with the live pins, so item 10 can share it. The fallback's RebindSpec is built by `fallbackLander.rebind` through `rebindSpecFor`, overlaid the way `bindFiringConfig` does. The entry's forced effort dialect wins over the beat's, and the entry's price is stated.
+
+NOTES (2026-11-02): the e2e tests do not `Close()` the primary after its first Turn. A test cannot do that cleanly, because httptest's Close blocks on the in-flight request. Instead the primary's first request is held at an `await:` gate. The test closes the stub, waits until its port refuses connections, then releases the held reply as a cut stream. Every grace beat then finds the server gone. The all-down test closes the fallback before the run starts.
+
+NOTES (2026-11-02): the recovered e2e test uses a cut turn under `re-stream-budget: 0` instead of "chat 503 once". The provider client retries a 5xx itself (2 retries by default), so a single 503 never reaches the resolver.
+
+NOTES (2026-11-02): consequential edit — cmd/apogee/doc.go: made necessary by the new fallback.go (TestDocMapNamesEveryFile requires every file in the package file map).
+
+NOTES (2026-11-02): consequential edit — docs/manual/headless.md: made necessary by the new stderr narration line for a switch (the manual's live-narration paragraph lists every line the stream prints).
 
 **What:**
 Depends on items 2 and 7.

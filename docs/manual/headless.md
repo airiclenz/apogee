@@ -122,7 +122,11 @@ prints `the reply dropped N malformed stream chunks — text may be missing`, at
 An `@file` or attached skill that entered the conversation clipped to its bound prints
 `<ref> clipped to N tokens — read_file ranges for the rest` (or, when its share of the
 context window bound it, `<ref> clipped to N tokens (its share of the context window) —
-read_file ranges for the rest`) in the same stream.
+read_file ranges for the rest`) in the same stream. A server that fails mid-run and moves the
+run to one of its entry's
+[fallback servers](configuration.md#moving-to-another-server-when-one-fails--fallback) prints
+`apogee: <server> failed (<fault>); continuing on <fallback> (<model>) after waiting <time>`
+once, however many agents shared that server.
 None of this is the run's outcome: the block described next is still composed after
 the run, from what it reported, in the wording and order it has always had.
 

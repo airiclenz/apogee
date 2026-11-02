@@ -127,6 +127,13 @@ type Spec struct {
 	// target describes a place nothing routes to, and that is the Driver's call to make.
 	DelegationSeat *agent.DelegationSeat
 
+	// Fallback is the Server fallback of the run's own seat (ADR 0105): the resolver the Agent
+	// consults before it abandons a Turn for a fault that is its server's own, built by the caller
+	// from the bound entry's `fallback:` list. nil ⇒ none, and a Turn is abandoned exactly as before
+	// this field existed. The engine still reads no config (ADR 0031): the Driver resolves the
+	// fallback servers, this seam only carries the resolver.
+	Fallback agent.FallbackResolver
+
 	// Journal opens the Firing's live Event journal (ADR 0103) — the file a watcher follows while
 	// the run is in flight. Once calls it only for a run that HOLDS its record (a Store and a
 	// RecordID, and the hold taken), immediately after the hold, and ends the journal after the
@@ -580,7 +587,8 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	a, err := agent.New(cfg,
 		agent.WithDelegationSeat(spec.DelegationSeat),
-		agent.WithDelegationTarget(spec.DelegationTarget))
+		agent.WithDelegationTarget(spec.DelegationTarget),
+		agent.WithFallbackResolver(spec.Fallback))
 	if err != nil {
 		if refused := (*agent.SeedRefusedError)(nil); errors.As(err, &refused) {
 			return Result{}, fmt.Errorf("%s: %w", lanesRefused, err)

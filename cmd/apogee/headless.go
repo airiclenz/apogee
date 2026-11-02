@@ -189,7 +189,8 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 
 // narrationSink is the headless Driver's own EventSink: the live view of an unattended run under
 // `--format text`. It prints one stderr line per [domain.PruneEvent], per
-// [domain.MalformedChunksEvent] and per [domain.RefClippedEvent], one per tool call and tool
+// [domain.MalformedChunksEvent], per [domain.RefClippedEvent] and per
+// [domain.UpstreamSwitchedEvent], one per tool call and tool
 // result at Depth 0, and one per sub-agent lifecycle boundary — and forwards every Event, its own
 // included, to whatever sink it wraps (nil ⇒ nothing to forward to). A zero-value inner is the
 // normal case — a bare headless run composes no sink of its own — and the wrap still matters,
@@ -221,6 +222,11 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 // The reference-clip line is the event's own Notice sentence too, escape-stripped to one line
 // because its Ref is the reference as the user wrote it: a reference that entered the
 // conversation clipped is read only in part, and an unattended run owes the human that fact.
+// The Server fallback line (ADR 0105) is the switch event's own Notice sentence too, with no depth
+// gate — a seat switches once however many agents share it, and an unrouted child's fault moves the
+// run's own seat — escape-stripped to one line because the server names and the model id it carries
+// come from the config file and a server's own model list: a run that finished on another server
+// than the one it started on owes the human which, and why.
 //
 // It prints for a prune and NOTHING for a [domain.ReactionFiredEvent], deliberately: a Floor guard
 // repairing the model's own failure is engine behaviour rather than news for the human who is not
@@ -279,6 +285,8 @@ func (s *narrationSink) narrate(e domain.Event) {
 	case domain.MalformedChunksEvent:
 		_, _ = fmt.Fprintln(s.out, ev.Notice())
 	case domain.RefClippedEvent:
+		_, _ = fmt.Fprintln(s.out, sanitize.StripEscapesToLine(ev.Notice()))
+	case domain.UpstreamSwitchedEvent:
 		_, _ = fmt.Fprintln(s.out, sanitize.StripEscapesToLine(ev.Notice()))
 	case domain.ToolCallEvent:
 		if ev.Depth != 0 {

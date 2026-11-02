@@ -575,6 +575,13 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	session.Model = spec.Model
 	cfg.Namer = newFiringNamer(session, effortDialect, routing.target, in.opts.AutoTitle)
 
+	// And the Server fallback of the run's own seat (ADR 0105): the resolver the engine consults
+	// before it abandons a Turn for a fault that is this server's own, built from the bound entry's
+	// `fallback:` list — nil when it names none, which leaves the run exactly as it was. Its grace
+	// beats observe the server this run talks to as the beat above did, and each fallback's key
+	// resolves through the run's one resolver.
+	routing.fallback = newFiringFallback(in, keys, apiKey, spec.Model)
+
 	// And the one thing an unattended run cannot get from the engine: the `run_on` and `context`
 	// arguments on sub_agent, which firingSeatTools assembles under `sub-agents-choice: model` or
 	// `sub-agents-context: on` and leaves nil otherwise. It is built HERE, after the scratch dir
@@ -649,6 +656,11 @@ type firingRouting struct {
 	// the seat is display text a human wrote down, while reachability is a fact about right now that
 	// a delegation's own result note reports (delegationSeatOf).
 	seat *apogee.DelegationSeat
+	// fallback is the Server fallback of the run's own seat (ADR 0105), handed to the run's Agent
+	// (run.Spec.Fallback) — nil when the bound entry names no `fallback:`. It rides the routing for
+	// the target's reason: it is where the run's requests go when its own server fails, and a Driver
+	// forwards it rather than reading it.
+	fallback *fallbackResolver
 	// Beat is the ONE observation this run took of its own bound server — the whole Beat rather
 	// than the two fields the composition read off it, so a Driver acting on it can say WHY
 	// (Beat.Failure) and tell a box that is merely rate-limited (Beat.Throttled, Beat.Answered)
@@ -1059,6 +1071,11 @@ func raise(
 	}
 	if ref != nil {
 		spec.ScheduleID, spec.ScheduleName = ref.ID, ref.Name
+	}
+	// The run's Server fallback, set only when the bound entry built one: a nil *fallbackResolver
+	// stored in the interface would be a resolver that is not nil, and the engine would consult it.
+	if routing.fallback != nil {
+		spec.Fallback = routing.fallback
 	}
 	// Resolved HERE and not at construction: a caller that left it nil gets the production runner
 	// at the moment the Firing is raised, and a caller that stated one gets exactly that.
