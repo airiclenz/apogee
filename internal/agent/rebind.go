@@ -423,6 +423,9 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	// swallowed: the switch has already committed above, and provider teardown reports nothing a
 	// caller could act on (Client.Close always succeeds), so surfacing it would say the move failed.
 	_ = a.closeOwnedUpstream(a.upstream.responder())
+	// The holder left behind is retired first: a background workflow child still reading it falls
+	// over no more, so a fault there abandons rather than moving the seat after the human did.
+	a.upstream.retire()
 	// A FRESH holder, never a replace of the one this Agent holds: that holder may be shared — with a
 	// background workflow's host that copied it (backgroundHost), which stays on the client it
 	// started with — so the switch moves this Agent alone, as it always has. It stays on the seat
@@ -459,7 +462,9 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 // The move goes into the seat's sharedUpstream, so every Agent on the seat follows it: the
 // holder is replaced only while it is still at the generation the faulted request went out at, so
 // the first Agent to arrive moves the seat and announces it with one UpstreamSwitchedEvent, and an
-// Agent arriving after it dials nothing and simply follows (true). A routed child's holder is its own, so on the
+// Agent arriving after it dials nothing and simply follows (true). A holder a server switch retired
+// while the resolver waited moves nothing and is refused (false), so a background workflow child
+// abandons rather than moving the seat after the human did. A routed child's holder is its own, so on the
 // Sub-agents seat the announcement is the First caller's instead (announcesRehome). The binding itself is applied by
 // followUpstream, on this Agent's own goroutine, when the loop re-arms the request.
 func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
@@ -477,10 +482,13 @@ func (a *Agent) rehome(turn int, reply completion, answer FallbackAnswer) bool {
 	// Dialled under the ARRIVED-AT Config, as SwitchUpstream dials: the wire, the idle window and the
 	// passthrough are the fallback's.
 	opts, tap := dialOptions(b.applyTo(a.cfg))
-	retired, moved := a.upstream.rehome(reply.generation, b, func() provider.Responder {
+	retired, outcome := a.upstream.rehome(reply.generation, b, func() provider.Responder {
 		return a.dial(spec.Endpoint, bind.Model, spec.APIKey, opts...)
 	})
-	if !moved {
+	switch outcome {
+	case rehomeRefusedRetired:
+		return false // a server switch retired the holder mid-resolve; the Turn abandons (ADR 0089)
+	case rehomeFollows:
 		return true // another Agent on the seat moved it first; this one follows that move
 	}
 	tap.bind(a)

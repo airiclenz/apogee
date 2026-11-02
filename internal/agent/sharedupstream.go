@@ -33,6 +33,13 @@ import (
 // what an UpstreamSwitchedEvent reports as the seat that moved, never the emitting Agent's depth. It
 // is set when the holder is built and never written after, so it needs no lock.
 //
+// retired says a server switch left the holder behind (SwitchUpstream): the session's seat now
+// speaks over a fresh holder, and whoever still reads this one — a background workflow's host and
+// its children (backgroundHost) — reads a client the human moved the session off. Such a reader
+// never moves the seat: a fault on it consults no fallback resolver and abandons, as a background
+// workflow did before Server fallback (ADR 0089), and a rehome already in flight when the switch
+// landed is refused (rehome). It is guarded by mu, and once set it is never cleared.
+//
 // Its reads are safe on a nil holder, which answers no Upstream at generation zero: an Agent built
 // bare in a test has none, and its Close must still close nothing rather than panic.
 type sharedUpstream struct {
@@ -41,7 +48,17 @@ type sharedUpstream struct {
 	generation uint64
 	bound      *rehomeBinding
 	seat       domain.UpstreamSeat
+	retired    bool
 }
+
+// rehomeOutcome is what a holder did with a Server fallback move it was asked to make (rehome).
+type rehomeOutcome int
+
+const (
+	rehomeLanded         rehomeOutcome = iota // the holder moved onto the fallback
+	rehomeFollows                             // another Agent on the seat moved it first; the caller follows that move
+	rehomeRefusedRetired                      // a server switch retired the holder; nothing moves and the caller abandons
+)
 
 // rehomeBinding is what a Server fallback rehome moved a seat onto: the fallback's UpstreamSpec and
 // the RebindSpec for the model its heartbeat observed, as the FallbackResolver answered them. It is
@@ -110,22 +127,49 @@ func (s *sharedUpstream) replace(up provider.Responder) uint64 {
 // rehome moves the holder onto a fallback, once per failed generation: when the holder is still at
 // from — the generation the faulted request went out at — it puts the Responder dial returns into
 // the holder with b beside it, advances the generation and returns the Responder it retired and
-// true. When the holder has already moved past from, another Agent on the seat answered the same
-// fault first: nothing is dialled or replaced, and it returns false, leaving the caller to follow
-// the move that was made (Agent.followUpstream). dial runs under the lock, so two Agents reporting
-// the same fault at once never dial the fallback twice; a Dialer builds a client and opens no
-// connection, so the lock is held for no wire wait.
-func (s *sharedUpstream) rehome(from uint64, b *rehomeBinding, dial func() provider.Responder) (provider.Responder, bool) {
+// rehomeLanded. When the holder has already moved past from, another Agent on the seat answered the
+// same fault first: nothing is dialled or replaced, and it returns rehomeFollows, leaving the caller
+// to follow the move that was made (Agent.followUpstream). When a server switch has retired the
+// holder — possibly while the caller's resolver waited — nothing is dialled or replaced either, and
+// it returns rehomeRefusedRetired: the human moved the session off this holder, so a reader left on
+// it must not move the seat after them. dial runs under the lock, so two Agents reporting the same
+// fault at once never dial the fallback twice; a Dialer builds a client and opens no connection, so
+// the lock is held for no wire wait.
+func (s *sharedUpstream) rehome(from uint64, b *rehomeBinding, dial func() provider.Responder) (provider.Responder, rehomeOutcome) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.retired {
+		return nil, rehomeRefusedRetired
+	}
 	if s.generation != from {
-		return nil, false
+		return nil, rehomeFollows
 	}
 	retired := s.up
 	s.up = dial()
 	s.generation++
 	s.bound = b
-	return retired, true
+	return retired, rehomeLanded
+}
+
+// retire marks the holder as one a server switch left behind (SwitchUpstream). A nil holder has
+// nothing to retire.
+func (s *sharedUpstream) retire() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retired = true
+}
+
+// isRetired reports whether a server switch left the holder behind (retire). A nil holder never was.
+func (s *sharedUpstream) isRetired() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.retired
 }
 
 // binding returns the holder's generation and the binding its latest replacement came with, read

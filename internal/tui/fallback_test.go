@@ -119,6 +119,38 @@ func TestFallbackSessionSeatSwitchIsNotedAndFollowed(t *testing.T) {
 	}
 }
 
+// A background workflow child on the session's live holder that hit the fault moved the session's
+// own seat: its switch is workflow-owned, yet it is noted once and followed like any other.
+func TestFallbackBackgroundSessionSeatSwitchIsFollowed(t *testing.T) {
+	t.Parallel()
+	follow := &fakeFollow{}
+	m, _, _ := seededFallback(t, follow)
+	m = foldEvents(t, m, bgPhase(domain.WorkflowStarted))
+	switched := sessionSwitch(1)
+	switched.EventBase = bgChildBase("run-bg-1")
+	if !m.workflows.owns(switched) {
+		t.Fatal("the background child's switch is not workflow-owned; the test would not reach the owned path")
+	}
+	notesBefore := len(noteTexts(m))
+
+	m, cmd := stepCmd(t, m, eventMsg{Event: switched})
+
+	if want := []string{"remote"}; !reflect.DeepEqual(follow.calls, want) {
+		t.Fatalf("follow calls = %v, want %v", follow.calls, want)
+	}
+	want := "server fallback: test-host (test-model) failed (status 503); " +
+		"continuing on remote (remote-model) after waiting 2s"
+	if got := noteTexts(m)[notesBefore:]; !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("new notes = %q, want only %q", got, want)
+	}
+	if m.opts.HostAlias != "remote" || m.opts.Model != "remote-model" || m.opts.ContextWindow != fallbackWindow {
+		t.Errorf("opts = {%q %q %d}, want the fallback adopted", m.opts.HostAlias, m.opts.Model, m.opts.ContextWindow)
+	}
+	if cmd == nil {
+		t.Error("the follow armed no beat — a beat in flight against the server left would stay live")
+	}
+}
+
 // A Sub-agents seat's switch is noted, naming that seat's servers, and moves no part of the session:
 // nothing is followed and the display stays on the session's server.
 func TestFallbackSubAgentsSeatSwitchIsNotedAndNotFollowed(t *testing.T) {

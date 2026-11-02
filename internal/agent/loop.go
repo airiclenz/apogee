@@ -747,7 +747,9 @@ func (a *Agent) faultedOnRetiredUpstream(reply completion) bool {
 // transient re-stream budget already spent on it, or a class that budget never covers), it asks the
 // resolver what to do, telling it whether this Turn has already spent its one recovered resend
 // (t.recoveredSpent). Any other fault, or no resolver, abandons at once, so the loop is exactly what
-// it was without one.
+// it was without one — and so does a fault on a holder a server switch retired (sharedUpstream.retire):
+// a background workflow child left on the client the human moved the session off abandons as it did
+// before Server fallback (ADR 0089) and never asks the resolver.
 //
 // A "recovered" answer resends the same request on the same Upstream with a fresh re-stream budget:
 // the latch flips first, so a second fault in this Turn reaches the resolver flagged and a second
@@ -757,7 +759,7 @@ func (a *Agent) faultedOnRetiredUpstream(reply completion) bool {
 // leaves step to re-arm the request for it; a switch whose answer cannot be applied, and "none",
 // abandon. A ctx cancelled during the wait is the user's cancel whatever the resolver answered.
 func (a *Agent) consultFallback(ctx context.Context, t *turnRun, reply completion) fallbackStep {
-	if a.fallback == nil || !reply.fault.FallbackEligible() {
+	if a.fallback == nil || !reply.fault.FallbackEligible() || a.upstream.isRetired() {
 		return fallbackAbandon
 	}
 	answer := a.fallback.Resolve(ctx, FallbackReport{

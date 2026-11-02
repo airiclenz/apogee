@@ -114,7 +114,8 @@ func TestSharedUpstreamUnroutedChildCloseLeavesParentClient(t *testing.T) {
 
 // TestSharedUpstreamSwitchLeavesBackgroundHost pins what a server switch moves: SwitchUpstream
 // installs a FRESH holder on the switching Agent, so a background workflow's host, which copied the
-// old holder, stays on the client it started with — and the old holder itself is not replaced.
+// old holder, stays on the client it started with — and the old holder itself is not replaced, but
+// retired, so a fault a background child hits on it never moves the seat (consultFallback).
 func TestSharedUpstreamSwitchLeavesBackgroundHost(t *testing.T) {
 	t.Parallel()
 
@@ -140,5 +141,11 @@ func TestSharedUpstreamSwitchLeavesBackgroundHost(t *testing.T) {
 	}
 	if up, gen := oldHolder.current(); up != provider.Responder(old) || gen != 0 {
 		t.Errorf("old holder = (%T, %d) after the switch, want (the old client, 0) untouched", up, gen)
+	}
+	if !oldHolder.isRetired() || !host.upstream.isRetired() {
+		t.Error("the holder the switch left behind is not retired, want a background reader's fault to abandon")
+	}
+	if a.upstream.isRetired() {
+		t.Error("the switching Agent's fresh holder is retired, want it live")
 	}
 }

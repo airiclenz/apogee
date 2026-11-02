@@ -57,7 +57,11 @@ Closes the defect that a mid-stream Anthropic `api_error` (that wire's 500) is n
 **Closes:** anthropic-api-error-fallback
 **Commit:** `fix(provider): an Anthropic in-band api_error is the 500 it stands for`
 
-## 2. Background workflow children consult the session resolver
+## 2. Background workflow children consult the session resolver — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the amendment id is `adr-0105-amend-1102b` — `adr-0105-amend-1102` was already taken by item 1; it amends ADR 0105 decision 6 (one-way, per seat) and is named on the Status line and the reading-order list.
+NOTES (2026-11-02): `sharedUpstream.rehome` now returns a `rehomeOutcome` (landed / follows / refused-retired) instead of a bool, so the retired refusal is distinct from the follow path; `Agent.rehome` maps the refusal to false (fallbackAbandon).
+NOTES (2026-11-02): a watcher of the journal (watch.go foldWatchedEvent) still routes a workflow-owned session-seat `upstream_switched` to foldBackgroundEvent, so it writes no fallback note there; the live path notes and follows it. Pre-existing neighbour, not in this item's files.
 
 **What:**
 Closes the defect that a session-seat fault in a background workflow child is abandoned even when the entry names a fallback.

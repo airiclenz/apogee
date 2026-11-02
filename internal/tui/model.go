@@ -1337,13 +1337,22 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// this Exchange's life) — workflow.go, ADR 0089.
 		if m.workflows.owns(msg.Event) {
 			m = m.foldBackgroundEvent(msg.Event)
+			// The one background event that is the session's news: a workflow child on the session's
+			// live holder hit the fault and moved the session's OWN seat (ADR 0105), so it is noted
+			// and followed exactly as the conversation's own switch is below. A Sub-agents seat's
+			// switch moves no part of the session.
+			var followed tea.Cmd
+			if switched, ok := msg.Event.(domain.UpstreamSwitchedEvent); ok && switched.Seat == domain.UpstreamSeatSession {
+				m.transcript.addNote(fallbackNote(switched))
+				m, followed = m.followFallback(switched)
+			}
 			// A workflow's phase moves what the open /workflows view lists: it re-reads (workflows.go).
 			refresh := m.refreshWorkflows(msg.Event)
 			if _, isToolResult := msg.Event.(domain.ToolResultEvent); isToolResult {
 				next, reassert := m.reassertMouse()
 				return next, tea.Batch(reassert, refresh)
 			}
-			return m, refresh
+			return m, tea.Batch(refresh, followed)
 		}
 		// Any Event, any depth, any variant: the engine is not silent. Stamped before the fold and
 		// unconditionally, so an Event the folds deliberately ignore — usage accounting, an audit

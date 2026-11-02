@@ -664,7 +664,10 @@ func (a *Agent) stopAllBackground() {
 // effort dialect — are copied as they stand, the Upstream as the HOLDER this Agent read it through at
 // the copy (sharedupstream.go), so a later server switch, which installs a fresh holder on this Agent,
 // leaves the workflow on the client it started with, while a Server fallback rehome, which moves the
-// holder itself, reaches the workflow's children too (followUpstream, from the copied appliedGen); the lock-guarded live settings are read through their
+// holder itself, reaches the workflow's children too (followUpstream, from the copied appliedGen).
+// The session seat's fallback resolver is copied beside the holder, so a child on it that hits the
+// fault falls over with the seat; once a server switch has retired the holder, that child abandons
+// instead (consultFallback). The lock-guarded live settings are read through their
 // accessors and frozen, all but the mode, which the host holds as a tighten-only view of this
 // Agent's (liveMode), the way a delegate holds its parent's. The tree's shared handles are shared.
 // The host owns no Upstream and no tool set (it never closes or recomposes either), runs no Turn of
@@ -679,6 +682,7 @@ func (a *Agent) backgroundHost() *Agent {
 		cfg:                a.cfg,
 		upstream:           a.upstream,
 		appliedGen:         a.appliedGen, // the generation the copied Config reflects, so the host's children follow only a later rehome (followUpstream)
+		fallback:           a.fallback,   // the session seat's resolver, so an unrouted child on the copied holder falls over with the seat
 		dial:               a.dial,
 		builtins:           a.builtinLadder(),
 		armed:              a.armed,

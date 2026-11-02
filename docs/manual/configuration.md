@@ -2383,7 +2383,11 @@ move of the session's own server the footer and the heartbeat follow the fallbac
 sub-agent running on the session's server move together, and sub-agents sent to
 `sub-agents-server` follow that entry's own `fallback:` list — once that seat has moved, later
 sub-agents go to its fallback too, until `/sub-agents-server` (or an edit of the
-`sub-agents-server:` key) moves it back. A resumed session starts on
+`sub-agents-server:` key) moves it back. A background workflow running on the session's
+server moves with it too: when one of its sub-agents hits the failure, the whole seat moves,
+the session included. The exception is a background workflow you left behind with `/server`:
+it keeps running on the server it started on, and a failure there ends that item as it
+always has, without moving the session. A resumed session starts on
 the server you configured, not on the fallback.
 
 A `fallback:` name that no entry has, the entry's own name, or a name listed twice is

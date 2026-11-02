@@ -714,6 +714,139 @@ func TestFallbackSwitchByAnUnroutedChildMovesTheSessionSeat(t *testing.T) {
 	}
 }
 
+// backgroundChild spawns an unrouted child off a background workflow's host of the rig's parent —
+// the launch-time snapshot a background workflow runs off (backgroundHost) — and returns both.
+func (r *seatRig) backgroundChild(t *testing.T, name string) (host, child *Agent) {
+	t.Helper()
+	host = r.parent.backgroundHost()
+	child, err := host.newChildAgent("call_"+name, "the background item "+name, name)
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	return host, child
+}
+
+// switchAway runs the human's `/server` on the rig's parent, which retires the holder the parent
+// spoke over (SwitchUpstream) — the one a background workflow's host copied.
+func (r *seatRig) switchAway(t *testing.T) {
+	t.Helper()
+	if err := r.parent.SwitchUpstream(UpstreamSpec{Endpoint: "http://elsewhere.local:4444"}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+}
+
+// TestFallbackBackgroundChildConsultsTheSessionResolver pins a background workflow on the session's
+// live holder: its host carries the session seat's resolver, so a child that hits the fault moves
+// the SESSION's seat — one session-seat switch event — and the parent follows at its next Step.
+func TestFallbackBackgroundChildConsultsTheSessionResolver(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	host, child := r.backgroundChild(t, "item")
+	if host.fallback != r.resolver || child.fallback != r.resolver {
+		t.Fatal("the background host or its child did not carry the session's resolver")
+	}
+
+	res := stepOnce(t, child, "background item work")
+
+	if res.Faulted {
+		t.Fatalf("child result = %+v, want the item finished on the fallback", res)
+	}
+	if n := len(r.resolver.seen()); n != 1 {
+		t.Errorf("resolver reports = %d, want 1", n)
+	}
+	events := r.switchedEvents()
+	if len(events) != 1 || events[0].Seat != domain.UpstreamSeatSession || events[0].ToServer != "spare" {
+		t.Fatalf("events = %+v, want one session-seat switch onto the spare", events)
+	}
+	if got := r.lastSpareModel(t); got != spareModel {
+		t.Errorf("child resend model = %q, want %q", got, spareModel)
+	}
+
+	stepOnce(t, r.parent, "the parent's next question")
+
+	if r.parent.cfg.ServerName != "spare" || r.parent.cfg.Model != spareModel {
+		t.Errorf("parent bound server=%q model=%q, want the spare's", r.parent.cfg.ServerName, r.parent.cfg.Model)
+	}
+	if got := r.lastSpareModel(t); got != spareModel {
+		t.Errorf("parent request model = %q, want %q", got, spareModel)
+	}
+	if r.primary.calls() != 1 {
+		t.Errorf("primary calls = %d, want only the child's faulted one", r.primary.calls())
+	}
+}
+
+// TestFallbackBackgroundChildOnARetiredHolderAbandons pins the exception: once `/server` has moved
+// the session off the holder a background workflow copied, a fault there is abandoned as before
+// Server fallback (ADR 0089) — the resolver is not asked and no seat moves.
+func TestFallbackBackgroundChildOnARetiredHolderAbandons(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	_, child := r.backgroundChild(t, "item")
+	r.switchAway(t)
+
+	res := stepOnce(t, child, "background item work")
+
+	if !res.Faulted {
+		t.Errorf("child result = %+v, want the item abandoned", res)
+	}
+	if reports := r.resolver.seen(); len(reports) != 0 {
+		t.Errorf("resolver reports = %+v, want none on a retired holder", reports)
+	}
+	if n := len(r.switchedEvents()); n != 0 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want none", n)
+	}
+	if dials := r.fallbackDials(); len(dials) != 0 {
+		t.Errorf("fallback dials = %+v, want none", dials)
+	}
+	if got := len(errorEvents(r.sink.events)); got != 1 {
+		t.Errorf("ErrorEvents = %d, want 1", got)
+	}
+}
+
+// TestFallbackBackgroundChildRetiredMidResolveAbandons pins the race the retired flag closes: a
+// background child whose resolver is still waiting when `/server` retires its holder abandons on
+// the switch answer that follows — no move, no session-seat switch announced after the human's.
+func TestFallbackBackgroundChildRetiredMidResolveAbandons(t *testing.T) {
+	t.Parallel()
+	r := newSeatRig(t, nil)
+	_, child := r.backgroundChild(t, "item")
+	var switchErr error
+	r.resolver.answer = func(context.Context, FallbackReport) FallbackAnswer {
+		switched := make(chan struct{})
+		go func() { // the human's `/server`, landing while the resolver waits
+			defer close(switched)
+			switchErr = r.parent.SwitchUpstream(UpstreamSpec{Endpoint: "http://elsewhere.local:4444"})
+		}()
+		<-switched
+		return spareAnswer()
+	}
+
+	res := stepOnce(t, child, "background item work")
+
+	if switchErr != nil {
+		t.Fatalf("SwitchUpstream: %v", switchErr)
+	}
+
+	if !res.Faulted {
+		t.Errorf("child result = %+v, want the item abandoned", res)
+	}
+	if n := len(r.resolver.seen()); n != 1 {
+		t.Errorf("resolver reports = %d, want the one in flight when the holder was retired", n)
+	}
+	if n := len(r.switchedEvents()); n != 0 {
+		t.Errorf("UpstreamSwitchedEvents = %d, want none", n)
+	}
+	if dials := r.fallbackDials(); len(dials) != 0 {
+		t.Errorf("fallback dials = %+v, want none", dials)
+	}
+	if r.spare.calls() != 0 {
+		t.Errorf("spare calls = %d, want none", r.spare.calls())
+	}
+	if got := len(errorEvents(r.sink.events)); got != 1 {
+		t.Errorf("ErrorEvents = %d, want 1", got)
+	}
+}
+
 // TestFallbackSwitchFollowedByEveryAgentOnTheSeat pins the followers: a child spawned before the
 // move and one spawned after it — from a parent that has not stepped since, so it carries the
 // parent's APPLIED generation rather than the holder's — both stream from the fallback with its
