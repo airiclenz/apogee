@@ -24,5 +24,6 @@ standalone `host-alias:` key exists. A session starts on the entry the `server:`
 last one a `/server` switch chose, recorded automatically — and asks with the picker when that key
 is unset or names an entry that is gone; a raw `--endpoint`/`APOGEE_ENDPOINT` override builds an
 unlisted, unpersisted entry for one run
-(ADR 0036).
+(ADR 0036). An entry may also name **Server fallback** entries (`fallback:`), the servers a
+seat moves to when that entry's server fails mid-Turn (ADR 0105); a one-run entry has none.
 _Avoid_: "the model server", "the backend".

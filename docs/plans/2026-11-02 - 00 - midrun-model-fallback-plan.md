@@ -58,7 +58,13 @@
 - 8 (re-check, completion): guard folded (reads item 6's recovered-spent signal to skip grace; shared work on the detached context; cancel-the-runner test)
 - 11 (re-check, completion): guard folded (`d.target` re-pointed on fallover, the fallback's target pushed into the latch, a fresh resolver on `Retarget`/relist; relist-after-fallover test)
 
-## 1. Design record: ADR for per-entry server fallback
+## 1. Design record: ADR for per-entry server fallback — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the new record is ADR 0105 (next free number after adr-0104); each of the four amendments is named on its record's Status line and appended to its reading-order sentence; the Upstream Note links the new `Server fallback` term in prose.
+
+NOTES (2026-11-02): read item 11's section (and item 4's Seat member) because item 1's regression guard points there for the content of `adr-0045-amend-1102` and `adr-0075-amend-1102`; no edits outside item 1's Files.
+
+NOTES (2026-11-02): consequential edit — .capcom/knowledge/decisions.md: made necessary by the new adr-0105 record (the decisions index lists every record; added "- `adr-0105` — A server entry may name fallback servers, and a failed seat falls over one-way" after the adr-0104 line)
 
 **What:**
 **Goal:** a new decision record (next free `adr-NNNN`) records every ratified call above; ADR 0028 and ADR 0085 each carry a dated amendment naming it; the glossary has a `Server fallback` Note.
