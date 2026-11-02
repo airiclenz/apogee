@@ -441,6 +441,80 @@ func TestRenderBudgetedTranscriptNoticeOverBudgetKeepsMostRecentMessage(t *testi
 	}
 }
 
+// TestRenderBudgetedTranscriptElidesAnOversizedNewestMessage pins cause (C) of the fresh-result
+// overflow: a most recent message ten times the whole budget — a single-line body, so no line
+// elision could shrink it — is kept head-and-tail with the elision marker, and the rendered
+// transcript stays within the budget, with or without dropped middles and their notice.
+func TestRenderBudgetedTranscriptElidesAnOversizedNewestMessage(t *testing.T) {
+	const budget = 4000
+	prefix := domain.Message{Role: domain.RoleUser, Content: "OVERARCHING-GOAL"}
+	newest := domain.Message{Role: domain.RoleTool, Content: "NEWEST-HEAD" + strings.Repeat("j", 10*budget) + "NEWEST-TAIL"}
+	mid := domain.Message{Role: domain.RoleAssistant, Content: "MIDDLE " + strings.Repeat("x", 100)}
+
+	for name, msgs := range map[string][]domain.Message{
+		"newest only past the prefix": {prefix, newest},
+		"middles dropped for it":      {prefix, mid, mid, mid, newest},
+	} {
+		got := renderBudgetedTranscript(msgs, 1, budget)
+
+		if len(got) > budget {
+			t.Errorf("%s: output is %d chars, over the %d-char budget", name, len(got), budget)
+		}
+		if !strings.Contains(got, toolResultElisionMarker) {
+			t.Errorf("%s: output carries no elision marker:\n%.300s", name, got)
+		}
+		for _, want := range []string{"OVERARCHING-GOAL", "[tool]\nNEWEST-HEAD", "NEWEST-TAIL"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: output lost %q", name, want)
+			}
+		}
+	}
+}
+
+// TestRenderBudgetedTranscriptNewestMessageElisionFloor pins the floor: when the prefix leaves the
+// most recent message no room at all, an oversized one is still elided, never below
+// newestMessageFloor — it keeps its head and the marker rather than vanishing or staying whole.
+func TestRenderBudgetedTranscriptNewestMessageElisionFloor(t *testing.T) {
+	prefix := domain.Message{Role: domain.RoleUser, Content: "GOAL-" + strings.Repeat("g", 200)}
+	newest := domain.Message{Role: domain.RoleTool, Content: "NEWEST-HEAD" + strings.Repeat("j", 50_000)}
+
+	got := renderBudgetedTranscript([]domain.Message{prefix, newest}, 1, 100)
+
+	wantPrefix := renderMessage(prefix) + "[tool]\n"
+	if !strings.HasPrefix(got, wantPrefix+"NEWEST-HEAD") {
+		t.Fatalf("output does not keep the prefix then the newest message's head:\n%.400s", got)
+	}
+	body := strings.TrimPrefix(got, wantPrefix)
+	if len(body) > newestMessageFloor {
+		t.Errorf("newest message body is %d bytes, want at most the %d-byte floor", len(body), newestMessageFloor)
+	}
+	if !strings.Contains(body, toolResultElisionMarker) {
+		t.Errorf("newest message body carries no elision marker:\n%.400s", body)
+	}
+}
+
+// TestRenderBudgetedTranscriptThatFitsIsUnchanged pins that the newest-message elision only
+// touches an overflow: a transcript under its budget renders exactly as the unbudgeted one, and a
+// most recent message that fits after middles are dropped is still rendered verbatim.
+func TestRenderBudgetedTranscriptThatFitsIsUnchanged(t *testing.T) {
+	prefix := domain.Message{Role: domain.RoleUser, Content: "OVERARCHING-GOAL"}
+	mid := domain.Message{Role: domain.RoleAssistant, Content: "MIDDLE\n" + strings.Repeat("x", 300)}
+	newest := domain.Message{Role: domain.RoleTool, Content: "line one\n" + strings.Repeat("y", 600) + "\nline three"}
+	msgs := []domain.Message{prefix, mid, mid, newest}
+
+	whole := renderTranscript(msgs)
+	if got := renderBudgetedTranscript(msgs, 1, 10*len(whole)); got != whole {
+		t.Errorf("a transcript under its budget rendered differently:\ngot  %q\nwant %q", got, whole)
+	}
+
+	budget := len(renderMessage(prefix)) + len(elisionNotice(2)) + len(renderMessage(newest))
+	got := renderBudgetedTranscript(msgs, 1, budget)
+	want := renderMessage(prefix) + elisionNotice(2) + strings.TrimRight(renderMessage(newest), "\n")
+	if got != want {
+		t.Errorf("a newest message that fits was not kept verbatim:\ngot  %q\nwant %q", got, want)
+	}
+}
+
 // TestCompactAppliesTranscriptBudget proves the budget threads through Compact into the summary
 // call: with a small budget an over-budget conversation's request carries the prefix and recent
 // tail plus an elision notice, not the earliest middle turns.

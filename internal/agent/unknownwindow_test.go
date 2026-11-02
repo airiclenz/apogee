@@ -155,9 +155,10 @@ func TestUnknownWindowGuardMeasuresTheTranscriptNotTheWholeRequest(t *testing.T)
 
 // TestUnknownWindowClampKeepsTheFoldSurvivable drives the case that made the clamp's inertness
 // load-bearing rather than merely conservative: a giant tool result committed under an unknown
-// window becomes the most recent message, and the emergency fold's transcript render keeps the most
-// recent message UNCONDITIONALLY — so an unclamped one re-wedges the session that bounding the
-// fold un-wedged. The clamped result must therefore fit the fold's own budget.
+// window becomes the most recent message, which the emergency fold's transcript render kept whole
+// until 2026-11-02 — so an unclamped one re-wedged the session that bounding the fold un-wedged —
+// and byte-elides only as a last resort since. The clamped result must therefore fit the fold's
+// own budget.
 func TestUnknownWindowClampKeepsTheFoldSurvivable(t *testing.T) {
 	a, ceiling := unknownWindowAgent(t, &recordingSink{})
 

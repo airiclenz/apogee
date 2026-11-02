@@ -57,9 +57,11 @@ const (
 	// that reason), so the one meaningful rule left is that nothing the fold can shed — the
 	// conversation, or a single result about to enter it — may exceed what the fold can actually
 	// render. Keying every bound to the fold's own budget is what makes the fold survivable here: a
-	// result bigger than it survives the clamp only to become the most recent message the fold's
-	// transcript render keeps UNCONDITIONALLY (context.renderBudgetedTranscript), which re-wedges
-	// the very session the bound above rescued (audit 2026-08-01, follow-up B).
+	// result bigger than it survives the clamp only to become the most recent message, which the
+	// fold's transcript render can then keep only byte-elided to the room left
+	// (context.renderBudgetedTranscript) — the last-resort rescue, not the shape a bound should
+	// leave. Before that render elided it (2026-11-02) it kept such a message whole, which
+	// re-wedged the very session the bound above rescued (audit 2026-08-01, follow-up B).
 	//
 	// Being a TRANSCRIPT budget is load-bearing for what each bound measures against it: the
 	// transcript, never a request's fixed cost. The tool menu and the standing system content ride

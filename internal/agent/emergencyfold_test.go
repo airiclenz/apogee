@@ -125,8 +125,8 @@ func TestEmergencyFoldUnknownWindowStillBoundsTheSummaryCall(t *testing.T) {
 
 	// The captured summary request is sized by compactUnknownWindowTranscriptTokens, not by the
 	// conversation. The slack covers what the budget does not: the summarizer's system prompt and
-	// trailing instruction, plus the protected prefix and the most recent message, which
-	// renderBudgetedTranscript keeps whatever the budget says.
+	// trailing instruction, plus the protected prefix, which renderBudgetedTranscript keeps whatever
+	// the budget says, and the most recent message's elision floor (context.newestMessageFloor).
 	reqChars := 0
 	for _, m := range up.last.Messages {
 		reqChars += len(m.Content)

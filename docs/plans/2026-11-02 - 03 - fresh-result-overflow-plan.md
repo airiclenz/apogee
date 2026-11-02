@@ -56,7 +56,11 @@ internal/provider/reliability_test.go — TestRespond_ContextOverflow; internal/
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestClassify|TestRespond_ContextOverflow|TestStream_ContextOverflow' ./internal/provider/`
 **Commit:** `fix(provider): classify context_length_exceeded as a context overflow`
 
-## 2. The fold's transcript byte-elides an oversized newest message
+## 2. The fold's transcript byte-elides an oversized newest message — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the newest message's BODY (everything under its "[role]" header: content, image placeholders, tool calls) is elided rather than the whole rendering, so ElideMiddle's line back-off cannot cut the head back to the bare header line; the floor is `newestMessageFloor` = marker + 2×256 bytes (`newestMessageFloorHeadBytes`), since ElideToBytes splits the room past the marker evenly between head and tail.
+NOTES (2026-11-02): consequential edit — internal/agent/dispatch.go: made necessary by the fold transcript now eliding the newest message (structuralFloor's comment said the fold keeps it unconditionally; found by the item's sweep grep, beyond its four named sites).
+NOTES (2026-11-02): the three pinned tests (TestCompactAppliesTranscriptBudget, TestRenderBudgetedTranscriptAlwaysKeepsMostRecentMessage, TestRenderBudgetedTranscriptNoticeOverBudgetKeepsMostRecentMessage) are unchanged and green: their newest messages sit under the floor, so they still render whole.
 
 **What:** Recast at the regression check (2026-11-02).
 **Goal:** the compaction transcript rendered for a summary call never exceeds its character budget unless prefix and notice alone leave no room: a newest message over the room left after prefix and notice is kept head-and-tail with the elision marker, at no less than a floor that keeps a head plus the marker; a transcript that fits is unchanged byte for byte.

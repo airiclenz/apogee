@@ -305,9 +305,9 @@ func blockBody(t *testing.T, message string) string {
 
 // TestResolveFileRefs_ClampsAReferencePastTheHistoryAllocation is item 3's core fact: a reference
 // bigger than the whole History allocation enters the conversation elided, not whole — the state
-// no later reducer could have rescued, since the emergency fold keeps the most recent message
-// unconditionally. A reference under the bound is still injected verbatim: this is a floor, not a
-// budgeter.
+// no reducer short of the emergency fold's last-resort byte elision of the most recent message
+// could have rescued. A reference under the bound is still injected verbatim: this is a floor, not
+// a budgeter.
 func TestResolveFileRefs_ClampsAReferencePastTheHistoryAllocation(t *testing.T) {
 	dir := t.TempDir()
 	longFiller := strings.Repeat("referenced text ", 32)

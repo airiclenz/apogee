@@ -107,6 +107,23 @@ func ElideMiddle(content string, maxBytes, headBytes int) string {
 	return b.String()
 }
 
+// ElideToBytes bounds content to maxBytes — the GUARDED form of ElideMiddle, for a caller that
+// holds only a bound and may hand it any value, however small. Content already within maxBytes is
+// returned unchanged. Otherwise the room past the elision marker is split evenly: headBytes is half
+// of (maxBytes − marker), and ElideMiddle spends the rest on the tail, so the rendering never
+// exceeds maxBytes. A bound with no room past the marker — at or below the marker's own length,
+// zero or negative — cannot carry the marker at all, so the result is a bare head cut at
+// max(maxBytes, 0) bytes, backed off to a whole UTF-8 sequence; it never panics.
+func ElideToBytes(content string, maxBytes int) string {
+	if len(content) <= maxBytes {
+		return content
+	}
+	if maxBytes <= len(toolResultElisionMarker) {
+		return trimPartialRune(content[:max(maxBytes, 0)])
+	}
+	return ElideMiddle(content, maxBytes, (maxBytes-len(toolResultElisionMarker))/2)
+}
+
 // trimPartialRune drops an incomplete trailing UTF-8 sequence from s, so a byte-offset cut never
 // ends on the first bytes of a multi-byte rune.
 func trimPartialRune(s string) string {

@@ -44,7 +44,8 @@ const minCompactTail = 2
 // cannot overflow at exactly the high context fill /compact exists to relieve (a full-transcript
 // request near n_ctx overflows deterministically). When the rendering exceeds the budget the
 // middle is elided — the protected prefix and a budgeted tail of the most recent messages are
-// kept, with a marker where history was dropped (renderBudgetedTranscript). A non-positive budget
+// kept, with a marker where history was dropped, and a most recent message too big for the
+// budget on its own is byte-elided head-and-tail (renderBudgetedTranscript). A non-positive budget
 // renders the whole conversation — which is what a caller asks for by passing one, and never what
 // the agent asks for: it budgets against the discovered window, or against a conservative default
 // when no window is known (agent.compactTranscriptChars).
@@ -247,12 +248,18 @@ func renderMessage(m domain.Message) string {
 // cannot overflow at high context fill. A non-positive budget renders the whole conversation
 // (renderTranscript) — no bound was asked for. Otherwise the protected prefix (msgs[:prefixEnd])
 // is kept verbatim and the most recent messages are kept backwards until the next would exceed
-// the budget; the most recent message is always kept (the next turn depends on it) even if it
-// alone is over budget. When any middle messages are dropped, an elision notice marks the gap so
-// the summarizer treats the prefix and tail as non-contiguous rather than one continuous history.
-// The notice counts against the budget: the oldest kept tail messages give way to it, down to the
-// most recent message, so the output stays within maxChars unless the prefix, the most recent
-// message and the notice alone exceed it.
+// the budget; the most recent message is always kept (the next turn depends on it). When any
+// middle messages are dropped, an elision notice marks the gap so the summarizer treats the prefix
+// and tail as non-contiguous rather than one continuous history. The notice counts against the
+// budget: the oldest kept tail messages give way to it, down to the most recent message.
+//
+// A most recent message that alone exceeds the room left after the prefix and the notice — a
+// fresh tool result bigger than the whole window is the shape — is kept head-and-tail with the
+// elision marker (elideNewestMessage) rather than whole, since a whole one would overflow the very
+// summary call that exists to relieve the overflow. It is elided to that room but never below
+// newestMessageFloor, so the summarizer always sees how the message starts. The output therefore
+// stays within maxChars unless the prefix and the notice alone leave the most recent message less
+// than that floor; a transcript that fits renders exactly as it would unbudgeted.
 func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) string {
 	if maxChars <= 0 {
 		return renderTranscript(msgs)
@@ -270,8 +277,9 @@ func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) st
 		used += len(rendered[i])
 	}
 
-	// Fill the tail from the most recent message backwards. The first tail message is kept
-	// unconditionally (continuation depends on it); earlier ones join only while they fit.
+	// Fill the tail from the most recent message backwards. The first tail message is always kept
+	// (continuation depends on it), elided below if it alone overflows; earlier ones join only
+	// while they fit.
 	keepFrom := len(msgs)
 	for i := len(msgs) - 1; i >= prefixEnd; i-- {
 		if keepFrom < len(msgs) && used+len(rendered[i]) > maxChars {
@@ -294,6 +302,13 @@ func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) st
 		}
 	}
 
+	// Only the most recent message is left and the budget is still exceeded: if that message is
+	// what overflows, elide it to the room the prefix and the notice leave it.
+	if newest := len(msgs) - 1; keepFrom == newest && newest >= prefixEnd && used+len(notice) > maxChars {
+		prefixUsed := used - len(rendered[newest])
+		rendered[newest] = elideNewestMessage(msgs[newest], rendered[newest], maxChars-prefixUsed-len(notice))
+	}
+
 	var b strings.Builder
 	for i := 0; i < prefixEnd; i++ {
 		b.WriteString(rendered[i])
@@ -303,6 +318,33 @@ func renderBudgetedTranscript(msgs []domain.Message, prefixEnd, maxChars int) st
 		b.WriteString(rendered[i])
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// newestMessageFloorHeadBytes is the least head an elided most recent message keeps. Its floor
+// (newestMessageFloor) holds this head, the elision marker and an equal tail, because ElideToBytes
+// splits the room past the marker evenly.
+const newestMessageFloorHeadBytes = 256
+
+// newestMessageFloor is the smallest body a most recent message is elided to, however little room
+// the prefix and the notice leave it: below it the message would carry the marker and almost
+// nothing else, which tells the summarizer less than the overrun costs.
+const newestMessageFloor = len(toolResultElisionMarker) + 2*newestMessageFloorHeadBytes
+
+// elideNewestMessage renders the most recent message within room characters when it alone
+// exceeds them: the "[role]" header stays and the body under it — content, image placeholders and
+// tool calls, as renderMessage writes them — is byte-elided head-and-tail with the shared elision
+// marker (ElideToBytes), never below newestMessageFloor. A message whose body already fits that
+// bound is returned as rendered. Eliding the body rather than the whole rendering keeps the header
+// out of the head's line back-off, so a single-line body keeps both its start and its end.
+func elideNewestMessage(m domain.Message, rendered string, room int) string {
+	header := fmt.Sprintf("[%s]\n", m.Role)
+	const separator = "\n\n"
+	body := strings.TrimRight(strings.TrimPrefix(rendered, header), "\n")
+	bound := max(room-len(header)-len(separator), newestMessageFloor)
+	if len(body) <= bound {
+		return rendered
+	}
+	return header + ElideToBytes(body, bound) + separator
 }
 
 // elisionNotice is the marker renderBudgetedTranscript writes where elided middle messages were

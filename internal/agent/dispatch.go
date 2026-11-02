@@ -2123,18 +2123,19 @@ func (a *Agent) appendToolResult(
 // structuralFloor is the BOUND behind both structural clamps: the whole History allocation — the
 // most any single body could occupy and still leave the conversation renderable. Content past it
 // can never survive ANY reducer, so committing it whole buys nothing and can doom the Turn
-// outright: the emergency fold's own summary call keeps the most recent message unconditionally
-// (renderBudgetedTranscript), so a fresh giant body IS that message and overflows the fold that was
-// supposed to rescue the Turn.
+// outright: a fresh giant body IS the most recent message the emergency fold's own summary call
+// must carry, which that call can render only byte-elided to its room (renderBudgetedTranscript) —
+// and before it elided one (2026-11-02), kept whole, overflowing the fold that was supposed to
+// rescue the Turn.
 //
 // With an unknown window (a zero History allocation — Allocate had no basis to allocate) the floor
 // measures against compactUnknownWindowTranscriptTokens instead of standing down — the substitution
 // growthBounds.historyFloor makes at the one site every growth bound shares (deriveGrowthBounds,
 // compact.go), so this clamp and the boundary trigger bound against one number. Being inert there
-// was not the conservative choice it looked like: the fold's transcript render keeps the most recent
-// message UNCONDITIONALLY, so an unclamped giant body becomes the one message the emergency fold
-// cannot shed and re-wedges the session bounding the fold was meant to un-wedge (audit 2026-08-01,
-// follow-up B). Keying the floor to the fold's own unknown-window budget makes the two meet exactly:
+// was not the conservative choice it looked like: an unclamped giant body becomes the one message
+// the emergency fold cannot shed — kept whole by the fold's transcript render until 2026-11-02,
+// and so re-wedging the session bounding the fold was meant to un-wedge (audit 2026-08-01,
+// follow-up B); byte-elided by it since, the last-resort rescue rather than the intended shape. Keying the floor to the fold's own unknown-window budget makes the two meet exactly:
 // content that survives the clamp is, by construction, content the fold can still render.
 //
 // The threshold sits deliberately far above the tool-result-cap Floor guard's: the whole History
