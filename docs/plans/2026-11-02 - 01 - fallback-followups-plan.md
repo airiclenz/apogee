@@ -143,7 +143,11 @@ Depends on item 5.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFallbackSessionSeat' ./internal/tui/`; `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestTUIFallback' ./cmd/apogee/`; `capcom check`
 **Commit:** `fix(tui): a fallover settles the fallback profile at the Turn boundary`
 
-## 7. A Firing with a Driver-built tool set takes the fallback roster
+## 7. A Firing with a Driver-built tool set takes the fallback roster — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): the seam is `domain.Config.ToolsForRoster func(ToolRosterDelta) *ToolRegistry`, called through the new `Agent.hostRoster` (setprofile.go) before `bindMu` is taken in `applyRehome`. It is set by `firingConfig` through the new `firingRosterBuilder` (nil when `firingSeatTools` built no registry) and cleared on `childCfg` in `newChildAgentOn`. `probeContextConfig` gets no builder: it never rehomes.
+NOTES (2026-11-02): `TestHeadlessFallbackAppliesTheFallbackRoster` sits in cmd/apogee/fallback_test.go, as **Files:** names, and reuses the e2e harness in e2e_fallback_test.go (`dyingPrimary`, `startHeadless`, `killHeldPrimary`). Like those e2e tests it is not `t.Parallel` (it uses `t.Setenv`). The agent tests reuse the existing `requestToolNames` helper from subagent_test.go.
+NOTES (2026-11-02): a host that set a builder and later installs a set through `SwapTools` would have that set rebuilt by the builder at a rehome. No host does both (the Firing never swaps), so the ADR amendment claims nothing about `SwapTools`.
 
 **What:**
 Depends on item 6.

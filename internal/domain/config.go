@@ -239,6 +239,18 @@ type Config struct {
 	// Extension points. nil ⇒ the built-in defaults.
 	Tools *ToolRegistry // open extension point (ADR 0002)
 
+	// ToolsForRoster is the host's builder for the set it injected through Tools, called with a
+	// Model profile's roster axis when a Server fallback rehome (ADR 0105) binds a profile whose
+	// roster differs from the one the set was built under. It is the one exception to "an injected
+	// Tools is the host's verbatim" (ADR 0057 bounds, amended 2026-11-02): the HOST rebuilds its own
+	// assembly under the fallback's roster, so the engine still composes nothing over a host set.
+	//
+	// It is consulted at a rehome only, on the Agent's own goroutine at the request boundary, and
+	// only while the set is the host's (an engine-composed set re-composes itself); a nil return
+	// keeps the set in place. A sub-agent never inherits it: a child's set is the narrowed subset
+	// it was spawned with. nil (the default) leaves an injected set standing across a rehome.
+	ToolsForRoster func(roster ToolRosterDelta) *ToolRegistry
+
 	// Reactions are the Reactions armed BESIDE the engine's own builtins (ADR 0076 D1): the
 	// seven Floor guards fire first at every seam, then these, in registration order. A host
 	// arms a Go reaction here to observe or shape a Turn without touching the engine — the door

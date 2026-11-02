@@ -1842,6 +1842,11 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the
 	// parent's context-file CONTENT verbatim below, because a sub-agent is not a session boundary.
 	childCfg.Tools = a.defaultSubAgentTools()
+	// …and never the host's builder for the parent's set (Config.ToolsForRoster): it rebuilds the
+	// PARENT's whole roster, so a child carrying it would trade the subset it was spawned with for
+	// that roster at a rehome. A child keeps its spawn-time set; one spawned after a rehome narrows
+	// the rebuilt set the parent then holds.
+	childCfg.ToolsForRoster = nil
 	// The armed Reactions are inherited UNCONDITIONALLY, because a reaction the parent runs with
 	// is part of the posture the delegation inherits —
 	// with Reaction.TopLevelOnly as the one opt-out (ADR 0076). They are filtered HERE rather

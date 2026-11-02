@@ -542,9 +542,10 @@ func (a *Agent) followUpstream() bool {
 }
 
 // applyRehome commits a rehome binding to this Agent: the Config as the fallback states it, the
-// profile's parse-seam collaborators and tool roster, and the server's effort dialect, then the
-// recalibration every move makes. The commit is taken under bindMu, the lock the exported accessors a
-// Driver calls mid-Turn read under. The profile was validated by the Agent that moved the seat
+// profile's parse-seam collaborators and tool roster — re-composed when the engine owns the set, or
+// rebuilt by the host's builder when the host injected it with one (hostRoster) — and the server's
+// effort dialect, then the recalibration every move makes. The commit is taken under bindMu, the
+// lock the exported accessors a Driver calls mid-Turn read under. The profile was validated by the Agent that moved the seat
 // (rehome), so the translation cannot fail here; were it to, every binding stands.
 func (a *Agent) applyRehome(b *rehomeBinding) {
 	next := b.applyTo(a.cfg)
@@ -552,11 +553,15 @@ func (a *Agent) applyRehome(b *rehomeBinding) {
 	if err != nil {
 		return
 	}
+	hostSet := a.hostRoster(next)
 	a.bindMu.Lock()
 	a.cfg = next
 	a.textParser = textParser
 	a.stripper = stripper
 	a.applyRoster()
+	if hostSet != nil {
+		a.tools = hostSet
+	}
 	a.effortDialect = b.rebind.EffortDialect
 	a.bindMu.Unlock()
 	a.recalibrate()

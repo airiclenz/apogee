@@ -754,3 +754,56 @@ func TestTUIFallbackSettlesTheFallbackProfileRoster(t *testing.T) {
 		t.Error("view_diff is missing after the boundary: the fallback profile's roster was never applied")
 	}
 }
+
+// fallbackDroppedTool is the tool the backup model's profile roster disables in the roster test.
+const fallbackDroppedTool = "grep"
+
+// TestHeadlessFallbackAppliesTheFallbackRoster: under `sub-agents-choice: model` a Firing's tool set
+// is the Driver's own (firingSeatTools), and after the seat falls over the request resent to the
+// backup offers the backup model's profile roster — the tool that profile disables is gone, while
+// the Driver-built `sub_agent` the run published stays.
+func TestHeadlessFallbackAppliesTheFallbackRoster(t *testing.T) {
+	primary, backup := dyingPrimary(t), backupServer(t)
+	home := t.TempDir()
+	writeConfigHome(t, home,
+		"context-window: 32768\n"+
+			"re-stream-budget: 0\n"+
+			"sub-agents-choice: model\n"+
+			"model-profiles:\n"+
+			"  "+backup.Model+":\n"+
+			"    tools:\n"+
+			"      disabled: ["+fallbackDroppedTool+"]\n"+
+			"servers:\n"+
+			"  - name: primary\n"+
+			"    endpoint: "+primary.URL+"\n"+
+			"    model: "+primary.Model+"\n"+
+			"    fallback: [backup]\n"+
+			"    fallback-after: "+fallbackGraceForTests.String()+"\n"+
+			"  - name: backup\n"+
+			"    endpoint: "+backup.URL+"\n"+
+			"    model: "+backup.Model+"\n"+
+			"server: primary\n")
+	done := startHeadless(t, home)
+
+	killHeldPrimary(t, primary)
+	res := awaitHeadless(t, done)
+
+	if res.err != nil {
+		t.Fatalf("headless: %v (exit %d)\n%s", res.err, exitCodeFor(res.err), res.stderr)
+	}
+	before := primary.Requests()
+	if len(before) == 0 || !slices.Contains(before[0].Tools, fallbackDroppedTool) {
+		t.Fatalf("the primary's request did not offer %q; the test proves nothing", fallbackDroppedTool)
+	}
+	resent := backup.Requests()
+	if len(resent) != 1 {
+		t.Fatalf("the backup saw %d requests, want the one resend", len(resent))
+	}
+	if slices.Contains(resent[0].Tools, fallbackDroppedTool) {
+		t.Errorf("the resent request offers %q; want the backup profile's roster without it: %v",
+			fallbackDroppedTool, resent[0].Tools)
+	}
+	if !slices.Contains(resent[0].Tools, "sub_agent") {
+		t.Errorf("the resent request lost the Driver-built sub_agent: %v", resent[0].Tools)
+	}
+}

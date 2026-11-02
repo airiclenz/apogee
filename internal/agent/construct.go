@@ -546,7 +546,10 @@ func defaultRoster(cfg domain.Config) *domain.ToolRegistry {
 //
 // Only the remaining case — the engine composed the set from the build's menu — may be re-composed
 // when the bound model's roster axis changes, because only there does the engine hold every fact
-// the assembly needs.
+// the assembly needs. The one exception on the host side is a Server fallback rehome under a host
+// that injected its set WITH a builder (Config.ToolsForRoster): there the host, not the engine,
+// rebuilds its own assembly under the fallback's roster (hostRoster; ADR 0057 bounds, amended
+// 2026-11-02), so the engine still composes nothing over a host set.
 func composesDefaultRoster(cfg domain.Config) bool {
 	return cfg.Tools == nil && cfg.WorkspaceDir != ""
 }

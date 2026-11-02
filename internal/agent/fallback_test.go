@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"iter"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1143,5 +1144,100 @@ func TestFallbackRoutedSiblingsAnnounceOnce(t *testing.T) {
 	}
 	if got := r.spare.calls(); got != n {
 		t.Errorf("spare calls = %d, want %d", got, n)
+	}
+}
+
+// rosterToolNames are the tools a Driver-built set holds in the roster tests, and droppedTool the
+// one the fallback's profile roster disables.
+var rosterToolNames = []string{"alpha", "beta", "gamma"}
+
+const droppedTool = "gamma"
+
+// rosterRig is a seat rig whose parent runs a Driver-built tool set (Config.Tools) with the host's
+// builder for it (Config.ToolsForRoster), and whose fallback answer binds a profile disabling
+// droppedTool. built records every roster the builder was asked for.
+func rosterRig(t *testing.T) (r *seatRig, built *[]domain.ToolRosterDelta) {
+	t.Helper()
+	var mu sync.Mutex
+	var rosters []domain.ToolRosterDelta
+	r = newSeatRig(t, func(cfg *domain.Config) {
+		cfg.Tools = toolRegistryWithout(t, nil)
+		cfg.ToolsForRoster = func(roster domain.ToolRosterDelta) *domain.ToolRegistry {
+			mu.Lock()
+			rosters = append(rosters, roster)
+			mu.Unlock()
+			return toolRegistryWithout(t, roster.Disabled)
+		}
+	})
+	if r.parent.ownsToolSet {
+		t.Fatal("the parent owns its tool set; want the Driver's injected set")
+	}
+	r.resolver.answer = func(context.Context, FallbackReport) FallbackAnswer {
+		answer := spareAnswer()
+		answer.Rebind.Profile.Tools = domain.ToolRosterDelta{Disabled: []string{droppedTool}}
+		return answer
+	}
+	return r, &rosters
+}
+
+// toolRegistryWithout is a registry of rosterToolNames minus the names in disabled.
+func toolRegistryWithout(t *testing.T, disabled []string) *domain.ToolRegistry {
+	t.Helper()
+	reg := domain.NewToolRegistry()
+	for _, name := range rosterToolNames {
+		if slices.Contains(disabled, name) {
+			continue
+		}
+		if err := reg.Register(fakeTool{name: name}); err != nil {
+			t.Fatalf("Register(%q): %v", name, err)
+		}
+	}
+	return reg
+}
+
+// TestFallbackRehomeAppliesTheRosterToADriverToolSet pins the host-builder exception (ADR 0057
+// bounds, amended 2026-11-02): an Agent whose tool set the Driver built offers the fallback
+// profile's roster from the first request after the rehome, rebuilt through the Driver's builder
+// with the fallback's roster axis, as an engine-composed set already does.
+func TestFallbackRehomeAppliesTheRosterToADriverToolSet(t *testing.T) {
+	t.Parallel()
+	r, built := rosterRig(t)
+
+	stepOnce(t, r.parent, "ask the model")
+
+	if got := requestToolNames(r.primary.sent()[0]); !slices.Contains(got, droppedTool) {
+		t.Fatalf("primary request tools = %v, want the primary roster with %q", got, droppedTool)
+	}
+	if r.spare.calls() != 1 {
+		t.Fatalf("spare calls = %d, want 1", r.spare.calls())
+	}
+	if got, want := requestToolNames(r.spare.sent()[0]), []string{"alpha", "beta"}; !slices.Equal(got, want) {
+		t.Errorf("resent request tools = %v, want the fallback roster %v", got, want)
+	}
+	if len(*built) != 1 || !slices.Equal((*built)[0].Disabled, []string{droppedTool}) {
+		t.Errorf("builder rosters = %+v, want one, the fallback profile's", *built)
+	}
+}
+
+// TestFallbackRehomeKeepsANarrowedChildsSubset pins the regression guard: a child spawned before
+// the rehome with a narrowed roster keeps that subset after the rehome its own fault drives — it
+// never inherits the parent's builder, so it is neither widened to the parent's roster nor
+// re-narrowed by the fallback profile — and the parent's builder is not consulted on its behalf.
+func TestFallbackRehomeKeepsANarrowedChildsSubset(t *testing.T) {
+	t.Parallel()
+	r, built := rosterRig(t)
+	child := r.child(t, "narrowed")
+	child.tools = child.tools.Subset("alpha", droppedTool)
+
+	stepOnce(t, child, "delegated work")
+
+	if r.spare.calls() != 1 {
+		t.Fatalf("spare calls = %d, want the child's resend", r.spare.calls())
+	}
+	if got, want := requestToolNames(r.spare.sent()[0]), []string{"alpha", droppedTool}; !slices.Equal(got, want) {
+		t.Errorf("child resend tools = %v, want its spawn-time subset %v", got, want)
+	}
+	if len(*built) != 0 {
+		t.Errorf("builder rosters = %+v, want none — the child carries no builder", *built)
 	}
 }

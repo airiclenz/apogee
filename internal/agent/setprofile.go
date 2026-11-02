@@ -109,10 +109,27 @@ func (a *Agent) applyProfile(profile domain.ModelProfile) error {
 // It is a no-op unless the ENGINE composed the set (ownsToolSet): an injected Config.Tools is the
 // host's authority verbatim and a SwapTools set is the host's own assembly, so under either the
 // roster axis is simply not this layer's to apply — the host folds its deltas in where it builds,
-// and the tools of such a session stand across a switch exactly as they always have.
+// and the tools of such a session stand across a switch exactly as they always have. The one
+// exception is a Server fallback rehome under a host that supplied a builder (hostRoster).
 func (a *Agent) applyRoster() {
 	if !a.ownsToolSet {
 		return
 	}
 	a.tools = defaultRoster(a.cfg)
+}
+
+// hostRoster is the host's own tool set rebuilt under cfg's profile roster — the one exception to
+// applyRoster's stand-down, taken at a Server fallback rehome (applyRehome, ADR 0105) when the host
+// handed over a builder for the set it injected (Config.ToolsForRoster; ADR 0057 bounds, amended
+// 2026-11-02). The HOST rebuilds its assembly, so the engine still composes nothing over a host set.
+//
+// It returns nil — the set stands — when the set is the engine's own (applyRoster re-composes that),
+// when the host supplied no builder (every sub-agent, whose Config never carries one), or when the
+// builder itself answers nil. It is called before bindMu is taken: the builder is host code, and
+// the commit that installs its answer is the only part the lock need cover.
+func (a *Agent) hostRoster(cfg domain.Config) *domain.ToolRegistry {
+	if a.ownsToolSet || cfg.ToolsForRoster == nil {
+		return nil
+	}
+	return cfg.ToolsForRoster(cfg.Profile.Tools.Clone())
 }

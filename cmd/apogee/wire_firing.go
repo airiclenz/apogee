@@ -591,8 +591,34 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// above is bound, because the registry copies ReadMounts by value: one built earlier would carry
 	// a read root that never names the dir this run announces as writable.
 	cfg.Tools = firingSeatTools(cfg, in.opts, in.roots.workspace)
+	cfg.ToolsForRoster = firingRosterBuilder(cfg, in.opts, in.roots.workspace)
 
 	return cfg, routing, notices, nil
+}
+
+// firingRosterBuilder is the builder a Firing hands the engine beside the registry firingSeatTools
+// assembled (Config.ToolsForRoster), or nil when it assembled none. A Server fallback rehome (ADR
+// 0105) binds the fallback's Model profile, and the engine re-composes only a tool set it composed
+// itself; this set is the Driver's, so without the builder its roster would stay the primary
+// profile's for the rest of the run. The builder re-runs the same assembly over the final cfg —
+// scratch mount, delegates and seat gates as the run bound them — with only the profile's roster
+// axis replaced, so the rehomed set differs from the original by that axis alone.
+//
+// With no registry there is nothing to rebuild: the engine owns the set and re-composes it at the
+// rehome on its own, so the builder stays nil and that path is unchanged.
+func firingRosterBuilder(
+	cfg apogee.Config,
+	opts config.Options,
+	workspace string,
+) func(domain.ToolRosterDelta) *apogee.ToolRegistry {
+	if cfg.Tools == nil {
+		return nil
+	}
+	return func(roster domain.ToolRosterDelta) *apogee.ToolRegistry {
+		rostered := cfg
+		rostered.Profile.Tools = roster
+		return firingSeatTools(rostered, opts, workspace)
+	}
 }
 
 // firingSeatTools is the tool registry an unattended run hands the engine, or nil. It is the one
