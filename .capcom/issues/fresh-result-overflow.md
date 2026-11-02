@@ -1,9 +1,11 @@
 ---
 title: One oversized tool result overflows the context window and abandons the Turn
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-02T17:31:11Z
+closed: 2026-11-02T18:59:54Z
+reason: "Resolved by plan 2026-11-02 - 03 - fresh-result-overflow-plan (archived at 7b74c4cf): context_length_exceeded classifies as overflow and reaches ADR 0018's one fold, which byte-elides an oversized newest message; a fresh tool result is byte-elided to the room left in the request; loop-level pins cover both."
 ---
 
 A single large tool result can push the next request past the model's context window. The server answers `HTTP 400 … context_length_exceeded`, and apogee abandons the Turn. In headless mode that ends the run, and everything the run did in that Turn is lost.
