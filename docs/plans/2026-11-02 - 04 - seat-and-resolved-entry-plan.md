@@ -323,7 +323,11 @@ internal/agent/construct.go — buildAgent, seedTopLevel, delegation.seed; inter
 
 **Commit:** `test(agent): guard the background host's copy field by field`
 
-## 11. One shared-handles value for delegates and the background host
+## 11. One shared-handles value for delegates and the background host — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): `Agent` embeds the new unexported `sharedHandles` value (dial, delegation latch, now, contextFiles, journal, consoles, runIDs, workflowLive, cancelFoldBound, restreamHoldoff) by value, so every existing `a.<field>` read and write stays as written through field promotion; `delegation` carries it as `handles` and `delegation.seed`/`backgroundHost` assign it whole. The session-seated child still swaps in its own latch after the copy (`d.handles.delegation = a.delegation.rootBound()`); the `fanout_test.go` literals are rewritten to `sharedHandles: sharedHandles{delegation: &delegationLatch{}}`.
+NOTES (2026-11-02): item 10's table drops the ten field rows for one `sharedHandles` row (classed hostShared); its shared-handle check now recurses into a struct's pointer fields (`sameHandles`), so the value's latch, journal, consoles and run-id minter are each held to the session's own.
+NOTES (2026-11-02): the latch's field doc ("the fields above carry theirs") and seatMu's doc ("sits beside the latch above") were reworded, since the latch no longer sits among those fields.
 
 **What:**
 **Goal:** the tree's shared handles (journal, consoles, runIDs, workflowLive, latch, contextFiles, dial, now, cancelFoldBound, restreamHoldoff) are one unexported value `delegation.seed` and `backgroundHost` copy whole.

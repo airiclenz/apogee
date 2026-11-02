@@ -39,32 +39,23 @@ type hostField struct {
 // moment to decide whether the host copies, shares, freezes, rebuilds or leaves it.
 var backgroundHostFields = map[string]hostField{
 	// Copied as they stand: the idle-only fields.
-	"cfg":             {hostCopied, "idle-only: the Config the session runs, as it stands at launch"},
-	"dial":            {hostCopied, "the one dial seam; the host's routed children dial through the session's"},
-	"armed":           {hostCopied, "the construction-time armed route, fixed for the session"},
-	"tools":           {hostCopied, "idle-only tool set as it stands; the host never closes or recomposes it"},
-	"textParser":      {hostCopied, "idle-only parse seam of the bound profile"},
-	"stripper":        {hostCopied, "idle-only parse seam of the bound profile"},
-	"effortDialect":   {hostCopied, "idle-only wire shape of the session server's effort intent"},
-	"contextFiles":    {hostCopied, "idle-only context-file content, what a child copies verbatim"},
-	"undoNote":        {hostCopied, "set with the journal it describes, which the host shares"},
-	"now":             {hostCopied, "the clock; a test that pins the session's pins the workflow's"},
-	"depth":           {hostCopied, "the host stands where the session does, so its children nest from there"},
-	"cancelFoldBound": {hostCopied, "one bound over the whole tree's cancel folds"},
-	"restreamHoldoff": {hostCopied, "one re-stream wait over the whole tree"},
+	"cfg":           {hostCopied, "idle-only: the Config the session runs, as it stands at launch"},
+	"armed":         {hostCopied, "the construction-time armed route, fixed for the session"},
+	"tools":         {hostCopied, "idle-only tool set as it stands; the host never closes or recomposes it"},
+	"textParser":    {hostCopied, "idle-only parse seam of the bound profile"},
+	"stripper":      {hostCopied, "idle-only parse seam of the bound profile"},
+	"effortDialect": {hostCopied, "idle-only wire shape of the session server's effort intent"},
+	"undoNote":      {hostCopied, "set with the journal it describes, which the host shares"},
+	"depth":         {hostCopied, "the host stands where the session does, so its children nest from there"},
 
 	// Shared by reference: the tree's handles.
-	"seating":      {hostShared, "the session seat inherited whole: the holder by reference, so a rehome reaches the workflow's children and a /server switch leaves them behind (adr-0105-amend-1102b), with its resolver, owning nothing"},
-	"delegation":   {hostShared, "the one Delegation-target latch the whole tree routes by"},
-	"guards":       {hostShared, "the session's guardrails; their breaker state is one"},
-	"liveMode":     {hostShared, "a tighten-only view of the session's live mode, as a delegate holds its parent's"},
-	"prompts":      {hostShared, "the one prompt slot every human gate in the tree queues on"},
-	"journal":      {hostShared, "the session's undo journal, so the workflow's writes are revertible"},
-	"consoles":     {hostShared, "one Console registry per engine"},
-	"runIDs":       {hostShared, "the root's run-id minter, so no two delegations share an id"},
-	"workflowLive": {hostShared, "the root's background liveness, so a blocking launch refuses a folder it drives"},
-	"tasks":        {hostShared, "the session's checklist, written through the task_list tool"},
-	"tree":         {hostShared, "the tracked-file mutation floor of the one workspace"},
+	"sharedHandles": {hostShared, "the tree's shared handles copied whole, as a delegate takes its parent's: the latch, journal, consoles, run-id minter and workflow liveness by reference, the dial seam, clock, bounds and context files as they stand"},
+	"seating":       {hostShared, "the session seat inherited whole: the holder by reference, so a rehome reaches the workflow's children and a /server switch leaves them behind (adr-0105-amend-1102b), with its resolver, owning nothing"},
+	"guards":        {hostShared, "the session's guardrails; their breaker state is one"},
+	"liveMode":      {hostShared, "a tighten-only view of the session's live mode, as a delegate holds its parent's"},
+	"prompts":       {hostShared, "the one prompt slot every human gate in the tree queues on"},
+	"tasks":         {hostShared, "the session's checklist, written through the task_list tool"},
+	"tree":          {hostShared, "the tracked-file mutation floor of the one workspace"},
 
 	// Frozen at launch: the lock-guarded live settings (ADR 0089's launch-time snapshot).
 	"builtins":           {hostFrozen, "the builtin ladder of the Generation live at launch"},
@@ -168,7 +159,7 @@ func TestBackgroundHostCoversEveryAgentField(t *testing.T) {
 				t.Errorf("Agent.%s is classed zero by design, but the host's is set", field.Name)
 			}
 		case hostShared:
-			if got.Kind() == reflect.Pointer && got.Pointer() != was.Pointer() {
+			if !sameHandles(got, was) {
 				t.Errorf("Agent.%s is classed a shared handle, but the host holds another one", field.Name)
 			}
 		case hostFresh:
@@ -182,6 +173,23 @@ func TestBackgroundHostCoversEveryAgentField(t *testing.T) {
 			t.Errorf("backgroundHostFields classes %q, which Agent no longer has", name)
 		}
 	}
+}
+
+// sameHandles reports whether got holds the very handles was does: the same pointer for a pointer,
+// and for a struct of handles (sharedHandles) the same pointer in every pointer field. Any other
+// kind holds no handle to compare and passes.
+func sameHandles(got, was reflect.Value) bool {
+	switch got.Kind() {
+	case reflect.Pointer:
+		return got.Pointer() == was.Pointer()
+	case reflect.Struct:
+		for i := range got.NumField() {
+			if !sameHandles(got.Field(i), was.Field(i)) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // TestBackgroundHostChildrenInheritTheSessionSeat pins a background workflow's children on the

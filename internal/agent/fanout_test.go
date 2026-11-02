@@ -834,7 +834,7 @@ func TestFanOutWidth_BoundsTheGroup(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// The latch is part of an Agent's construction (construct.go), so a hand-built one
 			// gets an empty holder: nothing routed, the session cap above governs.
-			a := &Agent{depth: tc.depth, parallelAgents: tc.cap, delegation: &delegationLatch{}}
+			a := &Agent{depth: tc.depth, parallelAgents: tc.cap, sharedHandles: sharedHandles{delegation: &delegationLatch{}}}
 			if got := a.fanOutWidth(tc.delegations); got != tc.want {
 				t.Errorf("fanOutWidth(%d) at depth %d cap %d = %d, want %d",
 					tc.delegations, tc.depth, tc.cap, got, tc.want)
@@ -947,7 +947,7 @@ func TestFanOutWidth_MixedSeatsTakeTheSmallerCap(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, delegation: &delegationLatch{}}
+			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, sharedHandles: sharedHandles{delegation: &delegationLatch{}}}
 			if tc.seatChoice {
 				a.tools = seatChoiceRegistry(t)
 			}
@@ -967,7 +967,7 @@ func TestFanOutWidth_MixedSeatsTakeTheSmallerCap(t *testing.T) {
 func TestFanOutWidth_UnparseableSeatIsNotASplit(t *testing.T) {
 	t.Parallel()
 
-	a := &Agent{parallelAgents: 4, delegation: &delegationLatch{}, tools: seatChoiceRegistry(t)}
+	a := &Agent{parallelAgents: 4, sharedHandles: sharedHandles{delegation: &delegationLatch{}}, tools: seatChoiceRegistry(t)}
 	a.SetDelegationTarget(&DelegationTarget{ParallelAgents: 3})
 
 	calls := seatCalls("banana", "", "")
@@ -1011,7 +1011,7 @@ func TestDelegationCapPicksTheGoverningServer(t *testing.T) {
 		{"depth 1 is serial whatever is latched", 1, 4, &DelegationTarget{ParallelAgents: 3}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, delegation: &delegationLatch{}}
+			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, sharedHandles: sharedHandles{delegation: &delegationLatch{}}}
 			a.SetDelegationTarget(tc.target)
 			if got := a.delegationWidth(); got != tc.want {
 				t.Errorf("delegationWidth() = %d, want %d", got, tc.want)
@@ -1916,7 +1916,7 @@ func TestDelegationWidth_AnswersStatedBatchAndCeiling(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, delegation: &delegationLatch{}}
+			a := &Agent{depth: tc.depth, parallelAgents: tc.sessionCap, sharedHandles: sharedHandles{delegation: &delegationLatch{}}}
 			a.cfg.Delegation.FanOutRounds = tc.rounds
 			if tc.seatChoice {
 				a.tools = seatChoiceRegistry(t)

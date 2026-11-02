@@ -172,7 +172,7 @@ func buildAgent(cfg domain.Config, seating seatBinding, d *delegation) (*Agent, 
 
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go). A delegate is NOT
-	// a session boundary: it speaks from its parent's bytes (seeded above from d.contextFiles), so an
+	// a session boundary: it speaks from its parent's bytes (seeded above from d.handles), so an
 	// AGENTS.md edited or deleted mid-delegation never reaches it — and the workspace is not read.
 	if d == nil {
 		a.reloadContextFiles()
@@ -332,7 +332,6 @@ func (d *delegation) seed(a *Agent) {
 	a.depth = d.depth
 	a.callID = d.spawnCallID
 	a.runID = d.runID
-	a.runIDs = d.runIDs
 	a.task = d.task
 	a.name = d.name // written bare: the child is unpublished until it is returned, so no reader can race the lock setName takes later
 	a.consoleOwner = d.consoleOwner
@@ -340,18 +339,10 @@ func (d *delegation) seed(a *Agent) {
 	a.stepCap = d.stepCap
 	a.tokenCap = d.tokenCap
 	a.timeCap = d.timeCap
-	a.now = d.now
-	a.cancelFoldBound = d.cancelFoldBound
-	a.restreamHoldoff = d.restreamHoldoff
 	a.effortDialect = d.effortDialect
-	a.dial = d.dial // the parent's seam, so a grandchild's routed dial crosses the same one the host injected
 	a.guards = d.guards
-	a.contextFiles = d.contextFiles
 	a.liveMode = d.parentLiveMode
-	a.delegation = d.latch
-	a.journal = d.journal
-	a.consoles = d.consoles
-	a.workflowLive = d.workflowLive
+	a.sharedHandles = d.handles // whole: the parent's dial seam (so a grandchild's routed dial crosses the one the host injected), its clock and bounds, its context files and the tree's latch, journal, consoles, run-id minter and workflow liveness
 	// The child's other structural bound on runaway context: it folds under budget pressure at
 	// quiescent TURN boundaries, not only at Exchange boundaries (shouldAutoCompact's S2 guard). A
 	// delegation is ONE Exchange from its first Turn to its report, so the boundary the main loop's

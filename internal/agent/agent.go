@@ -76,12 +76,11 @@ type Agent struct {
 	// value and assigned whole wherever the Agent is built or switched (seatBinding, sharedupstream.go).
 	seating seatBinding
 
-	// dial is the one seam every provider dial this Agent ever makes crosses (Dialer): New and
-	// Resume dial the session's client through it, SwitchUpstream dials the replacement, and a
-	// ROUTED spawn dials the child's own client with it before handing the same Dialer down, so a
-	// host that injected one sees every connection its engine opens. Seeded with dialProvider at
-	// construction and replaced only by WithDialer, on the constructor that took the option.
-	dial Dialer
+	// sharedHandles are what the whole tree holds in common — the handles a delegate takes from its
+	// parent and a background host from its session, each as ONE value copied whole (delegation.seed,
+	// backgroundHost) rather than field by field. Held by value: the root rewrites its contextFiles at
+	// a session boundary and its dial on the constructor that took WithDialer, after construction.
+	sharedHandles
 
 	// builtins are the engine's OWN Reactions — the seven Floor guards and, when its switch is
 	// on, the context-fill notice (builtins.go) — which fire first at every seam Moment. A Floor
@@ -224,19 +223,9 @@ type Agent struct {
 	// far-width stickiness delegationwidth.go names (ADR 0069 decision 6).
 	farWidth int
 
-	// delegation is the Delegation-target latch — the Sub-agent server every delegation in this
-	// tree routes to, or nil for today's parent-inheriting spawn (ADR 0045 —
-	// internal/agent/delegationtarget.go). It is another live field of the anytime-safe class, and
-	// the one field held by POINTER rather than by value: newChildAgent hands the child the
-	// PARENT's holder, so one latch serves the whole tree and a host pushing to the top-level
-	// Agent reaches a depth-2 spawn too. It carries its own lock for the same reason the fields
-	// above carry theirs, and is never nil on a constructed Agent (construction seeds it: a fresh
-	// one at the top level, the parent's for a delegate — construct.go).
-	delegation *delegationLatch
-
 	// seatMu guards seat — what the orientation block tells the model about the Sub-agent server as
-	// a Delegation SEAT (ADR 0069 — internal/agent/delegationseat.go). It sits beside the latch
-	// above because the two describe the same box, and apart from it because they move on different
+	// a Delegation SEAT (ADR 0069 — internal/agent/delegationseat.go). It pairs with the latch
+	// (sharedHandles.delegation) because the two describe the same box, and stays apart from it because they move on different
 	// clocks: the latch is a dial fact the host's heartbeat re-states every beat, this is a display
 	// fact the human moves with `/sub-agents-server`, and only the second one may reach a standing
 	// system message without churning the prefix cache (ADR 0023 §6).
@@ -324,36 +313,6 @@ type Agent struct {
 	// a nested Agent's own stays inert.
 	prompts *domain.PromptSlot
 
-	// now is the request-render clock the configured system prompt's {{datetime}} placeholder
-	// reads (ADR 0023). It is a field rather than a direct time.Now call so a test can pin the
-	// rendered date — the injectable-clock shape cmd/apogee's sessionHost.now already uses.
-	// newAgent seeds it with time.Now; it is never nil on a constructed Agent.
-	now func() time.Time
-
-	// contextFiles is the session's cache of discovered workspace context files
-	// (Config.ContextFiles — internal/agent/contextfiles.go). It is filled at construction and
-	// REFILLED only at a session boundary (ClearContext, a successful RestoreSession), so the
-	// standing content a request carries is byte-stable for the life of a session — a
-	// mid-session edit to a repo's AGENTS.md lands on the next session, not under a running
-	// one. A sub-agent is handed the parent's slice verbatim (newChildAgent), so one session's
-	// nested agents all speak from the same bytes. It is not serialized: the resolved-live
-	// posture of ADR 0023 §6 means a resumed session re-reads the CURRENT files.
-	contextFiles []contextFile
-
-	// journal is the per-Exchange pre-image record behind the human's `/undo` (ADR 0051):
-	// what every write replaced, grouped by the Exchange that caused it. It is LIVE HOST STATE,
-	// not session state (ADR 0022 §8) — it is never part of the Session snapshot, and the Agent
-	// never reads or writes a file for it. What it can REACH is the Driver's call: construction
-	// supplies ADR 0051's funnel journal, which this process alone ever holds, and a
-	// Driver that opened the session's own snapshot store hands that one over instead
-	// (SetJournal), which is what lets a resumed session revert an earlier process's writes
-	// (ADR 0074). A nil journal is the honest encoding of an
-	// engine that records nothing, and every reader treats it as such rather than as an error.
-	// A delegated child is handed the PARENT's instance rather than its own (newChildAgent), so
-	// the whole tree's writes land in one Exchange's undo step; only the depth-0 Agent opens a
-	// group on it (loop.go).
-	journal *undo.Journal
-
 	// undoNote says WHY the journal is the journal it is: "" when the session's snapshot store is
 	// open and undo reaches every workspace write, or the reason it does not — no git,
 	// `undo-snapshots: false`, a store imaging a different workspace (ADR 0074 decision 2). It is
@@ -362,33 +321,6 @@ type Agent struct {
 	// the journal it is live host state and is never serialized: a resumed session's note describes
 	// the store THIS process opened.
 	undoNote string
-
-	// consoles is the set of interactive processes the model drives across Turns — the Console
-	// family's live state (ADR 0059). Like the journal it is LIVE HOST STATE, not session state
-	// (ADR 0022 §8) — in-memory, for this process only, never serialized — because what it holds
-	// are running processes: a resumed session inherits no shells from the process that ended,
-	// and an id from an earlier run is simply an id this registry does not have. newAgent always
-	// supplies it; the nil receiver its close paths tolerate is the honest "no consoles" engine.
-	// A delegated child is handed the PARENT's instance (newChildAgent), so one engine has one
-	// set of Consoles however deep the delegation nests, and ownership is carried by the Console's
-	// Owner field rather than by which Agent holds the registry: a delegation's end closes the
-	// Consoles that delegation opened (Close) and nothing else.
-	consoles *console.Registry
-
-	// runIDs mints the run id of every delegation this Agent's tree spawns (runIDMinter). The root
-	// Agent draws it once (seedTopLevel) and every delegate is handed the ROOT's instance
-	// (delegation.seed), exactly as the Console registry is shared, so no two delegations anywhere
-	// in one tree are handed the same id. Live host state, never serialized: a run id names a run of
-	// this process, and a resumed session's root draws a fresh prefix.
-	runIDs *runIDMinter
-
-	// workflowLive reports whether a background workflow of this tree drives the folder id — the
-	// ROOT's background manager's liveness (backgroundManager.isLive). The root binds it to its own
-	// manager (seedTopLevel); every delegate is handed its parent's (delegation.seed) and a
-	// background host copies it (backgroundHost), so a blocking launch anywhere in the tree refuses
-	// a folder the root's background run still drives (admitBlocking). A delegate's own manager is
-	// empty, which is why it never reads that one. nil admits every folder.
-	workflowLive func(id string) bool
 
 	// tasks is the model's own checklist — the complete list of what this run is doing, written
 	// only through the task_list tool and re-rendered into the standing content on every request
@@ -522,14 +454,6 @@ type Agent struct {
 	// delegationResult alone: the stopped branch and the undelivered notes of its result.
 	stoppedByUser   bool
 	stopUndelivered []domain.UserInput
-	// cancelFoldBound is the longest the fold of each running child a cancel of this Agent's Turn
-	// stops may take (foldStoppedChild); 0 reads as defaultCancelFoldBound. A child inherits it at
-	// spawn, so one value bounds the whole tree's cancel folds.
-	cancelFoldBound time.Duration
-	// restreamHoldoff is the base of the wait before a transient fault's re-stream
-	// (restreamHoldoffFor); 0 reads as defaultRestreamHoldoff. Only a test sets it, to skip the
-	// production second. A child inherits it at spawn, so a test's short wait holds across the tree.
-	restreamHoldoff time.Duration
 	// bindMu guards the Config cells a Server fallback rehome writes mid-Turn (applyRehome) against
 	// the exported accessors a Driver calls from its own goroutine while a Step runs (Vision,
 	// VisionRefusal, ThinkingEffort, SetAllowRules, SetReactions). The loop's own cfg reads run on
@@ -570,6 +494,101 @@ type Agent struct {
 	// the main loop keeps folding at Exchange boundaries only so bench arms stay comparable.
 	// Structural (ADR 0006), not a Reaction: there is no config key and it stays on under Bypass.
 	midExchangeCompaction bool
+}
+
+// sharedHandles are the tree's shared handles: what every Agent of one session tree holds in common,
+// composed once and copied WHOLE — by a delegate from its parent (newChildAgentOn → delegation.seed)
+// and by a background host from its session (backgroundHost). The pointers and funcs among them are
+// shared by reference, so what one Agent of the tree writes through them the others see; the
+// durations and the context-file slice are copied as they stand. The one per-site exception is the
+// Delegation latch of a child the model put on the SESSION seat: it is handed an empty latch of its
+// own, swapped into its copy after the copy (ADR 0069 decision 3). Guards, the prompt slot and the
+// checklist are deliberately not here: a delegate takes fresh ones and a background host shares
+// the session's, so each site states its own.
+type sharedHandles struct {
+	// dial is the one seam every provider dial this Agent ever makes crosses (Dialer): New and
+	// Resume dial the session's client through it, SwitchUpstream dials the replacement, and a
+	// ROUTED spawn dials the child's own client with it before handing the same Dialer down, so a
+	// host that injected one sees every connection its engine opens. Seeded with dialProvider at
+	// construction and replaced only by WithDialer, on the constructor that took the option.
+	dial Dialer
+
+	// delegation is the Delegation-target latch — the Sub-agent server every delegation in this
+	// tree routes to, or nil for today's parent-inheriting spawn (ADR 0045 —
+	// internal/agent/delegationtarget.go). It is a live field of the anytime-safe class, like
+	// Agent's parallelAgents and farWidth, but held by POINTER rather than by value: newChildAgent
+	// hands the child the PARENT's holder, so one latch serves the whole tree and a host pushing to
+	// the top-level Agent reaches a depth-2 spawn too. It carries its own lock for the same reason
+	// those fields carry theirs, and is never nil on a constructed Agent (construction seeds it: a fresh
+	// one at the top level, the parent's for a delegate — construct.go).
+	delegation *delegationLatch
+
+	// now is the request-render clock the configured system prompt's {{datetime}} placeholder
+	// reads (ADR 0023). It is a field rather than a direct time.Now call so a test can pin the
+	// rendered date — the injectable-clock shape cmd/apogee's sessionHost.now already uses.
+	// newAgent seeds it with time.Now; it is never nil on a constructed Agent.
+	now func() time.Time
+
+	// contextFiles is the session's cache of discovered workspace context files
+	// (Config.ContextFiles — internal/agent/contextfiles.go). It is filled at construction and
+	// REFILLED only at a session boundary (ClearContext, a successful RestoreSession), so the
+	// standing content a request carries is byte-stable for the life of a session — a
+	// mid-session edit to a repo's AGENTS.md lands on the next session, not under a running
+	// one. A sub-agent is handed the parent's slice verbatim (newChildAgent), so one session's
+	// nested agents all speak from the same bytes. It is not serialized: the resolved-live
+	// posture of ADR 0023 §6 means a resumed session re-reads the CURRENT files.
+	contextFiles []contextFile
+
+	// journal is the per-Exchange pre-image record behind the human's `/undo` (ADR 0051):
+	// what every write replaced, grouped by the Exchange that caused it. It is LIVE HOST STATE,
+	// not session state (ADR 0022 §8) — it is never part of the Session snapshot, and the Agent
+	// never reads or writes a file for it. What it can REACH is the Driver's call: construction
+	// supplies ADR 0051's funnel journal, which this process alone ever holds, and a
+	// Driver that opened the session's own snapshot store hands that one over instead
+	// (SetJournal), which is what lets a resumed session revert an earlier process's writes
+	// (ADR 0074). A nil journal is the honest encoding of an
+	// engine that records nothing, and every reader treats it as such rather than as an error.
+	// A delegated child is handed the PARENT's instance rather than its own (newChildAgent), so
+	// the whole tree's writes land in one Exchange's undo step; only the depth-0 Agent opens a
+	// group on it (loop.go).
+	journal *undo.Journal
+
+	// consoles is the set of interactive processes the model drives across Turns — the Console
+	// family's live state (ADR 0059). Like the journal it is LIVE HOST STATE, not session state
+	// (ADR 0022 §8) — in-memory, for this process only, never serialized — because what it holds
+	// are running processes: a resumed session inherits no shells from the process that ended,
+	// and an id from an earlier run is simply an id this registry does not have. newAgent always
+	// supplies it; the nil receiver its close paths tolerate is the honest "no consoles" engine.
+	// A delegated child is handed the PARENT's instance (newChildAgent), so one engine has one
+	// set of Consoles however deep the delegation nests, and ownership is carried by the Console's
+	// Owner field rather than by which Agent holds the registry: a delegation's end closes the
+	// Consoles that delegation opened (Close) and nothing else.
+	consoles *console.Registry
+
+	// runIDs mints the run id of every delegation this Agent's tree spawns (runIDMinter). The root
+	// Agent draws it once (seedTopLevel) and every delegate is handed the ROOT's instance
+	// (delegation.seed), exactly as the Console registry is shared, so no two delegations anywhere
+	// in one tree are handed the same id. Live host state, never serialized: a run id names a run of
+	// this process, and a resumed session's root draws a fresh prefix.
+	runIDs *runIDMinter
+
+	// workflowLive reports whether a background workflow of this tree drives the folder id — the
+	// ROOT's background manager's liveness (backgroundManager.isLive). The root binds it to its own
+	// manager (seedTopLevel); every delegate is handed its parent's (delegation.seed) and a
+	// background host copies it (backgroundHost), so a blocking launch anywhere in the tree refuses
+	// a folder the root's background run still drives (admitBlocking). A delegate's own manager is
+	// empty, which is why it never reads that one. nil admits every folder.
+	workflowLive func(id string) bool
+
+	// cancelFoldBound is the longest the fold of each running child a cancel of this Agent's Turn
+	// stops may take (foldStoppedChild); 0 reads as defaultCancelFoldBound. A child inherits it at
+	// spawn, so one value bounds the whole tree's cancel folds.
+	cancelFoldBound time.Duration
+
+	// restreamHoldoff is the base of the wait before a transient fault's re-stream
+	// (restreamHoldoffFor); 0 reads as defaultRestreamHoldoff. Only a test sets it, to skip the
+	// production second. A child inherits it at spawn, so a test's short wait holds across the tree.
+	restreamHoldoff time.Duration
 }
 
 // stepCapErrFormat is the ErrorEvent text a delegate surfaces when it reaches its step cap — the

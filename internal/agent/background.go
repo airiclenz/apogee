@@ -660,8 +660,8 @@ func (a *Agent) stopAllBackground() {
 
 // backgroundHost is the snapshot of this top-level Agent a background workflow runs off (see the file
 // comment): a detached Agent that nothing mutates once it is returned. The idle-only fields — the
-// Config, the Upstream, the tool set, the profile's parsers, the context files, the journal and the
-// effort dialect — are copied as they stand, the Upstream as the seat this Agent is on, inherited
+// Config, the Upstream, the tool set, the profile's parsers and the effort dialect — are copied as
+// they stand, the Upstream as the seat this Agent is on, inherited
 // whole (seatBinding.inherit): the HOLDER this Agent read it through at the copy (sharedupstream.go), so a later server switch, which installs a fresh holder on this Agent,
 // leaves the workflow on the client it started with, while a Server fallback rehome, which moves the
 // holder itself, reaches the workflow's children too (followUpstream, from the copied appliedGen).
@@ -669,7 +669,11 @@ func (a *Agent) stopAllBackground() {
 // fault falls over with the seat; once a server switch has retired the holder, that child abandons
 // instead (consultFallback). The lock-guarded live settings are read through their
 // accessors and frozen, all but the mode, which the host holds as a tighten-only view of this
-// Agent's (liveMode), the way a delegate holds its parent's. The tree's shared handles are shared.
+// Agent's (liveMode), the way a delegate holds its parent's. The tree's shared handles — the
+// dial seam, the clock and bounds, the context files, the Delegation latch, the journal, the
+// consoles, the run-id minter and the workflow liveness — are copied whole, as one value
+// (sharedHandles), the way a delegate takes its parent's; the guards, the prompt slot and the
+// checklist, which a delegate takes fresh, the host shares with the session.
 // The host owns no Upstream and no tool set (it never closes or recomposes either), runs no Turn of
 // its own — its conversation stays empty and its Turn lifecycle idle — and starts its own token
 // estimator, so a Step calibrating this Agent's never races it. Call it where the idle-only
@@ -684,7 +688,7 @@ func (a *Agent) backgroundHost() *Agent {
 	host := &Agent{
 		cfg:                a.cfg,
 		seating:            a.seating.inherit(), // the copied holder, the session seat's resolver (an unrouted child on it falls over with the seat) and the generation the copied Config reflects (the host's children follow only a later rehome), owning nothing
-		dial:               a.dial,
+		sharedHandles:      a.sharedHandles,
 		builtins:           a.builtinLadder(),
 		armed:              a.armed,
 		tools:              a.tools,
@@ -700,25 +704,16 @@ func (a *Agent) backgroundHost() *Agent {
 		contextFileNames:   a.contextFileList(),
 		parallelAgents:     parallelAgents,
 		farWidth:           farWidth,
-		delegation:         a.delegation,
 		seat:               a.subAgentsSeat(),
 		effortOverride:     a.effortOverrideValue(),
 		effortDialect:      a.effortDialect,
 		liveMode:           a.effectiveMode,
 		tokens:             apogeectx.NewTokenEstimator(),
 		prompts:            a.prompts,
-		now:                a.now,
-		contextFiles:       a.contextFiles,
-		journal:            a.journal,
 		undoNote:           a.undoNote,
-		consoles:           a.consoles,
-		runIDs:             a.runIDs,
-		workflowLive:       a.workflowLive,
 		tasks:              a.tasks,
 		tree:               a.tree,
 		depth:              a.depth,
-		cancelFoldBound:    a.cancelFoldBound,
-		restreamHoldoff:    a.restreamHoldoff,
 	}
 	host.turns = &turnLifecycle{conv: &host.conv, observer: host}
 	return host

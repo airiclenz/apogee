@@ -14,7 +14,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
@@ -23,7 +22,6 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
-	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ----------------------------------------------------------------------------
@@ -1714,32 +1712,27 @@ type delegation struct {
 	task        string // that call's delegated task — the child's identity in words, on every Approval it raises
 	name        string // the call's optional short name, already normalised by delegationName; "" = unnamed
 
-	stepCap  int              // the delegate step cap at spawn (Config.Delegation.MaxSteps); 0 = unbounded
-	tokenCap int              // and its two siblings, read at spawn for the same reason
-	timeCap  time.Duration    //
-	now      func() time.Time // the clock the time bound reads — the parent's, so a pinned parent pins the child
-	// cancelFoldBound is the parent's bound on a cancel's fold of each running child
-	// (foldStoppedChild), so the child holds its own children's to the same one.
-	cancelFoldBound time.Duration
-	// restreamHoldoff is the parent's re-stream hold-off base (restreamHoldoffFor), so a child's
-	// re-streams wait what its parent's do.
-	restreamHoldoff time.Duration
+	stepCap  int           // the delegate step cap at spawn (Config.Delegation.MaxSteps); 0 = unbounded
+	tokenCap int           // and its two siblings, read at spawn for the same reason
+	timeCap  time.Duration //
 
 	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
 	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
 	seating       seatBinding            // the child's seat, whole: the parent's inherited by an unrouted spawn (seatBinding.inherit), a fresh owned holder on the target's own resolver for a routed one (ownedSeat)
-	dial          Dialer                 // the parent's Dialer, inherited: the seam a routed grandchild's client is dialled through (Dialer)
 	tap           *wireTap               // the Inspector seam of a client this spawn BUILT, bound once the child's identity is stamped; nil when unrouted
 
 	consoleOwner   string             // the engine-minted Console privilege key (console.Registry.MintOwner), never the model-chosen call id
 	guards         security.Guards    // Guards.ForSubAgent: fresh live state over the parent's shared dangerous floor
-	contextFiles   []contextFile      // the PARENT's cache, verbatim — a sub-agent is not a session boundary, so the child never re-reads the workspace
 	parentLiveMode func() domain.Mode // the parent's effectiveMode accessor — the tighten-only view that composes down the chain (ADR 0013)
-	latch          *delegationLatch   // the parent's holder, shared — or an empty one for a session-seated child (ADR 0069 decision 3)
-	journal        *undo.Journal      // the parent's undo journal, shared: delegated writes belong to the current Exchange's undo step (ADR 0051)
-	consoles       *console.Registry  // the engine's one Console registry, shared: the cap of four is per engine, not per delegation (ADR 0059 §6)
-	runIDs         *runIDMinter       // the tree's run-id minter, shared: the child's own delegations draw from the root's counter, so no two runs in the tree share an id
-	workflowLive   func(string) bool  // the root's background liveness, inherited: the child's own manager is empty, so its blocking launches ask the root's (admitBlocking)
+	// handles are the parent's shared handles, copied whole (sharedHandles): its Dialer (the seam a
+	// routed grandchild's client is dialled through), its clock (a pinned parent pins the child's time
+	// bound), its cancel-fold bound and re-stream hold-off, its context-file cache verbatim (a sub-agent
+	// is not a session boundary, so the child never re-reads the workspace), and by reference its
+	// Delegation latch, undo journal (delegated writes belong to the current Exchange's undo step,
+	// ADR 0051), Console registry (the cap of four is per engine, ADR 0059 §6), the tree's run-id
+	// minter and the root's background liveness (admitBlocking) — all but the latch of a
+	// session-seated child, which is an empty one of its own (ADR 0069 decision 3).
+	handles sharedHandles
 }
 
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges
@@ -1969,11 +1962,6 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		stepCap:  childCfg.Delegation.MaxSteps,
 		tokenCap: childCfg.Delegation.MaxTokens,
 		timeCap:  childCfg.Delegation.Timeout,
-		// The clock the time bound reads is the parent's, so a test that pins the parent's now has
-		// pinned the child's.
-		now:             a.now,
-		cancelFoldBound: a.cancelFoldBound,
-		restreamHoldoff: a.restreamHoldoff,
 		// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
 		// than the childCfg copy the child's Config carries. The field is the authority the way it is
 		// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two
@@ -1992,7 +1980,6 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		// could tell the difference.
 		effortDialect: a.effortDialect,
 		seating:       seating,
-		dial:          a.dial,
 		tap:           tap,
 		// The Console privilege key, minted by the registry that compares it rather than taken from
 		// the spawning call's id: that id is the model's to choose, and a text-format parser numbering
@@ -2001,7 +1988,6 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		// key; that is harmless on a child, because an engine with no registry holds no Console.
 		consoleOwner: a.consoles.MintOwner(),
 		guards:       a.guards.ForSubAgent(),
-		contextFiles: a.contextFiles,
 		// A tighten-only view of the parent's EFFECTIVE mode (ADR 0013): the child's disposition takes
 		// TighterMode(parentEffective, spawnMode), so a parent tightening mid-delegation reaches the
 		// child while a parent loosening cannot loosen it. It is the parent's effectiveMode accessor —
@@ -2011,17 +1997,15 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		// Capturing an accessor (not the raw field/mutex) keeps every read modeMu-guarded at the agent
 		// that owns the field, so the child reads race-free but has no seam to mutate anything.
 		parentLiveMode: a.effectiveMode,
-		// The Delegation-target latch is shared by HANDLE, not copied (ADR 0045): the child holds the
-		// parent's holder, so a target the host pushes after this spawn is the one the child's OWN
-		// delegations read, and routing reaches every depth from the one place a host pushes to. A
-		// snapshot instead would freeze depth≥1 spawns on whatever was current when their parent was
-		// built — and "identity once there" (a routed child's delegations go to the same server) is
-		// exactly what one shared latch gives for free.
-		latch:        a.delegation,
-		journal:      a.journal,
-		consoles:     a.consoles,
-		runIDs:       a.runIDs,
-		workflowLive: a.workflowLive,
+		// The tree's shared handles, copied whole. Among them the Delegation-target latch is shared by
+		// HANDLE, not copied (ADR 0045): the child holds the parent's holder, so a target the host
+		// pushes after this spawn is the one the child's OWN delegations read, and routing reaches
+		// every depth from the one place a host pushes to. A snapshot instead would freeze depth≥1
+		// spawns on whatever was current when their parent was built — and "identity once there" (a
+		// routed child's delegations go to the same server) is exactly what one shared latch gives for
+		// free. The clock among them is the parent's, so a test that pins the parent's now has pinned
+		// the child's time bound.
+		handles: a.sharedHandles,
 	}
 	if routedDialect != provider.EffortDialectNone {
 		d.effortDialect = routedDialect
@@ -2036,7 +2020,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	// still carries the root's width setters (rootBound), since this child speaks over the session's
 	// own holder: a session-seat rehome it lands states the fallback's width on the root.
 	if seat == seatSession {
-		d.latch = a.delegation.rootBound()
+		d.handles.delegation = a.delegation.rootBound()
 	}
 	return newDelegateAgent(childCfg, d)
 }
