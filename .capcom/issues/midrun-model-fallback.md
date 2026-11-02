@@ -1,11 +1,13 @@
 ---
 title: Mid-session fallback to a second model when the primary keeps failing
-status: open
+status: done
 type: feature
 priority: 3
 labels: [feature]
 plan: 2026-11-02 - 00 - midrun-model-fallback-plan
 created: 2026-11-01T19:26:29Z
+closed: 2026-11-02T14:28:02Z
+reason: "Resolved by plan 2026-11-02 - 00 - midrun-model-fallback-plan (archived at 206e9e61): ADR for per-entry server fallback settles trigger, scope, one-way switch and per-Driver reporting; implemented across items 1-11. Known gaps filed separately: anthropic-api-error-fallback, background-workflow-no-fallback, fallback-lander-stale-options, routed-rehome-root-pins."
 ---
 
 Model choice is fixed before a session starts: if the configured server dies or keeps erroring partway through, the session retries it or fails; nothing hands the session to a second configured server/model. Reported by Seqcom (request apogee-midrun-fallback, run 20261031T1223Z, apogee v0.29.1) for unattended headless runs on a local model with a cloud fallback.
