@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/testtime"
 	// Aliased because the tests below hold a skills.Provider in a variable called `provider`,
@@ -59,12 +60,14 @@ func firingRoots(t *testing.T) stateRoots {
 	}
 }
 
-// firingBeat is a dictated observation of a Firing's OWN server: a reachable box that advertises
-// nothing. It exists because one beat per Firing is unconditional — the round trip is the liveness
-// gate, not an optimisable probe — so a composition test about anything else would otherwise dial
-// `box.example` for real and wait out the discovery timeout.
+// firingBeat is a dictated observation of a Firing's OWN server: a reachable box serving one model
+// and advertising nothing else. It exists because one beat per Firing is unconditional — the round
+// trip is the liveness gate, not an optimisable probe — so a composition test about anything else
+// would otherwise dial `box.example` for real and wait out the discovery timeout. It names the model
+// it serves because an unpinned Firing binds that model, and one that answered naming none is
+// refused before anything is composed.
 func firingBeat(context.Context, string, string, string, apiprovider.Wire) heartbeat.Beat {
-	return heartbeat.Beat{Reachable: true, Answered: true}
+	return heartbeat.Beat{Reachable: true, Answered: true, ActiveModel: "beat-model"}
 }
 
 // Every field an unattended run's Config carries, asserted in one place — which is the whole point
@@ -1041,7 +1044,7 @@ func TestFiringConfigCarriesItsPrimaryObservation(t *testing.T) {
 			beats := &stubBeat{beat: tc.beat}
 			_, routing, _, err := firingConfig(context.Background(), firingInputs{
 				opts:     config.Options{Bypass: true},
-				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", Model: "box-model"},
 				apiKey:   "sk-test",
 				roots:    firingRoots(t),
 				confiner: fenceableHost,
@@ -1066,6 +1069,108 @@ func TestFiringConfigCarriesItsPrimaryObservation(t *testing.T) {
 				t.Errorf("routing.Beat.Answered = %v, want %v — the weaker liveness question travels "+
 					"whole, so a Driver can tell a declining box from an absent one",
 					routing.Beat.Answered, tc.beat.Answered)
+			}
+		})
+	}
+}
+
+// An entry that names no model binds the model its one beat saw the server serving, and everything
+// keyed on the model keys on THAT id: the per-model system prompt (ADR 0023), the Model profile
+// (ADR 0044), the window the beat observed for it and the namer's session binding. Before the fix an
+// unpinned Firing composed for the empty model and the engine refused it with "no model is bound".
+func TestFiringConfigBindsTheServedModelWhenNoneIsConfigured(t *testing.T) {
+	t.Parallel()
+
+	beats := &stubBeat{beat: heartbeat.Beat{
+		Reachable: true, Answered: true,
+		ActiveModel: "served", ContextWindow: 65536,
+		Resolution: apiprovider.HintFirstAdvertised,
+	}}
+	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{
+			Bypass: true,
+			SystemPrompt: config.SystemPromptSettings{
+				Global: config.PromptSource{Text: "the global prompt"},
+				Models: map[string]config.PromptSource{"served": {Text: "the served model's prompt"}},
+			},
+			ModelProfiles: []profiles.Entry{{
+				Pattern:     "served",
+				Profile:     domain.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"view_diff"}}},
+				SpellsTools: true,
+			}},
+		},
+		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+		apiKey:   "sk-test",
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     beats.discover,
+		recordID: "2026-11-02T09-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+
+	if cfg.Model != "served" {
+		t.Errorf("cfg.Model = %q; want the served model the beat observed", cfg.Model)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "the served model's prompt") {
+		t.Errorf("the system prompt is %q; want the served model's own", cfg.SystemPrompt)
+	}
+	if !slices.Contains(cfg.Profile.Tools.Enabled, "view_diff") {
+		t.Errorf("cfg.Profile = %+v; want the profile matched on the served model", cfg.Profile)
+	}
+	if cfg.Context.MaxContextTokens != 65536 {
+		t.Errorf("the run bound window %d; want the 65536 the beat observed", cfg.Context.MaxContextTokens)
+	}
+	namer, ok := cfg.Namer.(*delegationNamer)
+	if !ok {
+		t.Fatalf("cfg.Namer is %T; want the Firing's *delegationNamer", cfg.Namer)
+	}
+	if binding, _ := namer.session(); binding.Model != "served" {
+		t.Errorf("the namer's session binding names model %q; want the served model", binding.Model)
+	}
+}
+
+// An entry that names no model, against a server that answered its beat yet named none it serves,
+// has nothing to send as: the composition refuses before the scratch dir, the routing or the namer
+// is built, with the beat's failure appended when it had one. A beat that never answered is not
+// this refusal's business — raise's offline gate says that one.
+func TestFiringConfigRefusesWhenTheServerNamesNoModel(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		beat    heartbeat.Beat
+		wantErr string
+	}{
+		{
+			name:    "answered with nothing to name",
+			beat:    heartbeat.Beat{Reachable: true, Answered: true},
+			wantErr: errFiringNoActiveModel.Error(),
+		},
+		{
+			name:    "answered a 401",
+			beat:    heartbeat.Beat{Answered: true, Failure: "apogee: model discovery: upstream HTTP 401"},
+			wantErr: errFiringNoActiveModel.Error() + ": apogee: model discovery: upstream HTTP 401",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, _, err := firingConfig(context.Background(), firingInputs{
+				opts:     config.Options{Bypass: true},
+				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+				apiKey:   "sk-test",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+				beat:     (&stubBeat{beat: tc.beat}).discover,
+				recordID: "2026-11-02T09-00-00-firing",
+			})
+			if err == nil || err.Error() != tc.wantErr {
+				t.Errorf("firingConfig err = %v; want %q", err, tc.wantErr)
+			}
+			if !errors.Is(err, errFiringNoActiveModel) {
+				t.Errorf("err = %v; want it to wrap errFiringNoActiveModel", err)
 			}
 		})
 	}
@@ -1354,7 +1459,7 @@ func TestFiringConfigBeatsTheSubAgentServerOnItsOwnEndpoint(t *testing.T) {
 			Servers:         []config.ServerEntry{grunt},
 			SubAgentsServer: "grunt",
 		},
-		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1"},
+		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", Model: "box-model"},
 		apiKey:   "sk-test",
 		roots:    firingRoots(t),
 		confiner: fenceableHost,
@@ -1692,7 +1797,7 @@ func raiseInputs(t *testing.T, stub *stubRunner, beat heartbeat.Beat) firingInpu
 	t.Helper()
 	return firingInputs{
 		opts:     config.Options{Bypass: true},
-		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", ParallelAgents: 1},
+		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", Model: "box-model", ParallelAgents: 1},
 		apiKey:   "sk-test",
 		roots:    firingRoots(t),
 		confiner: fenceableHost,

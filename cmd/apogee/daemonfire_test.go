@@ -369,8 +369,8 @@ func TestDaemonFireOverlaysTheEntrysModel(t *testing.T) {
 }
 
 // A launcher-fronted server is dialled exactly as it stands: the daemon never actuates the launcher
-// (ADR 0055 decision 3), so a Firing sends to whatever is serving and nothing on this path loads,
-// unloads or restores a profile. Nothing is left to stub, because no actuation call site exists —
+// (ADR 0055 decision 3), so a Firing binds the model its beat saw the server serving and nothing on
+// this path loads, unloads or restores a profile. Nothing is left to stub, because no actuation call site exists —
 // which is the assertion the sibling test below makes structurally.
 func TestDaemonFireSendsToALauncherFrontedServerAsItStands(t *testing.T) {
 	harness := newDaemonFireHarness(t, config.Options{
@@ -389,10 +389,10 @@ func TestDaemonFireSendsToALauncherFrontedServerAsItStands(t *testing.T) {
 	if got := spec.Config.Endpoint; got != harness.upstream.URL {
 		t.Errorf("the firing dials %q, want the launcher-fronted entry's endpoint as it stands", got)
 	}
-	// Whatever that server is serving — the entry names no `model:` and validation refuses one here,
-	// so the Firing states none and the server answers with its loaded slot.
-	if got := spec.Config.Model; got != "" {
-		t.Errorf("the firing names model %q, want none — a model name here would be a request to load one", got)
+	// The model that server is serving — the entry names no `model:` and validation refuses one
+	// here, so the Firing binds the loaded slot its beat observed rather than asking for a load.
+	if got := spec.Config.Model; got != headlessBeatModel {
+		t.Errorf("the firing names model %q, want the served %q its beat observed", got, headlessBeatModel)
 	}
 }
 

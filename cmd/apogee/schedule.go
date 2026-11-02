@@ -187,6 +187,9 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		// before a prompt is spent on it (the gate is Beat.Answered, wire_firing.go). No verdict yet
 		// reads as online, so a session that has never heard from its monitor fires as it always did.
 		//
+		// The active model is the one this session is bound to (the entry's own above): an unpinned
+		// Firing binds the model its beat names, and a session's bind already resolved that name.
+		//
 		// The window is the last one this session's beats could name (liveSettings.observed), which
 		// an unpinned Firing binds exactly as the session's own rebind does — pin, else observed (ADR
 		// 0024 decision 6, amended 2026-10-08) — and 0 until a beat has named one, which leaves it
@@ -197,6 +200,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 				Reachable:     !offline,
 				Answered:      !offline,
 				Failure:       failure,
+				ActiveModel:   binding.Model,
 				ContextWindow: w.live.observed(),
 				TotalSlots:    w.width(),
 				EffortSupport: domain.EffortSupport{Dialect: domainEffortDialect(w.live.observedDialect())},

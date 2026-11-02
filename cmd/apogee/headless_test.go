@@ -945,7 +945,9 @@ func TestHeadlessOfflineRefusalIsOneSentenceOnEveryFormat(t *testing.T) {
 // The other side of the gate: a server that ANSWERED runs, whatever it answered. A 429 on the model
 // list is the server saying "not now" rather than "not here" (internal/heartbeat's Throttled), and a
 // completions-only endpoint that advertises no list at all was never unreachable — both served
-// completions before this gate existed and both must go on serving them.
+// completions before this gate existed and both must go on serving them. The home pins the model,
+// because a server that answered without naming one has nothing for an unpinned run to bind
+// (TestHeadlessRefusesAnUnpinnedRunTheServerNamedNoModelFor) and this test is about the gate.
 func TestHeadlessRunsAgainstAServerThatAnsweredAtAll(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -972,7 +974,9 @@ func TestHeadlessRunsAgainstAServerThatAnsweredAtAll(t *testing.T) {
 			srv := stubllm.New(t, stubllm.Script{Discovery: tc.discovery})
 
 			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
-			out, _, err := headlessRunOn(t, stub, srv, fenceableHost, testConfigHomeOn(t, srv, ""), "a prompt")
+			home := testConfigHomeOn(t, srv, "servers:\n  - name: "+testServerName+"\n    endpoint: "+srv.URL+
+				"\n    model: "+headlessBeatModel+"\nserver: "+testServerName+"\n")
+			out, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt")
 			if err != nil {
 				t.Fatalf("headless refused a server that answered: %v", err)
 			}
@@ -981,6 +985,89 @@ func TestHeadlessRunsAgainstAServerThatAnsweredAtAll(t *testing.T) {
 			}
 			if !strings.Contains(out, "the answer") {
 				t.Errorf("stdout = %q; the run should have answered", out)
+			}
+		})
+	}
+}
+
+// With no model set anywhere — no `model:` on the entry, no --model, no APOGEE_MODEL — a run binds
+// the model the server says it is serving, as `apogee --help` promises. The real engine runs here,
+// run.Once against a scripted upstream, because the defect was the engine refusing an unbound
+// model: a stub of the run would compose the Config and never reach that refusal.
+func TestHeadlessUnpinnedRunBindsTheServedModel(t *testing.T) {
+	srv := stubllm.New(t, stubllm.Script{
+		Model: headlessBeatModel,
+		Turns: []stubllm.Turn{{Text: "the answer"}},
+	})
+	assertNoAmbientApogeeConfig(t)
+	t.Setenv(config.EnvMode, "")
+	t.Setenv(config.EnvModel, "")
+	// Naming off: a second request would be a second thing to script, and this case is about the
+	// model the run binds, not about how many requests it makes.
+	home := testConfigHomeOn(t, srv, "auto-title: false\n")
+
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
+	var outBuf, errBuf bytes.Buffer
+	cmd.SetOut(&outBuf)
+	cmd.SetErr(&errBuf)
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetArgs([]string{"--config", home, "--workspace", e2eWorkspace(t), "--format", "json", "a prompt"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("headless: %v (stderr: %q)", err, errBuf.String())
+	}
+
+	lines := jsonEventLines(t, outBuf.String())
+	if len(lines) == 0 || lines[0]["event"] != "run_started" {
+		t.Fatalf("the stream does not open with run_started:\n%s", outBuf.String())
+	}
+	started, _ := lines[0]["data"].(map[string]any)
+	if got := started["model"]; got != headlessBeatModel {
+		t.Errorf("run_started names model %v; want the served %q", got, headlessBeatModel)
+	}
+	_, data := finishedFrame(t, lines)
+	wantExitCode(t, data, 0)
+	requests := srv.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the run made %d completion request(s); want 1", len(requests))
+	}
+	if got := requests[0].Model; got != headlessBeatModel {
+		t.Errorf("the completion request named model %q; want the served %q", got, headlessBeatModel)
+	}
+}
+
+// A server that answered its beat but named no model leaves an unpinned run nothing to send as, so
+// the run is refused before anything is sent — exit 2, never-started — with a sentence that says
+// how to fix it and carries the beat's own failure, so a 401 is named rather than read as a server
+// serving nothing. It is never the engine's "no model is bound — Rebind" refusal.
+func TestHeadlessRefusesAnUnpinnedRunTheServerNamedNoModelFor(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		failure string
+	}{
+		{name: "a 401 on the model list", status: http.StatusUnauthorized, failure: "401"},
+		{name: "no model list at all", status: http.StatusNotFound, failure: "404"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Status: tc.status}})
+			t.Setenv(config.EnvModel, "")
+
+			stub := &stubRunner{}
+			_, _, err := headlessRunOn(t, stub, srv, fenceableHost, testConfigHomeOn(t, srv, ""), "a prompt")
+			if err == nil {
+				t.Fatal("an unpinned run against a server naming no model was accepted")
+			}
+			if code := exitCodeFor(err); code != exitNotStarted {
+				t.Errorf("exit code = %d; want %d (err: %v)", code, exitNotStarted, err)
+			}
+			if !errors.Is(err, errFiringNoActiveModel) {
+				t.Errorf("err = %v; want the no-active-model refusal", err)
+			}
+			if !strings.Contains(err.Error(), tc.failure) {
+				t.Errorf("err = %q; want the beat's own failure (%s) named", err, tc.failure)
+			}
+			if stub.called {
+				t.Error("the runner ran with no model to send as")
 			}
 		})
 	}

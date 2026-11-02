@@ -454,9 +454,10 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// The `model:` overlay is handed over as the entry states it. It is legal here because
 	// validation already refused it where a model name would be a request to ACTUATE a load rather
 	// than a per-request selection (ADR 0055 decision 2); absent, the composer falls back to the
-	// bound entry's own `model:` — and on a launcher-fronted server that is whatever is serving,
+	// bound entry's own `model:`, and with none there either it binds the model its composition beat
+	// saw the server serving (firingConfig). On a launcher-fronted server that is the loaded slot,
 	// because the daemon never actuates the launcher (decision 3): nothing serving means this Firing
-	// fails visibly in its record and the next tick behaves normally.
+	// is refused before it starts and the next tick behaves normally.
 	//
 	// No skills catalog and no width source: a daemon holds no longer-lived provider to share and
 	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults

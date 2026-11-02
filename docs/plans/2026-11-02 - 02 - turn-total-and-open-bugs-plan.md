@@ -37,7 +37,10 @@
 - Changing Splash itself; any effort dialect beyond the four that exist.
 - A new repaint timer (the total rides the spinner tick).
 
-## 1. Firings bind the served model when none is configured
+## 1. Firings bind the served model when none is configured — ✅ DONE (2026-11-02)
+
+NOTES (2026-11-02): firingConfig returns the no-active-model refusal as a plain error (sentinel errFiringNoActiveModel, failure appended by firingNoActiveModel) which raise already wraps as errNotStarted{Stage: stageCompose}, rather than returning an errNotStarted from firingConfig itself — the observable result (typed never-started refusal, headless exit 2) is the one the Goal names, without a double wrap.
+NOTES (2026-11-02): cmd/apogee/wire_config_test.go needed no edit — projectedDrivers' "the Firing composer" goes through firingBeat, which now carries ActiveModel "beat-model".
 
 **Closes:** headless-unbound-model
 

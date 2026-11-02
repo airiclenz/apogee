@@ -183,8 +183,9 @@ type firingBinding struct {
 // probe relies on — and it fails exactly where firingConfig failed before the extraction: a key
 // source that refuses, or a per-model resolution that does.
 func bindFiringConfig(in firingInputs) (firingBinding, error) {
-	// The bound entry's own `model:` unless the Driver overlaid one. On a launcher-fronted server an
-	// empty model is legitimate — it means "whatever is serving" — so this is a fallback, not a
+	// The bound entry's own `model:` unless the Driver overlaid one. Both may be empty: an unpinned
+	// entry is legal, and firingConfig then binds the model its one beat saw the server serving by
+	// composing this binding a second time with that id overlaid — so here it is a fallback, not a
 	// default that has to hold a name.
 	model := in.model
 	if model == "" {
@@ -426,6 +427,33 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 		observe = observeServer
 	}
 	beat := observe(ctx, in.entry.Endpoint, spec.Model, apiKey, provider.WireFor(in.entry.Wire))
+
+	// A Firing on an entry that names no model — no `model:`, no `--model`, no APOGEE_MODEL — binds
+	// the model that beat saw the server serving, as a session's startup bind does (`apogee --help`:
+	// "With no model set anywhere, apogee asks the server for its active model"). Left unbound it
+	// would reach the engine with an empty model and die on its "no model is bound" refusal, after
+	// the scratch dir, the routing and the namer had all been composed for no model at all. The
+	// binding is composed a second time with that id overlaid, so the system prompt, the Model
+	// profile and the window key on it exactly as they would on a pinned entry; the key already
+	// resolved and its resolver are handed back in, so an `api-key-cmd:` still runs once. The Firing
+	// still actuates nothing (ADR 0055 decision 3) — it names the model the beat saw serving.
+	//
+	// A beat that answered yet named no model is refused here, before anything is sent, with the
+	// beat's own failure appended when it had one, so a 401 or a 429 is named rather than read as an
+	// empty server. A beat that never answered is not this gate's business: raise's offline gate
+	// refuses it with the sentence every Driver shares.
+	if spec.Model == "" {
+		if beat.ActiveModel != "" {
+			in.model, in.apiKey, in.keys = beat.ActiveModel, apiKey, keys
+			rebound, err := bindFiringConfig(in)
+			if err != nil {
+				return apogee.Config{}, firingRouting{}, nil, err
+			}
+			cfg, spec, notices = rebound.cfg, rebound.spec, rebound.notices
+		} else if beat.Answered {
+			return apogee.Config{}, firingRouting{}, notices, firingNoActiveModel(beat.Failure)
+		}
+	}
 
 	// The window this run binds: the `context-window:` pin bindFiringConfig resolved, else the window
 	// this beat observed — the rule a session's rebind binds by, so a Firing is no exception to it
@@ -952,6 +980,20 @@ func (s *projectRunSlot) runner() domain.ProjectRun {
 		}
 		return (*run)(ctx, r, stdin, env)
 	}
+}
+
+// errFiringNoActiveModel is the refusal of a Firing whose entry names no model and whose server,
+// asked once, named none it is serving either: there is nothing to send as.
+var errFiringNoActiveModel = errors.New(
+	"no model to send as — the server names no active model; set model: on the entry or pass --model")
+
+// firingNoActiveModel words that refusal, appending the beat's own failure when it had one (as
+// notice.ServerOffline does), so a server that answered a 401 or a 429 is named for it.
+func firingNoActiveModel(failure string) error {
+	if failure == "" {
+		return errFiringNoActiveModel
+	}
+	return fmt.Errorf("%w: %s", errFiringNoActiveModel, failure)
 }
 
 // The two stages at which raise can refuse a Firing before it starts, carried on errNotStarted so
