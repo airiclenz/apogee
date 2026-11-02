@@ -411,7 +411,7 @@ func TestFallbackResolverSeededThroughNew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer a.Close()
+	t.Cleanup(func() { _ = a.Close() })
 	if err := a.Submit(domain.UserInput{Text: "ask the model"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
