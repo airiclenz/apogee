@@ -44,7 +44,10 @@
 - 6: guard folded (Acceptance drops `TestDocs` for `capcom` checks).
 - 4 (re-check): guard folded (the prose rule covers every comment naming a local or field item 4 deletes, incl. `resolveConfig`'s `projectRuns` comment; `\bprojectRuns\b` joins the Acceptance grep).
 
-## 1. The late binds, the no-MCP disarm and the close grace live in internal/reactions
+## 1. The late binds, the no-MCP disarm and the close grace live in internal/reactions — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): doc.go's import-direction paragraph is unchanged (bind.go adds only standard-library imports and internal/domain); its per-file map gains a bind.go line and names CloseGrace on runner.go's line.
+NOTES (2026-11-03): the "nil report drops the notices" case is its own test, TestDisarmUnconnectedMCPNilReport, beside the TestDisarmUnconnectedMCP table.
 
 **What:**
 **Goal:** `internal/reactions` exports `ProjectRunSlot`, `ErrProjectRunUnbound`, `MCPSlot`, `ErrMCPResolverUnbound`, `DisarmUnconnectedMCP` and `CloseGrace`, and its own tests pin each one but `CloseGrace`. Replace's drain uses `CloseGrace`, and its doc names it as the grace a root gives its Runner at close.

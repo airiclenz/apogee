@@ -34,7 +34,11 @@
 // through, shared with the Agent's sync lane so the two lanes can never read a filter differently.
 // runner.go is the sink decorator itself — the Executor seam, the per-Reaction
 // queues and workers, the Driver-facing failure reporter, and the reload (Replace) and shutdown
-// (Close) paths. exec.go is the production Executor — DefaultExecutor's dispatch onto whichever
+// (Close) paths, under the one CloseGrace both give. bind.go is what a Driver root composes around
+// its Runner before the values it fires into exist — the ProjectRunSlot and MCPSlot late binds the
+// executor is handed, and DisarmUnconnectedMCP, the filter a root that dials no MCP server runs
+// over its list before arming, with one notice per entry. exec.go is the production Executor —
+// DefaultExecutor's dispatch onto whichever
 // action the entry configured, the one JSON encoding every action sends, and the MCP action, which
 // calls the entry's tool through the resolver the Driver injected and discards the answer.
 // command.go runs a Reaction's argv through internal/userexec — the api-key-cmd exec posture — with

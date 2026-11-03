@@ -18,12 +18,13 @@ const (
 	// growing without limit, because the alternative — an unbounded queue behind an engine that
 	// emits under its own mutex — turns a wedged script into a memory leak (ADR 0073 §7).
 	queueDepth = 64
-
-	// drainGrace is how long a set of workers replaced by a config reload is given to finish
-	// what it is holding before the running jobs are cancelled. It matches the grace every root
-	// passes to Close, so a Reaction takes the same worst case whether the run ended or the list did.
-	drainGrace = 5 * time.Second
 )
+
+// CloseGrace is the one grace a Runner's workers get to finish what they are holding before their
+// running jobs are cancelled (ADR 0073 §7): a Driver root bounds its Runner's Close by it when the
+// run ends, and Replace drains a generation retired by a config reload under it, so a Reaction
+// takes the same worst case whether the run ended or the list did.
+const CloseGrace = 5 * time.Second
 
 // Executor runs one Reaction's action for one firing: an argv command, a webhook POST, or — in a
 // test — a recording fake. It is the package's ONE seam over the outside world, so everything
@@ -347,7 +348,7 @@ func (r *Runner) noteDrop(w *worker) {
 // `reactions:` costs the user nothing.
 //
 // The previous generation finishes what it already holds (its in-flight job and its queue) under
-// the same grace Close gives, then stops. Firings the old matcher was still correlating — a write
+// CloseGrace — the grace a root gives its Runner at close — then stops. Firings the old matcher was still correlating — a write
 // whose tool result has not arrived — are forgotten, because the new generation starts with a
 // clean correlation map; a reload is a rare, human-initiated event and the alternative would be to
 // read one generation's map from another generation's goroutine.
@@ -364,7 +365,7 @@ func (r *Runner) Replace(list []domain.Reaction) error {
 	previous := r.active.Swap(set)
 	if previous != nil {
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), drainGrace)
+			ctx, cancel := context.WithTimeout(context.Background(), CloseGrace)
 			defer cancel()
 			_ = r.drainSet(previous, ctx)
 		}()
