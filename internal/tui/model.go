@@ -4732,7 +4732,7 @@ func (m Model) statusRight(room int) string {
 //
 // Inside a run view (ADR 0063 D4, amended 2026-09-24) it is the viewed run's: its head's fill as
 // [transcript.applyUsage] froze it, against the window that run actually filled (childWindow) —
-// the session's only when the reading named none. The top-level fill never shows there: a parent's
+// the top-level run's ([Model.topLevelWindow]) only when the reading named none. The top-level fill never shows there: a parent's
 // gauge above a child's transcript is a number about someone else. Until the viewed run has
 // reported usage — or when its head is gone ([Model.viewedChild]) — the gauge renders nothing, and
 // the slot falls through to its hints ([Model.statusRight]), which inside a view say `esc back`.
@@ -4752,7 +4752,7 @@ func (m Model) contextGauge() string {
 	}
 	limit := head.ctxLimit
 	if limit == 0 {
-		limit = m.opts.ContextWindow
+		limit = m.topLevelWindow()
 	}
 	return contextUsage{Used: head.ctxUsed, Limit: limit}.view(m.th)
 }
@@ -4766,6 +4766,17 @@ func (m Model) topLevelWindow() int {
 		return m.watch.window
 	}
 	return m.opts.ContextWindow
+}
+
+// topLevelModel is the model the top-level run is bound to, the yardstick a sub-agent row's model
+// cell is measured against ([transcript.applyUsage]). In a read-only watch it is the watched run's,
+// once a journal usage line or the record has named one (watchState.model); otherwise, and as the
+// watch's fallback, it is the session's own bound model.
+func (m Model) topLevelModel() string {
+	if m.watch.isActive && m.watch.model != "" {
+		return m.watch.model
+	}
+	return m.opts.Model
 }
 
 // contextUsage is the live context-window gauge's data: tokens Used out of the window Limit, and

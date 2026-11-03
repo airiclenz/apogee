@@ -153,6 +153,12 @@ type watchState struct {
 	// ([Model.topLevelWindow]). It is the watched run's, so it lives here and never in m.opts,
 	// and leaveWatch drops it with the rest of the watch.
 	window int
+	// model is the watched run's bound model, the yardstick its sub-agent rows' model cells are
+	// measured against ([transcript.applyUsage]): from the last depth-0, non-maintenance usage line
+	// that named one, else the record's Meta.Model as the opening frame read it; "" until either
+	// does, the watcher's own model standing in meanwhile ([Model.topLevelModel]). It is the watched
+	// run's, so it lives here and never in m.opts, and leaveWatch drops it with the rest of the watch.
+	model string
 }
 
 // parkedSession is the session view watch mode sets aside: exactly the field set resetSessionView
@@ -225,13 +231,15 @@ type watchItem struct {
 }
 
 // watchStart is a journal's opening frame resolved against the record: the title, the record's
-// first `entries` entries ready to replay, and the record's last observed context fill
-// (Meta.CtxUsed), which lights the gauge before any journal usage line folds (err when the entries
-// were wanted and would not read).
+// first `entries` entries ready to replay, the record's last observed context fill
+// (Meta.CtxUsed), which lights the gauge before any journal usage line folds, and the record's
+// bound model (Meta.Model), which measures the watched sub-agents until a journal usage line names
+// one (err when the entries were wanted and would not read).
 type watchStart struct {
 	title   string
 	entries []entry
 	ctxUsed int
+	model   string
 	err     error
 }
 
@@ -298,12 +306,12 @@ func watchSourceOf(live LiveSession, title string) watchSource {
 // banner and nothing is ever polled or probed. A record that will not read paints the watch's
 // unreadable note in its place.
 func readRecordOnly(src watchSource, gen int) watchBatchMsg {
-	entries, ctxUsed, err := recordHead(src.recordPath, math.MaxInt)
+	entries, ctxUsed, model, err := recordHead(src.recordPath, math.MaxInt)
 	return watchBatchMsg{
 		gen:         gen,
 		isOwnerGone: true,
 		items: []watchItem{
-			{start: &watchStart{entries: entries, ctxUsed: ctxUsed, err: err}},
+			{start: &watchStart{entries: entries, ctxUsed: ctxUsed, model: model, err: err}},
 			{isFinished: true},
 		},
 	}
@@ -702,27 +710,27 @@ func loadWatchStart(raw []byte, recordPath string) watchStart {
 	if frame.Data.Entries <= 0 {
 		return start
 	}
-	start.entries, start.ctxUsed, start.err = recordHead(recordPath, frame.Data.Entries)
+	start.entries, start.ctxUsed, start.model, start.err = recordHead(recordPath, frame.Data.Entries)
 	return start
 }
 
-// recordHead reads the record at path and returns its first n transcript entries and its last
-// observed context fill (Meta.CtxUsed).
-func recordHead(path string, n int) (entries []entry, ctxUsed int, err error) {
+// recordHead reads the record at path and returns its first n transcript entries, its last
+// observed context fill (Meta.CtxUsed) and its bound model (Meta.Model).
+func recordHead(path string, n int) (entries []entry, ctxUsed int, model string, err error) {
 	if path == "" {
-		return nil, 0, errors.New("watch: no record path")
+		return nil, 0, "", errors.New("watch: no record path")
 	}
 	record, err := session.NewStore(filepath.Dir(path)).LoadPath(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	entries, err = decodeTranscript(record.Transcript)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
 	entries = entries[:min(n, len(entries))]
 	closeInterruptedCalls(entries)
-	return entries, record.Meta.CtxUsed, nil
+	return entries, record.Meta.CtxUsed, record.Meta.Model, nil
 }
 
 // foldWatchPoll answers the follower's tick with the next read. A watch whose owner has ended
@@ -820,10 +828,14 @@ func (m Model) foldWatchItem(item watchItem) Model {
 // paintWatchStart (re)paints the watched session from its opening frame: the view is cleared and
 // the record's head replayed directly, with none of replayScrollback's resume notices — the
 // session is not being resumed. The gauge relights from the record's fill, as a resume relights it
-// (resumeLoaded), until a journal usage line moves it.
+// (resumeLoaded), until a journal usage line moves it; the record's model, where it names one,
+// measures the watched sub-agents until a journal usage line names another (watchState.model).
 func (m *Model) paintWatchStart(start watchStart) {
 	m.clearWatchView()
 	m.ctxUsed = start.ctxUsed
+	if start.model != "" {
+		m.watch.model = start.model
+	}
 	m.watch.hasRunFinished = false
 	if title := stripEscapes(start.title); title != "" {
 		m.watch.title = title
@@ -839,8 +851,12 @@ func (m *Model) paintWatchStart(start watchStart) {
 // events go to its own state, everything else through the conversation fold. It leaves out what
 // the live case adds for the owner's own run — the progress save, the stall clock, the mouse
 // re-assert and the decision-pane withdrawal — since the watcher saves nothing and runs nothing.
-// What it adds is the watched window: a usage reading that moves the top-level gauge (depth 0, not
-// maintenance) and names its window makes that window the gauge's limit for the rest of the watch.
+// What it adds is the watched binding: a usage reading that moves the top-level gauge (depth 0, not
+// maintenance) and names its window makes that window the gauge's limit for the rest of the watch,
+// and one that names its model makes that model the watched run's. The conversation fold is handed
+// that pair (topLevelWindow, topLevelModel), so the watched run's sub-agent rows are measured
+// against the run they belong to rather than against the watcher's own binding. Only this routing
+// hands it: an owner Msg folded mid-watch (foldForOwner) reaches foldEvent, which keeps m.opts.
 // A background workflow child's switch of the session's own seat is noted as the live case notes
 // it, and followed nowhere: the server it names is not this process's.
 func (m Model) foldWatchedEvent(e domain.Event) Model {
@@ -849,10 +865,15 @@ func (m Model) foldWatchedEvent(e domain.Event) Model {
 		m.noteWorkflowSessionSwitch(e)
 		return m
 	}
-	if usage, ok := e.(domain.UsageEvent); ok && usage.Depth == 0 && !usage.Maintenance && usage.ContextWindow > 0 {
-		m.watch.window = usage.ContextWindow
+	if usage, ok := e.(domain.UsageEvent); ok && usage.Depth == 0 && !usage.Maintenance {
+		if usage.ContextWindow > 0 {
+			m.watch.window = usage.ContextWindow
+		}
+		if usage.Model != "" {
+			m.watch.model = usage.Model
+		}
 	}
-	return m.foldEvent(e)
+	return m.foldEventAgainst(e, m.topLevelWindow(), m.topLevelModel())
 }
 
 // exchangeEnded reports whether e closes the watched top-level Exchange: a depth-0 Turn that ended

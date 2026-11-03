@@ -627,6 +627,139 @@ func TestWatchLightsTheGaugeFromTheWatchedRun(t *testing.T) {
 	}
 }
 
+// seedRecordModel rewrites the fixture's record with model as its bound model (Meta.Model), leaving
+// the rest of it — and newWatchFixture's own signature — as they are.
+func seedRecordModel(t *testing.T, f *watchFixture, model string) {
+	t.Helper()
+	raw, err := os.ReadFile(f.src.recordPath)
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	var record session.Record
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatalf("unmarshal record: %v", err)
+	}
+	record.Meta.Model = model
+	if raw, err = json.Marshal(record); err != nil {
+		t.Fatalf("marshal record: %v", err)
+	}
+	if err := os.WriteFile(f.src.recordPath, raw, 0o600); err != nil {
+		t.Fatalf("write record: %v", err)
+	}
+}
+
+// delegationEvents are the depth-0 sub_agent call that spawns run (its SpawnRunID set) under name,
+// the started phase its child stamps, and the child's first tool call, which gives its row the
+// summary line its fill and model cells ride on.
+func delegationEvents(run runRef, name string) []domain.Event {
+	return []domain.Event{
+		domain.ToolCallEvent{EventBase: domain.EventBase{Turn: 1}, SpawnRunID: run.id, Call: domain.ToolCall{
+			ID: run.spawn, Tool: subAgentToolName, Arguments: []byte(`{"task":"work","name":"` + name + `"}`),
+		}},
+		domain.SubAgentPhaseEvent{EventBase: stampedBase(run), Phase: domain.SubAgentStarted},
+		domain.ToolCallEvent{EventBase: stampedBase(run), Call: domain.ToolCall{
+			ID: run.id + "-r1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`),
+		}},
+	}
+}
+
+// childUsageOn is run's usage reading: total tokens filled on model, naming no window of its own.
+func childUsageOn(run runRef, model string, total int) domain.UsageEvent {
+	base := stampedBase(run)
+	base.Turn = 1
+	return domain.UsageEvent{EventBase: base, Model: model, PromptTokens: total, TotalTokens: total,
+		Cumulative: domain.Usage{Calls: 1, PromptTokens: total, TotalTokens: total}}
+}
+
+// subAgentRowOf is the rendered line of the transcript that names a sub-agent run, or "" when none
+// does.
+func subAgentRowOf(m Model, name string) string {
+	for _, line := range strings.Split(plainTranscript(m), "\n") {
+		if strings.Contains(line, name) {
+			return line
+		}
+	}
+	return ""
+}
+
+// TestWatchMeasuresSubAgentsAgainstTheWatchedRun pins a watch's sub-agent rows to the watched run's
+// binding: a child is measured against the model and window the watched run is bound to — its
+// depth-0 usage line's, else the record's model — never against the watcher's own, while an owner
+// delegation folded mid-watch keeps the watcher's.
+func TestWatchMeasuresSubAgentsAgainstTheWatchedRun(t *testing.T) {
+	t.Parallel()
+	opts := testOpts
+	opts.Model = "model-a" // the watcher's own binding, with testOpts' 32768 window
+	unrouted := runRef{depth: 1, spawn: "s1", id: "run-s1"}
+	routed := runRef{depth: 1, spawn: "s2", id: "run-s2"}
+	watchedUsage := domain.UsageEvent{EventBase: domain.EventBase{Turn: 1}, Model: "model-b",
+		ContextWindow: 131072, PromptTokens: 20000, TotalTokens: 20000,
+		Cumulative: domain.Usage{Calls: 1, PromptTokens: 20000, TotalTokens: 20000}}
+	enter := func(t *testing.T, f *watchFixture) Model {
+		t.Helper()
+		m, cmd := newTestModelEng(t, watchEngine(), opts).enterWatch(f.src)
+		if !m.watch.isActive || cmd == nil {
+			t.Fatal("setup: enterWatch did not enter watch mode")
+		}
+		return step(t, m, cmd())
+	}
+
+	t.Run("the watched run's depth-0 usage line binds its children", func(t *testing.T) {
+		t.Parallel()
+		f := newWatchFixture(t, "watched", nil, 0)
+		m := enter(t, f)
+		f.emit(watchedUsage)
+		f.emit(delegationEvents(unrouted, "scout-one")...)
+		f.emit(delegationEvents(routed, "scout-two")...)
+		f.emit(childUsageOn(unrouted, "model-b", 12000), childUsageOn(routed, "model-a", 9000))
+		m = pollWatch(t, m)
+
+		one := subAgentRowOf(m, "scout-one")
+		if strings.Contains(one, "model-b") || !strings.Contains(one, "/128k") {
+			t.Errorf("unrouted child's row = %q; want no model-b cell and a fill against the watched window (/128k)", one)
+		}
+		if two := subAgentRowOf(m, "scout-two"); !strings.Contains(two, "model-a") {
+			t.Errorf("routed child's row = %q; want the model-a cell — the watcher's model is not the watched run's", two)
+		}
+	})
+
+	t.Run("the record's model binds them before any usage line names one", func(t *testing.T) {
+		t.Parallel()
+		f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+		seedRecordModel(t, f, "model-b")
+		m := enter(t, f)
+		f.emit(delegationEvents(unrouted, "scout-one")...)
+		f.emit(childUsageOn(unrouted, "model-b", 12000))
+		m = pollWatch(t, m)
+
+		if one := subAgentRowOf(m, "scout-one"); !strings.Contains(one, "12k/32k") || strings.Contains(one, "model-b") {
+			t.Errorf("unrouted child's row = %q; want its fill (12k/32k) and no model-b cell — the record binds the watched run to model-b", one)
+		}
+	})
+
+	t.Run("an owner delegation folded mid-watch keeps the watcher's binding", func(t *testing.T) {
+		t.Parallel()
+		f := newWatchFixture(t, "watched", nil, 0)
+		m := enter(t, f)
+		f.emit(watchedUsage)
+		m = pollWatch(t, m)
+		owner := runRef{depth: 1, spawn: "own-s1", id: "own-run"}
+		for _, e := range append(delegationEvents(owner, "owner-scout"), childUsageOn(owner, opts.Model, 6000)) {
+			m = step(t, m, eventMsg{Event: e})
+		}
+
+		m = step(t, m, keyEsc())
+
+		if m.watch.isActive {
+			t.Fatal("esc did not leave the watch")
+		}
+		row := subAgentRowOf(m, "owner-scout")
+		if strings.Contains(row, "model-a") || !strings.Contains(row, "6k/32k") {
+			t.Errorf("owner's row = %q; want no model cell and a fill against the watcher's own window (6k/32k)", row)
+		}
+	})
+}
+
 func TestWatchMakesNoEngineCallAndEscGoesBack(t *testing.T) {
 	t.Parallel()
 	eng := watchEngine()

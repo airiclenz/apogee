@@ -37,7 +37,16 @@ const throughputWindowFloor = 250 * time.Millisecond
 // foldEvent folds one engine Event into the view: the live token stats, the thinking board, the
 // advice board, the wire and attempt rings, then the transcript, then the activity phrase. It mutates the local copy and returns
 // it, like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
+// A sub-agent's reading is measured against the session's own bound window and model (m.opts).
 func (m Model) foldEvent(e domain.Event) Model {
+	return m.foldEventAgainst(e, m.opts.ContextWindow, m.opts.Model)
+}
+
+// foldEventAgainst is foldEvent with the run the Event belongs to named: window and model are that
+// run's bound window and model, which its sub-agent readings are measured against. The session's
+// own Events are its own run's (foldEvent); a read-only watch's journal Events are the watched
+// run's (foldWatchedEvent), which a watch never writes into m.opts.
+func (m Model) foldEventAgainst(e domain.Event, window int, model string) Model {
 	e = m.countedUsage(e) // a resumed session under its own label counts later calls unpriced
 	m = m.foldStats(e)
 	// Order-free, and placed here rather than woven into the dependency below because it has none:
@@ -65,13 +74,14 @@ func (m Model) foldEvent(e domain.Event) Model {
 	}
 	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
 	// is a FILL, so it needs the window it fills — and where the reading names none, that window is
-	// a Model fact. It is HANDED in, by the same rule foldActivity is handed its answer below,
-	// rather than reached for sideways from inside the transcript. The session's own bound model
-	// rides in beside it on the same terms: the reading names the model that produced it, and only
-	// the Model knows what that is DIFFERENT from (ADR 0045). The two travel together and are used
-	// oppositely — the window is the FALLBACK behind the reading's own (a routed child fills the
+	// a fact of the run the reading belongs to. It is HANDED in, by the same rule foldActivity is
+	// handed its answer below, rather than reached for sideways from inside the transcript. That
+	// run's bound model rides in beside it on the same terms: the reading names the model that
+	// produced it, and only the caller knows what that is DIFFERENT from (ADR 0045) — the session's
+	// own binding for its own run, the watched run's inside a watch. The two travel together and are
+	// used oppositely — the window is the FALLBACK behind the reading's own (a routed child fills the
 	// Delegation target's window), the model the YARDSTICK the reading's own is measured against.
-	m.transcript.applyUsage(e, m.opts.ContextWindow, m.opts.Model)
+	m.transcript.applyUsage(e, window, model)
 	// The band's half of the same delivery report the transcript just folded: a message the human
 	// addressed to a running child is accounted for by the engine (ADR 0063), so the staged row
 	// that stood for it comes off here rather than on a timer (interject.go).

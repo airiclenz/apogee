@@ -50,7 +50,11 @@
 - 4 (re-check): guard folded — `reflect.VisibleFields` named for the promoted fields; `fieldsRead` deleted; `make lint` and a grep for the deleted park symbols added to Acceptance.
 - 8 (re-check): guard folded — `sessions.md` check greps the unwrapped prefix; deleted-symbol grep over `layout.md`, `docs/manual`, `.capcom/knowledge` and a `layout.md` grep for the new sentences; glossary Note `event-journal` in Files and the members rule; `layout.md` names both fallback cases.
 
-## 1. A watch measures sub-agent rows against the watched run
+## 1. A watch measures sub-agent rows against the watched run — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the watched pair reaches the fold through a new `foldEventAgainst(e, window, model)`. `foldEvent(e)` is now a thin wrapper that passes `m.opts`, so its ~150 test callers and the live `eventMsg` case (and with it `foldForOwner`'s owner fold) keep the session's own binding. Only `foldWatchedEvent` passes `topLevelWindow()`/`topLevelModel()`. This follows the item's Regression guard, which overrides the Approach's `foldEvent` bullet.
+NOTES (2026-11-03): `recordHead` now returns a fourth value, `model` (Meta.Model), alongside `ctxUsed`. `contextGauge`'s doc sentence now names the top-level run's window as the run-view fallback, because its code now reads it.
+NOTES (2026-11-03): `TestWatchMeasuresSubAgentsAgainstTheWatchedRun` gives each child a first tool call, because a running child's row only gets its summary line (fill and model cells) once one exists. Confirmed by temporarily stashing the non-test changes: cases 1 and 2 fail at the base. Case 3 fails when `foldEvent` passes `topLevelWindow()`/`topLevelModel()`.
 
 **What:**
 Fix for `watch-child-model-mismatch` (not a regression: wrong since watch shipped on 2026-10-17). `foldEvent` hands `applyUsage` the watcher's `opts.ContextWindow` and `opts.Model`, which a watch does not swap. So an unrouted child of a session on another model shows `· <its model>`, and a child routed onto the watcher's model shows no cell.
