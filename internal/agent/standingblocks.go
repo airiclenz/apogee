@@ -95,6 +95,9 @@ type standingRender struct {
 // renders into the seeded message and ContextCost (contextcost.go) counts them piece by piece,
 // so the two cannot disagree on which blocks a request carries.
 func (a *Agent) standingRenders() []standingRender {
+	if a.onStandingRender != nil {
+		a.onStandingRender()
+	}
 	rows := standingBlocks()
 	rendered := make([]standingRender, len(rows))
 	seeded := false

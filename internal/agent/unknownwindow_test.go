@@ -63,7 +63,7 @@ func TestUnknownWindowBoundsShareOneCeiling(t *testing.T) {
 		calibrate(guarded) // CALIBRATED: the ratio margin is out of the way and the ceiling is the bare one
 		exceeds := func() bool {
 			req := domain.NewRequest(guarded.cfg.Model, guarded.conv.Messages(), guarded.toolMenu(), guarded.budget(), 0)
-			return guarded.requestExceedsWindow(req)
+			return guarded.requestRoom().exceeds(req, guarded.conv.Messages())
 		}
 		guarded.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("x", ceiling)})
 		if exceeds() {
@@ -92,11 +92,11 @@ func TestUnknownWindowBoundsShareOneCeiling(t *testing.T) {
 
 	t.Run("the structural tool-result clamp", func(t *testing.T) {
 		atCeiling := linesOfExactly(ceiling)
-		if got := a.clampToolResult(atCeiling); got != atCeiling {
+		if got := a.clampToolResult(a.requestRoom(), atCeiling); got != atCeiling {
 			t.Errorf("a result of exactly the %d-char ceiling was clamped to %d chars", ceiling, len(got))
 		}
 		over := linesOfExactly(ceiling + 1)
-		if got := a.clampToolResult(over); got == over {
+		if got := a.clampToolResult(a.requestRoom(), over); got == over {
 			t.Errorf("a result of %d chars past the %d-char ceiling was committed whole", len(over), ceiling)
 		}
 	})
@@ -163,7 +163,7 @@ func TestUnknownWindowClampKeepsTheFoldSurvivable(t *testing.T) {
 	a, ceiling := unknownWindowAgent(t, &recordingSink{})
 
 	giant := numberedLines(20_000) // ~1.6 MB — a whole-file read, the audit's shape
-	committed := a.clampToolResult(giant)
+	committed := a.clampToolResult(a.requestRoom(), giant)
 
 	if len(committed) >= len(giant) {
 		t.Fatalf("a %d-char result was committed unclamped", len(giant))
@@ -233,7 +233,7 @@ func TestKnownWindowIgnoresTheUnknownWindowCeiling(t *testing.T) {
 	}
 
 	between := linesOfExactly(ceiling + 1) // one char past the ceiling, well under the allocation
-	if got := a.clampToolResult(between); got != between {
+	if got := a.clampToolResult(a.requestRoom(), between); got != between {
 		t.Errorf("a result past the assumed ceiling but under the History allocation was clamped (%d chars in, %d out)",
 			len(between), len(got))
 	}
@@ -243,7 +243,7 @@ func TestKnownWindowIgnoresTheUnknownWindowCeiling(t *testing.T) {
 		t.Error("a history past the assumed ceiling but under the History allocation tripped the boundary trigger")
 	}
 	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), nil, a.budget(), 0)
-	if a.requestExceedsWindow(req) {
+	if a.requestRoom().exceeds(req, a.conv.Messages()) {
 		t.Error("a request past the assumed ceiling but inside the working room tripped the predictive guard")
 	}
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -34,6 +35,14 @@ func roomTestBudget(used int) domain.Budget {
 	}
 }
 
+// roomTestRows is a standing render of one row carrying standing, or nil (nothing seeded) for "".
+func roomTestRows(standing string) []standingRender {
+	if standing == "" {
+		return nil
+	}
+	return []standingRender{{name: "prompt", rendered: standing}}
+}
+
 // roomTestMessages is one user message weighing exactly tokens at the fixture ratio.
 func roomTestMessages(tokens int) []domain.Message {
 	return []domain.Message{{Role: domain.RoleUser, Content: strings.Repeat("x", tokens*roomTestCharsPerToken)}}
@@ -59,7 +68,7 @@ func TestRequestRoomWeightCountsStandingAndMenu(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := newRequestRoom(roomTestBudget(1), tt.standing, tt.menu)
+			r := newRequestRoom(roomTestBudget(1), roomTestRows(tt.standing), tt.menu)
 			if got := r.weight(tt.msgs); got != tt.want {
 				t.Errorf("weight = %d, want %d", got, tt.want)
 			}
@@ -99,7 +108,7 @@ func TestRequestRoomFreshShare(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := newRequestRoom(tt.budget, tt.standing, nil)
+			r := newRequestRoom(tt.budget, roomTestRows(tt.standing), nil)
 			if got := r.freshShare(tt.msgs, tt.pending); got != tt.want {
 				t.Errorf("freshShare(pending %d) = %d, want %d", tt.pending, got, tt.want)
 			}
@@ -112,7 +121,7 @@ func TestRequestRoomFreshShare(t *testing.T) {
 func TestRequestRoomFreshShareRollsForward(t *testing.T) {
 	t.Parallel()
 
-	r := newRequestRoom(roomTestBudget(1), "", nil)
+	r := newRequestRoom(roomTestBudget(1), nil, nil)
 	msgs := roomTestMessages(roomTestRoom - 3000)
 	first := r.freshShare(msgs, 2)
 	small := domain.Message{Role: domain.RoleTool, Content: strings.Repeat("r", 100*roomTestCharsPerToken)}
@@ -153,7 +162,7 @@ func TestRequestRoomExceeds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := newRequestRoom(tt.budget, "", nil)
+			r := newRequestRoom(tt.budget, nil, nil)
 			req := domain.NewRequest("m", tt.req, nil, tt.budget, 0)
 			if got := r.exceeds(req, tt.conv); got != tt.want {
 				t.Errorf("exceeds = %v, want %v", got, tt.want)
@@ -185,7 +194,7 @@ func TestRequestRoomFit(t *testing.T) {
 		{name: "many-line body takes the line elision", content: manyLines, want: apogeectx.TruncateToolResult(manyLines, maxChars)},
 		{name: "long-line body takes the byte elision", content: longLine, want: apogeectx.ElideToBytes(longLine, maxChars)},
 	}
-	r := newRequestRoom(roomTestBudget(1), "", nil)
+	r := newRequestRoom(roomTestBudget(1), nil, nil)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -197,5 +206,33 @@ func TestRequestRoomFit(t *testing.T) {
 				t.Errorf("fit left %d tokens, over the %d bound", tokens, bound)
 			}
 		})
+	}
+}
+
+// TestAppendToolResultRendersStandingOnce pins one standing render per tool-result commit (plan
+// 2026-11-02 - 05, item 3): commitCall builds one request room, and the post-tool-result cascade
+// (loopView's projection and the armed fill notice's bound), the clamp, the result's
+// EstimatedTokens and the ContextEstimateEvent all read it. The fixture has no usage reading, so
+// the estimate takes the ContextEstimate path, and no max-output pin, so the projection's reply
+// cap is derived from the Budget.
+func TestAppendToolResultRendersStandingOnce(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := fillConfig(sink)
+	cfg.SystemPrompt = "You are a careful engineer."
+	a := fillAgent(t, cfg)
+	renders := 0
+	a.onStandingRender = func() { renders++ }
+	slot := &dispatchSlot{
+		call:   domain.ToolCall{ID: "c1", Tool: "read_file"},
+		result: domain.ToolResult{CallID: "c1", Content: "the file's body"},
+	}
+
+	a.commitCall(context.Background(), 0, slot)
+
+	if renders != 1 {
+		t.Errorf("one commit rendered the standing table %d times, want 1", renders)
+	}
+	if a.turns.commitRoom != nil {
+		t.Errorf("the commit's request room outlived the commit")
 	}
 }

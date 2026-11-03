@@ -264,7 +264,7 @@ func TestFreshResultTakesOnlyTheRoomLeftEndToEnd(t *testing.T) {
 	}})
 	a := seqcomAgent(t, sink, modelListLine(), up)
 	calibrate(a)
-	room, ceiling := freshRoom(t, a), a.structuralFloor()
+	room, ceiling := freshRoom(t, a), a.requestRoom().structuralFloor()
 	// A prompt that leaves half the History allocation in the request: under the ceiling, so the
 	// room left is what bounds the result, and over the 1/8 floor, so the share is not floored.
 	standing := requestTokens(a, []domain.Message{{Role: domain.RoleUser}})

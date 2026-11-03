@@ -49,7 +49,7 @@ const (
 	// (overflowGiveUpErr, loop.go).
 	//
 	// It is also the ONE ceiling the other three window-gated growth bounds fall back to — the
-	// predictive guard (requestExceedsWindow, loop.go), the boundary compaction trigger
+	// predictive guard (requestRoom.exceeds, requestroom.go), the boundary compaction trigger
 	// (historyExceedsAllocation) and the structural tool-result clamp (clampToolResult,
 	// dispatch.go, whose room-left bound has no room to share without a window and takes this
 	// ceiling whole — freshResultBound) — rather than each inventing its own default, and the substitution is made at
@@ -73,9 +73,9 @@ const (
 )
 
 // growthBounds are the window-gated bounds the engine lets the conversation grow against: the
-// room a request may fill before the predictive guard fires (requestExceedsWindow, loop.go), the
+// room a request may fill before the predictive guard fires (requestRoom.exceeds, requestroom.go), the
 // History floor the boundary trigger and the structural clamps measure against
-// (historyExceedsAllocation; structuralFloor, dispatch.go), and the token budget the summary
+// (historyExceedsAllocation; requestRoom.structuralFloor, requestroom.go), and the token budget the summary
 // call's transcript is rendered into (compactTranscriptChars). TWO windows feed them, never one:
 // room and transcriptBudget derive off the ADVERTISED window (Budget.Window), the wall the server
 // enforces and the one that drives overflow detection, while historyFloor derives off the
@@ -91,7 +91,7 @@ const (
 type growthBounds struct {
 	// windowKnown reports whether an advertised window with room past its reserve backs room.
 	// False means room is the fallback and the predictive guard measures the TRANSCRIPT alone
-	// against it — the only part a fold can shed (requestExceedsWindow).
+	// against it — the only part a fold can shed (requestRoom.exceeds).
 	windowKnown bool
 	// room is what a request may fill: the advertised window less the response reserve. It is
 	// pre-margin — the uncalibrated margin (uncalibratedRoomMargin) stays the reader's live read

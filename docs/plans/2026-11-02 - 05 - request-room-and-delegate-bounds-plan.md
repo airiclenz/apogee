@@ -95,7 +95,18 @@ Depends on item 1.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestRequestRoom|TestFreshResult|TestFreshOversized|TestSeqcomOverflow|TestOversizedToolResult|TestClampToBound|TestUnknownWindowClamp|TestPredictiveGuard|TestKnownWindowIgnores|TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass' ./internal/agent/`
 **Commit:** `refactor(agent): one request-room module for the measure, the share and the clamp`
 
-## 3. One room per commit
+## 3. One room per commit — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the room now carries the standing rows (requestRoom.rows) and derives its Budget from them (Agent.budgetOf, budget()'s body over a taken render); standingMeasured takes the rows, standingSystem joins through joinStanding, newRequestRoom takes rows instead of the joined string (requestroom_test.go builds them through roomTestRows).
+NOTES (2026-11-03): commitCall builds the room and parks it on turnLifecycle.commitRoom (cleared by defer); loopView and contextFillNotice read it there and fall back to a live Budget / a room of their own when it is unset (adviseOneCall's path). settleCancelledLeaf builds one room for its append; commitNotRun builds one at entry (when it has calls) for all its appends and keeps its signature.
+NOTES (2026-11-03): freshResultBound and clampToolResult keep their names but take the caller's room (no longer composing one); clampToBound and requestExceedsWindow are removed (callers use room.fit / room.exceeds); structuralFloor moved with its doc comment onto requestRoom (requestroom.go); refBound became a package func taking the room; clampRef/refBlock/resolveFileRefs take the room.
+NOTES (2026-11-03): resolveSkillRefs keeps its signature (skillmount_test.go), so it builds one room of its own for its clamps — a message with attached skills takes two standing renders (composeUserMessage's for refBound, resolveSkillRefs' for the clamp), down from one per clamped block before; buildRequest passes a.budget() to newProjection unchanged (item 4 owns that path).
+NOTES (2026-11-03): consequential edit — internal/agent/agent.go: made necessary by the render-count seam TestAppendToolResultRendersStandingOnce counts through (the Agent.onStandingRender field, nil in production).
+NOTES (2026-11-03): consequential edit — internal/agent/standingblocks.go: made necessary by the render-count seam (standingRenders calls onStandingRender when set).
+NOTES (2026-11-03): consequential edit — internal/agent/compact.go: made necessary by removing requestExceedsWindow and moving structuralFloor (comments now name requestRoom.exceeds / requestRoom.structuralFloor).
+NOTES (2026-11-03): consequential edit — internal/agent/freshresult_overflow_test.go: made necessary by moving structuralFloor onto requestRoom (caller migrated to a.requestRoom().structuralFloor()).
+NOTES (2026-11-03): consequential edit — internal/agent/autocompact_guard_test.go: made necessary by removing requestExceedsWindow (comment names requestRoom.exceeds).
+NOTES (2026-11-03): reactions.go needed no edit — loopView keeps its signature and reads the commit's room itself. The render-count test bites: with the commitRoom hand-off disabled it reports 3 renders.
 
 Depends on item 2.
 

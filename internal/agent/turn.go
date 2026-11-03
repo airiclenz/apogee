@@ -56,6 +56,14 @@ type turnLifecycle struct {
 	// dispatch takes the whole room. Transient like wrapUp: neither configured nor serialized.
 	resultsToAppend int
 
+	// commitRoom is the request room of the tool-result commit in flight (commitCall, dispatch.go),
+	// nil outside one: set as the commit builds its room and cleared as it returns, so the
+	// post-tool-result cascade that runs inside the commit reads the commit's one Budget and
+	// standing render — loopView's projection and the fill notice's bound (contextFillNotice) —
+	// rather than rendering its own. A reader finding it nil builds a room of its own. Transient like
+	// resultsToAppend: neither configured nor serialized, and never read past the commit that set it.
+	commitRoom *requestRoom
+
 	// compactSat is the saturation latch (S2): a prior automatic fold could not bring the history
 	// under its allocation (an oversized protected prefix), so further automatic folds stand down
 	// until the estimate drops back under it (foldSaturated / autoFoldArmed, compact.go). With no

@@ -477,7 +477,8 @@ func TestClampToBound_SharedByToolResultsAndFileRefs(t *testing.T) {
 	// One explicit bound for both seams: a lone reference's (refBound(1)) — the tool-result seam's
 	// own bound is its share of the room left in the request (freshResultBound), which the default
 	// menu at this window shrinks far below the History allocation a lone reference keeps.
-	viaToolResult := a.clampToBound(big, a.refBound(1)) // taken before the Turn, so both readings share one Budget
+	room := a.requestRoom() // taken before the Turn, so both readings share one Budget
+	viaToolResult := room.fit(big, refBound(room, 1))
 	if viaToolResult == big {
 		t.Fatalf("the payload of %d chars was not clamped at all; the comparison would be vacuous", len(big))
 	}
@@ -535,7 +536,7 @@ func TestResolveFileRefs_CapsAReferenceAtTheAbsoluteBound(t *testing.T) {
 
 	a, sink := clippingRefAgent(t, dir, largeWindow)
 	capChars := int(float64(fileRefMaxTokens) * a.budget().CharsPerToken)
-	if share := a.structuralFloor(); share <= fileRefMaxTokens {
+	if share := a.requestRoom().structuralFloor(); share <= fileRefMaxTokens {
 		t.Fatalf("History share = %d tokens on a %d-token window; the share, not the cap, would bind", share, largeWindow)
 	}
 
@@ -575,7 +576,7 @@ func TestResolveFileRefs_ShareBoundClipNamesItsOwnBound(t *testing.T) {
 	writeRefFile(t, dir, "big.txt", 400, longFiller)
 
 	a, sink := clippingRefAgent(t, dir, floorWindow)
-	share := a.structuralFloor()
+	share := a.requestRoom().structuralFloor()
 	if share >= fileRefMaxTokens {
 		t.Fatalf("History share = %d tokens on the %d-token window; the cap, not the share, would bind", share, floorWindow)
 	}

@@ -447,7 +447,7 @@ func compactionErrorTexts(events []domain.Event) []string {
 // ErrorEvent, and that event must say the trigger stood down.
 //
 // The four Turns keep the existing 25k-char result + "ok" reply shape deliberately: that keeps every
-// request under requestExceedsWindow's doubled uncalibrated room (loop.go), so the latch-exempt
+// request under requestRoom.exceeds's doubled uncalibrated room (requestroom.go), so the latch-exempt
 // emergencyFold never fires and adds a summary call of its own — summaryCalls == 1 is the
 // estimate-driven trigger's own count.
 func TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange(t *testing.T) {

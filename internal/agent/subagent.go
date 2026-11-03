@@ -2335,10 +2335,11 @@ func (a *Agent) contextPrefix(files []sharedFile) string {
 	if len(files) == 0 {
 		return ""
 	}
-	bound := a.refBound(len(files))
+	room := a.requestRoom()
+	bound := refBound(room, len(files))
 	var b strings.Builder
 	for _, file := range files {
-		b.WriteString(a.refBlock(a.turns.index, file.path, file.path, "", file.content, bound))
+		b.WriteString(a.refBlock(a.turns.index, room, file.path, file.path, "", file.content, bound))
 	}
 	return b.String()
 }

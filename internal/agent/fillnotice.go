@@ -57,10 +57,17 @@ var (
 //
 // The result is measured as appendToolResult will commit it: no longer than the bound its clamp
 // applies (freshResultBound), so a result the clamp elides reads at its committed size rather than
-// its raw one, and the rung reports the fill the model will actually see.
+// its raw one, and the rung reports the fill the model will actually see. The bound is read from
+// the request room of the commit in flight (turnLifecycle.commitRoom) — the very room the clamp
+// then applies — and from a room of its own when the cascade fires outside a commit.
 func (a *Agent) contextFillNotice(_ context.Context, view domain.LoopView, _ domain.ToolCall, result *domain.ToolResultEdit) (domain.Outcome, error) {
 	budget := view.Budget()
-	boundChars := int(float64(a.freshResultBound()) * budget.CharsPerToken)
+	room := a.turns.commitRoom
+	if room == nil {
+		own := a.requestRoom()
+		room = &own
+	}
+	boundChars := int(float64(a.freshResultBound(*room)) * budget.CharsPerToken)
 	chars := domain.ConversationChars(view.Conversation()) + min(len(result.Content()), boundChars)
 	fill := budget.HistoryFill(chars)
 	if fill <= 0 {

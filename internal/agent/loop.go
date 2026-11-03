@@ -1375,7 +1375,7 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	if sys := a.standingSystem(); sys != "" {
 		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
 	}
-	req := a.newProjection(msgs, turn)
+	req := a.newProjection(msgs, turn, a.budget())
 	// The wrap-up directive (subagent.go), stamped at the same moment and for the same reason as
 	// the reply ceiling newProjection stamps: after construction, before any pre-request hook,
 	// because it is the engine's own bound and must hold under Bypass, where no hook runs at all.
@@ -1428,7 +1428,13 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 // standingRenders, shared with ContextCost (contextcost.go) so the report counts exactly the
 // blocks the request carries.
 func (a *Agent) standingSystem() string {
-	rows := a.standingRenders()
+	return joinStanding(a.standingRenders())
+}
+
+// joinStanding joins one standing render's non-empty rows with a blank line — the seeded system
+// content standingSystem returns and a request room carries (requestRoom.standing) — or "" when the
+// render seeded nothing (nil rows).
+func joinStanding(rows []standingRender) string {
 	if rows == nil {
 		return ""
 	}
@@ -1479,16 +1485,10 @@ func (a *Agent) systemPrompt() string {
 // on calibration: waiting for the first UsageEvent would leave exactly those Turns unprotected.
 const uncalibratedRoomMargin = 2
 
-// requestExceedsWindow reports whether req's prompt is ALREADY estimated to be too big for the
-// model's context window — the predictive half of overflow protection, read by step() between
-// building a request and sending it. The arithmetic is this Agent's request room's
-// (requestRoom.exceeds, requestroom.go), measured against the conversation req was projected from.
-func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
-	return a.requestRoom().exceeds(req, a.conv.Messages())
-}
-
 // predictiveFoldDue is the predictive guard's verdict at its call site in step(): whether the
-// request about to be sent must be folded first. It is requestExceedsWindow, damped on an unknown
+// request about to be sent must be folded first. It is the request room's window check
+// (requestRoom.exceeds, requestroom.go — one room built per check, measured against the
+// conversation req was projected from), damped on an unknown
 // window once a fold has saturated (compactSat): there the guard stays quiet until the transcript
 // estimate grows past uncalibratedRoomMargin times the estimate recorded when the latch was set
 // (compactSatTokens), then fires again, once, and the fold re-records the baseline — damping, never
@@ -1498,10 +1498,11 @@ func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 // guard measures the whole request against the advertised room, which the saturation check does
 // not, so the latch says nothing about whether this fold can help.
 func (a *Agent) predictiveFoldDue(req *domain.Request) bool {
-	if !a.requestExceedsWindow(req) {
+	room := a.requestRoom()
+	if !room.exceeds(req, a.conv.Messages()) {
 		return false
 	}
-	if !a.turns.compactSat || deriveGrowthBounds(a.budget()).windowKnown {
+	if !a.turns.compactSat || room.bounds.windowKnown {
 		return true
 	}
 	return a.transcriptTokens() > uncalibratedRoomMargin*a.turns.compactSatTokens
@@ -1521,7 +1522,7 @@ func (a *Agent) latchPredictiveSaturation(turn int) {
 }
 
 // transcriptTokens estimates the conversation alone — no tool menu, no standing system content —
-// through the Budget's chars→token ratio: the quantity requestExceedsWindow measures on an unknown
+// through the Budget's chars→token ratio: the quantity requestRoom.exceeds measures on an unknown
 // window, and the one the saturation latch records as its damping baseline.
 func (a *Agent) transcriptTokens() int {
 	return a.budget().EstimateTokens(domain.PromptChars(a.conv.Messages(), nil))
@@ -1556,20 +1557,21 @@ const fileRefMaxTokens = 32_000
 // never a looser one, and a lone reference keeps the whole floor — the ceiling a tool result's
 // share of the room left is held under (freshResultBound, dispatch.go).
 //
-// Computed ONCE per message by the caller (loop.go's pending-input consumption, Interject) and
-// handed to both resolvers, so the two seams cannot drift into two different arithmetics.
-func (a *Agent) refBound(refs int) int {
-	return min(max(a.structuralFloor()/max(refs, 1), 1), fileRefMaxTokens)
+// Computed ONCE per message by the caller (loop.go's pending-input consumption, Interject) from
+// the request room it built for that message, and handed to both resolvers, so the two seams
+// cannot drift into two different arithmetics.
+func refBound(room requestRoom, refs int) int {
+	return min(max(room.structuralFloor()/max(refs, 1), 1), fileRefMaxTokens)
 }
 
-// clampRef bounds one reference block against bound exactly as clampToBound does — the same
-// elision, byte for byte — and reports the clip as a domain.RefClippedEvent NOTE when it
-// happened: a clip that worked is housekeeping the human is owed a line about, never a fault,
+// clampRef bounds one reference block against bound through room's elision (requestRoom.fit) —
+// the one a tool result's clamp renders, byte for byte — and reports the clip as a
+// domain.RefClippedEvent NOTE when it happened: a clip that worked is housekeeping the human is owed a line about, never a fault,
 // so it does not ride the missing-reference ErrorEvent (refIgnored). The note names the bound
 // that clipped: the absolute cap when bound IS fileRefMaxTokens, else the reference's share of
 // the History allocation, which binds instead on a small window.
-func (a *Agent) clampRef(turn int, ref, content string, bound int) string {
-	clamped := a.clampToBound(content, bound)
+func (a *Agent) clampRef(turn int, room requestRoom, ref, content string, bound int) string {
+	clamped := room.fit(content, bound)
 	if len(clamped) < len(content) {
 		a.cfg.Events.Emit(domain.RefClippedEvent{
 			EventBase: a.base(turn),
@@ -1601,8 +1603,8 @@ func (a *Agent) clampRef(turn int, ref, content string, bound int) string {
 // extracted document, so the model is told the format, the page count, and that the lines
 // below are read-only before it tries to edit what it cannot write back.
 //
-// Every block carries the same STRUCTURAL clamp a tool result has (clampToBound, dispatch.go),
-// against a bound of its own: content past its share of the History allocation — or past fileRefMaxTokens, whichever is
+// Every block carries the same STRUCTURAL clamp a tool result has (requestRoom.fit, through the
+// caller's room), against a bound of its own: content past its share of the History allocation — or past fileRefMaxTokens, whichever is
 // smaller — is elided to the shared head/tail-plus-marker shape BEFORE the header is added, so
 // the model still reads which file an elided block came from and, for a document, how many pages
 // it had. The bound is the CALLER'S (refBound), not this function's: one message's attached
@@ -1630,7 +1632,13 @@ func (a *Agent) clampRef(turn int, ref, content string, bound int) string {
 // bound server does not accept images (Config.Vision) or when it breaks a cap (imageCapError) —
 // attached is the bytes the message already carries before the refs (UserInput.Images), so the
 // per-message cap counts them too.
-func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bound, attached int) (string, []domain.Image) {
+func (a *Agent) resolveFileRefs(
+	ctx context.Context,
+	turn int,
+	room requestRoom,
+	refs []string,
+	bound, attached int,
+) (string, []domain.Image) {
 	if len(refs) == 0 {
 		return "", nil
 	}
@@ -1638,7 +1646,7 @@ func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bo
 	var images []domain.Image
 	// TWICE the clamp's char budget, so a document elided to the head/tail shape has real content
 	// at both ends rather than a head the extractor stopped in the middle of.
-	extractBytes := 2 * int(float64(bound)*a.budget().CharsPerToken)
+	extractBytes := 2 * int(float64(bound)*room.budget.CharsPerToken)
 	for _, ref := range refs {
 		data, err := a.readFileRef(ref)
 		if err != nil {
@@ -1663,7 +1671,7 @@ func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bo
 			}
 			content, annotation = extracted, " ("+doctext.PDFAnnotation(pages)+")"
 		}
-		b.WriteString(a.refBlock(turn, "@"+ref, ref, annotation, content, bound))
+		b.WriteString(a.refBlock(turn, room, "@"+ref, ref, annotation, content, bound))
 	}
 	return b.String(), images
 }
@@ -1678,8 +1686,8 @@ const refBlockFormat = "Referenced file `%s`%s:\n```\n%s\n```\n\n"
 // to bound first (clampRef), so the header survives an elision; label is the reference as the
 // human or model spelled it, which a clip note names (domain.RefClippedEvent), and ref is the path
 // the header names.
-func (a *Agent) refBlock(turn int, label, ref, annotation, content string, bound int) string {
-	return fmt.Sprintf(refBlockFormat, ref, annotation, a.clampRef(turn, label, content, bound))
+func (a *Agent) refBlock(turn int, room requestRoom, label, ref, annotation, content string, bound int) string {
+	return fmt.Sprintf(refBlockFormat, ref, annotation, a.clampRef(turn, room, label, content, bound))
 }
 
 // visionRefusalFormat is the refusal an image meets on a server whose entry does not opt into image
@@ -1858,7 +1866,7 @@ func (a *Agent) readFileRef(ref string) ([]byte, error) {
 // every {{SKILL_DIR}} expanded to that Dir (ResolvedSkill.Expand), and the closer. The blank line
 // separating one block from the next is this function's.
 //
-// A body meets the same STRUCTURAL floor an @file block does (clampToBound, dispatch.go): content
+// A body meets the same STRUCTURAL floor an @file block does (requestRoom.fit): content
 // past its share of the History allocation is elided to the shared head/tail-plus-marker shape
 // BEFORE the header and the files: line are added, so the model still reads which skill an elided
 // block came from and where its bundled files live. A skill body is instruction text a human
@@ -1889,6 +1897,9 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 		byID[s.ID] = s
 	}
 
+	// One room for the whole list: the clamp reads only its Budget's ratio, and nothing between two
+	// skills moves it.
+	room := a.requestRoom()
 	var b strings.Builder
 	for _, id := range ids {
 		s, ok := byID[id]
@@ -1900,7 +1911,7 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 			})
 			continue
 		}
-		body := a.clampRef(turn, "/"+id, s.Expand(s.Body), bound)
+		body := a.clampRef(turn, room, "/"+id, s.Expand(s.Body), bound)
 		b.WriteString(s.Block(body))
 		b.WriteString("\n")
 	}
@@ -1932,9 +1943,10 @@ func (a *Agent) composeUserMessage(ctx context.Context, turn int, in domain.User
 		launched = a.launchRecipe(ctx, turn, in, recipe)
 		skillIDs = skillIDs[1:]
 	}
-	bound := a.refBound(len(skillIDs) + len(in.FileRefs))
+	room := a.requestRoom()
+	bound := refBound(room, len(skillIDs)+len(in.FileRefs))
 	skillBlocks := a.resolveSkillRefs(turn, skillIDs, bound)
-	refs, refImages := a.resolveFileRefs(ctx, turn, in.FileRefs, bound, imageBytes(in.Images))
+	refs, refImages := a.resolveFileRefs(ctx, turn, room, in.FileRefs, bound, imageBytes(in.Images))
 	var images []domain.Image
 	if len(in.Images)+len(refImages) > 0 {
 		images = append(slices.Clone(in.Images), refImages...)
@@ -1971,10 +1983,17 @@ func (a *Agent) composeUserMessage(ctx context.Context, turn int, in domain.User
 // PRODUCED — every reader (the fill notice, Prune, HistoryExceedsAllocation, the fold trigger and
 // structuralFloor) reads the one number set here.
 func (a *Agent) budget() domain.Budget {
+	return a.budgetOf(a.standingRenders())
+}
+
+// budgetOf is budget's body over a standing render already taken (standingRenders): a request
+// room derives its Budget from the very rows it carries (Agent.requestRoom), so one render serves
+// both the Budget's measured reservations and the room's measure.
+func (a *Agent) budgetOf(rows []standingRender) domain.Budget {
 	window := a.cfg.Context.MaxContextTokens
 	limit := workingLimit(a.cfg.Context)
 	alloc := apogeectx.Allocate(limit, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction,
-		a.standingMeasured())
+		a.standingMeasured(rows))
 	history := alloc.History
 	// The cap keeps ADR 0018 §8's survivability ordering at every window: History — the bound both
 	// structural clamps and the boundary trigger read — must stay at or under what the emergency
@@ -2015,14 +2034,15 @@ func workingLimit(config domain.ContextConfig) int {
 // chars→token ratio the reducers read, so a reservation and the trigger it protects share one
 // scale.
 //
-// It takes ONE render of the table per call and memoises nothing: the standing content moves on
-// SetMode, SetScratchDir, the date, an opened delegation seat, ReadMounts.Roots and every task_list
-// call, so a cached measurement would reserve room for a render the request no longer carries.
-// When nothing seeds the message the table renders nothing (the ride-along rule), and both parts
-// measure zero — MEASURED zero, which floors at its 2% share, never the unmeasured fallback.
-func (a *Agent) standingMeasured() apogeectx.Measured {
+// It measures the ONE render of the table its caller took (rows, from standingRenders) and memoises
+// nothing: the standing content moves on SetMode, SetScratchDir, the date, an opened delegation
+// seat, ReadMounts.Roots and every task_list call, so a cached measurement would reserve room for a
+// render the request no longer carries. When nothing seeds the message the table renders nothing
+// (the ride-along rule), and both parts measure zero — MEASURED zero, which floors at its 2%
+// share, never the unmeasured fallback.
+func (a *Agent) standingMeasured(rows []standingRender) apogeectx.Measured {
 	system, files := 0, 0
-	for _, row := range a.standingRenders() {
+	for _, row := range rows {
 		if row.name == standingContextFilesRow {
 			files += len(row.rendered)
 			continue
@@ -2071,10 +2091,17 @@ const (
 // wedged an unbudgeted session — and the pin is the escape hatch for a server that advertises no
 // window at all.
 func (a *Agent) maxOutputTokens() int {
+	return a.maxOutputTokensFor(a.budget())
+}
+
+// maxOutputTokensFor is maxOutputTokens's body over a Budget already read: a projection built
+// from a request room's Budget (newProjection) derives its reply cap from that Budget rather than
+// reading — and rendering — a second one.
+func (a *Agent) maxOutputTokensFor(b domain.Budget) int {
 	if pin := a.cfg.Context.MaxOutputTokens; pin > 0 {
 		return pin
 	}
-	switch reserve := a.budget().ResponseReserve; {
+	switch reserve := b.ResponseReserve; {
 	case reserve < minOutputTokenCap: // including the unknown window's zero
 		return minOutputTokenCap
 	case reserve > maxOutputTokenCap:
@@ -2179,7 +2206,14 @@ func (a *Agent) loopView(turn int) domain.LoopView {
 	// never state different ceilings (ADR 0046). This one reaches no server — a LoopView is read by
 	// the tool-stage hooks and drained by nobody — so its stamps are a consistency measure, not a
 	// wire bound.
-	return a.newProjection(a.conv.Messages(), turn).View()
+	//
+	// Inside a tool-result commit (commitCall) the view reads the commit's request room Budget
+	// (turnLifecycle.commitRoom), so the post-tool-result cascade renders no standing table of its
+	// own; outside one it reads the Budget live.
+	if room := a.turns.commitRoom; room != nil {
+		return a.newProjection(a.conv.Messages(), turn, room.budget).View()
+	}
+	return a.newProjection(a.conv.Messages(), turn, a.budget()).View()
 }
 
 // newProjection constructs the domain.Request both projections of a Turn — buildRequest's
@@ -2192,10 +2226,12 @@ func (a *Agent) loopView(turn int) domain.LoopView {
 // field leaves the loop's value untouched" true of this field at last. Temperature stays nil: the
 // server's own default is still the right answer for it. Depth surfaces this Agent's nesting
 // level through req.View().Depth() (ADR 0013/0014) and ParallelAgents the width a delegation
-// batch may take through req.View().ParallelAgents() (ADR 0039).
-func (a *Agent) newProjection(msgs []domain.Message, turn int) *domain.Request {
-	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn)
-	outputCap := a.maxOutputTokens()
+// batch may take through req.View().ParallelAgents() (ADR 0039). budget is the caller's one
+// Budget read: the request carries it and the reply cap is derived from it (maxOutputTokensFor),
+// so a projection reads the Budget once.
+func (a *Agent) newProjection(msgs []domain.Message, turn int, budget domain.Budget) *domain.Request {
+	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), budget, turn)
+	outputCap := a.maxOutputTokensFor(budget)
 	req.SetSampling(domain.SamplingParams{MaxTokens: &outputCap})
 	req.SetDepth(a.depth)
 	req.SetParallelAgents(a.delegationWidth())

@@ -397,7 +397,7 @@ func TestPredictiveGuardMeasuresTheAdvertisedWindow(t *testing.T) {
 	}
 	exceeds := func(tokens int) bool {
 		msgs := []domain.Message{{Role: domain.RoleUser, Content: strings.Repeat("x", tokens*4)}}
-		return a.requestExceedsWindow(domain.NewRequest(a.cfg.Model, msgs, nil, a.budget(), 0))
+		return a.requestRoom().exceeds(domain.NewRequest(a.cfg.Model, msgs, nil, a.budget(), 0), a.conv.Messages())
 	}
 
 	if exceeds(past) {

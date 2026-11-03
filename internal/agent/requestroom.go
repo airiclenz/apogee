@@ -13,31 +13,41 @@ import (
 //
 // It is a value built from the values the arithmetic reads: one Budget view, the growthBounds
 // derived from it (deriveGrowthBounds, the one substitution site for an unknown window), the
-// standing system content buildRequest seeds at position 0 and the tool menu the request offers.
-// It reaches no Agent, so the arithmetic is testable as a table; Agent.requestRoom gathers the
-// values live.
+// standing rows of ONE render of the standing table (standingRenders — the rows ContextCost
+// counts, joined into the system content buildRequest seeds at position 0) and the tool menu the
+// request offers. It reaches no Agent, so the arithmetic is testable as a table; Agent.requestRoom
+// gathers the values live.
+//
+// A room is built once per tool-result commit and handed down as a value, never cached on the
+// Agent past that commit (commitCall, dispatch.go — ADR 0084 D1): the standing content moves on a
+// mode switch, a task_list call or an opened seat, so a room outliving its commit would measure a
+// render the request no longer carries.
 type requestRoom struct {
 	budget   domain.Budget
 	bounds   growthBounds
+	rows     []standingRender
 	standing string
 	menu     []domain.ToolDef
 }
 
-// newRequestRoom builds the room from one Budget view, the standing system content ("" when
+// newRequestRoom builds the room from one Budget view, the rows of one standing render (nil when
 // nothing is seeded) and the tool menu.
-func newRequestRoom(b domain.Budget, standing string, menu []domain.ToolDef) requestRoom {
+func newRequestRoom(b domain.Budget, rows []standingRender, menu []domain.ToolDef) requestRoom {
 	return requestRoom{
 		budget:   b,
 		bounds:   deriveGrowthBounds(b),
-		standing: standing,
+		rows:     rows,
+		standing: joinStanding(rows),
 		menu:     menu,
 	}
 }
 
-// requestRoom gathers this Agent's room live: the Budget, the standing render and the tool menu
-// as they stand now.
+// requestRoom gathers this Agent's room live from ONE render of the standing table: the Budget is
+// derived from those very rows (budgetOf), so the room's measure, its share and its Budget all
+// read the render the room carries, and the tool menu as it stands now.
 func (a *Agent) requestRoom() requestRoom {
-	return newRequestRoom(a.budget(), a.standingSystem(), a.toolMenu())
+	rows := a.standingRenders()
+	return newRequestRoom(a.budgetOf(rows), rows, a.toolMenu())
 }
 
 // weight is the estimated tokens of a request carrying msgs: the standing system content seeded
@@ -80,6 +90,40 @@ func (r requestRoom) freshShare(msgs []domain.Message, pending int) int {
 	share := r.left(msgs) / max(pending, 1)
 	floor := max(r.bounds.historyFloor/freshResultFloorDivisor, 1)
 	return min(max(share, floor), r.bounds.historyFloor)
+}
+
+// structuralFloor is the CEILING behind both structural clamps: the whole History allocation — the
+// most any single body could occupy and still leave the conversation renderable. A reference block
+// is bounded by its share of it (refBound); a tool result by its share of the room left in the
+// request, never above it (freshResultBound), and by exactly it when no window is known. Content past it
+// can never survive ANY reducer, so committing it whole buys nothing and can doom the Turn
+// outright: a fresh giant body IS the most recent message the emergency fold's own summary call
+// must carry, which that call can render only byte-elided to its room (renderBudgetedTranscript) —
+// and before it elided one (2026-11-02), kept whole, overflowing the fold that was supposed to
+// rescue the Turn.
+//
+// With an unknown window (a zero History allocation — Allocate had no basis to allocate) the floor
+// measures against compactUnknownWindowTranscriptTokens instead of standing down — the substitution
+// growthBounds.historyFloor makes at the one site every growth bound shares (deriveGrowthBounds,
+// compact.go), so this clamp and the boundary trigger bound against one number. Being inert there
+// was not the conservative choice it looked like: an unclamped giant body becomes the one message
+// the emergency fold cannot shed — kept whole by the fold's transcript render until 2026-11-02,
+// and so re-wedging the session bounding the fold was meant to un-wedge (audit 2026-08-01,
+// follow-up B); byte-elided by it since, the last-resort rescue rather than the intended shape. Keying the floor to the fold's own unknown-window budget makes the two meet exactly:
+// content that survives the clamp is, by construction, content the fold can still render.
+//
+// The threshold sits deliberately far above the tool-result-cap Floor guard's: the whole History
+// allocation — the working room less what this session's standing content MEASURES (plus headroom,
+// each part floored at 2% of the room), floored at half that room and then capped — the cap binds
+// below the floor at a small window — chosen because it puts History at or below the emergency
+// fold's own transcript budget, which is the property that keeps the fold
+// survivable, while the guard's tighter 40%-of-working-room cap shapes the ordinary case. That
+// ordering used to be arithmetic that only held above ~8.9k tokens; it is now construction: the
+// Budget caps History at the fold's transcript budget itself (HistoryCap, applied where History is
+// produced in Agent.budget), so content that survives this clamp is content the fold can render at
+// EVERY advertised window (ADR 0018 §8).
+func (r requestRoom) structuralFloor() int {
+	return r.bounds.historyFloor
 }
 
 // exceeds reports whether req's prompt is ALREADY estimated to be too big for the model's context

@@ -533,7 +533,7 @@ func TestGrowthBounds_WorkingWindowKeepsReaderNumbers(t *testing.T) {
 	}
 	b := a.budget()
 
-	gotChars, gotFloor := a.compactTranscriptChars(), a.structuralFloor()
+	gotChars, gotFloor := a.compactTranscriptChars(), a.requestRoom().structuralFloor()
 
 	wantChars := int(float64(advertised-compactMaxTokens-compactPromptOverheadTokens) * b.CharsPerToken)
 	if gotChars != wantChars {

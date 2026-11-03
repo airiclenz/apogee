@@ -588,8 +588,11 @@ func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 // reaction can run under the cancelled context. The audit record a child that ran earns is still
 // booked (ADR 0088 D2).
 func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
+	room := a.requestRoom()
+	a.turns.commitRoom = &room
+	defer func() { a.turns.commitRoom = nil }()
 	if slot.hookFailed {
-		a.appendToolResult(turn, slot.call, slot.runID, slot.result, "", nil)
+		a.appendToolResult(turn, room, slot.call, slot.runID, slot.result, "", nil)
 		return
 	}
 	if slot.delegated {
@@ -602,11 +605,11 @@ func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 		slot.result.Content = withBodyNote(slot.result.Content, slot.widthNote)
 	}
 	if ctx.Err() != nil {
-		a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, nil)
+		a.appendToolResult(turn, room, slot.call, slot.runID, slot.result, slot.writeTarget, nil)
 		return
 	}
 	advised := a.firePostToolResult(ctx, slot.call, &slot.result)
-	a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, advised)
+	a.appendToolResult(turn, room, slot.call, slot.runID, slot.result, slot.writeTarget, advised)
 }
 
 // cancelledWhileRunningContent is the whole tool result of a leaf call the user's cancel ended while
@@ -626,18 +629,23 @@ const (
 // through appendToolResult alone: no post-tool-result Moment and no audit record, since no
 // decision about a finished call is left to make. rest are then answered not-run (commitNotRun).
 func (a *Agent) settleCancelledLeaf(turn int, slot *dispatchSlot, rest []domain.ToolCall) {
-	a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, nil)
+	a.appendToolResult(turn, a.requestRoom(), slot.call, slot.runID, slot.result, slot.writeTarget, nil)
 	a.commitNotRun(turn, rest)
 }
 
 // commitNotRun answers each call a cancel kept from starting with the not-run result, in emitted
 // order. Each call's ToolCallEvent is surfaced first — the dispatch never reached the call, so
 // nothing has announced it — so a Driver pairs the result with a row of its own rather than
-// reading it as an orphan; nothing else of the pipeline runs for it.
+// reading it as an orphan; nothing else of the pipeline runs for it. One request room serves every
+// append of the run: nothing between them moves the standing render or the Budget.
 func (a *Agent) commitNotRun(turn int, calls []domain.ToolCall) {
+	if len(calls) == 0 {
+		return
+	}
+	room := a.requestRoom()
 	for _, call := range calls {
 		a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
-		a.appendToolResult(turn, call, "", errorToolResult(call.ID, notRunCancelledContent), "", nil)
+		a.appendToolResult(turn, room, call, "", errorToolResult(call.ID, notRunCancelledContent), "", nil)
 	}
 }
 
@@ -2062,6 +2070,11 @@ func pathWithin(abs, root string) bool {
 // spawnRunID is the run id of the delegation the result answers (dispatchSlot.runID), "" for a leaf
 // call — observation only, stamped on the event as SpawnRunID and never on the committed message.
 //
+// room is the request room the commit was built with (commitCall, or the caller's own entry): the
+// clamp, the event's EstimatedTokens and the ContextEstimateEvent all read its one Budget and its
+// one standing render, so a commit renders the standing table once (ADR 0084 D1's append-commit
+// note).
+//
 // advised is the post-tool-result cascade's advise slot (reactions.go) — the spans this result's
 // message carries as a fenced trailer, nil for the two routes that commit a result no cascade ran
 // on (a pre-tool-exec fault, a hook-failed delegation slot).
@@ -2076,13 +2089,14 @@ func pathWithin(abs, root string) bool {
 // (Request.NoteOnTail), always last.
 func (a *Agent) appendToolResult(
 	turn int,
+	room requestRoom,
 	call domain.ToolCall,
 	spawnRunID string,
 	result domain.ToolResult,
 	writeTarget string,
 	advised []advice,
 ) {
-	result.Content = a.clampToolResult(result.Content)
+	result.Content = a.clampToolResult(room, result.Content)
 	a.turns.resultsToAppend = max(a.turns.resultsToAppend-1, 0)
 	msg := domain.Message{
 		Role:        domain.RoleTool,
@@ -2109,7 +2123,6 @@ func (a *Agent) appendToolResult(
 	// grew by, and the ContextEstimateEvent that follows counts the same characters.
 	chars := domain.PromptChars([]domain.Message{msg}, nil)
 	a.reading.appended(chars)
-	budget := a.budget()
 	// The event carries the tool's own result, never the trailer: advice is a model-facing
 	// injection, so what an observer records, the transcript shows and the session record keeps is
 	// the output the tool actually produced.
@@ -2119,49 +2132,9 @@ func (a *Agent) appendToolResult(
 		Tool:            call.Tool,
 		WriteTarget:     writeTarget,
 		SpawnRunID:      spawnRunID,
-		EstimatedTokens: budget.EstimateTokens(chars),
+		EstimatedTokens: room.budget.EstimateTokens(chars),
 	})
-	a.cfg.Events.Emit(a.contextEstimateEvent(turn, budget))
-}
-
-// structuralFloor is the CEILING behind both structural clamps: the whole History allocation — the
-// most any single body could occupy and still leave the conversation renderable. A reference block
-// is bounded by its share of it (refBound); a tool result by its share of the room left in the
-// request, never above it (freshResultBound), and by exactly it when no window is known. Content past it
-// can never survive ANY reducer, so committing it whole buys nothing and can doom the Turn
-// outright: a fresh giant body IS the most recent message the emergency fold's own summary call
-// must carry, which that call can render only byte-elided to its room (renderBudgetedTranscript) —
-// and before it elided one (2026-11-02), kept whole, overflowing the fold that was supposed to
-// rescue the Turn.
-//
-// With an unknown window (a zero History allocation — Allocate had no basis to allocate) the floor
-// measures against compactUnknownWindowTranscriptTokens instead of standing down — the substitution
-// growthBounds.historyFloor makes at the one site every growth bound shares (deriveGrowthBounds,
-// compact.go), so this clamp and the boundary trigger bound against one number. Being inert there
-// was not the conservative choice it looked like: an unclamped giant body becomes the one message
-// the emergency fold cannot shed — kept whole by the fold's transcript render until 2026-11-02,
-// and so re-wedging the session bounding the fold was meant to un-wedge (audit 2026-08-01,
-// follow-up B); byte-elided by it since, the last-resort rescue rather than the intended shape. Keying the floor to the fold's own unknown-window budget makes the two meet exactly:
-// content that survives the clamp is, by construction, content the fold can still render.
-//
-// The threshold sits deliberately far above the tool-result-cap Floor guard's: the whole History
-// allocation — the working room less what this session's standing content MEASURES (plus headroom,
-// each part floored at 2% of the room), floored at half that room and then capped — the cap binds
-// below the floor at a small window — chosen because it puts History at or below the emergency
-// fold's own transcript budget, which is the property that keeps the fold
-// survivable, while the guard's tighter 40%-of-working-room cap shapes the ordinary case. That
-// ordering used to be arithmetic that only held above ~8.9k tokens; it is now construction: the
-// Budget caps History at the fold's transcript budget itself (HistoryCap, applied where History is
-// produced in Agent.budget), so content that survives this clamp is content the fold can render at
-// EVERY advertised window (ADR 0018 §8).
-func (a *Agent) structuralFloor() int {
-	return deriveGrowthBounds(a.budget()).historyFloor
-}
-
-// clampToBound renders content within bound through this Agent's request room (requestRoom.fit,
-// requestroom.go): the elision both structural clamps share.
-func (a *Agent) clampToBound(content string, bound int) string {
-	return a.requestRoom().fit(content, bound)
+	a.cfg.Events.Emit(a.contextEstimateEvent(turn, room))
 }
 
 // clampToolResult is the STRUCTURAL bound on a single tool result: a result whose estimated tokens
@@ -2186,10 +2159,10 @@ func (a *Agent) clampToBound(content string, bound int) string {
 // (loop.go) clamp every @file block and every attached skill body against the same bound, divided
 // across ALL the references of one message (refBound), so an assembled block of references can no
 // more outgrow the allocation than a result can. The seams share structuralFloor as their ceiling
-// and clampToBound as their rendering because they have one reason to change — the fold's
+// and requestRoom.fit as their rendering because they have one reason to change — the fold's
 // arithmetic.
-func (a *Agent) clampToolResult(content string) string {
-	return a.clampToBound(content, a.freshResultBound())
+func (a *Agent) clampToolResult(room requestRoom, content string) string {
+	return room.fit(content, a.freshResultBound(room))
 }
 
 // freshResultFloorDivisor sets the least a fresh tool result is ever bounded to: 1/8 of the
@@ -2199,11 +2172,12 @@ func (a *Agent) clampToolResult(content string) string {
 const freshResultFloorDivisor = 8
 
 // freshResultBound is the bound, in tokens, a tool result about to be appended is clamped to: its
-// share of the room left in the request (requestRoom.freshShare, requestroom.go), weighed over the
-// conversation as it stands and split across the Turn's results still to append
-// (turnLifecycle.resultsToAppend).
-func (a *Agent) freshResultBound() int {
-	return a.requestRoom().freshShare(a.conv.Messages(), a.turns.resultsToAppend)
+// share of room's room left in the request (requestRoom.freshShare, requestroom.go), weighed over
+// the conversation as it stands and split across the Turn's results still to append
+// (turnLifecycle.resultsToAppend). room is the caller's — the commit's own (commitCall) — so the
+// clamp and the fill notice that predicts it read one render.
+func (a *Agent) freshResultBound(room requestRoom) int {
+	return room.freshShare(a.conv.Messages(), a.turns.resultsToAppend)
 }
 
 // errorToolResult builds a tool-level failure result surfaced to the model (IsError) rather

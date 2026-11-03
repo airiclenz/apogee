@@ -596,7 +596,7 @@ func TestContextFillNoticeMeasuresTheAppliedBound(t *testing.T) {
 	room := deriveGrowthBounds(b).room
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("h", int(float64(room/2)*b.CharsPerToken))})
 
-	bound := a.freshResultBound()
+	bound := a.freshResultBound(a.requestRoom())
 	if bound >= b.History {
 		t.Fatalf("bound = %d, want the room left to bind under the History allocation %d", bound, b.History)
 	}

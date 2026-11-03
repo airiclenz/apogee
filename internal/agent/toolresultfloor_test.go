@@ -164,14 +164,14 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.agent.clampToolResult(tc.content); got != tc.content {
+			if got := tc.agent.clampToolResult(tc.agent.requestRoom(), tc.content); got != tc.content {
 				t.Errorf("result was altered (%d chars in, %d out); want it verbatim", len(tc.content), len(got))
 			}
 		})
 	}
 
 	t.Run("single line the head/tail form cannot shrink", func(t *testing.T) {
-		got := a.clampToolResult(unshrinkable)
+		got := a.clampToolResult(a.requestRoom(), unshrinkable)
 		if len(got) > floorChars {
 			t.Errorf("clamped result is %d chars, want at most the floor of %d chars", len(got), floorChars)
 		}
@@ -251,9 +251,9 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: between}, "", nil)
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: between}, "", nil)
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c2", Content: "small"}, "", nil)
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c2", Content: "small"}, "", nil)
 
 	if got := a.conv.At(2).Content; got != between {
 		t.Errorf("the floor clamped a result under its threshold: %d chars committed, want the whole %d", len(got), len(between))
@@ -293,9 +293,9 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 	between := betweenTheCeilings(t)
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: between}, "", nil)
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: between}, "", nil)
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "lookup"}}})
-	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c2", Content: "small"}, "", nil)
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c2", Content: "small"}, "", nil)
 
 	req, _ := a.buildRequest(0)
 	firePreRequest(t, a, req)
@@ -386,7 +386,7 @@ func TestFreshResultIsBoundedByTheRoomLeft(t *testing.T) {
 			b.EstimateTokens(len(result)), left, b.History)
 	}
 
-	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: result}, "", nil)
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: result}, "", nil)
 
 	committed := a.conv.At(a.conv.Len() - 1).Content
 	if got := b.EstimateTokens(len(committed)); got > left {
@@ -488,10 +488,10 @@ func TestFreshResultNeverBelowTheFloor(t *testing.T) {
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: singleLine(a, room)})
 
 	floor := b.History / freshResultFloorDivisor
-	if got := a.freshResultBound(); got != floor {
+	if got := a.freshResultBound(a.requestRoom()); got != floor {
 		t.Fatalf("bound with no room left = %d, want the floor %d (History %d / %d)", got, floor, b.History, freshResultFloorDivisor)
 	}
-	a.appendToolResult(0, domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: numberedLines(200)}, "", nil)
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: numberedLines(200)}, "", nil)
 	if got := b.EstimateTokens(len(a.conv.At(a.conv.Len() - 1).Content)); got > floor {
 		t.Errorf("committed result is %d tokens, want at most the floor %d", got, floor)
 	}
@@ -507,7 +507,7 @@ func TestFreshResultUnknownWindowKeepsTheStructuralFloor(t *testing.T) {
 	}
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("u", 20_000)})
 	a.turns.resultsToAppend = 4
-	if got, want := a.freshResultBound(), a.structuralFloor(); got != want {
+	if got, want := a.freshResultBound(a.requestRoom()), a.requestRoom().structuralFloor(); got != want {
 		t.Errorf("unknown-window bound = %d, want structuralFloor() = %d", got, want)
 	}
 }

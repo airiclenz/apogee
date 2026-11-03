@@ -39,7 +39,14 @@ const (
 // dir), composes the mode-filtered menu and reads the token accounting, so a Driver calls it with
 // no worker driving the Agent.
 func (a *Agent) ContextCost() domain.ContextCost {
-	budget := a.budget()
+	return a.contextCost(a.requestRoom())
+}
+
+// contextCost is ContextCost's body over a request room already built: the rows are the room's one
+// standing render, the tool surface its menu and the estimate its Budget's, so a tool-result
+// commit (contextEstimateEvent) reports from the render its clamp read rather than taking another.
+func (a *Agent) contextCost(room requestRoom) domain.ContextCost {
+	budget := room.budget
 	report := domain.ContextCost{Calibrated: a.tokens.Calibrated()}
 	add := func(name string, bytes int) {
 		if bytes == 0 {
@@ -53,11 +60,11 @@ func (a *Agent) ContextCost() domain.ContextCost {
 		report.Bytes += bytes
 	}
 
-	for _, row := range a.standingRenders() {
+	for _, row := range room.rows {
 		add(row.name, len(row.rendered))
 	}
 
-	menu := a.toolMenu()
+	menu := room.menu
 	if block := a.toolInstructions(menu); block != "" {
 		add(contextCostToolInstructions, len(block))
 	} else {
@@ -69,7 +76,7 @@ func (a *Agent) ContextCost() domain.ContextCost {
 }
 
 // ContextEstimate is the token estimate of the request this Agent would send next: ContextCost's
-// standing blocks and tool surface plus the conversation history, measured the way requestExceedsWindow
+// standing blocks and tool surface plus the conversation history, measured the way requestRoom.exceeds
 // measures the history on an unknown window (domain.PromptChars over the messages, through the
 // Budget's chars→token ratio). ContextCost alone counts only what seeds Turn 1; the history term is
 // what the conversation has added since, so a compacted conversation estimates as its compacted
@@ -79,7 +86,12 @@ func (a *Agent) ContextCost() domain.ContextCost {
 // gauge). Like ContextCost it is an idle-only read — it renders the prompt, composes the menu and
 // reads the conversation — so a Driver takes it with no worker driving the Agent.
 func (a *Agent) ContextEstimate() int {
-	return a.ContextCost().Tokens + a.budget().EstimateTokens(domain.PromptChars(a.conv.Messages(), nil))
+	return a.contextEstimate(a.requestRoom())
+}
+
+// contextEstimate is ContextEstimate's body over a request room already built (contextCost).
+func (a *Agent) contextEstimate(room requestRoom) int {
+	return a.contextCost(room).Tokens + room.budget.EstimateTokens(domain.PromptChars(a.conv.Messages(), nil))
 }
 
 // contextReading is one Agent's running context-fill estimate between two Upstream readings
@@ -111,13 +123,14 @@ func (r *contextReading) report(promptTokens, completionTokens int) {
 func (r *contextReading) appended(chars int) { r.charsSince += chars }
 
 // contextEstimateEvent is the ContextEstimateEvent a tool-result append emits: the reading plus the
-// estimated tokens of everything appended since it, through budget's chars→token ratio — or, with
-// no reading, this Agent's own ContextEstimate. It runs on the goroutine driving this Agent, which
-// is what makes ContextEstimate's idle-only read safe here: no other reader is driving it.
-func (a *Agent) contextEstimateEvent(turn int, budget domain.Budget) domain.ContextEstimateEvent {
-	tokens := a.reading.tokens + budget.EstimateTokens(a.reading.charsSince)
+// estimated tokens of everything appended since it, through the room's chars→token ratio — or,
+// with no reading, this Agent's own estimate (contextEstimate) over the same room. It runs on the
+// goroutine driving this Agent, which is what makes ContextEstimate's idle-only read safe here: no
+// other reader is driving it.
+func (a *Agent) contextEstimateEvent(turn int, room requestRoom) domain.ContextEstimateEvent {
+	tokens := a.reading.tokens + room.budget.EstimateTokens(a.reading.charsSince)
 	if !a.reading.isReported {
-		tokens = a.ContextEstimate()
+		tokens = a.contextEstimate(room)
 	}
 	return domain.ContextEstimateEvent{
 		EventBase:  a.base(turn),

@@ -529,6 +529,11 @@ type sharedHandles struct {
 	// newAgent seeds it with time.Now; it is never nil on a constructed Agent.
 	now func() time.Time
 
+	// onStandingRender is the standing-render counter seam: nil in production, and called once per
+	// walk of the standing table (standingRenders) when a test sets it, so a test can pin how many
+	// renders one tool-result commit takes.
+	onStandingRender func()
+
 	// contextFiles is the session's cache of discovered workspace context files
 	// (Config.ContextFiles — internal/agent/contextfiles.go). It is filled at construction and
 	// REFILLED only at a session boundary (ClearContext, a successful RestoreSession), so the
