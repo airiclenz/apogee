@@ -186,6 +186,47 @@ func TestGuardrails_CommitSecretsForcesApprovalEvenInAuto(t *testing.T) {
 	})
 }
 
+// TestCommitSecretsForcesApprovalUnderNonASCIIDirectories proves a secret-bearing file name
+// staged under a non-ASCII directory forces the look exactly as an ASCII path does: git C-quotes
+// such a path in a plain `--name-only` listing (`"donn\303\251es/.env"`), whose quoted basename
+// would miss the name globs, so the names must be read NUL-delimited. The contents are harmless
+// and the files are staged with a plain `git add`, so only the names can force the look.
+func TestCommitSecretsForcesApprovalUnderNonASCIIDirectories(t *testing.T) {
+	const (
+		envPath = "données/.env"
+		pemPath = "日本語/server.pem"
+	)
+	root := newSecretsRepo(t)
+	// Pinned on: a global core.quotePath=false would leave the listing raw and hide the bite.
+	mustGit(t, root, "config", "core.quotePath", "true")
+	for _, name := range []string{envPath, pemPath} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeRepoFile(t, root, name, "harmless\n")
+	}
+	mustGit(t, root, "add", envPath, pemPath)
+	sink := &recordingSink{}
+	approver := &gateApprover{decision: domain.ApprovalDeny}
+
+	driveToolCall(t, secretsConfig(sink, root, approver), sink, "c1", "git_commit", `{"message":"add config"}`)
+
+	if len(approver.requests) != 1 {
+		t.Fatalf("approver consulted %d times in Auto; secret-named files under non-ASCII directories must force exactly one look", len(approver.requests))
+	}
+	req := approver.requests[0]
+	if req.Reason != forceApprovalReason {
+		t.Errorf("Reason = %q, want %q", req.Reason, forceApprovalReason)
+	}
+	wantRemedy := security.SecretsHint([]security.SecretFinding{
+		{Path: envPath, Class: "secret-bearing file name"},
+		{Path: pemPath, Class: "secret-bearing file name"},
+	})
+	if req.Remedy != wantRemedy {
+		t.Errorf("Remedy = %q, want %q (each path named unquoted)", req.Remedy, wantRemedy)
+	}
+}
+
 // TestCommitSecretsCleanTreeStaysSilent proves the pre-check tightens nothing when the staged
 // diff is clean: a plain file commits without a look in Auto, and a staged DELETION of a
 // `.key` file — the one shape `--name-only` would otherwise list — never forces one.

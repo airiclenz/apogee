@@ -182,11 +182,26 @@ func scanStagedSecrets(ctx context.Context, host gitexec.Host, root string, path
 	if err != nil {
 		return nil, err
 	}
-	names, err := shadow.git(ctx, "diff", "--cached", "--diff-filter=ACMR", "--name-only")
+	// -z lists each name raw and NUL-terminated: without it git C-quotes a non-ASCII or
+	// quote-bearing path (`"donn\303\251es/.env"`), and the quoted basename (`.env"`) would
+	// miss the name globs.
+	names, err := shadow.git(ctx, "diff", "--cached", "--diff-filter=ACMR", "--name-only", "-z")
 	if err != nil {
 		return nil, err
 	}
-	return security.SecretFindings(diff, nonEmptyLines(names)), nil
+	return security.SecretFindings(diff, nulFields(names)), nil
+}
+
+// nulFields splits git's NUL-terminated `-z` output into its non-empty fields, each kept
+// exactly as git wrote it — a path may begin or end in whitespace.
+func nulFields(out string) []string {
+	var fields []string
+	for _, field := range strings.Split(out, "\x00") {
+		if field != "" {
+			fields = append(fields, field)
+		}
+	}
+	return fields
 }
 
 // shadowIndex is one call's private staging area: a temp dir holding a copy of the repository's

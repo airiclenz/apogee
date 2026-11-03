@@ -71,7 +71,9 @@ NOTES (2026-11-03): docs/manual/reactions.md "`setsid` … is the one way to lea
 **Closes:** bwrap-host-pid-namespace
 **Commit:** `fix(platform): run bwrap confinement in its own PID namespace`
 
-## 2. List staged names NUL-delimited in the commit-secrets pre-check
+## 2. List staged names NUL-delimited in the commit-secrets pre-check — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the `-z` listing splits through a new `nulFields` helper beside `scanStagedSecrets` (no TrimSpace, so a path's own edge whitespace survives); `nonEmptyLines` is unchanged and keeps serving the rev-parse output. The new test pins `core.quotePath=true` repo-locally so a global `core.quotePath=false` cannot hide the bite; it fails (0 approvals) with the fix reverted.
 
 **What:** Fix: `git diff --cached --name-only` C-quotes non-ASCII paths, so `données/.env` reaches `isSecretBearingName` as `.env"` and skips the forced look (ADR 0080).
 **Regression guard.** `writeRepoFile` is a bare `os.WriteFile`: the test creates `données/` and `日本語/` (os.MkdirAll, or a MkdirAll in `writeRepoFile`) and stages them with `mustGit add`, never `stageSecrets` (its id_rsa + keys.go force the look on their own and hide the bite); the test is named `TestCommitSecrets…` so the Acceptance filter runs it.
