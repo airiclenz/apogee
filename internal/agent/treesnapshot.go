@@ -36,10 +36,12 @@ import (
 // rewritten (its " M" line is the same before and after) and a new file inside an untracked
 // directory (plain --porcelain collapses the directory to one unchanged "?? dir/" line).
 //
-// Robustness contract (binding): each git run carries a 2-second timeout and executes
-// in the workspace root; on ANY git error or timeout the check is skipped silently for
-// that call. The floor must never break or slow a tool call's success path beyond the
-// two snapshots, each bounded by treeSnapshotTimeout: a status listing past
+// Robustness contract (binding): each snapshot's git run carries treeSnapshotTimeout (2 s) and
+// executes in the workspace root; on ANY git error or timeout the check is skipped silently for
+// that call. The work-tree probe ahead of the first snapshots has its own treeProbeTimeout (30 s)
+// and is retried after a failure that is no answer, a bounded number of times (active; ADR 0056
+// amendment 2026-11-03). The floor must never break a tool call, nor slow its success path
+// beyond that probe and the two snapshots, each bounded by treeSnapshotTimeout: a status listing past
 // subprocess.MaxSubprocessOutputBytes skips the check, and the content hashing holds a per-file
 // cap and a whole-snapshot byte budget inside that same timeout, falling back past them to the
 // file's Lstat identity (type, size, modification time) rather than reading on. Only regular
@@ -53,6 +55,18 @@ import (
 // its status run plus its content hashing — so a wedged or enormous repository can never stall
 // a tool call behind its own bookkeeping.
 const treeSnapshotTimeout = 2 * time.Second
+
+// treeProbeTimeout bounds one run of the work-tree probe — its rev-parse plus the funnel's
+// command-config check ahead of it. It is the floor's one budget sized for a cold or loaded box
+// rather than for a call's bookkeeping, because a "no" from it can latch for the Agent's life,
+// where a slow snapshot only skips one call.
+const treeProbeTimeout = 30 * time.Second
+
+// treeProbeTransientLimit is how many consecutive probe runs may end with no answer — a timeout,
+// a wedged drain, a cancelled ctx, an incomplete command-config check — before the probe latches
+// "not a work tree" for the Agent's life, so a git that never answers stops costing every call a
+// treeProbeTimeout.
+const treeProbeTransientLimit = 3
 
 // treeMutationWarningCap is the most paths one warning line names; the remainder is
 // folded into an "… and N more" tail so a mass-write cannot balloon the result.
@@ -77,17 +91,29 @@ const treeIdentityDirectory = "dir"
 // incomplete, so the snapshot cannot be trusted and the check is skipped.
 var errTreeStatusTooLarge = errors.New("apogee: tree snapshot: status listing exceeds the output cap")
 
-// treeSnapshotter owns the floor's state for one Agent: the workspace root and the
-// once-probed answer to "is this root a git work tree?". The probe runs at most once
-// per Agent (sync.Once), on the first subprocess call rather than in the constructor,
-// so construction — including every sub-agent spawn — never pays a git invocation.
+// treeSnapshotter owns the floor's state for one Agent: the workspace root and the probed
+// answer to "is this root a git work tree?". The probe runs on the first subprocess call rather
+// than in the constructor, so construction — including every sub-agent spawn — never pays a git
+// invocation, and it runs again on a later call only while no run has yet given a definitive
+// answer (active).
 type treeSnapshotter struct {
-	root      string       // the workspace root snapshots run in; "" disables the floor
-	host      gitexec.Host // the git runner every snapshot goes through; a test passes a fake
-	probeOnce sync.Once    // guards the one rev-parse probe per Agent
-	isRepo    bool         // the cached probe answer; false until proven true
-	toplevel  string       // the repository's top directory, which porcelain paths are relative to
+	root string       // the workspace root snapshots run in; "" disables the floor
+	host gitexec.Host // the git runner every snapshot goes through; a test passes a fake
+
+	probeMu   sync.Mutex     // guards probe, transient and toplevel's one write
+	probe     treeProbeState // the probe's answer so far; treeProbeUnknown until a run latches one
+	transient int            // consecutive probe runs that ended with no answer
+	toplevel  string         // the repository's top directory, which porcelain paths are relative to
 }
+
+// treeProbeState is the work-tree probe's answer for one Agent.
+type treeProbeState int
+
+const (
+	treeProbeUnknown  treeProbeState = iota // no run has answered yet; the next call probes
+	treeProbeWorkTree                       // the root is a git work tree; the floor applies
+	treeProbeNone                           // not a work tree, no usable git, or too many unanswered runs
+)
 
 // treeSnapshot is one pre- or post-call picture of the work tree: every path the status listing
 // names, keyed by its repository-relative path. A path absent from the map was clean.
@@ -122,32 +148,72 @@ func newTreeSnapshotter(workspaceRoot string, host gitexec.Host) *treeSnapshotte
 }
 
 // active reports whether the floor applies at all: a workspace root is set and it is a
-// git work tree. The git probe runs once per Agent and its answer is cached — a repo
-// created or deleted mid-session is picked up at the next Agent, not the next call. The same
-// probe learns the repository's top directory, since status paths are relative to it rather than
-// to a workspace root that sits below it.
+// git work tree. A definitive answer latches for the Agent's life — a repo created or deleted
+// mid-session is picked up at the next Agent, not the next call: a work tree, or "no" for a git
+// that exited non-zero (not a work tree), is absent, is fenced (a planted git) or refused the
+// repository's command config. A run that gave no answer — it timed out, wedged its drain, was
+// cancelled with the call, or its command-config check did not complete — latches nothing, so the
+// next subprocess call probes again, until treeProbeTransientLimit such runs in a row latch "no".
+// The same probe learns the repository's top directory, since status paths are relative to it
+// rather than to a workspace root that sits below it. Concurrent calls wait on the one probe run.
 // Nil-safe: a nil snapshotter is an inactive floor, never an error.
 func (t *treeSnapshotter) active(ctx context.Context) bool {
 	if t == nil || t.root == "" {
 		return false
 	}
-	t.probeOnce.Do(func() {
-		out, err := t.git(ctx, "rev-parse", "--is-inside-work-tree", "--show-toplevel")
-		if err != nil {
+	t.probeMu.Lock()
+	defer t.probeMu.Unlock()
+	if t.probe == treeProbeUnknown {
+		t.runProbe(ctx)
+	}
+	return t.probe == treeProbeWorkTree
+}
+
+// runProbe runs the work-tree probe once under treeProbeTimeout and records its outcome: a latched
+// answer, or one more unanswered run — a failure matching gitexec.ErrIncomplete, or any failure
+// once the run's ctx is done (the call's cancelled Turn, or the probe's own deadline). Every other
+// failure — git absent, a fenced or refused git, not a repo — is a definitive "no", never a failed
+// tool call. The caller holds probeMu.
+//
+// It runs through the tools package's git funnel (tools.RunGitQuery), not a bare exec: the
+// floor fires around EVERY subprocess tool call in EVERY mode, so its own git is the most
+// frequently spawned program apogee runs and must carry the same hardening as a git tool's —
+// the exec fence on the resolved binary, core.hooksPath=, GIT_CONFIG_NOSYSTEM, the allowlisted
+// workspace-scoped environment (apogee's API key never reaches it), the repo-local
+// command-config refusal (every repo-local key whose value is a program git executes) and the
+// §2.4 process-tree teardown. The status listing takes the same Host's streaming RunTo
+// (statusListing), whose guarantees are Run's.
+//
+// ctx is the call's, so a cancelled Turn ends the run; the probe's timeout stays the outer bound
+// as well as the funnel's, since a ctx that is never cancelled must still not let one wedged git
+// hold a tool result.
+func (t *treeSnapshotter) runProbe(ctx context.Context) {
+	runCtx, cancel := context.WithTimeout(ctx, treeProbeTimeout)
+	defer cancel()
+	out, err := tools.RunGitQuery(runCtx, t.host, t.root, treeProbeTimeout,
+		"rev-parse", "--is-inside-work-tree", "--show-toplevel")
+	if err != nil {
+		if errors.Is(err, gitexec.ErrIncomplete) || runCtx.Err() != nil {
+			t.transient++
+			if t.transient >= treeProbeTransientLimit {
+				t.probe = treeProbeNone
+			}
 			return
 		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
-		if len(lines) != 2 || strings.TrimSpace(lines[0]) != "true" {
-			return
-		}
-		toplevel := strings.TrimSuffix(lines[1], "\r")
-		if toplevel == "" {
-			return
-		}
-		t.toplevel = filepath.FromSlash(toplevel)
-		t.isRepo = true
-	})
-	return t.isRepo
+		t.probe = treeProbeNone
+		return
+	}
+	t.probe = treeProbeNone
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 || strings.TrimSpace(lines[0]) != "true" {
+		return
+	}
+	toplevel := strings.TrimSuffix(lines[1], "\r")
+	if toplevel == "" {
+		return
+	}
+	t.toplevel = filepath.FromSlash(toplevel)
+	t.probe = treeProbeWorkTree
 }
 
 // beforeCall takes the pre-call snapshot. ok=false means the floor is off for this call —
@@ -208,28 +274,6 @@ func (t *treeSnapshotter) statusListing(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return sink.buf.String(), nil
-}
-
-// git runs one git command in the workspace root under the floor's timeout, returning
-// stdout. Every error — git absent, a fenced or refused git, not a repo, timeout — is the
-// caller's signal to skip, never to fail the tool call.
-//
-// It runs through the tools package's git funnel (tools.RunGitQuery), not a bare exec: the
-// floor fires around EVERY subprocess tool call in EVERY mode, so its own git is the most
-// frequently spawned program apogee runs and must carry the same hardening as a git tool's —
-// the exec fence on the resolved binary, core.hooksPath=, GIT_CONFIG_NOSYSTEM, the allowlisted
-// workspace-scoped environment (apogee's API key never reaches it), the repo-local
-// command-config refusal (every repo-local key whose value is a program git executes) and the
-// §2.4 process-tree teardown. The status listing takes the same Host's streaming RunTo
-// (statusListing), whose guarantees are Run's.
-//
-// ctx is the call's, so a cancelled Turn skips the check as the contract allows; the per-run
-// timeout stays the outer bound as well as the funnel's, since a ctx that is never cancelled
-// must still not let one wedged git hold a tool result.
-func (t *treeSnapshotter) git(ctx context.Context, args ...string) (string, error) {
-	runCtx, cancel := context.WithTimeout(ctx, treeSnapshotTimeout)
-	defer cancel()
-	return tools.RunGitQuery(runCtx, t.host, t.root, treeSnapshotTimeout, args...)
 }
 
 // identifyPath reads one listed path's Lstat identity and, where it can within budget, its

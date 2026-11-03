@@ -42,7 +42,9 @@
 // env the caller appends — GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, or a captured run's own
 // variables — which redirects the run to an object database of apogee's own without weakening
 // anything the hardening put there, and the probe behind the refusal runs under that same env.
-// [IsIncompleteRefusal] tells a probe that could not finish from a repository that is refused.
+// [IsIncompleteRefusal] tells a probe that could not finish from a repository that is refused, and
+// a data entry point's error matches [ErrIncomplete] when git gave no complete answer (a timeout,
+// a wedged drain, that unfinished probe), so a caller can ask again rather than cache a "no".
 //
 // Every entry point is a method of a [Host] value — the PATH lookup, the two subprocess
 // launchers and the per-OS environment rules one run goes through — and a caller runs git

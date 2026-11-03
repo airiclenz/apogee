@@ -199,7 +199,19 @@ NOTES (2026-11-03): the member-first-then-site case is `TestDecodedReferences_Ex
 **Closes:** pdf-reference-quadratic-scan
 **Commit:** `fix(doctext): scan each PDF reference array once and honour cancellation`
 
-## 10. Retry the git work-tree probe after a transient failure
+## 10. Retry the git work-tree probe after a transient failure — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): one sentinel, `gitexec.ErrIncomplete`, covers both the TimedOut/DrainWedged errors and the incomplete command-config refusal (queryDiagnosed tells the latter apart with the package's own IsIncompleteRefusal); the command-config refusal stays a plain error and latches "no". Error() text of every wrapped error is unchanged.
+
+NOTES (2026-11-03): the floor's `treeSnapshotter.git` helper is removed — the probe was its only caller; its funnel-hardening doc moved onto the new `runProbe`, which runs `tools.RunGitQuery` under `treeProbeTimeout` and classifies `errors.Is(err, gitexec.ErrIncomplete) || runCtx.Err() != nil` as transient.
+
+NOTES (2026-11-03): the probe-scripting and ctx-honouring scriptedGit variant is one helper, `probeScriptedGit`, wrapping the unchanged `scriptedGit`; added rows TestTreeSnapshot_TimedOutProbeIsRetried, _ThreeUnansweredProbesLatchOff, _NotAWorkTreeLatchesOff, _IncompleteConfigCheckIsRetried, _CommandConfigRefusalLatchesOff, _CancelledProbeIsRetried.
+
+NOTES (2026-11-03): consequential edit — internal/agent/agent.go: made necessary by replacing the once-per-Agent probe (the `tree` field comment said "probed once per Agent, cached").
+
+NOTES (2026-11-03): consequential edit — internal/gitexec/doc.go: made necessary by adding the exported `ErrIncomplete` sentinel (the package map names IsIncompleteRefusal alongside it).
+
+NOTES (2026-11-03): the probe holds a mutex across its git run, so concurrent subprocess calls wait on the one probe as they did on sync.Once; worst case is now 3 × 30 s of probe time over an Agent's life on a git that never answers.
 
 **What:** Recast at the regression check (2026-11-03). Fix (slow-box): `active()` runs under `sync.Once`, so one timed-out or cancelled `rev-parse` turns the tracked-file mutation floor off for the Agent's life.
 **Regression guard.** Bound the retry: after 3 consecutive transient probe failures the probe latches "no" for the Agent's life; add a scriptedGit row (3 TimedOut rev-parses, then the next call runs no rev-parse). Classify CommandConfigIncompleteRefusal (incompleteRefusalLead) as transient and CommandConfigRefusal as definitive, preferring a gitexec sentinel over prefix matching. The cancelled-first-call row drives a.tree.beforeCall/active directly with a scriptedGit variant whose Spawn returns ctx.Err() when ctx is done. Guard rule: every comment in internal/agent describing the probe as once-per-Agent or 2 s-bounded is rewritten (`grep -n 'once\|2-second\|probeOnce' internal/agent/treesnapshot.go`). Supersede ADR 0056 D4's 2 s floor-git contract for the probe explicitly: add a dated child Note `adr-0056-amend-1103` (capcom know add --id adr-0056-amend-1103 --parent adr-0056), named on the record's Status line and reading-order list, recording the probe's own 30 s budget and bounded retry (snapshots keep 2 s); add ADR 0056 to the header Sources and the amendment files to item 10's Files. In gitexec.queryDiagnosed, wrap the TimedOut and DrainWedged errors in an exported sentinel, keeping Error() text unchanged; treesnapshot classifies errors.Is(sentinel) || runCtx.Err() != nil as transient. The incomplete-refusal and command-config-refusal rows use a scriptedGit variant that scripts the probe's own calls (TimedOut on `rev-parse --git-path config` for incomplete, a listing naming core.sshcommand for refusal); each row takes its own TempDir gitPath so gitexec's commandConfigProbes memo cannot carry over.

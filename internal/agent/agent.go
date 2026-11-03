@@ -341,8 +341,9 @@ type Agent struct {
 	// (treesnapshot.go): git-status snapshots taken before and after each subprocess
 	// run so the result names the workspace files the command changed. A structural
 	// floor in the ADR 0006 class — always on, every mode including Bypass — active
-	// only when the workspace root is a git repository (probed once per Agent,
-	// cached). newAgent always supplies it; nil is an inactive floor, never an error.
+	// only when the workspace root is a git repository (probed on the first subprocess
+	// call, the first definitive answer latched for the Agent's life). newAgent always
+	// supplies it; nil is an inactive floor, never an error.
 	tree *treeSnapshotter
 
 	// gitHost is the git runner the commit-secrets pre-check (secretsguard.go) resolves and

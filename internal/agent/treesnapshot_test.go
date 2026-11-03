@@ -673,3 +673,294 @@ func TestTreeSnapshot_ConfinedCallSnapshotsOutsideTheBox(t *testing.T) {
 		t.Errorf("Confine called %d times, want 1 (the tool alone) — the floor's git must run outside the box", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The work-tree probe latches only a definitive answer (ADR 0056 amendment 2026-11-03)
+// ---------------------------------------------------------------------------
+
+// treeProbeCommand is the floor's work-tree probe as gitCommand spells it.
+const treeProbeCommand = "rev-parse --is-inside-work-tree --show-toplevel"
+
+// probeScriptedGit is scriptedGit for a row that scripts the funnel's command-config probe too:
+// every captured launch — the probe's own `rev-parse --git-path config …` and
+// `config <scope> … --list -z` calls included — is first offered to probe, and a command it
+// declines (ok=false) falls through to scriptedGit's clean probe answer, then to answer. A launch
+// whose ctx is already done fails with ctx.Err(), as a cancelled call's launch does, and is
+// recorded like any other.
+func probeScriptedGit(
+	gitPath string,
+	probe func(command string) (res subprocess.SubprocessResult, ok bool),
+	answer func(command string) subprocess.SubprocessResult,
+) (gitexec.Host, *specLog) {
+	host, log := scriptedGit(gitPath, answer)
+	spawn, spawnTo := host.Spawn, host.SpawnTo
+	host.Spawn = func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		if err := ctx.Err(); err != nil {
+			log.add(spec)
+			return subprocess.SubprocessResult{}, err
+		}
+		if probe != nil {
+			if res, ok := probe(gitCommand(spec)); ok {
+				log.add(spec)
+				return res, nil
+			}
+		}
+		return spawn(ctx, spec)
+	}
+	host.SpawnTo = func(ctx context.Context, spec subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
+		if err := ctx.Err(); err != nil {
+			log.add(spec)
+			return subprocess.SubprocessResult{}, err
+		}
+		return spawnTo(ctx, spec, stdout)
+	}
+	return host, log
+}
+
+// newFileStatus answers the floor's status listings alternately as a clean "before" and an
+// "after" naming new.txt, so every call whose floor is active warns about new.txt.
+func newFileStatus() func() subprocess.SubprocessResult {
+	var mu sync.Mutex
+	var runs int
+	return func() subprocess.SubprocessResult {
+		mu.Lock()
+		defer mu.Unlock()
+		runs++
+		if runs%2 == 0 {
+			return subprocess.SubprocessResult{Stdout: "?? new.txt\x00"}
+		}
+		return subprocess.SubprocessResult{}
+	}
+}
+
+// countCommand reports how many recorded specs ran command.
+func countCommand(log *specLog, command string) int {
+	var n int
+	for _, spec := range log.all() {
+		if gitCommand(spec) == command {
+			n++
+		}
+	}
+	return n
+}
+
+// probeFloorAgent builds a workspace Agent at root whose engine git is host.
+func probeFloorAgent(t *testing.T, root string, host gitexec.Host) *Agent {
+	t.Helper()
+	a := newWorkspaceAgent(t, root)
+	withEngineGit(host)(a)
+	return a
+}
+
+// warnsAboutNewFile reports whether result carries the floor's warning naming new.txt.
+func warnsAboutNewFile(result domain.ToolResult) bool {
+	return strings.Contains(result.Content, "[warning: this command changed workspace files: new.txt]")
+}
+
+// TestTreeSnapshot_TimedOutProbeIsRetried pins the slow-box half: a work-tree probe that timed out
+// is no answer about the repository, so it latches nothing and the next subprocess call probes
+// again — and that call's floor warns.
+func TestTreeSnapshot_TimedOutProbeIsRetried(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	status := newFileStatus()
+	var mu sync.Mutex
+	var probes int
+	host, log := scriptedGit(filepath.Join(t.TempDir(), "git"), func(command string) subprocess.SubprocessResult {
+		switch command {
+		case treeProbeCommand:
+			mu.Lock()
+			defer mu.Unlock()
+			probes++
+			if probes == 1 {
+				return subprocess.SubprocessResult{TimedOut: true, ExitCode: -1}
+			}
+			return subprocess.SubprocessResult{Stdout: "true\n" + root + "\n"}
+		case "status --porcelain -uall -z":
+			return status()
+		}
+		return subprocess.SubprocessResult{}
+	})
+	a := probeFloorAgent(t, root, host)
+	fake := mutatingSubprocessTool{subprocess: true, result: domain.ToolResult{Content: "ok"}}
+
+	if first := executeFake(t, a, fake); first.Content != "ok" {
+		t.Fatalf("first call = %q, want the bare result while the probe has no answer", first.Content)
+	}
+	if second := executeFake(t, a, fake); !warnsAboutNewFile(second) {
+		t.Errorf("second call = %q, want the retried probe to turn the floor on and warn", second.Content)
+	}
+	if got := countCommand(log, treeProbeCommand); got != 2 {
+		t.Errorf("the work-tree probe ran %d times, want 2 (the timed-out run and its retry)", got)
+	}
+}
+
+// TestTreeSnapshot_ThreeUnansweredProbesLatchOff pins the retry's bound: after
+// treeProbeTransientLimit timed-out probes in a row the floor latches off, so a git that never
+// answers stops costing every later call a probe timeout.
+func TestTreeSnapshot_ThreeUnansweredProbesLatchOff(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	host, log := scriptedGit(filepath.Join(t.TempDir(), "git"), func(command string) subprocess.SubprocessResult {
+		if command == treeProbeCommand {
+			return subprocess.SubprocessResult{TimedOut: true, ExitCode: -1}
+		}
+		return subprocess.SubprocessResult{}
+	})
+	a := probeFloorAgent(t, root, host)
+	fake := mutatingSubprocessTool{subprocess: true, result: domain.ToolResult{Content: "ok"}}
+
+	for call := 1; call <= treeProbeTransientLimit+1; call++ {
+		if result := executeFake(t, a, fake); result.IsError || result.Content != "ok" {
+			t.Fatalf("call %d = %+v, want the bare result: an unanswered probe never breaks a call", call, result)
+		}
+	}
+	if got := countCommand(log, treeProbeCommand); got != treeProbeTransientLimit {
+		t.Errorf("the work-tree probe ran %d times, want %d and none on the call after the latch", got, treeProbeTransientLimit)
+	}
+}
+
+// TestTreeSnapshot_NotAWorkTreeLatchesOff pins the definitive half: git exiting non-zero is git's
+// answer that the root is no work tree, so the probe latches off and never runs again.
+func TestTreeSnapshot_NotAWorkTreeLatchesOff(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	host, log := scriptedGit(filepath.Join(t.TempDir(), "git"), func(command string) subprocess.SubprocessResult {
+		if command == treeProbeCommand {
+			return subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: not a git repository"}
+		}
+		return subprocess.SubprocessResult{}
+	})
+	a := probeFloorAgent(t, root, host)
+	fake := mutatingSubprocessTool{subprocess: true, result: domain.ToolResult{Content: "ok"}}
+
+	executeFake(t, a, fake)
+	executeFake(t, a, fake)
+
+	if got := countCommand(log, treeProbeCommand); got != 1 {
+		t.Errorf("the work-tree probe ran %d times, want 1: exit 128 latches the floor off", got)
+	}
+	if got := countCommand(log, "status --porcelain -uall -z"); got != 0 {
+		t.Errorf("status ran %d times on a root git says is no work tree, want 0", got)
+	}
+}
+
+// TestTreeSnapshot_IncompleteConfigCheckIsRetried pins the funnel's half of a transient failure:
+// a command-config check that timed out refuses the probe's git as incomplete — no answer about
+// the repository — so the next call probes again and warns.
+func TestTreeSnapshot_IncompleteConfigCheckIsRetried(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	status := newFileStatus()
+	var mu sync.Mutex
+	var checks int
+	host, log := probeScriptedGit(filepath.Join(t.TempDir(), "git"),
+		func(command string) (subprocess.SubprocessResult, bool) {
+			if !strings.HasPrefix(command, "rev-parse --git-path config ") {
+				return subprocess.SubprocessResult{}, false
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			checks++
+			if checks == 1 {
+				return subprocess.SubprocessResult{TimedOut: true, ExitCode: -1}, true
+			}
+			return subprocess.SubprocessResult{}, false
+		},
+		func(command string) subprocess.SubprocessResult {
+			switch command {
+			case treeProbeCommand:
+				return subprocess.SubprocessResult{Stdout: "true\n" + root + "\n"}
+			case "status --porcelain -uall -z":
+				return status()
+			}
+			return subprocess.SubprocessResult{}
+		})
+	a := probeFloorAgent(t, root, host)
+	fake := mutatingSubprocessTool{subprocess: true, result: domain.ToolResult{Content: "ok"}}
+
+	if first := executeFake(t, a, fake); first.Content != "ok" {
+		t.Fatalf("first call = %q, want the bare result while the config check is incomplete", first.Content)
+	}
+	if got := countCommand(log, treeProbeCommand); got != 0 {
+		t.Fatalf("the work-tree probe ran %d times behind an incomplete config check, want 0", got)
+	}
+	if second := executeFake(t, a, fake); !warnsAboutNewFile(second) {
+		t.Errorf("second call = %q, want the retried probe to turn the floor on and warn", second.Content)
+	}
+}
+
+// TestTreeSnapshot_CommandConfigRefusalLatchesOff pins the other side of that line: a repository
+// whose own config names a program git would execute is refused for as long as that config
+// stands — a definitive answer — so the floor latches off and the next call runs no git at all.
+func TestTreeSnapshot_CommandConfigRefusalLatchesOff(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	host, log := probeScriptedGit(filepath.Join(t.TempDir(), "git"),
+		func(command string) (subprocess.SubprocessResult, bool) {
+			if command == "config --local --includes --show-origin --list -z" {
+				return subprocess.SubprocessResult{Stdout: "file:.git/config\x00core.sshcommand\nevil\x00"}, true
+			}
+			return subprocess.SubprocessResult{}, false
+		},
+		func(command string) subprocess.SubprocessResult {
+			if command == treeProbeCommand {
+				return subprocess.SubprocessResult{Stdout: "true\n" + root + "\n"}
+			}
+			return subprocess.SubprocessResult{}
+		})
+	a := probeFloorAgent(t, root, host)
+	fake := mutatingSubprocessTool{subprocess: true, result: domain.ToolResult{Content: "ok"}}
+
+	if first := executeFake(t, a, fake); first.Content != "ok" {
+		t.Fatalf("first call = %q, want the bare result for a refused repository", first.Content)
+	}
+	launched := len(log.all())
+	if launched == 0 {
+		t.Fatal("the first call ran no config check at all")
+	}
+	if second := executeFake(t, a, fake); second.Content != "ok" {
+		t.Errorf("second call = %q, want the bare result for a refused repository", second.Content)
+	}
+	if got := len(log.all()); got != launched {
+		t.Errorf("the second call launched %d git runs, want none: the refusal latches the floor off", got-launched)
+	}
+	if got := countCommand(log, treeProbeCommand); got != 0 {
+		t.Errorf("the work-tree probe ran %d times past the refusal, want 0", got)
+	}
+}
+
+// TestTreeSnapshot_CancelledProbeIsRetried pins the cancelled-Turn case: a probe whose call's ctx
+// was already cancelled says nothing about the repository, so the next call — on a live ctx —
+// probes again and its floor warns.
+func TestTreeSnapshot_CancelledProbeIsRetried(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	status := newFileStatus()
+	host, log := probeScriptedGit(filepath.Join(t.TempDir(), "git"), nil, func(command string) subprocess.SubprocessResult {
+		switch command {
+		case treeProbeCommand:
+			return subprocess.SubprocessResult{Stdout: "true\n" + root + "\n"}
+		case "status --porcelain -uall -z":
+			return status()
+		}
+		return subprocess.SubprocessResult{}
+	})
+	a := probeFloorAgent(t, root, host)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, ok := a.tree.beforeCall(cancelled); ok {
+		t.Fatal("beforeCall on a cancelled ctx reported the floor on")
+	}
+	if len(log.all()) == 0 {
+		t.Fatal("the cancelled call launched no git; the row must reach the launcher to pin its error")
+	}
+	before, ok := a.tree.beforeCall(context.Background())
+	if !ok {
+		t.Fatal("beforeCall after a cancelled probe reported the floor off, want the probe retried")
+	}
+	if warning := a.tree.mutationWarning(context.Background(), before); !strings.Contains(warning, "new.txt") {
+		t.Errorf("warning = %q, want the retried floor to name new.txt", warning)
+	}
+}
