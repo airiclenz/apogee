@@ -150,14 +150,15 @@ type watchState struct {
 	// ending is the owner's end once the probe found the hold free; past it nothing is read.
 	ending watchEnding
 	// window is the watched run's context window, from the last depth-0, non-maintenance usage
-	// line that named one; 0 until one does, the watcher's own window standing in meanwhile
-	// ([Model.topLevelWindow]). It is the watched run's, so it lives here and never in m.opts,
+	// line that named one, else the journal's opening frame (its context_window); 0 until either
+	// does, the watcher's own window standing in meanwhile ([Model.topLevelWindow]). It is the watched run's, so it lives here and never in m.opts,
 	// and leaveWatch drops it with the rest of the watch.
 	window int
 	// model is the watched run's bound model, the yardstick its sub-agent rows' model cells are
 	// measured against ([transcript.applyUsage]): from the last depth-0, non-maintenance usage line
-	// that named one, else the record's Meta.Model as the opening frame read it; "" until either
-	// does, the watcher's own model standing in meanwhile ([Model.topLevelModel]). It is the watched
+	// that named one, else the journal's opening frame (its model), else the record's Meta.Model as
+	// the opening frame read it; "" until one does, the watcher's own model standing in meanwhile
+	// ([Model.topLevelModel]). It is the watched
 	// run's, so it lives here and never in m.opts, and leaveWatch drops it with the rest of the watch.
 	model string
 }
@@ -203,14 +204,17 @@ type watchItem struct {
 
 // watchStart is a journal's opening frame resolved against the record: the title, the record's
 // first `entries` entries ready to replay, the record's last observed context fill
-// (Meta.CtxUsed), which lights the gauge before any journal usage line folds, and the record's
-// bound model (Meta.Model), which measures the watched sub-agents until a journal usage line names
-// one (err when the entries were wanted and would not read).
+// (Meta.CtxUsed), which lights the gauge before any journal usage line folds, the watched run's
+// bound model — the frame's, else the record's (Meta.Model) — which measures the watched
+// sub-agents until a journal usage line names one, and the frame's context window, the gauge's
+// limit until a journal usage line names one (err when the entries were wanted and would not
+// read). model and window are "" and 0 when neither the frame nor the record names them.
 type watchStart struct {
 	title   string
 	entries []entry
 	ctxUsed int
 	model   string
+	window  int
 	err     error
 }
 
@@ -622,20 +626,24 @@ type journalStartedLine struct {
 	Data eventjson.JournalStarted `json:"data"`
 }
 
-// loadWatchStart resolves a journal's opening frame: its title, the record's fill, and the record's
-// first `entries` entries, decoded and with every call the record stored open closed, as a resume closes them
-// (closeInterruptedCalls) — but with none of a resume's notices. The record is read by path,
-// read-only; a store is never opened for it.
+// loadWatchStart resolves a journal's opening frame: its title, the binding it names (model and
+// context_window, read at head 0 too), the record's fill, and the record's first `entries`
+// entries, decoded and with every call the record stored open closed, as a resume closes them
+// (closeInterruptedCalls) — but with none of a resume's notices. The frame's model outranks the
+// record's; a frame without the members (an older apogee's journal) reads as naming neither. The
+// record is read by path, read-only; a store is never opened for it.
 func loadWatchStart(raw []byte, recordPath string) watchStart {
 	var frame journalStartedLine
 	if err := json.Unmarshal(raw, &frame); err != nil {
 		return watchStart{err: fmt.Errorf("watch: journal frame: %w", err)}
 	}
-	start := watchStart{title: frame.Data.Title}
-	if frame.Data.Entries <= 0 {
-		return start
+	start := watchStart{title: frame.Data.Title, window: frame.Data.ContextWindow}
+	if frame.Data.Entries > 0 {
+		start.entries, start.ctxUsed, start.model, start.err = recordHead(recordPath, frame.Data.Entries)
 	}
-	start.entries, start.ctxUsed, start.model, start.err = recordHead(recordPath, frame.Data.Entries)
+	if frame.Data.Model != "" {
+		start.model = frame.Data.Model
+	}
 	return start
 }
 
@@ -753,13 +761,18 @@ func (m Model) foldWatchItem(item watchItem) Model {
 // paintWatchStart (re)paints the watched session from its opening frame: the view is cleared and
 // the record's head replayed directly, with none of replayScrollback's resume notices — the
 // session is not being resumed. The gauge relights from the record's fill, as a resume relights it
-// (resumeLoaded), until a journal usage line moves it; the record's model, where it names one,
-// measures the watched sub-agents until a journal usage line names another (watchState.model).
+// (resumeLoaded), until a journal usage line moves it. The frame's window, where it names one, is
+// the gauge's limit, and the frame's model, else the record's, measures the watched sub-agents,
+// each until a journal usage line names another (watchState.window, watchState.model); a frame
+// naming neither leaves both as they stand.
 func (m *Model) paintWatchStart(start watchStart) {
 	m.clearWatchView()
 	m.ctxUsed = start.ctxUsed
 	if start.model != "" {
 		m.watch.model = start.model
+	}
+	if start.window > 0 {
+		m.watch.window = start.window
 	}
 	m.watch.hasRunFinished = false
 	if title := stripEscapes(start.title); title != "" {
@@ -778,7 +791,8 @@ func (m *Model) paintWatchStart(start watchStart) {
 // re-assert and the decision-pane withdrawal — since the watcher saves nothing and runs nothing.
 // What it adds is the watched binding: a usage reading that moves the top-level gauge (depth 0, not
 // maintenance) and names its window makes that window the gauge's limit for the rest of the watch,
-// and one that names its model makes that model the watched run's. The conversation fold is handed
+// over the one the opening frame named, and one that names its model makes that model the watched
+// run's, over the frame's or the record's. The conversation fold is handed
 // that pair (topLevelWindow, topLevelModel), so the watched run's sub-agent rows are measured
 // against the run they belong to rather than against the watcher's own binding. Only this routing
 // hands it: an owner Msg folded mid-watch (foldForOwner) reaches foldEvent, which keeps m.opts.

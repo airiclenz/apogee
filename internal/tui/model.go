@@ -4620,8 +4620,9 @@ func (m Model) contextGauge() string {
 
 // topLevelWindow is the window the top-level fill is measured against, read by the gauge
 // (contextGauge) and /usage's main row (usageRows) alike so the two never disagree. In a read-only
-// watch it is the watched run's, once a journal usage line has named one (watchState.window);
-// otherwise, and as the watch's fallback, it is the session's own bound window.
+// watch it is the watched run's, once a journal usage line or the journal's opening frame has named
+// one (watchState.window); otherwise, and as the watch's fallback, it is the session's own bound
+// window.
 func (m Model) topLevelWindow() int {
 	if m.watch.isActive && m.watch.window > 0 {
 		return m.watch.window
@@ -4631,8 +4632,8 @@ func (m Model) topLevelWindow() int {
 
 // topLevelModel is the model the top-level run is bound to, the yardstick a sub-agent row's model
 // cell is measured against ([transcript.applyUsage]). In a read-only watch it is the watched run's,
-// once a journal usage line or the record has named one (watchState.model); otherwise, and as the
-// watch's fallback, it is the session's own bound model.
+// once a journal usage line, the journal's opening frame or the record has named one
+// (watchState.model); otherwise, and as the watch's fallback, it is the session's own bound model.
 func (m Model) topLevelModel() string {
 	if m.watch.isActive && m.watch.model != "" {
 		return m.watch.model

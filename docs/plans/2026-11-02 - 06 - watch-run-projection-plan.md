@@ -234,7 +234,10 @@ Depends on item 5.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestSessionHost|Rebind|Fallover|Fallback|TestLoadProfile|TestMove' ./cmd/apogee/`
 **Commit:** `feat(apogee): an interactive session's journal frame names its binding`
 
-## 7. A watch binds the frame's model and window as it opens
+## 7. A watch binds the frame's model and window as it opens — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): `reopen` now delegates to the new `reopenBound(title, head, model, window)` helper (frame naming no binding), so the fixture's frame is written in one place; `reopen`'s and `newWatchFixture`'s signatures are unchanged.
+NOTES (2026-11-03): the head-0 subtest asserts `m.topLevelModel()` too (the frame's model at head 0, where the record is not read), beside the plan's `m.topLevelWindow() == 131072`; the no-members subtest also asserts the watcher's own model stands in.
 
 **What:**
 **Goal:** a journal frame naming a `context_window` > 0 makes it the watch's window, and a non-empty `model` makes it the watch's model, from the frame's fold onward. This happens before any usage line and at head 0 too, where the record is not read. Afterwards, a depth-0 usage line moves either value as before. A frame without the members (an older apogee's journal, or `0` and `""`) keeps item 1's fallback.

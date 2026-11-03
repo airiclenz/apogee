@@ -76,8 +76,11 @@ func newWatchFixture(t *testing.T, title string, entries []session.Entry, head i
 }
 
 // reopen truncates the journal and writes a fresh frame into it, as an owner reopening the record
-// does (Store.OpenJournal).
-func (f *watchFixture) reopen(title string, head int) {
+// does (Store.OpenJournal). The frame names no binding.
+func (f *watchFixture) reopen(title string, head int) { f.reopenBound(title, head, "", 0) }
+
+// reopenBound is reopen with a frame that names the owner's binding: model and context window.
+func (f *watchFixture) reopenBound(title string, head int, model string, window int) {
 	f.t.Helper()
 	file, err := os.Create(f.src.journalPath)
 	if err != nil {
@@ -86,11 +89,13 @@ func (f *watchFixture) reopen(title string, head int) {
 	f.t.Cleanup(func() { _ = file.Close() })
 	f.file = file
 	f.journal = eventjson.NewJournal(file, eventjson.JournalOptions{
-		Session: watchSessionID,
-		Title:   title,
-		Entries: head,
-		Now:     f.now,
-		Window:  time.Hour,
+		Session:       watchSessionID,
+		Title:         title,
+		Entries:       head,
+		Model:         model,
+		ContextWindow: window,
+		Now:           f.now,
+		Window:        time.Hour,
 	})
 }
 
@@ -626,6 +631,77 @@ func TestWatchLightsTheGaugeFromTheWatchedRun(t *testing.T) {
 		t.Errorf("window after esc = %d (opts %d); want the watcher's own %d",
 			m.topLevelWindow(), m.opts.ContextWindow, testOpts.ContextWindow)
 	}
+}
+
+// TestWatchBindsTheFramesModelAndWindowAtEntry pins the journal frame's binding: a frame that
+// names a model and a context window binds the watch to them from its fold — before any usage
+// line, and at head 0, where the record is not read — while a frame without the members (an older
+// apogee's journal) keeps the record-and-watcher fallback.
+func TestWatchBindsTheFramesModelAndWindowAtEntry(t *testing.T) {
+	t.Parallel()
+	opts := testOpts
+	opts.Model = "model-a" // the watcher's own binding, with testOpts' 32768 window
+	enter := func(t *testing.T, f *watchFixture) Model {
+		t.Helper()
+		m, cmd := newTestModelEng(t, watchEngine(), opts).enterWatch(f.src)
+		if !m.watch.isActive || cmd == nil {
+			t.Fatal("setup: enterWatch did not enter watch mode")
+		}
+		return step(t, m, cmd())
+	}
+
+	t.Run("the frame's binding lights the gauge and binds the children before any usage line", func(t *testing.T) {
+		t.Parallel()
+		f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+		seedRecordCtxUsed(t, f, 8000)
+		f.reopenBound("watched", 3, "model-b", 131072)
+		m := enter(t, f)
+
+		if got := statusText(t, m); !strings.Contains(got, "8k/128k") {
+			t.Errorf("status line on entry = %q; want the record's fill against the frame's window (8k/128k)", got)
+		}
+		unrouted := runRef{depth: 1, spawn: "s1", id: "run-s1"}
+		f.emit(delegationEvents(unrouted, "scout-one")...)
+		f.emit(childUsageOn(unrouted, "model-b", 12000))
+		m = pollWatch(t, m)
+		if one := subAgentRowOf(m, "scout-one"); strings.Contains(one, "model-b") || !strings.Contains(one, "12k/128k") {
+			t.Errorf("unrouted child's row = %q; want no model-b cell and its fill against the frame's window (12k/128k)", one)
+		}
+	})
+
+	t.Run("at head 0 the frame alone binds the watch", func(t *testing.T) {
+		t.Parallel()
+		f := newWatchFixture(t, "watched", nil, 0)
+		f.reopenBound("watched", 0, "model-b", 131072)
+		m := enter(t, f)
+
+		if got := m.topLevelWindow(); got != 131072 {
+			t.Errorf("topLevelWindow at head 0 = %d; want the frame's 131072", got)
+		}
+		if got := m.topLevelModel(); got != "model-b" {
+			t.Errorf("topLevelModel at head 0 = %q; want the frame's model-b", got)
+		}
+	})
+
+	t.Run("a frame without the members keeps the fallback", func(t *testing.T) {
+		t.Parallel()
+		f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+		seedRecordCtxUsed(t, f, 8000)
+		frame := `{"event":"run_started","v":2,"seq":1,"time":"2026-10-17T12:00:00Z","session":"` +
+			watchSessionID + `","turn":null,"depth":null,"call_id":null,"run_id":null,"data":{"session":"` +
+			watchSessionID + `","workspace":"/work","title":"watched","entries":3}}` + "\n"
+		if err := os.WriteFile(f.src.journalPath, []byte(frame), 0o600); err != nil {
+			t.Fatalf("write journal: %v", err)
+		}
+		m := enter(t, f)
+
+		if got := statusText(t, m); !strings.Contains(got, "8k/32k") {
+			t.Errorf("status line on entry = %q; want the record's fill against the watcher's window (8k/32k)", got)
+		}
+		if got := m.topLevelModel(); got != "model-a" {
+			t.Errorf("topLevelModel = %q; want the watcher's own model-a", got)
+		}
+	})
 }
 
 // seedRecordModel rewrites the fixture's record with model as its bound model (Meta.Model), leaving
