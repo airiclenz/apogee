@@ -79,6 +79,7 @@ func gateConfig(
 		tools.NewSubAgent())
 	cfg.WorkspaceDir = t.TempDir()
 	cfg.Mode = domain.ModeAskBefore
+	cfg.Unconfined = true // no Confiner here: an argv gate runs unfenced, as these tests mean
 	cfg.Reactions = reactions
 	if approver != nil {
 		cfg.Approver = approver

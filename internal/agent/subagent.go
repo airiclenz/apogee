@@ -1785,8 +1785,8 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 	childCfg := a.cfg
 	childCfg.Mode = a.Mode() // inherit the parent's LIVE mode at spawn (Shift+Tab may have changed it),
 	//                          read under the lock since this runs on the worker goroutine during dispatch
-	childCfg.ConfineToWorkspace = a.ConfineToWorkspace() // likewise the parent's LIVE blast radius at spawn
-	//                                                     (/confine may have moved it since construction)
+	childCfg.Unconfined = !a.ConfineToWorkspace() // likewise the parent's LIVE blast radius at spawn
+	//                                              (/confine may have moved it since construction)
 	childCfg.ScratchDir = a.ScratchDir() // and the parent's LIVE session scratch dir — a session
 	//                                      boundary may have moved it (SetScratchDir) since construction
 	gen := a.Generation()        // the parent's LIVE Generation at spawn:

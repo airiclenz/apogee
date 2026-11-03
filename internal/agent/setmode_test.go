@@ -68,7 +68,7 @@ func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModeAuto
 	cfg.Confiner = eligibleConfiner{} // Auto needs a Confiner at construction (ADR 0012)
-	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (resolveRun)
+	cfg.Unconfined = true             // "I am the sandbox": Auto auto-runs the write (resolveRun)
 	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -102,7 +102,7 @@ func TestSubAgentTighteningComposesToGrandchild(t *testing.T) {
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModeAuto
 	cfg.Confiner = eligibleConfiner{} // Auto needs a Confiner at construction (ADR 0012)
-	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (resolveRun)
+	cfg.Unconfined = true             // "I am the sandbox": Auto auto-runs the write (resolveRun)
 	top, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

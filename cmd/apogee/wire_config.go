@@ -58,9 +58,9 @@ func projectConfig(
 		// `/confine` toggle moves the blast radius on the live engine and nothing mirrors it onto
 		// the settings holder, which is the second named exception to "a Firing sees exactly what
 		// the session sees" (ADR 0037, note of 2026-08-25).
-		Confiner:           confiner,
-		ConfineToWorkspace: opts.ConfineToWorkspace,
-		WebSearchEndpoint:  opts.WebSearchEndpoint,
+		Confiner:          confiner,
+		Unconfined:        !opts.ConfineToWorkspace,
+		WebSearchEndpoint: opts.WebSearchEndpoint,
 		// The `tools.disabled:` roster switch — the built-in tools this configuration takes off the
 		// menu (empty ⇒ the whole roster) — and the `tools.enabled:` lift, the same global rung's
 		// ADD direction (ADR 0057): the built-in tools it puts back on the menu when the build or

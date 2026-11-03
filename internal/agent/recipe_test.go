@@ -521,7 +521,7 @@ func runScriptRecipe(t *testing.T, mode domain.Mode, confiner domain.Confiner) (
 	cfg := recipeConfig(t, &recordingSink{}, scriptRecipe("sh {{SKILL_DIR}}/bin/count.sh {workflow_dir}"))
 	cfg.Mode = mode
 	cfg.Confiner = confiner
-	cfg.ConfineToWorkspace = true
+	cfg.Unconfined = false // confined: the zero value, named for the reader
 	cfg.Approver = &gateApprover{decision: domain.ApprovalAllow}
 	shell := &shellTool{run: func(string) domain.ToolResult { return domain.ToolResult{Content: "COUNT=3\n"} }}
 	_ = cfg.Tools.Register(shell)

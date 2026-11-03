@@ -97,6 +97,7 @@ func sessionAdviseAgent(
 	reactions ...domain.Reaction,
 ) *Agent {
 	t.Helper()
+	cfg.Unconfined = true // no Confiner here: a user-origin argv entry runs unfenced, as these tests mean
 	cfg.Reactions = reactions
 	a, err := New(cfg, WithDialer(dialerTo(responder).dial))
 	if err != nil {

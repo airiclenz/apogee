@@ -142,10 +142,10 @@ type Agent struct {
 	// worker drives a Step (/confine off|on → SetConfineToWorkspace). It is a SIBLING of modeMu,
 	// not the same lock, because the two settings are independent: the Resolution reads them as
 	// two separate facts (resolutionInput), never as one pair that must be consistent, and each
-	// mutex here stays named for the single field it guards. cfg.ConfineToWorkspace stays the
-	// immutable construction seed.
+	// mutex here stays named for the single field it guards. cfg.Unconfined stays the
+	// immutable construction seed (negated: its zero value confines).
 	confineMu          sync.RWMutex
-	confineToWorkspace bool // live confine-to-workspace flag; seeded from cfg.ConfineToWorkspace, swappable via SetConfineToWorkspace
+	confineToWorkspace bool // live confine-to-workspace flag; seeded from !cfg.Unconfined, swappable via SetConfineToWorkspace
 
 	// scratchMu guards scratchDir, the session scratch directory the confinement box carries as
 	// an extra writable root (Config.ScratchDir). It is another live field of the modeMu class,

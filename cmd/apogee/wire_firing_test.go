@@ -81,7 +81,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	opts := config.Options{
 		// Bypass doubles as the Mechanisms floor.
 		Bypass:             true,
-		ConfineToWorkspace: true,
+		ConfineToWorkspace: false, // projects to Unconfined: true, off its zero
 		WebSearchEndpoint:  "https://search.example/v1",
 		ToolsDisabled:      []string{"run_terminal_cmd"},
 		ToolsEnabled:       []string{"web_search"},
@@ -184,8 +184,8 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if cfg.Confiner != apogee.Confiner(fenceableHost) {
 		t.Error("Config.Confiner is not the backend the Driver handed over; the run would be fenced by something else")
 	}
-	if !cfg.ConfineToWorkspace {
-		t.Error("Config.ConfineToWorkspace = false; the posture the host configured did not reach the run")
+	if !cfg.Unconfined {
+		t.Error("Config.Unconfined = false; the posture the host configured did not reach the run")
 	}
 	if !cfg.Bypass {
 		t.Error("Config.Bypass = false; the Mechanisms floor did not reach the run")

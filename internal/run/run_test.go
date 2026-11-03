@@ -417,7 +417,7 @@ func TestOnceDeniesAGatedActionWithoutParking(t *testing.T) {
 
 	spec := planSpec(up.URL, "write the report")
 	spec.Config.Mode = domain.ModeAuto
-	spec.Config.ConfineToWorkspace = true
+	spec.Config.Unconfined = false // confined: the zero value, named for the reader
 	spec.Config.Confiner = stubConfiner{}
 	spec.Config.Tools = registry
 
@@ -467,6 +467,7 @@ func TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep(t *testing.T) {
 
 	spec := planSpec(up.URL, "note something for me")
 	spec.Config.Tools = registry
+	spec.Config.Unconfined = true // no Confiner here: the argv gate runs unfenced, as this test means
 	spec.Generation = domain.Generation{Sync: []domain.Reaction{denyingGate("warden")}}
 
 	// A generous deadline rather than a bare Background: a gate that never answered would hang
@@ -685,6 +686,7 @@ func TestOnceSeedsASessionStartedAdviseEntryUnlessBypassed(t *testing.T) {
 			up := stubllm.New(t, finalScript("done"))
 			spec := planSpec(up.URL, "first prompt")
 			spec.Config.WorkspaceDir = t.TempDir()
+			spec.Config.Unconfined = true // no Confiner here: the argv advise entry runs unfenced, as this test means
 			spec.Config.Bypass = tc.bypass
 			spec.Generation = domain.Generation{Sync: []domain.Reaction{entry}}
 
@@ -979,7 +981,7 @@ func TestOnceReportsTheLastMessageNotTheFirst(t *testing.T) {
 
 	spec := planSpec(up.URL, "write the report")
 	spec.Config.Mode = domain.ModeAuto
-	spec.Config.ConfineToWorkspace = true
+	spec.Config.Unconfined = false // confined: the zero value, named for the reader
 	spec.Config.Confiner = stubConfiner{}
 	spec.Config.Tools = registry
 

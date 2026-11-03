@@ -467,7 +467,7 @@ func TestLateEngineAppliesPreBindSettingsOnBind(t *testing.T) {
 
 	cfg := validCfg(t)
 	cfg.Mode = domain.ModeAskBefore
-	cfg.ConfineToWorkspace = true
+	cfg.Unconfined = false // the launch blast radius: confined
 	var bound *apogee.Agent
 	if err := engine.Bind(cfg, func(cfg apogee.Config, opts ...apogee.Option) (*apogee.Agent, error) {
 		agent, err := apogee.New(cfg, opts...)

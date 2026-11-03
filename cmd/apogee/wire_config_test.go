@@ -26,7 +26,7 @@ func projectionOptions(t *testing.T) config.Options {
 		Workspace:            t.TempDir(),
 		ConfigDir:            t.TempDir(),
 		Bypass:               true,
-		ConfineToWorkspace:   true,
+		ConfineToWorkspace:   false, // projects to Unconfined: true, off its zero
 		WebSearchEndpoint:    "https://search.example/v1",
 		ToolsDisabled:        []string{"run_terminal_cmd"},
 		ToolsEnabled:         []string{"web_search"},
@@ -86,8 +86,12 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 	if got.Confiner != want.Confiner {
 		t.Errorf("Config.Confiner = %T, want the projection's %T", got.Confiner, want.Confiner)
 	}
-	if got.ConfineToWorkspace != want.ConfineToWorkspace {
-		t.Errorf("Config.ConfineToWorkspace = %v, want %v", got.ConfineToWorkspace, want.ConfineToWorkspace)
+	if got.Unconfined != want.Unconfined {
+		t.Errorf("Config.Unconfined = %v, want %v", got.Unconfined, want.Unconfined)
+	}
+	if !want.Unconfined {
+		t.Error("projection Config.Unconfined = false; the fixture's confine-to-workspace: false did not project, " +
+			"so the comparison above cannot tell a carried value from the zero")
 	}
 	if got.WebSearchEndpoint != want.WebSearchEndpoint {
 		t.Errorf("Config.WebSearchEndpoint = %q, want %q", got.WebSearchEndpoint, want.WebSearchEndpoint)

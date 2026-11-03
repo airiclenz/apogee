@@ -154,13 +154,15 @@ type Config struct {
 	// surface swaps whole; a child inherits the parent's LIVE value at spawn.
 	ContextFillNotice bool
 
-	// ConfineToWorkspace tunes Auto's blast radius (ADR 0012); meaningful only in Auto.
-	// true (the default) fences subprocess writes to the workspace under OS confinement
-	// (network open, MCP gated); false ("I am the sandbox") runs Auto unconfined, safe
-	// only inside a VM. It is loaded from the GLOBAL config only (a project config cannot
-	// loosen it — the hostile-repo footgun is closed). The host sets it; the loop reads it
-	// in the dispatch disposition.
-	ConfineToWorkspace bool
+	// Unconfined tunes Auto's blast radius (ADR 0012), and fences argv reactions in every mode.
+	// false — the zero value, so a Config that omits it confines, as FloorConfig's Disable
+	// fields keep their guard on — fences subprocess writes to the workspace under OS
+	// confinement (network open, MCP gated); true ("I am the sandbox") runs Auto unconfined,
+	// safe only inside a VM. The shipped host maps the GLOBAL-only `confine-to-workspace:`
+	// key to it by negation (a project config cannot loosen it — the hostile-repo footgun is
+	// closed). It is the construction seed: the live value is the Agent's ConfineToWorkspace,
+	// which the loop reads in the dispatch disposition.
+	Unconfined bool
 
 	// ConfineWritablePaths and ConfineNetworkAllow extend the confinement box beyond the
 	// workspace root (confinement-execution-contract §7): the toolchain cache/temp dirs a
@@ -1322,7 +1324,7 @@ const (
 	// identical on every OS (ADR 0012).
 	ModeAllowEdits Mode = "allow-edits"
 	// ModeAuto runs unbounded tool calls without per-call approval, tuned by
-	// Config.ConfineToWorkspace (ADR 0012). With confinement on (the default), the
+	// Config.Unconfined (ADR 0012). With confinement on (the default), the
 	// subprocess surface runs OS-confined to the workspace; an unfenceable tool (MCP) or
 	// an out-of-workspace Apogee write still gates through Approval; if fs-confinement is
 	// unavailable, the subprocess surface gates ("confine if you can, gate if you can't").

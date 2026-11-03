@@ -254,15 +254,15 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 func newIncapableHostAgent(t *testing.T, endpoint, workspace string, confiner apogee.Confiner, approver apogee.Approver, sink apogee.EventSink) tui.Engine {
 	t.Helper()
 	agent, err := apogee.New(apogee.Config{
-		Endpoint:           endpoint,
-		Model:              "fake",
-		Mode:               domain.ModeAuto,
-		Events:             sink,
-		Approver:           approver,
-		Tools:              tools.NewDefaultRegistry(workspace),
-		WorkspaceDir:       workspace,
-		Confiner:           confiner,
-		ConfineToWorkspace: true,
+		Endpoint:     endpoint,
+		Model:        "fake",
+		Mode:         domain.ModeAuto,
+		Events:       sink,
+		Approver:     approver,
+		Tools:        tools.NewDefaultRegistry(workspace),
+		WorkspaceDir: workspace,
+		Confiner:     confiner,
+		Unconfined:   false, // confined: the zero value, named for the reader
 	})
 	if err != nil {
 		t.Fatalf("apogee.New on the incapable host: %v", err)

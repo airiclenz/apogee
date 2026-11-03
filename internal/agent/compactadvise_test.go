@@ -47,6 +47,7 @@ func compactAdviseAgent(
 	reactions ...domain.Reaction,
 ) *Agent {
 	t.Helper()
+	cfg.Unconfined = true // no Confiner here: the argv re-brief runs unfenced, as these tests mean
 	cfg.Reactions = reactions
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -123,6 +124,7 @@ func TestCompactAdvise_AnEmergencyFoldFencesTheBridge(t *testing.T) {
 	t.Parallel()
 
 	cfg := autoCompactConfig(&recordingSink{})
+	cfg.Unconfined = true // no Confiner here: the argv re-brief runs unfenced, as this test means
 	cfg.Reactions = []domain.Reaction{rebriefEntry("rebrief", compactionFinished)}
 	up := recoveryResponder(t, "recovered reply", "EMERGENCY-SUMMARY", true)
 	a, err := newAgent(cfg, up)

@@ -748,8 +748,8 @@ func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
 		t.Fatal("the firing composed no run at all")
 	}
 
-	if !stub.spec.Config.ConfineToWorkspace {
-		t.Error("the firing runs with ConfineToWorkspace = false, want the boot value true — a blast " +
+	if stub.spec.Config.Unconfined {
+		t.Error("the firing runs with Unconfined = true, want the boot value false — a blast " +
 			"radius a human loosened for their own watched turn reached the run nobody is watching")
 	}
 }

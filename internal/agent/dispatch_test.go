@@ -1659,6 +1659,52 @@ func TestDispatch_ApproverErrorRefuses(t *testing.T) {
 	}
 }
 
+// TestDisposition_ZeroConfigConfinesAuto pins the field's polarity: a Driver that builds its Config
+// without naming the blast radius at all gets Auto confined, never "I am the sandbox", so only an
+// explicit Unconfined: true runs Auto unfenced.
+func TestDisposition_ZeroConfigConfinesAuto(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name         string
+		unconfined   bool
+		wantConfines int
+	}{
+		{name: "zero Config runs the subprocess confined", unconfined: false, wantConfines: 1},
+		{name: "Unconfined: true runs the subprocess unfenced", unconfined: true, wantConfines: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			sub := &subprocTool{name: "terminal"}
+			conf := &fakeConfiner{caps: capsBoth()}
+			cfg := configWithTools(sink, sub) // no autoConfig: the field is left exactly as a Driver omitting it would
+			cfg.Mode = domain.ModeAuto
+			cfg.Confiner = conf
+			if tt.unconfined {
+				cfg.Unconfined = true
+			}
+			approver := &fakeApprover{decision: domain.ApprovalDeny}
+			cfg.Approver = approver
+
+			driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"go build"}`)
+
+			if approver.calls != 0 {
+				t.Errorf("Approver consulted %d times; Auto with a capable Confiner gates neither row", approver.calls)
+			}
+			if sub.ranCount() != 1 {
+				t.Fatalf("subprocess ran %d times, want 1", sub.ranCount())
+			}
+			if got := conf.confineCount(); got != tt.wantConfines {
+				t.Errorf("Confine called %d times, want %d", got, tt.wantConfines)
+			}
+			if tt.wantConfines == 1 && !sub.confinedOK() {
+				t.Error("subprocess did not run under Confine (no handle, or Confine failed)")
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Auto · confine=false — everything auto-runs except the dangerous-action floor
 // ----------------------------------------------------------------------------
@@ -2744,7 +2790,7 @@ func autoConfig(sink *recordingSink, conf domain.Confiner, confine bool, tools .
 	cfg := configWithTools(sink, tools...)
 	cfg.Mode = domain.ModeAuto
 	cfg.Confiner = conf
-	cfg.ConfineToWorkspace = confine
+	cfg.Unconfined = !confine
 	return cfg
 }
 

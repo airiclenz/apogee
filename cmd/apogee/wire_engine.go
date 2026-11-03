@@ -310,7 +310,7 @@ func (e *lateEngine) seedGeneration(cfg *apogee.Config) (restoreRunner func() er
 // and a profile this build cannot parse fails construction as the file carrying it at launch would.
 // A nil pending value leaves cfg on what the caller built.
 func (e *lateEngine) seedConfig(cfg *apogee.Config) {
-	cfg.ConfineToWorkspace = e.confine
+	cfg.Unconfined = !e.confine
 	if s := e.pendingScratch; s != nil {
 		cfg.ScratchDir = *s
 	}

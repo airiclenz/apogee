@@ -34,7 +34,7 @@ func syncAgent(t *testing.T, sink domain.EventSink, conf domain.Confiner, confin
 	cfg.Mode = domain.ModePlan
 	cfg.WorkspaceDir = t.TempDir()
 	cfg.Confiner = conf
-	cfg.ConfineToWorkspace = confine
+	cfg.Unconfined = !confine
 
 	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
@@ -547,7 +547,7 @@ func TestRepoRunRunnerIsBoundByNew(t *testing.T) {
 	cfg.Endpoint = "http://127.0.0.1:1/v1"
 	cfg.WorkspaceDir = t.TempDir()
 	cfg.Confiner = &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: false}}
-	cfg.ConfineToWorkspace = true
+	cfg.Unconfined = false // confined: the zero value, named for the reader
 	var bound domain.ProjectRun
 	cfg.BindProjectRun = func(run domain.ProjectRun) { bound = run }
 

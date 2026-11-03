@@ -151,6 +151,7 @@ func TestConstructionSeed_ASessionStartedAdviseEntryRunsAtTheBoundary(t *testing
 			sink := &recordingSink{}
 			responder := echoResponder(t, "ok")
 			cfg := baseConfig(sink)
+			cfg.Unconfined = true // no Confiner here: the argv advise entry runs unfenced, as this test means
 			if tc.withRunner {
 				cfg.ObserveRunner = &startRecordingRunner{}
 			}

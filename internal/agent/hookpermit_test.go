@@ -44,7 +44,7 @@ func permitConfig(mode domain.Mode, conf domain.Confiner, confine bool) domain.C
 	cfg := baseConfig(&recordingSink{})
 	cfg.Mode = mode
 	cfg.Confiner = conf
-	cfg.ConfineToWorkspace = confine
+	cfg.Unconfined = !confine
 	cfg.WorkspaceDir = "/work/space"
 	cfg.ConfineWritablePaths = []string{"/work/space/out"}
 	cfg.ConfineNetworkAllow = []string{"example.test"}

@@ -64,6 +64,7 @@ func adviseArgvAgent(
 
 	cfg := configWithTools(sink, tools.NewWriteFile(ws), fakeTool{name: "list_dir", readOnly: true})
 	cfg.WorkspaceDir = ws
+	cfg.Unconfined = true // no Confiner here: the argv reactions run unfenced, as these tests mean
 	cfg.Reactions = reactions
 	cfg.Bypass = bypass
 	cfg.Report = func(msg string) { *reported = append(*reported, msg) }
