@@ -38,8 +38,8 @@ func TestNewAgentBuildsATopLevelAgent(t *testing.T) {
 	if a.depth != 0 || a.callID != "" || a.task != "" || a.consoleOwner != "" {
 		t.Errorf("top-level identity = (%d, %q, %q, %q), want all zero", a.depth, a.callID, a.task, a.consoleOwner)
 	}
-	if a.stepCap != 0 || a.tokenCap != 0 || a.timeCap != 0 {
-		t.Errorf("top-level bounds = (%d, %d, %v), want all zero: the delegate caps never bind the main loop", a.stepCap, a.tokenCap, a.timeCap)
+	if b := boundsOf(a); b.steps != 0 || b.tokens != 0 || b.time != 0 {
+		t.Errorf("top-level bounds = (%d, %d, %v), want all zero: the delegate caps never bind the main loop", b.steps, b.tokens, b.time)
 	}
 	if a.liveMode != nil || a.midExchangeCompaction || a.seatFallback {
 		t.Error("a top-level Agent carries no parent mode view, no mid-Exchange fold and no seat note")

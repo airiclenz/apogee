@@ -34,7 +34,7 @@ func stepNoticeChild(t *testing.T, cfg domain.Config, stepCap int) *Agent {
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.depth = 1
-	a.stepCap = stepCap
+	withBounds(a, testBounds{steps: stepCap})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}})
 	return a
 }
@@ -106,7 +106,7 @@ func TestStepNoticeFiresOnceOnTheThirdTurnOfACapOfFour(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.depth = 1
-	a.stepCap = 4
+	withBounds(a, testBounds{steps: 4})
 
 	res := runExchange(t, a, "trawl the repo")
 
@@ -230,17 +230,17 @@ func TestStepNoticeIsSilentAtDepthZeroUnboundedAndUnderTheThreshold(t *testing.T
 	cases := []struct {
 		name    string
 		depth   int
-		stepCap int
+		limit   int
 		counted int
 	}{
-		{name: "depth 0", depth: 0, stepCap: 4, counted: 2},
-		{name: "unbounded cap", depth: 1, stepCap: 0, counted: 2},
-		{name: "under the threshold", depth: 1, stepCap: 4, counted: 1},
+		{name: "depth 0", depth: 0, limit: 4, counted: 2},
+		{name: "unbounded cap", depth: 1, limit: 0, counted: 2},
+		{name: "under the threshold", depth: 1, limit: 4, counted: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			a := stepNoticeChild(t, stepNoticeConfig(sink), tc.stepCap)
+			a := stepNoticeChild(t, stepNoticeConfig(sink), tc.limit)
 			a.depth = tc.depth
 			a.turns.exchangeTurns = tc.counted
 
@@ -297,7 +297,7 @@ func TestStepNoticeIsToldAgainAfterAFoldSwallowedIt(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.depth = 1
-	a.stepCap = 4
+	withBounds(a, testBounds{steps: 4})
 
 	res := runExchange(t, a, "trawl the repo")
 
@@ -396,7 +396,7 @@ func tokenNoticeChild(t *testing.T, cfg domain.Config, tokenCap, spent int) *Age
 	t.Helper()
 
 	a := stepNoticeChild(t, cfg, 0)
-	a.tokenCap = tokenCap
+	withBounds(a, testBounds{tokens: tokenCap})
 	a.usage.prompt = spent
 	return a
 }
@@ -445,15 +445,15 @@ func TestTokenNoticeFiresOnceAtThreeQuartersOfTheCap(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.depth = 1
-	a.tokenCap = tokenCapTwentyMillion
+	withBounds(a, testBounds{tokens: tokenCapTwentyMillion})
 
 	res := runExchange(t, a, "trawl the repo")
 
 	if !res.StepCapped {
 		t.Fatalf("the child ended %+v, want it capped — the notice is measured against a budget the run meets", res)
 	}
-	if a.capHit != boundTokens {
-		t.Fatalf("the bound that ended the child = %v, want the token bound", a.capHit)
+	if hit := boundsOf(a).hit; hit != boundTokens {
+		t.Fatalf("the bound that ended the child = %v, want the token bound", hit)
 	}
 	assertNoTokenFiring(t, sink)
 	msgs := toolMessages(a)
@@ -507,19 +507,19 @@ func TestTokenNoticeReArmsAfterARollback(t *testing.T) {
 // and on a spend short of the threshold — 14.9M of 20M, where the 2026-09-18 child at 10.7M sat.
 func TestTokenNoticeIsSilentAtDepthZeroUnboundedAndUnderTheThreshold(t *testing.T) {
 	cases := []struct {
-		name     string
-		depth    int
-		tokenCap int
-		spent    int
+		name   string
+		depth  int
+		budget int
+		spent  int
 	}{
-		{name: "depth 0", depth: 0, tokenCap: tokenCapTwentyMillion, spent: 15_200_000},
-		{name: "unbounded budget", depth: 1, tokenCap: 0, spent: 15_200_000},
-		{name: "under the threshold", depth: 1, tokenCap: tokenCapTwentyMillion, spent: 14_900_000},
+		{name: "depth 0", depth: 0, budget: tokenCapTwentyMillion, spent: 15_200_000},
+		{name: "unbounded budget", depth: 1, budget: 0, spent: 15_200_000},
+		{name: "under the threshold", depth: 1, budget: tokenCapTwentyMillion, spent: 14_900_000},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			a := tokenNoticeChild(t, stepNoticeConfig(sink), tc.tokenCap, tc.spent)
+			a := tokenNoticeChild(t, stepNoticeConfig(sink), tc.budget, tc.spent)
 			a.depth = tc.depth
 
 			msg := adviseOneCall(t, a, "body")
@@ -572,7 +572,7 @@ func TestTokenNoticeIsToldAgainAfterAFoldSwallowedIt(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.depth = 1
-	a.tokenCap = tokenCapTwentyMillion
+	withBounds(a, testBounds{tokens: tokenCapTwentyMillion})
 
 	res := runExchange(t, a, "trawl the repo")
 

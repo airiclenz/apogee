@@ -8,6 +8,43 @@ import (
 	"github.com/airiclenz/apogee/internal/floor"
 )
 
+// testBounds is a delegate's bounds as a test sets or reads them: the step, token and time caps,
+// the clock reading the time bound counts from, the bound that ended the Exchange and the
+// max_steps a clamped ask requested. withBounds and boundsOf are the only test code that names
+// the Agent fields behind it, so a change to where an Agent keeps its bounds changes them alone.
+type testBounds struct {
+	steps     int
+	tokens    int
+	time      time.Duration
+	start     time.Time
+	hit       delegateBound
+	requested int
+}
+
+// withBounds sets every one of a's delegate bounds to b — a zero field clears that bound — and
+// returns a, so a bare test Agent is built and bounded in one expression.
+func withBounds(a *Agent, b testBounds) *Agent {
+	a.stepCap = b.steps
+	a.tokenCap = b.tokens
+	a.timeCap = b.time
+	a.capStart = b.start
+	a.capHit = b.hit
+	a.capRequested = b.requested
+	return a
+}
+
+// boundsOf reads a's delegate bounds.
+func boundsOf(a *Agent) testBounds {
+	return testBounds{
+		steps:     a.stepCap,
+		tokens:    a.tokenCap,
+		time:      a.timeCap,
+		start:     a.capStart,
+		hit:       a.capHit,
+		requested: a.capRequested,
+	}
+}
+
 // goldenWrapUpTail is wrapUpDirectiveTail spelled out, so the directive goldens below pin the
 // bytes the child reads rather than the constant that writes them.
 const goldenWrapUpTail = "no further tool calls are possible: the tools have been withdrawn for this final reply." +
@@ -78,7 +115,7 @@ func TestBoundRowsRenderEverySurface(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			child := &Agent{capHit: tc.bound, stepCap: 3, tokenCap: 20000000, timeCap: 2 * time.Hour}
+			child := withBounds(&Agent{}, testBounds{steps: 3, tokens: 20000000, time: 2 * time.Hour, hit: tc.bound})
 
 			surfaces := []struct{ surface, got, want string }{
 				{"error text", child.boundErrText(), tc.errText},

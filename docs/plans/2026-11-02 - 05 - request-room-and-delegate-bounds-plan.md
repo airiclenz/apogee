@@ -184,7 +184,10 @@ NOTES (2026-11-03): consequential edit — internal/agent/stepnotice_test.go: ma
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestBoundRows|TestParseDelegateBound|TestSubAgent_.*Budget|TestStepNotice|TestTokenNotice|TestWrapUpDirective|TestSnapshot|TestWorkflowSpawn|TestBoundErrText|TestCapResultHead|TestSeat_|TestDelegateReport' ./internal/agent/`
 **Commit:** `refactor(agent): a delegate's bounds read one table`
 
-## 6. Tests reach the delegate bounds through one helper
+## 6. Tests reach the delegate bounds through one helper — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the helpers are one value and two functions in delegatelimits_test.go — `testBounds` (steps, tokens, time, start, hit, requested), `withBounds(a, b) *Agent` (sets all six, returns a, so a bare `&Agent{…}` literal is bounded in one expression) and `boundsOf(a)` (reads all six); `TestBoundRowsRenderEverySurface`'s own literal there goes through `withBounds` too, so item 7 changes only those two functions. Sites on a `newAgent` Agent (all bounds zero) set with `withBounds` directly; the one site on a `newChildAgent` child (delegatereport_test.go) reads, edits and writes back so its seeded token and time caps stay.
+NOTES (2026-11-03): local table-struct fields renamed to satisfy the first Acceptance grep, which matches `tc.stepCap`/`tc.tokenCap` reads though they are not Agent fields: stepnotice_test.go `stepCap`→`limit` and `tokenCap`→`budget` (the plan's regression guard said these keys "stay"; the Acceptance grep binds), fanout_test.go `stepCap`→`applied`. A comment in subagent_test.go (`spentChildTurns`, "(Agent.tokenCap)") was reworded to "the token bound" for the same grep. Assertions unchanged.
 
 Depends on item 5.
 

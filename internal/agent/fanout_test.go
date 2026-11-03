@@ -2307,7 +2307,7 @@ func TestFanOut_StartedPhaseCarriesTheAppliedCap(t *testing.T) {
 
 	cases := []struct {
 		callID             string
-		stepCap, requested int
+		applied, requested int
 	}{
 		{"c1", 80, 120}, // asked above the cap: clamped, and the ask remembered
 		{"c2", 40, 0},   // asked below the cap: the ask binds and nothing was clamped
@@ -2318,9 +2318,9 @@ func TestFanOut_StartedPhaseCarriesTheAppliedCap(t *testing.T) {
 		if len(phases) != 2 || phases[0].Phase != domain.SubAgentStarted || phases[1].Phase != domain.SubAgentFinished {
 			t.Fatalf("%s phases = %+v, want a started/finished pair", tc.callID, phases)
 		}
-		if phases[0].StepCap != tc.stepCap || phases[0].CapRequested != tc.requested {
+		if phases[0].StepCap != tc.applied || phases[0].CapRequested != tc.requested {
 			t.Errorf("%s started phase caps = (StepCap %d, CapRequested %d), want (%d, %d)",
-				tc.callID, phases[0].StepCap, phases[0].CapRequested, tc.stepCap, tc.requested)
+				tc.callID, phases[0].StepCap, phases[0].CapRequested, tc.applied, tc.requested)
 		}
 		if phases[1].StepCap != 0 || phases[1].CapRequested != 0 {
 			t.Errorf("%s finished phase caps = (%d, %d), want both 0 — the facts ride the started phase only",

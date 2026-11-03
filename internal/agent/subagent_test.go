@@ -1774,7 +1774,7 @@ func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	a.stepCap = 3 // what newChildAgent seeds on a delegate; a top-level Agent is left at 0
+	withBounds(a, testBounds{steps: 3}) // what newChildAgent seeds on a delegate; a top-level Agent is left at 0
 
 	if err := a.Submit(domain.UserInput{Text: "trawl the repo"}); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -2076,11 +2076,11 @@ func TestBoundErrText_SaysCapped(t *testing.T) {
 		child *Agent
 		want  string
 	}{
-		{"step cap", &Agent{stepCap: 3},
+		{"step cap", withBounds(&Agent{}, testBounds{steps: 3}),
 			"delegate capped at its step cap (3 steps) — asking it to sum up; narrow the task or raise delegate-max-steps"},
-		{"token budget", &Agent{capHit: boundTokens, tokenCap: 20000000},
+		{"token budget", withBounds(&Agent{}, testBounds{tokens: 20000000, hit: boundTokens}),
 			"delegate capped at its token budget (20000000 tokens) — asking it to sum up; narrow the task or raise delegate-max-tokens"},
-		{"time limit", &Agent{capHit: boundTime, timeCap: 2 * time.Hour},
+		{"time limit", withBounds(&Agent{}, testBounds{time: 2 * time.Hour, hit: boundTime}),
 			"delegate capped at its time limit (2h0m) — asking it to sum up; narrow the task or raise delegate-timeout"},
 	}
 	for _, tc := range cases {
@@ -2107,9 +2107,9 @@ func TestCapResultHead_NonReportVariantsKeepTheBoundPrefix(t *testing.T) {
 		child  *Agent
 		prefix string
 	}{
-		{"step cap", &Agent{stepCap: 3}, "[delegate stopped at its step cap (3 steps);"},
-		{"token budget", &Agent{capHit: boundTokens, tokenCap: 20000000}, "[delegate stopped at its token budget (20000000 tokens);"},
-		{"time limit", &Agent{capHit: boundTime, timeCap: 2 * time.Hour}, "[delegate stopped at its time limit (2h0m);"},
+		{"step cap", withBounds(&Agent{}, testBounds{steps: 3}), "[delegate stopped at its step cap (3 steps);"},
+		{"token budget", withBounds(&Agent{}, testBounds{tokens: 20000000, hit: boundTokens}), "[delegate stopped at its token budget (20000000 tokens);"},
+		{"time limit", withBounds(&Agent{}, testBounds{time: 2 * time.Hour, hit: boundTime}), "[delegate stopped at its time limit (2h0m);"},
 	}
 	shapes := []floor.ClosingShape{floor.ShapeReport, floor.ShapeToolCallMarkup, floor.ShapeFileDump, floor.ShapeGrepDump, floor.ShapeNarration}
 	for _, b := range bounds {
@@ -2215,7 +2215,7 @@ func TestSubAgent_StepCapZeroIsUnbounded(t *testing.T) {
 
 // spentChildTurns is cappedChildTurns with a server-reported usage on every Turn: prompts[i] is
 // the prompt-token count Turn i reports, which the child's own tally sums — the reading the token
-// bound (Agent.tokenCap) is enforced against.
+// bound is enforced against.
 func spentChildTurns(prompts ...int) [][]provider.Delta {
 	out := make([][]provider.Delta, 0, len(prompts))
 	for i, prompt := range prompts {
@@ -2513,8 +2513,8 @@ func TestStepCapNeverBoundsTheMainAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	if a.stepCap != 0 {
-		t.Fatalf("top-level Agent constructed with stepCap = %d, want 0 — the cap is a delegate bound", a.stepCap)
+	if steps := boundsOf(a).steps; steps != 0 {
+		t.Fatalf("top-level Agent constructed with stepCap = %d, want 0 — the cap is a delegate bound", steps)
 	}
 	_ = a.Submit(domain.UserInput{Text: "do the work"})
 	res, err := a.Run(context.Background())
@@ -2713,8 +2713,8 @@ func TestNewChildAgent_IsBuiltFromOneDelegationValue(t *testing.T) {
 	if child.callID != "c1" || child.task != "summarise the repo" || child.displayName() != "summariser" {
 		t.Errorf("child identity = (%q, %q, %q), want (c1, summarise the repo, summariser)", child.callID, child.task, child.displayName())
 	}
-	if child.stepCap != 7 || child.tokenCap != 9000 || child.timeCap != 3*time.Minute {
-		t.Errorf("child bounds = (%d, %d, %v), want (7, 9000, 3m)", child.stepCap, child.tokenCap, child.timeCap)
+	if b := boundsOf(child); b.steps != 7 || b.tokens != 9000 || b.time != 3*time.Minute {
+		t.Errorf("child bounds = (%d, %d, %v), want (7, 9000, 3m)", b.steps, b.tokens, b.time)
 	}
 	if !child.midExchangeCompaction {
 		t.Error("a delegate folds mid-Exchange; the contract is set at construction")
@@ -3168,7 +3168,7 @@ func TestSubAgent_ParentNoticeOnEveryOutcomeButCancelled(t *testing.T) {
 	}{
 		{"run error", &Agent{steered: 2}, domain.StepResult{}, errors.New("boom"), "sub-agent failed: boom"},
 		{"faulted", &Agent{steered: 2, turns: &turnLifecycle{lastFault: "the upstream died"}}, domain.StepResult{Faulted: true}, nil, subAgentFaultPrefix + "the upstream died"},
-		{"step capped", &Agent{steered: 2, stepCap: 3}, domain.StepResult{StepCapped: true}, nil, fmt.Sprintf(stepCapResultFormat, 3)},
+		{"step capped", withBounds(&Agent{steered: 2}, testBounds{steps: 3}), domain.StepResult{StepCapped: true}, nil, fmt.Sprintf(stepCapResultFormat, 3)},
 		{"success", &Agent{steered: 2}, domain.StepResult{}, nil, ""},
 	}
 	for _, tc := range cases {
@@ -3999,7 +3999,7 @@ func wrapUpAgent(t *testing.T, latched bool, scripts ...[]provider.Delta) (*Agen
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	a.stepCap = 3 // what newChildAgent seeds on a delegate; the directive states this number
+	withBounds(a, testBounds{steps: 3}) // what newChildAgent seeds on a delegate; the directive states this number
 	if latched {
 		a.turns.capped()
 	}

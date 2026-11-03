@@ -194,7 +194,9 @@ func TestDelegateReport_DoesNotContradictTheWrapUpDirective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
 	}
-	child.stepCap = 3
+	bounds := boundsOf(child)
+	bounds.steps = 3
+	withBounds(child, bounds)
 	child.turns.capped() // the one tool-less closing Turn (Agent.finishAtStepCap)
 
 	got := seedSystemMessage(t, child, responder, "the delegated task")
@@ -202,7 +204,7 @@ func TestDelegateReport_DoesNotContradictTheWrapUpDirective(t *testing.T) {
 	if !strings.Contains(got, DelegateReportBlock) {
 		t.Errorf("the wrap-up request dropped the standing block:\n%q", got)
 	}
-	if directive := fmt.Sprintf(wrapUpDirectiveFormat, child.stepCap); !strings.Contains(got, directive) {
+	if directive := fmt.Sprintf(wrapUpDirectiveFormat, boundsOf(child).steps); !strings.Contains(got, directive) {
 		t.Errorf("the wrap-up request is missing the directive %q:\n%q", directive, got)
 	}
 	if strings.Contains(DelegateReportBlock, wrapUpMarker) {
