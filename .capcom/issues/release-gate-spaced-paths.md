@@ -1,11 +1,13 @@
 ---
 title: Release gate misreads any commit that touches a path containing a space
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tooling]
 plan: 2026-11-03 - 00 - code-audit-fixes-plan
 created: 2026-11-03T14:20:29Z
+closed: 2026-11-03T16:07:40Z
+reason: Resolved by plan '2026-11-03 - 00 - code-audit-fixes-plan' (archived in c3346711)
 ---
 
 From docs/reviews/code-audit-2026-11-03.md; fixed by item 12 of `docs/plans/2026-11-03 - 00 - code-audit-fixes-plan.md`. `touchesOnlyPeelablePaths` (cmd/release/gate.go:129) splits `git diff-tree --name-only` with `strings.Fields`, so house plan and handoff names (`YYYY-MM-DD - NN - name.md`) tear into fragments that match no CI-skip pattern; a C-quoted path keeps its quote. (The report's second site `:545` does not exist.)

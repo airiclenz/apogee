@@ -1,10 +1,12 @@
 ---
 title: systemd unit quoting does not escape `%` and `$`
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-03 - 00 - code-audit-fixes-plan
 created: 2026-11-03T14:20:29Z
+closed: 2026-11-03T16:07:40Z
+reason: Resolved by plan '2026-11-03 - 00 - code-audit-fixes-plan' (archived in c3346711)
 ---
 
 From docs/reviews/code-audit-2026-11-03.md; fixed by item 16 of `docs/plans/2026-11-03 - 00 - code-audit-fixes-plan.md`. `systemdQuote` (cmd/apogee/daemoninstall.go:426-432) quotes on `$` and `%` but escapes only `\` and `"`; systemd expands `%` specifiers and `$VAR` inside double quotes.

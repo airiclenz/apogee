@@ -1,11 +1,13 @@
 ---
 title: Hostile PDF stalls a Turn with quadratic reference scanning
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security]
 plan: 2026-11-03 - 00 - code-audit-fixes-plan
 created: 2026-11-03T14:20:29Z
+closed: 2026-11-03T16:07:40Z
+reason: Resolved by plan '2026-11-03 - 00 - code-audit-fixes-plan' (archived in c3346711)
 ---
 
 From docs/reviews/code-audit-2026-11-03.md; fixed by item 9 of `docs/plans/2026-11-03 - 00 - code-audit-fixes-plan.md`. `decodedReferences` (internal/doctext/pdf.go:1294-1307) rescans a referenced array object in full for every `/Contents` or `/ToUnicode` site naming it, with no de-duplication and no `ctx` check. One object of K references plus M sites costs M*K in `preflightPDF`, before any read budget.

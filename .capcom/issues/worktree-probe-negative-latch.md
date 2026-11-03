@@ -1,11 +1,13 @@
 ---
 title: Git work-tree probe latches a negative answer for the Agent's life after one transient failure
-status: open
+status: done
 type: bug
 priority: 2
 labels: [slow-box]
 plan: 2026-11-03 - 00 - code-audit-fixes-plan
 created: 2026-11-03T14:20:29Z
+closed: 2026-11-03T16:07:40Z
+reason: Resolved by plan '2026-11-03 - 00 - code-audit-fixes-plan' (archived in c3346711)
 ---
 
 From docs/reviews/code-audit-2026-11-03.md; fixed by item 10 of `docs/plans/2026-11-03 - 00 - code-audit-fixes-plan.md`. `active()` (internal/agent/treesnapshot.go:130-150, timeout :55) runs under `sync.Once` with the first call's context and a fixed 2 s timeout; any error leaves `isRepo` false for the life of the Agent.

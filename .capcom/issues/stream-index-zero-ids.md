@@ -1,10 +1,12 @@
 ---
 title: Streamed parallel tool calls sharing `index 0` with distinct ids fold into one invalid call
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-03 - 00 - code-audit-fixes-plan
 created: 2026-11-03T14:20:29Z
+closed: 2026-11-03T16:07:40Z
+reason: Resolved by plan '2026-11-03 - 00 - code-audit-fixes-plan' (archived in c3346711)
 ---
 
 From docs/reviews/code-audit-2026-11-03.md; fixed by item 13 of `docs/plans/2026-11-03 - 00 - code-audit-fixes-plan.md`. `address` (internal/provider/stream.go:560, `atIndex` :580, `fold` :528) merges a fragment into the call at its wire index even when it carries a different non-empty id. A server giving every parallel call `index: 0` with its own id (some OpenAI-compatible shims) yields one call with `{"a":1}{"b":2}`.

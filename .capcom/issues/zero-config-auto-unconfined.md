@@ -1,11 +1,13 @@
 ---
 title: A zero `domain.Config` runs Auto unconfined though `ConfineToWorkspace` is documented as defaulting to true
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security, driver-parity]
 plan: 2026-11-03 - 00 - code-audit-fixes-plan
 created: 2026-11-03T14:20:29Z
+closed: 2026-11-03T16:07:40Z
+reason: Resolved by plan '2026-11-03 - 00 - code-audit-fixes-plan' (archived in c3346711)
 ---
 
 From docs/reviews/code-audit-2026-11-03.md; fixed by item 19 of `docs/plans/2026-11-03 - 00 - code-audit-fixes-plan.md`. `Config.ConfineToWorkspace` (internal/domain/config.go:157-163, read at internal/agent/construct.go:116, branch at internal/agent/dispatch.go:1154) is a plain bool whose zero value is false, which dispatch treats as the unfenced Auto row. TUI, daemon and probe set it explicitly; headless, the bench or a library embedder that omits it gets fail-open Auto.
