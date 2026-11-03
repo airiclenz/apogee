@@ -139,6 +139,12 @@ func WithFallbackResolver(r FallbackResolver) Option { return agent.WithFallback
 // accepted and never panics. See internal/agent for the contract.
 type FallbackResolver = agent.FallbackResolver
 
+// FallbackLandingJoiner is the optional half of a FallbackResolver that joins a run still in flight
+// without ever starting one: on the Sub-agents seat the engine joins through it, after every routed
+// caller was cancelled during the wait, to re-latch the tree from where the run lands. A resolver
+// without it gets no post-cancel re-latch. See internal/agent for the contract.
+type FallbackLandingJoiner = agent.FallbackLandingJoiner
+
 // FallbackReport is what the engine tells a FallbackResolver about the fault it would abandon a
 // Turn for.
 type FallbackReport = agent.FallbackReport

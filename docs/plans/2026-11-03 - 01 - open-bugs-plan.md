@@ -67,7 +67,11 @@ NOTES (2026-11-03): pre-existing, not changed: the file named by `time --output 
 - `go test -race -count=1 -run 'TestTUIFallback|TestSeatResolver' ./cmd/apogee/`
 **Commit:** `fix(fallback): build no Monitor for a session seat without a fallback list`
 
-## 3. The post-cancel landing consult joins, never walks
+## 3. The post-cancel landing consult joins, never walks — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — example_test.go: made necessary by the new `apogee.FallbackLandingJoiner` alias (the facade's re-export enumeration lists every alias)
+NOTES (2026-11-03): `TestFallbackResolverLandsTheTargetForCancelledCallers` calls `JoinLanding` on a `context.WithTimeout(fallbackAnswerBudget)` rather than the plan's `context.Background()`, so a run that never lands fails the test instead of hanging it
+NOTES (2026-11-03): the engine test's "zero Resolve calls after the cancel" is a `testtime.Fixed(200ms)` nothing-happens window; mutation-checked against the old `Resolve`-based `awaitLanding`, which fails it
 
 **What:** fix: when every routed caller is cancelled during the grace window, `Agent.awaitLanding` re-consults via `Resolve` on `context.WithoutCancel`; if the run ended (and was dropped) in between, that consult starts a fresh grace window and walk with no caller, contrary to the interface doc's "must join the run still going rather than start another".
 **Regression guard.** sessionFallback's JoinLanding reads f.current under its lock and never calls f.resolver(), so item 2's "no resolver cached, no Monitor built" holds. `JoinLanding` is added to `*stubResolver` itself (delegating to its answer func on the detached ctx), so the no-joiner test uses its own comparable pointer type implementing `Resolve` only — never `resolverFunc`, which `isArmedOn` rejects, so `awaitLanding` would return early on either tree — latched as the armed target's Fallback. Every comment naming the engine's post-cancel consult or join is brought in line (`grep -rn "consult after\|once more about\|awaitLanding\|join.* the run" --include=*.go internal/agent cmd/apogee apogee.go`). This supersedes in part `adr-0105-amend-1102d` (the re-latch by "the engine's own consult" on every Driver's resolver): add a dated child `adr-0105-amend-1103` (a resolver without the joiner gets no post-cancel re-latch), named on ADR 0105's Status line and reading-order list.

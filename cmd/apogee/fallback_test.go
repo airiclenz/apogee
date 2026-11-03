@@ -977,11 +977,47 @@ func TestSeatResolverBindsEverySeatAndDriverAlike(t *testing.T) {
 	}
 }
 
+// TestFallbackResolverJoinAfterADroppedRunStartsNoWalk: a caller cancelled inside the grace window
+// leaves the run going; the run ends with nothing live and is dropped, and the engine's join after
+// the cancel then finds no run in flight — it answers nothing and starts no grace window, walk or
+// landing, where a Resolve would have begun a fresh run with no caller waiting on it.
+func TestFallbackResolverJoinAfterADroppedRunStartsNoWalk(t *testing.T) {
+	seat := newFakeSeat()
+	r := seat.resolver("backup")
+	ctx, cancel := context.WithCancel(context.Background())
+	caller := resolveAsync(ctx, r, primaryReport())
+	testtime.Eventually(t, fallbackAnswerBudget, func() bool { return seat.beats.Load() > 0 },
+		"the grace window to beat the primary")
+	cancel()
+	if answer := awaitAnswer(t, caller); answer.Verdict != apogee.FallbackNone {
+		t.Fatalf("the caller cancelled mid-grace got %+v; want the zero answer", answer)
+	}
+	testtime.Eventually(t, fallbackAnswerBudget, func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return len(r.runs) == 0
+	}, "the run that moved nothing to be dropped")
+	beats, lands := seat.beats.Load(), len(seat.lands())
+
+	answer, joined := r.JoinLanding(context.Background(), primaryReport())
+
+	if joined || answer.Verdict != apogee.FallbackNone || answer.Server != "" || answer.Target != nil {
+		t.Errorf("the join after the dropped run got %+v (joined %v); want the zero answer, nothing joined", answer, joined)
+	}
+	r.mu.Lock()
+	started := len(r.runs)
+	r.mu.Unlock()
+	if started != 0 || seat.beats.Load() != beats || len(seat.lands()) != lands {
+		t.Errorf("after the join: runs=%d beats %d→%d lands %d→%d; want no run started, no beat, no landing",
+			started, beats, seat.beats.Load(), lands, len(seat.lands()))
+	}
+}
+
 // TestFallbackResolverLandsTheTargetForCancelledCallers: on both Drivers' Sub-agents seat, a caller
 // whose Resolve is cancelled inside the grace window gets the zero answer, yet the run it started
 // goes on, lands on the backup and commits the backup's Delegation target on the answer, carrying the
-// seat's own resolver — so the engine's consult after the cancel (agent.Agent.consultResolver) joins
-// the run, reads that target and re-latches the tree, with no Driver push.
+// seat's own resolver — so the engine's join after the cancel (agent.Agent.consultResolver, through
+// JoinLanding) joins the run, reads that target and re-latches the tree, with no Driver push.
 func TestFallbackResolverLandsTheTargetForCancelledCallers(t *testing.T) {
 	t.Parallel()
 	backup := stubllm.New(t, stubllm.Script{Model: "backup-model", Turns: []stubllm.Turn{{Text: "unused"}}})
@@ -1041,10 +1077,12 @@ func TestFallbackResolverLandsTheTargetForCancelledCallers(t *testing.T) {
 			}
 
 			close(release)
-			answer := awaitAnswer(t, resolveAsync(context.Background(), seat.fallbackResolver, primaryReport()))
+			joinCtx, cancelJoin := context.WithTimeout(context.Background(), fallbackAnswerBudget)
+			defer cancelJoin()
+			answer, joined := seat.JoinLanding(joinCtx, primaryReport())
 
-			if answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" {
-				t.Fatalf("the consult after the cancel got %+v; want the run's switch onto backup", answer)
+			if !joined || answer.Verdict != apogee.FallbackSwitch || answer.Server != "backup" {
+				t.Fatalf("the join after the cancel got %+v (joined %v); want the run's switch onto backup", answer, joined)
 			}
 			if got := answer.Target; got == nil || got.Endpoint != backup.URL || got.Fallback != seat {
 				t.Errorf("answered target = %+v; want backup's, carrying the seat's resolver", got)

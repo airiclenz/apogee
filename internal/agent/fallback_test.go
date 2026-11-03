@@ -93,6 +93,12 @@ func (r *stubResolver) Resolve(ctx context.Context, report FallbackReport) Fallb
 	return r.answer(ctx, report)
 }
 
+// JoinLanding makes the stub a FallbackLandingJoiner: the engine's post-cancel join is recorded and
+// answered as a Resolve is, through answer on the detached ctx, and always reports a run joined.
+func (r *stubResolver) JoinLanding(ctx context.Context, report FallbackReport) (FallbackAnswer, bool) {
+	return r.Resolve(ctx, report), true
+}
+
 // seen returns a copy of the reports the resolver has been handed.
 func (r *stubResolver) seen() []FallbackReport {
 	r.mu.Lock()
@@ -1453,6 +1459,55 @@ func TestFallbackRoutedLandingRelatchesAfterCancelledCallers(t *testing.T) {
 	}
 	if got := len(r.switchedEvents()); got != 0 {
 		t.Errorf("UpstreamSwitchedEvents = %d, want 0 — no cancelled caller moved a holder", got)
+	}
+}
+
+// resolveOnlyResolver is a comparable FallbackResolver with no FallbackLandingJoiner: every Resolve
+// is handed to calls, and the wait answers nothing until its ctx is cancelled.
+type resolveOnlyResolver struct {
+	calls chan context.Context
+}
+
+func (r *resolveOnlyResolver) Resolve(ctx context.Context, _ FallbackReport) FallbackAnswer {
+	r.calls <- ctx
+	<-ctx.Done()
+	return FallbackAnswer{}
+}
+
+// TestFallbackRoutedLandingWithoutAJoinerConsultsNothing pins that the engine's post-cancel
+// observation only ever joins: a routed caller of a Sub-agents seat resolver that implements Resolve
+// alone is cancelled inside the wait, and the engine — though the latch is armed on that resolver —
+// consults it no further, since a second Resolve after the run ended would start a fresh grace window
+// and walk with no caller.
+func TestFallbackRoutedLandingWithoutAJoinerConsultsNothing(t *testing.T) {
+	t.Parallel()
+	resolver := &resolveOnlyResolver{calls: make(chan context.Context, 4)}
+	r := newRelatchRig(t, func(FallbackAnswer) FallbackResolver { return resolver })
+	child := r.routedChild(t, "cancelled")
+	if err := child.Submit(domain.UserInput{Text: "work"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan domain.StepResult, 1)
+	go func() {
+		res, _ := child.Step(ctx) // a cancelled Step's error is the user's cancel, not under test
+		result <- res
+	}()
+
+	<-resolver.calls
+	cancel()
+	if res := <-result; res.Status != domain.StatusCancelled {
+		t.Fatalf("the cancelled caller's Step = %+v, want a cancelled Turn", res)
+	}
+
+	if !r.parent.delegation.isArmedOn(resolver) {
+		t.Fatal("the latch is not armed on the resolver; the test would pass without reaching the observation")
+	}
+	select {
+	case <-resolver.calls:
+		t.Error("the engine called Resolve after the cancel; want no consult from a resolver with no joiner")
+	case <-time.After(testtime.Fixed(200 * time.Millisecond)):
 	}
 }
 

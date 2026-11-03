@@ -554,9 +554,9 @@ func (a *Agent) stateSessionWidth(answer FallbackAnswer) {
 // when a routed child applies it. A switch answer re-latches at once (relatchDelegation), whether
 // or not ctx was cancelled as it came back. A wait cancelled before the run answered — the user's
 // Esc, a cancelled Firing caller — leaves the run going, since a resolver runs it detached from every
-// caller (FallbackResolver), so the engine joins it once more on a context free of that cancel
-// (awaitLanding): a routed spawn made after every caller was cancelled still dials the fallback
-// before any beat re-states it, on every Driver (ADR 0031).
+// caller (FallbackResolver), so the engine joins it on a context free of that cancel when the
+// resolver is a FallbackLandingJoiner (awaitLanding): a routed spawn made after every caller was
+// cancelled still dials the fallback before any beat re-states it, on every Driver (ADR 0031).
 func (a *Agent) consultResolver(ctx context.Context, report FallbackReport) FallbackAnswer {
 	resolver := a.seating.fallback
 	answer := resolver.Resolve(ctx, report)
@@ -573,18 +573,22 @@ func (a *Agent) consultResolver(ctx context.Context, report FallbackReport) Fall
 }
 
 // awaitLanding observes, off the caller's goroutine, where resolver's run for report lands after the
-// caller's own wait was cancelled: it consults resolver again on ctx stripped of its cancel, which
-// joins the run still going (a resolver hands every report on one failed server the run's one
-// answer), and re-latches from a switch. It does nothing unless the latch is still armed on resolver:
-// a seat the human or a relist has moved since has no landing to wait for. The observer ends when the
-// run does, under the backstop a resolver's detached run carries.
+// caller's own wait was cancelled: it joins the run still going through the resolver's
+// FallbackLandingJoiner on ctx stripped of its cancel, and re-latches from a switch. It never calls
+// Resolve, which with the run ended and dropped in between would start a grace window and a walk no
+// caller waits for; a run no longer in flight answers nothing. It does nothing when the resolver has
+// no joiner, or unless the latch is still armed on resolver: a seat the human or a relist has moved
+// since has no landing to wait for. The observer ends when the run does, under the backstop a
+// resolver's detached run carries.
 func (a *Agent) awaitLanding(ctx context.Context, resolver FallbackResolver, report FallbackReport) {
-	if !a.delegation.isArmedOn(resolver) {
+	joiner, isJoiner := resolver.(FallbackLandingJoiner)
+	if !isJoiner || !a.delegation.isArmedOn(resolver) {
 		return
 	}
 	detached := context.WithoutCancel(ctx)
 	go func() {
-		if answer := resolver.Resolve(detached, report); answer.Verdict == FallbackSwitch {
+		answer, joined := joiner.JoinLanding(detached, report)
+		if joined && answer.Verdict == FallbackSwitch {
 			a.relatchDelegation(resolver, answer)
 		}
 	}()

@@ -119,12 +119,34 @@ func (r *fallbackResolver) Resolve(ctx context.Context, report apogee.FallbackRe
 	}
 	r.mu.Unlock()
 
+	answer, _ := run.wait(ctx)
+	return answer
+}
+
+// JoinLanding is the engine's post-cancel join (apogee.FallbackLandingJoiner): it waits for the run
+// still held for report's failed server and answers with it, and starts nothing. With no run held —
+// one that ended without moving the seat was dropped — it answers the zero answer and false at once,
+// so a join after the last caller's cancel never begins a fresh grace window or walk. A run that
+// moved the seat is never dropped, so a join after it landed reads its switch.
+func (r *fallbackResolver) JoinLanding(ctx context.Context, report apogee.FallbackReport) (apogee.FallbackAnswer, bool) {
+	r.mu.Lock()
+	run, inFlight := r.runs[report.Server]
+	r.mu.Unlock()
+	if !inFlight {
+		return apogee.FallbackAnswer{}, false
+	}
+	return run.wait(ctx)
+}
+
+// wait blocks until the run's answer is final and returns it with true, or returns the zero answer
+// and false once ctx ends first.
+func (run *fallbackRun) wait(ctx context.Context) (apogee.FallbackAnswer, bool) {
 	select {
 	case <-run.done:
+		return run.answer, true
 	case <-ctx.Done():
-		return apogee.FallbackAnswer{}
+		return apogee.FallbackAnswer{}, false
 	}
-	return run.answer
 }
 
 // execute runs the grace window and the list walk for report, on a context that keeps the starting
@@ -481,7 +503,7 @@ func newSeatResolver(kind seatKind, src seatSource) *seatResolver {
 // fallover latches consults the one instance; the source's width, when it states one, rides it as
 // FallbackAnswer.ParallelAgents. The landing, Target included, is recorded as the
 // latest before its answer goes back to the walk — where it commits for every caller of the run,
-// including the engine's consult after a cancelled one (agent.FallbackResolver).
+// including the engine's join after a cancelled one (agent.FallbackLandingJoiner).
 func (s *seatResolver) land(ctx context.Context, name string) (apogee.FallbackAnswer, bool) {
 	lander := s.src.lander()
 	if s.kind == subAgentsSeat {
@@ -599,6 +621,20 @@ func (f *sessionFallback) Resolve(ctx context.Context, report apogee.FallbackRep
 		return apogee.FallbackAnswer{}
 	}
 	return resolver.Resolve(ctx, report)
+}
+
+// JoinLanding joins the current primary's run still in flight for report
+// (apogee.FallbackLandingJoiner). It never builds a resolver: with none current — no fault since a
+// bind or a human move, or an entry with no `fallback:` — there is no run to join, and it answers
+// the zero answer and false, dialling no Monitor.
+func (f *sessionFallback) JoinLanding(ctx context.Context, report apogee.FallbackReport) (apogee.FallbackAnswer, bool) {
+	f.mu.Lock()
+	current := f.current
+	f.mu.Unlock()
+	if current == nil {
+		return apogee.FallbackAnswer{}, false
+	}
+	return current.JoinLanding(ctx, report)
 }
 
 // resolver is the current primary's resolver, built for the bound entry when there is none. Each

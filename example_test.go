@@ -152,6 +152,7 @@ var (
 	_ apogee.Option
 	_ apogee.SeedRefusedError
 	_ apogee.FallbackResolver
+	_ apogee.FallbackLandingJoiner
 	_ apogee.FallbackReport
 	_ apogee.FallbackAnswer
 	_ apogee.FallbackVerdict

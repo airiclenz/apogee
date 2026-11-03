@@ -800,10 +800,12 @@ func WithFallbackResolver(r FallbackResolver) Option {
 // its own) and only each caller's own wait honours that caller's ctx.
 //
 // On the Sub-agents seat a caller cancelled during the wait does not end the engine's interest in
-// the run: the engine consults the resolver once more about the same report on a context stripped
-// of that cancel, to observe where the run lands and re-latch the tree from its answer
-// (FallbackAnswer.Target). That consult must join the run still going rather than start another,
-// and returns when the run's backstop ends it.
+// the run, when the resolver also implements FallbackLandingJoiner: the engine joins the run still
+// going about the same report on a context stripped of that cancel, to observe where it lands and
+// re-latch the tree from its answer (FallbackAnswer.Target). The engine never calls Resolve for
+// that observation, since a Resolve with no run in flight starts one; a resolver without the joiner
+// gets no post-cancel re-latch, and its landing re-latches the tree only when a routed child's own
+// consult is answered with it.
 //
 // A resolver announces nothing: the engine emits the one UpstreamSwitchedEvent per seat move itself.
 // On the Sub-agents seat, where every routed child moves a holder of its own, it claims that one
@@ -814,6 +816,22 @@ func WithFallbackResolver(r FallbackResolver) Option {
 // announce their own move.
 type FallbackResolver interface {
 	Resolve(ctx context.Context, report FallbackReport) FallbackAnswer
+}
+
+// FallbackLandingJoiner is the optional half of a FallbackResolver the engine's post-cancel
+// observation uses (Agent.awaitLanding): on the Sub-agents seat, once every routed caller of a run
+// was cancelled during the wait, the engine joins the run about the same report to learn where it
+// lands and re-latch the tree from a switch. The engine type-asserts the seat's resolver for it; a
+// resolver without it is consulted only through Resolve, and gets no post-cancel re-latch.
+//
+// JoinLanding only ever joins: it waits for the run still going on report's failed server and
+// returns its answer with true, or returns the zero answer and false at once when no run is in
+// flight — one that ended without moving the seat and was dropped — so it never starts a grace
+// window, a list walk or a landing. A run that moved the seat and is still held answers its switch.
+// It must return promptly once ctx is cancelled, with false; the engine calls it on a context free
+// of the caller's cancel, so the run's own backstop is what ends the wait.
+type FallbackLandingJoiner interface {
+	JoinLanding(ctx context.Context, report FallbackReport) (FallbackAnswer, bool)
 }
 
 // FallbackReport is what the engine tells a FallbackResolver about the fault it would abandon a
@@ -867,8 +885,8 @@ type FallbackAnswer struct {
 	// the Driver from the same beat — the target a host would latch for the fallback had the human
 	// named it — and carrying the seat's own resolver as its Fallback. When the engine first
 	// observes a routed landing of this move in the tree — a routed child's consult answered with
-	// the switch, or, when every caller was cancelled during the wait, the engine's own consult
-	// joining the run that went on (Agent.consultResolver) — it re-latches the tree's Delegation
+	// the switch, or, when every caller was cancelled during the wait, the engine joining the run
+	// that went on (FallbackLandingJoiner, Agent.consultResolver) — it re-latches the tree's Delegation
 	// target to it and states its ParallelAgents as the far width on the root, so later spawns route
 	// to the fallback rather than to the dead server, with no beat and no Driver push. It is honoured
 	// only while the landing child's resolver is the one the latch is armed on
