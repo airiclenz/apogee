@@ -359,6 +359,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The configured `currency:` label, which a Save writes beside the session's usage unless a resumed
 	// record brought a priced label of its own (sessionHost.sessionLabel, ADR 0093).
 	w.host.currency = w.opts.Currency
+	// The launch window, beside the launch model newSessionHost took: the binding a live Event
+	// journal's opening frame names until a rebind or a move restates it — set here, ahead of the
+	// attach below, where a resumed record's journal is born. It is the window the display's gauge
+	// launches with (Options.ContextWindow).
+	w.host.window = w.live.window()
 	// The live Event journal (ADR 0103) rides the host too, since it follows the record's hold: the
 	// host points the chain's journal sink at the active record's `<id>.events.jsonl`, opened by the
 	// same store-backed opener a Firing's journal is (firingJournal), and the engine holder tells it

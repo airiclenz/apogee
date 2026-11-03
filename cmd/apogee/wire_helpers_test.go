@@ -257,10 +257,17 @@ func (f *fakeSwitcher) SwitchUpstream(spec apogee.UpstreamSpec) error {
 	return nil
 }
 
-// fakeStamper stands in for the session host at the metadata half of a move.
-type fakeStamper struct{ models []string }
+// fakeStamper stands in for the session host at the metadata half of a move: models and windows
+// record each SetModel's pair, in call order.
+type fakeStamper struct {
+	models  []string
+	windows []int
+}
 
-func (f *fakeStamper) SetModel(model string) { f.models = append(f.models, model) }
+func (f *fakeStamper) SetModel(model string, window int) {
+	f.models = append(f.models, model)
+	f.windows = append(f.windows, window)
+}
 
 // validCfg is the minimum Config that constructs (Endpoint/Model/Events). It installs the
 // real Bridge sink — the same delegate the binary wires — so the buildAgent tests exercise

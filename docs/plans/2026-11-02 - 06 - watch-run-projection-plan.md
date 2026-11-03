@@ -204,7 +204,10 @@ NOTES (2026-11-03): the zero-options frame is pinned by a new test, `TestJournal
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestSessionHostEventJournal' ./cmd/apogee/`
 **Commit:** `feat(eventjson): the journal's run_started names the run's model and window`
 
-## 6. An interactive session's journal frame names its binding
+## 6. An interactive session's journal frame names its binding — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): wire_live.go seeds the launch window with a direct field write (`w.host.window = w.live.window()`, beside the existing `w.host.currency` write, before any goroutine runs), not a `SetModel` call, so the launch model keeps its one source (newSessionHost's argument); the resumed-record test seeds it the same way.
+NOTES (2026-11-03): lock order checked: every `mu` section in wire_session.go releases `mu` before taking `evMu`, so `openEventJournalLocked` reads the pair under `mu` inside `evMu` without an inversion.
 
 **What:**
 **Goal:** an interactive session's journal frame names the model and context window the session is bound to at the journal's birth: the launch binding, or the one the last rebind or server fallback bound (`""` and `0` when unbound or unknown).

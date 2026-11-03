@@ -240,7 +240,7 @@ func TestSessionHostSetModelStampsSaves(t *testing.T) {
 	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save before the bind: %v", err)
 	}
-	host.SetModel("bound-model")
+	host.SetModel("bound-model", 131072)
 	if err := host.Save(apogee.Session{}, nil, "cold", 2, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("Save after the bind: %v", err)
 	}
@@ -1813,7 +1813,9 @@ func TestSessionHostEventJournalRecordsPromptsAndEvents(t *testing.T) {
 	if want := []string{"run_started", "prompt", "token", "turn", "prompt"}; !slices.Equal(kinds, want) {
 		t.Errorf("journal kinds = %v, want %v", kinds, want)
 	}
-	if want := (eventjson.JournalStarted{Session: id, Workspace: "/ws", Title: "Say hello", Entries: 0}); started != want {
+	if want := (eventjson.JournalStarted{
+		Session: id, Workspace: "/ws", Title: "Say hello", Entries: 0, Model: "m", ContextWindow: 0,
+	}); started != want {
 		t.Errorf("opening frame = %+v, want %+v", started, want)
 	}
 	if want := []eventjson.Prompt{{Text: "Say hello"}, {Text: "and this", Interjection: true}}; !slices.Equal(promptLines(lines), want) {
@@ -1831,6 +1833,33 @@ func TestSessionHostEventJournalRecordsPromptsAndEvents(t *testing.T) {
 		t.Errorf("journals after Close = %v, want none", journals)
 	}
 	assertHeld(t, store, id, false)
+}
+
+// An interactive session's journal frame names the binding the session holds at the journal's birth:
+// the pair the last SetModel stated. A rebind after a journal is born restamps no open frame; the
+// next journal born — here after a /clear — names the new pair.
+func TestSessionHostEventJournalNamesTheBinding(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	host := newSessionHost(store, nil, "/ws", "", nil, "", nil, "", nil) // a cold start: nothing bound yet
+	host.attachEventJournal(newLiveJournalSink(nil), firingJournal(store, nil))
+
+	host.SetModel("bound-model", 131072)
+	host.Prompt("first", false)
+	_, first := readJournal(t, store.JournalPath(host.SessionID()))
+	host.SetModel("rebound-model", 65536)
+	host.Rotate() // /clear
+	host.Prompt("second", false)
+	_, second := readJournal(t, store.JournalPath(host.SessionID()))
+	host.Close()
+
+	if first.Model != "bound-model" || first.ContextWindow != 131072 {
+		t.Errorf("first frame binding = %q / %d, want bound-model / 131072", first.Model, first.ContextWindow)
+	}
+	if second.Model != "rebound-model" || second.ContextWindow != 65536 {
+		t.Errorf("frame after the rebind and /clear = %q / %d, want rebound-model / 65536",
+			second.Model, second.ContextWindow)
+	}
 }
 
 // On /clear (Rotate), a /sessions switch (Load + Activate), /fork (Fork + Activate of the child) and
@@ -1875,10 +1904,10 @@ func TestSessionHostEventJournalEndsBeforeTheHoldIsReleased(t *testing.T) {
 
 	starts, ends := log.snapshot()
 	wantStarts := []run.JournalStart{
-		{RecordID: first, Title: "first", Workspace: "/ws", Entries: 0},
-		{RecordID: cleared, Title: "cleared", Workspace: "/ws", Entries: 0},
-		{RecordID: stored.Meta.ID, Title: "stored", Workspace: "/ws", Entries: 2},
-		{RecordID: child.ID, Title: "child", Workspace: "/ws", Entries: len(forkPrefix())},
+		{RecordID: first, Title: "first", Workspace: "/ws", Entries: 0, Model: "m", ContextWindow: 0},
+		{RecordID: cleared, Title: "cleared", Workspace: "/ws", Entries: 0, Model: "m", ContextWindow: 0},
+		{RecordID: stored.Meta.ID, Title: "stored", Workspace: "/ws", Entries: 2, Model: "m", ContextWindow: 0},
+		{RecordID: child.ID, Title: "child", Workspace: "/ws", Entries: len(forkPrefix()), Model: "m", ContextWindow: 0},
 	}
 	if !slices.Equal(starts, wantStarts) {
 		t.Errorf("journals born = %+v, want %+v", starts, wantStarts)
@@ -1890,17 +1919,22 @@ func TestSessionHostEventJournalEndsBeforeTheHoldIsReleased(t *testing.T) {
 }
 
 // A run resumed on a record holds it from construction, and that record has had its prompt: its
-// journal is born at attach, with the record's title and transcript length.
+// journal is born at attach, with the record's title and transcript length, and the launch binding —
+// the model newSessionHost took and the window the composition root seeds before the attach.
 func TestSessionHostEventJournalBornAtAttachOnAResumedRecord(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	rec := recordWithEntries(t, store, "resumed", forkPrefix())
 	host := newSessionHost(store, nil, "/ws", "m", &rec, "", nil, "", nil)
+	host.window = 32768 // the launch window, seeded as wireSession seeds it
 	log := &journalLog{store: store}
 	host.attachEventJournal(newLiveJournalSink(nil), log.open)
 
 	starts, _ := log.snapshot()
-	want := []run.JournalStart{{RecordID: rec.Meta.ID, Title: "resumed", Workspace: "/ws", Entries: len(forkPrefix())}}
+	want := []run.JournalStart{{
+		RecordID: rec.Meta.ID, Title: "resumed", Workspace: "/ws", Entries: len(forkPrefix()),
+		Model: "m", ContextWindow: 32768,
+	}}
 	if !slices.Equal(starts, want) {
 		t.Errorf("journals born at attach = %+v, want %+v", starts, want)
 	}

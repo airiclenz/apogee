@@ -561,6 +561,9 @@ func TestTUIFallbackFalloverRunsTheHeartbeatTail(t *testing.T) {
 	if got := seat.stamper.models; len(got) == 0 || got[len(got)-1] != "backup-model" {
 		t.Errorf("record models = %v, want backup-model stamped last", got)
 	}
+	if got := seat.stamper.windows; len(got) == 0 || got[len(got)-1] != 16384 {
+		t.Errorf("record windows = %v, want backup's 16384 stamped last — the window handed the display", got)
+	}
 	if entry, ok := seat.live.boundEntry(); !ok || entry.Name != "backup" {
 		t.Errorf("bound entry = %q (%v), want backup", entry.Name, ok)
 	}

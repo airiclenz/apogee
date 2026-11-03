@@ -79,8 +79,9 @@ func (w *rootWiring) rebind(model string, window int, effortDialect provider.Eff
 			spec.Model, err))
 	}
 	// Session metadata follows the wire: a session that switched models mid-conversation is
-	// listed under the model it ends on, which is the one its last Turns actually ran against.
-	w.host.SetModel(spec.Model)
+	// listed under the model it ends on, which is the one its last Turns actually ran against. The
+	// window goes with it, for the opening frame of the next live Event journal born.
+	w.host.SetModel(spec.Model, spec.MaxContextTokens)
 	// And so does discovery: the hint is "which of the served models do I mean", a property of
 	// the binding rather than of the launch. Re-stating it on every commit keeps the next beat
 	// measuring the model the session now runs as "nothing new" — without it a server serving

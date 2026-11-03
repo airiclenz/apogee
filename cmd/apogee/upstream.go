@@ -229,9 +229,10 @@ type upstreamSwitcher interface {
 }
 
 // modelStamper is the session-metadata half of the same move: the model id stamped on saved records,
-// which a move CLEARS because it unbinds the model. Satisfied by *sessionHost.
+// and the model and context window a live Event journal's opening frame names, which a move CLEARS
+// because it unbinds the model. Satisfied by *sessionHost.
 type modelStamper interface {
-	SetModel(model string)
+	SetModel(model string, window int)
 }
 
 // sessionMover is the shared core of every move to another Upstream: `/server`'s explicit switch
@@ -325,7 +326,7 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	if err := m.agent.SwitchUpstream(spec); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	m.arrive(entry, dial, "")
+	m.arrive(entry, dial, "", 0)
 	// A move the human made puts the session on an entry of their choosing: the next fault answers
 	// from that entry's own `fallback:` list, never from the one the session moved off.
 	m.fallback.rearm()
@@ -343,10 +344,10 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 // arrive is the follow every arrival on entry shares once the engine is already on it — a `/server`
 // move or a profile load after its engine switch (move), and a Server fallback the engine made
 // mid-Turn (fallover): the heartbeat, the stored model, the entry's pins and the fan-out width all
-// follow the server the wire is now pointed at. model is what the engine is bound to on arrival:
-// "" for a move, which UNBINDS it until the new server's first beat, and the fallback's for a
-// fallover, which bound it in the same step.
-func (m sessionMover) arrive(entry config.ServerEntry, dial upstreamBinding, model string) {
+// follow the server the wire is now pointed at. model and window are what the engine is bound to on
+// arrival: "" and 0 for a move, which UNBINDS it until the new server's first beat, and the
+// fallback's for a fallover, which bound it in the same step.
+func (m sessionMover) arrive(entry config.ServerEntry, dial upstreamBinding, model string, window int) {
 	// The replacement Monitor carries the new entry's forced effort dialect and its wire, the way
 	// the first bind's does: both are per-server facts, so they move with the server (ADR 0060
 	// decision 3, ADR 0078).
@@ -356,7 +357,7 @@ func (m sessionMover) arrive(entry config.ServerEntry, dial upstreamBinding, mod
 		// commit restates them, so the next beat measures the fallback's model as "nothing new".
 		m.holder.SetModel(model)
 	}
-	m.host.SetModel(model)
+	m.host.SetModel(model, window)
 	m.live.followEntry(entry)
 	// And how wide the session may fan out on the server it has just arrived on (ADR 0039): the new
 	// entry's `parallel-agents:` pin becomes the pin and the retired server's observed slot count is
@@ -392,15 +393,15 @@ func (m sessionMover) fallover(name string) (tui.ServerFallbackResult, config.Se
 		return tui.ServerFallbackResult{}, config.ServerEntry{},
 			fmt.Errorf("server fallback onto %q: the seat never landed there", name)
 	}
-	model := landing.answer.Rebind.Model
-	m.arrive(landing.entry, landing.dial, model)
+	model, window := landing.answer.Rebind.Model, landing.answer.Rebind.MaxContextTokens
+	m.arrive(landing.entry, landing.dial, model, window)
 	dialect := landing.observed.EffortSupport.Dialect
 	m.live.observe(landing.observed.ContextWindow, providerEffortDialect(dialect))
 	return tui.ServerFallbackResult{
 		Endpoint:        landing.entry.Endpoint,
 		HostAlias:       landing.entry.Name,
 		Model:           model,
-		ContextWindow:   landing.answer.Rebind.MaxContextTokens,
+		ContextWindow:   window,
 		ObservedWindow:  landing.observed.ContextWindow,
 		ObservedDialect: dialect,
 		ObservedEffort:  landing.observed.EffortSupport,

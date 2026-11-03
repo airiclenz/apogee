@@ -98,6 +98,13 @@ type sessionHost struct {
 	// rebind closure keeps the record's metadata describing what the conversation actually ran
 	// against. Guarded because that closure runs on the Update goroutine while Save runs on a Cmd.
 	model string
+	// window is the context window, in tokens, of the model the session is bound to — model's pair,
+	// moved with it by SetModel and named beside it on every live Event journal's opening frame, so
+	// a watcher measures the watched session against its own binding (ADR 0103). 0 means unknown:
+	// a move unbinds it, and a launch with no window pinned has none until the first beat binds one.
+	// The composition root seeds it with the launch window before attachEventJournal, where a
+	// resumed record's journal is born. Guarded for the reason model is.
+	window int
 	// sessionLabel is the active session's OWN currency label — what session.Meta.EffectiveCurrency
 	// keeps of a resumed or activated record (its label, once it carries a priced call), "" for a
 	// fresh session or a record with nothing priced — which Save writes in place of the configured
@@ -350,17 +357,23 @@ func (h *sessionHost) Prompt(text string, interjection bool) {
 
 // openEventJournalLocked opens the live Event journal of ident's record — held by the caller's
 // Claim, Begin or Activate — unless one is open already, the host keeps none, or that record's
-// journal already failed to open. Entries is the record's transcript length at this birth. Callers
-// hold evMu.
+// journal already failed to open. Entries is the record's transcript length at this birth, and Model
+// and ContextWindow the binding the session holds at it (SetModel's pair). Callers hold evMu, and
+// take mu inside it only here: no path takes evMu while holding mu.
 func (h *sessionHost) openEventJournalLocked(ident session.Identity) {
 	if h.events == nil || h.openEvents == nil || h.journal != nil || ident.ID == h.failedID {
 		return
 	}
+	h.mu.Lock()
+	model, window := h.model, h.window
+	h.mu.Unlock()
 	journal := h.openEvents(run.JournalStart{
-		RecordID:  ident.ID,
-		Title:     ident.Title,
-		Workspace: h.workspace,
-		Entries:   h.recordEntries(ident.ID),
+		RecordID:      ident.ID,
+		Title:         ident.Title,
+		Workspace:     h.workspace,
+		Entries:       h.recordEntries(ident.ID),
+		Model:         model,
+		ContextWindow: window,
 	})
 	if journal == nil {
 		h.failedID = ident.ID
@@ -459,14 +472,17 @@ func (h *sessionHost) Save(
 	})
 }
 
-// SetModel restamps the model recorded on subsequent Saves. The composition root's rebind closure
-// calls it once the engine has actually been rebound, so the stored metadata names the model the
-// conversation is running against rather than the one it launched with — including on a cold start,
-// where the session began with no model bound at all. It does not rewrite already-saved records:
-// the next Save updates the same file with the new id, which is the session's current truth.
-func (h *sessionHost) SetModel(model string) {
+// SetModel restamps the model recorded on subsequent Saves, and the model and context window the next
+// live Event journal born names on its opening frame. The composition root's rebind closure calls it
+// once the engine has actually been rebound, so the stored metadata names the model the conversation
+// is running against rather than the one it launched with — including on a cold start, where the
+// session began with no model bound at all. A move calls it with "" and 0, unbinding both until the
+// new server's first beat. It does not rewrite already-saved records: the next Save updates the same
+// file with the new id, which is the session's current truth. Nor does it restamp a journal already
+// open: the next depth-0 usage line carries the new binding to a watcher.
+func (h *sessionHost) SetModel(model string, window int) {
 	h.mu.Lock()
-	h.model = model
+	h.model, h.window = model, window
 	h.mu.Unlock()
 }
 
