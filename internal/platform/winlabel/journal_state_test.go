@@ -2,6 +2,7 @@ package winlabel
 
 import (
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -98,6 +99,96 @@ func TestJournalRecordThatChangesNothingDoesNotRewriteTheFile(t *testing.T) {
 	}
 	if string(raw) != sentinel {
 		t.Errorf("the journal file was rewritten by a record that changed nothing: %s", raw)
+	}
+}
+
+// A record whose flush fails leaves memory exactly as it found it, and the retry flushes again.
+// Kept in memory, the entry would make the retry report no change and skip the flush, so the
+// caller would label a path no on-disk journal names (ADR 0020 §2: journal before label). The
+// promotion row matters because recordEntry promotes a descendant to a root IN PLACE.
+func TestJournalRecordRollsBackWhenItsFlushFails(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		seed  *Entry
+		entry Entry
+	}{
+		{
+			name:  "a new root",
+			entry: Entry{Path: `C:\work`, Root: true},
+		},
+		{
+			name:  "a descendant promoted to a root",
+			seed:  &Entry{Path: `C:\work`, PriorSDDL: "S:AI(ML;;NW;;;ME)"},
+			entry: Entry{Path: `C:\work`, Root: true},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			j := Open(home)
+			if tc.seed != nil {
+				recordOrFail(t, j, *tc.seed)
+			}
+			want := j.Entries()
+			breakJournalDir(t, home)
+
+			j.mu.Lock()
+			changed, err := j.record(tc.entry)
+			j.mu.Unlock()
+
+			if err == nil || changed {
+				t.Fatalf("record() over an unwritable journal dir = (%v, %v), want (false, an error)", changed, err)
+			}
+			if got := j.Entries(); !slices.Equal(got, want) {
+				t.Fatalf("Entries() after a failed flush = %+v, want the entries before the call %+v", got, want)
+			}
+
+			if err := os.Remove(JournalDir(home)); err != nil {
+				t.Fatalf("repair the journal dir: %v", err)
+			}
+			j.mu.Lock()
+			changed, err = j.record(tc.entry)
+			j.mu.Unlock()
+
+			if err != nil || !changed {
+				t.Fatalf("the retried record() = (%v, %v), want (true, nil): it must flush again", changed, err)
+			}
+			rec, err := ReadJournal(JournalPath(home, os.Getpid()))
+			if err != nil {
+				t.Fatalf("read the journal the retry flushed: %v", err)
+			}
+			if len(rec.Entries) != 1 || rec.Entries[0].Path != tc.entry.Path || !rec.Entries[0].Root {
+				t.Errorf("the flushed journal holds %+v, want the one root %q", rec.Entries, tc.entry.Path)
+			}
+		})
+	}
+}
+
+// recordOrFail journals one entry under the lock, failing the test when the flush does.
+func recordOrFail(t *testing.T, j *Journal, entry Entry) {
+	t.Helper()
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if _, err := j.record(entry); err != nil {
+		t.Fatalf("record %q: %v", entry.Path, err)
+	}
+}
+
+// breakJournalDir replaces home's journal directory with a regular file, so every flush fails
+// at MkdirAll until the test removes it.
+func breakJournalDir(t *testing.T, home string) {
+	t.Helper()
+
+	dir := JournalDir(home)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("clear the journal dir %q: %v", dir, err)
+	}
+	if err := os.WriteFile(dir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("plant a file at the journal dir %q: %v", dir, err)
 	}
 }
 

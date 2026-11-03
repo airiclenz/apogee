@@ -3,6 +3,7 @@ package winlabel
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 )
 
@@ -125,13 +126,20 @@ func (j *Journal) Writable() bool {
 // journal on disk describing how to undo it, so a flush failure comes back as an error and the
 // caller refuses the box; the error is plain — package platform wraps the confinement sentinel
 // at its own call site.
+//
+// A failed flush also rolls the in-memory entries back to what they were before the call, so
+// memory never runs ahead of the disk: kept, the entry would make a retry see no change, skip
+// the flush and label a path no on-disk journal names (ADR 0020 §2). The rollback works on a
+// copy because recordEntry promotes a descendant to a root in place.
 func (j *Journal) record(entry Entry) (bool, error) {
+	before := slices.Clone(j.rec.Entries)
 	entries, changed := recordEntry(j.rec.Entries, entry, foldPath)
 	j.rec.Entries = entries
 	if !changed {
 		return false, nil
 	}
 	if err := j.flush(); err != nil {
+		j.rec.Entries = before
 		return false, err
 	}
 	return true, nil

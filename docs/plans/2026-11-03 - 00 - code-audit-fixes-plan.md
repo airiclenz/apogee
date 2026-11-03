@@ -310,7 +310,7 @@ NOTES (2026-11-03): the classification lives in a new `Handler.refreshRefused` p
 **Closes:** systemd-quote-percent-dollar
 **Commit:** `fix(apogee): escape percent and dollar in systemd unit arguments`
 
-## 17. Roll the label journal back when its flush fails
+## 17. Roll the label journal back when its flush fails — ✅ DONE (2026-11-03)
 
 **What:** Fix (ADR 0020 §2 journal-before-label): `Journal.record` keeps the new entry in memory when `flush` fails, so a retry sees it, skips the flush and labels a path no on-disk journal names.
 **Goal:** after a failed flush the in-memory entries equal those before the call, and a retried `record` flushes again.
