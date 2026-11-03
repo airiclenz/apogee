@@ -1160,6 +1160,8 @@
 // into that parked session meanwhile, the one allow-list gate every send, verb and engine
 // setter meets while watching, and the owner's end — its hold probed on the follower's chain, the
 // banner it shows, and ⏎ resuming a finished session of the watcher's own home;
+// sessionview.go the sessionView the Model embeds — the whole session view a session boundary
+// resets and a watch parks and swaps as one value through Model.swapSessionView;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block and the super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the
