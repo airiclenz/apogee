@@ -89,7 +89,12 @@ Add the exported refusal-kind predicate from 3(b) (`IsIncompleteRefusal`). Add a
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'NoTerminal|Session|Teardown' ./internal/subprocess/`
 **Commit:** `feat(gitexec): let a probed capture carry caller env and start with no terminal`
 
-## 3. Hardened status and fetch runner in `cmd/apogee`
+## 3. Hardened status and fetch runner in `cmd/apogee` — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the BatchMode `GIT_SSH_COMMAND` decision (which costs a `git config --get core.sshCommand` spawn) is made for Fetch only; Status carries the three no-prompt variables and the set ssh pass-through variables but no BatchMode, because status never runs ssh and the extra spawn on every 5 s poll would only cost a slow box.
+NOTES (2026-11-03): Status treats a git `Resolve` failure (no git on PATH, or a fenced git) as not-inside with a nil error, the §3a graceful degrade; Fetch returns that failure as its error.
+NOTES (2026-11-03): the host is an unexported `gitStatusHost` value type (zero value = system git, real env, runtime.GOOS) with `lookupEnv` and `goos` seams for the fake-spawn tests; item 7 wires it. On error Status returns a zero snapshot with inside=false and the caller keeps its last answer.
+NOTES (2026-11-03): the unreachable-fetch test covers three remotes (refused https, refused ssh, and a local httptest server answering 401 with a Basic challenge, the one that would prompt for credentials); each transport-vector test first proves its vector live under a plain `git fetch` (marker written) before asserting the host's fetch writes none.
 
 **What:** Recast at the regression check (2026-11-03). Depends on items 1 and 2.
 **Goal:** `cmd/apogee` has a git-status host with `Status(ctx, root) (gitstatus.Snapshot, bool, error)` (the bool is "inside a work tree") and `Fetch(ctx, root) error`, both run through `internal/gitexec`, never prompting and never taking `index.lock`.

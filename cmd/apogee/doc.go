@@ -122,7 +122,12 @@
 // by name, and the unattended run composed over the pair (ADR 0034, ADR 0055);
 // serverstats.go the per-server stats recorder — the Driver sink the session's boot and
 // every Firing wrap Config.Events in, appending each upstream attempt to
-// ~/.apogee/server-stats.jsonl while `server-stats:` is on (ADR 0085).
+// ~/.apogee/server-stats.jsonl while `server-stats:` is on (ADR 0085);
+// gitstatus_host.go the footer's git-status host — one porcelain v2 status read, counted as a
+// stream, and one background fetch, both through internal/gitexec, never prompting (no
+// controlling terminal for the fetch) and never taking index.lock, with the fetch's transport
+// flags closing the repo-local uploadpack, ext:: and gitProxy commands gitexec's refusal does
+// not cover.
 //
 // The subcommands: headless.go is `apogee headless`, one prompt run to completion with
 // nobody watching, and the binary's only distinct exit codes — with sigpipe_unix.go
