@@ -3,6 +3,7 @@ title: Session seat builds a Monitor on every fault when its entry has no fallba
 status: open
 type: bug
 priority: 3
+plan: 2026-11-03 - 01 - open-bugs-plan
 created: 2026-11-02T22:07:31Z
 ---
 

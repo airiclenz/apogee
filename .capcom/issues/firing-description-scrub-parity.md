@@ -3,6 +3,7 @@ title: In-session Firing scrubs the entry description from orientation; other Dr
 status: open
 type: task
 priority: 3
+plan: 2026-11-03 - 01 - open-bugs-plan
 created: 2026-11-02T20:02:20Z
 ---
 

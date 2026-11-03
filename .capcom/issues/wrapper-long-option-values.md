@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 2
 labels: [security]
+plan: 2026-11-03 - 01 - open-bugs-plan
 created: 2026-11-03T15:55:58Z
 ---
 

@@ -4,7 +4,7 @@ status: open
 type: bug
 priority: 2
 labels: [security]
-plan: 2026-11-03 - 00 - code-audit-fixes-plan
+plan: 2026-11-03 - 01 - open-bugs-plan
 created: 2026-11-03T14:20:29Z
 ---
 

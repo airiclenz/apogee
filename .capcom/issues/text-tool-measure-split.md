@@ -3,6 +3,7 @@ title: "Text-tool profiles: ContextEstimate counts the instruction block, the gu
 status: open
 type: task
 priority: 3
+plan: 2026-11-03 - 01 - open-bugs-plan
 created: 2026-11-02T20:02:20Z
 ---
 

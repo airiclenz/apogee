@@ -3,6 +3,7 @@ title: Engine's post-cancel landing consult can open a fresh grace window and wa
 status: open
 type: bug
 priority: 3
+plan: 2026-11-03 - 01 - open-bugs-plan
 created: 2026-11-02T22:07:31Z
 ---
 
