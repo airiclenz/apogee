@@ -16,8 +16,10 @@ worth — whose `On` list spans Moments and is checked against the class. An `MC
 data: the **Driver** injects a `Config.MCP` resolver that turns its server and tool into a call, the
 engine never dials a server, and a Driver that injects none (headless, the daemon, a Firing, the
 bench) leaves it inert with one notice per entry — an advise or observe entry dropped before arming,
-a gate entry armed but escalating every call to ask; the **Reaction host** owns that rule, disarming
-the entries and giving the notices when its root dials no MCP server. Its call never reaches the **Approver**: the
+a gate entry armed but escalating every call to ask; the **Reaction host** owns that rule for every
+Driver in the binary, disarming the entries and giving the notices when its root dials no MCP
+server, and a facade Driver such as the bench gets it only by building one
+(`apogee.NewReactionHost`). Its call never reaches the **Approver**: the
 user authored it, so writing the entry is the approval (`adr-0076-amend-1029`). `Validate`
 refuses an `On` list the handler cannot serve, an origin × class outside the matrix, and a missing
 id, origin, class or handler, and is answered ONCE, where the entry is built (the config layer's

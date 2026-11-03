@@ -14,8 +14,9 @@ type HostMCP int
 
 const (
 	// HostMCPNone is a Driver that dials no MCP server — every Firing (headless, the daemon, the
-	// TUI's /schedule) and `apogee probe context`. NewHost disarms the list's mcp: entries before
-	// arming, one notice per entry (DisarmUnconnectedMCP), and the executor holds no resolver.
+	// TUI's /schedule). NewHost disarms the list's mcp: entries before arming, one notice per entry
+	// (DisarmUnconnectedMCP), and the executor holds no resolver. `apogee probe context` builds no
+	// Host: it settles its mcp: entries through DisarmUnconnectedMCP directly.
 	HostMCPNone HostMCP = iota
 	// HostMCPLate is a Driver that dials its MCP set after the Host is built — the TUI session.
 	// The executor resolves through an MCPSlot the Driver fills through BindMCP once the set
