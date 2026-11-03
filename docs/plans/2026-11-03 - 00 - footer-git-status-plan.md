@@ -177,7 +177,12 @@ NOTES (2026-11-03): the model-level tests (exact run, no-upstream, detached, esc
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Footer|SafeGlyph' ./internal/tui/`
 **Commit:** `feat(tui): show branch and change counts in the footer`
 
-## 7. Wire the host into the TUI and drive it end to end
+## 7. Wire the host into the TUI and drive it end to end — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — docs/design/test-drivers.md: made necessary by the new `launchTUIInGitPolling` launcher and `e2eSession.gitEvery` field, documented beside `launchTUIOnBeating` whose shape they follow.
+NOTES (2026-11-03): one session field (`gitEvery`) sets both `GitStatusInterval` and `GitFetchInterval`; the launcher is `launchTUIInGitPolling(t, drv, stub, ws, every)` (caller-built workspace, home from `e2eHome`) rather than an `On` variant taking a home, since the test needs no hand-written home.
+NOTES (2026-11-03): the fixtures (bare remote `r.git`, workspace clone `w`, pusher `p`) sit under one `os.MkdirTemp("", "ag")` directory (symlink-resolved, removed in Cleanup) rather than t.TempDir(), so the footer's workdir cell stays short at W=140; commits pass `-c user.name/-c user.email` and also `-c commit.gpgsign=false` so a signing global config cannot stall them; the branch is pinned with `init -b main`.
+NOTES (2026-11-03): with the wiring line removed the new e2e times out waiting for `main 0Δ 0↓ 0↑`, so it discriminates; no separate non-git-workspace e2e was added — the existing non-git e2e runs (LiveState) and the control-plane workspace pass unchanged with the host wired.
 
 **What:** Depends on items 3 and 6.
 **Goal:** The TUI Driver passes item 3's host as `tui.Options.GitStatus`; a driven run in a git workspace shows the segment, and a commit pushed to the upstream shows in `↓` within one fetch interval.

@@ -66,6 +66,13 @@ func (w *rootWiring) options() tui.Options {
 		Endpoint:  w.opts.Endpoint,
 		Mode:      w.mode,
 		Workspace: w.roots.workspace,
+		// The footer's git seam (gitstatus_host.go): the status read and background fetch the
+		// renderer's poll chain runs against the Workspace above, through gitexec's hardened runner
+		// with the system git under this process's environment. options() is the TUI's projection
+		// alone, so headless, a daemon Firing and the bench never start a git child for a footer
+		// they do not paint. The two cadences stay zero — the renderer's named defaults — since they
+		// are not config keys; `ui.git-fetch` in the UI block below switches the fetch.
+		GitStatus: gitStatusHost{},
 		// The Project root the skills loader hangs .apogee/skills off (stateRoots.project), so a
 		// skill loaded from a Project root above the workspace is labelled "workspace" rather than
 		// "elsewhere", and the empty-catalog note names the folder discovery actually looked in.

@@ -735,6 +735,10 @@ of that session. It is for the claim that is about what a run of beats leads to 
 two failed beats before "unavailable" (`TestE2ESeatDelegationsLineSurvivesATargetDownBeat`) — which
 at the production minute a beat cost two minutes of wall clock. It is per session rather than a
 `TestMain` package var, so no other run's footer, notices or probe log move with it.
+`launchTUIInGitPolling(t, drv, stub, ws, every)` is the same shape for the footer's git segment: it
+runs both git chains — `tui.Options.GitStatusInterval` and `GitFetchInterval` — on `every` instead of
+the 5 s and 5 min defaults, in a workspace the caller built, so a commit pushed to the upstream
+reaches `↓` without minutes of wall clock (`TestE2EGitStatusFollowsTheUpstream`).
 
 `openerLookPath` (`cmd/apogee/wire_present.go`) is the same family of seam as `tuiScheduleClock`,
 `liveLauncherOps` and `configWatchTiming`: a package var that is nil in production. It becomes

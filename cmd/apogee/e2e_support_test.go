@@ -64,6 +64,12 @@ type e2eSession struct {
 	// and set per session rather than for the binary, so no other run's footer, notices or probes
 	// move. Held on the session, and supplied before the first launch, for [e2eSession.rec]'s reasons.
 	beat time.Duration
+	// gitEvery, when non-zero, is the cadence of both footer git chains — the status read and the
+	// background fetch ([tui.Options.GitStatusInterval], [tui.Options.GitFetchInterval]) — every
+	// launch of this session runs on in place of the renderer's 5 s and 5 min defaults. Zero for
+	// every launch but the ones whose claim is about what a later read or fetch shows, for
+	// [e2eSession.beat]'s reasons.
+	gitEvery time.Duration
 
 	drv  *tuitest.Driver
 	out  strings.Builder
@@ -145,6 +151,17 @@ func launchTUIOnBeating(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server,
 
 	e2eGuards(t)
 	return beginSession(drv, &e2eSession{t: t, home: home, ws: ws, stub: stub, beat: beat})
+}
+
+// launchTUIInGitPolling is [launchTUIIn] with both footer git chains on a cadence of every rather
+// than the renderer's defaults (see [e2eSession.gitEvery]), in the workspace the caller built.
+func launchTUIInGitPolling(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ws string,
+	every time.Duration) *e2eSession {
+	t.Helper()
+
+	e2eGuards(t)
+	home := e2eHome(t, stub)
+	return beginSession(drv, &e2eSession{t: t, home: home, ws: ws, stub: stub, gitEvery: every})
 }
 
 // launchTUIOnWith is [launchTUIOn] with the boot's dependencies stated by the caller (rootDeps), as
@@ -230,6 +247,10 @@ func (s *e2eSession) start(drv *tuitest.Driver) {
 	launch := func(ctx context.Context, eng tui.Engine, br *tui.Bridge, opts tui.Options) error {
 		if s.beat > 0 {
 			opts.BeatInterval = s.beat
+		}
+		if s.gitEvery > 0 {
+			opts.GitStatusInterval = s.gitEvery
+			opts.GitFetchInterval = s.gitEvery
 		}
 		program, cleanup, err := tui.Build(ctx, eng, br, opts, out, drv.ProgramOptions()...)
 		if err != nil {
