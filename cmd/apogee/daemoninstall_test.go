@@ -165,6 +165,57 @@ func TestDaemonInstallQuotesAPathWithSpaces(t *testing.T) {
 	}
 }
 
+// TestDaemonInstallEscapesSystemdSpecifiersAndVariables pins the two expansions systemd applies to
+// ExecStart even inside double quotes: a `%` doubles in every word, and a `$` doubles in every word
+// after the executable — systemd never variable-expands the executable, so a `$` there stays single.
+func TestDaemonInstallEscapesSystemdSpecifiersAndVariables(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, executable, configDir, want string }{
+		{
+			name:       "percent in the executable",
+			executable: "/opt/a%b/apogee",
+			configDir:  installFixtureHome,
+			want:       `ExecStart="/opt/a%%b/apogee" daemon --config /home/tester/.apogee`,
+		},
+		{
+			name:       "percent in the config dir",
+			executable: installFixtureBinary,
+			configDir:  "/home/a%b/.apogee",
+			want:       `ExecStart=/opt/apogee/bin/apogee daemon --config "/home/a%%b/.apogee"`,
+		},
+		{
+			name:       "dollar in the config dir",
+			executable: installFixtureBinary,
+			configDir:  "/home/$x/.apogee",
+			want:       `ExecStart=/opt/apogee/bin/apogee daemon --config "/home/$$x/.apogee"`,
+		},
+		{
+			name:       "dollar in the executable",
+			executable: "/home/u/d$x/apogee",
+			configDir:  installFixtureHome,
+			want:       `ExecStart="/home/u/d$x/apogee" daemon --config /home/tester/.apogee`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			plan := installFixture("linux", daemon.DefaultShutdownGrace)
+			plan.Executable = tc.executable
+			plan.ConfigDir = tc.configDir
+
+			rendered, err := renderDaemonUnit(plan)
+
+			if err != nil {
+				t.Fatalf("render the linux unit: %v", err)
+			}
+			if !strings.Contains(rendered, tc.want+"\n") {
+				t.Errorf("the linux unit does not carry %q:\n%s", tc.want, rendered)
+			}
+		})
+	}
+}
+
 // TestDaemonInstallEncodesTheTaskDefinitionAsUTF16 pins the encoding `schtasks /create /xml` reads:
 // the Task Scheduler exports UTF-16LE with a byte-order mark, and the template's own declaration
 // says UTF-16, so bytes that said otherwise would be a file Windows refuses.

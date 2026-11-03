@@ -297,7 +297,7 @@ NOTES (2026-11-03): the classification lives in a new `Handler.refreshRefused` p
 **Closes:** mcpauth-4xx-login-required
 **Commit:** `fix(mcpauth): report login required only for refusals a login fixes`
 
-## 16. Escape `%` and `$` in systemd ExecStart arguments
+## 16. Escape `%` and `$` in systemd ExecStart arguments — ✅ DONE (2026-11-03)
 
 **What:** Recast at the regression check (2026-11-03). Fix: `systemdQuote` triggers quoting on `%` and `$` but escapes only `\` and `"`; systemd expands both inside double quotes.
 **Regression guard.** Escape `%`→`%%` in every argv element, but `$`→`$$` only in argv[1:] (systemd never env-expands the executable path); unitFieldsFor passes the index. Add a linux row asserting a `$` Executable stays single-`$`, and fix the Goal line accordingly.

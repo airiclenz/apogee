@@ -278,7 +278,7 @@ func unitFieldsFor(plan installPlan) unitFields {
 	systemd := make([]string, len(argv))
 	for i, arg := range argv {
 		escaped[i] = xmlEscape(arg)
-		systemd[i] = systemdQuote(arg)
+		systemd[i] = systemdQuote(arg, i)
 	}
 
 	return unitFields{
@@ -421,13 +421,20 @@ func installGrace(path string) (time.Duration, string) {
 	return *document.ShutdownGrace, ""
 }
 
-// systemdQuote spells one argument the way systemd's ExecStart parser reads it: bare when it is one
-// plain word, double-quoted with backslash escapes when it is not.
-func systemdQuote(arg string) string {
+// systemdQuote spells the argument at position (0 is the executable) the way systemd's ExecStart
+// parser reads it: bare when it is one plain word, double-quoted with backslash escapes when it is
+// not. systemd expands `%` specifiers in every word and `$` variables in every word but the
+// executable, quoted or not, so `%` doubles everywhere and `$` doubles after position 0 — a `$$`
+// in the executable would reach exec as two dollars.
+func systemdQuote(arg string, position int) string {
 	if !strings.ContainsAny(arg, " \t\"'\\$%") {
 		return arg
 	}
-	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(arg)
+	escapes := []string{`\`, `\\`, `"`, `\"`, `%`, `%%`}
+	if position > 0 {
+		escapes = append(escapes, `$`, `$$`)
+	}
+	escaped := strings.NewReplacer(escapes...).Replace(arg)
 	return `"` + escaped + `"`
 }
 
