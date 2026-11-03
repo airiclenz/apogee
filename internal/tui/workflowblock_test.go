@@ -1421,7 +1421,7 @@ func TestFanOutCardSeatsARunHeadPerItem(t *testing.T) {
 		t.Errorf("fan_out card = done %v, run %+v, spawnRunID %q, agentName %q; want its own closed top-level call with nothing folded in",
 			card.done, card.run(), card.spawnRunID, card.tool.agentName)
 	}
-	if n := len(workflowEntries(Model{transcript: *tr})); n != 0 {
+	if n := len(workflowEntries(Model{sessionView: sessionView{transcript: *tr}})); n != 0 {
 		t.Errorf("workflow blocks = %d; want none beside the fan_out card", n)
 	}
 	assertHeadsItemRuns(t, tr.entries, head)

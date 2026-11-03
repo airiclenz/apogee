@@ -108,7 +108,11 @@ Bite: delete each `forgetPaintedFrame` call in turn (in `enterWatch`, `leaveWatc
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestWatchRepaintsOnEverySessionViewSwap|TestWatchIsolates' ./internal/tui/`
 **Commit:** `test(tui): pin the repaint on every session-view swap`
 
-## 3. sessionView holds the event-derived half of the parked view
+## 3. sessionView holds the event-derived half of the parked view — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): parkedSession embeds sessionView anonymously (not a named member), so the existing `m.watch.parked.state` (schedule.go) and `m.watch.parked.transcript` (watch_test.go) reads compile unchanged; clearWatchView's `parkedSession{...}` literal is nested too (a third composite literal the plan did not list).
+NOTES (2026-11-03): the moved fields' doc comments were carried verbatim except positional words the move made false ("above"/"below" in advice, thinking and acts); in Model, the worker and pendingDecision comments now point at sessionView for state and liveStats, and the shared workflows/wakePending comment keeps its other paragraphs with a pointer to sessionView.workflows. transcript and state had no doc of their own and gained one in sessionView.
+NOTES (2026-11-03): TestWatchIsolatesParksExactlyTheSessionViewResetSet expands a whole-sessionView selector through a new expandSessionView helper (reflect over sessionView's direct fields only, so the embedded liveStats counts as "liveStats").
 
 **What:**
 **Goal:** `Model` embeds one `sessionView` struct (`internal/tui/sessionview.go`) holding `transcript`, `thinking`, `advice`, `liveStats` (embedded), `usage`, `usageBase`, `delegateUsage`, `servedModels`, `sessionCurrency`, `workflows`, `acts` and `state`. The watch still parks and restores exactly the same 23 fields, and rendered output is byte-identical everywhere.

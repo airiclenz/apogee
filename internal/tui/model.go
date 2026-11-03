@@ -232,14 +232,6 @@ type Model struct {
 	// state, because the verb is whileRunning and the pane reads Model state only.
 	advicePane reportPane
 
-	// advice is the /advice pane's board (advicepane.go): every advise firing the session's agents
-	// handed their model — a user `advise:` entry's fenced text, the context-fill notice's rung — as
-	// the fold recorded them off domain.ReactionFiredEvent, oldest first, bounded to the newest
-	// maxAdviceRecords. It sits BESIDE the transcript like the wire ring above: a firing is not a
-	// conversation entry and disturbs no entry pairing, and it is rebuilt rather than appended into,
-	// so it rides safely in the value-copied Model (ADR 0011).
-	advice []adviceRecord
-
 	// wire is the Inspector's bounded ring: the most recent maxWireRecords halves of an Upstream
 	// round-trip, as the fold recorded them (foldWire). Each half carries the wire stream it came
 	// from — the run (depth, callID and run id) of the agent that made the call — because the one ring
@@ -297,16 +289,16 @@ type Model struct {
 	// unwired, and every reader treats that zero value as "no monitor, nothing to say".
 	hb heartbeatState
 
-	// Lifecycle.
-	state uiState
+	// Lifecycle. The state the keys route on is the session view's (sessionView.state).
+	//
 	// worker is the in-flight worker as one value (worker.go): the CancelFunc the stop key calls
 	// (C4), the running Exchange's interjection mailbox, and the spinner tick chain's generation,
 	// written by its three verbs — start (enterRunning), resume (resumeRunning), finish
-	// (finishWorker). The state above stays here: it is the machine the keys route on, and the
-	// worker exists in three of its four states.
+	// (finishWorker). The state stays on the session view: it is the machine the keys route on, and
+	// the worker exists in three of its four states.
 	worker worker
 	// pendingDecision is the question this Exchange is blocked on and the payload that rides with
-	// it. It is EMBEDDED anonymously like liveStats above, so m.pending, m.pendingAsk and
+	// it. It is EMBEDDED anonymously like liveStats (sessionView), so m.pending, m.pendingAsk and
 	// m.askChecked read exactly as they always did while the three of them gain one owner — and
 	// with it the one call that lets go of ALL of them when the Exchange ends (pendingDecision.reset,
 	// finishWorker), rather than a run of assignments a new payload can be left out of.
@@ -399,10 +391,7 @@ type Model struct {
 	// rows above they are session-ephemeral: a quit drops them unrun.
 	deferredCommands []parsedInput
 
-	// workflows is the session's background workflows as their events fold (workflow.go, ADR 0089):
-	// each live one's name and item tally, and the runs it spawned. Its events go there and to the
-	// Inspector only — never the transcript, the activity board or the stall clock — which is what
-	// keeps the conversation's own view, and a stop key, off work that runs beside it.
+	// The session's background workflows themselves are the session view's (sessionView.workflows).
 	//
 	// wakePending says a background workflow has ended since the last wake was tried: the Update
 	// tail asks the engine to wake on its finish note at the first idle fold with no idle-only
@@ -428,7 +417,6 @@ type Model struct {
 	// their folders (Engine.ResumeWorkflows): set by a --resume start and by every /sessions switch
 	// or /fork that restored a record, and honoured by the Update tail at the first fold that finds
 	// the engine bound, idle and on the restored session's scratch directory (resumeAfterFold).
-	workflows     backgroundWorkflows
 	wakePending   bool
 	promptPending bool
 	holds         engineHold
@@ -470,19 +458,6 @@ type Model struct {
 	skillHintGen int
 	spentSkills  map[string]bool
 
-	// acts is the live activity board the status line renders while a worker runs — thinking,
-	// responding, a named tool, retrying, compacting, stopping (activity.go) — one slot per RUN
-	// rather than one for the session, keyed by the run identity (runActivities). It is derived
-	// from the Event stream (foldActivity) plus the transitions no Event announces, and it is
-	// deliberately NOT a uiState: the lifecycle machine above is untouched by it (ADR 0011).
-	//
-	// One slot per run is what a fan-out needs: concurrent delegates (ADR 0039) used to overwrite
-	// one another in a single slot, so the row jittered between whichever child spoke last. The
-	// board keeps each run's phrase and clock apart, and runningPhrase composes the ONE sentence
-	// the row has room for out of them. A map, like spentSkills above, and safe on the same terms
-	// (runActivities).
-	acts runActivities
-
 	// lastEvent is when the ENGINE was last heard from: any Event, at any depth, of any variant —
 	// including a ReasoningEvent, since a reasoning stream is life and the stall the guard was built
 	// for (2026-08-14) had NO events at all — plus a move to an activity kind the guard watches, the
@@ -493,65 +468,6 @@ type Model struct {
 	// it: a heartbeat or a spinner frame proves the TUI is alive, not the engine. A plain time.Time,
 	// safe in the value-copied Model (ADR 0011).
 	lastEvent time.Time
-
-	// thinking is the session's thinking as the view RETAINS it — one bounded, escape-stripped
-	// record per agent per Turn of the chunks domain.ReasoningEvent reveals, completed records
-	// newest last beside the in-flight one for each run currently thinking (thinking.go). It is
-	// what the /thinking pane reads and composes its rows out of; the pane keeps nothing of its
-	// own. What the status line says about reasoning it still says from the ARRIVAL of the event
-	// (act, above), never from these bytes.
-	thinking thinkingBoard
-
-	// liveStats is what the status line reports about the conversation the session is holding right
-	// now: the context gauge's fill and its estimate, the generation clock, and the last completion's
-	// throughput. It is EMBEDDED anonymously (the promptEditor posture), so m.ctxUsed, m.genStart and
-	// m.tokPerSec read exactly as they always did while the four of them gain one owner — and with it the one
-	// reset every session boundary spells out by hand (liveStats.reset).
-	liveStats
-
-	// usage is the MAIN agent's cumulative token accounting for the session — the latest reading
-	// its Depth-0 UsageEvents carried (domain.Usage, read by usageReading), including the maintenance events the
-	// gauge above skips. It is persisted with the session record and restored on reopen, so a
-	// resumed session reports what it has already spent. A sub-agent's totals live on its own run
-	// head instead (transcript.applyUsage), which is where the per-agent grouping already is.
-	usage domain.Usage
-
-	// usageBase is the accounting the session record carried when this session was (re)opened: the
-	// main agent's stored totals on either resume path (replayResumed, resumeLoaded), and the zero
-	// value on a fresh launch or after /clear (resetSessionView). It exists because the ENGINE's
-	// cumulative reading restarts at zero on every session boundary — a fresh Agent on --resume,
-	// RestoreSession's reset on a browser restore, ClearContext's on /clear — so the
-	// usage fold adds that reading ON TOP of this base instead of letting it replace what the record
-	// carried in (foldStats). Without it a resumed session's spend collapses to whatever the first
-	// post-resume reading says. The offset is the renderer's own because it is the Driver that seeds
-	// a view from a record: the engine never sees one.
-	usageBase domain.Usage
-
-	// sessionCurrency is the resumed record's own currency label (ADR 0093, amendment 2026-10-04):
-	// the label its priced amount was written in, which outlives a `currency:` changed since. It is
-	// an OVERRIDE only — "" reads the configured label live ([Model.currency]) — seated by either
-	// resume path from the label the binary or session.Meta resolved (replayResumed, resumeLoaded),
-	// escape-stripped there because it is disk input, and dropped on /clear (resetSessionView).
-	// While it names a label other than the configured one, every later reading counts its calls
-	// as unpriced ([Model.countedUsage]): their cost was reckoned in the configured currency, and
-	// adding it to an amount in another would misstate both.
-	sessionCurrency string
-
-	// servedModels is every distinct model id the upstream has answered with in this session, in
-	// the order first seen — the ServedModel each UsageEvent carries, at EVERY depth (a routed
-	// delegation's own model, ADR 0045, is one the session was answered by), folded as a set
-	// (foldStats). It is a record fact the renderer keeps because it is the one that sees the
-	// readings: it is seeded from a resumed record (ResumedSession.ServedModels, resumeLoaded),
-	// saved with every snapshot beside the tallies (savePayload), painted by /usage as `served:`,
-	// and zeroed with the tallies on /clear (resetSessionView). Nil until a reply names a model.
-	servedModels []string
-
-	// delegateUsage is the delegate half of a RESUMED record's accounting (session.Meta), and only
-	// ever a fallback: a live run head's own reading replaces it the moment one reports, so the two
-	// are never added together (delegateUsageTotal). It exists for the record whose scrollback did
-	// not come back — a legacy or undecodable blob replays no run blocks — where the sum the record
-	// stored is the only thing left that knows a delegate spent anything at all.
-	delegateUsage domain.Usage
 
 	// transcriptSel is the transcript viewport's screen-space drag-selection (mouse.go), anchored
 	// in content coordinates into m.lines; the zero value is "no selection". A re-render keeps it
@@ -609,8 +525,13 @@ type Model struct {
 	// opens without a notification (notify.go). finishWorker clears it.
 	answeredInExchange bool
 
+	// sessionView is the event-derived half of the session view: the transcript, the boards and
+	// the accounting the fold writes, and the run state (sessionview.go). It is EMBEDDED anonymously
+	// (the promptEditor posture), so m.transcript, m.state and m.ctxUsed read exactly as they always
+	// did while the fields gain the one owner a watch swaps.
+	sessionView
+
 	// Content & layout.
-	transcript transcript
 	// workdir is the footer's workspace fact: Options.Workspace respelled for display
 	// (workdirDisplay), resolved ONCE at construction rather than per repaint because it reads the
 	// home directory off the environment and neither input can change while the session runs — the
@@ -870,7 +791,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		promptEditor: newPromptEditor(opts.CursorShape, th.surface),
 		viewport:     vp,
 		th:           th,
-		state:        stateIdle,
+		sessionView:  sessionView{state: stateIdle},
 		notifyTmux:   os.Getenv("TMUX") != "",
 	}
 

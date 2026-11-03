@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1388,6 +1389,23 @@ func fieldsRead(methods map[string]*ast.FuncDecl, name string) map[string]bool {
 	return read
 }
 
+// expandSessionView replaces a whole-sessionView selector in a field set with every one of
+// sessionView's DIRECT fields — the embedded liveStats counts as the one field "liveStats", as
+// resetSessionView names it — so a method that copies the struct in one assignment is measured by
+// the fields that assignment moves.
+func expandSessionView(fields map[string]bool) map[string]bool {
+	if !fields["sessionView"] {
+		return fields
+	}
+	expanded := maps.Clone(fields)
+	delete(expanded, "sessionView")
+	typ := reflect.TypeFor[sessionView]()
+	for i := range typ.NumField() {
+		expanded[typ.Field(i).Name] = true
+	}
+	return expanded
+}
+
 // sortedKeys lists a set in order, for a readable failure.
 func sortedKeys(set map[string]bool) []string {
 	keys := make([]string, 0, len(set))
@@ -1409,8 +1427,8 @@ func TestWatchIsolatesParksExactlyTheSessionViewResetSet(t *testing.T) {
 		want[moved] = true
 	}
 
-	parked := fieldsRead(methods, "parkSession")
-	restored := fieldsWritten(methods, "restoreSession", map[string]bool{})
+	parked := expandSessionView(fieldsRead(methods, "parkSession"))
+	restored := expandSessionView(fieldsWritten(methods, "restoreSession", map[string]bool{}))
 
 	if !maps.Equal(parked, want) {
 		t.Errorf("parkSession parks %v;\nwant resetSessionView's set plus the run state %v", sortedKeys(parked), sortedKeys(want))

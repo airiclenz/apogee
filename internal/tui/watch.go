@@ -162,33 +162,23 @@ type watchState struct {
 }
 
 // parkedSession is the session view watch mode sets aside: exactly the field set resetSessionView
-// (commandrun.go) resets, plus the run state the watch moves (state, acts, cursor). A field added
-// to resetSessionView belongs here too, and TestWatchIsolatesParksExactlyTheSessionViewResetSet
-// fails until it is.
+// (commandrun.go) resets, plus the run state the watch moves (state, acts, cursor). The
+// event-derived half is one sessionView (sessionview.go), embedded so a parked field reads by its
+// own name; the rest sit beside it. A field added to resetSessionView belongs here too, and
+// TestWatchIsolatesParksExactlyTheSessionViewResetSet fails until it is.
 type parkedSession struct {
-	spentSkills     map[string]bool
-	thinking        thinkingBoard
-	advice          []adviceRecord
-	transcript      transcript
-	viewStack       []runView
-	detached        bool
-	stats           liveStats
-	usage           domain.Usage
-	usageBase       domain.Usage
-	delegateUsage   domain.Usage
-	workflows       backgroundWorkflows
-	servedModels    []string
-	sessionCurrency string
-	flash           string
-	autoTitleFired  bool
-	titleTouched    bool
-	pendingTitle    titleStash
-	sessionName     string
-	boundary        domain.Session
-	hasBoundary     bool
-	state           uiState
-	acts            runActivities
-	cursor          blockCursor
+	sessionView
+	spentSkills    map[string]bool
+	viewStack      []runView
+	detached       bool
+	flash          string
+	autoTitleFired bool
+	titleTouched   bool
+	pendingTitle   titleStash
+	sessionName    string
+	boundary       domain.Session
+	hasBoundary    bool
+	cursor         blockCursor
 }
 
 // journalCursor is where the follower stands in the journal. offset is how many journal bytes have
@@ -459,47 +449,27 @@ func (m Model) foldForOwner(msg tea.Msg) (tea.Model, tea.Cmd) {
 // parkSession copies the session view out of the Model.
 func (m Model) parkSession() parkedSession {
 	return parkedSession{
-		spentSkills:     m.spentSkills,
-		thinking:        m.thinking,
-		advice:          m.advice,
-		transcript:      m.transcript,
-		viewStack:       m.viewStack,
-		detached:        m.detached,
-		stats:           m.liveStats,
-		usage:           m.usage,
-		usageBase:       m.usageBase,
-		delegateUsage:   m.delegateUsage,
-		workflows:       m.workflows,
-		servedModels:    m.servedModels,
-		sessionCurrency: m.sessionCurrency,
-		flash:           m.flash,
-		autoTitleFired:  m.autoTitleFired,
-		titleTouched:    m.titleTouched,
-		pendingTitle:    m.pendingTitle,
-		sessionName:     m.sessionName,
-		boundary:        m.boundary,
-		hasBoundary:     m.hasBoundary,
-		state:           m.state,
-		acts:            m.acts,
-		cursor:          m.cursor,
+		sessionView:    m.sessionView,
+		spentSkills:    m.spentSkills,
+		viewStack:      m.viewStack,
+		detached:       m.detached,
+		flash:          m.flash,
+		autoTitleFired: m.autoTitleFired,
+		titleTouched:   m.titleTouched,
+		pendingTitle:   m.pendingTitle,
+		sessionName:    m.sessionName,
+		boundary:       m.boundary,
+		hasBoundary:    m.hasBoundary,
+		cursor:         m.cursor,
 	}
 }
 
 // restoreSession writes a parked session view back into the Model.
 func (m *Model) restoreSession(p parkedSession) {
+	m.sessionView = p.sessionView
 	m.spentSkills = p.spentSkills
-	m.thinking = p.thinking
-	m.advice = p.advice
-	m.transcript = p.transcript
 	m.viewStack = p.viewStack
 	m.detached = p.detached
-	m.liveStats = p.stats
-	m.usage = p.usage
-	m.usageBase = p.usageBase
-	m.delegateUsage = p.delegateUsage
-	m.workflows = p.workflows
-	m.servedModels = p.servedModels
-	m.sessionCurrency = p.sessionCurrency
 	m.flash = p.flash
 	m.autoTitleFired = p.autoTitleFired
 	m.titleTouched = p.titleTouched
@@ -507,8 +477,6 @@ func (m *Model) restoreSession(p parkedSession) {
 	m.sessionName = p.sessionName
 	m.boundary = p.boundary
 	m.hasBoundary = p.hasBoundary
-	m.state = p.state
-	m.acts = p.acts
 	m.cursor = p.cursor
 }
 
@@ -521,7 +489,9 @@ func (m *Model) clearWatchView() {
 	fresh.reset()
 	boards := m.thinking
 	boards.reset()
-	m.restoreSession(parkedSession{transcript: fresh, thinking: boards, state: stateIdle})
+	m.restoreSession(parkedSession{
+		sessionView: sessionView{transcript: fresh, thinking: boards, state: stateIdle},
+	})
 	m.reroot()
 }
 
