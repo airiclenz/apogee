@@ -30,7 +30,9 @@
 - `exec -a`'s short value option, and any wrapper other than `time` and `sudo`.
 - bash's `time` keyword grammar (`time -p`): the view reads GNU `time`'s options for every `time` leader.
 
-## 1. `time -o` / `--output`: report the output file and read `-o` / `-f` values
+## 1. `time -o` / `--output`: report the output file and read `-o` / `-f` values — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): `operandTargets` is split into the strip-and-prepend shell plus `leaderOperandTargets` (the unchanged leader switch), and `projectConfigOperandTargets` drops its unused `words` parameter and calls `leaderOperandTargets`, so the project-config view emits a wrapper's output file once on every path (its install/mv/ln/default branches used to re-strip through `operandTargets`). `resolveLongOption` keeps its `=` short-circuit and delegates name matching to the new sibling `longOptionName`.
 
 **What:**
 **Goal:** `writeTargetsOf` and `projectConfigTargetsOf` report the file a `time` wrapper's `-o FILE`, `-oFILE`, `--output FILE`, `--output=FILE` or unique-prefix long form (`--out FILE`) names, and `time -o FILE cmd …` / `time -f FMT cmd …` take `cmd` as the wrapped leader.

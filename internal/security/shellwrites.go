@@ -105,13 +105,13 @@ const apogeeFolderName = ".apogee"
 // that is only assignments keeps every value, as operandTargets does: it names no leader to judge,
 // and its values are what a later command's operands resolve through.
 func projectConfigCommandTargets(cmd simpleCommand) []string {
-	targets := slices.Clone(cmd.redirectTargets)
-	words := stripWrappers(cmd.words, strictStrip)
+	words, written := stripWrappersReporting(cmd.words, strictStrip)
+	targets := append(slices.Clone(cmd.redirectTargets), written...)
 	if len(words) == 0 {
-		return append(targets, operandTargets(cmd.words)...)
+		return append(targets, assignmentValues(cmd.words)...)
 	}
 	leader := path.Base(words[0])
-	targets = append(targets, projectConfigOperandTargets(leader, cmd.words, words[1:])...)
+	targets = append(targets, projectConfigOperandTargets(leader, words[1:])...)
 	if replacingLeaders[leader] {
 		return targets
 	}
@@ -123,10 +123,10 @@ func namesApogeeFolder(target string) bool {
 	return path.Base(strings.TrimRight(target, "/")) == apogeeFolderName
 }
 
-// projectConfigOperandTargets is operandTargets with the project-config view's two exemptions —
-// a git command's operands and a cp's sources — and its one addition: what a cp, install, mv or
-// ln puts into a destination directory (intoFolderTargets).
-func projectConfigOperandTargets(leader string, words, operands []string) []string {
+// projectConfigOperandTargets is leaderOperandTargets with the project-config view's two
+// exemptions — a git command's operands and a cp's sources — and its one addition: what a cp,
+// install, mv or ln puts into a destination directory (intoFolderTargets).
+func projectConfigOperandTargets(leader string, operands []string) []string {
 	switch leader {
 	case "git":
 		return outputOptionValues(leader, operands)
@@ -135,7 +135,7 @@ func projectConfigOperandTargets(leader string, words, operands []string) []stri
 		return append(ops.destinations(), ops.intoFolderTargets(leader)...)
 	case "install", "mv", "ln":
 		ops := parseIntoDirectoryOperands(operands)
-		targets := operandTargets(words)
+		targets := leaderOperandTargets(leader, operands)
 		for _, dir := range ops.directories {
 			if !slices.Contains(targets, dir) {
 				targets = append(targets, dir) // an attached `-tDIR`, which valueOperands drops
@@ -143,7 +143,7 @@ func projectConfigOperandTargets(leader string, words, operands []string) []stri
 		}
 		return append(targets, ops.intoFolderTargets(leader)...)
 	}
-	return operandTargets(words)
+	return leaderOperandTargets(leader, operands)
 }
 
 // projectConfigFileName is the Project config's own name inside the `.apogee` folder.
@@ -867,6 +867,20 @@ var wrapperValueLetters = map[string]string{
 	"sudo":  "ughpCDRTUrtc",
 	"nice":  "n",
 	"xargs": "InsPdEaL",
+	"time":  "of",
+}
+
+// wrapperOutputOption is a wrapper's option that names a file the wrapper itself writes.
+type wrapperOutputOption struct {
+	short byte   // the short option letter, one of the wrapper's wrapperValueLetters
+	long  string // the long option name, without its `--`, in the wrapper's wrapperLongOptions
+}
+
+// wrapperOutputOptions are, per wrapper leader, the option that names a file the wrapper itself
+// writes — GNU time's `-o FILE` / `--output=FILE` — whose value stripWrappersReporting reports as a
+// write target as it strips it. A wrapper not listed writes no file of its own.
+var wrapperOutputOptions = map[string]wrapperOutputOption{
+	"time": {short: 'o', long: "output"},
 }
 
 // longOptionArgument is how a long option takes its argument, as getopt_long declares it.
@@ -888,7 +902,7 @@ const (
 // every name beside it — so the value word of a required-argument option is never taken for the
 // wrapped leader, and an option the table cannot resolve (unknown, or a prefix of two names) is
 // one the strict strip stops at (wrapperStripMode). A wrapper with no long options has an empty
-// table; the short value options of `exec -a` and `time -o/-f` stay unread (wrapperValueLetters).
+// table; the short value option of `exec -a` stays unread (wrapperValueLetters).
 var wrapperLongOptions = map[string]map[string]longOptionArgument{
 	"env": {
 		"unset": requiredArgument, "chdir": requiredArgument, "split-string": requiredArgument,
@@ -1007,13 +1021,19 @@ var findWritingPredicates = map[string]bool{
 // operandTargets returns the words of one simple command that its leader may write to. A
 // command that is only assignments (`d=.git/hooks`) has no leader to judge; it sets a name a
 // LATER command's operands resolve through, so its values feed the view as `export`'s would.
+// A file a wrapper's output option names (`time -o out.txt`) comes first, ahead of the wrapped
+// leader's own targets.
 func operandTargets(words []string) []string {
-	all := words
-	words = stripWrappers(words, strictStrip)
-	if len(words) == 0 {
-		return assignmentValues(all)
+	stripped, written := stripWrappersReporting(words, strictStrip)
+	if len(stripped) == 0 {
+		return append(written, assignmentValues(words)...)
 	}
-	leader, operands := path.Base(words[0]), words[1:]
+	return append(written, leaderOperandTargets(path.Base(stripped[0]), stripped[1:])...)
+}
+
+// leaderOperandTargets is operandTargets' reading of one wrapped leader's operands: the words
+// leader may write to, wrapper and assignment stripping already done.
+func leaderOperandTargets(leader string, operands []string) []string {
 	// A branch that returns valueOperands already keeps an output option's file; every other
 	// branch adds it from outputs, so the file is emitted once either way.
 	outputs := outputOptionValues(leader, operands)
@@ -1451,11 +1471,22 @@ func hasAny(words []string, set map[string]bool) bool {
 // it returns nothing for a command that is only assignments. Under strictStrip a wrapper long
 // option it cannot resolve stops the strip there, and that option comes first instead.
 func stripWrappers(words []string, mode wrapperStripMode) []string {
+	words, _ = stripWrappersReporting(words, mode)
+	return words
+}
+
+// stripWrappersReporting is stripWrappers that also returns, in line order, the files the
+// stripped wrappers' output options name (wrapperOutputOptions) — writes of the wrapper's own,
+// which the write-target views report beside the wrapped leader's.
+func stripWrappersReporting(words []string, mode wrapperStripMode) (stripped, written []string) {
 	words = stripAssignments(words)
 	for len(words) > 0 && wrapperLeaders[path.Base(words[0])] {
-		words = stripAssignments(stripBareOptions(words[1:], path.Base(words[0]), mode))
+		var outputs []string
+		words, outputs = stripBareOptions(words[1:], path.Base(words[0]), mode)
+		words = stripAssignments(words)
+		written = append(written, outputs...)
 	}
-	return words
+	return words, written
 }
 
 // shellInterpreters are the leaders whose heredoc body, when it is the script they read on
@@ -1549,27 +1580,65 @@ func isAssignment(w string) bool {
 // is one word either way. A bare `--` ends the options as getopt ends them: it is dropped and the
 // word after it is the leader. A long option resolveLongOption cannot resolve is dropped bare
 // under lenientStrip; under strictStrip the strip stops there and the option is the first word
-// returned.
-func stripBareOptions(words []string, wrapper string, mode wrapperStripMode) []string {
+// returned. It also returns written: the value of every wrapper output option it strips
+// (wrapperOutputValue), in order.
+func stripBareOptions(
+	words []string,
+	wrapper string,
+	mode wrapperStripMode,
+) (rest, written []string) {
 	for len(words) > 0 && strings.HasPrefix(words[0], "-") && words[0] != "-" {
 		option := words[0]
 		if option == "--" {
-			return words[1:]
+			return words[1:], written
 		}
 		takesNextWord := takesNextWordValue(option, wrapperValueLetters[wrapper])
 		if long, isLong := strings.CutPrefix(option, "--"); isLong {
 			argument, isResolved := resolveLongOption(long, wrapperLongOptions[wrapper])
 			if !isResolved && mode == strictStrip {
-				return words
+				return words, written
 			}
 			takesNextWord = argument == requiredArgument
 		}
+		value, isOutput := wrapperOutputValue(option, wrapper)
 		words = words[1:]
 		if len(words) > 0 && takesNextWord {
+			if isOutput {
+				value = words[0]
+			}
 			words = words[1:]
 		}
+		if isOutput && value != "" {
+			written = append(written, value)
+		}
 	}
-	return words
+	return words, written
+}
+
+// wrapperOutputValue reports whether option is wrapper's output option (wrapperOutputOptions) —
+// the short letter as the cluster's first value letter (`-o`, `-vo`, `-oFILE`), or the long name
+// exactly or by unique prefix (`--output`, `--out=FILE`) — and returns the value the option word
+// itself carries: the cluster's rest after the letter, or the `=` half. The value is empty when
+// it is the next word instead.
+func wrapperOutputValue(option, wrapper string) (value string, isOutput bool) {
+	output, hasOutput := wrapperOutputOptions[wrapper]
+	if !hasOutput {
+		return "", false
+	}
+	if long, isLong := strings.CutPrefix(option, "--"); isLong {
+		name, isResolved := longOptionName(long, wrapperLongOptions[wrapper])
+		if !isResolved || name != output.long {
+			return "", false
+		}
+		_, value, _ = strings.Cut(long, "=")
+		return value, true
+	}
+	flags := option[1:]
+	letter := strings.IndexAny(flags, wrapperValueLetters[wrapper])
+	if letter < 0 || flags[letter] != output.short {
+		return "", false
+	}
+	return flags[letter+1:], true
 }
 
 // takesNextWordValue reports whether a short option cluster's value is the next word: its first
@@ -1589,21 +1658,30 @@ func takesNextWordValue(option, valueLetters string) bool {
 // carrying its value after `=` takes nothing more, so it resolves as noArgument whatever it names.
 // It reports false for a name that matches nothing, or is a prefix of more than one name.
 func resolveLongOption(spelled string, options map[string]longOptionArgument) (longOptionArgument, bool) {
-	name, _, hasValue := strings.Cut(spelled, "=")
-	if hasValue {
+	if strings.Contains(spelled, "=") {
 		return noArgument, true
 	}
-	if argument, isExact := options[name]; isExact {
-		return argument, true
+	name, isResolved := longOptionName(spelled, options)
+	return options[name], isResolved
+}
+
+// longOptionName resolves a long option word, spelled without its `--` and cut at any `=`, to the
+// name it stands for among options as getopt_long does: an exact name first, else the one name it
+// is a prefix of. Unlike resolveLongOption it reads a word carrying an `=value` too. It reports
+// false for a name that matches nothing, or is a prefix of more than one name.
+func longOptionName(spelled string, options map[string]longOptionArgument) (string, bool) {
+	name, _, _ := strings.Cut(spelled, "=")
+	if _, isExact := options[name]; isExact {
+		return name, true
 	}
-	var matched []longOptionArgument
-	for candidate, argument := range options {
+	var matched []string
+	for candidate := range options {
 		if strings.HasPrefix(candidate, name) {
-			matched = append(matched, argument)
+			matched = append(matched, candidate)
 		}
 	}
 	if len(matched) != 1 {
-		return noArgument, false
+		return "", false
 	}
 	return matched[0], true
 }
