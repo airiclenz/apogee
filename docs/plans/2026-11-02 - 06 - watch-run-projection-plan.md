@@ -83,7 +83,11 @@ The rendered view must show child 1's row with no `model-b` cell and a fill read
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Watch|TestApplyUsageStripsTheDelegateModel|TestSubAgentModelFoldsOnlyWhenItDiffers|TestTranscriptLayoutGolden' ./internal/tui/`
 **Commit:** `fix(tui): measure a watched run's sub-agents against the watched run`
 
-## 2. Every session-view swap forgets the painted frame
+## 2. Every session-view swap forgets the painted frame — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): re-derived from "the owner's generation one below its painted key": clearWatchView touches the generation three times (reset, setRoot, setStage), so the test measures the offset on a probe copy (clearWatchView over a fresh paint cache) instead of hardcoding one, and asserts the watched generation lands on the owner's painted one.
+NOTES (2026-11-03): the entry is enterWatch called directly and settled by a tea.FocusMsg Update (folds nothing), not the browser's ⏎: that Update also closes the browser, and the transcript's regained rows lay it out through freshenTranscriptClamp whatever the key says, so deleting enterWatch's forgetPaintedFrame passed through the browser path. The owner fold (exchangeDoneMsg) and esc are driven through Update; the fold's generation offset is measured on the unwatched twin, and the post-fold parked generation is asserted equal to the watched one.
+NOTES (2026-11-03): bite results — deleting forgetPaintedFrame in enterWatch fails "entering the watch left the owner's text on screen"; in foldForOwner fails "after the owner's fold the screen is not the watched view"; in leaveWatch fails "the view after esc is not the owner's unwatched view byte for byte". No production code changed.
 
 **What:**
 A test-only item. It pins the rule the glossary states but no test checks: every swap of the session view calls `forgetPaintedFrame`, because the parked and watched transcripts count generations apart, and `frameKey` names a transcript by its generation.

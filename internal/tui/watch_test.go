@@ -1201,6 +1201,81 @@ func TestWatchIsolatesThePaintsOfTheRestoredTranscript(t *testing.T) {
 	}
 }
 
+// Every swap of the session view forgets the painted frame (forgetPaintedFrame): settle names a
+// transcript by its generation, and the parked and the watched transcript count generations apart,
+// so a swap that lands on an equal count would otherwise keep the other view's lines on screen. The
+// fixture lines the generations up at each of the three swaps — entry, an owner fold, esc — which
+// is the case the rule exists for: with the counts apart, settle repaints on its own.
+//
+// The entry is enterWatch called directly and settled by a view Msg that folds nothing
+// (tea.FocusMsg): the browser's ⏎, the one Update that enters, also closes the browser, and the
+// transcript's regained rows lay it out whatever the key says.
+func TestWatchRepaintsOnEverySessionViewSwap(t *testing.T) {
+	t.Parallel()
+	const ownText = "my own question"
+	owner := func() Model {
+		return step(t, ownerSession(t, watchEngine(), &fakeSessionHost{}), tea.FocusMsg{})
+	}
+	f := isolationFixture(t)
+	f.emit(domain.TurnEvent{EventBase: domain.EventBase{Turn: 1}, Status: domain.StatusExchangeComplete})
+	m := owner()
+	if !strings.Contains(plain(m.View()), ownText) {
+		t.Fatalf("setup: the owner's view does not paint %q", ownText)
+	}
+
+	// The entry: the watch view's reset moves the generation by as many touches as clearWatchView
+	// makes, so the owner's transcript is set that far below its painted key and the watched one
+	// lands on the very generation the owner's lines were painted under.
+	g := m.painted.generation
+	probe := m
+	probe.transcript.paints = newPaintCache()
+	probe.clearWatchView()
+	m.transcript.generation = g - (probe.transcript.generation - m.transcript.generation)
+
+	m, read := m.enterWatch(f.src)
+	if !m.watch.isActive || read == nil {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	m = step(t, m, tea.FocusMsg{})
+	if m.transcript.generation != g {
+		t.Fatalf("setup: watched generation = %d, want the owner's painted %d", m.transcript.generation, g)
+	}
+	if screen := plain(m.View()); strings.Contains(screen, ownText) {
+		t.Errorf("entering the watch left the owner's %q on screen:\n%s", ownText, screen)
+	}
+
+	m = step(t, m, read())
+	// The owner's fold: an exchangeDoneMsg lays the owner's view out (finishWorker), so the frame on
+	// record is the owner's when the watch view comes back. Its parked transcript is set below the
+	// watched generation by what the fold touches, measured on a twin that folds it unwatched.
+	twin := owner()
+	before := twin.transcript.generation
+	twin = step(t, twin, exchangeDoneMsg{})
+	m.watch.parked.transcript.generation = m.transcript.generation - (twin.transcript.generation - before)
+
+	m = step(t, m, exchangeDoneMsg{})
+	if !m.watch.isActive {
+		t.Fatal("the owner's exchangeDoneMsg ended the watch")
+	}
+	if m.watch.parked.transcript.generation != m.transcript.generation {
+		t.Fatalf("setup: parked generation = %d, want the watched %d",
+			m.watch.parked.transcript.generation, m.transcript.generation)
+	}
+	screen := plain(m.View())
+	if strings.Contains(screen, ownText) || !strings.Contains(screen, "first ask") {
+		t.Errorf("after the owner's fold the screen is not the watched view:\n%s", screen)
+	}
+
+	m = step(t, m, keyEsc())
+	if m.watch.isActive {
+		t.Fatal("esc did not leave the watch")
+	}
+	if got, want := m.View().Content, twin.View().Content; got != want {
+		t.Errorf("the view after esc is not the owner's unwatched view byte for byte:\n%s\nwant:\n%s",
+			plain(m.View()), plain(twin.View()))
+	}
+}
+
 // packageMethods parses this package's production files and returns its Model methods by name.
 func packageMethods(t *testing.T) map[string]*ast.FuncDecl {
 	t.Helper()
