@@ -2086,7 +2086,10 @@ func pathWithin(abs, root string) bool {
 // reaction prose has mistaken an advice fence for. Its token-budget twin follows it
 // (budgetNotices, in bound-row order), so the fence order on a closing result is fixed: tool
 // output, advice, step note, token note — and the wrap-up directive, stamped on the request tail
-// at send time (Request.NoteOnTail), always last.
+// at send time (Request.NoteOnTail), always last. The advice and the budget notes count inside the
+// clamp's bound (requestRoom.trailedShare): a clamped body is shorter by their weight, so the
+// committed message, trailers included, stays within the result's share of the room. The wrap-up
+// directive is decided after the Turn and stays outside the bound.
 func (a *Agent) appendToolResult(
 	turn int,
 	room requestRoom,
@@ -2096,25 +2099,22 @@ func (a *Agent) appendToolResult(
 	writeTarget string,
 	advised []advice,
 ) {
-	result.Content = a.clampToolResult(room, result.Content)
-	a.turns.resultsToAppend = max(a.turns.resultsToAppend-1, 0)
-	msg := domain.Message{
+	// The trailers are collected BEFORE the clamp and weighed into its bound (trailedShare), so the
+	// result and its trailers together stay within the result's share of the room: trailers
+	// appended uncounted would land the next request past the room and fold it before the model
+	// read the result.
+	notes := a.budgetNotices()
+	bare := domain.Message{
 		Role:        domain.RoleTool,
-		Content:     result.Content,
 		ToolCallID:  result.CallID,
 		ToolOutcome: domain.ToolOutcomeOf(result.IsError),
 	}
-	// The advise slot the post-tool-result cascade filled, rendered in ladder order AFTER the
-	// clamp: a trailer is guidance for the next Step, so it must not be what the structural floor
-	// elides, and its offset must measure the content as committed. WithAdvice stamps each span's
-	// Offset from the message as it stands — past the clamp and past every earlier fence — so the
-	// ledger keeps pointing at its own fence however many spans land.
-	for _, adv := range advised {
-		msg = msg.WithAdvice(adv.span, adv.text)
-	}
-	for _, note := range a.budgetNotices() {
-		msg = msg.WithEngineNote(note.topic, note.text)
-	}
+	trailers := room.trailerWeight(bare, withTrailers(bare, advised, notes))
+	result.Content = a.clampToolResult(room, result.Content, trailers)
+	a.turns.resultsToAppend = max(a.turns.resultsToAppend-1, 0)
+	msg := bare
+	msg.Content = result.Content
+	msg = withTrailers(msg, advised, notes)
 	a.conv.Append(msg)
 	// The estimate measures the message as committed, trailers included: it is what the context
 	// grew by, and the ContextEstimateEvent that follows counts the same characters.
@@ -2134,10 +2134,28 @@ func (a *Agent) appendToolResult(
 	a.cfg.Events.Emit(a.contextEstimateEvent(turn, room))
 }
 
+// withTrailers returns msg with its trailers rendered on in the fence order: the advise slot the
+// post-tool-result cascade filled, in ladder order, then the fired budget notes in bound-row order
+// (budgetNotices). They land AFTER the clamp: a trailer is guidance for the next Step, so it must
+// not be what the structural floor elides, and its offset must measure the content as committed.
+// WithAdvice and WithEngineNote stamp each span's Offset from the message as it stands — past the
+// clamp and past every earlier fence — so the ledger keeps pointing at its own fence however many
+// spans land.
+func withTrailers(msg domain.Message, advised []advice, notes []budgetNote) domain.Message {
+	for _, adv := range advised {
+		msg = msg.WithAdvice(adv.span, adv.text)
+	}
+	for _, note := range notes {
+		msg = msg.WithEngineNote(note.topic, note.text)
+	}
+	return msg
+}
+
 // clampToolResult is the STRUCTURAL bound on a single tool result: a result whose estimated tokens
-// exceed its share of the room left in the request (freshResultBound) — never more than the
-// ENTIRE History allocation — is committed to the conversation as the shared elision instead of
-// whole.
+// exceed its share of the room left in the request (freshResultBound) less trailers, the weight of
+// the trailers it will carry (requestRoom.trailedShare) — never more than the ENTIRE History
+// allocation, never less than the result floor — is committed to the conversation as the shared
+// elision instead of whole.
 //
 // It is structural, not a Reaction (ADR 0006's floor): it consults no config and is never
 // disabled under Bypass. The tool-result-cap Floor guard is the
@@ -2158,8 +2176,8 @@ func (a *Agent) appendToolResult(
 // more outgrow the allocation than a result can. The seams share structuralFloor as their ceiling
 // and requestRoom.fit as their rendering because they have one reason to change — the fold's
 // arithmetic.
-func (a *Agent) clampToolResult(room requestRoom, content string) string {
-	return room.fit(content, a.freshResultBound(room))
+func (a *Agent) clampToolResult(room requestRoom, content string, trailers int) string {
+	return room.fit(content, room.trailedShare(a.freshResultBound(room), trailers))
 }
 
 // freshResultFloorDivisor sets the least a fresh tool result is ever bounded to: 1/8 of the
@@ -2168,7 +2186,8 @@ func (a *Agent) clampToolResult(room requestRoom, content string) string {
 // could not.
 const freshResultFloorDivisor = 8
 
-// freshResultBound is the bound, in tokens, a tool result about to be appended is clamped to: its
+// freshResultBound is the bound, in tokens, a tool result about to be appended is clamped to before
+// its trailers' weight is taken off (requestRoom.trailedShare): its
 // share of room's room left in the request (requestRoom.freshShare, requestroom.go), weighed over
 // the request buildRequest will send once the result is committed (requestContents — the
 // conversation as it stands with every note and deferred injection pending on it) and split across

@@ -239,7 +239,11 @@ Depends on item 6.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestDelegateLimits|TestBoundRows|TestStepNotice|TestTokenNotice|TestSubAgent|TestNewAgentBuildsATopLevelAgent|TestNewChildAgent|TestStepCapNeverBounds|TestRunEndsTheExchangeAtTheStepCap|TestBoundErrText|TestCapResultHead|TestSeat_|TestDelegateReport|TestFanOut|TestWorkflowSpawn|TestBackgroundHostCoversEveryAgentField' ./internal/agent/`
 **Commit:** `refactor(agent): one delegateLimits value for a delegate's bounds`
 
-## 8. Trailers count inside the fresh-result bound
+## 8. Trailers count inside the fresh-result bound — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): trailers are weighed as `EstimateTokens(PromptChars(trailed) − PromptChars(bare))` (requestRoom.trailerWeight), on the room's Budget ratio, rather than a difference of two `requestRoom.weight` calls: rounding the trailer chars up on their own keeps body + trailers within the bound under the ceil estimate, where a difference of two rounded weights can undercount by one token.
+NOTES (2026-11-03): the trailer subtraction is its own method (requestRoom.trailedShare = max(min(share, historyFloor) − trailers, resultFloor)) applied on top of an unchanged freshShare, so freshResultBound and contextFillNotice keep reading the share without trailers; the floor arithmetic moved into requestRoom.resultFloor, shared by both. The fence order now lives in one helper, withTrailers (dispatch.go), used both to weigh and to render the trailers.
+NOTES (2026-11-03): consequential edit — internal/agent/unknownwindow_test.go: made necessary by clampToolResult's new trailers parameter (four call sites pass 0; behaviour unchanged).
 
 Depends on items 4 and 7.
 

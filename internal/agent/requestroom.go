@@ -63,7 +63,8 @@ func (r requestRoom) left(msgs []domain.Message) int {
 	return r.bounds.room - r.weight(msgs)
 }
 
-// freshShare is the bound, in tokens, a tool result about to be appended is clamped to. With
+// freshShare is the share, in tokens, of the room a tool result about to be appended may take —
+// the bound it is clamped to once its trailers' weight is taken off (trailedShare). With
 // a known window it is the result's share of the room left in the request: the advertised window
 // less the reply reserve — the very room the predictive guard measures (deriveGrowthBounds,
 // exceeds) — less the estimate of contents, the next request as buildRequest will send it without
@@ -90,8 +91,34 @@ func (r requestRoom) freshShare(contents *domain.Request, pending int) int {
 	st := contents.State()
 	left := r.bounds.room - r.budget.EstimateTokens(domain.PromptChars(st.Messages, st.Tools))
 	share := left / max(pending, 1)
-	floor := max(r.bounds.historyFloor/freshResultFloorDivisor, 1)
-	return min(max(share, floor), r.bounds.historyFloor)
+	return min(max(share, r.resultFloor()), r.bounds.historyFloor)
+}
+
+// resultFloor is the least a fresh tool result is ever bounded to: 1/8 of the History allocation
+// (freshResultFloorDivisor), never below one token. Below it the predictive fold makes room
+// rather than the result shrinking further.
+func (r requestRoom) resultFloor() int {
+	return max(r.bounds.historyFloor/freshResultFloorDivisor, 1)
+}
+
+// trailerWeight is the estimated tokens a result's trailers add to its tool message: the
+// characters trailed carries past bare — bare with its advice spans and fired budget notes
+// rendered on (withTrailers, dispatch.go) — through the Budget's chars-per-token ratio, rounded up
+// as every estimate is. The trailers' fences do not depend on the body they follow, so bare may
+// carry no content at all.
+func (r requestRoom) trailerWeight(bare, trailed domain.Message) int {
+	chars := domain.PromptChars([]domain.Message{trailed}, nil) - domain.PromptChars([]domain.Message{bare}, nil)
+	return r.budget.EstimateTokens(chars)
+}
+
+// trailedShare is the bound a fresh tool result carrying trailers (trailerWeight tokens of them)
+// is clamped to: its share (freshShare, never above the History allocation) less the trailers'
+// weight, so the result and its trailers together stay within the share — on a known window the
+// room left, on an unknown one the History floor — and never above the History allocation. It
+// never drops below resultFloor: past that the predictive fold makes the room, as it does for a
+// bare result.
+func (r requestRoom) trailedShare(share, trailers int) int {
+	return max(min(share, r.bounds.historyFloor)-trailers, r.resultFloor())
 }
 
 // structuralFloor is the CEILING behind both structural clamps: the whole History allocation — the

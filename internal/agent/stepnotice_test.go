@@ -642,3 +642,65 @@ func TestTokenNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		assertNoTokenFiring(t, sink)
 	})
 }
+
+// TestClampedDelegateResultWithStepNoticeFitsTheRoom: a delegate at three quarters of its step cap
+// commits a read over the room left. The step note it carries is weighed inside the clamp's bound
+// (plan 2026-11-02 - 05, item 8), so the request buildRequest then sends, the note included, still
+// fits the room and the predictive guard does not fold it.
+func TestClampedDelegateResultWithStepNoticeFitsTheRoom(t *testing.T) {
+	a, room := pendingNoteAgent(t)
+	a.depth = 1
+	withBounds(a, testBounds{steps: 4})
+	a.turns.exchangeTurns = 2
+
+	assertBoundHoldsTheNextRequest(t, a, room)
+	if !a.conv.HasEngineNote(stepNoticeTopic) {
+		t.Error("the clamped result carries no step note, so the notice never rode it")
+	}
+}
+
+// TestTrailerFenceOrder pins the fence order on a clamped closing result: the clamped tool output,
+// the advice, the step note, the token note — each span's offset measured from the clamped content
+// and past every earlier fence, so counting the trailers inside the bound moved none of them.
+func TestTrailerFenceOrder(t *testing.T) {
+	a := stepNoticeChild(t, stepNoticeConfig(&recordingSink{}), 4)
+	withBounds(a, testBounds{steps: 4, tokens: tokenCapTwentyMillion})
+	a.usage.prompt = 15_200_000
+	a.turns.exchangeTurns = 2
+	notes := a.budgetNotices()
+	if len(notes) != 2 || notes[0].topic != stepNoticeTopic || notes[1].topic != tokenNoticeTopic {
+		t.Fatalf("test setup: budget notes = %+v, want the step note then the token note", notes)
+	}
+	advised := trailerAdvice("Re-read the range before editing it.")
+	body := numberedLines(4000)
+
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: body}, "", advised)
+
+	msg := a.conv.At(a.conv.Len() - 1)
+	if len(msg.Advice) != 3 {
+		t.Fatalf("ledger = %+v, want the advice span, the step note and the token note", msg.Advice)
+	}
+	clamped := msg.Content[:msg.Advice[0].Offset]
+	if len(clamped) >= len(body) || !strings.Contains(clamped, "start_line/end_line") {
+		t.Fatalf("the output ahead of the first fence is not the clamped body:\n%.200s", clamped)
+	}
+	adviceFence := domain.RenderAdvice(advised[0].span, advised[0].text)
+	stepFence := domain.RenderEngineNote(stepNoticeTopic, notes[0].text)
+	tokenFence := domain.RenderEngineNote(tokenNoticeTopic, notes[1].text)
+	if want := clamped + adviceFence + stepFence + tokenFence; msg.Content != want {
+		t.Errorf("committed content after the clamped output =\n%q\nwant advice, step note, token note:\n%q",
+			msg.Content[len(clamped):], want[len(clamped):])
+	}
+	wantSpan := advised[0].span
+	wantSpan.Offset = len(clamped)
+	wantLedger := []domain.AdviceSpan{
+		wantSpan,
+		{Origin: domain.OriginEngine, Offset: len(clamped) + len(adviceFence), Topic: stepNoticeTopic},
+		{Origin: domain.OriginEngine, Offset: len(clamped) + len(adviceFence) + len(stepFence), Topic: tokenNoticeTopic},
+	}
+	for i, want := range wantLedger {
+		if msg.Advice[i] != want {
+			t.Errorf("ledger row %d = %+v, want %+v", i, msg.Advice[i], want)
+		}
+	}
+}

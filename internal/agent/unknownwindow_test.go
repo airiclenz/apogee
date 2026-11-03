@@ -92,11 +92,11 @@ func TestUnknownWindowBoundsShareOneCeiling(t *testing.T) {
 
 	t.Run("the structural tool-result clamp", func(t *testing.T) {
 		atCeiling := linesOfExactly(ceiling)
-		if got := a.clampToolResult(a.requestRoom(), atCeiling); got != atCeiling {
+		if got := a.clampToolResult(a.requestRoom(), atCeiling, 0); got != atCeiling {
 			t.Errorf("a result of exactly the %d-char ceiling was clamped to %d chars", ceiling, len(got))
 		}
 		over := linesOfExactly(ceiling + 1)
-		if got := a.clampToolResult(a.requestRoom(), over); got == over {
+		if got := a.clampToolResult(a.requestRoom(), over, 0); got == over {
 			t.Errorf("a result of %d chars past the %d-char ceiling was committed whole", len(over), ceiling)
 		}
 	})
@@ -163,7 +163,7 @@ func TestUnknownWindowClampKeepsTheFoldSurvivable(t *testing.T) {
 	a, ceiling := unknownWindowAgent(t, &recordingSink{})
 
 	giant := numberedLines(20_000) // ~1.6 MB — a whole-file read, the audit's shape
-	committed := a.clampToolResult(a.requestRoom(), giant)
+	committed := a.clampToolResult(a.requestRoom(), giant, 0)
 
 	if len(committed) >= len(giant) {
 		t.Fatalf("a %d-char result was committed unclamped", len(giant))
@@ -233,7 +233,7 @@ func TestKnownWindowIgnoresTheUnknownWindowCeiling(t *testing.T) {
 	}
 
 	between := linesOfExactly(ceiling + 1) // one char past the ceiling, well under the allocation
-	if got := a.clampToolResult(a.requestRoom(), between); got != between {
+	if got := a.clampToolResult(a.requestRoom(), between, 0); got != between {
 		t.Errorf("a result past the assumed ceiling but under the History allocation was clamped (%d chars in, %d out)",
 			len(between), len(got))
 	}

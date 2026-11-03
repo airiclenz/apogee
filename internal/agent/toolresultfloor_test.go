@@ -164,14 +164,14 @@ func TestToolResultFloorLeavesEverythingElseVerbatim(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.agent.clampToolResult(tc.agent.requestRoom(), tc.content); got != tc.content {
+			if got := tc.agent.clampToolResult(tc.agent.requestRoom(), tc.content, 0); got != tc.content {
 				t.Errorf("result was altered (%d chars in, %d out); want it verbatim", len(tc.content), len(got))
 			}
 		})
 	}
 
 	t.Run("single line the head/tail form cannot shrink", func(t *testing.T) {
-		got := a.clampToolResult(a.requestRoom(), unshrinkable)
+		got := a.clampToolResult(a.requestRoom(), unshrinkable, 0)
 		if len(got) > floorChars {
 			t.Errorf("clamped result is %d chars, want at most the floor of %d chars", len(got), floorChars)
 		}
@@ -527,10 +527,10 @@ func pendingNoteAgent(t *testing.T) (*Agent, int) {
 }
 
 // assertBoundHoldsTheNextRequest appends a result the whole History allocation long — over the
-// room left, so the room-left bound bites — and checks the request buildRequest then sends, notes
-// and injections included, is estimated within the advertised room, so the predictive guard does
-// not fold it.
-func assertBoundHoldsTheNextRequest(t *testing.T, a *Agent, room int) {
+// room left, so the room-left bound bites — carrying advised as its advise slot, and checks the
+// request buildRequest then sends, notes, injections and trailers included, is estimated within
+// the advertised room, so the predictive guard does not fold it.
+func assertBoundHoldsTheNextRequest(t *testing.T, a *Agent, room int, advised ...advice) {
 	t.Helper()
 	b := a.budget()
 	left := room - requestTokens(a, a.conv.Messages())
@@ -538,7 +538,7 @@ func assertBoundHoldsTheNextRequest(t *testing.T, a *Agent, room int) {
 		t.Fatalf("test setup: %d tokens left, want between the floor %d and the History allocation %d", left, floor, b.History)
 	}
 
-	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: singleLine(a, b.History)}, "", nil)
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: singleLine(a, b.History)}, "", advised)
 	if committed := a.conv.At(a.conv.Len() - 1).Content; !strings.Contains(committed, "start_line/end_line") {
 		t.Fatalf("the result was not bounded (no elision marker), so the bound never bit:\n%.200s", committed)
 	}
@@ -579,4 +579,61 @@ func TestFreshResultCountsTheLedgerNote(t *testing.T) {
 	}
 
 	assertBoundHoldsTheNextRequest(t, a, room)
+}
+
+// The trailers count inside the fresh-result bound (plan 2026-11-02 - 05, item 8): the advice
+// spans and the fired budget notes a result carries are weighed before the clamp and taken off its
+// share, so a clamped result plus its trailers stays within the room — they used to be appended
+// after the clamp, uncounted, landing the next request at room plus trailer and folding it before
+// the model read the result (tool-result-trailers-overflow).
+
+// trailerAdvice is a post-tool-result advise slot of one span carrying text — the shape the
+// cascade hands appendToolResult.
+func trailerAdvice(text string) []advice {
+	span := domain.AdviceSpan{Reaction: "advisor", Origin: domain.OriginUser, Moment: domain.MomentPostToolResult}
+	return []advice{{span: span, text: text}}
+}
+
+// TestClampedResultWithAdviceFitsTheRoom: a ~2 KiB advice span rides a result over the room left.
+// The clamp shortens the body by the span's weight, so the request buildRequest then sends, the
+// fence included, still fits the room and the predictive guard does not fold it.
+func TestClampedResultWithAdviceFitsTheRoom(t *testing.T) {
+	a, room := pendingNoteAgent(t)
+	advised := trailerAdvice(strings.Repeat("Re-read the range before editing it. ", 56))
+
+	assertBoundHoldsTheNextRequest(t, a, room, advised...)
+	if msg := a.conv.At(a.conv.Len() - 1); len(msg.Advice) != 1 {
+		t.Errorf("the committed result carries %d ledger rows, want the one advice span", len(msg.Advice))
+	}
+}
+
+// TestUnknownWindowClampCountsTrailers: with no window known the bound is the History floor, and
+// a result clamped to it carries its advice inside it — the committed message, fence included, is
+// estimated at no more than the structural floor.
+func TestUnknownWindowClampCountsTrailers(t *testing.T) {
+	a, err := newAgent(configWithTools(&recordingSink{}), echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
+	r := a.requestRoom()
+	if r.bounds.windowKnown {
+		t.Fatal("test setup: the agent has a known window; the unknown-window bound does not apply")
+	}
+	ceiling := r.structuralFloor()
+	advised := trailerAdvice(strings.Repeat("Re-read the range before editing it. ", 56))
+
+	a.appendToolResult(0, r, domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: singleLine(a, 4*ceiling)}, "", advised)
+
+	msg := a.conv.At(a.conv.Len() - 1)
+	if !strings.Contains(msg.Content, "start_line/end_line") {
+		t.Fatalf("the result was not clamped (no elision marker), so the bound never bit:\n%.200s", msg.Content)
+	}
+	if len(msg.Advice) != 1 {
+		t.Fatalf("the committed result carries %d ledger rows, want the one advice span", len(msg.Advice))
+	}
+	if got := r.budget.EstimateTokens(domain.PromptChars([]domain.Message{msg}, nil)); got > ceiling {
+		t.Errorf("the committed message, trailers included, is %d tokens, past the History floor %d", got, ceiling)
+	}
 }

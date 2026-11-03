@@ -55,9 +55,11 @@ var (
 // rung adds the wrap-up sentence for a child agent alone (view.Depth() > 0): a main agent's fold
 // waits for the Exchange boundary and its wrap-up is the human's call.
 //
-// The result is measured as appendToolResult will commit it: no longer than the bound its clamp
-// applies (freshResultBound), so a result the clamp elides reads at its committed size rather than
-// its raw one, and the rung reports the fill the model will actually see. The bound is read from
+// The result is measured as appendToolResult will commit it, before its trailers: no longer than
+// the share its clamp starts from (freshResultBound), so a result the clamp elides reads near its
+// committed size rather than its raw one, and the rung reports the fill the model will actually
+// see. The rung runs before the advise slot fills, so it reads the result without the trailers
+// (advice, budget notes) the clamp then takes off that share (requestRoom.trailedShare). The bound is read from
 // the request room of the commit in flight (turnLifecycle.commitRoom) — the very room the clamp
 // then applies — and from a room of its own when the cascade fires outside a commit.
 func (a *Agent) contextFillNotice(_ context.Context, view domain.LoopView, _ domain.ToolCall, result *domain.ToolResultEdit) (domain.Outcome, error) {
