@@ -859,15 +859,23 @@ var wrapperLeaders = map[string]bool{
 
 // wrapperValueLetters are, per wrapper leader, the short options that take a value — the rest
 // of the cluster or else the next word — so the value word (`env -u NAME`, `sudo -u USER`,
-// `nice -n N`, `xargs -I R`) is never taken for the wrapped leader. A short option not listed is
-// stripped bare: the view is a footgun guard (ADR 0012), not a parser of every wrapper's short
-// grammar. Long options are read against wrapperLongOptions instead.
+// `nice -n N`, `xargs -I R`) is never taken for the wrapped leader. The short options that take
+// a value only inside their own word are wrapperOptionalValueLetters instead. A short option in
+// neither is stripped bare: the view is a footgun guard (ADR 0012), not a parser of every
+// wrapper's short grammar. Long options are read against wrapperLongOptions instead.
 var wrapperValueLetters = map[string]string{
 	"env":   "uCSa",
-	"sudo":  "ughpCDRTUrtc",
+	"sudo":  "ugpCDRTUrtc",
 	"nice":  "n",
 	"xargs": "InsPdEaL",
 	"time":  "of",
+}
+
+// wrapperOptionalValueLetters are, per wrapper leader, the short options whose value is optional
+// (getopt's `h::`): the rest of the cluster is the value (`sudo -hHOST`), and a bare one takes no
+// next word (`sudo -h rm x` judges `rm`). Like a wrapperValueLetters letter, one ends its cluster.
+var wrapperOptionalValueLetters = map[string]string{
+	"sudo": "h",
 }
 
 // wrapperOutputOption is a wrapper's option that names a file the wrapper itself writes.
@@ -1592,7 +1600,9 @@ func stripBareOptions(
 		if option == "--" {
 			return words[1:], written
 		}
-		takesNextWord := takesNextWordValue(option, wrapperValueLetters[wrapper])
+		takesNextWord := takesNextWordValue(
+			option, wrapperValueLetters[wrapper], wrapperOptionalValueLetters[wrapper],
+		)
 		if long, isLong := strings.CutPrefix(option, "--"); isLong {
 			argument, isResolved := resolveLongOption(long, wrapperLongOptions[wrapper])
 			if !isResolved && mode == strictStrip {
@@ -1642,15 +1652,21 @@ func wrapperOutputValue(option, wrapper string) (value string, isOutput bool) {
 }
 
 // takesNextWordValue reports whether a short option cluster's value is the next word: its first
-// letter that is one of valueLetters is its last letter (`-u`, `-Eu`). A value letter earlier in
-// the cluster takes the rest of the cluster as its value (`-uroot`); a long option takes none
-// here — its value is resolveLongOption's to find.
-func takesNextWordValue(option, valueLetters string) bool {
-	if valueLetters == "" || strings.HasPrefix(option, "--") {
+// letter that is one of valueLetters or optionalLetters is a valueLetters letter, and is the
+// cluster's last letter (`-u`, `-Eu`). A value letter earlier in the cluster takes the rest of
+// the cluster as its value (`-uroot`); an optionalLetters letter takes only the rest of the
+// cluster, never the next word (`-h`, `-hu`); a long option takes none here — its value is
+// resolveLongOption's to find.
+func takesNextWordValue(option, valueLetters, optionalLetters string) bool {
+	if strings.HasPrefix(option, "--") {
 		return false
 	}
 	flags := option[1:]
-	return strings.IndexAny(flags, valueLetters) == len(flags)-1
+	letter := strings.IndexAny(flags, valueLetters+optionalLetters)
+	if letter < 0 || strings.IndexByte(optionalLetters, flags[letter]) >= 0 {
+		return false
+	}
+	return letter == len(flags)-1
 }
 
 // resolveLongOption resolves a long option word, spelled without its `--`, against a wrapper's

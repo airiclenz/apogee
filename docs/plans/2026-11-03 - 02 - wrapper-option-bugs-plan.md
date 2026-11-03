@@ -53,7 +53,7 @@ The wrapper's output values go BEFORE the wrapped leader's operand targets (afte
 **Closes:** time-output-file-unreported
 **Commit:** `fix(security): report the file time -o writes and read time's -o/-f values`
 
-## 2. `sudo -h`: an optional-argument option
+## 2. `sudo -h`: an optional-argument option — ✅ DONE (2026-11-03)
 
 **What:**
 **Goal:** the wrapper strip reads sudo's `-h` as getopt `h::` does: `-hHOST` consumes only its own word, a bare `-h` consumes no next word, and `h` ends a short cluster (`-hu root rm .git/hooks/x` is host `u`, leader `root`).
