@@ -14,8 +14,8 @@ an `ArgvHandler` (a command), a `WebhookHandler` (a POST) and an `MCPHandler` (a
 connected MCP server), each serving observe, advise and gate, the class deciding what the reply is
 worth — whose `On` list spans Moments and is checked against the class. An `MCPHandler` is pure
 data: the **Driver** injects a `Config.MCP` resolver that turns its server and tool into a call, the
-engine never dials a server, and a Driver that injects none (headless, the daemon, a Firing, the
-bench) leaves it inert with one notice per entry — an advise or observe entry dropped before arming,
+engine never dials a server, and a Driver that injects none (headless, the daemon, a Firing) leaves
+it inert with one notice per entry — an advise or observe entry dropped before arming,
 a gate entry armed but escalating every call to ask; the **Reaction host** owns that rule for every
 Driver in the binary, disarming the entries and giving the notices when its root dials no MCP
 server, and a facade Driver such as the bench gets it only by building one
