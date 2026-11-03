@@ -2,6 +2,7 @@ package security
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -540,6 +541,108 @@ func TestSafeReadFile_ReadsWithinRoot(t *testing.T) {
 	}
 }
 
+// TestSafeReadFile_RefusesADirectory pins the regular-file-only read: a directory is refused with
+// ErrNotRegular naming the argument, never read or reported as absent.
+func TestSafeReadFile_RefusesADirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	for name, read := range map[string]func(string, string) ([]byte, error){
+		"SafeReadFile":       SafeReadFile,
+		"SafeReadFileCapped": SafeReadFileCapped,
+	} {
+		got, err := read(root, "dir")
+
+		if got != nil {
+			t.Errorf("%s(dir) returned %d bytes, want none", name, len(got))
+		}
+		if !errors.Is(err, ErrNotRegular) {
+			t.Errorf("%s(dir) err = %v, want ErrNotRegular", name, err)
+		}
+		if err != nil && err.Error() != "not a regular file: dir" {
+			t.Errorf("%s(dir) error text = %q, want %q", name, err.Error(), "not a regular file: dir")
+		}
+	}
+}
+
+// writeSparseFile creates name under root as a sparse file of size bytes, so an over-cap fixture
+// costs no disk.
+func writeSparseFile(t *testing.T, root, name string, size int64) {
+	t.Helper()
+
+	f, err := os.Create(filepath.Join(root, name))
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := f.Truncate(size); err != nil {
+		_ = f.Close()
+		t.Fatalf("setup: truncate: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("setup: close: %v", err)
+	}
+}
+
+// TestSafeReadFileCapped_RefusesAnOverCapFile pins the bound: one byte over maxSafeReadBytes is
+// refused with ErrTooLarge in the read tools' own wording, and no bytes come back.
+func TestSafeReadFileCapped_RefusesAnOverCapFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	size := maxSafeReadBytes + 1
+	writeSparseFile(t, root, "huge.bin", size)
+
+	got, err := SafeReadFileCapped(root, "huge.bin")
+
+	if got != nil {
+		t.Errorf("SafeReadFileCapped returned %d bytes, want none", len(got))
+	}
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("SafeReadFileCapped(over cap) err = %v, want ErrTooLarge", err)
+	}
+	want := fmt.Sprintf("file too large: %d bytes (max %d)", size, maxSafeReadBytes)
+	if err.Error() != want {
+		t.Errorf("error text = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestSafeReadFileCapped_ReadsAFileAtTheCap is the bound's positive edge: a file of exactly
+// maxSafeReadBytes is read whole.
+func TestSafeReadFileCapped_ReadsAFileAtTheCap(t *testing.T) {
+	root := t.TempDir()
+	writeSparseFile(t, root, "edge.bin", maxSafeReadBytes)
+
+	got, err := SafeReadFileCapped(root, "edge.bin")
+
+	if err != nil {
+		t.Fatalf("SafeReadFileCapped(at cap): %v", err)
+	}
+	if int64(len(got)) != maxSafeReadBytes {
+		t.Errorf("read %d bytes, want %d", len(got), maxSafeReadBytes)
+	}
+}
+
+// TestSafeReadFile_HasNoSizeRefusal pins that the bound is the capped variant's alone: the undo
+// journal's reads go through SafeReadFile and must cover a file over the cap whole.
+func TestSafeReadFile_HasNoSizeRefusal(t *testing.T) {
+	root := t.TempDir()
+	size := maxSafeReadBytes + 1
+	writeSparseFile(t, root, "huge.bin", size)
+
+	got, err := SafeReadFile(root, "huge.bin")
+
+	if err != nil {
+		t.Fatalf("SafeReadFile(over the capped variant's bound): %v", err)
+	}
+	if int64(len(got)) != size {
+		t.Errorf("read %d bytes, want %d", len(got), size)
+	}
+}
+
 // TestSafeOpen_ReadsWithinRoot is the open positive control: the returned handle reads the
 // in-root file's content, and stays readable after SafeOpen's internal pinning root has
 // been closed (a file opened through an os.Root outlives the root).
@@ -731,6 +834,9 @@ func TestSafeCopyFile_RefusesNonRegularSource(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not a regular file") {
 		t.Errorf("error = %v, want it to name the non-regular source", err)
+	}
+	if !errors.Is(err, ErrNotRegular) {
+		t.Errorf("error = %v, want it to wrap ErrNotRegular", err)
 	}
 	assertNoStagingLeftovers(t, root)
 }

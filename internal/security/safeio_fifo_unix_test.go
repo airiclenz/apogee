@@ -166,3 +166,83 @@ func TestSafeOpen_RefusesASocket(t *testing.T) {
 		t.Errorf("SafeOpen(socket) err = %v, want ENXIO from open(2)", err)
 	}
 }
+
+// returnsWithin runs call under safeOpenDeadline and fails the test when it does not return in
+// time — the wedge a FIFO pins on a read primitive other than SafeOpen. what names the call in
+// the failure.
+func returnsWithin(t *testing.T, what string, call func() error) error {
+	t.Helper()
+
+	done := make(chan error, 1)
+	go func() { done <- call() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(safeOpenDeadline):
+		t.Fatalf("%s did not return within %v: the open blocked", what, safeOpenDeadline)
+		return nil
+	}
+}
+
+// plantFIFO makes a named pipe called name under root, skipping where mkfifo is unsupported.
+func plantFIFO(t *testing.T, root, name string) {
+	t.Helper()
+
+	if err := syscall.Mkfifo(filepath.Join(root, name), 0o600); err != nil {
+		t.Skipf("mkfifo unsupported here: %v", err)
+	}
+}
+
+// TestSafeReadFile_RefusesAFIFOWithoutBlocking is the audit's wedge on the whole-file reads: a
+// planted pipe with no writer blocked SafeReadFile's open forever. Both it and the capped variant
+// now refuse the pipe promptly with ErrNotRegular. Fails against the pre-fix code on the deadline.
+func TestSafeReadFile_RefusesAFIFOWithoutBlocking(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	plantFIFO(t, root, "pipe")
+
+	for name, read := range map[string]func(string, string) ([]byte, error){
+		"SafeReadFile":       SafeReadFile,
+		"SafeReadFileCapped": SafeReadFileCapped,
+	} {
+		var got []byte
+		err := returnsWithin(t, name+"(fifo)", func() error {
+			var readErr error
+			got, readErr = read(root, "pipe")
+			return readErr
+		})
+
+		if got != nil {
+			t.Errorf("%s(fifo) returned %d bytes, want a refusal", name, len(got))
+		}
+		if !errors.Is(err, ErrNotRegular) {
+			t.Errorf("%s(fifo) err = %v, want ErrNotRegular", name, err)
+		}
+	}
+}
+
+// TestSafeCopyFile_RefusesAFIFOSourceWithoutBlocking is the same wedge on the copy's source: a
+// blocking open of a pipe with no writer never returned. The copy now refuses it promptly with
+// ErrNotRegular, and nothing is staged at the destination.
+func TestSafeCopyFile_RefusesAFIFOSourceWithoutBlocking(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	plantFIFO(t, root, "pipe")
+
+	err := returnsWithin(t, "CopyFile(fifo)", func() error {
+		return WorkspaceFence(root).CopyFile("pipe", "copy")
+	})
+
+	if !errors.Is(err, ErrNotRegular) {
+		t.Fatalf("CopyFile(fifo) err = %v, want ErrNotRegular", err)
+	}
+	if want := "not a regular file: pipe"; err.Error() != want {
+		t.Errorf("error text = %q, want %q", err.Error(), want)
+	}
+	if _, statErr := os.Lstat(filepath.Join(root, "copy")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("destination stat err = %v, want it absent", statErr)
+	}
+	assertNoStagingLeftovers(t, root)
+}

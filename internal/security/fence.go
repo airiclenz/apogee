@@ -21,11 +21,11 @@ import (
 // target? — is asked in one place, Governs, that every verb below routes through.
 //
 // The verbs are the mutating primitives of safeio.go, moved here: WriteFile, Remove, CopyFile,
-// CopyFileFrom and Rename. The read primitives (SafeReadFile, SafeOpen) are NOT verbs of the
-// Fence and take no permit — an approval authorises the write the operator read, not a wider
-// view of the host (ADR 0049 D2). The rule an approved escape lands under — re-resolution, the
-// deepest-existing-ancestor root, the symlinked-target refusal — is stated once in writepermit.go
-// and inherited here by construction.
+// CopyFileFrom and Rename. The read primitives (SafeReadFile, SafeReadFileCapped, SafeOpen) are
+// NOT verbs of the Fence and take no permit — an approval authorises the write the operator read,
+// not a wider view of the host (ADR 0049 D2). The rule an approved escape lands under —
+// re-resolution, the deepest-existing-ancestor root, the symlinked-target refusal — is stated once
+// in writepermit.go and inherited here by construction.
 
 // Fence is the bound a mutation runs under: the workspace Root every write is pinned to, and the
 // Permit that names the one resolved path outside it an approval authorised. A zero Permit is the

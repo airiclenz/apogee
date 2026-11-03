@@ -150,8 +150,8 @@
 // the SAME (workspace) root; CopyFileFrom is the exception that pins a root at each end, because
 // a copy's source is a read and may come from a read-only root the destination fence knows
 // nothing about — its write half is bounded by the destination root exactly as the others are.
-// safeio.go is the USE on the read side and the shared machinery — SafeReadFile and SafeOpen,
-// the read primitives, which take no permit and are not Fence verbs (ADR 0049 D2); the staging
+// safeio.go is the USE on the read side and the shared machinery — SafeReadFile, its bounded
+// SafeReadFileCapped and SafeOpen, the read primitives, which take no permit and are not Fence verbs (ADR 0049 D2); the staging
 // and copy helpers the verbs are built from live here too. It also carries the in-root symlink
 // policy the fence does not decide: ErrSymlinkedParent and
 // refuseSymlinkedParents, the write-side refusal of a parent chain that crosses a link, applied

@@ -185,10 +185,12 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 	// The source is read ONCE, through the workspace fence (os.Root-pinned), and the BYTES
 	// are handed to the parser below: parsing by path would re-walk that path, following a
 	// component swapped to point outside the workspace after security.ResolveInRoot checked it. A
-	// refusal is reported as a refusal, never as an absent file. No size bound is added —
-	// the parser read the whole file before this fence too, and a cap would stop a large but
-	// legitimate source file from being diagnosable at all.
-	src, err := security.SafeReadFile(t.root, workspaceRelative(abs, t.root))
+	// refusal is reported as a refusal, never as an absent file. The read is capped
+	// (security.SafeReadFileCapped, 64 MiB), superseding the earlier "no size bound" choice
+	// (2026-11-03 audit): no legitimate source file comes near the cap, and an uncapped read
+	// let a planted huge file exhaust memory. A FIFO, a directory or an over-cap file is
+	// refused in its own words.
+	src, err := security.SafeReadFileCapped(t.root, workspaceRelative(abs, t.root))
 	if err != nil {
 		return errorResult(callID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(abs, t.root), name)), nil
 	}

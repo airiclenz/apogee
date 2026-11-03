@@ -1,6 +1,7 @@
 package security
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -36,8 +37,10 @@ import (
 // descriptor it then reads through an io.LimitReader, so the check and the use cannot
 // disagree about which file they describe, and no more than the caller's cap+1 bytes are
 // ever materialised even if the file grows mid-call. SafeReadFile remains UNBOUNDED by
-// contract (its callers read files they are about to rewrite whole); a caller needing a
-// bound must use SafeOpen. A bound decided from a SEPARATE stat call is no defence
+// contract (its callers — the undo journal's capture, read-back and readCurrent — must cover
+// a file however large it is); SafeReadFileCapped is its bounded alternative, the same read
+// under maxSafeReadBytes for a tool that hands the bytes to a model, and any other bound
+// is the caller's own through SafeOpen. A bound decided from a SEPARATE stat call is no defence
 // against an adversary who can rename inside the workspace: the stat-first pattern this
 // package used to offer had exactly that window — an in-root name flipped between the
 // two calls was stat'd as one file and read as another, measured (2026-07-25, Linux
@@ -253,29 +256,107 @@ func stageAndClose(f *os.File, data []byte, mode os.FileMode, applyMode bool) er
 // disclose the resolved name rather than echo its argument (the SYMLINK POLICY note in the
 // package header; internal/tools renders it as `→ resolves to …`).
 //
+// The name is opened through SafeOpen, so it is opened non-blocking and only a regular file is
+// read: a named pipe, a device or a directory is refused with an error wrapping ErrNotRegular
+// before a byte is read — a planted pipe can no longer wedge the call — and a UNIX socket is
+// refused by open(2) itself, as SafeOpen documents.
+//
 // It applies no size bound of its own: the contents are whatever the name resolves to inside
-// the root at read time, however large. A caller that needs a bound must use SafeOpen and
-// decide it from an fstat of the returned handle — see the SCOPE note in the package header.
+// the root at read time, however large. A caller that needs a bound uses SafeReadFileCapped, or
+// SafeOpen and decides it from an fstat of the returned handle — see the SCOPE note in the
+// package header.
 func SafeReadFile(root, input string) ([]byte, error) {
-	rel, err := rootRelative(input, root)
+	return readRegularFile(root, input, unboundedRead)
+}
+
+// maxSafeReadBytes is SafeReadFileCapped's bound: 64 MiB, far past any source file a model
+// edits or a toolchain diagnoses, and small enough that a planted multi-gigabyte file cannot
+// make one tool call exhaust a small box's memory.
+const maxSafeReadBytes int64 = 64 << 20
+
+// unboundedRead is readRegularFile's "no bound" limit — SafeReadFile's contract.
+const unboundedRead int64 = -1
+
+// ErrTooLarge is returned when SafeReadFileCapped reaches a regular file larger than its bound.
+// Like ErrNotRegular it is neither an escape nor an absence — the file is there and inside the
+// workspace — so callers that render errors for the model pass it through verbatim
+// ("file too large: N bytes (max M)").
+var ErrTooLarge = errors.New("file too large")
+
+// SafeReadFileCapped is SafeReadFile with a size bound: the same fenced, non-blocking,
+// regular-file-only read, refusing a file over maxSafeReadBytes with an error wrapping
+// ErrTooLarge. The bound is decided from an fstat of the descriptor the bytes are read through
+// and enforced again by the read itself (cap+1 through an io.LimitReader), so a file that grows
+// past the bound mid-call is refused too and no more than cap+1 bytes are ever held. It serves
+// the tool-facing reads that hand the bytes to a model — edit, find-and-replace, diagnostics —
+// never the undo journal's, which must cover a large file whole.
+func SafeReadFileCapped(root, input string) ([]byte, error) {
+	return readRegularFile(root, input, maxSafeReadBytes)
+}
+
+// readRegularFile is the one read both SafeReadFile and SafeReadFileCapped are: SafeOpen's
+// fenced, non-blocking open, a directory refused as not regular, and the whole file read through
+// the pinned descriptor — at most limit bytes of it, or all of it when limit is unboundedRead.
+func readRegularFile(root, input string, limit int64) ([]byte, error) {
+	f, err := SafeOpen(root, input)
 	if err != nil {
 		return nil, err
 	}
-	r, err := os.OpenRoot(root)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRootInaccessible, err)
-	}
-	defer func() { _ = r.Close() }()
+	defer func() { _ = f.Close() }()
 
-	data, err := r.ReadFile(rel)
+	info, err := f.Stat()
 	if err != nil {
-		return nil, mapRootEscape(err)
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("%w: %s", ErrNotRegular, input)
+	}
+	if limit == unboundedRead {
+		return readSized(f, info.Size())
+	}
+	if info.Size() > limit {
+		return nil, tooLargeError(info.Size(), limit)
+	}
+
+	data, err := readSized(io.LimitReader(f, limit+1), info.Size())
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		// The file grew past the bound between the fstat and the read: report a fresh size from
+		// the same descriptor, falling back to the bytes actually drained.
+		size := int64(len(data))
+		if fresh, statErr := f.Stat(); statErr == nil {
+			size = fresh.Size()
+		}
+		return nil, tooLargeError(size, limit)
 	}
 	return data, nil
 }
 
+// readSized reads r to EOF into a buffer sized from the fstat's answer, as os.ReadFile does, so a
+// large file is not re-grown chunk by chunk; the size is only a hint, and a file that changed
+// size since the fstat still comes back whole.
+func readSized(r io.Reader, sizeHint int64) ([]byte, error) {
+	var buffer bytes.Buffer
+	if sizeHint > 0 && int64(int(sizeHint)) == sizeHint {
+		buffer.Grow(int(sizeHint) + bytes.MinRead)
+	}
+	if _, err := buffer.ReadFrom(r); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+// tooLargeError words SafeReadFileCapped's refusal the way the read tools word theirs.
+func tooLargeError(size, limit int64) error {
+	return fmt.Errorf("%w: %d bytes (max %d)", ErrTooLarge, size, limit)
+}
+
 // ErrNotRegular is returned when SafeOpen reaches something that is neither a regular file nor a
-// directory — a named pipe, a socket, a device. It is deliberately NOT ErrPathEscape: nothing left
+// directory — a named pipe, a socket, a device — and when SafeReadFile, SafeReadFileCapped or a
+// copy's source (openCopySource) reaches anything that is not a regular file, a directory
+// included. It is deliberately NOT ErrPathEscape: nothing left
 // the workspace, the name simply does not lead to bytes a read tool can bound and return. Callers
 // that render errors for the model pass it through verbatim, so the refusal is never disguised as
 // absence.
@@ -331,10 +412,12 @@ func SafeOpen(root, input string) (*os.File, error) {
 // openCopySource opens the copy's source through the root pinned at the SOURCE's end and reports
 // the mode the destination must land with. The mode comes from the very descriptor the bytes are
 // read through, so the copy cannot take its permissions from one file and its content from
-// another. A non-regular source is refused here, before anything is staged at the destination;
-// input is the source as the caller wrote it, for that refusal's message.
+// another. A non-regular source is refused here with an error wrapping ErrNotRegular, before
+// anything is staged at the destination; input is the source as the caller wrote it, for that refusal's message.
 func openCopySource(sr *os.Root, rel, input string) (*os.File, os.FileMode, error) {
-	f, err := sr.Open(rel)
+	// Opened non-blocking, as SafeOpen opens: a FIFO source with no writer would otherwise block
+	// the open itself, before the fstat below could refuse it.
+	f, err := sr.OpenFile(rel, os.O_RDONLY|openNonblock, 0)
 	if err != nil {
 		return nil, 0, mapRootEscape(err)
 	}
@@ -345,7 +428,7 @@ func openCopySource(sr *os.Root, rel, input string) (*os.File, os.FileMode, erro
 	}
 	if !info.Mode().IsRegular() {
 		_ = f.Close()
-		return nil, 0, fmt.Errorf("not a regular file: %s", input)
+		return nil, 0, fmt.Errorf("%w: %s", ErrNotRegular, input)
 	}
 	return f, info.Mode().Perm(), nil
 }

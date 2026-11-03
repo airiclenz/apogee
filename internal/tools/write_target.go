@@ -113,12 +113,28 @@ func (t writeTarget) pin() (pinInput, pinRoot string, absent bool) {
 // 0049's write-side-only rule where it is enforceable. And the bytes cannot part company with the
 // write: the write re-resolves the argument against the same permitted target, so an argument that
 // has come to mean something else is refused and nothing lands.
+//
+// It is UNBOUNDED, because the undo journal reads through it (capturePreImage, commitReadBack) and
+// must cover a file however large; a read whose bytes go on to a model uses readCapped.
 func (t writeTarget) read() ([]byte, error) {
 	pinInput, pinRoot, absent := t.pin()
 	if absent {
 		return nil, os.ErrNotExist
 	}
 	return security.SafeReadFile(pinRoot, pinInput)
+}
+
+// readCapped is read under security.SafeReadFileCapped's bound: the same fence, but a file over
+// the bound is refused with an error wrapping security.ErrTooLarge instead of being read whole.
+// It serves the read-modify-write tools — edit_existing_file and the find-and-replace pair —
+// whose bytes are patched in memory and quoted back to the model, so a planted multi-gigabyte
+// file is refused out loud rather than read into memory.
+func (t writeTarget) readCapped() ([]byte, error) {
+	pinInput, pinRoot, absent := t.pin()
+	if absent {
+		return nil, os.ErrNotExist
+	}
+	return security.SafeReadFileCapped(pinRoot, pinInput)
 }
 
 // stat stats the file this call is about to create, replace or remove, through the same fence

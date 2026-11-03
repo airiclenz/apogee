@@ -120,7 +120,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	// TOCTOU-safe read+write: both operations resolve through an os.Root pinned at
 	// t.root, so an escaping-symlink component (including one swapped in between the read
 	// and the write by a confined subprocess) is refused rather than followed (H1).
-	content, err := target.read()
+	content, err := target.readCapped()
 	if err != nil {
 		return errorResult(call.ID, target.notFound(err, "file not found: ")), nil
 	}
@@ -262,7 +262,7 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	}
 
 	// TOCTOU-safe read+write through an os.Root pinned at t.root (H1).
-	raw, err := target.read()
+	raw, err := target.readCapped()
 	if err != nil {
 		return errorResult(call.ID, target.notFound(err, "file not found: ")), nil
 	}

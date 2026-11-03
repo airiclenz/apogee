@@ -100,7 +100,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 	// and REFUSED on the write's parent chain (security's symlink policy), so the one path
 	// this edit can still take through a link is a symlinked final NAME — which the read
 	// followed and the write is about to replace.
-	original, err := target.read()
+	original, err := target.readCapped()
 	if err != nil {
 		return errorResult(call.ID, target.notFound(err, "file not found: ")), nil
 	}
