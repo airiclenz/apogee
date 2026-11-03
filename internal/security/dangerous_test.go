@@ -688,6 +688,7 @@ func TestShellWriteViewJudgesWhatTheCommandWrites(t *testing.T) {
 		{"a backslash-newline inside the target hides nothing", terminalCall("rm -rf .git/\\\nhooks"), shellTool, TierHardRefuse, "write-git-control-plane"},
 		{"a backslash-CR-LF ends the command before the delete", terminalCall("echo ok \\\r\nrm -rf .git/hooks"), shellTool, TierHardRefuse, "write-git-control-plane"},
 		{"an env -u value is not the wrapped leader", terminalCall("env -u echo rm -f .git/hooks/pre-commit"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"an env --unset value is not the wrapped leader", terminalCall("env --unset echo rm -f .git/hooks/pre-commit"), shellTool, TierHardRefuse, "write-git-control-plane"},
 		// Full-text rules are untouched by the view.
 		{"reading an ssh key", terminalCall("cat ~/.ssh/id_rsa"), shellTool, TierHardRefuse, "write-ssh-keys"},
 		{"reading the aws credentials", terminalCall("cat ~/.aws/credentials"), shellTool, TierHardRefuse, "write-credential-persistence"},

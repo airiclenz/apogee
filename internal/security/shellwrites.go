@@ -106,7 +106,7 @@ const apogeeFolderName = ".apogee"
 // and its values are what a later command's operands resolve through.
 func projectConfigCommandTargets(cmd simpleCommand) []string {
 	targets := slices.Clone(cmd.redirectTargets)
-	words := stripWrappers(cmd.words)
+	words := stripWrappers(cmd.words, strictStrip)
 	if len(words) == 0 {
 		return append(targets, operandTargets(cmd.words)...)
 	}
@@ -369,7 +369,7 @@ func isLiteralPath(w string) bool {
 // the directory it names and whether that word is free of substitutions; a bare `cd` (home)
 // names none and reports a non-literal empty target.
 func cdTarget(cmd simpleCommand) (target string, literal, isCd bool) {
-	words := stripWrappers(cmd.words)
+	words := stripWrappers(cmd.words, lenientStrip)
 	if len(words) == 0 || path.Base(words[0]) != "cd" {
 		return "", false, false
 	}
@@ -850,7 +850,8 @@ var readLeaders = map[string]bool{
 }
 
 // wrapperLeaders run another command named by their operands; the wrapper and its options
-// (with the values wrapperValueLetters names) are stripped so the wrapped leader is the one judged.
+// (with the values wrapperValueLetters and wrapperLongOptions name) are stripped so the wrapped
+// leader is the one judged.
 var wrapperLeaders = map[string]bool{
 	"sudo": true, "env": true, "nohup": true, "nice": true, "time": true, "xargs": true,
 	"command": true, "exec": true, "builtin": true,
@@ -858,14 +859,92 @@ var wrapperLeaders = map[string]bool{
 
 // wrapperValueLetters are, per wrapper leader, the short options that take a value — the rest
 // of the cluster or else the next word — so the value word (`env -u NAME`, `sudo -u USER`,
-// `nice -n N`, `xargs -I R`) is never taken for the wrapped leader. An option not listed is
-// stripped bare: the view is a footgun guard (ADR 0012), not a parser of every wrapper's grammar.
+// `nice -n N`, `xargs -I R`) is never taken for the wrapped leader. A short option not listed is
+// stripped bare: the view is a footgun guard (ADR 0012), not a parser of every wrapper's short
+// grammar. Long options are read against wrapperLongOptions instead.
 var wrapperValueLetters = map[string]string{
-	"env":   "uCS",
-	"sudo":  "ughpCDRTU",
+	"env":   "uCSa",
+	"sudo":  "ughpCDRTUrtc",
 	"nice":  "n",
 	"xargs": "InsPdEaL",
 }
+
+// longOptionArgument is how a long option takes its argument, as getopt_long declares it.
+type longOptionArgument int
+
+const (
+	// noArgument options take none: `--debug`.
+	noArgument longOptionArgument = iota
+	// optionalArgument options take one only inside their own word: `--replace=R`, never
+	// `--replace R`.
+	optionalArgument
+	// requiredArgument options take `--unset=NAME` or else the next word: `--unset NAME`.
+	requiredArgument
+)
+
+// wrapperLongOptions are, per wrapper leader, every long option the wrapper's man page names,
+// with how each takes its argument. The table is whole on purpose: a long option resolves by
+// exact name or unique prefix as getopt_long resolves it (`env --u` is `--unset`), and that needs
+// every name beside it — so the value word of a required-argument option is never taken for the
+// wrapped leader, and an option the table cannot resolve (unknown, or a prefix of two names) is
+// one the strict strip stops at (wrapperStripMode). A wrapper with no long options has an empty
+// table; the short value options of `exec -a` and `time -o/-f` stay unread (wrapperValueLetters).
+var wrapperLongOptions = map[string]map[string]longOptionArgument{
+	"env": {
+		"unset": requiredArgument, "chdir": requiredArgument, "split-string": requiredArgument,
+		"argv0": requiredArgument, "block-signal": optionalArgument,
+		"default-signal": optionalArgument, "ignore-signal": optionalArgument,
+		"ignore-environment": noArgument, "null": noArgument, "list-signal-handling": noArgument,
+		"debug": noArgument, "help": noArgument, "version": noArgument,
+	},
+	"sudo": {
+		"user": requiredArgument, "group": requiredArgument, "host": requiredArgument,
+		"prompt": requiredArgument, "close-from": requiredArgument, "chdir": requiredArgument,
+		"chroot": requiredArgument, "command-timeout": requiredArgument,
+		"other-user": requiredArgument, "role": requiredArgument, "type": requiredArgument,
+		"login-class": requiredArgument, "preserve-env": optionalArgument,
+		"askpass": noArgument, "background": noArgument, "bell": noArgument, "edit": noArgument,
+		"set-home": noArgument, "help": noArgument, "login": noArgument,
+		"remove-timestamp": noArgument, "reset-timestamp": noArgument, "list": noArgument,
+		"non-interactive": noArgument, "no-update": noArgument, "preserve-groups": noArgument,
+		"stdin": noArgument, "shell": noArgument, "version": noArgument, "validate": noArgument,
+	},
+	"nice": {
+		"adjustment": requiredArgument, "help": noArgument, "version": noArgument,
+	},
+	"xargs": {
+		"arg-file": requiredArgument, "delimiter": requiredArgument, "max-args": requiredArgument,
+		"max-chars": requiredArgument, "max-procs": requiredArgument,
+		"process-slot-var": requiredArgument, "replace": optionalArgument,
+		"eof": optionalArgument, "max-lines": optionalArgument, "null": noArgument,
+		"open-tty": noArgument, "interactive": noArgument, "no-run-if-empty": noArgument,
+		"show-limits": noArgument, "verbose": noArgument, "exit": noArgument,
+		"help": noArgument, "version": noArgument,
+	},
+	"time": {
+		"output": requiredArgument, "format": requiredArgument, "append": noArgument,
+		"portability": noArgument, "quiet": noArgument, "verbose": noArgument,
+		"help": noArgument, "version": noArgument,
+	},
+	"nohup":   {"help": noArgument, "version": noArgument},
+	"command": {},
+	"exec":    {},
+	"builtin": {},
+}
+
+// wrapperStripMode is what stripWrappers does at a wrapper long option wrapperLongOptions cannot
+// resolve.
+type wrapperStripMode int
+
+const (
+	// strictStrip stops stripping at it, so the option and every word after it stay in the
+	// command and a target view reports them as an unknown leader's operands (fail closed). The
+	// write-target views (operandTargets, projectConfigCommandTargets) strip strictly.
+	strictStrip wrapperStripMode = iota
+	// lenientStrip drops it bare and reads on, so a view that looks for one particular leader
+	// (cdTarget, readsStdinScript) still finds it past an option it does not know.
+	lenientStrip
+)
 
 // gitReadSubcommands are the `git` verbs that inspect a repository without writing to any
 // path their operands name. Every other verb — including `config`, `branch`, `tag`, `remote`
@@ -930,7 +1009,7 @@ var findWritingPredicates = map[string]bool{
 // LATER command's operands resolve through, so its values feed the view as `export`'s would.
 func operandTargets(words []string) []string {
 	all := words
-	words = stripWrappers(words)
+	words = stripWrappers(words, strictStrip)
 	if len(words) == 0 {
 		return assignmentValues(all)
 	}
@@ -1369,12 +1448,12 @@ func hasAny(words []string, set map[string]bool) bool {
 
 // stripWrappers drops a simple command's leading `NAME=value` assignments and wrapper
 // leaders (with their options and those options' values), so the wrapped leader comes first;
-// it returns nothing for a command that is only assignments.
-func stripWrappers(words []string) []string {
+// it returns nothing for a command that is only assignments. Under strictStrip a wrapper long
+// option it cannot resolve stops the strip there, and that option comes first instead.
+func stripWrappers(words []string, mode wrapperStripMode) []string {
 	words = stripAssignments(words)
 	for len(words) > 0 && wrapperLeaders[path.Base(words[0])] {
-		valueLetters := wrapperValueLetters[path.Base(words[0])]
-		words = stripAssignments(stripBareOptions(words[1:], valueLetters))
+		words = stripAssignments(stripBareOptions(words[1:], path.Base(words[0]), mode))
 	}
 	return words
 }
@@ -1398,7 +1477,7 @@ var interpreterLongOptionsTakingValue = map[string]bool{
 // then the script's input, payload like any other. An `-o` / `+o` / `-O` / `+O` option and
 // interpreterLongOptionsTakingValue consume the next word as their value.
 func readsStdinScript(words []string) bool {
-	words = stripWrappers(words)
+	words = stripWrappers(words, lenientStrip)
 	if len(words) == 0 || !shellInterpreters[path.Base(words[0])] {
 		return false
 	}
@@ -1464,14 +1543,29 @@ func isAssignment(w string) bool {
 	return true
 }
 
-// stripBareOptions drops the leading option words (`-u`, `--login`) of a wrapper's operands,
-// and with each one the next word when it is the value of one of valueLetters
-// (takesNextWordValue). A `--opt=value` or an attached `-uroot` is one word either way.
-func stripBareOptions(words []string, valueLetters string) []string {
+// stripBareOptions drops the leading option words (`-u`, `--login`) of wrapper's operands, and
+// with each one the next word when it is that option's value: a short option's per
+// takesNextWordValue, a long one's per resolveLongOption. A `--opt=value` or an attached `-uroot`
+// is one word either way. A bare `--` ends the options as getopt ends them: it is dropped and the
+// word after it is the leader. A long option resolveLongOption cannot resolve is dropped bare
+// under lenientStrip; under strictStrip the strip stops there and the option is the first word
+// returned.
+func stripBareOptions(words []string, wrapper string, mode wrapperStripMode) []string {
 	for len(words) > 0 && strings.HasPrefix(words[0], "-") && words[0] != "-" {
 		option := words[0]
+		if option == "--" {
+			return words[1:]
+		}
+		takesNextWord := takesNextWordValue(option, wrapperValueLetters[wrapper])
+		if long, isLong := strings.CutPrefix(option, "--"); isLong {
+			argument, isResolved := resolveLongOption(long, wrapperLongOptions[wrapper])
+			if !isResolved && mode == strictStrip {
+				return words
+			}
+			takesNextWord = argument == requiredArgument
+		}
 		words = words[1:]
-		if len(words) > 0 && takesNextWordValue(option, valueLetters) {
+		if len(words) > 0 && takesNextWord {
 			words = words[1:]
 		}
 	}
@@ -1480,13 +1574,38 @@ func stripBareOptions(words []string, valueLetters string) []string {
 
 // takesNextWordValue reports whether a short option cluster's value is the next word: its first
 // letter that is one of valueLetters is its last letter (`-u`, `-Eu`). A value letter earlier in
-// the cluster takes the rest of the cluster as its value (`-uroot`); a long option takes none.
+// the cluster takes the rest of the cluster as its value (`-uroot`); a long option takes none
+// here — its value is resolveLongOption's to find.
 func takesNextWordValue(option, valueLetters string) bool {
 	if valueLetters == "" || strings.HasPrefix(option, "--") {
 		return false
 	}
 	flags := option[1:]
 	return strings.IndexAny(flags, valueLetters) == len(flags)-1
+}
+
+// resolveLongOption resolves a long option word, spelled without its `--`, against a wrapper's
+// options as getopt_long does: an exact name first, else the one name it is a prefix of. A word
+// carrying its value after `=` takes nothing more, so it resolves as noArgument whatever it names.
+// It reports false for a name that matches nothing, or is a prefix of more than one name.
+func resolveLongOption(spelled string, options map[string]longOptionArgument) (longOptionArgument, bool) {
+	name, _, hasValue := strings.Cut(spelled, "=")
+	if hasValue {
+		return noArgument, true
+	}
+	if argument, isExact := options[name]; isExact {
+		return argument, true
+	}
+	var matched []longOptionArgument
+	for candidate, argument := range options {
+		if strings.HasPrefix(candidate, name) {
+			matched = append(matched, argument)
+		}
+	}
+	if len(matched) != 1 {
+		return noArgument, false
+	}
+	return matched[0], true
 }
 
 // valueOperands returns the operands that can name a path: every word that is not a bare
