@@ -1102,8 +1102,58 @@ type ReactionRunner = reactions.Runner
 // refusing the Agent over a bad entry — Close the Runner then. Every later list reaches the Runner
 // through Agent.SetReactions, which validates it before Replace. Nothing fires in between: the
 // Runner reacts only to the Events it is handed, and the engine hands none before the Agent exists.
+//
+// RunnerOptions.Exec is the embedder's own executor, required whenever an entry is active: an
+// embedder that wants the stock executor — the workspace exec fence, the url-safety guard, the
+// MCP disarm and the late binds — builds the observe lane through NewReactionHost instead.
 func NewReactionRunner(list []Reaction, o RunnerOptions) (*ReactionRunner, error) {
 	return reactions.New(list, o)
+}
+
+// ReactionHost is one Driver root's observe lane, owned whole: the ReactionRunner over the stock
+// executor, the MCP disarm and its notices, and the project-run and MCP late binds — the same
+// lane every Driver in the apogee binary composes, so an embedder arms it with the fence, the
+// guard and the one notice per entry rather than rebuilding them (ADR 0073 §9). Build one per
+// root — one per Firing, one per interactive session — with NewReactionHost.
+type ReactionHost = reactions.Host
+
+// ReactionHostOptions are the facts a ReactionHost cannot derive from the reaction list: the sink
+// its Runner decorates, the workspace it is rooted in, the Schedule a Firing runs for, where its
+// notices and failures are reported, the re-ask cue, the url-safety lists its webhooks post
+// under, and whether the root dials MCP servers. The zero value is a root that dials no MCP
+// server and reports nothing.
+type ReactionHostOptions = reactions.HostOptions
+
+// ReactionHostMCP says whether the root a ReactionHost serves dials MCP servers, which decides
+// what becomes of a user reaction's mcp: handler on its observe lane.
+type ReactionHostMCP = reactions.HostMCP
+
+const (
+	// ReactionHostMCPNone is a root that dials no MCP server: NewReactionHost disarms the list's
+	// mcp: entries before arming, one notice per entry to ReactionHostOptions.Report.
+	ReactionHostMCPNone = reactions.HostMCPNone
+	// ReactionHostMCPLate is a root that dials its MCP set after the host is built: an mcp:
+	// firing is refused as not connected yet until ReactionHost.BindMCP binds the live set.
+	ReactionHostMCPLate = reactions.HostMCPLate
+)
+
+// NewReactionHost builds a ReactionHost over list, the root's whole user `reactions:` list, taken
+// as validated like NewReactionRunner's. The host carries:
+//   - the stock executor: the workspace exec fence, which refuses a `run:` program inside the
+//     workspace (ADR 0073 §6), and the url-safety guard every webhook posts through;
+//   - under ReactionHostMCPNone, the MCP disarm, with one notice per disarmed entry;
+//   - the late binds: the project-run runner the Agent binds once it is built, and, under
+//     ReactionHostMCPLate, the MCP resolver the root binds through BindMCP.
+//
+// ReactionHost.Install fills the observe-lane keys of a Config — Events, ObserveRunner, Observe,
+// BindProjectRun, and Report and PinMoved when the options gave them — and never Config.MCP,
+// which stays the root's to set: the engine reads a nil resolver as a root that dials no server
+// and an unbound one as a connection not made yet. A Driver that renders Events wraps
+// Config.Events after Install. ReactionHost.Lanes divides the settled list, and its Sync lane is
+// what the root arms Config.Sync from. Close the host after the run, which drains the Runner
+// within the grace every root gives its Reactions.
+func NewReactionHost(list []Reaction, o ReactionHostOptions) (*ReactionHost, error) {
+	return reactions.NewHost(list, o)
 }
 
 // ----------------------------------------------------------------------------

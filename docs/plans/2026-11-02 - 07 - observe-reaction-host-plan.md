@@ -212,7 +212,10 @@ cmd/apogee/wire_settings_test.go — TestRootWiringEmitsThroughTheHookRunner; cm
 
 **Commit:** `refactor(apogee): compose the TUI session's observe lane through reactions.Host`
 
-## 5. The facade exports the Reaction host
+## 5. The facade exports the Reaction host — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the Tests line's one `TestReactionHostFromTheFacade…` is two tests sharing that prefix — `…DisarmsAnMCPEntryWithOneNotice` (a) and `…FencesARunInsideTheWorkspace` (b) — so the Acceptance `-run` pattern selects both; each validates its own entry through `Reaction.Validate` before arming.
+NOTES (2026-11-03): `NewReactionRunner`'s added godoc sentence names `RunnerOptions.Exec` as the embedder's own executor (the facade exposes no stock executor), then points at `NewReactionHost`.
 
 Depends on item 2.
 **What:**

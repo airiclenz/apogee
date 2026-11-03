@@ -142,6 +142,9 @@ var (
 	_ apogee.MCPCall
 	_ apogee.RunnerOptions
 	_ apogee.ReactionRunner
+	_ apogee.ReactionHost
+	_ apogee.ReactionHostOptions
+	_ apogee.ReactionHostMCP
 	_ apogee.EventLines
 	_ apogee.EventLinesOptions
 	_ apogee.RunStarted
@@ -165,6 +168,7 @@ var (
 	_ = apogee.NewToolRegistry
 	_ = apogee.DecodeSession
 	_ = apogee.NewReactionRunner
+	_ = apogee.NewReactionHost
 	_ = apogee.NewEventLines
 	_ = apogee.DefaultSystemPrompt
 	_ = apogee.ShippedProfile
@@ -217,6 +221,9 @@ var (
 	_ = apogee.StatusTurnComplete
 	_ = apogee.StatusExchangeComplete
 	_ = apogee.StatusCancelled
+
+	_ = apogee.ReactionHostMCPNone
+	_ = apogee.ReactionHostMCPLate
 
 	_ = apogee.SubAgentStarted
 	_ = apogee.SubAgentFinished
