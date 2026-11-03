@@ -1,10 +1,12 @@
 ---
 title: Pointer shape on hover in the TUI (OSC 22)
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-03 - 03 - pointer-shapes-on-hover-plan
 created: 2026-11-02T14:40:50Z
+closed: 2026-11-03T21:05:20Z
+reason: "Resolved by plan 2026-11-03 - 03 - pointer-shapes-on-hover-plan (all 8 items done; archived at fad6d88f): probe-gated OSC 22 pointer shapes behind ui.pointer-shapes, default off."
 ---
 
 Today apogee captures the mouse (View sets tea.MouseModeCellMotion) so the wheel scrolls and click positions/selects — which is exactly why the terminal's own selection AND its own pointer feedback never show. Button-less motion is ignored on purpose (mouse.go handleMouseMotion; settleFrame skips repainting on MouseMotionMsg, pinned by TestMouseMotionNeverRepaints). The frame already knows, for every cell, what it is over: the pointerPanes click/wheel chain, clickArm and the pane table (panes.go) classify a point into the editable prompt, the transcript, a toggleable tool block, a pane row (/settings, /sessions, picker, dropdown), the footer's mode marker, an approval/ask box. Raw escapes are already emitted on demand via tea.Raw (mousereassert.go reassertMouse, after tool results and on resize, because the renderer writes mouse modes only on a MouseMode diff).
