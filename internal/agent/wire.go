@@ -219,6 +219,33 @@ func (a *Agent) toolInstructions(menu []domain.ToolDef) string {
 	return block
 }
 
+// toolSurface is what a request's tool surface sends and weighs: on a native profile the tools
+// array, on a text-tool profile the rendered instruction block toProviderRequest folds into the
+// system channel in the array's place (the array is then never sent). chars is the one figure
+// every request measure counts for the surface — the request room's weight and left, the fresh
+// share, the predictive guard (requestRoom, requestroom.go), calibration (streamResponse) and
+// ContextCost's one tool row — so no two measures disagree on what the menu weighs.
+type toolSurface struct {
+	chars  int  // the characters the surface sends
+	isText bool // the surface is the text-tool instruction block, not the native tools array
+}
+
+// nativeToolSurface is menu sent as the native tools array, measured PromptChars-style (name,
+// description and schema per tool).
+func nativeToolSurface(menu []domain.ToolDef) toolSurface {
+	return toolSurface{chars: domain.PromptChars(nil, menu)}
+}
+
+// toolSurfaceOf is the tool surface a request offering menu sends under this Agent's profile: the
+// rendered instruction block when toolInstructions renders one (a non-native profile with a
+// non-empty menu), else the native tools array.
+func (a *Agent) toolSurfaceOf(menu []domain.ToolDef) toolSurface {
+	if block := a.toolInstructions(menu); block != "" {
+		return toolSurface{chars: len(block), isText: true}
+	}
+	return nativeToolSurface(menu)
+}
+
 // foldedToolCalls returns m with its tool calls written into its content in the bound profile's
 // format (processing.RenderToolCall), one call after another and a blank line apart from the
 // text, and its ToolCalls cleared — the projection the "never double-tell" rule asks of a

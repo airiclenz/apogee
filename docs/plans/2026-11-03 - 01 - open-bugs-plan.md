@@ -105,7 +105,10 @@ NOTES (2026-11-03): the engine test's "zero Resolve calls after the cancel" is a
 - `go test -race -count=1 -run 'TestFiringBinding|TestEntryRank|TestFiring' ./cmd/apogee/`
 **Commit:** `fix(firing): carry the entry description into an in-session Firing's orientation`
 
-## 5. Text-tool profiles: every request measure counts the sent tool surface
+## 5. Text-tool profiles: every request measure counts the sent tool surface — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): re-derived from "the helper returns one int": `toolSurfaceOf` (wire.go) returns a `toolSurface{chars, isText}` so ContextCost names its one tool row from the room's stored surface without rendering the block a second time; `nativeToolSurface` is the native half, used by the helper's fallback and the pure-arithmetic room tests. `newRequestRoom` takes the surface as a fourth argument, and `weight`/`freshShare`/`exceeds` share a new `requestRoom.requestChars`.
+NOTES (2026-11-03): dispatch.go needed no edit: `freshResultBound` reaches the surface through `room.freshShare`, and `requestContents` (loop.go) still hands it the room's own menu. No doc, glossary Note or ADR stated the split, so only the in-code comments in `internal/agent` changed.
 
 **What:** fix: on a non-native (text-tool) profile, ContextCost counts the rendered instruction block (the bytes sent), while the request room's weight, the fresh-result bound, the predictive guard and calibration count the raw `ToolDef` menu JSON, which is never sent.
 **Regression guard.** Calibration is `domain.PromptChars(st.Messages, nil) + a.<helper>(st.Tools)` over the sent request (`st := req.State()` in `streamResponse`, after `MomentPreRequest`, so a Reaction's `SetTools` is counted), never a room's stored figure; the room's stored figure serves `weight`/`left`/`freshShare`/`exceeds` only (`exceeds` runs before `MomentPreRequest`, so `st.Tools` is the room's menu there). The calibration test asserts after one Turn `a.budget().CharsPerToken == 4*(1-w) + (chars/P)*w`, with `chars = PromptChars(sent msgs, nil) + len(toolInstructions(menu))` and `Usage.Prompt` P chosen so `chars/P` lies inside `[2, 8]` for both the block and the menu-JSON figure (the estimator clamps each sample to that range).

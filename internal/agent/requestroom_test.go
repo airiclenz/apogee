@@ -74,12 +74,68 @@ func TestRequestRoomWeightCountsStandingAndMenu(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := newRequestRoom(roomTestBudget(1), roomTestRows(tt.standing), tt.menu)
+			r := newRequestRoom(roomTestBudget(1), roomTestRows(tt.standing), tt.menu, nativeToolSurface(tt.menu))
 			if got := r.weight(tt.msgs); got != tt.want {
 				t.Errorf("weight = %d, want %d", got, tt.want)
 			}
 			if got, want := r.left(tt.msgs), roomTestRoom-tt.want; got != want {
 				t.Errorf("left = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+// TestRequestRoomToolSurfaceIsTheSentSurface pins the tool surface the room counts to the one the
+// wire sends: on a native profile the menu PromptChars-style, on a markdown-fenced (text-tool)
+// profile the rendered instruction block — never the menu JSON the wire suppresses — and in both
+// the same figure ContextCost's one tool row reports, which the room's weight counts.
+func TestRequestRoomToolSurfaceIsTheSentSurface(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		profile domain.ModelProfile
+		row     string
+	}{
+		{name: "native profile counts the menu", row: contextCostToolMenu},
+		{
+			name:    "text-tool profile counts the instruction block",
+			profile: domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced},
+			row:     contextCostToolInstructions,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := contextCostConfig(t, &recordingSink{})
+			cfg.Profile = tt.profile
+			a := newProfileAgent(t, cfg, echoResponder(t, "ok"))
+			room := a.requestRoom()
+
+			menuChars := domain.PromptChars(nil, room.menu)
+			want := menuChars
+			if block := a.toolInstructions(room.menu); block != "" {
+				want = len(block)
+			}
+			if tt.row == contextCostToolInstructions && want == menuChars {
+				t.Fatalf("precondition: the instruction block (%d chars) weighs the same as the menu JSON", want)
+			}
+			if room.tools.chars != want {
+				t.Errorf("room tool surface = %d chars, want the sent surface's %d", room.tools.chars, want)
+			}
+			row, ok := rowBytes(a.contextCost(room), tt.row)
+			if !ok {
+				t.Fatalf("ContextCost carries no %q row", tt.row)
+			}
+			if row != room.tools.chars {
+				t.Errorf("ContextCost %q row = %d bytes, room tool surface = %d chars; want one figure", tt.row, row, room.tools.chars)
+			}
+
+			msgs := roomTestMessages(10)
+			wantWeight := room.budget.EstimateTokens(domain.PromptChars(requestMessages(room.standing, msgs), nil) + want)
+			if got := room.weight(msgs); got != wantWeight {
+				t.Errorf("weight = %d, want %d (standing, messages and the sent tool surface)", got, wantWeight)
 			}
 		})
 	}
@@ -114,7 +170,7 @@ func TestRequestRoomFreshShare(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := newRequestRoom(tt.budget, roomTestRows(tt.standing), nil)
+			r := newRequestRoom(tt.budget, roomTestRows(tt.standing), nil, toolSurface{})
 			if got := r.freshShare(roomTestContents(r, tt.msgs), tt.pending); got != tt.want {
 				t.Errorf("freshShare(pending %d) = %d, want %d", tt.pending, got, tt.want)
 			}
@@ -127,7 +183,7 @@ func TestRequestRoomFreshShare(t *testing.T) {
 func TestRequestRoomFreshShareRollsForward(t *testing.T) {
 	t.Parallel()
 
-	r := newRequestRoom(roomTestBudget(1), nil, nil)
+	r := newRequestRoom(roomTestBudget(1), nil, nil, toolSurface{})
 	msgs := roomTestMessages(roomTestRoom - 3000)
 	first := r.freshShare(roomTestContents(r, msgs), 2)
 	small := domain.Message{Role: domain.RoleTool, Content: strings.Repeat("r", 100*roomTestCharsPerToken)}
@@ -168,7 +224,7 @@ func TestRequestRoomExceeds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := newRequestRoom(tt.budget, nil, nil)
+			r := newRequestRoom(tt.budget, nil, nil, toolSurface{})
 			req := domain.NewRequest("m", tt.req, nil, tt.budget, 0)
 			if got := r.exceeds(req, tt.conv); got != tt.want {
 				t.Errorf("exceeds = %v, want %v", got, tt.want)
@@ -200,7 +256,7 @@ func TestRequestRoomFit(t *testing.T) {
 		{name: "many-line body takes the line elision", content: manyLines, want: apogeectx.TruncateToolResult(manyLines, maxChars)},
 		{name: "long-line body takes the byte elision", content: longLine, want: apogeectx.ElideToBytes(longLine, maxChars)},
 	}
-	r := newRequestRoom(roomTestBudget(1), nil, nil)
+	r := newRequestRoom(roomTestBudget(1), nil, nil, toolSurface{})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

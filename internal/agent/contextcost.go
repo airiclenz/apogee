@@ -43,8 +43,9 @@ func (a *Agent) ContextCost() domain.ContextCost {
 }
 
 // contextCost is ContextCost's body over a request room already built: the rows are the room's one
-// standing render, the tool surface its menu and the estimate its Budget's, so a tool-result
-// commit (contextEstimateEvent) reports from the render its clamp read rather than taking another.
+// standing render, the tool row its tool surface (toolSurface, wire.go — the figure every request
+// measure counts) and the estimate its Budget's, so a tool-result commit (contextEstimateEvent)
+// reports from the render its clamp read rather than taking another.
 func (a *Agent) contextCost(room requestRoom) domain.ContextCost {
 	budget := room.budget
 	report := domain.ContextCost{Calibrated: a.tokens.Calibrated()}
@@ -64,12 +65,11 @@ func (a *Agent) contextCost(room requestRoom) domain.ContextCost {
 		add(row.name, len(row.rendered))
 	}
 
-	menu := room.menu
-	if block := a.toolInstructions(menu); block != "" {
-		add(contextCostToolInstructions, len(block))
-	} else {
-		add(contextCostToolMenu, domain.PromptChars(nil, menu))
+	toolRow := contextCostToolMenu
+	if room.tools.isText {
+		toolRow = contextCostToolInstructions
 	}
+	add(toolRow, room.tools.chars)
 
 	report.Tokens = budget.EstimateTokens(report.Bytes)
 	return report

@@ -14,9 +14,10 @@ import (
 // It is a value built from the values the arithmetic reads: one Budget view, the growthBounds
 // derived from it (deriveGrowthBounds, the one substitution site for an unknown window), the
 // standing rows of ONE render of the standing table (standingRenders — the rows ContextCost
-// counts, joined into the system content buildRequest seeds at position 0) and the tool menu the
-// request offers. It reaches no Agent, so the arithmetic is testable as a table; Agent.requestRoom
-// gathers the values live.
+// counts, joined into the system content buildRequest seeds at position 0), the tool menu the
+// request offers and the tool surface that menu sends (toolSurface, wire.go — on a text-tool
+// profile the instruction block, never the menu JSON). It reaches no Agent, so the arithmetic is
+// testable as a table; Agent.requestRoom gathers the values live.
 //
 // A room is built once per tool-result commit and handed down as a value, never cached on the
 // Agent past that commit (commitCall, dispatch.go — ADR 0084 D1): the standing content moves on a
@@ -28,33 +29,45 @@ type requestRoom struct {
 	rows     []standingRender
 	standing string
 	menu     []domain.ToolDef
+	tools    toolSurface
 }
 
 // newRequestRoom builds the room from one Budget view, the rows of one standing render (nil when
-// nothing is seeded) and the tool menu.
-func newRequestRoom(b domain.Budget, rows []standingRender, menu []domain.ToolDef) requestRoom {
+// nothing is seeded), the tool menu and the tool surface that menu sends.
+func newRequestRoom(b domain.Budget, rows []standingRender, menu []domain.ToolDef, tools toolSurface) requestRoom {
 	return requestRoom{
 		budget:   b,
 		bounds:   deriveGrowthBounds(b),
 		rows:     rows,
 		standing: joinStanding(rows),
 		menu:     menu,
+		tools:    tools,
 	}
 }
 
 // requestRoom gathers this Agent's room live from ONE render of the standing table: the Budget is
 // derived from those very rows (budgetOf), so the room's measure, its share and its Budget all
-// read the render the room carries, and the tool menu as it stands now.
+// read the render the room carries, and the tool menu as it stands now with the surface it sends.
 func (a *Agent) requestRoom() requestRoom {
 	rows := a.standingRenders()
-	return newRequestRoom(a.budgetOf(rows), rows, a.toolMenu())
+	menu := a.toolMenu()
+	return newRequestRoom(a.budgetOf(rows), rows, menu, a.toolSurfaceOf(menu))
 }
 
 // weight is the estimated tokens of a request carrying msgs: the standing system content seeded
-// ahead of them, the messages and the tool menu, through the Budget's chars-per-token ratio — the
-// predictive guard's own measure, with no comfort margin (ADR 0018 §7) and no second estimator.
+// ahead of them, the messages and the tool surface (r.tools — what the menu sends, the instruction
+// block on a text-tool profile), through the Budget's chars-per-token ratio — the predictive
+// guard's own measure, with no comfort margin (ADR 0018 §7) and no second estimator.
 func (r requestRoom) weight(msgs []domain.Message) int {
-	return r.budget.EstimateTokens(domain.PromptChars(requestMessages(r.standing, msgs), r.menu))
+	return r.budget.EstimateTokens(r.requestChars(requestMessages(r.standing, msgs)))
+}
+
+// requestChars is the characters a request carrying msgs and offering the room's menu sends: the
+// messages PromptChars-style plus the room's tool surface (toolSurface, wire.go). It is the one
+// measure weight, freshShare and exceeds share, and the figure calibration counts over the sent
+// request (streamResponse).
+func (r requestRoom) requestChars(msgs []domain.Message) int {
+	return domain.PromptChars(msgs, nil) + r.tools.chars
 }
 
 // left is the room a request carrying msgs leaves: the room (the advertised window less the reply
@@ -70,15 +83,16 @@ func (r requestRoom) left(msgs []domain.Message) int {
 // exceeds) — less the estimate of contents, the next request as buildRequest will send it without
 // the result (Agent.requestContents: the standing system content, the conversation, the
 // delegation-ledger note, the wrap-up directive, the pending deferred injections and the tool
-// menu), divided across the pending results of the Turn still to append
+// surface), divided across the pending results of the Turn still to append
 // (turnLifecycle.resultsToAppend, counted by dispatchTools). It is recomputed at each append, so
 // the room a small result leaves unused rolls forward to the next. The share is clamped to [1/8 of
 // the History allocation, the History allocation]: never above the structural ceiling the fold's
 // arithmetic rests on (structuralFloor), and never below the floor, where the predictive fold
 // makes room rather than the result shrinking to nothing.
 //
-// contents is weighed as the predictive guard weighs the request it checks — its messages and tool
-// menu through the Budget's ratio, no comfort margin (ADR 0018 §7) — so a result held at its share
+// contents is weighed as the predictive guard weighs the request it checks — its messages and the
+// room's tool surface (contents offers the room's own menu — requestContents) through the Budget's
+// ratio, no comfort margin (ADR 0018 §7) — so a result held at its share
 // leaves a request the guard finds within the room. With no window known the bound is the History
 // floor (growthBounds.historyFloor) — the conservative ceiling the fold renders against — exactly
 // as before the room-left bound (ADR 0018 §8).
@@ -88,8 +102,7 @@ func (r requestRoom) freshShare(contents *domain.Request, pending int) int {
 	if !r.bounds.windowKnown {
 		return r.bounds.historyFloor
 	}
-	st := contents.State()
-	left := r.bounds.room - r.budget.EstimateTokens(domain.PromptChars(st.Messages, st.Tools))
+	left := r.bounds.room - r.budget.EstimateTokens(r.requestChars(contents.State().Messages))
 	share := left / max(pending, 1)
 	return min(max(share, r.resultFloor()), r.bounds.historyFloor)
 }
@@ -160,7 +173,8 @@ func (r requestRoom) structuralFloor() int {
 // and sending it. conv is the conversation the request was projected from.
 //
 // The measure is the one the whole engine shares: domain.PromptChars over the request's projected
-// messages and tool menu, through the Budget's calibrated chars→token ratio
+// messages plus the room's tool surface (requestChars — req is checked before MomentPreRequest, so
+// it still offers the room's own menu), through the Budget's calibrated chars→token ratio
 // (domain.Budget.EstimateTokens), so this guard can never disagree with the compaction trigger or
 // a hook reading the same Budget. The threshold is the HARD room — the ADVERTISED window less the
 // reply reserve (Window − ResponseReserve) — uncalibratedRoomMargin times it while the ratio is
@@ -207,8 +221,7 @@ func (r requestRoom) structuralFloor() int {
 func (r requestRoom) exceeds(req *domain.Request, conv []domain.Message) bool {
 	room, chars := r.bounds.room, 0
 	if r.bounds.windowKnown {
-		st := req.State()
-		chars = domain.PromptChars(st.Messages, st.Tools)
+		chars = r.requestChars(req.State().Messages)
 	} else {
 		chars = domain.PromptChars(conv, nil)
 	}

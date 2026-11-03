@@ -1187,8 +1187,11 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				// characters actually sent recomputes this model's chars→token ratio (bounded and
 				// smoothed), so LoopView.Budget() tracks the real tokenizer instead of a fixed
 				// guess (TDD §8 #8, plan item 8).
+				// The tool surface is counted as sent (toolSurfaceOf): on a text-tool profile the
+				// instruction block, never the menu JSON the wire suppresses, and over this request's
+				// own menu, so a pre-request Reaction's SetTools is counted.
 				st := req.State()
-				a.tokens.Calibrate(domain.PromptChars(st.Messages, st.Tools), u.PromptTokens)
+				a.tokens.Calibrate(domain.PromptChars(st.Messages, nil)+a.toolSurfaceOf(st.Tools).chars, u.PromptTokens)
 				// The same report is the reading the tool-result appends of this reply estimate
 				// from (contextReading), so the gauge moves between replies.
 				a.reading.report(u.PromptTokens, u.CompletionTokens)

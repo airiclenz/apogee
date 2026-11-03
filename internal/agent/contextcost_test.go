@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -215,5 +216,51 @@ func TestContextCostCalibratedAfterUsage(t *testing.T) {
 	}
 	if ratio := a.budget().CharsPerToken; ratio == apogeectx.DefaultCharsPerToken {
 		t.Errorf("CharsPerToken still the default %v; the report's estimate did not follow the calibration", ratio)
+	}
+}
+
+// TestContextCostCalibrationCountsTheSentToolSurface pins calibration to the tool surface the wire
+// sends on a markdown-fenced (text-tool) profile: after one Turn the ratio is the estimator's fold
+// of the sent messages plus the rendered instruction block over the reported prompt tokens — the
+// figure ContextCost's `tool instructions` row reports — never the menu JSON the wire suppresses.
+// The reported prompt is chosen so both candidate figures land inside the estimator's sample clamp,
+// so the two would calibrate to different ratios.
+func TestContextCostCalibrationCountsTheSentToolSurface(t *testing.T) {
+	t.Parallel()
+
+	cfg := contextCostConfig(t, &recordingSink{})
+	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
+	user := []domain.Message{{Role: domain.RoleUser, Content: "hi"}}
+
+	probe := newProfileAgent(t, cfg, echoResponder(t, "ok"))
+	msgChars := domain.PromptChars(requestMessages(probe.standingSystem(), user), nil)
+	blockChars := msgChars + len(probe.toolInstructions(probe.toolMenu()))
+	menuChars := msgChars + domain.PromptChars(nil, probe.toolMenu())
+	prompt := int(math.Sqrt(float64(blockChars)*float64(menuChars)) / 4)
+	for _, chars := range []int{blockChars, menuChars} {
+		if ratio := float64(chars) / float64(prompt); ratio < 2 || ratio > 8 {
+			t.Fatalf("precondition: %d chars over %d prompt tokens = %.2f, outside the [2, 8] sample clamp", chars, prompt, ratio)
+		}
+	}
+
+	a := newProfileAgent(t, cfg, scriptedResponder(t, usageScript("hello", stubllm.Usage{Prompt: prompt, Completion: 7})))
+	stepOnce(t, a, "hi")
+
+	sent := requestMessages(a.standingSystem(), user)
+	block := a.toolInstructions(a.toolMenu())
+	row, ok := rowBytes(a.ContextCost(), contextCostToolInstructions)
+	if !ok || row != len(block) {
+		t.Fatalf("tool instructions row = %d (present %v), want the rendered block's %d", row, ok, len(block))
+	}
+	want := apogeectx.NewTokenEstimator()
+	want.Calibrate(domain.PromptChars(sent, nil)+len(block), prompt)
+	menuJSON := apogeectx.NewTokenEstimator()
+	menuJSON.Calibrate(domain.PromptChars(sent, nil)+domain.PromptChars(nil, a.toolMenu()), prompt)
+	if want.CharsPerToken() == menuJSON.CharsPerToken() {
+		t.Fatalf("precondition: the block and the menu JSON calibrate to the same ratio %v", want.CharsPerToken())
+	}
+	if got := a.budget().CharsPerToken; got != want.CharsPerToken() {
+		t.Errorf("CharsPerToken = %v, want %v (calibrated over the sent instruction block; the menu JSON gives %v)",
+			got, want.CharsPerToken(), menuJSON.CharsPerToken())
 	}
 }
