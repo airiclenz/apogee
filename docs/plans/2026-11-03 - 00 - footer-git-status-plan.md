@@ -67,7 +67,13 @@ NOTES (2026-11-03): `gitStatusReport.changedFiles()` became the tools-local func
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'GitStatus' ./internal/tools/`
 **Commit:** `refactor(gitstatus): move the porcelain v2 status parser out of the git tool`
 
-## 2. gitexec Capture with caller env, and a no-terminal spawn
+## 2. gitexec Capture with caller env, and a no-terminal spawn — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): NoTerminal reuses startConfinedSession itself (run calls it for `confined || spec.NoTerminal`) rather than a renamed or second helper; its comments in session_unix.go, session_windows.go, subprocess.go and subprocess/doc.go now name the NoTerminal run beside the confined one. The denial watch stays confined-only.
+NOTES (2026-11-03): the probe's own git calls run with zero CaptureOptions (no NoTerminal); only the command spec carries opts. The probe is a local `git config`/`rev-parse` listing that launches nothing that could prompt.
+NOTES (2026-11-03): CaptureEnv and CaptureEnvTo share an unexported refuseCapture helper (probe under env, refusal as exit-1 outcome); CommandConfigIncompleteRefusal's sentence is unchanged byte for byte, now built from the incompleteRefusalLead const that IsIncompleteRefusal matches by prefix.
+NOTES (2026-11-03): gitexec/doc.go now counts seven entry points and corrects the old "All five take an env" (Capture never took one) to "Every one but Capture".
+NOTES (2026-11-03): the /dev/tty NoTerminal test skips without a controlling terminal (as the confined twin does); TestRunSubprocessNoTerminalChildLeadsItsOwnSession proves sid == pid from /proc on any Linux run, verified to fail with the NoTerminal branch removed.
 
 **What:** Recast at the regression check (2026-11-03).
 **Goal:** `gitexec.Host` has `CaptureEnv(ctx, gitPath, root, env, opts CaptureOptions, timeout, args...)`: Capture with the caller's env appended last through `runSpec` (which also copies `CaptureOptions{NoTerminal bool}` onto the spec) and the probe run under that SAME env; `Capture` is `CaptureEnv` with nil env and zero options. `subprocess.SubprocessSpec` has an opt-in `NoTerminal bool`: on POSIX the child is a new session leader (Setsid in place of Setpgid) and the teardown still works; on Windows a no-op.

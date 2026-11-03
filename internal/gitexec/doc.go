@@ -28,16 +28,20 @@
 //     ([security.GitCommandConfigNameSource]), which the shell write view widens with
 //     core.hooksPath to name .git/config for a `git config` line that sets such a key.
 //
-// Five entry points, one funnel. [Host.Capture] returns the captured outcome — exit code and
-// output — for a caller rendering what git printed to the model. [Host.Run] and [Host.Query]
-// return the child's stdout as DATA, with the diagnostics left out of the payload and every
-// failure flattened to one error. [Host.RunTo] is Run with the payload streamed uncapped to the
-// caller's writer, for output a truncation would corrupt. [Host.RunDiagnosed] is Run that also
-// hands back the child's stderr on a zero exit, for a command whose warning is the only sign its
-// answer is partial. All five take an
-// env the caller appends — GIT_DIR, GIT_WORK_TREE,
-// GIT_INDEX_FILE — which redirects the run to an object database of apogee's own without
-// weakening anything the hardening put there.
+// Seven entry points, one funnel. [Host.Capture] returns the captured outcome — exit code and
+// output — for a caller rendering what git printed to the model. [Host.CaptureEnv] is Capture
+// with a caller's env and [CaptureOptions] — NoTerminal starts git with no controlling terminal,
+// for a run apogee starts on its own that must never prompt — and [Host.CaptureEnvTo] is
+// CaptureEnv with stdout streamed uncapped to the caller's writer, for an answer parsed at any
+// size. [Host.Run] and [Host.Query] return the child's stdout as DATA, with the diagnostics left
+// out of the payload and every failure flattened to one error. [Host.RunTo] is Run with the
+// payload streamed uncapped to the caller's writer, for output a truncation would corrupt.
+// [Host.RunDiagnosed] is Run that also hands back the child's stderr on a zero exit, for a
+// command whose warning is the only sign its answer is partial. Every one but Capture takes an
+// env the caller appends — GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, or a captured run's own
+// variables — which redirects the run to an object database of apogee's own without weakening
+// anything the hardening put there, and the probe behind the refusal runs under that same env.
+// [IsIncompleteRefusal] tells a probe that could not finish from a repository that is refused.
 //
 // Every entry point is a method of a [Host] value — the PATH lookup, the two subprocess
 // launchers and the per-OS environment rules one run goes through — and a caller runs git

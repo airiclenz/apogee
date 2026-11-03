@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -804,5 +805,235 @@ func TestHost_CapturePassesAWorktreeListingThatExits128(t *testing.T) {
 
 	if err != nil || res.ExitCode != 0 || res.CombinedOutput != "PAYLOAD" {
 		t.Errorf("Capture = %+v (err %v), want the command's own outcome", res, err)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// CaptureEnv and CaptureEnvTo — Capture with a caller's env and spawn options
+// ----------------------------------------------------------------------------
+
+// TestHost_CaptureEnvAppendsTheEnvToTheProbeAndTheChild pins that the caller's env reaches every
+// launch a CaptureEnv makes — each probe call as much as the command — and comes last, after
+// GIT_CONFIG_NOSYSTEM, so it adds to the hardened environment and removes nothing from it.
+func TestHost_CaptureEnvAppendsTheEnvToTheProbeAndTheChild(t *testing.T) {
+	t.Parallel()
+	gitPath := outsideGit(t)
+	host, spawned := fakeHost(gitPath, cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{CombinedOutput: "PAYLOAD"}
+	}))
+	env := []string{"GIT_TERMINAL_PROMPT=0", "GIT_DIR=/elsewhere"}
+
+	res, err := host.CaptureEnv(context.Background(), gitPath, t.TempDir(), env, gitexec.CaptureOptions{}, testTimeout, "status")
+	if err != nil || res.CombinedOutput != "PAYLOAD" {
+		t.Fatalf("CaptureEnv = %q (err %v), want the command's own outcome", res.CombinedOutput, err)
+	}
+
+	if len(*spawned) < 2 {
+		t.Fatalf("%d launches, want the probe's and the command's", len(*spawned))
+	}
+	for _, spec := range *spawned {
+		if got := spec.Env[len(spec.Env)-len(env):]; !slices.Equal(got, env) {
+			t.Errorf("launch %q ends its env with %q, want the caller's %q last", spec.Argv, got, env)
+		}
+		if !slices.Contains(spec.Env, "GIT_CONFIG_NOSYSTEM=1") {
+			t.Errorf("launch %q env = %q, want GIT_CONFIG_NOSYSTEM=1 kept", spec.Argv, spec.Env)
+		}
+	}
+	if last := (*spawned)[len(*spawned)-1]; !strings.HasSuffix(strings.Join(last.Argv, " "), " status") {
+		t.Errorf("last launch = %q, want the command after its probe", last.Argv)
+	}
+}
+
+// TestHost_CaptureIsCaptureEnvWithNothingAdded pins that Capture's launch is unchanged by the
+// new entry point: its command spec equals CaptureEnv's with a nil env and zero options —
+// argv, env, directory, timeout and the terminal it keeps — and so does its outcome.
+func TestHost_CaptureIsCaptureEnvWithNothingAdded(t *testing.T) {
+	t.Parallel()
+	gitPath, root := outsideGit(t), t.TempDir()
+	host, spawned := fakeHost(gitPath, cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{CombinedOutput: "PAYLOAD", ExitCode: 3}
+	}))
+
+	viaCapture, captureErr := host.Capture(context.Background(), gitPath, root, testTimeout, "status", "--porcelain")
+	captureSpec := (*spawned)[len(*spawned)-1]
+	viaEnv, envErr := host.CaptureEnv(context.Background(), gitPath, root, nil, gitexec.CaptureOptions{}, testTimeout, "status", "--porcelain")
+	envSpec := (*spawned)[len(*spawned)-1]
+
+	if captureErr != nil || envErr != nil || !reflect.DeepEqual(viaCapture, viaEnv) {
+		t.Errorf("Capture = %+v (err %v), CaptureEnv = %+v (err %v), want the same outcome",
+			viaCapture, captureErr, viaEnv, envErr)
+	}
+	if !reflect.DeepEqual(captureSpec, envSpec) {
+		t.Errorf("Capture launched %+v, CaptureEnv(nil, zero) launched %+v, want the same spec", captureSpec, envSpec)
+	}
+	if got := strings.Join(captureSpec.Argv[1:], " "); got != "-c core.hooksPath= -c core.fsmonitor=false status --porcelain" {
+		t.Errorf("Capture argv = %q, want the hardening options ahead of the subcommand and nothing else", got)
+	}
+	if captureSpec.NoTerminal {
+		t.Error("Capture launched with NoTerminal set, want the terminal left as it was")
+	}
+}
+
+// TestHost_CaptureEnvCarriesNoTerminalOntoTheSpec pins that CaptureOptions.NoTerminal reaches the
+// spec the launcher is handed, on the captured and the streamed entry point alike.
+func TestHost_CaptureEnvCarriesNoTerminalOntoTheSpec(t *testing.T) {
+	t.Parallel()
+	gitPath := outsideGit(t)
+	host, spawned := fakeHost(gitPath, cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{}
+	}))
+	opts := gitexec.CaptureOptions{NoTerminal: true}
+
+	if _, err := host.CaptureEnv(context.Background(), gitPath, t.TempDir(), nil, opts, testTimeout, "fetch"); err != nil {
+		t.Fatalf("CaptureEnv err = %v", err)
+	}
+	captured := (*spawned)[len(*spawned)-1]
+	if _, err := host.CaptureEnvTo(context.Background(), gitPath, t.TempDir(), nil, opts, testTimeout, io.Discard, "status"); err != nil {
+		t.Fatalf("CaptureEnvTo err = %v", err)
+	}
+	streamed := (*spawned)[len(*spawned)-1]
+
+	for name, spec := range map[string]subprocess.SubprocessSpec{"CaptureEnv": captured, "CaptureEnvTo": streamed} {
+		if !spec.NoTerminal {
+			t.Errorf("%s launched %q with NoTerminal=false, want true", name, spec.Argv)
+		}
+	}
+}
+
+// TestCaptureEnvTo_StreamsPastTheCapUntruncated pins that the streamed entry point hands the
+// whole payload over — twice the capped path's ceiling, byte for byte — with Truncated never set.
+func TestCaptureEnvTo_StreamsPastTheCapUntruncated(t *testing.T) {
+	posixScriptHost(t)
+
+	const chunk = 64
+	const repeats = 8192 // 512 KiB — twice the capped path's ceiling
+	fakeGit := writeFakeGit(t, t.TempDir(), "#!/bin/sh\n"+
+		"case \"$*\" in *config*|*rev-parse*) exit 1 ;; esac\n"+
+		"line=0123456789012345678901234567890123456789012345678901234567890123\n"+
+		"n=0\nwhile [ $n -lt 8192 ]; do printf '%s' \"$line\"; n=$((n+1)); done\n")
+	host := fakeGitHost(fakeGit)
+
+	var payload bytes.Buffer
+	res, err := host.CaptureEnvTo(context.Background(), fakeGit, t.TempDir(), []string{"GIT_TERMINAL_PROMPT=0"},
+		gitexec.CaptureOptions{NoTerminal: true}, testTimeout, &payload, "status", "--porcelain=v2", "-z")
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("CaptureEnvTo = exit %d, output %q (err %v), want a clean run", res.ExitCode, res.CombinedOutput, err)
+	}
+
+	if payload.Len() <= subprocess.MaxSubprocessOutputBytes {
+		t.Fatalf("payload = %d bytes, want more than the capped path's %d-byte ceiling (the fixture must exceed it for this to assert anything)",
+			payload.Len(), subprocess.MaxSubprocessOutputBytes)
+	}
+	if payload.Len() != chunk*repeats || res.Truncated {
+		t.Errorf("payload = %d bytes (Truncated %v), want %d untruncated", payload.Len(), res.Truncated, chunk*repeats)
+	}
+}
+
+// TestHost_CaptureEnvToProbesUnderTheSameEnv pins that the streamed entry point's probe runs
+// under the caller's env, as CaptureEnv's does, and that the payload leaves through SpawnTo.
+func TestHost_CaptureEnvToProbesUnderTheSameEnv(t *testing.T) {
+	t.Parallel()
+	gitPath := outsideGit(t)
+	host, spawned := fakeHost(gitPath, cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{Stdout: "PAYLOAD"}
+	}))
+	env := []string{"GIT_DIR=/elsewhere"}
+
+	var payload bytes.Buffer
+	if _, err := host.CaptureEnvTo(context.Background(), gitPath, t.TempDir(), env, gitexec.CaptureOptions{}, testTimeout, &payload, "status"); err != nil {
+		t.Fatalf("CaptureEnvTo err = %v", err)
+	}
+
+	if payload.String() != "PAYLOAD" {
+		t.Errorf("payload = %q, want the SpawnTo launcher's stream", payload.String())
+	}
+	if !launchedProbe(*spawned, 0) {
+		t.Fatal("CaptureEnvTo launched no probe")
+	}
+	for _, spec := range *spawned {
+		if !slices.Contains(spec.Env, env[0]) {
+			t.Errorf("launch %q env = %q, want the caller's %q", spec.Argv, spec.Env, env[0])
+		}
+	}
+}
+
+// TestHost_CaptureEnvToWritesNothingInARefusedRepository pins the refusal on the streamed entry
+// point: a repository whose own config names a program gets no command launch, nothing on the
+// caller's writer, and the refusal as the failed outcome.
+func TestHost_CaptureEnvToWritesNothingInARefusedRepository(t *testing.T) {
+	t.Parallel()
+	gitPath := outsideGit(t)
+	host, spawned := fakeHost(gitPath, func(argv string) subprocess.SubprocessResult {
+		if strings.Contains(argv, " config --local ") {
+			return subprocess.SubprocessResult{Stdout: "file:.git/config\x00core.sshcommand\nssh -i key\x00"}
+		}
+		return subprocess.SubprocessResult{Stdout: "PAYLOAD"}
+	})
+
+	var payload bytes.Buffer
+	res, err := host.CaptureEnvTo(context.Background(), gitPath, t.TempDir(), nil, gitexec.CaptureOptions{NoTerminal: true}, testTimeout, &payload, "status")
+	if err != nil {
+		t.Fatalf("CaptureEnvTo err = %v", err)
+	}
+
+	if payload.Len() != 0 {
+		t.Errorf("payload = %q, want nothing written for a refused repository", payload.String())
+	}
+	for _, spec := range *spawned {
+		if strings.HasSuffix(strings.Join(spec.Argv, " "), " status") {
+			t.Errorf("the refused command was launched: %q", spec.Argv)
+		}
+	}
+	if want := gitexec.CommandConfigRefusal([]string{"core.sshcommand"}); res.ExitCode != 1 || res.CombinedOutput != want {
+		t.Errorf("CaptureEnvTo = exit %d, output %q; want exit 1 and the refusal %q", res.ExitCode, res.CombinedOutput, want)
+	}
+}
+
+// TestCaptureEnv_JudgesTheRepositoryTheEnvReaches is Run's regression pin for the captured entry
+// point, with a real git: a workspace whose own config names a credential helper is refused,
+// while a CaptureEnv redirected by GIT_DIR into a clean store of apogee's own is judged by that
+// store's config and runs.
+func TestCaptureEnv_JudgesTheRepositoryTheEnvReaches(t *testing.T) {
+	gitPath := realGit(t)
+
+	root := t.TempDir()
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	runRealGit(t, gitPath, root, "config", "--local", "credential.helper", "!/bin/sh -c 'echo hostile'")
+	store := filepath.Join(t.TempDir(), "objects")
+	runRealGit(t, gitPath, filepath.Dir(store), "init", "--bare", store)
+
+	refused, err := gitexec.OS().CaptureEnv(context.Background(), gitPath, root, nil, gitexec.CaptureOptions{}, testTimeout, "rev-parse", "--git-dir")
+	if err != nil || refused.ExitCode == 0 || !strings.Contains(refused.CombinedOutput, "credential.helper") {
+		t.Errorf("CaptureEnv in the workspace = exit %d, %q (err %v); want the refusal naming credential.helper",
+			refused.ExitCode, refused.CombinedOutput, err)
+	}
+
+	env := []string{"GIT_DIR=" + store, "GIT_WORK_TREE=" + root}
+	res, err := gitexec.OS().CaptureEnv(context.Background(), gitPath, root, env, gitexec.CaptureOptions{NoTerminal: true}, testTimeout, "rev-parse", "--git-dir")
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("CaptureEnv under GIT_DIR = exit %d, %q (err %v); want the store's own clean config to decide",
+			res.ExitCode, res.CombinedOutput, err)
+	}
+	if got := strings.TrimSpace(res.CombinedOutput); got != store {
+		t.Errorf("git-dir = %q, want the redirected store %q", got, store)
+	}
+}
+
+// TestIsIncompleteRefusal_TellsAnUnfinishedProbeFromARefusedRepository pins the predicate a caller
+// keeps its last answer by: true for the incomplete-probe sentence whatever its reason, false for
+// the command-config refusal and for anything else git might print.
+func TestIsIncompleteRefusal_TellsAnUnfinishedProbeFromARefusedRepository(t *testing.T) {
+	t.Parallel()
+	cases := map[string]bool{
+		gitexec.CommandConfigIncompleteRefusal("git config --local timed out after 15s"): true,
+		gitexec.CommandConfigIncompleteRefusal(""):                                       true,
+		gitexec.CommandConfigRefusal([]string{"core.sshcommand"}):                        false,
+		"fatal: not a git repository (or any of the parent directories): .git":           false,
+		"": false,
+	}
+	for text, want := range cases {
+		if got := gitexec.IsIncompleteRefusal(text); got != want {
+			t.Errorf("IsIncompleteRefusal(%q) = %v, want %v", text, got, want)
+		}
 	}
 }

@@ -30,6 +30,7 @@
 // cmdline_unix.go is a no-op because execve takes a real argv; cmdline_other.go hands Windows the
 // raw command line verbatim through SysProcAttr.CmdLine, bypassing the argv joining cmd.exe cannot
 // read.
-// session_unix.go starts a confined POSIX run as a new session's leader (Setsid in place of
-// Setpgid), so it holds no controlling terminal; session_windows.go is its no-op twin.
+// session_unix.go starts a confined POSIX run — and an unconfined one whose spec sets NoTerminal —
+// as a new session's leader (Setsid in place of Setpgid), so it holds no controlling terminal;
+// session_windows.go is its no-op twin.
 package subprocess

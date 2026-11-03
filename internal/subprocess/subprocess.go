@@ -107,6 +107,14 @@ type SubprocessSpec struct {
 	// last tool result, not on a system-prompt line from a dozen calls earlier. Only the
 	// terminal's POSIX branch sets it: python_exec, git and the Console family prepend nothing.
 	FailFast bool
+	// NoTerminal asks for the child to start with no controlling terminal, confined or not: on
+	// POSIX it is made the leader of a new session (Setsid in place of the teardown's Setpgid,
+	// session_unix.go), so a /dev/tty open fails and nothing it runs can prompt on — or read —
+	// the operator's terminal; the §2.4 group kill still reaches it, a session leader's PGID
+	// being its PID. A run apogee starts on its own sets it — a background git fetch, whose ssh
+	// would otherwise ask for a passphrase behind the TUI. On Windows, which has no sessions, it
+	// is a no-op. A confined run is started this way whatever it says.
+	NoTerminal bool
 	// NewTeardown builds the per-run process-tree teardown for the cmd, before the process
 	// starts. Nil means platform.NewProcessTeardown (one per build tag), which every production
 	// caller leaves it at; a test sets it to hand out a fake platform.ProcessTeardown and observe
@@ -205,8 +213,9 @@ type SubprocessResult struct {
 //     whose Confiner is nil is that same failure, reported rather than run around.
 //   - On POSIX a confined run starts as the leader of a new session (Setsid in place of
 //     Setpgid), so it has no controlling terminal: a confined command cannot open /dev/tty
-//     and inject keystrokes into the operator's terminal. The teardown is unchanged — the
-//     session leader's PGID is its PID, the group the negative-PID kill aims at.
+//     and inject keystrokes into the operator's terminal. A spec that sets NoTerminal starts
+//     an unconfined run the same way. The teardown is unchanged — the session leader's PGID
+//     is its PID, the group the negative-PID kill aims at.
 //
 // The returned error is non-nil only for ctx cancellation (so the loop rolls the Turn back)
 // or a confinement-unavailable demotion; a clean non-zero process exit is a normal result
@@ -296,7 +305,7 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 
 	// Wire the process-tree teardown BEFORE confining: the Confiner only appends to
 	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
-	// two compose — and a confined POSIX run then trades that Setpgid for Setsid below. The returned handle is what the teardown needs once the process exists —
+	// two compose — and a confined or NoTerminal POSIX run then trades that Setpgid for Setsid below. The returned handle is what the teardown needs once the process exists —
 	// nothing on POSIX, the Job Object assignment on Windows (internal/platform/teardown.go).
 	newTeardown := spec.NewTeardown
 	if newTeardown == nil {
@@ -334,8 +343,9 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	}
 	// A confined child starts a new session instead of joining a bare process group, so it
 	// holds no controlling terminal to inject keystrokes into; the group kill still reaches it,
-	// a session leader's PGID being its PID (session_unix.go).
-	if confined {
+	// a session leader's PGID being its PID (session_unix.go). A NoTerminal spec asks for the
+	// same start on an unconfined run, so nothing it launches can prompt on the terminal.
+	if confined || spec.NoTerminal {
 		startConfinedSession(cmd)
 	}
 	// The box the run was fenced by rides along on the result: it is what the denial labels

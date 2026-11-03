@@ -36,8 +36,8 @@ type LookFunc func(string) (string, error)
 
 // Host is the set of operating-system facilities one git run goes through: the PATH lookup that
 // finds git, the two subprocess launchers that run it, and the per-OS rules its environment is
-// scoped by. Every method of the package's funnel — Resolve, Program, Capture, CaptureUnchecked,
-// Run, RunTo, RunDiagnosed, Query, SafeEnv — hangs off it, so a caller holding a Host reaches the
+// scoped by. Every method of the package's funnel — Resolve, Program, Capture, CaptureEnv,
+// CaptureEnvTo, CaptureUnchecked, Run, RunTo, RunDiagnosed, Query, SafeEnv — hangs off it, so a caller holding a Host reaches the
 // whole hardened runner through one value, and a test holding a fake one scripts git's outcomes
 // (absent, fenced, refused, failed) with no real git on the machine.
 //
@@ -255,14 +255,56 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // refused the same way ([CommandConfigIncompleteRefusal]) and never memoised: an answer git did
 // not finish giving is never read as a clean one.
 func (h Host) Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	refusal, err := h.probeCommandConfig(ctx, gitPath, root, nil)
+	return h.CaptureEnv(ctx, gitPath, root, nil, CaptureOptions{}, timeout, args...)
+}
+
+// CaptureOptions are the spawn choices a captured run may opt into. The zero value is Capture's
+// own run, so a caller that names none gets exactly what Capture launches.
+type CaptureOptions struct {
+	// NoTerminal starts git with no controlling terminal (subprocess.SubprocessSpec.NoTerminal):
+	// a run apogee starts on its own — not one the model asked for and is waiting on — must never
+	// stop on a password or host-key prompt that would read the operator's terminal behind the
+	// TUI's back. git and the ssh it launches then fail at once where they would have asked.
+	NoTerminal bool
+}
+
+// CaptureEnv is Capture with the caller's env appended last to the hardened environment and the
+// spawn choices in opts. The command-config probe runs under the SAME env, so a run redirected
+// elsewhere is judged by the repository it actually reaches (as Run's is), and a refused
+// repository gets the same failed outcome Capture returns — no git call, the refusal sentence as
+// the output. Capture is CaptureEnv with a nil env and zero options.
+func (h Host) CaptureEnv(ctx context.Context, gitPath, root string, env []string, opts CaptureOptions, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
+	if refused, ok, err := h.refuseCapture(ctx, gitPath, root, env); ok || err != nil {
+		return refused, err
+	}
+	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, opts, args...))
+}
+
+// CaptureEnvTo is CaptureEnv with the child's standard output streamed UNCAPPED into stdout
+// rather than captured, for a caller that parses an answer of any size as it arrives: the
+// returned result holds the diagnostics alone, and since nothing is capped Truncated never
+// reports the payload. The probe, the env and opts are CaptureEnv's; a refused repository
+// writes nothing to stdout and returns the refusal as the failed outcome. A nil stdout discards
+// the payload.
+func (h Host) CaptureEnvTo(ctx context.Context, gitPath, root string, env []string, opts CaptureOptions, timeout time.Duration, stdout io.Writer, args ...string) (subprocess.SubprocessResult, error) {
+	if refused, ok, err := h.refuseCapture(ctx, gitPath, root, env); ok || err != nil {
+		return refused, err
+	}
+	return h.spawnTo(ctx, h.runSpec(gitPath, root, env, timeout, false, opts, args...), stdout)
+}
+
+// refuseCapture runs the command-config probe for a captured run under env. ok reports a refusal,
+// returned as the failed outcome every captured entry point hands back; err is the probe's own
+// failure (a cancelled ctx, a confinement demotion).
+func (h Host) refuseCapture(ctx context.Context, gitPath, root string, env []string) (refused subprocess.SubprocessResult, ok bool, err error) {
+	refusal, err := h.probeCommandConfig(ctx, gitPath, root, env)
 	if err != nil {
-		return subprocess.SubprocessResult{}, err
+		return subprocess.SubprocessResult{}, false, err
 	}
 	if refusal != "" {
-		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, nil
+		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, true, nil
 	}
-	return h.CaptureUnchecked(ctx, gitPath, root, nil, timeout, args...)
+	return subprocess.SubprocessResult{}, false, nil
 }
 
 // CaptureUnchecked is Capture without the command-config probe. Only one caller may use it: a
@@ -271,7 +313,7 @@ func (h Host) Capture(ctx context.Context, gitPath, root string, timeout time.Du
 // program — go through probeGit instead, which keeps git's diagnostics out of the listing it
 // parses. Everything a MODEL causes goes through Capture.
 func (h Host) CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
-	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, args...))
+	return h.spawn(ctx, h.runSpec(gitPath, root, env, timeout, false, CaptureOptions{}, args...))
 }
 
 // runSpec builds the subprocess spec for one git invocation in root: hardeningOptions ahead of
@@ -283,8 +325,9 @@ func (h Host) CaptureUnchecked(ctx context.Context, gitPath, root string, env []
 //
 // The caller's env comes LAST because it is an addition, never a removal: a GIT_DIR or
 // GIT_INDEX_FILE that redirects the run to a store of apogee's own overrides nothing the
-// hardening put there, and no entry it carries can drop GIT_CONFIG_NOSYSTEM.
-func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration, splitStdout bool, args ...string) subprocess.SubprocessSpec {
+// hardening put there, and no entry it carries can drop GIT_CONFIG_NOSYSTEM. opts rides onto the
+// spec as it is; the zero value changes nothing.
+func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration, splitStdout bool, opts CaptureOptions, args ...string) subprocess.SubprocessSpec {
 	argv := make([]string, 0, 1+len(hardeningOptions)+len(args))
 	argv = append(argv, gitPath)
 	argv = append(argv, hardeningOptions...)
@@ -300,6 +343,7 @@ func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration,
 		Timeout:     timeout,
 		Env:         full,
 		SplitStdout: splitStdout,
+		NoTerminal:  opts.NoTerminal,
 	}
 }
 
@@ -393,7 +437,7 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 		return "", "", errors.New(refusal)
 	}
 
-	spec := h.runSpec(gitPath, dir, env, timeout, stdout == nil, args...)
+	spec := h.runSpec(gitPath, dir, env, timeout, stdout == nil, CaptureOptions{}, args...)
 	var res subprocess.SubprocessResult
 	if stdout != nil {
 		res, err = h.spawnTo(ctx, spec, stdout)
@@ -621,7 +665,7 @@ func (e errIncompleteProbe) Error() string {
 // refuse the call may be exactly the part that is missing. Only a run that finished is an answer,
 // whatever its exit code.
 func (h Host) probeGit(ctx context.Context, gitPath, root string, env []string, args ...string) (subprocess.SubprocessResult, error) {
-	res, err := h.spawn(ctx, h.runSpec(gitPath, root, env, probeTimeout, true, args...))
+	res, err := h.spawn(ctx, h.runSpec(gitPath, root, env, probeTimeout, true, CaptureOptions{}, args...))
 	if err != nil {
 		return res, err
 	}
@@ -846,7 +890,20 @@ func CommandConfigRefusal(names []string) string {
 // answer git never delivered may be exactly the key that names a program. It is never memoised,
 // so the next call probes afresh.
 func CommandConfigIncompleteRefusal(reason string) string {
-	return fmt.Sprintf("git refused: the check of this repository's own config for programs git would execute did not complete (%s). "+
+	return fmt.Sprintf(incompleteRefusalLead+"%s). "+
 		"No git tool runs on a repository that check could not finish; the next git call checks again.",
 		reason)
+}
+
+// incompleteRefusalLead opens every [CommandConfigIncompleteRefusal] sentence, up to the reason.
+// It is what [IsIncompleteRefusal] matches, so the sentence and its predicate cannot drift apart.
+const incompleteRefusalLead = "git refused: the check of this repository's own config for programs git would execute did not complete ("
+
+// IsIncompleteRefusal reports whether text is a [CommandConfigIncompleteRefusal] — a probe that
+// could not finish, which the next call asks again — rather than a [CommandConfigRefusal], which
+// stands while the repository's config does. A caller that keeps its last answer through a slow
+// probe but drops it for a refused repository tells the two apart here, never by matching the
+// sentences itself.
+func IsIncompleteRefusal(text string) bool {
+	return strings.HasPrefix(text, incompleteRefusalLead)
 }

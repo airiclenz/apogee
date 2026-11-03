@@ -11,7 +11,9 @@ import (
 // from apogee's controlling terminal: /dev/tty opens fail with ENXIO, so a confined command
 // cannot push keystrokes into the operator's terminal with TIOCSTI or read it behind the TUI's
 // back. The Console's pty path is the one confined run that keeps a terminal — its own pty,
-// made controlling there (internal/console) — and does not come through here.
+// made controlling there (internal/console) — and does not come through here. An unconfined run
+// whose spec sets NoTerminal comes through here too, for the same detachment: nothing it starts
+// can prompt on the operator's terminal.
 //
 // Setsid replaces the Setpgid the teardown and the Confiner set rather than joining it: Go runs
 // setsid and then setpgid in the child, and setpgid on a session leader fails with EPERM, so
