@@ -849,11 +849,22 @@ var readLeaders = map[string]bool{
 	"sleep": true, "exit": true, ":": true,
 }
 
-// wrapperLeaders run another command named by their operands; the wrapper and its bare
-// options are stripped so the wrapped leader is the one judged.
+// wrapperLeaders run another command named by their operands; the wrapper and its options
+// (with the values wrapperValueLetters names) are stripped so the wrapped leader is the one judged.
 var wrapperLeaders = map[string]bool{
 	"sudo": true, "env": true, "nohup": true, "nice": true, "time": true, "xargs": true,
 	"command": true, "exec": true, "builtin": true,
+}
+
+// wrapperValueLetters are, per wrapper leader, the short options that take a value — the rest
+// of the cluster or else the next word — so the value word (`env -u NAME`, `sudo -u USER`,
+// `nice -n N`, `xargs -I R`) is never taken for the wrapped leader. An option not listed is
+// stripped bare: the view is a footgun guard (ADR 0012), not a parser of every wrapper's grammar.
+var wrapperValueLetters = map[string]string{
+	"env":   "uCS",
+	"sudo":  "ughpCDRTU",
+	"nice":  "n",
+	"xargs": "InsPdEaL",
 }
 
 // gitReadSubcommands are the `git` verbs that inspect a repository without writing to any
@@ -1337,12 +1348,13 @@ func hasAny(words []string, set map[string]bool) bool {
 }
 
 // stripWrappers drops a simple command's leading `NAME=value` assignments and wrapper
-// leaders (with their bare options), so the wrapped leader comes first; it returns nothing
-// for a command that is only assignments.
+// leaders (with their options and those options' values), so the wrapped leader comes first;
+// it returns nothing for a command that is only assignments.
 func stripWrappers(words []string) []string {
 	words = stripAssignments(words)
 	for len(words) > 0 && wrapperLeaders[path.Base(words[0])] {
-		words = stripAssignments(stripBareOptions(words[1:]))
+		valueLetters := wrapperValueLetters[path.Base(words[0])]
+		words = stripAssignments(stripBareOptions(words[1:], valueLetters))
 	}
 	return words
 }
@@ -1432,12 +1444,29 @@ func isAssignment(w string) bool {
 	return true
 }
 
-// stripBareOptions drops the leading option words (`-u`, `--login`) of a wrapper's operands.
-func stripBareOptions(words []string) []string {
+// stripBareOptions drops the leading option words (`-u`, `--login`) of a wrapper's operands,
+// and with each one the next word when it is the value of one of valueLetters
+// (takesNextWordValue). A `--opt=value` or an attached `-uroot` is one word either way.
+func stripBareOptions(words []string, valueLetters string) []string {
 	for len(words) > 0 && strings.HasPrefix(words[0], "-") && words[0] != "-" {
+		option := words[0]
 		words = words[1:]
+		if len(words) > 0 && takesNextWordValue(option, valueLetters) {
+			words = words[1:]
+		}
 	}
 	return words
+}
+
+// takesNextWordValue reports whether a short option cluster's value is the next word: its first
+// letter that is one of valueLetters is its last letter (`-u`, `-Eu`). A value letter earlier in
+// the cluster takes the rest of the cluster as its value (`-uroot`); a long option takes none.
+func takesNextWordValue(option, valueLetters string) bool {
+	if valueLetters == "" || strings.HasPrefix(option, "--") {
+		return false
+	}
+	flags := option[1:]
+	return strings.IndexAny(flags, valueLetters) == len(flags)-1
 }
 
 // valueOperands returns the operands that can name a path: every word that is not a bare

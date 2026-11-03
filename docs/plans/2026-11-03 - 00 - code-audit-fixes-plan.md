@@ -114,7 +114,10 @@ NOTES (2026-11-03): added rows beyond the plan's list — a double-quoted contin
 **Closes:** shell-line-continuation-words
 **Commit:** `fix(security): join backslash-newline continuations in the shell write view`
 
-## 5. Skip wrapper option values in `stripWrappers`
+## 5. Skip wrapper option values in `stripWrappers` — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): short option clusters follow getopt: a cluster whose first value letter is its last letter (`sudo -Eu root`) consumes the next word, one with the value letter earlier (`-uroot`) carries its value attached; long options (`--user root`) still strip bare — only the plan's short-option table is consumed.
+NOTES (2026-11-03): `env -S 'rm -f x'` now consumes the split string as a value, leaving no leader; its words are not re-split into a command (no target before or after, so unchanged behaviour).
 
 **What:** Fix: `stripBareOptions` drops wrapper options without their values, so `env -u echo rm -f .git/hooks/pre-commit` takes `echo` as the leader and emits no target. Depends on item 4.
 **Regression guard.** The Goal is bounded to the per-wrapper value table: value-taking options of listed wrappers not in it (`exec -a`, GNU `time -o`/`-f`) stay bare, as the Approach's ADR 0012 line says. The `xargs` row is spelled with the value separate (`xargs -I {} rm {}`: "rm {}" today, "{}" after); the attached `xargs -I{} rm {}` stays a separate unchanged-behaviour row (stripBareOptions already drops `-I{}`).
