@@ -52,8 +52,9 @@
 // The package is a LEAF over internal/subprocess: it imports internal/domain, internal/platform,
 // internal/security and internal/subprocess, and nothing else in the tree — never internal/tools,
 // never internal/agent (ADR 0010). Everything tool-shaped — the tool structs, the ref guards, the
-// porcelain-v2 parsing, the result rendering — stays in internal/tools/git.go, which reaches this
-// package through thin wrappers.
+// result rendering — stays in internal/tools/git.go, which reaches this package through thin
+// wrappers; the porcelain-v2 status parsing lives in internal/gitstatus, a pure parser that runs
+// no git and so imports neither this package nor internal/subprocess.
 //
 // # The files, one line each
 //

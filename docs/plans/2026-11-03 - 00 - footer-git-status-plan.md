@@ -49,7 +49,10 @@
 - 2: recast — guard folded (`CaptureOptions`, NoTerminal spec test, both `doc.go`); refusal-kind predicate; `CaptureEnvTo`.
 - 3: recast — fetch transport closed (supersedes `internal/gitexec/doc.go:18-20` for fetch); incomplete probe keeps counts (yields to AGENTS.md slow-box rule); status streamed.
 
-## 1. Shared porcelain v2 parser in `internal/gitstatus`
+## 1. Shared porcelain v2 parser in `internal/gitstatus` — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): API shape for later items — `gitstatus.Parse(out string) Snapshot`; the streaming form is `gitstatus.Counter` (zero value ready, `io.Writer`, `Snapshot()` reads the folded counts and branch fields, entry lists nil). Snapshot fields: Branch, Detached, Upstream, HasAheadBehind, Ahead, Behind, Dirty, Staged, Unstaged, Untracked (counts), StagedEntries/UnstagedEntries/UntrackedEntries (Parse only).
+NOTES (2026-11-03): `gitStatusReport.changedFiles()` became the tools-local function `changedFiles(gitstatus.Snapshot)` (a method cannot sit on the foreign type); it still derives the full-length triple from the entry lists, so git_test.go:891-892 call `changedFiles(rep)` with every assertion unchanged.
 
 **What:** Recast at the regression check (2026-11-03).
 **Goal:** A pure `internal/gitstatus` (no exec imports) parses `git status --porcelain=v2 --branch -z` output into a `Snapshot` of branch fields (branch, detached, upstream) and count fields (`Dirty`: one per changed path). The git status tool uses it and its output is unchanged.

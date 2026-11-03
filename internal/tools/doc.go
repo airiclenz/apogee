@@ -87,7 +87,8 @@
 // git_status (2026-08-10) joins the P3.9 git family as its fourth member: a read-only report
 // of the current branch, the ahead/behind divergence from its upstream when one exists, and
 // the staged / unstaged / untracked path lists. It reads git's porcelain v2 format with -z, so
-// a path with a space, a quote, or a newline arrives verbatim rather than C-quoted, and it
+// a path with a space, a quote, or a newline arrives verbatim rather than C-quoted (the parse
+// itself lives in internal/gitstatus, a pure parser other git readers share), and it
 // caps EACH list (maxGitStatusPaths) while stating the full count in the section header — a
 // tree mid-refactor must not flood a small model's context. It passes --ignore-submodules=dirty
 // because git's default of none makes git status run `git status --porcelain=2` inside every
@@ -242,7 +243,7 @@
 // trailer below also runs; the door renders its own `abs:line:col: msg` line), an optional
 // go vet, and the graceful "no provider" for every other language. git.go is the
 // whole git family: git_branch, git_commit, git_diff_range, git_status, git_log and git_show, with the
-// ref guards and porcelain-v2 parsing they share and gitRead, the one read call the four
+// ref guards they share and gitRead, the one read call the four
 // RO-subproc tools spawn through (a gitRef, minted by the guard alone, is the only revision it
 // takes) — plus RunGitQuery, the package's one exported non-tool entry, which lends the same
 // hardened funnel to the ENGINE's own read-side git (the tracked-file mutation floor,

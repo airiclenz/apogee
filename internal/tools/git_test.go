@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitexec"
+	"github.com/airiclenz/apogee/internal/gitstatus"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
 )
@@ -857,7 +858,7 @@ func TestGitStatus_ParsesPorcelainRecords(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := renderGitStatus(parseGitStatus(tc.out))
+			got := renderGitStatus(gitstatus.Parse(tc.out))
 			for _, want := range tc.want {
 				if !strings.Contains(got, want) {
 					t.Errorf("status = %q, want it to contain %q", got, want)
@@ -883,13 +884,13 @@ func TestGitStatus_CapsEachList(t *testing.T) {
 	for i := 0; i < maxGitStatusPaths+extra; i++ {
 		records = append(records, fmt.Sprintf("? file%d.txt", i))
 	}
-	rep := parseGitStatus(porcelainZ(records...))
+	rep := gitstatus.Parse(porcelainZ(records...))
 	got := renderGitStatus(rep)
 
 	// The summary states what the tree HOLDS, not what the list printed: the cap trims the
 	// paths a model reads, never the count a host renders.
-	if want := (domain.ChangedFiles{Untracked: maxGitStatusPaths + extra}); rep.changedFiles() != want {
-		t.Errorf("summary = %+v, want %+v — the FULL count past the cap", rep.changedFiles(), want)
+	if want := (domain.ChangedFiles{Untracked: maxGitStatusPaths + extra}); changedFiles(rep) != want {
+		t.Errorf("summary = %+v, want %+v — the FULL count past the cap", changedFiles(rep), want)
 	}
 	if want := fmt.Sprintf("Untracked (%d):", maxGitStatusPaths+extra); !strings.Contains(got, want) {
 		t.Errorf("status = %q, want the header %q with the full count", got, want)
