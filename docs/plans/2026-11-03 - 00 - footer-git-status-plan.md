@@ -135,7 +135,16 @@ Pinned tables follow the new key: `GitFetch: true` in every `config_test.go` lit
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'SettingsApplyLocal' ./internal/tui/`
 **Commit:** `feat(config): add the ui.git-fetch setting`
 
-## 5. TUI git poll chain behind a host seam
+## 5. TUI git poll chain behind a host seam — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — internal/tui/watch.go: made necessary by the four new Msgs Model.fold folds (gitStatusMsg, gitStatusTickMsg, gitFetchMsg, gitFetchTickMsg); TestWatchIsolatesRoutesEveryFoldedMsg requires watchRouteOf to name each, and they route to the view (the git state is a Model field outside the swapped session view).
+NOTES (2026-11-03): seam shape — `tui.GitStatusHost{Status(ctx, root) (gitstatus.Snapshot, bool, error); Fetch(ctx, root) error}` on `Options.GitStatus`, plus `Options.GitStatusInterval`/`GitFetchInterval`; wired means host non-nil AND `Options.Workspace` non-empty. The footer (item 6) reads `m.gitSnapshot() (gitstatus.Snapshot, bool)`; the Model keeps counts only (entry lists dropped).
+NOTES (2026-11-03): the long backoff after a not-inside or failed read is `gitStatusBackoff = time.Minute` (max with 4 × the read's duration); `Options.GitStatusInterval` does not shorten it.
+NOTES (2026-11-03): delegate/workflow paths do not count as Turn ends: a delegate's Turns end inside the parent's Exchange, whose own turnSnapshotMsg/cancelledMsg/errMsg re-reads after them, and a background workflow emits none of those Msgs, so its edits show on the next 5 s tick (stated on gitAfterTurn).
+NOTES (2026-11-03): the fetch chain fires its first fetch at once when armed (a landed read that names an upstream with the pref on, or the pref switched on at /settings), then every 5 min after each landing; switched off (or upstream gone) it retires at its next step rather than by a generation bump, so a fetch in flight finishes and two fetches never run at once. Only a successful fetch asks for a status read.
+NOTES (2026-11-03): the turnSnapshotMsg arm now schedules the save in a statement of its own (`save := m.persist(...)`) before handing m to gitAfterTurn, so the pointer-receiver persist is ordered before the copy (ADR 0011).
+NOTES (2026-11-03): settingsApplyLocal's `ui.git-fetch` arm now returns the arming Cmd; its doc ("Two of these keys…") now names git-fetch beside the colour scheme. TestGitStatusImportsNoGitRunner pins that production internal/tui imports neither internal/gitexec nor internal/subprocess.
+NOTES (2026-11-03): retry fix — Build now calls cleanup() before the `--tui-diag` error return (as the buildProgramOptions error path does), so the derived program context is cancelled on every error return after it is made.
 
 **What:** Depends on items 1 and 4.
 **Goal:** `tui.Options` carries a `GitStatus` host (nil = no segment, no git). The Model holds the last good snapshot as plain values, kept by one status and one fetch chain, each with one live generation; no git call runs in `Update` or `View`; every git child is cancelled at exit.

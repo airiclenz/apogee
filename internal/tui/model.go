@@ -255,6 +255,10 @@ type Model struct {
 	// unwired, and every reader treats that zero value as "no monitor, nothing to say".
 	hb heartbeatState
 
+	// git is the footer's git state and its two poll chains (gitstatus.go). Plain values, so it is
+	// safe inside the value-copied Model (ADR 0011); zero when the git seam is unwired.
+	git gitState
+
 	// Lifecycle. The state the keys route on is the session view's (sessionView.state).
 	//
 	// worker is the in-flight worker as one value (worker.go): the CancelFunc the stop key calls
@@ -742,6 +746,14 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		m.hb.gen = 1
 	}
 
+	// Arm the git status chain the same way: generation 1 is the chain Init's first read belongs to,
+	// and that read is in flight from Init on, so a Turn end before it lands waits for it rather
+	// than starting a second one. Unwired, it stays at 0 and no git ever runs.
+	if m.gitWired() {
+		m.git.gen = 1
+		m.git.inFlight = true
+	}
+
 	// Resolve the root every tool card's paths are printed relative to, before anything can record a
 	// call against the transcript (workspacepath.go). It is set on the transcript rather than kept
 	// on the Model because the fold that records a call reaches no Model, and reset preserves it —
@@ -1036,7 +1048,7 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 // adoption pane (adoption.go) — took its generation and its place in the marker queue there, but
 // construction returns no Cmd, so its drain marker and backstop leave from here (startupLatchCmds).
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.beatCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd(),
+	return tea.Batch(m.beatCmd(), m.gitStatusCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd(),
 		m.startupLatchCmds(), m.startupWatchRead)
 }
 
@@ -1337,12 +1349,12 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The worker cancelled at a quiescent boundary and has returned, so the engine is the Update
 		// loop's to touch again (C1): settle the interrupted Exchange (its finished Turns kept),
 		// run the commands queued meanwhile, and hold whatever messages were staged.
-		return m.foldCancelled()
+		return gitAfterTurn(m.foldCancelled())
 
 	case errMsg:
 		// A loop-level fault also returns the engine to the Update loop (C1): settle the
 		// interrupted Exchange, record the error, and hold whatever was staged.
-		return m.foldLoopError(msg)
+		return gitAfterTurn(m.foldLoopError(msg))
 
 	case compactDoneMsg:
 		// The /compact worker returned (startCompact): note what it did, return to idle, drain the
@@ -1366,8 +1378,13 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// It is also the freshest boundary the Model will see until the next Turn ends, so it
 		// becomes the engine half every progress save inside the NEXT Turn pairs its live
 		// transcript with (progressSave).
+		//
+		// And it ends a Turn, so the footer's git state is read again now (gitstatus.go). The save
+		// is scheduled in a statement of its own: persist takes a pointer, and the copy of m an
+		// argument list hands on is not ordered against it (ADR 0011).
 		m.cacheBoundary(msg.Sess)
-		return m, m.persist(msg.Sess)
+		save := m.persist(msg.Sess)
+		return gitAfterTurn(m, save)
 
 	case saveDoneMsg:
 		// An async save returned. Note the ok↔fail transition once, queue any title waiting for the
@@ -1509,6 +1526,25 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// left on, state why it is not being loaded, or do nothing at all. It lands off a Cmd goroutine
 		// like a beat, and what it may do it does through the latch above rather than beside it.
 		return m.foldRestore(msg)
+
+	case gitStatusMsg:
+		// One status read of the workspace's git state landed (gitStatusCmd): keep it and re-arm the
+		// chain from here (gitstatus.go).
+		return m.foldGitStatus(msg)
+
+	case gitStatusTickMsg:
+		// The wait since the last landed read has elapsed: issue the next one, unless the tick
+		// belongs to a retired chain.
+		return m.foldGitStatusTick(msg)
+
+	case gitFetchMsg:
+		// One background fetch landed: a successful one asks for a status read, and the chain
+		// waits its interval or retires (gitstatus.go).
+		return m.foldGitFetch(msg)
+
+	case gitFetchTickMsg:
+		// The fetch interval has elapsed: fetch again, or retire the chain when its reason is gone.
+		return m.foldGitFetchTick(msg)
 
 	case heartbeatTickMsg:
 		// The interval since the last landed beat has elapsed: issue the next one. Same generation

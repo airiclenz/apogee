@@ -616,6 +616,23 @@
 // since the Exchange that just completed was allowed to start. An unwired seam arms no chain, folds
 // nothing and blocks nothing, which is exactly the pre-heartbeat renderer.
 //
+// The footer's git state is the package's THIRD tick chain, on the heartbeat's shape. [GitStatusHost]
+// is the seam the binary backs with its hardened git runner — this package imports internal/gitstatus
+// for the Snapshot value and neither internal/gitexec nor internal/subprocess, so no git child is
+// ever started here, and none on the render path: Update and View read only the [gitState] the
+// folds keep. [Model.Init] issues the first status read on the generation newModel armed, and the
+// landing re-arms from HERE, max(5 s, 4 × the read's own duration) later, so reads never overlap
+// and a slow repository is read less often rather than back to back. ONE LIVE CHAIN is the
+// invariant, kept the armBeat way: a Turn end ([gitAfterTurn]) asks for a read now through
+// [Model.refreshGit], which opens a fresh generation while the chain waits on its tick (retiring the
+// tick) and only marks it dirty while a read is in flight, so the landing issues exactly one
+// follow-up. A failed read keeps the last snapshot; one that found no work tree clears it; both wait
+// out a long backoff, never the 5 s cadence. The fetch chain is a second generation, live only while
+// `ui.git-fetch` is on and the snapshot names an upstream — armed by a landed read or the pref
+// switched on, retired at its own next step when either goes away — and a fetch that lands asks
+// for a status read. Every call runs under the program context [Build] derives and its cleanup
+// cancels, so a git child still blocked at exit is cancelled with it. An unwired seam arms nothing.
+//
 // What a beat DOES about a changed upstream is the second act, [ServerHost.Rebind], and the split
 // between the two is the design: the heartbeat seam observes, the rebind seam applies, and the
 // binary owns everything in between — re-resolving the per-model system prompt (ADR 0023), the
@@ -921,7 +938,9 @@
 // the re-binding an advertised model earns at a quiescent boundary ([rebindIntent],
 // [Model.observeBinding], [Model.applyRebind], [Model.applyPendingRebind]) and the
 // [Model.blockedUpstream] refusal the offline state is spent on (the Model still owns the
-// [heartbeatState] field itself); theme.go the palette, the
+// [heartbeatState] field itself); gitstatus.go the footer's git poll — the [GitStatusHost] seam,
+// the [gitState] the Model keeps, and the status and fetch chains that keep it current
+// ([Model.refreshGit], [Model.armGitFetch], [Model.foldGitStatus], [Model.foldGitFetch]); theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps
 // that palette under the running frame (status, pick, and the `export` that is the only way to

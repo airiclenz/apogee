@@ -1525,6 +1525,19 @@ type Options struct {
 	// because the next one is armed only from a landed one; it only observes more often.
 	BeatInterval time.Duration
 
+	// GitStatus is the footer's git seam (gitstatus.go): the host that reads the workspace's git
+	// state and fetches its upstream. nil ⇒ unwired: no git segment, no chain, and no git child is
+	// ever started (ADR 0054). The renderer owns only WHEN a read or a fetch runs.
+	GitStatus GitStatusHost
+
+	// GitStatusInterval and GitFetchInterval are the git chains' cadences, for the reason
+	// [Options.BeatInterval] is a field: a Driver watches a refresh without sitting out the wall
+	// clock. Zero ⇒ the named defaults (5 s after a status read lands, 5 min after a fetch lands).
+	// The binary leaves both at zero; they are not config keys. The backoff after a read that
+	// found no work tree or failed is not shortened by either.
+	GitStatusInterval time.Duration
+	GitFetchInterval  time.Duration
+
 	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3, 4
 	// and 7). The zero value is the ordinary start — the binary determined a startup server and the
 	// engine was constructed before the program began — and everything below it is unchanged.
@@ -2252,6 +2265,10 @@ func Build(
 	// late-bound program sender (the same programRef the Sink pushes Events through), so the
 	// Model persists between Steps without any exported API. Bind (below) resolves it to the
 	// live program before the first worker can fire.
+	// The program's own context, cancelled by cleanup and by every error return below, so a Cmd
+	// still blocked when the program exits — a git read on a wedged repository — is cancelled when
+	// the caller cleans up rather than outliving the program. The Model and the program share it.
+	ctx, cancel := context.WithCancel(ctx)
 	m := newModel(ctx, eng, opts, br.prog.send)
 	// The Step-boundary flush: the Sink coalesces adjacent tokens (and reasoning deltas) behind a
 	// short window, and the worker empties that buffer the instant a Step returns, so no token is
@@ -2272,7 +2289,7 @@ func Build(
 	// What the caller has to close when the program is done, closed in reverse order. It is a
 	// slice rather than a deferred pair because Build RETURNS before the program runs: the files
 	// have to outlive this function and still be closed exactly once.
-	var closers []func()
+	closers := []func(){cancel}
 	cleanup := func() {
 		for i := len(closers) - 1; i >= 0; i-- {
 			closers[i]()
@@ -2288,6 +2305,7 @@ func Build(
 		if err != nil {
 			// Named so the human knows which of the two paths they got wrong; the wrapped error
 			// already carries the path and what was refused about it.
+			cleanup()
 			return nil, nil, fmt.Errorf("--tui-diag: %w", err)
 		}
 		closers = append(closers, func() { _ = diag.Close() })

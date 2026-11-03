@@ -454,7 +454,8 @@ func (m Model) autoBlastRadiusNote(pending settingEdit) string {
 //
 // Two of these keys have more to say than "done": the note is the row's own sentence about the apply
 // (empty for a key that simply took effect), and the Cmd is what the apply needs the program to do
-// next. Only the colour scheme uses either.
+// next. The colour scheme uses both; `ui.git-fetch` uses the Cmd alone — the first fetch of the chain
+// it arms.
 func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, bool, error) {
 	switch path {
 	case settingKeyAutoTitle:
@@ -534,12 +535,15 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 			return m, "", nil, true, err
 		}
 	case domain.UIKeyGitFetch:
-		// The flag is read where the footer's git poll decides whether a tick also fetches, so this
-		// write is the whole apply: the next tick fetches (or does not) under the new value, and
-		// nothing on the screen moves.
+		// The flag is read where the footer's git fetch chain decides whether to run (gitstatus.go).
+		// Switched on, the chain is armed here — its first fetch runs now — when the workspace has an
+		// upstream and no chain runs; switched off, the running chain retires at its next step, and
+		// a fetch already in flight finishes. Nothing on the screen moves.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
+		fetch := m.armGitFetch()
+		return m, "", fetch, true, nil
 	case domain.UIKeyStallAfter:
 		// Nothing is scheduled and nothing is laid out again: the threshold is read where the status
 		// line is painted, and the spinner already repaints it every frame while a turn runs.
