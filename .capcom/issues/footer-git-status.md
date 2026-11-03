@@ -1,10 +1,12 @@
 ---
 title: Footer shows git branch, uncommitted files and ahead/behind counts
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-03 - 00 - footer-git-status-plan.md
 created: 2026-11-03T08:11:32Z
+closed: 2026-11-03T11:40:10Z
+reason: Resolved by plan '2026-11-03 - 00 - footer-git-status-plan' (all 8 items), archived at 2649bdb1.
 ---
 
 The footer's upstream slot states `host ✦ model ✦ effort ✦ workdir` (layout.md, "The footer's upstream slot"). It says nothing about the git state of the workdir. Add one segment after the workdir: the branch and three compact counts.
