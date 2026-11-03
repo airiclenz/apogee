@@ -132,27 +132,6 @@ type retainedRoundJSON struct {
 	Seq          uint64               `json:"seq"`
 }
 
-// The words a delegateBound is saved as — the bound's own name, as the capped result heads spell
-// the resource that ran out.
-var delegateBoundWords = map[delegateBound]string{
-	boundSteps:  "steps",
-	boundTokens: "tokens",
-	boundTime:   "time",
-}
-
-// word is the word the session snapshot saves b as.
-func (b delegateBound) word() string { return delegateBoundWords[b] }
-
-// parseDelegateBound reads a saved bound word back; false for a word this build never writes.
-func parseDelegateBound(word string) (delegateBound, bool) {
-	for b, w := range delegateBoundWords {
-		if w == word {
-			return b, true
-		}
-	}
-	return 0, false
-}
-
 // retainedToJSON spells entries in the snapshot's form, in the order given; nil for none, so a
 // session with nothing retained writes no `retained` key.
 func retainedToJSON(entries []retainedDelegate) []retainedEntryJSON {

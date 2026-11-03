@@ -64,7 +64,8 @@ const wrapUpFinishDirectiveFormat = "You have reached %s for this item: " + wrap
 	"\n\nCall finish now with your receipt — status partial when the work is unfinished, blocked" +
 	" when you could not proceed — and a summary saying where you stopped. Do not continue the task."
 
-// The bound phrases wrapUpFinishDirectiveFormat opens with, one per delegate bound (capHit).
+// The bound phrases wrapUpFinishDirectiveFormat opens with, one per delegate bound (capHit),
+// each named by its bound's row (boundRows).
 const (
 	wrapUpFinishStepCause  = "the step limit (%d steps)"
 	wrapUpFinishTokenCause = "the token budget (%d tokens)"
@@ -156,16 +157,7 @@ func finishCalls(calls []domain.ToolCall) []domain.ToolCall {
 // wrapUpFinishDirective renders the capped closing directive for a workflow item's child, naming
 // the bound capHit records with its applied value, as wrapUpDirective does for a delegate.
 func (a *Agent) wrapUpFinishDirective() string {
-	var cause string
-	switch a.capHit {
-	case boundTokens:
-		cause = fmt.Sprintf(wrapUpFinishTokenCause, a.tokenCap)
-	case boundTime:
-		cause = fmt.Sprintf(wrapUpFinishTimeCause, boundDurationText(a.timeCap))
-	default:
-		cause = fmt.Sprintf(wrapUpFinishStepCause, a.stepCap)
-	}
-	return fmt.Sprintf(wrapUpFinishDirectiveFormat, cause)
+	return fmt.Sprintf(wrapUpFinishDirectiveFormat, a.capMarker(a.capHit.row().finishCauseFormat))
 }
 
 // workflowSpawner runs one workflow's item children for the Agent that runs the workflow, under

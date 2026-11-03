@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -619,56 +618,6 @@ const (
 	timeCapErrFormat = "delegate capped at its time limit (%s) — asking it to sum up; " +
 		"narrow the task or raise delegate-timeout"
 )
-
-// delegateBound names which of a delegate's three bounds ended its Exchange (Agent.capHit). The
-// zero value is the step cap — the bound every capped result was read as before the token and
-// time bounds existed, so an Agent built with a stepCap alone still words its markers as it did.
-type delegateBound int
-
-const (
-	boundSteps delegateBound = iota
-	boundTokens
-	boundTime
-)
-
-// boundDurationText spells a time bound the way the markers quote it: time.Duration's own text
-// with a trailing `0s` dropped where minutes precede it, so the default reads `2h0m` rather than
-// `2h0m0s` and a bound of `90s` still reads as `1m30s`.
-func boundDurationText(d time.Duration) string {
-	text := d.String()
-	if strings.HasSuffix(text, "m0s") {
-		text = strings.TrimSuffix(text, "0s")
-	}
-	return text
-}
-
-// delegateBoundHit reports which bound, if any, the Turn just completed has reached — steps
-// first, then tokens, then time, so where two trip at once the cheaper story wins. A bound at 0
-// is off. The token bound reads this Agent's own usage tally, which is what the child spent and
-// nothing a parent spent; the time bound reads the clock through a.now against capStart, which
-// Run set at its head.
-func (a *Agent) delegateBoundHit() (delegateBound, bool) {
-	switch {
-	case a.stepCap > 0 && a.turns.exchangeTurns >= a.stepCap:
-		return boundSteps, true
-	case a.tokenCap > 0 && a.usage.prompt >= a.tokenCap:
-		return boundTokens, true
-	case a.timeCap > 0 && !a.capStart.IsZero() && a.now().Sub(a.capStart) >= a.timeCap:
-		return boundTime, true
-	}
-	return boundSteps, false
-}
-
-// boundErrText words the ErrorEvent finishAtStepCap emits for the bound capHit names.
-func (a *Agent) boundErrText() string {
-	switch a.capHit {
-	case boundTokens:
-		return fmt.Sprintf(tokenCapErrFormat, a.tokenCap)
-	case boundTime:
-		return fmt.Sprintf(timeCapErrFormat, boundDurationText(a.timeCap))
-	}
-	return fmt.Sprintf(stepCapErrFormat, a.stepCap)
-}
 
 // usageTally is one Agent's running token accounting: the sums and the call count behind the
 // Cumulative reading of every domain.UsageEvent that Agent emits. It is deliberately a plain

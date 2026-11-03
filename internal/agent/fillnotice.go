@@ -122,9 +122,9 @@ func rungReached(pct int) int {
 // formatTokens renders a token count the way a person reads one: plain under a thousand, one
 // decimal of thousands under a hundred thousand (8192 → 8.2k, 32768 → 32.8k), whole thousands
 // under a million (131072 → 131k), and one decimal of millions from there (1300000 → 1.3M,
-// 20000000 → 20.0M) — the tier a million-token window and a delegate's cumulative budget
-// (tokenBudgetNotice) read in — so a small window's precision survives and a large one's noise
-// does not.
+// 20000000 → 20.0M) — the tier a million-token window and a delegate's cumulative budget (the
+// token-budget notice, budgetNotices) read in — so a small window's precision survives and a large
+// one's noise does not.
 func formatTokens(n int) string {
 	switch {
 	case n < 1000:

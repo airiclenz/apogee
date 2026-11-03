@@ -384,7 +384,7 @@ func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// The token-budget notice: stepBudgetNotice's twin over the child's cumulative prompt tokens
+// The token-budget notice: the step notice's twin over the child's cumulative prompt tokens
 // (Agent.usage) against its token cap (`delegate-max-tokens`). The 2026-09-18 session's evidence:
 // a child at 10.7M of a 20M budget under a 1.3M working window heard nothing, because the fill
 // ladder measures one request against the window and the step notice counts Turns.

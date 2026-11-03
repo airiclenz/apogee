@@ -159,7 +159,12 @@ Depends on item 3.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestFreshResultCounts|TestFreshResult|TestPredictiveGuard|TestDelegationLedger|TestAppendToolResultRendersStandingOnce' ./internal/agent/`
 **Commit:** `feat(agent): the fresh-result bound weighs the request buildRequest sends`
 
-## 5. A delegate's bounds as one table
+## 5. A delegate's bounds as one table — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the format constants keep their names, text and home files (agent.go, subagent.go, workflowspawn.go, stepnotice.go); the rows reference them. The delegateBound type, boundDurationText, delegateBoundHit, boundErrText, word/parseDelegateBound and delegationBound moved into delegatelimits.go; capHeadFormats and delegateBoundWords are gone (no test named them), folded into capResultHead and the rows.
+NOTES (2026-11-03): consequential edit — internal/agent/doc.go: made necessary by the new delegatelimits.go (package map, TestDocMapNamesEveryFile)
+NOTES (2026-11-03): consequential edit — internal/agent/fillnotice.go: made necessary by removing tokenBudgetNotice (formatTokens comment named it)
+NOTES (2026-11-03): consequential edit — internal/agent/stepnotice_test.go: made necessary by removing stepBudgetNotice (a section comment named it; no code change)
 
 **What:**
 **Goal:** One table in `internal/agent/delegatelimits.go` holds a row per bound (steps, tokens, time), and every per-bound fact reads it: which bound tripped, its words on every surface, and its ¾ notice. Every rendered string is byte-identical; a golden row test pins each surface.

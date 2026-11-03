@@ -280,35 +280,11 @@ func unknownContinueResult(asked string, retained []string) string {
 // judged the child's closing text to be: the plain head for a report (or for no text at all), the
 // non-report variant naming the shape for anything else. It is the ONE site both heads are written.
 func (a *Agent) capResultHead(shape floor.ClosingShape) string {
-	reportFormat, nonReportFormat, bound := a.capHeadFormats()
+	row := a.capHit.row()
 	if shape.IsNonReport() {
-		return fmt.Sprintf(nonReportFormat, bound, string(shape))
+		return a.capMarker(row.nonReportHeadFormat, string(shape))
 	}
-	return fmt.Sprintf(reportFormat, bound)
-}
-
-// capHeadFormats picks the head formats for the bound capHit names — the plain one and its
-// non-report variant — and the value that fills their bound slot.
-func (a *Agent) capHeadFormats() (reportFormat, nonReportFormat string, bound any) {
-	switch a.capHit {
-	case boundTokens:
-		return tokenCapResultFormat, tokenCapNonReportFormat, a.tokenCap
-	case boundTime:
-		return timeCapResultFormat, timeCapNonReportFormat, boundDurationText(a.timeCap)
-	}
-	return stepCapResultFormat, stepCapNonReportFormat, a.stepCap
-}
-
-// delegationBound is the host-facing name of this bound (domain.DelegationBound), the one a capped
-// result's typed outcome reports beside the head line capHeadFormats picks for the same bound.
-func (b delegateBound) delegationBound() domain.DelegationBound {
-	switch b {
-	case boundTokens:
-		return domain.DelegationTokenBudget
-	case boundTime:
-		return domain.DelegationTimeLimit
-	}
-	return domain.DelegationStepCap
+	return a.capMarker(row.reportHeadFormat)
 }
 
 // subAgentFaultPrefix opens the error result a FAULTED delegation becomes. What follows it is the
@@ -548,7 +524,7 @@ func (a *Agent) draftOutputSurvives() bool {
 //
 // The token and time bounds hand the child the same directive with their own opening clause
 // (wrapUpTokenDirectiveFormat, wrapUpTimeDirectiveFormat): the cause differs, the prohibition and
-// the ask do not, so the three share wrapUpDirectiveTail and wrapUpDirective picks by capHit.
+// the ask do not, so the three share wrapUpDirectiveTail and wrapUpDirective reads capHit's row (boundRows).
 //
 // wrapUpOutputClauseFormat and wrapUpWriteClause are the one clause appended AFTER the directive —
 // never folded into it, so the three formats above keep their arity and their pinned text — when,
@@ -596,15 +572,7 @@ func (a *Agent) wrapUpDirective() string {
 	if a.workflowItem != nil {
 		return a.wrapUpFinishDirective()
 	}
-	var directive string
-	switch a.capHit {
-	case boundTokens:
-		directive = fmt.Sprintf(wrapUpTokenDirectiveFormat, a.tokenCap)
-	case boundTime:
-		directive = fmt.Sprintf(wrapUpTimeDirectiveFormat, boundDurationText(a.timeCap))
-	default:
-		directive = fmt.Sprintf(wrapUpDirectiveFormat, a.stepCap)
-	}
+	directive := a.capMarker(a.capHit.row().wrapUpFormat)
 	if _, ok := a.wrapUpWriter(); !ok {
 		return directive
 	}

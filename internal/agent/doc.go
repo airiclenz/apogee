@@ -51,7 +51,9 @@
 // the step-budget notice and its token-budget twin — no Reaction but engine notes, structural for
 // every delegate — which tell a child once at three quarters of its step cap, and once at three
 // quarters of its token budget, to write its output, fenced on the closing tool result by
-// appendToolResult (prompts/step-notice.txt, prompts/token-notice.txt). syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
+// appendToolResult (prompts/step-notice.txt, prompts/token-notice.txt); delegatelimits.go is the
+// delegate's bounds as one table — a row per bound (steps, tokens, time) that every per-bound fact
+// reads: which bound tripped, its words on every surface, its snapshot word and its notice. syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
 // advise or gate command is spawned through while the loop waits on it, owning the permit, the
 // class default deadline, the payload document and the failure report so the seams that call it
 // see only (stdout, err). sessionadvise.go is the session-start and compaction advise lanes (ADR
