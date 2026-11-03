@@ -18,28 +18,37 @@ const journalCoalesceWindow = 30 * time.Millisecond
 //
 // Session, Title and Workspace name the record the journal belongs to, and Entries is how many
 // transcript entries that record held when the journal was born — the count a watcher paints from
-// the record before it follows the journal (ADR 0103 decision 3). Now and Report are Options' own
-// (see Options). Window overrides journalCoalesceWindow; zero means the default. Tests shrink it to
-// see the timer flush, or stretch it so only events flush.
+// the record before it follows the journal (ADR 0103 decision 3). Model and ContextWindow are the
+// run's binding at the journal's birth — the model it talks to and that model's context window in
+// tokens — so a watcher measures the run against them; "" and 0 mean unknown. Now and Report are
+// Options' own (see Options). Window overrides journalCoalesceWindow; zero means the default. Tests
+// shrink it to see the timer flush, or stretch it so only events flush.
 type JournalOptions struct {
-	Session   string
-	Title     string
-	Workspace string
-	Entries   int
-	Report    func(error)
-	Now       func() time.Time
-	Window    time.Duration
+	Session       string
+	Title         string
+	Workspace     string
+	Entries       int
+	Model         string
+	ContextWindow int
+	Report        func(error)
+	Now           func() time.Time
+	Window        time.Duration
 }
 
 // JournalStarted is the `data` of a journal's opening frame. It is the journal's own frame, never
-// the headless one: RunStarted's Model, Server and the rest are facts of a Firing's start that a
-// journal born at a hold does not hold, and Title and Entries are the journal's alone (ADR 0103
-// decision 3), so headless stdout frames do not change.
+// the headless one: Title and Entries are the journal's alone (ADR 0103 decision 3), and Model and
+// ContextWindow state the run's binding at the journal's birth, so a watcher measures the watched
+// run against its own model and window from the frame onward. Both are always written; "" and 0
+// mean unknown. A later rebind is not re-stamped here — the run's next depth-0 usage line carries
+// the new binding. RunStarted's Server, Mode and the rest stay headless stdout's own, so headless
+// stdout frames do not change.
 type JournalStarted struct {
-	Session   string `json:"session"`
-	Workspace string `json:"workspace"`
-	Title     string `json:"title"`
-	Entries   int    `json:"entries"`
+	Session       string `json:"session"`
+	Workspace     string `json:"workspace"`
+	Title         string `json:"title"`
+	Entries       int    `json:"entries"`
+	Model         string `json:"model"`
+	ContextWindow int    `json:"context_window"`
 }
 
 // journalFinished is the `data` of a journal's closing frame: an empty object. The frame itself is
@@ -104,10 +113,12 @@ func NewJournal(w io.Writer, o JournalOptions) *Journal {
 		window: window,
 	}
 	j.lines.writeLine(kindRunStarted, nil, JournalStarted{
-		Session:   o.Session,
-		Workspace: o.Workspace,
-		Title:     o.Title,
-		Entries:   o.Entries,
+		Session:       o.Session,
+		Workspace:     o.Workspace,
+		Title:         o.Title,
+		Entries:       o.Entries,
+		Model:         o.Model,
+		ContextWindow: o.ContextWindow,
 	})
 	return j
 }

@@ -169,7 +169,9 @@ Depends on item 3.
 - `grep -c "ParksExactly" .capcom/knowledge/glossary/glossary-identity/watch-mode.md` prints 0, and `capcom check` passes
 **Commit:** `refactor(tui): park and restore the session view as one sessionView value`
 
-## 5. A Firing's journal frame names the run's model and window
+## 5. A Firing's journal frame names the run's model and window — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the zero-options frame is pinned by a new test, `TestJournalFrameWritesAnUnknownBindingAsZero`, rather than a row in `TestJournalFrames` (whose rows all assert the `s-1` session stamp); `eventjson.Decode` needed no change — `RunStarted` already maps `model`, so it now reads the journal's model as written.
 
 **What:**
 **Goal:** the journal's `run_started` data carries `model` and `context_window` after `entries`, always written. Every journal `run.Once` opens fills them from its `domain.Config` (`Model`, `Context.MaxContextTokens`). Headless stdout's `run_started` is byte-identical.

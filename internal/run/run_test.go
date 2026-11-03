@@ -3285,10 +3285,10 @@ func (j *recordingJournal) snapshot() (start JournalStart, opened int, prompts [
 
 // TestOnceJournalsAHeldFiringForTheLifeOfItsHold pins the live Event journal's lifecycle (ADR
 // 0103): a held Firing opens its journal through Spec.Journal before its first request, with the
-// record's id, the title the record will carry, its workspace and Entries 0, and writes the
-// Firing's prompt as the journal's first line; every Event passes through the journal on its way to
-// the caller's sink; and the journal is ended exactly once, after the record is saved and while
-// the hold is still taken.
+// record's id, the title the record will carry, its workspace, Entries 0 and the run's model and
+// window, and writes the Firing's prompt as the journal's first line; every Event passes through
+// the journal on its way to the caller's sink; and the journal is ended exactly once, after the
+// record is saved and while the hold is still taken.
 func TestOnceJournalsAHeldFiringForTheLifeOfItsHold(t *testing.T) {
 	t.Parallel()
 
@@ -3299,6 +3299,7 @@ func TestOnceJournalsAHeldFiringForTheLifeOfItsHold(t *testing.T) {
 	sink := &recordingSink{}
 	spec := planSpec(up.URL, prompt)
 	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.Context.MaxContextTokens = 65536
 	spec.Config.Events = sink
 	spec.Store = store
 	spec.RecordID = callerRecordID
@@ -3340,10 +3341,12 @@ func TestOnceJournalsAHeldFiringForTheLifeOfItsHold(t *testing.T) {
 	}
 
 	want := JournalStart{
-		RecordID:  callerRecordID,
-		Title:     got.res.Title,
-		Workspace: spec.Config.WorkspaceDir,
-		Entries:   0,
+		RecordID:      callerRecordID,
+		Title:         got.res.Title,
+		Workspace:     spec.Config.WorkspaceDir,
+		Entries:       0,
+		Model:         spec.Config.Model,
+		ContextWindow: 65536,
 	}
 	if start != want {
 		t.Errorf("JournalStart = %+v; want %+v", start, want)

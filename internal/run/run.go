@@ -227,7 +227,9 @@ func runWithin(ctx context.Context, a *agent.Agent, b Budget, elapsed func() tim
 
 // JournalStart is what a Firing's live Event journal opens with: the record it belongs to and the
 // facts its opening frame carries (ADR 0103 decision 3). Entries is always 0 — a Firing never
-// resumes a record, so its journal follows a record with no transcript before it.
+// resumes a record, so its journal follows a record with no transcript before it. Model and
+// ContextWindow are the run's binding as the journal opens, from the Firing's domain.Config, so a
+// watcher measures the run against its own model and window.
 type JournalStart struct {
 	// RecordID is the held record's id — the journal's file name and its lines' session.
 	RecordID string
@@ -237,6 +239,11 @@ type JournalStart struct {
 	Workspace string
 	// Entries is how many transcript entries the record held when the journal was born.
 	Entries int
+	// Model is the model the run is bound to (Config.Model); "" means unknown.
+	Model string
+	// ContextWindow is that model's context window in tokens (Config.Context.MaxContextTokens);
+	// 0 means unknown.
+	ContextWindow int
 }
 
 // LiveJournal is one open live Event journal as Once drives it. Wrap installs the sink it forwards
@@ -619,9 +626,11 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// once: the engine reports no event for a submission.
 	if isHeld && spec.Journal != nil {
 		if live := spec.Journal(JournalStart{
-			RecordID:  spec.RecordID,
-			Title:     spec.title(startedAt),
-			Workspace: cfg.WorkspaceDir,
+			RecordID:      spec.RecordID,
+			Title:         spec.title(startedAt),
+			Workspace:     cfg.WorkspaceDir,
+			Model:         cfg.Model,
+			ContextWindow: cfg.Context.MaxContextTokens,
 		}); live != nil {
 			tap.attach(live)
 			live.Prompt(spec.line(), false)

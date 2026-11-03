@@ -49,12 +49,14 @@ func (b *lockedBuffer) String() string {
 // journalOptions are the options every event-driven test opens a journal with.
 func journalOptions() JournalOptions {
 	return JournalOptions{
-		Session:   "s-1",
-		Title:     "fix the parser",
-		Workspace: "/work/project",
-		Entries:   3,
-		Now:       fixedClock,
-		Window:    stretchedWindow,
+		Session:       "s-1",
+		Title:         "fix the parser",
+		Workspace:     "/work/project",
+		Entries:       3,
+		Model:         "qwen3-coder",
+		ContextWindow: 65536,
+		Now:           fixedClock,
+		Window:        stretchedWindow,
 	}
 }
 
@@ -246,6 +248,31 @@ func TestJournalStopsAtTheFirstWriteError(t *testing.T) {
 	}
 }
 
+// A journal opened without a binding still writes both members, "" and 0 meaning unknown, so a
+// reader never has to tell a missing member from an unknown one.
+func TestJournalFrameWritesAnUnknownBindingAsZero(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	journal := NewJournal(&out, JournalOptions{Now: fixedClock})
+	journal.Close()
+	raw := lines(t, &out)
+	if len(raw) == 0 {
+		t.Fatal("got no lines, want the opening frame first")
+	}
+
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw[0]), &envelope); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw[0], err)
+	}
+	want := `{"session":"","workspace":"","title":"","entries":0,"model":"","context_window":0}`
+	if string(envelope.Data) != want {
+		t.Errorf("data = %s, want %s", envelope.Data, want)
+	}
+}
+
 func TestJournalFrames(t *testing.T) {
 	t.Parallel()
 
@@ -263,9 +290,10 @@ func TestJournalFrames(t *testing.T) {
 		data string
 	}{
 		{
-			name: "run_started carries the record's identity and entry count",
+			name: "run_started carries the record's identity, entry count, model and context window",
 			line: raw[0],
-			data: `{"session":"s-1","workspace":"/work/project","title":"fix the parser","entries":3}`,
+			data: `{"session":"s-1","workspace":"/work/project","title":"fix the parser","entries":3,` +
+				`"model":"qwen3-coder","context_window":65536}`,
 		},
 		{
 			name: "run_finished is an empty object",

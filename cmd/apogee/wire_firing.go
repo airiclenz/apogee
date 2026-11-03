@@ -1251,11 +1251,13 @@ func firingJournal(store *session.Store, report func(string)) run.JournalOpener 
 		}
 		return &firingJournalFile{
 			Journal: eventjson.NewJournal(file, eventjson.JournalOptions{
-				Session:   start.RecordID,
-				Title:     start.Title,
-				Workspace: start.Workspace,
-				Entries:   start.Entries,
-				Report:    say,
+				Session:       start.RecordID,
+				Title:         start.Title,
+				Workspace:     start.Workspace,
+				Entries:       start.Entries,
+				Model:         start.Model,
+				ContextWindow: start.ContextWindow,
+				Report:        say,
 			}),
 			file:  file,
 			store: store,
