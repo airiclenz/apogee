@@ -891,11 +891,18 @@ var gitReadSubcommands = map[string]bool{
 const GitCommandConfigNameSource = `core\.(sshcommand|editor|pager|askpass|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external|diff\..*\.(command|textconv)|merge\..*\.driver|mergetool\..*\.cmd|difftool\..*\.cmd|filter\..*\.(clean|smudge|process)|credential\.helper|credential\..*\.helper|gpg\.program|gpg\..*\.program|uploadpack\.packobjectshook|remote\..*\.proxy|pager\..*`
 
 // GitCommandConfigName is the shell write view's superset of gitexec's CommandConfigName: the
-// same names plus core.hookspath. The probe leaves core.hooksPath out on purpose — gitexec's
-// hardening options empty it on every call, so refusing it there would cost a repository its
-// git tools for a key that reaches no program — but a `git config` line that SETS it is a write
-// into the repository's control plane all the same, and that is what this pattern judges.
-var GitCommandConfigName = regexp.MustCompile(`^(` + GitCommandConfigNameSource + `|core\.hookspath)$`)
+// same names plus the keys git runs, or reads more config through, without being asked — the
+// hooks directory (core.hookspath), the fsmonitor hook (core.fsmonitor), the interactive diff
+// filter (interactive.difffilter) and the include paths (include.path, includeif.<cond>.path).
+// The probe leaves them out on purpose — gitexec's hardening options neutralise the first two on
+// every call and its --includes listing already reads what an include names, so refusing them
+// there would cost a repository its git tools for a key that reaches no program of apogee's —
+// but a `git config` line that SETS one is a write into the repository's control plane all the
+// same, run by the operator's next ordinary git, and that is what this pattern judges. alias.*
+// stays out: git runs an alias only when it is typed. A git-boolean core.fsmonitor value is
+// exempt in gitConfigWritesCommandKey, which reads the value this pattern cannot see.
+var GitCommandConfigName = regexp.MustCompile(`^(` + GitCommandConfigNameSource +
+	`|core\.hookspath|core\.fsmonitor|interactive\.difffilter|include\.path|includeif\..*\.path)$`)
 
 // gitConfigReadForms are the `git config` options under which the invocation only reads a
 // value and writes no config file.
@@ -1258,7 +1265,7 @@ func appendNonEmpty(words []string, w string) []string {
 
 // gitTargets judges a git command by its subcommand: a read verb contributes only the file an
 // output option names (`git diff --output=file`; outputOptionValues), any other verb's operands (the global options before it included) are write targets. A `config`
-// write of a command-valued key into the repository's own config additionally names
+// write of a GitCommandConfigName key into the repository's own config additionally names
 // `.git/config`, the file it lands in — its operands alone (`filter.x.clean cmd`) never spell
 // the control-plane path the write-git-control-plane rule matches, so the approval would not
 // show what the line really touches (the git tools' probe re-reads a changed config on its own).
@@ -1294,19 +1301,32 @@ func gitTargets(operands []string) []string {
 // gitConfigWritesCommandKey reports whether the operands of a `git config` invocation write a
 // command-valued key (GitCommandConfigName, matched on the lowered operand — git canonicalises
 // the name's case) into the repository's own config: no operand directs the write at another
-// file (gitConfigOtherFileOptions), none makes it a read (gitConfigReadForms).
+// file (gitConfigOtherFileOptions), none makes it a read (gitConfigReadForms). A core.fsmonitor
+// whose value word is a git boolean is no such write: `true` turns on git's builtin daemon and
+// `false` turns the hook off, so neither names a program in the workspace.
 func gitConfigWritesCommandKey(operands []string) bool {
 	matched := false
-	for _, w := range operands {
+	for i, w := range operands {
 		option, _, _ := strings.Cut(w, "=")
 		if gitConfigOtherFileOptions[option] || gitConfigReadForms[option] {
 			return false
 		}
-		if GitCommandConfigName.MatchString(strings.ToLower(w)) {
-			matched = true
+		name := strings.ToLower(w)
+		if !GitCommandConfigName.MatchString(name) {
+			continue
 		}
+		if name == "core.fsmonitor" && i+1 < len(operands) && gitBooleans[strings.ToLower(operands[i+1])] {
+			continue
+		}
+		matched = true
 	}
 	return matched
+}
+
+// gitBooleans are the value spellings git reads as a boolean (git-config(1), "boolean"), lowered:
+// git compares them case-insensitively.
+var gitBooleans = map[string]bool{
+	"true": true, "false": true, "yes": true, "no": true, "on": true, "off": true, "1": true, "0": true,
 }
 
 // ddTargets keeps only what dd writes: the values of its `of=` operands.

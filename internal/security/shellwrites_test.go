@@ -84,6 +84,14 @@ func TestWriteTargetsOf(t *testing.T) {
 		{"git config --global writes the operator's file, not .git/config", "git config --global filter.x.clean cmd", "filter.x.clean cmd"},
 		{"git config of a plain key names no file", "git config user.name x", "user.name x"},
 		{"git config --get is a read of the key", "git config --get filter.x.clean", "filter.x.clean"},
+		{"git config setting core.fsmonitor to a program names .git/config", "git config core.fsmonitor ./x", "core.fsmonitor ./x .git/config"},
+		{"git config setting core.fsmonitor to a git boolean names no file", "git config core.fsmonitor true", "core.fsmonitor true"},
+		{"git config setting core.fsmonitor false names no file", "git config core.fsmonitor FALSE", "core.fsmonitor FALSE"},
+		{"git config --global core.fsmonitor writes the operator's file", "git config --global core.fsmonitor x", "core.fsmonitor x"},
+		{"git config setting interactive.diffFilter names .git/config", "git config interactive.diffFilter ./x", "interactive.diffFilter ./x .git/config"},
+		{"git config setting include.path names .git/config", "git config include.path ../x.cfg", "include.path ../x.cfg .git/config"},
+		{"git config setting an includeIf path names .git/config", "git config includeIf.gitdir:/w/.path ../x.cfg", "includeIf.gitdir:/w/.path ../x.cfg .git/config"},
+		{"git config of an alias names no file", "git config alias.co checkout", "alias.co checkout"},
 
 		// --- dd ----------------------------------------------------------------------------
 		{"dd writes only its of=", "dd if=.git/config of=/tmp/x bs=1", "/tmp/x"},

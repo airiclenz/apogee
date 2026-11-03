@@ -26,7 +26,8 @@
 //     cap — refuses the call too ([CommandConfigIncompleteRefusal]) and is never memoised. The
 //     pattern's source string is internal/security's
 //     ([security.GitCommandConfigNameSource]), which the shell write view widens with
-//     core.hooksPath to name .git/config for a `git config` line that sets such a key.
+//     core.hooksPath, core.fsmonitor, interactive.diffFilter and the include paths to name
+//     .git/config for a `git config` line that sets such a key.
 //
 // Seven entry points, one funnel. [Host.Capture] returns the captured outcome — exit code and
 // output — for a caller rendering what git printed to the model. [Host.CaptureEnv] is Capture

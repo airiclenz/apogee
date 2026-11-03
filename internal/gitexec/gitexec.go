@@ -475,8 +475,9 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 // global-scope guards), where git compiles it with regcomp; the probe itself lists every key and
 // re-checks each against this compiled form. That source is [security.GitCommandConfigNameSource]: the
 // shell write view builds its own [security.GitCommandConfigName] from it — the same names PLUS
-// core.hookspath, because a `git config` line that sets the key is a write into .git/config
-// whatever the hardening options do to it afterwards — and this package imports security, never
+// core.hookspath, core.fsmonitor, interactive.difffilter and the include paths, because a
+// `git config` line that sets one is a write into .git/config whatever the hardening options do
+// to it afterwards — and this package imports security, never
 // the reverse, so the one string lives there.
 var CommandConfigName = regexp.MustCompile(`^(` + security.GitCommandConfigNameSource + `)$`)
 

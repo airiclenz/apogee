@@ -130,7 +130,11 @@ NOTES (2026-11-03): `env -S 'rm -f x'` now consumes the split string as a value,
 **Closes:** wrapper-option-values-leader
 **Commit:** `fix(security): consume wrapper option values before naming the leader`
 
-## 6. Count `core.fsmonitor` and include paths as git-control-plane writes
+## 6. Count `core.fsmonitor` and include paths as git-control-plane writes — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — internal/gitexec/gitexec.go: made necessary by widening security.GitCommandConfigName (the CommandConfigName comment named only core.hookspath as the write view's addition)
+NOTES (2026-11-03): consequential edit — internal/gitexec/doc.go: made necessary by widening security.GitCommandConfigName (the package doc named only core.hooksPath as the write view's widening)
+NOTES (2026-11-03): the boolean exemption reads the word right after the `core.fsmonitor` key; a line with no value word (`git config --unset core.fsmonitor`) still counts as a write, as every other GitCommandConfigName key already does.
 
 **What:** Fix: `git config core.fsmonitor ./x` synthesises no `.git/config` target, so `write-git-control-plane` never fires on a key git runs unprompted. Depends on item 5.
 **Regression guard.** Every per-item `go test` names one package: the tools half of the Acceptance runs alone (`./internal/tools/`), and `internal/gitexec` is dropped from it (no test there matches `Fsmonitor|HooksPath`). A `git config core.fsmonitor <value>` whose value is a git boolean (true/false/yes/no/on/off/1/0, case-insensitive) is not a control-plane write — it toggles git's builtin daemon and runs no workspace script — so the write view exempts boolean values for core.fsmonitor only; add rows: `git config core.fsmonitor true` and `git config core.fsmonitor false` stay unrefused, `git config core.fsmonitor ./x` hard-refuses.
