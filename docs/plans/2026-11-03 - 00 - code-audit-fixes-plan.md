@@ -182,7 +182,11 @@ NOTES (2026-11-03): the per-block cost is `reasoningBlockCost` = 1 KiB in client
 **Closes:** anthropic-thinking-block-cap
 **Commit:** `fix(provider): cap reasoning blocks in a streamed Anthropic reply`
 
-## 9. Expand each PDF reference array once and honour cancellation
+## 9. Expand each PDF reference array once and honour cancellation — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the 5k×5k timing case's budget is `testtime.Budget(time.Second)`, sized from Pi 5 measurements: at base the preflight alone took 1.94 s without -race; after the fix the whole ExtractPDF takes ~10 ms (~100 ms under -race). On a much faster box, a plain (non-race) run at base may finish under 1 s, so there the timing case bites only under `make test`'s -race.
+
+NOTES (2026-11-03): the member-first-then-site case is `TestDecodedReferences_ExpandsAnArrayFirstSeenAsAMember`, which calls `decodedReferences` directly rather than going through ExtractPDF; a mutation that reuses `named` as the skip set fails it.
 
 **What:** Fix: `decodedReferences` re-scans a referenced array for every `/Contents` or `/ToUnicode` site naming it, with no ctx check, so a hostile PDF stalls a Turn quadratically.
 **Regression guard.** `TestExtractPDF_HonoursACancelledContext` already gets `pdfCancelledCause` at base (largestInflation's ctx check, pdf.go:555-557) and nothing lets a test cancel mid-scan, so the cancellation row tests `decodedReferences(ctx, …)` directly with a pre-cancelled ctx on the 5k×5k fixture, expecting the ctx error; the item's bite comes from the `testtime.Budget` timing case alone.

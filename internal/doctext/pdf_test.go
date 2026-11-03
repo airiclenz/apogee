@@ -9,6 +9,7 @@ import (
 	"crypto/rc4"
 	"encoding/ascii85"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/adler32"
 	"os"
@@ -20,6 +21,8 @@ import (
 	"time"
 
 	"github.com/ledongthuc/pdf"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // readPDFFixture returns the bytes of a committed PDF under testdata. The fixtures are
@@ -1062,6 +1065,112 @@ func TestExtractPDF_ChargesAContentStreamWhateverItsLabel(t *testing.T) {
 
 	if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
 		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+	}
+}
+
+// sharedArrayReferences and sharedArraySites size the quadratic-scan fixture: one array object of
+// that many references, named by that many /Contents sites. Expanded once per site, the array
+// costs the preflight twenty-five million reference reads; expanded once, ten thousand.
+const (
+	sharedArrayReferences = 5000
+	sharedArraySites      = 5000
+)
+
+// sharedArrayPDF builds a one-page document beside an array object (object 6) of `references`
+// references and `sites` further objects whose /Contents each names that array. The page tree
+// reaches none of the sites, so the parser never reads them: only the preflight's raw scan does,
+// which is exactly the work a hostile document can multiply.
+func sharedArrayPDF(t *testing.T, references, sites int) []byte {
+	t.Helper()
+
+	array := "[" + strings.Repeat("5 0 R ", references) + "]"
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]" +
+			" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+		contentStream("Beside a shared array"),
+		array,
+	}
+	for range sites {
+		objects = append(objects, "<< /Contents 6 0 R >>")
+	}
+	return hostilePDF(t, objects...)
+}
+
+// TestExtractPDF_ScansASharedReferenceArrayOnce pins the preflight's cost to the document's size:
+// an array object named by thousands of /Contents sites is expanded once, not once per site, so a
+// hostile document of a few hundred kibibytes cannot stall a Turn quadratically before any read
+// budget applies. The budget sits between the two costs as measured on a Raspberry Pi 5: the whole
+// extraction takes ~10 ms (~100 ms under -race) once the array is expanded once, and the quadratic
+// preflight alone took ~1.9 s without the race detector.
+func TestExtractPDF_ScansASharedReferenceArrayOnce(t *testing.T) {
+	t.Parallel()
+
+	data := sharedArrayPDF(t, sharedArrayReferences, sharedArraySites)
+	budget := testtime.Budget(time.Second)
+
+	start := time.Now()
+	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+	elapsed := time.Since(start)
+
+	if failMessage != "" {
+		t.Fatalf("ExtractPDF failed: %s", failMessage)
+	}
+	if pages != 1 || !strings.Contains(text, "Beside a shared array") {
+		t.Errorf("text = %q, pages = %d, want the page's own text", text, pages)
+	}
+	if elapsed > budget {
+		t.Errorf("extraction took %s, want at most %s: the shared array was expanded once per site",
+			elapsed, budget)
+	}
+}
+
+// TestDecodedReferences_ExpandsAnArrayFirstSeenAsAMember pins why an expanded array is tracked
+// apart from a named number: object 4 is first reached as a member of the array object 3, which
+// names it without resolving it, and a later /Contents naming 4 directly must still reach its own
+// member, object 6.
+func TestDecodedReferences_ExpandsAnArrayFirstSeenAsAMember(t *testing.T) {
+	t.Parallel()
+
+	data := hostilePDF(t,
+		"<< /Type /Catalog >>",
+		"<< /Contents 3 0 R >>",
+		"[4 0 R]",
+		"[6 0 R]",
+		"<< /Contents 4 0 R >>",
+		contentStream("Behind a nested array"))
+
+	decoded, err := decodedReferences(context.Background(), data, indexPDFObjects(data))
+
+	if err != nil {
+		t.Fatalf("decodedReferences: %v", err)
+	}
+	for _, number := range []int64{3, 4, 6} {
+		if !decoded[number] {
+			t.Errorf("decoded = %v, want it to name object %d", decoded, number)
+		}
+	}
+}
+
+// TestDecodedReferences_HonoursACancelledContext pins the site loop's own cancellation check: a
+// document with thousands of sites stops at the first one once the Turn is cancelled, and the
+// context's error comes back for preflightPDF to report as pdfCancelledCause.
+func TestDecodedReferences_HonoursACancelledContext(t *testing.T) {
+	t.Parallel()
+
+	data := sharedArrayPDF(t, sharedArrayReferences, sharedArraySites)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	decoded, err := decodedReferences(ctx, data, indexPDFObjects(data))
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if decoded != nil {
+		t.Errorf("decoded = %v, want nil on cancellation", decoded)
 	}
 }
 

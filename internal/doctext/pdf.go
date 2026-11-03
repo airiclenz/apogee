@@ -540,7 +540,10 @@ func preflightPDF(ctx context.Context, data []byte) string {
 		}
 	}
 
-	decoded := decodedReferences(data, indexPDFObjects(data))
+	decoded, err := decodedReferences(ctx, data, indexPDFObjects(data))
+	if err != nil {
+		return pdfCancelledCause
+	}
 	remaining := int64(pdfMaxInflatedBytes)
 	for _, stream := range locatePDFStreams(data) {
 		if !stream.owned {
@@ -1284,30 +1287,62 @@ func pdfObjectHeaders(span []byte) []pdfObjectHeader {
 // the two ways the text path reaches a stream by reference (page.go GetPlainText, readCmap).
 // A direct reference, an inline array of references and a reference to an array object are all
 // read; the array object is resolved one level, because that is how far the parser looks.
-func decodedReferences(data []byte, objects []pdfObject) map[int64]bool {
+//
+// Each array object is expanded once however many sites name it, so the scan costs the document's
+// size rather than its sites times its references. The context is checked before every site, and
+// its error is returned with a nil set when it is done: a hostile document's sites run into the
+// hundreds of thousands, and a cancelled Turn must not wait for them.
+func decodedReferences(ctx context.Context, data []byte, objects []pdfObject) (map[int64]bool, error) {
+	references := newPDFReferenceSet(objects)
+	for _, span := range withoutStreamBodies(data) {
+		for _, key := range []string{"Contents", "ToUnicode"} {
+			for _, site := range pdfNameSites(span, key) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				references.name(pdfReferencesAt(span, site))
+			}
+		}
+	}
+	return references.named, nil
+}
+
+// pdfReferenceSet is decodedReferences' accumulator: the numbers named so far, and apart from them
+// the numbers whose array object has been expanded. The two sets differ on purpose — a number
+// first seen as an array's member is named but not expanded, because the parser resolves only one
+// level, and a site that later names it directly must still reach its own members.
+type pdfReferenceSet struct {
+	byNumber map[int64]pdfObject
+	named    map[int64]bool
+	expanded map[int64]bool
+}
+
+// newPDFReferenceSet returns an empty set that resolves numbers against objects.
+func newPDFReferenceSet(objects []pdfObject) *pdfReferenceSet {
 	byNumber := make(map[int64]pdfObject, len(objects))
 	for _, object := range objects {
 		byNumber[object.number] = object
 	}
+	return &pdfReferenceSet{byNumber: byNumber, named: map[int64]bool{}, expanded: map[int64]bool{}}
+}
 
-	named := map[int64]bool{}
-	for _, span := range withoutStreamBodies(data) {
-		for _, key := range []string{"Contents", "ToUnicode"} {
-			for _, site := range pdfNameSites(span, key) {
-				for _, number := range pdfReferencesAt(span, site) {
-					named[number] = true
-					// A stream object's value is its dictionary, which names no reference at
-					// its start, so only an array object resolves to members here.
-					if object, ok := byNumber[number]; ok {
-						for _, member := range pdfReferencesAt(object.value, 0) {
-							named[member] = true
-						}
-					}
-				}
+// name records the numbers one site names, and the members of each one that is an array object
+// not yet expanded.
+func (s *pdfReferenceSet) name(numbers []int64) {
+	for _, number := range numbers {
+		s.named[number] = true
+		if s.expanded[number] {
+			continue
+		}
+		s.expanded[number] = true
+		// A stream object's value is its dictionary, which names no reference at its start, so
+		// only an array object resolves to members here.
+		if object, ok := s.byNumber[number]; ok {
+			for _, member := range pdfReferencesAt(object.value, 0) {
+				s.named[member] = true
 			}
 		}
 	}
-	return named
 }
 
 // chargesInflation decides whether a stream's inflation counts against the document's budget:
