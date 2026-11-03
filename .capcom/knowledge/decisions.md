@@ -107,6 +107,7 @@ title: "apogee's decision records: one Note per record, with each of its section
 - `adr-0103` — Live sessions are watchable through a Driver-written event journal
 - `adr-0104` — Project config execution keys are adoption-gated entries
 - `adr-0105` — A server entry may name fallback servers, and a failed seat falls over one-way
+- `adr-0106` — Pointer shapes on hover are OSC 22, probe-gated and off by default
 
 > **Note (2026-10-29, knowledge inventory).** Older records point at files that have since moved.
 > Read those pointers through this map; the records keep their spellings as written.

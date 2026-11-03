@@ -44,7 +44,7 @@
 - 4 (round 2): guard folded (Goal's outside-box rule rewritten; `onRow` struck from Approach; settings `kind == settingsKeyList` gate; click tests added to Acceptance)
 - 7 (round 2): recast (writer's decision: Bubble Tea v2.0.8 flushes queued `tea.Raw` on release and shutdown, premise corrected; exit reset on both screen stacks; editor-handoff reset kept; suspend dropped) plus the report's guards (written flag, `reassertCount` prefix match, `TestClaimTerminalScreen` in Acceptance)
 
-## 1. ADR 0106 — probe-gated OSC 22 pointer shapes
+## 1. ADR 0106 — probe-gated OSC 22 pointer shapes — ✅ DONE (2026-11-03)
 
 **What:**
 **Goal:** the `decisions` tree holds `adr-0106` with context, decision, rejected and consequences children recording this plan's ratified calls.
