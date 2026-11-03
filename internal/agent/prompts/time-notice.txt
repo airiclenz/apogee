@@ -1,0 +1,1 @@
+time: %s of %s elapsed — %s left before the wrap-up Turn; write your output now

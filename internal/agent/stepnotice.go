@@ -1,5 +1,7 @@
 package agent
 
+import "time"
+
 // The step-budget notice: an ENGINE NOTE, structural at depth ≥ 1 — never a Reaction, so no
 // switch, no Reaction id, no firing, and on under Bypass with the clamp and the wrap-up directive.
 // Only a delegate carries a step cap (delegateLimits.steps), so it speaks to a CHILD agent and a child
@@ -21,8 +23,14 @@ package agent
 // of 20M without a word. Neither notice is a rung of that ladder: the ladder measures ONE
 // request's fill against the window, these measure the delegation's whole spend against its cap.
 //
-// Each notice is its bound's row's (boundRows, delegatelimits.go: boundRow.notice), and
-// budgetNotices below is the one seam that reads them.
+// The time-budget notice completes the set for the third bound (delegateLimits.time,
+// `delegate-timeout`): the same fence, latch and append site, fired once when the wall clock since
+// the child's Run began (delegateLimits.start, read through the injected clock Agent.now) reaches
+// three quarters of the timeout — so a delegate that has used most of its time is told so before
+// the wrap-up Turn, as it is for the Turns and the tokens.
+//
+// Three notices, one table: each is its bound's row's (boundRows, delegatelimits.go:
+// boundRow.notice), and budgetNotices below is the one seam that reads them.
 
 // stepNoticeTopic is the engine-note topic the notice is fenced under on the closing tool result
 // — `[engine — step budget]` … `[end engine — step budget]` — and the Topic its ledger row carries.
@@ -49,6 +57,20 @@ const tokenNoticeShare = 0.75
 // spent, the cap, and the tokens left before the wrap-up Turn, each rendered by formatTokens.
 var tokenNoticeLine = mustPrompt("token-notice.txt")
 
+// timeNoticeTopic is the engine-note topic the time-budget notice is fenced under —
+// `[engine — time budget]` … `[end engine — time budget]` — and the Topic its ledger row carries.
+const timeNoticeTopic = "time budget"
+
+// timeNoticeShare is the share of the time cap the time-budget notice fires at: the wall clock
+// since the child's Run began reaching ceil(timeNoticeShare × cap). Fixed for stepNoticeShare's
+// reason.
+const timeNoticeShare = 0.75
+
+// timeNoticeLine is the time notice's fact line format (prompts/time-notice.txt): the time
+// elapsed, the cap, and the time left before the wrap-up Turn, each in whole seconds and spelled
+// as the time markers spell the cap (boundDurationText).
+var timeNoticeLine = mustPrompt("time-notice.txt")
+
 // budgetNote is one fired budget notice: the engine-note topic it is fenced under and its text.
 type budgetNote struct {
 	topic string
@@ -57,11 +79,12 @@ type budgetNote struct {
 
 // budgetNotices is the budget notices' one seam, consulted by appendToolResult for every tool
 // result that reaches history: it returns the notes the result about to be committed carries, in
-// bound-row order (boundRows: the step note, then the token note), and none when no notice fires.
-// Each bound's notice (boundRow.notice) fires when what the delegate has spent of the bound —
-// the Turn this result closes for steps, the cumulative prompt tokens (Agent.usage, the tally the
-// token bound itself is enforced against) for tokens — has reached its threshold
-// (boundNotice.threshold: stepNoticeThreshold, tokenNoticeThreshold) while no copy of that note
+// bound-row order (boundRows: the step note, then the token note, then the time note), and none
+// when no notice fires. Each bound's notice (boundRow.notice) fires when what the delegate has
+// spent of the bound — the Turn this result closes for steps, the cumulative prompt tokens
+// (Agent.usage, the tally the token bound itself is enforced against) for tokens, the wall clock
+// since its Run began for time — has reached its threshold (boundNotice.threshold:
+// stepNoticeThreshold, tokenNoticeThreshold, timeNoticeThreshold) while no copy of that note
 // stands in the conversation, so it lands ONCE: a Turn with several tool calls commits once per
 // call, and the first result past the threshold carries the note that keeps every later result
 // silent while it survives. The latch IS the note's own presence (Conversation.HasEngineNote,
@@ -108,11 +131,17 @@ func (a *Agent) budgetNotice(notice *boundNotice) (string, bool) {
 // stepNoticeThreshold is the Turn count the notice fires at for cap: ceil(stepNoticeShare × cap),
 // so a cap of 4 warns after Turn 3 and a cap of 80 after Turn 60.
 func stepNoticeThreshold(stepCap int) int {
-	return boundSteps.row().notice.threshold(stepCap)
+	return int(boundSteps.row().notice.threshold(int64(stepCap)))
 }
 
 // tokenNoticeThreshold is the cumulative prompt-token count the token notice fires at for cap:
 // ceil(tokenNoticeShare × cap), so the default 20M budget warns at 15M.
 func tokenNoticeThreshold(tokenCap int) int {
-	return boundTokens.row().notice.threshold(tokenCap)
+	return int(boundTokens.row().notice.threshold(int64(tokenCap)))
+}
+
+// timeNoticeThreshold is the wall clock the time notice fires at for cap: ceil(timeNoticeShare ×
+// cap), so the default 2h timeout warns at 1h30m.
+func timeNoticeThreshold(timeCap time.Duration) time.Duration {
+	return time.Duration(boundTime.row().notice.threshold(int64(timeCap)))
 }

@@ -7,11 +7,13 @@ package agent
 // second result of the same Turn, depth 0, an unbounded cap, Bypass, a rollback — and the fold
 // test proves a fold that swallowed the note has it told again. The token-budget notice, its twin
 // for the token cap, is pinned by the same suite over the child's cumulative prompt tokens
-// (TestTokenNotice*), at the foot of this file.
+// (TestTokenNotice*), and the time-budget notice over the wall clock since the child's Run began,
+// read through the injected clock (TestTimeNotice*), at the foot of this file.
 
 import (
 	"strings"
 	"testing"
+	"time"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -660,16 +662,18 @@ func TestClampedDelegateResultWithStepNoticeFitsTheRoom(t *testing.T) {
 }
 
 // TestTrailerFenceOrder pins the fence order on a clamped closing result: the clamped tool output,
-// the advice, the step note, the token note — each span's offset measured from the clamped content
-// and past every earlier fence, so counting the trailers inside the bound moved none of them.
+// the advice, the step note, the token note, the time note — each span's offset measured from the
+// clamped content and past every earlier fence, so counting the trailers inside the bound moved
+// none of them.
 func TestTrailerFenceOrder(t *testing.T) {
 	a := stepNoticeChild(t, stepNoticeConfig(&recordingSink{}), 4)
-	withBounds(a, testBounds{steps: 4, tokens: tokenCapTwentyMillion})
+	withBounds(a, testBounds{steps: 4, tokens: tokenCapTwentyMillion, time: timeCapTwoHours, start: timeNoticeStart})
 	a.usage.prompt = 15_200_000
 	a.turns.exchangeTurns = 2
+	pinClock(a, timeNoticeStart.Add(90*time.Minute))
 	notes := a.budgetNotices()
-	if len(notes) != 2 || notes[0].topic != stepNoticeTopic || notes[1].topic != tokenNoticeTopic {
-		t.Fatalf("test setup: budget notes = %+v, want the step note then the token note", notes)
+	if len(notes) != 3 || notes[0].topic != stepNoticeTopic || notes[1].topic != tokenNoticeTopic || notes[2].topic != timeNoticeTopic {
+		t.Fatalf("test setup: budget notes = %+v, want the step note, the token note, then the time note", notes)
 	}
 	advised := trailerAdvice("Re-read the range before editing it.")
 	body := numberedLines(4000)
@@ -677,8 +681,8 @@ func TestTrailerFenceOrder(t *testing.T) {
 	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: body}, "", advised)
 
 	msg := a.conv.At(a.conv.Len() - 1)
-	if len(msg.Advice) != 3 {
-		t.Fatalf("ledger = %+v, want the advice span, the step note and the token note", msg.Advice)
+	if len(msg.Advice) != 4 {
+		t.Fatalf("ledger = %+v, want the advice span, the step note, the token note and the time note", msg.Advice)
 	}
 	clamped := msg.Content[:msg.Advice[0].Offset]
 	if len(clamped) >= len(body) || !strings.Contains(clamped, "start_line/end_line") {
@@ -687,8 +691,9 @@ func TestTrailerFenceOrder(t *testing.T) {
 	adviceFence := domain.RenderAdvice(advised[0].span, advised[0].text)
 	stepFence := domain.RenderEngineNote(stepNoticeTopic, notes[0].text)
 	tokenFence := domain.RenderEngineNote(tokenNoticeTopic, notes[1].text)
-	if want := clamped + adviceFence + stepFence + tokenFence; msg.Content != want {
-		t.Errorf("committed content after the clamped output =\n%q\nwant advice, step note, token note:\n%q",
+	timeFence := domain.RenderEngineNote(timeNoticeTopic, notes[2].text)
+	if want := clamped + adviceFence + stepFence + tokenFence + timeFence; msg.Content != want {
+		t.Errorf("committed content after the clamped output =\n%q\nwant advice, step note, token note, time note:\n%q",
 			msg.Content[len(clamped):], want[len(clamped):])
 	}
 	wantSpan := advised[0].span
@@ -697,10 +702,227 @@ func TestTrailerFenceOrder(t *testing.T) {
 		wantSpan,
 		{Origin: domain.OriginEngine, Offset: len(clamped) + len(adviceFence), Topic: stepNoticeTopic},
 		{Origin: domain.OriginEngine, Offset: len(clamped) + len(adviceFence) + len(stepFence), Topic: tokenNoticeTopic},
+		{Origin: domain.OriginEngine, Offset: len(clamped) + len(adviceFence) + len(stepFence) + len(tokenFence), Topic: timeNoticeTopic},
 	}
 	for i, want := range wantLedger {
 		if msg.Advice[i] != want {
 			t.Errorf("ledger row %d = %+v, want %+v", i, msg.Advice[i], want)
 		}
 	}
+}
+
+// The time-budget notice: the step notice's twin over the wall clock since the child's Run began
+// (delegateLimits.start) against its time cap (`delegate-timeout`), read through the injected
+// clock (Agent.now) so no test waits on a real one.
+
+// timeCapTwoHours is the default `delegate-timeout`, the cap every time-notice test runs under.
+const timeCapTwoHours = 2 * time.Hour
+
+// timeNoticeStart is the clock reading a time-notice child's bound counts from.
+var timeNoticeStart = time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+
+const (
+	timeNoticeLineNinetyMinutes = "time: 1h30m of 2h0m elapsed — 30m left before the wrap-up Turn; write your output now"
+	timeNoticeLineOneOhFive     = "time: 1h45m of 2h0m elapsed — 15m left before the wrap-up Turn; write your output now"
+	timeNoticeLineThreeThirty   = "time: 3h30m of 2h0m elapsed — 0s left before the wrap-up Turn; write your output now"
+)
+
+// pinClock makes at the only reading a's injected clock gives.
+func pinClock(a *Agent, at time.Time) {
+	a.now = func() time.Time { return at }
+}
+
+// requestClock is a clock that reads timeNoticeStart plus step for every request responder has
+// taken, so the time a scripted child has spent is fixed by the Turns it has asked for and not by
+// how often the engine reads the clock between them.
+func requestClock(responder *requestLogResponder, step time.Duration) func() time.Time {
+	return func() time.Time {
+		return timeNoticeStart.Add(time.Duration(responder.calls) * step)
+	}
+}
+
+// timeNoticeChild is stepNoticeChild for the time cap: a depth-1 Agent whose bound started at
+// timeNoticeStart and whose clock reads elapsed past it, with no step cap, so nothing but the time
+// notice can fire.
+func timeNoticeChild(t *testing.T, cfg domain.Config, timeCap, elapsed time.Duration) *Agent {
+	t.Helper()
+
+	a := stepNoticeChild(t, cfg, 0)
+	withBounds(a, testBounds{time: timeCap, start: timeNoticeStart})
+	pinClock(a, timeNoticeStart.Add(elapsed))
+	return a
+}
+
+// timeNoticeRendered is the exact fence the time notice appends.
+func timeNoticeRendered(line string) string {
+	return domain.RenderEngineNote(timeNoticeTopic, line)
+}
+
+// assertTimeNoted is assertStepNoted for the time notice's topic.
+func assertTimeNoted(t *testing.T, msg domain.Message, body, line string) {
+	t.Helper()
+	assertEngineNoted(t, msg, body, timeNoticeTopic, line)
+}
+
+// assertNoTimeFiring asserts the time notice booked nothing: a structural note has no firing.
+func assertNoTimeFiring(t *testing.T, sink *recordingSink) {
+	t.Helper()
+
+	for _, fe := range firedAdvice(sink) {
+		if strings.Contains(fe.Reaction, "time") || strings.HasPrefix(fe.Detail, "time") {
+			t.Errorf("the stream booked a firing for the time notice, want none: %+v", fe)
+		}
+	}
+}
+
+// The whole contract through the loop: a child under the 2h cap whose every request lands 35m
+// after the last hears the notice exactly once, on the tool result closing Turn 3 — the first at
+// or past ceil(0.75 × 2h) = 1h30m, at 1h45m — as the engine fence with the exact figures and a
+// ledger row on the topic, and nothing is booked. Turns 1 and 2 (35m, 1h10m) land bare, and Turn
+// 4's too: past the threshold, but the note is still live. Turn 4 reaches 2h20m, so the time bound
+// ends the run through the wrap-up.
+func TestTimeNoticeFiresOnceAtThreeQuartersOfTheLimit(t *testing.T) {
+	sink := &recordingSink{}
+	scripts := append(cappedChildTurns(4), contentScript(childFoldSummary), contentScript(childClosingReport))
+	responder := &requestLogResponder{scripts: scripts}
+	a, err := newAgent(stepNoticeConfig(sink), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.depth = 1
+	withBounds(a, testBounds{time: timeCapTwoHours})
+	a.now = requestClock(responder, 35*time.Minute)
+
+	res := runExchange(t, a, "trawl the repo")
+
+	if !res.StepCapped {
+		t.Fatalf("the child ended %+v, want it capped — the notice is measured against a limit the run meets", res)
+	}
+	if hit := boundsOf(a).hit; hit != boundTime {
+		t.Fatalf("the bound that ended the child = %v, want the time bound", hit)
+	}
+	assertNoTimeFiring(t, sink)
+	msgs := toolMessages(a)
+	if len(msgs) != 4 {
+		t.Fatalf("conversation holds %d tool messages, want 4 — the Turns the limit allowed", len(msgs))
+	}
+	for i, msg := range msgs {
+		if i == 2 {
+			continue
+		}
+		assertBare(t, i, msg, "package main")
+	}
+	assertTimeNoted(t, msgs[2], "package main", timeNoticeLineOneOhFive)
+}
+
+// The threshold is ceil(0.75 × cap) of wall clock: the default 2h timeout warns at 1h30m.
+func TestTimeNoticeThresholdIsThreeQuartersOfTheLimit(t *testing.T) {
+	cases := map[time.Duration]time.Duration{
+		timeCapTwoHours: 90 * time.Minute,
+		time.Minute:     45 * time.Second,
+		time.Second:     750 * time.Millisecond,
+		3:               3, // ceil(2.25ns): a cap too small for a fraction still warns before it trips
+	}
+	for timeCap, want := range cases {
+		if got := timeNoticeThreshold(timeCap); got != want {
+			t.Errorf("timeNoticeThreshold(%v) = %v, want %v", timeCap, got, want)
+		}
+	}
+}
+
+// Silent everywhere it has nothing to say: at depth 0 (no cap), on an unbounded delegation (cap
+// 0), on a clock short of the threshold by one second, and on a bound whose clock never started.
+func TestTimeNoticeIsSilentAtDepthZeroUnboundedAndUnderTheThreshold(t *testing.T) {
+	cases := []struct {
+		name     string
+		depth    int
+		timeCap  time.Duration
+		elapsed  time.Duration
+		unstated bool
+	}{
+		{name: "depth 0", depth: 0, timeCap: timeCapTwoHours, elapsed: 100 * time.Minute},
+		{name: "unbounded limit", depth: 1, timeCap: 0, elapsed: 100 * time.Minute},
+		{name: "under the threshold", depth: 1, timeCap: timeCapTwoHours, elapsed: 90*time.Minute - time.Second},
+		{name: "clock never started", depth: 1, timeCap: timeCapTwoHours, elapsed: 100 * time.Minute, unstated: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			a := timeNoticeChild(t, stepNoticeConfig(sink), tc.timeCap, tc.elapsed)
+			a.depth = tc.depth
+			if tc.unstated {
+				a.limits.start = time.Time{}
+			}
+
+			msg := adviseOneCall(t, a, "body")
+
+			assertBare(t, 0, msg, "body")
+			assertNoTimeFiring(t, sink)
+		})
+	}
+}
+
+// Structural means on under Bypass: the note fires at exactly three quarters, as with Bypass off.
+func TestTimeNoticeFiresUnderBypass(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := stepNoticeConfig(sink)
+	cfg.Bypass = true
+	a := timeNoticeChild(t, cfg, timeCapTwoHours, 90*time.Minute)
+
+	msg := adviseOneCall(t, a, "body")
+
+	assertTimeNoted(t, msg, "body", timeNoticeLineNinetyMinutes)
+	assertNoTimeFiring(t, sink)
+}
+
+// A fold between the notice Turn and the bound swallows the note with the history it sat in, and
+// the next tool result is told again. Every request lands 35m after the last: the child hears the
+// note on Turn 3 at 1h45m, Turn 4's request overflows and the emergency fold replaces the
+// conversation, and Turn 4's re-sent result — six requests in, at 3h30m, past the threshold with
+// no note live — carries it once more, with 0s left; the time bound then ends the run.
+func TestTimeNoticeIsToldAgainAfterAFoldSwallowedIt(t *testing.T) {
+	sink := &recordingSink{}
+	turns := cappedChildTurns(4)
+	scripts := [][]provider.Delta{
+		turns[0], turns[1], turns[2],
+		{{Kind: provider.DeltaContextOverflow, Err: "apogee: context window exceeded"}}, // Turn 4's first request
+		contentScript("FOLDED"), // the overflow fold's summary call
+		turns[3],                // Turn 4 re-sent over the folded conversation
+		contentScript(childFoldSummary),
+		contentScript(childClosingReport),
+	}
+	responder := &requestLogResponder{scripts: scripts}
+	cfg := stepNoticeConfig(sink)
+	cfg.Context.CompactionEnabled = true
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.depth = 1
+	withBounds(a, testBounds{time: timeCapTwoHours})
+	a.now = requestClock(responder, 35*time.Minute)
+
+	res := runExchange(t, a, "trawl the repo")
+
+	if !res.StepCapped || boundsOf(a).hit != boundTime {
+		t.Fatalf("the child ended %+v at bound %v, want it capped by the time bound", res, boundsOf(a).hit)
+	}
+	if responder.calls != len(scripts) {
+		t.Fatalf("the upstream took %d requests, want %d — three Turns, the overflow, its fold, the re-sent Turn, the engine fold and the wrap-up", responder.calls, len(scripts))
+	}
+	overflowed := responder.requests[3].Messages
+	if tail := overflowed[len(overflowed)-1].Content; !strings.HasSuffix(tail, timeNoticeRendered(timeNoticeLineOneOhFive)) {
+		t.Errorf("the overflowed request's tail = %q, want Turn 3's result carrying the note", tail)
+	}
+	for _, msg := range responder.requests[5].Messages {
+		if strings.Contains(msg.Content, domain.EngineNoteFencePrefix+timeNoticeTopic) {
+			t.Errorf("the re-sent request still carries the note in %q; the fold should have swallowed it", msg.Content)
+		}
+	}
+	msgs := toolMessages(a)
+	if len(msgs) != 1 {
+		t.Fatalf("conversation holds %d tool messages after the fold, want the one post-fold result", len(msgs))
+	}
+	assertTimeNoted(t, msgs[0], "package main", timeNoticeLineThreeThirty)
+	assertNoTimeFiring(t, sink)
 }

@@ -266,7 +266,12 @@ Depends on items 4 and 7.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestClampedResultWithAdviceFitsTheRoom|TestClampedDelegateResultWithStepNoticeFitsTheRoom|TestUnknownWindowClampCountsTrailers|TestTrailerFenceOrder|TestFreshResult|TestStepNotice|TestTokenNotice|TestContextFillNotice' ./internal/agent/`
 **Commit:** `fix(agent): count a tool result's trailers inside its fresh-result bound`
 
-## 9. A delegate's time-budget notice
+## 9. A delegate's time-budget notice — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — internal/agent/delegatelimits_test.go: made necessary by the time row gaining a notice (TestBoundRowsRenderEverySurface's time row now pins its render; noticeGolden's spent/limit widened to int64)
+NOTES (2026-11-03): consequential edit — internal/agent/dispatch.go: made necessary by the time note joining the fixed fence order appendToolResult's comment states (advice, step note, token note, time note)
+NOTES (2026-11-03): boundNotice's spent/limit/render/threshold widened from int to int64 so a time bound counted in nanoseconds holds on a 32-bit build; the step and token rows convert at their closures, and stepNoticeThreshold/tokenNoticeThreshold keep their int signatures. Added timeNoticeThreshold (time.Duration) and TestTimeNoticeThresholdIsThreeQuartersOfTheLimit beside the named tests; the silent test also covers a bound whose clock never started (zero start reads as nothing spent).
+NOTES (2026-11-03): the loop tests drive the clock off the responder's request count (requestClock) rather than a stepping clock, so the elapsed time a Turn sees does not depend on how often the engine reads Agent.now. Comments in internal/domain/conversation.go and internal/tui/advicepane.go still list the step and token notices as examples only; left for item 10's listing sweep.
 
 Depends on item 8.
 

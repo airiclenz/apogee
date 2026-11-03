@@ -125,12 +125,15 @@ type boundNotice struct {
 	topic string
 	// share is the share of the bound the notice fires at: spent reaching ceil(share × limit).
 	share float64
-	// spent is what the delegate has used of the bound at the result about to be committed.
-	spent func(a *Agent) int
-	// limit is the bound applied; 0 is unbounded, and an unbounded delegation is never told.
-	limit func(limits delegateLimits) int
+	// spent is what the delegate has used of the bound at the result about to be committed, in
+	// the bound's own unit: Turns, prompt tokens, or nanoseconds of wall clock for time — int64 so
+	// a time bound counts the same on a 32-bit build.
+	spent func(a *Agent) int64
+	// limit is the bound applied, in spent's unit; 0 is unbounded, and an unbounded delegation is
+	// never told.
+	limit func(limits delegateLimits) int64
 	// render is the notice's fact line for spent of limit, in the notice's own spelling.
-	render func(spent, limit int) string
+	render func(spent, limit int64) string
 }
 
 // boundRows is the table: one row per delegateBound, in the order delegateBoundHit checks them —
@@ -154,9 +157,9 @@ var boundRows = [...]boundRow{
 			share: stepNoticeShare,
 			// turns.exchangeTurns is advanced by Run AFTER step() returns, so at the commit of
 			// Turn N it reads N-1 and the Turn under way is one more.
-			spent: func(a *Agent) int { return a.turns.exchangeTurns + 1 },
-			limit: func(l delegateLimits) int { return l.steps },
-			render: func(used, stepCap int) string {
+			spent: func(a *Agent) int64 { return int64(a.turns.exchangeTurns + 1) },
+			limit: func(l delegateLimits) int64 { return int64(l.steps) },
+			render: func(used, stepCap int64) string {
 				return fmt.Sprintf(stepNoticeLine, used, stepCap, stepCap-used)
 			},
 		},
@@ -180,13 +183,13 @@ var boundRows = [...]boundRow{
 			share: tokenNoticeShare,
 			// The Turn under way has already booked its usage: the server's report lands on the
 			// stream before the tool runs (loop.go, DeltaDone).
-			spent: func(a *Agent) int { return a.usage.prompt },
-			limit: func(l delegateLimits) int { return l.tokens },
+			spent: func(a *Agent) int64 { return int64(a.usage.prompt) },
+			limit: func(l delegateLimits) int64 { return int64(l.tokens) },
 			// The tokens-left figure floors at 0: the result closing the Turn that crossed the cap
 			// commits before the boundary trips the bound, and "0 left" is what the wrap-up states.
-			render: func(spent, tokenCap int) string {
+			render: func(spent, tokenCap int64) string {
 				left := max(tokenCap-spent, 0)
-				return fmt.Sprintf(tokenNoticeLine, formatTokens(spent), formatTokens(tokenCap), formatTokens(left))
+				return fmt.Sprintf(tokenNoticeLine, formatTokens(int(spent)), formatTokens(int(tokenCap)), formatTokens(int(left)))
 			},
 		},
 	},
@@ -203,7 +206,29 @@ var boundRows = [...]boundRow{
 			return l.time > 0 && !l.start.IsZero() && now().Sub(l.start) >= l.time
 		},
 		marker: func(l delegateLimits) any { return boundDurationText(l.time) },
+		notice: &boundNotice{
+			topic: timeNoticeTopic,
+			share: timeNoticeShare,
+			// The wall clock since start, read through the injected clock at the commit; a zero
+			// start (a loop that never ran startClock) has spent nothing.
+			spent: func(a *Agent) int64 {
+				if a.limits.start.IsZero() {
+					return 0
+				}
+				return int64(a.now().Sub(a.limits.start))
+			},
+			limit: func(l delegateLimits) int64 { return int64(l.time) },
+			render: func(spent, timeCap int64) string {
+				return fmt.Sprintf(timeNoticeLine, timeNoticeText(spent), timeNoticeText(timeCap), timeNoticeText(max(timeCap-spent, 0)))
+			},
+		},
 	},
+}
+
+// timeNoticeText spells one of the time notice's fields: whole seconds (Truncate), in the markers'
+// own spelling (boundDurationText), so the notice quotes the cap exactly as the wrap-up does.
+func timeNoticeText(d int64) string {
+	return boundDurationText(time.Duration(d).Truncate(time.Second))
 }
 
 // row is b's row in boundRows.
@@ -248,6 +273,6 @@ func (a *Agent) boundErrText() string {
 }
 
 // threshold is the spend the notice fires at for limit: ceil(share × limit).
-func (n *boundNotice) threshold(limit int) int {
-	return int(math.Ceil(n.share * float64(limit)))
+func (n *boundNotice) threshold(limit int64) int64 {
+	return int64(math.Ceil(n.share * float64(limit)))
 }

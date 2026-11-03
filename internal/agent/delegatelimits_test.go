@@ -113,6 +113,7 @@ func TestBoundRowsRenderEverySurface(t *testing.T) {
 			finish:        "You have reached the time limit (2h0m)" + goldenFinishTail,
 			delegation:    domain.DelegationTimeLimit,
 			word:          "time",
+			notice:        &noticeGolden{spent: int64(90 * time.Minute), limit: int64(2 * time.Hour), want: "time: 1h30m of 2h0m elapsed — 30m left before the wrap-up Turn; write your output now"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,9 +142,10 @@ func TestBoundRowsRenderEverySurface(t *testing.T) {
 	}
 }
 
-// noticeGolden is a bound notice's expected render for spent of limit.
+// noticeGolden is a bound notice's expected render for spent of limit, in the bound's own unit
+// (nanoseconds for time).
 type noticeGolden struct {
-	spent, limit int
+	spent, limit int64
 	want         string
 }
 

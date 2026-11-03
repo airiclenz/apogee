@@ -2083,9 +2083,9 @@ func pathWithin(abs, root string) bool {
 // own fence (Message.WithEngineNote): it is structural — consulted for every result on every
 // route, under Bypass too, booking no firing — and the fence header is what tells the model it
 // is the engine speaking and not a Reaction, which a delegate reading a source file full of
-// reaction prose has mistaken an advice fence for. Its token-budget twin follows it
+// reaction prose has mistaken an advice fence for. Its token- and time-budget twins follow it
 // (budgetNotices, in bound-row order), so the fence order on a closing result is fixed: tool
-// output, advice, step note, token note — and the wrap-up directive, stamped on the request tail
+// output, advice, step note, token note, time note — and the wrap-up directive, stamped on the request tail
 // at send time (Request.NoteOnTail), always last. The advice and the budget notes count inside the
 // clamp's bound (requestRoom.trailedShare): a clamped body is shorter by their weight, so the
 // committed message, trailers included, stays within the result's share of the room. The wrap-up
