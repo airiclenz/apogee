@@ -100,6 +100,13 @@ func (a *anthropicCodec) parseSSE(body io.Reader, sent sentRequest, toolFragment
 	s.finish()
 }
 
+// reasoningBlockCountTripped is the fault a streamed Messages reply ends on when it opens more
+// reasoning blocks than maxReasoningBlocks.
+var reasoningBlockCountTripped = fmt.Sprintf(
+	"apogee: streamed reply opened more than %d reasoning blocks",
+	maxReasoningBlocks,
+)
+
 // anthropicStream is the state one streamed Messages reply accumulates between its events.
 type anthropicStream struct {
 	codec         *anthropicCodec
@@ -129,10 +136,14 @@ type anthropicStream struct {
 	servedModel string
 	// stopReason is message_delta's stop reason, already mapped; "" until it arrives.
 	stopReason string
-	// textBytes is the running total of content plus thinking bytes yielded, and of the
-	// signature and redacted data bytes the reasoning blocks accumulate, against
+	// textBytes is the running total of content plus thinking bytes yielded, of the
+	// signature and redacted data bytes the reasoning blocks accumulate, and of the
+	// reasoningBlockCost each reasoning block is charged as it opens, against
 	// maxReplyTextBytes; tool-call bytes are openToolCalls' own count.
 	textBytes int
+	// reasoningOpened counts every reasoning block the reply has opened, closed ones included,
+	// against maxReasoningBlocks (openReasoning).
+	reasoningOpened int
 	// malformed counts the payloads that failed to decode; it rides the terminal Delta.
 	malformed int
 }
@@ -204,9 +215,23 @@ func (s *anthropicStream) startBlock(ev anthropicEvent) (ended bool) {
 // redacted_thinking block arrives whole — its `data` is on the start event — so its bytes are
 // kept as they came and charged to the text cap here. The block records its place — the text
 // and calls the reply opened before it. A block with no index cannot be closed and is not opened.
+// Every opening counts against maxReasoningBlocks — the one past it is terminal — and is charged
+// reasoningBlockCost against the text cap, so endless openings end the stream whatever they carry.
 func (s *anthropicStream) openReasoning(ev anthropicEvent) (ended bool) {
 	if ev.Index == nil {
 		return false
+	}
+	s.reasoningOpened++
+	if s.reasoningOpened > maxReasoningBlocks {
+		s.yield(Delta{
+			Kind:  DeltaError,
+			Err:   reasoningBlockCountTripped,
+			Fault: UpstreamFault{Class: FaultLocal},
+		})
+		return true
+	}
+	if s.charge(reasoningBlockCost) {
+		return true
 	}
 	block := &anthropicReasoningBlock{afterText: s.textSeen, afterCalls: s.callsSeen}
 	s.layout.block(anthropicLayoutReasoning)

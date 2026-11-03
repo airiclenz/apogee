@@ -167,7 +167,9 @@ internal/tools/diagnostics.go — diagnoseGo; internal/tools/path_suggest.go —
 **Closes:** safe-read-fifo-unbounded
 **Commit:** `fix(security): refuse non-regular and oversized files in SafeReadFile`
 
-## 8. Cap Anthropic reasoning blocks per reply
+## 8. Cap Anthropic reasoning blocks per reply — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the per-block cost is `reasoningBlockCost` = 1 KiB in client.go beside `maxReasoningBlocks`, and `reasoningBlockCountTripped` sits in wire_anthropic_stream.go (Anthropic-only, built from the client.go constant the way `toolCallCountTripped` is); the text-cap test adds an exact-budget row that must still finish with a Done, so it pins the charge at exactly `reasoningBlockCost` per block.
 
 **What:** Fix: `openReasoning` charges nothing for a `thinking` block, so endless block starts grow memory without bound.
 **Regression guard.** The per-block cost is a named constant beside `maxReasoningBlocks`, and a Tests row exercises the text-cap clause (N blocks plus thinking text sized to exactly `maxReplyTextBytes - N*cost + 1` trips the MiB message): at any cost under 32 KiB the 256-block count trips first, so no other row observes it. The `textBytes` field comment (wire_anthropic_stream.go:131-134) names the per-block charge.

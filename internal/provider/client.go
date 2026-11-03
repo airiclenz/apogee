@@ -30,6 +30,20 @@ const (
 	// honest reply's parallel-call count; the 65th ends the stream exactly as the byte cap does.
 	maxOpenToolCalls = 64
 
+	// maxReasoningBlocks caps how many reasoning blocks (thinking or redacted_thinking) one
+	// streamed Anthropic reply may open, counting every opening — a block opened and closed
+	// again counts as much as one left open. The text cap bounds what the blocks carry, not
+	// the blocks themselves: a server opening empty block after empty block would otherwise
+	// grow the reasoning set and the reply layout without limit. An honest interleaved-thinking
+	// reply opens one block per step, far below 256; the 257th ends the stream.
+	maxReasoningBlocks = 256
+
+	// reasoningBlockCost is the bytes each reasoning block an Anthropic reply opens is charged
+	// against maxReplyTextBytes, for the bookkeeping its text never counts (the block, its map
+	// entry, its layout member, its yielded entry). At this cost the count cap trips long before
+	// the charges alone could reach the text cap; the charge keeps the two caps one budget.
+	reasoningBlockCost = 1 << 10 // 1 KiB
+
 	// maxErrorBodyBytes caps how much of a non-2xx body is read before it is classified. The
 	// request timeouts default to 0, so a hostile or broken upstream answering a multi-GB
 	// error body would otherwise be buffered whole and exhaust the agent's memory. 64 KiB is

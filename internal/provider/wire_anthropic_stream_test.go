@@ -507,6 +507,112 @@ func TestAnthropicParseSSE_ReplyTextIsCapped(t *testing.T) {
 	}
 }
 
+// anthropicThinkingOpeningsSSE builds a Messages stream that opens n thinking blocks — at
+// distinct block indexes, each closed again before the next opens, when closed; all at index 0
+// and never closed otherwise — with thinkingBytes of thinking_delta text streamed into the last
+// one, then stops.
+func anthropicThinkingOpeningsSSE(n int, closed bool, thinkingBytes int) string {
+	const chunkBytes = 64 << 10
+	var b strings.Builder
+	b.WriteString(`data: {"type":"message_start","message":{"model":"claude-x","usage":{"input_tokens":1,"output_tokens":1}}}` + "\n")
+	for i := range n {
+		index := 0
+		if closed {
+			index = i
+		}
+		fmt.Fprintf(&b, `data: {"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":""}}`+"\n", index)
+		for left := thinkingBytes; i == n-1 && left > 0; left -= chunkBytes {
+			fmt.Fprintf(
+				&b,
+				`data: {"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":"%s"}}`+"\n",
+				index,
+				strings.Repeat("a", min(left, chunkBytes)),
+			)
+		}
+		if closed {
+			fmt.Fprintf(&b, `data: {"type":"content_block_stop","index":%d}`+"\n", index)
+		}
+	}
+	b.WriteString(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}` + "\n")
+	b.WriteString(`data: {"type":"message_stop"}` + "\n")
+	return b.String()
+}
+
+// TestAnthropicParseSSE_ReasoningBlockCountIsCapped pins maxReasoningBlocks: the
+// content_block_start that opens the maxReasoningBlocks+1th reasoning block ends the stream on
+// the one FaultLocal count fault and no Done, whether the earlier blocks were left open or
+// opened and closed again; exactly maxReasoningBlocks blocks still flush every block and the Done.
+func TestAnthropicParseSSE_ReasoningBlockCountIsCapped(t *testing.T) {
+	t.Parallel()
+
+	countFault := Delta{Kind: DeltaError, Err: reasoningBlockCountTripped, Fault: UpstreamFault{Class: FaultLocal}}
+	tests := []struct {
+		name       string
+		blocks     int
+		closed     bool
+		wantBlocks int
+		wantTail   Delta
+	}{
+		{name: "never_closed_past_the_cap", blocks: maxReasoningBlocks + 1, wantTail: countFault},
+		{name: "open_close_cycles_past_the_cap", blocks: maxReasoningBlocks + 1, closed: true, wantBlocks: maxReasoningBlocks, wantTail: countFault},
+		{name: "at_the_cap_flushes", blocks: maxReasoningBlocks, closed: true, wantBlocks: maxReasoningBlocks, wantTail: Delta{Kind: DeltaDone}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := parseAnthropicSSE(t, anthropicThinkingOpeningsSSE(tc.blocks, tc.closed, 0))
+
+			var blocks int
+			for _, d := range got[:len(got)-1] {
+				if d.Kind == DeltaThinkingBlock {
+					blocks++
+				}
+				if d.Kind == DeltaError || d.Kind == DeltaDone {
+					t.Fatalf("terminal %v before the last delta:\n%s", d.Kind, dumpDeltas(got))
+				}
+			}
+			if blocks != tc.wantBlocks {
+				t.Errorf("thinking blocks yielded = %d, want %d", blocks, tc.wantBlocks)
+			}
+			last := got[len(got)-1]
+			if last.Kind != tc.wantTail.Kind || last.Err != tc.wantTail.Err || last.Fault != tc.wantTail.Fault {
+				t.Errorf("last delta = %+v, want %+v", last, tc.wantTail)
+			}
+		})
+	}
+}
+
+// TestAnthropicParseSSE_ReasoningBlocksChargeTheTextCap pins reasoningBlockCost: every reasoning
+// block opened is charged against maxReplyTextBytes, so n blocks plus thinking text one byte past
+// maxReplyTextBytes - n*reasoningBlockCost end on the text cap's fault, while text that fills the
+// budget exactly still ends in a Done.
+func TestAnthropicParseSSE_ReasoningBlocksChargeTheTextCap(t *testing.T) {
+	t.Parallel()
+
+	const blocks = 4
+	budget := maxReplyTextBytes - blocks*reasoningBlockCost
+	t.Run("one_byte_past_the_budget_trips", func(t *testing.T) {
+		t.Parallel()
+
+		deltas := parseAnthropicSSE(t, anthropicThinkingOpeningsSSE(blocks, true, budget+1))
+
+		assertReplyTextCapDeltas(t, deltas)
+		if last := deltas[len(deltas)-1]; last.Kind != DeltaError {
+			t.Errorf("last delta is %v, want the cap's DeltaError", last.Kind)
+		}
+	})
+	t.Run("the_exact_budget_finishes", func(t *testing.T) {
+		t.Parallel()
+
+		deltas := parseAnthropicSSE(t, anthropicThinkingOpeningsSSE(blocks, true, budget))
+
+		if last := deltas[len(deltas)-1]; last.Kind != DeltaDone {
+			t.Errorf("last delta = %+v, want a Done", last)
+		}
+	})
+}
+
 // TestAnthropicWireSelectsTheCodec pins that WithWire(WireAnthropic) is served by the anthropic
 // codec, now that the codec has its parser: the Client reports the wire and the codec holds the
 // Client it renders in-band errors through.
