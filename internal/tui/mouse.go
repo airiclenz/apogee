@@ -496,36 +496,46 @@ func (m Model) footerRowY() int {
 // handleFooterModeClick gives the footer's mode marker its pointer: a click anywhere on it opens
 // the four-rung mode picker (pickerMode, picker.go), whose accept takes the rung through the same
 // SetMode path shift+tab does. It is a second ROUTE to the ladder and never a cycle — the human
-// sees the four rungs and names one.
-//
-// The rect is the footer's own row and the columns [Model.footerModeSpan] reports for the frame the
-// click was aimed at (pre) — the same value the painter drew from, so the pointer can never address
-// a column the painter did not paint, and the narrow branch that drops the marker whole
-// (ok false) leaves the footer naming nothing. The WHOLE marker is the hit area, Auto's
-// blast-radius word included: that word is a FACT about the mode rather than a second control, so
-// every cell of the marker acts on the mode. The confinement word stays display-only in the sense
-// that matters — clicking it opens the mode picker, not a confinement one.
-//
-// The claim is gated on the PICKER's OWN entitlement rather than on !m.picker.open alone.
-// renderPicker paints on m.picker.open by itself, while the picker rung claims keys only under
-// m.state.live() && m.picker.open and the two higher modal rungs — the /sessions browser and the
-// /settings pane — claim before it (keyClaimOrder, model.go). Opening the overlay from underneath
-// one of those, or while a Turn is awaiting approval, would put up a modal the human can neither
-// answer nor close, which is the very thing that rung's comment forbids. shift+tab stays the
-// every-state route to the ladder.
+// sees the four rungs and names one. Whether a click lands on the marker, and whether the picker may
+// open there, is [Model.footerModeHit]'s to say — the one predicate the pointer-shape classifier asks
+// as well (pointershape.go), so the marker never shows a pointer a click there would not honour.
 func (m Model) handleFooterModeClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if !m.state.live() || m.picker.open || m.sessionBrowser.open || m.settingsOwnsInput() {
-		return m, nil, false
-	}
-	text, col, ok := pre.footerModeSpan(pre.width)
-	if !ok || msg.Y != pre.footerRowY() {
-		return m, nil, false
-	}
-	if msg.X < col || msg.X >= col+pre.th.measure.Width(text) {
+	if !m.footerModeHit(pre, msg.X, msg.Y) {
 		return m, nil, false
 	}
 	m.picker = picker{open: true, kind: pickerMode}
 	return m, nil, true
+}
+
+// footerModeHit reports whether a click at (x, y) on the frame pre was aimed at is a click on the
+// footer's mode marker that may open the mode picker: the footer-click handler's whole decision,
+// geometry and state gate together, so the click and the pointer shape over the marker are one
+// answer ([Model.handleFooterModeClick], [Model.pointerShapeAt]). The gate is read off the live m
+// and the geometry off pre, handleMouseClick's rule.
+//
+// The rect is the footer's own row and the columns [Model.footerModeSpan] reports for pre — the same
+// value the painter drew from, so the pointer can never address a column the painter did not paint,
+// and the narrow branch that drops the marker whole (ok false) leaves the footer naming nothing. The
+// WHOLE marker is the hit area, Auto's blast-radius word included: that word is a FACT about the mode
+// rather than a second control, so every cell of the marker acts on the mode. The confinement word
+// stays display-only in the sense that matters — clicking it opens the mode picker, not a confinement
+// one.
+//
+// The gate is the PICKER's OWN entitlement rather than !m.picker.open alone. renderPicker paints on
+// m.picker.open by itself, while the picker rung claims keys only under m.state.live() &&
+// m.picker.open and the two higher modal rungs — the /sessions browser and the /settings pane — claim
+// before it (keyClaimOrder, model.go). Opening the overlay from underneath one of those, or while a
+// Turn is awaiting approval, would put up a modal the human can neither answer nor close, which is the
+// very thing that rung's comment forbids. shift+tab stays the every-state route to the ladder.
+func (m Model) footerModeHit(pre Model, x, y int) bool {
+	if !m.state.live() || m.picker.open || m.sessionBrowser.open || m.settingsOwnsInput() {
+		return false
+	}
+	text, col, ok := pre.footerModeSpan(pre.width)
+	if !ok || y != pre.footerRowY() {
+		return false
+	}
+	return x >= col && x < col+pre.th.measure.Width(text)
 }
 
 // handleMouseMotion extends whichever selection is live as the mouse drags with the left button
@@ -772,10 +782,10 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // than returning it to Update — an interface there would put a type assertion of this package's own
 // type in the middle of that path.
 func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
-	if line < 0 || line >= len(m.lineTargets) {
+	target, ok := m.blockTargetAt(line)
+	if !ok {
 		return m, nil
 	}
-	target := m.lineTargets[line]
 	switch target.kind {
 	case targetBreadcrumb:
 		// The run view's header band is not a block: it is the way back up, and a click on any of
@@ -835,6 +845,19 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	}
 	m.refreshViewportAnchored(line, releaseRow)
 	return m, nil
+}
+
+// blockTargetAt is the click surface the paint stashed for content line line — the target a motionless
+// click there hands [Model.toggleBlockAt] — and whether there is one at all: false off the stashed map
+// (an anchor can outlive the paint it was taken in) and on a line no block marked. It is the one
+// lookup the toggle and the pointer-shape classifier (pointershape.go) both read, so a line shows the
+// pointer exactly where a click there would act on a block.
+func (m Model) blockTargetAt(line int) (lineTarget, bool) {
+	if line < 0 || line >= len(m.lineTargets) {
+		return lineTarget{}, false
+	}
+	target := m.lineTargets[line]
+	return target, target.kind != targetNone
 }
 
 // releaseField finalises a drag on an editable field's selection — the prompt's or the /settings

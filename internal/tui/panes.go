@@ -57,6 +57,11 @@ const (
 // the pre-click frame pre, which every geometry question is put to (handleMouseClick's rule); the
 // walk composes pre once and hands the same value to every pane.
 //
+// hover is what [Model.pointerShapeAt] asks of the pane, in the same pointer order: the shape a click
+// at that point of the frame pre would imply, and whether the pane answers for the point at all. It
+// carries no side effect, and it answers through the hit predicate the pane's click decides by,
+// never a restatement of it. nil is a pane that answers nothing, so the classifier asks the next.
+//
 // rank is WHEN the pane is asked: its rung of [keyClaimOrder] and its place in [pointerPanes], the two
 // gesture chains. Both lists are derived from the rows' ranks in init(), so where a pane rises and
 // falls in either chain is stated on its row beside what it does there ([paneRank]).
@@ -71,6 +76,7 @@ type paneSpec struct {
 	keyOpen func(Model) bool                                                 // the key claim's gate; nil = always ask
 	click   func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) // its answer to a left-click on the frame
 	wheel   func(Model, tea.MouseWheelMsg) (Model, bool)                     // its answer to a wheel notch on the frame
+	hover   func(pre Model, x, y int) (pointerShape, bool)                   // the pointer shape a click at (x, y) implies; nil, or false, asks the next pane
 	rank    paneRank                                                         // where the two gesture chains ask it
 }
 

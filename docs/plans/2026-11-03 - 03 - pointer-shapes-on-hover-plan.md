@@ -79,7 +79,10 @@ cmd/apogee/settingsrows_test.go — fabricatedSettings, TestSettingsRowsFormatEf
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestManualDocumentsEverySettingsKey|TestSettingsRowsMatchTheRegistryOrder|TestEveryEditableSettingKeyHasAnApply|TestSettingsRowsFormatEffectiveValues' ./cmd/apogee/`
 **Commit:** `feat(config): add the ui.pointer-shapes setting, default off`
 
-## 3. Pointer-shape classifier — prompt, footer, transcript
+## 3. Pointer-shape classifier — prompt, footer, transcript — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — internal/tui/doc.go: made necessary by the new pointershape.go (TestDocMapNamesEveryFile requires every file in the package map) and the new `hover` field on paneSpec (the map's field list).
+NOTES (2026-11-03): `footerModeHit` is a method `func (m Model) footerModeHit(pre Model, x, y int) bool` — the entitlement gate reads the live m and the geometry reads pre, exactly as handleFooterModeClick did, so the click's behaviour is unchanged; the transcript's toggle-target lookup is likewise extracted from toggleBlockAt as `blockTargetAt(line) (lineTarget, bool)` and called by both.
 
 **What:**
 **Goal:** a pure method answers, for a frame point, which of `default|text|pointer` a click there implies, for the regions outside the panes; it has no side effects and is unit-tested per region.
