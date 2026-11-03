@@ -97,7 +97,12 @@ internal/tui/mouse_test.go — footerMarkerCells, modelWithToolBlock, markedLine
 - `go vet ./internal/tui/`
 **Commit:** `feat(tui): classify a frame point into a pointer shape`
 
-## 4. Pointer-shape answers for the panes
+## 4. Pointer-shape answers for the panes — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the shared predicate is a `paneHit` value (mouse.go, beside popupPaneHit) with a `hitKind` per answer of the click currency (absent, outside, dismiss, inert, row, field). Each handler — handleSettingsClick, handleBrowserClick, handlePickerClick, handleAskClick, handleApprovalClick, handleDropdownClick, handleWorkflowsClick, handleReportClick — now calls a pure `<pane>Hit` predicate (settingsHit, browserHit, pickerHit, askHit, approvalHit, dropdownHit, workflowsHit, reportHit) and acts on it, and `paneHit.shape()` maps it for hover. The click behaviour is unchanged. The predicates sit beside their handlers; only the hover funcs (settingsHover, reportHover, browserHover, pickerHover, workflowsHover, promptHover, dropdownHover) live in pointershape.go.
+NOTES (2026-11-03): sessions.go and picker.go needed no edit: the browser's and picker's handlers live in mouse.go, and no click handler built its render inline except the ask/approval closures, which moved into askHit/approvalHit unchanged.
+NOTES (2026-11-03): pointerShapeAt no longer skips a nil hover: every pointer pane now has one, and TestEveryFramePaneHasASpec enforces it, as it already did for click and wheel. The paneSpec doc no longer says "nil asks the next pane". The fast path skips the pane walk when `pre.openPanes() == 0`.
+NOTES (2026-11-03): the picker's and ask/approval's arming latch is not part of the hit. It holds back only a second click on the armed row while the latch waits on its tick, so that row still shows the hand.
 
 **What:**
 Recast at the regression check (2026-11-03).

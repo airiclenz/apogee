@@ -60,7 +60,7 @@ const (
 // hover is what [Model.pointerShapeAt] asks of the pane, in the same pointer order: the shape a click
 // at that point of the frame pre would imply, and whether the pane answers for the point at all. It
 // carries no side effect, and it answers through the hit predicate the pane's click decides by,
-// never a restatement of it. nil is a pane that answers nothing, so the classifier asks the next.
+// never a restatement of it ([paneHit]). Every pane has one, as it has a click and a wheel.
 //
 // rank is WHEN the pane is asked: its rung of [keyClaimOrder] and its place in [pointerPanes], the two
 // gesture chains. Both lists are derived from the rows' ranks in init(), so where a pane rises and
@@ -76,7 +76,7 @@ type paneSpec struct {
 	keyOpen func(Model) bool                                                 // the key claim's gate; nil = always ask
 	click   func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) // its answer to a left-click on the frame
 	wheel   func(Model, tea.MouseWheelMsg) (Model, bool)                     // its answer to a wheel notch on the frame
-	hover   func(pre Model, x, y int) (pointerShape, bool)                   // the pointer shape a click at (x, y) implies; nil, or false, asks the next pane
+	hover   func(pre Model, x, y int) (pointerShape, bool)                   // the pointer shape a click at (x, y) implies; false asks the next pane
 	rank    paneRank                                                         // where the two gesture chains ask it
 }
 
@@ -133,6 +133,7 @@ func init() {
 			height: Model.promptHeight,
 			click:  promptPointerClick,
 			wheel:  Model.promptWheel,
+			hover:  promptHover,
 			// No key rung, for the reason above; its place in the pointer chain is the one pointerPanes
 			// states.
 			rank: paneRank{pointer: 9},
@@ -150,6 +151,7 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state == stateIdle && m.sessionBrowser.open },
 			click:   Model.handleBrowserClick,
 			wheel:   Model.browserWheel,
+			hover:   browserHover,
 			// The top rung of the key precedence: a modal overlay (idle only), so while open it claims
 			// every keypress but the frame chords — selection, resume, delete-confirm, rename edit, and
 			// esc to close (sessions.go) — before the normal input routing, exactly as the autocomplete
@@ -173,6 +175,7 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state.live() && m.picker.open },
 			click:   Model.handlePickerClick,
 			wheel:   Model.pickerWheel,
+			hover:   pickerHover,
 			// The browser's simpler sibling, and it claims keys the same way: while it is open the
 			// selection, the accept and esc are all its own (picker.go) — in BOTH live states, for the
 			// reason keyOpen states. Its rung sits under the /settings pane's.
@@ -194,6 +197,7 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state.live() && m.workflowsPane.open },
 			click:   Model.handleWorkflowsClick,
 			wheel:   Model.workflowsWheel,
+			hover:   workflowsHover,
 			// The picker's sibling in the key precedence as well: modal while it is up, in both live
 			// states, for the reason keyOpen states (workflows.go). The two are never open together —
 			// each owns ⏎ for as long as it is up, so neither verb can be accepted over the other — so
@@ -215,6 +219,7 @@ func init() {
 			keyOpen: Model.settingsOwnsInput,
 			click:   settingsPointerClick,
 			wheel:   Model.settingsWheel,
+			hover:   settingsHover,
 			// Modal in the key precedence as the browser is, and for a stronger reason: as the frame's one
 			// full-height pane it hides the input box behind it, a box the human cannot read — a keystroke
 			// falling through to it would edit an invisible draft. Idle-only, like its verb (commandSpecs),
@@ -279,6 +284,7 @@ func init() {
 			keyOpen: func(m Model) bool { return m.state.live() && m.autocomplete.active },
 			click:   Model.handleDropdownClick,
 			wheel:   Model.dropdownWheel,
+			hover:   dropdownHover,
 			// While it is open it claims the navigation, accept and dismiss keys — enter and tab among
 			// them — under the four modal overlays' rungs and before the normal routing; any other key
 			// falls through to edit the input. It closes the pointer chain, for the reason pointerPanes
@@ -317,14 +323,15 @@ func keyClaimRungs() []keyClaimant {
 	return append(order, transcriptClaimants...)
 }
 
-// reportPaneRow is the row of one report pane: open, render, key, click and wheel all resolve through
-// the kind's row of reportRows (reportpane.go), so a fifth report is one row here and one there. A
-// report is never modal — it says something rather than asking, and the box behind it stays live —
-// so its key claim is the soft one ([paneClaim] over [Model.reportKey]) with no gate: the claim
+// reportPaneRow is the row of one report pane: open, render, key, click, wheel and hover all resolve
+// through the kind's row of reportRows (reportpane.go), so a fifth report is one row here and one
+// there. A report is never modal — it says something rather than asking, and the box behind it stays
+// live — so its key claim is the soft one ([paneClaim] over [Model.reportKey]) with no gate: the claim
 // itself answers false while the report is closed. The click is [Model.handleReportClick] — inside
 // the box it is claimed and nothing happens, outside it the report is dismissed and the click goes on
-// — and the wheel is [Model.reportWheel], one row per notch while the pointer is over it. rank is the
-// kind's place in the two gesture chains, which the table states beside each report's row.
+// — the wheel is [Model.reportWheel], one row per notch while the pointer is over it, and the hover
+// is [reportHover], the arrow inside the box off the same hit the click reads. rank is the kind's
+// place in the two gesture chains, which the table states beside each report's row.
 func reportPaneRow(name string, r reportKind, rank paneRank) paneSpec {
 	return paneSpec{
 		name:   name,
@@ -340,7 +347,8 @@ func reportPaneRow(name string, r reportKind, rank paneRank) paneSpec {
 		wheel: func(m Model, msg tea.MouseWheelMsg) (Model, bool) {
 			return m.reportWheel(r, msg)
 		},
-		rank: rank,
+		hover: reportHover(r),
+		rank:  rank,
 	}
 }
 

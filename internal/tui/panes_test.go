@@ -65,6 +65,11 @@ func TestEveryFramePaneHasASpec(t *testing.T) {
 	if len(inputPanes) != 1 || inputPanes[0] != paneDropdown {
 		t.Errorf("the input slot holds %v, want the dropdown alone", inputPanes)
 	}
+	for _, p := range pointerPanes {
+		if paneSpecs[p].hover == nil {
+			t.Errorf("pane %d (%s) has no hover: the pointer-shape classifier would panic on it", p, paneSpecs[p].name)
+		}
+	}
 }
 
 // TestTheFourReportsPaintInTheFramePaneOrder is the paint the goldens do not cover: every report up at

@@ -455,14 +455,29 @@ func (m Model) reportWindow(r reportKind) (reportWindow, bool) {
 // to the live receiver. That is also what keeps a click in the band the LOWER report regrows into,
 // once the one above it is dismissed, out of its rectangle (the doctrine above).
 func (m Model) handleReportClick(r reportKind, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	y0, h, ok := pre.reportPaneRect(r)
-	if !ok {
+	switch reportHit(r, pre, msg.Y).at {
+	case hitInert:
+		return m, nil, true
+	case hitOutside:
+		return m.dismissReport(r), nil, false
+	default:
 		return m, nil, false
 	}
-	if msg.Y >= y0 && msg.Y < y0+h {
-		return m, nil, true
+}
+
+// reportHit is handleReportClick's decision for a screen row, read without acting on it ([paneHit],
+// mouse.go): a report has no row a click acts on, so inside its box the click is claimed for nothing,
+// and outside it the report is dismissed on the click's way down the chain. It reads only geometry,
+// which is pre's.
+func reportHit(r reportKind, pre Model, y int) paneHit {
+	y0, h, ok := pre.reportPaneRect(r)
+	if !ok {
+		return paneHit{}
 	}
-	return m.dismissReport(r), nil, false
+	if y >= y0 && y < y0+h {
+		return paneHit{at: hitInert}
+	}
+	return paneHit{at: hitOutside}
 }
 
 // reportWheel scrolls the named report one row per notch while the pointer is over it, and CLAMPS at

@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // unmarkedLine returns the index of the first on-screen rendered line no block marked as a click
@@ -164,4 +167,303 @@ func footerMarkerMiddle(t *testing.T, m Model) (int, int) {
 	t.Helper()
 	y, _, middle, _ := footerMarkerCells(t, m)
 	return middle, y
+}
+
+// paneBox is the screen rows the named pane's box spans on the composed frame, failing when the
+// fixture did not seat it.
+func paneBox(t *testing.T, m Model, pane framePane) (y0, h int) {
+	t.Helper()
+	y0, h, ok := m.frameSpans().pane(pane)
+	if !ok {
+		t.Fatalf("pane %s is not on the frame", paneSpecs[pane].name)
+	}
+	return y0, h
+}
+
+// firstPaneRow aims at the first screen row the painter seats one of the pane's rows on, read off its
+// placement through popupPaneHit — geometry alone, no state gate — so a case can ask what the gate
+// makes of a row the pane does draw.
+func firstPaneRow(t *testing.T, m Model, pane framePane) (int, int) {
+	t.Helper()
+	render := map[framePane]func() (string, popupPlacement){
+		paneBrowser:   m.renderSessionBrowserPlaced,
+		panePicker:    m.renderPickerPlaced,
+		paneWorkflows: m.renderWorkflowsPlaced,
+		paneDropdown:  m.renderAutocompletePlaced,
+		panePrompt: func() (string, popupPlacement) {
+			if m.pending != nil {
+				return m.approvalPromptPlaced(m.pending.Request)
+			}
+			return m.askPromptPlaced(m.pendingAsk.Request)
+		},
+	}[pane]
+	y0, h := paneBox(t, m, pane)
+	for y := y0; y < y0+h; y++ {
+		if _, _, _, on := popupPaneHit(m, pane, render, y); on {
+			return m.width / 2, y
+		}
+	}
+	t.Fatalf("pane %s seats no row", paneSpecs[pane].name)
+	return 0, 0
+}
+
+// paneTopBorder aims at the named pane's top border.
+func paneTopBorder(pane framePane) func(*testing.T, Model) (int, int) {
+	return func(t *testing.T, m Model) (int, int) {
+		t.Helper()
+		y0, _ := paneBox(t, m, pane)
+		return m.width / 2, y0
+	}
+}
+
+// paneMiddle aims at the middle row of the named pane's box.
+func paneMiddle(pane framePane) func(*testing.T, Model) (int, int) {
+	return func(t *testing.T, m Model) (int, int) {
+		t.Helper()
+		y0, h := paneBox(t, m, pane)
+		return m.width / 2, y0 + h/2
+	}
+}
+
+// onFrame aims at the first cell of the frame painting want (frameCell, mouse_test.go).
+func onFrame(want string) func(*testing.T, Model) (int, int) {
+	return func(t *testing.T, m Model) (int, int) {
+		t.Helper()
+		return frameCell(t, m, want)
+	}
+}
+
+// onSettingsRow aims at want as onFrame does, failing unless the cell is on one of the /settings pane's
+// own rows — the pane answers for it — so an arrow there is the pane's and not the chain's below it.
+func onSettingsRow(want string) func(*testing.T, Model) (int, int) {
+	return func(t *testing.T, m Model) (int, int) {
+		t.Helper()
+		x, y := frameCell(t, m, want)
+		if _, ok := settingsHover(m.withFrameSpans(), x, y); !ok {
+			t.Fatalf("%q is painted at (%d, %d), which is not one of the pane's rows", want, x, y)
+		}
+		return x, y
+	}
+}
+
+// aTranscriptLine aims at the first line of the transcript behind the panes, failing when the row
+// names no content.
+func aTranscriptLine(t *testing.T, m Model) (int, int) {
+	t.Helper()
+	if _, _, ok := m.pointTranscriptRow(2, 0); !ok {
+		t.Fatal("the frame's first row is not a transcript line")
+	}
+	return 2, 0
+}
+
+// theInputRow aims at the prompt's first text row.
+func theInputRow(_ *testing.T, m Model) (int, int) {
+	x0, y0, _, _ := m.inputContentRect()
+	return x0, y0
+}
+
+// fourReportsModel is every report up at once, on a window tall enough to seat them all.
+func fourReportsModel(t *testing.T) Model {
+	t.Helper()
+	m := bothPanesModel(t, 4)
+	m.thinkingPane = reportPane{open: true}
+	m.advicePane = reportPane{open: true}
+	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: 60})
+}
+
+// settingsResetModel is the /settings pane over one resettable key, and whether its reset is armed.
+func settingsResetModel(armed bool) func(*testing.T) Model {
+	return func(t *testing.T) Model {
+		t.Helper()
+		rows := []SettingRow{{
+			Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "false", Default: "true",
+			Editable: true, Desc: "Name a new session from its first prompt.",
+		}}
+		m, _ := settingsEditModel(t, rows, &settingsWriteLog{})
+		if armed {
+			m = step(t, m, keyBackspace())
+			if m.settings.kind != settingsResetArmed {
+				t.Fatalf("pane = %+v, want the reset armed", m.settings)
+			}
+		}
+		return m
+	}
+}
+
+// settingsValueBufferModel is the /settings pane with the edit buffer open on its first of two keys.
+func settingsValueBufferModel(t *testing.T) Model {
+	t.Helper()
+	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow(), settingsIntRow()}, &settingsWriteLog{})
+	m = step(t, m, keyEnter())
+	if m.settings.kind != settingsValueBuffer {
+		t.Fatalf("pane = %+v, want the edit buffer open", m.settings)
+	}
+	return m
+}
+
+// threeWayAsk is an ask_user question offering three answers.
+func threeWayAsk(t *testing.T) Model {
+	t.Helper()
+	return askPaneModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "middle", "right"}})
+}
+
+// TestPointerShapeAtAnswersThePanes is the panes' half of the classifier's contract: inside a pane the
+// shape is the one its click implies — the hand on a row the click acts on, the I-beam on the
+// /settings field, the arrow on the rest of the box — and outside it the modal lists answer the arrow
+// (their click only dismisses) while every other pane leaves the point to the chain.
+func TestPointerShapeAtAnswersThePanes(t *testing.T) {
+	t.Parallel()
+
+	browser := func(t *testing.T) Model { return browserPaneModel(t, 3) }
+	picker := func(t *testing.T) Model { return pickerPaneModel(t, pickerCycle) }
+	workflows := func(t *testing.T) Model { return workflowsPaneModel(t, workflowsAtList) }
+	dropdown := func(t *testing.T) Model { return dropdownPaneModel(t, testOpts, "/") }
+	settings := func(t *testing.T) Model { return settingsFrameModel(t, 80, 24, 8) }
+	paneRow := func(pane framePane) func(*testing.T, Model) (int, int) {
+		return func(t *testing.T, m Model) (int, int) { return firstPaneRow(t, m, pane) }
+	}
+
+	for _, tc := range []struct {
+		name  string
+		model func(*testing.T) Model
+		point func(*testing.T, Model) (x, y int)
+		want  pointerShape
+	}{
+		{"settings: a key row", settings, onFrame("key-02"), shapePointer},
+		{"settings: a section label", settings, onSettingsRow("Interface"), shapeDefault},
+		{"settings: the legend", settings, onFrame(settingsHint), shapeDefault},
+		{"settings: a key row before the reset arms", settingsResetModel(false), onFrame("auto-title"), shapePointer},
+		{"settings: a key row under an armed reset", settingsResetModel(true), onSettingsRow("auto-title"), shapeDefault},
+		{"settings: the edit buffer's text", settingsValueBufferModel, onFrame("box"), shapeText},
+		{"settings: another key row under the edit buffer", settingsValueBufferModel, onSettingsRow("port"), shapeDefault},
+		{"settings: the multi-line field's text", func(t *testing.T) Model {
+			return settingsTextEditModel(t, "alpha beta gamma")
+		}, onFrame("beta"), shapeText},
+
+		{"usage report: inside", func(t *testing.T) Model { return usageReportModel(t, 2) }, paneMiddle(paneUsage), shapeDefault},
+		{"inspector pane: inside", func(t *testing.T) Model { return inspectorPaneModel(t, 2) }, paneMiddle(paneInspector), shapeDefault},
+		{"four reports: inside /usage", fourReportsModel, paneMiddle(paneUsage), shapeDefault},
+		{"four reports: inside /inspect", fourReportsModel, paneMiddle(paneInspector), shapeDefault},
+		{"four reports: inside /thinking", fourReportsModel, paneMiddle(paneThinking), shapeDefault},
+		{"four reports: inside /advice", fourReportsModel, paneMiddle(paneAdvice), shapeDefault},
+
+		{"browser: a session row", browser, onFrame("session number 01"), shapePointer},
+		{"browser: its top border", browser, paneTopBorder(paneBrowser), shapeDefault},
+		{"browser: a transcript line outside it", browser, aTranscriptLine, shapeDefault},
+
+		{"picker: an offered row", picker, paneRow(panePicker), shapePointer},
+		{"picker: its top border", picker, paneTopBorder(panePicker), shapeDefault},
+		{"picker: a transcript line outside it", picker, aTranscriptLine, shapeDefault},
+
+		{"workflows: a workflow row", workflows, paneRow(paneWorkflows), shapePointer},
+		{"workflows: its top border", workflows, paneTopBorder(paneWorkflows), shapeDefault},
+		{"workflows: a transcript line outside it", workflows, aTranscriptLine, shapeDefault},
+
+		{"ask: an offered answer", threeWayAsk, onFrame("middle"), shapePointer},
+		{"ask: its top border", threeWayAsk, paneTopBorder(panePrompt), shapeDefault},
+		{"ask: a transcript line outside it", threeWayAsk, aTranscriptLine, shapeText},
+		{"ask: the editable input row", threeWayAsk, theInputRow, shapeText},
+
+		{"approval: a menu row", approvalPaneModel, paneRow(panePrompt), shapePointer},
+		{"approval: its top border", approvalPaneModel, paneTopBorder(panePrompt), shapeDefault},
+		{"approval: a transcript line outside it", approvalPaneModel, aTranscriptLine, shapeText},
+
+		{"dropdown: a menu row", dropdown, paneRow(paneDropdown), shapePointer},
+		{"dropdown: its top border", dropdown, paneTopBorder(paneDropdown), shapeDefault},
+		{"dropdown: the editable input row below it", dropdown, theInputRow, shapeText},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := tc.model(t)
+			x, y := tc.point(t, m)
+
+			got := m.pointerShapeAt(m.withFrameSpans(), x, y)
+
+			if got != tc.want {
+				t.Fatalf("pointerShapeAt(%d, %d) = %s, want %s", x, y, got.name(), tc.want.name())
+			}
+		})
+	}
+}
+
+// TestPointerShapeAtShowsNoPointerWhereAPaneGateRefusesTheClick is the state gates: a pane up in a
+// state where its click takes no row — a rename, a confirm or a name row owning the pane, a list with
+// nothing to choose, an answer already typed, the rule field open — shows the hand on none of its
+// rows, though the rows are drawn.
+func TestPointerShapeAtShowsNoPointerWhereAPaneGateRefusesTheClick(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		pane  framePane
+		model func(*testing.T) Model
+	}{
+		{"browser: a rename edit", paneBrowser, func(t *testing.T) Model {
+			m := browserPaneModel(t, 3)
+			m.sessionBrowser.renaming = true
+			return m
+		}},
+		{"browser: a delete confirm", paneBrowser, func(t *testing.T) Model {
+			m := browserPaneModel(t, 3)
+			m.sessionBrowser.confirming = true
+			return m
+		}},
+		{"browser: no session matches the filter", paneBrowser, func(t *testing.T) Model {
+			m := browserPaneModel(t, 3)
+			for _, r := range "zzz" {
+				m = step(t, m, keyRune(r))
+			}
+			return m
+		}},
+		{"picker: no offering matches the filter", panePicker, func(t *testing.T) Model {
+			m := pickerPaneModel(t, pickerCycle)
+			for _, r := range "zzz" {
+				m = step(t, m, keyRune(r))
+			}
+			return m
+		}},
+		{"workflows: the name row open", paneWorkflows, func(t *testing.T) Model {
+			m := workflowsPaneModel(t, workflowsAtDetail)
+			m.workflowsPane.naming = true
+			m.layout()
+			return m
+		}},
+		{"workflows: the shown workflow gone", paneWorkflows, func(t *testing.T) Model {
+			m := workflowsPaneModel(t, workflowsAtDetail)
+			m.workflowsPane.infos = nil
+			m.layout()
+			return m
+		}},
+		{"ask: an answer typed into the box", panePrompt, func(t *testing.T) Model {
+			m := threeWayAsk(t)
+			m.input.SetValue("my own way")
+			return m
+		}},
+		{"ask: a question offering no choices", panePrompt, func(t *testing.T) Model {
+			return askPaneModel(t, domain.AskRequest{Question: "which way?"})
+		}},
+		{"approval: the rule field open", panePrompt, func(t *testing.T) Model {
+			m, _, _ := projectRulePane(t, terminalGate("go test ./..."), nil)
+			m = step(t, m, keyRune('p'))
+			if !m.editingProjectRule() {
+				t.Fatal("setup: p did not open the rule field")
+			}
+			return m
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := tc.model(t)
+			pre := m.withFrameSpans()
+			y0, h := paneBox(t, m, tc.pane)
+
+			for y := y0; y < y0+h; y++ {
+				for _, x := range []int{2, m.width / 2} {
+					if got := m.pointerShapeAt(pre, x, y); got == shapePointer {
+						t.Errorf("pointerShapeAt(%d, %d) = pointer inside the %s, whose click takes no row there", x, y, paneSpecs[tc.pane].name)
+					}
+				}
+			}
+		})
+	}
 }

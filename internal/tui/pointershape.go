@@ -39,13 +39,12 @@ func (s pointerShape) name() string {
 //
 // It has no side effects: the Model is a value (ADR 0011) and nothing here writes to it.
 func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
-	for _, p := range pointerPanes {
-		hover := paneSpecs[p].hover
-		if hover == nil {
-			continue
-		}
-		if shape, ok := hover(pre, x, y); ok {
-			return shape
+	// The fast path: with no pane up, none can answer, and the walk would only ask each to say so.
+	if pre.openPanes() != 0 {
+		for _, p := range pointerPanes {
+			if shape, ok := paneSpecs[p].hover(pre, x, y); ok {
+				return shape
+			}
 		}
 	}
 	if m.footerModeHit(pre, x, y) {
@@ -64,4 +63,60 @@ func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
 		return shapePointer
 	}
 	return shapeText
+}
+
+// The panes' hovers, one per row of the pane table (panes.go), each the shape its pane's click hit
+// implies ([paneHit.shape]) — asked of the same pure predicate the pane's click handler acts on, so
+// the hover and the click cannot come apart. pre is the frame the point is aimed at, and it stands in
+// for the live model too: nothing has been dismissed on a hover's way down the chain.
+//
+// Outside its box a pane answers only where its click claims there: the modal lists (the /sessions
+// browser, the picker, the /workflows view) dismiss AND claim, so their outside is the arrow — the
+// click only closes them — while the decision prompt, the /settings pane, the reports and the dropdown
+// leave the point to the next region, as their clicks leave it to the chain (handleMouseClick's
+// outside-click rule).
+
+// settingsHover is the /settings pane's: the I-beam on the open field's text, the hand on a key the
+// key list would select, the arrow on the rest of the pane's rows.
+func settingsHover(pre Model, x, y int) (pointerShape, bool) {
+	return pre.settingsHit(pre, x, y).shape()
+}
+
+// reportHover is a report's: the arrow anywhere inside its box, where a click is claimed for nothing.
+func reportHover(r reportKind) func(pre Model, x, y int) (pointerShape, bool) {
+	return func(pre Model, _, y int) (pointerShape, bool) {
+		return reportHit(r, pre, y).shape()
+	}
+}
+
+// browserHover is the /sessions browser's: the hand on a session row, the arrow on its chrome, in a
+// rename or a delete confirm, and outside the box.
+func browserHover(pre Model, _, y int) (pointerShape, bool) {
+	hit, _ := pre.browserHit(pre, y)
+	return hit.shape()
+}
+
+// pickerHover is the picker's: the hand on an offered row, the arrow elsewhere and outside the box.
+func pickerHover(pre Model, _, y int) (pointerShape, bool) {
+	return pre.pickerHit(pre, y).shape()
+}
+
+// workflowsHover is the /workflows view's: the hand on a row, the arrow on its chrome and prose, while
+// the name row is open, and outside the box.
+func workflowsHover(pre Model, _, y int) (pointerShape, bool) {
+	return pre.workflowsHit(pre, y).shape()
+}
+
+// promptHover is the decision prompt's: the ask pane, then the approval pane, in promptPointerClick's
+// order — only one is ever up, and the other answers nothing.
+func promptHover(pre Model, _, y int) (pointerShape, bool) {
+	if shape, ok := pre.askHit(pre, y).shape(); ok {
+		return shape, true
+	}
+	return pre.approvalHit(pre, y).shape()
+}
+
+// dropdownHover is the "/" | "@" menu's: the hand on a row, the arrow on its chrome.
+func dropdownHover(pre Model, _, y int) (pointerShape, bool) {
+	return pre.dropdownHit(pre, y).shape()
 }

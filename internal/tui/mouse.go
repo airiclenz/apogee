@@ -1139,6 +1139,48 @@ func popupPaneHit(pre Model, pane framePane, render func() (string, popupPlaceme
 	return row, place.start, true, ok
 }
 
+// paneHit is what a left-click at one point of the frame would do to one pane, read WITHOUT doing it:
+// the decision the pane's click handler acts on, taken by a pure predicate of the pane's (geometry
+// through popupPaneHit, and the handler's state gates beside it). The handler acts on it, and the
+// pane's hover answers from it ([paneHit.shape]) — one predicate, two callers — so the pointer can
+// never promise a click the handler would refuse, nor hide one it would take.
+type paneHit struct {
+	at    hitKind
+	row   int // the row a hitRow names: the pane's own row index (the /settings pane: the key)
+	top   int // the first row of the window the placement seated, for the arm (popupPaneHit)
+	count int // how many choices the row is one of, for the seat
+	off   int // the rune offset a hitField seats the caret at
+}
+
+// hitKind is which of the answers a pane's click currency has a point gets.
+type hitKind int
+
+const (
+	hitAbsent  hitKind = iota // not the pane's click at all — the pane is not up, or the point is chrome it leaves to the chain
+	hitOutside                // outside the box of a pane that does NOT claim there: the chain goes on (a pane that dismisses on its way out has done so)
+	hitDismiss                // outside the box of a modal list: dismissed, and the click is spent on that
+	hitInert                  // claimed, and nothing happens: the chrome, prose, or a state that owns the pane
+	hitRow                    // on a row the click acts on: it seats the highlight, or takes the armed row
+	hitField                  // on the editable field: the click seats the caret
+)
+
+// shape is the pointer the hit implies, and whether the pane answers for the point: a row is the hand,
+// the field the I-beam, and a point the pane claims for nothing — its chrome, or the outside of a
+// modal list, where the click only dismisses — the arrow. A point the pane does not claim is not its
+// to answer, so the classifier asks the next region, exactly as the click chain carries on.
+func (h paneHit) shape() (pointerShape, bool) {
+	switch h.at {
+	case hitRow:
+		return shapePointer, true
+	case hitField:
+		return shapeText, true
+	case hitInert, hitDismiss:
+		return shapeDefault, true
+	default:
+		return shapeDefault, false
+	}
+}
+
 // settingsPaint is the open key list as the frame composes it: the display rows the pane built, and the
 // composition a pointer is mapped through (popupPaneHit). It is everything a gesture needs in order to
 // name what is under it — the row through the placement, the value column through the display.
@@ -1430,39 +1472,57 @@ func (m Model) highlightSettingsField(view string, p settingsFieldPaint) string 
 // as the receiver while this is the FIRST handler in the chain, and it is written down anyway: the one
 // invariant the chain holds is that no rect in it is ever read off a model a dismissal has moved.
 func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	hit := m.settingsHit(pre, msg.X, msg.Y)
+	if hit.at == hitAbsent {
+		return m, nil, false
+	}
+	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
+	switch hit.at {
+	case hitField:
+		m.settings.editor.edit(func(e *lineEditor) tea.Cmd {
+			e.caretToRune(hit.off)
+			return nil
+		})
+		m.settings.sel.seat(hit.off, cell{})
+	case hitRow:
+		m.settings.selected = hit.row
+	}
+	return m, nil, true
+}
+
+// settingsHit is handleSettingsClick's decision for a point, read without acting on it ([paneHit]), in
+// the handler's own branch order. Geometry is put to pre and every state gate to the receiver
+// (handleMouseClick's rule).
+func (m Model) settingsHit(pre Model, x, y int) paneHit {
 	if m.settings.kind == settingsValueBuffer || m.settings.kind == settingsTextEditor {
 		// One branch for both fields, over their one geometry: a click on one of the pane's rows is
 		// claimed — on the field it seats the caret, on another key row of the value buffer's list it is
 		// swallowed and the buffer stays where it is — and a click on the chrome is left to the chain.
 		paint, ok := pre.settingsFieldPaint()
-		if !ok || !paint.onRow(msg.Y) {
-			return m, nil, false
+		if !ok || !paint.onRow(y) {
+			return paneHit{}
 		}
-		m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
-		if off, on := pre.settingsFieldCaretAt(paint, msg.X, msg.Y); on {
-			m.settings.editor.edit(func(e *lineEditor) tea.Cmd {
-				e.caretToRune(off)
-				return nil
-			})
-			m.settings.sel.seat(off, cell{})
+		if off, on := pre.settingsFieldCaretAt(paint, x, y); on {
+			return paneHit{at: hitField, off: off}
 		}
-		return m, nil, true
+		return paneHit{at: hitInert}
 	}
 	paint, ok := pre.settingsPaint()
 	if !ok {
-		return m, nil, false
+		return paneHit{}
 	}
-	display, ok := paint.rowAt(pre, msg.Y)
+	display, ok := paint.rowAt(pre, y)
 	if !ok {
-		return m, nil, false
+		return paneHit{}
 	}
-	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
+	// Only the key list moves the selection: a step that still paints the list under it — an armed
+	// reset, the save-target question — owns the pane, so a click on a key row there is swallowed.
 	if m.settings.kind == settingsKeyList {
 		if key, isKey := paint.display.settingKeyAt(display); isKey {
-			m.settings.selected = key
+			return paneHit{at: hitRow, row: key}
 		}
 	}
-	return m, nil, true
+	return paneHit{at: hitInert}
 }
 
 // handleSettingsMotion extends the open field's selection as the mouse drags with the left button held
@@ -1571,35 +1631,53 @@ func (m Model) settingsWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // and the accept all read that one composition, exactly as sessionBrowserKey composes them once per
 // keypress.
 func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if !m.sessionBrowser.open || !pre.sessionBrowser.open {
+	hit, rows := m.browserHit(pre, msg.Y)
+	switch hit.at {
+	case hitAbsent:
 		return m, nil, false
-	}
-	if m.sessionBrowser.renaming || m.sessionBrowser.confirming {
-		return m, nil, true // a modal surface within the modal: it owns the pane until it is answered
-	}
-	row, top, inRect, onRow := popupPaneHit(pre, paneBrowser, pre.renderSessionBrowserPlaced, msg.Y)
-	if !inRect {
+	case hitDismiss:
 		m.sessionBrowser = sessionBrowser{} // outside the modal: dismissed, and the click is spent on that
 		return m, nil, true
+	case hitRow:
+	default:
+		return m, nil, true // a modal surface within the modal, the pane's chrome, or prose: claimed, with no row to take
 	}
-	if !onRow {
-		return m, nil, true // the pane's chrome: claimed, with no row to take
-	}
-	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
-	count := len(m.sessionBrowser.view(rows).rows)
-	if count == 0 {
-		return m, nil, true // the empty-workspace note, or the zero-match one, is prose, not a choice: no row to name
-	}
-	if m.clickArmed.holds(paneBrowser, row) {
+	if m.clickArmed.holds(paneBrowser, hit.row) {
 		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
 		// the next gesture to drop, because the pane it belonged to is closing.
 		m.clickArmed = clickArm{}
 		next, cmd := acceptedModel(m.acceptBrowser(rows))
 		return next, cmd, true
 	}
-	m.sessionBrowser.seat(row, count)
-	m.clickArmed = clickArm{pane: paneBrowser, row: row, top: top, ok: true}
+	m.sessionBrowser.seat(hit.row, hit.count)
+	m.clickArmed = clickArm{pane: paneBrowser, row: hit.row, top: hit.top, ok: true}
 	return m, nil, true
+}
+
+// browserHit is handleBrowserClick's decision for a point, read without acting on it ([paneHit]), with
+// the unfiltered rows a row hit was counted against — the one composition the handler's seat and
+// accept then read. Geometry is put to pre and every state gate to the receiver (handleMouseClick's
+// rule).
+func (m Model) browserHit(pre Model, y int) (paneHit, []popupRow) {
+	if !m.sessionBrowser.open || !pre.sessionBrowser.open {
+		return paneHit{}, nil
+	}
+	if m.sessionBrowser.renaming || m.sessionBrowser.confirming {
+		return paneHit{at: hitInert}, nil // a modal surface within the modal: it owns the pane until it is answered
+	}
+	row, top, inRect, onRow := popupPaneHit(pre, paneBrowser, pre.renderSessionBrowserPlaced, y)
+	if !inRect {
+		return paneHit{at: hitDismiss}, nil
+	}
+	if !onRow {
+		return paneHit{at: hitInert}, nil // the pane's chrome
+	}
+	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
+	count := len(m.sessionBrowser.view(rows).rows)
+	if count == 0 {
+		return paneHit{at: hitInert}, nil // the empty-workspace note, or the zero-match one, is prose, not a choice: no row to name
+	}
+	return paneHit{at: hitRow, row: row, top: top, count: count}, rows
 }
 
 // handlePickerClick answers a left-click while the picker is up — every kind of it, the two
@@ -1623,26 +1701,22 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 // than that zeroing: it cancels through answerBoundary, which drains the commands the confirm held
 // and runs a held flush, so an outside click there cancels the same way rather than stranding them.
 func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if !m.picker.open || !pre.picker.open {
+	hit := m.pickerHit(pre, msg.Y)
+	switch hit.at {
+	case hitAbsent:
 		return m, nil, false
-	}
-	row, top, inRect, onRow := popupPaneHit(pre, panePicker, pre.renderPickerPlaced, msg.Y)
-	if !inRect {
+	case hitDismiss:
 		if m.boundaryConfirmOpen() {
 			next, cmd := acceptedModel(m.answerBoundary(boundaryCancel))
 			return next, cmd, true
 		}
 		m.picker = picker{} // outside the modal: dismissed, and the click is spent on that
 		return m, nil, true
+	case hitRow:
+	default:
+		return m, nil, true // the pane's chrome, or the zero-match note: claimed, with no row to take
 	}
-	if !onRow {
-		return m, nil, true // the pane's chrome: claimed, with no row to take
-	}
-	count := m.pickerCount()
-	if count == 0 {
-		return m, nil, true // a filter matching nothing: its one row is the zero-match note, prose and not a choice
-	}
-	if m.clickArmed.holds(panePicker, row) {
+	if m.clickArmed.holds(panePicker, hit.row) {
 		if !m.picker.isArmed() {
 			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
 		}
@@ -1650,9 +1724,31 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 		next, cmd := acceptedModel(m.acceptPicker())
 		return next, cmd, true
 	}
-	m.picker.seat(row, count)
-	m.clickArmed = clickArm{pane: panePicker, row: row, top: top, ok: true}
+	m.picker.seat(hit.row, hit.count)
+	m.clickArmed = clickArm{pane: panePicker, row: hit.row, top: hit.top, ok: true}
 	return m, nil, true
+}
+
+// pickerHit is handlePickerClick's decision for a point, read without acting on it ([paneHit]).
+// Geometry is put to pre and every state gate to the receiver (handleMouseClick's rule). The arming
+// latch is not part of it: it holds back only the second click on the row the pointer armed, for the
+// round trip it waits on, and the row is still the one the click is aimed at.
+func (m Model) pickerHit(pre Model, y int) paneHit {
+	if !m.picker.open || !pre.picker.open {
+		return paneHit{}
+	}
+	row, top, inRect, onRow := popupPaneHit(pre, panePicker, pre.renderPickerPlaced, y)
+	if !inRect {
+		return paneHit{at: hitDismiss}
+	}
+	if !onRow {
+		return paneHit{at: hitInert} // the pane's chrome
+	}
+	count := m.pickerCount()
+	if count == 0 {
+		return paneHit{at: hitInert} // a filter matching nothing: its one row is the zero-match note, prose and not a choice
+	}
+	return paneHit{at: hitRow, row: row, top: top, count: count}
 }
 
 // ----------------------------------------------------------------------------
@@ -1687,24 +1783,15 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 // is read off pre: submitAnswer clears m.pendingAsk, and a second click composing the pane from the
 // answered model would have nothing to place.
 func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if m.state != stateAwaitingAsk || m.pendingAsk == nil || pre.pendingAsk == nil {
-		return m, nil, false
+	hit := m.askHit(pre, msg.Y)
+	switch hit.at {
+	case hitAbsent, hitOutside:
+		return m, nil, false // not up, or outside the box: unclaimed, and the chain goes on with it
+	case hitRow:
+	default:
+		return m, nil, true // off its rows, the box holds a typed answer, or no choices are offered
 	}
-	req := pre.pendingAsk.Request
-	row, top, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
-		return pre.askPromptPlaced(req)
-	}, msg.Y)
-	if !inRect {
-		return m, nil, false // outside the box: unclaimed, and the chain goes on with it
-	}
-	if !onRow || m.input.Value() != "" {
-		return m, nil, true // off its rows, or the box holds a typed answer
-	}
-	choices := m.pendingAsk.Request.Choices
-	if len(choices) == 0 {
-		return m, nil, true
-	}
-	if m.clickArmed.holds(panePrompt, row) {
+	if m.clickArmed.holds(panePrompt, hit.row) {
 		if !m.approvalArmed {
 			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
 		}
@@ -1714,16 +1801,40 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 		next, cmd := acceptedModel(m.submitAnswer())
 		return next, cmd, true
 	}
-	m.askSel.seat(row, len(choices))
-	if req.MultiSelect {
+	m.askSel.seat(hit.row, hit.count)
+	if pre.pendingAsk.Request.MultiSelect {
 		// A checked set shorter than the offering ticks nothing rather than panicking — the −1
 		// listCursor.highlight answers for an empty one, the same guard ␣ takes (askChoiceKey).
 		if sel := m.askSel.highlight(len(m.askChecked)); sel >= 0 {
 			m.askChecked[sel] = !m.askChecked[sel]
 		}
 	}
-	m.clickArmed = clickArm{pane: panePrompt, row: row, top: top, ok: true}
+	m.clickArmed = clickArm{pane: panePrompt, row: hit.row, top: hit.top, ok: true}
 	return m, nil, true
+}
+
+// askHit is handleAskClick's decision for a point, read without acting on it ([paneHit]). Geometry is
+// put to pre — the question it is composed from included — and every state gate to the receiver
+// (handleMouseClick's rule).
+func (m Model) askHit(pre Model, y int) paneHit {
+	if m.state != stateAwaitingAsk || m.pendingAsk == nil || pre.pendingAsk == nil {
+		return paneHit{}
+	}
+	req := pre.pendingAsk.Request
+	row, top, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
+		return pre.askPromptPlaced(req)
+	}, y)
+	if !inRect {
+		return paneHit{at: hitOutside}
+	}
+	if !onRow || m.input.Value() != "" {
+		return paneHit{at: hitInert} // off its rows, or the box holds a typed answer
+	}
+	choices := m.pendingAsk.Request.Choices
+	if len(choices) == 0 {
+		return paneHit{at: hitInert}
+	}
+	return paneHit{at: hitRow, row: row, top: top, count: len(choices)}
 }
 
 // ----------------------------------------------------------------------------
@@ -1762,22 +1873,15 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 // is read off pre: sendApproval clears m.pending, and a second click composing the pane from the
 // answered model would have nothing to place.
 func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if m.state != stateAwaitingApproval || m.pending == nil || pre.pending == nil {
-		return m, nil, false
+	hit := m.approvalHit(pre, msg.Y)
+	switch hit.at {
+	case hitAbsent, hitOutside:
+		return m, nil, false // not up, or outside the box: unclaimed, and the chain goes on with it
+	case hitRow:
+	default:
+		return m, nil, true // the pane's chrome, or the open rule field: claimed, with no row to take
 	}
-	req := pre.pending.Request
-	row, top, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
-		return pre.approvalPromptPlaced(req)
-	}, msg.Y)
-	if !inRect {
-		return m, nil, false // outside the box: unclaimed, and the chain goes on with it
-	}
-	if !onRow || m.editingProjectRule() {
-		// The pane's chrome — or the open rule field, whose save is ⏎'s alone: claimed, with no row to
-		// take.
-		return m, nil, true
-	}
-	if m.clickArmed.holds(panePrompt, row) {
+	if m.clickArmed.holds(panePrompt, hit.row) {
 		if !m.approvalArmed {
 			return m, nil, true // the latch, not the arm: the row stays armed for the click after the tick
 		}
@@ -1787,9 +1891,30 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		next, cmd := acceptedModel(m.resolveApproval())
 		return next, cmd, true
 	}
-	m.approvalSel.seat(row, len(m.approvalMenuFor(req)))
-	m.clickArmed = clickArm{pane: panePrompt, row: row, top: top, ok: true}
+	m.approvalSel.seat(hit.row, hit.count)
+	m.clickArmed = clickArm{pane: panePrompt, row: hit.row, top: hit.top, ok: true}
 	return m, nil, true
+}
+
+// approvalHit is handleApprovalClick's decision for a point, read without acting on it ([paneHit]).
+// Geometry is put to pre — the request it is composed from included — and every state gate to the
+// receiver (handleMouseClick's rule).
+func (m Model) approvalHit(pre Model, y int) paneHit {
+	if m.state != stateAwaitingApproval || m.pending == nil || pre.pending == nil {
+		return paneHit{}
+	}
+	req := pre.pending.Request
+	row, top, inRect, onRow := popupPaneHit(pre, panePrompt, func() (string, popupPlacement) {
+		return pre.approvalPromptPlaced(req)
+	}, y)
+	if !inRect {
+		return paneHit{at: hitOutside}
+	}
+	if !onRow || m.editingProjectRule() {
+		// The pane's chrome — or the open rule field, whose save is ⏎'s alone.
+		return paneHit{at: hitInert}
+	}
+	return paneHit{at: hitRow, row: row, top: top, count: len(m.approvalMenuFor(req))}
 }
 
 // ----------------------------------------------------------------------------
@@ -1831,27 +1956,43 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 // (handleMouseClick's rule); the geometry is composed from pre's own menu, so a second click reads
 // the frame the human aimed at rather than one an accept has already re-derived.
 func (m Model) handleDropdownClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if !m.openPanes().has(paneDropdown) || !pre.openPanes().has(paneDropdown) {
+	hit := m.dropdownHit(pre, msg.Y)
+	switch hit.at {
+	case hitAbsent:
 		return m, nil, false
-	}
-	row, top, inRect, onRow := popupPaneHit(pre, paneDropdown, pre.renderAutocompletePlaced, msg.Y)
-	if !inRect {
+	case hitOutside:
 		m.dismissAutocomplete() // outside a menu that decides nothing: it closes, and the click travels on
 		return m, nil, false
-	}
-	if !onRow {
+	case hitRow:
+	default:
 		return m, nil, true // the pane's chrome: claimed, with no row to take
 	}
-	if m.clickArmed.holds(paneDropdown, row) {
+	if m.clickArmed.holds(paneDropdown, hit.row) {
 		// The row the POINTER highlighted, clicked again: the arm is spent here rather than left for
 		// the next gesture to drop, because the menu it belonged to is being accepted from.
 		m.clickArmed = clickArm{}
 		next, cmd := acceptedModel(m.acceptAutocomplete())
 		return next, cmd, true
 	}
-	m.autocomplete.seat(row, len(m.autocomplete.items))
-	m.clickArmed = clickArm{pane: paneDropdown, row: row, top: top, ok: true}
+	m.autocomplete.seat(hit.row, hit.count)
+	m.clickArmed = clickArm{pane: paneDropdown, row: hit.row, top: hit.top, ok: true}
 	return m, nil, true
+}
+
+// dropdownHit is handleDropdownClick's decision for a point, read without acting on it ([paneHit]).
+// Geometry is put to pre and every state gate to the receiver (handleMouseClick's rule).
+func (m Model) dropdownHit(pre Model, y int) paneHit {
+	if !m.openPanes().has(paneDropdown) || !pre.openPanes().has(paneDropdown) {
+		return paneHit{}
+	}
+	row, top, inRect, onRow := popupPaneHit(pre, paneDropdown, pre.renderAutocompletePlaced, y)
+	if !inRect {
+		return paneHit{at: hitOutside}
+	}
+	if !onRow {
+		return paneHit{at: hitInert} // the pane's chrome
+	}
+	return paneHit{at: hitRow, row: row, top: top, count: len(m.autocomplete.items)}
 }
 
 // highlightTranscript overlays the transcript drag-selection's background on the viewport's

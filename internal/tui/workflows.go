@@ -681,29 +681,45 @@ func (m Model) workflowsHeight() int {
 // open every click is claimed and ignored, as the browser's rename is: the name row is a modal
 // surface within the modal, answered by ⏎ or esc, and a stray of the pointer never cancels it.
 func (m Model) handleWorkflowsClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if !m.workflowsPane.open || !pre.workflowsPane.open {
+	hit := m.workflowsHit(pre, msg.Y)
+	switch hit.at {
+	case hitAbsent:
 		return m, nil, false
-	}
-	if m.workflowsPane.naming {
-		return m, nil, true // a modal surface within the modal: it owns the pane until it is answered
-	}
-	row, top, inRect, onRow := popupPaneHit(pre, paneWorkflows, pre.renderWorkflowsPlaced, msg.Y)
-	if !inRect {
+	case hitDismiss:
 		m.workflowsPane = workflowsPane{}
 		return m, nil, true
+	case hitRow:
+	default:
+		return m, nil, true // the name row, the pane's chrome, or prose: claimed, with no row to take
 	}
-	count := m.workflowsChoiceCount()
-	if !onRow || count == 0 {
-		return m, nil, true // the pane's chrome, or prose: claimed, with no row to take
-	}
-	if m.clickArmed.holds(paneWorkflows, row) {
+	if m.clickArmed.holds(paneWorkflows, hit.row) {
 		m.clickArmed = clickArm{}
 		next, cmd := acceptedModel(m.workflowsAccept())
 		return next, cmd, true
 	}
-	m.workflowsPane.cursor().seat(row, count)
-	m.clickArmed = clickArm{pane: paneWorkflows, row: row, top: top, ok: true}
+	m.workflowsPane.cursor().seat(hit.row, hit.count)
+	m.clickArmed = clickArm{pane: paneWorkflows, row: hit.row, top: hit.top, ok: true}
 	return m, nil, true
+}
+
+// workflowsHit is handleWorkflowsClick's decision for a point, read without acting on it ([paneHit]).
+// Geometry is put to pre and every state gate to the receiver (handleMouseClick's rule, mouse.go).
+func (m Model) workflowsHit(pre Model, y int) paneHit {
+	if !m.workflowsPane.open || !pre.workflowsPane.open {
+		return paneHit{}
+	}
+	if m.workflowsPane.naming {
+		return paneHit{at: hitInert} // a modal surface within the modal: it owns the pane until it is answered
+	}
+	row, top, inRect, onRow := popupPaneHit(pre, paneWorkflows, pre.renderWorkflowsPlaced, y)
+	if !inRect {
+		return paneHit{at: hitDismiss}
+	}
+	count := m.workflowsChoiceCount()
+	if !onRow || count == 0 {
+		return paneHit{at: hitInert} // the pane's chrome, or prose
+	}
+	return paneHit{at: hitRow, row: row, top: top, count: count}
 }
 
 // workflowsWheel walks the level's highlight one row per notch while the pointer is over the pane,
