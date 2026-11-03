@@ -46,7 +46,10 @@
 - 3 (re-check): guards folded (`newProjection` takes the room's Budget and derives the reply cap from it, `maxOutputTokens()` kept no-arg; `loopView(turn)` and `resolveSkillRefs` keep their signatures; the render-count test arms the fill notice; `-run` widened to the budget, output-cap and sub-agent context tests).
 - 4 (re-check): decision applied (the render-once Acceptance depends on item 3 removing the `maxOutputTokens` second render in `newProjection`).
 
-## 1. Loop-level pins bite on the fold elision and the room-left share
+## 1. Loop-level pins bite on the fold elision and the room-left share — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): bite proven locally — `elideNewestMessage` forced to keep-whole fails TestFoldElidesAnOversizedNewestMessageEndToEnd (summary call 16722 tokens vs 4096, no marker); `freshResultBound` forced to `structuralFloor()` fails TestFreshResultTakesOnlyTheRoomLeftEndToEnd (summarizer calls = 1, want 0); the two existing Seqcom pins stay green under both reverts, as the issue records.
+NOTES (2026-11-03): the elision pin reaches the fold through the predictive guard on the second Exchange (uncalibrated window) and also asserts the prompt's head and tail survive; the room-left pin calibrates (`calibrate`) so the guard measures the bare room, and checks the room-left setup (between the 1/8 floor and the History allocation) at the append point.
 
 **What:**
 **Goal:** Loop-level tests in `internal/agent` fail when the fold transcript keeps an oversized newest message whole, and fail when the fresh-result bound returns the whole History allocation instead of the room left. Test-only; no production change.

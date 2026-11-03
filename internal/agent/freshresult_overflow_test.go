@@ -186,3 +186,114 @@ func TestSeqcomOverflowBodyFoldsAndRetries(t *testing.T) {
 		t.Errorf("the retried request's reply did not land: last message %+v (roles %s)", last, convRoles(a))
 	}
 }
+
+// The two pins below hold the mechanisms the Seqcom pins above pass through without biting on
+// (issue fresh-result-pins-blunt): reverting either one leaves those two green, so each gets a
+// loop-level scenario where it alone decides the outcome.
+
+// TestFoldElidesAnOversizedNewestMessageEndToEnd: a second Exchange's prompt larger than the whole
+// transcript budget is the most recent message the predictive fold's summary call must carry. A
+// tool result cannot be that message — the structural clamp holds it under the History allocation,
+// which is at most the transcript budget — so it is an unclamped user prompt past the protected
+// prefix. The summary call must fit its budget and carry that prompt byte-elided head-and-tail
+// (elideNewestMessage, internal/context/compact.go): kept whole, it overflows the very call meant
+// to relieve the overflow.
+func TestFoldElidesAnOversizedNewestMessageEndToEnd(t *testing.T) {
+	sink := &recordingSink{}
+	up := scriptResponder(t, stubllm.Script{Turns: []stubllm.Turn{
+		summaryTurn("FOLD-SUMMARY"),
+		contentTurn("hello"),
+		contentTurn("all done"),
+	}})
+	cfg := configWithTools(sink)
+	cfg.Context.MaxContextTokens = floorWindow
+	cfg.Context.CompactionEnabled = true
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	const head, tail = "PROMPT-HEAD:", ":PROMPT-TAIL"
+	prompt := head + strings.Repeat("p", 2*floorWindow*4) + tail
+	budget := deriveGrowthBounds(a.budget()).transcriptBudget
+	if got := a.budget().EstimateTokens(len(prompt)); got <= budget {
+		t.Fatalf("test setup: prompt is %d tokens (want past the %d-token transcript budget)", got, budget)
+	}
+
+	runExchange(t, a, "hi")
+	res := runExchange(t, a, prompt)
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("the Exchange surfaced %d ErrorEvent(s) %v; want none", len(errs), errs)
+	}
+	if n := up.summaryCalls(); n != 1 {
+		t.Fatalf("summarizer calls = %d, want exactly 1 fold of the oversized prompt", n)
+	}
+	summary := up.lastSummary()
+	// The transcript budget plus the prompt overhead it was sized for is the window less the
+	// summary's reply reserve.
+	if got, room := wireTokens(a, summary), a.budget().Window-compactMaxTokens; got > room {
+		t.Errorf("the summary call carried %d tokens, past its budget of %d (window less the summary's reply reserve)", got, room)
+	}
+	transcript := ""
+	for _, m := range summary.Messages {
+		transcript += m.Content
+	}
+	if !strings.Contains(transcript, elisionMarkerMark) {
+		t.Error("the summary call's transcript carries no elision marker; the oversized prompt was not elided")
+	}
+	if !strings.Contains(transcript, head) || !strings.Contains(transcript, tail) {
+		t.Error("the summary call's transcript lost the prompt's head or tail; want it elided head-and-tail")
+	}
+}
+
+// TestFreshResultTakesOnlyTheRoomLeftEndToEnd: on a calibrated window — the predictive guard
+// measures the bare room, no uncalibrated margin — a prompt fills the request until less room is
+// left than the History allocation, and one call returns a body past the whole window. The result
+// is committed at the room left (freshResultBound), not at the allocation, so the request carrying
+// it estimates within the room and goes out without a fold. Bounded at the allocation instead, it
+// overruns the room and the predictive guard folds before the continuation.
+func TestFreshResultTakesOnlyTheRoomLeftEndToEnd(t *testing.T) {
+	sink := &recordingSink{}
+	up := scriptResponder(t, stubllm.Script{Turns: []stubllm.Turn{
+		summaryTurn("UNEXPECTED-SUMMARY"),
+		toolCallTurn("c1", "web_fetch", `{"url":"https://openrouter.ai/api/v1/models"}`),
+		contentTurn("all done"),
+	}})
+	a := seqcomAgent(t, sink, modelListLine(), up)
+	calibrate(a)
+	room, ceiling := freshRoom(t, a), a.structuralFloor()
+	// A prompt that leaves half the History allocation in the request: under the ceiling, so the
+	// room left is what bounds the result, and over the 1/8 floor, so the share is not floored.
+	standing := requestTokens(a, []domain.Message{{Role: domain.RoleUser}})
+	prompt := singleLine(a, room-ceiling/2-standing)
+
+	res := runExchange(t, a, prompt)
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+	if n := up.summaryCalls(); n != 0 {
+		t.Errorf("summarizer calls = %d, want 0 — a result bounded at the room left needs no fold", n)
+	}
+	msgs, at := committedToolMessages(a)
+	if len(msgs) != 1 {
+		t.Fatalf("conversation holds %d tool messages, want 1", len(msgs))
+	}
+	left := room - requestTokens(a, a.conv.Messages()[:at[0]])
+	if floor := ceiling / freshResultFloorDivisor; left >= ceiling || left <= floor {
+		t.Fatalf("test setup: %d tokens left at the append, want between the floor %d and the History allocation %d", left, floor, ceiling)
+	}
+	if next := requestTokens(a, a.conv.Messages()[:at[0]+1]); next > room {
+		t.Errorf("the request carrying the result is estimated at %d tokens, past the room of %d", next, room)
+	}
+	mains := up.mains()
+	if len(mains) != 2 {
+		t.Fatalf("main requests = %d, want 2 (the tool call and the continuation)", len(mains))
+	}
+	if got := wireTokens(a, mains[1]); got > room {
+		t.Errorf("the continuation carried %d tokens, past the room of %d", got, room)
+	}
+}
