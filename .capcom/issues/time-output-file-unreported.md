@@ -1,10 +1,12 @@
 ---
 title: "`time -o FILE` / `time --output FILE`: the file time writes is never reported as a write target, and `-o`'s value is taken as the leader"
-status: open
+status: done
 type: bug
 priority: 3
 labels: [security]
 created: 2026-11-03T18:09:10Z
+closed: 2026-11-03T18:37:42Z
+reason: "Resolved by plan '2026-11-03 - 02 - wrapper-option-bugs-plan' item 1 (archived at 1b9580fb): time -o/-oFILE/--output[=]/prefix report the output file and -o/-f values are read"
 ---
 
 Found during plan `2026-11-03 - 01 - open-bugs-plan` (item 1, after `74189cf7`), not introduced by it. GNU `time -o FILE` / `--output=FILE` writes its report to FILE, but `writeTargetsOf` (internal/security/shellwrites.go:57) never reports it:
