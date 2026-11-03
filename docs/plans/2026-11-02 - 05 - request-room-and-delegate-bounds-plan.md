@@ -68,7 +68,11 @@ NOTES (2026-11-03): the elision pin reaches the fold through the predictive guar
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestFoldElidesAnOversizedNewestMessageEndToEnd|TestFreshResultTakesOnlyTheRoomLeftEndToEnd|TestFreshOversizedResultFitsTheNextRequest|TestSeqcomOverflowBodyFoldsAndRetries' ./internal/agent/`
 **Commit:** `test(agent): pin the fold elision and the room-left share at loop level`
 
-## 2. Extract the request room
+## 2. Extract the request room — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — internal/agent/doc.go: made necessary by adding requestroom.go (the package file map that TestDocMapNamesEveryFile checks).
+NOTES (2026-11-03): the room holds the standing render as the joined string standingSystem() returns, not the standing rows; item 3 re-derives the Budget from the rows. The clampToBound and requestExceedsWindow wrappers now gather a whole room (one standing render and tool menu more per call than before) until item 3 builds one room per commit; model-facing bytes are unchanged.
+NOTES (2026-11-03): the long design comments on freshResultBound, clampToBound and requestExceedsWindow moved onto requestRoom.freshShare, fit and exceeds; the wrappers keep short pointers. freshResultFloorDivisor and uncalibratedRoomMargin stay in dispatch.go and loop.go (also read by predictiveFoldDue and the docs naming them).
 
 Depends on item 1.
 

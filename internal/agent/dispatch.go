@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/console"
-	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/security"
@@ -2159,27 +2158,10 @@ func (a *Agent) structuralFloor() int {
 	return deriveGrowthBounds(a.budget()).historyFloor
 }
 
-// clampToBound is the RENDERING both structural clamps share: content whose estimated tokens exceed
-// bound is replaced by the head/tail-plus-marker elision (context.TruncateToolResult — the same
-// shape the tool-result-cap guard renders), so the model reads ONE "the middle was dropped, re-read the
-// range" idiom whichever seam produced it. Content within bound is returned untouched.
-//
-// The line elision keeps whole head and tail lines, so a body of a few very long lines (minified
-// JSON, a one-line page) comes out of it still over bound — or longer than it went in. Such a body
-// is byte-elided instead (context.ElideToBytes, the same marker) to the bound in characters, so
-// the result is within bound for any input shape; content the line elision already brings under
-// bound comes back exactly as that elision renders it.
+// clampToBound renders content within bound through this Agent's request room (requestRoom.fit,
+// requestroom.go): the elision both structural clamps share.
 func (a *Agent) clampToBound(content string, bound int) string {
-	b := a.budget()
-	if b.EstimateTokens(len(content)) <= bound {
-		return content
-	}
-	maxChars := int(float64(bound) * b.CharsPerToken)
-	clamped := apogeectx.TruncateToolResult(content, maxChars)
-	if b.EstimateTokens(len(clamped)) <= bound {
-		return clamped
-	}
-	return apogeectx.ElideToBytes(content, maxChars)
+	return a.requestRoom().fit(content, bound)
 }
 
 // clampToolResult is the STRUCTURAL bound on a single tool result: a result whose estimated tokens
@@ -2216,38 +2198,12 @@ func (a *Agent) clampToolResult(content string) string {
 // could not.
 const freshResultFloorDivisor = 8
 
-// freshResultBound is the bound, in tokens, a tool result about to be appended is clamped to. With
-// a known window it is the result's share of the room left in the request: the advertised window
-// less the reply reserve — the very room the predictive guard measures (deriveGrowthBounds,
-// requestExceedsWindow) — less the estimate of the next request without the result (the standing
-// system content buildRequest seeds, the conversation, the tool menu), divided across the results
-// of the Turn still to append (turnLifecycle.resultsToAppend, counted by dispatchTools). It is
-// recomputed at each append, so the room a small result leaves unused rolls forward to the next.
-// The share is clamped to [1/8 of the History allocation, the History allocation]: never above
-// the structural ceiling the fold's arithmetic rests on (structuralFloor), and never below the
-// floor, where the predictive fold makes room rather than the result shrinking to nothing.
-//
-// The estimate is the predictive guard's own measure — the Budget's chars-per-token ratio over
-// what the request carries — with no comfort margin (ADR 0018 §7) and no second estimator. It is
-// composed here from its parts rather than through buildRequest, which arms a projection this
-// seam must not build. With no window known the bound is structuralFloor() — the conservative
-// ceiling the fold renders against — exactly as before the room-left bound (ADR 0018 §8).
-//
-// Structural like the clamp it feeds (ADR 0006): no config key, on under Bypass.
+// freshResultBound is the bound, in tokens, a tool result about to be appended is clamped to: its
+// share of the room left in the request (requestRoom.freshShare, requestroom.go), weighed over the
+// conversation as it stands and split across the Turn's results still to append
+// (turnLifecycle.resultsToAppend).
 func (a *Agent) freshResultBound() int {
-	b := a.budget()
-	g := deriveGrowthBounds(b)
-	if !g.windowKnown {
-		return g.historyFloor
-	}
-	msgs := a.conv.Messages()
-	if sys := a.standingSystem(); sys != "" {
-		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
-	}
-	left := g.room - b.EstimateTokens(domain.PromptChars(msgs, a.toolMenu()))
-	share := left / max(a.turns.resultsToAppend, 1)
-	floor := max(g.historyFloor/freshResultFloorDivisor, 1)
-	return min(max(share, floor), g.historyFloor)
+	return a.requestRoom().freshShare(a.conv.Messages(), a.turns.resultsToAppend)
 }
 
 // errorToolResult builds a tool-level failure result surfaced to the model (IsError) rather

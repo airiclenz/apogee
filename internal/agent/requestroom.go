@@ -1,0 +1,168 @@
+package agent
+
+import (
+	apogeectx "github.com/airiclenz/apogee/internal/context"
+	"github.com/airiclenz/apogee/internal/domain"
+)
+
+// requestRoom is the one module that knows how big a request is and how much room it has left:
+// the request's measure (weight), the room left after it (left), a fresh tool result's share of
+// that room (freshShare), the predictive guard's window check (exceeds) and the elision both
+// structural bounds render through (fit). It has one reason to change — the arithmetic the fold
+// rests on — so no second copy of any of it lives at the seams that read it.
+//
+// It is a value built from the values the arithmetic reads: one Budget view, the growthBounds
+// derived from it (deriveGrowthBounds, the one substitution site for an unknown window), the
+// standing system content buildRequest seeds at position 0 and the tool menu the request offers.
+// It reaches no Agent, so the arithmetic is testable as a table; Agent.requestRoom gathers the
+// values live.
+type requestRoom struct {
+	budget   domain.Budget
+	bounds   growthBounds
+	standing string
+	menu     []domain.ToolDef
+}
+
+// newRequestRoom builds the room from one Budget view, the standing system content ("" when
+// nothing is seeded) and the tool menu.
+func newRequestRoom(b domain.Budget, standing string, menu []domain.ToolDef) requestRoom {
+	return requestRoom{
+		budget:   b,
+		bounds:   deriveGrowthBounds(b),
+		standing: standing,
+		menu:     menu,
+	}
+}
+
+// requestRoom gathers this Agent's room live: the Budget, the standing render and the tool menu
+// as they stand now.
+func (a *Agent) requestRoom() requestRoom {
+	return newRequestRoom(a.budget(), a.standingSystem(), a.toolMenu())
+}
+
+// weight is the estimated tokens of a request carrying msgs: the standing system content seeded
+// ahead of them, the messages and the tool menu, through the Budget's chars-per-token ratio — the
+// predictive guard's own measure, with no comfort margin (ADR 0018 §7) and no second estimator.
+func (r requestRoom) weight(msgs []domain.Message) int {
+	if r.standing != "" {
+		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: r.standing}}, msgs...)
+	}
+	return r.budget.EstimateTokens(domain.PromptChars(msgs, r.menu))
+}
+
+// left is the room a request carrying msgs leaves: the room (the advertised window less the reply
+// reserve) less its weight. It goes negative once the request is already past the room.
+func (r requestRoom) left(msgs []domain.Message) int {
+	return r.bounds.room - r.weight(msgs)
+}
+
+// freshShare is the bound, in tokens, a tool result about to be appended is clamped to. With
+// a known window it is the result's share of the room left in the request: the advertised window
+// less the reply reserve — the very room the predictive guard measures (deriveGrowthBounds,
+// exceeds) — less the estimate of the next request without the result (the standing system
+// content buildRequest seeds, the conversation msgs, the tool menu), divided across the pending
+// results of the Turn still to append (turnLifecycle.resultsToAppend, counted by dispatchTools).
+// It is recomputed at each append, so the room a small result leaves unused rolls forward to the
+// next. The share is clamped to [1/8 of the History allocation, the History allocation]: never
+// above the structural ceiling the fold's arithmetic rests on (structuralFloor), and never below
+// the floor, where the predictive fold makes room rather than the result shrinking to nothing.
+//
+// The estimate is weight's — composed from its parts rather than through buildRequest, which arms
+// a projection this seam must not build. With no window known the bound is the History floor
+// (growthBounds.historyFloor) — the conservative ceiling the fold renders against — exactly as
+// before the room-left bound (ADR 0018 §8).
+//
+// Structural like the clamp it feeds (ADR 0006): no config key, on under Bypass.
+func (r requestRoom) freshShare(msgs []domain.Message, pending int) int {
+	if !r.bounds.windowKnown {
+		return r.bounds.historyFloor
+	}
+	share := r.left(msgs) / max(pending, 1)
+	floor := max(r.bounds.historyFloor/freshResultFloorDivisor, 1)
+	return min(max(share, floor), r.bounds.historyFloor)
+}
+
+// exceeds reports whether req's prompt is ALREADY estimated to be too big for the model's context
+// window — the predictive half of overflow protection, read by step() between building a request
+// and sending it. conv is the conversation the request was projected from.
+//
+// The measure is the one the whole engine shares: domain.PromptChars over the request's projected
+// messages and tool menu, through the Budget's calibrated chars→token ratio
+// (domain.Budget.EstimateTokens), so this guard can never disagree with the compaction trigger or
+// a hook reading the same Budget. The threshold is the HARD room — the ADVERTISED window less the
+// reply reserve (Window − ResponseReserve) — uncalibratedRoomMargin times it while the ratio is
+// still the uncalibrated seed — deliberately not a softer fraction: a fold is a lossy rewrite of
+// the user's history, so it must fire only when the estimate says the request cannot fit at all,
+// never as a comfort margin. That is also why it reads Window rather than the working ceiling
+// ContextLimit: a `working-window:` bound is a soft line the reducers keep the session under, and
+// folding at it would fire this guard on every request a bounded session deliberately lets run
+// past its working room while still fitting the server's window. The History allocation — the
+// working room less the measured standing reservations, floored at half that room and then capped
+// at the fold's transcript budget, which at a small window binds below that floor — stays the
+// boundary trigger's business (Budget.HistoryExceedsAllocation), not this one's — and that one
+// DOES follow the working ceiling, which is how the bound actually bites.
+//
+// With an UNKNOWN window (no discovery, no config: Allocate returns the zero Allocation, leaving
+// no working room) BOTH sides of the compare change. The room becomes
+// compactUnknownWindowTranscriptTokens — the same conservative ceiling the emergency fold renders
+// against, substituted at the one site every growth bound draws on (deriveGrowthBounds,
+// compact.go) — and the measure becomes the TRANSCRIPT alone: conv, without the tool menu
+// and without the standing system content the request projection seeds at position 0. That
+// ceiling is a transcript budget (compact.go), the transcript is the only part a fold can shed,
+// and the boundary trigger measures exactly the same quantity against the same number
+// (historyExceedsAllocation), so on an unknown window all three bounds read one number through one
+// measure.
+//
+// Measuring the whole REQUEST against that ceiling instead would compare a request-sized quantity
+// to a transcript-sized bound, and the fixed costs alone settle it: the default 19-tool menu is
+// ~11.5k characters ≈ 3.8k tokens at a code-heavy 3.0 chars/token, already past the ceiling with an
+// empty conversation. The guard would then fire on a four-message session and fold every Exchange
+// without any fold ever getting under the bound — a comfort margin, which decision 7 forbids
+// outright (audit 2026-08-01, follow-up B).
+//
+// It used to be INERT here, which left the ONE case the reactive path cannot cover (a 400 the
+// provider cannot classify as an overflow) with no protection at all on exactly the sessions that
+// have no window to protect them. Bounding against an assumed small window means a large window a
+// server never advertised is managed as if it were small — the give-up and saturation events both
+// name `context-window:` for that reason, and a pinned window restores the exact arithmetic above.
+//
+// The estimate is advisory either way: an over-estimate costs one fold, and an under-estimate
+// costs nothing, because the wire overflow still routes to the reactive path. That asymmetry is
+// why an UNCALIBRATED Budget is measured against uncalibratedRoomMargin (documented on it) times
+// the room rather than the bare room — the ratio's uncertainty is independent of the window's, so
+// the margin applies to the assumed room as well.
+func (r requestRoom) exceeds(req *domain.Request, conv []domain.Message) bool {
+	room, chars := r.bounds.room, 0
+	if r.bounds.windowKnown {
+		st := req.State()
+		chars = domain.PromptChars(st.Messages, st.Tools)
+	} else {
+		chars = domain.PromptChars(conv, nil)
+	}
+	if r.budget.Used == 0 {
+		room *= uncalibratedRoomMargin
+	}
+	return r.budget.EstimateTokens(chars) > room
+}
+
+// fit is the RENDERING both structural clamps share: content whose estimated tokens exceed
+// bound is replaced by the head/tail-plus-marker elision (context.TruncateToolResult — the same
+// shape the tool-result-cap guard renders), so the model reads ONE "the middle was dropped, re-read the
+// range" idiom whichever seam produced it. Content within bound is returned untouched.
+//
+// The line elision keeps whole head and tail lines, so a body of a few very long lines (minified
+// JSON, a one-line page) comes out of it still over bound — or longer than it went in. Such a body
+// is byte-elided instead (context.ElideToBytes, the same marker) to the bound in characters, so
+// the result is within bound for any input shape; content the line elision already brings under
+// bound comes back exactly as that elision renders it.
+func (r requestRoom) fit(content string, bound int) string {
+	if r.budget.EstimateTokens(len(content)) <= bound {
+		return content
+	}
+	maxChars := int(float64(bound) * r.budget.CharsPerToken)
+	clamped := apogeectx.TruncateToolResult(content, maxChars)
+	if r.budget.EstimateTokens(len(clamped)) <= bound {
+		return clamped
+	}
+	return apogeectx.ElideToBytes(content, maxChars)
+}

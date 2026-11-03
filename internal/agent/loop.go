@@ -1481,67 +1481,10 @@ const uncalibratedRoomMargin = 2
 
 // requestExceedsWindow reports whether req's prompt is ALREADY estimated to be too big for the
 // model's context window — the predictive half of overflow protection, read by step() between
-// building a request and sending it.
-//
-// The measure is the one the whole engine shares: domain.PromptChars over the request's projected
-// messages and tool menu, through the Budget's calibrated chars→token ratio
-// (domain.Budget.EstimateTokens), so this guard can never disagree with the compaction trigger or
-// a hook reading the same Budget. The threshold is the HARD room — the ADVERTISED window less the
-// reply reserve (Window − ResponseReserve) — uncalibratedRoomMargin times it while the ratio is
-// still the uncalibrated seed — deliberately not a softer fraction: a fold is a lossy rewrite of
-// the user's history, so it must fire only when the estimate says the request cannot fit at all,
-// never as a comfort margin. That is also why it reads Window rather than the working ceiling
-// ContextLimit: a `working-window:` bound is a soft line the reducers keep the session under, and
-// folding at it would fire this guard on every request a bounded session deliberately lets run
-// past its working room while still fitting the server's window. The History allocation — the
-// working room less the measured standing reservations, floored at half that room and then capped
-// at the fold's transcript budget, which at a small window binds below that floor — stays the
-// boundary trigger's business (Budget.HistoryExceedsAllocation), not this one's — and that one
-// DOES follow the working ceiling, which is how the bound actually bites.
-//
-// With an UNKNOWN window (no discovery, no config: Allocate returns the zero Allocation, leaving
-// no working room) BOTH sides of the compare change. The room becomes
-// compactUnknownWindowTranscriptTokens — the same conservative ceiling the emergency fold renders
-// against, substituted at the one site every growth bound draws on (deriveGrowthBounds,
-// compact.go) — and the measure becomes the TRANSCRIPT alone: the conversation, without the tool menu
-// and without the standing system content the request projection seeds at position 0. That
-// ceiling is a transcript budget (compact.go), the transcript is the only part a fold can shed,
-// and the boundary trigger measures exactly the same quantity against the same number
-// (historyExceedsAllocation), so on an unknown window all three bounds read one number through one
-// measure.
-//
-// Measuring the whole REQUEST against that ceiling instead would compare a request-sized quantity
-// to a transcript-sized bound, and the fixed costs alone settle it: the default 19-tool menu is
-// ~11.5k characters ≈ 3.8k tokens at a code-heavy 3.0 chars/token, already past the ceiling with an
-// empty conversation. The guard would then fire on a four-message session and fold every Exchange
-// without any fold ever getting under the bound — a comfort margin, which decision 7 forbids
-// outright (audit 2026-08-01, follow-up B).
-//
-// It used to be INERT here, which left the ONE case the reactive path cannot cover (a 400 the
-// provider cannot classify as an overflow) with no protection at all on exactly the sessions that
-// have no window to protect them. Bounding against an assumed small window means a large window a
-// server never advertised is managed as if it were small — the give-up and saturation events both
-// name `context-window:` for that reason, and a pinned window restores the exact arithmetic above.
-//
-// The estimate is advisory either way: an over-estimate costs one fold, and an under-estimate
-// costs nothing, because the wire overflow still routes to the reactive path. That asymmetry is
-// why an UNCALIBRATED Budget is measured against uncalibratedRoomMargin (documented above) times
-// the room rather than the bare room — the ratio's uncertainty is independent of the window's, so
-// the margin applies to the assumed room as well.
+// building a request and sending it. The arithmetic is this Agent's request room's
+// (requestRoom.exceeds, requestroom.go), measured against the conversation req was projected from.
 func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
-	b := a.budget()
-	g := deriveGrowthBounds(b)
-	room, chars := g.room, 0
-	if g.windowKnown {
-		st := req.State()
-		chars = domain.PromptChars(st.Messages, st.Tools)
-	} else {
-		chars = domain.PromptChars(a.conv.Messages(), nil)
-	}
-	if b.Used == 0 {
-		room *= uncalibratedRoomMargin
-	}
-	return b.EstimateTokens(chars) > room
+	return a.requestRoom().exceeds(req, a.conv.Messages())
 }
 
 // predictiveFoldDue is the predictive guard's verdict at its call site in step(): whether the

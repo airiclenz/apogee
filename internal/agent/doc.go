@@ -68,6 +68,9 @@
 // (prompts/overflow-bridge.txt, prompts/summary-truncated.txt), and the summarizer's own fixed
 // sampling. prune.go is its cheap, non-generative twin: the Turn-boundary trigger that drives
 // internal/context.Prune over the committed history and reports the reclaim as a PruneEvent.
+// requestroom.go is requestRoom, the one module for a request's measure, the room it leaves, a
+// fresh tool result's share of that room, the predictive guard's window check and the elision
+// both structural clamps render through.
 //
 // The tool path. resolution.go computes the per-call Resolution — the complete verdict before
 // anything executes: the guardrail floor, the ladder-by-blast-radius table, the confinement

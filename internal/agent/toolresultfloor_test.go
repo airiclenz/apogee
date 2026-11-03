@@ -314,12 +314,10 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 // The tests below observe whole-versus-elided at sizes either side of that share.
 
 // requestTokens estimates, the way freshResultBound does, a request carrying msgs: the standing
-// system content buildRequest seeds, msgs, and the tool menu, through the Budget's ratio.
+// system content buildRequest seeds, msgs, and the tool menu, through the Budget's ratio — the
+// request room's own measure (requestRoom.weight).
 func requestTokens(a *Agent, msgs []domain.Message) int {
-	if sys := a.standingSystem(); sys != "" {
-		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
-	}
-	return a.budget().EstimateTokens(domain.PromptChars(msgs, a.toolMenu()))
+	return a.requestRoom().weight(msgs)
 }
 
 // freshRoom is the advertised room the bound and the predictive guard share: window less reply
