@@ -4498,7 +4498,7 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 	if err := w.resolveConfig(); err != nil {
 		t.Fatalf("resolveConfig: %v", err)
 	}
-	if w.hooks == nil {
+	if w.reactionHost == nil || w.reactionHost.Runner() == nil {
 		t.Fatal("the root built no Reaction Runner")
 	}
 	// The live Event journal's sink is outermost (ADR 0103 decision 1) and the root's own: unwrapped,
@@ -4508,14 +4508,14 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 		t.Fatalf("Config.Events = %T, want the root's own live Event journal sink outermost", w.cfg.Events)
 	}
 	sink, ok := journal.inner.(statsSink)
-	if !ok || sink.inner != domain.EventSink(w.hooks) {
+	if !ok || sink.inner != domain.EventSink(w.reactionHost.Runner()) {
 		t.Fatalf("the journal sink's inner = %T, want the stats recorder over the root's own *reactions.Runner",
 			journal.inner)
 	}
 	// And an Event emitted before wireSession has installed a tool set at all — the first beat of a
 	// cold start — is forwarded: the Runner holds no handle on the registry to dereference.
 	w.cfg.Events.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
-	_ = w.hooks.Close(context.Background())
+	_ = w.reactionHost.Close()
 }
 
 // A webhook Reaction's `headers-env:` names a variable holding a token, and the execution tools
@@ -4542,7 +4542,7 @@ func TestRootWiringScrubsHookHeaderVariables(t *testing.T) {
 	if err := w.resolveConfig(); err != nil {
 		t.Fatalf("resolveConfig: %v", err)
 	}
-	t.Cleanup(func() { _ = w.hooks.Close(context.Background()) })
+	t.Cleanup(func() { _ = w.reactionHost.Close() })
 	for _, want := range []string{"SERVER_KEY", "HOOK_TOKEN"} {
 		if !slices.Contains(w.cfg.SecretEnvVars, want) {
 			t.Errorf("Config.SecretEnvVars = %v, want it to carry %q", w.cfg.SecretEnvVars, want)

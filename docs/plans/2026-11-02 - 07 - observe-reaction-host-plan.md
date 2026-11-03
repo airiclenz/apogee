@@ -162,7 +162,10 @@ cmd/apogee/probecontext.go — probeContextCommand (adds the internal/reactions 
 
 **Commit:** `refactor(apogee): compose every Firing's observe lane through reactions.Host`
 
-## 4. The TUI session composes its observe lane through the Host
+## 4. The TUI session composes its observe lane through the Host — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): wireSession guards `w.reactionHost.BindMCP` with a nil check: the deleted `mcpResolverSlot.bind` was nil-safe ("a wiring whose boot built no Runner"), while a nil `*reactions.Host` would panic in BindMCP, so the guard keeps that behaviour.
+NOTES (2026-11-03): resolveConfig wraps `w.cfg.Events` (the Runner Install set) rather than the Runner directly, keeping the chain journal(stats(Runner(bridge))); the comments over the old six assignments were folded into one comment over `Install`. The two test cleanups that closed `w.hooks` with `context.Background()` (TestRootWiringEmitsThroughTheHookRunner, TestRootWiringScrubsHookHeaderVariables) now call `w.reactionHost.Close()`, bounded by reactions.CloseGrace.
 
 Depends on items 2 and 3. Item 3 removes `raise`'s use of `hookCloseGrace`.
 **What:** Recast at the regression check (2026-11-02).

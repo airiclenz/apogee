@@ -105,13 +105,6 @@ type rootDeps struct {
 	mcpLogin mcpLoginDeps
 }
 
-// hookCloseGrace is how long a root gives its Reaction Runner to finish what it is already running
-// before the context cancels the rest. It is the SAME five seconds at every root — this session, a
-// headless run, a daemon Firing — because a Reaction must take the same worst case whether a human
-// is watching or not (ADR 0073 §7), and it matches the grace internal/reactions gives a generation
-// retired by a `reactions:` reload.
-const hookCloseGrace = 5 * time.Second
-
 // ----------------------------------------------------------------------------
 // Root command body
 // ----------------------------------------------------------------------------
@@ -234,19 +227,18 @@ type rootWiring struct {
 	// mcpLogin is the boot's other half of rootDeps the session reads later: what the startup login
 	// of an `auth: oauth` MCP server talks through (connectMCPServers).
 	mcpLogin mcpLoginDeps
-	// hooks is this session's Reaction Runner (ADR 0073): the observe-only decorator installed as
-	// Config.Events over the Bridge's own sink, so every engine Event reaches the renderer first and
-	// whatever the `reactions:` list subscribes to is fired off the engine's path afterwards. It is
-	// built in resolveConfig — before the Config that carries it — and it is the ONE Runner this
-	// session has; a Firing raised inside the session composes its own (wire_firing.go).
-	hooks *reactions.Runner
-	// mcpReactions is the slot hooks' executor resolves an observe reaction's mcp: entry through
-	// (adr-0076-amend-1029): built with hooks in resolveConfig, bound by wireSession to the resolver
-	// over the live MCP set once that set is dialled.
-	mcpReactions *mcpResolverSlot
+	// reactionHost is this session's Reaction host (ADR 0073, reactions.Host): its observe lane,
+	// whose Runner is the observe-only decorator installed as Config.Events over the Bridge's own
+	// sink, so every engine Event reaches the renderer first and whatever the `reactions:` list
+	// subscribes to is fired off the engine's path afterwards. It is built in resolveConfig — before
+	// the Config that carries it — and it is the ONE host this session has; a Firing raised inside
+	// the session composes its own (wire_firing.go). wireSession binds its MCP half to the resolver
+	// over the live MCP set once that set is dialled (adr-0076-amend-1029).
+	reactionHost *reactions.Host
 	// stats is this session's per-server stats recorder (ADR 0085): the Driver sink that appends
 	// every UpstreamAttemptEvent to ~/.apogee/server-stats.jsonl while `server-stats:` is on. It
-	// decorates hooks as Config.Events, and the `/settings` row opens or stops it live.
+	// decorates the Reaction host's Runner as Config.Events, and the `/settings` row opens or stops
+	// it live.
 	stats *statsRecorder
 	// events is the outermost sink of Config.Events, over stats: the live Event journal's (ADR 0103),
 	// which the session host points at the active record's journal (sessionHost.attachEventJournal).
@@ -334,15 +326,13 @@ func (w *rootWiring) close() {
 
 	// The Reactions go after the Firings and BEFORE the engine, for the Firings' own reason: a
 	// Reaction is still holding an event this session produced, and it finishes it while everything it
-	// was composed from still stands. The grace is the five seconds every root gives (ADR 0073 §7),
-	// and what is still running when it expires is killed by the context — a wedged script may not
+	// was composed from still stands. The grace is reactions.CloseGrace, the one every root gives
+	// (ADR 0073 §7), and what is still running when it expires is killed — a wedged script may not
 	// hold the alternate screen down. A Reaction killed at the deadline is reported by Close's error,
 	// which there is nowhere left to say: stderr belongs to the shell again the moment the TUI tears
 	// down, and the run is over either way.
-	if w.hooks != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
-		_ = w.hooks.Close(ctx)
-		cancel()
+	if w.reactionHost != nil {
+		_ = w.reactionHost.Close()
 	}
 
 	// The stats recorder stops beside the Reactions, before the engine: nothing this session

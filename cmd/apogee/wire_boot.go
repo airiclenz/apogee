@@ -18,7 +18,6 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
-	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -194,60 +193,58 @@ func (w *rootWiring) resolveConfig() error {
 	// the switch is off (naming.go).
 	w.namer = newDelegationNamer(w.sessionNamingUpstream, w.routedNamingUpstream, w.opts.AutoTitle)
 
-	// This session's Reaction Runner (ADR 0073), built HERE rather than beside the facilities above
+	// This session's Reaction host (ADR 0073), built HERE rather than beside the facilities above
 	// for two reasons that pull the same way: it can fail — a malformed `reactions:` entry or an
 	// unresolvable `workspace:` is structural configuration, and it fails the run the way an
 	// unreadable prompt does — and the Config below is where it is installed, so building it any later
 	// would either box a nil Runner into Events or leave a Runner the engine never emits into.
 	//
-	// It DECORATES the Bridge's sink rather than replacing it: every Event reaches the renderer first
-	// and unconditionally (Runner.Emit forwards before it matches), so installing Reactions cannot
-	// change what the transcript sees. A run whose `reactions:` list is empty gets a Runner with no
-	// workers, which costs one atomic load per Event and nothing else.
+	// Its Runner DECORATES the Bridge's sink rather than replacing it: every Event reaches the
+	// renderer first and unconditionally (Runner.Emit forwards before it matches), so installing
+	// Reactions cannot change what the transcript sees. A run whose `reactions:` list is empty gets a
+	// Runner with no workers, which costs one atomic load per Event and nothing else.
 	//
 	// It needs no handle on the tool registry: the `file-changed` derivation reads the written path
-	// off the ToolResultEvent the engine stamps (domain.ToolResultEvent.WriteTarget), so the Runner
-	// can be built here, before wireSession installs a tool set, and follows every `/settings`
-	// roster edit and MCP reconnect for free — the engine resolves each call against the set it is
-	// actually running.
+	// off the ToolResultEvent the engine stamps (domain.ToolResultEvent.WriteTarget), so the host can
+	// be built here, before wireSession installs a tool set, and follows every `/settings` roster
+	// edit and MCP reconnect for free — the engine resolves each call against the set it is actually
+	// running.
 	//
-	// It is handed the OBSERVE half alone (ADR 0076 A8). One `reactions:` file resolves to both
-	// lanes in one list, and the sync half — the advise and gate entries the AGENT runs inside the
-	// loop — is armed through the generation the engine holder is seeded with (wire_live.go), which
-	// is the one route it takes into this session. The observe half is read off that same
-	// projection (generationOf), so the list this Runner is built over and the lane the holder is
-	// seeded with are one division of one list. The Runner itself is handed to the Agent too,
-	// through the Config below, so the Agent's one swap moves both lanes.
+	// It is handed the whole resolved `reactions:` list and builds its Runner over the OBSERVE half
+	// alone (ADR 0076 A8), divided by the same domain.LanesOf that generationOf divides the list the
+	// engine holder is seeded with (wire_live.go) — so the list this Runner is built over and the lane
+	// the holder is seeded with are one division of one list. The sync half — the advise and gate
+	// entries the AGENT runs inside the loop — takes that generation as its one route into this
+	// session. The Runner itself is handed to the Agent too, through the Config below, so the Agent's
+	// one swap moves both lanes.
 	//
-	// Its webhooks post through the url-safety guard built from the options' allow/deny host lists —
-	// off w.opts, since the projected cfg does not exist yet — so a host the operator closed for the
-	// network tools is closed for a Reaction's POST too.
+	// The host owns the rest of the lane (reactions.Host): its webhooks post through the url-safety
+	// guard built from the options' allow/deny host lists — off w.opts, since the projected cfg does
+	// not exist yet — so a host the operator closed for the network tools is closed for a Reaction's
+	// POST too. An adopted repo reaction's `run:` reaches the session's Agent through the host's
+	// project-run bind instead of running on the global posture (ADR 0104 §8): the Agent binds its
+	// fenced runner once the late engine builds it (Config.BindProjectRun, installed below), and the
+	// command runs inside the workspace exec fence under that Agent's permit.
 	//
-	// An adopted repo reaction's `run:` reaches the session's Agent through projectRuns instead of
-	// running on the global posture (ADR 0104 §8): the Agent binds its fenced runner into the slot
-	// once the late engine builds it (Config.BindProjectRun, below), and the command runs inside
-	// the workspace exec fence under that Agent's permit.
-	//
-	// An observe entry's `run: mcp:` resolves through mcpReactions, which wireSession binds to the
-	// resolver over the live MCP set once it has dialled the servers (adr-0076-amend-1029): the
-	// Runner exists before any server is connected, and a reconnect is seen without rebuilding it.
-	// Such an entry from the repo that is refused because its pin moved gives the same re-ask cue
-	// the engine gives (Config.PinMoved, below): the session's config wake, reloadWake.poke.
-	observe := generationOf(w.opts).Observe
-	webhookGuard := security.NewURLGuard(w.opts.URLAllowHosts, w.opts.URLDenyHosts)
-	projectRuns := &projectRunSlot{}
-	w.mcpReactions = &mcpResolverSlot{}
-	runner, err := reactions.New(observe, reactions.Options{
-		Inner:     w.bridge.Sink(),
-		Workspace: w.roots.workspace,
-		Report:    w.bridge.NotifyHook,
-		Exec: reactions.DefaultExecutor(w.roots.workspace, webhookGuard, projectRuns.runner(),
-			w.mcpReactions.resolver(), w.reloadWake.poke),
+	// It is built HostMCPLate: an observe entry's `run: mcp:` resolves through the host's MCP bind,
+	// which wireSession binds to the resolver over the live MCP set once it has dialled the servers
+	// (adr-0076-amend-1029) — the host exists before any server is connected, and a reconnect is
+	// seen without rebuilding it. Such an entry from the repo that is refused because its pin moved
+	// gives the same re-ask cue the engine gives (Config.PinMoved, below): the session's config wake,
+	// reloadWake.poke.
+	reactionHost, err := reactions.NewHost(w.opts.Reactions, reactions.HostOptions{
+		Inner:         w.bridge.Sink(),
+		Workspace:     w.roots.workspace,
+		Report:        w.bridge.NotifyHook,
+		PinMoved:      w.reloadWake.poke,
+		URLAllowHosts: w.opts.URLAllowHosts,
+		URLDenyHosts:  w.opts.URLDenyHosts,
+		MCP:           reactions.HostMCPLate,
 	})
 	if err != nil {
 		return err
 	}
-	w.hooks = runner
+	w.reactionHost = reactionHost
 
 	// The keys both Drivers fill identically come off the one projection (wire_config.go); what a
 	// watched session adds on top is the binding it starts on and the human seams the Bridge stands
@@ -260,11 +257,27 @@ func (w *rootWiring) resolveConfig() error {
 	// source, which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
 	// Authorization header at all.
 	w.cfg.APIKey = apiKey
-	// The Reaction Runner built above, which DECORATES the Bridge's sink: the renderer sees every
-	// Event exactly as it did before this key existed, and the `reactions:` list is fired behind it
-	// (ADR 0073 §2 — observe-only, nothing a Reaction does reaches the model or the record).
+	// The Reaction host built above composes its observe lane into the Config (Host.Install). Its
+	// Runner, which DECORATES the Bridge's sink, becomes Events: the renderer sees every Event
+	// exactly as it did before this key existed, and the `reactions:` list is fired behind it
+	// (ADR 0073 §2 — observe-only, nothing a Reaction does reaches the model or the record). The
+	// same Runner becomes the Agent's observe half (ADR 0076 A8), with the list it was built from:
+	// Agent.SetReactions swaps it whenever a generation's observe list moves off that list, so the
+	// Floor-, Bypass- and sync-only edits a settings row makes never retire it. BindProjectRun is
+	// the host's project-run bind the Runner's repo `run:` entries reach the Agent through: every
+	// Agent the late engine builds binds its fenced runner into it, so a rebuilt engine rebinds
+	// (ADR 0104 §8).
 	//
-	// The per-server stats recorder (ADR 0085) decorates that Runner in turn: every Event still
+	// Report is where a SYNC-lane reaction's trouble is said out loud too — a gate or advise
+	// command that failed, timed out or could not be spawned. It is the same seam the Runner
+	// reports the observe lane's failures through, so one `reactions:` file's trouble reads the
+	// same way whichever lane it came from. And PinMoved is the re-ask cue (ADR 0104 §4): a repo
+	// reaction refused because its pinned files moved wakes the config wait (reloadWake), whose
+	// re-read proposes the entry again for the adoption pane — no Project config edit and no
+	// restart needed. The host's MCP half holds the same cue for an observe `mcp:` entry, which
+	// never reaches the Agent.
+	w.reactionHost.Install(&w.cfg)
+	// The per-server stats recorder (ADR 0085) decorates the Runner in turn: every Event still
 	// reaches the Runner — and so the renderer — first and unchanged, and an UpstreamAttemptEvent is
 	// then appended to ~/.apogee/server-stats.jsonl while `server-stats:` is on. It is built whatever
 	// the key says, because the key is live-editable: an off recorder opens nothing and records
@@ -275,26 +288,8 @@ func (w *rootWiring) resolveConfig() error {
 	// reaches the recorder — and so the Runner and the renderer — unchanged. It sits over the chain,
 	// never inside reactions.Runner (ADR 0075 D9), and is built once: the session host swaps which
 	// record's journal it records into as the hold moves (sessionHost.attachEventJournal).
-	w.events = newLiveJournalSink(w.stats.wrap(w.hooks))
+	w.events = newLiveJournalSink(w.stats.wrap(w.cfg.Events))
 	w.cfg.Events = w.events
-	// And the same Runner as the Agent's observe half (ADR 0076 A8), with the list it was built
-	// from: Agent.SetReactions swaps it whenever a generation's observe list moves off that list,
-	// so the Floor-, Bypass- and sync-only edits a settings row makes never retire it.
-	w.cfg.ObserveRunner = w.hooks
-	w.cfg.Observe = observe
-	// The slot the Runner's repo `run:` entries reach the Agent through: every Agent the late
-	// engine builds binds its fenced runner into it, so a rebuilt engine rebinds (ADR 0104 §8).
-	w.cfg.BindProjectRun = projectRuns.bind
-	// Where a SYNC-lane reaction's trouble is said out loud — a gate or advise command that
-	// failed, timed out or could not be spawned. It is the same seam the Runner reports the
-	// observe lane's failures through (Report above), so one `reactions:` file's trouble reads
-	// the same way whichever lane it came from.
-	w.cfg.Report = w.bridge.NotifyHook
-	// The re-ask cue (ADR 0104 §4): a repo reaction refused because its pinned files moved wakes
-	// the config wait (reloadWake), whose re-read proposes the entry again for the adoption pane —
-	// no Project config edit and no restart needed. The Runner's MCP half, above, holds the same
-	// cue for an observe `mcp:` entry, which never reaches the Agent.
-	w.cfg.PinMoved = w.reloadWake.poke
 	w.cfg.Approver = w.bridge.Approver()
 	w.cfg.Asker = w.bridge.Asker()
 	// The pre-emption seam (ADR 0025): the Bridge answers whether the TUI's queue holds a

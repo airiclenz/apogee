@@ -178,10 +178,13 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// set rather than this startup snapshot, so a reconnect's servers are what the next firing
 	// resolves against without a restart. It reads w.mcpSet through a closure, never a method value:
 	// the holder is assigned on the line above, and the serverBinder below copies this Config, so
-	// both the sync lanes (Config.MCP) and the observe Runner's executor (mcpReactions) are set here.
+	// both the sync lanes (Config.MCP) and the observe Runner's executor (the Reaction host's MCP
+	// bind) are set here. A wiring whose boot built no host binds nothing.
 	resolveMCP := mcp.Resolver(func() []apogee.Tool { return w.mcpSet.tools() })
 	w.cfg.MCP = resolveMCP
-	w.mcpReactions.bind(resolveMCP)
+	if w.reactionHost != nil {
+		w.reactionHost.BindMCP(resolveMCP)
+	}
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the
 	// composition root has to keep the pointer. The settings surface re-points a live tool in place

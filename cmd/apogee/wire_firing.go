@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee"
@@ -850,40 +849,6 @@ func firingSubAgentsSource(
 			return resolveDelegationTarget(landing.entry, landing.dial.APIKey, landing.observed,
 				in.opts.ModelProfiles, in.opts.StreamIdleTimeout)
 		},
-	}
-}
-
-// errProjectRunUnbound refuses an adopted repo reaction's `run:` that fired before an Agent bound
-// its fenced runner into the slot: running it without the Agent's permit would run it unfenced.
-var errProjectRunUnbound = errors.New("refusing to run a project reaction before its session's engine is built")
-
-// projectRunSlot is the late bind between a Driver's Reaction Runner and the Agent whose permit an
-// adopted repo reaction's observe-lane `run:` spawns under (ADR 0104 §8). The Runner is built
-// first and holds runner(); the Agent, once New or Resume has built it, stores its fenced runner
-// through bind (domain.Config.BindProjectRun). A later Agent — a rebuilt session engine — simply
-// rebinds. It is safe for concurrent use: the Runner's workers read it while a bind may land.
-type projectRunSlot struct {
-	run atomic.Pointer[domain.ProjectRun]
-}
-
-// bind stores the Agent's fenced runner, replacing any earlier one.
-func (s *projectRunSlot) bind(run domain.ProjectRun) {
-	s.run.Store(&run)
-}
-
-// runner is the domain.ProjectRun the Runner's executor is handed: the bound Agent's runner, or
-// errProjectRunUnbound while none is bound. A nil slot answers nil, which the executor reads as no
-// fenced runner at all.
-func (s *projectRunSlot) runner() domain.ProjectRun {
-	if s == nil {
-		return nil
-	}
-	return func(ctx context.Context, r domain.Reaction, stdin string, env []string) error {
-		run := s.run.Load()
-		if run == nil {
-			return errProjectRunUnbound
-		}
-		return (*run)(ctx, r, stdin, env)
 	}
 }
 

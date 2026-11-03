@@ -956,7 +956,7 @@ func TestSessionResolvesReactionMCPThroughTheLiveSet(t *testing.T) {
 	}
 	resolvers := map[string]domain.MCPResolver{
 		"the engine Config":           w.binder.cfg.MCP,
-		"the observe Runner executor": w.mcpReactions.resolver(),
+		"the observe Runner executor": w.reactionHost.MCPResolver(),
 	}
 	for label, resolve := range resolvers {
 		assertMCPAnswer(t, label, resolve, "llm", "ping", "pong")
