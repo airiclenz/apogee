@@ -3,6 +3,7 @@ title: Pointer shape on hover in the TUI (OSC 22)
 status: open
 type: feature
 priority: 3
+plan: 2026-11-03 - 03 - pointer-shapes-on-hover-plan
 created: 2026-11-02T14:40:50Z
 ---
 
