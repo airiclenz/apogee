@@ -1881,22 +1881,49 @@ effort ✦ workdir`, the sketch's `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ h
 and the autonomy mode on the right. The host is the bound `servers:` entry's own name — the name IS
 a server's alias (ADR 0036 decision 1) — falling back to the endpoint's own host for the unlisted
 `--endpoint` start that has no name, and any segment nothing has named is dropped with its
-separator.
+separator. Two segments that are not about the upstream can follow the workdir: the workspace's git
+state and the session's spend (both below).
 
 **While you watch.** A read-only watch leaves the footer alone: it keeps naming your own host,
 model and effort, the binding of the session you parked and that `esc` returns you to. Only the
 status line's context gauge is the watched run's (see "The status line's right slot").
 
 **The spend.** Once any call of the session has been priced (a `servers:` entry with a `price:`,
-ADR 0093), the run gains one more segment after the workdir: the session's **Spend (money)** in the
-configured `currency:` label — `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high ✦ ~/Repos/apogee ✦
-0.42 USD`. It is the WHOLE session's amount — the main agent's, every sub-agent's and every
+ADR 0093), the run gains one more segment at its end, after the workdir and the git state: the
+session's **Spend (money)** in the configured `currency:` label — `workstation ✦
+qwen3.6-27B-Q4_K_S.gguf ✦ high ✦ ~/Repos/apogee ✦ 0.42 USD`. It is the WHOLE session's amount — the main agent's, every sub-agent's and every
 Workflow's, background ones included — the same sum the `/usage` pane's `session` row states, so
 the two never name different amounts. Where some of those calls ran on a server with no `price:`,
 the amount is the floor it is and reads `≥ 0.42 USD`. A session that priced no call shows no
 segment at all, never a `0.00`: an unpriced call is not a free one. It sits last because it is a
-running tally rather than a fact about where the session points, and it is priority 4 — the FIRST
-thing a narrow row gives up, before the effort word, since the `/usage` pane states it in full.
+running tally rather than a fact about where the session points, and it is priority 5 — the FIRST
+thing a narrow row gives up, before the git state and the effort word, since the `/usage` pane
+states it in full.
+
+**The git state.** In a git workspace the run gains one segment between the workdir and the spend:
+the branch and three counts, `<branch> NΔ N↓ N↑` — `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high ✦
+~/Repos/apogee ✦ main 5Δ 0↓ 4↑ ✦ 0.42 USD`. `Δ` counts the changed paths, each once (a staged,
+edited, renamed, conflicted or untracked path alike); `↓` is how many commits the branch is behind
+its upstream and `↑` how many it is ahead. The marks keep their shape under `ui.glyphs: safe`. The
+segment states only what git compared: `↓` and `↑` are absent on a branch with no upstream (or one
+whose upstream is gone), since a `0↓ 0↑` there would claim a level the branch was never measured
+against; a detached HEAD has no branch to name, so the counts stand alone (`5Δ`); and outside a
+work tree — or in a repository the git tools refuse, one whose own config names a command to run —
+the segment is absent with its separator. The branch is the repository's text, so its escape
+sequences are stripped before it is measured or painted. The branch and every zero count sit in
+the footer's own muted tone and a non-zero count in the brighter muted step (`MutedBright`, the
+tone a tool card's bright detail uses — no role of its own), so a tree with something to say lifts
+out of the row while a clean one stays quiet. git never runs on the render path: a poll reads the
+state off the frame every 5 s after the last read landed (stretched when a read was slow, and
+backed off to a minute where the read failed or found no work tree), and a Turn's end asks for one
+more read at once, so what the model just changed is counted when it stops. A failed read keeps
+the counts the footer had rather than blanking them. So that `↓` sees commits pushed since you last
+fetched, apogee also runs `git fetch` in the background every 5 minutes while the branch has an
+upstream — never prompting, and never in a refused repository — behind
+[`ui.git-fetch`](docs/manual/configuration.md#the-terminal-ui--ui), on by default; off, the counts
+are what the repository already knows. It is priority 4: a narrow row gives it up after the spend
+and before the effort word, because it is a fact about the working tree that `git status` restates
+rather than one about where the session points.
 
 **The effort word.** The thinking-effort segment sits with the upstream facts and before the
 workdir, because how hard the model is asked to think is a property of the model answering, not of
@@ -1946,9 +1973,9 @@ missing, the content between two `│` bars, and a `╰──╯` rule under it 
 **status line's** posture instead, one row below the box rather than one row above it: the two-column
 `bodyIndent` lead, one unbroken black field to the window's full width, and the mode marker ending
 `bodyIndent` short of the edge — the same column the gauge ends in (above). A narrow window does not
-give up an end: the row is composed TO the width. The session's spend goes first (below, "The
-spend"), and then the row spends its columns in the order it is read for — the effort word, then
-the workdir, then the host. What is left is what the row never gives up: the model, the
+give up an end: the row is composed TO the width. The session's spend goes first (above, "The
+spend"), then the git state ("The git state"), and then the row spends its columns in the order it
+is read for — the effort word, then the workdir, then the host. What is left is what the row never gives up: the model, the
 `✦ offline` marker and the mode marker, and those three only give way to each other — the model
 truncates with an `…` before it goes at all, then `offline` goes. The marker drops
 only where it cannot seat whole between its two margins, and only THERE does the row keep the older
@@ -1974,8 +2001,9 @@ content and not a second gauge — at the top level the chrome gains nothing fro
 run. Inside that run's view the chrome's one gauge is the run's own ("Where it ends"), so the number
 the reader sees is always the fill of the transcript on screen.
 
-**The workdir the slot ends on.** The last segment is the local directory this session is rooted
-in, written with the home directory as `~` (`~/Repos/apogee`). The substitution happens only at a
+**The workdir the upstream facts end on.** The last of the upstream facts is the local directory
+this session is rooted in — only the git state and the spend, which are about the tree and the
+session rather than where the session points, come after it — written with the home directory as `~` (`~/Repos/apogee`). The substitution happens only at a
 component boundary, so a sibling that merely opens with home's spelling stays whole — the same
 boundary rule the tool cards' workspace shortening uses. It is resolved once, at start-up, and is
 the one fact in the slot that no upstream state can change: it sits **after** the model precisely
@@ -1996,8 +2024,8 @@ behind the stand-in word.
 
 The slot holds one word at a time and says nothing else: an actuation's own progress steps are
 transcript notes, not chrome. The `✦ offline` marker is separate again — it is *appended* to the
-**end** of the left slot in the error tone once the offline crossing is made, after the workdir and
-whatever the model segment is showing, so it closes the line rather than displacing a fact.
+**end** of the left slot in the error tone once the offline crossing is made, after the workdir,
+the git state, the spend and whatever the model segment is showing, so it closes the line rather than displacing a fact.
 
 ---
 

@@ -196,7 +196,9 @@ NOTES (2026-11-03): with the wiring line removed the new e2e times out waiting f
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'E2EGitStatus|LiveState|E2EGuardSecrets|E2EGuardControlPlane' ./cmd/apogee/`
 **Commit:** `feat(apogee): wire the git status host into the TUI footer`
 
-## 8. layout.md describes the git segment
+## 8. layout.md describes the git segment — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): beyond the new "**The git state.**" paragraph, the section's other order sentences follow the git rung: "What it carries" names the two non-upstream segments after the workdir; "The spend" now sits after the workdir and git state and is priority 5 (was 4); "What it is" gives the drop order spend → git → effort → workdir → host (its pointer to "The spend" corrected from "below" to "above" while that sentence was rewritten); "The workdir the slot ends on" is relabelled "The workdir the upstream facts end on", since git and spend now follow it; the `✦ offline` sentence names the git state and spend it follows.
 
 **What:** Depends on item 6.
 **Goal:** layout.md's "## The footer's upstream slot" states the git segment: place, the three counts, absence rules (no upstream, detached, outside git, refused repo), tones, cadence, `ui.git-fetch`, and the drop order with renumbered priorities.
