@@ -225,7 +225,9 @@ internal/agent/dispatch.go — floorCtx, a.tree.beforeCall; internal/tools/git.g
 **Closes:** worktree-probe-negative-latch
 **Commit:** `fix(agent): retry the work-tree probe after a transient git failure`
 
-## 11. Report a timed-out `go vet` as skipped
+## 11. Report a timed-out `go vet` as skipped — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): runGoVet now returns a small vetOutcome struct (findings, hadFindings, skipNote) instead of a third bare return, so diagnoseGo branches on the skip note before the findings branch; the skip notes end with a period like the existing "no 'go' toolchain found on PATH." note.
 
 **What:** Fix (slow-box): `runGoVet` ignores `TimedOut`/`DrainWedged`, so a killed vet reads "go vet reported problems (exit code -1)" after a fixed 30 s.
 **Goal:** a timed-out or wedged vet yields an ok result: the syntax verdict plus `go vet skipped: timed out after 5m0s` (or `… left its output pipe held open`), with no "go vet checked" line; `vetTimeout` is 300 s.

@@ -49,10 +49,12 @@ import (
 // Plan, because the Plan menu keys on that same class — exactly like git_diff_range (P3.9). It is stateless across Turns
 // (ADR 0008): a fresh parse / a fresh process per call, no persistent state.
 
-// vetTimeout bounds a single go vet (or external linter) invocation. Vetting a
-// single package is local and quick, so a short ceiling is ample and a hung
-// toolchain never wedges a Turn (the §2.4 teardown reaps the process group).
-const vetTimeout = 30 * time.Second
+// vetTimeout bounds a single go vet (or external linter) invocation. It is sized for the
+// slowest box apogee runs on: vet compiles the package and its dependencies first, and a cold
+// build cache on a throttled single-board machine can take minutes, so the ceiling only stops a
+// hung toolchain from wedging a Turn (the §2.4 teardown reaps the process group). A vet cut
+// short by it is reported as skipped, never as findings (runGoVet).
+const vetTimeout = 300 * time.Second
 
 var diagnosticsSpec = toolSpec{
 	name:        "diagnostics",
@@ -225,18 +227,23 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 		return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: no 'go' toolchain found on PATH."), nil
 	}
 
-	vet, hadFindings, err := runGoVet(ctx, t.host, goPath, t.root, abs)
+	vet, err := runGoVet(ctx, t.host, goPath, t.root, abs)
 	if err != nil {
 		// Only ctx cancellation reaches here (runGoVet's contract); surface it as a Go
 		// error so the loop rolls the Turn back rather than reporting a partial result.
 		return domain.ToolResult{}, err
 	}
-	// Both vet outcomes state the SCOPE vet really ran on (vettedPackageLine): the call
-	// named one file, the subprocess read the package around it, and the result is where
-	// that difference is said out loud. The two branches that skip vet above say nothing
-	// of the kind, because nothing beyond the named file was read.
-	if hadFindings {
-		return errorResult(callID, vettedPackageLine(abs, t.root)+"\n\n"+vet), nil
+	if vet.skipNote != "" {
+		// A vet that never finished checked nothing: the syntax verdict stands and the note
+		// says why vet is missing, with no claim that the package was checked.
+		return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: "+vet.skipNote), nil
+	}
+	// Both finished vet outcomes state the SCOPE vet really ran on (vettedPackageLine): the
+	// call named one file, the subprocess read the package around it, and the result is where
+	// that difference is said out loud. The branches that skip vet say nothing of the kind,
+	// because vet read nothing beyond the named file or never finished reading it.
+	if vet.hadFindings {
+		return errorResult(callID, vettedPackageLine(abs, t.root)+"\n\n"+vet.findings), nil
 	}
 	return okResult(callID, cleanGoMessage(abs)+"\n\n"+vettedPackageLine(abs, t.root)), nil
 }
@@ -273,32 +280,49 @@ func goSyntaxDiagnostics(abs string, src []byte) string {
 	return strings.TrimSpace(out)
 }
 
+// vetOutcome is what one go vet invocation yields: either findings (hadFindings, with the
+// formatted output), a clean pass (the zero value), or — when vet never finished — a skipNote
+// naming why, in which case the other fields are empty.
+type vetOutcome struct {
+	findings    string
+	hadFindings bool
+	skipNote    string
+}
+
 // runGoVet runs `go vet` on the package containing abs, under the vet timeout and the
-// pinned toolchain environment (goVetSpec). It returns the formatted findings, whether
-// vet reported any problem (a non-zero exit with output), and a non-nil error ONLY for
-// ctx cancellation or a confinement-unavailable demotion (so an ordinary vet failure —
+// pinned toolchain environment (goVetSpec). It returns the vet outcome, and a non-nil error
+// ONLY for ctx cancellation or a confinement-unavailable demotion (so an ordinary vet failure —
 // including a dependency the pinned environment cannot resolve — degrades rather than
-// failing the diagnosis). go vet writes findings to stderr and
-// exits non-zero when it finds problems; a clean package exits zero with no output.
+// failing the diagnosis). go vet writes findings to stderr and exits non-zero when it finds
+// problems; a clean package exits zero with no output. A vet the ceiling killed, or one whose
+// drain wedged on a pipe something it started still held, checked nothing: it comes back as a
+// skipNote rather than as findings, because its exit code (-1 for a kill) says nothing about
+// the code.
 //
 // It launches through h.run — the calling tool's execHost, the same host whose look resolved
 // goPath — so a host carrying a fake look never has its answer executed by the real launcher.
-func runGoVet(ctx context.Context, h execHost, goPath, root, abs string) (findings string, hadFindings bool, err error) {
+func runGoVet(ctx context.Context, h execHost, goPath, root, abs string) (vetOutcome, error) {
 	res, runErr := h.run(ctx, goVetSpec(h, goPath, root, abs))
 	if runErr != nil {
 		// ctx cancellation, or a confinement-unavailable demotion (diagnostics takes
 		// the subprocess class, so dispatch does confine it — the demote signal must
 		// reach dispatch rather than being swallowed as a finding).
-		return "", false, runErr
+		return vetOutcome{}, runErr
+	}
+	if res.TimedOut {
+		return vetOutcome{skipNote: "timed out after " + vetTimeout.String() + "."}, nil
+	}
+	if res.DrainWedged {
+		return vetOutcome{skipNote: "go vet left its output pipe held open."}, nil
 	}
 	out := strings.TrimSpace(res.CombinedOutput)
 	if res.ExitCode == 0 {
-		return "", false, nil
+		return vetOutcome{}, nil
 	}
 	if out == "" {
 		out = "go vet reported problems (exit code " + strconv.Itoa(res.ExitCode) + ")"
 	}
-	return out, true, nil
+	return vetOutcome{findings: out, hadFindings: true}, nil
 }
 
 // goVetSpec is the exact subprocess one vet invocation runs as: the argv, the working

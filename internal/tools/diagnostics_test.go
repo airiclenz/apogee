@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
 func diagnosticsCall(id, path string) domain.ToolCall {
@@ -430,6 +431,57 @@ func TestDiagnostics_VetRunsThroughTheHost(t *testing.T) {
 	if !slices.Equal(captured.Argv, want.Argv) || captured.Dir != want.Dir || captured.Timeout != want.Timeout {
 		t.Errorf("host run got argv %q dir %q timeout %v, want %q %q %v",
 			captured.Argv, captured.Dir, captured.Timeout, want.Argv, want.Dir, want.Timeout)
+	}
+}
+
+// TestDiagnostics_UnfinishedVetIsReportedAsSkipped pins that a vet the ceiling killed, or one
+// whose drain wedged, reads as a skip on a clean syntax verdict: its exit code (-1) says
+// nothing about the code, so the result carries no findings and no claim that vet checked
+// the package.
+func TestDiagnostics_UnfinishedVetIsReportedAsSkipped(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		result   subprocess.SubprocessResult
+		wantNote string
+	}{
+		{
+			name:     "timed out",
+			result:   subprocess.SubprocessResult{TimedOut: true, ExitCode: -1},
+			wantNote: "go vet skipped: timed out after 5m0s",
+		},
+		{
+			name:     "drain wedged",
+			result:   subprocess.SubprocessResult{DrainWedged: true, ExitCode: -1},
+			wantNote: "go vet skipped: go vet left its output pipe held open",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := tempRoot(t)
+			writeGoFile(t, root, "clean.go", "package main\n\nfunc main() {}\n")
+			h := defaultExecHost()
+			h.look = fakeLook(true, filepath.Join(t.TempDir(), "go"))
+			h.run = func(context.Context, subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+				return tc.result, nil
+			}
+
+			res, err := newDiagnostics(root, h).Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
+
+			if err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if res.IsError {
+				t.Errorf("an unfinished vet must leave an ok result: %q", res.Content)
+			}
+			if !strings.Contains(res.Content, tc.wantNote) {
+				t.Errorf("result = %q, want the skip note %q", res.Content, tc.wantNote)
+			}
+			if strings.Contains(res.Content, "go vet checked") || strings.Contains(res.Content, "exit code") {
+				t.Errorf("an unfinished vet must claim neither a check nor findings: %q", res.Content)
+			}
+		})
 	}
 }
 
