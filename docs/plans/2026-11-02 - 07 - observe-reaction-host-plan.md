@@ -253,7 +253,11 @@ internal/userexec/userexec.go — ResolveProgram's "refusing to run %q" wording
 
 **Commit:** `feat(apogee): export NewReactionHost so an embedder gets the stock fence and MCP notices`
 
-## 6. Knowledge: the Reaction host in the decision records and the glossary
+## 6. Knowledge: the Reaction host in the decision records and the glossary — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the adr-0076-amend-1029 blockquote names its source as the plan basename (`2026-11-02 - 07 - observe-reaction-host-plan`) rather than the literal "(this plan)", which would read wrongly from inside the 1029 amendment; it sits indented under the "Drivers without MCP" bullet so it stays in that list item.
+NOTES (2026-11-03): the "Reaction host" Note carries `refs: [internal/reactions/host.go]` (as `list-filter` does) so capcom flags it when the host file moves.
+NOTES (2026-11-03): retry per the verifier's DECISION — `apogee probe context` is dropped from the `HostMCPNone` root lists in both the Reaction host Note and `adr-0073-amend-1102`; each now says only that it settles its `mcp:` entries through the same `reactions.DisarmUnconnectedMCP`, without a host (cmd/apogee/probecontext.go calls it directly).
 
 Depends on items 3, 4 and 5.
 **What:**
