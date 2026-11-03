@@ -98,6 +98,31 @@ func TestSecretFindingsMatchesEachClass(t *testing.T) {
 			diff: "--- a/x\n+++ \"b/my dir/caf\\303\\251.txt\"\n@@ -0,0 +1 @@\n+" + fixtureJWT + "\n",
 			want: []SecretFinding{{Path: "my dir/café.txt", Class: "JWT"}},
 		},
+		{
+			name: "an added line beginning ++ is scanned under its file",
+			diff: addedLineDiff("notes.md", "++ "+fixtureAWSKey),
+			want: []SecretFinding{{Path: "notes.md", Class: "AWS access key id"}},
+		},
+		{
+			name: "an added ++ line between two files does not re-attribute a later finding",
+			diff: addedLineDiff("first.txt", "++ x") +
+				"@@ -1 +2 @@\n+" + fixtureSlackToken + "\n" +
+				addedLineDiff("second.txt", fixtureJWT),
+			want: []SecretFinding{
+				{Path: "first.txt", Class: "Slack token"},
+				{Path: "second.txt", Class: "JWT"},
+			},
+		},
+		{
+			name: "a removed -- line followed by an added ++ line finds the key under its file",
+			diff: "diff --git a/app.conf b/app.conf\n" +
+				"--- a/app.conf\n" +
+				"+++ b/app.conf\n" +
+				"@@ -1 +1 @@\n" +
+				"--- x\n" +
+				"+++ " + fixtureAWSKey + "\n",
+			want: []SecretFinding{{Path: "app.conf", Class: "AWS access key id"}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -86,7 +86,7 @@ NOTES (2026-11-03): the `-z` listing splits through a new `nulFields` helper bes
 **Closes:** staged-names-quoted-paths
 **Commit:** `fix(agent): read staged names NUL-delimited in the commit-secrets check`
 
-## 3. Treat `+++ ` as a file header only after a `--- ` line
+## 3. Treat `+++ ` as a file header only after a `--- ` line — ✅ DONE (2026-11-03)
 
 **What:** Fix: `SecretFindings` skips every line starting `+++ `, so an added content line `++ AKIA…` is never scanned and resets the attributed path.
 **Regression guard.** A removed `-- x` line renders `--- x` inside a hunk, so "previous line began `--- `" alone still takes a following `+++ AKIA…` as a header: a `+++ ` line is a header only when the previous line began `--- ` AND no `@@` line has come since the last `diff --git` line (or since the start of the diff).

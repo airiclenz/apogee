@@ -74,6 +74,18 @@ const publicKeySuffix = ".pub"
 // added lines, so it only needs to be recognised as a header and not as content.
 const addedFileHeader = "+++ "
 
+// removedFileHeader, fileDiffHeader and hunkHeader are the other unified-diff lines that decide
+// whether a `+++ ` line is a header: git writes `+++ b/<path>` straight after the `--- a/<path>`
+// line of a file's header block (opened by `diff --git`), and every `@@` hunk header after it
+// starts that file's content. Inside a hunk an added line whose own text begins `++ ` reads
+// `+++ …`, and a removed `-- x` line reads `--- x`, so neither prefix alone tells a header from
+// content.
+const (
+	removedFileHeader = "--- "
+	fileDiffHeader    = "diff --git "
+	hunkHeader        = "@@"
+)
+
 // gitAddedPrefix is the prefix git puts on the added-side path in a diff header.
 const gitAddedPrefix = "b/"
 
@@ -82,7 +94,10 @@ const gitAddedPrefix = "b/"
 // then every content class detected on an ADDED line of diff (in diff order, each attributed
 // to the file named by the nearest preceding `+++ b/<path>` header). Only `+`-prefixed lines
 // are read — a removed `-` line, a context line and the `+++` header itself never match — and
-// each (path, class) pair is reported once, at its first occurrence. The function is pure:
+// each (path, class) pair is reported once, at its first occurrence. A `+++ ` line is that
+// header only when it directly follows a `--- ` line and no `@@` hunk header has come since
+// the last `diff --git` line (or the start of diff); any other `+++ ` line is an added line
+// whose content begins `++ `, scanned and attributed like the rest. The function is pure:
 // the caller precomputes both the staged diff and the staged paths (D6), so it never touches
 // git or the filesystem and can be judged in a table test.
 //
@@ -108,9 +123,22 @@ func SecretFindings(diff string, paths []string) []SecretFinding {
 		}
 	}
 
-	current := ""
+	var (
+		current      string // the path the nearest preceding `+++ ` header named
+		inHunk       bool   // an `@@` line has come since the last `diff --git` line
+		afterRemoved bool   // the previous line was a header-block `--- ` line
+	)
 	for _, line := range strings.Split(diff, "\n") {
-		if strings.HasPrefix(line, addedFileHeader) {
+		isHeader := afterRemoved && !inHunk && strings.HasPrefix(line, addedFileHeader)
+		afterRemoved = !inHunk && strings.HasPrefix(line, removedFileHeader)
+		switch {
+		case strings.HasPrefix(line, fileDiffHeader):
+			inHunk = false
+			continue
+		case strings.HasPrefix(line, hunkHeader):
+			inHunk = true
+			continue
+		case isHeader:
 			current = addedFilePath(line)
 			continue
 		}
