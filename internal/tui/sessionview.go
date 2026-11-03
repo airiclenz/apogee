@@ -2,12 +2,19 @@ package tui
 
 import "github.com/airiclenz/apogee/internal/domain"
 
-// sessionView is the event-derived half of the session view the Model renders: the transcript, the
-// /thinking and /advice boards, the status line's gauge and clocks, the session's token accounting
-// and the models that answered, its background workflows, the per-run activity board and the
-// lifecycle state. It is what the fold writes as Events arrive, and the unit a watch swaps: watch
-// mode parks the owner's sessionView whole beside the rest of the parked view (parkedSession,
-// watch.go) and paints the watched run's in its place. The Model embeds it anonymously, so every
+// sessionView is the session view the Model renders, whole: the event-derived half the fold
+// writes as Events arrive — the transcript, the /thinking and /advice boards, the status line's
+// gauge and clocks, the session's token accounting and the models that answered, its background
+// workflows, the per-run activity board and the lifecycle state — and beside it the rest of what a
+// session boundary resets and a watch must keep apart: the open run views and the scroll and
+// keyboard pointers over the paint, the flash note, the suggestion band's spent set, the session's
+// naming and its cached engine boundary.
+//
+// It is the unit a watch swaps: watch mode parks the owner's sessionView whole (watchState.parked,
+// watch.go) and paints the watched run's in its place, and every swap goes through one method
+// ([Model.swapSessionView]). A field resetSessionView or resumeLoaded writes belongs here, and
+// TestSessionViewHoldsEveryFieldTheBoundariesReset fails until it is (or until the guard's
+// allow-list says why it stays on the Model). The Model embeds it anonymously, so every
 // m.transcript, m.state and m.ctxUsed site reads as it did before the fields gained this owner.
 //
 // It holds plain values only — reference headers, small structs and no strings.Builder — so it
@@ -106,4 +113,75 @@ type sessionView struct {
 	// state is the lifecycle: the machine the keys route on (uiState). A watch parks it with the
 	// rest of the view, so the owner's run state stands aside while the watched run's is painted.
 	state uiState
+
+	// viewStack is the run views that are open, outermost first, and empty at the top level: which
+	// delegation — or which workflow stage, at a stage level — the transcript is painted rooted at,
+	// and where the level below each one was parked (runview.go, ADR 0063). The paint's own root
+	// lives on the transcript; this is the WALK — what esc and the breadcrumb go back to, and how a
+	// nested delegation is unwound one level at a time.
+	// A plain slice of plain values, so ADR 0011's copy rule needs no exception.
+	viewStack []runView
+
+	// detached says the human scrolled off the tail: refreshViewport holds the scroll position
+	// where they put it instead of following new content, until a re-arm event (submit, /clear,
+	// /continue, a flushed interjection, a resumed session) clears it. The zero value is
+	// attached — a fresh Model follows the tail with no construction help. A plain bool by
+	// ADR 0011: the Model is copied by value on every Update.
+	detached bool
+
+	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy or a
+	// refused child message (interject.go) and cleared by flashClearMsg after flashDuration (the
+	// Model's flashGen numbers it).
+	flash string
+
+	// cursor is the transcript's modal KEYBOARD pointer over the paint's click targets (the Model's
+	// lineTargets, blockcursor.go): whether the walk is on, and which content line its highlight is
+	// standing on. Two plain fields by ADR 0011, and a content line rather than a screen row so the
+	// highlight travels with the text it names through a scroll or a stream — refreshViewport keeps
+	// it standing on a real click surface (blockCursor.clamp) exactly as it keeps that map honest.
+	cursor blockCursor
+
+	// spentSkills is the suggestion band's dedup set (suggestband.go; the band's live state is the
+	// Model's skillHints): a skill named in the band at the moment a message went out is spent and
+	// is never suggested again, so the band cannot nag about the same skill for the whole session.
+	// It is filled at send (submit and the staged-interjection path) and emptied at every boundary
+	// the conversation itself resets on — /clear and /new (commandrun.go) and an in-TUI /sessions
+	// restore (resumeLoaded, sessions.go). A nil map reads as empty, so the zero-value Model needs
+	// no construction step. A map is a plain reference header, safe in the value-copied Model
+	// (ADR 0011).
+	spentSkills map[string]bool
+
+	// Session naming (autotitle.go; ADR 0022 addendum). autoTitleFired latches the one
+	// cosmetic naming call a Session record gets — set when it fires, and set UP FRONT on a resumed
+	// record, which already has a name. titleTouched records that a human named this session (the
+	// browser's `r`, either form of /rename), which drops a late-landing automatic title (never
+	// clobber). pendingTitle is the title stash: a title that resolved before the first Save minted
+	// an id to rename, held with who asked for it and applied at that save's completion. Its rules —
+	// what may be stashed, restashed, flushed or dropped — are the value's own (titleStash), and
+	// every site that changes it asks for one of its verbs rather than writing the fields.
+	// sessionName is the same machinery's DISPLAY side: the name this session is currently known
+	// by, and the one the frame renders. It is what the human last saw decided rather than what the
+	// store holds — a rename that never reaches disk leaves the frame naming the session the human
+	// named — and "" means "not named yet", which the seam that renders it answers for itself. It
+	// carries untrusted text (a model's reply, a resumed record's Meta), so that seam sanitizes;
+	// nothing else reads it.
+	// Four plain values, safe in the value-copied Model (ADR 0011); startNewSession resets all of
+	// them, so the session /clear opens names itself afresh.
+	autoTitleFired bool
+	titleTouched   bool
+	pendingTitle   titleStash
+	sessionName    string
+
+	// boundary is the most recent engine snapshot the Model saw taken at a QUIESCENT boundary —
+	// a completed Turn's turnSnapshotMsg, the idle capture each worker launch takes
+	// (cacheBoundaryAtIdle), or a restored record's own payload — and it is the engine half a
+	// progress save pairs with the LIVE transcript while a Turn is still open (progressSave,
+	// sessionsave.go). hasBoundary is its presence flag, because a zero domain.Session is itself a
+	// legal envelope and so cannot say whether one was ever cached. cacheBoundary is the only site
+	// that fills the pair; startNewSession is the only one that empties it.
+	//
+	// A domain.Session is plain values (a version and an opaque blob), so it rides the
+	// value-copied Model like the usage readings above (ADR 0011).
+	boundary    domain.Session
+	hasBoundary bool
 }

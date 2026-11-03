@@ -1202,11 +1202,12 @@ func TestWatchIsolatesThePaintsOfTheRestoredTranscript(t *testing.T) {
 	}
 }
 
-// Every swap of the session view forgets the painted frame (forgetPaintedFrame): settle names a
-// transcript by its generation, and the parked and the watched transcript count generations apart,
-// so a swap that lands on an equal count would otherwise keep the other view's lines on screen. The
-// fixture lines the generations up at each of the three swaps — entry, an owner fold, esc — which
-// is the case the rule exists for: with the counts apart, settle repaints on its own.
+// Every swap of the session view forgets the painted frame (swapSessionView, which every swap goes
+// through, calls forgetPaintedFrame): settle names a transcript by its generation, and the parked
+// and the watched transcript count generations apart, so a swap that lands on an equal count would
+// otherwise keep the other view's lines on screen. The fixture lines the generations up at each of
+// the three swaps — entry, an owner fold, esc — which is the case the rule exists for: with the
+// counts apart, settle repaints on its own.
 //
 // The entry is enterWatch called directly and settled by a view Msg that folds nothing
 // (tea.FocusMsg): the browser's ⏎, the one Update that enters, also closes the browser, and the
@@ -1373,39 +1374,6 @@ func fieldsWritten(methods map[string]*ast.FuncDecl, name string, seen map[strin
 	return written
 }
 
-// fieldsRead is the set of Model fields method names anywhere in its body.
-func fieldsRead(methods map[string]*ast.FuncDecl, name string) map[string]bool {
-	read := map[string]bool{}
-	fn := methods[name]
-	receiver := receiverName(fn)
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok {
-			if id, ok := sel.X.(*ast.Ident); ok && id.Name == receiver {
-				read[sel.Sel.Name] = true
-			}
-		}
-		return true
-	})
-	return read
-}
-
-// expandSessionView replaces a whole-sessionView selector in a field set with every one of
-// sessionView's DIRECT fields — the embedded liveStats counts as the one field "liveStats", as
-// resetSessionView names it — so a method that copies the struct in one assignment is measured by
-// the fields that assignment moves.
-func expandSessionView(fields map[string]bool) map[string]bool {
-	if !fields["sessionView"] {
-		return fields
-	}
-	expanded := maps.Clone(fields)
-	delete(expanded, "sessionView")
-	typ := reflect.TypeFor[sessionView]()
-	for i := range typ.NumField() {
-		expanded[typ.Field(i).Name] = true
-	}
-	return expanded
-}
-
 // sortedKeys lists a set in order, for a readable failure.
 func sortedKeys(set map[string]bool) []string {
 	keys := make([]string, 0, len(set))
@@ -1416,25 +1384,43 @@ func sortedKeys(set map[string]bool) []string {
 	return keys
 }
 
-func TestWatchIsolatesParksExactlyTheSessionViewResetSet(t *testing.T) {
+// The two session boundaries the view resets at — /clear and /new (resetSessionView) and an in-TUI
+// /sessions restore (resumeLoaded) — write only the session view, which is the one value a watch
+// parks and swaps (swapSessionView). A field either boundary writes on the Model itself would stand
+// across a watch unparked: the watched run would paint the owner's, and the owner's would come back
+// changed by the watch. So every Model field the two write, through every Model method they call,
+// is a sessionView field — direct, or promoted out of the embedded liveStats (ctxUsed) — or is on
+// the allow-list below with the reason it belongs to the Model rather than the view.
+func TestSessionViewHoldsEveryFieldTheBoundariesReset(t *testing.T) {
 	t.Parallel()
+	allowed := map[string]string{
+		"eng":           "the engine is the Model's wiring; a watch parks it beside the view, as watch.owner",
+		"resumePending": "the restore's queued resume of the record's workflows (resumeAfterFold) is engine work",
+		"writeBusy":     "the record-write single-flight (scheduleWrite) serialises the session host's writes",
+		"pendingWrites": "the record writes queued behind that single-flight (scheduleWrite), not the view's",
+	}
 	methods := packageMethods(t)
-	want := fieldsWritten(methods, "resetSessionView", map[string]bool{})
-	// The engine resetSessionView asks for the context files is parked whole, as watch.owner; the
-	// run state the watch moves is parked beside the reset set.
-	delete(want, "eng")
-	for _, moved := range []string{"state", "acts", "cursor"} {
-		want[moved] = true
+	view := map[string]bool{}
+	for _, field := range reflect.VisibleFields(reflect.TypeFor[sessionView]()) {
+		view[field.Name] = true
 	}
 
-	parked := expandSessionView(fieldsRead(methods, "parkSession"))
-	restored := expandSessionView(fieldsWritten(methods, "restoreSession", map[string]bool{}))
-
-	if !maps.Equal(parked, want) {
-		t.Errorf("parkSession parks %v;\nwant resetSessionView's set plus the run state %v", sortedKeys(parked), sortedKeys(want))
+	written := map[string]bool{}
+	for _, boundary := range []string{"resetSessionView", "resumeLoaded"} {
+		for field := range fieldsWritten(methods, boundary, map[string]bool{}) {
+			written[field] = true
+		}
 	}
-	if !maps.Equal(restored, want) {
-		t.Errorf("restoreSession restores %v;\nwant %v", sortedKeys(restored), sortedKeys(want))
+	for _, field := range sortedKeys(written) {
+		if !view[field] && allowed[field] == "" {
+			t.Errorf("a session boundary writes the Model's %s, which no watch parks: move it into sessionView "+
+				"or name on the allow-list why it is the Model's", field)
+		}
+	}
+	for field := range allowed {
+		if view[field] || !written[field] {
+			t.Errorf("allow-list entry %s is stale: it is a sessionView field or neither boundary writes it", field)
+		}
 	}
 }
 

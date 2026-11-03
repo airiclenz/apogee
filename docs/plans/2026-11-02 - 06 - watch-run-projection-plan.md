@@ -134,7 +134,13 @@ Depends on item 2.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Watch|TestClear|TestResume|TestSession|TestFanOutCardSeatsARunHeadPerItem|TestTranscriptLayoutGolden|TestModelNoBuilderByValue|TestModelFitsTheStack' ./internal/tui/`
 **Commit:** `refactor(tui): hold the event-derived session view in one sessionView`
 
-## 4. The whole parked view is one sessionView, swapped by one method
+## 4. The whole parked view is one sessionView, swapped by one method — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): enterWatch still parks by copying m.sessionView into watch.parked before the paint-cache steps (the park is a copy, not a swap); the swap into the watch is clearWatchView's swapSessionView, so the entry's trailing forgetPaintedFrame call is gone. clearWatchView now forgets the painted frame on a truncation repaint too (it swaps); that only forces a re-layout of the same state, so output is unchanged.
+NOTES (2026-11-03): foldForOwner now also forgets the painted frame on the swap IN (before the owner's fold), not only on the swap back; m.painted is read only by settle at Update's tail, so the fold is unaffected.
+NOTES (2026-11-03): expandSessionView (watch_test.go) lost its only caller with the old guard and was deleted beside fieldsRead. The allow-list the AST found is eng, resumePending, writeBusy and pendingWrites (the last two via scheduleWrite); the guard also fails on a stale allow-list entry (a view field, or one neither boundary writes).
+NOTES (2026-11-03): moved field docs carried verbatim except positional or neighbour references the move made false (boundary's "the queue above it", cursor's "those same targets"/"the map above it", spentSkills' shared skill-band paragraph, which was split with a pointer left on skillHints); Model's and sessionView's own docs now say the struct holds the whole view and name swapSessionView and the new guard.
+NOTES (2026-11-03): the glossary Watch mode Note's "no test checks that" sentence about forgetPaintedFrame was rewritten too (item 2's test checks it, and the swap now goes through swapSessionView), beside the guard sentence this item owns.
 
 **What:**
 Recast at the regression check (2026-11-02).

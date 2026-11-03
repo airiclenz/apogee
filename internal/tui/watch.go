@@ -135,8 +135,9 @@ type watchState struct {
 	// ownerSessions is the watcher's own session host, parked while m.sessions is nil — which is
 	// what gates every save (persist, saveAtIdle) and every queued record write out of the watch.
 	ownerSessions SessionHost
-	// parked is the watcher's own session view, restored on the way out.
-	parked parkedSession
+	// parked is the watcher's own session view, swapped back in on the way out
+	// ([Model.swapSessionView]).
+	parked sessionView
 	// held are the owner's Msgs that would open a surface over the view (watchRouteHeld); they are
 	// delivered again once the watch ends.
 	held []tea.Msg
@@ -159,26 +160,6 @@ type watchState struct {
 	// does, the watcher's own model standing in meanwhile ([Model.topLevelModel]). It is the watched
 	// run's, so it lives here and never in m.opts, and leaveWatch drops it with the rest of the watch.
 	model string
-}
-
-// parkedSession is the session view watch mode sets aside: exactly the field set resetSessionView
-// (commandrun.go) resets, plus the run state the watch moves (state, acts, cursor). The
-// event-derived half is one sessionView (sessionview.go), embedded so a parked field reads by its
-// own name; the rest sit beside it. A field added to resetSessionView belongs here too, and
-// TestWatchIsolatesParksExactlyTheSessionViewResetSet fails until it is.
-type parkedSession struct {
-	sessionView
-	spentSkills    map[string]bool
-	viewStack      []runView
-	detached       bool
-	flash          string
-	autoTitleFired bool
-	titleTouched   bool
-	pendingTitle   titleStash
-	sessionName    string
-	boundary       domain.Session
-	hasBoundary    bool
-	cursor         blockCursor
 }
 
 // journalCursor is where the follower stands in the journal. offset is how many journal bytes have
@@ -257,17 +238,17 @@ func (m Model) enterWatch(src watchSource) (Model, tea.Cmd) {
 		title:         stripEscapes(src.title),
 		owner:         m.eng,
 		ownerSessions: m.sessions,
-		parked:        m.parkSession(),
+		parked:        m.sessionView,
 	}
 	m.eng, m.sessions = inert, nil
 	// The block-paint cache is keyed by entry index (paintcache.go). The parked transcript's is
 	// cleared on the way in, as on the way out, and the watch paints through a cache of its own,
 	// so an owner Msg folded with the parked view swapped in (foldForOwner) never paints into the
-	// cache the watch reads, nor the watch into the owner's.
+	// cache the watch reads, nor the watch into the owner's. The cache is replaced on the live copy
+	// only, after the park: the parked view keeps the owner's.
 	m.transcript.paints.clear()
 	m.transcript.paints = newPaintCache()
 	m.clearWatchView()
-	m.forgetPaintedFrame()
 	if src.journalPath == "" {
 		gen := m.watch.gen
 		return m, func() tea.Msg { return readRecordOnly(src, gen) }
@@ -334,13 +315,24 @@ func (m Model) leaveWatch() (Model, tea.Cmd) {
 	held := m.watch.held
 	closeJournal(m.watch.journal)
 	m.eng, m.sessions = m.watch.owner, m.watch.ownerSessions
-	m.restoreSession(m.watch.parked)
+	m.swapSessionView(m.watch.parked)
 	m.watch = watchState{gen: m.watch.gen}
 	// The block-paint cache is keyed by entry index, and the indices now mean the restored
 	// transcript's entries again, not the watched one's (paintcache.go).
 	m.transcript.paints.clear()
-	m.forgetPaintedFrame()
 	return m, redeliver(held)
+}
+
+// swapSessionView puts v in place as the session view the Model renders and returns the one it
+// displaced. It is the one way a session view changes hands — into a watch (clearWatchView), out
+// of it (leaveWatch) and around an owner's fold (foldForOwner) — and it always forgets the painted
+// frame, so no swap can leave the other view's lines on screen (forgetPaintedFrame). It touches no
+// engine, session host or paint cache: those are the caller's, in the order its own rules set.
+func (m *Model) swapSessionView(v sessionView) sessionView {
+	displaced := m.sessionView
+	m.sessionView = v
+	m.forgetPaintedFrame()
+	return displaced
 }
 
 // forgetPaintedFrame makes Update's tail lay out the session view a swap just put in place. The
@@ -431,67 +423,30 @@ func (m Model) foldWhileWatching(msg tea.Msg) (next tea.Model, cmd tea.Cmd, isOw
 // The watch stays active throughout, so the engine holds it takes (holdWatching) still keep a wake,
 // a resume and every waiting pane for after the watch, both inside this fold and in Update's tail.
 func (m Model) foldForOwner(msg tea.Msg) (tea.Model, tea.Cmd) {
-	watched, inert := m.parkSession(), m.eng
+	inert := m.eng
 	m.eng, m.sessions = m.watch.owner, m.watch.ownerSessions
-	m.restoreSession(m.watch.parked)
+	watched := m.swapSessionView(m.watch.parked)
 
 	next, cmd := m.fold(msg)
 	folded := next.(Model) // every arm of fold returns the Model it folded
 
 	folded.watch.owner, folded.watch.ownerSessions = folded.eng, folded.sessions
-	folded.watch.parked = folded.parkSession()
 	folded.eng, folded.sessions = inert, nil
-	folded.restoreSession(watched)
-	folded.forgetPaintedFrame()
+	folded.watch.parked = folded.swapSessionView(watched)
 	return folded, cmd
-}
-
-// parkSession copies the session view out of the Model.
-func (m Model) parkSession() parkedSession {
-	return parkedSession{
-		sessionView:    m.sessionView,
-		spentSkills:    m.spentSkills,
-		viewStack:      m.viewStack,
-		detached:       m.detached,
-		flash:          m.flash,
-		autoTitleFired: m.autoTitleFired,
-		titleTouched:   m.titleTouched,
-		pendingTitle:   m.pendingTitle,
-		sessionName:    m.sessionName,
-		boundary:       m.boundary,
-		hasBoundary:    m.hasBoundary,
-		cursor:         m.cursor,
-	}
-}
-
-// restoreSession writes a parked session view back into the Model.
-func (m *Model) restoreSession(p parkedSession) {
-	m.sessionView = p.sessionView
-	m.spentSkills = p.spentSkills
-	m.viewStack = p.viewStack
-	m.detached = p.detached
-	m.flash = p.flash
-	m.autoTitleFired = p.autoTitleFired
-	m.titleTouched = p.titleTouched
-	m.pendingTitle = p.pendingTitle
-	m.sessionName = p.sessionName
-	m.boundary = p.boundary
-	m.hasBoundary = p.hasBoundary
-	m.cursor = p.cursor
 }
 
 // clearWatchView empties the view for a (re)paint of the watched session: an empty transcript under
 // the same display preferences (transcript.reset keeps them), empty boards and accounting, and the
-// watched run idle until its journal says otherwise. The parked copies are untouched — every
-// reset below replaces a slice or map rather than editing it in place.
+// watched run idle until its journal says otherwise; every other field of the view starts at its
+// zero value. The parked copy is untouched — every reset below replaces a slice or map rather than
+// editing it in place.
 func (m *Model) clearWatchView() {
 	fresh := m.transcript
 	fresh.reset()
 	boards := m.thinking
 	boards.reset()
-	m.restoreSession(parkedSession{
-		sessionView: sessionView{transcript: fresh, thinking: boards, state: stateIdle},
-	})
+	m.swapSessionView(sessionView{transcript: fresh, thinking: boards, state: stateIdle})
 	m.reroot()
 }
 

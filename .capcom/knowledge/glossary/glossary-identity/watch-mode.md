@@ -15,11 +15,12 @@ the watcher's own home ⏎ then resumes through the normal door, and a **Watched
 is never resumable. See ADR 0103.
 
 In code, a new Msg case in `Model.fold` needs a watch route in `watchRouteOf` (view, owner or held),
-and a new field `resetSessionView` writes must be parked and restored too. Two guard tests enforce
-this (`TestWatchIsolatesRoutesEveryFoldedMsg`,
-`TestWatchIsolatesParksExactlyTheSessionViewResetSet`), and choosing the route is a design decision.
-Every view swap calls `forgetPaintedFrame`, since the parked and watched transcripts count
-generations apart; no test checks that. (2026-10-17, docs/plans/archived/2026-10-17 - 03 -
-live-session-watch-plan.md.)
+and a new field `resetSessionView` or `resumeLoaded` writes belongs in `sessionView`, the one value
+a watch parks and swaps. Two guard tests enforce this (`TestWatchIsolatesRoutesEveryFoldedMsg`,
+`TestSessionViewHoldsEveryFieldTheBoundariesReset`), and choosing the route is a design decision.
+Every view swap goes through `swapSessionView`, which calls `forgetPaintedFrame`, since the parked
+and watched transcripts count generations apart; `TestWatchRepaintsOnEverySessionViewSwap` checks
+that. (2026-10-17, docs/plans/archived/2026-10-17 - 03 - live-session-watch-plan.md; 2026-11-03,
+docs/plans/2026-11-02 - 06 - watch-run-projection-plan.md.)
 _Avoid_: "attach" (nothing is shared with the owner and nothing flows back), "spectate",
 "mirror".

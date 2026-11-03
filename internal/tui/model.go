@@ -117,45 +117,11 @@ type Model struct {
 	saveFailing   bool
 	pendingWrites []recordWrite
 
-	// boundary is the most recent engine snapshot the Model saw taken at a QUIESCENT boundary —
-	// a completed Turn's turnSnapshotMsg, the idle capture each worker launch takes
-	// (cacheBoundaryAtIdle), or a restored record's own payload — and it is the engine half a
-	// progress save pairs with the LIVE transcript while a Turn is still open (progressSave,
-	// sessionsave.go). hasBoundary is its presence flag, because a zero domain.Session is itself a
-	// legal envelope and so cannot say whether one was ever cached. cacheBoundary is the only site
-	// that fills the pair; startNewSession is the only one that empties it.
-	//
-	// A domain.Session is plain values (a version and an opaque blob), so it rides the
-	// value-copied Model like the queue above it (ADR 0011).
-	boundary    domain.Session
-	hasBoundary bool
-
 	// sessionBrowser is the /sessions history-browser overlay's state (sessions.go): the loaded
 	// session metas, the current selection, the current-workspace ⇄ all toggle, and any inline
 	// delete-confirm or rename edit. Its zero value is "closed", so it lives inline in the
 	// value-copied Model like autocompleteState (ADR 0011). It is driven only at idle.
 	sessionBrowser sessionBrowser
-
-	// Session naming (autotitle.go; ADR 0022 addendum). autoTitleFired latches the one
-	// cosmetic naming call a Session record gets — set when it fires, and set UP FRONT on a resumed
-	// record, which already has a name. titleTouched records that a human named this session (the
-	// browser's `r`, either form of /rename), which drops a late-landing automatic title (never
-	// clobber). pendingTitle is the title stash: a title that resolved before the first Save minted
-	// an id to rename, held with who asked for it and applied at that save's completion. Its rules —
-	// what may be stashed, restashed, flushed or dropped — are the value's own (titleStash), and
-	// every site that changes it asks for one of its verbs rather than writing the fields.
-	// sessionName is the same machinery's DISPLAY side: the name this session is currently known
-	// by, and the one the frame renders. It is what the human last saw decided rather than what the
-	// store holds — a rename that never reaches disk leaves the frame naming the session the human
-	// named — and "" means "not named yet", which the seam that renders it answers for itself. It
-	// carries untrusted text (a model's reply, a resumed record's Meta), so that seam sanitizes;
-	// nothing else reads it.
-	// Four plain values, safe in the value-copied Model (ADR 0011); startNewSession resets all of
-	// them, so the session /clear opens names itself afresh.
-	autoTitleFired bool
-	titleTouched   bool
-	pendingTitle   titleStash
-	sessionName    string
 
 	// actuation is the launcher latch (actuation.go, ADR 0029 D5): which blocking launcher verb is
 	// in flight, on what, and the channel its narration is pumped back through. Its zero value is
@@ -445,18 +411,11 @@ type Model struct {
 	// opens a new generation, and a skillHintTickMsg carrying an older one is a no-op (the
 	// ctrlCGen/flashGen pattern).
 	//
-	// spentSkills is the session's dedup set: a skill named in the band at the moment a message
-	// went out is spent and is never suggested again, so the band cannot nag about the same skill
-	// for the whole session. It is filled at send (submit and the staged-interjection path) and
-	// emptied at every boundary the conversation itself resets on — /clear and /new (commandrun.go)
-	// and an in-TUI /sessions restore (resumeLoaded, sessions.go). A nil map reads as empty, so the
-	// zero-value Model needs no construction step.
-	//
-	// The two collections are plain reference headers and the generation a plain int, all safe in
-	// the value-copied Model (ADR 0011).
+	// The slice is a plain reference header and the generation a plain int, both safe in the
+	// value-copied Model (ADR 0011). The band's spent set lives in the session view
+	// (sessionView.spentSkills), which a session boundary resets and a watch parks.
 	skillHints   []skills.Suggestion
 	skillHintGen int
-	spentSkills  map[string]bool
 
 	// lastEvent is when the ENGINE was last heard from: any Event, at any depth, of any variant —
 	// including a ReasoningEvent, since a reasoning stream is life and the stall the guard was built
@@ -503,9 +462,6 @@ type Model struct {
 	//
 	// A plain value, so it rides the value-copied Model (ADR 0011).
 	clickArmed clickArm
-	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy or a
-	// refused child message (interject.go) and cleared by flashClearMsg after flashDuration.
-	flash string
 	// flashGen numbers the flashes set by showFlash (mouse.go); a flashClearMsg clears only the
 	// flash whose generation it carries, so a late clear for flash A never takes down flash B.
 	flashGen int
@@ -525,10 +481,12 @@ type Model struct {
 	// opens without a notification (notify.go). finishWorker clears it.
 	answeredInExchange bool
 
-	// sessionView is the event-derived half of the session view: the transcript, the boards and
-	// the accounting the fold writes, and the run state (sessionview.go). It is EMBEDDED anonymously
-	// (the promptEditor posture), so m.transcript, m.state and m.ctxUsed read exactly as they always
-	// did while the fields gain the one owner a watch swaps.
+	// sessionView is the session view, whole: the transcript, the boards and the accounting the
+	// fold writes, the run state, and the rest of what a session boundary resets — the run views,
+	// the pointers over the paint, the naming and the cached boundary (sessionview.go). It is
+	// EMBEDDED anonymously (the promptEditor posture), so m.transcript, m.state and m.ctxUsed read
+	// exactly as they always did while the fields gain the one owner a watch swaps
+	// ([Model.swapSessionView]).
 	sessionView
 
 	// Content & layout.
@@ -548,12 +506,6 @@ type Model struct {
 	th            theme // the palette and reusable styles; rebuilt whenever the colour scheme changes (ADR 0040)
 	width, height int
 	ready         bool // a WindowSizeMsg has sized the layout at least once
-	// detached says the human scrolled off the tail: refreshViewport holds the scroll position
-	// where they put it instead of following new content, until a re-arm event (submit, /clear,
-	// /continue, a flushed interjection, a resumed session) clears it. The zero value is
-	// attached — a fresh Model follows the tail with no construction help. A plain bool by
-	// ADR 0011: the Model is copied by value on every Update.
-	detached bool
 
 	// Last render output, stashed by refreshViewport for View's sticky-header overlay and the
 	// mouse: the physical lines the viewport holds, the line range of every user block, and — one
@@ -584,18 +536,6 @@ type Model struct {
 	// the whole transcript is on screen. It takes the overlay slot outright when it is there — inside
 	// a run view the breadcrumb is the only header, and the paint registers no user block beside it.
 	header userBlock
-	// cursor is the transcript's modal KEYBOARD pointer over those same targets (blockcursor.go):
-	// whether the walk is on, and which content line its highlight is standing on. Two plain fields
-	// by ADR 0011, and a content line rather than a screen row so the highlight travels with the text
-	// it names through a scroll or a stream — refreshViewport keeps it standing on a real click
-	// surface (blockCursor.clamp) exactly as it keeps the map above it honest.
-	cursor blockCursor
-	// viewStack is the run views that are open, outermost first, and empty at the top level: which
-	// delegation — or which workflow stage, at a stage level — the transcript is painted rooted at,
-	// and where the level below each one was parked (runview.go, ADR 0063). The paint's own root lives on the transcript; this is the WALK — what
-	// esc and the breadcrumb go back to, and how a nested delegation is unwound one level at a time.
-	// A plain slice of plain values, so ADR 0011's copy rule needs no exception.
-	viewStack []runView
 	// spans is the geometry of the frame a pointer gesture was aimed at: where each boxed overlay of
 	// the transcript-side slot landed, published onto the pre-gesture snapshot ([Model.withFrameSpans])
 	// so every rectangle the gesture asks for is a READ of one composition rather than a composition
