@@ -90,7 +90,11 @@ internal/reactions/runner.go — drainGrace; cmd/apogee/wire_firing_test.go — 
 
 **Commit:** `refactor(reactions): own the observe lane's late binds, MCP disarm and close grace`
 
-## 2. `reactions.Host`: one Driver-built owner of the observe lane
+## 2. `reactions.Host`: one Driver-built owner of the observe lane — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): NewHost refuses a HostMCP value outside HostMCPNone/HostMCPLate with an error (fail fast at entry); TestHostRefusesAnUnknownMCPMode pins it beside the six lettered tests.
+NOTES (2026-11-03): doc.go's import-direction paragraph and per-file map were rewrapped to the file's ~100-column width (the 144-char line and the orphan "match.go is the pure" line); the text is unchanged except the new host.go entry naming the Host as what a Driver root composes.
+NOTES (2026-11-03): no CHANGELOG entry — the Host is internal until item 5 exports it through the facade, and no Driver uses it yet (items 3 and 4).
 
 Depends on item 1.
 **What:**

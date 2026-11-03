@@ -10,39 +10,41 @@
 // machine, outside confinement, as the user's config rather than a model action.
 //
 // One direction: this package imports internal/domain for the events it reads, internal/security
-// for path resolution and the url-safety guard a webhook posts through, internal/userexec for the exec posture a Reaction's argv runs under and
-// internal/webhook for the one POST both lanes' webhooks send, and nothing else in the tree —
-// never internal/agent, never internal/tools, never internal/tui. Every fact a firing needs rides
-// the Event itself: the file a tool call changed arrives on domain.ToolResultEvent.WriteTarget,
-// stamped by the engine from the one resolution its blast-radius ladder judged the call by, so no
-// root injects anything.
+// for path resolution and the url-safety guard a webhook posts through, internal/userexec for the
+// exec posture a Reaction's argv runs under and internal/webhook for the one POST both lanes'
+// webhooks send, and nothing else in the tree — never internal/agent, never internal/tools, never
+// internal/tui. Every fact a firing needs rides the Event itself: the file a tool call changed
+// arrives on domain.ToolResultEvent.WriteTarget, stamped by the engine from the one resolution its
+// blast-radius ladder judged the call by, so no root injects anything.
 //
 // # The files, one line each
 //
 // hooks.go is the vocabulary and the entry shape — the five Event constants, which are the notice
 // Moments of the Reaction core under an alias (ADR 0076), Events/ParseEvent, and the
 // Validate/ValidateAll rules that refuse a malformed domain.Reaction with a sentence naming it.
-// payload.go is the observe lane's share of the payload: the document itself is domain.SeamPayload —
-// the ONE JSON document every fired out-of-process Reaction reads, on either lane, with the
+// payload.go is the observe lane's share of the payload: the document itself is domain.SeamPayload
+// — the ONE JSON document every fired out-of-process Reaction reads, on either lane, with the
 // APOGEE_REACTION_* environment set its Env derives — and this file holds the ScheduleRef alias the
 // roots hand Options and the per-seam projections a seam-closing notice carries under "value".
-// match.go is the pure
-// mapping from one domain.Event to the Reaction events it produces, built over the SUBSCRIBED set
-// so an unsubscribed event costs nothing; it is also where a closed seam's working value is
-// projected, while the engine's Emit is still running. The `workspace:` filter lives in the scope
-// subpackage — the one path resolution the filter and a root's own workspace are both compared
-// through, shared with the Agent's sync lane so the two lanes can never read a filter differently.
-// runner.go is the sink decorator itself — the Executor seam, the per-Reaction
-// queues and workers, the Driver-facing failure reporter, and the reload (Replace) and shutdown
-// (Close) paths, under the one CloseGrace both give. bind.go is what a Driver root composes around
-// its Runner before the values it fires into exist — the ProjectRunSlot and MCPSlot late binds the
+// match.go is the pure mapping from one domain.Event to the Reaction events it produces, built over
+// the SUBSCRIBED set so an unsubscribed event costs nothing; it is also where a closed seam's
+// working value is projected, while the engine's Emit is still running. The `workspace:` filter
+// lives in the scope subpackage — the one path resolution the filter and a root's own workspace are
+// both compared through, shared with the Agent's sync lane so the two lanes can never read a filter
+// differently. runner.go is the sink decorator itself — the Executor seam, the per-Reaction queues
+// and workers, the Driver-facing failure reporter, and the reload (Replace) and shutdown (Close)
+// paths, under the one CloseGrace both give. bind.go is what a Driver root composes around its
+// Runner before the values it fires into exist — the ProjectRunSlot and MCPSlot late binds the
 // executor is handed, and DisarmUnconnectedMCP, the filter a root that dials no MCP server runs
-// over its list before arming, with one notice per entry. exec.go is the production Executor —
-// DefaultExecutor's dispatch onto whichever
-// action the entry configured, the one JSON encoding every action sends, and the MCP action, which
-// calls the entry's tool through the resolver the Driver injected and discards the answer.
-// command.go runs a Reaction's argv through internal/userexec — the api-key-cmd exec posture — with
-// the payload on stdin and the APOGEE_REACTION_* facts in the environment. webhook.go POSTs the
-// same document to a Reaction's URL through internal/webhook — the request the sync lane's
-// `advise:`/`gate:` webhooks share — and discards the reply.
+// over its list before arming, with one notice per entry. host.go is the Host a Driver root
+// composes its observe lane through — the disarm, the url-safety guard, the fenced DefaultExecutor,
+// both late binds and the Runner under CloseGrace, installed into the root's domain.Config in one
+// call — so no Driver arms the lane without them. exec.go is the production Executor —
+// DefaultExecutor's dispatch onto whichever action the entry configured, the one JSON encoding
+// every action sends, and the MCP action, which calls the entry's tool through the resolver the
+// Driver injected and discards the answer. command.go runs a Reaction's argv through
+// internal/userexec — the api-key-cmd exec posture — with the payload on stdin and the
+// APOGEE_REACTION_* facts in the environment. webhook.go POSTs the same document to a Reaction's
+// URL through internal/webhook — the request the sync lane's `advise:`/`gate:` webhooks share — and
+// discards the reply.
 package reactions
