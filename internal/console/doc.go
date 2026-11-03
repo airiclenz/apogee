@@ -22,7 +22,8 @@
 // command that backgrounded a child and returned still leaves that child holding the terminal
 // (confinement execution contract §2.4). A descendant that deliberately left the group with a
 // setsid of its own is outside that reach — the same accepted residual the one-shot subprocess
-// path documents.
+// path documents, save under the bwrap backend, whose PID namespace dies with the run and takes
+// the escapee with it.
 //
 // On Windows the terminal is a pseudoconsole (ConPTY) and the group is a Job Object: the command is
 // created suspended inside a kill-on-close job before it runs (platform.StartPseudoConsole), so

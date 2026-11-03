@@ -3,24 +3,28 @@
 package platform
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform/confinetest"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // namespaceBaseFlags is the fixed prefix every bwrap launch line carries before the
-// network flag and the writable binds: the read-only root, the device and proc mounts, and
-// the die-with-parent teardown (namespace_linux.go, namespaceArgv).
-var namespaceBaseFlags = []string{"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent"}
+// network flag and the writable binds: the read-only root, the device and proc mounts, the
+// die-with-parent teardown and the PID namespace (namespace_linux.go, namespaceArgv).
+var namespaceBaseFlags = []string{"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent", "--unshare-pid"}
 
 // bwrapAbsentReason is the reason a host with no bwrap in any trusted directory discloses: the
 // four directories of bwrapCandidates, in order, and never PATH.
@@ -82,10 +86,13 @@ func TestNamespaceArgv(t *testing.T) {
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("namespaceArgv =\n  %q\nwant\n  %q", got, tt.want)
 			}
-			for _, forbidden := range []string{"--new-session", "--unshare-pid"} {
-				if slices.Contains(got, forbidden) {
-					t.Errorf("namespaceArgv carries %s, which the backend must never emit", forbidden)
-				}
+			if slices.Contains(got, "--new-session") {
+				t.Error("namespaceArgv carries --new-session, which the backend must never emit")
+			}
+			// The PID namespace is what keeps the host's process table — and the
+			// /proc/<pid>/root escape it opens — out of the box, so every box carries it.
+			if !slices.Contains(got, "--unshare-pid") {
+				t.Error("namespaceArgv lacks --unshare-pid; the child would see the host's processes")
 			}
 		})
 	}
@@ -276,6 +283,194 @@ func TestNamespaceProbe(t *testing.T) {
 // connect(2) AF_UNIX alone and `--unshare-net` cuts datagram egress with the rest.
 func TestNamespaceProbeNetwork(t *testing.T) {
 	confinetest.ProbeNetwork(t, NewNamespaceConfiner(), Current())
+}
+
+// fencingNamespaceConfiner returns the namespace backend as this host constructs it, skipping
+// the test where it cannot fence (no trusted bwrap, or a kernel that refuses it the namespaces),
+// the same rule the confinetest harness applies.
+func fencingNamespaceConfiner(t *testing.T) *namespaceConfiner {
+	t.Helper()
+	c := NewNamespaceConfiner()
+	if caps := c.Capabilities(); !caps.FSWrite {
+		t.Skipf("namespace backend cannot fence on this host: %s", caps.Unavailable)
+	}
+	return c
+}
+
+// hostStatusName returns the Name: line of the host's /proc/<pid>/status, the line a child
+// reading that file would see if the host's process table reached it.
+func hostStatusName(t *testing.T, pid int) string {
+	t.Helper()
+	status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		t.Fatalf("read host status of PID %d: %v", pid, err)
+	}
+	for line := range strings.SplitSeq(string(status), "\n") {
+		if strings.HasPrefix(line, "Name:") {
+			return line
+		}
+	}
+	t.Fatalf("host status of PID %d has no Name: line", pid)
+	return ""
+}
+
+// TestNamespaceHidesHostProcesses pins the PID namespace (`--unshare-pid`) from inside the box:
+// the child's procfs must not reach this test process (standing in for apogee), so it can
+// neither read its status nor write outside the box through `/proc/<pid>/root`, which resolves
+// against the host's unconfined mount namespace.
+func TestNamespaceHidesHostProcesses(t *testing.T) {
+	// Not parallel: the confined child is a real subprocess.
+	c := fencingNamespaceConfiner(t)
+
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+	outside := filepath.Join(t.TempDir(), "escaped")
+	hostProc := fmt.Sprintf("/proc/%d", os.Getpid())
+	hostName := hostStatusName(t, os.Getpid())
+
+	// Each step's failure is the expected outcome, so the line always exits 0: what the test
+	// reads is the file the write left and the status the read printed.
+	line := fmt.Sprintf("printf x > %s 2>/dev/null; cat %s 2>/dev/null; exit 0",
+		posixQuote(hostProc+"/root"+outside), posixQuote(hostProc+"/status"))
+	cmd := exec.Command("/bin/sh", "-c", line)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := c.Confine(context.Background(), box, cmd); err != nil {
+		t.Fatalf("Confine: %v", err)
+	}
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("confined run: %v", err)
+	}
+
+	if _, err := os.Lstat(outside); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("confined child wrote %s through %s/root (Lstat err = %v); the host process table reaches the box", outside, hostProc, err)
+	}
+	if strings.Contains(stdout.String(), hostName) {
+		t.Errorf("confined child read %s/status and saw the host process (%q); the box shares the host PID namespace", hostProc, hostName)
+	}
+}
+
+// hostPIDsWithArg returns the PIDs whose host /proc/<pid>/cmdline carries arg as one argument.
+// The scan runs on the host side, so it finds a process inside the box by the PID the host
+// knows it by, never by one the box reports.
+func hostPIDsWithArg(arg string) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if err != nil {
+			continue
+		}
+		if slices.Contains(strings.Split(string(cmdline), "\x00"), arg) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
+}
+
+// TestNamespaceTeardownLeavesNoSurvivor pins §2.4 teardown on this backend: a confined run's
+// whole tree dies with it, including a descendant that called setsid to leave the run's
+// process group — the POSIX residual TestTeardownDoesNotReachASetsidEscapee pins for an
+// unconfined run does not hold here, because the PID namespace dies with its pid 1. Each
+// backgrounded sleep carries a unique duration as its marker, and survivors are looked for in
+// the host's own /proc.
+func TestNamespaceTeardownLeavesNoSurvivor(t *testing.T) {
+	// Not parallel: the confined children are real subprocesses.
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skipf("setsid not on PATH (%v); the escapee it kills needs the tool to detach with", err)
+	}
+	c := fencingNamespaceConfiner(t)
+
+	// marker returns a sleep duration no other process on the host carries: ten minutes plus a
+	// fraction made of this process's PID, the clock and n.
+	stamp := time.Now().UnixNano() % 1_000_000_000
+	marker := func(n int) string { return fmt.Sprintf("600.%d%09d%d", os.Getpid(), stamp, n) }
+
+	// runConfinedTree starts line confined under the §2.4 seam exactly as a spawner does, waits
+	// until every marker is alive on the host, then lets the run end through end — and returns
+	// once the run has. The markers' processes are SIGKILLed on cleanup whatever the outcome.
+	runConfinedTree := func(t *testing.T, line string, markers []string, end func(cancel context.CancelFunc)) error {
+		t.Helper()
+		t.Cleanup(func() {
+			for _, m := range markers {
+				for _, pid := range hostPIDsWithArg(m) {
+					killPID(pid)
+				}
+			}
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), escapeeRunTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", line)
+		td := NewProcessTeardown(cmd)
+		if err := c.Confine(ctx, domain.ConfinementBox{WorkspaceRoot: t.TempDir()}, cmd); err != nil {
+			t.Fatalf("Confine: %v", err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- RunWithTeardown(cmd, td) }()
+
+		testtime.Eventually(t, testtime.Budget(20*time.Second), func() bool {
+			for _, m := range markers {
+				if len(hostPIDsWithArg(m)) == 0 {
+					return false
+				}
+			}
+			return true
+		}, "every confined sleep to be running")
+		end(cancel)
+		return <-done
+	}
+
+	assertNoSurvivor := func(t *testing.T, markers []string) {
+		t.Helper()
+		testtime.Eventually(t, testtime.Budget(20*time.Second), func() bool {
+			for _, m := range markers {
+				if len(hostPIDsWithArg(m)) > 0 {
+					return false
+				}
+			}
+			return true
+		}, "every confined sleep to be gone after teardown")
+	}
+
+	t.Run("a cancelled run leaves no survivor", func(t *testing.T) {
+		markers := []string{marker(1), marker(2), marker(3)}
+		line := fmt.Sprintf("sleep %s & setsid sleep %s >/dev/null 2>&1 </dev/null & sleep %s",
+			markers[0], markers[1], markers[2])
+
+		// Cancelling a run is a result, not a Go error the assertion needs: what this test
+		// reads is what the kill reached, not what the run reported.
+		_ = runConfinedTree(t, line, markers, func(cancel context.CancelFunc) { cancel() })
+
+		assertNoSurvivor(t, markers)
+	})
+
+	t.Run("a cleanly exited run leaves no survivor", func(t *testing.T) {
+		markers := []string{marker(4), marker(5)}
+		release := filepath.Join(t.TempDir(), "release")
+		// The leader waits for the release file so both sleeps are up before it exits; the box
+		// reads the host filesystem, so the file the test creates is visible inside.
+		line := fmt.Sprintf("sleep %s >/dev/null 2>&1 & setsid sleep %s >/dev/null 2>&1 </dev/null &\n"+
+			"until [ -e %s ]; do sleep 0.05; done",
+			markers[0], markers[1], posixQuote(release))
+
+		err := runConfinedTree(t, line, markers, func(context.CancelFunc) {
+			if err := os.WriteFile(release, nil, 0o600); err != nil {
+				t.Fatalf("write release file: %v", err)
+			}
+		})
+		if err != nil {
+			t.Fatalf("RunWithTeardown err = %v, want nil — the leader exits cleanly", err)
+		}
+
+		assertNoSurvivor(t, markers)
+	})
 }
 
 // stubLauncher writes an executable shell script named bwrap under a fresh temp dir and

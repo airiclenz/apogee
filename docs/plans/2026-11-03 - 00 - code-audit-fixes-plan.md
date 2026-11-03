@@ -54,7 +54,11 @@
 - 7: guard folded (SafeReadFile's unbounded-contract comments kept; only tool-facing "no bound" comments reworded; FIFO test named under an Acceptance prefix; supersedes the diagnostics.go `diagnoseGo` "No size bound is added" comment)
 - 10: guard folded (gitexec sentinel for TimedOut/DrainWedged; a scriptedGit variant scripts the probe's own calls, one TempDir gitPath per row)
 
-## 1. Run the bwrap backend in its own PID namespace
+## 1. Run the bwrap backend in its own PID namespace — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — .capcom/knowledge/decisions/adr-0081/adr-0081-consequences.md: made necessary by adding `--unshare-pid` (its "`--unshare-pid` … out of scope and stay so" bullet became false; a dated blockquote amends it, the bullet text is untouched)
+NOTES (2026-11-03): the no-survivor test also backgrounds a `setsid` sleep and covers the clean-exit path as well as cancel; survivors are found by unique fractional sleep durations scanned in host /proc/*/cmdline. Both new tests and TestNamespaceArgv were confirmed to fail with the flag removed. The `/proc/<pid>/root` write did not succeed even pre-fix on this host (EACCES), so the status-read assertion is what discriminates here
+NOTES (2026-11-03): docs/manual/reactions.md "`setsid` … is the one way to leave something running" left as is — it describes your own (unconfined) `run:` entries, which the bwrap change does not reach
 
 **What:** Fix (audit High): bwrap runs without `--unshare-pid` while `--proc /proc` mounts the host process table, so a confined same-uid command reaches `/proc/<apogee-pid>/root/…` (writes outside the box) and, with `ptrace_scope=0`, apogee's memory.
 **Regression guard.** The doc rule is: every hit of `grep -rn 'unshare-pid' internal docs/design .capcom/knowledge` no longer forbids the flag, save amendment text, testdata fixtures and the ADR 0081 Decision text (`adr-0081-decision.md:77`, superseded by `adr-0081-amend-1103`, never rewritten); the contract's line-wrapped "never / `--unshare-pid`" at :231-232 and :1178-1179 are sites; docs/plans and docs/reviews stay out of the check. Every comment stating a setsid escapee survives the call notes the bwrap exception (`grep -rn 'survives the call\|outside that reach' internal docs/design`). The no-survivor test finds survivors from the host side (a unique argv marker in host `/proc/*/cmdline`, or the outer bwrap's pgid), never by a pid printed inside the box.

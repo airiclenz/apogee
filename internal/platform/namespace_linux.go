@@ -59,7 +59,11 @@ import (
 // backend's set. Only the Console's pty run owns a terminal: a one-shot run starts in a new
 // session with none (below), so its /dev/tty open fails with ENXIO and it has no
 // /dev/console.
-// `--proc /proc` mounts a fresh procfs so the child sees its own process tree.
+// `--unshare-pid` gives the child a PID namespace of its own and `--proc /proc` mounts that
+// namespace's procfs, so the child sees only its own process tree. Without the namespace the
+// fresh procfs would list the host's processes, and a same-uid child could write outside the
+// box through `/proc/<apogee-pid>/root/…` (that path resolves against apogee's own,
+// unconfined mount namespace) and, where ptrace_scope permits, read apogee's memory.
 //
 // What passes through untouched: cwd (bwrap chdir's to the parent's directory, which the
 // ro-bind of `/` carries), the environment, and the three standard streams — the
@@ -68,13 +72,17 @@ import (
 // the subprocess funnel starts a confined one-shot run as a new session's leader (Setsid,
 // internal/subprocess session_unix.go), so bwrap and its child hold no controlling terminal
 // to inject keystrokes into with TIOCSTI — while on the Console's pty run it would detach the
-// child from the terminal the tool drives. And no `--unshare-pid` (a PID namespace would hide
-// the child's process group from the teardown kill).
+// child from the terminal the tool drives.
 //
-// Teardown (§2.4) is two-sided: Setpgid — Setsid once the run is started as a session —
+// Teardown (§2.4) is three-sided. Setpgid — Setsid once the run is started as a session —
 // puts bwrap and its child in one process group so the execution tool's negative-PID kill
-// reaps both, and `--die-with-parent` makes the kernel deliver SIGKILL to the child the
-// moment bwrap itself dies, so a child that escaped the group cannot outlive its launcher.
+// reaps both: the PID namespace does not hide the group, because a process group is the
+// host's and the child's processes keep their host PIDs and the group they inherited.
+// `--die-with-parent` makes the kernel deliver SIGKILL to the namespace's pid 1 (bwrap's
+// reaper) the moment bwrap itself dies. And when that pid 1 dies — killed, or exiting once
+// the command it ran has exited — the kernel kills every process left in the namespace, so
+// a descendant that called setsid to leave the group dies with the run instead of
+// surviving it: on this backend the POSIX setsid residual (teardown_unix.go) does not hold.
 //
 // Network follows landlock's semantics (ADR 0012): open by default, and a non-empty
 // NetworkAllow opts the box into deny-all via `--unshare-net` — an empty network
@@ -126,8 +134,11 @@ var bwrapCandidates = []string{
 // is installed" is not "bwrap can fence here" (contract §5). Kernels and profiles that refuse
 // CLONE_NEWUSER to an unprivileged process — `kernel.apparmor_restrict_unprivileged_userns`, a
 // seccomp filter, `user.max_user_namespaces=0` — refuse it at run time, not at resolution time,
-// so only a real launch can answer. Either failure yields a backend that fences nothing and says
-// why through Capabilities().Unavailable and, in the typed form a caller can branch on, through
+// so only a real launch can answer. The launch carries the same flags a confined run does
+// (namespaceArgv), so a host that grants the user namespace but refuses CLONE_NEWPID for
+// `--unshare-pid` is refused here too, not on the first confined call. Either failure yields a
+// backend that fences nothing and says why through Capabilities().Unavailable and, in the typed
+// form a caller can branch on, through
 // Capabilities().Cause: an absent or untrusted bwrap is domain.CauseBackendAbsent, while a
 // launch that refused or outlived the probe budget carries the cause probeNamespace returned.
 // The probe has no disk side effect, so the report confiner may construct it too.
@@ -326,8 +337,11 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 //     exec stay open (the box bounds where a child may WRITE, like the other backends);
 //   - `--dev /dev` — the minimal device set, the backend's write-exempt set (see the file
 //     header);
-//   - `--proc /proc` — a fresh procfs for the child's own view of its process tree;
+//   - `--proc /proc` — the procfs of the child's PID namespace, its own view of its
+//     process tree;
 //   - `--die-with-parent` — the child dies with bwrap (§2.4 teardown);
+//   - `--unshare-pid` — a PID namespace of the child's own, so its procfs names no host
+//     process and a setsid descendant dies with the namespace (see the file header);
 //   - `--unshare-net` — only when the box opts into network-deny via a non-empty
 //     NetworkAllow (ADR 0012: open by default, deny is a coarse tightening);
 //   - `--bind <root> <root>` for WorkspaceRoot and each WritablePaths entry, bound
@@ -338,14 +352,14 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 //     have to exist in full for the writable roots that do exist to be honoured (the
 //     ENOENT rule of landlock's allowWriteBeneath).
 //
-// Never `--new-session` and never `--unshare-pid` (see the file header for why).
+// Never `--new-session` (see the file header for why).
 func namespaceArgv(box domain.ConfinementBox, exists func(string) bool) []string {
 	roots := make([]string, 0, 1+len(box.WritablePaths))
 	roots = append(roots, box.WorkspaceRoot)
 	roots = append(roots, box.WritablePaths...)
 
-	argv := make([]string, 0, 7+2*len(roots))
-	argv = append(argv, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent")
+	argv := make([]string, 0, 10+3*len(roots))
+	argv = append(argv, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent", "--unshare-pid")
 
 	// Network is open by default (ADR 0012). A non-empty NetworkAllow opts the box into
 	// network-deny: an empty network namespace, the same deny-all landlock ABI 4 enforces

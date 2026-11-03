@@ -29,7 +29,10 @@ import (
 // this one reaches: it escapes both cmd.Cancel and the clean-exit reap and survives the call,
 // unsupervised, while the tool reports the leader's own exit status. It stays inside whatever
 // write-fence the Confiner installed — changing process group sheds no landlock ruleset and no
-// seatbelt profile — so the residual is loss of supervision, not loss of confinement. It is
+// seatbelt profile — so the residual is loss of supervision, not loss of confinement. The bwrap
+// backend is the exception: its run has a PID namespace of its own (`--unshare-pid`,
+// namespace_linux.go), and the kernel kills every process left in it when its pid 1 dies, so
+// there a setsid escapee dies with the run rather than surviving it. It is
 // accepted rather than enforced against (no subreaper, no descendant tracking): deliberately
 // backgrounding a process is legitimate terminal use. The residual is POSIX-specific — Windows'
 // Job Object holds a descendant unless the job permits breakaway, which it does not

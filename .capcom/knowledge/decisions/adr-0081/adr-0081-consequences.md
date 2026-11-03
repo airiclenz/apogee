@@ -20,3 +20,7 @@ title: ADR 0081 consequences
   namespace driver skips where landlock is available, so a single host proves one backend.
 - **A native namespace launcher stays open** as a follow-up; `--unshare-pid`, a per-host network
   allow list and a backend-forcing config key are out of scope and stay so.
+
+> **Amended 2026-11-03 (code audit, `adr-0081-amend-1103`).** `--unshare-pid` is no longer out of
+> scope: every run carries it, so the child's procfs names no host process and a setsid escapee
+> dies with the namespace.

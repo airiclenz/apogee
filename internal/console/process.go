@@ -128,8 +128,9 @@ func (p *Process) releaseMaster() error {
 // leader's negative pid, which is safe precisely because the group still has a member (the
 // kernel cannot recycle a process group id while one remains). A descendant that left the group
 // with a setsid or setpgid of its own is outside that reach — the same accepted residual the
-// one-shot subprocess path documents at platform.NewProcessTeardown. Release then drops whatever
-// the containment held, a no-op on POSIX.
+// one-shot subprocess path documents at platform.NewProcessTeardown, and the same bwrap
+// exception: a run confined there dies with its PID namespace, escapee included. Release then
+// drops whatever the containment held, a no-op on POSIX.
 func (p *Process) reap() {
 	defer close(p.reaped)
 	_ = p.cmd.Wait()

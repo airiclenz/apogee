@@ -202,8 +202,9 @@ type SubprocessResult struct {
 //     container. The one documented escape is POSIX's: a descendant that calls
 //     setsid/setpgid(0,0) is outside the group and outside the kill, so it survives the call
 //     unsupervised — still inside whatever fence the Confiner installed, an accepted residual
-//     rather than an enforcement gap (platform.NewProcessTeardown states it in full). Windows'
-//     Job Object denies breakaway and has no counterpart.
+//     rather than an enforcement gap (platform.NewProcessTeardown states it in full). A run
+//     confined by the bwrap backend is the exception: its PID namespace dies with the run and
+//     the escapee with it. Windows' Job Object denies breakaway and has no counterpart.
 //   - If a Confinement handle is on ctx (the dispatch disposition installed it for an
 //     Auto/confine subprocess call), it asks the Confiner to wrap the cmd before running.
 //     A backend that cannot establish the box returns ErrConfinementUnavailable, which this

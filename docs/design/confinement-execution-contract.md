@@ -216,6 +216,7 @@ twin) from the first executable among `/usr/bin/bwrap`, `/bin/bwrap`, `/usr/loca
 ```
 cmd.Path = <bwrap, the first trusted candidate at construction>
 cmd.Args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent",
+            "--unshare-pid",
             ("--unshare-net" iff box.NetworkAllow is non-empty),
             "--bind", <root>, <root> (for WorkspaceRoot and each existing WritablePaths entry, canonicalised),
             "--", <original cmd.Path>, <original cmd.Args[1:]...>]
@@ -228,8 +229,13 @@ subprocess funnel replaces with `Setsid` on a one-shot run (§2.4, amended 2026-
 `bwrap` and its child share one process group, since a session leader's PGID is its PID — and
 `--die-with-parent` kills the child when `bwrap` dies. The flag line is a
 **pure function of the box** and is unit-tested as argv with no process (hermetic), exactly as the
-seatbelt profile is. Never `--new-session` and never
-`--unshare-pid` (it would hide the child's process group from the teardown kill). *(Amended 2026-10-05,
+seatbelt profile is. Never `--new-session`. *(Amended 2026-11-03, code audit, ADR 0081 amendment
+1103:)* every run carries `--unshare-pid`, which this paragraph used to forbid: without a PID namespace
+the fresh procfs lists the host's processes, so a same-uid child could write outside the box through
+`/proc/<apogee-pid>/root/…` (resolved against apogee's own, unconfined mount namespace) and, where
+`ptrace_scope` allows, read apogee's memory. The feared cost does not exist: a process group belongs to
+the host, the child's processes keep their host PIDs and the group they inherited, so the negative-PID
+teardown kill still reaches them. *(Amended 2026-10-05,
 code audit:)* the detach `--new-session` would buy comes from the fork instead — the subprocess funnel
 starts every confined one-shot run as a session leader (§2.4), so bwrap and its child hold no
 controlling terminal to inject keystrokes into with `TIOCSTI` — while on the Console's pty run the flag
@@ -319,7 +325,11 @@ descendant can do to leave it (the residual below).
   own exit status. It remains inside whatever write-fence the Confiner installed — changing process
   group sheds no landlock ruleset, no seatbelt profile and no mount namespace — so what is lost is
   supervision, not confinement *(and under the namespace backend, 2026-09-17, less of that:
-  `--die-with-parent` kills the child when `bwrap` dies, whatever group it moved to)*. Enforcing against it (a subreaper, descendant tracking) was **rejected**: deliberately
+  `--die-with-parent` kills the child when `bwrap` dies, whatever group it moved to)*. *(Amended
+  2026-11-03, ADR 0081 amendment 1103: under the namespace backend the residual does not hold. The run
+  has a PID namespace of its own (`--unshare-pid`), and when its pid 1 — bwrap's reaper — dies, killed
+  by the group kill or exiting once the command has, the kernel kills every process left in it, so a
+  setsid escapee dies with the run on both teardown paths.)* Enforcing against it (a subreaper, descendant tracking) was **rejected**: deliberately
   backgrounding a process is legitimate `terminal` use. Windows has no counterpart — its Job Object
   holds a descendant unless the job permits breakaway, which this one does not.
 - **Tool obligation — Windows (Phase 5):** Windows has no process groups, so the container is a **Job
@@ -1176,7 +1186,10 @@ promoted to a direct dep with `go mod tidy` clean.
 user namespaces `confinetest.Probe` passes #1–#6, #11 and #12 (#12 denying — no `truncate(2)`
 residual is disclosed) and `confinetest.ProbeNetwork` passes #7/#8 and #13; the argv line is unit-tested as a pure function of the box with
 no process (hermetic — `--unshare-net` iff `NetworkAllow` is non-empty, missing roots skipped, never
-`--new-session` or `--unshare-pid`); `bwrap` absent **or** userns refused ⇒ `Capabilities() ==
+`--new-session`, always `--unshare-pid` — amended 2026-11-03); a confined child reads no host process
+through its `/proc` and writes no host path through `/proc/<pid>/root`, and a cancelled or cleanly
+exited confined run leaves no survivor, a setsid escapee included, looked for from the host side
+(amended 2026-11-03); `bwrap` absent **or** userns refused ⇒ `Capabilities() ==
 {false, false}` with a non-empty `Unavailable` naming the cause (`bwrap not found in <the four trusted
 dirs>` / `bwrap at <path> is outside the trusted system directories` / `bwrap refused: <stderr line>` /
 `bwrap timed out`), and `Confine` then returns `ErrConfinementUnavailable`; a
