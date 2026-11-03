@@ -676,6 +676,9 @@ func TestShellWriteViewJudgesWhatTheCommandWrites(t *testing.T) {
 		{"a read chained with a write", terminalCall("cat .git/config && cp x .git/hooks/pre-commit"), shellTool, TierHardRefuse, "write-git-control-plane"},
 		{"a cd into the hooks dir before the delete", terminalCall("cd .git/hooks && rm -rf pre-commit"), shellTool, TierHardRefuse, "write-git-control-plane"},
 		{"a variable naming the hooks dir before the delete", terminalCall("d=.git/hooks; rm -rf $d"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"a backslash-newline after a cd is no command of its own", terminalCall("cd .git && \\\n ls hooks"), shellTool, TierNone, ""},
+		{"a backslash-newline inside the target hides nothing", terminalCall("rm -rf .git/\\\nhooks"), shellTool, TierHardRefuse, "write-git-control-plane"},
+		{"a backslash-CR-LF ends the command before the delete", terminalCall("echo ok \\\r\nrm -rf .git/hooks"), shellTool, TierHardRefuse, "write-git-control-plane"},
 		// Full-text rules are untouched by the view.
 		{"reading an ssh key", terminalCall("cat ~/.ssh/id_rsa"), shellTool, TierHardRefuse, "write-ssh-keys"},
 		{"reading the aws credentials", terminalCall("cat ~/.aws/credentials"), shellTool, TierHardRefuse, "write-credential-persistence"},

@@ -51,6 +51,12 @@ func TestWriteTargetsOf(t *testing.T) {
 		{"a quoted redirect target", `echo x > ".git/hooks/pre commit"`, ".git/hooks/pre commit"},
 		{"a single-quoted separator is text", `echo 'a; rm -rf .git/hooks'`, ""},
 		{"an escaped separator is text", `echo a\; rm -rf .git/hooks`, ""},
+		{"a backslash-newline ends no command: cd is not a read leader", "cd .git && \\\n ls hooks", ".git"},
+		{"a backslash-newline splits no word", "rm -rf .git/\\\nhooks", ".git/hooks"},
+		{"a backslash-newline inside double quotes joins too", "rm -rf \".git/\\\nhooks\"", ".git/hooks"},
+		{"a backslash-newline inside single quotes is quoted text", "echo 'a\\\nb' > f", "f"},
+		{"a single-quoted backslash-newline stays in the word", "rm 'a\\\nb'", "a\\\nb"},
+		{"a backslash-CR is an escaped CR: the LF after it ends the command", "echo ok \\\r\nrm -rf .git/hooks", ".git/hooks"},
 		{"sudo is stripped", "sudo rm -rf .git/hooks", ".git/hooks"},
 		{"env with an assignment is stripped", "env GIT_DIR=.git cat .git/config", ""},
 		{"a leading assignment is not the leader", "GOCACHE=/tmp/x cat .git/config", ""},
@@ -304,6 +310,7 @@ func TestWithoutHeredocBodies(t *testing.T) {
 		{"an unterminated body runs to the end", "cat <<EOF\nit's\nno end", "cat <<EOF\n"},
 		{"multi-byte text around the body", "echo héllo; cat <<EOF\nça n'est\nEOF\necho fin", "echo héllo; cat <<EOF\necho fin"},
 		{"bytes that are not UTF-8 around the body", "echo \xff; cat <<EOF\nit's\nEOF\necho \xfe", "echo \xff; cat <<EOF\necho \xfe"},
+		{"a backslash-newline before the heredoc", "cat \\\n<<EOF > notes.md\nit's\nEOF\necho done", "cat \\\n<<EOF > notes.md\necho done"},
 
 		// --- lines with no body: byte-identical ----------------------------------------
 		{"a here-string opens no body", "cat <<<EOF\nEOF", "cat <<<EOF\nEOF"},

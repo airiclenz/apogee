@@ -504,9 +504,14 @@ func (tk *shellTokenizer) scan(s string) {
 		r := runes[i]
 		switch {
 		case r == '\\':
+			// A backslash-newline joins lines as sh does: it emits nothing, ends no command
+			// and splits no word. Only a LF joins: a backslash-CR stays an escaped CR, and the
+			// LF after it ends the command.
 			if i+1 < len(runes) {
 				i++
-				tk.writeRune(runes[i])
+				if runes[i] != '\n' {
+					tk.writeRune(runes[i])
+				}
 			}
 		case r == '\'':
 			i = tk.scanSingleQuoted(runes, i)
@@ -578,7 +583,9 @@ func (tk *shellTokenizer) scanDoubleQuoted(runes []rune, i int) int {
 		case '\\':
 			if i+1 < len(runes) {
 				i++
-				tk.word.WriteRune(runes[i])
+				if runes[i] != '\n' { // a backslash-newline joins lines here too
+					tk.word.WriteRune(runes[i])
+				}
 			}
 		case '`':
 			i = tk.scanBacktick(runes, i)

@@ -99,7 +99,9 @@ NOTES (2026-11-03): the `-z` listing splits through a new `nulFields` helper bes
 **Closes:** secret-scan-plusplus-lines
 **Commit:** `fix(security): scan added lines that begin with ++ in the secrets diff`
 
-## 4. Consume backslash-newline in the shell tokenizer
+## 4. Consume backslash-newline in the shell tokenizer — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): added rows beyond the plan's list — a double-quoted continuation (`rm -rf ".git/\⏎hooks"` → `.git/hooks`), a single-quoted one that stays in the word (`rm 'a\⏎b'`), and a TestWriteTargetsOf twin of the backslash-CR-LF row — because the plan's `echo 'a\⏎b' > f` row yields `f` whatever the quoted text holds.
 
 **What:** Recast at the regression check (2026-11-03). Fix: `scan` and `scanDoubleQuoted` keep `\`+newline as a literal newline word, so `cd .git && \⏎ ls hooks` is falsely refused and `rm -rf .git/\⏎hooks` hides its target.
 **Regression guard.** Only backslash+LF joins lines; drop the backslash-CR-LF branch (sh treats it as escaped CR then a command-ending LF). Add a regression row: `echo ok \<CR><LF>rm -rf .git/hooks` still hard-refuses write-git-control-plane; fix the Goal line to match. The TestWriteTargetsOf row `cd .git && \⏎ ls hooks` expects ".git" (cd is not a read leader); the rule-level row stays TierNone.
