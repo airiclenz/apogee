@@ -458,9 +458,14 @@ same line kinds as stdout, with three differences that make it a coalesced varia
   30 ms are written as one line whose text is exactly their concatenation, so a fast stream costs a
   line per window on disk rather than a line per token. Nothing is lost, and no other line kind is
   merged.
-- **The opening frame carries two more members**: `title`, the session's title, and `entries`, the
-  number of transcript entries the record held when the journal began — where a watcher stops
-  painting the record and starts following the journal.
+- **The opening frame is the journal's own**: its `data` holds `session` and `workspace`, as
+  stdout's does, then `title`, the session's title; `entries`, the number of transcript entries the
+  record held when the journal began — where a watcher stops painting the record and starts
+  following the journal; and `model` and `context_window`, the model and window the run was bound
+  to when the journal began, so a watcher measures the watched run against its own binding from the
+  first frame. Both are always written, with `""` and `0` meaning unknown, and a later model or
+  server change is not re-stamped there: the run's next usage reading carries it. stdout's
+  `server`, `mode`, `bypass`, `confined` and `version` are not in it.
 - **A `prompt` line** is written for each top-level prompt and each Interjection — `data.text` is
   what was submitted and `data.interjection` says which it was — because a prompt is not an Event
   and a watcher would otherwise see answers with no question. This kind is the journal's own and

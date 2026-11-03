@@ -1757,8 +1757,10 @@ no usage yet — falling back to `esc back` where the slot cannot hold it — an
 primed-`ctrl+c` and armed-`esc` lines), and
 the mouse-copy flash. The gauge is the fill of the run the reader is looking at: at the top level the
 session's own agent, in a read-only watch the watched run's — lit as the watch opens and measured
-against that run's own context window, with `/usage` agreeing and `esc` back restoring your own —
-inside a run view the viewed run's — its latest reading against the window that
+against the window the watched run is bound to, as its journal's opening frame names it (a journal
+from an older apogee, or a frame naming no window, e.g. after a `/server` move, uses your own window
+until the run's first reading names its own), with `/usage` agreeing and `esc` back restoring your
+own — inside a run view the viewed run's — its latest reading against the window that
 run filled — and never the parent's there, since a parent's fill above a child's transcript is a
 number about someone else; a stage view lists runs and fills no window, so it states none. At the
 top level the gauge does not wait for the server: until the first usage reading lands — again after
@@ -1880,6 +1882,10 @@ and the autonomy mode on the right. The host is the bound `servers:` entry's own
 a server's alias (ADR 0036 decision 1) — falling back to the endpoint's own host for the unlisted
 `--endpoint` start that has no name, and any segment nothing has named is dropped with its
 separator.
+
+**While you watch.** A read-only watch leaves the footer alone: it keeps naming your own host,
+model and effort, the binding of the session you parked and that `esc` returns you to. Only the
+status line's context gauge is the watched run's (see "The status line's right slot").
 
 **The spend.** Once any call of the session has been priced (a `servers:` entry with a `price:`,
 ADR 0093), the run gains one more segment after the workdir: the session's **Spend (money)** in the

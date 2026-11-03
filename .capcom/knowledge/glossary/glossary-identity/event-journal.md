@@ -7,16 +7,19 @@ The per-session file `<sessions>/<id>.events.jsonl` a **Driver** writes beside a
 record** while it holds that record: the TUI, `apogee headless` and `apogee daemon` alike. Its
 lines are **Event lines** in the `v:2` envelope, bracketed by one `run_started`/`run_finished`
 pair, with token and reasoning deltas merged over a window of about 30 ms without losing text. Its
-`run_started` adds `title` and `entries`, the record's transcript entry count when the journal
-was born. It also carries a Driver-written `prompt` line for each top-level prompt and
+`run_started` adds `title`, `entries` (the record's transcript entry count when the journal was
+born), `model` and `context_window` (the run's binding at that birth; `""` and `0` mean
+unknown). It also carries a Driver-written `prompt` line for each top-level prompt and
 Interjection, because prompts are not Events. It is born when the record is held and the session
 has a prompt, never under `--no-save`, and it is removed after the final save, before the hold is
 released. The startup sweep removes an orphan whose lock is free. **Watch mode** follows it. The
 engine never sees it: the Driver composes it as a sink. See ADR 0103.
 
 The shared decoder `eventjson.Decode` reads a journal's `run_started` into the headless frame, which
-drops `title` and `entries` without an error; a reader that needs them unmarshals the raw line's
-`data` into `eventjson.JournalStarted`, as Watch mode does (`internal/tui/watch.go`,
-`loadWatchStart`). (2026-10-17, docs/plans/archived/2026-10-17 - 03 - live-session-watch-plan.md.)
+keeps `model` but drops `title`, `entries` and `context_window` without an error; a reader that
+needs them unmarshals the raw line's `data` into `eventjson.JournalStarted`, as Watch mode does
+(`internal/tui/watch.go`, `loadWatchStart`). (2026-10-17,
+docs/plans/archived/2026-10-17 - 03 - live-session-watch-plan.md; 2026-11-03,
+docs/plans/2026-11-02 - 06 - watch-run-projection-plan.md.)
 _Avoid_: "log" (it is deleted at release and nothing replays it; the record is the history),
 "event log", "stream file".

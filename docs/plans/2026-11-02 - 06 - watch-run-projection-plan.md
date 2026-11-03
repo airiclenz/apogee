@@ -261,7 +261,11 @@ Depends on items 1, 4 and 5.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'Watch|TestSession' ./internal/tui/`
 **Commit:** `feat(tui): a watch binds the watched run's model and window as it opens`
 
-## 8. Docs: the frame's binding, the watch gauge and footer, the session view
+## 8. Docs: the frame's binding, the watch gauge and footer, the session view — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the glossary Note `watch-mode`'s "In code" paragraph already states the shipped behaviour (one `sessionView` swapped by `swapSessionView`, which forgets the painted frame, `TestWatchRepaintsOnEverySessionViewSwap`, `TestWatchIsolatesRoutesEveryFoldedMsg`, a 2026-11-03 source line, no "no test checks that"), written by item 4, so it is left unchanged and is not in FILES.
+NOTES (2026-11-03): the `event-journal` Note's frame sentence is reworded to list `title`, `entries`, `model` and `context_window` together, so the Acceptance grep for "title. and .entries" prints nothing; its `Decode` sentence now says the headless frame keeps `model` and drops `title`, `entries` and `context_window`.
+NOTES (2026-11-03): the prose rule's remaining "own context window" hits (layout.md info-row line, docs/manual/configuration.md) and the ADR 0075 decision / ADR 0103 consequences "title and entries" text are not about the watch gauge or are point-in-time decision text, and stay.
 
 **What:**
 Recast at the regression check (2026-11-02).
