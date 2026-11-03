@@ -9,6 +9,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-11-03
+
 - **`ui.pointer-shapes`** — a new `ui:` key, off by default and editable in `/settings`, for a mouse pointer that shows what a click does on hover (an I-beam over text, a hand over a clickable row) through OSC 22 pointer shapes. It takes effect only on a terminal that answers apogee's query for them (kitty, Ghostty, WezTerm, foot); under tmux it stays off. Purely visual: nothing about it reaches the model (ADR 0106).
 - With `ui.pointer-shapes` on, the TUI asks the terminal once per session whether it supports the OSC 22 pointer shapes `default`, `text` and `pointer` (a DA1 request follows as the "no answer" sentinel; no timer), and switches to all-motion mouse tracking only when it answers `1,1,1`; otherwise it keeps cell-motion tracking and the setting off sends no query at all. The verdict is logged under `pointer-probe` in `--tui-diag`.
 - With `ui.pointer-shapes` on and the terminal confirming support, hovering the mouse now sets the terminal pointer to what a click there does — an I-beam over the editable prompt, settings text fields and transcript lines, a hand over clickable rows and toggleable blocks, the arrow elsewhere — with one OSC 22 write per change of shape and no repaint; a held button (any drag) writes nothing.
