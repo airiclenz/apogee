@@ -32,7 +32,6 @@ import (
 	// which shadows the package name inside those functions.
 	apiprovider "github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
-	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
@@ -1561,11 +1560,16 @@ func TestFiringHooksRefusesADenyListedWebhookEndpoint(t *testing.T) {
 		lines = append(lines, line)
 	}
 
-	guard := security.NewURLGuard(opts.URLAllowHosts, opts.URLDenyHosts)
-	runner, err := firingHooks(list, firingRoots(t).workspace, guard, nil, report, nil)
+	host, err := reactions.NewHost(list, reactions.HostOptions{
+		Workspace:     firingRoots(t).workspace,
+		Report:        report,
+		URLAllowHosts: opts.URLAllowHosts,
+		URLDenyHosts:  opts.URLDenyHosts,
+	})
 	if err != nil {
-		t.Fatalf("firingHooks: %v", err)
+		t.Fatalf("reactions.NewHost: %v", err)
 	}
+	runner := host.Runner()
 	runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
 	closeCtx, cancel := context.WithTimeout(context.Background(), testtime.Budget(10*time.Second))
 	defer cancel()
@@ -1601,11 +1605,14 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 		},
 		Timeout: time.Second,
 	}}
-	runner, err := firingHooks(list, roots.workspace, security.URLGuard{},
-		&reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"}, nil, nil)
+	host, err := reactions.NewHost(list, reactions.HostOptions{
+		Workspace: roots.workspace,
+		Schedule:  &reactions.ScheduleRef{ID: "sch-1", Name: "Nightly"},
+	})
 	if err != nil {
-		t.Fatalf("firingHooks: %v", err)
+		t.Fatalf("reactions.NewHost: %v", err)
 	}
+	runner := host.Runner()
 	t.Cleanup(func() { _ = runner.Close(context.Background()) })
 
 	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
@@ -1621,7 +1628,7 @@ func TestFiringConfigInstallsTheHookRunner(t *testing.T) {
 		mode:     domain.ModePlan,
 		beat:     firingBeat,
 		recordID: "2026-09-06T09-00-00-firing",
-		hooks:    runner,
+		host:     host,
 	})
 	if err != nil {
 		t.Fatalf("firingConfig: %v", err)
@@ -2200,7 +2207,7 @@ func TestFiringOutcomeCarriesWhatTheFiringWroteAndHowToUndoIt(t *testing.T) {
 
 // A Firing's adopted repo reaction runs its `run:` through the fenced runner of the Agent the
 // Firing builds (ADR 0104 §8), never on the global posture: firingConfig hands the Agent the slot
-// firingHooks' Runner reads (Config.BindProjectRun), the bound runner receives the firing, and a
+// its Reaction host's Runner reads (Config.BindProjectRun), the bound runner receives the firing, and a
 // Runner whose slot no Agent has bound yet refuses the command rather than run it unfenced. The
 // canary is the file the command would have written had it run on the global posture.
 func TestFiringHooksFenceARepoRun(t *testing.T) {
@@ -2217,7 +2224,7 @@ func TestFiringHooksFenceARepoRun(t *testing.T) {
 		Timeout: 10 * time.Second,
 		Project: true,
 	}}
-	fire := func(t *testing.T, bind func(*projectRunSlot)) []string {
+	fire := func(t *testing.T, bind func(*reactions.Host)) []string {
 		t.Helper()
 		var (
 			mu    sync.Mutex
@@ -2228,12 +2235,12 @@ func TestFiringHooksFenceARepoRun(t *testing.T) {
 			defer mu.Unlock()
 			lines = append(lines, line)
 		}
-		slot := &projectRunSlot{}
-		runner, err := firingHooks(list, roots.workspace, security.URLGuard{}, nil, report, slot)
+		host, err := reactions.NewHost(list, reactions.HostOptions{Workspace: roots.workspace, Report: report})
 		if err != nil {
-			t.Fatalf("firingHooks: %v", err)
+			t.Fatalf("reactions.NewHost: %v", err)
 		}
-		bind(slot)
+		runner := host.Runner()
+		bind(host)
 		runner.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
 		closeCtx, cancel := context.WithTimeout(context.Background(), testtime.Budget(10*time.Second))
 		defer cancel()
@@ -2244,16 +2251,16 @@ func TestFiringHooksFenceARepoRun(t *testing.T) {
 	}
 
 	var got atomic.Pointer[domain.Reaction]
-	lines := fire(t, func(slot *projectRunSlot) {
+	lines := fire(t, func(host *reactions.Host) {
 		cfg, _, _, err := firingConfig(context.Background(), firingInputs{
-			opts:        config.Options{Bypass: true, Reactions: list},
-			entry:       config.ServerEntry{Endpoint: "http://box.example/v1"},
-			roots:       roots,
-			confiner:    fenceableHost,
-			mode:        domain.ModePlan,
-			beat:        firingBeat,
-			recordID:    "2026-10-18T09-00-00-firing",
-			projectRuns: slot,
+			opts:     config.Options{Bypass: true, Reactions: list},
+			entry:    config.ServerEntry{Endpoint: "http://box.example/v1"},
+			roots:    roots,
+			confiner: fenceableHost,
+			mode:     domain.ModePlan,
+			beat:     firingBeat,
+			recordID: "2026-10-18T09-00-00-firing",
+			host:     host,
 		})
 		if err != nil {
 			t.Fatalf("firingConfig: %v", err)
@@ -2270,8 +2277,8 @@ func TestFiringHooksFenceARepoRun(t *testing.T) {
 		t.Errorf("bound runner got %v (report %q), want the repo entry", r, lines)
 	}
 
-	unbound := fire(t, func(*projectRunSlot) {})
-	if len(unbound) != 1 || !strings.Contains(unbound[0], errProjectRunUnbound.Error()) {
+	unbound := fire(t, func(*reactions.Host) {})
+	if len(unbound) != 1 || !strings.Contains(unbound[0], reactions.ErrProjectRunUnbound.Error()) {
 		t.Errorf("report lines = %q, want one refusal of the unbound repo run", unbound)
 	}
 	if _, statErr := os.Stat(canary); statErr == nil {
@@ -2290,6 +2297,12 @@ func mcpReaction(id string, class domain.Class, on domain.Moment, tool string) d
 		Handler: domain.MCPHandler{Server: "llm", Tool: tool},
 		Timeout: testtime.Budget(10 * time.Second),
 	}
+}
+
+// callsMCP reports whether r calls a tool on an MCP server.
+func callsMCP(r domain.Reaction) bool {
+	_, ok := r.Handler.(domain.MCPHandler)
+	return ok
 }
 
 // noticeRecorder collects the lines a Driver's report seam is told, safe for the Runner's workers.
@@ -2371,7 +2384,7 @@ func TestFiringLeavesAdviseAndObserveMCPEntriesInert(t *testing.T) {
 				t.Errorf("the Driver was told %q, want %q", got, tt.wantSaid)
 			}
 			armed := slices.Concat(stub.spec.Generation.Sync, stub.spec.Generation.Observe, stub.spec.Config.Observe)
-			if slices.ContainsFunc(armed, isMCPReaction) {
+			if slices.ContainsFunc(armed, callsMCP) {
 				t.Errorf("an mcp: entry was armed: Generation %+v, Runner list %+v",
 					stub.spec.Generation, stub.spec.Config.Observe)
 			}

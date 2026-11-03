@@ -125,7 +125,10 @@ internal/domain/config.go — Config; cmd/apogee/wire_firing.go — firingHooks;
 
 **Commit:** `feat(reactions): add the Host a Driver composes its observe lane through`
 
-## 3. Every Firing composes its observe lane through the Host
+## 3. Every Firing composes its observe lane through the Host — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): firingInputs' `hooks` and `projectRuns` fields became one `host *reactions.Host`; raise passes `PinMoved: in.pinMoved` to the Host too (Install then sets the same Config.PinMoved firingConfig already did), and drains via `host.Close()` under `reactions.CloseGrace`. The two test sites that drive the Runner directly still close it under `testtime.Budget(10s)` through `host.Runner().Close(ctx)`, keeping their slow-box budget.
+NOTES (2026-11-03): `projectRunSlot`, `errProjectRunUnbound` (wire_firing.go) and `hookCloseGrace` (wire.go) stay for the TUI per the regression guard; item 4 deletes them. hookCloseGrace's comment in wire.go still names a headless run and a daemon Firing as its users — left for item 4, which removes the const.
 
 Depends on item 2.
 **What:** Recast at the regression check (2026-11-02).

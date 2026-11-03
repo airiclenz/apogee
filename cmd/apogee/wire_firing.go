@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -19,7 +18,6 @@ import (
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
-	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -104,19 +102,17 @@ type firingInputs struct {
 	// that names the record and the id that names the scratch dir cannot be two — and a composition
 	// test, which runs nothing, states it directly.
 	recordID string
-	// hooks is the Reaction Runner this ONE Firing fires through (ADR 0073), built by the Driver from
-	// firingHooks and closed by it when the Firing ends. It is a field rather than a branch for the
-	// file's own rule: the three Drivers differ in where a Reaction's trouble is reported and in
-	// whether the run belongs to a Schedule at all, and both of those are decided before the Runner
-	// exists.
+	// host is this ONE Firing's observe lane (ADR 0073), built by raise through reactions.NewHost and
+	// closed by it when the Firing ends: the Runner the run fires through and the project-run slot an
+	// adopted repo reaction's `run:` reaches this Firing's Agent through (ADR 0104 §8). It is a field
+	// rather than a branch for the file's own rule: the three Drivers differ in where a Reaction's
+	// trouble is reported and in whether the run belongs to a Schedule at all, and both of those are
+	// decided before the Host exists.
 	//
 	// nil is the legitimate absence — a Driver that raises no Reactions, and every composition test —
-	// and it leaves Config.Events nil exactly as it was before this key existed.
-	hooks *reactions.Runner
-	// projectRuns is the slot hooks hands an adopted repo reaction's `run:` to (firingHooks): the
-	// Agent this Firing builds binds its fenced runner into it (Config.BindProjectRun). nil — no
-	// Runner, or a composition test — binds nothing.
-	projectRuns *projectRunSlot
+	// and it leaves Config.Events and Config.BindProjectRun nil exactly as they were before this key
+	// existed.
+	host *reactions.Host
 	// report is where a SYNC-lane reaction's trouble is said out loud — a `gate:` or `advise:`
 	// command that failed, timed out or could not be spawned (domain.Config.Report). It is the SAME
 	// function the Driver hands its Runner for the observe lane's failures, so one `reactions:`
@@ -392,7 +388,7 @@ func observeServer(ctx context.Context, endpoint, model, apiKey string, wire pro
 //
 // Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and handing it
 // any of them is how a run acquires a human it does not have. Events is the ONE exception, and only
-// where the Driver built a Reaction Runner (in.hooks): that Runner observes and forwards, so a
+// where the Driver built a Reaction host (in.host): its Runner observes and forwards, so a
 // Firing gains no human from it — a Reaction can read what the run did and nothing a Reaction does
 // reaches the model, the conversation or the Session record (ADR 0073 §2). With no Runner it stays
 // nil, exactly as it was before the key existed. Tools is left nil too and the engine builds its
@@ -531,29 +527,20 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	cfg.EffortDialect = domain.EffortDialect(effortDialect)
 	cfg.ParallelAgents = firingWidth(in.entry, slots)
 
-	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink
-	// (ADR 0073 §2). It is assigned after the literal rather than inside it because a nil
-	// *reactions.Runner boxed into the domain.EventSink interface is a NON-nil interface holding a nil
-	// pointer, and run.Once's own tap would then wrap a sink that panics on the first Event. A Driver
-	// that built no Runner leaves Events nil, which is what every composition test asserts.
+	// This ONE Firing's observe lane, installed through the Host raise built (reactions.Host.Install):
+	// its Runner becomes the run's Event sink (ADR 0073 §2) and the Agent's observe half, seeded with
+	// the lane it was built over (Config.ObserveRunner, Config.Observe), so the Agent run.Once builds
+	// announces the Firing's session-started boundary through it and run.Once, seeding that same lane
+	// into the Agent's construction, finds nothing moved and hands the Runner nothing. And the
+	// project-run slot's bind (Config.BindProjectRun): the Agent run.Once builds binds its fenced
+	// runner into it, so a repo `run:` runs under that Agent's permit (ADR 0104 §8). A Driver that
+	// built no Host leaves all four nil, which is what every composition test asserts.
 	//
-	// It is the INNERMOST sink of the run: run.Once wraps whatever it is handed (eventTap), and the
-	// one Driver that renders an Event itself wraps this Runner in turn (headless's prune notice),
-	// so the renderer stays outermost and the Reactions stay invisible to it.
-	if in.hooks != nil {
-		cfg.Events = in.hooks
-		// And the same Runner as the Agent's observe half, seeded with the lane it was built over
-		// (Config.ObserveRunner, Config.Observe), as the TUI boot does: the Agent run.Once builds
-		// announces the Firing's session-started boundary through it, and run.Once, seeding that same
-		// lane into the Agent's construction, finds nothing moved and hands the Runner nothing.
-		cfg.ObserveRunner = in.hooks
-		cfg.Observe = domain.LanesOf(in.opts.Reactions).Observe
-	}
-	// The slot that Runner's repo `run:` entries reach this Firing's Agent through: the Agent
-	// run.Once builds binds its fenced runner into it, so a repo command runs under that Agent's
-	// permit (ADR 0104 §8). A Driver that built no slot leaves the bind nil.
-	if in.projectRuns != nil {
-		cfg.BindProjectRun = in.projectRuns.bind
+	// The Runner is the INNERMOST sink of the run: run.Once wraps whatever it is handed (eventTap),
+	// and the one Driver that renders an Event itself wraps this Runner in turn (headless's prune
+	// notice), so the renderer stays outermost and the Reactions stay invisible to it.
+	if in.host != nil {
+		in.host.Install(&cfg)
 	}
 	// The per-server stats recorder (ADR 0085) wraps whatever sink stands above — the Runner, or
 	// none — as the session's own does (wire_boot.go): every Event reaches that sink first and
@@ -866,56 +853,6 @@ func firingSubAgentsSource(
 	}
 }
 
-// firingHooks builds the Reaction Runner ONE unattended run fires through (ADR 0073). What it arms
-// is the OBSERVE half of the generation the root resolved (ADR 0076 A8) — for a Firing a live
-// session raises, the rows a `reactions:` apply last installed, since a Firing is composed out of
-// the session's live options rather than the file it launched with.
-//
-// Every Firing root composes a Runner of its own — `apogee headless`, a daemon tick, the
-// `/schedule` picker inside a live session — because a Runner per Firing is what carries the
-// Schedule a run belongs to onto every payload it stamps, with no per-event plumbing to carry it
-// there.
-//
-// It is one constructor rather than three literals for firingConfig's own reason: everything except
-// the five arguments is the same at every root, and three copies of it is three chances for one
-// `reactions:` list to mean two different things depending on which Driver read it.
-//
-// The caller closes what comes back — [hookCloseGrace], the same grace the session gives (wire.go)
-// — and a returned error fails the Firing: a `reactions:` list this root cannot resolve is
-// structural configuration, exactly as an unreadable prompt is.
-//
-// guard is the url-safety guard every webhook Reaction posts through: the caller builds it from the
-// url-safety allow/deny lists of the options the Firing composes from (raise, off in.opts), so a
-// host the operator closed for the network tools is closed for a Firing's webhooks too.
-//
-// projectRuns is the slot an adopted repo reaction's `run:` reaches the Firing's Agent through
-// (ADR 0104 §8): the Runner is built before run.Once builds that Agent, so the Agent binds its
-// fenced runner into the slot once it exists (domain.Config.BindProjectRun, which firingConfig
-// sets from the same slot) and the repo command runs under that Agent's permit. A nil slot
-// refuses every repo `run:`.
-func firingHooks(
-	observe []domain.Reaction,
-	workspace string,
-	guard security.URLGuard,
-	sched *reactions.ScheduleRef,
-	report func(string),
-	projectRuns *projectRunSlot,
-) (*reactions.Runner, error) {
-	return reactions.New(observe, reactions.Options{
-		// Inner stays nil: a Firing's Config carries no sink of its own (firingConfig), so there is
-		// nothing underneath this Runner to forward to. The one Driver that renders an Event itself
-		// wraps THIS Runner rather than being wrapped by it (headless's prune notice), which keeps the
-		// renderer outermost and the Reactions invisible to it.
-		//
-		// The MCP half gets neither a resolver nor a re-ask cue: a Firing dials no MCP server, so an
-		// `mcp:` entry fails as not connected before its pin is ever read.
-		Workspace: workspace,
-		Schedule:  sched,
-		Report:    report,
-		Exec:      reactions.DefaultExecutor(workspace, guard, projectRuns.runner(), nil, nil),
-	})
-}
-
 // errProjectRunUnbound refuses an adopted repo reaction's `run:` that fired before an Agent bound
 // its fenced runner into the slot: running it without the Agent's permit would run it unfenced.
 var errProjectRunUnbound = errors.New("refusing to run a project reaction before its session's engine is built")
@@ -1034,60 +971,10 @@ func clockNow(c schedule.Clock) func() time.Time {
 	return c.Now
 }
 
-// The two sentences a Driver that dials no MCP server says about a user reaction's mcp: handler
-// (adr-0076-amend-1029), once per entry at setup. An advise or observe entry is dropped before
-// arming; a gate entry stays armed and escalates every call it sees to an ask, which a Firing's
-// deny-all Approver refuses.
-const (
-	inertMCPNotice     = "reaction %q: its mcp: handler is inert here — MCP servers are not connected in this run"
-	inertMCPGateNotice = "reaction %q: its mcp: gate cannot run here — MCP servers are not connected in this " +
-		"run, so every call it gates is refused"
-)
-
-// disarmUnconnectedMCP is the one filter every Driver path that arms reactions without an MCP
-// resolver runs — every Firing (raise: headless, the daemon, the TUI's /schedule) and
-// `apogee probe context` — before it reads the lanes. It returns list without its advise and
-// observe mcp: entries and with its gate mcp: entries kept, and tells report one notice per entry:
-// inertMCPNotice for a dropped one, inertMCPGateNotice for a kept gate. Notices are deduplicated by
-// reaction id and text, because one `reactions:` entry with both `run:` and `advise:` as mcp:
-// resolves to two Reactions under one id. nil report drops the notices; list itself is never
-// modified.
-func disarmUnconnectedMCP(list []domain.Reaction, report func(string)) []domain.Reaction {
-	if !slices.ContainsFunc(list, isMCPReaction) {
-		return list
-	}
-	kept := make([]domain.Reaction, 0, len(list))
-	said := make(map[string]bool)
-	for _, r := range list {
-		if !isMCPReaction(r) {
-			kept = append(kept, r)
-			continue
-		}
-		format := inertMCPNotice
-		if r.Class == domain.ClassGate {
-			format = inertMCPGateNotice
-			kept = append(kept, r)
-		}
-		msg := fmt.Sprintf(format, r.ID)
-		if said[msg] || report == nil {
-			continue
-		}
-		said[msg] = true
-		report(msg)
-	}
-	return kept
-}
-
-// isMCPReaction reports whether r calls a tool on an MCP server.
-func isMCPReaction(r domain.Reaction) bool {
-	_, ok := r.Handler.(domain.MCPHandler)
-	return ok
-}
-
 // raise is the ONE act every unattended Firing is: it takes what a Driver decided (firingInputs, the
 // prompt, the Schedule the run belongs to, the store its record lands in) and does, in this order,
 // everything the three Drivers used to spell out for themselves — divides the `reactions:` list
-// into its lanes (domain.LanesOf, ADR 0076 A8), builds this Firing's own Reaction Runner and drains it when the
+// into its lanes (domain.LanesOf, ADR 0076 A8), builds this Firing's own Reaction host and drains it when the
 // Firing ends (ADR 0073), mints the record id, composes the Config (firingConfig), refuses a server
 // that answered nothing (notice.ServerOffline), lets the Driver decorate the Event sink, and runs
 // the Firing once through its runner (in.runner, or the production run.Once when nil). It exists
@@ -1127,7 +1014,7 @@ func isMCPReaction(r domain.Reaction) bool {
 // The Reaction drain is deferred here, so it runs BEFORE this function returns — a Firing refused
 // by either gate takes its workers down with it (a daemon runs for weeks, and a Runner leaked per
 // refused tick accumulates), and a Driver's own summary of a finished run prints after the last
-// Reaction has had its grace (hookCloseGrace). Close's own error is discarded: it says only that a
+// Reaction has had its grace (reactions.CloseGrace). Close's own error is discarded: it says only that a
 // Reaction was killed at the deadline, the drop totals it wanted to report have already gone to the
 // Driver's report line, and the run is over either way.
 func raise(
@@ -1139,23 +1026,25 @@ func raise(
 	onID func(recordID string),
 	narrate func(recordID string, cfg apogee.Config, sink domain.EventSink) domain.EventSink,
 ) (run.Result, []string, error) {
-	// A Firing dials no MCP server, so its mcp: entries are settled before either lane is read —
-	// here and in firingConfig, which reads the same in.opts (adr-0076-amend-1029).
-	in.opts.Reactions = disarmUnconnectedMCP(in.opts.Reactions, in.report)
-	lanes := domain.LanesOf(in.opts.Reactions)
-	guard := security.NewURLGuard(in.opts.URLAllowHosts, in.opts.URLDenyHosts)
-	projectRuns := &projectRunSlot{}
-	hookRunner, err := firingHooks(lanes.Observe, in.roots.workspace, guard, ref, in.report, projectRuns)
+	// A Firing dials no MCP server, so its Host settles the mcp: entries before either lane is read
+	// (HostMCPNone, adr-0076-amend-1029), and the settled list replaces in.opts.Reactions — firingConfig
+	// reads the same in.opts. The webhooks post under the url-safety lists of the options the Firing
+	// composes from, so a host the operator closed for the network tools is closed for them too.
+	host, err := reactions.NewHost(in.opts.Reactions, reactions.HostOptions{
+		Workspace:     in.roots.workspace,
+		Schedule:      ref,
+		Report:        in.report,
+		PinMoved:      in.pinMoved,
+		URLAllowHosts: in.opts.URLAllowHosts,
+		URLDenyHosts:  in.opts.URLDenyHosts,
+		MCP:           reactions.HostMCPNone,
+	})
 	if err != nil {
 		return run.Result{}, nil, errNotStarted{Stage: stageCompose, Err: err}
 	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), hookCloseGrace)
-		defer cancel()
-		_ = hookRunner.Close(closeCtx)
-	}()
-	in.hooks = hookRunner
-	in.projectRuns = projectRuns
+	defer func() { _ = host.Close() }()
+	in.opts.Reactions = host.Reactions()
+	in.host = host
 
 	now := in.now
 	if now == nil {
@@ -1194,10 +1083,10 @@ func raise(
 		// Both lanes of the `reactions:` list this Firing resolved, handed whole and seeded into the
 		// Agent run.Once builds, armed before its first Step: a `gate:` answers this run's very first
 		// tool call, and its trouble reaches the same report line the Runner's does (Config.Report,
-		// firingConfig). The observe lane is the one the Runner above was built over and seeded with
-		// (Config.ObserveRunner, Config.Observe, set in firingConfig), so run.Once finds nothing moved
-		// and retires nothing.
-		Generation: lanes,
+		// firingConfig). The observe lane is the one the Host's Runner above was built over and seeded
+		// with (Config.ObserveRunner, Config.Observe, set by Host.Install in firingConfig), so run.Once
+		// finds nothing moved and retires nothing.
+		Generation: host.Lanes(),
 		// The routing the composer resolved, latched through run.Spec's own seam (internal/run): a
 		// Firing delegates to the `sub-agents-server:` entry exactly as a session does, and both
 		// fields are nil when no key named one — the unrouted floor every Firing had before.
