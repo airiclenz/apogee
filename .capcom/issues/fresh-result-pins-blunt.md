@@ -1,10 +1,12 @@
 ---
 title: Seqcom overflow loop pins miss the fold elision and room-left share
-status: open
+status: done
 type: task
 priority: 3
 plan: 2026-11-02 - 05 - request-room-and-delegate-bounds-plan.md
 created: 2026-11-02T18:50:12Z
+closed: 2026-11-03T06:38:43Z
+reason: "Resolved by plan '2026-11-02 - 05 - request-room-and-delegate-bounds-plan' item 1 (archived at d14d774d): TestFoldElidesAnOversizedNewestMessageEndToEnd and TestFreshResultTakesOnlyTheRoomLeftEndToEnd pin the fold elision and the room-left share at loop level; bite proven by reverting each."
 ---
 
 Deferred from plan 'docs/plans/2026-11-02 - 03 - fresh-result-overflow-plan.md' (item 5). The loop-level pins in internal/agent/freshresult_overflow_test.go (TestFreshOversizedResultFitsTheNextRequest at :91, TestSeqcomOverflowBodyFoldsAndRetries at :141) do not bite on item 2's fold-transcript byte elision of an oversized newest message (internal/context/compact.go elideNewestMessage) or on item 4's room-left share (internal/agent/dispatch.go freshResultBound): reverting either change leaves both tests green. Only those items' own unit tests pin them, so the end-to-end Seqcom scenario is not guarded against a regression in either mechanism.
