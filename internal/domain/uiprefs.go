@@ -98,6 +98,12 @@ type UIPrefs struct {
 	// zero block — a test harness's, or a Driver that seeds no prefs — never rings the terminal.
 	// Any other name is refused by [UIPrefs.Validate] naming the key.
 	Notify NotifyMode
+	// GitFetch lets the TUI run a periodic background `git fetch` in a git workspace, so the
+	// footer's behind count sees upstream commits that have not been fetched yet. Default TRUE.
+	// Unlike every other key of the block it reaches past the screen — a fetch touches the network
+	// and writes remote-tracking refs — though nothing about it reaches the model. false keeps the
+	// footer's counts to what the repository already knows.
+	GitFetch bool
 }
 
 // NotifyMode names how the terminal is told that apogee waits on the human. The vocabulary is
@@ -218,6 +224,7 @@ const (
 	UIKeyToolsOpen        = "ui.tools-open"
 	UIKeyToolsFoldOver    = "ui.tools-fold-over"
 	UIKeyNotify           = "ui.notify"
+	UIKeyGitFetch         = "ui.git-fetch"
 )
 
 // uiKeys is the block's keys in the order the starter template presents them, declared once so a
@@ -225,7 +232,7 @@ const (
 var uiKeys = []string{
 	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
 	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
-	UIKeyToolsFoldOver, UIKeyNotify,
+	UIKeyToolsFoldOver, UIKeyNotify, UIKeyGitFetch,
 }
 
 // UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
@@ -240,7 +247,8 @@ func UIKeys() []string {
 // colour loop on, the scroll bar shown, the default colour scheme, the shipped quiet threshold,
 // the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
 // umbrella folding past five type rows with large umbrellas starting folded, the unicode glyph
-// set, and the terminal bell when apogee waits on the human. Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
+// set, the terminal bell when apogee waits on the human, and the footer's periodic git fetch on.
+// Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
 		Spinner:          DefaultSpinnerStyle,
@@ -253,6 +261,7 @@ func DefaultUIPrefs() UIPrefs {
 		ToolsFoldOver:    DefaultToolsFoldOver,
 		Glyphs:           DefaultGlyphSet,
 		Notify:           DefaultNotifyMode,
+		GitFetch:         true,
 	}
 }
 
@@ -397,6 +406,8 @@ func (u *UIPrefs) land(key, value string) error {
 			return fmt.Errorf("apogee: invalid ui.notify: %w", err)
 		}
 		u.Notify = mode
+	case UIKeyGitFetch:
+		return landBool(&u.GitFetch, key, value, defaults.GitFetch)
 	default:
 		return fmt.Errorf("apogee: unknown ui key %q", key)
 	}

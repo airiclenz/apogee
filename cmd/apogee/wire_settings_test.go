@@ -974,6 +974,7 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.tools-open",
 	"ui.tools-fold-over",
 	"ui.notify",
+	"ui.git-fetch",
 	"cursor-shape",
 }
 

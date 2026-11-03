@@ -1085,7 +1085,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"ui.spinner": "UI", "ui.spinner-color": "UI", "ui.glyphs": "UI", "ui.show-scrollbar": "UI",
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
 		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI",
-		"ui.tools-open": "UI", "ui.tools-fold-over": "UI", "ui.notify": "UI",
+		"ui.tools-open": "UI", "ui.tools-fold-over": "UI", "ui.notify": "UI", "ui.git-fetch": "UI",
 		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions", "sessions.share-group": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
 		"currency": "Currency",
@@ -1164,7 +1164,7 @@ func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
 		"ui.spinner": "classic", "ui.spinner-color": "false", "ui.glyphs": "safe", "ui.show-scrollbar": "false",
 		"ui.color-scheme": "light", "ui.stall-after": "1m30s", "ui.inspector": "true",
 		"ui.skill-suggestions": "false", "ui.task-list-open": "false", "ui.tools-open": "true",
-		"ui.tools-fold-over": "12", "ui.notify": "both",
+		"ui.tools-fold-over": "12", "ui.notify": "both", "ui.git-fetch": "false",
 	}
 
 	for _, key := range domain.UIKeys() {

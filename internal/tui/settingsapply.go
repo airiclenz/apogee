@@ -533,6 +533,13 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
+	case domain.UIKeyGitFetch:
+		// The flag is read where the footer's git poll decides whether a tick also fetches, so this
+		// write is the whole apply: the next tick fetches (or does not) under the new value, and
+		// nothing on the screen moves.
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
 	case domain.UIKeyStallAfter:
 		// Nothing is scheduled and nothing is laid out again: the threshold is read where the status
 		// line is painted, and the spinner already repaints it every frame while a turn runs.

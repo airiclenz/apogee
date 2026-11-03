@@ -1153,6 +1153,14 @@ update-check: true
 # signals the same way, but only while the terminal reports its window out of focus. Default
 # `bell`. Switch live from /settings.
 #
+# `git-fetch` lets apogee run `git fetch` in the background every so often while you work in a git
+# repository, so the footer's `↓` count — the commits your branch is behind its upstream — sees
+# commits pushed since you last fetched. Unlike every other key here it reaches past the screen: a
+# fetch talks to your remote over the network and updates your remote-tracking refs (never your
+# branches or your working tree). It never prompts — a fetch that would need a password or a
+# passphrase simply fails, and the footer keeps the counts it had. Default on; `false` keeps the
+# counts to what the repository already knows. Switch live from /settings.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -1166,6 +1174,7 @@ ui:
   tools-open: false      # true = large Tools umbrellas start open; toggling one writes this back
   tools-fold-over: 5     # type rows an umbrella may show before it folds; 0 = never folds
   notify: bell           # off | bell | osc9 | both — how the terminal is told apogee waits on you
+  git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched
 
 # =============================================================================
 # Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and

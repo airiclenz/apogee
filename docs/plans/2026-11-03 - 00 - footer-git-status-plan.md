@@ -114,7 +114,10 @@ NOTES (2026-11-03): the unreachable-fetch test covers three remotes (refused htt
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'GitStatusHost|DocMap' ./cmd/apogee/`
 **Commit:** `feat(apogee): add a non-prompting git status and fetch host for the footer`
 
-## 4. The `ui.git-fetch` setting
+## 4. The `ui.git-fetch` setting — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): `ui.git-fetch` sits last in the `ui:` block (after `ui.notify`) in uiKeys, the registry, the template's key lines and its prose; the manual's key count moves from eleven to twelve "more keys" and the new key joins `ui.notify`/`ui.inspector`/`ui.stall-after` as the ones that are not screen looks, with its own paragraph after `ui.inspector`'s.
+NOTES (2026-11-03): The TUI applies the key to itself (settingsApplyLocal sets `UI.GitFetch`); nothing reads the field yet — the poll chain that honours it is item 5.
 
 **What:**
 **Goal:** `ui.git-fetch` is a bool UI pref, default true, editable on the settings screen, documented in `docs/manual/configuration.md`, and applied live to the TUI's `UIPrefs`.

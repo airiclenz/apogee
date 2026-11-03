@@ -1098,8 +1098,9 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Eleven more keys live under `ui:`. Eight of them change how the screen looks rather than what it
-says; the other three, `ui.notify`, `ui.inspector` and `ui.stall-after`, come further down.
+Twelve more keys live under `ui:`. Eight of them change how the screen looks rather than what it
+says; the other four, `ui.notify`, `ui.inspector`, `ui.stall-after` and `ui.git-fetch`, come further
+down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
@@ -1190,6 +1191,22 @@ is honoured at the **next start** — until then the row goes on reporting what 
 capturing, which is the key's contract rather than a write that failed. The quiet-turn threshold,
 `ui.stall-after`, is a `ui:` key too; it is described [with the effort dial](#how-hard-a-model-thinks--effort)
 whose long silences it is there to report.
+
+`ui.git-fetch` — on by default — lets apogee run `git fetch` in the background every so often while
+you work in a git repository, so the footer's `↓` count, the commits your branch is behind its
+upstream, sees commits pushed since you last fetched. It is the one `ui:` key whose effect leaves
+the screen: a fetch **talks to your remote over the network and writes your remote-tracking refs**
+(`origin/main` and the like — never your own branches or your working tree). The fetch never
+prompts: it starts with no terminal to ask on, so a remote that wants a password or a passphrase
+simply fails it, and the footer keeps the counts it had. Off, the counts are only what the
+repository already knows. The flip is live: commit the row in `/settings` and the next poll fetches,
+or does not.
+
+```yaml
+# ~/.apogee/config.yaml
+ui:
+  git-fetch: false
+```
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter
 key — a YAML list, or one comma-separated string — naming the phrases somebody would actually type

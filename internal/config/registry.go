@@ -1178,6 +1178,17 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *domain.NotifyMode { return nonEmptyName[domain.NotifyMode](u.Notify) }),
 	},
 	{
+		// A bool like ui.skill-suggestions, applied the same way (the renderer's own
+		// settingsApplyLocal): the poll chain that runs the fetch is the renderer's, so a flip is
+		// live. The one `ui:` key whose effect leaves the screen — a fetch touches the network and
+		// writes remote-tracking refs — which the manual says out loud.
+		Path: "ui.git-fetch", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Run a periodic `git fetch` so the footer's ↓ count sees new upstream commits.",
+		field: uiBool(domain.UIKeyGitFetch, func(u *domain.UIPrefs) *bool { return &u.GitFetch },
+			func(u *uiConfig) *bool { return u.GitFetch }),
+	},
+	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
 		// posture above, for the same reason: one key is not a vocabulary, and the kind carries the
 		// shape while the hook carries the contract the kind cannot.

@@ -102,10 +102,16 @@ var uiKeyCases = map[string]uiKeyCase{
 		want:  NotifyOSC9,
 		bad:   map[string]string{"beep": `apogee: invalid ui.notify: unknown notify mode "beep"`},
 	},
+	UIKeyGitFetch: {
+		value: "false",
+		read:  func(u UIPrefs) any { return u.GitFetch },
+		want:  false,
+		bad:   map[string]string{"maybe": `apogee: invalid ui.git-fetch "maybe": want true or false`},
+	},
 }
 
 // TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase pins the sweep the other tests run on: the
-// twelve keys in the order the starter template presents them, each with a case above, and a slice
+// thirteen keys in the order the starter template presents them, each with a case above, and a slice
 // a caller cannot reorder under this package.
 func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	t.Parallel()
@@ -113,7 +119,7 @@ func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	want := []string{
 		"ui.spinner", "ui.spinner-color", "ui.glyphs", "ui.show-scrollbar", "ui.color-scheme",
 		"ui.stall-after", "ui.inspector", "ui.skill-suggestions", "ui.task-list-open", "ui.tools-open",
-		"ui.tools-fold-over", "ui.notify",
+		"ui.tools-fold-over", "ui.notify", "ui.git-fetch",
 	}
 	if got := UIKeys(); !slices.Equal(got, want) {
 		t.Errorf("UIKeys() = %v; want the template order %v", got, want)

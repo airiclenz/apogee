@@ -2873,6 +2873,10 @@ type uiConfig struct {
 	// UIPrefs.Notify reads as off. A raw string for Spinner's reason: UIPrefs.Validate parses it
 	// once, at startup.
 	Notify string `yaml:"notify"`
+	// GitFetch is whether the TUI runs a periodic background `git fetch` for the footer's behind
+	// count. A pointer for SkillSuggestions's reason: the default is TRUE, so it is the explicit
+	// `false` that must be distinguishable from an absent key.
+	GitFetch *bool `yaml:"git-fetch"`
 }
 
 // sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with
