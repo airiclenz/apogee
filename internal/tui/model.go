@@ -3792,7 +3792,7 @@ func (m Model) footerView() string {
 	return m.footerContent(m.width)
 }
 
-// footerContent composes the footer's single line: host ✦ model ✦ effort ✦ workdir on the left, the mode
+// footerContent composes the footer's single line: host ✦ model ✦ effort ✦ workdir ✦ git on the left, the mode
 // marker — its symbol, its word (modeMarker), and in Auto the blast radius that word runs with
 // (confinementWord) — on the right, over one unbroken black field. It
 // takes the STATUS LINE's posture, one row below the box rather than one row above it — a
@@ -3806,19 +3806,21 @@ func (m Model) footerView() string {
 // The workdir closes the outward-in facts rather than opening them because the line reads
 // outward-in — the server this session talks to, the model it talks to there, how hard that model
 // is asked to think, and last the local directory it is pointed at, the one fact of the four that
-// no upstream state can change. Once a call has been priced the session's spend follows them
-// ([Model.footerLeftText]): a running tally, not a fact about where the session points.
+// no upstream state can change. In a git workspace the branch and its change counts follow the
+// workdir they describe ([gitFooterSpans]), and once a call has been priced the session's spend
+// closes the run ([Model.footerLeftText]): a running tally, not a fact about where the session
+// points.
 //
 // A narrow window does not give up an end: the row is composed TO the width by [footerFit]
-// (footerfit.go), which spends it in priority order — the spend first, then the effort word, then
-// the workdir, then the host — and keeps the model, the offline marker and the mode marker. Only
-// at the FLOOR, where the marker cannot seat whole between its two margins, does the left info
-// truncate with an ellipsis and the mode marker drop WHOLE, because a clipped mode word would name
-// a blast radius the session is not in.
+// (footerfit.go), which spends it in priority order — the spend first, then the git segment, then
+// the effort word, then the workdir, then the host — and keeps the model, the offline marker and
+// the mode marker. Only at the FLOOR, where the marker cannot seat whole between its two margins,
+// does the left info truncate with an ellipsis and the mode marker drop WHOLE, because a clipped
+// mode word would name a blast radius the session is not in.
 //
 // The line is one of the view's escape-strip SEAMS (doc.go): the model id and the effort default
-// are the SERVER's text and the host is config text, and the footer strips all three on their
-// producers' behalf rather than trusting any of them — one unterminated OSC 8 opener painted into
+// are the SERVER's text, the host is config text and the branch is the repository's, and the footer
+// strips all four on their producers' behalf rather than trusting any of them — one unterminated OSC 8 opener painted into
 // the footer's black field turns the rest of the frame into a link to somebody else's URL.
 func (m Model) footerContent(w int) string {
 	layout := m.footerRow(w)
@@ -3831,7 +3833,7 @@ func (m Model) footerContent(w int) string {
 		offline := m.th.measure.Truncate(layout.offline,
 			max(0, w-m.th.measure.Width(lead)-m.th.measure.Width(info)), "…")
 		spent := m.th.measure.Width(lead) + m.th.measure.Width(info) + m.th.measure.Width(offline)
-		return m.footerLeft(lead+info, offline) +
+		return m.footerLeft(lead, footerLayout{info: info, offline: offline}) +
 			m.th.footerText.Render(strings.Repeat(" ", max(0, w-spent)))
 	}
 	// footerText keeps the black background; only the foreground swaps to the mode's colour. Symbol
@@ -3861,20 +3863,69 @@ func (m Model) footerContent(w int) string {
 	gap := layout.col - m.th.measure.Width(bodyIndent) -
 		m.th.measure.Width(layout.info) - m.th.measure.Width(layout.offline)
 	fill := m.th.footerText.Render(strings.Repeat(" ", max(0, gap)))
-	return m.footerLeft(bodyIndent+layout.info, layout.offline) + fill + mode
+	return m.footerLeft(bodyIndent, layout) + fill + mode
 }
 
-// footerLeft paints the row's left half from the fit's two plain runs: the fact line on the
-// footer's own tone, and the word for the state a send is refused in styled independently, like
-// the mode marker, so the state reads at a glance without recolouring the line. It is its own
-// styled run at EVERY width — folded into the info run to be truncated with it, as the old narrow
-// branch did, offline lost its error tone exactly where the row is most cramped.
-func (m Model) footerLeft(info, offline string) string {
-	left := m.th.footerText.Render(info)
-	if offline != "" {
-		left += m.th.footerText.Foreground(m.th.errorFg).Render(offline)
+// footerLeft paints the row's left half, behind its lead margin, from the fit's two plain runs: the
+// fact line on the footer's own tone, and the word for the state a send is refused in styled
+// independently, like the mode marker, so the state reads at a glance without recolouring the
+// line. It is its own styled run at EVERY width — folded into the info run to be truncated with
+// it, as the old narrow branch did, offline lost its error tone exactly where the row is most
+// cramped.
+//
+// Where the layout kept the git segment, the fact line is cut at the span the layout names and the
+// segment is painted span by span between the two halves ([Model.footerGit]); every cell keeps the
+// column the fit measured, since the painted spans re-join to exactly the layout's text.
+func (m Model) footerLeft(lead string, layout footerLayout) string {
+	var left string
+	if layout.git == "" {
+		left = m.th.footerText.Render(lead + layout.info)
+	} else {
+		left = m.th.footerText.Render(lead+layout.info[:layout.gitAt]) + m.footerGit(layout.git)
+		if rest := layout.info[layout.gitAt+len(layout.git):]; rest != "" {
+			left += m.th.footerText.Render(rest)
+		}
+	}
+	if layout.offline != "" {
+		left += m.th.footerText.Foreground(m.th.errorFg).Render(layout.offline)
 	}
 	return left
+}
+
+// footerGit paints the git segment the layout kept: the branch and every zero count on the
+// footer's own muted tone, every non-zero count in the brighter muted step (theme.mutedBright),
+// adjacent pieces of one tone joined into one styled run. The spans are worded afresh from the
+// same snapshot the fit was handed, and should they ever fail to re-join to text the layout
+// measured, the segment is painted plain rather than in cells the layout did not count.
+func (m Model) footerGit(text string) string {
+	snap, _ := m.gitSnapshot()
+	spans := gitFooterSpans(snap, m.th.glyphs)
+	if footerSpansText(spans) != text {
+		return m.th.footerText.Render(text)
+	}
+	// The separators are muted, so a piece's tone is its span's, and a run closes only where the
+	// tone changes.
+	var pieces []footerSpan
+	for i, span := range spans {
+		if i > 0 {
+			pieces = append(pieces, footerSpan{text: " "})
+		}
+		pieces = append(pieces, span)
+	}
+	var out string
+	for start := 0; start < len(pieces); {
+		end, run := start, ""
+		for ; end < len(pieces) && pieces[end].bright == pieces[start].bright; end++ {
+			run += pieces[end].text
+		}
+		style := m.th.footerText
+		if pieces[start].bright {
+			style = style.Foreground(m.th.mutedBright)
+		}
+		out += style.Render(run)
+		start = end
+	}
+	return out
 }
 
 // footerRow composes the footer's whole row for a window w wide — the ONE call to the fit
@@ -3897,7 +3948,8 @@ func (m Model) footerRow(w int) footerLayout {
 }
 
 // footerLeftText composes the footer's left half as PLAIN, UNJOINED segments: the outward-in facts
-// (host, model, effort, workdir), the session's spend, and the bare word for the state a send is
+// (host, model, effort, workdir), the workspace's git segment while a snapshot is held
+// ([Model.gitSnapshot], [gitFooterSpans]), the session's spend, and the bare word for the state a send is
 // refused in, each one empty where nothing has named it. They stay apart because the fit spends them one at a time — a
 // run joined here could only be truncated as a whole, where the ladder drops entire segments WITH
 // their separators ([footerFit]) — and the join itself now happens there.
@@ -3922,6 +3974,7 @@ func (m Model) footerLeftText() footerInput {
 		host:    stripEscapes(hostDisplay(m.opts)),
 		model:   footerRun(m.th.glyphs, m.upstreamSegments()...),
 		workdir: m.workdir,
+		git:     m.footerGitText(),
 		spend:   spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency()),
 		glyphs:  m.th.glyphs,
 	}
@@ -3934,6 +3987,16 @@ func (m Model) footerLeftText() footerInput {
 		in.offline = offlineLabel
 	}
 	return in
+}
+
+// footerGitText is the git segment's plain text, or "" — the segment absent WITH its separator —
+// while no snapshot is held: unwired, not yet landed, or a workspace outside any work tree.
+func (m Model) footerGitText() string {
+	snap, ok := m.gitSnapshot()
+	if !ok {
+		return ""
+	}
+	return footerSpansText(gitFooterSpans(snap, m.th.glyphs))
 }
 
 // footerModeText joins the mode marker with Auto's blast-radius word the way the footer paints

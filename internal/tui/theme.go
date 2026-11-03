@@ -127,6 +127,13 @@ type glyphSet struct {
 	failure    string // leads a /settings row's refusal note (settingsNote), one cell like the "·" every other note leads with (settingsNoteMarkerCells)
 	askChecked string // a ticked option of the LIVE multi-select ask pane (askChoiceRows), the same width as askUncheckedMarker so ticking a row moves nothing
 
+	// The footer's git segment marks (gitFooterSpans): each follows its count — `5Δ` changed paths,
+	// `0↓` commits behind the upstream, `4↑` ahead of it. The safe set keeps the same three shapes
+	// (a ratified call of the footer-git-status plan), so the segment reads one way under either set.
+	gitDirty  string
+	gitBehind string
+	gitAhead  string
+
 	// asciiSpinner turns the status-line spinner into safeSpinnerFrames under EVERY style
 	// (spinnerAnim.view): the braille block the styles draw is the shape a thin font lacks first.
 	asciiSpinner bool
@@ -151,6 +158,9 @@ var defaultGlyphs = glyphSet{
 	forkTag:        "⑂",
 	failure:        "✗",
 	askChecked:     askCheckedMarker,
+	gitDirty:       "Δ",
+	gitBehind:      "↓",
+	gitAhead:       "↑",
 }
 
 // safeGlyphs is the font-safe set `ui.glyphs: safe` selects: a shape nearly every terminal font
@@ -173,6 +183,9 @@ var safeGlyphs = glyphSet{
 	forkTag:        "+",
 	failure:        "x",
 	askChecked:     "[x]",
+	gitDirty:       "Δ",
+	gitBehind:      "↓",
+	gitAhead:       "↑",
 	asciiSpinner:   true,
 }
 
@@ -268,6 +281,9 @@ type theme struct {
 	chrome  color.Color // the `chrome` role: the user block's field, the borders, the gauge's track
 	muted   color.Color // the `muted` role: the dim tone, and modeColor's off-ladder fallback
 	errorFg color.Color // the `error` role: the footer's offline segment, painted onto footerText
+	// the `muted-bright` role: a non-zero count in the footer's git segment, painted onto footerText
+	// so a count that asks for attention lifts out of the muted run without a role of its own
+	mutedBright color.Color
 
 	// The four autonomy-mode marker colours, warming up the privilege ladder (least → most
 	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
@@ -469,6 +485,7 @@ func newTheme(s scheme.Scheme) theme {
 		chrome:         chrome,
 		muted:          muted,
 		errorFg:        errFg,
+		mutedBright:    openDetail,
 		modePlan:       modePlan,
 		modeAskBefore:  modeAskBefore,
 		modeAllowEdits: modeAllowEdits,

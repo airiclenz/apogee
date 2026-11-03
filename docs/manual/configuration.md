@@ -1117,10 +1117,11 @@ the `❯` prompt, a `·` leader for `⋯`, `►` for the `▶` fold indicator, `
 interjection, `≡` for the `▤` presented document, `@` and `+` for the `⟳` and `⑂` `/sessions`
 tags, `x` for `✗`, the footer's rungs as `□ plan`, `○ ask before`, `√ allow edits` and `►► auto`,
 `[x]` for a ticked option in an open `ask_user` pane, and the status-line spinner — every style —
-as a one-column `| / - \` turn instead of braille. Three things keep their shape: the key hints
-(`⇥ ⇧ ⌃ ⌥ ⌫ ⏎ ␣`); the `[✔]` of the task-list cards and of a recorded `ask_user` exchange, which
-the model reads back and the session record keeps; and the `⋯⋯⋯⋯⋯⋯⋯⋯` rule between the regions of
-an edit's stacked diff, which is drawn into the edit's saved result. A value other than those two is a startup
+as a one-column `| / - \` turn instead of braille. Four things keep their shape: the key hints
+(`⇥ ⇧ ⌃ ⌥ ⌫ ⏎ ␣`); the `Δ ↓ ↑` marks of the footer's git counts; the `[✔]` of the task-list cards
+and of a recorded `ask_user` exchange, which the model reads back and the session record keeps;
+and the `⋯⋯⋯⋯⋯⋯⋯⋯` rule between the regions of an edit's stacked diff, which is drawn into the
+edit's saved result. A value other than those two is a startup
 error. The switch is live: commit the row in `/settings` and the whole transcript repaints in the
 other set.
 

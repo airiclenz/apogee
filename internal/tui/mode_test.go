@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/gitstatus"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -187,6 +188,111 @@ func TestFooterStatesTheSessionSpend(t *testing.T) {
 		}
 		t.Fatal("the footer never narrowed past its full run")
 	})
+}
+
+// withGitSnapshot hands the footer a held git snapshot, as a landed status read leaves it
+// (gitstatus.go) — the footer reads the Model's state, not the poll that filled it.
+func withGitSnapshot(m Model, snap gitstatus.Snapshot) Model {
+	m.git.snap, m.git.hasSnap = snap, true
+	return m
+}
+
+// footerGitTestSnapshot is the git state the footer tests read: on main, five changed paths, level
+// with nothing behind and four commits ahead of its upstream.
+var footerGitTestSnapshot = gitstatus.Snapshot{
+	Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Dirty: 5, Ahead: 4,
+}
+
+// TestFooterStatesTheGitSegment pins the footer's git segment in the painted row: after the workdir
+// it describes, `<branch> NΔ N↓ N↑`, its upstream counts absent without an upstream, its branch
+// absent on a detached HEAD, and the whole segment absent WITH its separator while no snapshot is
+// held. The branch is repository text and leaves its escapes behind on the way in.
+func TestFooterStatesTheGitSegment(t *testing.T) {
+	t.Parallel()
+
+	const facts = "test-host ✦ test-model ✦ high ✦ /ws/proj"
+	for _, tc := range []struct {
+		name string
+		snap *gitstatus.Snapshot
+		want string
+	}{
+		{"no snapshot shows no segment", nil, facts},
+		{"a branch with an upstream", &footerGitTestSnapshot, facts + " ✦ main 5Δ 0↓ 4↑"},
+		{"no upstream", &gitstatus.Snapshot{Branch: "main", Dirty: 5}, facts + " ✦ main 5Δ"},
+		{"a detached HEAD", &gitstatus.Snapshot{Detached: true, Dirty: 5}, facts + " ✦ 5Δ"},
+		{
+			"an escape-laden branch",
+			&gitstatus.Snapshot{Branch: "ma\x1b]8;;http://evil\x07in\x1b[31m", Dirty: 5},
+			facts + " ✦ main 5Δ",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := footerFactsModel(t)
+			if tc.snap != nil {
+				m = withGitSnapshot(m, *tc.snap)
+			}
+			if got := footerLeftRun(t, m, 160); got != tc.want {
+				t.Errorf("footer's left run = %q, want %q", got, tc.want)
+			}
+			if raw := m.footerContent(160); strings.Contains(raw, "evil") || strings.Contains(raw, "\x1b]") {
+				t.Errorf("footer carries the branch's escape sequence: %q", raw)
+			}
+		})
+	}
+
+	t.Run("the git segment goes after the spend and before the effort word", func(t *testing.T) {
+		t.Parallel()
+
+		m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
+		withGit := facts + " ✦ main 5Δ 0↓ 4↑"
+		for w := 160; w > 0; w-- {
+			got := footerLeftRun(t, m, w)
+			if got == withGit {
+				continue
+			}
+			if got != facts {
+				t.Errorf("footer's left run at width %d = %q, want %q — the git segment goes before the effort word", w, got, facts)
+			}
+			return
+		}
+		t.Fatal("the footer never narrowed past its full run")
+	})
+}
+
+// TestFooterTonesOnlyNonZeroGitCounts reads the styled bytes: a non-zero count opens the brighter
+// muted step (theme.mutedBright) and a zero count or the branch never does, so a clean tree stays
+// on the footer's own tone and the row draws no new role.
+func TestFooterTonesOnlyNonZeroGitCounts(t *testing.T) {
+	t.Parallel()
+
+	m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
+	probe := m.th.footerText.Foreground(m.th.mutedBright).Render("X")
+	bright := probe[:strings.Index(probe, "X")]
+	if bright == "" || strings.HasPrefix(m.th.footerText.Render("X"), bright) {
+		t.Fatalf("the bright tone opens with %q, indistinguishable from the footer's own", bright)
+	}
+
+	footer := m.footerContent(160)
+	if n := strings.Count(footer, bright); n != 2 {
+		t.Errorf("footer opens the bright tone %d times, want 2 (5Δ and 4↑): %q", n, footer)
+	}
+	for _, count := range []string{"5Δ", "4↑"} {
+		if !strings.Contains(footer, bright+count) {
+			t.Errorf("footer does not paint %q bright: %q", count, footer)
+		}
+	}
+	for _, quiet := range []string{"0↓", "main"} {
+		if strings.Contains(footer, bright+quiet) || strings.Contains(footer, bright+" "+quiet) {
+			t.Errorf("footer paints %q bright: %q", quiet, footer)
+		}
+	}
+
+	clean := withGitSnapshot(footerFactsModel(t), gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true})
+	if footer := clean.footerContent(160); strings.Contains(footer, bright) {
+		t.Errorf("a clean, level tree opens the bright tone: %q", footer)
+	}
 }
 
 // TestModeColorDistinct proves each autonomy mode maps to its own footer-marker colour, so the

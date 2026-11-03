@@ -8138,7 +8138,8 @@ func footerFactsModel(t *testing.T) Model {
 //
 // The sweep crosses all three shapes the fit composes: windows too narrow to seat the marker at all
 // (and narrower than the lead margin itself), windows where the ladder has dropped segments to seat
-// it, and roomy ones where nothing is given up.
+// it, and roomy ones where nothing is given up. With a git snapshot held it sweeps every width to
+// 80, so each column the git segment is painted span by span in is a column the fit counted.
 func TestFooterFitsTheWindowExactly(t *testing.T) {
 	t.Parallel()
 	m := footerFactsModel(t)
@@ -8147,6 +8148,14 @@ func TestFooterFitsTheWindowExactly(t *testing.T) {
 		if got := m.th.measure.Width(m.footerContent(w)); got != w {
 			t.Errorf("footer at width %d renders %d columns, want exactly %d: %q",
 				w, got, w, ansiPattern.ReplaceAllString(m.footerContent(w), ""))
+		}
+	}
+
+	git := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
+	for w := 0; w <= 80; w++ {
+		if got := git.th.measure.Width(git.footerContent(w)); got != w {
+			t.Errorf("footer with a git snapshot at width %d renders %d columns, want exactly %d: %q",
+				w, got, w, ansiPattern.ReplaceAllString(git.footerContent(w), ""))
 		}
 	}
 }

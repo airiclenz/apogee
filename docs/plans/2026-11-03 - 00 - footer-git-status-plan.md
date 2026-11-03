@@ -158,7 +158,12 @@ NOTES (2026-11-03): retry fix — Build now calls cleanup() before the `--tui-di
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'GitStatus|DocMap' ./internal/tui/`
 **Commit:** `feat(tui): poll git state off the render path for the footer`
 
-## 6. Footer git segment, fit and tones
+## 6. Footer git segment, fit and tones — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): `↓`/`↑` show only when the snapshot carries an ahead/behind header (`Snapshot.HasAheadBehind`), not merely when `Upstream` is set: a configured but deleted upstream reports no counts, and a `0↓ 0↑` there would claim the branch is level with an upstream git did not compare it to.
+NOTES (2026-11-03): the brighter tone is a new raw-colour field `theme.mutedBright` bound to the scheme's existing `MutedBright` role (the same colour `toolDetailBright` uses), painted onto `footerText` the way `errorFg` paints offline; no scheme role was added. The glyphs are new `glyphSet` fields `gitDirty`/`gitBehind`/`gitAhead`, identical in both sets.
+NOTES (2026-11-03): `footerLayout` reports the kept git segment as `git` + `gitAt` (its byte offset in `info`, computed by `footerInput.gitOffset` from the same `footerRun` joiner); `Model.footerLeft` now takes `(lead, footerLayout)` and paints the git span via `Model.footerGit`, which re-words the spans from the snapshot and falls back to plain text if they ever fail to re-join to the measured text. The wording lives in `gitFooterSpans`/`footerSpansText` in footerfit.go.
+NOTES (2026-11-03): the model-level tests (exact run, no-upstream, detached, escape-stripped branch, drop before the effort word, bright tones only on non-zero counts) are `TestFooterStatesTheGitSegment` and `TestFooterTonesOnlyNonZeroGitCounts` in mode_test.go, beside `footerLeftRun`; the span wording is also pinned directly in footerfit_test.go (`TestGitFooterSpansWordTheWorkingTree`, `TestGitFooterSpansKeepTheirMarksUnderSafeGlyphs`).
 
 **What:** Depends on item 5.
 **Goal:** The footer's left run reads `host ✦ model ✦ effort ✦ workdir ✦ <branch> NΔ N↓ N↑ ✦ spend`; `↓`/`↑` are absent without an upstream, the branch on a detached HEAD, and the segment with its separator when there is no snapshot. Drop order and tones follow the header's ratified calls.

@@ -3,9 +3,11 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/gitstatus"
 )
 
-// The footer's six facts and its marker, as one narrow window after another takes them away.
+// The footer's seven facts and its marker, as one narrow window after another takes them away.
 // The literals are deliberately spelled out rather than composed from the code under test: the
 // drop ORDER is the contract, and a test that built its own expectation with the same joiner
 // would agree with a wrong order as happily as with the right one.
@@ -14,18 +16,20 @@ const (
 	footerTestModel   = "gpt-oss-20b"
 	footerTestEffort  = "high"
 	footerTestWorkdir = "~/apogee"
+	footerTestGit     = "main 5Δ 0↓ 4↑"
 	footerTestSpend   = "≥ 0.42 EUR"
 	footerTestMode    = "⏵⏵ auto · confined"
 
-	footerRunFull       = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee ✦ ≥ 0.42 EUR"
-	footerRunNoSpend    = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee"
+	footerRunFull       = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee ✦ main 5Δ 0↓ 4↑ ✦ ≥ 0.42 EUR"
+	footerRunNoSpend    = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee ✦ main 5Δ 0↓ 4↑"
+	footerRunNoGit      = "apollo ✦ gpt-oss-20b ✦ high ✦ ~/apogee"
 	footerRunNoEffort   = "apollo ✦ gpt-oss-20b ✦ ~/apogee"
 	footerRunNoWorkdir  = "apollo ✦ gpt-oss-20b"
 	footerRunModelOnly  = "gpt-oss-20b"
 	footerOfflineJoined = " ✦ offline"
 )
 
-// footerFitCase is the full six-segment footer every case below narrows, offline included so the
+// footerFitCase is the full seven-segment footer every case below narrows, offline included so the
 // ladder is exercised with the one segment it may never drop before the model.
 func footerFitCase() footerInput {
 	measure := newWidthAuthority()
@@ -34,6 +38,7 @@ func footerFitCase() footerInput {
 		model:   footerTestModel,
 		effort:  footerTestEffort,
 		workdir: footerTestWorkdir,
+		git:     footerTestGit,
 		spend:   footerTestSpend,
 		offline: offlineLabel,
 		mode:    footerTestMode,
@@ -55,21 +60,24 @@ func footerSeatWidth(t *testing.T, in footerInput, info, offline string) int {
 
 // TestFooterFitDropsSegmentsInPriorityOrder is the ladder itself: at the narrowest window each
 // rung still seats in, the row says exactly that rung — and one column below it, a further segment
-// has gone. The spend goes first, and then the order is the order the row is read for, outward-in:
-// the effort word, then the workdir, then the host.
+// has gone. The spend goes first, then the git segment, and then the order is the order the row is
+// read for, outward-in: the effort word, then the workdir, then the host. While the git segment is
+// on the row the layout names where it sits, so the painter tones that span and nothing else.
 func TestFooterFitDropsSegmentsInPriorityOrder(t *testing.T) {
 	t.Parallel()
 
 	in := footerFitCase()
 	rungs := []struct {
-		name string
-		info string
+		name     string
+		info     string
+		keepsGit bool
 	}{
-		{"everything the session knows", footerRunFull},
-		{"the spend goes first", footerRunNoSpend},
-		{"then the effort word", footerRunNoEffort},
-		{"then the workdir", footerRunNoWorkdir},
-		{"then the host", footerRunModelOnly},
+		{"everything the session knows", footerRunFull, true},
+		{"the spend goes first", footerRunNoSpend, true},
+		{"then the git segment", footerRunNoGit, false},
+		{"then the effort word", footerRunNoEffort, false},
+		{"then the workdir", footerRunNoWorkdir, false},
+		{"then the host", footerRunModelOnly, false},
 	}
 
 	for _, rung := range rungs {
@@ -86,6 +94,14 @@ func TestFooterFitDropsSegmentsInPriorityOrder(t *testing.T) {
 			}
 			if got.offline != footerOfflineJoined {
 				t.Errorf("footerFit(width %d).offline = %q, want %q", w, got.offline, footerOfflineJoined)
+			}
+			if rung.keepsGit {
+				if got.git != footerTestGit || got.info[got.gitAt:got.gitAt+len(got.git)] != footerTestGit {
+					t.Errorf("footerFit(width %d) = (git %q at %d in %q), want %q named where it sits",
+						w, got.git, got.gitAt, got.info, footerTestGit)
+				}
+			} else if got.git != "" {
+				t.Errorf("footerFit(width %d).git = %q, want none once the segment has gone", w, got.git)
 			}
 			if !got.hasMode || got.mode != footerTestMode {
 				t.Errorf("footerFit(width %d) = (mode %q, hasMode %t), want the marker whole", w, got.mode, got.hasMode)
@@ -183,6 +199,9 @@ func TestFooterFitDropsTheMarkerOnlyBelowItsOwnFloor(t *testing.T) {
 	if !strings.HasPrefix(footerRunFull, strings.TrimSuffix(got.info, "…")) {
 		t.Errorf("footerFit(width %d).info = %q, want the full left run truncated", at.width, got.info)
 	}
+	if got.git != "" {
+		t.Errorf("footerFit(width %d).git = %q, want the truncated floor run painted plain", at.width, got.git)
+	}
 	if spent := in.measure.Width(got.info) + in.measure.Width(got.offline); spent > at.width-in.margin {
 		t.Errorf("footerFit(width %d) spends %d columns beside its margin, want at most %d",
 			at.width, spent, at.width-in.margin)
@@ -233,14 +252,15 @@ func TestFooterFitSeatsTheMarkerAtEveryWidthThatHoldsIt(t *testing.T) {
 }
 
 // TestFooterFitSkipsASegmentNothingNamed proves the ladder is stated over priorities rather than
-// over positions: a session with no priced call and a server that reports no effort dial has
-// nothing to drop at priorities 4 and 3, so the first segment the narrowing row gives up is the
-// workdir.
+// over positions: a session with no priced call, outside any git work tree, on a server that
+// reports no effort dial has nothing to drop at priorities 5, 4 and 3, so the first segment the
+// narrowing row gives up is the workdir.
 func TestFooterFitSkipsASegmentNothingNamed(t *testing.T) {
 	t.Parallel()
 
 	in := footerFitCase()
 	in.spend = ""
+	in.git = ""
 	in.effort = ""
 
 	const runNoEffort = "apollo ✦ gpt-oss-20b ✦ ~/apogee"
@@ -263,7 +283,7 @@ func TestFooterFitKeepsOfflineThroughEveryLadderDrop(t *testing.T) {
 	t.Parallel()
 
 	in := footerFitCase()
-	for _, info := range []string{footerRunFull, footerRunNoSpend, footerRunNoEffort, footerRunNoWorkdir, footerRunModelOnly} {
+	for _, info := range []string{footerRunFull, footerRunNoSpend, footerRunNoGit, footerRunNoEffort, footerRunNoWorkdir, footerRunModelOnly} {
 		at := in
 		at.width = footerSeatWidth(t, in, info, footerOfflineJoined)
 		if got := footerFit(at); got.offline != footerOfflineJoined {
@@ -274,20 +294,96 @@ func TestFooterFitKeepsOfflineThroughEveryLadderDrop(t *testing.T) {
 }
 
 // TestFooterFitLeavesNoDanglingSeparator sweeps every width for the one shape a hand-joined row
-// gets wrong: a segment that left without the ✦ that introduced it.
+// gets wrong: a segment that left without the ✦ that introduced it — with the git segment on the
+// row, and with it absent, as it is outside a work tree.
 func TestFooterFitLeavesNoDanglingSeparator(t *testing.T) {
 	t.Parallel()
 
-	in := footerFitCase()
-	for w := 0; w <= footerSeatWidth(t, in, footerRunFull, footerOfflineJoined)+10; w++ {
-		at := in
-		at.width = w
-		got := footerFit(at)
+	withGit := footerFitCase()
+	noGit := footerFitCase()
+	noGit.git = ""
+	for _, in := range []footerInput{withGit, noGit} {
+		for w := 0; w <= footerSeatWidth(t, in, footerRunFull, footerOfflineJoined)+10; w++ {
+			at := in
+			at.width = w
+			got := footerFit(at)
 
-		row := got.info + got.offline
-		if strings.HasPrefix(row, " ") || strings.HasSuffix(row, " ") ||
-			strings.HasPrefix(row, defaultGlyphs.assistant) || strings.HasSuffix(row, defaultGlyphs.assistant) {
-			t.Errorf("footerFit(width %d) left run = %q, want no dangling separator", w, row)
+			row := got.info + got.offline
+			if strings.HasPrefix(row, " ") || strings.HasSuffix(row, " ") ||
+				strings.HasPrefix(row, defaultGlyphs.assistant) || strings.HasSuffix(row, defaultGlyphs.assistant) {
+				t.Errorf("footerFit(width %d, git %q) left run = %q, want no dangling separator", w, in.git, row)
+			}
 		}
+	}
+}
+
+// TestGitFooterSpansWordTheWorkingTree pins the git segment's words: the branch, the changed-path
+// count, and — only where git compared the branch with an upstream — how far it is behind and
+// ahead. Each count is bright exactly when it is not zero; the branch is never bright.
+func TestGitFooterSpansWordTheWorkingTree(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		snap   gitstatus.Snapshot
+		want   string
+		bright []string
+	}{
+		{
+			name:   "a branch with an upstream",
+			snap:   gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Dirty: 5, Ahead: 4},
+			want:   "main 5Δ 0↓ 4↑",
+			bright: []string{"5Δ", "4↑"},
+		},
+		{
+			name:   "no upstream drops both upstream counts",
+			snap:   gitstatus.Snapshot{Branch: "main", Dirty: 5},
+			want:   "main 5Δ",
+			bright: []string{"5Δ"},
+		},
+		{
+			name: "a detached HEAD drops the branch",
+			snap: gitstatus.Snapshot{Detached: true, Dirty: 5},
+			want: "5Δ", bright: []string{"5Δ"},
+		},
+		{
+			name: "a clean level tree is all muted",
+			snap: gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true},
+			want: "main 0Δ 0↓ 0↑",
+		},
+		{
+			name: "an escape-laden branch is stripped",
+			snap: gitstatus.Snapshot{Branch: "ma\x1b]8;;http://evil\x07in\x1b[31m", Dirty: 1},
+			want: "main 1Δ", bright: []string{"1Δ"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			spans := gitFooterSpans(tc.snap, defaultGlyphs)
+			if got := footerSpansText(spans); got != tc.want {
+				t.Errorf("gitFooterSpans(%+v) = %q, want %q", tc.snap, got, tc.want)
+			}
+			var bright []string
+			for _, span := range spans {
+				if span.bright {
+					bright = append(bright, span.text)
+				}
+			}
+			if strings.Join(bright, ",") != strings.Join(tc.bright, ",") {
+				t.Errorf("gitFooterSpans(%+v) bright spans = %q, want %q", tc.snap, bright, tc.bright)
+			}
+		})
+	}
+}
+
+// TestGitFooterSpansKeepTheirMarksUnderSafeGlyphs: `ui.glyphs: safe` keeps `Δ ↓ ↑` — the marks a
+// count reads by are the same under either set.
+func TestGitFooterSpansKeepTheirMarksUnderSafeGlyphs(t *testing.T) {
+	t.Parallel()
+
+	snap := gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Dirty: 5, Ahead: 4}
+	if got := footerSpansText(gitFooterSpans(snap, safeGlyphs)); got != footerTestGit {
+		t.Errorf("gitFooterSpans under safe glyphs = %q, want %q", got, footerTestGit)
 	}
 }
