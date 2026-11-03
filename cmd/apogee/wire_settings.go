@@ -894,10 +894,11 @@ func (s *liveSettings) options() config.Options {
 // that pin against what a beat observed, and a Firing takes it through the width seam instead
 // (schedule.go); repeating the pin here would give the composer two answers to one question. The
 // key SOURCE fields are cleared for the mirror-image reason: the session already resolved its key,
-// and a Firing is handed that value rather than asking the source a second time. The description
-// and the forced `effort-dialect:` are cleared too, so an in-session Firing keeps the orientation
-// Delegations line it has always had and the session's observed dialect keeps outranking the
-// entry's forced one; the Driver-parity alternative (ADR 0031) is a decision not taken here.
+// and a Firing is handed that value rather than asking the source a second time. The forced
+// `effort-dialect:` is cleared too, so the session's observed dialect keeps outranking the entry's
+// forced one. The `description:` is not: an in-session Firing orients with the entry's own words in
+// its Delegations line exactly as headless, the daemon and the session itself do (ADR 0031, Driver
+// parity; ADR 0083 part 4 as amended 2026-11-03).
 func (s *liveSettings) firingBinding(bound upstreamBinding) (config.Options, config.ServerEntry) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -905,7 +906,7 @@ func (s *liveSettings) firingBinding(bound upstreamBinding) (config.Options, con
 	entry.Endpoint, entry.Model = bound.Endpoint, bound.Model
 	entry.ParallelAgents = 0
 	entry.APIKey, entry.APIKeyCmd, entry.APIKeyEnv, entry.PlaintextKeyOK = "", "", "", false
-	entry.Description, entry.EffortDialect = "", ""
+	entry.EffortDialect = ""
 	return cloneOptions(s.now), entry
 }
 

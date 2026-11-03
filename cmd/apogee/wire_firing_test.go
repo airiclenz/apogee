@@ -755,6 +755,91 @@ func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
 	}
 }
 
+// The in-session Firing's half of the same Delegations bullet (ADR 0031, Driver parity). A Firing a
+// session raises composes from what its settings holder hands over (firingBinding), not from the
+// entry a file names, so this drives the same seat-choice fixture through that seam: the entry the
+// session holds, the Upstream binding's wire and key, and the composer and run.Once a scheduled
+// Firing reaches through raise. Its first Delegations line must say what the session's box is for
+// in the bound entry's own words, exactly as the headless path above renders it.
+func TestFiringInSessionOrientationCarriesTheEntrysDescription(t *testing.T) {
+	session := stubllm.New(t, stubllm.Script{
+		Model: "session-model",
+		Turns: []stubllm.Turn{{Text: "nothing to delegate"}},
+	})
+	gruntServer := stubllm.New(t, stubllm.Script{
+		Model:     "grunt-model",
+		Discovery: stubllm.Discovery{Props: &stubllm.Props{TotalSlots: 2}},
+	})
+	grunt := config.ServerEntry{
+		Name:        "grunt",
+		Endpoint:    gruntServer.URL,
+		Description: "the cheap box",
+		Model:       "grunt-model",
+		APIKey:      "sk-grunt",
+	}
+	box := config.ServerEntry{
+		Name:          "box",
+		Endpoint:      session.URL,
+		Model:         session.Model,
+		Description:   "the session box",
+		APIKey:        "sk-test",
+		EffortDialect: "reasoning",
+	}
+	live := newLiveSettings(config.Options{
+		Bypass:          true,
+		Servers:         []config.ServerEntry{box, grunt},
+		SubAgentsServer: "grunt",
+		SubAgentsChoice: config.SubAgentsChoiceModel,
+		SystemPrompt: config.SystemPromptSettings{
+			Global: config.PromptSource{Text: "You are apogee, a terminal coding agent."},
+		},
+		StartupEntry: box,
+		HostAlias:    box.Name,
+	}, config.ProjectOffer{})
+	// firingBinding clears the entry's key, so the key rides on the binding as schedule.go's fire
+	// hands it over.
+	binding := upstreamBinding{Endpoint: session.URL, Model: session.Model, APIKey: "sk-test"}
+	opts, entry := live.firingBinding(binding)
+
+	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
+		opts:     opts,
+		entry:    entry,
+		apiKey:   binding.APIKey,
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     firingBeat,
+		recordID: "2026-11-03T10-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+	if routing.target == nil || routing.seat == nil {
+		t.Fatalf("routing resolved target=%v seat=%v; the fixture names a reachable Sub-agent server",
+			routing.target, routing.seat)
+	}
+	if cfg.ServerDescription != box.Description {
+		t.Errorf("the in-session Firing's ServerDescription is %q; want the bound entry's %q",
+			cfg.ServerDescription, box.Description)
+	}
+
+	if _, err := run.Once(context.Background(), run.Spec{
+		Config:           cfg,
+		Prompt:           "say something",
+		DelegationTarget: routing.target,
+		DelegationSeat:   routing.seat,
+	}); err != nil {
+		t.Fatalf("run.Once: %v", err)
+	}
+
+	line := seatFirstDelegationsLine(t, session)
+	// The `;` closes the session's clause, so the words are the whole of what follows the dash.
+	want := `run_on "session" = ` + session.Model + " on box — the session box;"
+	if !strings.Contains(line, want) {
+		t.Errorf("the in-session Firing's Delegations line does not state %q:\n%s", want, line)
+	}
+}
+
 // The entry's wire reaches both beats (ADR 0078): the Firing's own server is observed under the
 // wire its entry names, and the `sub-agents-server:` entry under ITS wire — a mixed pair, so an
 // anthropic entry cannot be observed as an openai one by either beat, and the fold of an unnamed

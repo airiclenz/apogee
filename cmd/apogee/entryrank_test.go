@@ -566,9 +566,8 @@ func wantSessionFiring(s rankScenario) entryRanks {
 	}
 	// The width is the session's own (ADR 0039 D2): the same ranks, read off the session's cap.
 	ranks.width = s.width(true)
-	// The description and the forced dialect are dropped (issue firing-description-scrub-parity):
-	// the session's observed dialect stands in, which its Monitor already forced.
-	ranks.description = ""
+	// The forced dialect is dropped: the session's observed dialect stands in, which its Monitor
+	// already forced. The description is carried like every other Driver's (ADR 0031).
 	ranks.dialect = domain.EffortDialectNone
 	if s.beat {
 		ranks.dialect = rankObserved

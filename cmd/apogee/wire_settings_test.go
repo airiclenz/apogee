@@ -3742,8 +3742,9 @@ func TestFiringBindingCarriesTheLiveSubAgentsServer(t *testing.T) {
 // a `servers:` re-read spells it now — never the launch entry re-assembled from the pins beside it.
 // One overlay rides on it: the wire is the Upstream binding's (a `/model` pick is honoured), the
 // width pin and the key sources are cleared for the composer's two-routes-to-one-value rule, and the
-// description and the forced dialect are cleared so an in-session Firing keeps the orientation line
-// and the observed dialect it has always had.
+// forced dialect is cleared so an in-session Firing keeps the observed dialect it has always had. The
+// description is carried as the held entry spells it, so the Firing's Delegations line says what the
+// box is for exactly as every other Driver's does (ADR 0031).
 func TestFiringBindingHandsOverTheHeldEntry(t *testing.T) {
 	t.Parallel()
 
@@ -3772,9 +3773,11 @@ func TestFiringBindingHandsOverTheHeldEntry(t *testing.T) {
 	case entry.ParallelAgents != 0 || entry.APIKeyEnv != "":
 		t.Errorf("after the move the width pin is %d and the key source %q; want both cleared",
 			entry.ParallelAgents, entry.APIKeyEnv)
-	case entry.Description != "" || entry.EffortDialect != "":
-		t.Errorf("after the move the description is %q and the dialect %q; want both cleared",
-			entry.Description, entry.EffortDialect)
+	case entry.Description != "the moved box":
+		t.Errorf("after the move the description is %q; want the held entry's %q",
+			entry.Description, "the moved box")
+	case entry.EffortDialect != "":
+		t.Errorf("after the move the dialect is %q; want it cleared", entry.EffortDialect)
 	}
 
 	// A `servers:` edit on the entry the session is on re-derives the whole entry, pins included, and
@@ -3792,9 +3795,11 @@ func TestFiringBindingHandsOverTheHeldEntry(t *testing.T) {
 	case entry.ParallelAgents != 0 || entry.APIKeyCmd != "" || entry.APIKeyEnv != "":
 		t.Errorf("after the re-read the width pin is %d and the key sources %q/%q; want all cleared",
 			entry.ParallelAgents, entry.APIKeyCmd, entry.APIKeyEnv)
-	case entry.Description != "" || entry.EffortDialect != "":
-		t.Errorf("after the re-read the description is %q and the dialect %q; want both cleared",
-			entry.Description, entry.EffortDialect)
+	case entry.Description != "re-read box":
+		t.Errorf("after the re-read the description is %q; want the held entry's %q",
+			entry.Description, "re-read box")
+	case entry.EffortDialect != "":
+		t.Errorf("after the re-read the dialect is %q; want it cleared", entry.EffortDialect)
 	}
 }
 

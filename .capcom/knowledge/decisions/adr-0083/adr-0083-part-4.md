@@ -26,6 +26,15 @@ Driver-parity alternative of ADR 0031
 same review's candidate 6 ("one server binding with one zero rule — engine side") is new and is
 not covered by this section.
 
+> **Amended 2026-11-03 (plan 2026-11-03 - 01).** The in-session description clear is no longer
+> accepted: the Driver-parity alternative this paragraph names as "a decision not taken here" is
+> taken (owner, 2026-11-03). `liveSettings.firingBinding` now hands an in-session Firing the bound
+> entry's `description:` as the holder holds it, so its Delegations bullet reads
+> `run_on "session" = <model> on <name> — <description>` exactly as headless, the daemon and the
+> session itself render it (ADR 0031). The forced `effort-dialect:` clear stands, as do the
+> parallel-cap and key-source clears; the six arrival sites and this section's reduction are
+> unchanged.
+
 **Reopens on.** A fifth arrival site that re-spells the ladder, or an entry key added that
 needs an edit at every one of the six — the "adding an entry key: 12 edits → 3" leverage the
 candidate claimed, once it is measured against a key that actually arrives.
