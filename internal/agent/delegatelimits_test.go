@@ -24,27 +24,13 @@ type testBounds struct {
 // withBounds sets every one of a's delegate bounds to b — a zero field clears that bound — and
 // returns a, so a bare test Agent is built and bounded in one expression.
 func withBounds(a *Agent, b testBounds) *Agent {
-	a.limits = delegateLimits{
-		steps:     b.steps,
-		tokens:    b.tokens,
-		time:      b.time,
-		start:     b.start,
-		hit:       b.hit,
-		requested: b.requested,
-	}
+	a.limits = delegateLimits(b)
 	return a
 }
 
 // boundsOf reads a's delegate bounds.
 func boundsOf(a *Agent) testBounds {
-	return testBounds{
-		steps:     a.limits.steps,
-		tokens:    a.limits.tokens,
-		time:      a.limits.time,
-		start:     a.limits.start,
-		hit:       a.limits.hit,
-		requested: a.limits.requested,
-	}
+	return testBounds(a.limits)
 }
 
 // goldenWrapUpTail is wrapUpDirectiveTail spelled out, so the directive goldens below pin the
