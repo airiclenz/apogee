@@ -2882,6 +2882,11 @@ type uiConfig struct {
 	// count. A pointer for SkillSuggestions's reason: the default is TRUE, so it is the explicit
 	// `false` that must be distinguishable from an absent key.
 	GitFetch *bool `yaml:"git-fetch"`
+	// PointerShapes is whether the TUI sets the terminal's mouse-pointer shape on hover (OSC 22,
+	// ADR 0106). A pointer for ToolsOpen's reason: the default is FALSE, and an explicit
+	// `pointer-shapes: false` is a fact about this config rather than an absent key, so the schema
+	// stays honest if the default ever moves.
+	PointerShapes *bool `yaml:"pointer-shapes"`
 }
 
 // sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with

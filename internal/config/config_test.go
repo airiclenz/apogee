@@ -749,7 +749,7 @@ func everyKeyFileConfig() fileConfig {
 		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), Glyphs: "safe", ShowScrollbar: boolptr(false),
 			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true),
 			SkillSuggestions: boolptr(false), TaskListOpen: boolptr(false), ToolsOpen: boolptr(true),
-			ToolsFoldOver: countptr(8), Notify: "osc9", GitFetch: boolptr(false)},
+			ToolsFoldOver: countptr(8), Notify: "osc9", GitFetch: boolptr(false), PointerShapes: boolptr(true)},
 		Sessions: &sessionsConfig{MaxAge: strptr("720h"), MaxCount: countptr(50),
 			WatchHomes: watchHomesConfig{{Label: "bob", Path: "/home/bob/.apogee"}},
 			ShareGroup: "apogee-watch"},

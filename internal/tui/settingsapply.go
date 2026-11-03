@@ -528,6 +528,12 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// Which umbrellas are large is a paint fact, so the setter touches the transcript: an
 		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
 		m.transcript.setToolsFoldOver(m.opts.UI.ToolsFoldOver)
+	case domain.UIKeyPointerShapes:
+		// The flag lands on the block and nothing else yet: no hover path reads it, so the write is
+		// the whole apply and nothing on the screen moves.
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
 	case domain.UIKeyNotify:
 		// The mode is read where a prompt opens, so this write is the whole apply: the next prompt
 		// signals (or stays silent) in the new mode, and nothing on the screen moves.

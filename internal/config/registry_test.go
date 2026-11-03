@@ -1084,7 +1084,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"present.host": "Present", "present.command-on-model-documents": "Present",
 		"ui.spinner": "UI", "ui.spinner-color": "UI", "ui.glyphs": "UI", "ui.show-scrollbar": "UI",
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
-		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI",
+		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI", "ui.pointer-shapes": "UI",
 		"ui.tools-open": "UI", "ui.tools-fold-over": "UI", "ui.notify": "UI", "ui.git-fetch": "UI",
 		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions", "sessions.share-group": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
@@ -1165,6 +1165,7 @@ func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
 		"ui.color-scheme": "light", "ui.stall-after": "1m30s", "ui.inspector": "true",
 		"ui.skill-suggestions": "false", "ui.task-list-open": "false", "ui.tools-open": "true",
 		"ui.tools-fold-over": "12", "ui.notify": "both", "ui.git-fetch": "false",
+		"ui.pointer-shapes": "true",
 	}
 
 	for _, key := range domain.UIKeys() {

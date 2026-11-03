@@ -1144,6 +1144,14 @@ update-check: true
 # no umbrella is ever large, so none follows `tools-open`.
 # Defaults: `tools-open: false`, `tools-fold-over: 5`.
 #
+# `pointer-shapes` lets apogee change your mouse pointer to show what a click does where it rests:
+# an I-beam over the input box and the transcript's text, a hand over a row or a block a click
+# opens, folds or picks, the ordinary arrow everywhere else. It needs a terminal that understands
+# OSC 22 pointer shapes AND answers apogee's query for them (kitty, Ghostty, WezTerm and foot among
+# them); a terminal that stays silent — tmux included — just keeps its own pointer, and apogee sends
+# it nothing more. Purely visual: nothing about it reaches the model. Default off. Switch live from
+# /settings.
+#
 # `notify` is how apogee tells your terminal it is waiting on you — an approval or a question
 # prompt has opened, so the run is stopped until you answer. `bell` rings the terminal bell, which
 # most terminals and tmux turn into a visual or audible cue or a flagged tab. `osc9` sends an OSC 9
@@ -1173,6 +1181,7 @@ ui:
   task-list-open: true   # false = task-list cards start folded; toggling a card writes this back
   tools-open: false      # true = large Tools umbrellas start open; toggling one writes this back
   tools-fold-over: 5     # type rows an umbrella may show before it folds; 0 = never folds
+  pointer-shapes: false  # true = text / hand mouse pointer on hover, on a terminal that answers OSC 22
   notify: bell           # off | bell | osc9 | both — how the terminal is told apogee waits on you
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched
 

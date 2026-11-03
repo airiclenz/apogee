@@ -1103,7 +1103,7 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Twelve more keys live under `ui:`. Eight of them change how the screen looks rather than what it
+Thirteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
 says; the other four, `ui.notify`, `ui.inspector`, `ui.stall-after` and `ui.git-fetch`, come further
 down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
@@ -1155,6 +1155,16 @@ folds on its own, for this session only: nothing is written, and it starts the n
 `ui.tools-fold-over` defaults to `5`; `0` means no umbrella is ever large, so none follows
 `ui.tools-open` (each still folds on its own from its header), and a value below zero is refused —
 in `/settings` at the keystroke, in the file at startup.
+
+`ui.pointer-shapes` — **off by default** — lets apogee change the mouse pointer to show what a
+click does where it rests: an I-beam over the input box and the transcript's text, a hand over a
+row or a block a click opens, folds or picks, and the ordinary arrow everywhere else. It needs a
+terminal that understands OSC 22 pointer shapes and answers apogee's query for them — kitty,
+Ghostty, WezTerm and foot among them. A terminal that does not answer keeps its own pointer and
+gets nothing more from apogee, and that includes every terminal reached **through tmux**, which
+does not pass the query on: under tmux the setting stays off whatever it says. It is purely visual —
+nothing about it reaches the model. The flip is live: commit the row in `/settings` and apogee asks
+the terminal then.
 
 `ui.color-scheme` names the palette the screen is drawn in. It defaults to `dark`, `light` is the
 other built-in, and any `~/.apogee/schemes/<name>.yaml` joins them under its own file name —

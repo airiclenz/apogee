@@ -1166,6 +1166,19 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *int { return countPtr(u.ToolsFoldOver) }),
 	},
 	{
+		// A bool like ui.show-scrollbar, applied the same way (the renderer's own
+		// settingsApplyLocal): its whole effect is the pointer over THIS screen. Off by default, and
+		// on it still waits for the terminal to answer an OSC 22 query (ADR 0106) — which the
+		// description says, so a row reading true over an unchanged pointer reads as the terminal's
+		// answer rather than a failed write.
+		Path: "ui.pointer-shapes", Kind: KindBool, Default: "false",
+		Editable: true,
+		Desc: "Show a text or hand mouse pointer over what a click does; " +
+			"only on a terminal that answers an OSC 22 query.",
+		field: uiBool(domain.UIKeyPointerShapes, func(u *domain.UIPrefs) *bool { return &u.PointerShapes },
+			func(u *uiConfig) *bool { return u.PointerShapes }),
+	},
+	{
 		Path: "ui.notify", Kind: KindEnum, Default: string(domain.DefaultNotifyMode), EnumValues: notifyValues,
 		Editable: true,
 		Validate: validateNotifyMode,

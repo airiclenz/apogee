@@ -59,7 +59,10 @@
 - `capcom check` reports no problems.
 **Commit:** `docs(adr): record ADR 0106, probe-gated OSC 22 pointer shapes`
 
-## 2. `ui.pointer-shapes` setting
+## 2. `ui.pointer-shapes` setting — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — internal/config/config_test.go: made necessary by the new registry row — TestRegistrySetIsTheInverseOfRead refuses a key `everyKeyFileConfig` leaves at its default, so the fixture gains `PointerShapes: boolptr(true)`; the plan's "minus config_test.go" held only for the default-true `wantUIDefault` literals, which a default-false key leaves untouched.
+NOTES (2026-11-03): placed `ui.pointer-shapes` after `ui.tools-fold-over` (the last visual/mouse key) and before `ui.notify` in `uiKeys`, the starter template and `KeyRegistry` alike; the manual paragraph sits after the Tools-umbrella paragraph.
 
 **What:**
 **Goal:** `ui.pointer-shapes` is a registry key (bool, default false, editable), read from config into `UIPrefs`, listed in the starter template and the manual, shown in /settings, and landed live through `settingsApplyLocal`; nothing in the TUI acts on it yet.

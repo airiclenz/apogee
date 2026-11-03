@@ -104,6 +104,12 @@ type UIPrefs struct {
 	// and writes remote-tracking refs — though nothing about it reaches the model. false keeps the
 	// footer's counts to what the repository already knows.
 	GitFetch bool
+	// PointerShapes lets the TUI set the terminal's mouse-pointer shape over what a click there
+	// does — an I-beam over text, a hand over a clickable row — through OSC 22, and only once the
+	// terminal has answered a capability query for the shapes (ADR 0106). Default FALSE: the
+	// feature ships off until real use turns it on, and off apogee writes no OSC 22 byte at all.
+	// Purely visual — nothing about it reaches the model.
+	PointerShapes bool
 }
 
 // NotifyMode names how the terminal is told that apogee waits on the human. The vocabulary is
@@ -225,6 +231,7 @@ const (
 	UIKeyToolsFoldOver    = "ui.tools-fold-over"
 	UIKeyNotify           = "ui.notify"
 	UIKeyGitFetch         = "ui.git-fetch"
+	UIKeyPointerShapes    = "ui.pointer-shapes"
 )
 
 // uiKeys is the block's keys in the order the starter template presents them, declared once so a
@@ -232,7 +239,7 @@ const (
 var uiKeys = []string{
 	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
 	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
-	UIKeyToolsFoldOver, UIKeyNotify, UIKeyGitFetch,
+	UIKeyToolsFoldOver, UIKeyPointerShapes, UIKeyNotify, UIKeyGitFetch,
 }
 
 // UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
@@ -246,8 +253,9 @@ func UIKeys() []string {
 // DefaultUIPrefs is the `ui:` block with nothing configured: the default spinner style with the
 // colour loop on, the scroll bar shown, the default colour scheme, the shipped quiet threshold,
 // the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
-// umbrella folding past five type rows with large umbrellas starting folded, the unicode glyph
-// set, the terminal bell when apogee waits on the human, and the footer's periodic git fetch on.
+// umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
+// the unicode glyph set, the terminal bell when apogee waits on the human, and the footer's
+// periodic git fetch on.
 // Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
@@ -408,6 +416,8 @@ func (u *UIPrefs) land(key, value string) error {
 		u.Notify = mode
 	case UIKeyGitFetch:
 		return landBool(&u.GitFetch, key, value, defaults.GitFetch)
+	case UIKeyPointerShapes:
+		return landBool(&u.PointerShapes, key, value, defaults.PointerShapes)
 	default:
 		return fmt.Errorf("apogee: unknown ui key %q", key)
 	}
