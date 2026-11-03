@@ -547,17 +547,22 @@ func (m Model) footerModeHit(pre Model, x, y int) bool {
 // held on the top row, or anywhere below the last, it scrolls the transcript toward the pointer
 // and the head follows the revealed edge line (trackDragEdge). CellMotion reports motion only
 // while a button is down; AllMotion — set only while the pointer-shape gate is open
-// (pointerprobe.go) — also reports button-less hover, which the button checks below leave a
-// no-op, so either way a selection moves only mid-drag.
+// (pointerprobe.go) — also reports button-less hover, which moves no selection either: with no
+// press armed it goes to hoverPointerShape (pointershape.go), which may write the pointer shape a
+// click there implies and touches nothing else, so a selection moves only mid-drag. A right or
+// middle drag under AllMotion carries its own button, so it neither hovers nor drags.
 //
 // One decoder quirk lands here rather than in handleMouseRelease: some terminals encode the
 // release with the motion bit set (SGR "ESC[<35;x;ym"), which decodes to a BUTTON-LESS motion
 // (MouseNone) instead of a release, so while the press latch is armed such a motion IS the
 // release and is routed as one — otherwise the press stays armed for the rest of the session and
-// the drag never finishes. With nothing armed it stays the no-op it reads as.
+// the drag never finishes. With nothing armed it is the hover it reads as.
 func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 	if msg.Button == tea.MouseNone && m.mousePressed {
 		return m.handleMouseRelease(tea.MouseReleaseMsg{X: msg.X, Y: msg.Y, Button: tea.MouseLeft, Mod: msg.Mod})
+	}
+	if msg.Button == tea.MouseNone {
+		return m.hoverPointerShape(msg.X, msg.Y)
 	}
 	if msg.Button != tea.MouseLeft {
 		return m, nil

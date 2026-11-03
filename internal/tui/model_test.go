@@ -7308,8 +7308,8 @@ func TestANewPaneClaimingAKeyStillReachesLayout(t *testing.T) {
 // It is an invariant PIN rather than a regression test: at HEAD the motion arm itself repaints
 // nothing, so its bite is the INJECTED key miss — a transcript write left unpainted before the
 // motion starts, exactly what the tail would repaint on any other Msg. A thousand motions with the
-// settings pane open leave m.lines the same slice (identity, not equality) and the widget's height
-// where it was; the very next non-motion Msg then repaints, which is what says the miss was real
+// settings pane open — drags, then hovers under the pointer-shape gate — leave m.lines the same slice
+// (identity, not equality) and the widget's height where it was; the very next non-motion Msg then repaints, which is what says the miss was real
 // and the exemption was the only thing holding it back.
 func TestMouseMotionNeverRepaints(t *testing.T) {
 	t.Parallel()
@@ -7329,6 +7329,28 @@ func TestMouseMotionNeverRepaints(t *testing.T) {
 	}
 	if m.viewport.Height() != height {
 		t.Errorf("motion laid the frame out: viewport height %d → %d", height, m.viewport.Height())
+	}
+
+	// Hover is motion too: with the pointer-shape gate open, a thousand button-less motions classify
+	// the frame and write shapes, and still repaint nothing.
+	m.opts.UI.PointerShapes, m.pointerProbe = true, pointerProbeSupported
+	hoverWrites := 0
+	for i := range 1000 {
+		var cmd tea.Cmd
+		m, cmd = stepCmd(t, m, tea.MouseMotionMsg{X: i % 80, Y: i % 24, Button: tea.MouseNone})
+		if cmd != nil {
+			hoverWrites++
+		}
+	}
+
+	if hoverWrites == 0 {
+		t.Fatal("premise: no hover wrote a pointer shape — the hover path never ran")
+	}
+	if !sameLines(m.lines, lines) {
+		t.Error("hover repainted the transcript: m.lines is a different slice")
+	}
+	if m.viewport.Height() != height {
+		t.Errorf("hover laid the frame out: viewport height %d → %d", height, m.viewport.Height())
 	}
 
 	m = step(t, m, ctrlCResetMsg{})

@@ -443,10 +443,10 @@ type Model struct {
 	// mousePressed is the press latch: true from the moment a left press lands (handleMouseClick)
 	// until the release that ends it (handleMouseRelease clears it on every exit). It says "a
 	// button is still down", which is NOT what a selection's .active says — that one means
-	// "highlight shown" and outlives the release that copied it (mouse.go). Only the decoder-quirk
-	// conversion in handleMouseMotion reads it: a button-less motion is the missing release only
-	// while a press is genuinely in flight. A plain bool, so it rides the value-copied Model
-	// (ADR 0011).
+	// "highlight shown" and outlives the release that copied it (mouse.go). handleMouseMotion reads
+	// it to tell the two button-less motions apart: the missing release while a press is genuinely
+	// in flight (the decoder quirk), a hover otherwise (hoverPointerShape). A plain bool, so it rides
+	// the value-copied Model (ADR 0011).
 	mousePressed bool
 	// dragScroll is the edge auto-scroll of a held transcript drag (mouse.go): where past the
 	// transcript's edge the pointer last sat, and the generation of the one tick loop scrolling
@@ -479,6 +479,10 @@ type Model struct {
 	// ui.pointer-shapes setting it decides the mouse mode View asks for. A plain int, riding the
 	// value-copied Model (ADR 0011).
 	pointerProbe pointerProbe
+	// pointerShape is the pointer shape last written to the terminal (hoverPointerShape,
+	// pointershape.go), so a hover writes OSC 22 only when the shape under the mouse changes. The
+	// zero value is the default arrow. A plain int, riding the value-copied Model (ADR 0011).
+	pointerShape pointerShape
 	// notifyTmux says $TMUX was set when the Model was built, so an OSC 9 notification is wrapped
 	// for tmux passthrough (notify.go). Read once by newModel; a test sets it.
 	notifyTmux bool
@@ -1590,7 +1594,8 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMotionMsg:
 		// A drag (button held) extends whichever selection is live — prompt or transcript; a
 		// BUTTON-LESS motion while a press is armed is the release some terminals encode that way
-		// and is routed as one (mouse.go).
+		// and is routed as one, and with none armed it is a hover that may write the pointer shape
+		// (mouse.go, pointershape.go).
 		return m.handleMouseMotion(msg)
 
 	case tea.MouseReleaseMsg:
@@ -2886,9 +2891,9 @@ func (m *Model) freshenTranscriptClamp() {
 // the WindowSizeMsg arm lays out and stores the key on the first sized frame, so a measure a mode
 // report moved before it is carried by that first layout (foldModeReport, width.go). The one Msg
 // exempt from it is tea.MouseMotionMsg, which settleFrame filters before calling: motion moves a
-// selection's head and nothing else, View overlays the shade, and a key miss that motion happens to
-// be the first Update after waits for the next Msg rather than repainting the scrollback at the
-// mouse's sampling rate (TestMouseMotionNeverRepaints).
+// selection's head or, hovering, the pointer shape last written, and nothing else; View overlays the
+// shade, and a key miss that motion happens to be the first Update after waits for the next Msg
+// rather than repainting the scrollback at the mouse's sampling rate (TestMouseMotionNeverRepaints).
 func (m *Model) settle() {
 	if !m.ready {
 		return

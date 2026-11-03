@@ -139,7 +139,10 @@ internal/tui/watch_test.go — TestWatchIsolatesRoutesEveryFoldedMsg; internal/t
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestPointerProbe|Reassert|TestWatchIsolatesRoutesEveryFoldedMsg|TestSettingsApplyLocal' ./internal/tui/`
 **Commit:** `feat(tui): probe OSC 22 support and gate all-motion tracking on it`
 
-## 6. Write the pointer shape on hover
+## 6. Write the pointer shape on hover — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the hover lives in a new `Model.hoverPointerShape` (pointershape.go) called from `handleMouseMotion` on `msg.Button == tea.MouseNone` right after the armed-release branch, so its `!m.mousePressed` half is that branch's fall-through rather than a second read of the latch; new `Model.pointerShape` field (model.go) keeps the last written shape, zero value = default arrow.
+NOTES (2026-11-03): the item's gate-off test is four cases (setting off; probe unasked, pending, unsupported); the held-button test covers right, middle and an unlatched left drag. Motion comments updated in mouse.go (handleMouseMotion doc), model.go (mousePressed field, the MouseMotionMsg arm, settle's exemption note) and TestMouseMotionNeverRepaints's doc.
 
 **What:**
 Depends on items 4 and 5.

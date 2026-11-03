@@ -1,5 +1,10 @@
 package tui
 
+import (
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+)
+
 // pointerShape is the pointer the terminal should show over one point of the frame: what a click
 // there would do, said in the three shapes apogee speaks (ADR 0106). The zero value is the default
 // arrow, which is what every point no click acts on shows.
@@ -63,6 +68,27 @@ func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
 		return shapePointer
 	}
 	return shapeText
+}
+
+// hoverPointerShape answers one button-less motion — a hover, which only all-motion tracking reports
+// (pointerprobe.go) — with the pointer shape a click at (x, y) would imply. While the pointer-shape
+// gate is open ([Model.pointerShapesLive]) and that shape differs from the last one written, it keeps
+// the new shape and returns the one OSC 22 write that shows it; an unchanged shape, or the gate shut,
+// writes nothing, so a hover across one region costs a classification per cell and a single write.
+//
+// It never repaints: it reads the frame through a [Model.withFrameSpans] snapshot that stays here,
+// and the motion it answers is the one Msg the Update tail leaves unsettled ([settleFrame]). A drag
+// never reaches it — a held button reports its own motion — so a drag keeps the shape it started on.
+func (m Model) hoverPointerShape(x, y int) (Model, tea.Cmd) {
+	if !m.pointerShapesLive() {
+		return m, nil
+	}
+	shape := m.pointerShapeAt(m.withFrameSpans(), x, y)
+	if shape == m.pointerShape {
+		return m, nil
+	}
+	m.pointerShape = shape
+	return m, tea.Raw(ansi.SetPointerShape(shape.name()))
 }
 
 // The panes' hovers, one per row of the pane table (panes.go), each the shape its pane's click hit

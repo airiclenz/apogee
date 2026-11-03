@@ -7223,3 +7223,148 @@ func TestDragScrollUpUnderStickyHeader(t *testing.T) {
 		t.Fatal("the head landed on the sticky prompt, not the revealed line")
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Hover: the pointer shape a click implies (pointershape.go, ADR 0106)
+// ----------------------------------------------------------------------------
+
+// withPointerShapesLive opens the pointer-shape gate on m: the setting on and the terminal's answer
+// folded as full support, the two halves [Model.pointerShapesLive] reads.
+func withPointerShapesLive(m Model) Model {
+	m.opts.UI.PointerShapes = true
+	m.pointerProbe = pointerProbeSupported
+	return m
+}
+
+// moveWrites steps each motion through Update and returns the model and every OSC 22 write the
+// motions answered, in order. A motion's Cmd is run only when it is a raw write, so a stray tick
+// can neither block the test nor be mistaken for one.
+func moveWrites(t *testing.T, m Model, motions ...tea.MouseMotionMsg) (Model, []string) {
+	t.Helper()
+	var writes []string
+	for _, motion := range motions {
+		var cmd tea.Cmd
+		m, cmd = stepCmd(t, m, motion)
+		if cmd == nil {
+			continue
+		}
+		raw, isRaw := cmd().(tea.RawMsg)
+		if !isRaw {
+			t.Fatalf("motion at (%d,%d) answered a non-write Cmd", motion.X, motion.Y)
+		}
+		if seq, isText := raw.Msg.(string); isText && strings.HasPrefix(seq, "\x1b]22;") {
+			writes = append(writes, seq)
+		}
+	}
+	return m, writes
+}
+
+// hoverAcross is three button-less motions on each of the prompt's text row, a tool block's header
+// line and a plain transcript line, in that order — three regions whose shapes are text, pointer,
+// text — on the tool-block fixture.
+func hoverAcross(t *testing.T, m Model) []tea.MouseMotionMsg {
+	t.Helper()
+	x0, y0, _, _ := m.inputContentRect()
+	header := screenRow(t, m, markedLine(t, m, targetHeader))
+	line := screenRow(t, m, unmarkedLine(t, m))
+	var motions []tea.MouseMotionMsg
+	for _, y := range []int{y0, header, line} {
+		for dx := range 3 {
+			motions = append(motions, noneMotion(x0+dx, y))
+		}
+	}
+	return motions
+}
+
+// TestHoverPointerShapeWritesOncePerChange: with the gate open, hovering from the prompt onto a
+// block header and then onto a plain transcript line writes text, pointer, text — one write per
+// change of shape, however many motions each region takes.
+func TestHoverPointerShapeWritesOncePerChange(t *testing.T) {
+	t.Parallel()
+	m := withPointerShapesLive(modelWithToolBlock(t, "one\ntwo\nthree\nfour"))
+
+	m, writes := moveWrites(t, m, hoverAcross(t, m)...)
+
+	want := []string{ansi.SetPointerShape("text"), ansi.SetPointerShape("pointer"), ansi.SetPointerShape("text")}
+	if !slices.Equal(writes, want) {
+		t.Errorf("hover wrote %q, want %q", writes, want)
+	}
+	if m.pointerShape != shapeText {
+		t.Errorf("last written shape kept as %v, want shapeText", m.pointerShape)
+	}
+}
+
+// TestHoverPointerShapeStaysQuietInsideOneRegion: fifty motions across the prompt's text row are
+// one shape, so they write once.
+func TestHoverPointerShapeStaysQuietInsideOneRegion(t *testing.T) {
+	t.Parallel()
+	m := withPointerShapesLive(modelWithInput(t, "hello"))
+	x0, y0, w, _ := m.inputContentRect()
+	var motions []tea.MouseMotionMsg
+	for i := range 50 {
+		motions = append(motions, noneMotion(x0+i%w, y0))
+	}
+
+	_, writes := moveWrites(t, m, motions...)
+
+	if want := []string{ansi.SetPointerShape("text")}; !slices.Equal(writes, want) {
+		t.Errorf("fifty motions in the prompt wrote %q, want %q", writes, want)
+	}
+}
+
+// TestHoverPointerShapeIgnoresHeldButtons: under all-motion a right or middle drag reports its own
+// button, and a left drag with no press latched is no hover either, so none of them classifies or
+// writes — only a button-less motion is a hover.
+func TestHoverPointerShapeIgnoresHeldButtons(t *testing.T) {
+	t.Parallel()
+	for name, button := range map[string]tea.MouseButton{
+		"right": tea.MouseRight, "middle": tea.MouseMiddle, "left, no press latched": tea.MouseLeft,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := withPointerShapesLive(modelWithToolBlock(t, "one\ntwo\nthree\nfour"))
+			motions := hoverAcross(t, m)
+			for i := range motions {
+				motions[i].Button = button
+			}
+
+			m, writes := moveWrites(t, m, motions...)
+
+			if len(writes) != 0 {
+				t.Errorf("a %s drag wrote %q, want no pointer-shape write", name, writes)
+			}
+			if m.pointerShape != shapeDefault {
+				t.Errorf("a %s drag kept shape %v, want it untouched", name, m.pointerShape)
+			}
+		})
+	}
+}
+
+// TestHoverPointerShapeWritesNothingWhileTheGateIsShut: the setting off, or the terminal not (yet)
+// confirming the shapes, and a hover across every region writes no OSC 22 byte at all.
+func TestHoverPointerShapeWritesNothingWhileTheGateIsShut(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		setting bool
+		probe   pointerProbe
+	}{
+		{"setting off, terminal supports", false, pointerProbeSupported},
+		{"setting on, probe unasked", true, pointerProbeUnasked},
+		{"setting on, probe pending", true, pointerProbePending},
+		{"setting on, terminal unsupported", true, pointerProbeUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := modelWithToolBlock(t, "one\ntwo\nthree\nfour")
+			m.opts.UI.PointerShapes = tc.setting
+			m.pointerProbe = tc.probe
+
+			_, writes := moveWrites(t, m, hoverAcross(t, m)...)
+
+			if len(writes) != 0 {
+				t.Errorf("hover with the gate shut wrote %q, want nothing", writes)
+			}
+		})
+	}
+}
