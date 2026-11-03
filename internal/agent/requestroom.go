@@ -54,10 +54,7 @@ func (a *Agent) requestRoom() requestRoom {
 // ahead of them, the messages and the tool menu, through the Budget's chars-per-token ratio — the
 // predictive guard's own measure, with no comfort margin (ADR 0018 §7) and no second estimator.
 func (r requestRoom) weight(msgs []domain.Message) int {
-	if r.standing != "" {
-		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: r.standing}}, msgs...)
-	}
-	return r.budget.EstimateTokens(domain.PromptChars(msgs, r.menu))
+	return r.budget.EstimateTokens(domain.PromptChars(requestMessages(r.standing, msgs), r.menu))
 }
 
 // left is the room a request carrying msgs leaves: the room (the advertised window less the reply
@@ -69,25 +66,30 @@ func (r requestRoom) left(msgs []domain.Message) int {
 // freshShare is the bound, in tokens, a tool result about to be appended is clamped to. With
 // a known window it is the result's share of the room left in the request: the advertised window
 // less the reply reserve — the very room the predictive guard measures (deriveGrowthBounds,
-// exceeds) — less the estimate of the next request without the result (the standing system
-// content buildRequest seeds, the conversation msgs, the tool menu), divided across the pending
-// results of the Turn still to append (turnLifecycle.resultsToAppend, counted by dispatchTools).
-// It is recomputed at each append, so the room a small result leaves unused rolls forward to the
-// next. The share is clamped to [1/8 of the History allocation, the History allocation]: never
-// above the structural ceiling the fold's arithmetic rests on (structuralFloor), and never below
-// the floor, where the predictive fold makes room rather than the result shrinking to nothing.
+// exceeds) — less the estimate of contents, the next request as buildRequest will send it without
+// the result (Agent.requestContents: the standing system content, the conversation, the
+// delegation-ledger note, the wrap-up directive, the pending deferred injections and the tool
+// menu), divided across the pending results of the Turn still to append
+// (turnLifecycle.resultsToAppend, counted by dispatchTools). It is recomputed at each append, so
+// the room a small result leaves unused rolls forward to the next. The share is clamped to [1/8 of
+// the History allocation, the History allocation]: never above the structural ceiling the fold's
+// arithmetic rests on (structuralFloor), and never below the floor, where the predictive fold
+// makes room rather than the result shrinking to nothing.
 //
-// The estimate is weight's — composed from its parts rather than through buildRequest, which arms
-// a projection this seam must not build. With no window known the bound is the History floor
-// (growthBounds.historyFloor) — the conservative ceiling the fold renders against — exactly as
-// before the room-left bound (ADR 0018 §8).
+// contents is weighed as the predictive guard weighs the request it checks — its messages and tool
+// menu through the Budget's ratio, no comfort margin (ADR 0018 §7) — so a result held at its share
+// leaves a request the guard finds within the room. With no window known the bound is the History
+// floor (growthBounds.historyFloor) — the conservative ceiling the fold renders against — exactly
+// as before the room-left bound (ADR 0018 §8).
 //
 // Structural like the clamp it feeds (ADR 0006): no config key, on under Bypass.
-func (r requestRoom) freshShare(msgs []domain.Message, pending int) int {
+func (r requestRoom) freshShare(contents *domain.Request, pending int) int {
 	if !r.bounds.windowKnown {
 		return r.bounds.historyFloor
 	}
-	share := r.left(msgs) / max(pending, 1)
+	st := contents.State()
+	left := r.bounds.room - r.budget.EstimateTokens(domain.PromptChars(st.Messages, st.Tools))
+	share := left / max(pending, 1)
 	floor := max(r.bounds.historyFloor/freshResultFloorDivisor, 1)
 	return min(max(share, floor), r.bounds.historyFloor)
 }

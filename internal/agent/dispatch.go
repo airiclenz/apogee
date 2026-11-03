@@ -2173,11 +2173,14 @@ const freshResultFloorDivisor = 8
 
 // freshResultBound is the bound, in tokens, a tool result about to be appended is clamped to: its
 // share of room's room left in the request (requestRoom.freshShare, requestroom.go), weighed over
-// the conversation as it stands and split across the Turn's results still to append
-// (turnLifecycle.resultsToAppend). room is the caller's — the commit's own (commitCall) — so the
-// clamp and the fill notice that predicts it read one render.
+// the request buildRequest will send once the result is committed (requestContents — the
+// conversation as it stands with every note and deferred injection pending on it) and split across
+// the Turn's results still to append (turnLifecycle.resultsToAppend). room is the caller's — the
+// commit's own (commitCall) — so the clamp and the fill notice that predicts it read one standing
+// render and one Budget. Each read weighs the contents afresh: the clamp follows the cascade, and
+// a correction a post-tool-result Reaction defers in it rides the next request too.
 func (a *Agent) freshResultBound(room requestRoom) int {
-	return room.freshShare(a.conv.Messages(), a.turns.resultsToAppend)
+	return room.freshShare(a.requestContents(room), a.turns.resultsToAppend)
 }
 
 // errorToolResult builds a tool-level failure result surfaced to the model (IsError) rather

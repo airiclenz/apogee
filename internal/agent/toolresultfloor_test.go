@@ -313,9 +313,10 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 // of the Turn still to append, clamped to [1/8 of the History allocation, the History allocation].
 // The tests below observe whole-versus-elided at sizes either side of that share.
 
-// requestTokens estimates, the way freshResultBound does, a request carrying msgs: the standing
-// system content buildRequest seeds, msgs, and the tool menu, through the Budget's ratio — the
-// request room's own measure (requestRoom.weight).
+// requestTokens estimates, the way freshResultBound does while no note or injection is pending on
+// the next request, a request carrying msgs: the standing system content buildRequest seeds, msgs,
+// and the tool menu, through the Budget's ratio — the request room's own measure
+// (requestRoom.weight).
 func requestTokens(a *Agent, msgs []domain.Message) int {
 	return a.requestRoom().weight(msgs)
 }
@@ -510,4 +511,72 @@ func TestFreshResultUnknownWindowKeepsTheStructuralFloor(t *testing.T) {
 	if got, want := a.freshResultBound(a.requestRoom()), a.requestRoom().structuralFloor(); got != want {
 		t.Errorf("unknown-window bound = %d, want structuralFloor() = %d", got, want)
 	}
+}
+
+// pendingNoteAgent is a calibrated floorAgent whose history already fills half the advertised room
+// and ends in an assistant call awaiting its result — the shape where the room-left bound bites —
+// with its advertised room.
+func pendingNoteAgent(t *testing.T) (*Agent, int) {
+	t.Helper()
+	a, _ := floorAgent(t, &recordingSink{})
+	calibrate(a)
+	room := freshRoom(t, a)
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: singleLine(a, room/2)})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
+	return a, room
+}
+
+// assertBoundHoldsTheNextRequest appends a result the whole History allocation long — over the
+// room left, so the room-left bound bites — and checks the request buildRequest then sends, notes
+// and injections included, is estimated within the advertised room, so the predictive guard does
+// not fold it.
+func assertBoundHoldsTheNextRequest(t *testing.T, a *Agent, room int) {
+	t.Helper()
+	b := a.budget()
+	left := room - requestTokens(a, a.conv.Messages())
+	if floor := b.History / freshResultFloorDivisor; left <= floor || left >= b.History {
+		t.Fatalf("test setup: %d tokens left, want between the floor %d and the History allocation %d", left, floor, b.History)
+	}
+
+	a.appendToolResult(0, a.requestRoom(), domain.ToolCall{}, "", domain.ToolResult{CallID: "c1", Content: singleLine(a, b.History)}, "", nil)
+	if committed := a.conv.At(a.conv.Len() - 1).Content; !strings.Contains(committed, "start_line/end_line") {
+		t.Fatalf("the result was not bounded (no elision marker), so the bound never bit:\n%.200s", committed)
+	}
+
+	req, _ := a.buildRequest(1)
+	st := req.State()
+	if next := b.EstimateTokens(domain.PromptChars(st.Messages, st.Tools)); next > room {
+		t.Errorf("the next request is estimated at %d tokens, past the advertised room of %d", next, room)
+	}
+	if a.predictiveFoldDue(req) {
+		t.Errorf("the predictive guard folds the request the bounded result was committed into")
+	}
+}
+
+// TestFreshResultCountsAPendingInjection: a deferred correction is queued when a result over the
+// room left arrives. buildRequest injects it into the next request, so the bound weighs it too —
+// the result is shortened by its weight, and the request still fits the room.
+func TestFreshResultCountsAPendingInjection(t *testing.T) {
+	a, room := pendingNoteAgent(t)
+	a.conv.Defer(strings.Repeat("Re-run the failing test before editing again. ", 20))
+
+	assertBoundHoldsTheNextRequest(t, a, room)
+	if a.conv.DeferredLen() != 0 {
+		t.Errorf("the deferred correction is still queued after buildRequest; it never rode the request")
+	}
+}
+
+// TestFreshResultCountsTheLedgerNote: two delegations this Exchange arm the delegation-ledger note,
+// which buildRequest stamps on the tail — the very result being appended. The bound weighs the note
+// with it, so the result is shortened by the note's weight and the request still fits the room.
+func TestFreshResultCountsTheLedgerNote(t *testing.T) {
+	a, room := pendingNoteAgent(t)
+	cause := strings.Repeat("the delegate's upstream refused the request; ", 3)
+	a.delegations.record(delegationRecord{spawnIndex: a.delegations.open("d1"), callID: "d1", name: "Alpha", outcome: delegationFaulted, cause: cause})
+	a.delegations.record(delegationRecord{spawnIndex: a.delegations.open("d2"), callID: "d2", name: "Beta", outcome: delegationFaulted, cause: cause})
+	if _, ok := a.delegations.note(); !ok {
+		t.Fatal("test setup: the ledger note is not armed")
+	}
+
+	assertBoundHoldsTheNextRequest(t, a, room)
 }

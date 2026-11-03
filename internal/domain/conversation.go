@@ -177,6 +177,16 @@ func (c *Conversation) TakeDeferred() (injects []string, ok bool) {
 	return out, true
 }
 
+// PeekDeferred returns a copy of the pending deferred corrections in FIFO order, leaving the queue
+// as it stands — the read the engine's measure of the next request takes before the request is
+// built, where TakeDeferred is the drain building it. nil when none are pending.
+func (c *Conversation) PeekDeferred() []string {
+	if len(c.deferred) == 0 {
+		return nil
+	}
+	return append([]string(nil), c.deferred...)
+}
+
 // DeferredLen reports how many deferred corrections are currently queued — the loop reads it
 // after draining a request to capture the floor a cancelled Turn's own deferrals are truncated
 // back to (TruncateDeferred), so a re-attempt restores only the drained injections (F6).

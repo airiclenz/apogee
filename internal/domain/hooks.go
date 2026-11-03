@@ -23,14 +23,14 @@ import (
 //
 // The exported constructors and the State / Messages drains (NewRequest,
 // Request.State, NewResponse, NewConversation, Conversation.Messages, Defer /
-// TakeDeferred) are the ENGINE SEAM: internal/agent builds these values from loop
+// TakeDeferred / PeekDeferred) are the ENGINE SEAM: internal/agent builds these values from loop
 // state and reads the post-hook result back through them. They are exported only
 // because the engine lives in a sibling package, and a hook never needs them.
 //
 // The types themselves are NOT hidden from the public API: the root facade aliases
 // Request, Response and Conversation, and a Go type alias carries the full method set —
-// so Request.State, Conversation.Messages, Conversation.Defer and
-// Conversation.TakeDeferred are reachable through the facade too. What the facade does
+// so Request.State, Conversation.Messages, Conversation.Defer,
+// Conversation.TakeDeferred and Conversation.PeekDeferred are reachable through the facade too. What the facade does
 // not re-export is the package-level constructors — NewRequest, NewResponse,
 // NewConversation — so a facade user can receive these values but never mint one.
 

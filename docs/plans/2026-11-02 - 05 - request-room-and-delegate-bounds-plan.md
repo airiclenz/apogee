@@ -129,7 +129,14 @@ internal/agent/fillnotice.go — contextFillNotice; internal/agent/standingblock
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestAppendToolResultRendersStandingOnce|TestContextFillNotice|TestContextCost|TestContextEstimate|TestFreshResult|TestRequestRoom|TestPredictiveGuard|TestUnknownWindow|TestKnownWindow|TestAdvise|TestAppendTool|TestToolOutcome|TestClampTo|TestResolveFile|TestResolveRefs|TestResolveSkill|TestInterject|TestGrowthBounds|TestBudget|TestMaxOutputTokens|TestTurnRequestCarriesTheOutputCap|TestSubAgentContext' ./internal/agent/`
 **Commit:** `refactor(agent): one request room per commit, read by every measure`
 
-## 4. The bound weighs the request buildRequest sends
+## 4. The bound weighs the request buildRequest sends — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): buildRequest is split into requestMessages (standing system + conversation; requestRoom.weight seeds through it too) and stampRequestTail (ledger note, wrap-up directive, deferred injections, in that order); requestContents(room) builds the unarmed measure request over the same halves with a peeked queue and an empty tool-message stand-in for the pending result. It takes the room but no Turn (the request is never sent), so it passes 0 to domain.NewRequest.
+NOTES (2026-11-03): requestRoom.freshShare now takes the contents request (*domain.Request) and weighs its State messages and tools; freshResultBound passes a.requestContents(room). The measure is taken at each bound read — the fill notice's and the clamp's — over the commit's one room (one standing render, one Budget, no re-render; TestAppendToolResultRendersStandingOnce green), not stored once per commit: the clamp follows the post-tool-result cascade, and a correction a Reaction defers in that cascade rides the next request, so a measure frozen before the cascade would miss it.
+NOTES (2026-11-03): consequential edit — internal/domain/hooks.go: made necessary by adding Conversation.PeekDeferred (the package doc's engine-seam and facade method lists now name it).
+NOTES (2026-11-03): consequential edit — internal/agent/requestroom_test.go: made necessary by freshShare taking the contents request (roomTestContents builds it from the room's standing and menu; every table row and expected value unchanged).
+NOTES (2026-11-03): requestRoom.left is now read only by its own table test (freshShare weighs the contents request directly); left in place.
+NOTES (2026-11-03): both new tests bite — with freshResultBound reverted to the conversation-only measure they report the next request at 6784 / 6672 tokens against a room of 6554 and the predictive guard folding it. The whole internal/agent and internal/domain packages pass (no -race).
 
 Depends on item 3.
 

@@ -43,6 +43,12 @@ func roomTestRows(standing string) []standingRender {
 	return []standingRender{{name: "prompt", rendered: standing}}
 }
 
+// roomTestContents is the request room r weighs a fresh result's share over when the next request
+// carries msgs and nothing else: r's standing system content seeded ahead of them, over r's menu.
+func roomTestContents(r requestRoom, msgs []domain.Message) *domain.Request {
+	return domain.NewRequest("", requestMessages(r.standing, msgs), r.menu, r.budget, 0)
+}
+
 // roomTestMessages is one user message weighing exactly tokens at the fixture ratio.
 func roomTestMessages(tokens int) []domain.Message {
 	return []domain.Message{{Role: domain.RoleUser, Content: strings.Repeat("x", tokens*roomTestCharsPerToken)}}
@@ -109,7 +115,7 @@ func TestRequestRoomFreshShare(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			r := newRequestRoom(tt.budget, roomTestRows(tt.standing), nil)
-			if got := r.freshShare(tt.msgs, tt.pending); got != tt.want {
+			if got := r.freshShare(roomTestContents(r, tt.msgs), tt.pending); got != tt.want {
 				t.Errorf("freshShare(pending %d) = %d, want %d", tt.pending, got, tt.want)
 			}
 		})
@@ -123,9 +129,9 @@ func TestRequestRoomFreshShareRollsForward(t *testing.T) {
 
 	r := newRequestRoom(roomTestBudget(1), nil, nil)
 	msgs := roomTestMessages(roomTestRoom - 3000)
-	first := r.freshShare(msgs, 2)
+	first := r.freshShare(roomTestContents(r, msgs), 2)
 	small := domain.Message{Role: domain.RoleTool, Content: strings.Repeat("r", 100*roomTestCharsPerToken)}
-	second := r.freshShare(append(msgs, small), 1)
+	second := r.freshShare(roomTestContents(r, append(msgs, small)), 1)
 	if first != 1500 {
 		t.Fatalf("first share = %d, want 1500", first)
 	}

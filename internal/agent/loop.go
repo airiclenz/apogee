@@ -1357,8 +1357,11 @@ func assistantMessage(resp *domain.Response, calls []domain.ToolCall) domain.Mes
 // and injecting each role-safely. It returns the drained corrections so a cancellation can
 // re-queue them. The request carries the tool menu (Plan-filtered) and a trivial Budget so
 // a hook can read them through req.View().
+//
+// It is built from the two halves requestContents shares, so the request sent and the request the
+// fresh-result bound weighs cannot disagree on what rides it: the message list (requestMessages)
+// and the per-request tail notes (stampRequestTail), stamped over the drained corrections.
 func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
-	msgs := a.conv.Messages()
 	// The standing system content (ADR 0023) — the configured system prompt and the workspace
 	// context files — is seeded at position 0 of the REQUEST projection, never the conversation,
 	// so it is re-composed per request (armRequest, and refold after an overflow fold), stays out
@@ -1372,33 +1375,52 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// what the request actually costs; and a post-response scanner reading req.View() sees a
 	// leading system message whenever a prompt is configured — the same shape a seeding
 	// pre-request hook already produced.
-	if sys := a.standingSystem(); sys != "" {
-		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
+	req := a.newProjection(requestMessages(a.standingSystem(), a.conv.Messages()), turn, a.budget())
+	deferred, _ := a.conv.TakeDeferred()
+	a.stampRequestTail(req, deferred)
+	return req, deferred
+}
+
+// requestMessages is the message list a request carries ahead of its tail notes: the standing
+// system content seeded at position 0 as one system message, then conv — conv alone when standing
+// is "" (nothing configured), so the native anchor stays byte-identical. buildRequest, the fresh-
+// result bound's measure (requestContents) and the request room's weight all seed through it.
+func requestMessages(standing string, conv []domain.Message) []domain.Message {
+	if standing == "" {
+		return conv
 	}
-	req := a.newProjection(msgs, turn, a.budget())
-	// The wrap-up directive (subagent.go), stamped at the same moment and for the same reason as
-	// the reply ceiling newProjection stamps: after construction, before any pre-request hook,
-	// because it is the engine's own bound and must hold under Bypass, where no hook runs at all.
-	// It is the other half of the withdrawn menu toolMenu just returned — without it the child is
-	// left to guess why its tools vanished — and it carries the write clause exactly when that
-	// menu kept write_file (wrapUpWriter). It rides the
-	// closing tool result of the capping Turn as an engine note (Request.NoteOnTail, the advise
-	// slot's seam under the engine's own fence — ADR 0076 D6 addendum): the tail is where the
-	// model reads next, whereas a sentence at the far end of a long system prompt is what a
-	// capped child ignored when it narrated its next tool call instead of reporting. It is
-	// per-request and stands alone — never in the conversation, never a standingBlocks row. The
-	// system copy remains only as the FALLBACK for a tail that is not a tool result (a wrap-up
-	// Submitted on a user message, a faulted-then-retried assistant tail): AppendToSystem CREATES
-	// the system message when none exists, so a session with no configured prompt and no context
-	// files still carries the directive on that path.
-	//
-	// The delegate ledger (children.go, apogee-clb) rides the same seam by the same rule, and is
-	// stamped FIRST so the wrap-up directive stays on the very end where a capped child reads
-	// last. It is the host's record of what every delegation of this Exchange did — rendered per
-	// request, presence read at render time — for a coordinator that has been seen misremembering
-	// which delegates faulted or wrote their file; the trigger (two or more delegations, or any
-	// that did not complete) is the ledger's own (delegationLedger.note). Structural like the
-	// directive: no key, no Reaction, on under Bypass, and the system copy is the same fallback.
+	return append([]domain.Message{{Role: domain.RoleSystem, Content: standing}}, conv...)
+}
+
+// stampRequestTail stamps the per-request notes the engine itself places on a request, in their
+// one fixed order: the delegation-ledger note, the wrap-up directive, then each of deferred
+// injected role-safely. buildRequest stamps them over the corrections it drains, and
+// requestContents over the ones it peeks, so the note order has one copy.
+//
+// The wrap-up directive (subagent.go) is stamped at the same moment and for the same reason as
+// the reply ceiling newProjection stamps: after construction, before any pre-request hook,
+// because it is the engine's own bound and must hold under Bypass, where no hook runs at all.
+// It is the other half of the withdrawn menu toolMenu just returned — without it the child is
+// left to guess why its tools vanished — and it carries the write clause exactly when that
+// menu kept write_file (wrapUpWriter). It rides the
+// closing tool result of the capping Turn as an engine note (Request.NoteOnTail, the advise
+// slot's seam under the engine's own fence — ADR 0076 D6 addendum): the tail is where the
+// model reads next, whereas a sentence at the far end of a long system prompt is what a
+// capped child ignored when it narrated its next tool call instead of reporting. It is
+// per-request and stands alone — never in the conversation, never a standingBlocks row. The
+// system copy remains only as the FALLBACK for a tail that is not a tool result (a wrap-up
+// Submitted on a user message, a faulted-then-retried assistant tail): AppendToSystem CREATES
+// the system message when none exists, so a session with no configured prompt and no context
+// files still carries the directive on that path.
+//
+// The delegate ledger (children.go, apogee-clb) rides the same seam by the same rule, and is
+// stamped FIRST so the wrap-up directive stays on the very end where a capped child reads
+// last. It is the host's record of what every delegation of this Exchange did — rendered per
+// request, presence read at render time — for a coordinator that has been seen misremembering
+// which delegates faulted or wrote their file; the trigger (two or more delegations, or any
+// that did not complete) is the ledger's own (delegationLedger.note). Structural like the
+// directive: no key, no Reaction, on under Bypass, and the system copy is the same fallback.
+func (a *Agent) stampRequestTail(req *domain.Request, deferred []string) {
 	if note, ok := a.delegations.note(); ok {
 		if !req.NoteOnTail(delegationsNoteTopic, note) {
 			req.AppendToSystem(delegationsNoteHead, note)
@@ -1409,13 +1431,31 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 			req.AppendToSystem(wrapUpMarker, directive)
 		}
 	}
-	deferred, ok := a.conv.TakeDeferred()
-	if ok {
-		for _, inject := range deferred {
-			req.InjectContext(inject)
-		}
+	for _, inject := range deferred {
+		req.InjectContext(inject)
 	}
-	return req, deferred
+}
+
+// requestContents is the request the next buildRequest would send once the tool result about to
+// be appended is committed — the contents the fresh-result bound weighs (freshResultBound): the
+// standing system, the conversation, a stand-in for the pending result, and the tail notes stamped
+// over the deferred corrections as they stand. It is built from buildRequest's own two halves
+// (requestMessages, stampRequestTail), so it carries exactly what that request will: the ledger
+// note, the wrap-up directive and every pending injection.
+//
+// The stand-in is an empty tool message: it weighs nothing itself (domain.PromptChars counts
+// content), but it is the tail the committed result will be, so NoteOnTail and InjectContext take
+// the branches they take at send time rather than the AppendToSystem fallback the assistant tail
+// before it would.
+//
+// It reads room's standing render, menu and Budget, so it renders no standing table of its own,
+// and it only peeks the deferred queue (Conversation.PeekDeferred): the request is a measure,
+// never armed, hooked or sent — which is why it carries no Turn.
+func (a *Agent) requestContents(room requestRoom) *domain.Request {
+	conv := append(a.conv.Messages(), domain.Message{Role: domain.RoleTool})
+	req := domain.NewRequest(a.cfg.Model, requestMessages(room.standing, conv), room.menu, room.budget, 0)
+	a.stampRequestTail(req, a.conv.PeekDeferred())
+	return req
 }
 
 // standingSystem composes this request's standing system content — what buildRequest seeds as
