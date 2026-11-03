@@ -336,9 +336,7 @@ func (d *delegation) seed(a *Agent) {
 	a.name = d.name // written bare: the child is unpublished until it is returned, so no reader can race the lock setName takes later
 	a.consoleOwner = d.consoleOwner
 	a.seatFallback = d.seatFallback
-	a.stepCap = d.stepCap
-	a.tokenCap = d.tokenCap
-	a.timeCap = d.timeCap
+	a.limits = d.limits
 	a.effortDialect = d.effortDialect
 	a.guards = d.guards
 	a.liveMode = d.parentLiveMode

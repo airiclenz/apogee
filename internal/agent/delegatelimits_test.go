@@ -11,7 +11,7 @@ import (
 // testBounds is a delegate's bounds as a test sets or reads them: the step, token and time caps,
 // the clock reading the time bound counts from, the bound that ended the Exchange and the
 // max_steps a clamped ask requested. withBounds and boundsOf are the only test code that names
-// the Agent fields behind it, so a change to where an Agent keeps its bounds changes them alone.
+// the delegateLimits behind it, so a change to where an Agent keeps its bounds changes them alone.
 type testBounds struct {
 	steps     int
 	tokens    int
@@ -24,24 +24,26 @@ type testBounds struct {
 // withBounds sets every one of a's delegate bounds to b — a zero field clears that bound — and
 // returns a, so a bare test Agent is built and bounded in one expression.
 func withBounds(a *Agent, b testBounds) *Agent {
-	a.stepCap = b.steps
-	a.tokenCap = b.tokens
-	a.timeCap = b.time
-	a.capStart = b.start
-	a.capHit = b.hit
-	a.capRequested = b.requested
+	a.limits = delegateLimits{
+		steps:     b.steps,
+		tokens:    b.tokens,
+		time:      b.time,
+		start:     b.start,
+		hit:       b.hit,
+		requested: b.requested,
+	}
 	return a
 }
 
 // boundsOf reads a's delegate bounds.
 func boundsOf(a *Agent) testBounds {
 	return testBounds{
-		steps:     a.stepCap,
-		tokens:    a.tokenCap,
-		time:      a.timeCap,
-		start:     a.capStart,
-		hit:       a.capHit,
-		requested: a.capRequested,
+		steps:     a.limits.steps,
+		tokens:    a.limits.tokens,
+		time:      a.limits.time,
+		start:     a.limits.start,
+		hit:       a.limits.hit,
+		requested: a.limits.requested,
 	}
 }
 
@@ -179,5 +181,75 @@ func TestParseDelegateBoundRoundTrips(t *testing.T) {
 	}
 	if _, ok := parseDelegateBound("turns"); ok {
 		t.Error(`parseDelegateBound("turns") = true; want false for a word this build never writes`)
+	}
+}
+
+// TestDelegateLimitsTripped pins Run's one enforcement rule on the value itself: a cap at 0 is
+// off, each cap trips once what the delegate spent reaches it, a zero start never trips the time
+// cap, and where several trip at once the row order (steps, then tokens, then time) names the one
+// that ended the Exchange. The clock is read only for a live time cap.
+func TestDelegateLimitsTripped(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+	pinned := func(elapsed time.Duration) func() time.Time {
+		return func() time.Time { return start.Add(elapsed) }
+	}
+	unread := func() time.Time {
+		t.Error("tripped read the clock for a delegation with no live time cap")
+		return start
+	}
+	everything := delegateLimits{steps: 3, tokens: 1000, time: time.Hour, start: start}
+
+	for _, tc := range []struct {
+		name    string
+		limits  delegateLimits
+		turns   int
+		prompt  int
+		now     func() time.Time
+		want    delegateBound
+		wantHit bool
+	}{
+		{name: "zero value bounds nothing", turns: 1 << 20, prompt: 1 << 30, now: unread},
+		{name: "steps below the cap", limits: delegateLimits{steps: 3}, turns: 2, now: unread},
+		{name: "steps at the cap", limits: delegateLimits{steps: 3}, turns: 3, now: unread, want: boundSteps, wantHit: true},
+		{name: "tokens below the cap", limits: delegateLimits{tokens: 1000}, prompt: 999, now: unread},
+		{name: "tokens at the cap", limits: delegateLimits{tokens: 1000}, prompt: 1000, now: unread, want: boundTokens, wantHit: true},
+		{name: "time with a zero start", limits: delegateLimits{time: time.Hour}, now: pinned(2 * time.Hour)},
+		{name: "time below the cap", limits: delegateLimits{time: time.Hour, start: start}, now: pinned(59 * time.Minute)},
+		{name: "time at the cap", limits: delegateLimits{time: time.Hour, start: start}, now: pinned(time.Hour), want: boundTime, wantHit: true},
+		{name: "all three: steps first", limits: everything, turns: 3, prompt: 1000, now: pinned(time.Hour), want: boundSteps, wantHit: true},
+		{name: "tokens and time: tokens first", limits: everything, turns: 2, prompt: 1000, now: pinned(time.Hour), want: boundTokens, wantHit: true},
+		{name: "time alone", limits: everything, turns: 2, prompt: 999, now: pinned(time.Hour), want: boundTime, wantHit: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, hit := tc.limits.tripped(tc.turns, tc.prompt, tc.now)
+			if hit != tc.wantHit || (hit && got != tc.want) {
+				t.Errorf("tripped(%d, %d) = (%s, %v), want (%s, %v)",
+					tc.turns, tc.prompt, got.word(), hit, tc.want.word(), tc.wantHit)
+			}
+		})
+	}
+}
+
+// TestDelegateLimitsStartClockReadsOnce pins the time cap's start: taken once for a live time cap,
+// kept on a second call (a resumed loop never restarts the clock), never taken for an unbounded one.
+func TestDelegateLimitsStartClockReadsOnce(t *testing.T) {
+	t.Parallel()
+
+	first := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return first }
+
+	bounded := delegateLimits{time: time.Hour}
+	bounded.startClock(clock)
+	bounded.startClock(func() time.Time { return first.Add(time.Minute) })
+	if !bounded.start.Equal(first) {
+		t.Errorf("start = %v after two startClock calls, want the first reading %v", bounded.start, first)
+	}
+
+	var unbounded delegateLimits
+	unbounded.startClock(clock)
+	if !unbounded.start.IsZero() {
+		t.Errorf("start = %v for an unbounded time cap, want zero", unbounded.start)
 	}
 }

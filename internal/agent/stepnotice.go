@@ -2,7 +2,7 @@ package agent
 
 // The step-budget notice: an ENGINE NOTE, structural at depth ≥ 1 — never a Reaction, so no
 // switch, no Reaction id, no firing, and on under Bypass with the clamp and the wrap-up directive.
-// Only a delegate carries a step cap (Agent.stepCap), so it speaks to a CHILD agent and a child
+// Only a delegate carries a step cap (delegateLimits.steps), so it speaks to a CHILD agent and a child
 // alone: on the tool result that closes the Turn reaching three quarters of the Turns its
 // delegation is bounded to, it says how many are spent and how many remain, so the model can
 // write its output while it still holds the tools to write it with rather than discovering the
@@ -12,7 +12,7 @@ package agent
 // reading `[advice — reaction …]` on a read_file result as part of the file it read, and the
 // fence header is the one thing that tells a structural instruction from a Reaction's advice.
 //
-// The token-budget notice is its twin for the step cap's token sibling (Agent.tokenCap,
+// The token-budget notice is its twin for the step cap's token sibling (delegateLimits.tokens,
 // `delegate-max-tokens`): the same fence, the same latch (the note's own
 // presence), the same append site, fired once when the child's cumulative prompt tokens reach
 // three quarters of the budget. It exists because the two bounds are independent: a child under a wide working
@@ -94,7 +94,7 @@ func (a *Agent) budgetNotice(notice *boundNotice) (string, bool) {
 	if notice == nil {
 		return "", false
 	}
-	limit := notice.limit(a)
+	limit := notice.limit(a.limits)
 	if limit <= 0 {
 		return "", false
 	}

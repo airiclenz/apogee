@@ -360,7 +360,6 @@ type Agent struct {
 	consoleOwner string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
 	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
 	seatFallback bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so — for a workflow item's child, workflowPhaseResult and the workflow's answer (workflowAnswer), or its finish note when it runs in the background (finishNote). False for every other spawn, the absent ask included
-	capRequested int                 // the `max_steps` this delegation's spawning call asked for when it was ABOVE the configured step cap and was applied as the cap instead (runSubAgent): delegationResult appends the clamp note that says so. 0 for every other spawn — no ask, a lower ask that bound, an ask against an unbounded cap
 
 	// nameMu guards name, which is the ONE identity field a running Agent may see replaced under
 	// it: a delegation the model left unnamed is named out of band, by a completion that lands while
@@ -414,30 +413,15 @@ type Agent struct {
 	// child's Run has returned.
 	steered int
 
-	// stepCap bounds the Turns this Agent may take in ONE Exchange before Run ends it; 0 =
-	// unbounded. It is a DELEGATE bound: only newChildAgent seeds it (from
-	// Config.Delegation.MaxSteps, the `delegate-max-steps` key), and a sub_agent call's optional
-	// max_steps may lower it further for that one delegation — a top-level Agent is left at 0,
-	// because the main loop is the human's to stop and a delegate's is nobody's. Structural
-	// (ADR 0006), not a Reaction: it stays on under Bypass. Run is the ONE enforcement site.
-	stepCap int
-
-	// tokenCap and timeCap are the step cap's two siblings, seeded at the same site and enforced
-	// at the same one (Run): the cumulative PROMPT tokens this Agent's usage tally may reach
-	// (Config.Delegation.MaxTokens, the `delegate-max-tokens` key) and the wall clock its one
-	// Exchange may run from its first request (Config.Delegation.Timeout, `delegate-timeout`);
-	// 0 = unbounded, and a top-level Agent is left at 0 for stepCap's reason. capStart is the
-	// clock reading the time bound counts from, taken at the head of the child's Run through
-	// a.now so a test can pin it; capHit records WHICH bound ended the Exchange, the one fact the
-	// three markers a capped run writes (finishAtStepCap's ErrorEvent, loop.go's wrap-up
-	// directive, subagent.go's result head) need in common. Its zero value is the step cap, so a
-	// capped boundary that never named a bound reads exactly as every capped boundary read before
-	// the other two existed. Structural like stepCap (ADR 0006): on under Bypass, no Reaction.
-	tokenCap int
-	timeCap  time.Duration
-	capStart time.Time
-	capHit   delegateBound
-	// capFold is the ENGINE FOLD of this Agent's conversation, written at the bound capHit names
+	// limits is this Agent's DELEGATE bounds (delegatelimits.go): the step, token and time caps
+	// Run ends its one Exchange at, the clock the time cap counts from, the bound that ended it and
+	// the max_steps ask the step cap clamped. Only newChildAgent seeds it (delegation.seed, from
+	// Config.Delegation at spawn) and runSubAgent may clamp its step cap for that one delegation —
+	// a top-level Agent keeps the zero value, which bounds nothing, because the main loop is the
+	// human's to stop and a delegate's is nobody's. Structural (ADR 0006), not a Reaction: it stays
+	// on under Bypass. Run is the ONE enforcement site.
+	limits delegateLimits
+	// capFold is the ENGINE FOLD of this Agent's conversation, written at the bound limits.hit names
 	// before the wrap-up Turn is spent (foldForParent) and read into the capped result under
 	// `[engine summary]` (delegationResult) — the report the parent receives whatever the child's
 	// closing reply turns out to be. A delegate whose Exchange FAULTED writes it too
@@ -609,7 +593,7 @@ const stepCapErrFormat = "delegate capped at its step cap (%d steps) — asking 
 	"narrow the task or raise delegate-max-steps"
 
 // tokenCapErrFormat and timeCapErrFormat are stepCapErrFormat for the two other bounds a delegate
-// runs under (Agent.tokenCap, Agent.timeCap): the same shape and the same middle clause, because
+// runs under (delegateLimits): the same shape and the same middle clause, because
 // the engine does the same thing next, and each names the key that raises ITS bound. %d is the
 // token budget applied; %s is the time limit, spelled by boundDurationText.
 const (
@@ -1161,8 +1145,8 @@ func (a *Agent) emitTurn(res domain.StepResult) {
 // (children.go). ADR 0063 D1 records this and supersedes ADR 0025's rejected Run-side drain for
 // depth > 0 ONLY: the top-level contract in the paragraph above stands unchanged.
 //
-// It is also the one place the DELEGATE STEP CAP is enforced (Agent.stepCap) — and, since the
-// token and time bounds joined it (Agent.tokenCap, Agent.timeCap), the one place all three are: a
+// It is also the one place the DELEGATE STEP CAP is enforced (delegateLimits.steps) — and, since
+// the token and time bounds joined it (delegateLimits.tokens, .time), the one place all three are: a
 // child agent that is still asking for tools after its capped number of Turns, or whose prompt
 // tokens or wall clock have reached their bound, leaves this loop rather than looping on, is given
 // one further tool-less Turn (bar write_file to a spawn-named `output_path` — Agent.outputPath) to
@@ -1175,9 +1159,7 @@ func (a *Agent) emitTurn(res domain.StepResult) {
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	// The time bound counts from the child's first request, which this Run is about to make; the
 	// reading is taken once, so a resumed loop never restarts the clock.
-	if a.timeCap > 0 && a.capStart.IsZero() {
-		a.capStart = a.now()
-	}
+	a.limits.startClock(a.now)
 	for {
 		res, err := a.step(ctx)
 		a.emitTurn(res)
@@ -1187,7 +1169,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 			}
 			return res, err
 		}
-		// The delegate step cap, counted and enforced HERE and nowhere else (stepCap): step() is
+		// The delegate step cap, counted and enforced HERE and nowhere else (limits): step() is
 		// the Turn, and a Turn cannot know how many came before it. The count is taken AFTER the
 		// Turn completed, which is after its tool calls were dispatched and their results
 		// appended — so the history the parent snapshots ends on a complete tool round and stays
@@ -1197,7 +1179,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 		// round when one trips.
 		a.turns.exchangeTurns++
 		if bound, hit := a.delegateBoundHit(); hit {
-			a.capHit = bound
+			a.limits.hit = bound
 			capped := a.finishAtStepCap(ctx, res)
 			a.emitTurn(capped)
 			return capped, nil
@@ -1211,7 +1193,7 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 }
 
 // finishAtStepCap ends the open Exchange at a delegate bound — the step cap it is named for, or
-// the token or time bound capHit says tripped instead, which take the same path with their own
+// the token or time bound limits.hit says tripped instead, which take the same path with their own
 // markers (boundErrText) — but not before spending one further Turn on the child's CLOSING
 // REPORT. It surfaces the bound to the human as one ErrorEvent
 // (the child's own stream, at its Depth), then latches wrapUp for exactly one step(): the tool
@@ -2066,7 +2048,7 @@ func (a *Agent) displayName() string {
 // reads it, so the fact has a single spelling and a single source, the nesting depth ADR 0013
 // stamps on every Event (depth stays a numeric field for base and WithSubAgentDepth). The
 // spawning call id and the task are consequences of being a delegate, never tests for it; the
-// delegate caps (stepCap, tokenCap, timeCap) are BOUNDS a delegate may or may not carry, so they
+// delegate caps (delegateLimits) are BOUNDS a delegate may or may not carry, so they
 // gate their own enforcement and nothing else.
 func (a *Agent) isDelegate() bool {
 	return a.depth > 0

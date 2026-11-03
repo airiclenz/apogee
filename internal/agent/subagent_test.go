@@ -2514,7 +2514,7 @@ func TestStepCapNeverBoundsTheMainAgent(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	if steps := boundsOf(a).steps; steps != 0 {
-		t.Fatalf("top-level Agent constructed with stepCap = %d, want 0 — the cap is a delegate bound", steps)
+		t.Fatalf("top-level Agent constructed with a step cap of %d, want 0 — the cap is a delegate bound", steps)
 	}
 	_ = a.Submit(domain.UserInput{Text: "do the work"})
 	res, err := a.Run(context.Background())

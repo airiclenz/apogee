@@ -20,7 +20,7 @@ type turnLifecycle struct {
 	exchangeStart int  // cached rollback boundary of the open Exchange (ADR 0017 §2's recorded fallback)
 
 	// exchangeTurns counts the Turns COMPLETED in the open Exchange — the quantity the delegate
-	// step cap bounds (Agent.stepCap). It is written by Run, the one place the cap is enforced,
+	// step cap bounds (delegateLimits.steps). It is written by Run, the one place the cap is enforced,
 	// and reset by openExchange so the bound is per-Exchange rather than per-Agent. It is
 	// deliberately not serialized: a snapshot is taken at a quiescent boundary, and a resumed
 	// Exchange's cap starts counting again from there.

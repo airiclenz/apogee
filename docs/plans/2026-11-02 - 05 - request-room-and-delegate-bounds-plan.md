@@ -209,7 +209,13 @@ Depends on item 5.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestStepNotice|TestTokenNotice|TestSubAgent|TestNewAgentBuildsATopLevelAgent|TestNewChildAgent|TestStepCapNeverBounds|TestRunEndsTheExchangeAtTheStepCap|TestBoundErrText|TestCapResultHead|TestSeat_|TestDelegateReport|TestFanOut' ./internal/agent/`
 **Commit:** `test(agent): reach the delegate bounds through one helper`
 
-## 7. One delegateLimits value replaces the six bound fields
+## 7. One delegateLimits value replaces the six bound fields — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): delegateLimits (steps, tokens, time, start, hit, requested) lives in delegatelimits.go with tripped(turns, prompt, now func() time.Time), startClock(now), clampSteps(asked) and capMarker(format, rest...); the rows' reached/marker/notice.limit read the value, and notice.spent still reads the Agent (turns, usage). `now` is passed as the clock func, not a time.Time, so an unbounded delegation never reads the clock (as before).
+NOTES (2026-11-03): the approach's `noticeDue(row, …)` and `word(surface)` methods were not added: budgetNotice stays on the Agent (it needs the conversation's latch and the spend), reading `notice.limit(a.limits)`; `word(surface)` is capMarker moved onto the value (delegateBound.word() already names the snapshot word). delegateBoundHit and boundErrText stay as thin Agent methods over the value.
+NOTES (2026-11-03): hostcopy_test.go exists (plan 04 item 14 landed): the six rows became one `limits` row, hostZero as before.
+NOTES (2026-11-03): consequential edit — internal/agent/subagent_test.go: made necessary by removing Agent.stepCap (a t.Fatalf message in TestStepCapNeverBoundsTheMainAgent named `stepCap`; now "a step cap of %d", assertion unchanged)
+NOTES (2026-11-03): added TestDelegateLimitsStartClockReadsOnce beside TestDelegateLimitsTripped (start taken once, never for an unbounded time cap).
 
 Depends on item 6.
 

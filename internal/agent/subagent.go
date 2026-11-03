@@ -82,7 +82,7 @@ func depthLimitReason(maxDepth int) string {
 const stepCapClampNoteFormat = "[max_steps %d requested; the configured cap is %d — %d applied]"
 
 // stepCapResultFormat is the marker line the PARENT model receives when a delegation ended at its
-// step cap (Agent.stepCap): a NON-error result whose first line says the answer that follows is
+// step cap (delegateLimits.steps): a NON-error result whose first line says the answer that follows is
 // partial, so the parent can re-delegate a narrower task instead of treating a half-finished
 // investigation as the finding. What follows it is the body cappedResultBody renders: the ENGINE
 // SUMMARY — the engine's own fold of the child's conversation at the bound (Agent.foldForParent),
@@ -98,7 +98,7 @@ const stepCapClampNoteFormat = "[max_steps %d requested; the configured cap is %
 const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — engine summary and closing report follow]"
 
 // tokenCapResultFormat and timeCapResultFormat are stepCapResultFormat for the two other bounds a
-// delegate runs under (Agent.tokenCap, Agent.timeCap): the same shape — a non-error head promising
+// delegate runs under (delegateLimits): the same shape — a non-error head promising
 // a partial result — with the bound that tripped named in the parenthesis, so the parent learns
 // which knob its next delegation is up against. Package constants, pinned by test, because the TUI
 // reads the three heads by shape (delegationBoundHead) off a result carrying no typed outcome
@@ -275,16 +275,17 @@ func unknownContinueResult(asked string, retained []string) string {
 	return fmt.Sprintf(unknownContinueFormat, asked, list)
 }
 
-// capResultHead is the marker line a capped delegation's result opens with, for the bound capHit
-// names — the receiver is the CHILD, as in delegationResult. shape is what floor.ClosingShapeOf
-// judged the child's closing text to be: the plain head for a report (or for no text at all), the
-// non-report variant naming the shape for anything else. It is the ONE site both heads are written.
+// capResultHead is the marker line a capped delegation's result opens with, for the bound
+// limits.hit names — the receiver is the CHILD, as in delegationResult. shape is what
+// floor.ClosingShapeOf judged the child's closing text to be: the plain head for a report (or for
+// no text at all), the non-report variant naming the shape for anything else. It is the ONE site
+// both heads are written.
 func (a *Agent) capResultHead(shape floor.ClosingShape) string {
-	row := a.capHit.row()
+	row := a.limits.hit.row()
 	if shape.IsNonReport() {
-		return a.capMarker(row.nonReportHeadFormat, string(shape))
+		return a.limits.capMarker(row.nonReportHeadFormat, string(shape))
 	}
-	return a.capMarker(row.reportHeadFormat)
+	return a.limits.capMarker(row.reportHeadFormat)
 }
 
 // subAgentFaultPrefix opens the error result a FAULTED delegation becomes. What follows it is the
@@ -517,14 +518,14 @@ func (a *Agent) draftOutputSurvives() bool {
 // (buildRequest → Request.NoteOnTail), where the model reads next; the system prompt carries it
 // only on the fallback — a tail that is not a tool result — through AppendToSystem, whose
 // idempotency contract needs the marker to be a phrase INSIDE the directive (domain/request.go).
-// %d is the cap actually applied (Agent.stepCap) — the same number the human reads in
+// %d is the cap actually applied (delegateLimits.steps) — the same number the human reads in
 // stepCapErrFormat and the parent reads in stepCapResultFormat, so all three tell one story.
 // Package constants, pinned by test, because the child reads them as the contract for its last
 // reply.
 //
 // The token and time bounds hand the child the same directive with their own opening clause
 // (wrapUpTokenDirectiveFormat, wrapUpTimeDirectiveFormat): the cause differs, the prohibition and
-// the ask do not, so the three share wrapUpDirectiveTail and wrapUpDirective reads capHit's row (boundRows).
+// the ask do not, so the three share wrapUpDirectiveTail and wrapUpDirective reads limits.hit's row (boundRows).
 //
 // wrapUpOutputClauseFormat and wrapUpWriteClause are the one clause appended AFTER the directive —
 // never folded into it, so the three formats above keep their arity and their pinned text — when,
@@ -561,7 +562,7 @@ const (
 		wrapUpDirectiveTail
 )
 
-// wrapUpDirective renders the closing-report directive for the bound capHit names, with that
+// wrapUpDirective renders the closing-report directive for the bound limits.hit names, with that
 // bound's applied value in the clause — the same number the human read in the ErrorEvent and the
 // parent reads in the result head, so all three tell one story. The write clause rides it only
 // when the wrap-up menu actually carries write_file (wrapUpWriter), so the child is never told it
@@ -572,7 +573,7 @@ func (a *Agent) wrapUpDirective() string {
 	if a.workflowItem != nil {
 		return a.wrapUpFinishDirective()
 	}
-	directive := a.capMarker(a.capHit.row().wrapUpFormat)
+	directive := a.limits.capMarker(a.limits.hit.row().wrapUpFormat)
 	if _, ok := a.wrapUpWriter(); !ok {
 		return directive
 	}
@@ -1135,7 +1136,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 	// the same rule runDelegation applied to the started phase event). A continuation takes the
 	// same road: its fresh child was seeded from the same key and its call's max_steps clamps the
 	// same way.
-	sub.stepCap, sub.capRequested = resolveStepCap(sub.stepCap, args.MaxSteps)
+	sub.limits.clampSteps(args.MaxSteps)
 	// The out-of-band namer's two handles, declared ABOVE the reaping defer so that defer can stop
 	// and join the naming goroutine before anything the child owns is torn down (ADR 0068). Both
 	// stay zero when no naming starts — every early return below, a named delegation, and a nil
@@ -1260,7 +1261,7 @@ func (a *Agent) runDelegate(ctx context.Context, call domain.ToolCall, runID str
 		if continuing {
 			entry = prior
 		}
-		entry.name, entry.tools, entry.outputPath, entry.bound = sub.displayName(), args.Tools, args.OutputPath, sub.capHit
+		entry.name, entry.tools, entry.outputPath, entry.bound = sub.displayName(), args.Tools, args.OutputPath, sub.limits.hit
 		round := delegateRound{
 			report: report, summary: summary, spawnCallID: call.ID,
 			name: entry.name, tools: entry.tools, outputPath: entry.outputPath, bound: entry.bound,
@@ -1605,8 +1606,8 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// And the clamp note, in the same slot for the same reason: a parent whose max_steps was cut
 	// down to the configured cap must learn that from the result whichever way the delegation
 	// ended, and must learn it below the head line, never in front of it.
-	if a.capRequested > 0 {
-		result.Content += "\n" + fmt.Sprintf(stepCapClampNoteFormat, a.capRequested, a.stepCap, a.stepCap)
+	if a.limits.requested > 0 {
+		result.Content += "\n" + fmt.Sprintf(stepCapClampNoteFormat, a.limits.requested, a.limits.steps, a.limits.steps)
 	}
 	// And the continue line, LAST of the body notes, for a capped, faulted or stopped child the parent
 	// retains — one that ended its run wearing a name (runSubAgent joins the namer before rendering
@@ -1652,7 +1653,7 @@ func (a *Agent) delegationSummary(res domain.StepResult, result domain.ToolResul
 	case a.stoppedByUser:
 		summary.IsStoppedByUser = true
 	case res.StepCapped:
-		summary.Bound = a.capHit.delegationBound()
+		summary.Bound = a.limits.hit.delegationBound()
 	default:
 		text := strings.TrimSpace(result.Content)
 		summary.HasNoReport = text == noReportMarker || floor.IsNonReport(result.Content)
@@ -1680,9 +1681,7 @@ type delegation struct {
 	task        string // that call's delegated task — the child's identity in words, on every Approval it raises
 	name        string // the call's optional short name, already normalised by delegationName; "" = unnamed
 
-	stepCap  int           // the delegate step cap at spawn (Config.Delegation.MaxSteps); 0 = unbounded
-	tokenCap int           // and its two siblings, read at spawn for the same reason
-	timeCap  time.Duration //
+	limits delegateLimits // the delegate's step, token and time caps at spawn (Config.Delegation); 0 = unbounded. Only the caps are set: the start, hit and clamp are the child's own
 
 	seatFallback  bool                   // asked for the Sub-agent server and got the session one (ADR 0069 decision 9)
 	effortDialect provider.EffortDialect // the wire shape of an effort intent on the server this child speaks to (ADR 0060 §3)
@@ -1927,9 +1926,11 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, n
 		// siblings ride the same Config for the same reasons and are read here at SPAWN, so a value
 		// the settings surface moved bounds the children spawned after the move and never one already
 		// running.
-		stepCap:  childCfg.Delegation.MaxSteps,
-		tokenCap: childCfg.Delegation.MaxTokens,
-		timeCap:  childCfg.Delegation.Timeout,
+		limits: delegateLimits{
+			steps:  childCfg.Delegation.MaxSteps,
+			tokens: childCfg.Delegation.MaxTokens,
+			time:   childCfg.Delegation.Timeout,
+		},
 		// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
 		// than the childCfg copy the child's Config carries. The field is the authority the way it is
 		// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two

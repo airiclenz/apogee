@@ -232,7 +232,7 @@ type retainedDelegate struct {
 	tools      tools.SubAgentRoster // the `tools` argument as the latest call asked it, unresolved: re-resolved against the parent's menu on a continuation
 	outputPath string               // the `output_path` argument as the latest call spelled it; "" when it named none
 	rounds     []delegateRound      // one per run under the name, oldest first; never empty for a retained entry
-	bound      delegateBound        // which bound ended the latest run when it was capped (Agent.capHit); the zero value otherwise
+	bound      delegateBound        // which bound ended the latest run when it was capped (delegateLimits.hit); the zero value otherwise
 	used       uint64               // the use sequence retainedDelegates.retain stamped: the higher, the more recently this entry was retained — names orders by it
 }
 
@@ -253,7 +253,7 @@ type delegateRound struct {
 	name         string               // the display name this run ended wearing
 	tools        tools.SubAgentRoster // the `tools` argument this run's call resolved to, unresolved against the menu
 	outputPath   string               // the `output_path` argument this run's call resolved to; "" when none
-	bound        delegateBound        // which bound capped this run (Agent.capHit); the zero value otherwise
+	bound        delegateBound        // which bound capped this run (delegateLimits.hit); the zero value otherwise
 	seq          uint64               // the use sequence retainedDelegates.retain stamped when this round was first retained: orders rounds across entries for a fork's cut
 }
 
