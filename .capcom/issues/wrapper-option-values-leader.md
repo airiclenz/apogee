@@ -1,11 +1,13 @@
 ---
 title: "`stripWrappers` drops wrapper options without their values, so `env -u echo rm .git/hooks/x` hides the write"
-status: open
+status: done
 type: bug
 priority: 2
 labels: [security]
 plan: 2026-11-03 - 01 - open-bugs-plan
 created: 2026-11-03T14:20:29Z
+closed: 2026-11-03T17:58:59Z
+reason: Resolved by item 1 of plan '2026-11-03 - 01 - open-bugs-plan' (archived in b3ffc752), completing the short-option fix with long-option value consumption and a fail-closed strict strip.
 ---
 
 From docs/reviews/code-audit-2026-11-03.md; fixed by item 5 of `docs/plans/2026-11-03 - 00 - code-audit-fixes-plan.md`. `stripWrappers` (internal/security/shellwrites.go:1335-1339, :1429-1434, :939-940) drops wrapper option words without knowing which take a value, so in `env -u echo rm -f .git/hooks/pre-commit` it takes `echo` as a read leader and never emits the `rm` target.
