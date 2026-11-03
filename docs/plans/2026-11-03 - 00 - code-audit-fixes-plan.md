@@ -252,7 +252,7 @@ NOTES (2026-11-03): runGoVet now returns a small vetOutcome struct (findings, ha
 **Closes:** release-gate-spaced-paths
 **Commit:** `fix(release): split gate path lists on NUL, not whitespace`
 
-## 13. Open a new tool call when an indexed fragment brings a new id
+## 13. Open a new tool call when an indexed fragment brings a new id — ✅ DONE (2026-11-03)
 
 **What:** Fix: `openToolCalls.address` merges a fragment into the call at its wire index even when its non-empty id differs, folding shims' all-`index:0` parallel calls into one.
 **Regression guard.** An index hit opens a new call only when the differing non-empty id comes WITH a function name (a call's start); an id-only fragment keeps today's continue-and-never-overwrite rule (amend the stream.go:540-541 comment). On an index hit with a differing id, first continue an entry carrying that index AND that id; open only when none exists, so `0/a name`, `0/b name`, `0/a args` never yields a duplicate id `a`.

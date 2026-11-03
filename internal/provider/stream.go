@@ -477,8 +477,10 @@ func readFault(err error) UpstreamFault {
 // A server addresses a call by its wire index when it sends one, by its id when it does not,
 // and by "the call addressed last" when it sends neither — so interleaved parallel calls are
 // joined by index rather than by arrival order, and a server repeating one id on every
-// fragment continues one call instead of splitting it into many. Nothing is emitted until
-// flush runs at the end of the stream. The zero value is ready to use.
+// fragment continues one call instead of splitting it into many. A shim that puts every
+// parallel call at one index (all `index:0`) still keeps them apart: a fragment there whose
+// new id comes with a function name starts a call of its own (address). Nothing is emitted
+// until flush runs at the end of the stream. The zero value is ready to use.
 type openToolCalls struct {
 	entries []*openToolCall
 	// last is the call a fragment addressed most recently — the target for a fragment that
@@ -538,7 +540,9 @@ func (o *openToolCalls) fold(frag sseToolCall) bool {
 	}
 	o.last = target
 	// An id or name arriving on a later fragment fills in on the call it addresses; one
-	// arriving on top of a value already accumulated never overwrites it.
+	// arriving on top of a value already accumulated never overwrites it. A differing id that
+	// comes with a name never reaches here on top of another id — address opened a call of its
+	// own for it — so what does is an id-only fragment, and it continues the call it addressed.
 	if target.call.ID == "" {
 		target.call.ID = frag.ID
 	}
@@ -557,15 +561,33 @@ func (o *openToolCalls) fold(frag sseToolCall) bool {
 // address resolves the call a fragment belongs to, opening one where the fragment may. An
 // index-bearing fragment carrying neither an id nor a name never opens a call — that is how
 // the provider avoids manufacturing a nameless, id-less call for the loop to report.
+//
+// An index already open is shared by several calls when a shim numbers every parallel call
+// `index:0`. A fragment there whose non-empty id differs from the latest call's first
+// continues the call at that index carrying its id, so a later fragment of an earlier call
+// never opens a duplicate; failing that, the id opens a new call only when it comes with a
+// function name — a call's start. An id-only fragment continues the latest call, its id
+// never overwriting the one accumulated (fold).
 func (o *openToolCalls) address(frag sseToolCall) *openToolCall {
 	if frag.Index != nil {
-		if e := o.atIndex(*frag.Index); e != nil {
+		index := *frag.Index
+		e := o.atIndex(index)
+		if e == nil {
+			if frag.ID != "" || frag.Function.Name != "" {
+				return o.open(index)
+			}
+			return o.last
+		}
+		if frag.ID == "" || e.call.ID == "" || e.call.ID == frag.ID {
 			return e
 		}
-		if frag.ID != "" || frag.Function.Name != "" {
-			return o.open(*frag.Index)
+		if same := o.atIndexWithID(index, frag.ID); same != nil {
+			return same
 		}
-		return o.last
+		if frag.Function.Name != "" {
+			return o.open(index)
+		}
+		return e
 	}
 	if frag.ID != "" {
 		if e := o.withID(frag.ID); e != nil {
@@ -576,10 +598,21 @@ func (o *openToolCalls) address(frag sseToolCall) *openToolCall {
 	return o.last
 }
 
-// atIndex returns the open call at a wire index, or nil when none is open there.
+// atIndex returns the call opened most recently at a wire index — the one an empty-id
+// continuation there joins — or nil when none is open there.
 func (o *openToolCalls) atIndex(index int) *openToolCall {
+	for i := len(o.entries) - 1; i >= 0; i-- {
+		if e := o.entries[i]; e.wireIndex != noIndex && e.wireIndex == index {
+			return e
+		}
+	}
+	return nil
+}
+
+// atIndexWithID returns the open call at a wire index carrying an id, or nil when none does.
+func (o *openToolCalls) atIndexWithID(index int, id string) *openToolCall {
 	for _, e := range o.entries {
-		if e.wireIndex != noIndex && e.wireIndex == index {
+		if e.wireIndex != noIndex && e.wireIndex == index && e.call.ID == id {
 			return e
 		}
 	}

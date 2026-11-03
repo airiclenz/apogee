@@ -493,6 +493,90 @@ data: [DONE]
 	assertCall(t, calls[0], "tc_1", "grep", `{"q":"x"}`)
 }
 
+// TestStream_SharedIndexToolCalls covers the shim that numbers every parallel call `index:0`.
+// A fragment there whose differing id comes with a name starts a call of its own; one whose
+// id matches an earlier call at the index continues that call rather than opening a duplicate;
+// an id-only fragment with a differing id and an empty-id fragment both continue the call
+// opened last at the index.
+func TestStream_SharedIndexToolCalls(t *testing.T) {
+	t.Parallel()
+
+	type wantCall struct{ id, name, args string }
+	cases := []struct {
+		name  string
+		body  string
+		calls []wantCall
+	}{
+		{
+			name: "two ids then an empty-id continuation",
+			body: `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"grep","arguments":"{\"q\":1}"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"b","function":{"name":"read","arguments":"{\"p\":"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"2}"}}]}}]}
+
+data: [DONE]
+
+`,
+			calls: []wantCall{{"a", "grep", `{"q":1}`}, {"b", "read", `{"p":2}`}},
+		},
+		{
+			name: "an id-only fragment with a differing id continues the call",
+			body: `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"grep","arguments":"{\"q\":"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"b","function":{"arguments":"1}"}}]}}]}
+
+data: [DONE]
+
+`,
+			calls: []wantCall{{"a", "grep", `{"q":1}`}},
+		},
+		{
+			name: "a later fragment of an earlier id continues that call",
+			body: `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"grep"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"b","function":{"name":"read","arguments":"{}"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"arguments":"{\"q\":1}"}}]}}]}
+
+data: [DONE]
+
+`,
+			calls: []wantCall{{"a", "grep", `{"q":1}`}, {"b", "read", `{}`}},
+		},
+		{
+			name: "a repeated id at one index is one call",
+			body: `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"grep"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"arguments":"{\"q\":1}"}}]}}]}
+
+data: [DONE]
+
+`,
+			calls: []wantCall{{"a", "grep", `{"q":1}`}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := sseServer(tc.body)
+			defer srv.Close()
+
+			_, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+			if len(calls) != len(tc.calls) {
+				t.Fatalf("tool calls = %+v, want %d", calls, len(tc.calls))
+			}
+			for i, want := range tc.calls {
+				assertCall(t, calls[i], want.id, want.name, want.args)
+				if !json.Valid([]byte(calls[i].Function.Arguments)) {
+					t.Errorf("call %q arguments %q are not valid JSON", calls[i].ID, calls[i].Function.Arguments)
+				}
+			}
+		})
+	}
+}
+
 // TestStream_FlushesOpenCallsWithoutDone pins the second terminal path: a server that closes
 // the connection without [DONE] still hands over the calls it opened, before the synthesised
 // Done.
