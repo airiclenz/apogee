@@ -156,7 +156,12 @@ Depends on items 4 and 5.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestMouseMotionNeverRepaints|TestHoverPointerShape' ./internal/tui/`
 **Commit:** `feat(tui): show the pointer shape a click implies on hover`
 
-## 7. Re-assert and reset the pointer shape
+## 7. Re-assert and reset the pointer shape — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): new `Model.pointerShapeWritten` (model.go) is the plan's "written flag": set by the hover write, cleared by `forgetPointerShape` (pointershape.go) on toggle-off and on the editor handoff; `pointerShapeSuffix`, `pointerShapeResetBothStacks` and `pointerShapeWrittenBy` live in pointershape.go. `claimTerminalScreen`'s release is now `func(pointerShapeWritten bool)`, and `Run` reads the flag off `program.Run()`'s final Model; when set, the release writes `pointerShapeResetBothStacks()` (reset + enter-alt + reset + exit-alt) in place of the bare exit, so the exit sequence is still written exactly once.
+NOTES (2026-11-03): the editor handoff writes the both-stacks reset only when a shape is in force (the written flag), not on every handoff under the gate: with the gate open but no hover yet the terminal is already at default; the gate-off path returns the bare exec unchanged. The toggle-off reset is the single `ansi.SetPointerShape("")` (only the alternate screen's stack is live then).
+NOTES (2026-11-03): consequential edit — internal/tui/conpty_windows_test.go: made necessary by claimTerminalScreen's release taking the pointer flag (conptyClaimTerminal wraps it as `release(false)`; checked with `GOOS=windows go vet ./internal/tui/`).
+NOTES (2026-11-03): consequential edit — internal/tui/diagnostics.go: made necessary by the exit release now carrying the pointer reset (tracedOutput's doc names what apogee writes outside the trace).
 
 **What:**
 Recast at the regression check (2026-11-03).

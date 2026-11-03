@@ -73,8 +73,9 @@ func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
 // hoverPointerShape answers one button-less motion — a hover, which only all-motion tracking reports
 // (pointerprobe.go) — with the pointer shape a click at (x, y) would imply. While the pointer-shape
 // gate is open ([Model.pointerShapesLive]) and that shape differs from the last one written, it keeps
-// the new shape and returns the one OSC 22 write that shows it; an unchanged shape, or the gate shut,
-// writes nothing, so a hover across one region costs a classification per cell and a single write.
+// the new shape, marks a shape as in force on the terminal, and returns the one OSC 22 write that
+// shows it; an unchanged shape, or the gate shut, writes nothing, so a hover across one region costs a
+// classification per cell and a single write.
 //
 // It never repaints: it reads the frame through a [Model.withFrameSpans] snapshot that stays here,
 // and the motion it answers is the one Msg the Update tail leaves unsettled ([settleFrame]). A drag
@@ -88,7 +89,48 @@ func (m Model) hoverPointerShape(x, y int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pointerShape = shape
+	m.pointerShapeWritten = true
 	return m, tea.Raw(ansi.SetPointerShape(shape.name()))
+}
+
+// pointerShapeSuffix is what a mouse re-assert (reassertMouse, mousereassert.go) appends to the
+// tracking escapes: the shape last written, said again, because the child that may have reset the
+// terminal's mouse reporting may have reset its pointer too. It is empty while the gate is shut and
+// before any shape has been written — the terminal is still on its own default then, and a write of
+// the zero shapeDefault would be an OSC 22 byte the session never asked for.
+func (m Model) pointerShapeSuffix() string {
+	if !m.pointerShapesLive() || !m.pointerShapeWritten {
+		return ""
+	}
+	return ansi.SetPointerShape(m.pointerShape.name())
+}
+
+// forgetPointerShape is the model's half of a pointer reset: it drops the last written shape, so the
+// next hover writes afresh, and reports whether a shape was in force — the caller writes the reset
+// only then, so a session that never wrote a shape never writes a reset either.
+func (m Model) forgetPointerShape() (Model, bool) {
+	written := m.pointerShapeWritten
+	m.pointerShape, m.pointerShapeWritten = shapeDefault, false
+	return m, written
+}
+
+// pointerShapeResetBothStacks is the reset written when apogee lets go of the terminal — the program's
+// exit (claimTerminalScreen's release, tui.go) and the foreground-editor handoff
+// (settingsExternalEdit, settingswatcher.go): the empty-name OSC 22 reset, then the same again on the
+// alternate screen, ending on the primary one. A terminal keeps one pointer stack per screen (the
+// kitty spec), and the reset can land on either — after the renderer has already left the alternate
+// screen, or before — so saying it on both leaves both at the default arrow whichever was active.
+func pointerShapeResetBothStacks() string {
+	reset := ansi.SetPointerShape("")
+	return reset + ansiEnterAltScreen + reset + ansiExitAltScreen
+}
+
+// pointerShapeWrittenBy reports whether final — the model the program returned from its run — left
+// a pointer shape in force on the terminal, which is what decides whether the exit release writes
+// the reset. Anything but a Model reads as no shape: nothing apogee knows of was written.
+func pointerShapeWrittenBy(final tea.Model) bool {
+	m, ok := final.(Model)
+	return ok && m.pointerShapeWritten
 }
 
 // The panes' hovers, one per row of the pane table (panes.go), each the shape its pane's click hit

@@ -108,9 +108,19 @@ func (m Model) settingsExternalEdit(row SettingRow) (tea.Model, tea.Cmd) {
 	if launch.Detached {
 		return m, startDetachedEditor(row.Path, argv)
 	}
-	return m, tea.ExecProcess(exec.Command(argv[0], argv[1:]...), func(err error) tea.Msg {
+	editor := tea.ExecProcess(exec.Command(argv[0], argv[1:]...), func(err error) tea.Msg {
 		return settingsEditedMsg{path: row.Path, err: err}
 	})
+	// The editor gets the terminal with the pointer back at its default: a shape left in force
+	// would follow the human into a program that never asked for it. The reset is sequenced AHEAD
+	// of the exec so it is queued before the release flushes, and it is said on both screens
+	// because the flush may land on either (pointerShapeResetBothStacks). Back from the editor, the
+	// next hover writes the shape afresh.
+	var shapeWritten bool
+	if m, shapeWritten = m.forgetPointerShape(); !shapeWritten {
+		return m, editor
+	}
+	return m, tea.Sequence(tea.Raw(pointerShapeResetBothStacks()), editor)
 }
 
 // startDetachedEditor is the launch that keeps the terminal: the program is started with no stdin,

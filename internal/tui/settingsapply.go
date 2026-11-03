@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -531,8 +532,10 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 	case domain.UIKeyPointerShapes:
 		// The flag is half of the pointer-shape gate (pointerprobe.go); the terminal's answer is the
 		// other half. Switched on in a session that never asked, the query goes out now; one that
-		// already asked keeps its answer and sends nothing (ADR 0106 §3). Either way View reads the
-		// gate on the next frame, so the mouse mode follows the flag with no apply of its own.
+		// already asked keeps its answer and sends nothing (ADR 0106 §3). Switched off, the shape the
+		// hover left in force is reset, so the terminal is not left showing a pointer nothing keeps
+		// up to date any more. Either way View reads the gate on the next frame, so the mouse mode
+		// follows the flag with no apply of its own.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
@@ -540,6 +543,10 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 			var query tea.Cmd
 			m, query = m.askPointerShapes()
 			return m, "", query, true, nil
+		}
+		var written bool
+		if m, written = m.forgetPointerShape(); written {
+			return m, "", tea.Raw(ansi.SetPointerShape("")), true, nil
 		}
 	case domain.UIKeyNotify:
 		// The mode is read where a prompt opens, so this write is the whole apply: the next prompt

@@ -28,12 +28,18 @@ import (
 // batched with a record write is still a re-assert. It RUNS what it is given, so keep it away from
 // a Cmd whose side effect a test also drives (a record write): counting it would perform it. Either
 // mode's sequence counts — which one a re-assert carries is the live mode's business, pinned by the
-// verbatim tests.
+// verbatim tests — and it counts by prefix, because under live pointer shapes the same write goes on
+// to say the shape (pointerShapeSuffix).
 func reassertCount(t *testing.T, cmd tea.Cmd) int {
 	t.Helper()
 	n := 0
 	for _, msg := range expandBatch(cmd) {
-		if raw, isRaw := msg.(tea.RawMsg); isRaw && (raw.Msg == mouseTrackingSeq || raw.Msg == allMotionTrackingSeq) {
+		raw, isRaw := msg.(tea.RawMsg)
+		if !isRaw {
+			continue
+		}
+		if seq, isText := raw.Msg.(string); isText &&
+			(strings.HasPrefix(seq, mouseTrackingSeq) || strings.HasPrefix(seq, allMotionTrackingSeq)) {
 			n++
 		}
 	}

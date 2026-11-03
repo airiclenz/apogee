@@ -449,7 +449,12 @@ func conptyClaimTerminal(arm string) (func(), error) {
 			_, _ = io.WriteString(os.Stdout, ansiExitAltScreen)
 		}, nil
 	}
-	return claimTerminalScreen(os.Stdout)
+	release, err := claimTerminalScreen(os.Stdout)
+	if err != nil {
+		return nil, err
+	}
+	// No pointer shape is ever written here: the harness measures the screen switch, not OSC 22.
+	return func() { release(false) }, nil
 }
 
 // conptyLFTranslation measures the one console behaviour this whole plan turned on: what a bare LF

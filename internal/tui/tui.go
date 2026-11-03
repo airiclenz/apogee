@@ -2208,19 +2208,25 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// the first frame's AltScreen field — see claimAltScreen for why the order cannot be left to
 	// Bubble Tea. Only on a real terminal: with stdout redirected there is no scroll bar to put
 	// out and the sequences would be noise in the file.
+	//
+	// The release also resets the pointer shape when the run left one in force, which only the
+	// program's final Model can say: pointerShapeWritten is read from it once the loop returns, and
+	// stays false on any return before that — no loop ran, so no shape was written.
+	pointerShapeWritten := false
 	if stdoutIsTerminal() {
 		release, err := claimTerminalScreen(os.Stdout)
 		if err != nil {
 			return err
 		}
-		defer release()
+		defer func() { release(pointerShapeWritten) }()
 	}
 	program, cleanup, err := Build(ctx, eng, br, opts, nil)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	_, err = program.Run()
+	final, err := program.Run()
+	pointerShapeWritten = pointerShapeWrittenBy(final)
 	return err
 }
 
@@ -2419,8 +2425,9 @@ func programOutput(tracePath string, declineSyncOutput bool) (term.File, *traced
 	return out, traced, nil
 }
 
-// The three screen-control sequences apogee sends on its own behalf. Everything else on the wire
-// is the renderer's.
+// The three screen-control sequences apogee sends on its own behalf, and the OSC 22 pointer
+// writes (pointershape.go) — the hover's shapes, and the reset a release says on both screens with
+// the first two of these. Everything else on the wire is the renderer's.
 const (
 	ansiEnterAltScreen  = "\x1b[?1049h" // switch to the alternate screen, saving the primary one
 	ansiExitAltScreen   = "\x1b[?1049l" // switch back, restoring the primary screen
@@ -2452,14 +2459,24 @@ const (
 // never leaves it either — the shell would come back to a screen apogee took and kept. When the
 // renderer did restore, this second one lands on a primary screen already restored, where it is a
 // cursor restore to the position it just returned to.
-func claimTerminalScreen(f *os.File) (func(), error) {
+//
+// The release takes pointerShapeWritten: true when the run left an OSC 22 pointer shape in force
+// (ADR 0106). Then the exit sequence is the end of a longer write — the pointer reset on the primary
+// screen, the alternate screen entered just long enough to reset its own pointer stack, and the exit
+// that leaves it ([pointerShapeResetBothStacks]) — so the shell gets its arrow back on both screens.
+// False writes the exit sequence alone: a run that never wrote a shape writes no OSC 22 byte.
+func claimTerminalScreen(f *os.File) (func(pointerShapeWritten bool), error) {
 	restoreConsole := prepareAltScreenConsole(f)
 	if err := claimAltScreen(f); err != nil {
 		restoreConsole()
 		return nil, err
 	}
-	return func() {
-		_, _ = io.WriteString(f, ansiExitAltScreen)
+	return func(pointerShapeWritten bool) {
+		leave := ansiExitAltScreen
+		if pointerShapeWritten {
+			leave = pointerShapeResetBothStacks()
+		}
+		_, _ = io.WriteString(f, leave)
 		restoreConsole()
 	}, nil
 }

@@ -24,7 +24,9 @@ import (
 //
 // The fix is to say it again ourselves at the two moments the terminal may have been taken over
 // or reset: after every tool result, and on every resize. The sequence is idempotent, so
-// re-asserting a mode that was never lost costs two escapes nobody sees.
+// re-asserting a mode that was never lost costs two escapes nobody sees. While pointer shapes are
+// live and one has been written, the same write says the shape again (pointerShapeSuffix,
+// pointershape.go): a child that reset the mouse may have reset the pointer with it.
 
 const (
 	// mouseTrackingSeq is exactly the byte sequence Bubble Tea's renderer emits for
@@ -45,7 +47,8 @@ const (
 	diagMouseReassert = "mouse-reassert"
 )
 
-// reassertMouse re-sends the live mode's mouse-tracking escapes to the terminal, and returns the
+// reassertMouse re-sends the live mode's mouse-tracking escapes to the terminal — followed, in the
+// same one write, by the pointer shape last written while pointer shapes are live — and returns the
 // model carrying the incremented count with the Cmd that writes them. It answers with a nil Cmd
 // before the first WindowSizeMsg: the pre-ready frame paints no mouse mode at all (View), so
 // asserting one there would enable reporting the renderer never turned on.
@@ -58,7 +61,7 @@ func (m Model) reassertMouse() (Model, tea.Cmd) {
 	}
 	m.mouseReasserts++
 	m.diag.record(diagMouseReassert, strconv.Itoa(m.mouseReasserts))
-	return m, tea.Raw(trackingSeqOf(m.mouseMode()))
+	return m, tea.Raw(trackingSeqOf(m.mouseMode()) + m.pointerShapeSuffix())
 }
 
 // trackingSeqOf is the byte sequence the renderer writes for mode, so a re-assert says exactly what

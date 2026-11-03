@@ -5454,3 +5454,108 @@ func TestSettingsNoteIsMeasuredOverTheSectionHeadings(t *testing.T) {
 		}
 	}
 }
+
+// TestSettingsApplyLocalPointerShapesOffResetsTheShape: turning ui.pointer-shapes off in /settings
+// resets the shape the hover left in force and drops the mouse back to cell motion; a session whose
+// terminal never confirmed the shapes wrote none, so turning it off writes no OSC 22 byte either.
+func TestSettingsApplyLocalPointerShapesOffResetsTheShape(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		answer    tea.Msg
+		hover     bool
+		wantReset bool
+	}{
+		{"a shape written", oscReply(pointerShapeFullSupport, "\x1b\\"), true, true},
+		{"terminal unsupported", da1Reply(), false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m, _ := startedModel(t, pointerShapesOpts(true))
+			m = step(t, m, tc.answer)
+			if tc.hover {
+				m = hoverThePrompt(t, m)
+			}
+
+			m, _, off, _, err := m.settingsApplyLocal(domain.UIKeyPointerShapes, settingFalse)
+			if err != nil {
+				t.Fatalf("apply off: %v", err)
+			}
+
+			var writes []string
+			for _, msg := range expandBatch(off) {
+				if raw, isRaw := msg.(tea.RawMsg); isRaw {
+					writes = append(writes, fmt.Sprint(raw.Msg))
+				}
+			}
+			var want []string
+			if tc.wantReset {
+				want = []string{ansi.SetPointerShape("")}
+			}
+			if !reflect.DeepEqual(writes, want) {
+				t.Errorf("turning pointer shapes off wrote %q, want %q", writes, want)
+			}
+			if got := m.View().MouseMode; got != tea.MouseModeCellMotion {
+				t.Errorf("after turning pointer shapes off View asked for %v, want cell motion", got)
+			}
+		})
+	}
+}
+
+// sequenceOf opens the tea.Sequence cmd yields and returns the Msg each of its Cmds delivers, in
+// order. Bubble Tea's sequence message is unexported, so it is recognised as what it is — a []Cmd
+// that is not a tea.BatchMsg — rather than by name. Running a member only packages it: an exec Cmd
+// yields the message the runtime acts on, and starts nothing.
+func sequenceOf(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	msg := cmdMsg(cmd)
+	if _, batched := msg.(tea.BatchMsg); batched {
+		t.Fatalf("the Cmd yielded a tea.BatchMsg, want a tea.Sequence: a batch does not order its members")
+	}
+	value := reflect.ValueOf(msg)
+	if value.Kind() != reflect.Slice || value.Type().Elem() != reflect.TypeFor[tea.Cmd]() {
+		t.Fatalf("the Cmd yielded %T, want a tea.Sequence", msg)
+	}
+	msgs := make([]tea.Msg, 0, value.Len())
+	for i := range value.Len() {
+		msgs = append(msgs, value.Index(i).Interface().(tea.Cmd)())
+	}
+	return msgs
+}
+
+// TestPointerShapeResetPrecedesTheForegroundEditor: with a shape in force, ⏎ on a structured row
+// hands the editor the terminal only after the both-screens pointer reset — the reset is sequenced
+// ahead of the exec, so it is queued before the release flushes — and the shape is forgotten, so the
+// re-assert after the trip says the bare tracking sequence until the next hover writes one afresh.
+func TestPointerShapeResetPrecedesTheForegroundEditor(t *testing.T) {
+	t.Parallel()
+	rows := []SettingRow{settingsStructuredRow()}
+	edit := &externalEditLog{argv: []string{"vi", "+7", "/tmp/config.yaml"}} // detached is false
+	log := &settingsWriteLog{}
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
+	opts.Config = fakeConfigHost{externalEditSpec: edit.spec, reloadConfig: edit.reload}
+	m := hoverThePrompt(t, withPointerShapesLive(newTestModelEng(t, &fakeEngine{}, opts)))
+	m = openSettingsPane(t, m)
+
+	m, cmd := stepCmd(t, m, keyEnter())
+
+	msgs := sequenceOf(t, cmd)
+	if len(msgs) != 2 {
+		t.Fatalf("the handoff sequenced %d Msgs, want 2 (the pointer reset, then the exec)", len(msgs))
+	}
+	const wantReset = "\x1b]22;\a\x1b[?1049h\x1b]22;\a\x1b[?1049l"
+	if raw, isRaw := msgs[0].(tea.RawMsg); !isRaw || raw.Msg != wantReset {
+		t.Errorf("the handoff's first Msg is %#v, want the both-screens reset %q", msgs[0], wantReset)
+	}
+	if got := fmt.Sprintf("%T", msgs[1]); !strings.Contains(got, "exec") {
+		t.Errorf("the handoff's second Msg is %s, want Bubble Tea's own exec message", got)
+	}
+	_, reassert := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if got := trackingWrites(t, reassert); len(got) != 1 || got[0] != allMotionTrackingSeq {
+		t.Errorf("the re-assert after the handoff wrote %q, want the bare %q", got, allMotionTrackingSeq)
+	}
+}

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -465,5 +467,139 @@ func TestPointerShapeAtShowsNoPointerWhereAPaneGateRefusesTheClick(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+// hoverThePrompt hovers m's prompt text row once and returns the model that wrote the I-beam for it,
+// failing unless exactly that one write went out — the fixture a re-assert or a reset test needs: a
+// session with a shape in force on the terminal. The gate must already be open on m.
+func hoverThePrompt(t *testing.T, m Model) Model {
+	t.Helper()
+	x0, y0, _, _ := m.inputContentRect()
+	m, writes := moveWrites(t, m, noneMotion(x0, y0))
+	if want := ansi.SetPointerShape("text"); len(writes) != 1 || writes[0] != want {
+		t.Fatalf("hovering the prompt wrote %q, want exactly %q", writes, want)
+	}
+	return m
+}
+
+// trackingWrites returns every raw write cmd delivers that opens with a mouse-tracking sequence —
+// the re-assert's writes, whatever follows the tracking escapes inside them.
+func trackingWrites(t *testing.T, cmd tea.Cmd) []string {
+	t.Helper()
+	var writes []string
+	for _, msg := range expandBatch(cmd) {
+		raw, isRaw := msg.(tea.RawMsg)
+		if !isRaw {
+			continue
+		}
+		if seq, isText := raw.Msg.(string); isText &&
+			(strings.HasPrefix(seq, mouseTrackingSeq) || strings.HasPrefix(seq, allMotionTrackingSeq)) {
+			writes = append(writes, seq)
+		}
+	}
+	return writes
+}
+
+// TestReassertSaysTheWrittenShapeAfterTheTrackingSeq: with pointer shapes live and a shape written,
+// both re-assert moments — a resize and a tool result — send ONE write carrying the all-motion
+// tracking sequence and then the shape last written, because a child that reset the mouse may have
+// reset the pointer with it.
+func TestReassertSaysTheWrittenShapeAfterTheTrackingSeq(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		trigger tea.Msg
+	}{
+		{"resize", tea.WindowSizeMsg{Width: 100, Height: 30}},
+		{"tool result", toolResult()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := hoverThePrompt(t, withPointerShapesLive(modelWithInput(t, "hello")))
+
+			_, cmd := m.Update(tc.trigger)
+
+			want := []string{allMotionTrackingSeq + ansi.SetPointerShape("text")}
+			if got := trackingWrites(t, cmd); len(got) != 1 || got[0] != want[0] {
+				t.Errorf("the %s re-asserted %q, want %q", tc.name, got, want)
+			}
+		})
+	}
+}
+
+// TestReassertBeforeAnyShapeIsWrittenSendsTheBareTrackingSeq: with the gate open but no hover yet,
+// the terminal is still on its own default pointer, so the re-assert says the all-motion tracking
+// sequence alone — no OSC 22 byte for a shape the session never wrote.
+func TestReassertBeforeAnyShapeIsWrittenSendsTheBareTrackingSeq(t *testing.T) {
+	t.Parallel()
+	m := withPointerShapesLive(modelWithInput(t, "hello"))
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	if got := trackingWrites(t, cmd); len(got) != 1 || got[0] != allMotionTrackingSeq {
+		t.Errorf("the resize re-asserted %q, want exactly %q", got, allMotionTrackingSeq)
+	}
+}
+
+// TestClaimTerminalScreenReleaseResetsThePointerOnBothScreens: the exit release writes the pointer
+// reset on the primary screen, enters the alternate one to reset its stack too, and leaves it — but
+// only when the run left a shape in force; otherwise the release is the bare exit sequence, exactly
+// as before pointer shapes, with no OSC 22 byte.
+func TestClaimTerminalScreenReleaseResetsThePointerOnBothScreens(t *testing.T) {
+	t.Parallel()
+	const (
+		claim = "\x1b[?1049h\x1b[3J"
+		reset = "\x1b]22;\a"
+		enter = "\x1b[?1049h"
+		exit  = "\x1b[?1049l"
+	)
+	for _, tc := range []struct {
+		name         string
+		shapeWritten bool
+		want         string
+	}{
+		{"no shape written", false, claim + exit},
+		{"a shape written", true, claim + reset + enter + reset + exit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "screen")
+			f, err := os.Create(path)
+			if err != nil {
+				t.Fatalf("create %s: %v", path, err)
+			}
+			defer func() { _ = f.Close() }()
+
+			release, err := claimTerminalScreen(f)
+			if err != nil {
+				t.Fatalf("claimTerminalScreen: %v", err)
+			}
+			release(tc.shapeWritten)
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("the terminal received %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPointerShapeResetReadsTheFinalModel: Run hands the exit release the final Model's word on
+// whether a shape is in force — true after a hover wrote one, false for a session that never did,
+// and false for anything that is not apogee's Model.
+func TestPointerShapeResetReadsTheFinalModel(t *testing.T) {
+	t.Parallel()
+	quiet := withPointerShapesLive(modelWithInput(t, "hello"))
+	hovered := hoverThePrompt(t, quiet)
+
+	if !pointerShapeWrittenBy(hovered) {
+		t.Error("a final Model that wrote a shape read as none; the exit would leave it in force")
+	}
+	if pointerShapeWrittenBy(quiet) || pointerShapeWrittenBy(nil) {
+		t.Error("a final Model that never wrote a shape (or none at all) read as one; the exit would write a stray reset")
 	}
 }

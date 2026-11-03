@@ -483,6 +483,11 @@ type Model struct {
 	// pointershape.go), so a hover writes OSC 22 only when the shape under the mouse changes. The
 	// zero value is the default arrow. A plain int, riding the value-copied Model (ADR 0011).
 	pointerShape pointerShape
+	// pointerShapeWritten says a shape apogee wrote is in force on the terminal: set by the first
+	// hover write, cleared by every reset (forgetPointerShape). It — not the zero shapeDefault —
+	// decides whether a mouse re-assert says the shape again and whether a release writes the reset,
+	// so a session that never wrote a shape writes no OSC 22 byte at all.
+	pointerShapeWritten bool
 	// notifyTmux says $TMUX was set when the Model was built, so an OSC 9 notification is wrapped
 	// for tmux passthrough (notify.go). Read once by newModel; a test sets it.
 	notifyTmux bool

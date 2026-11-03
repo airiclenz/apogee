@@ -34,9 +34,10 @@ import (
 // can be replayed through a virtual terminal rather than only eyeballed.
 //
 // What it holds is the RENDERER's stream and only that. The three screen-control sequences apogee
-// sends on its own behalf (claimAltScreen, and its pairing exit) go straight to os.Stdout before
-// the program exists and after it has stopped, so they are outside the traced window by
-// construction — which is the honest boundary, since they are not what any frame is painted with.
+// sends on its own behalf (claimAltScreen, and its pairing exit with the pointer reset it may carry)
+// go straight to os.Stdout before the program exists and after it has stopped, so they are outside
+// the traced window by construction — which is the honest boundary, since they are not what any
+// frame is painted with.
 //
 // The whole design is one constraint, and it is the thing most easily got wrong here. bubbletea
 // decides whether its output IS a terminal by type-asserting it to term.File (tty_windows.go:36,
