@@ -26,12 +26,20 @@ type fakeTokenServer struct {
 	srv *httptest.Server
 	// reject, when set, answers every refresh with invalid_grant.
 	reject bool
+	// refusal, when its status is set, answers every refresh with that status and body.
+	refusal tokenRefusal
 
 	mu       sync.Mutex
 	live     map[string]bool
 	minted   int
 	forms    []url.Values
 	basicIDs []string
+}
+
+// tokenRefusal is a token endpoint answer refusing a refresh: an HTTP status and a raw body.
+type tokenRefusal struct {
+	status int
+	body   string
 }
 
 // newFakeTokenServer starts a token endpoint accepting the refresh token initial.
@@ -53,6 +61,12 @@ func (f *fakeTokenServer) serveToken(w http.ResponseWriter, r *http.Request) {
 	f.forms = append(f.forms, r.PostForm)
 	if id, _, ok := r.BasicAuth(); ok {
 		f.basicIDs = append(f.basicIDs, id)
+	}
+	if f.refusal.status != 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(f.refusal.status)
+		_, _ = io.WriteString(w, f.refusal.body)
+		return
 	}
 	presented := r.PostForm.Get("refresh_token")
 	if f.reject || !f.live[presented] {
@@ -321,6 +335,88 @@ func TestHandlerNeedsALogin(t *testing.T) {
 			_, err := currentToken(t, context.Background(), h)
 
 			assertLoginRequired(t, err)
+		})
+	}
+}
+
+func TestHandlerReportsALoginOnlyForRefusalsALoginFixes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		refusal   tokenRefusal
+		wantLogin bool
+		// wantText are substrings a plain error must carry.
+		wantText []string
+	}{
+		{
+			name:      "a 400 invalid_grant",
+			refusal:   tokenRefusal{status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`},
+			wantLogin: true,
+		},
+		{
+			name:      "a 401 with no body",
+			refusal:   tokenRefusal{status: http.StatusUnauthorized},
+			wantLogin: true,
+		},
+		{
+			name:      "a 400 invalid_client",
+			refusal:   tokenRefusal{status: http.StatusBadRequest, body: `{"error":"invalid_client"}`},
+			wantLogin: true,
+		},
+		{
+			name:      "a 401 invalid_client",
+			refusal:   tokenRefusal{status: http.StatusUnauthorized, body: `{"error":"invalid_client"}`},
+			wantLogin: true,
+		},
+		{
+			name: "a 429",
+			refusal: tokenRefusal{status: http.StatusTooManyRequests,
+				body: `{"error":"slow_down","error_description":"retry in a minute"}`},
+			wantText: []string{"HTTP 429", "retry in a minute"},
+		},
+		{
+			name:     "a 408 with no body",
+			refusal:  tokenRefusal{status: http.StatusRequestTimeout},
+			wantText: []string{"HTTP 408"},
+		},
+		{
+			name: "a 400 invalid_request",
+			refusal: tokenRefusal{status: http.StatusBadRequest,
+				body: `{"error":"invalid_request","error_description":"resource is malformed"}`},
+			wantText: []string{"HTTP 400", "invalid_request", "resource is malformed"},
+		},
+		{
+			name:     "a 403 with no body",
+			refusal:  tokenRefusal{status: http.StatusForbidden},
+			wantText: []string{"HTTP 403"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tokens := newFakeTokenServer(t, staleRefresh)
+			tokens.refusal = tt.refusal
+			store := NewStore(t.TempDir())
+			saveRecord(t, store, testServer, handlerEndpoint, tokens.storedRecord(time.Now().Add(-time.Minute)))
+			h := newTestHandler(t, store)
+
+			_, err := currentToken(t, context.Background(), h)
+
+			if tt.wantLogin {
+				assertLoginRequired(t, err)
+				return
+			}
+			if err == nil {
+				t.Fatal("error = nil; want the refusal reported")
+			}
+			if errors.Is(err, ErrLoginRequired) || strings.Contains(err.Error(), "apogee mcp login") {
+				t.Fatalf("error = %v; want a plain error, not a login", err)
+			}
+			for _, want := range tt.wantText {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q; want it to name %q", err, want)
+				}
+			}
 		})
 	}
 }

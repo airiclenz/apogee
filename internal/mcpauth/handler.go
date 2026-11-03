@@ -246,8 +246,8 @@ type tokenErrorResponse struct {
 // requestRefresh exchanges record's refresh token at its stored token endpoint, sending the stored
 // resource and the client's credentials the way its registration recorded, and returns record
 // with the new token. It runs on ctx's values without its cancellation, bounded by
-// refreshTimeout. A 4xx answer is the authorization server rejecting the refresh, which is
-// ErrLoginRequired; a transport failure or any other answer is a plain error.
+// refreshTimeout. A 4xx answer is ErrLoginRequired only when a login fixes it (refreshRefused); a
+// transport failure, any other 4xx and any other answer are a plain error.
 func (h *Handler) requestRefresh(ctx context.Context, record Record) (Record, error) {
 	if record.TokenEndpoint == "" {
 		return Record{}, loginRequired(h.cfg.Name, "the stored token names no token endpoint", nil)
@@ -272,7 +272,7 @@ func (h *Handler) requestRefresh(ctx context.Context, record Record) (Record, er
 
 	switch {
 	case resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError:
-		return Record{}, loginRequired(h.cfg.Name, "the authorization server rejected the refresh", refreshRejection(resp.StatusCode, body))
+		return Record{}, h.refreshRefused(resp.StatusCode, body)
 	case resp.StatusCode != http.StatusOK:
 		return Record{}, fmt.Errorf("mcpauth: server %q: refresh the token: the token endpoint answered HTTP %d",
 			h.cfg.Name, resp.StatusCode)
@@ -345,11 +345,38 @@ func (h *Handler) applyRefresh(record Record, body []byte) (Record, error) {
 	return record, nil
 }
 
-// refreshRejection words a rejected refresh's answer: the OAuth error code and description when
-// the body carries them, else the bare status.
-func refreshRejection(status int, body []byte) error {
+// refreshRefused is the error for a refresh the token endpoint answered with a 4xx status. An
+// OAuth invalid_grant or invalid_client, at any 4xx, and a 400 or 401 with no parseable error code
+// say the stored grant or client is no longer accepted, which only a login fixes: ErrLoginRequired.
+// Any other 4xx — a 408 or 429, an invalid_request — leaves the refresh token as good as it was,
+// so it is a plain error naming the status and the server's description.
+func (h *Handler) refreshRefused(status int, body []byte) error {
 	var answer tokenErrorResponse
-	if json.Unmarshal(body, &answer) != nil || answer.Error == "" {
+	if json.Unmarshal(body, &answer) != nil {
+		answer = tokenErrorResponse{}
+	}
+	cause := refreshRejection(status, answer)
+	if refusalNeedsLogin(status, answer.Error) {
+		return loginRequired(h.cfg.Name, "the authorization server rejected the refresh", cause)
+	}
+	return fmt.Errorf("mcpauth: server %q: refresh the token: %w", h.cfg.Name, cause)
+}
+
+// refusalNeedsLogin reports whether a 4xx refresh answer with OAuth error code is one a login fixes.
+func refusalNeedsLogin(status int, code string) bool {
+	switch code {
+	case "invalid_grant", "invalid_client":
+		return true
+	case "":
+		return status == http.StatusBadRequest || status == http.StatusUnauthorized
+	}
+	return false
+}
+
+// refreshRejection words a refused refresh's answer: the OAuth error code and description when
+// the body carries them, else the bare status.
+func refreshRejection(status int, answer tokenErrorResponse) error {
+	if answer.Error == "" {
 		return fmt.Errorf("the token endpoint answered HTTP %d", status)
 	}
 	if answer.Description == "" {

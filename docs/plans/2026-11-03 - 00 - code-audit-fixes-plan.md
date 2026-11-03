@@ -281,7 +281,10 @@ NOTES (2026-11-03): `ValidateName` checks the name as written and leaves the emp
 **Closes:** mcp-tool-name-collision
 **Commit:** `fix(mcp): refuse server names that make tool names ambiguous`
 
-## 15. Reserve "login required" for refusals a login fixes
+## 15. Reserve "login required" for refusals a login fixes — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — docs/design/mcp-client.md: made necessary by the handler no longer treating every refused refresh as login required (the OAuth client section said "a refresh the authorization server rejects is ErrLoginRequired")
+NOTES (2026-11-03): the classification lives in a new `Handler.refreshRefused` plus `refusalNeedsLogin`; `refreshRejection` now takes the parsed `tokenErrorResponse` instead of the raw body, so the body is decoded once
 
 **What:** Fix: `requestRefresh` maps every 4xx from the token endpoint to `ErrLoginRequired`, so a 429 or 408 tells the user to run `apogee mcp login`.
 **Regression guard.** The Goal is scoped to a refresh the token endpoint answers with 4xx: the handler's other `loginRequired` paths (insufficient_scope 403, record gone, client changed, no refresh token, no token endpoint) stay. `requestRefresh`'s doc comment (handler.go:249-250, "A 4xx answer … is ErrLoginRequired") is rewritten to the new rule.

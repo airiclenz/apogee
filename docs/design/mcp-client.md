@@ -178,7 +178,8 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   (`routeClient`). The handler refreshes an expired token itself, bound to the server as the RFC
   8707 resource, and saves a rotated refresh token before it is used, serialised across processes
   by a lock file beside the record. A missing record or a refresh the authorization server
-  rejects is `mcpauth.ErrLoginRequired`, whose error names `apogee mcp login <name>`; the engine
+  refuses in a way only a login fixes (`invalid_grant` or `invalid_client` at any 4xx, or a 400 or
+  401 with no OAuth error code) is `mcpauth.ErrLoginRequired`, whose error names `apogee mcp login <name>`; the engine
   never prompts. The interactive login — the loopback listener on `127.0.0.1:0` at `/callback`,
   the pasted-redirect fallback, the startup offer on stderr and `apogee mcp login|logout` — lives
   in `cmd/apogee` alone, so the client stays wire-silent and any Driver can bring its own login.
