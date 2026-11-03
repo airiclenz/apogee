@@ -761,6 +761,56 @@ func TestFloorGuard_ReadCacheSkipsAToolWithoutAMaxLinesSchema(t *testing.T) {
 	}
 }
 
+// An earlier full read over the tool-result cap's ceiling is not whole in the request — the cap
+// trims it to a head/tail elision once its Turn is no longer the freshest — so it cannot stand as
+// the cached copy: the re-read of that file is dispatched whole, under Bypass, and nothing is booked
+// (ADR 0071 Decision 1, clause (c)).
+func TestFloorGuard_ReadCacheLeavesAReReadOfALargeEarlierReadUntouched(t *testing.T) {
+	big := betweenTheCeilings(t)
+	sink := &recordingSink{}
+	var seen []string
+	reader := schemaTool{
+		fakeTool: fakeTool{
+			name:     "read_file",
+			readOnly: true,
+			execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+				seen = append(seen, string(call.Arguments))
+				content := "package b"
+				if strings.Contains(string(call.Arguments), "a.go") {
+					content = big
+				}
+				return domain.ToolResult{CallID: call.ID, Content: content}, nil
+			},
+		},
+		schema: readFileSchemaWithMaxLines,
+	}
+	cfg := configWithTools(sink, reader)
+	cfg.Context.MaxContextTokens = floorWindow
+	cfg.Bypass = true
+	responder := scriptedResponder(t,
+		toolCallTurn("r1", "read_file", `{"path":"a.go"}`),
+		toolCallTurn("r2", "read_file", `{"path":"b.go"}`),
+		toolCallTurn("r3", "read_file", `{"path":"a.go"}`),
+		contentTurn("done"),
+	)
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "read the files")
+
+	if len(seen) != 3 {
+		t.Fatalf("read_file ran %d times, want 3: %v", len(seen), seen)
+	}
+	if seen[2] != `{"path":"a.go"}` {
+		t.Errorf("a re-read of a read the tool-result cap trims was capped: %s", seen[2])
+	}
+	if n := guardFireCountFor(sink.events, guardReadCache); n != 0 {
+		t.Errorf("the read cache fired %d times on a re-read of a large earlier read, want 0", n)
+	}
+}
+
 // The tool-result cap is engine behaviour on the REQUEST PROJECTION: an oversized result from an
 // earlier Turn goes out trimmed to the shared head/tail elision while the conversation keeps every
 // byte of it, with NO catalogued Mechanism enabled and Bypass ON. The freshest tool-call Turn is

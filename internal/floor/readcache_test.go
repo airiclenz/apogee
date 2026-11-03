@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/domain/domaintest"
 )
@@ -389,5 +390,83 @@ func TestCacheReadCapsReReadAfterSliceThenFullRead(t *testing.T) {
 	got, ok := cacheRead(history, readCall("r3", "a.go"))
 	if !ok || !hasMaxLines(got.Arguments) {
 		t.Errorf("a re-read after a full read was not capped; args = %s", got.Arguments)
+	}
+}
+
+// cacheReadWithBudget runs the guard over the default menu with b as the Budget the view reports,
+// so the tool-result cap's ceiling (capMaxChars) is live.
+func cacheReadWithBudget(history []domain.Message, call domain.ToolCall, b domain.Budget) (domain.ToolCall, bool) {
+	c := call
+	view := domaintest.FakeLoopView{Messages: history, ToolMenu: []domain.ToolDef{readFileTool}, BudgetValue: b}
+	ok := CacheRead(view, domain.NewToolCallEdit(&c))
+	return c, ok
+}
+
+// readHistory is a full read of a.go returning content, then a bare re-read of it pending.
+func readHistory(content string) []domain.Message {
+	return []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(readCall("r1", "a.go")),
+		toolResult("r1", content),
+		assistantCall(readCall("r2", "a.go")),
+	}
+}
+
+// An earlier copy that is not whole in the request — over the tool-result cap's ceiling (so the cap
+// trims it), or already carrying either reducer's elision marker — leaves the file not in front of
+// the model, so the re-read goes through whole (ADR 0071 D1(c)). A copy under the ceiling is still
+// capped, and an unknown window (a zero Budget, so no ceiling) keeps the guard's earlier behaviour.
+func TestCacheReadLeavesReReadOfANotWholeCopyUntouched(t *testing.T) {
+	t.Parallel()
+	maxChars := capMaxChars(capBudget())
+	over := capLines(200, "a line of the file that repeats to blow past the per-result ceiling")
+	if len(over) <= maxChars {
+		t.Fatalf("fixture %d chars is not over the %d ceiling", len(over), maxChars)
+	}
+	under := "package a\nfunc F() {}"
+	cases := []struct {
+		name    string
+		content string
+		budget  domain.Budget
+		capped  bool
+	}{
+		{name: "over the ceiling", content: over, budget: capBudget()},
+		{name: "line-elided", content: apogeectx.TruncateToolResult(over, maxChars), budget: capBudget()},
+		{name: "byte-elided", content: apogeectx.ElideToBytes(over, maxChars/2), budget: capBudget()},
+		{name: "elided, unknown window", content: apogeectx.TruncateToolResult(over, maxChars), budget: domain.Budget{}},
+		{name: "under the ceiling", content: under, budget: capBudget(), capped: true},
+		{name: "over the ceiling, unknown window", content: over, budget: domain.Budget{}, capped: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := cacheReadWithBudget(readHistory(tc.content), readCall("r2", "a.go"), tc.budget)
+			if ok != tc.capped || hasMaxLines(got.Arguments) != tc.capped {
+				t.Errorf("CacheRead capped = %v (args %s), want %v", ok, got.Arguments, tc.capped)
+			}
+		})
+	}
+}
+
+// The ceiling is the only test the two guards share: a result already elided but under the ceiling
+// is left whole by the tool-result cap — only a result STRICTLY over the ceiling is trimmed — though
+// the read cache declines it as a copy.
+func TestCapToolResultsLeavesAnElidedResultUnderTheCeilingWhole(t *testing.T) {
+	t.Parallel()
+	maxChars := capMaxChars(capBudget())
+	elided := apogeectx.ElideToBytes(capLines(200, "a line of tool output"), maxChars/2)
+	msgs := []domain.Message{
+		userMsg("go"),
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: elided},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: "read_file"}}},
+		{Role: domain.RoleTool, ToolCallID: "c2", Content: "ok"},
+	}
+	req := capRequest(msgs, capBudget())
+	if capped := CapToolResults(req); capped != 0 {
+		t.Fatalf("CapToolResults capped %d results, want 0 (the elided result is under the ceiling)", capped)
+	}
+	if got := req.State().Messages[2].Content; got != elided {
+		t.Errorf("the elided result was reshaped: %d chars, want the whole %d", len(got), len(elided))
 	}
 }

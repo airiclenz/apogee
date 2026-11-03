@@ -39,7 +39,7 @@ func CapToolResults(req *domain.Request) (capped int) {
 	protectedFrom := mostRecentToolCallTurn(conv)
 	for i := 0; i < protectedFrom; i++ {
 		msg := conv.At(i)
-		if msg.Role != domain.RoleTool || len(msg.Content) <= maxChars {
+		if msg.Role != domain.RoleTool || !overCeiling(msg.Content, maxChars) {
 			continue
 		}
 		trimmed := apogeectx.TruncateToolResult(msg.Content, maxChars)
@@ -70,6 +70,13 @@ func capMaxChars(b domain.Budget) int {
 		return 0
 	}
 	return int(float64(budgetTokens) * b.CharsPerToken * toolResultBudgetFraction)
+}
+
+// overCeiling reports whether content is STRICTLY over the per-result ceiling maxChars — the
+// test the tool-result cap trims on, shared with the read cache, which must not take a copy the cap
+// would trim as whole. A zero (or negative) ceiling — the window is unknown — puts nothing over it.
+func overCeiling(content string, maxChars int) bool {
+	return maxChars > 0 && len(content) > maxChars
 }
 
 // mostRecentToolCallTurn is the index of the last assistant message that issued tool calls;

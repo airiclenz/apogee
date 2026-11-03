@@ -36,6 +36,16 @@ const (
 // hint is actionable.
 const toolResultElisionMarker = "\n[truncated to fit the context budget — re-read with start_line/end_line for the omitted range]\n\n"
 
+// IsElided reports whether content carries the elision marker TruncateToolResult and ElideMiddle
+// (so ElideToBytes) render in place of a dropped middle — a result that is no longer the whole of
+// what its call returned. It matches the marker's text without the newlines framing it, so a
+// rendering whose framing was since trimmed still counts. A bare head cut (ElideToBytes under a
+// bound too small to carry the marker) leaves no trace and is not detected; a caller that must
+// not mistake a part for the whole pairs this with its own size ceiling.
+func IsElided(content string) bool {
+	return strings.Contains(content, strings.TrimSpace(toolResultElisionMarker))
+}
+
 // TruncateToolResult renders content as its first toolResultHeadLines lines, the elision marker,
 // and its last toolResultTailLines lines — apogee-sim truncateToolResult (`compress.go:499` @pin)
 // minus the dropped codeinfo summary (C7). maxChars is the ceiling the caller is trimming to; the

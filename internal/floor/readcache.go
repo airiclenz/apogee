@@ -19,8 +19,9 @@ const readCacheLines = 1
 var readSliceKeys = []string{"start_line", "end_line", "max_lines"}
 
 // CacheRead is the read cache guard (the `read-cache` key, ADR 0071): a read of a file this
-// conversation already read in full successfully — no line range, limit or locate, its result not
-// since pruned to a stub, and with no write to the file, and no call to any non-read-only tool,
+// conversation already read in full successfully — no line range, limit or locate, its result
+// still whole in the request (not since pruned to a stub, elided, or over the tool-result cap's
+// ceiling), and with no write to the file, and no call to any non-read-only tool,
 // since — is capped to a header-only slice by appending max_lines to its arguments. The
 // model's existing copy stays the source of truth, and the window the re-dump would have cost is
 // reclaimed.
@@ -29,7 +30,7 @@ var readSliceKeys = []string{"start_line", "end_line", "max_lines"}
 // when the call is not a read, carries no path, targets a file not read successfully before (or
 // changed since: written by name, or followed by a non-read-only call such as a shell command that
 // may have rewritten it unnamed, so the copy may be stale; or read only in slices, or whose full read
-// was pruned, so no copy is in the conversation), already asks for an explicit line range
+// was pruned, elided or is over the cap's ceiling, so no whole copy reaches the model), already asks for an explicit line range
 // or limit (a targeted read is not a redundant full re-dump), has arguments that are not a JSON
 // object, or names a tool whose schema does not declare max_lines. That last gate is what makes the
 // no-op literal rather than hoped-for: a strict MCP server (additionalProperties:false) rejects an
@@ -49,7 +50,8 @@ func CacheRead(view domain.LoopView, edit *domain.ToolCallEdit) (ok bool) {
 	if rawPath == "" {
 		return false
 	}
-	if !priorSuccessfulReadUnchanged(view.Conversation(), view.Tools(), normalizePath(rawPath), edit.ID()) {
+	maxChars := capMaxChars(view.Budget())
+	if !priorSuccessfulReadUnchanged(view.Conversation(), view.Tools(), normalizePath(rawPath), edit.ID(), maxChars) {
 		return false
 	}
 	if !toolDeclaresMaxLines(view.Tools(), edit.Tool()) {
@@ -75,14 +77,13 @@ func CacheRead(view domain.LoopView, edit *domain.ToolCallEdit) (ok bool) {
 // runs.
 //
 // Only the EARLIEST full read since the last change stands as the copy, and only while its result is
-// unpruned. A read carrying any readSliceKeys key or a locate returned a slice or windows, never the
+// whole (copyNotWhole, against the tool-result cap's ceiling maxChars). A read carrying any readSliceKeys key or a locate returned a slice or windows, never the
 // file, so it is skipped. The earliest is the one to judge because a later bare read may be one this
 // guard capped to a header: prepareCall caps a local copy of the call, so history still holds the
-// bare arguments, and only an earlier full read can vouch for it. That earliest read being pruned to
-// a stub means the file is no longer in the conversation, and the re-read must go through whole —
-// the guard never leaves the model worse off than the loop without it would (ADR 0071 Decision 1,
-// clause (c)).
-func priorSuccessfulReadUnchanged(conv domain.ConversationView, tools []domain.ToolDef, np, currentCallID string) bool {
+// bare arguments, and only an earlier full read can vouch for it. That earliest read not being whole
+// means the file is not in front of the model, and the re-read must go through whole — the guard
+// never leaves the model worse off than the loop without it would (ADR 0071 Decision 1, clause (c)).
+func priorSuccessfulReadUnchanged(conv domain.ConversationView, tools []domain.ToolDef, np, currentCallID string, maxChars int) bool {
 	copyCallID := ""
 	for i := 0; i < conv.Len(); i++ {
 		m := conv.At(i)
@@ -120,7 +121,15 @@ func priorSuccessfulReadUnchanged(conv domain.ConversationView, tools []domain.T
 		return false
 	}
 	res, _, ok := conv.ResultFor(copyCallID)
-	return !ok || !apogeectx.IsPruneStub(res.Content)
+	return !ok || !copyNotWhole(res.Content, maxChars)
+}
+
+// copyNotWhole reports whether a cached read's result no longer carries the whole file into the
+// request: pruned to a stub, elided by a reducer that already trimmed it (the structural floor as
+// the result entered the conversation), or over the per-result ceiling maxChars, so the tool-result
+// cap trims it in the projected request. Any of the three leaves the model a part, never the file.
+func copyNotWhole(content string, maxChars int) bool {
+	return apogeectx.IsPruneStub(content) || apogeectx.IsElided(content) || overCeiling(content, maxChars)
 }
 
 // isFullRead reports whether a read call's arguments asked for the whole file: no readSliceKeys key

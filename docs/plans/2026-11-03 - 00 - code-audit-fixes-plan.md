@@ -322,7 +322,10 @@ NOTES (2026-11-03): the classification lives in a new `Handler.refreshRefused` p
 **Closes:** winlabel-journal-flush-rollback
 **Commit:** `fix(winlabel): roll the journal back when its flush fails`
 
-## 18. Decline the read cache when the earlier copy is not whole
+## 18. Decline the read cache when the earlier copy is not whole — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): IsElided matches the marker text without its framing newlines; ElideToBytes's bare head cut (a bound too small for the marker) carries no marker and is caught only by the ceiling test, not by IsElided.
+NOTES (2026-11-03): the CapToolResults elided-under-the-ceiling test lives in internal/floor/readcache_test.go (the item's listed test file), named TestCapToolResults… so the Acceptance filter selects it.
 
 **What:** Fix (ADR 0071 D1(c) breach): `priorSuccessfulReadUnchanged` checks only for a prune stub, so a read result the tool-result cap elides (or `requestRoom.fit` already elided) still counts as in the conversation and a needed re-read is capped to one line.
 **Regression guard.** Share only the ceiling half: `CapToolResults` keeps its `len(content) > maxChars` trim condition through an `overCeiling` helper, and the read-cache predicate is `IsPruneStub || elided || overCeiling`; routing the trim through the whole "not whole" predicate would send an elided result under the ceiling through `TruncateToolResult` (which trims unconditionally), breaking resultcap.go's "only a result STRICTLY over the ceiling is trimmed". The agent-level Acceptance filter is `TestFloorGuard_ToolResultCap`.

@@ -106,3 +106,27 @@ func TestElideToBytes_NoRoomForTheMarkerCutsABareHead(t *testing.T) {
 		t.Errorf("ElideToBytes(bound 7) = %q, want the three whole runes the bound holds", got)
 	}
 }
+
+// IsElided recognises both renderings' marker — the line-based TruncateToolResult and the
+// byte-based ElideToBytes — even with the framing newlines trimmed, and passes a whole result.
+func TestIsElided_RecognisesBothRenderings(t *testing.T) {
+	t.Parallel()
+	whole := strings.Repeat("line of a whole file\n", 100)
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "whole", content: whole, want: false},
+		{name: "TruncateToolResult", content: TruncateToolResult(whole, 200), want: true},
+		{name: "ElideToBytes", content: ElideToBytes(whole, 400), want: true},
+		{name: "marker without framing", content: "head" + strings.TrimSpace(toolResultElisionMarker) + "tail", want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsElided(tc.content); got != tc.want {
+				t.Errorf("IsElided(%.60q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
