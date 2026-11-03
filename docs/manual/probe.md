@@ -219,8 +219,11 @@ string per write, so a corrupted frame can be replayed rather than only describe
 `--tui-diag <file>` writes what the terminal told apogee about itself: the environment the
 renderer read, the width method it started on, the window size, the colour profile,
 every mode report the terminal sent, the kind of each mouse event it delivered
-(`mouse-kind`: `press`, `motion`, `release`, `wheel`) and every re-assertion of mouse
-tracking apogee sent after a tool child (`mouse-reassert`, a running count) — each written
+(`mouse-kind`: `press`, `motion`, `release`, `wheel`), every re-assertion of mouse
+tracking apogee sent after a tool child (`mouse-reassert`, a running count) and, while
+`ui.pointer-shapes` is on, whether the terminal answered apogee's OSC 22 pointer-shape query
+(`pointer-probe`: `supported`, `unsupported (answered …)` with the answer it gave, or
+`unsupported (no answer before DA1)`) — each written
 once and again only when it changes, so the file stays short enough to paste into a bug
 report. A terminal that stopped reporting the mouse shows as `mouse-kind: press` with no
 `motion` or `release` line ever following it.

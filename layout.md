@@ -175,6 +175,40 @@ of this table is one pane's own answer, stated once on that pane's row of the pa
 (`internal/tui/panes.go`) beside its key claim and its wheel; the order the frame asks the panes in
 is a separate list, and never the table's.
 
+**And the pointer shows what a click does — where the terminal can say so.** With
+`ui.pointer-shapes` on, the mouse pointer takes one of three shapes where it rests, each the answer
+to "what would a click here do?", asked of the same hit test the click itself acts on, in the click
+chain's own order — so the pointer never promises a click the frame would refuse:
+
+| Under the pointer | Shape |
+| --- | --- |
+| the input box's text rows while the box is editable; the open `/settings` field's text | `text` (I-beam) |
+| a row a pane's click acts on — a `/settings` key, a session, a picker or `/workflows` row, an approval or ask choice, a `/` \| `@` entry; the footer's mode marker; a transcript block that hides something, anywhere on it | `pointer` (hand) |
+| any other transcript line — it is drag-selectable | `text` (I-beam) |
+| a pane's chrome and prose, the inside of a report, the outside of a modal list (where a click only dismisses it), and everywhere else, the transcript's rows past its content included | `default` (arrow) |
+
+Outside its box a pane answers only where its click claims: the decision prompts, `/settings`, the
+reports and the dropdown leave the point to what lies under it, exactly as the outside-click table
+above leaves the click. **The gate.** The shapes ride OSC 22 (kitty's pointer-shapes protocol,
+`OSC 22 ; <name> ST`), and apogee writes them only while the setting is on AND this terminal
+answered the in-session query `OSC 22 ; ?default,text,pointer ST` with `1,1,1` ahead of the DA1
+request sent right behind it as a sentinel ([ADR 0106](.capcom/knowledge/decisions/adr-0106.md)).
+A DA1 reply arriving first, any other answer, or no answer at all keeps the feature off, and no
+timer stands in for the answer — a slow or silent terminal simply stays off. The query is sent only
+while the setting is on — at start-up, or when `/settings` turns it on — and one answer is kept per
+session. Under **tmux** the query and the shapes are written raw, never wrapped in tmux's
+passthrough, so tmux leaves the query unanswered and the feature stays off there. **While the gate
+is shut apogee writes no OSC 22 byte and keeps cell-motion tracking (mode 1002)**: a button-less
+motion — a hover — is never reported, so a terminal that cannot show a shape pays no motion traffic.
+Only while it is open does apogee ask for all-motion tracking (mode 1003), and a hover writes a
+shape only when it differs from the last one written; a drag keeps the shape it started on, since a
+held button reports its own motion. The mouse re-assert after a tool child says the last shape
+again. **And the pointer is handed back.** Whenever apogee lets go of the terminal — its exit, on
+both the main and the alternate screen's pointer stacks, and the handoff to `$EDITOR` from
+`/settings` — and when the setting turns off, it writes the empty-name reset `OSC 22 ; ST`, and only
+when a shape was ever written, so a session that never showed one writes no reset either. It is
+purely visual: nothing about the pointer reaches the model.
+
 **And a pane in that slot sits flush on the bottom chrome.** The frame spends exactly one blank gap
 row, and it sits ABOVE the slot — between the session area and whatever comes next — so the approval
 and ask prompts, the `/sessions` browser and the `/model` | `/server` picker each seat their bottom

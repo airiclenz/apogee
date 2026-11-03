@@ -178,7 +178,9 @@ bubbletea v2.0.8 tea.go — exec, releaseTerminal, stopRenderer, shutdown; tty.g
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Reassert|TestPointerShapeReset|TestSettingsApplyLocal|TestSettingsPaneForegroundEditorTakesTheTerminal|TestClaimTerminalScreen' ./internal/tui/`
 **Commit:** `feat(tui): re-assert the pointer shape and reset it on release`
 
-## 8. Document pointer shapes in the layout spec and probe manual
+## 8. Document pointer shapes in the layout spec and probe manual — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the layout.md text is a bold-lead paragraph plus a region → shape table inside the "What \"height\" means" section, placed right after the outside-click rule it builds on. That section is written as bold-lead paragraphs, so this matches it; it is not a separate heading. The scoped live-doc grep (`motion|cell-motion|1002` over layout.md, docs/layout, docs/manual, docs/design/*.md, README.md) found no existing sentence saying motion or hover is ignored. The only such statement is the new one in layout.md, and it carries the gate caveat, so no other prose guard needed editing.
 
 **What:**
 Depends on item 7.
