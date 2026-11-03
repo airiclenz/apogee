@@ -33,7 +33,8 @@ itself (ADR 0076 D6, 2026-09-20 amendment). Its board is **Driver state** like t
 and empties with it at every session boundary (`/clear`, `/new`, a `/sessions` resume, `/fork`).
 
 The same ledger also carries the engine's own **engine notes** (`Message.WithEngineNote`: a capped
-delegate's wrap-up directive, the step and token budget notices, the cut a settled Exchange marks).
+delegate's wrap-up directive, the step, token and time budget notices, the cut a settled Exchange
+marks).
 Such a row has `topic` set and origin `engine`, with no reaction, moment or turn, and its fence is
 `[engine — <topic>]` … `[end engine — <topic>]`, never the advice fence. One strip and one staleness
 guard cover both kinds (ADR 0076, 2026-09-19 addendum).

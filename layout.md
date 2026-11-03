@@ -2404,8 +2404,8 @@ injected under its `[advice — …]` fence, trailing a tool result or, for a `s
 leading the session's first prompt, and the context-fill notice's rung — one
 record per firing, newest last. It is the view for the question the transcript cannot answer because
 the transcript never carried the advice at all: what the model was **told** beside the results it
-read. The engine's own structural notes — the step notice, the token-budget notice, the delegations
-ledger, the cancelled cut — are not in it: no reaction fires to write them, so nothing books them,
+read. The engine's own structural notes — the step notice, the token-budget notice, the time-budget
+notice, the delegations ledger, the cancelled cut — are not in it: no reaction fires to write them, so nothing books them,
 and `/inspect` is where their bytes are read.
 
 **It is always recording, and there is nothing to arm.** Every firing the engine reports with the

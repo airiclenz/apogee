@@ -131,10 +131,20 @@ bound announces itself the same way — the **token-budget notice** (2026-09-19,
 **ceil(0.75 × delegate-max-tokens)** carries one engine note, fenced `[engine — token budget]` …
 `[end engine — token budget]`, `tokens: 15.2M of 20.0M spent — 4.8M left before the wrap-up Turn;
 write your output now`, latched the same way (by its own note's presence) and beside the step
-note on the result.
-Neither notice is a rung of the **context-fill notice** ladder: the ladder measures one request
-against the window, these measure the delegation's whole spend against its cap — which is why a
-child under a wide `working-window:` heard nothing at 10.7M of 20M before the twin existed. It is a
+note on the result. The time bound completes the set — the **time-budget notice** (2026-11-02,
+ADR 0077 `adr-0077-addendum-1102`): the first tool result committed once the wall clock the
+`delegate-timeout` bound reads reaches **ceil(0.75 × delegate-timeout)** — 1h30m at the default —
+carries one engine note, fenced `[engine — time budget]` … `[end engine — time budget]`,
+`time: 1h30m4s of 2h0m elapsed — 29m56s left before the wrap-up Turn; write your output now`
+(whole seconds, the cap spelled as the time-limit marker spells it), latched the same way. The
+fence order on a result is fixed: tool output, advice, step note, token note, time note, and the
+wrap-up directive last. The advice and the three notes count inside the result's share of the
+room left in the request (ADR 0018 `adr-0018-amend-1102b`), so a clamped result is shorter by
+their weight rather than pushing the next request past the room.
+None of the three notices is a rung of the **context-fill notice** ladder: the ladder measures
+one request against the window, these measure the delegation's whole spend against its cap —
+which is why a child under a wide `working-window:` heard nothing at 10.7M of 20M before the
+token notice existed. It is a
 **structural floor**
 (ADR 0006), not an armed **Reaction** —
 it stays on under **Bypass** and nothing withdraws it at runtime. Enforced in exactly one place,

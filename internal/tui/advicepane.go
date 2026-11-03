@@ -32,8 +32,8 @@ import (
 // the model rather than advice it read, and stays out.
 //
 // ENGINE NOTES ARE ABSENT, and deliberately. The structural notes the engine appends to a tool
-// result — the step notice, the token-budget notice, the delegations ledger, the cancelled cut
-// (domain.RenderEngineNote) — are not reactions: no reaction fires to write them, so no
+// result — the step notice, the token-budget notice, the time-budget notice, the delegations
+// ledger, the cancelled cut (domain.RenderEngineNote) — are not reactions: no reaction fires to write them, so no
 // ReactionFiredEvent books them and nothing here can see them. A reader who wants the whole tail
 // the model saw has /inspect for the bytes; this pane is the advice slot alone.
 //

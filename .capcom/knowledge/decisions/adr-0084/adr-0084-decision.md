@@ -12,6 +12,15 @@ and the triggers that read it share one chars→token scale. The measurement is 
 `budget()` call and never memoised: the standing render moves on `SetMode`, `SetScratchDir`, the
 date, delegation seats, `ExtraReadRoots` and every `task_list` call.
 
+> **Amended 2026-11-02 (`docs/plans/2026-11-02 - 05 - request-room-and-delegate-bounds-plan.md`, item 3).**
+> A tool-result append commit renders the standing table once and passes that render down as a
+> value: the commit's request room (`requestRoom`, ADR 0018 `adr-0018-amend-1102b`) derives its
+> Budget from its own standing rows, and within that commit the clamp, the post-tool-result
+> cascade's `loopView`, the fill notice and the commit's event estimates read the room's Budget
+> instead of calling `budget()` again. This is not a memo: the room lives for one commit and is
+> dropped when the commit ends, so the next commit, or any call site outside one, measures afresh
+> through `budget()` as this decision says.
+
 **2. The 15% / 25% fractions survive only as the unmeasured fallback.** A caller that passes a
 negative measurement (`Measured{-1, -1}`) keeps today's fraction for that part. Since `budget()`
 always measures, that path is test-only in the shipped engine. A zero measurement is *measured

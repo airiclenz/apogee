@@ -1235,7 +1235,9 @@ a result larger than its share of the room the request has left (the window, les
 reply reserve, less everything else the request already carries) is cut to that share:
 apogee keeps its start and its end and puts `[truncated to fit the context budget …]` in
 the middle, cutting by whole lines where that is enough and by characters where it is not
-(a few very long lines). Several results from one turn share the room evenly, and a small
+(a few very long lines). The notes apogee adds below a result — a reaction's advice, a
+sub-agent's budget notices — count inside its share, so the result is cut shorter by their
+length rather than pushing the next request past the room. Several results from one turn share the room evenly, and a small
 one passes its unused share on to the next. A result is never cut below an eighth of the
 history's budgeted share; past that point the conversation is folded instead. With no
 window known, a result is cut only when it exceeds the whole of the history's share. This
@@ -1435,6 +1437,20 @@ compaction folds the line away. It is not a rung of the context-fill notice: tha
 single request against the window, this one the delegation's whole spend against its budget, so a
 sub-agent under a wide window can hear this notice while the fill notice stays silent. If a
 sub-agent's single requests are what run large, the lever is `working-window:`, not this ceiling.
+
+The time ceiling announces itself the same way: the first tool result the sub-agent receives once
+three quarters of `delegate-timeout:` has passed — 1h30m at the default — carries one line fenced
+as the engine's own note (`[engine — time budget]`), after the step and token lines when they fall
+on the same result:
+
+```
+time: 1h30m4s of 2h0m elapsed — 29m56s left before the wrap-up Turn; write your output now
+```
+
+The times are whole seconds, and the ceiling is spelled the way the result's `time limit` line
+spells it. Like the other two notices it has no key, stays on under `--bypass`, never fires for
+the session you are talking to or with no time ceiling (`delegate-timeout: 0`), and fires again
+after a compaction folds the line away.
 
 Your agent is also **handed the engine's own record of its delegations**. A coordinator that
 delegates several times has been seen misremembering, turns later, which sub-agents faulted and

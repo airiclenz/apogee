@@ -14,7 +14,10 @@ the advertised window less the reply reserve less the estimate of the next reque
 it, divided across the Turn's results still to append — never above the *entire* History
 allocation and never below 1/8 of it (with no window known, the History allocation), because
 a result that does not fit the next request would overflow it and even the emergency fold
-that exists to rescue the Turn (ADR 0018 `adr-0018-amend-1102`). Both render the same
+that exists to rescue the Turn (ADR 0018 `adr-0018-amend-1102`). The estimate is of the request
+the loop will actually send (the ledger note, the wrap-up directive and pending injections
+included), and the result's trailers — its advice spans and the delegate's budget notices — count
+inside its share: the body is clamped shorter by their weight (`adr-0018-amend-1102b`). Both render the same
 head/tail-plus-marker elision (`context.TruncateToolResult`), so the model reads one idiom;
 a body the line elision cannot bring under the floor's bound — a few very long lines — is
 cut by bytes instead (`context.ElideToBytes`, the same marker). The guard's tighter

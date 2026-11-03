@@ -290,7 +290,13 @@ Depends on item 8.
 - `GOMEMLIMIT=2GiB go test -count=1 -run 'TestTimeNotice|TestTrailerFenceOrder|TestStepNotice|TestTokenNotice|TestBoundRows' ./internal/agent/`
 **Commit:** `feat(agent): tell a delegate when three quarters of its time is spent`
 
-## 10. Record the request room, the trailer rule and the time notice
+## 10. Record the request room, the trailer rule and the time notice — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): prose guard (`composed here|from its parts|freshResultBound|after the clamp|ladder order AFTER|advise slot`) found no stale code comment: items 2–9 had already rewritten the hits in internal/agent (dispatch.go appendToolResult/withTrailers/clampToolResult, fillnotice.go, requestroom.go, turn.go, loop.go, compact.go); the remaining hits are unrelated "composed here"/"advise slot" prose. No code comment edited for that guard.
+NOTES (2026-11-03): regression-guard hits updated to name the time notice: docs/manual/commands.md (`/advice` row), layout.md (`/advice` pane), .capcom/knowledge/glossary/glossary-reactions/advice-span.md, .capcom/knowledge/glossary/glossary-turns/step-cap.md, internal/config/defaults/config.yaml (`delegate-timeout` comment; no internal/config/testdata golden carries it), plus internal/domain/conversation.go and internal/tui/advicepane.go per the item-9 DECISION.
+NOTES (2026-11-03): consequential edit — internal/domain/advice.go: made necessary by the time notice (its Topic comment listed only the step- and token-budget notices; found by widening the regression grep to internal/domain).
+NOTES (2026-11-03): consequential edit — .capcom/knowledge/glossary/glossary-context/tool-result-capping.md: made necessary by the trailer rule (the Note described the room-left bound without the request-sent measure or the trailers counting inside it).
+NOTES (2026-11-03): docs/manual/configuration.md also gains one sentence in the single-tool-result paragraph saying a result's advice and budget notes count inside its share; adr-0077.md's summary sentence was left as written (only its Status line and reading list name the addendum).
 
 Depends on item 9.
 

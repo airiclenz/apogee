@@ -776,8 +776,9 @@ context-fill-notice: false
 # and nobody is watching a sub-agent's clock, so this is the wall-clock ceiling on one delegation,
 # counted from its first request, as a length of time like 2h or 30m; when it is reached apogee
 # ends the delegation the way the step ceiling does — one closing turn to sum up, the result
-# marked as partial. 0 lets a delegation run for as long as it takes. Config-file only (no flag or
-# env). Default: 2h.
+# marked as partial. The sub-agent is told once, at three quarters of this ceiling, how long it has
+# run and how long is left, so it can write its output while it still has its tools. 0 lets a
+# delegation run for as long as it takes. Config-file only (no flag or env). Default: 2h.
 # delegate-timeout: 2h
 
 # =============================================================================
