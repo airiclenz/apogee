@@ -142,6 +142,46 @@ func TestServerToolNameDistinct(t *testing.T) {
 	}
 }
 
+// TestServerConfigValidateName asserts a server name holding the "__" separator or ending in "_"
+// is refused naming it, because either lets two (alias, tool) pairs qualify alike — alias a__b's
+// tool c and alias a's tool b__c are both a__b__c — while a name with a lone "_" or a "." passes.
+func TestServerConfigValidateName(t *testing.T) {
+	t.Parallel()
+	if got := qualifyToolName("a", "b__c"); got != qualifyToolName("a__b", "c") {
+		t.Fatalf("qualifyToolName(a, b__c) = %q; want it equal to alias a__b's tool c, the collision refused here", got)
+	}
+	if got := qualifyToolName("a", "b__c"); got != "a__b__c" {
+		t.Errorf("qualifyToolName(a, b__c) = %q; want a__b__c", got)
+	}
+	cases := []struct {
+		name        string
+		isRefused   bool
+		wantInError string
+	}{
+		{name: "a__b", isRefused: true, wantInError: `name: "a__b" holds "__"`},
+		{name: "a_", isRefused: true, wantInError: `name: "a_" ends in "_"`},
+		{name: "a_b"},
+		{name: "a.b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ServerConfig{Name: tc.name, Transport: TransportStdio, Command: "x"}.ValidateName()
+
+			if !tc.isRefused {
+				if err != nil {
+					t.Fatalf("ValidateName() = %v; want the name accepted", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantInError) {
+				t.Fatalf("ValidateName() = %v; want a refusal containing %q", err, tc.wantInError)
+			}
+		})
+	}
+}
+
 // TestNormaliseSchema asserts a usable schema round-trips and an absent/unmarshalable one degrades
 // to the empty-object schema (so the tool is never lost, only its arg hint).
 func TestNormaliseSchema(t *testing.T) {

@@ -304,6 +304,18 @@ func TestRepoMCPServerRefusedAloneKeepsTheTightenOnlyKeys(t *testing.T) {
 			},
 		},
 		{
+			name: "names that would make tool names ambiguous",
+			servers: "mcp-servers:\n" +
+				"  - name: a_\n    transport: stdio\n    command: trailing\n" +
+				"  - name: a__b\n    transport: stdio\n    command: separator\n" +
+				"  - name: a_b\n    transport: stdio\n    command: ok-server\n",
+			wantProposed: []string{"a_b"},
+			wantNotices: []string{
+				`ignoring mcp-servers entry "a_": name: "a_" ends in "_"`,
+				`ignoring mcp-servers entry "a__b": name: "a__b" holds "__"`,
+			},
+		},
+		{
 			name:        "a value that is not a list",
 			servers:     "mcp-servers: docs\n",
 			wantNotices: []string{"ignoring mcp-servers: it is not a list of servers"},

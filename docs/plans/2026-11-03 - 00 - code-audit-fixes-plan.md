@@ -265,7 +265,10 @@ NOTES (2026-11-03): runGoVet now returns a small vetOutcome struct (findings, ha
 **Closes:** stream-index-zero-ids
 **Commit:** `fix(provider): keep distinct-id tool calls apart at a shared index`
 
-## 14. Refuse MCP server names that make tool names ambiguous
+## 14. Refuse MCP server names that make tool names ambiguous — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): the `TestRepoMCPServerRefusedAloneKeepsTheTightenOnlyKeys` row is a new table row ("names that would make tool names ambiguous", `a_` and `a__b` refused beside an accepted `a_b`) rather than an extra entry in the existing row; the config-load test is `TestApplyConfigMCPServerNameRefusals` so the `-run 'MCP'` Acceptance filter selects it.
+NOTES (2026-11-03): `ValidateName` checks the name as written and leaves the empty-name refusal to `validateServers` / `checkRepoServer`, which already word it their own way; the `ServerConfig.Name` field comment now states the rule.
 
 **What:** Fix: `<alias>__<tool>` collides when an alias contains `__` (`a__b`+`c` vs `a`+`b__c`) or ends in `_` (`a_`+`b` vs `a`+`_b`).
 **Regression guard.** Project-config entries never reach `fileMCPServers`: `checkRepoServer` (internal/config/execlayer.go) calls `ValidateName` too, so a bad project name drops that one entry with the `ignoring mcp-servers entry "a_"` notice instead of `validateServers` refusing the whole `ConnectWith`. `TestServerToolNameDistinct` asserts its pairs differ and stays as is; the rule is tested in a separate `TestServerConfigValidateName` plus `qualifyToolName("a","b__c") == "a__b__c"`.

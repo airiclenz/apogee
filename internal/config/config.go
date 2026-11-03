@@ -524,7 +524,9 @@ func fileUnconfinedHosts(o *Options, fc fileConfig) error {
 
 // fileMCPServers projects `mcp-servers:`. The on-disk entries are mapped across one by one, as they
 // are everywhere else in this package: the schema shape and the resolved one stay independently
-// evolvable. An entry whose `headers:` / `headers-env:` could not be sent as written is a startup
+// evolvable. An entry whose `name:` would make two servers' tool names ambiguous (it holds `__` or
+// ends in `_`; mcp.ServerConfig.ValidateName owns the rule) is a startup refusal naming it. So is
+// an entry whose `headers:` / `headers-env:` could not be sent as written is a startup
 // refusal (mcp.ServerConfig.ValidateHeaders owns the rule), so a reserved or malformed header is
 // never a request that fails later, per connect, with nothing in the config pointing at it. So is
 // an `auth:` / `client-id:` / `client-secret-env:` combination that could not do what it says
@@ -537,6 +539,9 @@ func fileMCPServers(o *Options, fc fileConfig) error {
 		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
 		for i, m := range fc.MCPServers {
 			servers[i] = m.toServerConfig()
+			if err := servers[i].ValidateName(); err != nil {
+				return fmt.Errorf("apogee: mcp-servers.%s: %w", m.Name, err)
+			}
 			if err := servers[i].ValidateHeaders(); err != nil {
 				return fmt.Errorf("apogee: mcp-servers.%s: %w", m.Name, err)
 			}

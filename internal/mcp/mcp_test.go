@@ -1162,8 +1162,9 @@ func TestConnect_NoServersIsDormant(t *testing.T) {
 	}
 }
 
-// TestConnect_RejectsBadServerNames proves an empty or duplicate server name is rejected
-// before any connection — the name must uniquely qualify a surfaced tool's registry key.
+// TestConnect_RejectsBadServerNames proves an empty, duplicate or ambiguous server name is
+// rejected before any connection — the name must uniquely qualify a surfaced tool's registry key,
+// so one holding "__" or ending in "_" is refused naming the entry (ServerConfig.ValidateName).
 func TestConnect_RejectsBadServerNames(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		_, err := Connect(context.Background(),
@@ -1179,6 +1180,18 @@ func TestConnect_RejectsBadServerNames(t *testing.T) {
 			t.Fatalf("Connect with a duplicate name: err = %v, want a duplicate-name error", err)
 		}
 	})
+	for _, name := range []string{"a__b", "a_"} {
+		t.Run(name, func(t *testing.T) {
+			cfg := ServerConfig{Name: name, Transport: TransportStdio, Command: "x"}
+
+			_, err := Connect(context.Background(), []ServerConfig{cfg}, security.URLGuard{}, t.TempDir())
+
+			want := fmt.Sprintf("mcp: server %q: name: %q", name, name)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Connect with server name %q: err = %v, want a refusal containing %q", name, err, want)
+			}
+		})
+	}
 }
 
 // ----------------------------------------------------------------------------

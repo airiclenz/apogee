@@ -188,9 +188,9 @@ func globalMCPServers(servers []mcp.ServerConfig) []mcp.ServerConfig {
 
 // repoMCPServers decodes and checks the project file's `mcp-servers:` value (nil when the file
 // states none) one entry at a time, answering the entries that passed in file order. An entry that
-// does not decode, has no name, repeats an earlier entry's name, or spells headers or an `auth:`
-// combination the global file would be refused for is dropped with one notice naming it; a value
-// that is not a list drops every entry with one notice. Neither ever skips the layer.
+// does not decode, has no name, repeats an earlier entry's name, or spells a name, headers or an
+// `auth:` combination the global file would be refused for is dropped with one notice naming it; a
+// value that is not a list drops every entry with one notice. Neither ever skips the layer.
 func repoMCPServers(value *yaml.Node, path string, notify func(string)) []mcpServerConfig {
 	if value == nil {
 		return nil
@@ -222,7 +222,7 @@ func repoMCPServers(value *yaml.Node, path string, notify func(string)) []mcpSer
 }
 
 // checkRepoServer refuses the repo server m when it has no name, repeats a name in named, or spells
-// headers or an `auth:` combination the global file's pass would refuse (fileMCPServers).
+// a name, headers or an `auth:` combination the global file's pass would refuse (fileMCPServers).
 func checkRepoServer(m mcpServerConfig, named map[string]bool) error {
 	switch {
 	case strings.TrimSpace(m.Name) == "":
@@ -231,6 +231,9 @@ func checkRepoServer(m mcpServerConfig, named map[string]bool) error {
 		return errors.New("an earlier entry already uses that name")
 	}
 	server := m.toServerConfig()
+	if err := server.ValidateName(); err != nil {
+		return err
+	}
 	if err := server.ValidateHeaders(); err != nil {
 		return err
 	}

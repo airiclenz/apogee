@@ -71,7 +71,9 @@ const (
 // HeadersEnv.
 type ServerConfig struct {
 	// Name is the server alias — the prefix on each surfaced tool's registry name. Required and
-	// must be unique across the configured set (the Client rejects a duplicate or empty name).
+	// must be unique across the configured set (the Client rejects a duplicate or empty name), and
+	// may not hold "__" or end in "_", which would make two qualified tool names alike
+	// (ValidateName).
 	Name string
 	// Transport selects stdio / sse / streamable-http. An empty/unknown transport is rejected at
 	// connect time rather than silently defaulted.
@@ -171,6 +173,28 @@ var reservedHeaders = map[string]bool{
 	"transfer-encoding": true,
 	"last-event-id":     true,
 }
+
+// ValidateName refuses a Name that would make two qualified tool names ambiguous: one holding the
+// "__" separator (`a__b` + `c` and `a` + `b__c` both qualify as `a__b__c`) or ending in "_" (`a_` +
+// `b` and `a` + `_b` both qualify as `a___b`). With neither, the first "__" of a qualified name
+// always ends the alias, so distinct (alias, tool) pairs never share a registry key. An empty name
+// is not this rule's to judge (validateServers and the config loader each refuse it in their own
+// words). The error names the key and the name.
+func (cfg ServerConfig) ValidateName() error {
+	if strings.Contains(cfg.Name, toolNameSeparator) {
+		return fmt.Errorf("name: %q holds %q, which apogee puts between a server's name and its tool's — "+
+			"two servers' tools could be offered under one name", cfg.Name, toolNameSeparator)
+	}
+	if strings.HasSuffix(cfg.Name, serverNameForbiddenSuffix) {
+		return fmt.Errorf("name: %q ends in %q, which runs into the %q apogee puts before its tool's name — "+
+			"two servers' tools could be offered under one name", cfg.Name, serverNameForbiddenSuffix, toolNameSeparator)
+	}
+	return nil
+}
+
+// serverNameForbiddenSuffix is what a server name may not end in: it would merge with the
+// leading character of toolNameSeparator (ValidateName).
+const serverNameForbiddenSuffix = "_"
 
 // ValidateHeaders refuses a Headers / HeadersEnv pair that could not be sent as written: a name
 // that is not an HTTP token, a name the transport or the MCP protocol sets itself (Host,

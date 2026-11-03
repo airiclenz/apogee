@@ -3612,6 +3612,35 @@ func TestApplyConfigMCPServerHeadersRefusals(t *testing.T) {
 	}
 }
 
+// An entry whose name holds "__" or ends in "_" is a startup refusal naming it: either would let two
+// servers' tools be offered to the model under one qualified name (mcp.ServerConfig.ValidateName).
+func TestApplyConfigMCPServerNameRefusals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		want string
+	}{
+		{name: "a__b", want: `apogee: mcp-servers.a__b: name: "a__b" holds "__"`},
+		{name: "a_", want: `apogee: mcp-servers.a_: name: "a_" ends in "_"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, "mcp-servers:\n  - name: "+tc.name+"\n    transport: stdio\n    command: x\n")
+			opts := Options{ConfigDir: home}
+
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ApplyConfig error = %v; want a refusal containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // `auth: oauth` on a streamable-http entry loads with its optional preregistered client, and every
 // combination that could not do what it says is a startup refusal naming the entry and the key.
 // `auth:` on a stdio or sse server is refused, not noticed like the other transport-mismatched

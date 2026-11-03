@@ -674,6 +674,11 @@ reached over http(s). A stdio entry takes `command`, optional `args`, and option
 one takes `endpoint`, and optional `headers` and `headers-env` — and a `streamable-http` one can
 instead log in with OAuth (`auth: oauth`, optionally with `client-id` and `client-secret-env`).
 
+A `name` may not hold `__` or end in `_`: server `a__b`'s tool `c` and server `a`'s tool `b__c`
+would both be offered as `a__b__c`, and `a_`'s `b` and `a`'s `_b` both as `a___b`. Such an entry
+in your own file stops apogee at startup with an error naming it; one in a project's file is
+skipped with a notice naming it, and the project's other entries still apply.
+
 A prefixed name the model providers would refuse — one outside `^[a-zA-Z0-9_-]{1,64}$`, because the
 server's or the tool's name holds a dot, a space or a non-ASCII letter, or the two run past 64
 characters — is offered to the model rewritten: every other character becomes `_`, the name is cut
