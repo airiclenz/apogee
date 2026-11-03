@@ -19,21 +19,27 @@ const (
 	proseCommit   = "7000000000000000000000000000000000000000"
 )
 
-// The `git diff-tree -r --name-only <parent> <commit>` outputs the test commits answer with.
-// bumpPaths is copied from real output: `git diff-tree -r --name-only 5b3ed35c 58e85387` over
-// this repository's micro-bump to v0.24.11 prints exactly this.
+// The `git diff-tree -r -z --name-only <parent> <commit>` outputs the test commits answer with,
+// each path NUL-terminated. bumpPaths is copied from real output: `git diff-tree -r -z
+// --name-only 5b3ed35c 58e85387` over this repository's micro-bump to v0.24.11 prints exactly this.
 const (
-	bumpPaths    = "VERSION\n"
-	rollupPaths  = "CHANGELOG.md\nVERSION\n"
-	featurePaths = "cmd/release/dist.go\ncmd/release/dist_test.go\n"
-	mixedPaths   = "CHANGELOG.md\nREADME.md\n"
+	bumpPaths    = "VERSION\x00"
+	rollupPaths  = "CHANGELOG.md\x00VERSION\x00"
+	featurePaths = "cmd/release/dist.go\x00cmd/release/dist_test.go\x00"
+	mixedPaths   = "CHANGELOG.md\x00README.md\x00"
 	// prosePaths are all skipped by ci.yml's push filter; takeBackPaths is one the filter
 	// drops by its tree and then takes back, so CI runs on it.
-	prosePaths        = ".capcom/issues/x.md\ndocs/plans/p.md\n"
-	proseAndBumpPaths = ".capcom/issues/x.md\nCHANGELOG.md\nVERSION\n"
-	takeBackPaths     = ".capcom/knowledge/decisions/adr-0098.md\n"
-	proseAndCodePaths = ".capcom/issues/x.md\ncmd/release/gate.go\n"
-	linearProsePaths  = ".capcom/issues/x.md\n"
+	prosePaths        = ".capcom/issues/x.md\x00docs/plans/p.md\x00"
+	proseAndBumpPaths = ".capcom/issues/x.md\x00CHANGELOG.md\x00VERSION\x00"
+	takeBackPaths     = ".capcom/knowledge/decisions/adr-0098.md\x00"
+	proseAndCodePaths = ".capcom/issues/x.md\x00cmd/release/gate.go\x00"
+	linearProsePaths  = ".capcom/issues/x.md\x00"
+	// spacedProsePaths and nonASCIIProsePaths are prose paths as -z prints them: raw, where the
+	// newline form would split the house plan name at its spaces and C-quote the accented byte.
+	spacedProsePaths   = "docs/plans/2026-11-03 - 00 - x.md\x00"
+	nonASCIIProsePaths = "docs/plans/caf\xc3\xa9.md\x00.capcom/issues/x.md\x00"
+	// spacedCodePaths is a code path with a space, which CI runs on, so it stops the peel.
+	spacedCodePaths = "docs/plans/2026-11-03 - 00 - x.md\x00cmd/release/a b.go\x00"
 )
 
 // fakeCommit is one commit of a fakeRepo: its parents, and the paths it changes against its
@@ -112,10 +118,10 @@ func (r fakeRepo) respond(call recordedCall) (string, error) {
 	case call.name == "git" && len(args) == 4 && args[0] == "rev-list" && args[1] == "--parents":
 		commit := args[3]
 		return strings.Join(append([]string{commit}, r.commits[commit].parents...), " ") + "\n", nil
-	case call.name == "git" && len(args) == 5 && args[0] == "diff-tree":
-		commit := args[4]
-		if parents := r.commits[commit].parents; len(parents) == 0 || parents[0] != args[3] {
-			return "", fmt.Errorf("diff-tree asked for %s against %s, not its first parent", commit, args[3])
+	case call.name == "git" && len(args) == 6 && args[0] == "diff-tree":
+		commit := args[5]
+		if parents := r.commits[commit].parents; len(parents) == 0 || parents[0] != args[4] {
+			return "", fmt.Errorf("diff-tree asked for %s against %s, not its first parent", commit, args[4])
 		}
 		return r.commits[commit].changed, nil
 	case call.name == "git" && len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor":
@@ -191,6 +197,9 @@ func TestGatePeelsOnlyTrailingChangelogAndVersionCommits(t *testing.T) {
 		"prose with a bump is peeled":            {commits: historyWithHead(proseAndBumpPaths), head: sideCommit, want: featureCommit},
 		"a take-back path stops the peel":        {commits: historyWithHead(takeBackPaths), head: sideCommit, want: sideCommit},
 		"prose mixed with code stops the peel":   {commits: historyWithHead(proseAndCodePaths), head: sideCommit, want: sideCommit},
+		"a spaced prose path is peeled":          {commits: historyWithHead(spacedProsePaths), head: sideCommit, want: featureCommit},
+		"a non-ASCII prose path is peeled":       {commits: historyWithHead(nonASCIIProsePaths), head: sideCommit, want: featureCommit},
+		"a spaced code path stops the peel":      {commits: historyWithHead(spacedCodePaths), head: sideCommit, want: sideCommit},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -210,10 +219,10 @@ func TestGatePeelsOnlyTrailingChangelogAndVersionCommits(t *testing.T) {
 				if call.args[0] != "diff-tree" {
 					continue
 				}
-				if call.args[1] != "-r" || call.args[2] != "--name-only" {
-					t.Errorf("diff-tree called as %v, want the two-tree -r --name-only form", call.args)
+				if call.args[1] != "-r" || call.args[2] != "-z" || call.args[3] != "--name-only" {
+					t.Errorf("diff-tree called as %v, want the two-tree -r -z --name-only form", call.args)
 				}
-				if call.args[4] == mergeCommit {
+				if call.args[5] == mergeCommit {
 					t.Errorf("diff-tree was asked about the merge commit: %v", call.args)
 				}
 			}

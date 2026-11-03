@@ -239,7 +239,7 @@ NOTES (2026-11-03): runGoVet now returns a small vetOutcome struct (findings, ha
 **Closes:** go-vet-timeout-misreported
 **Commit:** `fix(tools): report a timed-out go vet as skipped, not as findings`
 
-## 12. Read release-gate paths NUL-delimited
+## 12. Read release-gate paths NUL-delimited — ✅ DONE (2026-11-03)
 
 **What:** Fix (slow-box/fail-closed): `touchesOnlyPeelablePaths` splits `git diff-tree --name-only` with `strings.Fields`, so a spaced house plan path (`2026-11-03 - 00 - x.md`) stops the peel and the gate reports a clear release as un-run by CI.
 **Regression guard.** The diff-tree fixture constants (gate_test.go, shared through `fakeRepo` by `clearedRepo` and `newPublishFake`) become NUL-terminated, re-copied from real `-z` output so the bumpPaths "copied from real output" comment stays true; `fakeRepo.respond` and `TestGatePeelsOnlyTrailingChangelogAndVersionCommits` move to the new indices (len 6, parent `args[4]`, commit `args[5]`); Acceptance covers `TestStatus` and `TestPublish`.

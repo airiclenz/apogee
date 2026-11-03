@@ -114,8 +114,9 @@ func peelBumps(ctx context.Context, commands runner, dir, head string) (string, 
 		parent := fields[1]
 
 		// The two-tree form lists the paths alone; the one-commit form would print the commit id
-		// first, and nothing at all for a merge.
-		changed, err := commands.run(ctx, dir, nil, "git", "diff-tree", "-r", "--name-only", parent, commit)
+		// first, and nothing at all for a merge. -z ends each path with a NUL and prints it raw,
+		// so a path with a space or a non-ASCII byte reads back exactly as the filter sees it.
+		changed, err := commands.run(ctx, dir, nil, "git", "diff-tree", "-r", "-z", "--name-only", parent, commit)
 		if err != nil {
 			return "", nil, fmt.Errorf("list the paths %s changes: %w", short(commit), err)
 		}
@@ -127,11 +128,11 @@ func peelBumps(ctx context.Context, commands runner, dir, head string) (string, 
 	}
 }
 
-// touchesOnlyPeelablePaths reports whether the diff-tree path list names at least one path and
-// each one is in peelablePaths or skipped by ci.yml's push filter. A path the filter takes back
-// (an ADR a test stats, the demo stage's Go) is one CI runs on, so it stops the peel.
+// touchesOnlyPeelablePaths reports whether the NUL-terminated diff-tree path list names at least
+// one path and each one is in peelablePaths or skipped by ci.yml's push filter. A path the filter
+// takes back (an ADR a test stats, the demo stage's Go) is one CI runs on, so it stops the peel.
 func touchesOnlyPeelablePaths(changed string) bool {
-	paths := strings.Fields(changed)
+	paths := slices.DeleteFunc(strings.Split(changed, "\x00"), func(path string) bool { return path == "" })
 	if len(paths) == 0 {
 		return false
 	}
