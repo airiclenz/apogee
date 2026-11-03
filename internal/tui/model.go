@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
@@ -473,6 +474,11 @@ type Model struct {
 	// the only thing --tui-diag can say about them. A plain int, riding the value-copied Model
 	// (ADR 0011).
 	mouseReasserts int
+	// pointerProbe is where this session's one OSC 22 capability question stands (pointerprobe.go,
+	// ADR 0106 §2): unasked, pending, or the verdict kept for the rest of the run. With the
+	// ui.pointer-shapes setting it decides the mouse mode View asks for. A plain int, riding the
+	// value-copied Model (ADR 0011).
+	pointerProbe pointerProbe
 	// notifyTmux says $TMUX was set when the Model was built, so an OSC 9 notification is wrapped
 	// for tmux passthrough (notify.go). Read once by newModel; a test sets it.
 	notifyTmux bool
@@ -744,6 +750,13 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// so a stray Msg cannot be folded into a Model that monitors nothing.
 	if m.observesUpstream() {
 		m.hb.gen = 1
+	}
+
+	// Mark the pointer-shape probe pending when the setting is on at start-up: the query leaves from
+	// Init (probeQueryCmd), which has a value receiver and so cannot record that it asked. With the
+	// setting off nothing is asked at all (ADR 0106 §3).
+	if opts.UI.PointerShapes {
+		m.pointerProbe = pointerProbePending
 	}
 
 	// Arm the git status chain the same way: generation 1 is the chain Init's first read belongs to,
@@ -1049,7 +1062,7 @@ func steadyCursor(ta *textarea.Model, shape tea.CursorShape) {
 // construction returns no Cmd, so its drain marker and backstop leave from here (startupLatchCmds).
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.beatCmd(), m.gitStatusCmd(), m.loadRecallCmd(), m.awaitConfigChange(), m.restoreCmd(), m.updateCheckCmd(),
-		m.startupLatchCmds(), m.startupWatchRead)
+		m.startupLatchCmds(), m.startupWatchRead, m.probeQueryCmd())
 }
 
 // startupLatchCmds issues the arming Cmds for a latched surface newModel opened, and nothing when
@@ -1150,6 +1163,16 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// it reached before this case existed.
 		m.th.padPrompts = padsPrompts(msg.Profile)
 		return m.foldWidgetMsg(msg)
+
+	case uv.UnknownOscEvent:
+		// An OSC ultraviolet does not decode itself, handed on whole: the one apogee asks for is
+		// the pointer-shape probe's OSC 22 answer (pointerprobe.go).
+		return m.foldPointerShapeReply(string(msg)), nil
+
+	case uv.PrimaryDeviceAttributesEvent:
+		// A DA1 reply: the probe's sentinel, which settles a still-pending probe as unsupported
+		// (pointerprobe.go).
+		return m.foldPointerProbeSentinel(), nil
 
 	case tea.KeyboardEnhancementsMsg:
 		// The terminal answered bubbletea's kitty-keyboard query: the prompt legend learns whether
@@ -3463,8 +3486,10 @@ func (m Model) View() tea.View {
 
 	v := tea.NewView(m.joinFrame(rows))
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion // enable wheel scrolling (Update routes MouseWheelMsg)
-	v.ReportFocus = true                  // a blurred window is told a Turn ended (notify.go)
+	// Wheel scrolling, clicks and drags always (Update routes the mouse Msgs); all-motion hover
+	// reports only while the pointer-shape gate is open (mouseMode, pointerprobe.go).
+	v.MouseMode = m.mouseMode()
+	v.ReportFocus = true // a blurred window is told a Turn ended (notify.go)
 	v.Cursor = m.promptCursor()
 	return v
 }

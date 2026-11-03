@@ -12,13 +12,14 @@ import (
 //
 // Bubble Tea writes the mouse-tracking escapes only when the frame's MouseMode CHANGES
 // (cursed_renderer.go's `view.MouseMode != s.lastView.MouseMode` diff). View sets
-// tea.MouseModeCellMotion on every laid-out frame, so from the renderer's side the mode never
-// moves and the sequence is written exactly once, at the first laid-out frame.
+// tea.MouseModeCellMotion on every laid-out frame — tea.MouseModeAllMotion instead while the
+// pointer-shape gate is open (mouseMode, pointerprobe.go) — so from the renderer's side the mode
+// moves at most when that gate does, and the sequence is written once per mode it settles on.
 //
 // That is a problem apogee cannot see: a tool child runs on the SAME terminal, and one that
 // resets mouse tracking on its way out — an editor, a pager, anything that drives the tty and
 // restores its own idea of the mode — turns the terminal's reporting off behind apogee's back.
-// The renderer has nothing to re-send (its lastView still says CellMotion), so block toggles,
+// The renderer has nothing to re-send (its lastView still says the same mode), so block toggles,
 // drag-select and wheel scrolling stay dead for the rest of the session.
 //
 // The fix is to say it again ourselves at the two moments the terminal may have been taken over
@@ -33,13 +34,18 @@ const (
 	// visible at the seam that has to match the renderer byte for byte.
 	mouseTrackingSeq = "\x1b[?1002h\x1b[?1006h"
 
+	// allMotionTrackingSeq is the same for tea.MouseModeAllMotion (ansi.SetModeMouseAnyEvent +
+	// ansi.SetModeMouseExtSgr): any-event tracking, which reports button-less motion too, plus SGR
+	// coordinates. It is what the frame asks for only while the pointer-shape gate is open.
+	allMotionTrackingSeq = "\x1b[?1003h\x1b[?1006h"
+
 	// diagMouseReassert is the --tui-diag key for the re-assert counter (diagnostics.go's
 	// change-suppressed log): the value is the running count, so every re-assert is a new line
 	// and a bug report shows how many went out and when.
 	diagMouseReassert = "mouse-reassert"
 )
 
-// reassertMouse re-sends the cell-motion mouse-tracking escapes to the terminal, and returns the
+// reassertMouse re-sends the live mode's mouse-tracking escapes to the terminal, and returns the
 // model carrying the incremented count with the Cmd that writes them. It answers with a nil Cmd
 // before the first WindowSizeMsg: the pre-ready frame paints no mouse mode at all (View), so
 // asserting one there would enable reporting the renderer never turned on.
@@ -52,5 +58,14 @@ func (m Model) reassertMouse() (Model, tea.Cmd) {
 	}
 	m.mouseReasserts++
 	m.diag.record(diagMouseReassert, strconv.Itoa(m.mouseReasserts))
-	return m, tea.Raw(mouseTrackingSeq)
+	return m, tea.Raw(trackingSeqOf(m.mouseMode()))
+}
+
+// trackingSeqOf is the byte sequence the renderer writes for mode, so a re-assert says exactly what
+// the frame's MouseMode already describes. Model.mouseMode only ever asks for these two modes.
+func trackingSeqOf(mode tea.MouseMode) string {
+	if mode == tea.MouseModeAllMotion {
+		return allMotionTrackingSeq
+	}
+	return mouseTrackingSeq
 }

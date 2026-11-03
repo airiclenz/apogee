@@ -10,7 +10,11 @@ title: ADR 0106 consequences
 - A pointer-shape classifier beside the click chain, answering per point for the prompt, the
   footer, the transcript and each pane.
 - View picks `tea.MouseModeAllMotion` while the gate is open and `tea.MouseModeCellMotion`
-  otherwise. `handleMouseMotion` writes a shape on change, through `tea.Raw`, and still never
+  otherwise. The open gate has a cost: every hovered cell is an Update plus the full `View()`
+  composition the program draws after it, where cell-motion pays that only mid-drag. Measured
+  2026-11-03 on a Raspberry Pi 5 (`BenchmarkPointerProbeHoverUpdateAndView`, 80×24, 25 turns of
+  transcript): about 1.2 ms and 3.8k allocations per hovered cell. The closed gate is untouched.
+  `handleMouseMotion` writes a shape on change, through `tea.Raw`, and still never
   repaints.
 - The shape is re-asserted beside `reassertMouse` and reset on exit (both screen stacks), on the
   external-editor handoff and when the setting turns off.

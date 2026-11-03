@@ -452,10 +452,10 @@ func (m Model) autoBlastRadiusNote(pending settingEdit) string {
 // but the pane is not the only thing that can put a value in the file, and a spinner style this
 // build has no animation for is worth a sentence on the row. A refused Set has touched nothing.
 //
-// Two of these keys have more to say than "done": the note is the row's own sentence about the apply
+// Three of these keys have more to say than "done": the note is the row's own sentence about the apply
 // (empty for a key that simply took effect), and the Cmd is what the apply needs the program to do
 // next. The colour scheme uses both; `ui.git-fetch` uses the Cmd alone — the first fetch of the chain
-// it arms.
+// it arms — and so does `ui.pointer-shapes`, for the capability query it sends when switched on.
 func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, bool, error) {
 	switch path {
 	case settingKeyAutoTitle:
@@ -529,10 +529,17 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
 		m.transcript.setToolsFoldOver(m.opts.UI.ToolsFoldOver)
 	case domain.UIKeyPointerShapes:
-		// The flag lands on the block and nothing else yet: no hover path reads it, so the write is
-		// the whole apply and nothing on the screen moves.
+		// The flag is half of the pointer-shape gate (pointerprobe.go); the terminal's answer is the
+		// other half. Switched on in a session that never asked, the query goes out now; one that
+		// already asked keeps its answer and sends nothing (ADR 0106 §3). Either way View reads the
+		// gate on the next frame, so the mouse mode follows the flag with no apply of its own.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
+		}
+		if m.opts.UI.PointerShapes {
+			var query tea.Cmd
+			m, query = m.askPointerShapes()
+			return m, "", query, true, nil
 		}
 	case domain.UIKeyNotify:
 		// The mode is read where a prompt opens, so this write is the whole apply: the next prompt

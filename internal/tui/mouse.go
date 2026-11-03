@@ -15,7 +15,8 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The terminal does its own click-drag text selection only while no application captures the
-// mouse. apogee captures it (MouseModeCellMotion, set in View) so the wheel can scroll the
+// mouse. apogee captures it (MouseModeCellMotion, set in View — MouseModeAllMotion while the
+// pointer-shape gate is open, pointerprobe.go) so the wheel can scroll the
 // transcript and a click can position the caret — which is exactly why the terminal's own
 // selection is off. So selection is implemented here, on top of the widgets' public API: no
 // copy of the widgets' internal wrapping is needed, which keeps the geometry correct across
@@ -545,7 +546,9 @@ func (m Model) footerModeHit(pre Model, x, y int) bool {
 // collapse or hijack the selection. For the TRANSCRIPT that motion has one meaning of its own:
 // held on the top row, or anywhere below the last, it scrolls the transcript toward the pointer
 // and the head follows the revealed edge line (trackDragEdge). CellMotion reports motion only
-// while a button is down, so this fires only mid-drag.
+// while a button is down; AllMotion — set only while the pointer-shape gate is open
+// (pointerprobe.go) — also reports button-less hover, which the button checks below leave a
+// no-op, so either way a selection moves only mid-drag.
 //
 // One decoder quirk lands here rather than in handleMouseRelease: some terminals encode the
 // release with the motion bit set (SGR "ESC[<35;x;ym"), which decodes to a BUTTON-LESS motion
@@ -2068,7 +2071,8 @@ func (m Model) highlightTranscript(view string) string {
 //
 // The wheel scrolls the transcript in every state — unlike the ordinary keyboard path, which is
 // state-gated (idle/ask/running feed the input; only PgUp/PgDn scroll from the keyboard everywhere).
-// Mouse reporting is enabled in View (MouseModeCellMotion); the viewport's own Update turns the
+// Mouse reporting is enabled in View (MouseModeCellMotion, or AllMotion behind the pointer-shape
+// gate — pointerprobe.go); the viewport's own Update turns the
 // wheel into a scroll.
 func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	// A notch drops any click-armed row, whichever pane below takes it: the wheel MOVES the highlight

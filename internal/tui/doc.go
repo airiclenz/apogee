@@ -1048,7 +1048,9 @@
 // pointer for a frame point by walking the click chain's own order and asking each region the hit
 // predicate its click handler decides by (a pane's hover, [Model.footerModeHit], the prompt's
 // [Model.inputEditable] and [Model.pointInputRow], the transcript's [Model.pointTranscriptRow] and
-// [Model.blockTargetAt]), never restating one; popup.go the one bordered pane every overlay — those five, the autocomplete
+// [Model.blockTargetAt]), never restating one; pointerprobe.go the OSC 22 capability probe — the
+// query and its DA1 sentinel, the one verdict a session keeps — and the gate it opens with
+// ui.pointer-shapes: [Model.mouseMode], all-motion tracking only while both hold; popup.go the one bordered pane every overlay — those five, the autocomplete
 // dropdown, the ask and approval prompts — is painted through, and the [popupPlacement] it hands
 // back with each paint is where the pointer READS that pane: which line the row block starts on and
 // how many lines each row took, walked by [popupPlacement.rowAt], so the package holds one mapping

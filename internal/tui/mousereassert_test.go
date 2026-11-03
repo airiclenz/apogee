@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -24,12 +26,14 @@ import (
 // reassertCount reports how many of the Msgs cmd delivers are the mouse-tracking re-assert,
 // looking inside a tea.BatchMsg the way the runtime does (expandBatch, model_test.go): a re-assert
 // batched with a record write is still a re-assert. It RUNS what it is given, so keep it away from
-// a Cmd whose side effect a test also drives (a record write): counting it would perform it.
+// a Cmd whose side effect a test also drives (a record write): counting it would perform it. Either
+// mode's sequence counts — which one a re-assert carries is the live mode's business, pinned by the
+// verbatim tests.
 func reassertCount(t *testing.T, cmd tea.Cmd) int {
 	t.Helper()
 	n := 0
 	for _, msg := range expandBatch(cmd) {
-		if raw, isRaw := msg.(tea.RawMsg); isRaw && raw.Msg == mouseTrackingSeq {
+		if raw, isRaw := msg.(tea.RawMsg); isRaw && (raw.Msg == mouseTrackingSeq || raw.Msg == allMotionTrackingSeq) {
 			n++
 		}
 	}
@@ -59,6 +63,28 @@ func TestResizeReassertsMouseTrackingVerbatim(t *testing.T) {
 	}
 	if raw.Msg != "\x1b[?1002h\x1b[?1006h" {
 		t.Errorf("re-asserted %q, want the cell-motion sequence \"\\x1b[?1002h\\x1b[?1006h\"", raw.Msg)
+	}
+}
+
+// With the pointer-shape gate open the frame asks for all-motion tracking, so the re-assert must say
+// that mode too: re-sending cell motion would quietly switch hover reports off behind the frame's
+// MouseMode.
+func TestReassertUnderAllMotionWritesAnyEventTracking(t *testing.T) {
+	t.Parallel()
+	opts := testOpts
+	opts.UI.PointerShapes = true
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = step(t, m, uv.UnknownOscEvent("\x1b]22;1,1,1\x1b\\"))
+
+	_, cmd := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	raw, isRaw := cmdMsg(cmd).(tea.RawMsg)
+	if !isRaw {
+		t.Fatalf("the resize answered %T, want a tea.RawMsg carrying the tracking sequence", cmdMsg(cmd))
+	}
+	if raw.Msg != "\x1b[?1003h\x1b[?1006h" {
+		t.Errorf("re-asserted %q, want the all-motion sequence \"\\x1b[?1003h\\x1b[?1006h\"", raw.Msg)
 	}
 }
 

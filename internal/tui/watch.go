@@ -15,6 +15,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
@@ -382,6 +383,7 @@ func watchRouteOf(msg tea.Msg) watchRoute {
 	switch msg.(type) {
 	case watchPollMsg, watchBatchMsg,
 		tea.WindowSizeMsg, tea.ModeReportMsg, tea.ColorProfileMsg, tea.KeyboardEnhancementsMsg,
+		uv.UnknownOscEvent, uv.PrimaryDeviceAttributesEvent,
 		tea.FocusMsg, tea.BlurMsg,
 		tea.KeyPressMsg, tea.PasteMsg, clipboardImageMsg, clipboardTextMsg,
 		ctrlCResetMsg, escStopResetMsg, tea.CursorPositionMsg,

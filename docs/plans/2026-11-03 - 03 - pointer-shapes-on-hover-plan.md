@@ -119,7 +119,12 @@ internal/tui/mouse_test.go — browserPaneModel, pickerPaneModel, askPaneModel, 
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestPointerShapeAt|TestEveryFramePaneHasASpec|Click|TestSettingsPointerActsOnTheFilteredRows|TestPopupPaneHit' ./internal/tui/`
 **Commit:** `feat(tui): answer pointer shapes for every pane`
 
-## 5. Terminal capability probe and the all-motion gate
+## 5. Terminal capability probe and the all-motion gate — ✅ DONE (2026-11-03)
+
+NOTES (2026-11-03): consequential edit — internal/tui/doc.go: made necessary by the new file pointerprobe.go (the package map, enforced by TestDocMapNamesEveryFile).
+NOTES (2026-11-03): consequential edit — .capcom/knowledge/decisions/adr-0106/adr-0106-consequences.md: the item's regression guard says to name the all-motion hover cost in ADR 0106, which item 1 did not; added to the Consequences bullet on View's mouse mode (no Decision text changed), with the Pi 5 measurement from the new BenchmarkPointerProbeHoverUpdateAndView: ~1.16 ms, ~220 KB and ~3.8k allocs per hovered cell (80x24, 25 turns).
+NOTES (2026-11-03): Bubble Tea v2.0.8 sends no DA1 of its own (no RequestPrimaryDeviceAttributes outside raw.go's doc comment), so the plain "DA1 while pending = unsupported" sentinel is used, no reply counting; query and sentinel go out as ONE tea.Raw so nothing can interleave them.
+NOTES (2026-11-03): the probe state lives on the Model as `pointerProbe` with `pointerShapesLive()` and `mouseMode()` beside it (pointerprobe.go); items 6/7 should gate shape writes on `pointerShapesLive()`. Diag values: `supported`, `unsupported (answered <data>)`, `unsupported (no answer before DA1)`; the diag log is wired after newModel, so only the verdict is recorded, not the pending state.
 
 **What:**
 Depends on item 2.
