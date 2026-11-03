@@ -53,7 +53,7 @@ NOTES (2026-11-03): pre-existing, not changed: the file named by `time --output 
 - `go test -race -count=1 -run 'TestWriteTargetsOf|TestShellWriteView|TestProjectConfig' ./internal/security/`
 **Commit:** `fix(security): consume wrapper long-option values and fail closed on unknown ones`
 
-## 2. A session seat with no fallback builds no Monitor per fault
+## 2. A session seat with no fallback builds no Monitor per fault — ✅ DONE (2026-11-03)
 
 **What:** regression from item 3 of the seat-and-resolved-entry plan: `sessionFallback.resolver()` builds the bound binding's Monitor before `newSeatResolver` returns nil for an entry with no `fallback:`, so every upstream fault builds and discards one.
 **Goal:** a fault on a session-seat entry whose primary names no `fallback:` builds no Monitor and leaves no resolver cached; a test pins it.

@@ -605,7 +605,8 @@ func (f *sessionFallback) Resolve(ctx context.Context, report apogee.FallbackRep
 // landing reads the configuration as it stands at the walk (f.lander, called per move), not as it
 // stood when the resolver was built: a `/settings` or `servers:` edit made after the first fault
 // reaches the fallback entry, its root pins and its per-model facts — as the Sub-agents seat's
-// resolver does (delegationWiring.rearmLocked).
+// resolver does (delegationWiring.rearmLocked). A bound entry with no `fallback:` is answered nil
+// before the primary's Monitor is dialled, so a fault on it builds nothing and caches nothing.
 func (f *sessionFallback) resolver() *seatResolver {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -613,7 +614,7 @@ func (f *sessionFallback) resolver() *seatResolver {
 		return f.current
 	}
 	entry, ok := f.bound()
-	if !ok {
+	if !ok || len(entry.Fallback.Names()) == 0 {
 		return nil
 	}
 	monitor := f.binding().Monitor()

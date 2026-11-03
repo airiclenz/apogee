@@ -526,6 +526,43 @@ func TestTUIFallbackResolverAnswersForTheBoundEntry(t *testing.T) {
 	}
 }
 
+// TestTUIFallbackNoFallbackEntryBuildsNoMonitor: a fault on a bound entry whose primary names no
+// `fallback:` is answered "none" without dialling the primary's Monitor — the session's binding is
+// never read for one — and leaves no resolver cached, however many faults arrive.
+func TestTUIFallbackNoFallbackEntryBuildsNoMonitor(t *testing.T) {
+	t.Parallel()
+	seat := newTUIFallbackSeat(t)
+	plain, err := findServer(seat.live.serverList(), "plain")
+	if err != nil {
+		t.Fatalf("find plain: %v", err)
+	}
+	seat.live.followEntry(plain)
+	fallback := seat.mover.fallback
+	var bindings atomic.Int32
+	fallback.binding = func() upstreamBinding {
+		bindings.Add(1)
+		return seat.holder.Binding()
+	}
+	ctx := context.Background()
+
+	for range 2 {
+		answer := fallback.Resolve(ctx, apogee.FallbackReport{Server: "plain"})
+		if !reflect.DeepEqual(answer, apogee.FallbackAnswer{}) {
+			t.Errorf("answer on plain = %+v, want the zero answer — plain names no fallback", answer)
+		}
+	}
+
+	if got := bindings.Load(); got != 0 {
+		t.Errorf("binding read %d times, want 0 — no Monitor is built for an entry with no fallback", got)
+	}
+	fallback.mu.Lock()
+	current := fallback.current
+	fallback.mu.Unlock()
+	if current != nil {
+		t.Error("a resolver was cached for an entry with no fallback")
+	}
+}
+
 // TestTUIFallbackFalloverRunsTheHeartbeatTail: following a committed switch onto backup moves the
 // holder's Monitor and binding onto backup with its model bound, stamps that model on the record,
 // latches backup as the bound entry, re-follows the fan-out width and records backup's observed
