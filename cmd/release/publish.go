@@ -155,6 +155,11 @@ func runPublish(ctx context.Context, commands runner, output io.Writer, options 
 	if err != nil {
 		return err
 	}
+	// Refused before any probe: the retracted v1.8.0 tag still exists on origin, so the probes
+	// would read its tag step as done and converge a release onto it.
+	if err := checkNotRetracted(version); err != nil {
+		return fmt.Errorf("refusing to publish %s, nothing was changed:\n%w", version, err)
+	}
 	run := &publishRun{commands: commands, output: output, options: options, version: version}
 
 	var refusals []error

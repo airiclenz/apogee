@@ -151,8 +151,9 @@ From `highestTag` `v0.M.P` (the retracted `v1.x` tags never count):
 
 An argument version replaces the proposal. *Ask* with the proposal first and
 the other size second, plus a free-text choice; the owner's answer is final.
-A version not strictly above `highestTag` → say `prepare` will refuse it and
-*Ask* again.
+A version not strictly above `highestTag`, or one inside the retracted
+`v1.0.0`–`v1.8.0` series → say `prepare` will refuse it (and CI would not tag
+it) and *Ask* again. Never propose a version in that series.
 
 ## 5 — Probe the channels and prepare
 

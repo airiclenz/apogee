@@ -548,6 +548,33 @@ func TestPublishRefusesBeforeChangingAnything(t *testing.T) {
 	}
 }
 
+// TestPublishRefusesARetractedVersionBeforeAnyProbe pins that publish names no command at all for
+// a version in the retracted series. The v1.8.0 tag still exists on origin, so a probe would read
+// its tag step as done and converge a release onto it.
+func TestPublishRefusesARetractedVersionBeforeAnyProbe(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"v1.0.0", "v1.8.0"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+			commands := newPublishFake().runner()
+			notesPath := filepath.Join(t.TempDir(), "notes.md")
+			writeTestFile(t, notesPath, "- A release.\n")
+			options := publishOptions{dir: t.TempDir(), version: version, notesFile: notesPath}
+			var output bytes.Buffer
+
+			err := runPublish(t.Context(), commands, &output, options)
+
+			want := version + " lies in the retracted v1.0.0 to v1.8.0 series"
+			if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "nothing was changed") {
+				t.Fatalf("publish error = %v, want one naming %q and saying nothing was changed", err, want)
+			}
+			if len(commands.calls) > 0 {
+				t.Errorf("issued %d commands, want none", len(commands.calls))
+			}
+		})
+	}
+}
+
 // TestPublishDryRunWithABlockedGateFailsButPrintsThePlan pins a dry run's exit status: a blocked
 // gate fails it, yet every probe row and every pending step's plan is still printed.
 func TestPublishDryRunWithABlockedGateFailsButPrintsThePlan(t *testing.T) {

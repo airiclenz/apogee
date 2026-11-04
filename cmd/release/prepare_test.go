@@ -52,6 +52,7 @@ const (
 const (
 	preparedTags    = "v0.24.10\nv0.24.11\nv1.0.0\nv1.8.0\n"
 	preparedVersion = "v0.24.11\n"
+	preparedGoMod   = "module example.com/apogee\n\ngo 1.26\n\nretract [v1.0.0, v1.8.0]\n"
 )
 
 // prepareRepo answers prepare's git commands over a checkout in dir and records, at each
@@ -79,6 +80,7 @@ func newPrepareRepo(t *testing.T, changelog, version string) *prepareRepo {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, changelogFile), changelog)
 	writeTestFile(t, filepath.Join(dir, versionFile), version)
+	writeTestFile(t, filepath.Join(dir, goModFile), preparedGoMod)
 	return &prepareRepo{dir: dir, tags: preparedTags}
 }
 
@@ -250,6 +252,7 @@ func TestPrepareRefuses(t *testing.T) {
 		version   string
 		changelog string
 		versionIn string
+		goMod     string
 		isDirty   bool
 		failing   string
 		wantError string
@@ -263,6 +266,23 @@ func TestPrepareRefuses(t *testing.T) {
 		},
 		"below the highest tag": {
 			version: "v0.24.9", wantError: "v0.24.9 is not above the highest release tag v0.24.11",
+		},
+		"the lowest retracted version": {
+			version: "v1.0.0", wantError: "v1.0.0 lies in the retracted v1.0.0 to v1.8.0 series",
+		},
+		"a retracted version in the middle": {
+			version: "v1.4.2", wantError: "v1.4.2 lies in the retracted v1.0.0 to v1.8.0 series",
+		},
+		"the highest retracted version, whose tag exists": {
+			version: "v1.8.0", wantError: "v1.8.0 lies in the retracted v1.0.0 to v1.8.0 series",
+		},
+		"go.mod without the retract line": {
+			goMod:     "module example.com/apogee\n\ngo 1.26\n",
+			wantError: `go.mod has lost the "retract [v1.0.0, v1.8.0]" line`,
+		},
+		"go.mod with the retract line commented out": {
+			goMod:     "module example.com/apogee\n\n// retract [v1.0.0, v1.8.0]\n",
+			wantError: `go.mod has lost the "retract [v1.0.0, v1.8.0]" line`,
 		},
 		"a dirty working tree": {isDirty: true, wantError: "the working tree is not clean"},
 		"the tags cannot be listed": {
@@ -305,6 +325,9 @@ func TestPrepareRefuses(t *testing.T) {
 				version = "v0.25.0"
 			}
 			repo := newPrepareRepo(t, changelog, versionIn)
+			if tc.goMod != "" {
+				writeTestFile(t, filepath.Join(repo.dir, goModFile), tc.goMod)
+			}
 			repo.isDirty = tc.isDirty
 			repo.failing = tc.failing
 			commands := repo.runner()

@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Release tooling refuses the retracted v1.0.0–v1.8.0 numbers.** `go run ./cmd/release prepare` refuses a version inside that series and a `go.mod` that has lost its `retract [v1.0.0, v1.8.0]` line; `publish` refuses a version inside the series before it probes anything, since the `v1.8.0` tag still exists on origin. The tag-on-version-bump workflow no longer tags such a `VERSION`, nor any bump whose `go.mod` lacks the line, and now refuses a version with a leading zero, as the update check already did. A new drift test, `TestRepoKeepsTheRetractLineAndAReleasableVersion`, fails CI on a commit that does either.
+
 ## [0.32.0] — 2026-11-03
 
 - **`ui.pointer-shapes`** — a new `ui:` key, off by default and editable in `/settings`, for a mouse pointer that shows what a click does on hover (an I-beam over text, a hand over a clickable row) through OSC 22 pointer shapes. It takes effect only on a terminal that answers apogee's query for them (kitty, Ghostty, WezTerm, foot); under tmux it stays off. Purely visual: nothing about it reaches the model (ADR 0106).

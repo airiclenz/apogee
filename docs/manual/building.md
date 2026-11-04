@@ -59,7 +59,12 @@ proxy.golang.org retains immutably are retracted in `go.mod`, so `@latest` no lo
 resolves to them.) The `retract [v1.0.0, v1.8.0]` block was published in the
 self-retracting `v1.8.0` tag, whose only job is that retraction. Go reads a retraction from
 the `go.mod` of the *highest* version, so it could not ride a 0.x tag. Keep the block in
-`go.mod`, and never publish a version above v1.8.0 without it.
+`go.mod`, and never publish a version above v1.8.0 without it. Three guards hold both rules:
+`go run ./cmd/release prepare` refuses a version inside the series or a `go.mod` without the
+line, and `publish` refuses a version inside it before any probe; the tag workflow
+(`.github/scripts/version-bump.sh`) tags neither; and
+`TestRepoKeepsTheRetractLineAndAReleasableVersion` in `cmd/release` turns CI red on a commit
+that drops the line or bumps `VERSION` into the series.
 
 **Versions and tags.** The top-level `VERSION` file is the single source of truth for the
 release version — one line, carrying the leading `v` (`vX.Y.Z`); the `dist` step strips

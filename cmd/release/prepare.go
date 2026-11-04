@@ -18,6 +18,7 @@ import (
 // in CHANGELOG.md carries (5b3ed35c cut v0.24.11 this way).
 const (
 	changelogFile      = "CHANGELOG.md"
+	goModFile          = "go.mod"
 	unreleasedHeading  = "## [Unreleased]"
 	releaseHeadingLead = "## ["
 	releaseDateLayout  = "2006-01-02"
@@ -45,7 +46,8 @@ func newPrepareCommand(commands runner) *cobra.Command {
 			"which gives every bullet under ## [Unreleased] in CHANGELOG.md its own\n" +
 			"## [X.Y.Z] — YYYY-MM-DD heading (today's local date), then\n" +
 			"\"chore(version): bump version to vX.Y.Z\", which writes vX.Y.Z to VERSION. It refuses,\n" +
-			"writing nothing, when the version is malformed or not above the highest release tag,\n" +
+			"writing nothing, when the version is malformed, not above the highest release tag or\n" +
+			"inside the retracted v1.0.0 to v1.8.0 series, go.mod has lost its retract line,\n" +
 			"VERSION already reads it, the working tree is not clean, ## [Unreleased] is missing or\n" +
 			"holds no bullet, or CHANGELOG.md already has a heading for the version. A bare X.Y.Z\n" +
 			"reads as vX.Y.Z.",
@@ -104,6 +106,16 @@ func checkPrepare(ctx context.Context, commands runner, dir string, version rele
 		if refusal := checkAboveTag(version, highest); refusal != nil {
 			refusals = append(refusals, refusal)
 		}
+	}
+
+	if refusal := checkNotRetracted(version); refusal != nil {
+		refusals = append(refusals, refusal)
+	}
+	goMod, err := os.ReadFile(filepath.Join(dir, goModFile))
+	if err != nil {
+		refusals = append(refusals, fmt.Errorf("read %s: %w", goModFile, err))
+	} else if refusal := checkRetractKept(goMod); refusal != nil {
+		refusals = append(refusals, refusal)
 	}
 
 	if refusal := checkVersionFile(dir, version); refusal != nil {

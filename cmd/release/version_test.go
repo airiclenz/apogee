@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // TestParseReleaseVersionAcceptsTheTagShapeOnly pins what counts as a release version: vX.Y.Z,
 // or a bare X.Y.Z read as vX.Y.Z, and nothing looser.
@@ -72,5 +77,69 @@ func TestHighestReleaseTagOrdersNumericallyAndSetsAsideTheRetractedSeries(t *tes
 				t.Errorf("highestReleaseTag(%q) = %q, want %q", tc.tags, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCheckNotRetractedRefusesTheWholeSeriesOnly pins the bounds of the refusal: both ends of the
+// retracted v1.0.0–v1.8.0 series are refused, and the versions either side of it are not.
+func TestCheckNotRetractedRefusesTheWholeSeriesOnly(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		version   string
+		isRefused bool
+	}{
+		"the current 0.x line":   {version: "v0.32.0"},
+		"a high 0.x":             {version: "v0.99.99"},
+		"the lower bound":        {version: "v1.0.0", isRefused: true},
+		"inside the series":      {version: "v1.7.3", isRefused: true},
+		"the upper bound":        {version: "v1.8.0", isRefused: true},
+		"just above the series":  {version: "v1.8.1"},
+		"the first stable minor": {version: "v1.9.0"},
+		"a later major":          {version: "v2.0.0"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			version, err := parseReleaseVersion(tc.version)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = checkNotRetracted(version)
+
+			if isRefused := err != nil; isRefused != tc.isRefused {
+				t.Errorf("checkNotRetracted(%s) = %v, want refused %t", tc.version, err, tc.isRefused)
+			}
+		})
+	}
+}
+
+// TestRepoKeepsTheRetractLineAndAReleasableVersion is the drift guard on the live checkout: the
+// repository's own go.mod still carries the retract line prepare builds from the bounds, and
+// VERSION does not read a retracted number. CI runs it on every push, so a commit that drops the
+// line or bumps into the series turns the build red before any release is cut.
+func TestRepoKeepsTheRetractLineAndAReleasableVersion(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join("..", "..")
+
+	goMod, err := os.ReadFile(filepath.Join(root, goModFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkRetractKept(goMod); err != nil {
+		t.Error(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, versionFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := parseReleaseVersion(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("%s: %v", versionFile, err)
+	}
+	if err := checkNotRetracted(version); err != nil {
+		t.Errorf("%s: %v", versionFile, err)
 	}
 }

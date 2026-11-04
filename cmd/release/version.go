@@ -70,6 +70,35 @@ func (v releaseVersion) isRetracted() bool {
 	return v.compare(retractedLow) >= 0 && v.compare(retractedHigh) <= 0
 }
 
+// retractDirective is the go.mod line that retracts the series, built from the same bounds.
+func retractDirective() string {
+	return fmt.Sprintf("retract [%s, %s]", retractedLow, retractedHigh)
+}
+
+// checkNotRetracted refuses a version inside the retracted series. Such a release ships already
+// retracted: `go install …@latest` and the update check both pass over it, so nobody is offered
+// it, and the number cannot be taken back.
+func checkNotRetracted(version releaseVersion) error {
+	if !version.isRetracted() {
+		return nil
+	}
+	return fmt.Errorf("%s lies in the retracted %s to %s series, which no release may reuse",
+		version, retractedLow, retractedHigh)
+}
+
+// checkRetractKept refuses a go.mod that has lost the retract directive. Go reads a retraction
+// from the go.mod of the highest version, so a release above v1.8.0 without the line would bring
+// the retracted series back; the line stays for every release, so its loss is caught early.
+func checkRetractKept(goMod []byte) error {
+	directive := retractDirective()
+	for line := range strings.Lines(string(goMod)) {
+		if strings.TrimSpace(line) == directive {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s has lost the %q line", goModFile, directive)
+}
+
 // highestReleaseTag returns the highest release tag in tags — one tag per line, as
 // `git tag --list` prints them — setting aside the retracted v1.x series and every tag that is
 // not exactly `vX.Y.Z`. It returns "" when no tag qualifies.
