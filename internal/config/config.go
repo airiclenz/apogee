@@ -1108,8 +1108,9 @@ type fileConfig struct {
 	// acknowledged, which is the default.
 	UnconfinedHosts []UnconfinedHost `yaml:"unconfined-hosts"`
 	// WebSearch is the search endpoint the web_search tool sends a query to (P3.11).
-	// Absent ⇒ the built-in DuckDuckGo default; `off` disables the tool. Empty string is
-	// treated as absent.
+	// Absent ⇒ the built-in DuckDuckGo default; `off` disables the tool. Empty or
+	// whitespace-only text is treated as absent; anything else not an http(s) URL with a host
+	// (after the tool's https:// heal) is refused at load by the row's hook.
 	WebSearch string `yaml:"web-search-endpoint"`
 	// UseProjectSkills gates discovery of the workspace's bare skills/ folder. A pointer so an
 	// explicit `use-project-skills: false` is distinguishable from an absent key (default true).

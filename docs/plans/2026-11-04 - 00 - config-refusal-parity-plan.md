@@ -56,7 +56,13 @@ internal/config/layer.go — LoadLayeredOffer, layerProjectRoot; cmd/apogee/prob
 - `go vet ./cmd/apogee/`
 **Commit:** `fix(probe): make probe config refuse what startup refuses`
 
-## 2. web-search-endpoint is refused at load
+## 2. web-search-endpoint is refused at load — ✅ DONE (2026-11-04)
+
+NOTES (2026-11-04): consequential edit — internal/config/config.go: made necessary by the row now refusing at load (the fileConfig.WebSearch doc comment said only that an empty string is treated as absent)
+NOTES (2026-11-04): keyfield.go's checked-text enumeration now reads "the ten" — it gains web-search-endpoint and also sub-agents-context, a checkedField row the old "eight" list already omitted, so the count is true by rule
+NOTES (2026-11-04): internal/config/defaults/config.yaml left unchanged — its web-search-endpoint comment states no refusal rule, old or new
+NOTES (2026-11-04): the refusal keeps the hook's sentence and its "not a URL" phrase, widened to "it is not a URL web search can reach — give an http or https search endpoint, or off to disable web search"
+NOTES (2026-11-04): the plan's guard example `https://http://[` is accepted by the new parse (Hostname "http", not empty); the guard still holds because a value naming a scheme is never healed, so `http://[` itself is refused — the parse table pins `http://[`, not the healed form
 
 **What:**
 **Goal:** a `web-search-endpoint` that, after trimming and the `https://` heal, is not an `http`/`https` URL with a non-empty host — and is not blank or a disable sentinel (`off`/`none`/`disabled`, any case) — is refused when the config is read, so startup, a live re-read and `apogee probe config` all fail naming the key and value; blank text loads as unset (the built-in provider). The tool and the validator decide through one parse. Fix for Seqcom docs-a5-v0310: `x y z`, `://`, `http://[` started fine and failed at call time.

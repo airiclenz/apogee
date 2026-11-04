@@ -215,8 +215,9 @@ func TestFieldFileModeUnderAnOverrideResolves(t *testing.T) {
 }
 
 // The scalar keys of a block are typed copies at the load: a bad spinner, an out-of-range port, a
-// negative count, an unparseable age, an unknown scheme and a bad search endpoint all LOAD, and the
-// block refusals stay ResolveOptions'. The checked-text keys still refuse at the load.
+// negative count, an unparseable age and an unknown scheme all LOAD, and the block refusals stay
+// ResolveOptions'. The checked-text keys — a search endpoint web search could not reach among them —
+// still refuse at the load.
 func TestFieldLoadFileConfigKeepsItsRefusals(t *testing.T) {
 	t.Parallel()
 
@@ -230,7 +231,6 @@ func TestFieldLoadFileConfigKeepsItsRefusals(t *testing.T) {
 		"sessions:\n  max-count: -1\n",
 		"ui:\n  color-scheme: no-such-scheme\n",
 		"ui:\n  tools-fold-over: -2\n",
-		"web-search-endpoint: not a url\n",
 		"mode: fast\n",
 	} {
 		if _, err := load(file); err != nil {
@@ -257,6 +257,7 @@ func TestFieldLoadFileConfigKeepsItsRefusals(t *testing.T) {
 		"sub-agents-choice: anyone\n",
 		"cursor-shape: triangle\n",
 		"ui:\n  stall-after: soon\n",
+		"web-search-endpoint: not a url\n",
 	} {
 		if _, err := load(file); err == nil {
 			t.Errorf("LoadFileConfig(%q) loaded a value its row refuses at the file pass", file)

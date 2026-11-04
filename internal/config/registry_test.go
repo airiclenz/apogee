@@ -724,6 +724,9 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		wantMsg string
 	}{
 		{"web-search-endpoint", "%zz", "not a URL"},
+		{"web-search-endpoint", "x y z", "not a URL"},
+		{"web-search-endpoint", "://", "not a URL"},
+		{"web-search-endpoint", "ftp://h", "not a URL"},
 		{"context-window", "-1", "0 or more"},
 		{"working-window", "-1", "0 or more"},
 		{"working-window", "lots", "0 or more"},
@@ -788,7 +791,11 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"web-search-endpoint", ""},
 		{"web-search-endpoint", "off"},
 		{"web-search-endpoint", "search.example.com/s"}, // scheme-less: the tool heals it to https://
+		{"web-search-endpoint", "localhost:8080/s"},     // heals too, though url.Parse reads a scheme
 		{"web-search-endpoint", "https://search.example.com/s"},
+		{"web-search-endpoint", "   "}, // blank: the built-in provider
+		{"web-search-endpoint", "NONE"},
+		{"web-search-endpoint", "Disabled"},
 		{"context-window", "0"},
 		{"context-window", "32768"},
 		// 0 is the documented spelling of "work in the whole advertised window", not a refusal — and
@@ -1266,5 +1273,37 @@ func TestRegistrySetRefusesWhatValidateRefuses(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A `web-search-endpoint:` web search could not reach is refused when the config is read, naming
+// the key and the value — Seqcom's docs-a5 shapes started fine and failed only at call time.
+func TestApplyConfigRefusesUnusableWebSearchEndpoint(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "web-search-endpoint: \"x y z\"\n")
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify)
+	if err == nil {
+		t.Fatal("ApplyConfig accepted web-search-endpoint: \"x y z\"; want a refusal")
+	}
+	if want := `invalid web-search-endpoint "x y z"`; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q; want it to contain %q", err, want)
+	}
+}
+
+// Whitespace-only text states nothing: it loads as unset — the built-in provider — rather than
+// being refused or carried as an endpoint.
+func TestApplyConfigBlankWebSearchEndpointIsUnset(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "web-search-endpoint: \"   \"\n")
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig refused a blank web-search-endpoint: %v", err)
+	}
+	if opts.WebSearchEndpoint != "" {
+		t.Errorf("WebSearchEndpoint = %q, want the empty value that selects the built-in provider",
+			opts.WebSearchEndpoint)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The declarative key registry: ONE table describing every key of the on-disk config
@@ -519,8 +519,12 @@ var KeyRegistry = bindRows([]Key{
 		Editable: true,
 		Validate: validateSearchEndpoint,
 		Desc:     "Search endpoint the web_search tool queries; unset uses DuckDuckGo, off disables it.",
-		field: stringField(func(o *Options) *string { return &o.WebSearchEndpoint },
-			func(fc fileConfig) *string { return nonEmpty(fc.WebSearch) }),
+		// Landed through the row at the file pass, delegate-timeout's reason: an endpoint the tool
+		// can make nothing of is refused at load in the hook's sentence, so startup, a live re-read
+		// and `apogee probe config` all refuse it — rather than a session starting on it and every
+		// search failing at call time. Blank text states nothing: the built-in provider lands.
+		field: checkedField(asIs, spelled[string], func(o *Options) *string { return &o.WebSearchEndpoint },
+			func(fc fileConfig) *string { return nonEmpty(strings.TrimSpace(fc.WebSearch)) }),
 	},
 	{
 		// Granting since ADR 0104 §1: a Project config's entries are carried apart from the layered
@@ -1326,23 +1330,16 @@ var KeyRegistry = bindRows([]Key{
 // out of the cell.
 
 // validateSearchEndpoint refuses a `web-search-endpoint:` the web_search tool could make nothing of.
-// It is deliberately loose, because this key has four documented shapes
-// (tools.NewWebSearch): empty for the built-in provider, the off/none/disabled sentinels, a
-// scheme-less host the tool itself heals to https://, and a full URL. So what is refused is text no
-// url.Parse accepts even after that heal — and the sentinels pass on their own merits (`off` heals
-// to a host), which is why this does not restate a list the tool owns.
+// The rule is the tool's own, read through tools.ParseSearchEndpoint rather than restated here:
+// blank text is the built-in provider, the off/none/disabled sentinels (any case) disable web
+// search, and anything else must be — after the tool's heal of a scheme-less value to https:// —
+// an http or https URL with a host. Text that is none of those is refused.
 func validateSearchEndpoint(value string) error {
-	if value == "" {
-		return nil // the built-in provider
+	if _, _, err := tools.ParseSearchEndpoint(value); err != nil {
+		return fmt.Errorf("apogee: invalid web-search-endpoint %q: it is not a URL web search can "+
+			"reach — give an http or https search endpoint, or off to disable web search", value)
 	}
-	if _, err := url.Parse(value); err == nil {
-		return nil
-	}
-	if _, err := url.Parse("https://" + value); err == nil {
-		return nil
-	}
-	return fmt.Errorf("apogee: invalid web-search-endpoint %q: it is not a URL — give a search "+
-		"endpoint, or off to disable web search", value)
+	return nil
 }
 
 // validateSystemPromptFile refuses a `system-prompt-file:` the next launch could not read. Two

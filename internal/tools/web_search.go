@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -112,32 +114,77 @@ func (t *WebSearch) config() (endpoint string, provider searchProvider, disabled
 	return t.endpoint, t.provider, t.disabled
 }
 
-// resolveSearchEndpoint turns a configured `web-search-endpoint:` value into the three things
-// Execute runs on. An empty endpoint selects the built-in DuckDuckGo default; the sentinels
-// "off"/"none"/"disabled" (case-insensitive) disable the tool and store no endpoint at all;
-// anything else is a custom endpoint. A scheme-less custom endpoint (e.g. "search.example.com/s")
-// self-heals to https:// — url.Parse reads it as a bare path (Host == ""), and url-safety would
-// otherwise reject every request. An endpoint whose host is the built-in DuckDuckGo host IS the
-// built-in provider: DDG answers only the provider's request shape (POST + browser headers), so a
-// config'd "html.duckduckgo.com/html/" must not degrade to the custom-endpoint GET.
-func resolveSearchEndpoint(endpoint string) (string, searchProvider, bool) {
+// SearchEndpointKind is what a `web-search-endpoint:` value asks of web_search: the built-in
+// provider, no web search at all, or a search backend of the host's own.
+type SearchEndpointKind int
+
+const (
+	SearchEndpointUnset    SearchEndpointKind = iota // blank: the built-in DuckDuckGo provider
+	SearchEndpointDisabled                           // the off/none/disabled sentinel
+	SearchEndpointURL                                // an http or https URL with a host
+)
+
+// ParseSearchEndpoint is the one reading of a `web-search-endpoint:` value — the tool resolves its
+// endpoint through it and the config row refuses through it, so the two can never disagree about
+// what the key takes. The value is trimmed first: blank text is the built-in provider and the
+// sentinels "off"/"none"/"disabled" (any case) disable the tool, both with no URL. Anything else
+// must be an http or https URL with a non-empty host. A value with no "://" in it self-heals to
+// https:// first, so a scheme-less "search.example.com/s" — or "localhost:8080/s", which url.Parse
+// would read as scheme "localhost" — is the URL its writer meant; a value that names a scheme is
+// never healed, so "http://[" stays the broken URL it is. The host is judged by Hostname, not
+// Host, so a port alone (":8080/s", Host ":8080") is no host. The URL comes back as text, healed;
+// any other value is an error.
+func ParseSearchEndpoint(endpoint string) (SearchEndpointKind, string, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	switch strings.ToLower(endpoint) {
 	case "":
-		return defaultSearchEndpoint, providerDuckDuckGo, false
+		return SearchEndpointUnset, "", nil
 	case "off", "none", "disabled":
+		return SearchEndpointDisabled, "", nil
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "https://" + endpoint
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return 0, "", errors.New("web search endpoint is not a URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return 0, "", fmt.Errorf("web search endpoint scheme %q is not http or https", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return 0, "", errors.New("web search endpoint names no host")
+	}
+	return SearchEndpointURL, endpoint, nil
+}
+
+// resolveSearchEndpoint turns a configured `web-search-endpoint:` value into the three things
+// Execute runs on, read through ParseSearchEndpoint: an unset endpoint selects the built-in
+// DuckDuckGo default, a sentinel disables the tool and stores no endpoint at all, and a URL is a
+// custom endpoint — healed to https:// where it was scheme-less, because url-safety would otherwise
+// reject every request. An endpoint whose host is the built-in DuckDuckGo host IS the built-in
+// provider: DDG answers only the provider's request shape (POST + browser headers), so a config'd
+// "html.duckduckgo.com/html/" must not degrade to the custom-endpoint GET.
+//
+// A value ParseSearchEndpoint refuses never reaches here from a config file — the row refuses it at
+// load — but an embedder's domain.Config.WebSearchEndpoint is unvalidated, so it falls through as
+// the trimmed text on a custom provider: Execute then fails it through the redacted error rather
+// than this quietly picking a provider nobody configured.
+func resolveSearchEndpoint(endpoint string) (string, searchProvider, bool) {
+	kind, healed, err := ParseSearchEndpoint(endpoint)
+	switch {
+	case err != nil:
+		return strings.TrimSpace(endpoint), providerCustom, false
+	case kind == SearchEndpointUnset:
+		return defaultSearchEndpoint, providerDuckDuckGo, false
+	case kind == SearchEndpointDisabled:
 		return "", providerDuckDuckGo, true
 	}
-	if u, err := url.Parse(endpoint); err != nil || u.Host == "" {
-		if healed, herr := url.Parse("https://" + endpoint); herr == nil && healed.Host != "" {
-			endpoint = "https://" + endpoint
-		}
-	}
 	provider := providerCustom
-	if u, err := url.Parse(endpoint); err == nil && strings.EqualFold(u.Hostname(), defaultSearchHost) {
+	if u, err := url.Parse(healed); err == nil && strings.EqualFold(u.Hostname(), defaultSearchHost) {
 		provider = providerDuckDuckGo
 	}
-	return endpoint, provider, false
+	return healed, provider, false
 }
 
 // ExternalEffect reports that web_search reaches the network (kind network).

@@ -643,9 +643,11 @@ disabled on this host (web-search-endpoint: off); web_search is unavailable." An
 your own search backend, which receives the query as the `q` URL parameter (a value whose host is
 `html.duckduckgo.com` is the built-in provider under your own spelling, and is asked the way that
 provider is asked: the query POSTed as a form, not carried as a parameter) — an HTML response is
-cleaned into title/url/snippet results, a JSON or text one passes through unchanged. A
-scheme-less value heals to `https://`, and the only value refused at startup is text that no URL
-parse can make sense of even after that.
+cleaned into title/url/snippet results, a JSON or text one passes through unchanged. A blank or
+whitespace-only value counts as unset — the built-in provider. A scheme-less value heals to
+`https://`, and a value that is still not an `http` or `https` URL with a host after that (`x y z`,
+`://`, `ftp://host`) is refused when the config is read — at startup, on a live re-read and by
+`apogee probe config` — naming the key and the value.
 
 ```yaml
 # ~/.apogee/config.yaml

@@ -23,10 +23,10 @@ import (
 // default lands. A block the file carries is judged where it always was — the block's validator
 // at ResolveOptions, the Set admission at the settings pane and the env pass — so a file edit
 // that leaves one neighbour of a key out of range still loads, as it did before the descriptor.
-// The exceptions are the keys the file spells as TEXT a parse can fail on (fileText): the eight
-// whose file pass lands through the row's Set (sub-agents-choice, delegate-timeout,
-// stream-idle-timeout, re-stream-budget, workflow-wake, headless-max-turns, headless-max-wall-time,
-// cursor-shape), so a bad value refuses at
+// The exceptions are the keys the file spells as TEXT a parse can fail on (fileText): the ten
+// whose file pass lands through the row's Set (sub-agents-choice, sub-agents-context,
+// web-search-endpoint, delegate-timeout, stream-idle-timeout, re-stream-budget, workflow-wake,
+// headless-max-turns, headless-max-wall-time, cursor-shape), so a bad value refuses at
 // the pass in the row's own sentence; `ui.stall-after`, refused at the pass by the block's own duration parser;
 // and `sessions.max-age`, whose unparseable text is carried as written for the block's validator
 // to refuse at ResolveOptions.
@@ -188,8 +188,8 @@ func listField(at func(*Options) *[]string, file func(fileConfig) []string) scal
 
 // checkedField is the descriptor of a key the file spells as TEXT that lands through the row's own
 // Set, so a value the key cannot take is refused at the file pass in the row's sentence — the
-// posture of the keys whose parse can fail (a duration's text) or whose vocabulary the yaml decode
-// cannot judge (an enum's word).
+// posture of the keys whose parse can fail (a duration's text), whose vocabulary the yaml decode
+// cannot judge (an enum's word) or whose validate hook judges text the decode passes (a URL).
 func checkedField[T any](parse func(string) (T, error), format func(T) string, at func(*Options) *T,
 	text func(fileConfig) *string) scalarField[T] {
 	return scalarField[T]{at: at, fileText: text, parse: parse, format: format}

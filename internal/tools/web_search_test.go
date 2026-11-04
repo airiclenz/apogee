@@ -136,3 +136,63 @@ func TestCleanHTMLText_FragmentFormIsUnchanged(t *testing.T) {
 		})
 	}
 }
+
+// ParseSearchEndpoint is the one reading of `web-search-endpoint:` the tool and the config row
+// share, so this table is the key's whole contract: blank is the built-in provider, the sentinels
+// disable it in any case, a scheme-less value heals to https:// (even one url.Parse reads as a
+// scheme of its own, "localhost:8080/s"), and anything that is not then an http or https URL with a
+// host is refused — the shapes Seqcom's docs-a5 report started on and only failed at call time.
+func TestParseSearchEndpoint(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		in       string
+		wantKind SearchEndpointKind
+		wantURL  string
+		wantErr  bool
+	}{
+		{in: "", wantKind: SearchEndpointUnset},
+		{in: "   ", wantKind: SearchEndpointUnset},
+		{in: "off", wantKind: SearchEndpointDisabled},
+		{in: "NONE", wantKind: SearchEndpointDisabled},
+		{in: " Disabled ", wantKind: SearchEndpointDisabled},
+		{in: "example.com/search", wantKind: SearchEndpointURL, wantURL: "https://example.com/search"},
+		{in: "localhost:8080/s", wantKind: SearchEndpointURL, wantURL: "https://localhost:8080/s"},
+		{in: "https://h/s?q=", wantKind: SearchEndpointURL, wantURL: "https://h/s?q="},
+		{in: "  http://h/s  ", wantKind: SearchEndpointURL, wantURL: "http://h/s"},
+		{in: "x y z", wantErr: true},
+		{in: "://", wantErr: true},
+		{in: "http://[", wantErr: true},
+		{in: "http://", wantErr: true},
+		{in: ":8080/s", wantErr: true},
+		{in: "ftp://h", wantErr: true},
+	} {
+		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
+			kind, got, err := ParseSearchEndpoint(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseSearchEndpoint(%q) = (%v, %q), want a refusal", tt.in, kind, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseSearchEndpoint(%q) refused: %v", tt.in, err)
+			}
+			if kind != tt.wantKind || got != tt.wantURL {
+				t.Errorf("ParseSearchEndpoint(%q) = (%v, %q), want (%v, %q)", tt.in, kind, got, tt.wantKind, tt.wantURL)
+			}
+		})
+	}
+}
+
+// An endpoint the parse refuses can still arrive unvalidated from an embedder's
+// domain.Config.WebSearchEndpoint; the tool keeps it as the trimmed text on a custom provider, so
+// Execute fails it through the redacted error rather than quietly searching somewhere else.
+func TestWebSearchRefusedEndpointFallsThroughAsCustom(t *testing.T) {
+	t.Parallel()
+	tool := NewWebSearch(security.URLGuard{}, "  x y z  ")
+	if tool.endpoint != "x y z" || tool.provider != providerCustom || tool.disabled {
+		t.Errorf("refused endpoint resolved to (%q, %v, disabled=%v), want (\"x y z\", custom, false)",
+			tool.endpoint, tool.provider, tool.disabled)
+	}
+}
