@@ -1440,7 +1440,8 @@ spawns get no `sub_agent` tool of their own, so every delegation is one level de
 every report comes straight back to the agent you are talking to. Raise it to `2` to let a
 sub-agent delegate in turn — each level costs a full nested loop and puts the result one
 hand-off further from you, so raise it only for work that genuinely needs a middle layer.
-It must be at least `1`; a session that should not delegate at all disables the
+It must be at least `1`: a `0` or a negative value is a startup error naming the key, not a
+quiet return to the default. A session that should not delegate at all disables the
 `sub_agent` tool instead (`tools.disabled`).
 
 Two more file-only keys bound what a **single delegation may spend**, because a turn count

@@ -754,10 +754,12 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateDelegateMaxDepth,
 		Desc: "How deep delegation may nest: 1 lets the session delegate and its delegates not; " +
 			"at least 1; takes effect at the next start.",
-		// A plain int on disk: 0 is not a value here (the bound is at least 1), so an absent key
-		// and a 0 resolve alike, to the default — the settings surface refuses the 0 outright.
-		field: intField(func(o *Options) *int { return &o.DelegateMaxDepth },
-			func(fc fileConfig) *int { return atLeast(1, countPtr(&fc.DelegateMaxDepth)) }),
+		// Landed through the row at the file pass, re-stream-budget's reason: a 0 or a negative
+		// bound is refused there in the row's own sentence — a depth that quietly resolved to the
+		// default would leave the file reading as configured under a bound nobody set. A pointer on
+		// disk, so an absent key still resolves to the default.
+		field: checkedField(strconv.Atoi, strconv.Itoa, func(o *Options) *int { return &o.DelegateMaxDepth },
+			func(fc fileConfig) *string { return countText(fc.DelegateMaxDepth) }),
 	},
 	{
 		Path: "delegate-max-tokens", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxTokens),
@@ -827,7 +829,7 @@ var KeyRegistry = bindRows([]Key{
 	{
 		// A count, delegate-fanout-rounds's posture on disk — a pointer, because 0 is a VALUE here
 		// (never restart) — but FILE-ONLY, so no Validate hook (a non-editable row runs none): a
-		// negative count resolves to the default, as it does for the delegate-* keys. Its default is
+		// negative count resolves to the default, as it does for the other delegate-* counts. Its default is
 		// the engine's own (domain.DefaultWorkflowRetries), so the host's and an embedder's zero
 		// Config agree.
 		Path: "workflow-retries", Kind: KindInt, Default: strconv.Itoa(domain.DefaultWorkflowRetries),

@@ -1034,6 +1034,16 @@ func countPtr(w *WholeCount) *int {
 	return &n
 }
 
+// countText spells an optional count as the text a checkedField row lands through its bound Set,
+// so the row's own validator judges the value the file states: absent stays nil.
+func countText(w *WholeCount) *string {
+	if w == nil {
+		return nil
+	}
+	text := strconv.Itoa(int(*w))
+	return &text
+}
+
 // fileConfig is the on-disk config schema. It mirrors the settable flags so a user can
 // fix their servers/autonomy once instead of passing them every invocation.
 // Bypass is a pointer so an explicit `bypass: false` is distinguishable from an absent
@@ -1186,10 +1196,11 @@ type fileConfig struct {
 	// domain.Config.Delegation.FanOutRounds.
 	DelegateFanOutRounds *WholeCount `yaml:"delegate-fanout-rounds"`
 	// DelegateMaxDepth bounds how deep delegation may NEST: the session (depth 0) delegates, and a
-	// delegate at this depth is never offered `sub_agent`. File-only (no flag/env), and a plain
-	// count rather than a pointer because 0 is not a value here — the bound is at least 1, so an
-	// absent key and a 0 both resolve to the built-in 1. It feeds domain.Config.Delegation.MaxDepth.
-	DelegateMaxDepth WholeCount `yaml:"delegate-max-depth"`
+	// delegate at this depth is never offered `sub_agent`. File-only (no flag/env), and a pointer so
+	// an absent key (the built-in 1) stays distinguishable from a stated 0: the bound is at least 1,
+	// and a 0 or a negative value is refused at the file pass rather than resolved as absent. It
+	// feeds domain.Config.Delegation.MaxDepth.
+	DelegateMaxDepth *WholeCount `yaml:"delegate-max-depth"`
 	// DelegateMaxTokens bounds what a CHILD agent's one Exchange may SPEND, in cumulative prompt
 	// tokens (default 20000000). File-only (no flag/env), and a pointer for DelegateMaxSteps's
 	// reason: an explicit `0` is the documented spelling of "unbounded". It feeds

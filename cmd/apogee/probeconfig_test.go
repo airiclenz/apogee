@@ -156,6 +156,7 @@ func TestProbeConfigRefusesWhatStartupRefuses(t *testing.T) {
 		{"sessions max-count negative", "sessions:\n  max-count: -1\n"},
 		{"ui spinner unknown", "ui:\n  spinner: no-such-spinner\n"},
 		{"server without an endpoint", "servers:\n  - name: no-endpoint\nserver: no-endpoint\n"},
+		{"delegate-max-depth below 1", "delegate-max-depth: 0\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

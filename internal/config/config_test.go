@@ -161,7 +161,7 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			name: "delegate-max-depth is file-only and defaults 1",
-			file: fileConfig{DelegateMaxDepth: 2},
+			file: fileConfig{DelegateMaxDepth: countptr(2)},
 			want: func(o *Options) { o.DelegateMaxDepth = 2 },
 		},
 		{
@@ -714,7 +714,7 @@ func everyKeyFileConfig() fileConfig {
 		UseDefaultPrompt:      boolptr(false),
 		DelegateMaxSteps:      countptr(12),
 		DelegateFanOutRounds:  countptr(3),
-		DelegateMaxDepth:      2,
+		DelegateMaxDepth:      countptr(2),
 		DelegateMaxTokens:     countptr(5_000_000),
 		DelegateTimeout:       strptr("30m"),
 		StreamIdleTimeout:     strptr("30s"),
@@ -2391,33 +2391,42 @@ func TestApplyConfigDelegateFanOutRounds(t *testing.T) {
 	}
 }
 
-// The delegate-max-depth key parses into opts.delegateMaxDepth: a file-only key (no flag/env)
+// The delegate-max-depth key parses into opts.DelegateMaxDepth: a file-only key (no flag/env)
 // beside the step cap above. Unlike that cap it has no "off" spelling — the bound is at least 1 —
-// so a plain int carries it and a 0 on disk resolves exactly as an absent key does, to the built-in
-// 1; the settings surface refuses the 0 outright (TestDelegateMaxDepthSettingKeyValidator). The
-// opts → Config.Delegation.MaxDepth threading is the composition root's.
+// so an absent key resolves to the built-in 1, while a 0 or a negative value on disk is refused at
+// the load in the row's own sentence (TestDelegateMaxDepthSettingKeyValidator's), never resolved as
+// absent. The opts → Config.Delegation.MaxDepth threading is the composition root's.
 func TestApplyConfigDelegateMaxDepth(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		name string
-		file string
-		want int
+		name    string
+		file    string
+		want    int
+		refused bool
 	}{
-		{"a stated bound", "delegate-max-depth: 2\n", 2},
-		{"an absent key takes the built-in default", "", defaultDelegateMaxDepth},
-		{"a 0 is not a value here and resolves as absent", "delegate-max-depth: 0\n", defaultDelegateMaxDepth},
+		{name: "a stated bound", file: "delegate-max-depth: 2\n", want: 2},
+		{name: "an absent key takes the built-in default", file: "", want: defaultDelegateMaxDepth},
+		{name: "a 0 is refused naming the key", file: "delegate-max-depth: 0\n", refused: true},
+		{name: "a negative bound is refused naming the key", file: "delegate-max-depth: -1\n", refused: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			home := testConfigHome(t, "")
 			writeConfigHome(t, home, tt.file)
 			opts := Options{ConfigDir: home}
-			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
-				os.ReadFile, noNotify); err != nil {
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if tt.refused {
+				if err == nil || !strings.Contains(err.Error(), "delegate-max-depth") {
+					t.Fatalf("ApplyConfig error = %v; want a refusal naming delegate-max-depth", err)
+				}
+				return
+			}
+			if err != nil {
 				t.Fatalf("ApplyConfig: %v", err)
 			}
 			if opts.DelegateMaxDepth != tt.want {
-				t.Errorf("opts.delegateMaxDepth = %d; want %d", opts.DelegateMaxDepth, tt.want)
+				t.Errorf("opts.DelegateMaxDepth = %d; want %d", opts.DelegateMaxDepth, tt.want)
 			}
 		})
 	}
@@ -2677,6 +2686,7 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 	}{
 		{name: "delegate-timeout", file: "delegate-timeout: 5x\n", wantErr: `apogee: invalid delegate-timeout "5x": want a length of time like 2h or 30m, or 0 to let a delegation run unbounded`},
 		{name: "stream-idle-timeout", file: "stream-idle-timeout: 5x\n", wantErr: `apogee: invalid stream-idle-timeout "5x": want a length of time like 10m or 30s, or 0 to wait for as long as the server takes`},
+		{name: "delegate-max-depth", file: "delegate-max-depth: 0\n", wantErr: `apogee: invalid delegate-max-depth "0": must be at least 1 (1 is the default: the session delegates, its delegates do not)`},
 		{name: "re-stream-budget", file: "re-stream-budget: -1\n", wantErr: `apogee: invalid re-stream-budget "-1": want a count of 0 or more (0 never re-streams; 3 is the default)`},
 		{name: "workflow-wake", file: "workflow-wake: maybe\n", wantErr: `apogee: workflow-wake is one of on, off, not "maybe"`},
 		{name: "headless-max-turns", file: "headless-max-turns: -1\n", wantErr: `apogee: invalid headless-max-turns "-1": want a Turn count of 0 or more (0, the default, sets no Turn budget)`},

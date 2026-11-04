@@ -79,7 +79,12 @@ internal/config/keyfield_test.go — TestFieldLoadFileConfigKeepsItsRefusals; in
 - `go build ./...`
 **Commit:** `fix(config): refuse an unusable web-search-endpoint at load`
 
-## 3. delegate-max-depth below 1 is refused at load
+## 3. delegate-max-depth below 1 is refused at load — ✅ DONE (2026-11-04)
+
+NOTES (2026-11-04): added a `countText` helper beside `countPtr` (internal/config/config.go) to spell the optional count as the row's checked text; the re-stream-budget row keeps its inline copy (not restyled — item 4 may fold it)
+NOTES (2026-11-04): consequential edit — internal/config/registry.go: the workflow-retries row comment's "as it does for the delegate-* keys" now reads "the other delegate-* counts", made necessary by delegate-max-depth now refusing a negative value (item 4 supersedes that comment wholesale)
+NOTES (2026-11-04): keyfield.go's checked-text enumeration now reads "the eleven" and names delegate-max-depth
+NOTES (2026-11-04): internal/agent/subagent.go and cmd/apogee/wire_config.go left unchanged — neither comment states the clamp (subagent.go already says the key "refuses 0", now true at load too)
 
 **What:**
 **Goal:** `delegate-max-depth: 0` or a negative value in a config file is refused when the config is read — startup, live re-read and `apogee probe config` fail naming the key and value — while an absent key still resolves to the default `1`. Fix for Seqcom docs-a7-v0310: `0` resolved silently to `1` (first half of `delegate-count-silent-clamp`; item 4 closes it).
