@@ -127,13 +127,14 @@ last-column wrap
 `apogee probe config` is the fourth subject, free like the host report: it answers "what do the
 config files say?" — `config.yaml` with the Project config of the current directory's Project
 root (`<root>/.apogee/config.yaml`, see [configuration](configuration.md)) layered over it, and
-nothing else: not the flags, `APOGEE_*` variables and host acknowledgement that `apogee probe`
-layers on top — save `APOGEE_CONFIG`, which names the config home to read when `--config` is not
+nothing else: the values it reports take in none of the flags, `APOGEE_*` variables and host
+acknowledgement that `apogee probe` layers on top — save `APOGEE_CONFIG`, which names the config home to read when `--config` is not
 given, as it does for every command. It reads the files the way a **live reload** reads them (the re-read a saved
 file triggers), never the way startup does, so it never migrates or rewrites a file it
-describes. The report has three sections: `notices` lists everything the reader announced — an
-unknown key it ignored, spelled exactly as the startup notice spells it, a global-only key the
-project file may not set, a project file it had to skip — or `(none)`; `migration` says whether
+describes. The report has three sections: `notices` lists everything a startup would announce
+about the files, each once — an unknown key it ignored, spelled exactly as the startup notice
+spells it, a global-only key the project file may not set, a project file it had to skip, an
+`unconfined-hosts` entry it skips — or `(none)`; `migration` says whether
 the global file is still written in a retired shape (the old top-level
 `endpoint:`/`api-key:`/`host-alias:`/`model:` keys, or a `hooks:` block) that a startup would
 fold for you, quoting the same refusal a live reload gives; and `resolved` lists every key of the
@@ -143,9 +144,13 @@ does — spelled the way the files spell it and in the order the starter file pr
 structured block reads as a summary (`servers: 2 servers`), so no `api-key` ever reaches the
 report. When the global file awaits migration the `resolved` section is replaced by `(start
 apogee once to migrate the file, then re-run)`. It takes `--config` only — or, without it, the
-home `APOGEE_CONFIG` names; the Project root is the directory you run it in. A global file the reader refuses for any other reason — a
-malformed one, a value a key rejects — fails the command with the reader's own sentence; a
-project file's defect is a notice, and the report then reads the global file alone.
+home `APOGEE_CONFIG` names; the Project root is the directory you run it in. Anything else a
+startup would refuse fails the command with startup's own sentence — a malformed global file, a
+value a key rejects, a `sessions:` age that is not a length of time, a `servers:` entry with no
+endpoint, a `sessions:` share group this machine lacks. A project file
+that cannot be read at all is a notice, and the report then reads the global file alone. A
+config that names no startup server is not refused: an interactive session starts on it and asks
+which server to use, so the report resolves it as usual.
 
 ```console
 $ apogee probe config

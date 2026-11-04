@@ -142,6 +142,107 @@ func TestProbeConfigFailsOnAMalformedFile(t *testing.T) {
 	}
 }
 
+// A file the reader passes but a startup refuses — a block validator's value, a `servers:` entry
+// that could never be switched to — fails the command too, in the sentence `apogee probe host` (the
+// startup resolution) refuses the same file with, rather than printing the file's values beside an
+// empty `notices` and exiting 0 (Seqcom docs-a3: `sessions: {max-age: 30d}` printed `0s`).
+func TestProbeConfigRefusesWhatStartupRefuses(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		contents string
+	}{
+		{"sessions max-age not a duration", "sessions:\n  max-age: 30d\n"},
+		{"sessions max-count negative", "sessions:\n  max-count: -1\n"},
+		{"ui spinner unknown", "ui:\n  spinner: no-such-spinner\n"},
+		{"server without an endpoint", "servers:\n  - name: no-endpoint\nserver: no-endpoint\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home, _ := seedConfigHome(t, tc.contents)
+
+			_, hostErr := executeProbe(t, "host", "--config", home, "--workspace", t.TempDir())
+			out, configErr := executeProbe(t, "config", "--config", home)
+
+			if hostErr == nil {
+				t.Fatalf("probe host accepted the file, so the case refuses nothing at startup")
+			}
+			if configErr == nil {
+				t.Fatalf("probe config accepted a file startup refuses with %q:\n%s", hostErr, out)
+			}
+			if configErr.Error() != hostErr.Error() {
+				t.Errorf("probe config refused with %q, want startup's own sentence %q", configErr, hostErr)
+			}
+		})
+	}
+}
+
+// What only the startup pass announces — here a Host acknowledgement entry with no id — reaches
+// `notices`, and a notice both passes announce — an unknown top-level key, which the reader and the
+// startup pass each read off the same file — is listed once. Neither fails the command.
+func TestProbeConfigListsEveryStartupNoticeOnce(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		contents string
+		notice   string
+	}{
+		{"startup-only notice", "unconfined-hosts:\n  - note: an entry with no id\n",
+			"apogee: skipping unconfined-hosts entry 1: it has no id"},
+		{"notice of both passes", "bogus-top-level: 1\n", `unknown key "bogus-top-level" at line 1 is ignored`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home, _ := seedConfigHome(t, tc.contents)
+
+			report := runProbeConfig(t, home)
+
+			if got := strings.Count(sectionOf(report, "notices"), tc.notice); got != 1 {
+				t.Errorf("notices carry %q %d times, want once:\n%s", tc.notice, got, report)
+			}
+			if got := strings.Count(report, tc.notice); got != 1 {
+				t.Errorf("the report carries %q %d times, want once:\n%s", tc.notice, got, report)
+			}
+		})
+	}
+}
+
+// A config that cannot name a startup server is no defect in the file — the TUI starts pre-bound
+// on it — so the report still resolves and the command succeeds, where `apogee probe host`, which
+// has no human to ask, refuses it.
+func TestProbeConfigToleratesAnUndeterminedStartupServer(t *testing.T) {
+	t.Parallel()
+	home, _ := seedConfigHome(t, "servers:\n"+
+		"  - name: only\n"+
+		"    endpoint: http://127.0.0.1:1\n"+
+		"server: missing\n")
+
+	_, hostErr := executeProbe(t, "host", "--config", home, "--workspace", t.TempDir())
+	report := runProbeConfig(t, home)
+
+	if hostErr == nil || !strings.Contains(hostErr.Error(), `server: names "missing"`) {
+		t.Fatalf("probe host err = %v, want the undetermined-startup refusal", hostErr)
+	}
+	if !strings.Contains(sectionOf(report, "resolved"), "missing") {
+		t.Errorf("the resolved section lacks the file's server: value:\n%s", report)
+	}
+}
+
+// executeProbe runs `apogee probe` with args and returns everything it printed and its error.
+func executeProbe(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := newProbeCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(args)
+
+	err := cmd.ExecuteContext(context.Background())
+	return out.String(), err
+}
+
 // The report layers the Project config of the directory it runs in: a project-param value the
 // project file sets is what `resolved` shows, the global value it outranks is not, and a global-only
 // key the project file states is named under `notices`. Not parallel: the Project root is the

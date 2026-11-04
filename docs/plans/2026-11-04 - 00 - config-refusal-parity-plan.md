@@ -34,7 +34,11 @@
 - `sessions.max-count`, `ui.tools-fold-over` and other block keys moving to the file pass — item 1 closes their probe gap through the validators.
 - `/settings`' per-block `settingsApplier.fileConfig` re-read, which deliberately skips block validators.
 
-## 1. probe config refuses what startup refuses
+## 1. probe config refuses what startup refuses — ✅ DONE (2026-11-04)
+
+NOTES (2026-11-04): `configReport` now takes the apogee home (`configDir`) rather than the config file path and derives the path with `config.FilePath`, so the startup pass and the reader read from the same home; the new pass lives in a helper, `startupRefusal`, which reuses `noFlagChanged`/`noEnvironment` from settingsedit.go.
+NOTES (2026-11-04): the "server with no endpoint" case uses `servers: [{name: no-endpoint}]` plus `server: no-endpoint`; every case also asserts that `apogee probe host` really refuses the file, so a case that startup accepts cannot pass silently.
+
 
 **What:**
 **Goal:** `apogee probe config` exits non-zero with startup's own sentence for every config value `config.ApplyConfigOffer` refuses (a `StartupUndetermined` result excepted), and its `notices` section lists every notice that pass announces, each once. Fix for Seqcom docs-a3-v0310: `sessions: {max-age: 30d}` printed `0s`, `notices (none)`, exit 0, while `apogee probe host` failed with `invalid sessions.max-age "30d": …`.
