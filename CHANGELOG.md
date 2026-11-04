@@ -3,8 +3,10 @@
 All notable changes to Apogee are recorded here. Versioning is deliberately 0.x
 while the project is pre-production (ADR 0001, as amended 2026-09-30; `VERSION`).
 The public Go API is meant to follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) once a `v1.0.0` is
-cut: Events and Moments stay **additively extensible**, so a new Event variant
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) once the first
+stable release is cut. That release cannot be numbered v1.0.0 to v1.8.0: an
+accidental v1.x series used those numbers and `go.mod` retracts them. Events
+and Moments stay **additively extensible**, so a new Event variant
 or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
