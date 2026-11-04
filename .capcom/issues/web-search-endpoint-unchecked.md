@@ -1,10 +1,12 @@
 ---
 title: web-search-endpoint is never refused at startup, despite the manual
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-04 - 00 - config-refusal-parity-plan.md
 created: 2026-11-04T20:46:42Z
+closed: 2026-11-04T21:40:16Z
+reason: "Resolved by plan '2026-11-04 - 00 - config-refusal-parity-plan' item 2 (archived at 218ddf4b): web-search-endpoint is a checkedField refused at load via a shared ParseSearchEndpoint; blank means unset, off/none/disabled still disable."
 ---
 
 Seqcom docs-a5-v0310 (apogee v0.31.0). The row is a `stringField`, so `validateSearchEndpoint` runs only at /settings, and it passes anything `url.Parse` survives. `x y z`, `://`, `http://[` start fine and fail at call time with url-safety errors. docs/manual/configuration.md says unparseable text is refused at startup.

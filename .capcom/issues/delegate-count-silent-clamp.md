@@ -1,10 +1,12 @@
 ---
 title: "delegate-max-depth: 0 and negative count keys silently resolve to defaults"
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-04 - 00 - config-refusal-parity-plan.md
 created: 2026-11-04T20:46:43Z
+closed: 2026-11-04T21:40:16Z
+reason: "Resolved by plan '2026-11-04 - 00 - config-refusal-parity-plan' items 3-4 (archived at 218ddf4b): delegate-max-depth below 1 and negative values for the six sibling count keys are refused at load naming the key; 0 meanings unchanged."
 ---
 
 Seqcom docs-a7-v0310 (apogee v0.31.0). `delegate-max-depth` is a plain `WholeCount` clamped by `atLeast(1, …)`, so 0 resolves to 1 with no notice; the manual and template say it must be at least 1. Negative `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-tokens`, `workflow-retries`, `workflow-continuations` and `working-window` silently become defaults the same way.
