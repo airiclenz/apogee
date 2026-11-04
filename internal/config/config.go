@@ -1231,8 +1231,8 @@ type fileConfig struct {
 	// after a fault, a missing receipt, or a cap its continuations did not clear (default 1).
 	// File-only (no flag/env), and a pointer for DelegateMaxSteps's reason: an explicit
 	// `workflow-retries: 0` is the documented spelling of "never restart", which a plain int could
-	// not tell from an absent key; a negative one resolves to the default. It feeds
-	// domain.Config.Workflow.Retries.
+	// not tell from an absent key; a negative one is refused at the file pass (a project file
+	// stating one skips the project layer). It feeds domain.Config.Workflow.Retries.
 	WorkflowRetries *WholeCount `yaml:"workflow-retries"`
 	// WorkflowContinuations is how many times a capped Workflow child is continued within one
 	// attempt (default 2). File-only (no flag/env), and a pointer for WorkflowRetries's reason: `0`
@@ -1304,14 +1304,15 @@ type fileConfig struct {
 	ContextWindow TokenCount `yaml:"context-window"`
 	// WorkingWindow BOUNDS the room the Budget hands its reducers, in tokens — a soft ceiling INSIDE
 	// the window above rather than a second pin of it. File-only (no flag/env), like context-window
-	// beside it, and a plain count for that key's reason: presence IS the positive value, so absent or
-	// ≤ 0 ⇒ the advertised window is the whole working room, exactly today's behaviour. It earns its
-	// keep on a model that advertises a very large window, where every guard that scales with the
-	// window — the allocation, the tool-result cap, the compaction trigger — becomes expensive at
-	// once; bounding the working room here is how such a model is run affordably without lying to
-	// overflow detection, which still measures against the ADVERTISED window. It feeds
-	// ContextConfig.WorkingWindow.
-	WorkingWindow WholeCount `yaml:"working-window"`
+	// beside it, and presence IS the positive value for that key's reason: absent or 0 ⇒ the
+	// advertised window is the whole working room, exactly today's behaviour. A pointer so a stated
+	// value lands through the row at the file pass, where a negative one is refused naming the key
+	// rather than read as the whole window. It earns its keep on a model that advertises a very
+	// large window, where every guard that scales with the window — the allocation, the
+	// tool-result cap, the compaction trigger — becomes expensive at once; bounding the working
+	// room here is how such a model is run affordably without lying to overflow detection, which
+	// still measures against the ADVERTISED window. It feeds ContextConfig.WorkingWindow.
+	WorkingWindow *WholeCount `yaml:"working-window"`
 	// ResponseReserve is how much of that window is held back for the model's REPLY, as a FRACTION
 	// of it (`response-reserve: 0.2` ⇒ a fifth). File-only (no flag/env), like context-window:
 	// beside it. Absent or 0 ⇒ unset, so apogee's built-in 0.20 share stands; a value in the open

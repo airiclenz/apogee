@@ -102,7 +102,11 @@ internal/config/config.go — fileConfig.DelegateMaxDepth, WholeCount.UnmarshalY
 **Depends on:** item 1 (shares `cmd/apogee/probeconfig_test.go`).
 **Commit:** `fix(config): refuse a delegate-max-depth below 1 at load`
 
-## 4. Negative count keys are refused at load
+## 4. Negative count keys are refused at load — ✅ DONE (2026-11-04)
+
+NOTES (2026-11-04): consequential edit — internal/config/options.go: made necessary by the workflow-retries refusal (the Options.WorkflowRetries comment said the loader lands the default for a negative key)
+NOTES (2026-11-04): internal/config/registry_test.go — TestRegistrySetRefusesWhatValidateRefuses gains a two-row `parseRefuses` exemption (workflow-retries, workflow-continuations). The plan's no-hook parse refusal is a Set refusal that neither a Validate hook nor the kind makes, so that test would otherwise fail. The exemption pins the refusal to the row's own "apogee: invalid <key> " sentence.
+NOTES (2026-11-04): the refusal sentences are new for the two workflow keys, which had no hook: `apogee: invalid workflow-retries "-1": want a count of 0 or more (0 never restarts an item; 1 is the default)`, with the same shape for workflow-continuations. Both come from one shared parseWorkflowCount in registry.go.
 
 **What:**
 **Goal:** a negative `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-tokens`, `workflow-retries`, `workflow-continuations` or `working-window` in a config file is refused when the config is read, naming the key and value; `0` and an absent key resolve exactly as before for each. Fix for the same silent-default class as Seqcom docs-a7-v0310.

@@ -1667,7 +1667,7 @@ the rounds before it, up to `workflow-continuations:` times (default **2**). Pas
 after a fault or an ending with no report, the item *starts over* with a fresh sub-agent,
 up to `workflow-retries:` times (default **1**). An item out of both ends on the best it
 has, marked as such, and the rest of the workflow runs on. `0` switches either second
-chance off; a negative count reads as the default. `workflow-wake:` (a file-only key, `on`
+chance off; a negative count is refused when the config loads, naming the key. `workflow-wake:` (a file-only key, `on`
 or `off`, default **on**) decides what happens when a workflow you sent to the background
 ends: `on` gives your agent a turn of its own to read the result, `off` shows you that it
 finished and lets the result ride on your next message instead. It takes the two words only

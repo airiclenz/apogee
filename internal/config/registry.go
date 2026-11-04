@@ -733,9 +733,11 @@ var KeyRegistry = bindRows([]Key{
 		Desc: "Turns a delegated sub-agent may take before apogee ends it; 0 lets it run " +
 			"unbounded; takes effect at the next start.",
 		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
-		// absence of one; a negative one resolves to the default.
-		field: intField(func(o *Options) *int { return &o.DelegateMaxSteps },
-			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.DelegateMaxSteps)) }),
+		// absence of one. Landed through the row at the file pass, delegate-max-depth's reason: a
+		// negative cap is refused there in the row's own sentence — a cap that quietly resolved to
+		// the default would leave the file reading as configured under a bound nobody set.
+		field: checkedField(strconv.Atoi, strconv.Itoa, func(o *Options) *int { return &o.DelegateMaxSteps },
+			func(fc fileConfig) *string { return countText(fc.DelegateMaxSteps) }),
 	},
 	{
 		Path: "delegate-fanout-rounds", Kind: KindInt, Default: strconv.Itoa(defaultDelegateFanOutRounds),
@@ -744,9 +746,10 @@ var KeyRegistry = bindRows([]Key{
 		Desc: "Rounds of the server's parallel-agents width one reply may fan out (calls past " +
 			"rounds × width are refused and must be delegated again); 0 switches the ceiling off; " +
 			"takes effect at the next start.",
-		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no ceiling").
-		field: intField(func(o *Options) *int { return &o.DelegateFanOutRounds },
-			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.DelegateFanOutRounds)) }),
+		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no ceiling"); landed
+		// through the row at the file pass, so a negative ceiling is refused in the row's sentence.
+		field: checkedField(strconv.Atoi, strconv.Itoa, func(o *Options) *int { return &o.DelegateFanOutRounds },
+			func(fc fileConfig) *string { return countText(fc.DelegateFanOutRounds) }),
 	},
 	{
 		Path: "delegate-max-depth", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxDepth),
@@ -767,9 +770,10 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateDelegateMaxTokens,
 		Desc: "Prompt tokens a delegated sub-agent may spend in all before apogee ends it; 0 lets " +
 			"it run unbounded; takes effect at the next start.",
-		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no bound").
-		field: intField(func(o *Options) *int { return &o.DelegateMaxTokens },
-			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.DelegateMaxTokens)) }),
+		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no bound"); landed
+		// through the row at the file pass, so a negative bound is refused in the row's sentence.
+		field: checkedField(strconv.Atoi, strconv.Itoa, func(o *Options) *int { return &o.DelegateMaxTokens },
+			func(fc fileConfig) *string { return countText(fc.DelegateMaxTokens) }),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
@@ -828,17 +832,19 @@ var KeyRegistry = bindRows([]Key{
 	},
 	{
 		// A count, delegate-fanout-rounds's posture on disk — a pointer, because 0 is a VALUE here
-		// (never restart) — but FILE-ONLY, so no Validate hook (a non-editable row runs none): a
-		// negative count resolves to the default, as it does for the other delegate-* counts. Its default is
-		// the engine's own (domain.DefaultWorkflowRetries), so the host's and an embedder's zero
-		// Config agree.
+		// (never restart) — but FILE-ONLY, so no Validate hook (a non-editable row runs none): the
+		// row's parse (parseWorkflowRetries) refuses a negative count at the file pass instead,
+		// workflow-wake's posture, in a sentence naming the key. A project file stating one skips
+		// the whole project layer with a notice rather than stopping the start. Its default is the
+		// engine's own (domain.DefaultWorkflowRetries), so the host's and an embedder's zero Config
+		// agree.
 		Path: "workflow-retries", Kind: KindInt, Default: strconv.Itoa(domain.DefaultWorkflowRetries),
 		Class: ClassProjectParam,
 		Desc: "How many times a workflow restarts an item with a fresh sub-agent after a fault, a " +
 			"missing receipt, or a cap its continuations did not clear; 0 never restarts one; takes " +
 			"effect at the next start.",
-		field: intField(func(o *Options) *int { return &o.WorkflowRetries },
-			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.WorkflowRetries)) }),
+		field: checkedField(parseWorkflowRetries, strconv.Itoa, func(o *Options) *int { return &o.WorkflowRetries },
+			func(fc fileConfig) *string { return countText(fc.WorkflowRetries) }),
 	},
 	{
 		// workflow-retries's posture exactly, for the continuation bound.
@@ -848,8 +854,9 @@ var KeyRegistry = bindRows([]Key{
 		Desc: "How many times a workflow continues a capped sub-agent within one attempt, each " +
 			"continuation seeded with the rounds before it; 0 never continues one; takes effect at " +
 			"the next start.",
-		field: intField(func(o *Options) *int { return &o.WorkflowContinuations },
-			func(fc fileConfig) *int { return atLeast(0, countPtr(fc.WorkflowContinuations)) }),
+		field: checkedField(parseWorkflowContinuations, strconv.Itoa,
+			func(o *Options) *int { return &o.WorkflowContinuations },
+			func(fc fileConfig) *string { return countText(fc.WorkflowContinuations) }),
 	},
 	{
 		// A two-word enum, sub-agents-choice's pattern, landed through the row at the file pass so
@@ -974,9 +981,11 @@ var KeyRegistry = bindRows([]Key{
 		Desc: "Bound the room the Budget works in to this many tokens; 0 uses the whole " +
 			"window; takes effect at the next start.",
 		// Presence is the positive value here too, for context-window's reason: 0 and absent both
-		// mean "this run bounds nothing of its own".
-		field: intField(func(o *Options) *int { return &o.WorkingWindow },
-			func(fc fileConfig) *int { return atLeast(1, countPtr(&fc.WorkingWindow)) }),
+		// mean "this run bounds nothing of its own". Landed through the row at the file pass,
+		// delegate-max-steps's reason: a negative room is refused there in the row's own sentence
+		// rather than read as the whole window.
+		field: checkedField(strconv.Atoi, strconv.Itoa, func(o *Options) *int { return &o.WorkingWindow },
+			func(fc fileConfig) *string { return countText(fc.WorkingWindow) }),
 	},
 	{
 		// Editable, and the edit is honoured at the NEXT start — the share is read off the file into
@@ -1628,6 +1637,32 @@ func parseHeadlessMaxTurns(value string) (int, error) {
 	if err != nil || n < 0 {
 		return 0, fmt.Errorf("apogee: invalid headless-max-turns %q: want a Turn count of 0 or more "+
 			"(0, the default, sets no Turn budget)", value)
+	}
+	return n, nil
+}
+
+// parseWorkflowRetries reads a `workflow-retries:` value into how many times a workflow restarts an
+// item: `0` never restarts one, and text that is not a whole number — or a negative one — is refused
+// with the key named. The row is file-only, so this parse is where the file pass refuses; a negative
+// bound would reach the engine as a restart budget every item had spent before its first attempt.
+func parseWorkflowRetries(value string) (int, error) {
+	return parseWorkflowCount("workflow-retries", value, "0 never restarts an item", domain.DefaultWorkflowRetries)
+}
+
+// parseWorkflowContinuations reads a `workflow-continuations:` value on parseWorkflowRetries's
+// contract: `0` never continues a capped sub-agent, and a negative count is refused with the key named.
+func parseWorkflowContinuations(value string) (int, error) {
+	return parseWorkflowCount("workflow-continuations", value, "0 never continues a capped sub-agent",
+		domain.DefaultWorkflowContinuations)
+}
+
+// parseWorkflowCount is the one reading of the two workflow counts: a whole number of 0 or more,
+// refused otherwise in a sentence naming the key, what its 0 means and its default.
+func parseWorkflowCount(key, value, zeroMeans string, def int) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("apogee: invalid %s %q: want a count of 0 or more (%s; %d is the default)",
+			key, value, zeroMeans, def)
 	}
 	return n, nil
 }

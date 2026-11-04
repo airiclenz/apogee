@@ -1227,6 +1227,10 @@ func TestRegistrySetRefusesWhatValidateRefuses(t *testing.T) {
 		"[../secrets.md]", "[AGENTS.md, ./AGENTS.md]", "%zz", "You are apogee in {{ workspace }}.",
 		"-5m", "90", "soonish",
 	}
+	// The file-only counts whose parse is the key's one reading (parseWorkflowCount): a non-editable
+	// row carries no hook (TestRegistryValidateHooksSitOnEditableKeys), so a negative count the kind
+	// admits is refused by the row's parse instead, in a sentence naming the key.
+	parseRefuses := map[string]bool{"workflow-retries": true, "workflow-continuations": true}
 
 	for _, k := range KeyRegistry {
 		if k.Set == nil {
@@ -1262,6 +1266,10 @@ func TestRegistrySetRefusesWhatValidateRefuses(t *testing.T) {
 					}
 					if want := "apogee: " + kindErr.Error(); setErr.Error() != want {
 						t.Errorf("Set refuses %q as\n  %v\nwant the writer's kind sentence\n  %v", value, setErr, want)
+					}
+				case setErr != nil && parseRefuses[k.Path]:
+					if want := "apogee: invalid " + k.Path + " "; !strings.HasPrefix(setErr.Error(), want) {
+						t.Errorf("Set refuses %q as\n  %v\nwant the row's parse sentence, led by %q", value, setErr, want)
 					}
 				case setErr != nil:
 					t.Fatalf("neither Validate nor the kind refuses %q, but Set did: %v", value, setErr)

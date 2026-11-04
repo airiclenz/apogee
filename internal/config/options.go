@@ -311,9 +311,9 @@ type Options struct {
 
 	// workflowRetries is how many times an engine-run Workflow restarts an item with a fresh child
 	// (default 1; 0 = never), loaded from the config file only, delegate-fanout-rounds's posture:
-	// the loader lands the default when the key is absent or negative. The composition root folds
-	// its ADDRESS into
-	// apogee.Config.Workflow.Retries, whose nil keeps the engine's own default.
+	// the loader lands the default when the key is absent and refuses a negative count. The
+	// composition root folds its ADDRESS into apogee.Config.Workflow.Retries, whose nil keeps the
+	// engine's own default.
 	WorkflowRetries int
 
 	// workflowContinuations is how many times a capped Workflow child is continued within one

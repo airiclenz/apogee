@@ -727,7 +727,7 @@ func everyKeyFileConfig() fileConfig {
 		ServerStats:           boolptr(false),
 		RememberModel:         boolptr(false),
 		UpdateCheck:           boolptr(false),
-		ContextWindow:         64000, WorkingWindow: 32000, ResponseReserve: 0.3,
+		ContextWindow:         64000, WorkingWindow: countptr(32000), ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
 			Run: []any{"true"}}},
@@ -2270,6 +2270,67 @@ func TestApplyConfigCountKeysRefuseAFraction(t *testing.T) {
 	}
 }
 
+// The six count keys whose 0 is a value of its own refuse a negative count at the load, naming the
+// key and the value as written, rather than resolving it to the default — a bound that quietly
+// became the default would leave the file reading as configured under a limit nobody set. A 0 and
+// an absent key resolve exactly as they always have: each key's own 0 meaning (unbounded, no
+// ceiling, never, the whole window) and its built-in default.
+func TestApplyConfigCountKeysRefuseANegative(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		key        string
+		got        func(o Options) int
+		wantZero   int
+		wantAbsent int
+	}{
+		{"delegate-max-steps", func(o Options) int { return o.DelegateMaxSteps }, 0, 80},
+		{"delegate-fanout-rounds", func(o Options) int { return o.DelegateFanOutRounds }, 0, 2},
+		{"delegate-max-tokens", func(o Options) int { return o.DelegateMaxTokens }, 0, 20_000_000},
+		{"workflow-retries", func(o Options) int { return o.WorkflowRetries }, 0, 1},
+		{"workflow-continuations", func(o Options) int { return o.WorkflowContinuations }, 0, 2},
+		{"working-window", func(o Options) int { return o.WorkingWindow }, 0, 0},
+	} {
+		for _, c := range []struct {
+			name    string
+			file    string
+			want    int
+			refused bool
+		}{
+			{name: "a negative count is refused", file: tt.key + ": -1\n", refused: true},
+			{name: "a 0 resolves as before", file: tt.key + ": 0\n", want: tt.wantZero},
+			{name: "an absent key resolves as before", file: "", want: tt.wantAbsent},
+		} {
+			t.Run(tt.key+" — "+c.name, func(t *testing.T) {
+				t.Parallel()
+				home := testConfigHome(t, "")
+				writeConfigHome(t, home, c.file)
+				opts := Options{ConfigDir: home}
+
+				err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+					os.ReadFile, noNotify)
+
+				if c.refused {
+					if err == nil {
+						t.Fatalf("ApplyConfig = nil error (%s = %d); want %s: -1 refused at load", tt.key, tt.got(opts), tt.key)
+					}
+					for _, want := range []string{tt.key, `"-1"`} {
+						if !strings.Contains(err.Error(), want) {
+							t.Errorf("error = %q; want it to contain %q", err, want)
+						}
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("ApplyConfig: %v", err)
+				}
+				if got := tt.got(opts); got != c.want {
+					t.Errorf("%s = %d; want %d", tt.key, got, c.want)
+				}
+			})
+		}
+	}
+}
+
 // topLevelKey is the file text that sets one top-level key to a value, as written.
 func topLevelKey(key string) func(value string) string {
 	return func(value string) string { return key + ": " + value + "\n" }
@@ -2615,8 +2676,8 @@ func TestApplyConfigRestreamBudget(t *testing.T) {
 
 // The three workflow keys parse off the file the way the engine will read them: each count lands as
 // written, an absent key takes the engine's own default, an explicit 0 is a value (no second chance)
-// rather than "unset", and a negative count resolves to the default (the delegate-* keys' file
-// posture: the rows are file-only, so no settings hook refuses one). `workflow-wake:` takes its
+// rather than "unset", and a negative count is refused at the load naming the key (the rows are
+// file-only, so the rows' own parse refuses it, not a settings hook). `workflow-wake:` takes its
 // two words only — `off` lands as off, while a YAML `true`, which a *bool field would have taken, is
 // refused rather than read as a switch the key does not spell. The opts → Config.Workflow threading
 // is the composition root's (projectConfig).
@@ -2637,8 +2698,8 @@ func TestApplyConfigWorkflowKeys(t *testing.T) {
 		{name: "an explicit 0 is no second chance, not absent",
 			file:        "workflow-retries: 0\nworkflow-continuations: 0\nworkflow-wake: on\n",
 			wantRetries: 0, wantContinuations: 0, wantWake: true},
-		{name: "a negative count resolves to the default", file: "workflow-retries: -1\nworkflow-continuations: -2\n",
-			wantRetries: 1, wantContinuations: 2, wantWake: true},
+		{name: "a negative count is refused naming the key", file: "workflow-retries: -1\nworkflow-continuations: -2\n",
+			wantErr: `apogee: invalid workflow-retries "-1": want a count of 0 or more`},
 		{name: "a YAML true is not a wake word", file: "workflow-wake: true\n",
 			wantErr: `workflow-wake is one of on, off, not "true"`},
 	} {
@@ -2688,6 +2749,8 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 		{name: "stream-idle-timeout", file: "stream-idle-timeout: 5x\n", wantErr: `apogee: invalid stream-idle-timeout "5x": want a length of time like 10m or 30s, or 0 to wait for as long as the server takes`},
 		{name: "delegate-max-depth", file: "delegate-max-depth: 0\n", wantErr: `apogee: invalid delegate-max-depth "0": must be at least 1 (1 is the default: the session delegates, its delegates do not)`},
 		{name: "re-stream-budget", file: "re-stream-budget: -1\n", wantErr: `apogee: invalid re-stream-budget "-1": want a count of 0 or more (0 never re-streams; 3 is the default)`},
+		{name: "workflow-retries", file: "workflow-retries: -1\n", wantErr: `apogee: invalid workflow-retries "-1": want a count of 0 or more (0 never restarts an item; 1 is the default)`},
+		{name: "workflow-continuations", file: "workflow-continuations: -1\n", wantErr: `apogee: invalid workflow-continuations "-1": want a count of 0 or more (0 never continues a capped sub-agent; 2 is the default)`},
 		{name: "workflow-wake", file: "workflow-wake: maybe\n", wantErr: `apogee: workflow-wake is one of on, off, not "maybe"`},
 		{name: "headless-max-turns", file: "headless-max-turns: -1\n", wantErr: `apogee: invalid headless-max-turns "-1": want a Turn count of 0 or more (0, the default, sets no Turn budget)`},
 		{name: "headless-max-wall-time", file: "headless-max-wall-time: 5x\n", wantErr: `apogee: invalid headless-max-wall-time "5x": want a length of time like 90m or 2h, or 0 to set no wall-time budget`},

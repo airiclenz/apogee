@@ -267,6 +267,34 @@ func TestLayeredConfigSkipsAProjectFileThatFailsItsChecks(t *testing.T) {
 	}
 }
 
+// A project file stating a negative workflow count no longer resolves it to the default: the count
+// is refused at the project's file pass, so the whole project layer is skipped with one notice naming
+// the key and the value — workflow-wake's posture — and the session runs on the global file alone.
+func TestLayeredConfigSkipsANegativeWorkflowCount(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"workflow-retries", "workflow-continuations"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", key+": -1\n")
+
+			o, notices := loadLayered(t, globalPath, projectRoot)
+
+			if o.WorkflowRetries != 2 || o.ProjectKeys != nil {
+				t.Errorf("workflow-retries = %d, ProjectKeys = %v; want the global 2 and no layer",
+					o.WorkflowRetries, o.ProjectKeys)
+			}
+			if len(notices) != 1 {
+				t.Fatalf("notices = %q; want one naming the skipped project layer", notices)
+			}
+			for _, want := range []string{projectFilePath(projectRoot), key, `"-1"`, "the project layer is skipped"} {
+				if !strings.Contains(notices[0], want) {
+					t.Errorf("notice = %q; want it to contain %q", notices[0], want)
+				}
+			}
+		})
+	}
+}
+
 // A key the schema does not spell is announced against the project path, not the global one.
 func TestLayeredConfigAnnouncesUnknownProjectKeysAgainstTheProjectPath(t *testing.T) {
 	t.Parallel()
