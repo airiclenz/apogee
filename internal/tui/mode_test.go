@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -172,21 +173,14 @@ func TestFooterStatesTheSessionSpend(t *testing.T) {
 		}
 	})
 
-	t.Run("the spend goes before the effort word", func(t *testing.T) {
+	t.Run("the workdir middle-elides, then the spend goes before the effort word", func(t *testing.T) {
 		t.Parallel()
 
 		m := priced(t)
-		for w := 120; w > 0; w-- {
-			got := footerLeftRun(t, m, w)
-			if got == withSpend {
-				continue
-			}
-			if got != facts {
-				t.Errorf("footer's left run at width %d = %q, want %q — the spend is the first segment to go", w, got, facts)
-			}
-			return
+		want := []string{withSpend, "test-host ✦ test-model ✦ high ✦ …/proj ✦ ≥ 0.42 EUR", facts}
+		if got := footerNarrowingRuns(t, m, 120, facts); !slices.Equal(got, want) {
+			t.Errorf("footer's left runs, narrowing from 120 columns = %q, want %q — the workdir shortens before the spend, the first segment to go", got, want)
 		}
-		t.Fatal("the footer never narrowed past its full run")
 	})
 }
 
@@ -242,23 +236,101 @@ func TestFooterStatesTheGitSegment(t *testing.T) {
 		})
 	}
 
-	t.Run("the git segment goes after the spend and before the effort word", func(t *testing.T) {
+	t.Run("the workdir and then the branch middle-elide, then the git segment goes before the effort word", func(t *testing.T) {
 		t.Parallel()
 
-		m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
-		withGit := facts + " ✦ main 5Δ 0↓ 4↑"
+		m := withGitSnapshot(footerFactsModel(t), footerLongBranchSnapshot)
+		want := []string{
+			facts + " ✦ feature/long-branch-name 5Δ 0↓ 4↑",
+			"test-host ✦ test-model ✦ high ✦ …/proj ✦ feature/long-branch-name 5Δ 0↓ 4↑",
+			"test-host ✦ test-model ✦ high ✦ …/proj ✦ feature/lon…branch-name 5Δ 0↓ 4↑",
+		}
+		got := footerNarrowingRuns(t, m, 160, facts)
+		if len(got) < 4 || !slices.Equal(got[:3], want) {
+			t.Fatalf("footer's left runs, narrowing from 160 columns = %q, want them to open %q", got, want)
+		}
+		// The branch gives up a cell a column until its floor, the counts whole beside it, and only
+		// then does the first segment drop — the git segment, with the full workdir back.
+		var floor string
+		for _, run := range got[2 : len(got)-1] {
+			branch, counts, ok := strings.Cut(strings.TrimPrefix(run, "test-host ✦ test-model ✦ high ✦ …/proj ✦ "), " ")
+			if !ok || counts != "5Δ 0↓ 4↑" || !strings.Contains(branch, "…") {
+				t.Errorf("footer's left run %q, want the branch middle-elided beside its whole counts", run)
+			}
+			floor = branch
+		}
+		if floor != "feat…name" {
+			t.Errorf("the branch's last elided form = %q, want its floor %q", floor, "feat…name")
+		}
+		if last := got[len(got)-1]; last != facts {
+			t.Errorf("footer's first run past the branch's floor = %q, want %q — the git segment goes before the effort word", last, facts)
+		}
+	})
+
+	t.Run("an elided branch keeps its counts' tone", func(t *testing.T) {
+		t.Parallel()
+
+		m := withGitSnapshot(footerFactsModel(t), footerLongBranchSnapshot)
+		bright := footerBrightOpener(t, m)
+		elided := 0
 		for w := 160; w > 0; w-- {
-			got := footerLeftRun(t, m, w)
-			if got == withGit {
+			run := footerLeftRun(t, m, w)
+			if run == facts {
+				break
+			}
+			if !strings.Contains(run, " ✦ feat") || strings.Contains(run, footerLongBranchSnapshot.Branch) {
 				continue
 			}
-			if got != facts {
-				t.Errorf("footer's left run at width %d = %q, want %q — the git segment goes before the effort word", w, got, facts)
+			elided++
+			footer := m.footerContent(w)
+			for _, count := range []string{"5Δ", "4↑"} {
+				if !strings.Contains(footer, bright+count) {
+					t.Errorf("footer at width %d does not paint %q bright beside the elided branch: %q", w, count, footer)
+				}
 			}
-			return
 		}
-		t.Fatal("the footer never narrowed past its full run")
+		if elided == 0 {
+			t.Fatal("no width middle-elided the branch")
+		}
 	})
+}
+
+// footerLongBranchSnapshot is footerGitTestSnapshot on a branch long enough to middle-elide.
+var footerLongBranchSnapshot = gitstatus.Snapshot{
+	Branch: "feature/long-branch-name", Upstream: "origin/feature/long-branch-name",
+	HasAheadBehind: true, Dirty: 5, Ahead: 4,
+}
+
+// footerNarrowingRuns is the distinct left runs the footer states as its window narrows a column at
+// a time from width, in the order they appear, up to and including the first that reads until.
+func footerNarrowingRuns(t *testing.T, m Model, width int, until string) []string {
+	t.Helper()
+
+	var runs []string
+	for w := width; w > 0; w-- {
+		run := footerLeftRun(t, m, w)
+		if len(runs) == 0 || run != runs[len(runs)-1] {
+			runs = append(runs, run)
+		}
+		if run == until {
+			return runs
+		}
+	}
+	t.Fatalf("the footer never narrowed to %q: %q", until, runs)
+	return nil
+}
+
+// footerBrightOpener is the escape sequence the footer opens its bright tone (theme.mutedBright)
+// with, refused where it would be indistinguishable from the footer's own tone.
+func footerBrightOpener(t *testing.T, m Model) string {
+	t.Helper()
+
+	probe := m.th.footerText.Foreground(m.th.mutedBright).Render("X")
+	bright := probe[:strings.Index(probe, "X")]
+	if bright == "" || strings.HasPrefix(m.th.footerText.Render("X"), bright) {
+		t.Fatalf("the bright tone opens with %q, indistinguishable from the footer's own", bright)
+	}
+	return bright
 }
 
 // TestFooterTonesOnlyNonZeroGitCounts reads the styled bytes: a non-zero count opens the brighter
@@ -268,11 +340,7 @@ func TestFooterTonesOnlyNonZeroGitCounts(t *testing.T) {
 	t.Parallel()
 
 	m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
-	probe := m.th.footerText.Foreground(m.th.mutedBright).Render("X")
-	bright := probe[:strings.Index(probe, "X")]
-	if bright == "" || strings.HasPrefix(m.th.footerText.Render("X"), bright) {
-		t.Fatalf("the bright tone opens with %q, indistinguishable from the footer's own", bright)
-	}
+	bright := footerBrightOpener(t, m)
 
 	footer := m.footerContent(160)
 	if n := strings.Count(footer, bright); n != 2 {

@@ -2007,9 +2007,18 @@ missing, the content between two `│` bars, and a `╰──╯` rule under it 
 **status line's** posture instead, one row below the box rather than one row above it: the two-column
 `bodyIndent` lead, one unbroken black field to the window's full width, and the mode marker ending
 `bodyIndent` short of the edge — the same column the gauge ends in (above). A narrow window does not
-give up an end: the row is composed TO the width. The session's spend goes first (above, "The
-spend"), then the git state ("The git state"), and then the row spends its columns in the order it
-is read for — the effort word, then the workdir, then the host. What is left is what the row never gives up: the model, the
+give up an end: the row is composed TO the width. Before it gives up anything it SHORTENS: the
+workdir and the branch are the row's two long, free-form facts, and a shortened one still names
+which one it is, so they middle-elide first. The workdir goes a step at a time, its head and its
+tail kept a component shallower each step and the middle given to an `…` — `~/repos/apogee/internal/tui`,
+then `~/repos/…/internal/tui`, then `~/…/tui` — down to its floor `…/tui` (a rooted path keeps its
+root: `/home/…/tui`). Then the branch middle-elides a cell a column (`feature/lon…branch-name`),
+its counts whole beside it and still in their tone, down to its floor of eight cells of its own
+name (`feat…name`); a branch no longer than that floor and its `…` is never elided. Only past both floors does a segment
+drop, and that rung states the workdir and the branch in full again — the drop is what bought the
+room. The session's spend goes first (above, "The spend"), then the git state ("The git state"),
+and then the row spends its columns in the order it is read for — the effort word, then the
+workdir, then the host. What is left is what the row never gives up: the model, the
 `✦ offline` marker and the mode marker, and those three only give way to each other — the model
 truncates with an `…` before it goes at all, then `offline` goes. The marker drops
 only where it cannot seat whole between its two margins, and only THERE does the row keep the older

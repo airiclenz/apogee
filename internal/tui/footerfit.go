@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,15 @@ import (
 // those three only give way to each other — the model truncates, then goes, then offline goes, and
 // only where the mode marker cannot seat whole between its two margins does the row fall back to
 // the old shape.
+//
+// Before the ladder gives anything up, the row SHORTENS: the workdir middle-elides stepwise, its
+// head and its last components kept and the middle given to an ellipsis (`~/repos/…/internal/tui`,
+// then `~/…/tui`), down to its floor `…/<last>`, and only then the branch middle-elides, to the
+// width the row has left, down to its own floor ([footerBranchFloorCells]). Both are the long,
+// free-form facts of the row, and a shortened path or branch still names which one it is, where a
+// dropped git segment or effort word says nothing at all. The shortening belongs to the full run
+// alone: once a segment has dropped, the rung composes the full workdir and branch again, since the
+// drop is what bought the room.
 //
 // The whole layout comes out of ONE call. The footer has two readers of its arithmetic — the
 // painter and the pointer that addresses the marker's cells ([Model.handleFooterModeClick]) — and
@@ -83,10 +93,29 @@ func (id footerSegmentID) priority() int {
 }
 
 // footerSegment is one named fact of the left run: its name and its plain text, empty where
-// nothing has named it.
+// nothing has named it. pieces is the git segment's toned words ([gitFooterSpans]) and nil for
+// every other segment; where it is set, text is exactly those pieces re-joined
+// ([footerSpansText]), so a fit that elides the branch rewrites both together ([gitFooterSegment]).
 type footerSegment struct {
-	id   footerSegmentID
-	text string
+	id     footerSegmentID
+	text   string
+	pieces []footerSpan
+}
+
+// The ellipsis the footer's middle-elision puts where the text it gave up stood.
+const footerEllipsis = "…"
+
+// footerBranchFloorCells is the fewest cells of the branch's own name a middle-elided branch keeps
+// — split around the ellipsis, the extra cell to the head — so the shortest branch the row states
+// still reads as its own (`feat…name`) rather than as two letters. A branch no wider than this
+// floor and its ellipsis is never elided.
+const footerBranchFloorCells = 8
+
+// gitFooterSegment is the git segment worded from its pieces: the pieces themselves, for the
+// painter to tone one by one, and their plain re-join, for the fit to measure. No pieces is no
+// segment — empty, so it leaves the row with its separator.
+func gitFooterSegment(pieces []footerSpan) footerSegment {
+	return footerSegment{id: footerSegGit, text: footerSpansText(pieces), pieces: pieces}
 }
 
 // footerInput is everything the fit needs, and all of it is plain text: no styles, no escape
@@ -123,14 +152,19 @@ func (in footerInput) segment(id footerSegmentID) string {
 // footerSegmentSpan is where one kept segment sits on the composed row: its text as the row shows
 // it, at the byte offset in the layout's info run that text begins at, and its cell span — the
 // screen column of its first cell, the row's lead margin included, and the cells it covers. The
-// text is the segment's own unless the priority-0 rung cut it, in which case it is the cut text,
-// ellipsis and all.
+// text is the segment's own — middle-elided where the fit shortened it — unless the priority-0
+// rung cut it, in which case it is the cut text, ellipsis and all.
+//
+// pieces is the git segment's toned words as the row shows them, an elided branch included, so
+// the painter tones the very words the fit measured ([Model.footerGit]); it is nil for every other
+// segment and for a segment the cut reached.
 type footerSegmentSpan struct {
-	id    footerSegmentID
-	text  string
-	at    int
-	col   int
-	cells int
+	id     footerSegmentID
+	text   string
+	pieces []footerSpan
+	at     int
+	col    int
+	cells  int
 }
 
 // footerLayout is the composed row: the three plain runs the painter styles separately — info on
@@ -175,22 +209,31 @@ func (l footerLayout) span(id footerSegmentID) (footerSegmentSpan, bool) {
 //
 // "Fits" is the painter's own test, unchanged: at least one blank column between the left run and
 // the marker, so the two ends never touch. The rungs, in order, stopping at the first that fits:
-// the full run, and then the run without every segment of priority 5, of 4 and above, and so on
+// the full run; the full run with the workdir middle-elided one step at a time down to its floor,
+// and then with the branch middle-elided too ([footerInput.shortenings]); and then the run without
+// every segment of priority 5, of 4 and above, and so on
 // down to 1 ([footerSegmentID.priority]) — today the spend, the git segment, the effort word, the
 // workdir and the host, in that order; then the priority-0 run (the model) truncated to what is
 // left; that run gone; offline gone. The last rung is the marker alone between its two margins,
 // and there the blank column is not asked for — with no left run there is nothing for it to
 // separate the marker from.
 func footerFit(in footerInput) footerLayout {
+	full := in.keptBelow(footerTopPriority + 1)
+	if layout, ok := in.fit(full); ok {
+		return layout
+	}
+	for _, kept := range in.shortenings(full) {
+		if layout, ok := in.fit(kept); ok {
+			return layout
+		}
+	}
+
 	// The priority drops, richest first: each rung keeps the segments below its limit, in row
-	// order. A rung whose dropped segments were already absent composes the same run as the one
-	// above it and fails the same way, so an absent spend, git segment or effort word simply hands
-	// the next rung on — nothing has to know which segments are named.
-	for limit := footerTopPriority + 1; limit > 0; limit-- {
-		kept := in.keptBelow(limit)
-		info := footerRun(in.glyphs, segmentTexts(kept)...)
-		if layout, ok := in.seat(info); ok {
-			layout.spans = in.spansOf(kept, info)
+	// order, at their full text. A rung whose dropped segments were already absent composes the
+	// same run as the one above it and fails the same way, so an absent spend, git segment or
+	// effort word simply hands the next rung on — nothing has to know which segments are named.
+	for limit := footerTopPriority; limit > 0; limit-- {
+		if layout, ok := in.fit(in.keptBelow(limit)); ok {
 			return layout
 		}
 	}
@@ -217,6 +260,126 @@ func footerFit(in footerInput) footerLayout {
 		return footerLayout{mode: in.mode, col: in.width - in.margin - in.measure.Width(in.mode), hasMode: true}
 	}
 	return in.floor()
+}
+
+// fit composes the run of kept and seats the marker against it, naming every kept segment's span
+// when the two ends fit.
+func (in footerInput) fit(kept []footerSegment) (footerLayout, bool) {
+	info := footerRun(in.glyphs, segmentTexts(kept)...)
+	layout, ok := in.seat(info)
+	if ok {
+		layout.spans = in.spansOf(kept, info)
+	}
+	return layout, ok
+}
+
+// shortenings is the full run's rungs between "everything" and the first drop, narrowest last:
+// the workdir middle-elided one step after another ([elidePath]), and then, with the workdir at
+// its floor, the branch middle-elided to exactly the width the row still lacks
+// ([elideMiddle]). A branch that would have to go below its floor to fit adds no rung — the row
+// does not fit that way, and the ladder's first drop is what comes next.
+func (in footerInput) shortenings(full []footerSegment) [][]footerSegment {
+	var rungs [][]footerSegment
+	kept := full
+	for i, seg := range kept {
+		if seg.id != footerSegWorkdir {
+			continue
+		}
+		for _, shorter := range elidePath(seg.text, in.measure) {
+			kept = withSegmentAt(kept, i, footerSegment{id: seg.id, text: shorter})
+			rungs = append(rungs, kept)
+		}
+	}
+	for i, seg := range kept {
+		branchAt := footerBranchPiece(seg.pieces)
+		if seg.id != footerSegGit || branchAt < 0 {
+			continue
+		}
+		name := seg.pieces[branchAt].text
+		target := in.measure.Width(name) + in.slack(footerRun(in.glyphs, segmentTexts(kept)...))
+		if target < in.measure.Width(name) && target >= footerBranchFloorCells+in.measure.Width(footerEllipsis) {
+			pieces := append([]footerSpan(nil), seg.pieces...)
+			pieces[branchAt].text = elideMiddle(name, target, in.measure)
+			rungs = append(rungs, withSegmentAt(kept, i, gitFooterSegment(pieces)))
+		}
+	}
+	return rungs
+}
+
+// withSegmentAt is segments with the i-th replaced by seg — on a copy, so a rung never rewrites
+// the run of the rung before it.
+func withSegmentAt(segments []footerSegment, i int, seg footerSegment) []footerSegment {
+	out := append([]footerSegment(nil), segments...)
+	out[i] = seg
+	return out
+}
+
+// footerBranchPiece is the index of the branch among the git segment's pieces, or -1 where it
+// names none (a detached HEAD, or no git segment at all).
+func footerBranchPiece(pieces []footerSpan) int {
+	for i, piece := range pieces {
+		if piece.isBranch {
+			return i
+		}
+	}
+	return -1
+}
+
+// elidePath is a path's middle-elided forms, each strictly narrower than the one before: the path's
+// head and its tail kept k components deep and the middle given to an ellipsis, k shrinking to 1
+// (`~/repos/apogee/internal/tui` → `~/repos/…/internal/tui` → `~/…/tui`), and last the floor, the
+// ellipsis and the final component alone (`…/tui`). A rooted path keeps its root ahead of its head
+// (`/home/…/tui`). The forms are measured in the authority the row is, so a form only counts as a
+// step where it saves a cell; a path too shallow to save one has no forms at all.
+func elidePath(path string, measure widthAuthority) []string {
+	sep := "/"
+	if filepath.Separator != '/' && strings.ContainsRune(path, filepath.Separator) {
+		sep = string(filepath.Separator)
+	}
+	root := ""
+	if strings.HasPrefix(path, sep) {
+		root = sep
+	}
+	parts := strings.Split(strings.Trim(path, sep), sep)
+	if len(parts) < 2 {
+		return nil
+	}
+	var forms []string
+	width := measure.Width(path)
+	add := func(form string) {
+		if w := measure.Width(form); w < width {
+			forms, width = append(forms, form), w
+		}
+	}
+	for keep := (len(parts) - 1) / 2; keep >= 1; keep-- {
+		head := strings.Join(parts[:keep], sep)
+		tail := strings.Join(parts[len(parts)-keep:], sep)
+		add(root + head + sep + footerEllipsis + sep + tail)
+	}
+	add(footerEllipsis + sep + parts[len(parts)-1])
+	return forms
+}
+
+// elideMiddle cuts text to at most width cells by giving its middle to an ellipsis: the head keeps
+// half of what remains, the extra cell to it, and the tail the rest. A wide glyph that would
+// straddle either cut goes whole, so the result may fall a cell short of width but never past it.
+func elideMiddle(text string, width int, measure widthAuthority) string {
+	total := measure.Width(text)
+	if total <= width {
+		return text
+	}
+	room := max(0, width-measure.Width(footerEllipsis))
+	headCells := (room + 1) / 2
+	tailCells := room - headCells
+	// A cut from the left keeps a glyph it lands inside of, so the tail starts a cell later until
+	// that glyph has gone whole.
+	tail := ""
+	for from := total - tailCells; from < total; from++ {
+		if tail = measure.Cut(text, from, total); measure.Width(tail) <= tailCells {
+			break
+		}
+	}
+	return measure.Truncate(text, headCells, "") + footerEllipsis + tail
 }
 
 // keptBelow is the named segments whose priority is below limit, in row order — the run one rung
@@ -261,13 +424,17 @@ func (in footerInput) spansOf(kept []footerSegment, info string) []footerSegment
 		if cut {
 			text = info[len(prefix):]
 		}
-		spans = append(spans, footerSegmentSpan{
+		span := footerSegmentSpan{
 			id:    seg.id,
 			text:  text,
 			at:    len(prefix),
 			col:   in.margin + in.measure.Width(prefix),
 			cells: in.measure.Width(text),
-		})
+		}
+		if !cut {
+			span.pieces = seg.pieces
+		}
+		spans = append(spans, span)
 		if cut {
 			break
 		}
@@ -280,13 +447,21 @@ func (in footerInput) spansOf(kept []footerSegment, info string) []footerSegment
 // the marker's right-anchored first column — the slot's own trailing margin sits between its last
 // cell and the window edge, the very column the status line's right slot ends in.
 func (in footerInput) seat(info string) (footerLayout, bool) {
-	offline := in.offlineRun(info)
-	left := in.margin + in.measure.Width(info) + in.measure.Width(offline)
-	col := in.width - in.margin - in.measure.Width(in.mode)
-	if col-left < 1 {
+	if in.slack(info) < 0 {
 		return footerLayout{}, false
 	}
+	offline := in.offlineRun(info)
+	col := in.width - in.margin - in.measure.Width(in.mode)
 	return footerLayout{info: info, offline: offline, mode: in.mode, col: col, hasMode: true}, true
+}
+
+// slack is how many columns a candidate left run leaves spare once the marker is seated against it
+// with the one blank column between the two ends: zero is a run that just fits, and a negative
+// slack is the cells the run must still give up.
+func (in footerInput) slack(info string) int {
+	left := in.margin + in.measure.Width(info) + in.measure.Width(in.offlineRun(info))
+	col := in.width - in.margin - in.measure.Width(in.mode)
+	return col - left - 1
 }
 
 // floorBudget is the width the priority-0 run (the model) may still spend once every other
@@ -336,10 +511,12 @@ func footerRun(glyphs glyphSet, segments ...string) string {
 // footerSpan is one piece of the footer's git segment and the tone it is read in: the branch and a
 // zero count sit in the footer's own muted tone, and a non-zero count is bright — the brighter muted
 // step ([theme.mutedBright]), never a role of its own — so a tree with something to say lifts out of
-// the row while a clean one stays quiet.
+// the row while a clean one stays quiet. isBranch marks the one piece the fit may middle-elide
+// ([footerInput.shortenings]): a count is never shortened.
 type footerSpan struct {
-	text   string
-	bright bool
+	text     string
+	bright   bool
+	isBranch bool
 }
 
 // gitFooterSpans words the workspace's git state as the footer reads it — `<branch> NΔ N↓ N↑` —
@@ -354,7 +531,7 @@ type footerSpan struct {
 func gitFooterSpans(snap gitstatus.Snapshot, glyphs glyphSet) []footerSpan {
 	var spans []footerSpan
 	if branch := stripEscapes(snap.Branch); branch != "" && !snap.Detached {
-		spans = append(spans, footerSpan{text: branch})
+		spans = append(spans, footerSpan{text: branch, isBranch: true})
 	}
 	count := func(n int, mark string) {
 		spans = append(spans, footerSpan{text: strconv.Itoa(n) + mark, bright: n != 0})

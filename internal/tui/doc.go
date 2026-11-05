@@ -32,7 +32,8 @@
 // call was priced, plus an `✦ offline` marker while the upstream is unreachable), then the mode
 // behind its own symbol ("◐ ask before", [modeMarker]) — the workspace written with the home
 // directory as `~`, [workdirDisplay], resolved once at construction. The row is composed TO the
-// window by ONE priority fit ([footerFit], footerfit.go): the spend is given up first, then the
+// window by ONE priority fit ([footerFit], footerfit.go): the workdir and then the branch
+// middle-elide before anything drops ([elidePath], [elideMiddle]), then the spend is given up, then the
 // git segment, then the effort word, then the workdir, then the host, while the model, the offline
 // marker and the mode marker are what the row never gives up — the model truncating before it
 // goes, and the marker dropping only where it cannot seat whole. The live token gauge (reserved at P2.7) is now

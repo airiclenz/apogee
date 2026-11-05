@@ -72,7 +72,13 @@ internal/tui/footerfit_test.go — footerFitCase; internal/tui/usage_test.go —
 
 **Commit:** `refactor(tui): footer fit works on named segments`
 
-## 2. Middle-elide the workdir and the branch before any segment drops
+## 2. Middle-elide the workdir and the branch before any segment drops — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the workdir's steps keep head and tail k components deep with k shrinking to 1 (then the floor `…/<last>`), which reproduces the Goal's example sequence exactly; the Approach's "head component and as many trailing components as fit" would yield `~/…/apogee/internal/tui` rather than the Goal's `~/repos/…/internal/tui`, so the Goal wins. A form that saves no cell (`~/apogee` → `…/apogee`) is skipped.
+NOTES (2026-11-05): the plan names no branch floor; chosen as 8 cells of the branch's own name around the ellipsis (`footerBranchFloorCells`, `feat…name`). The branch elides to exactly the width the row lacks (one rung computed from the row's slack), not in fixed steps.
+NOTES (2026-11-05): the git segment's toned pieces now ride on `footerSegment.pieces` and `footerSegmentSpan.pieces` (the one span carrier), with `footerSpan.isBranch` marking the elidable piece; `Model.footerGit` takes the kept span and paints its pieces, and `Model.footerGitText` became `Model.footerGitSegment` (returns the segment with its pieces). Positional `footerSegment` literals in model.go and footerfit_test.go became keyed.
+NOTES (2026-11-05): consequential edit — internal/tui/doc.go: made necessary by the fit now middle-eliding before it drops (package map describes the fit's order).
+NOTES (2026-11-05): pre-existing lint finding outside this item: `golangci-lint run ./internal/tui/` reports SA4006 at internal/tui/toolpresent_test.go:2116 (unused `got`), untouched by this item.
 
 **What:** Depends on item 1.
 

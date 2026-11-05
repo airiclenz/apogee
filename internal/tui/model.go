@@ -3847,7 +3847,8 @@ func (m Model) footerView() string {
 // points.
 //
 // A narrow window does not give up an end: the row is composed TO the width by [footerFit]
-// (footerfit.go), which spends it in priority order — the spend first, then the git segment, then
+// (footerfit.go), which middle-elides the workdir and then the branch before anything drops, and
+// then spends it in priority order — the spend first, then the git segment, then
 // the effort word, then the workdir, then the host — and keeps the model, the offline marker and
 // the mode marker. Only at the FLOOR, where the marker cannot seat whole between its two margins,
 // does the left info truncate with an ellipsis and the mode marker drop WHOLE, because a clipped
@@ -3917,7 +3918,7 @@ func (m Model) footerLeft(lead string, layout footerLayout) string {
 	if git, ok := layout.span(footerSegGit); !ok {
 		left = m.th.footerText.Render(lead + layout.info)
 	} else {
-		left = m.th.footerText.Render(lead+layout.info[:git.at]) + m.footerGit(git.text)
+		left = m.th.footerText.Render(lead+layout.info[:git.at]) + m.footerGit(git)
 		if rest := layout.info[git.at+len(git.text):]; rest != "" {
 			left += m.th.footerText.Render(rest)
 		}
@@ -3930,14 +3931,15 @@ func (m Model) footerLeft(lead string, layout footerLayout) string {
 
 // footerGit paints the git segment the layout kept: the branch and every zero count on the
 // footer's own muted tone, every non-zero count in the brighter muted step (theme.mutedBright),
-// adjacent pieces of one tone joined into one styled run. The spans are worded afresh from the
-// same snapshot the fit was handed, and should they ever fail to re-join to text the layout
-// measured, the segment is painted plain rather than in cells the layout did not count.
-func (m Model) footerGit(text string) string {
-	snap, _ := m.gitSnapshot()
-	spans := gitFooterSpans(snap, m.th.glyphs)
-	if footerSpansText(spans) != text {
-		return m.th.footerText.Render(text)
+// adjacent pieces of one tone joined into one styled run. The pieces are the ones the layout KEPT
+// ([footerSegmentSpan]) — an elided branch included — never re-worded from the snapshot, which
+// would no longer re-join to the text the fit measured once the branch is shortened. Should they
+// ever fail to re-join to that text, the segment is painted plain rather than in cells the layout
+// did not count.
+func (m Model) footerGit(git footerSegmentSpan) string {
+	spans := git.pieces
+	if footerSpansText(spans) != git.text {
+		return m.th.footerText.Render(git.text)
 	}
 	// The separators are muted, so a piece's tone is its span's, and a run closes only where the
 	// tone changes.
@@ -4014,12 +4016,12 @@ func (m Model) footerLeftText() footerInput {
 	}
 	in := footerInput{
 		segments: []footerSegment{
-			{footerSegHost, stripEscapes(hostDisplay(m.opts))},
-			{footerSegModel, footerRun(m.th.glyphs, m.upstreamSegments()...)},
-			{footerSegEffort, effort},
-			{footerSegWorkdir, m.workdir},
-			{footerSegGit, m.footerGitText()},
-			{footerSegSpend, spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency())},
+			{id: footerSegHost, text: stripEscapes(hostDisplay(m.opts))},
+			{id: footerSegModel, text: footerRun(m.th.glyphs, m.upstreamSegments()...)},
+			{id: footerSegEffort, text: effort},
+			{id: footerSegWorkdir, text: m.workdir},
+			m.footerGitSegment(),
+			{id: footerSegSpend, text: spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency())},
 		},
 		glyphs: m.th.glyphs,
 	}
@@ -4029,14 +4031,15 @@ func (m Model) footerLeftText() footerInput {
 	return in
 }
 
-// footerGitText is the git segment's plain text, or "" — the segment absent WITH its separator —
-// while no snapshot is held: unwired, not yet landed, or a workspace outside any work tree.
-func (m Model) footerGitText() string {
+// footerGitSegment is the git segment, worded into its toned pieces ([gitFooterSegment]), or an
+// empty one — the segment absent WITH its separator — while no snapshot is held: unwired, not yet
+// landed, or a workspace outside any work tree.
+func (m Model) footerGitSegment() footerSegment {
 	snap, ok := m.gitSnapshot()
 	if !ok {
-		return ""
+		return gitFooterSegment(nil)
 	}
-	return footerSpansText(gitFooterSpans(snap, m.th.glyphs))
+	return gitFooterSegment(gitFooterSpans(snap, m.th.glyphs))
 }
 
 // footerModeText joins the mode marker with Auto's blast-radius word the way the footer paints

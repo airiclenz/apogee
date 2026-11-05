@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,12 +36,12 @@ func footerFitCase() footerInput {
 	measure := newWidthAuthority()
 	return footerInput{
 		segments: []footerSegment{
-			{footerSegHost, footerTestHost},
-			{footerSegModel, footerTestModel},
-			{footerSegEffort, footerTestEffort},
-			{footerSegWorkdir, footerTestWorkdir},
-			{footerSegGit, footerTestGit},
-			{footerSegSpend, footerTestSpend},
+			{id: footerSegHost, text: footerTestHost},
+			{id: footerSegModel, text: footerTestModel},
+			{id: footerSegEffort, text: footerTestEffort},
+			{id: footerSegWorkdir, text: footerTestWorkdir},
+			gitFooterSegment(gitFooterSpans(footerGitTestSnapshot, defaultGlyphs)),
+			{id: footerSegSpend, text: footerTestSpend},
 		},
 		offline: offlineLabel,
 		mode:    footerTestMode,
@@ -50,14 +51,14 @@ func footerFitCase() footerInput {
 	}
 }
 
-// withSegment is in with the named segment's text replaced — on a copy of the segment list, so the
-// input it was taken from keeps its own.
+// withSegment is in with the named segment replaced by plain text — on a copy of the segment list,
+// so the input it was taken from keeps its own.
 func withSegment(in footerInput, id footerSegmentID, text string) footerInput {
 	segments := make([]footerSegment, len(in.segments))
 	copy(segments, in.segments)
 	for i := range segments {
 		if segments[i].id == id {
-			segments[i].text = text
+			segments[i] = footerSegment{id: id, text: text}
 		}
 	}
 	in.segments = segments
@@ -265,6 +266,224 @@ func TestFooterFitSeatsTheMarkerAtEveryWidthThatHoldsIt(t *testing.T) {
 			t.Errorf("footerFit(width %d) leaves no blank column: left run ends at %d, marker starts at %d",
 				w, left, got.col)
 		}
+	}
+}
+
+// footerDeepWorkdir and footerLongBranch are the two long, free-form facts the row shortens before
+// it drops anything, deep and long enough that every step of each elision shows.
+const (
+	footerDeepWorkdir = "~/repos/apogee/internal/tui"
+	footerLongBranch  = "feature/long-branch-name"
+)
+
+// footerLongCase is footerFitCase with a deep workdir and a long branch.
+func footerLongCase(t *testing.T, branch string) footerInput {
+	t.Helper()
+
+	in := withSegment(footerFitCase(), footerSegWorkdir, footerDeepWorkdir)
+	snap := footerGitTestSnapshot
+	snap.Branch = branch
+	for i := range in.segments {
+		if in.segments[i].id == footerSegGit {
+			in.segments[i] = gitFooterSegment(gitFooterSpans(snap, defaultGlyphs))
+		}
+	}
+	return in
+}
+
+// footerFitRuns is the distinct left runs the fit composes as the window narrows a column at a time
+// from width, in the order they appear, up to and including the first that reads until.
+func footerFitRuns(t *testing.T, in footerInput, width int, until string) []string {
+	t.Helper()
+
+	var runs []string
+	for w := width; w > 0; w-- {
+		at := in
+		at.width = w
+		info := footerFit(at).info
+		if len(runs) == 0 || info != runs[len(runs)-1] {
+			runs = append(runs, info)
+		}
+		if info == until {
+			return runs
+		}
+	}
+	t.Fatalf("the fit never narrowed to %q: %q", until, runs)
+	return nil
+}
+
+// TestElidePathStepsDownToItsFloor pins the workdir's middle-elision on its own: the head and the
+// tail kept k components deep, k shrinking, and last the floor `…/<last>` — each form strictly
+// narrower than the one before, so a path too shallow to save a cell has no forms at all.
+func TestElidePathStepsDownToItsFloor(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want []string
+	}{
+		{"a deep home path", footerDeepWorkdir, []string{"~/repos/…/internal/tui", "~/…/tui", "…/tui"}},
+		{"a rooted path keeps its root", "/home/user/src/project/internal",
+			[]string{"/home/user/…/project/internal", "/home/…/internal", "…/internal"}},
+		{"a shallow rooted path has only its floor", "/ws/proj", []string{"…/proj"}},
+		{"a relative path", "src/project/internal", []string{"src/…/internal", "…/internal"}},
+		{"wide glyphs", "~/項目/内部/ツール", []string{"~/…/ツール", "…/ツール"}},
+		{"a path no form shortens", "~/apogee", nil},
+		{"the home itself", "~", nil},
+		{"nothing at all", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := elidePath(tc.path, newWidthAuthority()); !slices.Equal(got, tc.want) {
+				t.Errorf("elidePath(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestElideMiddleKeepsBothEnds pins the branch's middle-elision on its own: the head keeps half of
+// the cells left beside the ellipsis, the extra one to it, the tail the rest — and a wide glyph
+// either cut would split goes whole, so the result never spends a cell past the width it was given.
+func TestElideMiddleKeepsBothEnds(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		text  string
+		width int
+		want  string
+	}{
+		{"a branch that fits is untouched", footerLongBranch, 24, footerLongBranch},
+		{"one cell short", footerLongBranch, 23, "feature/lon…branch-name"},
+		{"at the floor", footerLongBranch, 9, "feat…name"},
+		{"an even split", footerLongBranch, 10, "featu…name"},
+		{"wide glyphs on a clean cut", "機能/長い名前", 9, "機能…名前"},
+		{"a wide glyph the tail's cut lands in goes whole", "機能/長い名前", 8, "機能…前"},
+		{"a wide glyph the head's cut lands in goes whole", "機能/長い名前", 7, "機…前"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			measure := newWidthAuthority()
+			got := elideMiddle(tc.text, tc.width, measure)
+			if got != tc.want {
+				t.Errorf("elideMiddle(%q, %d) = %q, want %q", tc.text, tc.width, got, tc.want)
+			}
+			if w := measure.Width(got); w > tc.width {
+				t.Errorf("elideMiddle(%q, %d) spends %d cells, want at most %d", tc.text, tc.width, w, tc.width)
+			}
+		})
+	}
+}
+
+// TestFooterFitMiddleElidesBeforeItDrops is the shortening ahead of the ladder, read off the fit
+// column by column: a row that fits is untouched; then the workdir steps down its middle-elided
+// forms to its floor; then the branch gives up a cell a column, its counts whole beside it, down to
+// its own floor; and only then does a segment drop — composed with the full workdir and branch
+// again, since the drop is what bought the room — and the ladder carries on in its own order.
+func TestFooterFitMiddleElidesBeforeItDrops(t *testing.T) {
+	t.Parallel()
+
+	in := footerLongCase(t, footerLongBranch)
+	const (
+		upstream = "apollo ✦ gpt-oss-20b ✦ high ✦ "
+		counts   = " 5Δ 0↓ 4↑ ✦ ≥ 0.42 EUR"
+	)
+	full := upstream + footerDeepWorkdir + " ✦ " + footerLongBranch + counts
+	runs := footerFitRuns(t, in, footerSeatWidth(t, in, full, footerOfflineJoined), footerRunModelOnly)
+
+	want := []string{
+		full,
+		upstream + "~/repos/…/internal/tui ✦ " + footerLongBranch + counts,
+		upstream + "~/…/tui ✦ " + footerLongBranch + counts,
+		upstream + "…/tui ✦ " + footerLongBranch + counts,
+	}
+	if len(runs) < len(want) || !slices.Equal(runs[:len(want)], want) {
+		t.Fatalf("the fit's runs = %q, want them to open %q", runs, want)
+	}
+
+	rest := runs[len(want):]
+	branches := 0
+	for ; branches < len(rest); branches++ {
+		branch, ok := strings.CutPrefix(rest[branches], upstream+"…/tui ✦ ")
+		if !ok {
+			break
+		}
+		branch, ok = strings.CutSuffix(branch, counts)
+		if !ok || !strings.Contains(branch, "…") {
+			t.Fatalf("the fit's run %q, want the branch middle-elided beside its whole counts", rest[branches])
+		}
+		if wantCells := len([]rune(footerLongBranch)) - 1 - branches; in.measure.Width(branch) != wantCells {
+			t.Errorf("the fit's branch %q spends %d cells, want %d — one cell a column", branch, in.measure.Width(branch), wantCells)
+		}
+	}
+	if branches == 0 || !strings.Contains(rest[branches-1], " feat…name ") {
+		t.Fatalf("the fit's runs = %q, want the branch elided down to its floor %q", runs, "feat…name")
+	}
+
+	// Past both floors the next run is a drop, the full workdir back: the shortened row saved more
+	// than the spend alone would, so the spend AND the git segment have gone, and the ladder then
+	// goes on in its own order.
+	drops := []string{
+		"apollo ✦ gpt-oss-20b ✦ high ✦ " + footerDeepWorkdir,
+		"apollo ✦ gpt-oss-20b ✦ " + footerDeepWorkdir,
+		footerRunNoWorkdir,
+		footerRunModelOnly,
+	}
+	if got := rest[branches:]; !slices.Equal(got, drops) {
+		t.Errorf("the fit's runs past both floors = %q, want %q", got, drops)
+	}
+}
+
+// TestFooterFitPaintsTheElidedBranchFromItsPieces pins the span table's carrier for the git
+// segment: once the branch is elided, the git span's pieces are the ELIDED words, re-joining to
+// exactly the text the fit measured, and the counts keep their tone — the painter tones these
+// pieces rather than re-wording the snapshot, whose full branch would no longer re-join.
+func TestFooterFitPaintsTheElidedBranchFromItsPieces(t *testing.T) {
+	t.Parallel()
+
+	in := footerLongCase(t, footerLongBranch)
+	in.width = footerSeatWidth(t, in,
+		"apollo ✦ gpt-oss-20b ✦ high ✦ …/tui ✦ feat…name 5Δ 0↓ 4↑ ✦ ≥ 0.42 EUR", footerOfflineJoined)
+	got := footerFit(in)
+
+	git, ok := got.span(footerSegGit)
+	if !ok || git.text != "feat…name 5Δ 0↓ 4↑" {
+		t.Fatalf("footerFit(width %d) git span = %q (kept %t), want the branch at its floor", in.width, git.text, ok)
+	}
+	if footerSpansText(git.pieces) != git.text {
+		t.Errorf("git span pieces re-join to %q, want %q", footerSpansText(git.pieces), git.text)
+	}
+	want := []footerSpan{{text: "feat…name", isBranch: true}, {text: "5Δ", bright: true}, {text: "0↓"}, {text: "4↑", bright: true}}
+	if !slices.Equal(git.pieces, want) {
+		t.Errorf("git span pieces = %+v, want %+v", git.pieces, want)
+	}
+}
+
+// TestFooterFitNeverOverrunsWithWideGlyphs sweeps a row whose workdir and branch are wide glyphs:
+// at every width that seats the marker, the shortened run still leaves the blank column before it,
+// since an elision that split a wide glyph would hand back a cell more than the fit counted.
+func TestFooterFitNeverOverrunsWithWideGlyphs(t *testing.T) {
+	t.Parallel()
+
+	in := withSegment(footerLongCase(t, "機能/とても長い枝の名前"), footerSegWorkdir, "~/項目/内部/ツール/部品")
+	sawElided := false
+	for w := 160; w >= 0; w-- {
+		at := in
+		at.width = w
+		got := footerFit(at)
+		if !got.hasMode || got.info == "" {
+			continue
+		}
+		if left := in.margin + in.measure.Width(got.info) + in.measure.Width(got.offline); left >= got.col {
+			t.Errorf("footerFit(width %d) = %q runs to %d, marker at %d — no blank column", w, got.info, left, got.col)
+		}
+		sawElided = sawElided || strings.Contains(got.info, "…/部品 ✦ 機能")
+	}
+	if !sawElided {
+		t.Error("the sweep never elided the wide workdir and branch together")
 	}
 }
 
