@@ -34,10 +34,10 @@ import (
 // It is the one pane granted the WHOLE transcript row budget (frameRowPlan, layout.md): the registry's
 // keys and their section headers are not a choice to scan but a screen to read, so the conversation gives
 // way entirely rather than the list scrolling inside eight rows. Nothing else about the frame moves —
-// the four-row pane floor, the twelve-row window below which no pane is drawn, the status line, the
-// input box and the footer are all where they were — and when the frame cannot seat the pane at all
-// the fact goes on the status line (settingsGiveWayNote), the licence layout.md gives every surface
-// that disappears.
+// the four-row pane floor, the thirteen-row window (twelve under a one-row footer) below which no
+// pane is drawn, the status line, the input box and the footer are all where they were — and when
+// the frame cannot seat the pane at all the fact goes on the status line (settingsGiveWayNote), the
+// licence layout.md gives every surface that disappears.
 //
 // Everything the pane needs in order to say what a row IS — the effective value, the override
 // marker, the mask, the read-only row's pointer — is already on the row (see [SettingRow]), so
@@ -2355,11 +2355,11 @@ func settingsEnumPrompt(row SettingRow) string {
 }
 
 // settingsGiveWayNote is what the status line says for a settings pane the frame could not seat —
-// under twelve rows, or under a window a long draft has taken the last of. It is the licence
-// layout.md gives every surface that disappears (the band's "N queued" is the other), and here it
-// carries the ONE fact the human cannot do without: the pane is open, it is claiming every key but
-// the frame chords, and esc is the way out. Without it a short terminal would answer /settings with a frame that
-// looked idle and a keyboard that did nothing.
+// under thirteen rows (twelve under a one-row footer), or under a window a long draft has taken the
+// last of. It is the licence layout.md gives every surface that disappears (the band's "N queued"
+// is the other), and here it carries the ONE fact the human cannot do without: the pane is open, it
+// is claiming every key but the frame chords, and esc is the way out. Without it a short terminal
+// would answer /settings with a frame that looked idle and a keyboard that did nothing.
 const settingsGiveWayNote = "settings — esc close"
 
 // settingsGiveWayPhrase is that note when it is owed and "" otherwise — the string statusLeft puts

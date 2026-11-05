@@ -1230,7 +1230,9 @@ ui:
 segments it shows, left to right. The segments are `host` (the upstream), `model`, `effort`, `mode`
 (the permission-mode marker), `workdir`, `git` (the branch and its counts) and `spend`; each may
 appear at most once, and `mode` must appear exactly once — its marker sits at the right edge of the
-row that names it. The default is one row, `[[host, model, effort, workdir, git, spend, mode]]`.
+row that names it. The default is two rows, `[[host, model, effort, mode], [workdir, git, spend]]`:
+the upstream above, the workspace below. `[[host, model, effort, workdir, git, spend, mode]]` is the
+one-row footer, every segment on a single line.
 A list of no rows or more than two, an empty row, a name that is not a segment, a name given twice,
 or a list without `mode` is a startup error that names the key and the value. It lives in a nested
 `footer:` block, so `/settings` shows it but does not edit it — `⏎` on its row opens the file, and
@@ -1241,7 +1243,7 @@ every `ui:` key it is global-only: a Project config that sets it is ignored, wit
 # ~/.apogee/config.yaml
 ui:
   footer:
-    rows: [[host, model, effort, mode], [workdir, git, spend]]
+    rows: [[host, model, effort, workdir, git, spend, mode]]
 ```
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter

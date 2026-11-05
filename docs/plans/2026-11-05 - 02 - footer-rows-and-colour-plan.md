@@ -189,7 +189,22 @@ internal/tui/settingsapply.go — settingsApplyLocal, settingsApplyLive, setting
 
 **Commit:** `feat(tui): paint the footer in the rows ui.footer.rows names`
 
-## 6. Default to the two-row footer
+## 6. Default to the two-row footer — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): re-derived from the assumption that only cmd/apogee followed the flip. internal/tui's unit tests build models with a zero `FooterRows`, which now reads as two rows, so 45 of them failed. The harness's `testUIPrefs` (internal/tui/model_test.go) now pins the one-row shape (`testFooterOneRow`), and `footerFactsModel`, `TestFooterRowsEachTakeATranscriptRow` and `TestFooterTwoRowsKeepTheGitStateAndTheEffortWordAt80` (mode_test.go) name that shape instead of `""`. `TestFooterUnsetRowsPaintTheDefaultLayout`'s comment now names the two-row default.
+NOTES (2026-11-05): re-derived from the assumption that the default lived only where the plan's Files name it. internal/domain/uiprefs_test.go pinned the old default: `TestUIPrefsFooterRowsDefaultToOneRow` is renamed `TestUIPrefsFooterRowsDefaultToTwoRows` and asserts the two-row rows.
+NOTES (2026-11-05): internal/config/registry_test.go was left unchanged. The `ui.footer.rows` registry row declares no Default, so TestRegistryDefaults* pass untouched. TestUIRowsLoadFromTheGlobalFile gained a one-row case, because its two-row case now equals the default and no longer tells a written value from it.
+NOTES (2026-11-05): e2e footer helpers. `footerRowIndex(f, line)` (e2e_hostile_test.go) now finds the footer by position: the `footerRows` (2) rows directly above the ▁ hairline. `footerRow` returns the upstream row (mode, host, model), and the new `footerWorkspaceRow` returns the workdir/git/spend row. e2e_gitstatus reads the workspace row. assertModelSegmentIsNotRed reads the upstream row and assertWorkdirCellIsNotRed reads the workspace row.
+NOTES (2026-11-05): golden redaction. The new `footerWorkspaceRedaction` (e2e_delegation_test.go) replaces the whole row above the hairline with `<footer workspace row>`, because the temp workdir's length decides how much of that row is stated. goldenRedactions and hostileRedactions both carry it, and the 20 goldens were re-recorded with `-update`.
+NOTES (2026-11-05): re-derived TestE2ESmokeInProcess step 9. At 60 columns the upstream row no longer drops anything, since the workspace moved to its own row. The old "wide states more separators than narrow" claim is now "the narrow upstream row states as many separated facts as the wide one", and the wide workspace check reads the workspace row.
+NOTES (2026-11-05): two driven tests needed room for the extra footer row. `narrowHostileSize` grows from 25 to 26 rows so the approval pane still shows two argument rows (TestE2EHostileWrapsUnderItsOwnIndent). In TestE2ESettingsTypeToFilter, `settingsOtherRow` is now `sub-agents-choice`, because `currency` fell off the settings pane's first screen at 140x30.
+NOTES (2026-11-05): `idleRuleFromBottom` goes from 7 to 8. Its comment now says t17 records the rule on row 23, and the synthetic chrome in TestE2ESubAgentViewRuleAnchor/RuleMissing gained a second footer row (h 10 → 11).
+NOTES (2026-11-05): consequential edit — layout.md: made necessary by the default flip. The frame floor is now nine rows (eight under a one-row footer). Several counts follow it: the pending-image line ("at nine rows and below"), the pane floor ("thirteen rows", twelve under a one-row footer, in four passages), the footer's "unset" sentence, and the two frame sketches, which now draw two footer rows.
+NOTES (2026-11-05): consequential edit — internal/tui/approval.go: made necessary by the default flip (the no-pane window is under thirteen rows, twelve under a one-row footer).
+NOTES (2026-11-05): consequential edit — internal/tui/model.go: made necessary by the default flip (the no-pane window is under thirteen rows, twelve under a one-row footer).
+NOTES (2026-11-05): consequential edit — internal/tui/settings.go: made necessary by the default flip (the no-pane window is under thirteen rows, twelve under a one-row footer).
+NOTES (2026-11-05): consequential edit — cmd/apogee/e2e_approval_test.go: made necessary by the default flip. The 140-column rationale comment now speaks of a one-row footer. The same comment fix lands in e2e_livestate_test.go's liveStateSize.
+NOTES (2026-11-05): TestArmsLeaveLayoutToTail fails on the clean tree at 5c6da57e (item 5). The `m.layout()` call at internal/tui/settingsapply.go:489 has no `// geometry:` comment. That is item 5's defect, not this item's, and is reported as FOLLOW-UP.
 
 **What:** Depends on item 5.
 

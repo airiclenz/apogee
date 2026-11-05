@@ -359,12 +359,15 @@ func TestUIPrefsNotifyDefaultsToBellAndReadsEmptyAsOff(t *testing.T) {
 	}
 }
 
-// TestUIPrefsFooterRowsDefaultToOneRow: the shipped default is every segment on one row with the
-// mode marker at its right edge, carried by DefaultUIPrefs; `""` reads as that default, so the zero
-// block still validates; and Set's `""` lands it, the contract every key keeps.
-func TestUIPrefsFooterRowsDefaultToOneRow(t *testing.T) {
+// TestUIPrefsFooterRowsDefaultToTwoRows: the shipped default is two rows — the upstream with the
+// mode marker at its right edge, above the workspace — carried by DefaultUIPrefs; `""` reads as that
+// default, so the zero block still validates; and Set's `""` lands it, the contract every key keeps.
+func TestUIPrefsFooterRowsDefaultToTwoRows(t *testing.T) {
 	t.Parallel()
-	want := [][]FooterSegment{{FooterHost, FooterModel, FooterEffort, FooterWorkdir, FooterGit, FooterSpend, FooterMode}}
+	want := [][]FooterSegment{
+		{FooterHost, FooterModel, FooterEffort, FooterMode},
+		{FooterWorkdir, FooterGit, FooterSpend},
+	}
 
 	got, err := ParseFooterRows(string(DefaultUIPrefs().FooterRows))
 

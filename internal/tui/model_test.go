@@ -45,7 +45,14 @@ import (
 // no large umbrella that the status-line and layout goldens are written against. It is seeded
 // deliberately because the renderer never special-cases a zero UIPrefs (domain.UIPrefs): a builder
 // that takes an Options seeds it where the caller left UI zero, and a literal Options names it.
-var testUIPrefs = domain.UIPrefs{ShowScrollbar: true, TaskListOpen: true}
+// The footer is pinned to the one-row shape (testFooterOneRow) rather than left to the two-row
+// default, so the frame arithmetic these tests are written against stays one footer row; the
+// two-row default is the driven suite's (cmd/apogee) and the footer-rows tests'.
+var testUIPrefs = domain.UIPrefs{ShowScrollbar: true, TaskListOpen: true, FooterRows: testFooterOneRow}
+
+// testFooterOneRow is `ui.footer.rows`' one-row shape: every segment on a single row, the mode
+// marker at its right edge.
+const testFooterOneRow domain.FooterRows = "[[host, model, effort, workdir, git, spend, mode]]"
 
 // testOpts are the display values the status line and footer render.
 var testOpts = Options{
@@ -8134,10 +8141,11 @@ func TestFooterMarkerCarriesNoConfinementWordBelowAuto(t *testing.T) {
 // footerFactsModel builds the model the footer's fit is exercised on: every one of the four
 // outward-in facts named — host alias, model id, effort word, workdir — and Auto's marker with its
 // blast-radius word beside it, the widest marker the row ever has to seat. Nothing is dropped
-// because nothing was missing, so which segment leaves at which width is the fit's doing alone.
+// because nothing was missing, so which segment leaves at which width is the fit's doing alone. It
+// lays the footer out on one row (testFooterOneRow), so every segment competes for that row's width.
 func footerFactsModel(t *testing.T) Model {
 	t.Helper()
-	return footerFactsModelIn(t, "", "/ws/proj")
+	return footerFactsModelIn(t, testFooterOneRow, "/ws/proj")
 }
 
 // footerFactsModelIn is footerFactsModel with its footer laid out in rows (`ui.footer.rows`, ""
@@ -8173,11 +8181,11 @@ const footerTwoRows domain.FooterRows = "[[host, model, effort, mode], [workdir,
 func TestFooterRowsEachTakeATranscriptRow(t *testing.T) {
 	t.Parallel()
 
-	one := footerFactsModelIn(t, "", "/ws/proj")
+	one := footerFactsModelIn(t, testFooterOneRow, "/ws/proj")
 	two := footerFactsModelIn(t, footerTwoRows, "/ws/proj")
 
 	if one.footerRows() != 1 || two.footerRows() != 2 {
-		t.Fatalf("footer rows = %d and %d, want 1 unset and 2 for %s", one.footerRows(), two.footerRows(), footerTwoRows)
+		t.Fatalf("footer rows = %d and %d, want 1 for %s and 2 for %s", one.footerRows(), two.footerRows(), testFooterOneRow, footerTwoRows)
 	}
 	if got, want := two.transcriptBudget(), one.transcriptBudget()-1; got != want {
 		t.Errorf("transcript budget under two footer rows = %d, want %d — one row fewer than under one", got, want)

@@ -1191,7 +1191,7 @@ ui:
   notify: bell           # off | bell | osc9 | both — how the terminal is told apogee waits on you
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched
   # footer:
-  #   rows: [[host, model, effort, workdir, git, spend, mode]]
+  #   rows: [[host, model, effort, mode], [workdir, git, spend]]
 
 # =============================================================================
 # Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and

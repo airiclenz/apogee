@@ -797,23 +797,32 @@ func sessionRecordsIn(t *testing.T, home string) []os.DirEntry {
 }
 
 // goldenRedactions are [e2eSession.Redactions] with the footer's whole tail past the model cell
-// replaced first.
+// and its whole workspace row replaced first.
 //
 // The session's own redactions replace the workspace path where it appears WHOLE, and the footer
-// does not show it whole: it composes the row TO the width it has (footerFit), so a long enough
-// temp path is dropped from the row rather than shown, and what stands beside the model instead is
-// whatever the fit could seat. How long a temp path is, and therefore how much of that row
-// survives, is a fact about the machine and not about the block this golden is of — so the whole
-// tail of the row goes, anchored at the MODEL rather than at the separator the workdir used to
-// follow, and a golden recorded on one box reads on another.
+// does not show it whole: it composes each row TO the width it has (footerFit), so a long enough
+// temp path is middle-elided or dropped rather than shown, and what stands beside it is whatever the
+// fit could seat. How long a temp path is, and therefore how much of the workspace row survives,
+// is a fact about the machine and not about the block this golden is of — so that row goes whole
+// ([footerWorkspaceRedaction]), and the upstream row's tail goes too, anchored at the MODEL, so a
+// golden recorded on one box reads on another.
 //
-// It goes FIRST because the session's redactions would otherwise rewrite the very path this one
-// anchors on.
+// They go FIRST because the session's redactions would otherwise rewrite the very path the
+// workspace row would be matched by.
 func goldenRedactions(sess *e2eSession) []tuitest.Redaction {
 	cell := glyphFooterSeparator + " " + sess.stub.Model
 	return append([]tuitest.Redaction{
 		tuitest.Redact(regexp.QuoteMeta(cell)+".*", cell+" <footer tail>"),
+		footerWorkspaceRedaction(),
 	}, sess.Redactions()...)
+}
+
+// footerWorkspaceRedaction replaces the footer's workspace row whole: under the default two-row
+// `ui.footer.rows` it is the row directly above the ▁ hairline that closes the screen, and every
+// fact on it — the temp workdir and how much of it the fit could seat, the git state, the spend —
+// is the machine's rather than the frame's.
+func footerWorkspaceRedaction() tuitest.Redaction {
+	return tuitest.Redact(`(?m)^.*\n(`+glyphBottomHairline+`+)$`, "  <footer workspace row>\n$1")
 }
 
 // childRequests counts the requests the stub answered that carry task in one of their messages —

@@ -31,16 +31,17 @@ func countptr(n int) *WholeCount { w := WholeCount(n); return &w }
 // default spinner style with its colour loop on, the transcript's scroll bar shown, the stall
 // guard waiting 120 seconds of engine silence out, the skill-suggestion band painting, the task-list cards open, and a Tools umbrella
 // folding past five type rows with large umbrellas starting folded, all drawn in the unicode glyph set, with the
-// terminal bell rung when apogee waits on the human, the footer's periodic git fetch on, and the footer laid out on one row. It is spelled out rather than taken from
+// terminal bell rung when apogee waits on the human, the footer's periodic git fetch on, and the footer laid out on two rows. It is spelled out rather than taken from
 // domain.DefaultUIPrefs, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
 	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
 	FooterRows: wantFooterRowsDefault}
 
-// wantFooterRowsDefault is the `ui.footer.rows` a config that names none resolves to — every segment
-// on one row, the mode marker at its right edge — spelled out for wantUIDefault's reason.
-const wantFooterRowsDefault domain.FooterRows = "[[host, model, effort, workdir, git, spend, mode]]"
+// wantFooterRowsDefault is the `ui.footer.rows` a config that names none resolves to — the upstream
+// row, the mode marker at its right edge, above the workspace row — spelled out for wantUIDefault's
+// reason.
+const wantFooterRowsDefault domain.FooterRows = "[[host, model, effort, mode], [workdir, git, spend]]"
 
 // testHostID is the machine identity injected into resolution so the Host acknowledgement
 // ladder is pinned off whatever host the tests happen to run on.
@@ -6346,16 +6347,21 @@ func applyUIRows(t *testing.T, yaml string) (Options, error) {
 
 // TestUIRowsLoadFromTheGlobalFile: `ui.footer.rows` lands in its canonical spelling, whatever flow or
 // block style the file writes it in, and a file that names no rows — or a `footer:` block with
-// nothing in it — resolves to the one-row default and leaves every other key of the block alone.
+// nothing in it — resolves to the two-row default and leaves every other key of the block alone. The
+// one-row shape is the case that tells a written value from the default.
 func TestUIRowsLoadFromTheGlobalFile(t *testing.T) {
 	t.Parallel()
-	const twoRows domain.FooterRows = "[[host, model, effort, mode], [workdir, git, spend]]"
+	const (
+		twoRows domain.FooterRows = "[[host, model, effort, mode], [workdir, git, spend]]"
+		oneRow  domain.FooterRows = "[[host, model, effort, workdir, git, spend, mode]]"
+	)
 	tests := []struct {
 		name, yaml string
 		want       domain.FooterRows
 	}{
 		{"flow style", "ui:\n  footer:\n    rows: [[host, model, effort, mode], [workdir, git, spend]]\n", twoRows},
 		{"block style", "ui:\n  footer:\n    rows:\n      - [host, model, effort, mode]\n      - - workdir\n        - git\n        - spend\n", twoRows},
+		{"one row", "ui:\n  footer:\n    rows: [[host, model, effort, workdir, git, spend, mode]]\n", oneRow},
 		{"no ui block", "mode: auto\n", wantFooterRowsDefault},
 		{"an empty footer block", "ui:\n  footer:\n", wantFooterRowsDefault},
 		{"a null rows key", "ui:\n  footer:\n    rows:\n", wantFooterRowsDefault},

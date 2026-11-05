@@ -4,20 +4,19 @@
 │ Description: Autonomy mode: how tool calls are gated, from least to most autonomous.                                                     │
 │                                                                                                                                          │
 │                                                                                                                                          │
-│   Autonomy                                                                                                                               │
-│ ❯ mode                                ask-before  (default)                                                                              │
-│                                                                                                                                          │
-│   System prompt                                                                                                                          │
-│   system-prompt-models                none        (default)  · ⏎ opens $EDITOR                                                           │
-│                                                                                                                                          │
-│   Session                                                                                                                                │
-│   remember-model                      true        (default)                                                                              │
-│                                                                                                                                          │
-│   Presentation                                                                                                                           │
-│   present.command-on-model-documents  false       (default)  · ⏎ opens $EDITOR                                                           │
-│                                                                                                                                          │
-│   Model profiles                                                                                                                         │
-│   model-profiles                      none        (default)  · ⏎ opens $EDITOR                                                           │
+│   Autonomy                                                                                                                             ┃ │
+│ ❯ mode                                ask-before  (default)                                                                            ┃ │
+│                                                                                                                                        ┃ │
+│   System prompt                                                                                                                        ┃ │
+│   system-prompt-models                none        (default)  · ⏎ opens $EDITOR                                                         ┃ │
+│                                                                                                                                        ┃ │
+│   Session                                                                                                                              ┃ │
+│   remember-model                      true        (default)                                                                            ┃ │
+│                                                                                                                                        ┃ │
+│   Presentation                                                                                                                         ┃ │
+│   present.command-on-model-documents  false       (default)  · ⏎ opens $EDITOR                                                         ┃ │
+│                                                                                                                                        ┃ │
+│   Model profiles                                                                                                                       │ │
 │                                                                                                                                          │
 │ ↑/↓ select · ⏎ edit · ⌫ trim · ⌦ reset · esc close                                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -27,4 +26,5 @@
 │ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
   probe-target ✦ livestate-model <footer tail>
+  <footer workspace row>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

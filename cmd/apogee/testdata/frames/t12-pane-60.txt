@@ -22,4 +22,5 @@
 │ queue a message…  ⏎ queue · ↑ recall · esc×2 cancel      │
 ╰──────────────────────────────────────────────────────────╯
   probe-target ✦ hostile-model <footer tail>
+  <footer workspace row>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

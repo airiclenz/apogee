@@ -338,7 +338,7 @@ func TestFooterPaintsEachConfiguredRow(t *testing.T) {
 }
 
 // TestFooterUnsetRowsPaintTheDefaultLayout: an unset `ui.footer.rows` paints exactly the layout the
-// key's default names — today the one-row shape — at every width.
+// key's default names — today the two-row shape, upstream then workspace — at every width.
 func TestFooterUnsetRowsPaintTheDefaultLayout(t *testing.T) {
 	t.Parallel()
 
@@ -382,7 +382,7 @@ func TestFooterTwoRowsKeepTheGitStateAndTheEffortWordAt80(t *testing.T) {
 		t.Errorf("row 1 %q did not middle-elide the long workdir and branch", lines[1])
 	}
 
-	one := withGitSnapshot(footerFactsModelIn(t, "", workspace), snap)
+	one := withGitSnapshot(footerFactsModelIn(t, testFooterOneRow, workspace), snap)
 	if flat := ansiPattern.ReplaceAllString(one.footerContent(80), ""); strings.Contains(flat, "5Δ") {
 		t.Errorf("the one-row footer %q kept the git state at 80 columns; this case needs a state it gives up", flat)
 	}

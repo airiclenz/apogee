@@ -588,8 +588,8 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 //
 // "Always" is total because the PANE is: the frame seats it last of all the surfaces and the input
 // box's draft rows give way to it (draftRowsCeiling), so there is no window a pane can be drawn in
-// where a/d/s are live and this pane is not on the frame. The "" below is the sub-twelve-row case,
-// where the frame draws no pane at all.
+// where a/d/s are live and this pane is not on the frame. The "" below is the window under thirteen
+// rows (twelve under a one-row footer), where the frame draws no pane at all.
 //
 // The other half of that promise is the INPUT STREAM rather than geometry, and it is the fold's,
 // not the paint's: a/s/d and ⏎ are dead until the terminal has answered the drain marker the fold

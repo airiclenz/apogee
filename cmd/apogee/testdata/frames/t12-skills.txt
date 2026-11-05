@@ -1,4 +1,3 @@
-  split this commit, amend the commit, updat…                                                      │
     /debugging · shipped  Debugging — Chase a bug down in four steps — reproduce, isolate, fix the │
   cause, verify — with the rules that keep each step honest.                                       │
       triggers: debug this, fix this bug, why is this failing, why does this crash, this test      │
@@ -10,7 +9,7 @@
   the steps, implement this feature, wh…                                                           │
                                                                                                    │
   1 skill found but not loaded:                                                                    │
-    evil row — skill is missing a required field (id="ev\x1b[31mil\nrow"                           ┃
+    evil row — skill is missing a required field (id="ev\x1b[31mil\nrow"                           │
   displayName="ev\x1b[31mil\nrow" summary="ev\x1b[31mil\nrow" body-empty=true)                     ┃
       <root>/wsRED/.apogee/skills/evil row/SKILL.md ┃
                                                                                                    ┃
@@ -27,4 +26,5 @@
 │ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   probe-target ✦ gpt-oss-20b <footer tail>
+  <footer workspace row>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

@@ -131,9 +131,9 @@ func TestE2EApprovalForcesALookAtTheControlPlane(t *testing.T) {
 func TestE2EApprovalForcedLookSurvivesAutoMode(t *testing.T) {
 	guardHome(t)
 	stub := stubllm.New(t, loadScript(t, "guard"))
-	// A wide terminal rather than T-10's narrow one: what is under test here is the RUNG, and the
-	// footer truncates the workdir cell and drops the mode marker beside it when the row runs out of
-	// room — which a temp workspace path under a long test name manages at a hundred columns.
+	// A wide terminal rather than T-10's narrow one: what is under test here is the RUNG, and a footer
+	// row gives up segments and then the mode marker when it runs out of room — which a temp
+	// workspace path under a long test name manages at a hundred columns under a one-row footer.
 	drv := tuitest.NewDriver(t, tuitest.Size{W: 140, H: 30})
 	sess := launchTUI(t, drv, stub, "--mode", "auto")
 

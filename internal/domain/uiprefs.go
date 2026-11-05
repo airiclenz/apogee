@@ -112,10 +112,11 @@ type UIPrefs struct {
 	PointerShapes bool
 	// FooterRows names the rows the footer's segments are laid out in, top to bottom, and the
 	// segments of each, left to right — carried in its one canonical spelling
-	// (`[[host, model, effort, workdir, git, spend, mode]]`) so the block stays comparable with `==`,
-	// and read into rows through [ParseFooterRows]. Default the one-row shape; `""` reads as the
-	// default too, Glyphs' posture, so a block assembled field by field still validates. A shape
-	// [ParseFooterRows] refuses is refused by [UIPrefs.Validate] naming the key.
+	// (`[[host, model, effort, mode], [workdir, git, spend]]`) so the block stays comparable with
+	// `==`, and read into rows through [ParseFooterRows]. Default two rows, the upstream above the
+	// workspace; `""` reads as the default too, Glyphs' posture, so a block assembled field by field
+	// still validates. A shape [ParseFooterRows] refuses is refused by [UIPrefs.Validate] naming
+	// the key.
 	FooterRows FooterRows
 }
 
@@ -152,9 +153,10 @@ const maxFooterRows = 2
 // [ParseFooterRows] reads back. A string rather than a slice so [UIPrefs] stays comparable.
 type FooterRows string
 
-// DefaultFooterRows is what a config that names no `ui.footer.rows:` resolves to: every segment on
-// one row, the mode marker at its right edge.
-const DefaultFooterRows FooterRows = "[[host, model, effort, workdir, git, spend, mode]]"
+// DefaultFooterRows is what a config that names no `ui.footer.rows:` resolves to: two rows, the
+// upstream (host, model, effort and the mode marker at its right edge) above the workspace (workdir,
+// git and spend).
+const DefaultFooterRows FooterRows = "[[host, model, effort, mode], [workdir, git, spend]]"
 
 // footerRowsShape is the refusal for text that is not a list of rows at all.
 const footerRowsShape = "want a list of 1 or 2 rows of segment names, like [[host, model, effort, mode], " +

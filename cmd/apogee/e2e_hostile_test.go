@@ -42,9 +42,10 @@ const (
 
 // narrowHostileSize is the terminal T-12's steps 6 and 10 are read at. Sixty columns is where the
 // approval pane's argument has to wrap and where the settings sub-list runs out of room, which is
-// the whole point of both steps. Twenty-five rows seat the approval pane's five-row menu (the
-// "Always in this project…" row included) beside the two rows of argument step 10 reads.
-var narrowHostileSize = tuitest.Size{W: 60, H: 25}
+// the whole point of both steps. Twenty-six rows seat the approval pane's five-row menu (the
+// "Always in this project…" row included) beside the two rows of argument step 10 reads, under the
+// default footer's two rows.
+var narrowHostileSize = tuitest.Size{W: 60, H: 26}
 
 // TestE2EHostileProbeKeepsItsOwnRows is T-12 step 1: the off-session report, on a workspace whose
 // ROOT NAME carries an escape sequence. The report is text a terminal will print verbatim, so the
@@ -529,12 +530,13 @@ func hostileHome(t *testing.T, stub *stubllm.Server) string {
 // reason — which is the whole reason to record this frame; what goes is everything that is a fact
 // about the machine.
 //
-// Three of them, in this order because each would otherwise rewrite the next one's match:
+// Four of them, in this order because each would otherwise rewrite the next one's match:
 //
-//   - the footer's whole tail past the model cell. The fit spends the row's width on the segments
-//     it can seat (footerFit), so how long the temp path came out decides both the padding and
-//     whether the workdir is on the row at all — the anchor stops at the model for that reason,
-//     rather than at the separator that used to follow it;
+//   - the footer's whole tail past the model cell. The anchor stops at the model, the last fact on
+//     the upstream row this golden keeps, rather than at the separator that used to follow it;
+//   - the footer's whole workspace row ([footerWorkspaceRedaction]). The fit spends the row's width
+//     on what it can seat (footerFit), so how long the temp path came out decides both the padding
+//     and whether the workdir is stated whole, middle-elided or not at all;
 //   - the fixture root, by name and by its resolved form (on macOS /tmp is a symlink, and the path
 //     apogee prints is the resolved one);
 //   - the padding between a redacted PATH and the scroll rail at the end of its row. The rail's
@@ -545,6 +547,7 @@ func hostileRedactions(sess *e2eSession, ws, model string) []tuitest.Redaction {
 	cell := glyphFooterSeparator + " " + model
 	redactions := []tuitest.Redaction{
 		{Pattern: regexp.MustCompile(regexp.QuoteMeta(cell) + ".*"), With: cell + " <footer tail>"},
+		footerWorkspaceRedaction(),
 	}
 	for _, root := range fixtureRoots(filepath.Dir(ws)) {
 		redactions = append(redactions,
@@ -609,7 +612,7 @@ func assertNoLeakedColour(t *testing.T, f tuitest.Frame, red tuitest.Style) {
 func assertModelSegmentIsNotRed(t *testing.T, f tuitest.Frame, red tuitest.Style) {
 	t.Helper()
 
-	y := footerRowIndex(f)
+	y := footerRowIndex(f, footerUpstream)
 	// The runs are walked from the left and the walk STOPS at the one that completes the label,
 	// rather than from a column found by [tuitest.Frame.Find]: the header box carries the same label
 	// and Find answers about the first row holding it, which is not this one.
@@ -632,11 +635,12 @@ func assertModelSegmentIsNotRed(t *testing.T, f tuitest.Frame, red tuitest.Style
 // effort default were sanitised as server- and config-authored text, and the operator's own path was
 // trusted. A directory NAME is not the operator's promise — a checkout or an unpacked archive can
 // author one — so it is escape-stripped at construction now (internal/tui/model.go's workdir field),
-// and the step has something to rule on: the whole footer row reads on the footer's own colours.
+// and the step has something to rule on: the footer's whole workspace row reads on the footer's own
+// colours.
 func assertWorkdirCellIsNotRed(t *testing.T, f tuitest.Frame, red tuitest.Style) {
 	t.Helper()
 
-	y := footerRowIndex(f)
+	y := footerRowIndex(f, footerWorkspace)
 	if run, ok := redRun(f, y, red); ok {
 		t.Errorf("the footer's workdir segment painted %q in the directory name's own red — the "+
 			"workdir reached the terminal unstripped: %q", run.Text, f.Row(y))
@@ -653,17 +657,42 @@ func redRun(f tuitest.Frame, y int, red tuitest.Style) (tuitest.Run, bool) {
 	return tuitest.Run{}, false
 }
 
-// footerRowIndex is the row the status line is painted on: the last row carrying the footer's own
-// separator. [footerRow] answers the same question with the row's TEXT; a colour claim needs its
-// POSITION, which is the whole of the difference.
-func footerRowIndex(f tuitest.Frame) int {
+// footerLine names one of the rows the default `ui.footer.rows` lays the footer out in.
+type footerLine int
+
+const (
+	// footerUpstream is the top row: the host, the model, the effort word and the mode marker.
+	footerUpstream footerLine = iota
+	// footerWorkspace is the row under it: the workdir, the git state and the spend.
+	footerWorkspace
+)
+
+// footerRows is how many rows the default `ui.footer.rows` lays the footer out in.
+const footerRows = 2
+
+// footerRowIndex is the frame row the default footer paints line on. The footer's rows are the
+// last rows the frame says anything on: directly beneath them the ▁ hairline closes the screen, so
+// they are found by position above it rather than by what they carry — a workspace row holding a
+// lone path has no separator to be found by. [footerRow] answers with a row's TEXT; a colour claim
+// needs its POSITION, which is the whole of the difference. -1 when the frame carries no hairline
+// with the footer's rows above it.
+func footerRowIndex(f tuitest.Frame, line footerLine) int {
 	for y := f.Height() - 1; y >= 0; y-- {
-		if strings.Contains(f.Row(y), " "+glyphFooterSeparator+" ") {
-			return y
+		row := strings.TrimRight(f.Row(y), " ")
+		if row == "" || strings.Trim(row, glyphBottomHairline) != "" {
+			continue
 		}
+		if y < footerRows {
+			return -1
+		}
+		return y - footerRows + int(line)
 	}
 	return -1
 }
+
+// glyphBottomHairline is the ▁ the frame closes the screen with, under the footer
+// (internal/tui/model.go's bottomRuleHeight row).
+const glyphBottomHairline = "▁"
 
 // glyphFooterSeparator is the ✦ the footer sets its segments apart with (internal/tui/theme.go's
 // default glyphSet.assistant, which the status line reuses).

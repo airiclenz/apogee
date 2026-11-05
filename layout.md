@@ -73,7 +73,8 @@
 │ at the clicked position. The background color of this box is black. The border      │
 │ of this prompt box are dark gray.                                                   │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
-  workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high ✦ ~/Repos/apogee          ◐ ask before
+  workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high                           ◐ ask before
+  ~/Repos/apogee
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 
 ---
@@ -268,9 +269,9 @@ the box is on the frame at every window size, and what the human was typing is s
 on as many rows as the frame can pay for. The dropdown, the browser and the picker never take the
 box's rows: the browser and the picker own the keyboard while they are open, so no draft can be
 growing beside them, and the dropdown is a completion of the very draft it would be shrinking.
-Below twelve rows there is no pane at all (see the four-row floor below), which is the floor of the
-pane arrangement rather than an exception to this rule; the frame has a lower floor of its own, and
-it is the last thing this section states.
+Below thirteen rows there is no pane at all (twelve under a one-row footer; see the four-row floor
+below), which is the floor of the pane arrangement rather than an exception to this rule; the frame
+has a lower floor of its own, and it is the last thing this section states.
 
 **The box's extra rows give way to the FRAME as well, which is not a place in the order at all.**
 The order above divides the rows the window can spare; the frame bound is about the window itself.
@@ -285,10 +286,10 @@ exactly as it pays for a pane's — it is first in the order and it goes to noth
 **The pending-image line gives way on the same terms as the draft's extra rows.** While an image is
 attached for the next message, an `attached: <name> (<size>)` line sits directly above the box and
 is paid for out of the box's rows. It is not part of the frame's floor, so where the floor leaves no
-row for it — at eight rows and below — it is not drawn, and while the approval or ask prompt is up it
-gives way to that pane's four rows too, so an attached image never pushes the frame past the
-terminal or a decision surface off it. The images stay pending; only the line that names them is
-not drawn, and it comes back with the rows. Once the images are sent the line goes, and the sent
+row for it — at nine rows and below, eight under a one-row footer — it is not drawn, and while the
+approval or ask prompt is up it gives way to that pane's four rows too, so an attached image never
+pushes the frame past the terminal or a decision surface off it. The images stay pending; only the
+line that names them is not drawn, and it comes back with the rows. Once the images are sent the line goes, and the sent
 block names them on a row of its own (see "A sent image is named in the block").
 
 **A capped box is a window onto the draft, and it says how much of it is out of sight.** The box
@@ -303,15 +304,15 @@ pane sheds its NAME to keep its number, and this row has no name to shed, so und
 `… +3` needs, it stays a plain border rather than drawing a clipped count. `… +1` of `… +19` is not
 a quieter statement of the fact; it is a false one.
 
-**The frame's own floor is eight rows, and below it the frame is its floor and nothing more.** With
+**The frame's own floor is nine rows, and below it the frame is its floor and nothing more.** With
 the session area gone the frame is one blank gap row, the `▔` hairline, the status line, the input
 box (its two borders and its one content row), the footer's rows and the `▁` hairline under them —
-eight rows under a one-row footer, every one of them something the rules above forbid giving way.
-Each further row `ui.footer.rows` lays the footer out in is one more row of that floor, and one row
-fewer for the session area at every height above it. At exactly eight the
-frame is that chrome and it fits. **Below eight it does not fit, and what it does there is
+nine rows under the default two-row footer, every one of them something the rules above forbid
+giving way. The floor counts the rows `ui.footer.rows` lays the footer out in: a one-row footer
+makes it eight, and one row more for the session area at every height above it. At exactly nine the
+frame is that chrome and it fits. **Below nine it does not fit, and what it does there is
 deliberate:** it composes its floor and no more. A long draft, a queued message or an open pane
-cannot make it grow past eight on a seven-row terminal any more than on an eight-row one, so the
+cannot make it grow past nine on an eight-row terminal any more than on a nine-row one, so the
 overflow is bounded at one row per row the terminal is short and never compounds. Clipping the frame
 to the window instead was considered and rejected: it would make "the frame never exceeds the
 terminal" trivially true at every size, and the next real overflow would then arrive silently
@@ -350,10 +351,10 @@ question itself; where the question is too long to be that one line, the row goe
 marker and the question's lead moves up onto the border, which costs the pane nothing. What no pane
 may do is claim a fifth row the frame has not got — and the blanks below are not that fifth row:
 they are spent INSIDE the rows the pane was granted, booked out of its own window before its rows
-are seated, which is exactly why they are the first thing it hands back. Under the eight
+are seated, which is exactly why they are the first thing it hands back. Under the nine
 rows of fixed chrome below the session area, that puts the shortest terminal a pane can be drawn in
-at all at **twelve rows** — and at twelve the session area is already gone, so the frame is exactly
-the pane and the chrome together.
+at all at **thirteen rows** (twelve under a one-row footer) — and at thirteen the session area is
+already gone, so the frame is exactly the pane and the chrome together.
 
 **Above that floor a pane breathes: one blank row over its row block, one under it.** A pane's rows
 are a block rather than more of the prose above them — on a decision surface the body asks and the
@@ -392,7 +393,7 @@ under every pane) — no prompt, browser, picker or dropdown can be up beside it
 
 **Nothing else about a full-height pane is special, and that is the point.** Its irreducible height
 is the same **four rows** every pane's is, spent the same way (two borders, a title row, a key hint);
-below twelve rows it is not drawn at all, exactly as no pane is; the input box, the footer and both
+below thirteen rows it is not drawn at all, exactly as no pane is; the input box, the footer and both
 hairlines are the frame's floor here as everywhere; and a draft the human has grown takes its rows
 out of the same budget, so a long draft shrinks the pane rather than the box. Above the floor it
 spends the rows in the pane's own order: the **rows first**, its body block — the **description
@@ -642,12 +643,12 @@ is booked out of the pane's rows, not its body.
 pane did get scrolls around the selection, so the entries outside it are one keypress away and need
 no marker — and now that a row can wrap, a row is seated whole or not at all, so a window that
 cannot pay for all three lines of an answer shows the answers it can rather than the first two
-thirds of one. The approval prompt at twelve rows is that case and not this one: `❯ Allow` is on
+thirds of one. The approval prompt at thirteen rows is that case and not this one: `❯ Allow` is on
 the screen and the other options are one ↑ or ↓ away. A window of **zero** rows is the other
 thing entirely — every choice or entry gone, and the key hint still offering `↑↓ select` to pick
 between them — so those rows are counted onto the title row too, in the **same** marker:
 `saved sessions  (all workspaces)  … (+8 more lines)`. The ask prompt is the pane where that title
-row IS the top border, having no title of its own to draw, so at twelve rows the four answers it
+row IS the top border, having no title of its own to draw, so at thirteen rows the four answers it
 could seat none of are counted there instead:
 
 ```
@@ -1392,7 +1393,8 @@ those rows is a collapsed run, and opening one opens its view.
 ╭─────────────────────────────────────────────────────────────────────────────────────╮
 │ Message scout…  ⏎ send · ↑ recall · esc back                                        │
 ╰─────────────────────────────────────────────────────────────────────────────────────╯
-  workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                 ◐ ask before
+  workstation ✦ qwen3.6-27B-Q4_K_S.gguf                                  ◐ ask before
+  ~/Repos/apogee
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 ```
 
@@ -2005,7 +2007,8 @@ nothing is drawn and a click on the footer names nothing.
 
 **What it is.** Frameless rows below the prompt box, which closes its own `╰─╯` frame — one row
 per row `ui.footer.rows` names (one or two), top to bottom, each carrying the segments its row names
-in the order it names them; unset, the key's default lays them out on one row. The
+in the order it names them; unset, the key's default lays them out on two rows, the upstream
+(host, model, effort and the mode marker) above the workspace (workdir, git and spend). The
 footer used to be three rows of chrome — a `├──┤` divider standing in for the edge the box was
 missing, the content between two `│` bars, and a `╰──╯` rule under it — and each row now takes the
 **status line's** posture instead, below the box rather than above it: the two-column

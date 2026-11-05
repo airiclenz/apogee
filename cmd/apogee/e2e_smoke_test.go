@@ -144,8 +144,9 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	typeSubmit(drv, "/version")
 	drv.WaitText(apogee.Version())
 
-	// Step 9 — narrower and wider: everything reflows, and the footer gives way from the LEFT —
-	// dropping whole segments in priority order — rather than giving up the mode marker it ends with.
+	// Step 9 — narrower and wider: everything reflows, and a footer row gives way from the LEFT —
+	// shortening, then dropping whole segments in priority order — rather than giving up the mode
+	// marker the upstream row ends with.
 	drv.Resize(60, 20)
 	drv.WaitQuiet(settled)
 	narrow := drv.Frame()
@@ -173,19 +174,21 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	if wide.Width() != wideW {
 		t.Fatalf("the frame is %d columns after a resize to %d", wide.Width(), wideW)
 	}
-	wideFooter := footerRow(t, wide)
+	wideFooter := footerRow(t, wide) + "\n" + footerWorkspaceRow(t, wide)
 	if strings.Contains(wideFooter, "…") {
 		t.Errorf("the wide footer is still truncated: %q", wideFooter)
 	}
-	// Given the room, the row states every fact it knows — the workspace among them, which is the
-	// segment the narrow window gave up.
-	if !strings.Contains(wideFooter, sess.Workspace()) {
-		t.Errorf("the wide footer does not name the workspace %q: %q", sess.Workspace(), wideFooter)
+	// Given the room, the rows state every fact they know — the workspace among them, on the row
+	// under the marker's.
+	if !strings.Contains(footerWorkspaceRow(t, wide), sess.Workspace()) {
+		t.Errorf("the wide footer's workspace row does not name the workspace %q: %q", sess.Workspace(), wideFooter)
 	}
-	// The window it had is what the two rows differ by: the wide one states facts the narrow one
-	// spent its columns on the marker instead of.
-	if strings.Count(wideFooter, glyphFooterSeparator) <= strings.Count(narrowFooter, glyphFooterSeparator) {
-		t.Errorf("the wide footer states no more than the narrow one: %q vs %q", wideFooter, narrowFooter)
+	// The second row is what the narrow window owes its room to: the workspace's facts moved off the
+	// marker's row, so at sixty columns the upstream row still states every fact the wide one does.
+	wideUpstream := footerRow(t, wide)
+	if got, want := strings.Count(narrowFooter, glyphFooterSeparator), strings.Count(wideUpstream, glyphFooterSeparator); got != want {
+		t.Errorf("the narrow upstream row states %d separated facts, the wide one %d: %q vs %q",
+			got, want, narrowFooter, wideUpstream)
 	}
 
 	// Step 10 — Ctrl+C twice ends it, cleanly. (The terminal-left-clean half is the PTY test's.)
@@ -628,19 +631,30 @@ func footerRoomFor(workspace string) int {
 	return 80 + utf8.RuneCountInString(workspace)
 }
 
-// footerRow is the last non-empty row of a frame: the status bar apogee paints at the bottom.
+// footerRow is the footer's upstream row — the host, the model, the effort word and the mode marker
+// at its right edge — under the default two-row `ui.footer.rows`. The marker, the server and the
+// model are all read here; the workspace's facts are [footerWorkspaceRow]'s.
 func footerRow(t *testing.T, f tuitest.Frame) string {
 	t.Helper()
+	return footerLineText(t, f, footerUpstream)
+}
 
-	for y := f.Height() - 1; y >= 0; y-- {
-		row := strings.TrimRight(f.Row(y), " ")
-		// The very last row is the scroll rail; the footer is the last row with words in it.
-		if strings.ContainsAny(row, "abcdefghijklmnopqrstuvwxyz") {
-			return row
-		}
+// footerWorkspaceRow is the footer's workspace row — the workdir, the git state and the spend —
+// under the default two-row `ui.footer.rows`.
+func footerWorkspaceRow(t *testing.T, f tuitest.Frame) string {
+	t.Helper()
+	return footerLineText(t, f, footerWorkspace)
+}
+
+// footerLineText is the text of one of the default footer's rows, trailing padding trimmed.
+func footerLineText(t *testing.T, f tuitest.Frame, line footerLine) string {
+	t.Helper()
+
+	y := footerRowIndex(f, line)
+	if y < 0 {
+		t.Fatalf("no footer row on the frame:\n%s", f)
 	}
-	t.Fatalf("no footer row on the frame:\n%s", f)
-	return ""
+	return strings.TrimRight(f.Row(y), " ")
 }
 
 // hasNonZeroNumber reports whether the frame shows a number other than zero — the automatable half

@@ -68,7 +68,8 @@ const (
 // liveStateSize is the terminal these tests read the footer at. A hundred and forty columns rather
 // than the usual hundred for the reason T-10's auto test takes the same width: the footer truncates
 // the workdir cell from the left and DROPS the mode marker beside it when the row runs out of room,
-// which a temp workspace path under a long test name manages at a hundred (item 11's note).
+// which a temp workspace path under a long test name manages at a hundred (item 11's note) under a
+// one-row footer; on the default two rows it is the workspace row's git segment that needs the room.
 var liveStateSize = tuitest.Size{W: 140, H: 30}
 
 // TestE2ELiveStateFollowsTheRunningSession is T-16 steps 1 to 10: the footer's Auto marker, the
@@ -222,9 +223,9 @@ const (
 	// spells it, so the narrowed list is short enough for its golden to read at a glance and still
 	// keeps the row the walk edits.
 	settingsFilter = "mode"
-	// settingsOtherRow is a row the filter narrows away: the `currency` key the unfiltered pane
-	// paints on its first screen (t16-settings-rows.txt), whose path holds no "mode".
-	settingsOtherRow = "currency"
+	// settingsOtherRow is a row the filter narrows away: the `sub-agents-choice` key the unfiltered
+	// pane paints on its first screen (t16-settings-rows.txt), whose path holds no "mode".
+	settingsOtherRow = "sub-agents-choice"
 )
 
 // TestE2ESettingsTypeToFilter drives the /settings key list's filter through the real binary: the

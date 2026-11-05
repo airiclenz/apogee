@@ -5135,11 +5135,11 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // allocation left this pane no rows at all — a window too short to seat it beside its siblings —
 // and the overlay renders nothing rather than a pane drawn past the terminal's last row.
 //
-// For the MODAL prompt that outcome is reachable only below twelve rows, where no pane is drawn at
-// all: the prompt is last in the give-way order and the input box's draft rows now give way to it
-// (draftRowsCeiling), so on every window a pane can be drawn in the decision the run is blocked on
-// is on the frame. It is not "seated or silent" — a decision surface must never be invisible while
-// its keys are live.
+// For the MODAL prompt that outcome is reachable only below thirteen rows (twelve under a one-row
+// footer), where no pane is drawn at all: the prompt is last in the give-way order and the input
+// box's draft rows now give way to it (draftRowsCeiling), so on every window a pane can be drawn in
+// the decision the run is blocked on is on the frame. It is not "seated or silent" — a decision
+// surface must never be invisible while its keys are live.
 //
 // The budget comes from the frame-wide allocation (frameRowPlan) rather than from the viewport
 // directly, because the pane is never the only thing taking rows off the transcript: the staged

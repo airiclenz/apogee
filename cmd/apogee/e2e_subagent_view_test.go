@@ -364,18 +364,18 @@ func assertFirstBodyRow(t *testing.T, f tuitest.Frame, header, want string) {
 
 // idleRuleFromBottom is how far above the frame's bottom edge the session-title rule sits, counting
 // the rule itself: the rule, the status line, the prompt box's three rows (two borders around one
-// content row), the footer's line and the ▁ hairline under it. That stack is the frame's floor
-// (layout.md, "The frame's own floor is eight rows": the gap row, the ▔ hairline, the status line,
-// the input box, the footer's single line and the ▁ hairline under it — the rule and everything
-// below it being seven of those eight), and cmd/apogee/testdata/frames/t17-run-view.txt records it,
-// the rule on row 24 of a 30-row frame.
+// content row), the default footer's two rows and the ▁ hairline under them. That stack is the
+// frame's floor (layout.md, "The frame's own floor is nine rows": the gap row, the ▔ hairline, the
+// status line, the input box, the footer's two rows and the ▁ hairline under them — the rule and
+// everything below it being eight of those nine), and cmd/apogee/testdata/frames/t17-run-view.txt
+// records it, the rule on row 23 of a 30-row frame.
 //
-// It is the IDLE one-row frame's offset and only that. stackInputSlot (internal/tui/model.go) seats
-// the autocomplete dropdown and the staged-interjection strip between the status line and the box,
-// and the box itself grows to maxInputRows, so a future call site made with a staged band up or a
+// It is the IDLE one-row frame's offset under the default two-row footer, and only that.
+// stackInputSlot (internal/tui/model.go) seats the autocomplete dropdown and the staged-interjection
+// strip between the status line and the box, and the box itself grows to maxInputRows, so a future call site made with a staged band up or a
 // grown draft would find the rule higher — that is the layout doing its job, not a regression, and
 // such a call site needs its own offset rather than a change to this one.
-const idleRuleFromBottom = 7
+const idleRuleFromBottom = 8
 
 // lastRuleRow returns the row index of the LAST row beginning with ▔ — the session-title rule the
 // prompt box sits under, and so the transcript's end — in a frame h rows tall. It scans from the
@@ -535,14 +535,14 @@ func resultBody(content string) string {
 func TestE2ESubAgentViewRuleAnchor(t *testing.T) {
 	t.Parallel()
 
-	// An idle 10-row frame: three body rows — one of them a decoy opening with the rule's own
+	// An idle 11-row frame: three body rows — one of them a decoy opening with the rule's own
 	// glyph — then the chrome, whose rule sits idleRuleFromBottom rows above the bottom.
-	const h = 10
+	const h = 11
 	framed := func(body ...string) []string {
 		rows := append([]string(nil), body...)
 		return append(rows,
 			"▔▔▔▔▔ a session ▔▔▔▔▔", // the rule: row h-idleRuleFromBottom
-			"  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ dir", "▁▁▁▁▁")
+			"  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ mode", "  dir", "▁▁▁▁▁")
 	}
 
 	for _, tc := range []struct {
@@ -565,12 +565,12 @@ func TestE2ESubAgentViewRuleAnchor(t *testing.T) {
 		},
 		{
 			name: "no rule at all does not resolve",
-			rows: []string{"one", "two", "three", "  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ dir", "▁▁▁▁▁", ""},
+			rows: []string{"one", "two", "three", "  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ mode", "  dir", "▁▁▁▁▁", ""},
 			ok:   false,
 		},
 		{
 			name: "a rule off the chrome's offset does not resolve",
-			rows: []string{"one", "▔▔▔▔▔ a session ▔▔▔▔▔", "three", "four", "five", "six", "seven", "eight", "nine", "ten"},
+			rows: []string{"one", "▔▔▔▔▔ a session ▔▔▔▔▔", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven"},
 			want: 1,
 			ok:   false,
 		},
@@ -638,9 +638,9 @@ func probeFrame(t *testing.T, rows ...string) tuitest.Frame {
 func TestE2ESubAgentViewRuleMissing(t *testing.T) {
 	t.Parallel()
 
-	// The chrome under the transcript, seven rows counting the rule (idleRuleFromBottom).
+	// The chrome under the transcript, eight rows counting the rule (idleRuleFromBottom).
 	const rule = "▔▔▔▔▔ a session ▔▔▔▔▔"
-	chrome := []string{"  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ dir", "▁▁▁▁▁"}
+	chrome := []string{"  <working>", "╭───╮", "│   │", "╰───╯", "  model ✦ mode", "  dir", "▁▁▁▁▁"}
 	framed := func(body ...string) []string { return append(append([]string(nil), body...), chrome...) }
 
 	for _, tc := range []struct {

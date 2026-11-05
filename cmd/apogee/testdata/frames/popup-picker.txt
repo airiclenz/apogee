@@ -8,7 +8,6 @@
 · context window unknown — apogee bounds each request by a conservative assumption and the Budget
   is inactive; set context-window: in config.yaml
 
-
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ schedule — how often                                                                             │
 │                                                                                                  │
@@ -27,4 +26,5 @@
 │ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
   probe-target ✦ popup-model <footer tail>
+  <footer workspace row>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

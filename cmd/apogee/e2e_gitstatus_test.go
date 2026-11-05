@@ -50,8 +50,8 @@ func TestE2EGitStatusFollowsTheUpstream(t *testing.T) {
 	level := gitStatusBranch + " 0Δ 0↓ 0↑"
 	drv.WaitFor(func() bool { return strings.Contains(drv.Frame().String(), level) },
 		tuitest.Awaiting("the footer's level git segment "+level))
-	if got := footerRow(t, drv.Frame()); !strings.Contains(got, level) {
-		t.Fatalf("the level git segment %q is on the frame but not on the footer row %q", level, got)
+	if got := footerWorkspaceRow(t, drv.Frame()); !strings.Contains(got, level) {
+		t.Fatalf("the level git segment %q is on the frame but not on the footer's workspace row %q", level, got)
 	}
 
 	gitCommitFile(t, pusher, "b.txt", "upstream\n", "an upstream commit")
@@ -61,8 +61,8 @@ func TestE2EGitStatusFollowsTheUpstream(t *testing.T) {
 	testtime.Eventually(t, testtime.Budget(time.Minute), func() bool {
 		return strings.Contains(drv.Frame().String(), behind)
 	}, "the footer to read "+behind+" after the push")
-	if got := footerRow(t, drv.Frame()); !strings.Contains(got, behind) {
-		t.Fatalf("the behind count %q is on the frame but not on the footer row %q", behind, got)
+	if got := footerWorkspaceRow(t, drv.Frame()); !strings.Contains(got, behind) {
+		t.Fatalf("the behind count %q is on the frame but not on the footer's workspace row %q", behind, got)
 	}
 }
 
