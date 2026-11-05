@@ -1538,6 +1538,10 @@ type Options struct {
 	GitStatusInterval time.Duration
 	GitFetchInterval  time.Duration
 
+	// GitActions is the footer's git actions seam (gitactions.go): the host that runs the user's
+	// own fetch, pull, push and sync on the workspace (ADR 0108). nil ⇒ no git actions.
+	GitActions GitActionsHost
+
 	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3, 4
 	// and 7). The zero value is the ordinary start — the binary determined a startup server and the
 	// engine was constructed before the program began — and everything below it is unchanged.

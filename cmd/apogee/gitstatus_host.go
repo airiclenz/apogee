@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,28 +30,41 @@ var gitStatusArgs = []string{
 	"status", "--porcelain=v2", "--branch", "--untracked-files=all", "--ignore-submodules=dirty", "-z",
 }
 
-// gitFetchArgs is the footer's background fetch. The -c pairs keep a fetch apogee starts on its
-// own from writing FETCH_HEAD or kicking off maintenance and gc, and close the two transports
-// that run a command (ext::) or a configured proxy (git://). --upload-pack names git's own
-// upload-pack, so a repo-local remote.<name>.uploadpack never runs: together they widen
-// gitexec's command-config refusal — which does not cover those keys — for this verb only.
-var gitFetchArgs = []string{
+// gitQuietConfig keeps a fetch from writing FETCH_HEAD and keeps any networked call from
+// kicking off maintenance or gc, which would leave a git child running past the call.
+var gitQuietConfig = []string{
 	"-c", "fetch.writeFetchHead=false",
 	"-c", "maintenance.auto=false",
 	"-c", "gc.auto=0",
+}
+
+// gitTransportConfig closes the two transports that run a command (ext::) or a configured proxy
+// (git://). Every networked call carries it: the footer's fetch and the git actions alike.
+var gitTransportConfig = []string{
 	"-c", "protocol.ext.allow=never",
 	"-c", "protocol.git.allow=never",
+}
+
+// gitFetchVerb is the fetch subcommand both fetches run. --upload-pack names git's own
+// upload-pack, so a repo-local remote.<name>.uploadpack never runs.
+var gitFetchVerb = []string{
 	"fetch", "--quiet", "--no-tags", "--recurse-submodules=no", "--upload-pack=git-upload-pack",
 }
 
-// gitNoPromptEnv is the environment both calls carry. GIT_OPTIONAL_LOCKS=0 keeps status from
+// gitFetchArgs is the footer's background fetch: [gitQuietConfig] and [gitTransportConfig] ahead
+// of [gitFetchVerb]. Together they widen gitexec's command-config refusal — which does not cover
+// the uploadpack, ext:: or gitProxy keys — for this verb only.
+var gitFetchArgs = slices.Concat(gitQuietConfig, gitTransportConfig, gitFetchVerb)
+
+// gitNoPromptEnv is the environment every call carries, the git actions host's included. GIT_OPTIONAL_LOCKS=0 keeps status from
 // taking index.lock for its opportunistic index refresh, so a poll never collides with the
 // operator's own git; the other two stop git and Git Credential Manager from asking for
 // anything.
 var gitNoPromptEnv = []string{"GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"}
 
-// gitSSHPassThrough are the variables gitexec's allowlist drops that a fetch over ssh needs from
-// the operator's environment: the agent socket, and the operator's own choice of ssh command.
+// gitSSHPassThrough are the variables gitexec's allowlist drops that a networked call over ssh
+// needs from the operator's environment: the agent socket, and the operator's own choice of ssh
+// command.
 var gitSSHPassThrough = []string{"SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_SSH"}
 
 // gitUserSSHVars are the variables that name an ssh command of the operator's own.
@@ -112,16 +126,12 @@ func (h gitStatusHost) Fetch(ctx context.Context, root string) error {
 	if err != nil {
 		return err
 	}
-	env := h.baseEnv()
-	userSSH, err := h.userSSHCommand(ctx, gitPath, root, env)
+	env, detachable, err := h.transportEnv(ctx, gitPath, root)
 	if err != nil {
 		return err
 	}
-	if userSSH && h.targetOS() == "windows" {
+	if !detachable {
 		return nil
-	}
-	if !userSSH {
-		env = append(env, gitBatchModeSSH)
 	}
 	res, err := h.git.CaptureEnv(ctx, gitPath, root, env, gitexec.CaptureOptions{NoTerminal: true}, gitStatusBackstop, gitFetchArgs...)
 	if err != nil {
@@ -131,6 +141,25 @@ func (h gitStatusHost) Fetch(ctx context.Context, root string) error {
 		return fmt.Errorf("git fetch: output passed %d bytes", subprocess.MaxSubprocessOutputBytes)
 	}
 	return gitOutcomeError("fetch", res)
+}
+
+// transportEnv is the env a networked call carries: [gitStatusHost.baseEnv], plus batch-mode ssh
+// where the operator named no ssh command of their own. detachable is false where the call would
+// run the operator's own ssh command on Windows, where the child cannot be detached from the
+// terminal: such a call must not run, and its caller decides whether that is a skip or a refusal.
+func (h gitStatusHost) transportEnv(ctx context.Context, gitPath, root string) (env []string, detachable bool, err error) {
+	env = h.baseEnv()
+	userSSH, err := h.userSSHCommand(ctx, gitPath, root, env)
+	if err != nil {
+		return nil, false, err
+	}
+	if userSSH && h.targetOS() == "windows" {
+		return nil, false, nil
+	}
+	if !userSSH {
+		env = append(env, gitBatchModeSSH)
+	}
+	return env, true, nil
 }
 
 // insideWorkTree asks git whether root is inside a work tree. A non-zero exit — no repository, or
@@ -177,7 +206,7 @@ func (h gitStatusHost) userSSHCommand(ctx context.Context, gitPath, root string,
 	return res.ExitCode == 0 && strings.TrimSpace(out.String()) != "", nil
 }
 
-// baseEnv is the env both calls append to gitexec's hardened one: the no-prompt variables, then
+// baseEnv is the env every call appends to gitexec's hardened one: the no-prompt variables, then
 // each ssh pass-through variable the operator has set.
 func (h gitStatusHost) baseEnv() []string {
 	env := make([]string, 0, len(gitNoPromptEnv)+len(gitSSHPassThrough)+1)

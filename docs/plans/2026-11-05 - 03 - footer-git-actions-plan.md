@@ -86,7 +86,11 @@ internal/gitexec/gitexec.go — hardeningOptions; docs/plans/2026-11-05 - 00 - v
 
 **Commit:** `docs(adr): footer git actions are the user's own act`
 
-## 3. A git actions host: fetch, pull, push, sync
+## 3. A git actions host: fetch, pull, push, sync — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): gitFetchArgs is now composed from three shared slices (gitQuietConfig, gitTransportConfig, gitFetchVerb) with the same argv in the same order, and Fetch's env and ssh decision moved into a shared `gitStatusHost.transportEnv` that returns `detachable=false` on Windows with an operator ssh command: Fetch still skips (nil), the actions host returns an error. gitStatusHost keeps git/lookupEnv/goos as direct fields; gitActionsHost holds a gitStatusHost as `base`.
+NOTES (2026-11-05): push always takes an explicit refspec with no `+` (`<remote> refs/heads/<b>:<upstream ref>`, read with `for-each-ref %(upstream:remotename)/%(upstream:remoteref)`) rather than a plain `git push`, so a configured `+` push refspec in remote.<name>.push cannot force it; with no upstream it is `--set-upstream origin refs/heads/<b>:refs/heads/<b>`. A detached HEAD is refused with an error.
+NOTES (2026-11-05): pull reads `rev-list --count HEAD..@{u}` after the fetch and skips the merge when that is 0 ("pull: already up to date"); the user's fetch reuses the footer fetch's verb (`--quiet --no-tags`), and merge and push carry the same quiet pairs (no FETCH_HEAD, maintenance or gc) as the fetch, plus `-c submodule.recurse=false`. No CHANGELOG entry: the host has no user-facing reach until item 5.
 
 **What:** Depends on item 2.
 

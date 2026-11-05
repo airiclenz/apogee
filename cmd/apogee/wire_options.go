@@ -73,6 +73,10 @@ func (w *rootWiring) options() tui.Options {
 		// they do not paint. The two cadences stay zero — the renderer's named defaults — since they
 		// are not config keys; `ui.git-fetch` in the UI block below switches the fetch.
 		GitStatus: gitStatusHost{},
+		// The footer's git actions seam (gitactions_host.go): the user's own fetch, pull, push and
+		// sync on the Workspace, on the footer fetch's hardened transport (ADR 0108). Like GitStatus
+		// it is the TUI's alone; headless and the daemon offer no git actions.
+		GitActions: gitActionsHost{},
 		// The Project root the skills loader hangs .apogee/skills off (stateRoots.project), so a
 		// skill loaded from a Project root above the workspace is labelled "workspace" rather than
 		// "elsewhere", and the empty-catalog note names the folder discovery actually looked in.

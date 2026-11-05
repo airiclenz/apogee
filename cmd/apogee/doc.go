@@ -127,7 +127,9 @@
 // stream, and one background fetch, both through internal/gitexec, never prompting (no
 // controlling terminal for the fetch) and never taking index.lock, with the fetch's transport
 // flags closing the repo-local uploadpack, ext:: and gitProxy commands gitexec's refusal does
-// not cover.
+// not cover; gitactions_host.go the footer's git actions host beside it — the user's own fetch,
+// pull (fast-forward only), push (never forced) and sync, on that same transport and with
+// submodule recursion off (ADR 0108).
 //
 // The subcommands: headless.go is `apogee headless`, one prompt run to completion with
 // nobody watching, and the binary's only distinct exit codes — with sigpipe_unix.go
