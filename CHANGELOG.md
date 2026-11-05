@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-11-05
+
 - **Fixed:** while you watch a live session, the status line's `[total …]` readout and the phrase clock (`thinking · 12s`) now count from the watched session's own journal times — the prompt's line for the total, the line that set the phrase for the clock — instead of from the moment you attached, so a watch opened mid-Exchange shows how long the session has been working. The times are read only as distances between the journal's own stamps, so an owner whose clock is set differently from yours cannot skew them. (watch-total-clock-origin)
 - **Fixed (docs):** the workflows manual's keys table now says `parallel-agents:` is set under a server entry in `servers:`, not at the top level, where the reader ignores it as an unknown key. (workflows-parallel-agents-row)
 - **The Tools umbrella's header says what ran.** Instead of a bare count (`✦ Tools (7 calls)`), the header now breaks its calls down by tool kind, `✦ Tools (3 Read, 4 Terminal)`, in the order each kind first ran, with every kind numbered (`1 Read`). A dotted leader runs from it to the ▶/▼ at the block's right edge, in the same column as the type rows' own ▶/▼, folded and open alike. When the window is too narrow for the breakdown, the header falls back to `(7 calls)`, and below that it is cut like any other row. It always stays on one line. (tools-header-breakdown)
