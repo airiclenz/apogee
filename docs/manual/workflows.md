@@ -532,7 +532,7 @@ The full command reference is in [Commands](commands.md).
 | `workflow-continuations:` | `2` | How many times a helper that ran out of room is continued |
 | `workflow-retries:` | `1` | How many times an item starts over with a fresh helper |
 | `workflow-wake:` | `on` | Whether a background workflow's end wakes an idle agent (`on` / `off`) |
-| `parallel-agents:` | the server's | How many helpers run at once ([servers](configuration.md#the-servers-you-run-models-on)) |
+| a server entry's `parallel-agents:` | the server's | How many helpers run at once — set under that entry in `servers:`, not at the top level ([servers](configuration.md#the-servers-you-run-models-on)) |
 
 The three `workflow-` keys are file-only and read when the session is built, so an edit applies at
 the next start.
