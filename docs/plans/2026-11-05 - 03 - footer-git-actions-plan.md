@@ -42,7 +42,9 @@
 - 6: decision applied — the rebase confirm is latched as `raiseAdoption`, never an unlatched kind (replaces the executor's choice)
 - 7: guard folded (every mode-marker click/pointer passage; fetch race and pull ordering)
 
-## 1. Verify the footer rows plan is archived
+## 1. Verify the footer rows plan is archived — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): gate passed — `docs/plans/archived/2026-11-05 - 02 - footer-rows-and-colour-plan.md` exists (archived in 3d8e0070) and the unarchived path is gone; FILES is empty because the item edits nothing.
 
 **What:** this plan clicks a segment that plan `2026-11-05 - 02 - footer-rows-and-colour-plan.md` lays out (per-segment spans, multi-row hit rows).
 
