@@ -295,6 +295,99 @@ func TestFooterStatesTheGitSegment(t *testing.T) {
 	})
 }
 
+// TestFooterPaintsEachConfiguredRow: each row `ui.footer.rows` names is painted on its own line,
+// fitted to the window on its own, with the mode marker — and the offline word just left of it — at
+// the right edge of the row naming `mode` and nowhere else.
+func TestFooterPaintsEachConfiguredRow(t *testing.T) {
+	t.Parallel()
+
+	m := withGitSnapshot(footerFactsModelIn(t, footerTwoRows, "/ws/proj"), footerGitTestSnapshot)
+	m.hb.offline = true
+	for _, w := range []int{60, 80, 140} {
+		lines := strings.Split(m.footerContent(w), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("width %d: footer is %d rows, want the 2 %s names", w, len(lines), footerTwoRows)
+		}
+		for i, line := range lines {
+			if got := m.th.measure.Width(line); got != w {
+				t.Errorf("width %d: footer row %d is %d cells, want the window's %d", w, i, got, w)
+			}
+		}
+		upstream := ansiPattern.ReplaceAllString(lines[0], "")
+		workspace := ansiPattern.ReplaceAllString(lines[1], "")
+
+		text, col, ok := m.footerModeSpan(w)
+		if !ok {
+			t.Fatalf("width %d: the mode marker does not seat; these widths need it drawn", w)
+		}
+		if !strings.HasSuffix(upstream, text+bodyIndent) || m.th.measure.Cut(upstream, col, col+m.th.measure.Width(text)) != text {
+			t.Errorf("width %d: row 0 %q does not end in the marker %q at column %d", w, upstream, text, col)
+		}
+		if !strings.Contains(upstream, "test-model") || !strings.Contains(upstream, offlineLabel) {
+			t.Errorf("width %d: row 0 %q lacks the model or the offline word", w, upstream)
+		}
+		if !strings.Contains(workspace, "/ws/proj") || !strings.Contains(workspace, "main 5Δ 0↓ 4↑") {
+			t.Errorf("width %d: row 1 %q lacks the workdir or the git state", w, workspace)
+		}
+		for _, other := range []string{text, offlineLabel, "test-model"} {
+			if strings.Contains(workspace, other) {
+				t.Errorf("width %d: row 1 %q carries %q, which row 0 names", w, workspace, other)
+			}
+		}
+	}
+}
+
+// TestFooterUnsetRowsPaintTheDefaultLayout: an unset `ui.footer.rows` paints exactly the layout the
+// key's default names — today the one-row shape — at every width.
+func TestFooterUnsetRowsPaintTheDefaultLayout(t *testing.T) {
+	t.Parallel()
+
+	unset := withGitSnapshot(footerFactsModelIn(t, "", "/ws/proj"), footerGitTestSnapshot)
+	stated := withGitSnapshot(footerFactsModelIn(t, domain.DefaultFooterRows, "/ws/proj"), footerGitTestSnapshot)
+	want, _ := domain.ParseFooterRows(string(domain.DefaultFooterRows))
+	if got := unset.footerRows(); got != len(want) {
+		t.Errorf("unset footer rows = %d, want the default's %d", got, len(want))
+	}
+	for _, w := range []int{20, 60, 80, 140} {
+		if got, want := unset.footerContent(w), stated.footerContent(w); got != want {
+			t.Errorf("width %d: unset footer\n%q\nwant the default's\n%q", w, got, want)
+		}
+	}
+}
+
+// TestFooterTwoRowsKeepTheGitStateAndTheEffortWordAt80: at 80 columns a long workdir and a long
+// branch shorten on their own row — the workdir and then the branch middle-elided — so the git
+// counts stay, and the upstream row keeps the effort word; the one-row layout gives the git
+// segment up at the same width.
+func TestFooterTwoRowsKeepTheGitStateAndTheEffortWordAt80(t *testing.T) {
+	t.Parallel()
+
+	const workspace = "/home/someone/repos/a-rather-long-project-name/internal/some/deep/package/directory"
+	snap := footerGitTestSnapshot
+	snap.Branch = "feature/a-very-long-branch-name-for-the-footer-row-test"
+	snap.Upstream = "origin/" + snap.Branch
+
+	m := withGitSnapshot(footerFactsModelIn(t, footerTwoRows, workspace), snap)
+	lines := strings.Split(ansiPattern.ReplaceAllString(m.footerContent(80), ""), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("footer is %d rows, want 2: %q", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "high") {
+		t.Errorf("row 0 %q dropped the effort word", lines[0])
+	}
+	if !strings.Contains(lines[1], "5Δ 0↓ 4↑") {
+		t.Errorf("row 1 %q dropped the git counts", lines[1])
+	}
+	if strings.Contains(lines[1], workspace) || strings.Contains(lines[1], snap.Branch) || !strings.Contains(lines[1], footerEllipsis) {
+		t.Errorf("row 1 %q did not middle-elide the long workdir and branch", lines[1])
+	}
+
+	one := withGitSnapshot(footerFactsModelIn(t, "", workspace), snap)
+	if flat := ansiPattern.ReplaceAllString(one.footerContent(80), ""); strings.Contains(flat, "5Δ") {
+		t.Errorf("the one-row footer %q kept the git state at 80 columns; this case needs a state it gives up", flat)
+	}
+}
+
 // footerLongBranchSnapshot is footerGitTestSnapshot on a branch long enough to middle-elide.
 var footerLongBranchSnapshot = gitstatus.Snapshot{
 	Branch: "feature/long-branch-name", Upstream: "origin/feature/long-branch-name",

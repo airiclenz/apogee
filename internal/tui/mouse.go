@@ -485,14 +485,14 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// footerRowY is the screen row the footer's FIRST row is painted on. View stacks the input box, the
-// footer's frameless rows (footerRows()) and the ▁ bottom-edge hairline at the bottom of the window
-// (model.go), so the footer's first row stands footerRows() + bottomRuleHeight rows above the
-// terminal's bottom edge. Both terms are named rather than folded into a literal, for
-// inputContentRect's reason: an omitted one is exactly the off-by-one that puts the rect on the
-// hairline.
-func (m Model) footerRowY() int {
-	return m.height - bottomRuleHeight - m.footerRows()
+// footerRowY is the screen row the footer's row-th row ([Model.footerLines]) is painted on. View
+// stacks the input box, the footer's frameless rows (footerRows()) and the ▁ bottom-edge hairline at
+// the bottom of the window (model.go), so the footer's first row stands footerRows() +
+// bottomRuleHeight rows above the terminal's bottom edge and each later row one below the row before
+// it. Both terms are named rather than folded into a literal, for inputContentRect's reason: an
+// omitted one is exactly the off-by-one that puts the rect on the hairline.
+func (m Model) footerRowY(row int) int {
+	return m.height - bottomRuleHeight - m.footerRows() + row
 }
 
 // handleFooterModeClick gives the footer's mode marker its pointer: a click anywhere on it opens
@@ -515,7 +515,8 @@ func (m Model) handleFooterModeClick(pre Model, msg tea.MouseClickMsg) (Model, t
 // answer ([Model.handleFooterModeClick], [Model.pointerShapeAt]). The gate is read off the live m
 // and the geometry off pre, handleMouseClick's rule.
 //
-// The rect is the footer's own row and the columns [Model.footerModeSpan] reports for pre — the same
+// The rect is the footer row naming `mode` ([Model.footerModeRow]) — never another footer row — and
+// the columns [Model.footerModeSpan] reports for pre — the same
 // value the painter drew from, so the pointer can never address a column the painter did not paint,
 // and the narrow branch that drops the marker whole (ok false) leaves the footer naming nothing. The
 // WHOLE marker is the hit area, Auto's blast-radius word included: that word is a FACT about the mode
@@ -534,7 +535,7 @@ func (m Model) footerModeHit(pre Model, x, y int) bool {
 		return false
 	}
 	text, col, ok := pre.footerModeSpan(pre.width)
-	if !ok || y != pre.footerRowY() {
+	if !ok || y != pre.footerRowY(pre.footerModeRow()) {
 		return false
 	}
 	return x >= col && x < col+pre.th.measure.Width(text)

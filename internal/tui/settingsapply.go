@@ -475,6 +475,19 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
+	case domain.UIKeyFooterRows:
+		// The footer's row count is frame height (footerRows), so the transcript gives up or takes
+		// back a row per footer row: the frame is laid out again here rather than left to the next
+		// resize. No pane edits the key — it is structured, edited in the file — so the edit that
+		// reaches here is a re-read of a hand-edited file (applyReloaded), applied live rather than
+		// refused at the binary's dispatcher. Before the first WindowSizeMsg there is no frame to lay
+		// out; that message lays it out from the value landed here.
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+		if m.ready {
+			m.layout()
+		}
 	case domain.UIKeySpinner:
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err

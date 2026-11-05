@@ -2798,10 +2798,37 @@ const (
 // box and the ▁ hairline, the status line's posture below the box. It is the ONE place the frame
 // learns how tall the footer is — the transcript budget, the draft ceiling, the pending-image line,
 // the frame's floor, the input box's top and the footer's hit row all read it (frameFixedRows(),
-// inputContentRect, footerRowY()) — so a footer laid out in more rows moves every one of them
-// together. The footer is one row.
+// inputContentRect, footerRowY(row)) — so a footer laid out in more rows moves every one of them
+// together. The count is the configured layout's ([Model.footerLines]): one row per row
+// `ui.footer.rows` names.
 func (m Model) footerRows() int {
-	return 1
+	return len(m.footerLines())
+}
+
+// footerLines is the footer's row layout as `ui.footer.rows` names it (Options.UI.FooterRows): the
+// segment names of each row, top to bottom, in the order each row lays them out. An unset value
+// reads as the key's default — today's one-row shape — and so does a value the parser refuses, which
+// cannot reach here through the config file or a live apply (both refuse it before it lands,
+// [domain.UIPrefs.Validate], [domain.UIPrefs.Set]) but would otherwise leave a frame with no footer
+// to stand the mode marker on.
+func (m Model) footerLines() [][]domain.FooterSegment {
+	if rows, err := domain.ParseFooterRows(string(m.opts.UI.FooterRows)); err == nil {
+		return rows
+	}
+	rows, _ := domain.ParseFooterRows("")
+	return rows
+}
+
+// footerModeRow is the index of the footer row naming `mode` — the row the mode marker, and the
+// offline word beside it, sit at the right edge of. The parser holds every layout to exactly one
+// `mode`, so the first row stands in only for a layout that names none.
+func (m Model) footerModeRow() int {
+	for i, row := range m.footerLines() {
+		if slices.Contains(row, domain.FooterMode) {
+			return i
+		}
+	}
+	return 0
 }
 
 // frameFixedRows() is what every frame spends below the transcript whatever is open: the blank gap
@@ -2832,8 +2859,8 @@ func (m Model) frameFloorRows() int {
 // layout sizes the viewport and input box to the current window. The input box auto-grows with its
 // content, clamped by its own taste and by what the frame can pay for (draftRowsCeiling), and the
 // viewport gets the height left after the gap row, the ▔ top-edge hairline, the status row, the
-// input box (its content rows plus its own top and bottom borders), the footer's single line and the
-// ▁ bottom-edge hairline under it, less the rows this frame's overlays take from it
+// input box (its content rows plus its own top and bottom borders), the footer's rows (footerRows())
+// and the ▁ bottom-edge hairline under them, less the rows this frame's overlays take from it
 // ([Model.transcriptRows]) — the widget is sized to what is DRAWN, so its scroll clamp reaches the
 // tail. A floor of one row keeps the WIDGET valid on a tiny window; the frame spends
 // transcriptBudget instead, which does not have that floor and so cannot compose a row the window
@@ -3832,17 +3859,29 @@ func (m Model) bottomRule() string {
 	return m.th.hairline.Render(strings.Repeat("▁", m.width))
 }
 
-// footerView renders the footer: ONE frameless line below the prompt box. It used to be three
-// rows — a ├──┤ divider standing in for the box's missing bottom edge, the content line between
-// two │ bars, and a ╰──╯ rule closing the whole unit — and the box now closes its own frame
-// instead, so the divider has nothing to join and the bottom rule nothing to close (layout.md).
-// What is left is the content line itself, which is why this is a one-line function rather than
-// a composition: the row IS the footer.
+// footerView renders the footer: its frameless rows below the prompt box ([Model.footerRows]). It
+// used to be three rows of frame — a ├──┤ divider standing in for the box's missing bottom edge,
+// the content line between two │ bars, and a ╰──╯ rule closing the whole unit — and the box now
+// closes its own frame instead, so the divider has nothing to join and the bottom rule nothing to
+// close (layout.md). What is left is the content rows themselves, which is why this is a one-line
+// function rather than a composition: the rows ARE the footer.
 func (m Model) footerView() string {
 	return m.footerContent(m.width)
 }
 
-// footerContent composes the footer's single line: host ✦ model ✦ effort ✦ workdir ✦ git on the left, the mode
+// footerContent composes the whole footer for a window w wide: one painted row per row
+// `ui.footer.rows` names ([Model.footerLines]), top to bottom, joined by newlines — each row fitted
+// to the window on its own ([Model.footerRow]) and painted by [Model.footerRowContent].
+func (m Model) footerContent(w int) string {
+	lines := make([]string, m.footerRows())
+	for i := range lines {
+		lines[i] = m.footerRowContent(i, w)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// footerRowContent composes one footer row: its named segments on the left — in the default
+// one-row layout host ✦ model ✦ effort ✦ workdir ✦ git — and, on the row naming `mode`, the mode
 // marker — its symbol, its word (modeMarker), and in Auto the blast radius that word runs with
 // (confinementWord) — on the right, over one unbroken black field. It
 // takes the STATUS LINE's posture, one row below the box rather than one row above it — a
@@ -3873,8 +3912,11 @@ func (m Model) footerView() string {
 // are the SERVER's text, the host is config text and the branch is the repository's, and the footer
 // strips all four on their producers' behalf rather than trusting any of them — one unterminated OSC 8 opener painted into
 // the footer's black field turns the rest of the frame into a link to somebody else's URL.
-func (m Model) footerContent(w int) string {
-	layout := m.footerRow(w)
+//
+// A row that does not name `mode` carries no marker (its layout's mode is empty): its left run is
+// fitted against the trailing margin alone, and the field is filled black to that margin.
+func (m Model) footerRowContent(row, w int) string {
+	layout := m.footerRow(row, w)
 	if !layout.hasMode {
 		// Too narrow to seat the marker at all. The fit has already cut the two left runs to the
 		// window; only the lead margin can still overflow a window narrower than itself, so it is
@@ -3900,13 +3942,16 @@ func (m Model) footerContent(w int) string {
 	// full privileges. Its separator travels with the word, exactly as offline's ✦ does, so no
 	// styled run ever ends on a space — which is why the split re-joins to exactly the layout's mode
 	// text (footerModeText), the one string the pointer addresses.
-	markerStyle := m.th.footerText.Foreground(m.th.modeColor(m.opts.Mode))
-	mode := markerStyle.Render(layout.mode)
-	if word := confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()); word == unconfinedWord {
-		mode = markerStyle.Render(modeMarker(m.th, m.opts.Mode)) +
-			m.th.footerText.Foreground(m.th.errorFg).Render(" · "+word)
+	mode := m.th.footerText.Render(bodyIndent)
+	if layout.mode != "" {
+		markerStyle := m.th.footerText.Foreground(m.th.modeColor(m.opts.Mode))
+		marker := markerStyle.Render(layout.mode)
+		if word := confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()); word == unconfinedWord {
+			marker = markerStyle.Render(modeMarker(m.th, m.opts.Mode)) +
+				m.th.footerText.Foreground(m.th.errorFg).Render(" · "+word)
+		}
+		mode = marker + mode
 	}
-	mode += m.th.footerText.Render(bodyIndent)
 
 	// The fill is what carries the marker to the column the LAYOUT reports: the painter follows the
 	// fit's arithmetic instead of restating it, so the cells the marker lands on and the cells a
@@ -3981,21 +4026,41 @@ func (m Model) footerGit(git footerSegmentSpan) string {
 	return out
 }
 
-// footerRow composes the footer's whole row for a window w wide — the ONE call to the fit
-// ([footerFit]) and the one place the row's width arithmetic happens. Both readers of that
-// arithmetic take it from here: [Model.footerContent] paints the layout it returns, and
+// footerRow composes the footer's row-th row ([Model.footerLines]) for a window w wide — the ONE
+// call to the fit ([footerFit]) and the one place the row's width arithmetic happens. Both readers
+// of that arithmetic take it from here: [Model.footerRowContent] paints the layout it returns, and
 // [Model.footerModeSpan] hands the marker's cells to the pointer, so what is drawn and what is
 // clickable are one value rather than two arithmetics that merely agree today.
+//
+// The row's segments are the ones its layout names, in the order it names them; each row is fitted
+// on its own, so a narrow window spends each row's priorities against that row alone. Only the row
+// naming `mode` seats the marker, and the offline word with it — `offline` is not a segment, it
+// sits just left of the marker — so every other row's input carries neither.
 //
 // Measurement is the theme's own width authority (ADR 0030 §5) and the margin is bodyIndent in that
 // same measure — a row laid out in a measure the painter did not choose is off by a column per wide
 // grapheme, and the marker is right-anchored, so that column would land on the mode word.
-func (m Model) footerRow(w int) footerLayout {
-	in := m.footerLeftText()
-	in.mode = footerModeText(
-		modeMarker(m.th, m.opts.Mode),
-		confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()),
-	)
+func (m Model) footerRow(row, w int) footerLayout {
+	all := m.footerLeftText()
+	in := footerInput{glyphs: all.glyphs}
+	if lines := m.footerLines(); row >= 0 && row < len(lines) {
+		for _, name := range lines[row] {
+			id := footerSegmentID(name)
+			if id == footerSegMode {
+				in.offline = all.offline
+				in.mode = footerModeText(
+					modeMarker(m.th, m.opts.Mode),
+					confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()),
+				)
+				continue
+			}
+			for _, seg := range all.segments {
+				if seg.id == id {
+					in.segments = append(in.segments, seg)
+				}
+			}
+		}
+	}
 	in.width, in.margin, in.measure = w, m.th.measure.Width(bodyIndent), m.th.measure
 	return footerFit(in)
 }
@@ -4077,12 +4142,12 @@ func footerModeText(marker, word string) string {
 // Every wider window keeps it: the ladder gives up segments off the LEFT run instead. A click on
 // the footer at that floor names nothing, because there is nothing drawn to click.
 //
-// It is the pointer's reading of the row's ONE composition ([Model.footerRow]) — the same layout
-// [Model.footerContent] paints — so the cells [Model.handleFooterModeClick] (mouse.go) addresses
-// and the cells the marker is drawn on are one value rather than two arithmetics that merely agree
-// today.
+// It is the pointer's reading of the ONE composition of the row naming `mode` ([Model.footerRow],
+// [Model.footerModeRow]) — the same layout [Model.footerRowContent] paints — so the cells
+// [Model.handleFooterModeClick] (mouse.go) addresses and the cells the marker is drawn on are one
+// value rather than two arithmetics that merely agree today.
 func (m Model) footerModeSpan(w int) (text string, col int, ok bool) {
-	layout := m.footerRow(w)
+	layout := m.footerRow(m.footerModeRow(), w)
 	return layout.mode, layout.col, layout.hasMode
 }
 

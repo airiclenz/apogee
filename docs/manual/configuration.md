@@ -1233,7 +1233,8 @@ appear at most once, and `mode` must appear exactly once — its marker sits at 
 row that names it. The default is one row, `[[host, model, effort, workdir, git, spend, mode]]`.
 A list of no rows or more than two, an empty row, a name that is not a segment, a name given twice,
 or a list without `mode` is a startup error that names the key and the value. It lives in a nested
-`footer:` block, so `/settings` shows it but does not edit it — `⏎` on its row opens the file. Like
+`footer:` block, so `/settings` shows it but does not edit it — `⏎` on its row opens the file, and
+the saved layout redraws the running session's footer at once. Like
 every `ui:` key it is global-only: a Project config that sets it is ignored, with a notice.
 
 ```yaml

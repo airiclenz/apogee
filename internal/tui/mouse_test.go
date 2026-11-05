@@ -6785,8 +6785,8 @@ func TestClickWhereAClosedDropdownWouldStandDismissesNothing(t *testing.T) {
 // The footer's mode marker as a pointer target (handleFooterModeClick, mouse.go)
 // ----------------------------------------------------------------------------
 
-// footerMarkerCells reports the footer's own row and the first, middle and last column the mode
-// marker is painted on in m's frame. It asks footerModeSpan — the ONE value the painter draws from
+// footerMarkerCells reports the footer row the mode marker stands on and the first, middle and last
+// column the marker is painted on in m's frame. It asks footerModeSpan — the ONE value the painter draws from
 // — rather than restating the arithmetic, so a case below can only fail for the reason it names.
 func footerMarkerCells(t *testing.T, m Model) (y, first, middle, last int) {
 	t.Helper()
@@ -6795,7 +6795,50 @@ func footerMarkerCells(t *testing.T, m Model) (y, first, middle, last int) {
 		t.Fatalf("the mode marker does not fit a %dx%d window; these cases need it drawn", m.width, m.height)
 	}
 	width := m.th.measure.Width(text)
-	return m.footerRowY(), col, col + width/2, col + width - 1
+	return m.footerRowY(m.footerModeRow()), col, col + width/2, col + width - 1
+}
+
+// TestClickOnTheFooterModeMarkerOpensThePickerOnlyOnItsRow: under a two-row footer the marker
+// stands on the row naming `mode`, and only that row answers its columns — the same columns on the
+// other footer row open nothing and show no pointer, wherever the layout puts the marker.
+func TestClickOnTheFooterModeMarkerOpensThePickerOnlyOnItsRow(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		rows    domain.FooterRows
+		modeRow int
+	}{
+		{"mode on the first row", "[[host, model, effort, mode], [workdir, git, spend]]", 0},
+		{"mode on the second row", "[[host, model, effort], [workdir, git, spend, mode]]", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := testOpts
+			opts.UI = testUIPrefs
+			opts.UI.FooterRows = tc.rows
+			base := newTestModelEng(t, &fakeEngine{}, opts)
+			first := base.height - bottomRuleHeight - base.footerRows()
+
+			y, left, middle, last := footerMarkerCells(t, base)
+			if want := first + tc.modeRow; y != want {
+				t.Fatalf("the marker stands on row %d, want %d — footer row %d", y, want, tc.modeRow)
+			}
+			other := first + 1 - tc.modeRow
+			for _, x := range []int{left, middle, last} {
+				if live := step(t, base, leftClick(x, y)); !live.picker.open || live.picker.kind != pickerMode {
+					t.Errorf("a click at column %d on the marker's row gave picker %+v, want the mode picker", x, live.picker)
+				}
+				if live := step(t, base, leftClick(x, other)); live.picker.open {
+					t.Errorf("a click at column %d on the other footer row opened %+v", x, live.picker)
+				}
+				if shape := base.pointerShapeAt(base.withFrameSpans(), x, other); shape == shapePointer {
+					t.Errorf("column %d of the other footer row shows the pointer the marker's cells show", x)
+				}
+			}
+		})
+	}
 }
 
 // TestClickOnTheFooterModeMarkerOpensTheModePicker is the marker's pointer contract: every cell of
@@ -6841,7 +6884,7 @@ func TestClickOnTheFooterModeMarkerOpensTheModePicker(t *testing.T) {
 		}
 
 		for x := 0; x < narrow.width; x++ {
-			if live := step(t, narrow, leftClick(x, narrow.footerRowY())); live.picker.open {
+			if live := step(t, narrow, leftClick(x, narrow.footerRowY(narrow.footerModeRow()))); live.picker.open {
 				t.Fatalf("a click at column %d of a footer with no marker opened %+v", x, live.picker)
 			}
 		}

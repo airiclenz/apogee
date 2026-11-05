@@ -159,7 +159,15 @@ internal/tui/sessions_test.go — TestFrameFitsEveryHeightDownToItsFloor
 
 **Commit:** `refactor(tui): the frame's row budget reads the footer's row count`
 
-## 5. Paint the configured footer rows
+## 5. Paint the configured footer rows — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): `footerRow(row, w)` fits one configured row (its segments in the row's order; only the `mode` row gets the marker and the offline word); `footerContent(w)` joins every row's paint (new `footerRowContent(row, w)`) with newlines, so its flat-text callers stay unchanged; `footerLines()` parses `Options.UI.FooterRows` (a refused value falls back to the default) and `footerModeRow()` names the marker's row. A row without `mode` is fitted by `footerFit` with an empty marker, so it keeps one blank cell before the trailing margin (footerfit.go untouched).
+NOTES (2026-11-05): `footerRowY()` became `footerRowY(row)` (the row-th footer row's screen row); `footerModeHit` checks `footerRowY(footerModeRow())`. pointershape.go needed no edit: `pointerShapeAt` asks `footerModeHit`, so it takes the row from there (covered by the new mouse test).
+NOTES (2026-11-05): the `ui.footer.rows` arm in `settingsApplyLocal` calls `m.layout()` itself (guarded by `m.ready`) instead of leaving the height change to the repaint tail, so `applyReloaded` called outside Update (the editor return trip, and the test) re-lays the frame too.
+NOTES (2026-11-05): the empty-value test asserts an unset key paints exactly what `domain.DefaultFooterRows` paints (today the one-row shape), not a hard-coded one-row spelling, so it follows the default when item 6 moves it.
+NOTES (2026-11-05): consequential edit — internal/tui/footerfit_test.go: made necessary by `footerRow` taking a row index (`m.footerRow(0, w)` in TestFooterSpanTableAgreesWithThePaintedRow).
+NOTES (2026-11-05): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by the new renderer-applied key (`settingKeysAppliedByTheRenderer` says a key added to `settingsApplyLocal` belongs there; the list exempts it from TestEveryEditableSettingKeyHasAnApply, which already skips it as non-Editable).
+NOTES (2026-11-05): consequential edit — docs/manual/configuration.md: made necessary by the live apply — the `ui.footer.rows` paragraph now says a saved layout redraws the running session's footer at once.
 
 **What:** Recast at the regression check (2026-11-05). Depends on items 1–4.
 

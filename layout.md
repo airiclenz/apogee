@@ -305,8 +305,10 @@ a quieter statement of the fact; it is a false one.
 
 **The frame's own floor is eight rows, and below it the frame is its floor and nothing more.** With
 the session area gone the frame is one blank gap row, the `▔` hairline, the status line, the input
-box (its two borders and its one content row), the footer's single line and the `▁` hairline under
-it — eight rows, every one of them something the rules above forbid giving way. At exactly eight the
+box (its two borders and its one content row), the footer's rows and the `▁` hairline under them —
+eight rows under a one-row footer, every one of them something the rules above forbid giving way.
+Each further row `ui.footer.rows` lays the footer out in is one more row of that floor, and one row
+fewer for the session area at every height above it. At exactly eight the
 frame is that chrome and it fits. **Below eight it does not fit, and what it does there is
 deliberate:** it composes its floor and no more. A long draft, a queued message or an open pane
 cannot make it grow past eight on a seven-row terminal any more than on an eight-row one, so the
@@ -2001,13 +2003,19 @@ every-state route. And in the one case below where the window is too narrow to s
 — narrower than the ordinary narrow window, which now keeps it rather than the segments beside it —
 nothing is drawn and a click on the footer names nothing.
 
-**What it is.** ONE frameless row below the prompt box, which closes its own `╰─╯` frame. The
+**What it is.** Frameless rows below the prompt box, which closes its own `╰─╯` frame — one row
+per row `ui.footer.rows` names (one or two), top to bottom, each carrying the segments its row names
+in the order it names them; unset, the key's default lays them out on one row. The
 footer used to be three rows of chrome — a `├──┤` divider standing in for the edge the box was
-missing, the content between two `│` bars, and a `╰──╯` rule under it — and it now takes the
-**status line's** posture instead, one row below the box rather than one row above it: the two-column
-`bodyIndent` lead, one unbroken black field to the window's full width, and the mode marker ending
-`bodyIndent` short of the edge — the same column the gauge ends in (above). A narrow window does not
-give up an end: the row is composed TO the width. Before it gives up anything it SHORTENS: the
+missing, the content between two `│` bars, and a `╰──╯` rule under it — and each row now takes the
+**status line's** posture instead, below the box rather than above it: the two-column
+`bodyIndent` lead, one unbroken black field to the window's full width, and on the row naming
+`mode` the mode marker ending `bodyIndent` short of the edge — the same column the gauge ends in
+(above) — with `✦ offline` just left of it; `offline` is no segment of its own and stands on that
+row alone, and the marker's click answers on that row alone. A row that does not name `mode` fills
+its black field to the same trailing margin. A narrow window does not
+give up an end: each row is composed TO the width, on its own — what follows is one row's fit, and a
+segment gives way only to the segments on its own row. Before it gives up anything it SHORTENS: the
 workdir and the branch are the row's two long, free-form facts, and a shortened one still names
 which one it is, so they middle-elide first. The workdir goes a step at a time, its head and its
 tail kept a component shallower each step and the middle given to an `…` — `~/repos/apogee/internal/tui`,

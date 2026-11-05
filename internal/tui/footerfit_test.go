@@ -637,7 +637,7 @@ func TestFooterSpanTableAgreesWithThePaintedRow(t *testing.T) {
 
 	sawGit, sawCut := false, false
 	for w := 160; w >= 0; w-- {
-		layout := m.footerRow(w)
+		layout := m.footerRow(0, w)
 		flat := ansiPattern.ReplaceAllString(m.footerContent(w), "")
 		for _, span := range layout.spans {
 			if got := m.th.measure.Cut(flat, span.col, span.col+span.cells); got != span.text {

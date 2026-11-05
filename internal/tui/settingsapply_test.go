@@ -160,6 +160,53 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 	}
 }
 
+// TestSettingsReReadOfFooterRowsRelaysTheFrame: `ui.footer.rows` is structured — edited in the
+// file, never on a row — so it reaches the session as a re-read of a hand-edited file, and the
+// renderer applies it itself: the footer takes the rows the file names and the frame is laid out
+// again for them, the transcript giving up the row the second footer row takes. The key never goes
+// out to the binary's dispatcher, which has no seam for it and would answer that it cannot be
+// applied. A layout the parser refuses lands nothing and the row carries the refusal.
+func TestSettingsReReadOfFooterRowsRelaysTheFrame(t *testing.T) {
+	t.Parallel()
+
+	rows := []SettingRow{{
+		Path: domain.UIKeyFooterRows, Section: "Terminal UI", Kind: SettingStructured,
+		Value: string(domain.DefaultFooterRows), EditPointer: pointerForTest, ExternalEdit: true,
+		Desc: "The footer's rows.",
+	}}
+	const twoRows = "[[host, model, effort, mode], [workdir, git, spend]]"
+	log := &settingsWriteLog{}
+	edit := &externalEditLog{applied: []AppliedSetting{{Path: domain.UIKeyFooterRows, Value: twoRows}}}
+	m := configWatchModel(t, rows, log, edit)
+	widget := m.viewport.Height()
+
+	m, _ = m.applyReloaded(rows, edit.applied, true)
+
+	if got := m.footerRows(); got != 2 {
+		t.Fatalf("footer rows after the re-read = %d, want the 2 the file names", got)
+	}
+	if got := strings.Count(m.footerView(), "\n") + 1; got != 2 {
+		t.Errorf("the footer paints %d rows after the re-read, want 2", got)
+	}
+	if got := m.viewport.Height(); got != widget-1 {
+		t.Errorf("transcript widget = %d rows after the re-read, want %d — laid out again by the apply", got, widget-1)
+	}
+	if len(log.applies) != 0 {
+		t.Errorf("the re-read went out to the dispatcher: %+v; the renderer applies ui.footer.rows itself", log.applies)
+	}
+	if msg := m.settings.failure.msg; msg != "" {
+		t.Errorf("the re-read left the row failing: %q", msg)
+	}
+
+	refused, _ := m.applyReloaded(rows, []AppliedSetting{{Path: domain.UIKeyFooterRows, Value: "[[host, model]]"}}, true)
+	if refused.opts.UI != m.opts.UI {
+		t.Errorf("a layout naming no mode moved the block to %+v", refused.opts.UI)
+	}
+	if got := refused.settings.failure.msg; !strings.HasPrefix(got, settingsApplyFailedNote) {
+		t.Errorf("failure = %q, want it to open with %q", got, settingsApplyFailedNote)
+	}
+}
+
 // TestGlyphsApplyRepaintsThePaintedBlocks: a `ui.glyphs` edit applied live swaps the theme's set and
 // the blocks already on screen repaint in it — the memoised paints of the outgoing marks are
 // dropped (paintcache.go) and the set is in the frame key, so a transcript painted with `▶` and the

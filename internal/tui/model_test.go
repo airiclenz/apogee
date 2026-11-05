@@ -8137,8 +8137,17 @@ func TestFooterMarkerCarriesNoConfinementWordBelowAuto(t *testing.T) {
 // because nothing was missing, so which segment leaves at which width is the fit's doing alone.
 func footerFactsModel(t *testing.T) Model {
 	t.Helper()
+	return footerFactsModelIn(t, "", "/ws/proj")
+}
+
+// footerFactsModelIn is footerFactsModel with its footer laid out in rows (`ui.footer.rows`, ""
+// for the unset key) and pointed at workspace.
+func footerFactsModelIn(t *testing.T, rows domain.FooterRows, workspace string) Model {
+	t.Helper()
 	opts := testOpts
-	opts.Workspace = "/ws/proj"
+	opts.UI = testUIPrefs
+	opts.UI.FooterRows = rows
+	opts.Workspace = workspace
 	opts.Mode = domain.ModeAuto
 	opts.Confinement = capableHost
 	serverSeams(&opts).beat = (&fakeHeartbeat{}).beat
@@ -8152,6 +8161,33 @@ func footerFactsModel(t *testing.T) Model {
 		Default:   "medium",
 	}
 	return foldBeatMsg(t, m, beat)
+}
+
+// footerTwoRows is the two-row layout `ui.footer.rows` names: the upstream facts with the mode
+// marker on the first row, the workspace's facts on the second.
+const footerTwoRows domain.FooterRows = "[[host, model, effort, mode], [workdir, git, spend]]"
+
+// TestFooterRowsEachTakeATranscriptRow: a second footer row is a row of frame height, so the
+// transcript gives it up — the budget, the widget and the painted frame all move by one, and the
+// frame still spends the window exactly.
+func TestFooterRowsEachTakeATranscriptRow(t *testing.T) {
+	t.Parallel()
+
+	one := footerFactsModelIn(t, "", "/ws/proj")
+	two := footerFactsModelIn(t, footerTwoRows, "/ws/proj")
+
+	if one.footerRows() != 1 || two.footerRows() != 2 {
+		t.Fatalf("footer rows = %d and %d, want 1 unset and 2 for %s", one.footerRows(), two.footerRows(), footerTwoRows)
+	}
+	if got, want := two.transcriptBudget(), one.transcriptBudget()-1; got != want {
+		t.Errorf("transcript budget under two footer rows = %d, want %d — one row fewer than under one", got, want)
+	}
+	if got, want := two.viewport.Height(), one.viewport.Height()-1; got != want {
+		t.Errorf("transcript widget under two footer rows is %d rows, want %d", got, want)
+	}
+	if got := lipgloss.Height(two.View().Content); got != two.height {
+		t.Errorf("the two-row frame is %d rows, want the window's %d", got, two.height)
+	}
 }
 
 // TestFooterFitsTheWindowExactly is the footer's counterpart to TestStatusLineIndentFitsNarrowWindow:
