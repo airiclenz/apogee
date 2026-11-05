@@ -3969,22 +3969,16 @@ func (m Model) footerRowContent(row, w int) string {
 // it, as the old narrow branch did, offline lost its error tone exactly where the row is most
 // cramped.
 //
-// Two segments of the fact line carry a tone of their own, and the line is cut at each one's entry
-// in the layout's span table: the model, painted whole in the `footer-accent` role — the cut text
-// too, where the priority-0 rung truncated it — and the git segment, painted span by span
-// ([Model.footerGit]). Everything between them stays on the footer's own tone, and every cell keeps
-// the column the fit measured, since the painted pieces re-join to exactly the layout's text.
+// A segment of the fact line that carries a tone of its own ([Model.footerToned]) is cut out of the
+// line at its entry in the layout's span table and painted on its own. Everything between those
+// segments stays on the footer's own tone, and every cell keeps the column the fit measured, since
+// the painted pieces re-join to exactly the layout's text.
 func (m Model) footerLeft(lead string, layout footerLayout) string {
 	var left string
 	plain, from := lead, 0
 	for _, span := range layout.spans {
-		var toned string
-		switch span.id {
-		case footerSegModel:
-			toned = m.th.footerAccent.Render(span.text)
-		case footerSegGit:
-			toned = m.footerGit(span)
-		default:
+		toned, ok := m.footerToned(span)
+		if !ok {
 			continue
 		}
 		if plain += layout.info[from:span.at]; plain != "" {
@@ -4002,6 +3996,45 @@ func (m Model) footerLeft(lead string, layout footerLayout) string {
 	return left
 }
 
+// footerToned paints one kept segment of the fact line in a tone of its own, and answers false for
+// a segment that stays on the footer's own tone. The git segment is painted span by span
+// ([Model.footerGit]); a segment `ui.footer.colors` names is painted whole in the role it names
+// ([Model.footerOverride]); and the model the file leaves alone is the footer's one accent, painted
+// whole in the `footer-accent` role. Painted whole means the cut text too, where the priority-0 rung
+// truncated the segment.
+func (m Model) footerToned(span footerSegmentSpan) (string, bool) {
+	if span.id == footerSegGit {
+		return m.footerGit(span), true
+	}
+	if style, ok := m.footerOverride(domain.FooterSegment(span.id)); ok {
+		return style.Render(span.text), true
+	}
+	if span.id == footerSegModel {
+		return m.th.footerAccent.Render(span.text), true
+	}
+	return "", false
+}
+
+// footerOverride is the style `ui.footer.colors` paints the target in — the footer's own field
+// with the foreground of the role the override names — and false where the target keeps its own
+// tone. The role is resolved here, at paint, in the scheme the screen is drawn in
+// ([Options.colorScheme], which a scheme switch updates with the theme), so an override follows a
+// live scheme switch and a live edit of the key alike without a colour cached anywhere: the theme's
+// shared styles are never written (themeStyles) and the theme header carries no scheme. A role the
+// scheme does not declare keeps the default tone; the load has already refused one
+// (internal/config).
+func (m Model) footerOverride(target domain.FooterSegment) (lipgloss.Style, bool) {
+	role := m.opts.UI.FooterColors.Role(target)
+	if role == "" {
+		return lipgloss.Style{}, false
+	}
+	colour, ok := m.opts.colorScheme().Role(role)
+	if !ok {
+		return lipgloss.Style{}, false
+	}
+	return m.th.footerText.Foreground(lipgloss.Color(colour)), true
+}
+
 // footerGit paints the git segment the layout kept: every piece in its span's tone
 // ([footerTone], [theme.footerToneStyle]) — the branch and every zero count on the footer's own
 // muted tone, a non-zero `Δ` or `↓` in the `warning` role, a non-zero `↑` in `success` — adjacent
@@ -4009,7 +4042,8 @@ func (m Model) footerLeft(lead string, layout footerLayout) string {
 // ([footerSegmentSpan]) — an elided branch included — never re-worded from the snapshot, which
 // would no longer re-join to the text the fit measured once the branch is shortened. Should they
 // ever fail to re-join to that text, the segment is painted plain rather than in cells the layout
-// did not count.
+// did not count. A branch `ui.footer.colors` names is painted in its own run, in the role it names
+// ([Model.footerOverride]); the counts keep the tones their meaning gives them.
 func (m Model) footerGit(git footerSegmentSpan) string {
 	spans := git.pieces
 	if footerSpansText(spans) != git.text {
@@ -4024,10 +4058,17 @@ func (m Model) footerGit(git footerSegmentSpan) string {
 		}
 		pieces = append(pieces, span)
 	}
+	branch, isBranchToned := m.footerOverride(domain.FooterBranch)
+	ownRun := func(piece footerSpan) bool { return isBranchToned && piece.isBranch }
 	var out string
 	for start := 0; start < len(pieces); {
+		if ownRun(pieces[start]) {
+			out += branch.Render(pieces[start].text)
+			start++
+			continue
+		}
 		end, run := start, ""
-		for ; end < len(pieces) && pieces[end].tone == pieces[start].tone; end++ {
+		for ; end < len(pieces) && pieces[end].tone == pieces[start].tone && !ownRun(pieces[end]); end++ {
 			run += pieces[end].text
 		}
 		out += m.th.footerToneStyle(pieces[start].tone).Render(run)

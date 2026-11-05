@@ -18,6 +18,16 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
+// fixtureFooterColors is the fixture's `ui.footer.colors`: two overrides, read through the parser
+// the file is read through, so the fixture cannot hold a value no file could.
+func fixtureFooterColors() domain.FooterColors {
+	colors, err := domain.ParseFooterColors("{branch: warning, model: success}")
+	if err != nil {
+		panic(err)
+	}
+	return colors
+}
+
 // fabricatedSettings is a resolved config with a DISTINCT value in every key, so a row that reads
 // the wrong field of options shows the wrong string rather than coincidentally the right one. The
 // values are deliberately not the defaults: `api-key` is set (so masking has something to hide) and
@@ -81,7 +91,8 @@ func fabricatedSettings() config.Options {
 		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, Glyphs: domain.GlyphsSafe, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, Notify: domain.NotifyBoth, GitFetch: false,
-			PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]"},
+			PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]",
+			FooterColors: fixtureFooterColors()},
 		// The retention keys stay unset; the two watch keys are set, so their rows report a value.
 		Sessions: config.SessionSettings{
 			WatchHomes: []config.WatchHome{{Label: "bob", Path: "/home/bob/.apogee"},
@@ -495,6 +506,9 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		// Two rows in the fixture, against the one-row default: the row reads the canonical spelling,
 		// a text the key takes back rather than a summary.
 		"ui.footer.rows": "[[host, model, effort, mode], [workdir, git, spend]]",
+		// Two overrides in the fixture, against none by default: the row reads the canonical spelling,
+		// the overridden segments in vocabulary order.
+		"ui.footer.colors": "{model: success, branch: warning}",
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
 		"sessions.max-age":     "0s",

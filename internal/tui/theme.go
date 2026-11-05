@@ -390,7 +390,7 @@ type themeStyles struct {
 	footerText    lipgloss.Style // the footer's content (faint on black)
 	footerWarning lipgloss.Style // a footer git count in the warning tone (footerToneWarning): the `warning` role on the footer's black
 	footerSuccess lipgloss.Style // a footer git count in the success tone (footerToneSuccess): the `success` role on the footer's black
-	footerAccent  lipgloss.Style // the footer's model name (Model.footerLeft): the `footer-accent` role on the footer's black
+	footerAccent  lipgloss.Style // the footer's model name (Model.footerToned) unless `ui.footer.colors` names it: the `footer-accent` role on the footer's black
 	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 

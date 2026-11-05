@@ -1231,6 +1231,20 @@ var KeyRegistry = bindRows([]Key{
 		fromFile:  fileFooterRows,
 	},
 	{
+		// A map of segment to role, so structured and edited in the file — ui.footer.rows' posture,
+		// global-only by the same zero class. Its Read is the canonical spelling
+		// (domain.FooterColors.String), a text domain.ParseFooterColors reads back (UIPrefs.Set lands
+		// it), so a live re-read lands through the parse the file does; `{}` is no overrides, the
+		// default. The segments are judged by fileFooterColors, the roles at ResolveOptions
+		// (footerColorRoles) — refused at load, not forgiven, since the role set is compiled in.
+		Path: "ui.footer.colors", Kind: KindStructured,
+		Desc: "A scheme role to paint a footer segment in, by segment: host, model, effort, workdir, " +
+			"branch, spend.",
+		Read:      func(o Options) string { return o.UI.FooterColors.String() },
+		Structure: func(o Options) any { return o.UI.FooterColors },
+		fromFile:  fileFooterColors,
+	},
+	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
 		// posture above, for the same reason: one key is not a vocabulary, and the kind carries the
 		// shape while the hook carries the contract the kind cannot.

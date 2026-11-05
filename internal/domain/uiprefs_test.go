@@ -444,3 +444,87 @@ func TestUIPrefsValidateRefusesEveryBadFooterShape(t *testing.T) {
 		})
 	}
 }
+
+// TestUIPrefsFooterColorsDefaultToNoOverrides: the zero overrides are the default — every segment
+// keeps its own tone, the canonical spelling is `{}`, and both `""` and `{}` read back to it.
+func TestUIPrefsFooterColorsDefaultToNoOverrides(t *testing.T) {
+	t.Parallel()
+
+	colors := DefaultUIPrefs().FooterColors
+
+	if colors != (FooterColors{}) || colors.String() != "{}" {
+		t.Errorf("DefaultUIPrefs().FooterColors = %q; want no overrides, spelled {}", colors)
+	}
+	for _, text := range []string{"", " {} ", "{ }"} {
+		if got, err := ParseFooterColors(text); err != nil || got != (FooterColors{}) {
+			t.Errorf("ParseFooterColors(%q) = %q, %v; want no overrides", text, got, err)
+		}
+	}
+	if got := colors.Role(FooterModel); got != "" {
+		t.Errorf("Role(model) with no overrides = %q; want \"\"", got)
+	}
+}
+
+// TestUIPrefsSetLandsFooterColorsInTheirCanonicalSpelling: the registry row's Read text is the
+// canonical spelling — the overridden targets in vocabulary order — and Set lands it back to the
+// same value; a looser spelling in another order lands as that one value, and each target answers
+// the role it names.
+func TestUIPrefsSetLandsFooterColorsInTheirCanonicalSpelling(t *testing.T) {
+	t.Parallel()
+	const canonical = "{host: muted-bright, model: success, branch: warning, spend: error}"
+
+	for _, text := range []string{canonical, "{ spend:error,branch : warning, host: muted-bright, model:success }"} {
+		u := DefaultUIPrefs()
+
+		err := u.Set(UIKeyFooterColors, text)
+
+		if err != nil || u.FooterColors.String() != canonical {
+			t.Errorf("Set(ui.footer.colors, %q) = %v, landing %q; want %q", text, err, u.FooterColors, canonical)
+		}
+		roles := map[FooterSegment]string{FooterHost: "muted-bright", FooterModel: "success",
+			FooterEffort: "", FooterWorkdir: "", FooterBranch: "warning", FooterSpend: "error", FooterMode: ""}
+		for segment, want := range roles {
+			if got := u.FooterColors.Role(segment); got != want {
+				t.Errorf("Role(%s) = %q; want %q", segment, got, want)
+			}
+		}
+		if err := u.Set(UIKeyFooterColors, ""); err != nil || u != DefaultUIPrefs() {
+			t.Errorf(`Set(ui.footer.colors, "") = %v, leaving %+v; want the defaults`, err, u)
+		}
+	}
+}
+
+// TestUIPrefsSetRefusesEveryBadFooterColors: each value the key refuses is refused in a sentence
+// naming the key and quoting the value, and a refused Set leaves the block as it was.
+func TestUIPrefsSetRefusesEveryBadFooterColors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, colors, reason string
+	}{
+		{"the mode marker", "{mode: success}", `segment "mode" cannot be overridden`},
+		{"the offline marker", "{offline: success}", `segment "offline" cannot be overridden`},
+		{"an unknown segment", "{clock: success}", `unknown segment "clock"`},
+		{"the whole git segment", "{git: success}", `unknown segment "git"`},
+		{"a segment twice", "{model: success, model: error}", `segment "model" is named twice`},
+		{"no role", "{model: }", `segment "model" names no role`},
+		{"no braces", "model: success", "want a map of segment names to scheme role names"},
+		{"no colon", "{model success}", "want a map of segment names to scheme role names"},
+		{"nested", "{model: {fg: success}}", "want a map of segment names to scheme role names"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			u := DefaultUIPrefs()
+
+			err := u.Set(UIKeyFooterColors, tt.colors)
+
+			wantPrefix := "apogee: invalid ui.footer.colors " + `"` + tt.colors + `": `
+			if err == nil || !strings.HasPrefix(err.Error(), wantPrefix) || !strings.Contains(err.Error(), tt.reason) {
+				t.Errorf("Set(ui.footer.colors, %q) = %v; want %q naming %q", tt.colors, err, wantPrefix, tt.reason)
+			}
+			if u != DefaultUIPrefs() {
+				t.Errorf("a refused Set moved the block to %+v", u)
+			}
+		})
+	}
+}

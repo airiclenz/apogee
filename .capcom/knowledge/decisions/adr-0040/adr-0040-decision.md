@@ -60,6 +60,14 @@ the same reason `ui.color-scheme` validates only as a name — non-empty, no pat
 existence is deliberately **not** checked at config-load time, because a scheme that has been
 deleted is a warning, not a broken config file.
 
+> **Amended 2026-11-05 (docs/plans/2026-11-05 - 02 - footer-rows-and-colour-plan.md).** One config
+> key is not forgiven: a role name in `ui.footer.colors`, which paints a footer segment in a scheme
+> role, is refused at config load — naming the key and the value — when the role vocabulary does not
+> declare it. The vocabulary is compiled into the binary rather than read from a file, so an unknown
+> role there is a typo in the config, never a role a scheme file on another machine might carry;
+> the forgiving posture above exists for the files a user edits and carries around. Scheme files
+> themselves stay forgiving exactly as decided, and `ui.color-scheme` still validates only as a name.
+
 **9. Schemes recolor only what apogee already colors.** No full-screen background painting: the
 terminal's background stays the terminal's, and a scheme cannot repaint the parts of the screen
 apogee leaves plain. `light` is documented as "for light terminals" and is the user's declaration

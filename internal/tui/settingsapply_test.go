@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -201,6 +203,59 @@ func TestSettingsReReadOfFooterRowsRelaysTheFrame(t *testing.T) {
 	refused, _ := m.applyReloaded(rows, []AppliedSetting{{Path: domain.UIKeyFooterRows, Value: "[[host, model]]"}}, true)
 	if refused.opts.UI != m.opts.UI {
 		t.Errorf("a layout naming no mode moved the block to %+v", refused.opts.UI)
+	}
+	if got := refused.settings.failure.msg; !strings.HasPrefix(got, settingsApplyFailedNote) {
+		t.Errorf("failure = %q, want it to open with %q", got, settingsApplyFailedNote)
+	}
+}
+
+// TestSettingsReReadOfFooterColorsRepaintsInTheCurrentScheme: `ui.footer.colors` is structured —
+// edited in the file, never on a row — so it reaches the session as a re-read of a hand-edited file,
+// and the renderer applies it itself: the footer paints the named segment in that role of the scheme
+// the screen is drawn in, with no scheme resolved or rebuilt. The key never goes out to the binary's
+// dispatcher, which has no seam for it and would answer that it cannot be applied. An override the
+// parser refuses lands nothing and the row carries the refusal.
+func TestSettingsReReadOfFooterColorsRepaintsInTheCurrentScheme(t *testing.T) {
+	t.Parallel()
+
+	rows := []SettingRow{{
+		Path: domain.UIKeyFooterColors, Section: "Terminal UI", Kind: SettingStructured,
+		Value: "{}", EditPointer: pointerForTest, ExternalEdit: true,
+		Desc: "A scheme role to paint a footer segment in.",
+	}}
+	light, warnings := scheme.Resolve("light", "")
+	if len(warnings) != 0 {
+		t.Fatalf("built-in light warned: %v", warnings)
+	}
+	log := &settingsWriteLog{}
+	edit := &externalEditLog{applied: []AppliedSetting{{Path: domain.UIKeyFooterColors, Value: "{branch: success}"}}}
+	m := withGitSnapshot(configWatchModel(t, rows, log, edit), footerGitTestSnapshot)
+	m = withScheme(m, light)
+	m.opts.ColorScheme, m.opts.UI.ColorScheme = light, "light"
+	styles := m.th.themeStyles
+
+	m, _ = m.applyReloaded(rows, edit.applied, true)
+
+	if got := m.opts.UI.FooterColors.Role(domain.FooterBranch); got != "success" {
+		t.Fatalf("branch role after the re-read = %q, want the success the file names", got)
+	}
+	branch := sgrOpener(t, lipgloss.NewStyle().Foreground(lipgloss.Color(light.Success)).Background(lipgloss.Color(light.Surface)))
+	if footer := m.footerView(); !strings.Contains(footer, branch+"main") {
+		t.Errorf("the footer does not paint the branch in light's success role after the re-read: %q", footer)
+	}
+	if m.th.themeStyles != styles || m.opts.ColorScheme != light || m.opts.UI.ColorScheme != "light" {
+		t.Error("the re-read rebuilt the theme or moved the scheme; an override changes no scheme")
+	}
+	if len(log.applies) != 0 {
+		t.Errorf("the re-read went out to the dispatcher: %+v; the renderer applies ui.footer.colors itself", log.applies)
+	}
+	if msg := m.settings.failure.msg; msg != "" {
+		t.Errorf("the re-read left the row failing: %q", msg)
+	}
+
+	refused, _ := m.applyReloaded(rows, []AppliedSetting{{Path: domain.UIKeyFooterColors, Value: "{mode: success}"}}, true)
+	if refused.opts.UI != m.opts.UI {
+		t.Errorf("an override of the mode marker moved the block to %+v", refused.opts.UI)
 	}
 	if got := refused.settings.failure.msg; !strings.HasPrefix(got, settingsApplyFailedNote) {
 		t.Errorf("failure = %q, want it to open with %q", got, settingsApplyFailedNote)

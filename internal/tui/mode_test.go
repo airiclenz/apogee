@@ -598,6 +598,110 @@ func TestFooterGitCountsReadTheSameUnderAsciiProfile(t *testing.T) {
 	}
 }
 
+// withFooterColors puts m's screen in scheme s, as a live switch does (applyColorScheme: the theme
+// and the Options' record of the scheme), and lands colors as `ui.footer.colors`.
+func withFooterColors(t *testing.T, m Model, s scheme.Scheme, colors string) Model {
+	t.Helper()
+
+	m = withScheme(m, s)
+	m.opts.ColorScheme = s
+	if err := m.opts.UI.Set(domain.UIKeyFooterColors, colors); err != nil {
+		t.Fatalf("Set(ui.footer.colors, %q): %v", colors, err)
+	}
+	return m
+}
+
+// footerColorsTestModel is the one-row footer with every overridable segment showing: the facts,
+// the git segment, and a priced call's spend.
+func footerColorsTestModel(t *testing.T) Model {
+	t.Helper()
+
+	m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
+	m.opts.Currency = "EUR"
+	m.usage = domain.Usage{Calls: 1, PromptTokens: 900, TotalTokens: 900, CostMicros: 100_000, PricedCalls: 1}
+	return m
+}
+
+// footerColorsEverySegment overrides every segment `ui.footer.colors` accepts.
+const footerColorsEverySegment = "{host: success, model: warning, effort: error, workdir: user-text, " +
+	"branch: code, spend: tool-header}"
+
+// TestFooterColorsPaintEachSegmentInItsRoleUnderEveryBuiltinScheme reads the footer's SGR under each
+// built-in scheme with every segment overridden, each escape derived from the scheme's own role
+// values rather than from the theme: each segment in the role the override names, the git counts
+// still in the tones their meaning gives them, the separators still muted, and the mode marker
+// painted exactly as it is with no override at all — it is no target, and stays loudest.
+func TestFooterColorsPaintEachSegmentInItsRoleUnderEveryBuiltinScheme(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range scheme.Discover("") {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, warnings := scheme.Resolve(name, "")
+			if len(warnings) != 0 {
+				t.Fatalf("built-in %q warned: %v", name, warnings)
+			}
+			role := func(fg string) string {
+				return sgrOpener(t, lipgloss.NewStyle().Foreground(lipgloss.Color(fg)).Background(lipgloss.Color(s.Surface)))
+			}
+			plain := withFooterColors(t, footerColorsTestModel(t), s, "")
+			overridden := withFooterColors(t, footerColorsTestModel(t), s, footerColorsEverySegment)
+			spend := overridden.footerLeftText().segment(footerSegSpend)
+			if spend == "" {
+				t.Fatal("the test model shows no spend")
+			}
+
+			footer := overridden.footerContent(160)
+
+			for _, run := range []string{
+				role(s.Success) + "test-host", role(s.Warning) + "test-model", role(s.Error) + "high",
+				role(s.UserText) + "/ws/proj", role(s.Code) + "main", role(s.Warning) + "5Δ",
+				role(s.Muted) + " 0↓ ", role(s.Success) + "4↑", role(s.ToolHeader) + spend,
+				role(s.Muted) + " ✦ ",
+			} {
+				if !strings.Contains(footer, run) {
+					t.Errorf("footer under %q lacks the run %q: %q", name, run, footer)
+				}
+			}
+			marker := sgrOpener(t, plain.th.footerText.Foreground(plain.th.modeColor(plain.opts.Mode)))
+			unset := plain.footerContent(160)
+			if got, want := footer[strings.LastIndex(footer, marker):], unset[strings.LastIndex(unset, marker):]; got != want {
+				t.Errorf("the mode marker under overrides paints %q, want it as it paints with none: %q", got, want)
+			}
+		})
+	}
+}
+
+// TestFooterColorsChangeNoText: an override changes colour and nothing else — the overridden footer
+// reads exactly as the plain one once the escapes are stripped, and the Ascii profile, which loses
+// the colour, writes that same text with no colour at all.
+func TestFooterColorsChangeNoText(t *testing.T) {
+	t.Parallel()
+
+	plain := ansiPattern.ReplaceAllString(footerColorsTestModel(t).footerContent(160), "")
+	m := withFooterColors(t, footerColorsTestModel(t), scheme.Default(), footerColorsEverySegment)
+	if got := ansiPattern.ReplaceAllString(m.footerContent(160), ""); got != plain {
+		t.Errorf("the overridden footer reads %q, want the plain footer's text %q", got, plain)
+	}
+	m = step(t, m, tea.ColorProfileMsg{Profile: colorprofile.Ascii})
+
+	var written strings.Builder
+	w := &colorprofile.Writer{Forward: &written, Profile: colorprofile.Ascii}
+	if _, err := w.WriteString(m.footerContent(160)); err != nil {
+		t.Fatalf("writing the footer through the Ascii profile: %v", err)
+	}
+
+	if got := ansiPattern.ReplaceAllString(written.String(), ""); got != plain {
+		t.Errorf("the Ascii footer reads %q, want the plain footer's text %q", got, plain)
+	}
+	for _, colour := range []string{"38;", "48;"} {
+		if strings.Contains(written.String(), colour) {
+			t.Errorf("the Ascii footer still carries a colour (%q): %q", colour, written.String())
+		}
+	}
+}
+
 // TestModeColorDistinct proves each autonomy mode maps to its own footer-marker colour, so the
 // four markers are visually distinguishable.
 func TestModeColorDistinct(t *testing.T) {

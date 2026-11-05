@@ -118,6 +118,12 @@ type UIPrefs struct {
 	// still validates. A shape [ParseFooterRows] refuses is refused by [UIPrefs.Validate] naming
 	// the key.
 	FooterRows FooterRows
+	// FooterColors is `ui.footer.colors`: the scheme role each overridable footer segment is
+	// painted in, in place of its default tone. The zero value overrides nothing, which is the
+	// default. The segments and their refusals are [ParseFooterColors]'s; whether a role names one
+	// the scheme vocabulary declares is judged at load by internal/config, which can read that
+	// vocabulary where this package cannot.
+	FooterColors FooterColors
 }
 
 // FooterSegment names one segment of the footer, as `ui.footer.rows` spells it.
@@ -138,6 +144,14 @@ const (
 	FooterGit FooterSegment = "git"
 	// FooterSpend is the session's spend.
 	FooterSpend FooterSegment = "spend"
+	// FooterBranch is the git segment's branch name. It is a target of `ui.footer.colors` alone:
+	// `ui.footer.rows` places the whole git segment, and the counts beside the branch keep the
+	// tones their meaning gives them.
+	FooterBranch FooterSegment = "branch"
+	// FooterOffline is the offline marker beside the mode marker. It is no segment of
+	// `ui.footer.rows` and no target of `ui.footer.colors`; it is named so a colour override of it
+	// is refused in words rather than as an unknown segment.
+	FooterOffline FooterSegment = "offline"
 )
 
 // footerSegmentNames is the vocabulary [ParseFooterRows] accepts, in the order its error lists them.
@@ -287,6 +301,141 @@ func footerSegmentList() string {
 	return strings.Join(names, ", ")
 }
 
+// footerColorTargets is the vocabulary `ui.footer.colors` accepts, in the order its canonical
+// spelling and its refusals list them. The mode marker and the offline marker are not in it: they
+// carry the session's state, so they keep the colours that state gives them.
+var footerColorTargets = [...]FooterSegment{
+	FooterHost, FooterModel, FooterEffort, FooterWorkdir, FooterBranch, FooterSpend,
+}
+
+// FooterColors is `ui.footer.colors`: the scheme role name each overridable segment is painted in,
+// one slot per target in [footerColorTargets] order, "" where the segment keeps its default tone.
+// A fixed array rather than a map so [UIPrefs] stays comparable with `==`; its text is the one
+// canonical spelling [FooterColors.String] writes and [ParseFooterColors] reads back.
+type FooterColors [len(footerColorTargets)]string
+
+// footerColorsShape is the refusal for text that is not a brace-wrapped list of pairs at all.
+const footerColorsShape = "want a map of segment names to scheme role names, like " +
+	"{model: success, branch: warning}"
+
+// Role is the scheme role name the target is painted in, and "" where it keeps its default tone
+// or is no target of the key.
+func (c FooterColors) Role(target FooterSegment) string {
+	i := slices.Index(footerColorTargets[:], target)
+	if i < 0 {
+		return ""
+	}
+	return c[i]
+}
+
+// String spells the overrides canonically — `{model: success, branch: warning}`, the targets in
+// [footerColorTargets] order and only those overridden, `{}` for none — the text
+// [ParseFooterColors] reads back to the same value.
+func (c FooterColors) String() string {
+	pairs := make([][2]string, 0, len(c))
+	for i, role := range c {
+		if role != "" {
+			pairs = append(pairs, [2]string{string(footerColorTargets[i]), role})
+		}
+	}
+	return SpellFooterColors(pairs)
+}
+
+// SpellFooterColors writes segment/role pairs in the canonical brace spelling, as written and
+// judging nothing: a config file's map is spelled through it so [ParseFooterColors] can quote it in
+// its refusal.
+func SpellFooterColors(pairs [][2]string) string {
+	spelled := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		spelled = append(spelled, pair[0]+": "+pair[1])
+	}
+	return "{" + strings.Join(spelled, ", ") + "}"
+}
+
+// ParseFooterColors reads a `ui.footer.colors` value. "" and `{}` (trimmed) ⇒ no overrides. It
+// refuses, in a sentence naming the key and quoting the text, text that is not `{` pairs `}` with
+// each pair `segment: role`, a pair naming no role, `mode` and `offline` (which keep their state's
+// colours), a name that is no overridable segment, and a segment given twice. It does not judge the
+// role names: the vocabulary they come from is the scheme's, checked at load.
+func ParseFooterColors(text string) (FooterColors, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return FooterColors{}, nil
+	}
+	refuse := func(reason string) error {
+		return fmt.Errorf("apogee: invalid ui.footer.colors %q: %s", text, reason)
+	}
+	pairs, ok := splitFooterColors(text)
+	if !ok {
+		return FooterColors{}, refuse(footerColorsShape)
+	}
+	var colors FooterColors
+	for _, pair := range pairs {
+		if err := colors.land(pair[0], pair[1]); err != nil {
+			return FooterColors{}, refuse(err.Error())
+		}
+	}
+	return colors, nil
+}
+
+// land writes one pair onto the overrides, refusing a target that cannot be overridden, is no
+// segment, or is already set, and a pair naming no role.
+func (c *FooterColors) land(name, role string) error {
+	segment := FooterSegment(name)
+	if segment == FooterMode || segment == FooterOffline {
+		return fmt.Errorf("segment %q cannot be overridden: the mode and offline markers keep the "+
+			"colours the session's state gives them", name)
+	}
+	i := slices.Index(footerColorTargets[:], segment)
+	if i < 0 {
+		return fmt.Errorf("unknown segment %q (segments a colour can be set for: %s)",
+			name, footerColorTargetList())
+	}
+	if role == "" {
+		return fmt.Errorf("segment %q names no role; want a scheme role name", name)
+	}
+	if c[i] != "" {
+		return fmt.Errorf("segment %q is named twice; want each segment once", name)
+	}
+	c[i] = role
+	return nil
+}
+
+// splitFooterColors cuts brace-wrapped text into its trimmed `name: role` pairs, answering false
+// for text that is not `{` pairs `}`, or a pair without its colon.
+func splitFooterColors(text string) ([][2]string, bool) {
+	inner, ok := strings.CutPrefix(text, "{")
+	if !ok {
+		return nil, false
+	}
+	inner, ok = strings.CutSuffix(inner, "}")
+	if !ok || strings.ContainsAny(inner, "{}") {
+		return nil, false
+	}
+	if strings.TrimSpace(inner) == "" {
+		return nil, true
+	}
+	entries := strings.Split(inner, ",")
+	pairs := make([][2]string, 0, len(entries))
+	for _, entry := range entries {
+		name, role, ok := strings.Cut(entry, ":")
+		if !ok {
+			return nil, false
+		}
+		pairs = append(pairs, [2]string{strings.TrimSpace(name), strings.TrimSpace(role)})
+	}
+	return pairs, true
+}
+
+// footerColorTargetList spells the overridable segments for a refusal.
+func footerColorTargetList() string {
+	names := make([]string, 0, len(footerColorTargets))
+	for _, segment := range footerColorTargets {
+		names = append(names, string(segment))
+	}
+	return strings.Join(names, ", ")
+}
+
 // NotifyMode names how the terminal is told that apogee waits on the human. The vocabulary is
 // declared once, here, so the config layer validates a `ui.notify:` value against the same names
 // the renderer picks its signal by.
@@ -410,6 +559,9 @@ const (
 	// UIKeyFooterRows is a key of the nested `footer:` block, and like every key of that block it
 	// is not one of [UIKeys]: it is a structured value, edited in the file rather than on a row.
 	UIKeyFooterRows = "ui.footer.rows"
+	// UIKeyFooterColors is the `footer:` block's other key, structured and edited in the file like
+	// [UIKeyFooterRows].
+	UIKeyFooterColors = "ui.footer.colors"
 )
 
 // uiKeys is the block's keys in the order the starter template presents them, declared once so a
@@ -522,7 +674,8 @@ func (u UIPrefs) Validate() error {
 // trimmed, `""` lands that key's default (what a fresh start resolves from a file that does not
 // carry the key), and the value is parsed per key — the spinner through [ParseSpinnerStyle], the
 // glyph set through [ParseGlyphSet], the notify mode through [ParseNotifyMode], the footer rows
-// through [ParseFooterRows] (landing their canonical spelling), the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
+// through [ParseFooterRows] (landing their canonical spelling), the footer colours through
+// [ParseFooterColors], the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
 // name as it is. The edit runs on a COPY, [UIPrefs.Validate] judges the copy, and only a copy it
 // accepts is written back: a Set that fails has touched nothing. A key this block does not carry
 // is refused.
@@ -607,6 +760,12 @@ func (u *UIPrefs) land(key, value string) error {
 			return err
 		}
 		u.FooterRows = SpellFooterRows(rows)
+	case UIKeyFooterColors:
+		colors, err := ParseFooterColors(value)
+		if err != nil {
+			return err
+		}
+		u.FooterColors = colors
 	default:
 		return fmt.Errorf("apogee: unknown ui key %q", key)
 	}

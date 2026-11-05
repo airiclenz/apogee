@@ -118,6 +118,20 @@ are load-bearing rather than decorative and every shipped scheme is tested for t
 git tones, `warning` and `success`, must stay apart from those four and from `error`, and so must
 the footer's model accent, `footer-accent`.
 
+**The footer is coloured by meaning, and the user may recolour its facts — never its state.** By
+default every footer segment wears `muted` except where a colour says something: a non-zero `Δ` or
+`↓` git count in `warning`, a non-zero `↑` in `success`, a zero count muted, and the model in its
+`footer-accent` tint. Nothing else changes tone by default. `ui.footer.colors` overrides a segment's
+colour with a scheme **role name** — `host`, `model`, `effort`, `workdir`, `branch` or `spend`, each
+mapped to a role such as `success` — so an override is still a role, resolved in whatever scheme is
+active and moving with a scheme switch; a raw colour is not accepted. `branch` recolours the git
+segment's branch alone; its counts keep their meaning's tones. The **mode marker stays the loudest
+thing on the footer**: it and the offline marker carry the session's state, take no override, and
+keep their `mode-*` and `error` tones. An unknown segment, `mode`, `offline` or an unknown role is
+refused at load, naming the key and the value — the role set is compiled in, so unlike a scheme
+file's unknown role it is never forgiven (ADR 0040 decision 8, amended 2026-11-05). An override
+changes colour only: no segment's text, width or place moves with it.
+
 **The glyphs this document draws are the default set.** `ui.glyphs: safe` swaps them, cell for cell
 at the same width, for shapes nearly every terminal font carries (`♦` for `✦`, `›` for `❯`, a `·`
 leader for `⋯`, an ASCII spinner) — the full list is in `docs/manual/configuration.md` (`ui.glyphs`).

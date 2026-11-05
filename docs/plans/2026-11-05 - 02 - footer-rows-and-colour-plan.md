@@ -280,7 +280,15 @@ internal/scheme/builtins_test.go — TestBuiltinSchemesStateEveryRole, TestBuilt
 
 **Commit:** `feat(scheme): footer-accent role tones the footer's model`
 
-## 9. The `ui.footer.colors` key
+## 9. The `ui.footer.colors` key — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): overrides resolve at paint (Model.footerOverride reads m.opts.colorScheme(), which applyColorScheme keeps in step with the theme), the guard's "(or at paint)" option, instead of three resolution sites at newModel, applyColorScheme and the colors arm; no colour is cached on the theme header or in themeStyles, and the colors arm in settingsApplyLocal only lands the value.
+NOTES (2026-11-05): domain.UIPrefs.FooterColors is a fixed array (domain.FooterColors, one role slot per target) whose zero value is the default, so no spelled-out `domain.UIPrefs{...}` test literal changed; its canonical text is `{model: success, branch: warning}` (targets in vocabulary order), `{}` for none. Segment judgement (shape, unknown, `mode`/`offline`, twice, no role) runs at the file pass (fileFooterColors via domain.ParseFooterColors); the role check (footerColorRoles, against scheme.RoleNames()) runs in ResolveOptions beside UIPrefs.Validate.
+NOTES (2026-11-05): new exports scheme.RoleNames() and Scheme.Role(name); new domain constants FooterBranch (a colours-only target) and FooterOffline (named only so its override is refused in words).
+NOTES (2026-11-05): the internal/config tests are named TestApplyConfigUIFooterColors* so the item's `-run 'TestApplyConfig|…'` acceptance runs them.
+NOTES (2026-11-05): ADR 0040 decision 8 amended by a dated blockquote under the decision (one-paragraph fix), named on the record's Status line; configuration.md's "Fourteen more keys" count becomes "Fifteen", the other six naming ui.footer.colors.
+NOTES (2026-11-05): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by the new TUI-local ui.footer.colors arm (settingKeysAppliedByTheRenderer enumerates the keys the renderer applies)
+NOTES (2026-11-05): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by the new registry row (TestSettingsRowsFormatEffectiveValues pins one value per registry key; the fixture gains two overrides and the table their canonical Read)
 
 **What:** Recast at the regression check (2026-11-05). Depends on items 3 and 8.
 

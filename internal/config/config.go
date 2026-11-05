@@ -24,6 +24,7 @@ import (
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/prompt"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tools"
 	"gopkg.in/yaml.v3"
 )
@@ -2911,6 +2912,77 @@ type uiFooterConfig struct {
 	// (or null) key, which keeps the default; an explicit `rows: []` is a stated empty list and is
 	// refused by the row's file pass (fileFooterRows). Every other judgement is UIPrefs.Validate's.
 	Rows footerRowsConfig `yaml:"rows"`
+	// Colors is `ui.footer.colors`: a scheme role name per footer segment, kept as written. Nil for
+	// an absent (or null) key, which overrides nothing; `colors: {}` states the same. The judgement
+	// is fileFooterColors' and footerColorRoles'.
+	Colors footerColorsConfig `yaml:"colors"`
+}
+
+// footerColorsConfig is the on-disk `ui.footer.colors:` map, its segment/role pairs kept in the
+// order written, a repeated segment included, so the refusal can quote what the file says.
+type footerColorsConfig [][2]string
+
+// UnmarshalYAML reads the map as written. It refuses only a shape no override can be made of — a
+// scalar or a list where the map belongs, or a segment or role that is not a single name — in a
+// sentence naming the key, and judges nothing else: the segments are domain.ParseFooterColors',
+// the roles footerColorRoles'.
+func (f *footerColorsConfig) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	shape := func(at *yaml.Node) error {
+		return fmt.Errorf("apogee: invalid ui.footer.colors at line %d: want a map of segment names to "+
+			"scheme role names, like {model: success, branch: warning}", at.Line)
+	}
+	if node.Kind != yaml.MappingNode {
+		return shape(node)
+	}
+	pairs := make(footerColorsConfig, 0, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		name, role := resolveAlias(node.Content[i]), resolveAlias(node.Content[i+1])
+		if name.Kind != yaml.ScalarNode {
+			return shape(name)
+		}
+		if role.Kind != yaml.ScalarNode {
+			return shape(role)
+		}
+		pairs = append(pairs, [2]string{name.Value, role.Value})
+	}
+	*f = pairs
+	return nil
+}
+
+// fileFooterColors projects `ui.footer.colors:` onto its one field of the block, writing it on
+// every pass so a re-read over a file that no longer names the key lands no overrides again. The
+// pairs are spelled as written and read through domain.ParseFooterColors, which refuses — naming the
+// key and quoting the value — a segment that is not one, `mode` and `offline`, a segment given twice
+// and a pair naming no role. The role names are judged at ResolveOptions (footerColorRoles).
+func fileFooterColors(o *Options, fc fileConfig) error {
+	o.UI.FooterColors = domain.FooterColors{}
+	if fc.UI == nil || fc.UI.Footer == nil || fc.UI.Footer.Colors == nil {
+		return nil
+	}
+	colors, err := domain.ParseFooterColors(domain.SpellFooterColors(fc.UI.Footer.Colors))
+	if err != nil {
+		return err
+	}
+	o.UI.FooterColors = colors
+	return nil
+}
+
+// footerColorRoles refuses a `ui.footer.colors` override naming a role the scheme vocabulary does
+// not declare, naming the key, quoting the value and listing the roles. It is a hard load error,
+// unlike a scheme file's forgiving load (ADR 0040 decision 8 and its 2026-11-05 amendment): the
+// role vocabulary is compiled into this build, so an unknown name is a typo in the config, never a
+// role some other build knows. internal/domain cannot make the check — the vocabulary lives in
+// internal/scheme, which imports domain — so it runs here, beside UIPrefs.Validate.
+func footerColorRoles(colors domain.FooterColors) error {
+	roles := scheme.RoleNames()
+	for _, role := range colors {
+		if role != "" && !slices.Contains(roles, role) {
+			return fmt.Errorf("apogee: invalid ui.footer.colors %q: unknown role %q (known roles: %s)",
+				colors.String(), role, strings.Join(roles, ", "))
+		}
+	}
+	return nil
 }
 
 // footerRowsConfig is the on-disk `ui.footer.rows:` list of rows, kept as written.
@@ -3947,6 +4019,9 @@ func resolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// startup error: silently resolving it to another style would leave the user staring at a
 	// spinner their config did not ask for, with nothing pointing at the typo.
 	if err := opts.UI.Validate(); err != nil {
+		return notices, ProjectOffer{}, err
+	}
+	if err := footerColorRoles(opts.UI.FooterColors); err != nil {
 		return notices, ProjectOffer{}, err
 	}
 	// A `sessions:` block whose age is not a length of time, or whose count is not a number of

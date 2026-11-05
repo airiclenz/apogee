@@ -1175,6 +1175,12 @@ update-check: true
 # most once. `mode` must appear exactly once; its marker sits at the right edge of its row. Default
 # one row, `[[host, model, effort, workdir, git, spend, mode]]`. Edit it here, in the file.
 #
+# `footer.colors` paints a footer segment in a colour-scheme role of your choosing, in place of its
+# own tone: a map from `host`, `model`, `effort`, `workdir`, `branch` or `spend` to a role name your
+# scheme files set (`success`, `warning`, `footer-accent`, …). The mode and offline markers keep the
+# colours the session's state gives them, and a segment or role apogee does not know is refused at
+# startup. Default none. Edit it here, in the file.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -1192,6 +1198,7 @@ ui:
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched
   # footer:
   #   rows: [[host, model, effort, mode], [workdir, git, spend]]
+  #   colors: {}             # e.g. {model: success, branch: warning}
 
 # =============================================================================
 # Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and

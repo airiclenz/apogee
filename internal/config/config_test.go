@@ -6438,6 +6438,93 @@ func TestUIRowsInAProjectFileAreDroppedAsGlobalOnly(t *testing.T) {
 	}
 }
 
+// TestApplyConfigUIFooterColorsLoadFromTheGlobalFile: `ui.footer.colors` lands each segment's role,
+// whatever style or order the file writes the map in, and a file that names no overrides — no key,
+// a null key, or an empty map — resolves to none and leaves every other key of the block alone.
+func TestApplyConfigUIFooterColorsLoadFromTheGlobalFile(t *testing.T) {
+	t.Parallel()
+	const canonical = "{model: success, branch: warning}"
+	tests := []struct {
+		name, yaml, want string
+	}{
+		{"flow style", "ui:\n  footer:\n    colors: {branch: warning, model: success}\n", canonical},
+		{"block style", "ui:\n  footer:\n    colors:\n      model: success\n      branch: warning\n", canonical},
+		{"no footer block", "mode: auto\n", "{}"},
+		{"a null colors key", "ui:\n  footer:\n    colors:\n", "{}"},
+		{"an empty map", "ui:\n  footer:\n    colors: {}\n", "{}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts, err := applyUIRows(t, tt.yaml)
+
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			want := wantUIDefault
+			want.FooterColors, _ = domain.ParseFooterColors(tt.want)
+			if opts.UI != want {
+				t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
+			}
+		})
+	}
+}
+
+// TestApplyConfigUIFooterColorsRefusedAtLoad: each override the key refuses stops the load in a
+// sentence naming the key and the value — a shape no override is made of at the yaml seam, a segment
+// that cannot be overridden or is no segment at the file pass, and a role the scheme vocabulary does
+// not declare beside UIPrefs.Validate. Unlike a scheme file's unknown role, which is forgiven, this
+// one is refused: the role set is compiled in.
+func TestApplyConfigUIFooterColorsRefusedAtLoad(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, colors string
+		want         []string
+	}{
+		{"the mode marker", "{mode: success}", []string{`ui.footer.colors "{mode: success}"`, `"mode" cannot be overridden`}},
+		{"the offline marker", "{offline: error}", []string{`ui.footer.colors "{offline: error}"`, `"offline" cannot be overridden`}},
+		{"an unknown segment", "{clock: success}", []string{`ui.footer.colors "{clock: success}"`, `unknown segment "clock"`}},
+		{"an unknown role", "{model: sparkly}", []string{`ui.footer.colors "{model: sparkly}"`, `unknown role "sparkly"`, "footer-accent"}},
+		{"a raw colour", "{model: \"#ff0000\"}", []string{`ui.footer.colors "{model: #ff0000}"`, `unknown role "#ff0000"`}},
+		{"a list", "[model, success]", []string{"ui.footer.colors at line 3", "want a map of segment names"}},
+		{"a nested map", "{model: {fg: success}}", []string{"ui.footer.colors at line 3", "want a map of segment names"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := applyUIRows(t, "ui:\n  footer:\n    colors: "+tt.colors+"\n")
+
+			if err == nil {
+				t.Fatalf("ApplyConfig accepted colors %s; want refused", tt.colors)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not name %s", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestApplyConfigUIFooterColorsInAProjectFileAreDroppedAsGlobalOnly: like every `ui:` key,
+// `ui.footer.colors` belongs to the global file — a Project config stating it is ignored, with the
+// one notice naming the key.
+func TestApplyConfigUIFooterColorsInAProjectFileAreDroppedAsGlobalOnly(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "mode: plan\n", "ui:\n  footer:\n    colors: {model: success}\n")
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if o.UI.FooterColors != (domain.FooterColors{}) {
+		t.Errorf("ui.footer.colors = %q; want no overrides", o.UI.FooterColors)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], `"ui.footer.colors"`) {
+		t.Errorf("notices = %q; want one naming the global-only ui.footer.colors", notices)
+	}
+}
+
 // With no ui block at all, the renderer's own defaults stand: the default spinner style with its
 // colour loop on, and the scroll bar shown. This is the anchor for "an absent block changes
 // nothing".

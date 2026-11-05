@@ -488,6 +488,16 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if m.ready {
 			m.layout()
 		}
+	case domain.UIKeyFooterColors:
+		// The overrides are resolved where the footer is painted, in the scheme the screen is drawn in
+		// (footerOverride), so landing the value is the whole apply: no scheme is resolved or rebuilt,
+		// nothing is laid out again — a colour moves no cell — and the next frame paints the footer in
+		// the roles the file names. Like the rows, no pane edits the key, so what reaches here is a
+		// re-read of a hand-edited file (applyReloaded), applied live rather than refused at the
+		// binary's dispatcher.
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
 	case domain.UIKeySpinner:
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err

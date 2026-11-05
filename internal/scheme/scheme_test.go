@@ -82,6 +82,35 @@ func TestRoleTableCoversEveryRole(t *testing.T) {
 	}
 }
 
+// TestRoleNamesListEveryRole: RoleNames is the role table's keys in declaration order, handed out
+// as a copy, and Role answers each name with the colour the scheme gives it — and a name that is no
+// role with false.
+func TestRoleNamesListEveryRole(t *testing.T) {
+	t.Parallel()
+	s := Default()
+
+	names := RoleNames()
+
+	if len(names) != len(roleTable) {
+		t.Fatalf("RoleNames() lists %d roles, the table declares %d", len(names), len(roleTable))
+	}
+	for i, role := range roleTable {
+		if names[i] != role.key {
+			t.Errorf("RoleNames()[%d] = %q; want %q", i, names[i], role.key)
+		}
+		if got, ok := s.Role(role.key); !ok || got != role.get(s) {
+			t.Errorf("Role(%q) = %q, %v; want %q, true", role.key, got, ok, role.get(s))
+		}
+	}
+	names[0] = "reordered"
+	if RoleNames()[0] == "reordered" {
+		t.Error("a write to the handed-out slice reached RoleNames")
+	}
+	if got, ok := s.Role("no-such-role"); ok || got != "" {
+		t.Errorf("Role(no-such-role) = %q, %v; want \"\", false", got, ok)
+	}
+}
+
 func TestParseFullFileRoundTrips(t *testing.T) {
 	t.Parallel()
 	// One distinct value per role, so a field that takes another role's value shows up.

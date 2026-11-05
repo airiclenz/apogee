@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -127,6 +128,21 @@ var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 // the key is known.
 func (s *Scheme) setRole(key, value string) {
 	reflect.ValueOf(s).Elem().Field(fieldIndex[key]).SetString(value)
+}
+
+// RoleNames lists every role's name — the keys a scheme file sets, and the names a
+// `ui.footer.colors` override may give — in declaration order. It hands back a fresh
+// slice on every call, so a caller cannot reorder the one this package reads.
+func RoleNames() []string { return slices.Clone(roleKeys) }
+
+// Role is the colour the scheme gives the role the name spells, and false for a name
+// that is no role.
+func (s Scheme) Role(name string) (string, bool) {
+	i, ok := fieldIndex[name]
+	if !ok {
+		return "", false
+	}
+	return reflect.ValueOf(s).Field(i).String(), true
 }
 
 // Warning is one thing a scheme file got wrong. Key is empty when the whole file is at

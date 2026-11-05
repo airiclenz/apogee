@@ -1105,9 +1105,9 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Fourteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
-says; the other five, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch` and the footer's
-layout, `ui.footer.rows`, come further down.
+Fifteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
+says; the other six, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch` and the footer's
+layout and colours, `ui.footer.rows` and `ui.footer.colors`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
@@ -1244,6 +1244,29 @@ every `ui:` key it is global-only: a Project config that sets it is ignored, wit
 ui:
   footer:
     rows: [[host, model, effort, workdir, git, spend, mode]]
+```
+
+`ui.footer.colors` paints a footer segment in a colour-scheme role of your choosing instead of its
+own tone: a map from `host`, `model`, `effort`, `workdir`, `branch` or `spend` to the name of a role
+a scheme file sets — `success`, `warning`, `footer-accent`, `user-text` and the rest of the
+vocabulary a `~/.apogee/schemes/` file speaks (`ui.color-scheme`, above) — never a raw colour, so an
+override follows a switch of scheme. By default nothing is overridden: the footer is muted except where a colour means
+something — the git counts (a changed-path `Δ` or a behind `↓` in `warning`, an ahead `↑` in
+`success`, a zero count muted) and the model, in the scheme's `footer-accent`. `branch` names the git
+segment's branch alone; its counts keep the tones their meaning gives them. The mode marker and the
+offline marker are not segments you can override: they carry the session's state, and stay the
+loudest things on the footer. A segment that is not one of the six, `mode` or `offline`, a segment
+named twice, and a role no scheme declares are startup errors that name the key and the value —
+unlike an unknown role in a scheme file, which is skipped with a warning, because the role names are
+built into apogee and an unknown one is a typo. Like `ui.footer.rows` it lives in the `footer:`
+block, edited in the file, and a saved change repaints the running session's footer at once in the
+scheme it is drawn in; it is global-only too.
+
+```yaml
+# ~/.apogee/config.yaml
+ui:
+  footer:
+    colors: {model: success, branch: warning}
 ```
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter
