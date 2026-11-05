@@ -3,6 +3,7 @@ title: "Tools super-group header: per-tool-kind breakdown instead of total calls
 status: open
 type: task
 priority: 2
+plan: 2026-11-05 - 01 - tools-header-breakdown-plan.md
 created: 2026-11-05T18:04:40Z
 ---
 
@@ -12,10 +13,18 @@ The tool super-group's header line paints only a total call count — `✦ Tools
 
 Wanted header shape (owner sketch):
 
-    ✦ Tools (3 Read, 4 Terminal) ⋯⋯⋯⋯ ▼
-    ┝ Read ⋯⋯⋯⋯ 17 lines ▶
-    ┝ Terminal (2) ⋯⋯⋯⋯ exit 0 ▶
-    ...
+Expanded:
+
+✦ Tools (3 Read, 4 Terminal) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 17 lines ▶
+  ┝ Terminal (2) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 ▶
+  ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 85 lines ▶
+  ┝ Terminal (2) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 1 error ▶
+  ┕ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 149 lines ▶
+
+Collapsed:
+
+✦ Tools (3 Read, 4 Terminal) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 
 Two deltas from the current shape:
 1. The count becomes a per-tool-kind breakdown ("(3 Read, 4 Terminal)") instead of "(N calls)". Keep the existing faint `toolIndicator` tone for the numbers, per the layout rule that the count is not part of the name (layout.md "never a target" + faint indicator tone).
