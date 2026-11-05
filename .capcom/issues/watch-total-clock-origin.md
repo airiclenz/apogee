@@ -1,11 +1,13 @@
 ---
 title: Watch mode's [total …] clock counts from when watching began, not the watched session's start
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tui, watch-mode]
 plan: 2026-11-05 - 06 - watch-total-clock-origin-plan
 created: 2026-11-05T20:45:40Z
+closed: 2026-11-05T21:26:22Z
+reason: "Resolved by plan 2026-11-05 - 06 - watch-total-clock-origin-plan (07b25982): watch [total …] and phrase clocks take their origin from the watched journal's own line times, mapped by stamp differences so an owner clock offset cannot skew them; owner path unchanged; driven watch tests cover attach mid-Exchange. Accepted per the plan: a watch attaching during a silent journal stretch undercounts by that gap."
 ---
 
 In **Watch mode** (the read-only view of a **Live session**, ADR 0103), the status line's
