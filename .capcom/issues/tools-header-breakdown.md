@@ -1,10 +1,12 @@
 ---
 title: "Tools super-group header: per-tool-kind breakdown instead of total calls only"
-status: open
+status: done
 type: task
 priority: 2
 plan: 2026-11-05 - 01 - tools-header-breakdown-plan.md
 created: 2026-11-05T18:04:40Z
+closed: 2026-11-05T20:36:28Z
+reason: "Resolved by plan '2026-11-05 - 01 - tools-header-breakdown-plan' (archived at c6fd5716): umbrella header paints a per-kind breakdown leader row with (N calls) fallback (829a65c4), docs/layout sketches updated (23a967e5)."
 ---
 
 ## What
