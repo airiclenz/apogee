@@ -1,11 +1,13 @@
 ---
 title: Painted fields erased with EL show the terminal's background in Terminal.app
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tui]
 plan: 2026-11-05 - 05 - bottom-chrome-erase-fill-plan
 created: 2026-11-05T17:35:56Z
+closed: 2026-11-05T19:17:17Z
+reason: Renderer no longer emits EL/ED on painted rows (482dab2e, 3b64a3ce); owner confirmed in Terminal.app on macOS 2026-11-05.
 ---
 
 In Terminal.app (`TERM_PROGRAM=Apple_Terminal`, `TERM=xterm-256color`) parts of the bottom chrome still show the terminal's own (translucent) background instead of the scheme's `surface`, after `prompt-box-uneven-background` was closed (screenshots 2026-11-05 16.02.44 and 18.20.20). Three spots: the whole idle status line between the `▔` rule and the input box, footer row 2 past the git segment (`~/repos/apogee ✦ main 0Δ 0↓ 0↑`), and footer row 1's margin after the mode marker (`◐ ask before`).
