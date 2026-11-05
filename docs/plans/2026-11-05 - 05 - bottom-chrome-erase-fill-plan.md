@@ -61,7 +61,11 @@ ultraviolet terminal_renderer.go — canClearWith, transformLine, clearToEnd; ul
 **Closes:** bottom-chrome-erased-cells
 **Commit:** `fix(tui): write painted row edges instead of leaving them to an erase`
 
-## 2. Record the sealed-edge rule in layout.md and ADR 0040
+## 2. Record the sealed-edge rule in layout.md and ADR 0040 — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the live-docs prose grep (`grep -rn 'TestBottomChromePaintsOneBackground' layout.md docs/layout docs/manual docs/design .capcom/knowledge/glossary`, archived/ excluded) finds no sentence pinning the full-width field with that test alone, so no other doc sentence gained the new tests; the only hits repo-wide are the point-in-time amendments 1105b/1105c, the plan and the issues, left as written per the guard.
+
+NOTES (2026-11-05): layout.md's added sentence is placed after the gap-row clause that ends the "The bottom chrome is one band: …" sentence (that sentence wraps as "The bottom / chrome is one band", so the plan's quoted phrase does not grep on one line).
 
 **What:** depends on item 1.
 **Regression guard.** Scope the prose-rule grep to live docs: `grep -rn 'TestBottomChromePaintsOneBackground' layout.md docs/layout docs/manual docs/design .capcom/knowledge/glossary`, excluding `archived/`. Earlier dated amendments (`adr-0040-amend-1105b`, `adr-0040-amend-1105c`) and archived plans are point-in-time records and are not rewritten: the new tests are cited only in `adr-0040-amend-1105d`.

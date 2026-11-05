@@ -115,7 +115,10 @@ already colours: no full-screen background is painted, so the terminal's own bac
 field the transcript is drawn on, and no glyph, marker, width or row budget is themed. The bottom
 chrome is one band: the hairlines, the status line (the gauge's filled cells included), the input
 box and both footer rows each paint `surface` explicitly to the full width, while the gap row above
-the `▔` hairline stays on the terminal's own background with the transcript. Only the gauge's empty track keeps its `chrome` groove (ADR 0040, amended 2026-11-05). Two roles
+the `▔` hairline stays on the terminal's own background with the transcript. A painted field's
+cells at a row's edge — the bottom chrome, a sent prompt block, the breadcrumb, a popup, the staged
+band — are written as characters, never left to a terminal erase: a terminal that erases in its own
+background (Terminal.app) would otherwise show that background through the field's tail. Only the gauge's empty track keeps its `chrome` groove (ADR 0040, amended 2026-11-05). Two roles
 are load-bearing rather than decorative and every shipped scheme is tested for them: `skill` and
 `file-ref` must stay tellable apart (ADR 0027), as must the four `mode-*` tones — and the footer's
 git tones, `warning` and `success`, must stay apart from those four and from `error`, and so must
