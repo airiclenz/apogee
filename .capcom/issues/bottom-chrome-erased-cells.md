@@ -24,3 +24,7 @@ The bottom of the screen still reads as patchy bands on a translucent terminal, 
 - Every cell of every painted field renders its field colour in Terminal.app (owner's check, no translucent band)
 
 Scope (owner, 2026-11-05): the same defect shows wherever a painted row ends in blanks with no character before the right border, so the fix covers every painted field (sent prompt blocks, popups, breadcrumb, suggest band, bottom chrome), not only the bottom chrome.
+
+## Log
+
+- 2026-11-05 Airic Lenz: Automated half landed via 2026-11-05 - 05 - bottom-chrome-erase-fill-plan (archived at 3b64a3ce): joinFrame seals painted row edges with conceal so ultraviolet writes them instead of sending EL; TestPaintedRowEdgesAreSealed and TestPaintedRowsAreNeverErased pin no EL/ED on first paint and repaint. Left open for the owner's Terminal.app check (acceptance bullet 2).
