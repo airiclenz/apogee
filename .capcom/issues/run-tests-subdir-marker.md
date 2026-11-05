@@ -3,6 +3,7 @@ title: "run_tests ignores markers under its path: detects the runner only at the
 status: open
 type: bug
 priority: 2
+plan: 2026-11-05 - 01 - run-tests-subdir-marker-plan.md
 created: 2026-11-05T08:51:43Z
 ---
 
