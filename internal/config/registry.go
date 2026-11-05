@@ -1217,6 +1217,20 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *bool { return u.GitFetch }),
 	},
 	{
+		// A list of lists, so structured — sessions.watch-homes' shape: no one-line row holds it,
+		// and it is edited in the file. Global-only by the zero class, like every `ui:` key. Its
+		// Read is the canonical spelling rather than a summary, a text domain.ParseFooterRows reads
+		// back (UIPrefs.Set lands it), so a live re-read lands through the parse the file does. No
+		// Default: the default lives in domain.DefaultUIPrefs and the starter template. The shape is
+		// judged by UIPrefs.Validate at ResolveOptions, an explicit empty list by fileFooterRows.
+		Path: "ui.footer.rows", Kind: KindStructured,
+		Desc: "The footer's rows, top to bottom, and the segments each shows, left to right: " +
+			"host, model, effort, mode, workdir, git, spend.",
+		Read:      func(o Options) string { return string(o.UI.FooterRows) },
+		Structure: func(o Options) any { return o.UI.FooterRows },
+		fromFile:  fileFooterRows,
+	},
+	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
 		// posture above, for the same reason: one key is not a vocabulary, and the kind carries the
 		// shape while the hook carries the contract the kind cannot.

@@ -83,6 +83,8 @@ func TestManualDocumentsEverySettingsKeyRejectsAnUndocumentedKey(t *testing.T) {
 		"no-such-setting",
 		"no-such-block.no-such-key",
 		"ui.no-such-key",
+		"ui.footer.no-such-key",
+		"ui.rows",
 	} {
 		if manualDocumentsSetting(manual, path) {
 			t.Errorf("the predicate calls %q documented; no such key is on %s, so the gate cannot fail",
@@ -125,6 +127,43 @@ func TestManualDocumentsEverySettingsKeyRejectsALeafBorrowedFromAnotherBlock(t *
 				"under its own block, so the leaf arm is reading outside the block's section",
 				borrowed.path, leaf, borrowed.from)
 		}
+	}
+}
+
+// TestManualDocumentsEverySettingsKeyReadsAThreeLevelKey: a key two blocks deep (`ui.footer.rows`)
+// is found by each arm on its own terms — the leaf back-ticked in the section that documents its
+// own `footer:` block, and the leaf indented under `footer:` under `ui:` in a fence — and by
+// neither when the leaf sits one block out of place. The pages are fabricated, so each arm is
+// proved alone rather than through whichever the real page happens to use.
+func TestManualDocumentsEverySettingsKeyReadsAThreeLevelKey(t *testing.T) {
+	t.Parallel()
+	page := func(body string) manualPage {
+		p := manualPage{body: body}
+		for _, m := range fencedBlock.FindAllStringSubmatch(body, -1) {
+			p.fences = append(p.fences, m[1])
+		}
+		p.sections = splitManualSections(body)
+		return p
+	}
+	tests := []struct {
+		name, body string
+		want       bool
+	}{
+		{"leaf in its block's section", "## Footer\n\nThe `footer:` block holds `rows`.\n", true},
+		{"nested in a fence", "## UI\n\n```yaml\nui:\n  footer:\n    rows: [[mode]]\n```\n", true},
+		{"leaf one block out in a fence", "## UI\n\n```yaml\nui:\n  rows: [[mode]]\n  footer:\n```\n", false},
+		{"leaf outside its block's section", "## UI\n\nThe `ui:` block holds `rows`.\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := manualDocumentsSetting(page(tt.body), "ui.footer.rows")
+
+			if got != tt.want {
+				t.Errorf("manualDocumentsSetting(ui.footer.rows) over %q = %v; want %v", tt.body, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -208,7 +247,7 @@ func manualDocumentsSetting(manual manualPage, path string) bool {
 	if backTickedKey(manual.body, path) {
 		return true
 	}
-	if parent, leaf, nested := strings.Cut(path, "."); nested && leafKeyInItsOwnSection(manual, parent, leaf) {
+	if parent, leaf, nested := cutLastSegment(path); nested && leafKeyInItsOwnSection(manual, parent, leaf) {
 		return true
 	}
 	return settingSpelledInFence(manual.fences, path)
@@ -241,8 +280,7 @@ func sectionDocumentsBlock(section, parent string, block *regexp.Regexp) bool {
 }
 
 // blockLine matches a block's own line inside a fenced example — `present:` with its keys indented
-// under it. It is the same shape settingSpelledInFence uses for a nested key's parent, spelled once
-// here and shared, so the two places that ask "is this fence showing that block?" cannot drift.
+// under it — which is how a section shows the block it documents.
 func blockLine(parent string) *regexp.Regexp {
 	return regexp.MustCompile(`(?m)^[ \t]*` + regexp.QuoteMeta(parent) + `:[ \t]*$`)
 }
@@ -253,11 +291,23 @@ func backTickedKey(body, name string) bool {
 	return strings.Contains(body, "`"+name+"`") || strings.Contains(body, "`"+name+":`")
 }
 
-// settingSpelledInFence is the third arm. A nested key needs its parent block's own line in the
-// same fence, with the leaf indented under it; a top-level key is the fence's own column-0 line.
+// cutLastSegment splits a dotted path at its last dot: the block the leaf sits in — named by that
+// block's own key, the last segment before the leaf (`footer` for `ui.footer.rows`), which is how
+// the manual names the block it is talking about — and the leaf. nested is false for a top-level key.
+func cutLastSegment(path string) (block, leaf string, nested bool) {
+	at := strings.LastIndex(path, ".")
+	if at < 0 {
+		return "", path, false
+	}
+	parents := path[:at]
+	return parents[strings.LastIndex(parents, ".")+1:], path[at+1:], true
+}
+
+// settingSpelledInFence is the third arm. A nested key needs each of its blocks' own lines in the
+// same fence, each indented under the one before it, with the leaf indented under the last; a
+// top-level key is the fence's own column-0 line.
 func settingSpelledInFence(fences []string, path string) bool {
-	parent, leaf, nested := strings.Cut(path, ".")
-	if !nested {
+	if !strings.Contains(path, ".") {
 		atRoot := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(path) + `:`)
 		for _, fence := range fences {
 			if atRoot.MatchString(fence) {
@@ -267,10 +317,42 @@ func settingSpelledInFence(fences []string, path string) bool {
 		return false
 	}
 
-	block := blockLine(parent)
-	under := regexp.MustCompile(`(?m)^[ \t]+` + regexp.QuoteMeta(leaf) + `:`)
 	for _, fence := range fences {
-		if block.MatchString(fence) && under.MatchString(fence) {
+		if fenceNestsPath(fence, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// fenceKeyLine is a key line inside a fenced example: its indentation, then a kebab-case key and
+// its colon.
+var fenceKeyLine = regexp.MustCompile(`^([ \t]*)([a-z0-9-]+):`)
+
+// fenceNestsPath walks one fence's key lines, tracking the blocks each sits under — a key line opens
+// a block for every later line indented deeper than it — and reports whether some key line, under
+// the blocks it sits in, spells the dotted path.
+func fenceNestsPath(fence, path string) bool {
+	type openKey struct {
+		indent int
+		name   string
+	}
+	var open []openKey
+	for _, line := range strings.Split(fence, "\n") {
+		m := fenceKeyLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		indent := len(m[1])
+		for len(open) > 0 && open[len(open)-1].indent >= indent {
+			open = open[:len(open)-1]
+		}
+		open = append(open, openKey{indent: indent, name: m[2]})
+		names := make([]string, len(open))
+		for i, key := range open {
+			names[i] = key.name
+		}
+		if strings.Join(names, ".") == path {
 			return true
 		}
 	}

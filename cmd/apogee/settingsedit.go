@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -534,7 +536,11 @@ func settingKeyLine(data []byte, key string) int {
 	if err != nil {
 		return 0
 	}
-	if t, err := config.ScalarTargetIn(doc, k); err == nil && t.IsSet() {
+	if strings.Count(k.Path, ".") > 1 {
+		if line := nestedKeyLine(doc, k.Path); line != 0 {
+			return line
+		}
+	} else if t, err := config.ScalarTargetIn(doc, k); err == nil && t.IsSet() {
 		return t.KeyNode.Line
 	}
 	head, _, _ := strings.Cut(k.Path, ".")
@@ -543,4 +549,39 @@ func settingKeyLine(data []byte, key string) int {
 		return 0
 	}
 	return line
+}
+
+// nestedKeyLine is the line of the active key a path two or more blocks deep names (`ui.footer.rows`
+// is `rows:` in `footer:` in `ui:`), walking one block mapping per segment, or 0 when the document
+// does not set it. ScalarTargetIn reaches one block down, which is as deep as a key a row can write
+// sits; a key deeper than that is structured, edited only in the file, so finding its line is all
+// that is asked of it.
+func nestedKeyLine(doc *yaml.Node, path string) int {
+	if doc == nil || len(doc.Content) == 0 {
+		return 0
+	}
+	node := doc.Content[0]
+	line := 0
+	for _, segment := range strings.Split(path, ".") {
+		key, value := blockEntry(node, segment)
+		if key == nil {
+			return 0
+		}
+		node, line = value, key.Line
+	}
+	return line
+}
+
+// blockEntry is the key and value nodes of one entry of a block mapping, or nils when the node is
+// not a mapping or holds no such key.
+func blockEntry(mapping *yaml.Node, name string) (*yaml.Node, *yaml.Node) {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == name {
+			return mapping.Content[i], mapping.Content[i+1]
+		}
+	}
+	return nil, nil
 }

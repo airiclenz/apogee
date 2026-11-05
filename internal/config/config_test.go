@@ -31,11 +31,16 @@ func countptr(n int) *WholeCount { w := WholeCount(n); return &w }
 // default spinner style with its colour loop on, the transcript's scroll bar shown, the stall
 // guard waiting 120 seconds of engine silence out, the skill-suggestion band painting, the task-list cards open, and a Tools umbrella
 // folding past five type rows with large umbrellas starting folded, all drawn in the unicode glyph set, with the
-// terminal bell rung when apogee waits on the human and the footer's periodic git fetch on. It is spelled out rather than taken from
+// terminal bell rung when apogee waits on the human, the footer's periodic git fetch on, and the footer laid out on one row. It is spelled out rather than taken from
 // domain.DefaultUIPrefs, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
-	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true}
+	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+	FooterRows: wantFooterRowsDefault}
+
+// wantFooterRowsDefault is the `ui.footer.rows` a config that names none resolves to — every segment
+// on one row, the mode marker at its right edge — spelled out for wantUIDefault's reason.
+const wantFooterRowsDefault domain.FooterRows = "[[host, model, effort, workdir, git, spend, mode]]"
 
 // testHostID is the machine identity injected into resolution so the Host acknowledgement
 // ladder is pinned off whatever host the tests happen to run on.
@@ -291,7 +296,8 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}},
 			want: func(o *Options) {
 				o.UI = domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
-					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true}
+					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+					FooterRows: wantFooterRowsDefault}
 			},
 		},
 		{
@@ -5732,7 +5738,8 @@ func TestApplyConfigUI(t *testing.T) {
 	}
 
 	want := domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
-		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true}
+		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+		FooterRows: wantFooterRowsDefault}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
 	}
@@ -6240,19 +6247,22 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
@@ -6260,13 +6270,15 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			// The band's key, the one whose default is TRUE: an explicit false takes the band away and
@@ -6274,7 +6286,8 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only skill-suggestions: false → the band goes and the look is untouched",
 			yaml: "ui:\n  skill-suggestions: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			// The task-list fold key, the other default-TRUE bool: an explicit false starts the cards
@@ -6282,7 +6295,8 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only task-list-open: false → the cards start folded and nothing else moves",
 			yaml: "ui:\n  task-list-open: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			// And the newest key is independent in both directions: turning the stall guard off says
@@ -6290,7 +6304,8 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only stall-after: 0 → the look is untouched and only the guard goes",
 			yaml: "ui:\n  stall-after: 0\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true},
+				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
+				FooterRows: wantFooterRowsDefault},
 		},
 		{
 			// The footer's fetch key, default TRUE: an explicit false stops the fetch and leaves the
@@ -6298,7 +6313,8 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only git-fetch: false → the fetch stops and the look is untouched",
 			yaml: "ui:\n  git-fetch: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: false},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: false,
+				FooterRows: wantFooterRowsDefault},
 		},
 	}
 	for _, tt := range tests {
@@ -6314,6 +6330,105 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 				t.Errorf("opts.ui = %+v; want %+v", opts.UI, tt.want)
 			}
 		})
+	}
+}
+
+// applyUIRows resolves a global file holding yaml the way startup does, answering the options and
+// the refusal.
+func applyUIRows(t *testing.T, yaml string) (Options, error) {
+	t.Helper()
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, yaml)
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+	return opts, err
+}
+
+// TestUIRowsLoadFromTheGlobalFile: `ui.footer.rows` lands in its canonical spelling, whatever flow or
+// block style the file writes it in, and a file that names no rows — or a `footer:` block with
+// nothing in it — resolves to the one-row default and leaves every other key of the block alone.
+func TestUIRowsLoadFromTheGlobalFile(t *testing.T) {
+	t.Parallel()
+	const twoRows domain.FooterRows = "[[host, model, effort, mode], [workdir, git, spend]]"
+	tests := []struct {
+		name, yaml string
+		want       domain.FooterRows
+	}{
+		{"flow style", "ui:\n  footer:\n    rows: [[host, model, effort, mode], [workdir, git, spend]]\n", twoRows},
+		{"block style", "ui:\n  footer:\n    rows:\n      - [host, model, effort, mode]\n      - - workdir\n        - git\n        - spend\n", twoRows},
+		{"no ui block", "mode: auto\n", wantFooterRowsDefault},
+		{"an empty footer block", "ui:\n  footer:\n", wantFooterRowsDefault},
+		{"a null rows key", "ui:\n  footer:\n    rows:\n", wantFooterRowsDefault},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts, err := applyUIRows(t, tt.yaml)
+
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			want := wantUIDefault
+			want.FooterRows = tt.want
+			if opts.UI != want {
+				t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
+			}
+		})
+	}
+}
+
+// TestUIRowsRefusedAtLoad: each shape the key refuses stops the load in a sentence naming the key
+// and the value — an explicit empty list at the row's file pass, a shape no row is made of at the
+// yaml seam, and every other at UIPrefs.Validate.
+func TestUIRowsRefusedAtLoad(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, rows string
+		want       []string
+	}{
+		{"no rows", "[]", []string{`ui.footer.rows "[]"`, "want 1 or 2 rows, not 0"}},
+		{"three rows", "[[host], [model], [mode]]", []string{`ui.footer.rows "[[host], [model], [mode]]"`, "not 3"}},
+		{"an empty row", "[[host, mode], []]", []string{`ui.footer.rows "[[host, mode], []]"`, "row 2 is empty"}},
+		{"an unknown segment", "[[host, clock, mode]]", []string{`ui.footer.rows "[[host, clock, mode]]"`, `unknown segment "clock"`}},
+		{"a repeated segment", "[[host, mode], [host]]", []string{`ui.footer.rows "[[host, mode], [host]]"`, `"host" is named twice`}},
+		{"no mode", "[[host, model]]", []string{`ui.footer.rows "[[host, model]]"`, `want "mode" in exactly one row`}},
+		{"two modes", "[[mode], [mode]]", []string{`ui.footer.rows "[[mode], [mode]]"`, `"mode" is named twice`}},
+		{"a flat list", "[host, mode]", []string{"ui.footer.rows at line 3", "want a list of rows"}},
+		{"a scalar", "host", []string{"ui.footer.rows at line 3", "want a list of rows"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := applyUIRows(t, "ui:\n  footer:\n    rows: "+tt.rows+"\n")
+
+			if err == nil {
+				t.Fatalf("ApplyConfig accepted rows %s; want refused", tt.rows)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("refusal %q does not name %s", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestUIRowsInAProjectFileAreDroppedAsGlobalOnly: like every `ui:` key, `ui.footer.rows` belongs to
+// the global file — a Project config stating it is ignored, with the one notice naming the key.
+func TestUIRowsInAProjectFileAreDroppedAsGlobalOnly(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t, "mode: plan\n",
+		"ui:\n  footer:\n    rows: [[host, model, effort, mode], [workdir, git, spend]]\n")
+
+	o, notices := loadLayered(t, globalPath, projectRoot)
+
+	if o.UI.FooterRows != wantFooterRowsDefault {
+		t.Errorf("ui.footer.rows = %q; want the global default %q", o.UI.FooterRows, wantFooterRowsDefault)
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0], `"ui.footer.rows"`) {
+		t.Errorf("notices = %q; want one naming the global-only ui.footer.rows", notices)
 	}
 }
 

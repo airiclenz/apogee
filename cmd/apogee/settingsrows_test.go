@@ -81,7 +81,7 @@ func fabricatedSettings() config.Options {
 		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, Glyphs: domain.GlyphsSafe, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, Notify: domain.NotifyBoth, GitFetch: false,
-			PointerShapes: true},
+			PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]"},
 		// The retention keys stay unset; the two watch keys are set, so their rows report a value.
 		Sessions: config.SessionSettings{
 			WatchHomes: []config.WatchHome{{Label: "bob", Path: "/home/bob/.apogee"},
@@ -492,6 +492,9 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.notify":                          "both",  // both signals in the fixture, against the bell default
 		"ui.git-fetch":                       "false", // off in the fixture, against its true default
 		"ui.pointer-shapes":                  "true",  // on in the fixture, against its false default
+		// Two rows in the fixture, against the one-row default: the row reads the canonical spelling,
+		// a text the key takes back rather than a summary.
+		"ui.footer.rows": "[[host, model, effort, mode], [workdir, git, spend]]",
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
 		"sessions.max-age":     "0s",

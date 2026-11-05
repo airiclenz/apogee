@@ -2900,6 +2900,72 @@ type uiConfig struct {
 	// `pointer-shapes: false` is a fact about this config rather than an absent key, so the schema
 	// stays honest if the default ever moves.
 	PointerShapes *bool `yaml:"pointer-shapes"`
+	// Footer is the nested `footer:` block: how the footer lays its segments out. A pointer so an
+	// absent block is told from one that states nothing.
+	Footer *uiFooterConfig `yaml:"footer"`
+}
+
+// uiFooterConfig is the on-disk `ui.footer:` block.
+type uiFooterConfig struct {
+	// Rows is `ui.footer.rows`: the footer's rows, each a list of segment names. Nil for an absent
+	// (or null) key, which keeps the default; an explicit `rows: []` is a stated empty list and is
+	// refused by the row's file pass (fileFooterRows). Every other judgement is UIPrefs.Validate's.
+	Rows footerRowsConfig `yaml:"rows"`
+}
+
+// footerRowsConfig is the on-disk `ui.footer.rows:` list of rows, kept as written.
+type footerRowsConfig [][]string
+
+// UnmarshalYAML reads the rows as written. It refuses only a shape no row can be made of — a
+// scalar or a map where the list belongs, or a row that is not a list of names — in a sentence
+// naming the key, and judges nothing else: the names, the row count and the mode marker are
+// UIPrefs.Validate's.
+func (f *footerRowsConfig) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	shape := func(at *yaml.Node) error {
+		return fmt.Errorf("apogee: invalid ui.footer.rows at line %d: want a list of rows, each a list "+
+			"of segment names, like [[host, model, effort, mode], [workdir, git, spend]]", at.Line)
+	}
+	if node.Kind != yaml.SequenceNode {
+		return shape(node)
+	}
+	rows := make(footerRowsConfig, 0, len(node.Content))
+	for _, rowNode := range node.Content {
+		rowNode = resolveAlias(rowNode)
+		if rowNode.Kind != yaml.SequenceNode {
+			return shape(rowNode)
+		}
+		row := make([]string, 0, len(rowNode.Content))
+		for _, name := range rowNode.Content {
+			name = resolveAlias(name)
+			if name.Kind != yaml.ScalarNode {
+				return shape(name)
+			}
+			row = append(row, name.Value)
+		}
+		rows = append(rows, row)
+	}
+	*f = rows
+	return nil
+}
+
+// fileFooterRows projects `ui.footer.rows:` onto its one field of the block, writing it on every
+// pass so a re-read over a file that no longer names the key lands the default again. The rows are
+// carried in their canonical spelling, unjudged, for UIPrefs.Validate to refuse at ResolveOptions —
+// all but an explicit empty list, which spells the same `[]` an absent key never could and is
+// refused here, in the parser's own sentence.
+func fileFooterRows(o *Options, fc fileConfig) error {
+	o.UI.FooterRows = domain.DefaultFooterRows
+	if fc.UI == nil || fc.UI.Footer == nil || fc.UI.Footer.Rows == nil {
+		return nil
+	}
+	spelled := domain.SpellFooterRows(fc.UI.Footer.Rows)
+	if len(fc.UI.Footer.Rows) == 0 {
+		_, err := domain.ParseFooterRows(string(spelled))
+		return err
+	}
+	o.UI.FooterRows = spelled
+	return nil
 }
 
 // sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with

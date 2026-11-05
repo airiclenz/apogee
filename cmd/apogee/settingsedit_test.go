@@ -676,6 +676,31 @@ func TestSettingKeyLineFallsBackToTheCommentedExample(t *testing.T) {
 	}
 }
 
+// A key two blocks deep is found on its own nested line — `rows:` in `footer:` in `ui:`, not the
+// `ui:` or `footer:` line above it — and a file that does not set it answers 0 rather than a line of
+// some other key that merely shares a block with it.
+func TestSettingKeyLineFindsANestedBlockKey(t *testing.T) {
+	t.Parallel()
+	data := []byte(strings.Join([]string{
+		"mode: auto",
+		"ui:",
+		"  spinner: snake",
+		"  footer:",
+		"    rows: [[host, model, effort, mode], [workdir, git, spend]]",
+		"",
+	}, "\n"))
+	unset := []byte("ui:\n  spinner: snake\n  footer:\n")
+
+	got, gotUnset := settingKeyLine(data, "ui.footer.rows"), settingKeyLine(unset, "ui.footer.rows")
+
+	if got != 5 {
+		t.Errorf("nested key line = %d, want 5", got)
+	}
+	if gotUnset != 0 {
+		t.Errorf("unset nested key line = %d, want 0", gotUnset)
+	}
+}
+
 // The `reactions:` block is a list of blocks no row can spell, so the pane will not write it: ⏎ on
 // that row hands the human the file itself, opened on the key's own line (ADR 0076 A3 — the
 // external-edit machinery the `mcp-servers:` block already uses). This is that affordance stated

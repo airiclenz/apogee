@@ -358,3 +358,86 @@ func TestUIPrefsNotifyDefaultsToBellAndReadsEmptyAsOff(t *testing.T) {
 		}
 	}
 }
+
+// TestUIPrefsFooterRowsDefaultToOneRow: the shipped default is every segment on one row with the
+// mode marker at its right edge, carried by DefaultUIPrefs; `""` reads as that default, so the zero
+// block still validates; and Set's `""` lands it, the contract every key keeps.
+func TestUIPrefsFooterRowsDefaultToOneRow(t *testing.T) {
+	t.Parallel()
+	want := [][]FooterSegment{{FooterHost, FooterModel, FooterEffort, FooterWorkdir, FooterGit, FooterSpend, FooterMode}}
+
+	got, err := ParseFooterRows(string(DefaultUIPrefs().FooterRows))
+
+	if err != nil || !slices.EqualFunc(got, want, slices.Equal[[]FooterSegment]) {
+		t.Errorf("ParseFooterRows(DefaultUIPrefs().FooterRows) = %v, %v; want %v", got, err, want)
+	}
+	if got, err := ParseFooterRows(""); err != nil || !slices.EqualFunc(got, want, slices.Equal[[]FooterSegment]) {
+		t.Errorf(`ParseFooterRows("") = %v, %v; want the default %v`, got, err, want)
+	}
+	if err := (UIPrefs{}).Validate(); err != nil {
+		t.Errorf("the zero block does not validate: %v", err)
+	}
+	u := UIPrefs{FooterRows: "[[mode]]"}
+	if err := u.Set(UIKeyFooterRows, ""); err != nil || u.FooterRows != DefaultFooterRows {
+		t.Errorf(`Set(ui.footer.rows, "") = %v, landing %q; want the default %q`, err, u.FooterRows, DefaultFooterRows)
+	}
+}
+
+// TestUIPrefsSetLandsFooterRowsInTheirCanonicalSpelling: the registry row's Read text is the
+// canonical spelling, and Set lands it back to the same value — and a looser spelling of the same
+// rows lands as that one canonical text, so two spellings never compare unequal.
+func TestUIPrefsSetLandsFooterRowsInTheirCanonicalSpelling(t *testing.T) {
+	t.Parallel()
+	const twoRows FooterRows = "[[host, model, effort, mode], [workdir, git, spend]]"
+
+	for _, text := range []string{string(twoRows), " [ [host,model,effort,mode] ,[ workdir , git,spend ] ] "} {
+		u := DefaultUIPrefs()
+
+		err := u.Set(UIKeyFooterRows, text)
+
+		if err != nil || u.FooterRows != twoRows {
+			t.Errorf("Set(ui.footer.rows, %q) = %v, landing %q; want %q", text, err, u.FooterRows, twoRows)
+		}
+	}
+	if got := SpellFooterRows([][]string{{"host", "mode"}, {"git"}}); got != "[[host, mode], [git]]" {
+		t.Errorf("SpellFooterRows = %q; want [[host, mode], [git]]", got)
+	}
+}
+
+// TestUIPrefsValidateRefusesEveryBadFooterShape: each shape the key refuses is refused by Validate
+// in a sentence naming the key and quoting the value, and Set refusing it leaves the block as it was.
+func TestUIPrefsValidateRefusesEveryBadFooterShape(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, rows, reason string
+	}{
+		{"no rows", "[]", "want 1 or 2 rows, not 0"},
+		{"three rows", "[[host], [model], [mode]]", "want 1 or 2 rows, not 3"},
+		{"empty row", "[[host, mode], []]", "row 2 is empty"},
+		{"unknown segment", "[[host, clock, mode]]", `unknown segment "clock"`},
+		{"repeated segment", "[[host, mode], [host]]", `segment "host" is named twice`},
+		{"two modes", "[[mode], [mode]]", `segment "mode" is named twice`},
+		{"no mode", "[[host, model]]", `want "mode" in exactly one row`},
+		{"not a list of rows", "host, mode", "want a list of 1 or 2 rows"},
+		{"flat list", "[host, mode]", "want a list of 1 or 2 rows"},
+		{"nested too deep", "[[[host], mode]]", "want a list of 1 or 2 rows"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			u := DefaultUIPrefs()
+			u.FooterRows = FooterRows(tt.rows)
+
+			err := u.Validate()
+
+			wantPrefix := "apogee: invalid ui.footer.rows " + `"` + tt.rows + `": `
+			if err == nil || !strings.HasPrefix(err.Error(), wantPrefix) || !strings.Contains(err.Error(), tt.reason) {
+				t.Errorf("Validate() with FooterRows %q = %v; want %q naming %q", tt.rows, err, wantPrefix, tt.reason)
+			}
+			held := DefaultUIPrefs()
+			if err := held.Set(UIKeyFooterRows, tt.rows); err == nil || held != DefaultUIPrefs() {
+				t.Errorf("Set(ui.footer.rows, %q) = %v, leaving %+v; want refused and untouched", tt.rows, err, held)
+			}
+		})
+	}
+}

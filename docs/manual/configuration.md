@@ -1105,9 +1105,9 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Thirteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
-says; the other four, `ui.notify`, `ui.inspector`, `ui.stall-after` and `ui.git-fetch`, come further
-down.
+Fourteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
+says; the other five, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch` and the footer's
+layout, `ui.footer.rows`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
@@ -1224,6 +1224,23 @@ or does not.
 # ~/.apogee/config.yaml
 ui:
   git-fetch: false
+```
+
+`ui.footer.rows` lays the footer out: a list of one or two rows, top to bottom, each a list of the
+segments it shows, left to right. The segments are `host` (the upstream), `model`, `effort`, `mode`
+(the permission-mode marker), `workdir`, `git` (the branch and its counts) and `spend`; each may
+appear at most once, and `mode` must appear exactly once — its marker sits at the right edge of the
+row that names it. The default is one row, `[[host, model, effort, workdir, git, spend, mode]]`.
+A list of no rows or more than two, an empty row, a name that is not a segment, a name given twice,
+or a list without `mode` is a startup error that names the key and the value. It lives in a nested
+`footer:` block, so `/settings` shows it but does not edit it — `⏎` on its row opens the file. Like
+every `ui:` key it is global-only: a Project config that sets it is ignored, with a notice.
+
+```yaml
+# ~/.apogee/config.yaml
+ui:
+  footer:
+    rows: [[host, model, effort, mode], [workdir, git, spend]]
 ```
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter

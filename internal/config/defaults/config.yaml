@@ -1170,6 +1170,11 @@ update-check: true
 # passphrase simply fails, and the footer keeps the counts it had. Default on; `false` keeps the
 # counts to what the repository already knows. Switch live from /settings.
 #
+# `footer.rows` lays the footer out: one or two rows, top to bottom, each a list of the segments it
+# shows, left to right — `host`, `model`, `effort`, `mode`, `workdir`, `git` and `spend`, each at
+# most once. `mode` must appear exactly once; its marker sits at the right edge of its row. Default
+# one row, `[[host, model, effort, workdir, git, spend, mode]]`. Edit it here, in the file.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -1185,6 +1190,8 @@ ui:
   pointer-shapes: false  # true = text / hand mouse pointer on hover, on a terminal that answers OSC 22
   notify: bell           # off | bell | osc9 | both — how the terminal is told apogee waits on you
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched
+  # footer:
+  #   rows: [[host, model, effort, workdir, git, spend, mode]]
 
 # =============================================================================
 # Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and

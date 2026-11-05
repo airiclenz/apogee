@@ -342,7 +342,8 @@ func TestTemplateMentionsEveryRegistryKey(t *testing.T) {
 
 // TestTemplateMentionsEveryRegistryKeyRejectsAnAbsentKey is the gate's negative case: the predicate
 // says no to a key the template has never spelled, and no to a leaf borrowed from another block
-// (`max-age` is spelled under `sessions:`, never under `ui:`). It feeds FABRICATED paths to the
+// (`max-age` is spelled under `sessions:`, never under `ui:`), nor to a nested block's leaf read one
+// level out of place (`rows` sits under `ui.footer`, never under `ui:` or at `footer:` alone). It feeds FABRICATED paths to the
 // real predicate over the real template rather than mutating the registry, so the gate itself is
 // proved without the gate's subject moving.
 func TestTemplateMentionsEveryRegistryKeyRejectsAnAbsentKey(t *testing.T) {
@@ -355,6 +356,9 @@ func TestTemplateMentionsEveryRegistryKeyRejectsAnAbsentKey(t *testing.T) {
 		"no-such-block.no-such-key",
 		"ui.no-such-key",
 		"ui.max-age",
+		"ui.footer.no-such-key",
+		"ui.rows",
+		"footer.rows",
 	} {
 		if templateMentionsSetting(lines, path) {
 			t.Errorf("the predicate calls %q spelled; no such key is in defaults/config.yaml, so the gate cannot fail", path)
@@ -365,32 +369,47 @@ func TestTemplateMentionsEveryRegistryKeyRejectsAnAbsentKey(t *testing.T) {
 	}
 }
 
-// templateMentionsSetting is the gate's predicate. It walks the template once, tracking the
-// top-level block each line sits under — the most recent column-0 key line, active or commented —
-// and accepts a top-level path as that line itself, a nested path as its leaf spelled indented
-// under its own parent. Both spellings the template uses for a commented key count: `#   leaf:`
+// templateMentionsSetting is the gate's predicate: whether some key line of the template spells the
+// path (templateFirstMention).
+func templateMentionsSetting(lines []string, path string) bool {
+	return templateFirstMention(lines, path) != 0
+}
+
+// templateFirstMention walks the template once, tracking the key lines each line sits under — a key
+// line opens a block for every later line indented deeper than it, active or commented — and answers
+// the 1-based line of the first key line whose own name, under the blocks it sits in, spells the
+// dotted path: a top-level path as its own column-0 line, a nested one as its leaf indented under
+// each of its parents in turn (`ui.footer.rows` is `rows:` under `footer:` under `ui:`). It answers 0
+// when no key line spells it. Both spellings the template uses for a commented key count: `#   leaf:`
 // (the comment first, then the indentation the key would have) and `  # leaf:` (an example
 // commented out inside an active block, as `ui:` carries `skill-suggestions`).
-func templateMentionsSetting(lines []string, path string) bool {
-	parent, leaf, nested := strings.Cut(path, ".")
-	block := ""
-	for _, line := range lines {
+func templateFirstMention(lines []string, path string) int {
+	type openKey struct {
+		indent int
+		name   string
+	}
+	var open []openKey
+	for i, line := range lines {
 		indent, name, ok := templateKeyLine(line)
 		if !ok {
 			continue
 		}
-		if indent == 0 {
-			block = name
-			if !nested && name == path {
-				return true
-			}
-			continue
+		for len(open) > 0 && open[len(open)-1].indent >= indent {
+			open = open[:len(open)-1]
 		}
-		if nested && block == parent && name == leaf {
-			return true
+		if len(open) == 0 && indent != 0 {
+			continue // an indented key-shaped line under no block is prose, never a top-level key
+		}
+		open = append(open, openKey{indent: indent, name: name})
+		names := make([]string, len(open))
+		for j, key := range open {
+			names[j] = key.name
+		}
+		if strings.Join(names, ".") == path {
+			return i + 1
 		}
 	}
-	return false
+	return 0
 }
 
 // templateKeyLine reads the key a template line spells, active or commented, with the indentation
@@ -481,29 +500,4 @@ func TestRegistryFollowsTheTemplateOrderReadsTheFirstMention(t *testing.T) {
 			"bypass, reactions, model-profiles (the Reactions block sits directly after the bypass block)",
 			bypass, reactions, profiles)
 	}
-}
-
-// templateFirstMention is templateMentionsSetting's first-index sibling: the 1-based line of the
-// first key line spelling the path — a top-level key on its own column-0 line, a nested key as its
-// leaf under its own parent's block — or 0 when the template never spells it as a key.
-func templateFirstMention(lines []string, path string) int {
-	parent, leaf, nested := strings.Cut(path, ".")
-	block := ""
-	for i, line := range lines {
-		indent, name, ok := templateKeyLine(line)
-		if !ok {
-			continue
-		}
-		if indent == 0 {
-			block = name
-			if !nested && name == path {
-				return i + 1
-			}
-			continue
-		}
-		if nested && block == parent && name == leaf {
-			return i + 1
-		}
-	}
-	return 0
 }

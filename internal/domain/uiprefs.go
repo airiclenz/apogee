@@ -12,7 +12,7 @@ import (
 // spinner and its colour loop, the scroll bar, the palette, the quiet threshold, the Inspector's
 // wire capture, the skill-suggestion band, the two fold states the transcript writes back, the
 // glyph set the screen's symbols are drawn from, and how the terminal is told apogee waits on the
-// human.
+// human, and the rows the footer's segments are laid out in.
 // It is one struct because the keys describe one subsystem and travel together, from the on-disk
 // block through resolution (internal/config) to the wire (tui.Options) to the live apply — and it
 // lives here, beside the vocabularies its fields are spelled in, so every layer that carries the
@@ -110,6 +110,179 @@ type UIPrefs struct {
 	// feature ships off until real use turns it on, and off apogee writes no OSC 22 byte at all.
 	// Purely visual — nothing about it reaches the model.
 	PointerShapes bool
+	// FooterRows names the rows the footer's segments are laid out in, top to bottom, and the
+	// segments of each, left to right — carried in its one canonical spelling
+	// (`[[host, model, effort, workdir, git, spend, mode]]`) so the block stays comparable with `==`,
+	// and read into rows through [ParseFooterRows]. Default the one-row shape; `""` reads as the
+	// default too, Glyphs' posture, so a block assembled field by field still validates. A shape
+	// [ParseFooterRows] refuses is refused by [UIPrefs.Validate] naming the key.
+	FooterRows FooterRows
+}
+
+// FooterSegment names one segment of the footer, as `ui.footer.rows` spells it.
+type FooterSegment string
+
+const (
+	// FooterHost is the upstream's host.
+	FooterHost FooterSegment = "host"
+	// FooterModel is the model the session talks to.
+	FooterModel FooterSegment = "model"
+	// FooterEffort is the reasoning effort.
+	FooterEffort FooterSegment = "effort"
+	// FooterMode is the permission-mode marker, which sits at the right edge of its row.
+	FooterMode FooterSegment = "mode"
+	// FooterWorkdir is the working directory.
+	FooterWorkdir FooterSegment = "workdir"
+	// FooterGit is the branch and its counts.
+	FooterGit FooterSegment = "git"
+	// FooterSpend is the session's spend.
+	FooterSpend FooterSegment = "spend"
+)
+
+// footerSegmentNames is the vocabulary [ParseFooterRows] accepts, in the order its error lists them.
+var footerSegmentNames = []FooterSegment{
+	FooterHost, FooterModel, FooterEffort, FooterMode, FooterWorkdir, FooterGit, FooterSpend,
+}
+
+// maxFooterRows is how many rows the footer may be laid out in.
+const maxFooterRows = 2
+
+// FooterRows is `ui.footer.rows` in its one canonical spelling: the rows in brackets, each a
+// bracketed list of segment names joined by `, ` — the text [SpellFooterRows] writes and
+// [ParseFooterRows] reads back. A string rather than a slice so [UIPrefs] stays comparable.
+type FooterRows string
+
+// DefaultFooterRows is what a config that names no `ui.footer.rows:` resolves to: every segment on
+// one row, the mode marker at its right edge.
+const DefaultFooterRows FooterRows = "[[host, model, effort, workdir, git, spend, mode]]"
+
+// footerRowsShape is the refusal for text that is not a list of rows at all.
+const footerRowsShape = "want a list of 1 or 2 rows of segment names, like [[host, model, effort, mode], " +
+	"[workdir, git, spend]]"
+
+// SpellFooterRows writes rows in the canonical spelling, judging nothing: a config file's rows are
+// spelled as written so [UIPrefs.Validate] can quote them in its refusal.
+func SpellFooterRows[S ~string](rows [][]S) FooterRows {
+	spelled := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names := make([]string, 0, len(row))
+		for _, name := range row {
+			names = append(names, string(name))
+		}
+		spelled = append(spelled, "["+strings.Join(names, ", ")+"]")
+	}
+	return FooterRows("[" + strings.Join(spelled, ", ") + "]")
+}
+
+// ParseFooterRows reads a `ui.footer.rows` value into its rows. "" (trimmed) ⇒ the default's rows.
+// It refuses, in a sentence naming the key and quoting the text, text that is not a bracketed list of
+// bracketed rows, fewer than 1 or more than 2 rows, an empty row, a name that is not a segment, a
+// name given twice, and a list without `mode`.
+func ParseFooterRows(text string) ([][]FooterSegment, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		text = string(DefaultFooterRows)
+	}
+	refuse := func(reason string) error {
+		return fmt.Errorf("apogee: invalid ui.footer.rows %q: %s", text, reason)
+	}
+	names, ok := splitFooterRows(text)
+	if !ok {
+		return nil, refuse(footerRowsShape)
+	}
+	if len(names) == 0 || len(names) > maxFooterRows {
+		return nil, refuse(fmt.Sprintf("want 1 or %d rows, not %d", maxFooterRows, len(names)))
+	}
+	rows, err := footerSegments(names)
+	if err != nil {
+		return nil, refuse(err.Error())
+	}
+	return rows, nil
+}
+
+// splitFooterRows cuts canonical-shaped text into its rows of trimmed names, answering false for
+// text that is not `[` rows `]` with each row `[` names `]`. An empty row is kept, as no names.
+func splitFooterRows(text string) ([][]string, bool) {
+	inner, ok := strings.CutPrefix(text, "[")
+	if !ok {
+		return nil, false
+	}
+	inner, ok = strings.CutSuffix(inner, "]")
+	if !ok {
+		return nil, false
+	}
+	var rows [][]string
+	rest := strings.TrimSpace(inner)
+	for rest != "" {
+		opened, ok := strings.CutPrefix(rest, "[")
+		if !ok {
+			return nil, false
+		}
+		body, after, ok := strings.Cut(opened, "]")
+		if !ok || strings.Contains(body, "[") {
+			return nil, false
+		}
+		rows = append(rows, footerRowNames(body))
+		rest = strings.TrimSpace(after)
+		if rest == "" {
+			break
+		}
+		if rest, ok = strings.CutPrefix(rest, ","); !ok {
+			return nil, false
+		}
+		rest = strings.TrimSpace(rest)
+	}
+	return rows, true
+}
+
+// footerRowNames splits one row's bracketed body into its trimmed names; a blank body is no names.
+func footerRowNames(body string) []string {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	names := strings.Split(body, ",")
+	for i := range names {
+		names[i] = strings.TrimSpace(names[i])
+	}
+	return names
+}
+
+// footerSegments judges the rows' names: no row empty, every name a segment, none given twice, and
+// `mode` among them.
+func footerSegments(names [][]string) ([][]FooterSegment, error) {
+	seen := make(map[FooterSegment]bool, len(footerSegmentNames))
+	rows := make([][]FooterSegment, 0, len(names))
+	for i, row := range names {
+		if len(row) == 0 {
+			return nil, fmt.Errorf("row %d is empty; want at least one segment", i+1)
+		}
+		segments := make([]FooterSegment, 0, len(row))
+		for _, name := range row {
+			segment := FooterSegment(name)
+			if !slices.Contains(footerSegmentNames, segment) {
+				return nil, fmt.Errorf("unknown segment %q (known segments: %s)", name, footerSegmentList())
+			}
+			if seen[segment] {
+				return nil, fmt.Errorf("segment %q is named twice; want each segment once", name)
+			}
+			seen[segment] = true
+			segments = append(segments, segment)
+		}
+		rows = append(rows, segments)
+	}
+	if !seen[FooterMode] {
+		return nil, fmt.Errorf("want %q in exactly one row", FooterMode)
+	}
+	return rows, nil
+}
+
+// footerSegmentList spells the segment vocabulary for a refusal.
+func footerSegmentList() string {
+	names := make([]string, 0, len(footerSegmentNames))
+	for _, segment := range footerSegmentNames {
+		names = append(names, string(segment))
+	}
+	return strings.Join(names, ", ")
 }
 
 // NotifyMode names how the terminal is told that apogee waits on the human. The vocabulary is
@@ -232,6 +405,9 @@ const (
 	UIKeyNotify           = "ui.notify"
 	UIKeyGitFetch         = "ui.git-fetch"
 	UIKeyPointerShapes    = "ui.pointer-shapes"
+	// UIKeyFooterRows is a key of the nested `footer:` block, and like every key of that block it
+	// is not one of [UIKeys]: it is a structured value, edited in the file rather than on a row.
+	UIKeyFooterRows = "ui.footer.rows"
 )
 
 // uiKeys is the block's keys in the order the starter template presents them, declared once so a
@@ -254,8 +430,8 @@ func UIKeys() []string {
 // colour loop on, the scroll bar shown, the default colour scheme, the shipped quiet threshold,
 // the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
 // umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
-// the unicode glyph set, the terminal bell when apogee waits on the human, and the footer's
-// periodic git fetch on.
+// the unicode glyph set, the terminal bell when apogee waits on the human, the footer's
+// periodic git fetch on, and the footer laid out on one row.
 // Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
@@ -270,6 +446,7 @@ func DefaultUIPrefs() UIPrefs {
 		Glyphs:           DefaultGlyphSet,
 		Notify:           DefaultNotifyMode,
 		GitFetch:         true,
+		FooterRows:       DefaultFooterRows,
 	}
 }
 
@@ -315,8 +492,8 @@ func ParseToolsFoldOver(text string) (int, error) {
 }
 
 // Validate rejects a block naming a spinner style this build has no animation for, a StallAfter
-// below zero, a ToolsFoldOver below zero, a glyph set this build does not know, or a notify mode it
-// does not know — the same five refusals the parsers make, so a block assembled field by field is judged as one read through
+// below zero, a ToolsFoldOver below zero, a glyph set this build does not know, a notify mode it
+// does not know, or footer rows [ParseFooterRows] refuses — the same six refusals the parsers make, so a block assembled field by field is judged as one read through
 // [UIPrefs.Set] would be. Catching them here makes a typo a startup error that names the key; left
 // to the renderer they would silently resolve to some other style, the shipped threshold or the
 // unicode glyphs, and the user would be left wondering why their setting did nothing.
@@ -333,13 +510,17 @@ func (u UIPrefs) Validate() error {
 	if _, err := ParseNotifyMode(string(u.Notify)); err != nil {
 		return fmt.Errorf("apogee: invalid ui.notify: %w", err)
 	}
+	if _, err := ParseFooterRows(string(u.FooterRows)); err != nil {
+		return err
+	}
 	return validToolsFoldOver(u.ToolsFoldOver)
 }
 
 // Set lands one key's value, spelled as the config file spells it, onto the block: the text is
 // trimmed, `""` lands that key's default (what a fresh start resolves from a file that does not
 // carry the key), and the value is parsed per key — the spinner through [ParseSpinnerStyle], the
-// glyph set through [ParseGlyphSet], the notify mode through [ParseNotifyMode], the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
+// glyph set through [ParseGlyphSet], the notify mode through [ParseNotifyMode], the footer rows
+// through [ParseFooterRows] (landing their canonical spelling), the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
 // name as it is. The edit runs on a COPY, [UIPrefs.Validate] judges the copy, and only a copy it
 // accepts is written back: a Set that fails has touched nothing. A key this block does not carry
 // is refused.
@@ -418,6 +599,12 @@ func (u *UIPrefs) land(key, value string) error {
 		return landBool(&u.GitFetch, key, value, defaults.GitFetch)
 	case UIKeyPointerShapes:
 		return landBool(&u.PointerShapes, key, value, defaults.PointerShapes)
+	case UIKeyFooterRows:
+		rows, err := ParseFooterRows(value)
+		if err != nil {
+			return err
+		}
+		u.FooterRows = SpellFooterRows(rows)
 	default:
 		return fmt.Errorf("apogee: unknown ui key %q", key)
 	}

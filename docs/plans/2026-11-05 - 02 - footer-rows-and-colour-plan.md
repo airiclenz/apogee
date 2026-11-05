@@ -100,7 +100,15 @@ TestFooterStatesTheGitSegment, TestFooterDropsSegmentsBeforeTheModeMarker; inter
 
 **Commit:** `feat(tui): footer middle-elides the workdir and branch before dropping a segment`
 
-## 3. The `ui.footer.rows` key
+## 3. The `ui.footer.rows` key — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the rows ride in `domain.UIPrefs` as `FooterRows`, a string type holding the one canonical spelling (`SpellFooterRows` writes it, `ParseFooterRows` reads it back into `[][]FooterSegment`), so the block stays comparable with `==`; `""` reads as the default (Glyphs' posture).
+NOTES (2026-11-05): the starter template states the default as a COMMENTED example under `ui:` (plus a prose paragraph in the block header), not an active line, so a seeded file does not pin the one-row shape once the default moves (item 6) and the template stays behaviour-neutral (TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt).
+NOTES (2026-11-05): the three-level template predicates (templateMentionsSetting/templateFirstMention) are now one indentation-tracking walk; the manual predicate's fence arm walks nested blocks and its leaf arm scopes to the leaf's immediate block (`footer:`); settingKeyLine walks blocks for a path deeper than two segments (yaml.v3 imported in cmd/apogee/settingsedit.go). ScalarTargetIn is unchanged.
+NOTES (2026-11-05): the global-only project-layer test (TestUIRowsInAProjectFileAreDroppedAsGlobalOnly) lives in internal/config/config_test.go beside the other TestUIRows tests, reusing layer_test.go's helpers, rather than in layer_test.go (not in Files).
+NOTES (2026-11-05): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by the new registry row (the row-value table pins one value per registry key; the fixture now carries two rows against the one-row default).
+NOTES (2026-11-05): consequential edit — cmd/apogee/testdata/frames/t16-settings-rows.txt: made necessary by the new row's Read text — the /settings pane sizes its value column to the widest value, and the canonical rows spelling (52 cells) widens it; regenerated with -update.
+NOTES (2026-11-05): the manual paragraph describes the layout the key names; the TUI reads the key only from item 5, as the item states.
 
 **What:** Recast at the regression check (2026-11-05). config only; the TUI does not read it until item 5.
 
