@@ -777,7 +777,7 @@
 // one empty line between blocks" holds; a tool header drops its square brackets for a bold-gold
 // label (the [theme] toolLabel role, styled before the wrap — the markdown.go posture); and
 // consecutive groupable calls at the same depth fold under one umbrella (toolSuperGroup /
-// groupable) headed by "✦ Tools (N calls)", one type row per run of a single label — a run of four
+// groupable) headed by "✦ Tools (3 Read, 4 Terminal)", one type row per run of a single label — a run of four
 // terminals and a read followed by a terminal take that same shape (plan "2026-09-02 - 01"; the
 // separate "✦ Label (N)" group it replaced is gone). Grouping is render-time only — the append-only
 // entry list, the call/result pairing, and transcript.hasOpenToolCall are untouched, so a call

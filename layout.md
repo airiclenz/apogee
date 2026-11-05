@@ -783,7 +783,7 @@ so the shell returns to the screen it had.
 and that file is canon.** It draws every row of one — the target on the left, the dotted leader, the
 outcome slot flush against the row's right edge, the state indicator past it — and it rules on
 everything that follows from that shape: what a run of 2+ groupable calls folds into — the
-**super-group** (`✦ Tools (N calls)`), one type row per run of a single tool, whether that is one
+**super-group** (the `✦ Tools` umbrella), one type row per run of a single tool, whether that is one
 run or several of different tools — the two fold states a call has and the
 `see less…` footer that closes an open one, what a click and the keyboard block cursor reach, the
 order things give way in when a row runs out of room, and the per-tool table of labels, collapsed
@@ -792,8 +792,8 @@ detail, outcome stat and expanded rows. Where that file and this one disagree ab
 the colour roles, how a path is spelled, what a body may say, and the blank line between blocks.
 
 **The label.** A tool header is `✦ ` plus the tool's label, **and nothing else — never a target**;
-the super-group's umbrella header is `✦ Tools` plus its total call count `(N calls)`, and the member
-count `(N)` belongs to a **type row** inside it rather than to a header. That holds for every block
+the super-group's umbrella header is `✦ Tools` plus how its calls divide by tool kind,
+`(3 Read, 4 Terminal)`, on a leader row to the fold's glyph, and the member count `(N)` belongs to a **type row** inside it rather than to a header. That holds for every block
 alike: a lone call, a call still in flight, and the stray-result `result` header. The target always
 leads the first branch line instead, so the block reshapes around its targets rather than under
 them. The label carries no brackets and is rendered **bold in the scheme's `tool-header` role**
@@ -973,7 +973,7 @@ fold holds — and open it is every row uncapped, the header's `▼` its only fo
 preview of a checklist would fold away exactly the rows the reader keeps glancing at. Its fold
 state is ONE state shared by every task-list card in the transcript — a click on any of them, or
 `enter` at the block cursor, toggles them all — and it is remembered across sessions in
-`ui.task-list-open`. The Tools umbrella (`✦ Tools (N calls)`) is the second block that folds to its
+`ui.task-list-open`. The `✦ Tools` umbrella is the second block that folds to its
 header, and every umbrella does (2026-09-18): it paints its counted header alone under a `▶`, or
 open under a `▼` over every type row, and a click on the header, or `enter` at the block cursor on
 it, flips it, the type rows and members a reader had opened surviving beneath the fold. Size alone

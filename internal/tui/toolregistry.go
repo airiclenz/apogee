@@ -140,7 +140,7 @@ type toolPresenter struct {
 	statTokens func(res domain.ToolResult, tokens int) (statValue, bool)
 
 	// count words the faint `(…)` the HEADER wears beside the label — the umbrella's own
-	// "✦ Tools (7 calls)" shape, worn here by one card about itself: task_list's `(done/total)`.
+	// "✦ Tools (3 Read, 4 Terminal)" shape, worn here by one card about itself: task_list's `(done/total)`.
 	// It is read off the lines of the result's BODY rather than off the result, because the wire
 	// keeps no result content (session.ToolView): a live card counts the rows the tool echoed back
 	// (enrichWithResult) and a replayed record counts the same rows off its decoded Details

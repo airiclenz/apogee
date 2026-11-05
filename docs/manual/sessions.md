@@ -181,7 +181,7 @@ exceptions are the task-list card and the large Tools umbrella: their folds are
 preferences rather than view state, remembered in
 [`ui.task-list-open`](configuration.md#the-terminal-ui--ui) and
 [`ui.tools-open`](configuration.md#the-terminal-ui--ui) — so a resumed session
-paints every task-list card, and every `✦ Tools (N calls)` umbrella with more
+paints every task-list card, and every `✦ Tools` umbrella with more
 type rows than `ui.tools-fold-over`, the way you last left them, not the way the
 record found them.
 

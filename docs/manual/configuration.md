@@ -1145,7 +1145,7 @@ saves: clicking a card folds — or opens — them all and records the flip in `
 silently, so the next session starts the way you left this one; only a write that fails is
 mentioned. The row shows in `/settings` like the rest, and a hand-edit applies live.
 
-`ui.tools-open` and `ui.tools-fold-over` do the same for the `✦ Tools (N calls)` umbrella a burst
+`ui.tools-open` and `ui.tools-fold-over` do the same for the `✦ Tools` umbrella a burst
 of tool calls is grouped under. Every umbrella folds to its one header line — `▶` folded, `▼`
 open — from a click on that header, whether the Turn is running or finished, in the transcript or
 inside a sub-agent's run view. An umbrella with more type rows than `ui.tools-fold-over` is *large*,

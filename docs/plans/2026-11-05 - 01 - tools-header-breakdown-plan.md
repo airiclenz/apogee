@@ -87,7 +87,12 @@ internal/tui/render_test.go — leaderEdgeRow; internal/tui/mouse_test.go — um
 - `grep -rn 'Tools ([0-9]* calls)' internal/tui/*_test.go cmd/apogee/*_test.go cmd/apogee/testdata/frames` prints only fallback-width tests and comments item 2 owns.
 **Commit:** `feat(tui): break the Tools umbrella header down by tool kind`
 
-## 2. Update the docs and comments that describe the header
+## 2. Update the docs and comments that describe the header — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): mouse_test.go:3950 and the cmd/apogee e2e comments (e2e_toolsfold_test.go, e2e_toolsfold_subagent_test.go) were already rewritten to the breakdown shape by item 1's commit; both files are in this item's Files but needed no change, so they are not in FILES.
+NOTES (2026-11-05): tool-layout.md's dated 2026-09-03 task_list note ("the same faint count tone as the umbrella's `(N calls)`") was reworded to "the umbrella's breakdown" so the Acceptance grep lists only fallback-rule mentions; the tone claim it makes still holds.
+NOTES (2026-11-05): test comments name the breakdown each test actually renders — render_test.go's layout golden "(3 Read, 1 Terminal, 1 Diff Preview, 2 Replace, 1 Write)", transcriptbridge_test.go's two skill fetches "(2 Skill)" — rather than a generic example.
+NOTES (2026-11-05): no CLOSES section: the item carries no **Closes:** line; the plan-level tools-header-breakdown is the plan closeout's, as item 1's notes left it — this item lands the docs half of its acceptance.
 
 Depends on item 1.
 **What:**

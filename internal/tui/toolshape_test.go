@@ -650,7 +650,7 @@ func TestRenderSkillFetchMissKeepsTheQuery(t *testing.T) {
 	}
 }
 
-// Two adjacent fetches never fold into the mixed "✦ Tools (N calls)" umbrella. The guard is worth
+// Two adjacent fetches never fold into the mixed "✦ Tools" umbrella. The guard is worth
 // stating twice over: each view carries a non-empty Target — which is what would otherwise make it
 // groupable, and what the unregistered fallback never gave it — and the never-group mark keeps it
 // out anyway, at every index the umbrella could form from.

@@ -277,9 +277,10 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 // gutter inside the sub-agent run — and the bracketless bold-gold label as the header text.
 //
 // The eight calls in a row are ONE block now, the umbrella of docs/layout/tool-layout.md: five type
-// rows in time order under "✦ Tools (8 calls)", each counting its run where the run holds more than
-// one call ("Read (3)", "Replace (2)") and aggregating it in the outcome slot — the reads' 570 lines
-// summed, the Replace run blank because a diffstat and a change count do not add up. The golden
+// rows in time order under "✦ Tools (3 Read, 1 Terminal, 1 Diff Preview, 2 Replace, 1 Write)",
+// each counting its run where the run holds more than one call ("Read (3)", "Replace (2)") and
+// aggregating it in the outcome slot — the reads' 570 lines summed, the Replace run blank because
+// a diffstat and a change count do not add up. The golden
 // carries all three of the canon sketch's states at once: the rows collapsed, the Terminal row open
 // to the call behind it under a │ gutter, and that call open to its output under a second one,
 // closed by the see-less footer. The targetless mcp_search block is the run's breaker as well as the

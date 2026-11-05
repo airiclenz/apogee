@@ -69,8 +69,19 @@ closer is drawn today.
   tool type or adjacent runs of different types. Breakers: any non-tool
   entry between calls (narration, note, approval, error), and any block that
   groups with its own kind instead — a sub-agent block or group, a skill block
-  or group. The umbrella header reads `✦ Tools (N calls)` — N = total calls,
-  painted in the faint count tone. It forms **live**, the moment the second
+  or group. The umbrella header is ONE leader row,
+  `✦ Tools (3 Read, 4 Terminal) ⋯⋯ ▼`: the star, `Tools` in the tool label's
+  bold gold, then how the calls divide by tool kind — one `<n> <tool-type-header>`
+  entry per distinct tool, summed across every run of it (two Read runs a
+  Terminal run apart are one `Read` entry), numbered even at one (`1 Read`,
+  never bare `Read`), in the order each kind first ran. The whole
+  parenthetical — names, numbers and commas — is painted in the faint count
+  tone. A dotted leader of at least one dot runs from it to the fold's `▶`/`▼`
+  at the block's right edge, in the type rows' indicator column; open and
+  folded differ only in that glyph. Where the breakdown leaves no room for one
+  dot, the parenthetical falls back to the total, `(N calls)`; narrower still,
+  the row clips the way a type row's label does, so the header is always one
+  line. It forms **live**, the moment the second
   groupable call is placed; the running call is its last row, wearing the
   spinner star. Only a LONE groupable call stays a standalone block.
 - `<tool-header>` — short human label of one call ("Read", "Terminal", …).
@@ -158,10 +169,10 @@ closer is drawn today.
   takes the ordinary targetless shape instead, so a failure is never folded
   away.
 - The umbrella is the second block that folds to its **header alone**, and
-  EVERY umbrella does (2026-09-18). Every `✦ Tools (N calls)` header wears
-  `▶`/`▼`; a click on it, or `enter` at the block cursor on it, folds the
-  umbrella to `✦ Tools (N calls) ▶` — no type row beneath, no `+N more lines`,
-  the call count saying what the fold holds — or opens it again onto its type
+  EVERY umbrella does (2026-09-18). Every `✦ Tools` header wears `▶`/`▼` at
+  its leader's edge; a click on it, or `enter` at the block cursor on it, folds
+  the umbrella to `✦ Tools (3 Read, 4 Terminal) ⋯ ▶` — no type row beneath, no
+  `+N more lines`, the breakdown saying what the fold holds — or opens it again onto its type
   rows under a `▼`, painted exactly as before. The fold covers the rows:
   whatever type rows and members a reader had opened stay open beneath the
   header and are there again when it unfolds. The rule has three parts, and
@@ -179,7 +190,7 @@ closer is drawn today.
   folded (small umbrella)" below); one that grows large follows the shared
   preference from then on, its own flag ignored while it is large. A folded
   umbrella with a call in flight paints its header exactly as an open one
-  with a call in flight does — the blinking `✦`, the `(N calls)` count
+  with a call in flight does — the blinking `✦`, the breakdown's counts
   climbing — and nothing else on the line. (Supersedes the 2026-09-17 rule,
   plan `docs/plans/2026-09-17 - 01`, under which only a large umbrella whose
   Turn had settled folded, and a small one or one with a call in flight wore a
@@ -237,7 +248,7 @@ One row per consecutive run, in time order. A row's
 `<tool-top-level-details>` aggregates its run.
 
 ```text
-✦ Tools (N calls) ▼
+✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -250,14 +261,14 @@ over a single type row. It keeps the row count of the retired `✦ Terminal (4)`
 group it replaced — one header, one row — and reads the same everywhere.
 
 ```text
-✦ Tools (4 calls) ▼
+✦ Tools (4 Terminal) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┕ Terminal (4) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 ▶
 ```
 
 ## Grouped tools expanded 1st step (super-group)
 
 ```text
-✦ Tools (N calls) ▼
+✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
   │ ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -269,7 +280,7 @@ group it replaced — one header, one row — and reads the same everywhere.
 ## Grouped tools expanded 2nd step (super-group)
 
 ```text
-✦ Tools (N calls) ▼
+✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
   │ ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -288,11 +299,11 @@ A LARGE umbrella — more type rows than `ui.tools-fold-over`, whatever the Turn
 is doing and wherever the umbrella sits — folds to its header alone under the
 shared `ui.tools-open`; the `▶` sits on the header and no type row is painted
 beneath it. Open, it is the "Grouped tools collapsed (super-group)" shape
-above with its `▼` after the count. With a call in flight the `✦` blinks as it
+above with its `▼` at the leader's edge. With a call in flight the `✦` blinks as it
 does on an open header; the line carries nothing else.
 
 ```text
-✦ Tools (N calls) ▶
+✦ Tools (<n> <tool-type-header>, …) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 ```
 
 ## Grouped tools folded (small umbrella)
@@ -304,7 +315,7 @@ folded shapes are indistinguishable on screen; only whose state the fold is
 differs.
 
 ```text
-✦ Tools (2 calls) ▶
+✦ Tools (1 Read, 1 Grep) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 ```
 
 ## Grouped Sub-agents
@@ -440,7 +451,7 @@ Notes:
   (ADR 0072). It carries no target because its one argument IS the list, and
   its count rides the header rather than the outcome slot: `✦ Task List
   (done/total)` — done rows over all rows of the list the tool echoed back,
-  painted in the same faint count tone as the umbrella's `(N calls)` — while
+  painted in the same faint count tone as the umbrella's breakdown — while
   the slot stays blank. A result with no rows at all — a cleared list, or a
   refusal — drops the count and reads plain `✦ Task List`.
   **2026-09-14** — the block folds to that counted header (the `Fold states`

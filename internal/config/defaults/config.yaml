@@ -1135,7 +1135,7 @@ update-check: true
 # a card folds (or opens) them all and records the flip here, silently, so the next session starts
 # the way you left this one. Default on.
 #
-# `tools-open` and `tools-fold-over` do the same for the `✦ Tools (N calls)` umbrella a burst of
+# `tools-open` and `tools-fold-over` do the same for the `✦ Tools` umbrella a burst of
 # tool calls is grouped under. Every umbrella folds to its one header line from a click on that
 # header, whether the Turn is running or finished. An umbrella with more type rows than
 # `tools-fold-over` is *large*, and a large umbrella is folded unless `tools-open` is true; clicking

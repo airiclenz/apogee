@@ -82,7 +82,7 @@ entry's `model:` and `launch-profile:` under `remember-model:` (ADR 0048), an en
 on a consented key migration (ADR 0047),
 `ui.task-list-open`, which the transcript's task-list fold records silently — the click or `enter`
 that folds every task-list card also writes the flip, only a failed write is mentioned (ADR 0035,
-2026-09-14 addendum) — and `ui.tools-open`, which the fold of a large `✦ Tools (N calls)` umbrella
+2026-09-14 addendum) — and `ui.tools-open`, which the fold of a large `✦ Tools` umbrella
 records the same silent way (ADR 0035, 2026-09-17 addendum; a small umbrella's fold is view state
 and writes nothing — 2026-09-18 addendum). See
 ADR 0035 (the

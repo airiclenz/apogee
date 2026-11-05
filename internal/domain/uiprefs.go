@@ -76,7 +76,7 @@ type UIPrefs struct {
 	TaskListOpen bool
 	// ToolsOpen is whether a LARGE Tools umbrella in the transcript — one with more type rows than
 	// ToolsFoldOver, by size alone, whatever the Turn is doing — starts open or folded to its
-	// counted `✦ Tools (N calls)` header. Default FALSE: a large umbrella is a burst of calls, and
+	// `✦ Tools (3 Read, 4 Terminal)` header. Default FALSE: a large umbrella is a burst of calls, and
 	// folding it out of the box is the point. ONE shared state for every large umbrella, and
 	// TaskListOpen's whole posture otherwise. A small umbrella never reads it: it folds on its own
 	// session-only flag, which is written nowhere (ADR 0035, 2026-09-18 addendum).

@@ -2294,7 +2294,7 @@ func TestTranscriptCodecReplaysANoReportDelegationWithoutACheck(t *testing.T) {
 // it. So a blob written before the mark
 // existed — every session recorded up to now, where load_skill had no registry entry at all — must
 // still replay refusing that fold, or a reload would bury the instructions the run took on inside a
-// mixed "✦ Tools (2 calls)" umbrella the live paint never showed.
+// "✦ Tools (2 Skill)" umbrella the live paint never showed.
 //
 // Hand-written bytes with no "solo" member, because the case IS an old file: a re-encode would
 // carry today's true and prove nothing.
