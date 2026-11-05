@@ -12,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2250,5 +2252,150 @@ func TestWatchReportsTheWatchersOwnActivity(t *testing.T) {
 	}
 	if len(reports) != 0 {
 		t.Errorf("reports after esc = %v; want none — this session never went busy", reports)
+	}
+}
+
+// stampedWatchFixture is an empty watched session whose journal stamps every line with *stamp,
+// which the test moves between appends: a journal written on a clock the test sets line by line.
+// The opening frame is stamped with *stamp as it stands at the call.
+func stampedWatchFixture(t *testing.T, stamp *time.Time) *watchFixture {
+	t.Helper()
+	f := newWatchFixture(t, "watched", nil, 0)
+	f.now = func() time.Time { return *stamp }
+	f.reopen("watched", 0)
+	return f
+}
+
+// presentUsage is a depth-0 usage reading: a line that moves no activity slot (foldActivity), so a
+// journal ending with one stamped at the present has its newest line say "now" and nothing more.
+func presentUsage() domain.UsageEvent {
+	return domain.UsageEvent{EventBase: domain.EventBase{Turn: 1}, PromptTokens: 10, TotalTokens: 20}
+}
+
+// statusClocks matches the running status line's phrase clock and its [total …] readout.
+var statusClocks = regexp.MustCompile(`· ([\d:]+s) \[total ([\d:]+s)\]`)
+
+// watchedClocks reads the phrase clock and the total off m's status line, as totalSuffix and
+// formatElapsed write them.
+func watchedClocks(t *testing.T, m Model) (phrase, total time.Duration) {
+	t.Helper()
+	got := statusText(t, m)
+	match := statusClocks.FindStringSubmatch(got)
+	if match == nil {
+		t.Fatalf("status line = %q; want a running phrase clock and a [total …] readout", got)
+	}
+	return parseElapsed(t, match[1]), parseElapsed(t, match[2])
+}
+
+// parseElapsed reads back formatElapsed's "12s", "03:15s" and "01:02:03s".
+func parseElapsed(t *testing.T, s string) time.Duration {
+	t.Helper()
+	var secs int
+	for _, part := range strings.Split(strings.TrimSuffix(s, "s"), ":") {
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			t.Fatalf("elapsed %q does not parse: %v", s, err)
+		}
+		secs = secs*secondsPerMinute + n
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// TestWatchTotalCountsFromTheWatchedPrompt pins the total's origin in a watch: the watched
+// prompt's own journal line, not the moment the watcher attached. A prompt stamped five minutes
+// before the journal's newest line shows a total of at least five minutes at once.
+func TestWatchTotalCountsFromTheWatchedPrompt(t *testing.T) {
+	t.Parallel()
+	stamp := time.Now()
+	f := stampedWatchFixture(t, &stamp)
+	stamp = time.Now().Add(-5 * time.Minute)
+	f.prompt("theirs", false)
+	stamp = time.Now()
+	f.emit(presentUsage())
+
+	m := enterWatchOn(t, watchEngine(), f)
+
+	if m.state != stateRunning {
+		t.Fatalf("state = %v; want running while the watched Exchange is open", m.state)
+	}
+	if _, total := watchedClocks(t, m); total < 5*time.Minute {
+		t.Errorf("total = %v; want at least 5m — the prompt's line is five minutes before the newest", total)
+	}
+}
+
+// TestWatchPhraseClockCountsFromItsJournalLine pins the phrase clock's origin in a watch: the line
+// that set the phrase, not the read that folded it.
+func TestWatchPhraseClockCountsFromItsJournalLine(t *testing.T) {
+	t.Parallel()
+	stamp := time.Now()
+	f := stampedWatchFixture(t, &stamp)
+	stamp = time.Now().Add(-3 * time.Minute)
+	f.prompt("theirs", false)
+	stamp = time.Now().Add(-2 * time.Minute)
+	f.emit(domain.ToolCallEvent{EventBase: domain.EventBase{Turn: 1}, Call: domain.ToolCall{
+		ID: "r1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`),
+	}})
+	stamp = time.Now()
+	f.emit(presentUsage())
+
+	m := enterWatchOn(t, watchEngine(), f)
+
+	phrase, total := watchedClocks(t, m)
+	if phrase < 2*time.Minute {
+		t.Errorf("phrase clock = %v; want at least 2m — the call's line is two minutes before the newest", phrase)
+	}
+	if total < 3*time.Minute {
+		t.Errorf("total = %v; want at least 3m — the prompt's line is three minutes before the newest", total)
+	}
+}
+
+// TestWatchClockIgnoresOwnerClockOffset pins the clock mapping: a watch measures only distances
+// between the journal's own stamps, so an owner whose clock runs hours ahead of or behind the
+// watcher's still shows the five minutes its prompt is old — never a negative, epoch-sized or
+// hours-large total.
+func TestWatchClockIgnoresOwnerClockOffset(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		offset time.Duration
+	}{
+		{name: "owner ahead", offset: 3 * time.Hour},
+		{name: "owner behind", offset: -3 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stamp := time.Now().Add(tc.offset)
+			f := stampedWatchFixture(t, &stamp)
+			stamp = time.Now().Add(tc.offset - 5*time.Minute)
+			f.prompt("theirs", false)
+			stamp = time.Now().Add(tc.offset)
+			f.emit(presentUsage())
+
+			m := enterWatchOn(t, watchEngine(), f)
+
+			if _, total := watchedClocks(t, m); total < 5*time.Minute || total >= 6*time.Minute {
+				t.Errorf("total = %v; want about 5m whatever the owner's clock says", total)
+			}
+		})
+	}
+}
+
+// TestWatchInterjectionKeepsTheTotalOrigin pins that an Interjection never moves the total's
+// origin: the Exchange is still the one the top-level prompt opened.
+func TestWatchInterjectionKeepsTheTotalOrigin(t *testing.T) {
+	t.Parallel()
+	stamp := time.Now()
+	f := stampedWatchFixture(t, &stamp)
+	stamp = time.Now().Add(-5 * time.Minute)
+	f.prompt("theirs", false)
+	stamp = time.Now().Add(-1 * time.Minute)
+	f.prompt("and also this", true)
+	stamp = time.Now()
+	f.emit(presentUsage())
+
+	m := enterWatchOn(t, watchEngine(), f)
+
+	if _, total := watchedClocks(t, m); total < 5*time.Minute {
+		t.Errorf("total = %v; want at least 5m — the Interjection must not restart it", total)
 	}
 }

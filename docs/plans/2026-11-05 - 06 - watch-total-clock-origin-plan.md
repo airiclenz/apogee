@@ -36,7 +36,7 @@
 - 1 (re-check): decision applied — Goal no longer claims "≈N at once" (header Goal too; silent-stretch undercount added to Out of scope); guards folded (each test's journal ends with a present-stamped line that does not move the slot; the `activityNow()` Approach bullet restated as the anchor mapping).
 - 2 (re-check): decision applied — doc sentences count from the watched session's journal times and promise no exact match with the owner's display.
 
-## 1. Watch clocks take the journal line's time as their origin
+## 1. Watch clocks take the journal line's time as their origin — ✅ DONE (2026-11-05)
 
 **What:**
 Recast at the regression check (2026-11-05).

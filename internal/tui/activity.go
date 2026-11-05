@@ -366,7 +366,8 @@ func (m *Model) foldSlot(run runRef, next activity) {
 // the same holds for the repeated announcement of one call. Depth and spawn alone do not restart it
 // either: the phrase's sub-agent prefix changes, but the same work is still in flight.
 //
-// next.since is ignored — callers state what is happening, never when it started.
+// next.since is ignored — callers state what is happening, never when it started. A restarted clock
+// starts at [Model.activityNow]: the moment of the move, or, in a watch, the folded line's own time.
 //
 // It is also the second seat of the QUIET clock, beside the eventMsg case that stamps it on every
 // Event: an activity moves either because an Event moved it (the engine spoke) or because a worker
@@ -385,7 +386,7 @@ func (m *Model) moveActivity(run runRef, next activity) {
 	next.depth, next.spawn = run.depth, run.spawn
 	next.since = slot.act.since
 	if slot.act.kind != next.kind || slot.act.label != next.label || slot.act.call != next.call {
-		next.since = time.Now()
+		next.since = m.activityNow()
 	}
 	slot.act = next
 	// The RUN's own clock starts when its slot opens and never moves again: the merged phrase counts
@@ -400,6 +401,25 @@ func (m *Model) moveActivity(run runRef, next activity) {
 	if next.kind.isQuietWatched() {
 		m.noteEngineHeard()
 	}
+}
+
+// activityNow is when an activity that moves now started, on the watcher's clock: time.Now(),
+// except while a watch folds a journal line, when it is that line's time. The line's time never
+// meets the watcher's clock directly — the owner's may be set to anything — but only through its
+// distance from the batch's newest line, which stands at the moment the batch folded
+// (watchState.anchorLine): anchorLocal − (anchorLine − lineAt). time.Now() caps it, so no origin
+// lies in the future and no clock reads negative.
+func (m Model) activityNow() time.Time {
+	now := time.Now()
+	w := m.watch
+	if w.lineAt.IsZero() || w.anchorLine.IsZero() {
+		return now
+	}
+	at := w.anchorLocal.Add(-w.anchorLine.Sub(w.lineAt))
+	if at.After(now) {
+		return now
+	}
+	return at
 }
 
 // noteEngineHeard restamps the quiet clock: the engine has just been heard from, so the stall guard

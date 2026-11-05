@@ -176,6 +176,17 @@ type watchState struct {
 	// resolved once at entry as newModel resolves m.workdir; "" when the watched workspace is
 	// unknown. leaveWatch drops it with the rest of the watch.
 	workdir string
+	// anchorLine and anchorLocal pin the watched journal's clock to the watcher's: the newest line
+	// time of the last batch that carried one, and the watcher's time.Now() when that batch folded.
+	// A journal time maps onto the watcher's clock only through its distance from anchorLine
+	// ([Model.activityNow]), so an owner clock offset from the watcher's skews neither clock.
+	// Both are zero until a timed batch folds.
+	anchorLine  time.Time
+	anchorLocal time.Time
+	// lineAt is the journal time of the line being folded, set by foldWatchItem for that one item
+	// and cleared after it; zero outside a watch fold and for an untimed item, which is what keeps
+	// the owner's own clocks on time.Now().
+	lineAt time.Time
 }
 
 // journalCursor is where the follower stands in the journal. offset is how many journal bytes have
@@ -209,12 +220,15 @@ type watchBatchMsg struct {
 	items       []watchItem
 }
 
-// watchItem is one decoded journal line the watch folds: exactly one of its members is set.
+// watchItem is one decoded journal line the watch folds: exactly one of start, prompt, event and
+// isFinished is set. at is the line's own journal time, zero for an item no journal line produced
+// (readRecordOnly) — the origin the watched clocks take for what the line opens.
 type watchItem struct {
 	start      *watchStart
 	prompt     *eventjson.Prompt
 	event      domain.Event
 	isFinished bool
+	at         time.Time
 }
 
 // watchStart is a journal's opening frame resolved against the record: the title, the record's
@@ -678,13 +692,13 @@ func decodeWatchLine(raw []byte, src watchSource) (watchItem, bool) {
 	switch {
 	case line.Started != nil:
 		start := loadWatchStart(raw, src.recordPath)
-		return watchItem{start: &start}, true
+		return watchItem{start: &start, at: line.Time}, true
 	case line.Prompt != nil:
-		return watchItem{prompt: line.Prompt}, true
+		return watchItem{prompt: line.Prompt, at: line.Time}, true
 	case line.Finished != nil:
-		return watchItem{isFinished: true}, true
+		return watchItem{isFinished: true, at: line.Time}, true
 	case line.Event != nil:
-		return watchItem{event: line.Event}, true
+		return watchItem{event: line.Event, at: line.Time}, true
 	}
 	return watchItem{}, false
 }
@@ -763,6 +777,7 @@ func (m Model) foldWatchBatch(msg watchBatchMsg) (tea.Model, tea.Cmd) {
 		m.clearWatchView()
 	}
 	wasRunning := m.state == stateRunning
+	m.anchorWatchClock(msg.items)
 	for _, item := range msg.items {
 		m = m.foldWatchItem(item)
 	}
@@ -778,6 +793,22 @@ func (m Model) foldWatchBatch(msg watchBatchMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.spin.arm(m.worker.gen, m.opts.UI.Spinner))
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// anchorWatchClock pins the journal's clock to the watcher's for the batch about to fold: its
+// newest line time against the watcher's time.Now() (watchState.anchorLine). A batch with no timed
+// line leaves the anchor as it stands; its items fold on time.Now() anyway.
+func (m *Model) anchorWatchClock(items []watchItem) {
+	var newest time.Time
+	for _, item := range items {
+		if item.at.After(newest) {
+			newest = item.at
+		}
+	}
+	if newest.IsZero() {
+		return
+	}
+	m.watch.anchorLine, m.watch.anchorLocal = newest, time.Now()
 }
 
 // noteOwnerEnded ends the follow once the owner has let the session go: the banner it shows says
@@ -806,8 +837,12 @@ func (m Model) isWatchResumable() bool {
 // one as the user block that opens an Exchange, an Interjection as the interjection block — and
 // the watched run shows running from a top-level prompt until a depth-0 Turn closes its Exchange or
 // the journal closes. Prompt text and the frame's title are untrusted and stripped here; every
-// Event's text is stripped by the folds it reaches.
+// Event's text is stripped by the folds it reaches. The line's own time is the watch's current
+// line time while the item folds, so an activity it opens or moves dates from the line rather than
+// from the read ([Model.activityNow]): the total counts from the prompt's line, and the phrase
+// clock from the line that set the phrase.
 func (m Model) foldWatchItem(item watchItem) Model {
+	m.watch.lineAt = item.at
 	switch {
 	case item.start != nil:
 		m.paintWatchStart(*item.start)
@@ -825,6 +860,7 @@ func (m Model) foldWatchItem(item watchItem) Model {
 			m.watchIdle()
 		}
 	}
+	m.watch.lineAt = time.Time{}
 	return m
 }
 
