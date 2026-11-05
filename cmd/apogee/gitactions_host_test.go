@@ -353,3 +353,270 @@ func TestGitActionsHostRefusedRepositoryRunsNoNetworkVerb(t *testing.T) {
 		}
 	}
 }
+
+// identifyFixture gives dir an identity and no signing in its own config, so a commit the host
+// makes there — a rebase's — needs nothing from the operator's config.
+func identifyFixture(t *testing.T, dir string) {
+	t.Helper()
+	gitFixture(t, dir, "config", "user.name", "Test")
+	gitFixture(t, dir, "config", "user.email", "test@example.com")
+	gitFixture(t, dir, "config", "commit.gpgsign", "false")
+}
+
+// divergeFromUpstream lands one upstream commit adding upstream.txt and one local commit adding
+// localName, then fetches, so the clone's branch has diverged from its last-fetched upstream.
+// A localName of "upstream.txt" makes the two commits conflict.
+func divergeFromUpstream(t *testing.T, remote, clone, localName string) {
+	t.Helper()
+	pushUpstreamCommit(t, remote, "upstream.txt")
+	writeFixtureFile(t, clone, localName, "local\n")
+	gitFixture(t, clone, "add", localName)
+	gitFixture(t, clone, "commit", "-q", "-m", "local")
+	gitFixture(t, clone, "fetch", "-q")
+}
+
+// TestGitActionsHostBranchesListsTheCurrentBranchFirst pins the list order — the checked-out
+// branch, then the rest by name — and that a branch shadowed by a tag of the same name is listed
+// by its bare name, never as heads/<name>.
+func TestGitActionsHostBranchesListsTheCurrentBranchFirst(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	_, clone := statusHostClone(t)
+	gitFixture(t, clone, "branch", "alpha")
+	gitFixture(t, clone, "tag", "zeta")
+	gitFixture(t, clone, "branch", "zeta")
+	gitFixture(t, clone, "checkout", "-q", "-b", "mid")
+
+	names, err := gitActionsHost{}.Branches(context.Background(), clone)
+
+	if err != nil {
+		t.Fatalf("Branches = %v", err)
+	}
+	if want := []string{"mid", "alpha", "main", "zeta"}; !slices.Equal(names, want) {
+		t.Errorf("Branches = %q, want %q", names, want)
+	}
+}
+
+// TestGitActionsHostSwitch pins each switch outcome: a clean switch lands on the branch (a
+// tag-shadowed one included, never a detached HEAD), and a dirty tree, an option-like name and a
+// name with no local branch are refused with no checkout run and HEAD where it was.
+func TestGitActionsHostSwitch(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+
+	cases := []struct {
+		name string
+		// arm shapes the clone before the switch.
+		arm     func(t *testing.T, clone string)
+		target  string
+		wantRef string
+		wantErr string
+	}{
+		{
+			name:    "clean tree",
+			arm:     func(t *testing.T, clone string) { gitFixture(t, clone, "branch", "feature") },
+			target:  "feature",
+			wantRef: "refs/heads/feature",
+		},
+		{
+			name: "branch shadowed by a tag",
+			arm: func(t *testing.T, clone string) {
+				gitFixture(t, clone, "tag", "x")
+				gitFixture(t, clone, "branch", "x")
+			},
+			target:  "x",
+			wantRef: "refs/heads/x",
+		},
+		{
+			name: "dirty tree",
+			arm: func(t *testing.T, clone string) {
+				gitFixture(t, clone, "branch", "feature")
+				writeFixtureFile(t, clone, "README", "edited\n")
+			},
+			target:  "feature",
+			wantRef: "refs/heads/main",
+			wantErr: "uncommitted changes",
+		},
+		{
+			name:    "option-like name",
+			arm:     func(t *testing.T, clone string) {},
+			target:  "-f",
+			wantRef: "refs/heads/main",
+			wantErr: "may not begin with '-'",
+		},
+		{
+			name:    "a tag with no local branch",
+			arm:     func(t *testing.T, clone string) { gitFixture(t, clone, "tag", "v1") },
+			target:  "v1",
+			wantRef: "refs/heads/main",
+			wantErr: "no local branch",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, clone := statusHostClone(t)
+			tc.arm(t, clone)
+			rec := &recordingStatusHost{}
+
+			result, err := gitActionsHost{base: rec.host()}.Switch(context.Background(), clone, tc.target)
+
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("Switch(%q) = %v", tc.target, err)
+			case tc.wantErr == "" && result != "switch: switched to "+tc.target:
+				t.Errorf("Switch result = %q", result)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("Switch(%q) = %v, want an error containing %q", tc.target, err, tc.wantErr)
+			case tc.wantErr != "" && rec.ran("checkout"):
+				t.Errorf("a refused switch ran `git checkout`")
+			}
+			if ref := gitFixtureOutput(t, clone, "symbolic-ref", "HEAD"); ref != tc.wantRef {
+				t.Errorf("HEAD = %s after the switch, want %s", ref, tc.wantRef)
+			}
+		})
+	}
+}
+
+// TestGitActionsHostRebaseOntoTheUpstream pins that a clean, diverged branch is rebased onto its
+// last-fetched upstream: the local commit now sits on the upstream's tip.
+func TestGitActionsHostRebaseOntoTheUpstream(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	remote, clone := statusHostClone(t)
+	identifyFixture(t, clone)
+	divergeFromUpstream(t, remote, clone, "local.txt")
+
+	result, err := gitActionsHost{}.Rebase(context.Background(), clone)
+
+	if err != nil {
+		t.Fatalf("Rebase = %v", err)
+	}
+	if result != "rebase: rebased onto origin/main" {
+		t.Errorf("Rebase result = %q", result)
+	}
+	if parent, upstream := gitFixtureOutput(t, clone, "rev-parse", "HEAD~1"), gitFixtureOutput(t, remote, "rev-parse", "main"); parent != upstream {
+		t.Errorf("HEAD~1 = %s after the rebase, want the upstream's %s", parent, upstream)
+	}
+}
+
+// TestGitActionsHostRebaseRefusesADirtyTree pins that a tree with uncommitted changes gets no
+// rebase and keeps its HEAD.
+func TestGitActionsHostRebaseRefusesADirtyTree(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	remote, clone := statusHostClone(t)
+	identifyFixture(t, clone)
+	divergeFromUpstream(t, remote, clone, "local.txt")
+	writeFixtureFile(t, clone, "README", "edited\n")
+	before := gitFixtureOutput(t, clone, "rev-parse", "HEAD")
+	rec := &recordingStatusHost{}
+
+	_, err := gitActionsHost{base: rec.host()}.Rebase(context.Background(), clone)
+
+	if err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("Rebase of a dirty tree = %v, want the dirty-tree refusal", err)
+	}
+	if rec.ran("rebase") {
+		t.Error("a dirty tree ran `git rebase`")
+	}
+	if after := gitFixtureOutput(t, clone, "rev-parse", "HEAD"); after != before {
+		t.Errorf("HEAD moved from %s to %s on a refused rebase", before, after)
+	}
+}
+
+// TestGitActionsHostRebaseConflictIsAborted pins that a rebase stopping on a conflict is aborted:
+// the error names the conflicting file, HEAD is unchanged, no rebase is left in progress, and the
+// tree holds the local content again.
+func TestGitActionsHostRebaseConflictIsAborted(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	remote, clone := statusHostClone(t)
+	identifyFixture(t, clone)
+	divergeFromUpstream(t, remote, clone, "upstream.txt")
+	before := gitFixtureOutput(t, clone, "rev-parse", "HEAD")
+
+	_, err := gitActionsHost{}.Rebase(context.Background(), clone)
+
+	if err == nil || !strings.Contains(err.Error(), "conflict in upstream.txt") || !strings.Contains(err.Error(), "aborted") {
+		t.Fatalf("Rebase with a conflict = %v, want an aborted conflict naming upstream.txt", err)
+	}
+	if after := gitFixtureOutput(t, clone, "rev-parse", "HEAD"); after != before {
+		t.Errorf("HEAD moved from %s to %s on an aborted rebase", before, after)
+	}
+	if status := gitFixtureOutput(t, clone, "status", "--porcelain"); status != "" {
+		t.Errorf("the tree is not as it was after the abort: %q", status)
+	}
+	if out, err := gitFixtureCmd(clone, "rev-parse", "-q", "--verify", "REBASE_HEAD").Output(); err == nil {
+		t.Errorf("a rebase is still in progress at %s", out)
+	}
+}
+
+// TestGitActionsHostBranchArgvsCarryTheHardening pins the checkout, rebase and rebase --abort
+// argvs: the hardening pairs, submodule recursion off, and never a force.
+func TestGitActionsHostBranchArgvsCarryTheHardening(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	remote, clone := statusHostClone(t)
+	identifyFixture(t, clone)
+	gitFixture(t, clone, "branch", "feature")
+	rec := &recordingStatusHost{}
+	host := gitActionsHost{base: rec.host()}
+	ctx := context.Background()
+
+	if _, err := host.Switch(ctx, clone, "feature"); err != nil {
+		t.Fatalf("Switch = %v", err)
+	}
+	if _, err := host.Switch(ctx, clone, "main"); err != nil {
+		t.Fatalf("Switch back = %v", err)
+	}
+	divergeFromUpstream(t, remote, clone, "upstream.txt")
+	if _, err := host.Rebase(ctx, clone); err == nil {
+		t.Fatal("Rebase with a conflict = nil, want the aborted conflict")
+	}
+
+	checkouts := rec.recordedArgvs("checkout")
+	rebases := rec.recordedArgvs("rebase")
+	if len(checkouts) != 2 || len(rebases) != 2 {
+		t.Fatalf("ran %d checkouts and %d rebases, want 2 of each", len(checkouts), len(rebases))
+	}
+	for _, argv := range checkouts {
+		assertActionArgv(t, argv, []string{"--"})
+	}
+	for _, argv := range rebases {
+		assertActionArgv(t, argv, nil)
+	}
+	if !slices.Contains(rebases[1], "--abort") {
+		t.Errorf("the second rebase argv %q is not the abort", rebases[1])
+	}
+}
+
+// TestGitActionsHostRefusedRepositoryRunsNoBranchVerb pins that a repository gitexec refuses
+// gets no checkout or rebase, and that the branch list, switch and rebase each report the
+// refusal as an error.
+func TestGitActionsHostRefusedRepositoryRunsNoBranchVerb(t *testing.T) {
+	t.Parallel()
+	requireGitForStatusHost(t)
+	_, clone := statusHostClone(t)
+	gitFixture(t, clone, "branch", "feature")
+	gitFixture(t, clone, "config", "core.sshCommand", "ssh -v")
+	rec := &recordingStatusHost{}
+	host := gitActionsHost{base: rec.host()}
+	ctx := context.Background()
+
+	if _, err := host.Branches(ctx, clone); err == nil {
+		t.Error("Branches in a refused repository = nil, want the refusal")
+	}
+	if _, err := host.Switch(ctx, clone, "feature"); err == nil {
+		t.Error("Switch in a refused repository = nil, want the refusal")
+	}
+	if _, err := host.Rebase(ctx, clone); err == nil {
+		t.Error("Rebase in a refused repository = nil, want the refusal")
+	}
+
+	for _, verb := range []string{"checkout", "rebase"} {
+		if rec.ran(verb) {
+			t.Errorf("a refused repository ran `git %s`", verb)
+		}
+	}
+}

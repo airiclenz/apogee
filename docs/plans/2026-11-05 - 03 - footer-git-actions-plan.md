@@ -116,7 +116,15 @@ cmd/apogee/gitstatus_host_test.go — statusHostClone, recordingStatusHost, Test
 
 **Commit:** `feat(git): a hardened git actions host for fetch, pull, push and sync`
 
-## 4. Host: branches, switch, rebase
+## 4. Host: branches, switch, rebase — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): "dirty" for switch and rebase means tracked changes only (staged, unstaged or unmerged), read with `status --porcelain=v2 --untracked-files=no --ignore-submodules=dirty -z` through gitstatus.Counter: untracked files cannot be lost, because checkout and rebase refuse to overwrite them, so they do not block. The footer's dirty count still includes untracked files.
+NOTES (2026-11-05): Switch checks that the branch exists by matching the name against the `for-each-ref %(HEAD) %(refname:lstrip=2) refs/heads/` listing that Branches uses, so the same read backs both. Switching to the branch already checked out returns "switch: already on <name>" and runs no checkout. The leading-`-` check is done inline: internal/tools' looksLikeOption is unexported in another package.
+NOTES (2026-11-05): Rebase is local and fetches nothing. It rebases onto `@{u}` as last fetched and returns "rebase: already up to date with <upstream>" when `HEAD..@{u}` is empty. After any rebase failure it reads the unmerged paths (`diff --name-only --diff-filter=U --no-ext-diff -z`) and then always runs `rebase --abort`. If the abort fails, its error is appended rather than dropped: apogee cannot tell a rebase that never started from an abort that failed.
+NOTES (2026-11-05): local verbs (branch list, switch, rebase) use the no-prompt baseEnv and make no transport decision, so the Windows operator-ssh refusal does not apply to them. checkout, rebase and rebase --abort go through `act`, so they carry the whole gitActionsConfig (submodule.recurse=false plus the quiet and transport pairs). Added TestGitActionsHostRefusedRepositoryRunsNoBranchVerb, which the plan's Tests line did not list.
+NOTES (2026-11-05): consequential edit — internal/tui/tui.go: made necessary by GitActionsHost adding switch and rebase (the Options.GitActions comment listed only fetch, pull, push and sync)
+NOTES (2026-11-05): consequential edit — internal/tui/doc.go: made necessary by GitActionsHost adding switch and rebase (the gitactions.go map line)
+NOTES (2026-11-05): consequential edit — cmd/apogee/doc.go: made necessary by gitactions_host.go adding the branch list, switch and rebase (its doc-map narration)
 
 **What:** Depends on item 3.
 

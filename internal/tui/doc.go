@@ -943,7 +943,7 @@
 // [heartbeatState] field itself); gitstatus.go the footer's git poll — the [GitStatusHost] seam,
 // the [gitState] the Model keeps, and the status and fetch chains that keep it current
 // ([Model.refreshGit], [Model.armGitFetch], [Model.foldGitStatus], [Model.foldGitFetch]); gitactions.go
-// the [GitActionsHost] seam the user's own fetch, pull, push and sync run through (ADR 0108); theme.go the palette, the
+// the [GitActionsHost] seam the user's own fetch, pull, push, sync, switch and rebase run through (ADR 0108); theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps
 // that palette under the running frame (status, pick, and the `export` that is the only way to
