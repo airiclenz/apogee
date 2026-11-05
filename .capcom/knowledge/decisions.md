@@ -108,6 +108,7 @@ title: "apogee's decision records: one Note per record, with each of its section
 - `adr-0104` — Project config execution keys are adoption-gated entries
 - `adr-0105` — A server entry may name fallback servers, and a failed seat falls over one-way
 - `adr-0106` — Pointer shapes on hover are OSC 22, probe-gated and off by default
+- `adr-0108` — Footer git actions are the user's own act
 
 > **Note (2026-10-29, knowledge inventory).** Older records point at files that have since moved.
 > Read those pointers through this map; the records keep their spellings as written.

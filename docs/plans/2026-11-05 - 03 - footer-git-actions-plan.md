@@ -60,7 +60,10 @@ NOTES (2026-11-05): gate passed — `docs/plans/archived/2026-11-05 - 02 - foote
 
 **Commit:** none (gate only)
 
-## 2. ADR — footer git actions are the user's own act
+## 2. ADR — footer git actions are the user's own act — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the record is ADR 0108 — 0107 is the next free file number but plan `2026-11-05 - 00 - v1-placeholder-retraction-plan.md` claims it, so the index line `adr-0108` sits directly after `adr-0106` with no 0107 line between them yet.
+NOTES (2026-11-05): decision 3 also records the item-3 guard calls the header lists (no submodule recursion; a transport that cannot run safely, e.g. Windows with an operator ssh command, refuses with a note instead of the background fetch's silent skip), so later items implement against the record.
 
 **What:** Depends on item 1.
 
