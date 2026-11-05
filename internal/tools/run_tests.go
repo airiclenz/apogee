@@ -81,8 +81,10 @@ var runTestsSpec = toolSpec{
 	// The description states the two things a model cannot learn by calling: that the runner
 	// is detected (so no command is expected from it) and that the result is a SUMMARY, never
 	// the log — with the escape hatch named, so needing the full output leads to terminal
-	// rather than to a second run_tests call that returns the same summary.
-	description: "Run the project's test suite and get a CONDENSED summary — never the full log. The runner is detected from project markers: go.mod ⇒ 'go test', pytest.ini or a pyproject.toml pytest section ⇒ 'pytest', package.json with a test script ⇒ 'npm test'. The result gives PASS/FAIL, the counts the runner reports, and the first failing tests with their first error lines, capped at 8 KB. Use terminal when you need the complete output.",
+	// rather than to a second run_tests call that returns the same summary. It also says WHERE
+	// detection looks and where the runner runs (2026-11-05), so a model testing a project in a
+	// subdirectory passes that directory as path instead of falling back to terminal.
+	description: "Run the project's test suite and get a CONDENSED summary — never the full log. The runner is detected from project markers at path or the nearest directory above it (up to the workspace root): go.mod ⇒ 'go test', pytest.ini or a pyproject.toml pytest section ⇒ 'pytest', package.json with a test script ⇒ 'npm test'. It runs from the directory holding the marker. The result gives PASS/FAIL, the counts the runner reports, and the first failing tests with their first error lines, capped at 8 KB. Use terminal when you need the complete output.",
 	// The timeout_seconds description is RENDERED from this tool's own default and
 	// internal/subprocess's ceiling, never restated by hand: the numbers the model is told are
 	// the numbers the run actually applies, so a resized budget cannot leave the advertised one
@@ -90,7 +92,7 @@ var runTestsSpec = toolSpec{
 	schema: json.RawMessage(fmt.Sprintf(`{
   "type": "object",
   "properties": {
-    "path": {"type": "string", "description": "Optional subtree to test, relative to the workspace root (default: the whole project). It is handed to the detected runner in that runner's own native form"},
+    "path": {"type": "string", "description": "Optional subtree to test, relative to the workspace root (default: the whole project). The runner is detected at this path or the nearest directory above it that holds a marker; it runs from that directory and is handed this path relative to it, in its own native form"},
     "filter": {"type": "string", "description": "Optional test-name pattern, mapped to the detected runner's own filter flag (go: -run, pytest: -k, npm: -t)"},
     "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds for the whole run (default %d, max %d). Raise it when the suite is slow rather than re-running a timed-out one"}
   }

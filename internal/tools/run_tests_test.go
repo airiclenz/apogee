@@ -725,6 +725,34 @@ func TestRunTestsSchemaAdvertisesTheTimeoutItApplies(t *testing.T) {
 	}
 }
 
+// TestRunTestsSpecSaysHowPathPicksTheRunner pins that the model is told where detection looks
+// and where the runner runs — at path or the nearest directory above it, from the marker's own
+// directory — in both the description and the path property, so a model testing a project in a
+// subdirectory passes that directory as path rather than reaching for terminal.
+func TestRunTestsSpecSaysHowPathPicksTheRunner(t *testing.T) {
+	t.Parallel()
+
+	tool := NewRunTests(t.TempDir(), nil)
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	pathDescription, _ := schema.Properties["path"]["description"].(string)
+
+	for name, text := range map[string]string{
+		"description":      tool.Description(),
+		"path description": pathDescription,
+	} {
+		for _, want := range []string{"nearest", "above", "runs from"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("the %s must state %q (detection at or above path, run from the marker directory): %q", name, want, text)
+			}
+		}
+	}
+}
+
 // TestRunTestsRequestedTimeoutReachesTheRunner pins the point of the parameter: a model that asks
 // for more time gets it on the spec the runner is launched with, handed through untouched — the
 // ceiling is internal/subprocess's to apply, not this tool's to duplicate.

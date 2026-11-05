@@ -83,7 +83,7 @@ NOTES (2026-11-05): each searched directory is passed through `clipLine`, like t
 
 **Commit:** `fix(tools): run_tests refusal names the directories it searched`
 
-## 3. Say how `path` picks the runner — tool description and manual
+## 3. Say how `path` picks the runner — tool description and manual — ✅ DONE (2026-11-05)
 
 **What:** Depends on item 1.
 

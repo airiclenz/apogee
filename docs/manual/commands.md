@@ -485,6 +485,16 @@ cut back to it beyond that, and a timed-out run names the budget it actually had
 — timed out after 15m0s`). The git tools take no such argument: `git_diff_range` and `git_show` get
 30 seconds, twice the 15 the other git reads get.
 
+**Where `run_tests` runs.** `run_tests` picks its runner from the project markers (`go.mod`, then
+`pytest.ini` or a pytest section in `pyproject.toml`, then a `package.json` test script) at its
+`path` or the nearest directory above it, up to the workspace root — never below `path`, and a
+file `path` starts the search at the file's directory. The runner runs from the directory holding
+the marker and is handed `path` relative to it, so `path=checkouts/tool` with its own `go.mod`
+runs `go test ./...` inside `checkouts/tool`, and a nested Go module is tested as itself rather than
+from an outer root that cannot build it. A run off the root ends its condensed result with
+``run `<command>` with terminal (workdir <dir>) for the full log``, and when no directory on the
+way up holds a marker the refusal names each one it searched, nearest first.
+
 **What the read tools may read.** The roots those tools accept are the workspace, the session's
 scratch directory, the skill libraries, and — when `go` is on your PATH — the Go toolchain's own two
 trees: `GOROOT` and the module cache (`GOMODCACHE`). apogee asks `go env` for the two once at
