@@ -11,6 +11,7 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **Fixed:** on Terminal.app, painted fields (the status line, the footer, and any other painted row that reaches the window's edge) now keep their own colour all the way to the right border. Before, the renderer cleared a row's painted tail with an erase that Terminal.app draws in its own background. Each painted blank at a row's edge is now written out as a character. Copied text is unchanged. (bottom-chrome-erased-cells)
 - **The bottom of the screen is one band under every colour scheme.** The context gauge's filled cells now paint the scheme's `surface` like the rest of the bottom chrome, so the prompt box, status line and footer no longer show stripes of the terminal's own background between them. The chat area, and the blank row between it and the chrome, keep the terminal's own background. (prompt-box-uneven-background)
 - **Fixed:** while watching a live session, a click on the footer's git segment no longer opens the git actions picker over the watched view; it raises the watch's read-only flash, as `/git` already did.
 - While you watch a live session, the footer's git poll reads the watched session's workspace instead of yours (nothing at all where the watch names no workspace) and the background `git fetch` pauses; leaving the watch reads your own workspace again at once.
