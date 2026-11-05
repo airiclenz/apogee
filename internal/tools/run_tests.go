@@ -273,9 +273,9 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, errMsg), nil
 	}
 
-	runner, markerDir, _, ok := detectTestRunner(t.root, start)
+	runner, markerDir, searched, ok := detectTestRunner(t.root, start)
 	if !ok {
-		return errorResult(call.ID, noTestRunnerMessage()), nil
+		return errorResult(call.ID, noTestRunnerMessage(searched)), nil
 	}
 
 	filter := strings.TrimSpace(args.Filter)
@@ -417,17 +417,47 @@ func detectTestRunner(root, start string) (runner testRunner, markerDir string, 
 	}
 }
 
-// noTestRunnerMessage tells the model exactly which markers were looked for and where to go
-// instead — a project with a Makefile target or a bespoke script is not a broken project, it is
-// one whose test command only the user's own tooling knows.
-func noTestRunnerMessage() string {
+// noTestRunnerMessage tells the model exactly which markers were looked for, in which directories
+// — searched is detectTestRunner's list, nearest first, "" naming the root — and where to go
+// instead: a project with a Makefile target or a bespoke script is not a broken project, it is
+// one whose test command only the user's own tooling knows. Naming the directories keeps a miss
+// from reading as "nothing anywhere" when the marker sits beside or below the searched ones.
+func noTestRunnerMessage(searched []string) string {
 	markers := make([]string, 0, len(testRunners))
 	for _, runner := range testRunners {
 		markers = append(markers, runner.marker)
 	}
-	return "no test runner detected: looked for " + strings.Join(markers, "; ") +
-		". Use terminal to run this project's own test command."
+	return "no test runner detected in " + searchedDirsPhrase(searched) + ": looked for " +
+		strings.Join(markers, "; ") + ". Use terminal to run this project's own test command."
 }
+
+// searchedDirsPhrase reads the searched directories out as the refusal spells them: workspace-
+// relative slash paths, the root as "the workspace root", and the list as "a and b" or
+// "a, b, and c". Each directory is clipped like the full-log hint's workdir, on the same grounds:
+// it is derived from the model's path.
+func searchedDirsPhrase(searched []string) string {
+	names := make([]string, 0, len(searched))
+	for _, dir := range searched {
+		if dir == "" {
+			names = append(names, workspaceRootPhrase)
+			continue
+		}
+		names = append(names, clipLine(dir))
+	}
+	switch len(names) {
+	case 0:
+		return workspaceRootPhrase
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+	}
+}
+
+// workspaceRootPhrase is how a model-facing message names the workspace root directory.
+const workspaceRootPhrase = "the workspace root"
 
 // markerPath joins a marker file's name onto the workspace-relative slash directory it is probed
 // in, in the host's own separator — the form the fenced stat and read take.

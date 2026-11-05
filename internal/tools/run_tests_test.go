@@ -369,20 +369,55 @@ func TestRunTestsFullLogHintNamesTheMarkerWorkdir(t *testing.T) {
 	}
 }
 
-// TestRunTestsNoMarkerIsAnErrorNamingTheMarkers pins the no-marker result: the model is told what
-// was looked for and where to go instead, so an unmarked project is an actionable answer rather
-// than a dead end it retries.
+// TestRunTestsNoMarkerIsAnErrorNamingTheMarkers pins the whole no-marker result for each shape of
+// walk: the model is told what was looked for, in which directories (nearest first, the root
+// spelled out — a miss that does not say where it looked reads as "nothing anywhere"), and where
+// to go instead, so an unmarked project is an actionable answer rather than a dead end it retries.
 func TestRunTestsNoMarkerIsAnErrorNamingTheMarkers(t *testing.T) {
 	t.Parallel()
 
-	res := runTestsCall(t, writeProject(t, map[string]string{"Makefile": "test:\n\t./run.sh\n"}), nil)
-	if !res.IsError {
-		t.Fatalf("a project with no runner marker must be an error result: %q", res.Content)
+	const lookedFor = ": looked for go.mod (go test); " +
+		"pytest.ini, or a pyproject.toml carrying a [tool.pytest…] section (pytest); " +
+		`package.json with a "test" script (npm test). Use terminal to run this project's own test command.`
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "a nested path two levels down names both levels and the root",
+			args: map[string]any{"path": "a/b"},
+			want: "no test runner detected in a/b, a, and the workspace root" + lookedFor,
+		},
+		{
+			name: "a one-directory path names it and the root",
+			args: map[string]any{"path": "sub"},
+			want: "no test runner detected in sub and the workspace root" + lookedFor,
+		},
+		{
+			name: "no path names only the root",
+			args: nil,
+			want: "no test runner detected in the workspace root" + lookedFor,
+		},
 	}
-	for _, want := range []string{"go.mod", "pytest", "package.json", "terminal"} {
-		if !strings.Contains(res.Content, want) {
-			t.Errorf("the no-runner message must name %q: %q", want, res.Content)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := writeProject(t, map[string]string{
+				"Makefile":      "test:\n\t./run.sh\n",
+				"a/b/README.md": "no tests here\n",
+				"sub/README.md": "no tests here\n",
+			})
+
+			res := runTestsCall(t, root, tc.args)
+
+			if !res.IsError {
+				t.Fatalf("a walk that finds no marker must be an error result: %q", res.Content)
+			}
+			if res.Content != tc.want {
+				t.Errorf("refusal =\n%q\nwant\n%q", res.Content, tc.want)
+			}
+		})
 	}
 }
 

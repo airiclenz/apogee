@@ -61,7 +61,9 @@ NOTES (2026-11-05): the footer's workdir goes through `clipLine`, like the comma
 
 **Commit:** `fix(tools): run_tests detects its runner at or above path and runs from the marker's directory`
 
-## 2. Name the searched directories in the refusal
+## 2. Name the searched directories in the refusal — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): each searched directory is passed through `clipLine`, like the full-log hint's workdir, since it derives from the model's `path`.
 
 **What:** Recast at the regression check (2026-11-05). fix — the "no test runner detected" refusal does not say where it looked, so it reads as if nothing was found anywhere. Depends on item 1.
 
