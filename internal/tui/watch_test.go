@@ -1544,6 +1544,25 @@ func TestWatchIsolatesRoutesEveryFoldedMsg(t *testing.T) {
 	}
 }
 
+func TestWatchRoutesGitActionLandingsToTheOwner(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		msg  gitActionDoneMsg
+		want watchRoute
+	}{
+		{"an action's result", gitActionDoneMsg{action: gitActionPull, result: "pull: already up to date"}, watchRouteOwner},
+		{"an action's failure", gitActionDoneMsg{action: gitActionPush, err: fmt.Errorf("git push: rejected")}, watchRouteOwner},
+		{"a failed branch listing", gitActionDoneMsg{action: gitActionSwitch, listing: true, err: fmt.Errorf("git switch: no repo")}, watchRouteOwner},
+		{"a branch listing that opens the picker", gitActionDoneMsg{action: gitActionSwitch, listing: true, branches: []string{"main"}}, watchRouteHeld},
+	}
+	for _, tc := range cases {
+		if got := watchRouteOf(tc.msg); got != tc.want {
+			t.Errorf("%s: watchRouteOf = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestWatchIsolatesHoldsTheOwnersSurfacesUntilEsc(t *testing.T) {
 	t.Parallel()
 	host := &fakeSessionHost{}

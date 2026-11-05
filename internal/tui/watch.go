@@ -379,8 +379,13 @@ const (
 // watchRouteOf routes msg while watching. Every Msg type [Model.fold] has a case for is named below
 // — TestWatchIsolatesRoutesEveryFoldedMsg fails until a new one is — and anything else is a widget's
 // own Msg, which belongs to the input box and so to the view.
+//
+// A footer git action is the owner's: no action starts while watching (acceptPicker refuses every
+// row), so one that lands began before the watch, its `git <verb>…` note sits in the parked
+// transcript, and its fold releases the owner's engine for a stashed rebind. A branch listing that
+// landed opens the branch picker over the view, so it waits for the watch like any other surface.
 func watchRouteOf(msg tea.Msg) watchRoute {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case watchPollMsg, watchBatchMsg,
 		tea.WindowSizeMsg, tea.ModeReportMsg, tea.ColorProfileMsg, tea.KeyboardEnhancementsMsg,
 		uv.UnknownOscEvent, uv.PrimaryDeviceAttributesEvent,
@@ -400,6 +405,11 @@ func watchRouteOf(msg tea.Msg) watchRoute {
 		workflowStoppedMsg, workflowSavedMsg, bgStartedMsg, workflowNoteLostMsg,
 		skillsReloadedMsg, skillsRescannedMsg, recallLoadedMsg, updateCheckedMsg,
 		beatMsg, actuationMsg, restoreMsg, heartbeatTickMsg:
+		return watchRouteOwner
+	case gitActionDoneMsg:
+		if msg.listing && msg.err == nil {
+			return watchRouteHeld
+		}
 		return watchRouteOwner
 	}
 	return watchRouteView
