@@ -145,7 +145,16 @@ cmd/apogee/gitstatus_host_test.go — statusHostClone, gitFixture, writeFixtureF
 
 **Commit:** `feat(git): git actions host lists, switches and rebases branches`
 
-## 5. The git actions picker, the footer click and `/git`
+## 5. The git actions picker, the footer click and `/git` — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the regression guard calls `footerRowY` gone after plan 02, but it still exists in its per-row form, `footerRowY(row)`. The git hit uses it with the row taken from the new `footerGitSpan` (model.go), which walks each footer row's `footerRow(...).span(footerSegGit)` span table. `footerLayout.git`/`gitAt` are not used.
+NOTES (2026-11-05): internal/tui/sessionsave.go was not in Files. `pumpOrQuit` now also waits out holdGitAction (`&& !m.holds.has(holdGitAction)`). Without that, a record write landing mid-action would fire a deferred quit before the git action's completion fold. `quitSession` defers on the hold beside its writeBusy branch, and `foldGitActionDone` fires the exit through `pumpOrQuit` once the write queue is idle.
+NOTES (2026-11-05): an action accepted while a background fetch is in flight takes the hold and notes `git <verb>…` at once, but is issued only when that fetch lands (`gitState.fetchInFlight`, `actionWaits`, `foldGitFetch`). A quit made meanwhile drops the waiting action instead of running it. While the hold stands, `foldGitFetchTick` re-arms itself for one more full fetch interval.
+NOTES (2026-11-05): the "switch branch" and "rebase onto upstream" rows are listed as the Goal says, but in this item accepting them only notes "git switch/rebase is not available yet". Item 6 wires them to `pickerGitBranch` and the latched confirm.
+NOTES (2026-11-05): the footer git hit (and its pointer shape) is gated on a wired GitActions host and a state other than errored, with no picker, /sessions browser or /settings pane up. It stays open while a Turn runs or a decision is pending, so the click can give the wait note. Failure notes drop a leading `git <verb>: ` from the host's error so the verb appears only once ("git push failed — …").
+NOTES (2026-11-05): consequential edit — internal/tui/doc.go: made necessary by the new hold (engineHold list), the git hit (pointer-shape predicate list) and gitactions.go's new picker/fold (its map line)
+NOTES (2026-11-05): consequential edit — internal/tui/footerfit.go: made necessary by the git segment becoming a second pointer reader of the footer layout
+NOTES (2026-11-05): the hold × questions table in engineholds_test.go was not extended (not in Files). The new hold's gate answers (canWake, canResumeWorkflows, commandRunnable) are asserted in TestGitActionPromptWaitsMidAction instead.
 
 **What:** Depends on item 3.
 

@@ -6940,6 +6940,96 @@ func TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered(t *te
 	}
 }
 
+// ----------------------------------------------------------------------------
+// The footer's git segment as a pointer target (handleFooterGitClick, mouse.go)
+// ----------------------------------------------------------------------------
+
+// footerGitCells reports the footer row the git segment stands on and the first and last column it
+// is painted on in m's frame. It asks footerGitSpan — the row's span table, the ONE value the
+// painter draws from — rather than restating the arithmetic, footerMarkerCells' rule.
+func footerGitCells(t *testing.T, m Model) (y, first, last int) {
+	t.Helper()
+	row, col, cells, ok := m.footerGitSpan(m.width)
+	if !ok {
+		t.Fatalf("the git segment is not drawn in a %dx%d window; these cases need it shown", m.width, m.height)
+	}
+	return m.footerRowY(row), col, col + cells - 1
+}
+
+// TestClickOnTheFooterGitSegmentOpensTheGitActionsPicker is the segment's pointer contract: every
+// cell of it, on the row it stands on under the layout's per-row span table, opens the git actions
+// picker and shows the pointer; the cells beside it and the same columns on another footer row do
+// neither.
+func TestClickOnTheFooterGitSegmentOpensTheGitActionsPicker(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		rows   domain.FooterRows
+		gitRow int
+	}{
+		{"the default layout", "", -1},
+		{"git on the second row", "[[host, model, effort, mode], [workdir, git, spend]]", 1},
+		{"git on the first row", "[[workdir, git], [host, model, effort, spend, mode]]", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base, _ := gitActionsModelWith(t, tracked(), &fakeGitActionsHost{}, func(opts *Options) {
+				opts.UI.FooterRows = tc.rows
+			})
+			top := base.height - bottomRuleHeight - base.footerRows()
+			if tc.gitRow < 0 { // the default layout: whichever row names git
+				tc.gitRow = slices.IndexFunc(base.footerLines(), func(row []domain.FooterSegment) bool {
+					return slices.Contains(row, domain.FooterGit)
+				})
+			}
+
+			y, first, last := footerGitCells(t, base)
+			if want := top + tc.gitRow; y != want {
+				t.Fatalf("the git segment stands on row %d, want %d — footer row %d", y, want, tc.gitRow)
+			}
+			pre := base.withFrameSpans()
+			for _, x := range []int{first, (first + last) / 2, last} {
+				if live := step(t, base, leftClick(x, y)); !live.picker.open || live.picker.kind != pickerGitActions {
+					t.Errorf("a click at column %d on the segment gave picker %+v, want the git actions picker", x, live.picker)
+				}
+				if shape := base.pointerShapeAt(pre, x, y); shape != shapePointer {
+					t.Errorf("column %d of the segment shows shape %v, want the pointer", x, shape)
+				}
+				for row := range base.footerRows() {
+					if other := top + row; other != y {
+						if live := step(t, base, leftClick(x, other)); live.picker.open && live.picker.kind == pickerGitActions {
+							t.Errorf("a click at column %d on footer row %d opened the git actions picker", x, row)
+						}
+					}
+				}
+			}
+			for _, x := range []int{first - 1, last + 1} {
+				if live := step(t, base, leftClick(x, y)); live.picker.open && live.picker.kind == pickerGitActions {
+					t.Errorf("a click at column %d beside the segment opened the git actions picker", x)
+				}
+			}
+		})
+	}
+}
+
+// TestClickOnTheFooterGitSegmentNeedsAnActionsHost: with no git actions host wired the segment still
+// shows, but a click on it opens nothing, says nothing and shows no pointer.
+func TestClickOnTheFooterGitSegmentNeedsAnActionsHost(t *testing.T) {
+	t.Parallel()
+	base, _ := gitActionsModelWith(t, tracked(), nil, func(*Options) {})
+	y, first, last := footerGitCells(t, base)
+
+	for _, x := range []int{first, last} {
+		live := step(t, base, leftClick(x, y))
+		if live.picker.open || len(noteTexts(live)) != len(noteTexts(base)) {
+			t.Errorf("a click at column %d gave picker %+v and notes %v, want nothing", x, live.picker, noteTexts(live))
+		}
+		if shape := base.pointerShapeAt(base.withFrameSpans(), x, y); shape == shapePointer {
+			t.Errorf("column %d shows the pointer with no git actions to open", x)
+		}
+	}
+}
+
 // A click on a workflow's stage row opens what the stage leads to: a single stage — one item, one
 // round, one attempt — its item's run view, under a trail that ends on the stage; a stage no item
 // of which has started, nothing at all.

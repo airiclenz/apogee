@@ -1,6 +1,12 @@
 package tui
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // GitActionsHost is the seam the footer's git actions run through: the user's own fetch, pull,
 // push, sync, branch switch and rebase on the workspace (ADR 0108). Like [GitStatusHost], it keeps HOW git runs — the
@@ -36,4 +42,278 @@ type GitActionsHost interface {
 	// rebase that stops on a conflict is aborted, leaving the branch and tree as they were, and
 	// comes back as an error naming the conflicting files.
 	Rebase(ctx context.Context, root string) (string, error)
+}
+
+// gitAction names one footer git action — a row of the git actions picker (pickerGitActions) and,
+// while one runs, which ([gitState.action]). It is an enum so the Model holds plain values only
+// (ADR 0011); what each action calls on the host is [gitActionCall]'s to say.
+type gitAction int
+
+const (
+	gitActionNone gitAction = iota
+	gitActionFetch
+	gitActionPull
+	gitActionPush
+	gitActionSync
+	gitActionSwitch
+	gitActionRebase
+)
+
+// word is the action's git verb — the word its notes open with ("git pull…").
+func (a gitAction) word() string {
+	switch a {
+	case gitActionFetch:
+		return "fetch"
+	case gitActionPull:
+		return "pull"
+	case gitActionPush:
+		return "push"
+	case gitActionSync:
+		return "sync"
+	case gitActionSwitch:
+		return "switch"
+	case gitActionRebase:
+		return "rebase"
+	}
+	return ""
+}
+
+// The git actions notes: the refusals /git and the footer click answer with, and the title the
+// picker carries.
+const (
+	// noGitActionsNote answers /git with no git to act on: no actions host wired, no workspace, or
+	// a workspace the status read found outside any work tree — or in a repository apogee refuses.
+	noGitActionsNote = "no git here — git actions need a workspace in a git repository apogee can act on"
+	// gitActionsBusyNote answers /git and the footer click while a Turn runs or a decision is
+	// pending: the picker opens only at idle.
+	gitActionsBusyNote = "git actions wait for the Turn to end"
+	// gitActionRunningFormat answers them while a git action is still running; %s is its verb.
+	gitActionRunningFormat = "git %s is still running — git actions wait for it to finish"
+	// gitActionsTitle is the picker's title; a branch, where HEAD is on one, follows it.
+	gitActionsTitle = "git actions"
+)
+
+// gitActionsWired reports whether the footer's git actions exist at all: a host is wired and there
+// is a workspace to act on.
+func (m Model) gitActionsWired() bool {
+	return m.opts.GitActions != nil && m.opts.Workspace != ""
+}
+
+// gitActionsRefusal is the one gate /git and the footer click share: the note the opener answers
+// with instead of the picker, and false where the picker may open. With no git to act on it says
+// so; while a Turn runs or a decision is pending, and while a git action is still running, the
+// actions wait.
+func (m Model) gitActionsRefusal() (string, bool) {
+	switch {
+	case !m.gitActionsWired() || !m.git.hasSnap:
+		return noGitActionsNote, true
+	case m.busy():
+		return gitActionsBusyNote, true
+	case m.holds.has(holdGitAction):
+		return fmt.Sprintf(gitActionRunningFormat, m.git.action.word()), true
+	}
+	return "", false
+}
+
+// openGitActions opens the git actions picker, or notes why it does not open
+// ([Model.gitActionsRefusal]). It is the one opener of /git and of a click on the footer's git
+// segment ([Model.handleFooterGitClick]).
+func (m Model) openGitActions() (Model, tea.Cmd) {
+	if note, refused := m.gitActionsRefusal(); refused {
+		m.transcript.addNote(note)
+		return m, nil
+	}
+	m.picker = picker{open: true, kind: pickerGitActions}
+	return m, nil
+}
+
+// runGitCommand is /git's run: the git actions picker, the footer click's keyboard reach. The row is
+// whileRunning so a /git typed mid-Turn answers at once with the wait note rather than being queued
+// silently for the next idle.
+func (m Model) runGitCommand() (tea.Model, tea.Cmd) {
+	return m.openGitActions()
+}
+
+// gitActionRow is one row the git actions picker offers: the action and the words it is shown with.
+type gitActionRow struct {
+	action gitAction
+	label  string
+	gloss  string
+}
+
+// gitActionsOffered is the picker's offering, derived from the last good snapshot: fetch and push
+// always, pull, sync and rebase only while the branch has an upstream to act against, and switch
+// branch. It is derived per frame and re-derived at accept, so a snapshot that lands under the open
+// pane moves the rows and the accept reads the same list it drew.
+func (m Model) gitActionsOffered() []gitActionRow {
+	upstream := stripEscapes(m.git.snap.Upstream)
+	hasUpstream := m.git.hasSnap && upstream != ""
+	push := gitActionRow{gitActionPush, "push", "push to origin and track it — never forced"}
+	if hasUpstream {
+		push.gloss = "push to " + upstream + " — never forced"
+	}
+	rows := []gitActionRow{{gitActionFetch, "fetch", "update the remote-tracking refs"}}
+	if hasUpstream {
+		rows = append(rows, gitActionRow{gitActionPull, "pull", "fast-forward to " + upstream + " — never a merge commit"})
+	}
+	rows = append(rows, push)
+	if hasUpstream {
+		rows = append(rows, gitActionRow{gitActionSync, "sync", "pull, then push — stops at the first failure"})
+	}
+	rows = append(rows, gitActionRow{gitActionSwitch, "switch branch", "check out another local branch"})
+	if hasUpstream {
+		rows = append(rows, gitActionRow{gitActionRebase, "rebase onto upstream", "rebase onto " + upstream + " as last fetched"})
+	}
+	return rows
+}
+
+// gitActionRows paints [Model.gitActionsOffered] as the picker's rows: the label, then its gloss.
+func (m Model) gitActionRows() []popupRow {
+	offered := m.gitActionsOffered()
+	rows := make([]popupRow, 0, len(offered))
+	for _, row := range offered {
+		rows = append(rows, popupRow{row.label, "— " + row.gloss})
+	}
+	return rows
+}
+
+// gitActionsPickerTitle names the picker: "git actions", and the branch HEAD is on where it is on
+// one. The branch is the repository's text, so it is stripped like every other footer fact.
+func (m Model) gitActionsPickerTitle() string {
+	if branch := stripEscapes(m.git.snap.Branch); m.git.hasSnap && branch != "" {
+		return gitActionsTitle + " — " + branch
+	}
+	return gitActionsTitle
+}
+
+// acceptGitAction takes the picker's highlighted row, named by its index into the OFFERING
+// (acceptPicker resolves the filter first), re-derived rather than trusted from the frame that drew
+// it. Fetch, pull, push and sync start at once ([Model.startGitAction]); an index naming no row
+// closes the overlay and moves nothing. The gate is asked again: the overlay may have stood open
+// across a fold that changed the answer.
+func (m Model) acceptGitAction(offered int) (tea.Model, tea.Cmd) {
+	rows := m.gitActionsOffered()
+	m.picker = picker{}
+	if offered < 0 || offered >= len(rows) {
+		return m, nil
+	}
+	if note, refused := m.gitActionsRefusal(); refused {
+		return m.pickerNote(note)
+	}
+	action := rows[offered].action
+	if action == gitActionSwitch || action == gitActionRebase {
+		return m.pickerNote("git " + action.word() + " is not available yet")
+	}
+	return m.startGitAction(action)
+}
+
+// gitActionDoneMsg carries one landed footer git action into the Update loop: the host's one-line
+// result, or its error.
+type gitActionDoneMsg struct {
+	action gitAction
+	result string
+	err    error
+}
+
+// startGitAction takes the git action hold and notes `git <verb>…`, then issues the action off the
+// loop — or, while the background fetch is in flight, leaves it waiting for that fetch to land
+// ([Model.foldGitFetch]), so two git processes never run on the repository at once. From here until
+// the action folds, a prompt, a wake, a workflow resume and an idle-only command wait
+// (holdGitAction), no background fetch is issued ([Model.foldGitFetchTick]), and a quit defers its
+// exit ([Model.quitSession]).
+func (m Model) startGitAction(action gitAction) (tea.Model, tea.Cmd) {
+	m.holds.hold(holdGitAction)
+	m.git.action = action
+	m.transcript.addNote("git " + action.word() + "…")
+	if m.git.fetchInFlight {
+		m.git.actionWaits = true
+		return m, nil
+	}
+	return m, m.gitActionCmd()
+}
+
+// issueWaitingGitAction issues the git action that was waiting for the background fetch, now that
+// it has landed, and is nil when none waits. A quit asked for meanwhile wins: the action that never
+// started is dropped with its hold, and the exit it held fires once the write queue has drained
+// ([Model.pumpOrQuit]). It takes a pointer for [Model.refreshGit]'s reason.
+func (m *Model) issueWaitingGitAction() tea.Cmd {
+	if !m.git.actionWaits {
+		return nil
+	}
+	m.git.actionWaits = false
+	if m.quitting {
+		m.holds.release(holdGitAction)
+		m.git.action = gitActionNone
+		if m.writeBusy {
+			return nil
+		}
+		return m.pumpOrQuit()
+	}
+	return m.gitActionCmd()
+}
+
+// gitActionCall is the host call one action runs, and nil for an action the picker does not run
+// through this path.
+func gitActionCall(host GitActionsHost, action gitAction) func(context.Context, string) (string, error) {
+	switch action {
+	case gitActionFetch:
+		return host.Fetch
+	case gitActionPull:
+		return host.Pull
+	case gitActionPush:
+		return host.Push
+	case gitActionSync:
+		return host.Sync
+	}
+	return nil
+}
+
+// gitActionCmd runs the current action off the Update loop under the program context, so a shutdown
+// cancels a git child still running; the host bounds it only by its generous backstop.
+func (m Model) gitActionCmd() tea.Cmd {
+	call := gitActionCall(m.opts.GitActions, m.git.action)
+	action, ctx, root := m.git.action, m.parent, m.opts.Workspace
+	return func() tea.Msg {
+		if call == nil {
+			return gitActionDoneMsg{action: action, err: fmt.Errorf("git %s: not an action this picker runs", action.word())}
+		}
+		result, err := call(ctx, root)
+		return gitActionDoneMsg{action: action, result: result, err: err}
+	}
+}
+
+// foldGitActionDone folds one landed git action: it releases the hold, notes the result — or the
+// error, git's own message — and asks for a status read so the footer's counts show what the action
+// did. A quit that waited for the action exits from here once the write queue has drained too
+// ([Model.pumpOrQuit]); otherwise the engine is the loop's again, so a stashed rebind is applied
+// and the commands queued behind the action run. A Msg with no action held is inert.
+func (m Model) foldGitActionDone(msg gitActionDoneMsg) (tea.Model, tea.Cmd) {
+	if !m.holds.has(holdGitAction) {
+		return m, nil
+	}
+	m.holds.release(holdGitAction)
+	m.git.action, m.git.actionWaits = gitActionNone, false
+	m.transcript.addNote(gitActionNote(msg))
+	if m.quitting {
+		if m.writeBusy {
+			return m, nil
+		}
+		return m, m.pumpOrQuit()
+	}
+	refresh := m.refreshGit()
+	m.releaseEngine()
+	next, cmd := m.runDeferredCommands()
+	return next, tea.Batch(refresh, cmd)
+}
+
+// gitActionNote words a landed action for the transcript: `git <result>` on success — the host's
+// result already opens with the verb ("pull: already up to date") — and `git <verb> failed — <why>`
+// on failure, with a leading `git <verb>: ` the host's error carries dropped so the verb is said
+// once.
+func gitActionNote(msg gitActionDoneMsg) string {
+	if msg.err == nil {
+		return "git " + msg.result
+	}
+	verb := msg.action.word()
+	return "git " + verb + " failed — " + strings.TrimPrefix(msg.err.Error(), "git "+verb+": ")
 }

@@ -882,8 +882,8 @@
 // layout, the frame's one stacking order and the block spans View publishes while walking it
 // ([frameSpans], read by every pane rectangle), the status line and the footer; footerfit.go the
 // footer's FIT beside it — the pure composer ([footerFit]) that spends a window on the row's seven
-// facts in priority order, so the painter and the pointer that addresses the mode marker read one
-// layout rather than two arithmetics; sessionsave.go the record-write cluster lifted out of
+// facts in priority order, so the painter and the pointer that addresses the mode marker and the git
+// segment read one layout rather than two arithmetics; sessionsave.go the record-write cluster lifted out of
 // model.go (ADR 0043) — the assembled [savePayload], the per-Turn and idle saves, and the
 // single-flight queue that orders every Save, Rename, Delete, Rotate and Activate against one
 // another (the Model still owns the three fields it latches on); approval.go the approval-decision
@@ -927,7 +927,8 @@
 // gate both invocation routes share, while the parse that classifies the line and the table whose
 // rows declare each verb stay in command.go and
 // [Model.submit] stays with the input concern; engineholds.go who holds the engine — the
-// [engineHold] set (worker, actuation, /bg launch, session load, record write, quitting, prebound),
+// [engineHold] set (worker, actuation, /bg launch, session load, record write, quitting, prebound,
+// watching, git action),
 // which overlap rather than exclude one another, the snapshot [Model.engineHolds] takes of it with
 // the non-hold facts the gates also read, and the named questions asked of that snapshot
 // (commandRunnable, canRunDeferred, canRebind, beatMayCount, canEditConfigExternally, canLaunchBg,
@@ -943,7 +944,9 @@
 // [heartbeatState] field itself); gitstatus.go the footer's git poll — the [GitStatusHost] seam,
 // the [gitState] the Model keeps, and the status and fetch chains that keep it current
 // ([Model.refreshGit], [Model.armGitFetch], [Model.foldGitStatus], [Model.foldGitFetch]); gitactions.go
-// the [GitActionsHost] seam the user's own fetch, pull, push, sync, switch and rebase run through (ADR 0108); theme.go the palette, the
+// the [GitActionsHost] seam the user's own fetch, pull, push, sync, switch and rebase run through (ADR 0108),
+// and the git actions picker /git and a click on the footer's git segment open ([Model.openGitActions]):
+// each action runs off the loop under holdGitAction and folds as [Model.foldGitActionDone]; theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps
 // that palette under the running frame (status, pick, and the `export` that is the only way to
@@ -1048,7 +1051,8 @@
 // so a pane is one row and the framePane order is the one order the frame both gives way and stacks in;
 // pointershape.go the pointer-shape classifier — [Model.pointerShapeAt], which answers default, text or
 // pointer for a frame point by walking the click chain's own order and asking each region the hit
-// predicate its click handler decides by (a pane's hover, [Model.footerModeHit], the prompt's
+// predicate its click handler decides by (a pane's hover, [Model.footerModeHit],
+// [Model.footerGitHit], the prompt's
 // [Model.inputEditable] and [Model.pointInputRow], the transcript's [Model.pointTranscriptRow] and
 // [Model.blockTargetAt]), never restating one; pointerprobe.go the OSC 22 capability probe — the
 // query and its DA1 sentinel, the one verdict a session keeps — and the gate it opens with

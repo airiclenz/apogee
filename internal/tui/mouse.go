@@ -382,7 +382,8 @@ func promptPointerClick(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bo
 // handleMouseClick starts a fresh, collapsed selection under a left-click. It arbitrates by
 // region: a click on the open /settings pane's row list belongs to the pane (selecting a row, or
 // seating the caret in the row being typed into); a click on the footer's mode marker opens the mode
-// picker ([Model.handleFooterModeClick]) and selects nothing; a click in the prompt's editable text area
+// picker ([Model.handleFooterModeClick]) and one on its git segment the git actions picker
+// ([Model.handleFooterGitClick]), and neither selects anything; a click in the prompt's editable text area
 // positions the caret and arms a prompt selection there; otherwise a click in the transcript viewport
 // arms a transcript selection at that rendered cell; a click in none of them clears all three. Starting
 // one selection clears the others, so no two coexist. Non-left buttons are ignored.
@@ -457,11 +458,16 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		}
 		m = next
 	}
-	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
-	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
-	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
-	// before the prompt and transcript rects, which own the rows above it.
+	// The footer's mode marker and its git segment are the frame's two CHROME controls
+	// ([Model.handleFooterModeClick], [Model.handleFooterGitClick]): a click on the marker opens the
+	// mode picker, one on the git segment the git actions picker. They are asked after the panes
+	// that draw OVER the transcript — they can cover any row, the footer's included, and a click on
+	// a pane belongs to the pane — and before the prompt and transcript rects, which own the rows
+	// above them. The two never overlap: each answers only for its own cells.
 	if footer, cmd, claimed := m.handleFooterModeClick(pre, msg); claimed {
+		return footer, cmd
+	}
+	if footer, cmd, claimed := m.handleFooterGitClick(pre, msg); claimed {
 		return footer, cmd
 	}
 	if m.inputEditable() {
@@ -539,6 +545,43 @@ func (m Model) footerModeHit(pre Model, x, y int) bool {
 		return false
 	}
 	return x >= col && x < col+pre.th.measure.Width(text)
+}
+
+// handleFooterGitClick gives the footer's git segment its pointer: a click anywhere on it opens the
+// git actions picker (pickerGitActions, gitactions.go) through the one opener /git uses
+// ([Model.openGitActions]) — so a click while a Turn runs, a decision is pending or a git action is
+// still running answers with the same note /git would, and opens nothing. Whether a click lands on
+// the segment is [Model.footerGitHit]'s to say, the predicate the pointer shape asks as well.
+func (m Model) handleFooterGitClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	if !m.footerGitHit(pre, msg.X, msg.Y) {
+		return m, nil, false
+	}
+	next, cmd := m.openGitActions()
+	return next, cmd, true
+}
+
+// footerGitHit reports whether a click at (x, y) on the frame pre was aimed at is a click on the
+// footer's git segment that the git actions opener answers: geometry off pre, gate off the live m,
+// handleMouseClick's rule. The rect is the row the segment stands on and the cells
+// [Model.footerGitSpan] reports for pre — the span table the painter drew from — so a branch the
+// fit elided is still clickable on every cell it shows, and a footer that shows no git segment
+// names nothing.
+//
+// The gate is narrower than the opener's: with no actions host wired there is nothing to open and
+// no pointer to promise; in the errored state, under the /sessions browser or the /settings pane,
+// or with a picker already up, the click would put up a modal nobody can answer
+// ([Model.footerModeHit]'s reason). A Turn running or a decision pending does NOT close the gate:
+// the click is answered there, with the note that git actions wait for the Turn to end.
+func (m Model) footerGitHit(pre Model, x, y int) bool {
+	if m.opts.GitActions == nil || m.state == stateErrored || m.picker.open || m.sessionBrowser.open ||
+		m.settingsOwnsInput() {
+		return false
+	}
+	row, col, cells, ok := pre.footerGitSpan(pre.width)
+	if !ok || y != pre.footerRowY(row) {
+		return false
+	}
+	return x >= col && x < col+cells
 }
 
 // handleMouseMotion extends whichever selection is live as the mouse drags with the left button

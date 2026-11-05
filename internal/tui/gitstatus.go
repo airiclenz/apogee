@@ -76,6 +76,17 @@ type gitState struct {
 	// fetchLive reports that a fetch chain is running: a fetch in flight or its tick pending. A
 	// chain is armed only while none is, so two fetches never run at once.
 	fetchLive bool
+	// fetchInFlight reports that the chain's fetch has been issued and has not landed — the half
+	// of fetchLive a footer git action waits out, so the user's own fetch, pull or push never runs
+	// beside the background one ([Model.startGitAction]).
+	fetchInFlight bool
+
+	// action is the footer git action running now, or waiting for the background fetch to land
+	// first (gitactions.go); gitActionNone while none is. It is set and cleared with holdGitAction.
+	action gitAction
+	// actionWaits reports that action has not been issued yet: it waits for the in-flight
+	// background fetch, whose landing issues it ([Model.foldGitFetch]).
+	actionWaits bool
 }
 
 // gitStatusMsg carries one landed status read into the Update loop, stamped with the generation
@@ -249,6 +260,7 @@ func (m *Model) armGitFetch() tea.Cmd {
 	}
 	m.git.fetchGen++
 	m.git.fetchLive = true
+	m.git.fetchInFlight = true
 	return m.gitFetchCmd()
 }
 
@@ -261,27 +273,32 @@ func (m Model) gitFetchCmd() tea.Cmd {
 }
 
 // foldGitFetch folds one landed fetch. A fetch that succeeded asks for a status read, so `↓` shows
-// what it brought; a failed one (no network, a refused repository) changes nothing on screen. The
-// chain then waits its interval, or retires when the pref went off or the upstream went away.
+// what it brought; a failed one (no network, a refused repository) changes nothing on screen. A
+// footer git action that was waiting for this fetch to land is issued now. The chain then waits its
+// interval, or retires when the pref went off or the upstream went away.
 func (m Model) foldGitFetch(msg gitFetchMsg) (tea.Model, tea.Cmd) {
 	if !m.gitWired() || msg.gen != m.git.fetchGen || !m.git.fetchLive {
 		return m, nil
 	}
+	m.git.fetchInFlight = false
 	var refresh tea.Cmd
 	if msg.err == nil {
 		refresh = m.refreshGit()
 	}
+	action := m.issueWaitingGitAction()
 	if !m.gitFetchWanted() {
 		m.git.fetchLive = false
-		return m, refresh
+		return m, tea.Batch(refresh, action)
 	}
 	gen := m.git.fetchGen
 	tick := tea.Tick(m.gitFetchInterval(), func(time.Time) tea.Msg { return gitFetchTickMsg{gen: gen} })
-	return m, tea.Batch(refresh, tick)
+	return m, tea.Batch(refresh, tick, action)
 }
 
 // foldGitFetchTick issues the fetch chain's next fetch, or retires the chain when its reason went
-// away while it waited. A tick from a retired chain is inert.
+// away while it waited. A tick from a retired chain is inert. While a footer git action holds the
+// workspace (holdGitAction) it issues no fetch and waits one more interval instead: the action is
+// git on the same repository, and a fetch, pull or sync refreshes the remote-tracking refs itself.
 func (m Model) foldGitFetchTick(msg gitFetchTickMsg) (tea.Model, tea.Cmd) {
 	if !m.gitWired() || msg.gen != m.git.fetchGen || !m.git.fetchLive {
 		return m, nil
@@ -290,5 +307,10 @@ func (m Model) foldGitFetchTick(msg gitFetchTickMsg) (tea.Model, tea.Cmd) {
 		m.git.fetchLive = false
 		return m, nil
 	}
+	if m.holds.has(holdGitAction) {
+		gen := m.git.fetchGen
+		return m, tea.Tick(m.gitFetchInterval(), func(time.Time) tea.Msg { return gitFetchTickMsg{gen: gen} })
+	}
+	m.git.fetchInFlight = true
 	return m, m.gitFetchCmd()
 }

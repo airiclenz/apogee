@@ -30,13 +30,14 @@ func (s pointerShape) name() string {
 
 // pointerShapeAt answers which shape a click at (x, y) implies, for the frame pre was composed for
 // (pre is m.withFrameSpans(), handleMouseClick's snapshot). It walks the click chain's own order —
-// the panes ([pointerPanes], each asked through its row's hover), the footer's mode marker, the
-// editable prompt, the transcript — and every region answers through the hit predicate its click
+// the panes ([pointerPanes], each asked through its row's hover), the footer's mode marker and its
+// git segment, the editable prompt, the transcript — and every region answers through the hit predicate its click
 // handler decides by, geometry and state gate together, so the pointer can never promise a click the
 // handler would refuse:
 //
 //   - a pane whose hover answers for the point: that pane's shape;
 //   - the mode marker, where [Model.footerModeHit] holds: pointer;
+//   - the git segment, where [Model.footerGitHit] holds: pointer;
 //   - the prompt's text rows, while [Model.inputEditable]: text;
 //   - a transcript line that is a block's click surface ([Model.blockTargetAt]): pointer;
 //   - any other transcript line — drag-selectable: text;
@@ -52,7 +53,7 @@ func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
 			}
 		}
 	}
-	if m.footerModeHit(pre, x, y) {
+	if m.footerModeHit(pre, x, y) || m.footerGitHit(pre, x, y) {
 		return shapePointer
 	}
 	if m.inputEditable() {

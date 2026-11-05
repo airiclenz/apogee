@@ -4,7 +4,7 @@ package tui
 // exclusive — a launcher verb can be in flight while a worker runs, a record write can queue
 // behind a /bg launch — so the record of who holds the engine is a SET of these bits, never a
 // single-valued state.
-type engineHold uint8
+type engineHold uint16
 
 const (
 	// holdWorker: a worker drives the engine — an Exchange runs, or blocks on an approval or an
@@ -28,6 +28,11 @@ const (
 	// behind an inert one and nothing idle-only — a wake, a workflow resume, a waiting prompt or
 	// adoption pane, a queued command — may act on the parked session until the watch ends.
 	holdWatching
+	// holdGitAction: a footer git action — fetch, pull, push or sync, chosen from the git actions
+	// picker (gitactions.go) — is running off the loop, or waiting for a background fetch to land
+	// first. It drives no engine, but what it changes is the workspace the next Turn reads, so a
+	// prompt, a wake, a workflow resume and an idle-only command wait for it to land.
+	holdGitAction
 )
 
 // The hold groups the questions below read. Each is named once so two questions that ask the same
@@ -38,15 +43,17 @@ const (
 	// and no Firing may start.
 	holdsOwningEngine = holdWorker | holdActuation
 	// holdsTakingAgent are the holds under which a verb driven now would race something reading
-	// or driving the Agent: an idle-only command or a second /bg launch waits for them.
-	holdsTakingAgent = holdWorker | holdBgLaunch
+	// or driving the Agent — or, for a git action, changing the workspace under it: an idle-only
+	// command or a second /bg launch waits for them.
+	holdsTakingAgent = holdWorker | holdBgLaunch | holdGitAction
 	// holdsBlockingRebind are the holds under which Agent.Rebind, idle-only by construction, must
 	// be stashed for the boundary rather than applied.
 	holdsBlockingRebind = holdsOwningEngine | holdBgLaunch
 	// holdsBlockingResume are the holds an idle-only resume or wake waits out: no engine yet, an
-	// exit under way, an idle-only operation still in flight, or a watch holding the engine parked.
+	// exit under way, an idle-only operation still in flight (a git action among them), or a watch
+	// holding the engine parked.
 	holdsBlockingResume = holdPrebound | holdQuitting | holdSessionLoad | holdBgLaunch | holdRecordWrite |
-		holdWatching
+		holdWatching | holdGitAction
 )
 
 // has reports whether every hold in want is in the set.
@@ -78,6 +85,7 @@ var engineHoldSources = [...]struct {
 	{holdQuitting, func(m Model) bool { return m.quitting }},
 	{holdPrebound, Model.prebound},
 	{holdWatching, func(m Model) bool { return m.watch.isActive }},
+	{holdGitAction, func(m Model) bool { return m.holds.has(holdGitAction) }},
 }
 
 // engineHolds is a snapshot of who holds the engine — the hold set — together with the non-hold

@@ -383,6 +383,10 @@ type Model struct {
 	//     (StartRecipe's launch-time snapshot), so until it lands a heartbeat's rebind is stashed
 	//     (observeBinding), a wake is held (canWake), an idle-only command is queued rather
 	//     than run (commandRunnable), and a typed message is refused (loadHoldNote).
+	//   - holdGitAction marks a footer git action running or waiting on a background fetch
+	//     (startGitAction sets it, foldGitActionDone releases it, gitactions.go): until it lands a
+	//     wake and a workflow resume are held, an idle-only command is queued, a typed message is
+	//     refused (loadHoldNote), and a quit defers its exit (quitSession).
 	//
 	// resumePending says a restored session's background workflows are still to be started from
 	// their folders (Engine.ResumeWorkflows): set by a --resume start and by every /sessions switch
@@ -1578,6 +1582,11 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The fetch interval has elapsed: fetch again, or retire the chain when its reason is gone.
 		return m.foldGitFetchTick(msg)
 
+	case gitActionDoneMsg:
+		// A footer git action landed (gitactions.go): note its result, release its hold and ask
+		// for a status read.
+		return m.foldGitActionDone(msg)
+
 	case heartbeatTickMsg:
 		// The interval since the last landed beat has elapsed: issue the next one. Same generation
 		// guard as the spinner chain — a tick from a retired chain schedules nothing.
@@ -2335,19 +2344,24 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 const (
 	sessionLoadHoldNote = "still loading a session — send once it has loaded"
 	bgLaunchHoldNote    = "still starting a /bg launch — send once it has started"
+	gitActionHoldNote   = "still running a git action — send once it has finished"
 )
 
 // loadHoldNote reports whether a session load (holdSessionLoad) or a /bg launch (holdBgLaunch) is
-// reading the Agent off the loop, with the note naming which. Every Exchange opener — the typed
-// message and the held-queue flush in submit, the completion flush (flushInterjections), /continue
-// and /compact — asks it before starting a worker: a worker started now would drive the Agent
-// beside the goroutine still reading it, so the opener refuses and nothing moves.
+// reading the Agent off the loop, or a footer git action (holdGitAction) is changing the workspace
+// under it, with the note naming which. Every Exchange opener — the typed message and the held-queue
+// flush in submit, the completion flush (flushInterjections), /continue and /compact — asks it
+// before starting a worker: a worker started now would drive the Agent beside the goroutine still
+// reading it, or read a workspace a pull or a sync is still rewriting, so the opener refuses and
+// nothing moves.
 func (m Model) loadHoldNote() (string, bool) {
 	switch {
 	case m.holds.has(holdSessionLoad):
 		return sessionLoadHoldNote, true
 	case m.holds.has(holdBgLaunch):
 		return bgLaunchHoldNote, true
+	case m.holds.has(holdGitAction):
+		return gitActionHoldNote, true
 	}
 	return "", false
 }
@@ -2752,7 +2766,10 @@ func (m Model) quitSession() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	cmd := m.saveAtIdle() // the closing flush joins the queue; nil when there is nothing worth saving
-	if m.writeBusy || len(m.pendingWrites) > 0 {
+	// A footer git action still running defers the exit as a queued write does: the git child is
+	// the program's to wait for, and its completion fold fires the exit (foldGitActionDone) once
+	// the write queue has drained too.
+	if m.writeBusy || len(m.pendingWrites) > 0 || m.holds.has(holdGitAction) {
 		m.quitting = true
 		return m, cmd
 	}
@@ -4080,8 +4097,9 @@ func (m Model) footerGit(git footerSegmentSpan) string {
 // footerRow composes the footer's row-th row ([Model.footerLines]) for a window w wide — the ONE
 // call to the fit ([footerFit]) and the one place the row's width arithmetic happens. Both readers
 // of that arithmetic take it from here: [Model.footerRowContent] paints the layout it returns, and
-// [Model.footerModeSpan] hands the marker's cells to the pointer, so what is drawn and what is
-// clickable are one value rather than two arithmetics that merely agree today.
+// [Model.footerModeSpan] hands the marker's cells to the pointer, and [Model.footerGitSpan] the git
+// segment's, so what is drawn and what is clickable are one value rather than two arithmetics that
+// merely agree today.
 //
 // The row's segments are the ones its layout names, in the order it names them; each row is fitted
 // on its own, so a narrow window spends each row's priorities against that row alone. Only the row
@@ -4200,6 +4218,21 @@ func footerModeText(marker, word string) string {
 func (m Model) footerModeSpan(w int) (text string, col int, ok bool) {
 	layout := m.footerRow(m.footerModeRow(), w)
 	return layout.mode, layout.col, layout.hasMode
+}
+
+// footerGitSpan places the footer's git segment in a window w wide: the footer row it stands on
+// ([Model.footerLines]), the screen column of its first cell and the cells it covers, read off that
+// row's span table ([footerLayout.span]) — the one composition [Model.footerRowContent] paints from,
+// so the cells [Model.footerGitHit] (mouse.go) addresses are the cells the segment is drawn on. ok
+// is false where no row shows it: no snapshot held, a layout that names no git, a ladder that
+// dropped it, or the floor, whose truncated run carries no span table.
+func (m Model) footerGitSpan(w int) (row, col, cells int, ok bool) {
+	for i := range m.footerLines() {
+		if span, shown := m.footerRow(i, w).span(footerSegGit); shown {
+			return i, span.col, span.cells, true
+		}
+	}
+	return 0, 0, 0, false
 }
 
 // The two words the footer says about the Upstream that are not facts about a model.

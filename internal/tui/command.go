@@ -100,7 +100,9 @@ type parsedInput struct {
 //     /schedule and /schedule-stop — writes only to the scheduler library, whose Schedules fire as
 //     separate headless runs (ADR 0033), or — /sub-agents-server — moves where the NEXT delegation is
 //     spawned, which no sub-agent already in flight can be reached by (ADR 0045). Any of the three:
-//     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is
+//     no engine mutation, no worker of its own, no quiescent boundary needed. /git carries it for a
+//     fourth reason: mid-run its run only says that git actions wait for the Turn to end, where a
+//     queued /git would open the picker at some later idle nobody asked for. Every other verb is
 //     idle-only and is queued mid-run to run at the next idle (Model.queueCommand) instead of
 //     running (parsedInput.safeWhileRunning is where the flag is read, and /confine's reporting
 //     FORM is the one nuance it adds).
@@ -307,6 +309,7 @@ func init() {
 		{name: "continue", summary: "ask the model to keep going", opensExchange: true, run: bareVerb(Model.runContinue)},
 		{name: "effort", summary: "set how hard the model thinks — a picker of this model's levels", whileRunning: true, gatedByEffort: true, run: bareVerb(Model.runEffortCommand)},
 		{name: "fork", summary: "branch a new session from one of this session's prompts", run: bareVerb(Model.runFork)},
+		{name: "git", summary: "git actions on the workspace — fetch, pull, push, sync, switch, rebase", whileRunning: true, run: bareVerb(Model.runGitCommand)},
 		{name: "help", summary: "list the commands and keys", whileRunning: true, noRecall: true, run: bareVerb(Model.runHelp)},
 		{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true, run: bareVerb(Model.runInspectCommand)},
 		{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true, run: tokenVerb(Model.runModelCommand)},

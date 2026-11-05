@@ -95,6 +95,7 @@ const (
 	pickerFork                                 // the prompts this session may be forked at — /fork
 	pickerWorkflowBoundary                     // stop or keep the running workflows — /clear, a switch, /fork
 	pickerAdoption                             // adopt, defer or reject one proposed project rule — adoption.go
+	pickerGitActions                           // fetch, pull, push, sync, switch, rebase — /git and the footer's git segment
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -178,7 +179,7 @@ const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 
 // pickerChooseHint and pickerStopHint are the legends for the kinds whose ⏎ answers a question
 // rather than moving the session: "choose" where a row is an answer (/schedule's two popups, /effort,
-// /sub-agents-server, the mode marker), "stop" where it ends something (/schedule-stop). The key
+// /sub-agents-server, the mode marker, the git actions), "stop" where it ends something (/schedule-stop). The key
 // migration offers and the adoption pane carry their own (keyMigrationHint) and /fork its "⏎ fork" (forkPickerHint) — four
 // verbs, because a legend that promised a switch would be wrong on every kind that is not one.
 const (
@@ -409,6 +410,15 @@ func init() {
 			accept:  Model.acceptAdoption,
 			body:    Model.adoptionBody,
 			answers: true,
+		},
+		pickerGitActions: {
+			title:   Model.gitActionsPickerTitle,
+			hint:    pickerChooseHint,
+			rows:    Model.gitActionRows,
+			matched: matchLabelAndGloss,
+			filters: true,
+			noun:    "action",
+			accept:  Model.acceptGitAction,
 		},
 	}
 }

@@ -490,12 +490,14 @@ func (m *Model) foldRecordWrite(msg recordWriteDoneMsg) tea.Cmd {
 // a WORKER runs is deliberately NOT fired here — that one belongs to finishWorker, once the
 // goroutine has unwound, because exiting first would let the composition root's teardown race a Step
 // still in flight (C4). The busy() guard is what keeps the two apart, including when a human quits
-// at idle and then sends one more message while the flush is still on its way to disk.
+// at idle and then sends one more message while the flush is still on its way to disk. A footer git
+// action still running holds the exit the same way (holdGitAction): its completion fold calls here
+// once it has landed (foldGitActionDone, gitactions.go).
 func (m *Model) pumpOrQuit() tea.Cmd {
 	if cmd := m.pumpWrites(); cmd != nil {
 		return cmd
 	}
-	if m.quitting && !m.busy() {
+	if m.quitting && !m.busy() && !m.holds.has(holdGitAction) {
 		return tea.Quit
 	}
 	return nil

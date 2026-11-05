@@ -40,7 +40,8 @@ import (
 // drop is what bought the room.
 //
 // The whole layout comes out of ONE call. The footer has two readers of its arithmetic — the
-// painter and the pointer that addresses the marker's cells ([Model.handleFooterModeClick]) — and
+// painter and the pointer that addresses the marker's cells and the git segment's
+// ([Model.handleFooterModeClick], [Model.handleFooterGitClick]) — and
 // two arithmetics that agree today are two that can disagree tomorrow, so this returns the whole
 // row and both read it. Measurement is the injected [widthAuthority] and nothing else (ADR 0030
 // §5): a footer laid out in a measure the painter did not choose is off by a column per wide
