@@ -259,9 +259,11 @@ child, so the number you are reading never restarts when a sibling emits. Open a
 run view and the row speaks for that one run again, as above.
 
 After the clock comes the Exchange's total, `[total 03:15s]`: how long the whole run has gone
-since your message went out. The activity clock restarts whenever the work changes; the total
-keeps counting across every phrase, delegation and run view until the run ends. It is the first
-thing the row drops when it is tight, ahead of `quiet` and of any key hint on the right.
+since your message went out — or, in [watch mode](sessions.md#watching-a-live-session), since
+the watched session's message did, both clocks counting that session's own time. The activity
+clock restarts whenever the work changes; the total keeps counting across every phrase,
+delegation and run view until the run ends. It is the first thing the row drops when it is
+tight, ahead of `quiet` and of any key hint on the right.
 
 After the total comes the throughput readout, `· N tok/s`: the last completion's server-reported
 token count over that turn's generation window, shown as a whole number. Below one token per

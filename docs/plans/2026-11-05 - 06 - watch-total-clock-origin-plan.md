@@ -67,7 +67,9 @@ internal/tui/watch_test.go — reopenBound; internal/tui/model.go — totalSuffi
 - The four new tests fail against the pre-item tree (bite check).
 **Commit:** `fix(tui): watch clocks count from the watched journal's own times`
 
-## 2. Docs say a watch's clocks are the watched session's
+## 2. Docs say a watch's clocks are the watched session's — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): layout.md's sentence sits at the end of the "How long the whole Exchange has run" paragraph rather than beside the `totalSuffix` sentence, so the paragraph's later "Only the running state carries it" keeps its referent; commands.md's clause re-wrapped the rest of its paragraph (text unchanged).
 
 **What:**
 **Goal:** the docs that describe the status line's `[total …]` readout and Watch mode say that, while watching, both clocks count from the watched session's own times.

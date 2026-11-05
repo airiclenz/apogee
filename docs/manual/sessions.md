@@ -217,6 +217,9 @@ that anyone is watching, and nothing flows back to it. The design is
   The footer names the watched session's folder and branch, led by a `watching` marker so they are
   never read as your own (the marker alone where that session names no folder); your host, model
   and effort stay, and a click on the git state opens nothing. `esc` puts your own folder back.
+  The status line's clocks show how long the watched session has been working, not how long you
+  have been watching: the activity clock and `[total …]` count from that session's own times, and
+  right after you open a quiet session they can run a little behind the owner's.
   Thinking is shown only in the `/thinking` pop-up, never inline. Opening a delegation's row opens its run
   view read-only, as it would in your own session. If the record cannot be read, the view says
   `the session record could not be read — showing the live events only` and follows the journal

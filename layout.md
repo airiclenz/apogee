@@ -1800,7 +1800,11 @@ the error read exactly as they did without it. It is the first thing the row giv
 row the left slot drops the total whole before the quiet qualifier and before the phrase is
 trimmed, and it gives way to every hint in the right slot — the primed `ctrl+c` and `esc` hints, a
 flash, `esc×2 cancel`, a run view's `esc back · ^x stop` — so a hint that would stand whole beside
-the plain phrase is never dropped or shortened to keep it.
+the plain phrase is never dropped or shortened to keep it. In Watch mode both clocks are the
+watched session's own: the total counts from the watched prompt's journal line and the phrase clock
+from the line that set the phrase, read only as distances between the journal's own stamps, so the
+two machines' clocks being set differently skews neither; right after attaching to a quiet session
+both can run a little behind the owner's.
 
 ---
 
