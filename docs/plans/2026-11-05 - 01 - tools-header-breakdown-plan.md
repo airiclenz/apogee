@@ -36,7 +36,13 @@ and folded alike, and every doc that sketches the header shows that shape.
 - Type rows and member rows — unchanged.
 - Point-in-time records naming `✦ Tools (N calls)`: `CHANGELOG.md`, ADR notes and addenda, archived plans/reviews.
 
-## 1. Paint the umbrella header as a breakdown leader row
+## 1. Paint the umbrella header as a breakdown leader row — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): leaderRowIn gained a marker-painter argument (func(theme, string, bool) string); the type rows and leaderRow pass paintRowMarker unchanged (output byte-identical), the umbrella header passes the new paintHeaderMarker (th.toolHeader). Its avail/budget arithmetic is now named (leaderAvail, leaderTargetBudget) so the header's breakdown-vs-total choice measures with the row's own numbers.
+NOTES (2026-11-05): e2e matchers became an umbrellaHeaderMatch value (text + glyph, matched on one row with only dots/blanks between them) because the leader's dot run makes "header ▶" non-contiguous; the row is not required to END in the glyph, since the approval pane draws a ┃ past a run view's edge.
+NOTES (2026-11-05): umbrellaHeaders (mouse_test.go), headerStar (blocktarget_test.go) and the folded-live subtest in toolblock_test.go now collapse the leader (collapseLeader) like renderPlain does, so their goldens read the shared umbrellaHeaderRow / blinkedUmbrellaHeaderRow helpers added beside leaderEdgeRow.
+NOTES (2026-11-05): comments left for item 2 (in its Files): render_test.go's "✦ Tools (8 calls)" layout-golden comment, transcriptbridge_test.go:2297, toolshape_test.go:653, and the non-test comments in doc.go, transcript.go and toolregistry.go. The cmd/apogee comments tied to the changed constants and matchers were updated here, since item 1's text names them.
+NOTES (2026-11-05): no CLOSES section: item 1 carries no **Closes:** line; the plan-level tools-header-breakdown is left for the plan's closeout once item 2's docs land.
 
 **What:**
 **Goal:** `renderSuperGroup` paints its header as ONE row: the block's star, `Tools` in `toolLabel`,

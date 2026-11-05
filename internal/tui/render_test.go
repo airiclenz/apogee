@@ -51,6 +51,20 @@ func leaderEdgeRow(text, mark string) string {
 	return text + strings.Repeat(" ", groupIndicatorGap) + mark
 }
 
+// umbrellaHeaderRow is the umbrella's header line as a collapsed-leader golden reads it: the star,
+// "Tools" and its per-kind breakdown ("3 Read, 4 Terminal"), the leader's one dot, and the fold's
+// mark at the block's edge (umbrellaHeader). One definition, so a golden that moves because the
+// header's shape moved fails everywhere at once.
+func umbrellaHeaderRow(breakdown, mark string) string {
+	return leaderEdgeRow("✦ "+superGroupLabel+" ("+breakdown+") ⋯", mark)
+}
+
+// blinkedUmbrellaHeaderRow is that line at a live umbrella's blinked-out phase: the star's cell
+// blank and its column held (blockState.star), the rest of the row exactly as it was.
+func blinkedUmbrellaHeaderRow(breakdown, mark string) string {
+	return leaderEdgeRow("  "+superGroupLabel+" ("+breakdown+") ⋯", mark)
+}
+
 // memberEdgeRow is the same arithmetic for a mark that is NOT on a leader row and so must be padded
 // out to the edge by hand — today the see-less marker closing an open member. One definition of
 // "flush against the block's right edge", so a golden that moves because the edge moved fails
@@ -330,7 +344,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		strings.Repeat(glyphPadBelow, 80), // the prompt's ▀ half row stands in for the separator
 		"✦ Reading the docs first.",
 		"",
-		"✦ Tools (8 calls) " + glyphExpanded,
+		umbrellaHeaderRow("3 Read, 1 Terminal, 1 Diff Preview, 2 Replace, 1 Write", glyphExpanded),
 		groupMemberLine("  ┝ Read (3) ⋯ 570 lines"),
 		leaderEdgeRow("  ┝ Terminal ⋯ exit 0", glyphExpanded),
 		leaderEdgeRow("  │ ┕ go test ./... ⋯ exit 0", glyphExpanded),

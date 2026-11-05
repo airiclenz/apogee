@@ -540,7 +540,7 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
 		}
 		want := strings.Join([]string{
-			"✦ Tools (2 calls) " + glyphExpanded,
+			umbrellaHeaderRow("2 Ask User", glyphExpanded),
 			leaderEdgeRow("  ┕ Ask User (2) ⋯", glyphExpanded),
 			"  │ ┝ Ship it? ⋯",
 			"  │ ┕ Tag it? ⋯",
@@ -591,7 +591,7 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
 		}
 		want := strings.Join([]string{
-			"✦ Tools (2 calls) " + glyphExpanded,
+			umbrellaHeaderRow("2 Ask User", glyphExpanded),
 			leaderEdgeRow("  ┕ Ask User (2) ⋯ 2 errors", glyphExpanded),
 			"  │ ┝ Ship it? ⋯ " + errWord + " " + defaultGlyphs.collapsed,
 			"  │ ┕ Tag it? ⋯ " + errWord + " " + defaultGlyphs.collapsed,

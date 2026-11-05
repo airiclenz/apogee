@@ -3879,7 +3879,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		copy(openState, m.transcript.entries)
 
 		m = clickLine(t, m, umbrellaHeaderLine(t, m))
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{umbrellaHeaderRow("2 Read, 2 Terminal", defaultGlyphs.collapsed)}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("after the header click the headers are %q, want the folded %q", got, want)
 		}
 		// The fold hides every row but the header: no type row and no member is left to click.
@@ -3916,7 +3916,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		if !m.transcript.umbrellaFolded(readRun) {
 			t.Fatal("a click on the shut umbrella's header did not fold it; every umbrella folds")
 		}
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{umbrellaHeaderRow("2 Read, 2 Terminal", defaultGlyphs.collapsed)}; !reflect.DeepEqual(got, want) {
 			t.Errorf("headers = %q, want the folded %q", got, want)
 		}
 		if len(m.lines) >= before {
@@ -3946,13 +3946,14 @@ func modelWithLargeUmbrellas(t *testing.T, opts Options) Model {
 	return m
 }
 
-// umbrellaHeaders is the stripped text of every umbrella header line on screen, in order — the
-// glyph after the count is what a large umbrella's fold is read off.
+// umbrellaHeaders is the stripped text of every umbrella header line on screen, in order, its
+// leader collapsed to one dot (umbrellaHeaderRow) — the glyph at the row's edge is what a large
+// umbrella's fold is read off.
 func umbrellaHeaders(t *testing.T, m Model) []string {
 	t.Helper()
 	var headers []string
 	for _, line := range m.lines {
-		if text := strings.TrimSpace(strip(line)); strings.Contains(text, superGroupLabel+" (") {
+		if text := strings.TrimSpace(collapseLeader(strip(line))); strings.Contains(text, superGroupLabel+" (") {
 			headers = append(headers, text)
 		}
 	}
@@ -3986,8 +3987,8 @@ func umbrellaHeaderLineOf(t *testing.T, m Model, head int) int {
 func TestLargeUmbrellasShareOneFold(t *testing.T) {
 	t.Parallel()
 	const firstHead, secondHead = 1, 6
-	folded := []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed, "✦ Tools (4 calls) " + defaultGlyphs.collapsed}
-	open := []string{"✦ Tools (4 calls) " + glyphExpanded, "✦ Tools (4 calls) " + glyphExpanded}
+	folded := []string{umbrellaHeaderRow("2 Read, 2 Terminal", defaultGlyphs.collapsed), umbrellaHeaderRow("2 Read, 2 Terminal", defaultGlyphs.collapsed)}
+	open := []string{umbrellaHeaderRow("2 Read, 2 Terminal", glyphExpanded), umbrellaHeaderRow("2 Read, 2 Terminal", glyphExpanded)}
 
 	t.Run("a gesture on any header flips them all and writes the key back", func(t *testing.T) {
 		t.Parallel()
@@ -4113,8 +4114,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		openCall(&m, "t2", "go test ./...") // still waiting for its result: the umbrella is live
 		m.refreshViewport()
 		const head = 1
-		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (4 calls) "+defaultGlyphs.collapsed) {
-			t.Fatalf("setup: headers = %q, want one folded live header ending in %q", got, "Tools (4 calls) "+defaultGlyphs.collapsed)
+		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (2 Read, 2 Terminal) ⋯ "+defaultGlyphs.collapsed) {
+			t.Fatalf("setup: headers = %q, want one folded live header ending in %q", got, "Tools (2 Read, 2 Terminal) ⋯ "+defaultGlyphs.collapsed)
 		}
 		if !m.transcript.umbrellaIsLarge(head) {
 			t.Fatal("setup: the live umbrella is not large; its size alone decides")
@@ -4122,7 +4123,7 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 
 		m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, head)))
 
-		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (4 calls) "+glyphExpanded) {
+		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (2 Read, 2 Terminal) ⋯ "+glyphExpanded) {
 			t.Errorf("after the click the header is %q, want it open, ending in %q", got, glyphExpanded)
 		}
 		typeRowLine(t, m, head) // the type rows are listed again
@@ -4151,13 +4152,13 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		if got := m.viewedRun().spawn; got != "s1" {
 			t.Fatalf("setup: ⏎ on the delegation opened run %q; want its view", got)
 		}
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{umbrellaHeaderRow("2 Read, 2 Terminal", defaultGlyphs.collapsed)}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("setup: the view paints headers %q, want the folded %q", got, want)
 		}
 
 		m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, head)))
 
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{umbrellaHeaderRow("2 Read, 2 Terminal", glyphExpanded)}; !reflect.DeepEqual(got, want) {
 			t.Errorf("after the click the view paints %q, want the open %q", got, want)
 		}
 		typeRowLine(t, m, head)
@@ -4181,7 +4182,7 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		}
 		m = step(t, m, keyEnter())
 
-		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := umbrellaHeaders(t, m), []string{umbrellaHeaderRow("2 Read, 2 Terminal", defaultGlyphs.collapsed)}; !reflect.DeepEqual(got, want) {
 			t.Errorf("after ⏎ on the header the view paints %q, want the folded %q", got, want)
 		}
 		if want := []settingEdit{{path: "ui.tools-open", value: "true"}, {path: "ui.tools-open", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
@@ -4257,9 +4258,9 @@ func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 	opts.Settings = fakeSettingsHost{write: log.write}
 	m := modelWithMixedUmbrellas(t, opts)
 	start := []string{
-		"✦ Tools (2 calls) " + glyphExpanded,
-		"✦ Tools (2 calls) " + glyphExpanded,
-		"✦ Tools (4 calls) " + defaultGlyphs.collapsed,
+		umbrellaHeaderRow("2 Read", glyphExpanded),
+		umbrellaHeaderRow("2 Terminal", glyphExpanded),
+		umbrellaHeaderRow("2 Read, 2 Terminal", defaultGlyphs.collapsed),
 	}
 	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, start) {
 		t.Fatalf("setup: headers = %q, want two open small ones over a folded large one %q", got, start)
@@ -4272,7 +4273,7 @@ func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 
 	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, runsHead)))
 
-	folded := []string{start[0], "✦ Tools (2 calls) " + defaultGlyphs.collapsed, start[2]}
+	folded := []string{start[0], umbrellaHeaderRow("2 Terminal", defaultGlyphs.collapsed), start[2]}
 	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, folded) {
 		t.Errorf("after the click on the Runs header the headers are %q, want that one alone folded %q", got, folded)
 	}

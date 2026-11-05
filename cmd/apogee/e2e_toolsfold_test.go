@@ -28,12 +28,10 @@ import (
 const (
 	toolsFoldPrompt = "Survey the workspace."
 	toolsFoldWrapUp = "The workspace is surveyed."
-	// toolsFoldHeader is the umbrella's counted header for the fixture's three calls, the prefix
-	// EVERY umbrella — small or large — wears its fold's ▶/▼ after.
-	toolsFoldHeader = "✦ Tools (3 calls)"
-	// The umbrella's two headers: ▼ open on its type rows, ▶ folded to the header alone.
-	toolsFoldHeaderOpen   = toolsFoldHeader + " ▼"
-	toolsFoldHeaderFolded = toolsFoldHeader + " ▶"
+	// toolsFoldHeader is the umbrella's header for the fixture's three calls, broken down by tool
+	// kind — the text EVERY umbrella — small or large — runs its leader dots from to the fold's ▶/▼
+	// at the row's right edge.
+	toolsFoldHeader = "✦ Tools (1 Read, 1 List, 1 Grep)"
 	// toolsFoldReadRow is the first type row's head — its branch marker and label — the row a folded
 	// umbrella hides and an open one paints. It is asserted by its head rather than as a whole row,
 	// because the row's right edge carries the run's aggregate and its own ▶, neither of which this
@@ -44,18 +42,67 @@ const (
 	// beneath the three landed reads. It is the umbrella's LAST type row, so its branch marker is the
 	// closing ┕ rather than the ┝ the rows above it wear.
 	toolsFoldTerminalRow = "┕ Terminal"
-	// The live fixture's umbrella, counted for its four calls and matched by its TAIL — `Tools (4
-	// calls)` and the fold's glyph — without the star cell before it. The approval pane freezes the
-	// blink (spinner.go foldSpinnerTick drops its ticks outside stateRunning), so the header's ✦ is
-	// caught in whichever phase the pane found it, lit or blank, and an assertion that spelled the
-	// star would be right half the time.
-	toolsFoldLiveHeaderFolded = "Tools (4 calls) ▶"
-	toolsFoldLiveHeaderOpen   = "Tools (4 calls) ▼"
+	// toolsFoldLiveHeader is the live fixture's umbrella, broken down for its four calls and matched
+	// without the star cell before it. The approval pane freezes the blink (spinner.go
+	// foldSpinnerTick drops its ticks outside stateRunning), so the header's ✦ is caught in whichever
+	// phase the pane found it, lit or blank, and an assertion that spelled the star would be right
+	// half the time.
+	toolsFoldLiveHeader = "Tools (1 Read, 1 List, 1 Grep, 1 Terminal)"
 	// The two configs under test: a threshold the fixture's three type rows exceed, and a threshold
 	// of 0, under which no umbrella is ever large. The small fold runs on the DEFAULT, no `ui:` at all.
 	toolsFoldOverTwoConfig  = "ui:\n  tools-fold-over: 2\n"
 	toolsFoldOverZeroConfig = "ui:\n  tools-fold-over: 0\n"
 )
+
+// The umbrella's headers in each of its fold states: ▼ open on its type rows, ▶ folded to the
+// header alone.
+var (
+	toolsFoldHeaderOpen       = umbrellaHeaderMatch{text: toolsFoldHeader, glyph: "▼"}
+	toolsFoldHeaderFolded     = umbrellaHeaderMatch{text: toolsFoldHeader, glyph: "▶"}
+	toolsFoldLiveHeaderOpen   = umbrellaHeaderMatch{text: toolsFoldLiveHeader, glyph: "▼"}
+	toolsFoldLiveHeaderFolded = umbrellaHeaderMatch{text: toolsFoldLiveHeader, glyph: "▶"}
+)
+
+// umbrellaHeaderMatch is one umbrella header in one fold state as a frame shows it: a leader row
+// whose dots run from the header's text to the fold's glyph at the row's right edge. The dots' count
+// is the width's business, so the two halves are matched on the one row rather than as one
+// contiguous string.
+type umbrellaHeaderMatch struct {
+	text  string
+	glyph string
+}
+
+// String is the header as an assertion names it.
+func (h umbrellaHeaderMatch) String() string { return h.text + " ⋯ " + h.glyph }
+
+// find returns the cell of the header's text — where a click on the header lands — and ok only
+// when nothing but the leader's dots and blanks stands between that text and the glyph on its row.
+// The row is not asked to END in the glyph: a frame may draw its own chrome past the block's edge
+// (the approval pane's ┃ beside a run view).
+func (h umbrellaHeaderMatch) find(f tuitest.Frame) (int, int, bool) {
+	x, y, ok := f.Find(h.text)
+	if !ok {
+		return 0, 0, false
+	}
+	row := f.Row(y)
+	rest := row[strings.Index(row, h.text)+len(h.text):]
+	if !strings.HasPrefix(strings.TrimLeft(rest, " ⋯"), h.glyph) {
+		return 0, 0, false
+	}
+	return x, y, true
+}
+
+// in reports whether the frame carries the header in this fold state.
+func (h umbrellaHeaderMatch) in(f tuitest.Frame) bool {
+	_, _, ok := h.find(f)
+	return ok
+}
+
+// await blocks until the driver's frame carries the header in this fold state.
+func (h umbrellaHeaderMatch) await(drv *tuitest.Driver) {
+	drv.WaitFor(func() bool { return h.in(drv.Frame()) },
+		tuitest.Awaiting(fmt.Sprintf("the %q umbrella header", h)))
+}
 
 // toolsFoldFrame drives one run to its wrap-up — the prompt sent, the three reads landed, the
 // wrap-up painted, the screen quiet — and returns the session so the caller can go on with it.
@@ -86,9 +133,9 @@ func awaitConfigCarries(t *testing.T, drv *tuitest.Driver, home, line string) {
 }
 
 // TestE2EToolsUmbrellaFoldsOverThreshold drives the fold from the FILE: with
-// `ui.tools-fold-over: 2` an umbrella of three type rows stands folded to `✦ Tools (3 calls) ▶`
-// with no type row beneath it — the default `ui.tools-open: false` — and a click on that header
-// opens it onto its rows under a ▼. The folded frame is recorded as a golden, since the fold is a
+// `ui.tools-fold-over: 2` an umbrella of three type rows stands folded to
+// `✦ Tools (1 Read, 1 List, 1 Grep) ⋯ ▶` with no type row beneath it — the default
+// `ui.tools-open: false` — and a click on that header opens it onto its rows under a ▼. The folded frame is recorded as a golden, since the fold is a
 // paint claim and the header's own spelling is what a reader sees.
 func TestE2EToolsUmbrellaFoldsOverThreshold(t *testing.T) {
 	t.Parallel()
@@ -96,7 +143,7 @@ func TestE2EToolsUmbrellaFoldsOverThreshold(t *testing.T) {
 	drv, sess := toolsFoldFrame(t, toolsFoldOverTwoConfig)
 
 	frame := drv.Frame().String()
-	if !strings.Contains(frame, toolsFoldHeaderFolded) {
+	if !toolsFoldHeaderFolded.in(drv.Frame()) {
 		t.Errorf("the frame carries no folded %q header:\n%s", toolsFoldHeaderFolded, frame)
 	}
 	if strings.Contains(frame, toolsFoldReadRow) {
@@ -104,13 +151,13 @@ func TestE2EToolsUmbrellaFoldsOverThreshold(t *testing.T) {
 	}
 	tuitest.Golden(t, "t19-tools-umbrella-folded", drv.Frame(), goldenRedactions(sess)...)
 
-	x, y, ok := drv.Frame().Find(toolsFoldHeaderFolded)
+	x, y, ok := toolsFoldHeaderFolded.find(drv.Frame())
 	if !ok {
 		t.Fatalf("the frame carries no folded %q header to click:\n%s", toolsFoldHeaderFolded, drv.Frame())
 	}
 	click(drv, x, y)
 
-	drv.WaitText(toolsFoldHeaderOpen)
+	toolsFoldHeaderOpen.await(drv)
 	drv.WaitText(toolsFoldReadRow)
 	waitIdle(drv)
 	if err := sess.Quit(); err != nil {
@@ -126,14 +173,14 @@ func TestE2EToolsUmbrellaFoldIsRememberedAcrossAResume(t *testing.T) {
 	t.Parallel()
 
 	drv, sess := toolsFoldFrame(t, toolsFoldOverTwoConfig)
-	x, y, ok := drv.Frame().Find(toolsFoldHeaderFolded)
+	x, y, ok := toolsFoldHeaderFolded.find(drv.Frame())
 	if !ok {
 		t.Fatalf("the frame carries no folded %q header to click:\n%s", toolsFoldHeaderFolded, drv.Frame())
 	}
 
 	click(drv, x, y)
 
-	drv.WaitText(toolsFoldHeaderOpen)
+	toolsFoldHeaderOpen.await(drv)
 	drv.WaitText(toolsFoldReadRow)
 	awaitConfigCarries(t, drv, sess.Home(), "tools-open: true")
 	// The only sentence the toggle can ever say names its key (`tools-open: not saved: …`), and a
@@ -154,7 +201,7 @@ func TestE2EToolsUmbrellaFoldIsRememberedAcrossAResume(t *testing.T) {
 
 	next := sess.RelaunchWith("--continue")
 	next.WaitText("Send a message")
-	next.WaitText(toolsFoldHeaderOpen)
+	toolsFoldHeaderOpen.await(next)
 	next.WaitQuiet(settled)
 
 	if frame := next.Frame().String(); !strings.Contains(frame, toolsFoldReadRow) {
@@ -167,7 +214,7 @@ func TestE2EToolsUmbrellaFoldIsRememberedAcrossAResume(t *testing.T) {
 
 // TestE2EToolsFoldOverZeroNeverFolds pins the threshold's off switch: under `ui.tools-fold-over: 0`
 // no umbrella is ever large, so the same three-row umbrella comes to rest OPEN — a small umbrella
-// starts every session open — wearing the ▼ every open umbrella's header wears after its count. The
+// starts every session open — wearing the ▼ every open umbrella's header wears at its edge. The
 // claim is made on the header LINE alone: every type row of an open umbrella carries a ▶/▼ of its
 // own, so a frame-wide search for the glyph would trip on rows that are not the header's.
 func TestE2EToolsFoldOverZeroNeverFolds(t *testing.T) {
@@ -181,7 +228,7 @@ func TestE2EToolsFoldOverZeroNeverFolds(t *testing.T) {
 		t.Fatalf("the frame carries no %q header:\n%s", toolsFoldHeader, frame)
 	}
 	line := frame.Row(y)
-	if !strings.Contains(line, toolsFoldHeaderOpen) {
+	if !toolsFoldHeaderOpen.in(frame) {
 		t.Errorf("the header line under tools-fold-over: 0 = %q; want the open small umbrella's %q", line, toolsFoldHeaderOpen)
 	}
 	if strings.Contains(line, "▶") {
@@ -207,10 +254,10 @@ var toolsFoldLiveSize = tuitest.Size{W: e2eSize.W, H: e2eSize.H + 10}
 // shipped fold got wrong: a large umbrella whose Turn has NOT come to rest. toolsfold-live.yaml
 // follows the three reads with a gated `terminal` call, so the approval pane holds the Turn open
 // with the umbrella's fourth type row still live — and under `ui.tools-fold-over: 2` that umbrella
-// stands folded to `Tools (4 calls) ▶` with no type row beneath it all the same. A click on the
-// header, pane and all, opens it onto its four rows, the live Terminal row among them; the
-// decision then lets the Turn wrap up. The header is matched by its tail (toolsFoldLiveHeaderFolded)
-// because the pane freezes the star's blink phase.
+// stands folded to `Tools (1 Read, 1 List, 1 Grep, 1 Terminal) ⋯ ▶` with no type row beneath it
+// all the same. A click on the header, pane and all, opens it onto its four rows, the live
+// Terminal row among them; the decision then lets the Turn wrap up. The header is matched without
+// its star (toolsFoldLiveHeaderFolded) because the pane freezes the star's blink phase.
 func TestE2EToolsUmbrellaFoldsWhileTheTurnRuns(t *testing.T) {
 	t.Parallel()
 
@@ -221,20 +268,20 @@ func TestE2EToolsUmbrellaFoldsWhileTheTurnRuns(t *testing.T) {
 	submit(drv, toolsFoldPrompt)
 	pane := awaitApprovalPane(drv)
 
-	if frame := pane.String(); !strings.Contains(frame, toolsFoldLiveHeaderFolded) {
+	if frame := pane.String(); !toolsFoldLiveHeaderFolded.in(pane) {
 		t.Errorf("the frame under the pane carries no folded %q header:\n%s", toolsFoldLiveHeaderFolded, frame)
 	}
 	if frame := pane.String(); strings.Contains(frame, toolsFoldReadRow) {
 		t.Errorf("the folded live umbrella paints its %q type row:\n%s", toolsFoldReadRow, frame)
 	}
-	x, y, ok := pane.Find(toolsFoldLiveHeaderFolded)
+	x, y, ok := toolsFoldLiveHeaderFolded.find(pane)
 	if !ok {
 		t.Fatalf("the frame carries no folded %q header to click:\n%s", toolsFoldLiveHeaderFolded, pane)
 	}
 
 	click(drv, x, y)
 
-	drv.WaitText(toolsFoldLiveHeaderOpen)
+	toolsFoldLiveHeaderOpen.await(drv)
 	drv.WaitText(toolsFoldReadRow)
 	drv.WaitText(toolsFoldTerminalRow)
 	drv.WaitQuiet(settled)
@@ -252,10 +299,10 @@ func TestE2EToolsUmbrellaFoldsWhileTheTurnRuns(t *testing.T) {
 }
 
 // TestE2EToolsUmbrellaSmallFoldsAlone is the small umbrella's own fold: at the default threshold
-// (no `ui:` at all) the three-row umbrella comes to rest OPEN as `✦ Tools (3 calls) ▼`, a click on
-// that header folds it to `▶` with no type row beneath it, and the home's config.yaml carries no
-// `tools-open` line afterwards — a small umbrella's fold is a session-only flag, never the shared
-// preference and never a write.
+// (no `ui:` at all) the three-row umbrella comes to rest OPEN as
+// `✦ Tools (1 Read, 1 List, 1 Grep) ⋯ ▼`, a click on that header folds it to `▶` with no type row
+// beneath it, and the home's config.yaml carries no `tools-open` line afterwards — a small
+// umbrella's fold is a session-only flag, never the shared preference and never a write.
 func TestE2EToolsUmbrellaSmallFoldsAlone(t *testing.T) {
 	t.Parallel()
 
@@ -265,20 +312,20 @@ func TestE2EToolsUmbrellaSmallFoldsAlone(t *testing.T) {
 	if !ok {
 		t.Fatalf("the frame carries no %q header:\n%s", toolsFoldHeader, frame)
 	}
-	if line := frame.Row(y); !strings.Contains(line, toolsFoldHeaderOpen) {
+	if line := frame.Row(y); !toolsFoldHeaderOpen.in(frame) {
 		t.Fatalf("the header line at the default threshold = %q; want the open small umbrella's %q", line, toolsFoldHeaderOpen)
 	}
 	if !strings.Contains(frame.String(), toolsFoldReadRow) {
 		t.Fatalf("the open small umbrella hides its %q type row:\n%s", toolsFoldReadRow, frame)
 	}
-	x, y, ok := frame.Find(toolsFoldHeaderOpen)
+	x, y, ok := toolsFoldHeaderOpen.find(frame)
 	if !ok {
 		t.Fatalf("the frame carries no open %q header to click:\n%s", toolsFoldHeaderOpen, frame)
 	}
 
 	click(drv, x, y)
 
-	drv.WaitText(toolsFoldHeaderFolded)
+	toolsFoldHeaderFolded.await(drv)
 	drv.WaitGone(toolsFoldReadRow)
 	// An absence, so it waits on the run rather than on the file: a large umbrella's toggle writes
 	// synchronously on the click (Model.toggleToolsFold), before the frame that shows the fold, so

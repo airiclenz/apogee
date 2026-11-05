@@ -141,7 +141,7 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, re
 			return tone.Render(s)
 		}
 	}
-	return leaderRowIn(th, left, paint, tv.Summary, marker, room, expanded, remainder)
+	return leaderRowIn(th, left, paint, tv.Summary, marker, paintRowMarker, room, expanded, remainder)
 }
 
 // leaderRowIn is the leader arithmetic itself, with the row's LEFT content handed in rather than
@@ -159,9 +159,16 @@ func leaderRow(th theme, tv toolView, marker string, room int, expanded bool, re
 // ARITHMETIC as part of the slot — measured, reserved and, at the last resort, clipped with it — and
 // the styling not at all: the whole slot takes one style off the summary alone (summaryStyle), so a
 // failed call's red still governs the row's right edge whatever the count says.
+//
+// paintMarker dresses the row's leading marker, for the same reason paint receives plain text: the
+// marker is MEASURED here, so it is handed in bare and styled only once laid out. A branch or type
+// row passes paintRowMarker, the detail tone its marker shares with the target; the umbrella's
+// header row passes its own (paintHeaderMarker), because the ✦ it leads with is the block's star and
+// keeps the header's tone rather than taking a row's.
 func leaderRowIn(th theme, left string, paint func(string) string, summary branchSummary,
-	marker string, room int, expanded bool, remainder string) string {
-	avail := max(1, room-th.measure.Width(marker))
+	marker string, paintMarker func(theme, string, bool) string, room int, expanded bool,
+	remainder string) string {
+	avail := leaderAvail(th, marker, room)
 	slot := affordableSlot(th, left, summary.Text, remainder, avail)
 	// The last resort under design call 4, past the point it words: an outcome WIDER than the row
 	// itself is cut too. A slot that printed whole there would not print whole anywhere — it would
@@ -176,7 +183,7 @@ func leaderRowIn(th theme, left string, paint func(string) string, summary branc
 		tail = leaderGap + th.measure.Width(slot)
 	}
 	target := ""
-	if budget := avail - tail - leaderGap - leaderMinDots; budget >= 1 {
+	if budget := leaderTargetBudget(avail, tail); budget >= 1 {
 		target, _ = clipCells(th, left, budget)
 		// A budget too narrow to hold even the clip tail comes back WIDER than it was given —
 		// fitClipTail appends the tail whatever room is left — and those cells would push the row
@@ -193,12 +200,27 @@ func leaderRowIn(th theme, left string, paint func(string) string, summary branc
 		leadCells = th.measure.Width(target) + leaderGap
 	}
 	dots := max(leaderMinDots, avail-leadCells-tail)
-	row := paintRowMarker(th, marker, expanded) + lead +
+	row := paintMarker(th, marker, expanded) + lead +
 		th.toolLeader.Render(strings.Repeat(th.glyphs.leaderDot, dots))
 	if slot != "" {
 		row += strings.Repeat(" ", leaderGap) + summaryStyle(th, summary, expanded).Render(slot)
 	}
 	return row
+}
+
+// leaderAvail is the cells a leader row lays its content out in: room less its leading marker,
+// floored at one so a marker wider than the row still leaves the arithmetic a cell to spend.
+func leaderAvail(th theme, marker string, room int) int {
+	return max(1, room-th.measure.Width(marker))
+}
+
+// leaderTargetBudget is how many of avail the row's LEFT content may take whole: what is left once
+// the outcome slot's tail (zero for a row with no slot) is reserved and the leader holds its gap and
+// its floor of leaderMinDots. A left content wider than this is clipped (leaderRowIn); one that fits
+// prints whole with at least one dot after it, which is what a caller choosing between two wordings
+// of the same row measures against (umbrellaHeaderText).
+func leaderTargetBudget(avail, tail int) int {
+	return avail - tail - leaderGap - leaderMinDots
 }
 
 // slotSeparator is what the outcome slot joins its two halves with — the middle dot the typed stats

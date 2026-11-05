@@ -20,8 +20,9 @@ import (
 
 // The two prompts toolsfold-subagent.yaml answers, the child they delegate to, and the wordings
 // the runs are waited on. The umbrella's own spellings are e2e_toolsfold_test.go's: the child's
-// three reads are toolsfold.yaml's three calls, so its header counts the same `(3 calls)`, and the
-// gated task's four the same `(4 calls)` as toolsfold-live.yaml's.
+// three reads are toolsfold.yaml's three calls, so its header breaks down the same
+// `(1 Read, 1 List, 1 Grep)`, and the gated task's four the same
+// `(1 Read, 1 List, 1 Grep, 1 Terminal)` as toolsfold-live.yaml's.
 const (
 	// The finished shape's prompt and the gated one's — the second matched first in the fixture,
 	// since the first is its prefix.
@@ -59,16 +60,17 @@ func toolsFoldDelegatedRun(t *testing.T) (*tuitest.Driver, *e2eSession) {
 }
 
 // assertRunViewUmbrellaFolded asserts the one claim every run below makes on the opened view: the
-// child's umbrella stands folded to its header — matched by its tail, folded, so the same assertion
-// holds at either star phase — with no type row beneath it.
-func assertRunViewUmbrellaFolded(t *testing.T, f tuitest.Frame, header string) {
+// child's umbrella stands folded to its header — matched with the ▶ at its row's edge, and for the
+// live shape without its star, so the same assertion holds at either star phase — with no type row
+// beneath it.
+func assertRunViewUmbrellaFolded(t *testing.T, f tuitest.Frame, header umbrellaHeaderMatch) {
 	t.Helper()
 
 	frame := f.String()
 	if !strings.Contains(frame, toolsFoldRunViewCrumb) {
 		t.Fatalf("the run view is not open; no %q crumb:\n%s", toolsFoldRunViewCrumb, frame)
 	}
-	if !strings.Contains(frame, header) {
+	if !header.in(f) {
 		t.Errorf("the run view carries no folded %q header:\n%s", header, frame)
 	}
 	if strings.Contains(frame, toolsFoldReadRow) {
@@ -78,8 +80,8 @@ func assertRunViewUmbrellaFolded(t *testing.T, f tuitest.Frame, header string) {
 
 // TestE2EToolsUmbrellaFoldsInsideARunView is the finished shape: with the run over, ⌥↑ ⏎ on the
 // delegation opens its view, and the child's three-row umbrella stands there folded to
-// `✦ Tools (3 calls) ▶` under the default `ui.tools-open: false`; a click on that header opens it
-// onto its rows under a ▼, and esc walks back up to the conversation.
+// `✦ Tools (1 Read, 1 List, 1 Grep) ⋯ ▶` under the default `ui.tools-open: false`; a click on that
+// header opens it onto its rows under a ▼, and esc walks back up to the conversation.
 func TestE2EToolsUmbrellaFoldsInsideARunView(t *testing.T) {
 	t.Parallel()
 
@@ -91,14 +93,14 @@ func TestE2EToolsUmbrellaFoldsInsideARunView(t *testing.T) {
 	drv.WaitQuiet(settled)
 
 	assertRunViewUmbrellaFolded(t, drv.Frame(), toolsFoldHeaderFolded)
-	x, y, ok := drv.Frame().Find(toolsFoldHeaderFolded)
+	x, y, ok := toolsFoldHeaderFolded.find(drv.Frame())
 	if !ok {
 		t.Fatalf("the run view carries no folded %q header to click:\n%s", toolsFoldHeaderFolded, drv.Frame())
 	}
 
 	click(drv, x, y)
 
-	drv.WaitText(toolsFoldHeaderOpen)
+	toolsFoldHeaderOpen.await(drv)
 	drv.WaitText(toolsFoldReadRow)
 	drv.WaitQuiet(settled)
 	if frame := drv.Frame().String(); !strings.Contains(frame, toolsFoldRunViewCrumb) {
@@ -117,8 +119,8 @@ func TestE2EToolsUmbrellaFoldsInsideARunView(t *testing.T) {
 // umbrella at four type rows, the last of them live. The view is opened over that pane by a CLICK
 // on the delegation's row — ⌥↑ never enters the walk while a decision is pending
 // (blockCursorOwnsKeys) and ⏎ belongs to the pane's rows — and the umbrella stands folded to
-// `Tools (4 calls) ▶` all the same. The header is matched by its tail for
-// e2e_toolsfold_test.go's reason: the pane freezes the star's blink phase.
+// `Tools (1 Read, 1 List, 1 Grep, 1 Terminal) ⋯ ▶` all the same. The header is matched without its
+// star for e2e_toolsfold_test.go's reason: the pane freezes the star's blink phase.
 //
 // The decision is taken before esc, not after the wrap-up: inside a view esc means "one level up"
 // only while no pane waits for an answer (runViewOwnsEsc), and the view is rooted at the child, so

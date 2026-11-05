@@ -157,7 +157,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetUmbrella, entry: 0, text: "✦ Tools (2 calls) " + glyphExpanded},
+				{line: 0, kind: targetUmbrella, entry: 0, text: umbrellaHeaderRow("2 Read", glyphExpanded)},
 				{line: 1, kind: targetType, entry: 0,
 					text: groupMemberLine("  ┕ Read (2) ⋯ 196 lines")},
 			},
@@ -645,7 +645,7 @@ func headerStar(t *testing.T, tr *transcript, blink bool) string {
 	if len(lines) == 0 {
 		t.Fatal("the transcript rendered nothing at all")
 	}
-	return strings.TrimRight(ansiPattern.ReplaceAllString(lines[0], ""), " ")
+	return strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(lines[0], "")), " ")
 }
 
 // TestLiveBlockHeaderStarBlinks is the rule in one table: a block still holding an open call paints
@@ -706,7 +706,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRead(tr, "c2", "util.go", 0)
 			},
-			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "  Tools (2 calls) " + glyphExpanded,
+			settled: umbrellaHeaderRow("2 Read", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("2 Read", glyphExpanded),
 		},
 		{
 			name: "a same-type run whose calls have all landed settles",
@@ -714,7 +714,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "✦ Tools (2 calls) " + glyphExpanded,
+			settled: umbrellaHeaderRow("2 Read", glyphExpanded), flipped: umbrellaHeaderRow("2 Read", glyphExpanded),
 		},
 		{
 			// A run is live until its REPORT lands, whatever the span has already finished.
@@ -755,7 +755,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRun(tr, "c2", "go test ./...")
 			},
-			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "  Tools (2 calls) " + glyphExpanded,
+			settled: umbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded), flipped: blinkedUmbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded),
 		},
 		{
 			name: "an umbrella whose calls have all landed settles",
@@ -763,7 +763,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				runCall(tr, "c2", "go test ./...", "PASS", 0)
 			},
-			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "✦ Tools (2 calls) " + glyphExpanded,
+			settled: umbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded), flipped: umbrellaHeaderRow("1 Read, 1 Terminal", glyphExpanded),
 		},
 	}
 	for _, tc := range cases {

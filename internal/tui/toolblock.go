@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -73,9 +74,9 @@ func renderToolBlock(th theme, view toolView, width int, state blockState) block
 	toggle := targetNone
 	label := th.toolLabel.Render(view.Label)
 	// A card that counts itself wears the count beside its label in the faint tone every group
-	// count wears — the umbrella's "✦ Tools (7 calls)" shape (renderSuperGroup), worn here by one
-	// call about its own rows (toolView.count) — and BEFORE any ▶/▼ the targetless shape hangs on
-	// the header, so the indicator stays the row's last word.
+	// count wears — the tone the umbrella's "(3 Read, 4 Terminal)" breakdown is in too
+	// (renderSuperGroup), worn here by one call about its own rows (toolView.count) — and BEFORE
+	// any ▶/▼ the targetless shape hangs on the header, so the indicator stays the row's last word.
 	if view.count != "" {
 		label += " " + th.toolIndicator.Render("("+view.count+")")
 	}
@@ -109,17 +110,20 @@ func (r toolRunView) memberExpanded(n int) bool {
 }
 
 // The umbrella header's own wording (design call 9, docs/layout/tool-layout.md, "Vocabulary"):
-// "✦ Tools (7 calls)". superGroupLabel takes the label's bold gold like any tool name — it is what
-// the block IS — and the count beside it the faint tone every group count wears, because N is the
-// block's own arithmetic rather than part of a name.
+// "✦ Tools (3 Read, 4 Terminal)", or "✦ Tools (7 calls)" where the breakdown cannot fit.
+// superGroupLabel takes the label's bold gold like any tool name — it is what the block IS — and
+// the parenthetical beside it the faint tone every group count wears, kind names included, because
+// it is the block's own arithmetic rather than part of a name. superCallNoun is the total's noun;
+// superKindSeparator joins the breakdown's entries.
 const (
-	superGroupLabel = "Tools"
-	superCallNoun   = "call"
+	superGroupLabel    = "Tools"
+	superCallNoun      = "call"
+	superKindSeparator = ", "
 )
 
 // renderSuperGroup paints the umbrella: a run of 2+ groupable calls — one run of a single tool, or
-// adjacent runs of different tools — folded under one "✦ Tools (N calls)" header, one row per run
-// in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (super-group)"). It is a LIST whose rows stand for RUNS rather than for calls, and everything
+// adjacent runs of different tools — folded under one "✦ Tools (3 Read, 4 Terminal)" header, one
+// row per run in time order (docs/layout/tool-layout.md, "Grouped tools collapsed (super-group)"). It is a LIST whose rows stand for RUNS rather than for calls, and everything
 // about the shape follows from that:
 //
 //   - a TYPE ROW is the leader row about a whole run (leaderRowIn): the label and its "(N)" where a
@@ -131,9 +135,10 @@ const (
 //     (superMemberMarker) and by the very painter a plain group's members go through
 //     (renderGroupMember), so a member opens onto its body inside a type row exactly as it does
 //     inside a group — the sketch's 2nd step.
-//   - EVERY umbrella's HEADER is a fold target and wears the fold's glyph: a ▶/▼ after its count
-//     the way a header-folding card does (renderToolBlock), ▼ while the rows are showing and ▶
-//     while the umbrella stands folded to its header line, and the header line is marked
+//   - EVERY umbrella's HEADER is a fold target and wears the fold's glyph: a leader row of its own
+//     (umbrellaHeader) whose dots run to a ▶/▼ at the block's right edge, in the column the type
+//     rows' glyphs stand in — ▼ while the rows are showing and ▶ while the umbrella stands folded
+//     to its header line, nothing else on the row differing — and the header line is marked
 //     targetUmbrella whether small or large, open or shut, live or done, so a click or ⏎ there
 //     always has a fold to answer with. Which fold it is, the umbrella's SIZE says
 //     ([transcript.umbrellaFolded]): a LARGE one — more type rows than `ui.tools-fold-over`
@@ -144,38 +149,32 @@ const (
 //     state beneath a fold is untouched: what a reader opened stays open under the header and is
 //     there again when it unfolds.
 //
-// The count the header states is the number of CALLS, not of rows: a reader wants to know how much
-// work is folded away, and the rows already say how it divides. Its star is the block's, live while
-// any call in it is still open (blockState.live) — the running call being the last row's last
-// member, by construction of a time-ordered walk (design call 2).
+// What the header states is the CALLS, divided by tool kind (umbrellaBreakdown): a reader wants to
+// know how much work is folded away and of what sort, and a folded umbrella has no rows left to say
+// how it divides. Where that breakdown cannot fit beside a dot, the header falls back to the bare
+// total (umbrellaHeaderText). Its star is the block's, live while any call in it is still open
+// (blockState.live) — the running call being the last row's last member, by construction of a
+// time-ordered walk (design call 2).
 //
 // Each run's views go through the promote-guard on their own (guardPromotions), in the frame their
 // rows are actually drawn in: demotion changes what a member hides, and that is what its indicator
 // and its click surface are answered from — the same reason the guard runs at the block's entrance
 // rather than inside a row.
 func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState, fold umbrellaFold) blockPaint {
-	calls := 0
-	for _, r := range runs {
-		calls += len(r.views)
-	}
-	label := th.toolLabel.Render(superGroupLabel) + " " +
-		th.toolIndicator.Render("("+plural(calls, superCallNoun)+")")
-	// The glyph sits after the count, the header-folding card's idiom (renderToolBlock): the
-	// indicator stays the row's last word.
-	label += " " + th.toolIndicator.Render(stateIndicator(th, !fold.folded))
+	room := toolRowCells(th, width)
 	var out blockPaint
+	out.add([]string{umbrellaHeader(th, runs, state, room, width, !fold.folded)}, targetUmbrella)
 	if fold.folded {
-		out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), targetUmbrella)
 		return out
 	}
-	room := toolRowCells(th, width)
 
 	var rows blockPaint
 	at := 0 // the run head's offset from the umbrella's own head
 	for i, r := range runs {
 		views := guardPromotions(th, r.views, room, superMemberMarker(true))
 		row := leaderRowIn(th, typeRowText(views), typeRowPaint(th, views),
-			runAggregate(views), branchMarker(i == len(runs)-1), room, r.expanded, noRemainder)
+			runAggregate(views), branchMarker(i == len(runs)-1), paintRowMarker, room, r.expanded,
+			noRemainder)
 		rows.addFor(at, []string{indicatorRow(th, row, width, stateIndicator(th, r.expanded))}, targetType)
 		if r.expanded {
 			for k, tv := range views {
@@ -191,9 +190,87 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 		at += len(r.views)
 	}
 
-	out.add(hangingWrap(th, th.toolHeader, state.star(th)+" ", label, width), targetUmbrella)
 	out.join(rows)
 	return out
+}
+
+// umbrellaHeader is the umbrella's header line: ONE leader row (leaderRowIn) led by the block's
+// star, carrying the header text where a call would put its target, no outcome slot, and its dots
+// running to the fold's ▶/▼ at the block's edge (indicatorRow) — the very column the type rows'
+// glyphs stand in. open is the fold's state and reaches the glyph alone: the row is laid out the
+// same open or folded, so the click that folds it does not move it.
+//
+// The star is the row's marker so the leader arithmetic measures it like any marker, and it is
+// painted by paintHeaderMarker rather than paintRowMarker: it is the block's star, blinking to a
+// blank cell that holds its column while a call is open (blockState.star), not a row's chrome.
+func umbrellaHeader(th theme, runs []toolRunView, state blockState, room, width int, open bool) string {
+	marker := state.star(th) + " "
+	text := umbrellaHeaderText(th, runs, leaderTargetBudget(leaderAvail(th, marker, room), 0))
+	row := leaderRowIn(th, text, umbrellaHeaderPaint(th), branchSummary{}, marker, paintHeaderMarker,
+		room, open, noRemainder)
+	return indicatorRow(th, row, width, stateIndicator(th, open))
+}
+
+// umbrellaHeaderText is the header's left content as it is MEASURED: the label and the breakdown,
+// "Tools (3 Read, 4 Terminal)", when that fits in budget — whole, with the leader's floor of one dot
+// still standing after it — and the bare total, "Tools (7 calls)", when it does not. A header too
+// narrow even for the total is not narrowed further here: the leader row clips it by its own rule,
+// as it would a type row's label, so the header stays one line at any width.
+func umbrellaHeaderText(th theme, runs []toolRunView, budget int) string {
+	if text := superGroupLabel + " (" + umbrellaBreakdown(runs) + ")"; th.measure.Width(text) <= budget {
+		return text
+	}
+	calls := 0
+	for _, r := range runs {
+		calls += len(r.views)
+	}
+	return superGroupLabel + " (" + plural(calls, superCallNoun) + ")"
+}
+
+// umbrellaBreakdown is how the umbrella's calls divide by tool kind, as "3 Read, 4 Terminal": one
+// entry per distinct run label, summed across every run of it — two Read runs a Terminal run apart
+// are one kind — numbered even at one ("1 Read"), so every entry reads the same way, and in the
+// order each kind first ran, which is the order the reader saw them start.
+func umbrellaBreakdown(runs []toolRunView) string {
+	var kinds []string
+	counts := make(map[string]int, len(runs))
+	for _, r := range runs {
+		if len(r.views) == 0 {
+			continue
+		}
+		kind := r.views[0].Label
+		if _, seen := counts[kind]; !seen {
+			kinds = append(kinds, kind)
+		}
+		counts[kind] += len(r.views)
+	}
+	entries := make([]string, len(kinds))
+	for i, kind := range kinds {
+		entries[i] = strconv.Itoa(counts[kind]) + " " + kind
+	}
+	return strings.Join(entries, superKindSeparator)
+}
+
+// umbrellaHeaderPaint dresses whatever of [umbrellaHeaderText] survived the row's clip: the label
+// in the tool label's bold gold, and the whole parenthetical after it — names, numbers and commas —
+// in the faint toolIndicator tone, the tone a group count wears. A clip that reached into the label
+// leaves nothing to split on, and the survivor is painted as the label it began as (typeRowPaint's
+// rule).
+func umbrellaHeaderPaint(th theme) func(string) string {
+	return func(clipped string) string {
+		if rest, ok := strings.CutPrefix(clipped, superGroupLabel+" "); ok {
+			return th.toolLabel.Render(superGroupLabel) + " " + th.toolIndicator.Render(rest)
+		}
+		return th.toolLabel.Render(clipped)
+	}
+}
+
+// paintHeaderMarker dresses the umbrella header's star in the header's own tone (th.toolHeader) —
+// the tone every ✦ header's star is in — whatever the fold's state: the star is the block's, not a
+// row's chrome, so neither the detail tone nor the open/shut step reaches it. It is leaderRowIn's
+// marker painter for that one row; every other leader row passes paintRowMarker.
+func paintHeaderMarker(th theme, marker string, _ bool) string {
+	return th.toolHeader.Render(marker)
 }
 
 // typeRowText is a type row's left content as it is MEASURED: the run's label, and the "(N)" beside
