@@ -220,3 +220,31 @@ func TestBuiltinSchemesKeepFooterGitTonesDistinct(t *testing.T) {
 		})
 	}
 }
+
+// TestBuiltinSchemesKeepFooterAccentDistinct: the footer's model wears `footer-accent` on the row the
+// mode marker ends, the offline word (`error`) stands in and the git counts (`warning`, `success`)
+// light up — so it must read as none of those meanings, nor as the footer's own muted text it is the
+// accent against.
+func TestBuiltinSchemesKeepFooterAccentDistinct(t *testing.T) {
+	t.Parallel()
+	for _, name := range builtinNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := builtinScheme(t, name)
+			for _, other := range []struct{ key, value string }{
+				{"error", got.Error},
+				{"warning", got.Warning},
+				{"success", got.Success},
+				{"muted", got.Muted},
+				{"mode-plan", got.ModePlan},
+				{"mode-ask-before", got.ModeAskBefore},
+				{"mode-allow-edits", got.ModeAllowEdits},
+				{"mode-auto", got.ModeAuto},
+			} {
+				if strings.EqualFold(got.FooterAccent, other.value) {
+					t.Errorf("footer-accent and %s are both %q — the footer's model must not read as %s", other.key, other.value, other.key)
+				}
+			}
+		})
+	}
+}

@@ -37,6 +37,7 @@ var roleTable = []struct {
 	{"tool-marker", func(s Scheme) string { return s.ToolMarker }},
 	{"tool-marker-bright", func(s Scheme) string { return s.ToolMarkerBright }},
 	{"tool-leader", func(s Scheme) string { return s.ToolLeader }},
+	{"footer-accent", func(s Scheme) string { return s.FooterAccent }},
 	{"gauge", func(s Scheme) string { return s.Gauge }},
 	{"selection", func(s Scheme) string { return s.Selection }},
 	{"spinner-1", func(s Scheme) string { return s.Spinner1 }},
@@ -65,7 +66,7 @@ func TestRoleTableCoversEveryRole(t *testing.T) {
 	// The vocabulary's size is stated in prose in three places that nothing else holds to the
 	// struct, so pin it here: roleKeys is built off Scheme's yaml tags by reflection, which makes
 	// this the one assertion a silent struct/prose drift has to pass.
-	const wantRoleCount = 29
+	const wantRoleCount = 30
 	if len(roleKeys) != wantRoleCount {
 		t.Errorf("Scheme declares %d roles, the prose says %d — update README.md:188, layout.md:86 "+
 			"and newTheme's comment (internal/tui/theme.go:277), then this count",
@@ -118,6 +119,26 @@ func TestParsePartialFileInheritsDefaults(t *testing.T) {
 		if role.get(got) != role.get(def) {
 			t.Errorf("key %q: got %q, want the default %q", role.key, role.get(got), role.get(def))
 		}
+	}
+}
+
+// TestParseOmittedFooterAccentInheritsDark: a custom scheme written before `footer-accent` existed
+// states every other role and none of it, and still loads clean — the footer's model takes the
+// built-in dark value silently, as every omitted role does (ADR 0040 decision 3).
+func TestParseOmittedFooterAccentInheritsDark(t *testing.T) {
+	t.Parallel()
+	values := make(map[string]string, len(roleTable))
+	for i, role := range roleTable {
+		if role.key != "footer-accent" {
+			values[role.key] = fmt.Sprintf("#0000%02x", i+1)
+		}
+	}
+	got, warnings := Parse("older.yaml", yamlFor(t, values))
+	if len(warnings) != 0 {
+		t.Fatalf("a scheme without footer-accent warned: %v — an omitted role inherits silently", warnings)
+	}
+	if want := Default().FooterAccent; want == "" || got.FooterAccent != want {
+		t.Errorf("footer-accent = %q, want the built-in dark value %q", got.FooterAccent, want)
 	}
 }
 

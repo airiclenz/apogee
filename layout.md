@@ -103,7 +103,7 @@ the glyph the pointer is on.
 ## What "colour" means everywhere below
 
 **Every colour in this document is a role, and the hex beside it is one scheme's answer.** Colours
-come from the active **colour scheme**: one YAML file of 29 semantic roles, selected by
+come from the active **colour scheme**: one YAML file of 30 semantic roles, selected by
 `ui.color-scheme`, shipped as `dark` and `light` and overridable per user from
 `~/.apogee/schemes/` ([ADR 0040](.capcom/knowledge/decisions/adr-0040.md),
 the glossary's **Color scheme**, `capcom know show color-scheme`). Every hex quoted below is the built-in **`dark`** scheme's value — what
@@ -115,7 +115,8 @@ already colours: no full-screen background is painted, so the terminal's own bac
 field everything below is drawn on, and no glyph, marker, width or row budget is themed. Two roles
 are load-bearing rather than decorative and every shipped scheme is tested for them: `skill` and
 `file-ref` must stay tellable apart (ADR 0027), as must the four `mode-*` tones — and the footer's
-git tones, `warning` and `success`, must stay apart from those four and from `error`.
+git tones, `warning` and `success`, must stay apart from those four and from `error`, and so must
+the footer's model accent, `footer-accent`.
 
 **The glyphs this document draws are the default set.** `ui.glyphs: safe` swaps them, cell for cell
 at the same width, for shapes nearly every terminal font carries (`♦` for `✦`, `›` for `❯`, a `·`
@@ -1920,7 +1921,11 @@ effort ✦ workdir`, the sketch's `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ h
 and the autonomy mode on the right. The host is the bound `servers:` entry's own name — the name IS
 a server's alias (ADR 0036 decision 1) — falling back to the endpoint's own host for the unlisted
 `--endpoint` start that has no name, and any segment nothing has named is dropped with its
-separator. Two segments that are not about the upstream can follow the workdir: the workspace's git
+separator. The model is the row's one accent: it wears its own `footer-accent` role (`#c8c8f0`), a
+step out of the muted facts around it — between `muted-bright` and `user-text` in brightness — and
+tested in every shipped scheme to stay apart from the four `mode-*` tones, from `error`, from the git
+tones and from `muted`. A custom scheme that names no `footer-accent` inherits `dark`'s, silently,
+as it does any role it omits. Two segments that are not about the upstream can follow the workdir: the workspace's git
 state and the session's spend (both below).
 
 **While you watch.** A read-only watch leaves the footer alone: it keeps naming your own host,

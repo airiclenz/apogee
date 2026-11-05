@@ -87,6 +87,11 @@ type Scheme struct {
 	// the tone the ▶/▼ indicator beside it already wears — so the leader reads as the same chrome
 	// until a scheme damps it further; splitting it off is what makes that possible at all.
 	ToolLeader string `yaml:"tool-leader"` // the ⋯ leader between a tool row's target and its outcome
+	// FooterAccent is the footer's one accent among its muted facts: the model a session talks to,
+	// the fact a reader looks for first on the upstream row. It reads a step out of the footer's
+	// muted text without taking a meaning's colour — no `mode-*` rung, no `error` — so it sits
+	// between `muted-bright` and `user-text` in brightness, a quiet tint rather than a signal.
+	FooterAccent string `yaml:"footer-accent"` // the footer's model name
 
 	Gauge     string `yaml:"gauge"`     // context-fill gauge bar
 	Selection string `yaml:"selection"` // mouse drag-selection highlight background

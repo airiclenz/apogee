@@ -390,6 +390,7 @@ type themeStyles struct {
 	footerText    lipgloss.Style // the footer's content (faint on black)
 	footerWarning lipgloss.Style // a footer git count in the warning tone (footerToneWarning): the `warning` role on the footer's black
 	footerSuccess lipgloss.Style // a footer git count in the success tone (footerToneSuccess): the `success` role on the footer's black
+	footerAccent  lipgloss.Style // the footer's model name (Model.footerLeft): the `footer-accent` role on the footer's black
 	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 
@@ -430,7 +431,7 @@ func (th theme) footerToneStyle(tone footerTone) lipgloss.Style {
 	}
 }
 
-// newTheme builds the styles from a colour scheme — the 29 semantic roles of ADR 0040, resolved
+// newTheme builds the styles from a colour scheme — the 30 semantic roles of ADR 0040, resolved
 // before it is called (the renderer never reads a scheme file itself). It is the ONE seam between a
 // scheme and the look: calling it again with another scheme rebuilds every style, which is what a
 // live scheme switch does (settingsApplyLocal).
@@ -467,6 +468,7 @@ func newTheme(s scheme.Scheme) theme {
 		toolMarkerFg   = lipgloss.Color(s.ToolMarker)
 		openMarker     = lipgloss.Color(s.ToolMarkerBright)
 		toolLeaderFg   = lipgloss.Color(s.ToolLeader)
+		footerAccentFg = lipgloss.Color(s.FooterAccent)
 		gauge          = lipgloss.Color(s.Gauge)
 		selectionFill  = lipgloss.Color(s.Selection)
 	)
@@ -603,8 +605,11 @@ func newTheme(s scheme.Scheme) theme {
 			footerText:    lipgloss.NewStyle().Foreground(muted).Background(surface),
 			// A git count's tone is its meaning (footerTone): the footer's own field, with the
 			// role's colour and no weight, so a count reads as a fact in the row rather than an alarm.
+			// The model is the footer's one accent among its facts, a tint rather than a meaning: its
+			// own `footer-accent` role on the same field, and no weight either.
 			footerWarning: lipgloss.NewStyle().Foreground(warningFg).Background(surface),
 			footerSuccess: lipgloss.NewStyle().Foreground(successFg).Background(surface),
+			footerAccent:  lipgloss.NewStyle().Foreground(footerAccentFg).Background(surface),
 			scrollThumb:   lipgloss.NewStyle().Foreground(muted),
 			scrollTrack:   lipgloss.NewStyle().Foreground(chrome),
 			gaugeFill:     lipgloss.NewStyle().Foreground(gauge),

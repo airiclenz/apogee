@@ -253,7 +253,11 @@ internal/tui/mode_test.go — TestFooterTonesOnlyNonZeroGitCounts; internal/sche
 
 **Commit:** `feat(tui): footer git counts take warning and success tones`
 
-## 8. A `footer-accent` role for the model
+## 8. A `footer-accent` role for the model — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): ADR 0040's 29-key counts (adr-0040-amend-0815.md, adr-0040-consequences.md) are left as written and superseded by the new dated amendment adr-0040-amend-1105, named on ADR 0040's Status line and in its reading order, as the item's re-check prescribes.
+NOTES (2026-11-05): the distinctness test also keeps `footer-accent` apart from `warning`, `success` and `muted` (the footer's other tones), beyond the item's `mode-*` and `error`.
+NOTES (2026-11-05): pre-existing: TestRoleTableCoversEveryRole's failure message names stale anchors (README.md:188 states no count; layout.md:86 and theme.go:277 have moved); left untouched.
 
 **What:** Recast at the regression check (2026-11-05). Depends on item 7.
 

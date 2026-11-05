@@ -44,6 +44,7 @@ prompt-toggle: "#4a72b8"      # the collapsed prompt's see-more / see-less marke
 tool-marker: "#3b6ea5"        # a tool block's synthesized "+N more lines" remainder marker AND the outcome slot at a row's right edge — prompt-toggle's cooler sibling, the same "apogee is talking" hue
 tool-marker-bright: "#2F5884" # the marker tone one step up, worn by the outcome slot once the block is EXPANDED — on a light terminal "up" is DARKER, one rung down the same ramp, so it stays the same voice at a higher volume
 tool-leader: "#656d76"        # the ⋯ leader carrying a tool row's eye from its target to the outcome slot at the row's edge — seeded from `muted`, the tone the ▶ beside it wears; damp it further to make the dots recede
+footer-accent: "#2d3a5a"      # the footer's model name — its one accent among the muted facts: a deep slate pitched between `muted-bright` and `user-text` (on a light terminal "brighter" is darker), a step out of the row without a meaning's hue (no `mode-*` rung, no `error`)
 
 # --- misc --------------------------------------------------------------------------
 gauge: "#8250df"     # context-fill gauge bar — purple

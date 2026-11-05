@@ -3969,19 +3969,32 @@ func (m Model) footerRowContent(row, w int) string {
 // it, as the old narrow branch did, offline lost its error tone exactly where the row is most
 // cramped.
 //
-// Where the layout kept the git segment, the fact line is cut at the git entry of the layout's span
-// table and the segment is painted span by span between the two halves ([Model.footerGit]); every
-// cell keeps the column the fit measured, since the painted spans re-join to exactly the layout's
-// text.
+// Two segments of the fact line carry a tone of their own, and the line is cut at each one's entry
+// in the layout's span table: the model, painted whole in the `footer-accent` role — the cut text
+// too, where the priority-0 rung truncated it — and the git segment, painted span by span
+// ([Model.footerGit]). Everything between them stays on the footer's own tone, and every cell keeps
+// the column the fit measured, since the painted pieces re-join to exactly the layout's text.
 func (m Model) footerLeft(lead string, layout footerLayout) string {
 	var left string
-	if git, ok := layout.span(footerSegGit); !ok {
-		left = m.th.footerText.Render(lead + layout.info)
-	} else {
-		left = m.th.footerText.Render(lead+layout.info[:git.at]) + m.footerGit(git)
-		if rest := layout.info[git.at+len(git.text):]; rest != "" {
-			left += m.th.footerText.Render(rest)
+	plain, from := lead, 0
+	for _, span := range layout.spans {
+		var toned string
+		switch span.id {
+		case footerSegModel:
+			toned = m.th.footerAccent.Render(span.text)
+		case footerSegGit:
+			toned = m.footerGit(span)
+		default:
+			continue
 		}
+		if plain += layout.info[from:span.at]; plain != "" {
+			left += m.th.footerText.Render(plain)
+		}
+		left += toned
+		plain, from = "", span.at+len(span.text)
+	}
+	if plain += layout.info[from:]; plain != "" {
+		left += m.th.footerText.Render(plain)
 	}
 	if layout.offline != "" {
 		left += m.th.footerText.Foreground(m.th.errorFg).Render(layout.offline)

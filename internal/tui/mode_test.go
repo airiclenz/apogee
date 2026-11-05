@@ -533,6 +533,42 @@ func TestFooterGitCountsTakeTheirRoleUnderEveryBuiltinScheme(t *testing.T) {
 	}
 }
 
+// TestFooterModelTakesTheAccentRoleUnderEveryBuiltinScheme reads the model segment's SGR under each
+// built-in scheme, with the escape derived from the scheme's own role values rather than from the
+// theme: the model in `footer-accent`, the facts either side of it in `muted` — every one on the
+// footer's `surface` field — and the accent opened exactly once, on the model alone.
+func TestFooterModelTakesTheAccentRoleUnderEveryBuiltinScheme(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range scheme.Discover("") {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, warnings := scheme.Resolve(name, "")
+			if len(warnings) != 0 {
+				t.Fatalf("built-in %q warned: %v", name, warnings)
+			}
+			role := func(fg string) string {
+				return sgrOpener(t, lipgloss.NewStyle().Foreground(lipgloss.Color(fg)).Background(lipgloss.Color(s.Surface)))
+			}
+			accent, muted := role(s.FooterAccent), role(s.Muted)
+			if accent == muted {
+				t.Fatalf("footer-accent opens like muted under %q: %q", name, accent)
+			}
+
+			footer := withScheme(footerFactsModel(t), s).footerContent(160)
+			for _, run := range []string{muted + bodyIndent + "test-host ✦ ", accent + "test-model", muted + " ✦ high ✦ "} {
+				if !strings.Contains(footer, run) {
+					t.Errorf("footer under %q lacks the run %q: %q", name, run, footer)
+				}
+			}
+			if n := strings.Count(footer, accent); n != 1 {
+				t.Errorf("footer under %q opens footer-accent %d times, want 1 (the model): %q", name, n, footer)
+			}
+		})
+	}
+}
+
 // TestFooterGitCountsReadTheSameUnderAsciiProfile: a terminal with no colour loses the tones and
 // nothing else — the row the Ascii profile writes reads exactly as the coloured one does once its
 // escapes are stripped, and it carries no colour at all.
