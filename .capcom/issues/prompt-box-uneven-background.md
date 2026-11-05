@@ -1,11 +1,13 @@
 ---
 title: "Prompt box background is not uniform: rows and cells paint different shades"
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tui]
 plan: 2026-11-05 - 04 - bottom-chrome-background-and-watch-footer-plan
 created: 2026-11-05T15:08:02Z
+closed: 2026-11-05T16:28:20Z
+reason: "Resolved by plan '2026-11-05 - 04 - bottom-chrome-background-and-watch-footer-plan' item 1 (archived at e63d4212): scheme surface set as terminal background, bottom chrome painted full width, pinned by TestBottomChromePaintsOneBackground."
 ---
 
 The area around the prompt box does not paint one uniform background. With a black colour scheme (screenshot 2026-11-05 16.02.44), the rows above the prompt box and the footer rows show bands of a slightly lighter shade next to true black. The footer's second row (`~/repos/apogee ✦ main 0Δ 0↓ 0↑`) paints the lighter band only as wide as its text, and the first row's right end (after `ask before`) shows a short band of the other shade too. So some cells take the theme's background and others take the terminal default (or an unset/other style), per row and per span.

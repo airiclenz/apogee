@@ -1,11 +1,13 @@
 ---
 title: Watching a live session, the footer shows apogee's own folder and branch, not the watched session's
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tui]
 plan: 2026-11-05 - 04 - bottom-chrome-background-and-watch-footer-plan
 created: 2026-11-05T15:08:07Z
+closed: 2026-11-05T16:28:20Z
+reason: "Resolved by plan '2026-11-05 - 04 - bottom-chrome-background-and-watch-footer-plan' item 5 with items 2-4 (archived at e63d4212): footer shows a watching marker and the watched folder and branch, git picker refused while watching, layout.md documents it, driven by TestWatchFooterNamesTheWatchedWorkspace."
 ---
 
 While watching a live session read-only, the footer status bar still shows the folder and git branch of the workspace apogee was started in. It should show the folder and branch the watched session is running in.
