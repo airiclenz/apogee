@@ -53,9 +53,17 @@ const gitFetchCadence = 5 * time.Minute
 // asks for a read now: while the chain waits on its tick that opens a fresh generation (retiring
 // the pending tick), and while a read is in flight it only marks the chain dirty, so the landing
 // issues exactly one follow-up read instead of the tick. The fetch chain is a second, independent
-// generation, live only while `ui.git-fetch` is on and the snapshot names an upstream.
+// generation, live only while `ui.git-fetch` is on, the snapshot names an upstream and no watch is
+// active.
+//
+// While a watch is active the one status chain reads the WATCHED session's workspace instead
+// ([Model.gitRoot]): entering and leaving the watch each open a fresh generation at the new root
+// ([Model.retargetGit]), so a read or tick of the other root is inert on arrival, and a watched
+// read folds into the watch's own slot ([watchState].gitSnap), leaving snap — the host's — exactly as
+// the last host read left it. No second chain runs beside it.
 type gitState struct {
-	// snap is the last good snapshot; meaningful only when hasSnap. Its entry lists are nil.
+	// snap is the host workspace's last good snapshot; meaningful only when hasSnap. Its entry
+	// lists are nil. A read of a watched workspace never lands here (watchState.gitSnap).
 	snap gitstatus.Snapshot
 	// hasSnap reports that the workspace was inside a work tree at the last good read. A failed
 	// read keeps it (and snap); a read that found no work tree clears it.
@@ -65,7 +73,9 @@ type gitState struct {
 	// no chain (the host is unwired).
 	gen int
 	// inFlight reports that a status read of the live generation has been issued and has not
-	// landed. newModel sets it for the read Init issues.
+	// landed. newModel sets it for the read Init issues. Every site that sets it does so only
+	// beside a non-nil [Model.gitStatusCmd]: a watch of an unknown workspace issues no read, so the
+	// chain is never left waiting on one.
 	inFlight bool
 	// dirty reports that a refresh was asked for while a read was in flight: the landing issues
 	// one more read at once instead of arming the tick.
@@ -121,6 +131,17 @@ func (m Model) gitWired() bool {
 	return m.opts.GitStatus != nil && m.opts.Workspace != ""
 }
 
+// gitRoot is the root the status chain reads: the watched session's workspace while a watch is
+// active — false when that workspace is unknown, so no read runs at all — and the host's own
+// workspace otherwise. The fetch chain never reads it: it fetches the host workspace only, and only
+// while no watch is active ([Model.gitFetchWanted]).
+func (m Model) gitRoot() (root string, ok bool) {
+	if workspace, isWatching := m.watchedWorkspace(); isWatching {
+		return workspace, workspace != ""
+	}
+	return m.opts.Workspace, m.opts.Workspace != ""
+}
+
 // gitSnapshot is the footer's reading of the workspace's git state: the last good snapshot, and
 // false when there is none to show (unwired, not yet landed, or not inside a work tree).
 func (m Model) gitSnapshot() (gitstatus.Snapshot, bool) {
@@ -128,13 +149,19 @@ func (m Model) gitSnapshot() (gitstatus.Snapshot, bool) {
 }
 
 // gitStatusCmd runs one status read off the Update loop and reports it stamped with the CURRENT
-// generation. Like [Model.beatCmd] it captures the program context and the seam by value, and it
-// CONTINUES a chain: the caller has already marked the read in flight on the Model it returns.
+// generation, at [Model.gitRoot]. Like [Model.beatCmd] it captures the program context and the
+// seam by value, and it CONTINUES a chain: the caller marks the read in flight on the Model it
+// returns, and only when this is non-nil — it is nil unwired and while watching an unknown
+// workspace.
 func (m Model) gitStatusCmd() tea.Cmd {
 	if !m.gitWired() {
 		return nil
 	}
-	host, ctx, root, gen := m.opts.GitStatus, m.parent, m.opts.Workspace, m.git.gen
+	root, ok := m.gitRoot()
+	if !ok {
+		return nil
+	}
+	host, ctx, gen := m.opts.GitStatus, m.parent, m.git.gen
 	return func() tea.Msg {
 		start := time.Now()
 		snap, inside, err := host.Status(ctx, root)
@@ -158,8 +185,27 @@ func (m *Model) refreshGit() tea.Cmd {
 		return nil
 	}
 	m.git.gen++
-	m.git.inFlight = true
-	return m.gitStatusCmd()
+	read := m.gitStatusCmd()
+	m.git.inFlight = read != nil
+	return read
+}
+
+// retargetGit moves the status chain to the root [Model.gitRoot] answers now — called once a watch
+// has been entered or left, which is what changes that root. It opens a fresh generation whatever
+// the chain was doing, so a read still in flight at the old root and a pending tick are both inert
+// on arrival, drops a dirty mark that belonged to the old root, and issues the first read at the
+// new one. Unwired, or watching an unknown workspace, it issues nothing and leaves the chain idle.
+//
+// It takes a pointer for the reason [Model.refreshGit] does.
+func (m *Model) retargetGit() tea.Cmd {
+	if !m.gitWired() {
+		return nil
+	}
+	m.git.gen++
+	m.git.dirty = false
+	read := m.gitStatusCmd()
+	m.git.inFlight = read != nil
+	return read
 }
 
 // gitAfterTurn is the Turn-end refresh laid over a fold's result: the fold that ended a Turn (a
@@ -199,8 +245,9 @@ func (m Model) gitFetchInterval() time.Duration {
 	return gitFetchCadence
 }
 
-// foldGitStatus folds one landed read and re-arms the chain from HERE, so reads never overlap. A
-// failed read keeps the last snapshot — a timed-out read on a slow box is no reason to blank the
+// foldGitStatus folds one landed read and re-arms the chain from HERE, so reads never overlap. The
+// snapshot lands in the slot of the root it was read at ([Model.keepGitSnapshot]). A failed read
+// keeps the last snapshot — a timed-out read on a slow box is no reason to blank the
 // segment — and a read that found no work tree clears it; both wait out [gitStatusBackoff] rather
 // than the cadence. A Turn end that arrived meanwhile turns the wait into one read at once.
 func (m Model) foldGitStatus(msg gitStatusMsg) (tea.Model, tea.Cmd) {
@@ -213,16 +260,17 @@ func (m Model) foldGitStatus(msg gitStatusMsg) (tea.Model, tea.Cmd) {
 	case msg.err != nil:
 		wait = max(gitStatusBackoff, wait)
 	case !msg.inside:
-		m.git.snap, m.git.hasSnap = gitstatus.Snapshot{}, false
+		m.keepGitSnapshot(gitstatus.Snapshot{}, false)
 		wait = max(gitStatusBackoff, wait)
 	default:
-		m.git.snap, m.git.hasSnap = countsOnly(msg.snap), true
+		m.keepGitSnapshot(countsOnly(msg.snap), true)
 	}
 	fetch := m.armGitFetch()
 	if m.git.dirty {
 		m.git.dirty = false
-		m.git.inFlight = true
-		return m, tea.Batch(m.gitStatusCmd(), fetch)
+		read := m.gitStatusCmd()
+		m.git.inFlight = read != nil
+		return m, tea.Batch(read, fetch)
 	}
 	gen := m.git.gen
 	tick := tea.Tick(wait, func(time.Time) tea.Msg { return gitStatusTickMsg{gen: gen} })
@@ -234,8 +282,20 @@ func (m Model) foldGitStatusTick(msg gitStatusTickMsg) (tea.Model, tea.Cmd) {
 	if !m.gitWired() || msg.gen != m.git.gen || m.git.inFlight {
 		return m, nil
 	}
-	m.git.inFlight = true
-	return m, m.gitStatusCmd()
+	read := m.gitStatusCmd()
+	m.git.inFlight = read != nil
+	return m, read
+}
+
+// keepGitSnapshot stores a landed read's snapshot in the slot of the root it was read at: the
+// watch's own while a watch is active, the host's otherwise. The generation bump at each watch
+// boundary ([Model.retargetGit]) is what guarantees a read lands only while its root is current.
+func (m *Model) keepGitSnapshot(snap gitstatus.Snapshot, inside bool) {
+	if m.watch.isActive {
+		m.watch.gitSnap, m.watch.hasGitSnap = snap, inside
+		return
+	}
+	m.git.snap, m.git.hasSnap = snap, inside
 }
 
 // countsOnly drops a snapshot's entry lists: the footer reads counts and branch fields, and the
@@ -245,10 +305,12 @@ func countsOnly(s gitstatus.Snapshot) gitstatus.Snapshot {
 	return s
 }
 
-// gitFetchWanted reports whether the fetch chain should run: `ui.git-fetch` is on and the last good
-// snapshot names an upstream to fetch from.
+// gitFetchWanted reports whether the fetch chain should run: `ui.git-fetch` is on, the host's last
+// good snapshot names an upstream to fetch from, and no watch is active — the watch reads another
+// workspace's status and fetches nothing, so a chain running at entry retires at its next step, and
+// the host read on leaving arms it again.
 func (m Model) gitFetchWanted() bool {
-	return m.gitWired() && m.opts.UI.GitFetch && m.git.hasSnap && m.git.snap.Upstream != ""
+	return m.gitWired() && m.opts.UI.GitFetch && !m.watch.isActive && m.git.hasSnap && m.git.snap.Upstream != ""
 }
 
 // armGitFetch opens the fetch chain when it is wanted and none runs, and issues its first fetch at
@@ -268,7 +330,8 @@ func (m *Model) armGitFetch() tea.Cmd {
 	return m.gitFetchCmd()
 }
 
-// gitFetchCmd runs one fetch off the Update loop, stamped with the current fetch generation.
+// gitFetchCmd runs one fetch of the host workspace off the Update loop, stamped with the current
+// fetch generation.
 func (m Model) gitFetchCmd() tea.Cmd {
 	host, ctx, root, gen := m.opts.GitStatus, m.parent, m.opts.Workspace, m.git.fetchGen
 	return func() tea.Msg {

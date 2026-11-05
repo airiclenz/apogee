@@ -598,12 +598,14 @@ func (m Model) openStoredSession(id string) (tea.Model, tea.Cmd) {
 // ([Model.isWatchResumable]): it leaves the watch first — the owner's engine, host and session view
 // restored, the journal closed, the follower's chain ended with its probe — and only then takes the
 // normal door (openStoredSession), so the load's Hold is the one this process takes and the record
-// opens exactly as the browser would open it. The owner's Msgs the watch held fold first.
+// opens exactly as the browser would open it. The owner's Msgs the watch held fold first. The host
+// workspace's git re-read runs beside that sequence, never in it, so a slow `git status` never
+// holds the record load up.
 func (m Model) resumeWatched() (tea.Model, tea.Cmd) {
 	id := m.watch.source.id
-	left, redelivered := m.leaveWatch()
+	left, redelivered, gitRead := m.leaveWatch()
 	next, opened := left.openStoredSession(id)
-	return next, tea.Sequence(redelivered, opened)
+	return next, tea.Batch(tea.Sequence(redelivered, opened), gitRead)
 }
 
 // switchSession starts the load of the stored session id that resumeLoaded then restores, keep

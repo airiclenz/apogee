@@ -629,10 +629,14 @@
 // [Model.refreshGit], which opens a fresh generation while the chain waits on its tick (retiring the
 // tick) and only marks it dirty while a read is in flight, so the landing issues exactly one
 // follow-up. A failed read keeps the last snapshot; one that found no work tree clears it; both wait
-// out a long backoff, never the 5 s cadence. The fetch chain is a second generation, live only while
-// `ui.git-fetch` is on and the snapshot names an upstream — armed by a landed read or the pref
-// switched on, retired at its own next step when either goes away — and a fetch that lands asks
-// for a status read. Every call runs under the program context [Build] derives and its cleanup
+// out a long backoff, never the 5 s cadence. While a watch is active the same one chain reads the
+// WATCHED session's workspace ([Model.gitRoot]) — entering and leaving each open a fresh generation
+// at the new root ([Model.retargetGit]), leaving re-reads the host at once, a watch of an unknown
+// workspace reads nothing — and a watched read folds into the watch's own slot, never the host's
+// snapshot. The fetch chain is a second generation, live only while `ui.git-fetch` is on, the host
+// snapshot names an upstream and no watch is active — armed by a landed read or the pref switched
+// on, retired at its own next step when any of that goes away — and a fetch that lands asks for a
+// status read. Every call runs under the program context [Build] derives and its cleanup
 // cancels, so a git child still blocked at exit is cancelled with it. An unwired seam arms nothing.
 //
 // What a beat DOES about a changed upstream is the second act, [ServerHost.Rebind], and the split

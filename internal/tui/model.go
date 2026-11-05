@@ -774,7 +774,8 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 
 	// Arm the git status chain the same way: generation 1 is the chain Init's first read belongs to,
 	// and that read is in flight from Init on, so a Turn end before it lands waits for it rather
-	// than starting a second one. Unwired, it stays at 0 and no git ever runs.
+	// than starting a second one. Unwired, it stays at 0 and no git ever runs. A --resume start
+	// into a watch re-derives the mark (enterStartupWatch): Init's read is then the watched one.
 	if m.gitWired() {
 		m.git.gen = 1
 		m.git.inFlight = true
@@ -1958,7 +1959,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// While watching there is no worker of the watcher's to cancel: esc leaves the watch and goes
 		// back to the parked session (watch.go). A run view or pane open in the watch claimed it above.
 		if m.watch.isActive {
-			return m.leaveWatch()
+			left, redelivered, gitRead := m.leaveWatch()
+			return left, tea.Batch(redelivered, gitRead)
 		}
 		// A background workflow's prompt (either pane) has no worker behind it: one press sends it
 		// back to the engine's queue unanswered (dismissWorkflowPrompt, workflow.go).
@@ -2749,9 +2751,9 @@ func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
 func (m Model) quit() (tea.Model, tea.Cmd) {
 	// A watch ends first, so everything below — the stop, the closing flush — acts on the
 	// watcher's own session and engine, never on the watched view (watch.go).
-	m, redeliver := m.leaveWatch()
+	m, redeliver, gitRead := m.leaveWatch()
 	next, cmd := m.quitSession()
-	return next, tea.Batch(redeliver, cmd)
+	return next, tea.Batch(redeliver, gitRead, cmd)
 }
 
 // quitSession is quit past the watch: the prompt-pane dismissal, the busy stop or the closing flush.

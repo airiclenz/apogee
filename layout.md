@@ -1986,10 +1986,13 @@ apart from every `mode-*` tone and from `error` in every shipped scheme, and und
 terminal profile the segment reads exactly as it does in colour. git never runs on the render path: a poll reads the
 state off the frame every 5 s after the last read landed (stretched when a read was slow, and
 backed off to a minute where the read failed or found no work tree), and a Turn's end asks for one
-more read at once, so what the model just changed is counted when it stops. A failed read keeps
+more read at once, so what the model just changed is counted when it stops. While you watch a live
+session the same poll reads the watched session's workspace instead (none at all where the watch
+names no workspace), and leaving the watch reads yours again at once. A failed read keeps
 the counts the footer had rather than blanking them. So that `↓` sees commits pushed since you last
 fetched, apogee also runs `git fetch` in the background every 5 minutes while the branch has an
-upstream — never prompting, and never in a refused repository — behind
+upstream — never prompting, never in a refused repository, and never while you watch a live
+session — behind
 [`ui.git-fetch`](docs/manual/configuration.md#the-terminal-ui--ui), on by default; off, the counts
 are what the repository already knows. It is priority 4: a narrow row gives it up after the spend
 and before the effort word, because it is a fact about the working tree that `git status` restates

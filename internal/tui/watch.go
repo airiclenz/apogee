@@ -19,6 +19,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
+	"github.com/airiclenz/apogee/internal/gitstatus"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/undo"
 	"github.com/airiclenz/apogee/internal/workflow"
@@ -165,6 +166,12 @@ type watchState struct {
 	// ([Model.topLevelModel]). It is the watched
 	// run's, so it lives here and never in m.opts, and leaveWatch drops it with the rest of the watch.
 	model string
+	// gitSnap is the watched workspace's last good git snapshot, meaningful only when hasGitSnap:
+	// the status chain reads the watched workspace while watching ([Model.gitRoot]) and folds here
+	// ([Model.keepGitSnapshot]), so the host's own snapshot (gitState.snap) stays as its last read
+	// left it. Its entry lists are nil, and leaveWatch drops it with the rest of the watch.
+	gitSnap    gitstatus.Snapshot
+	hasGitSnap bool
 }
 
 // journalCursor is where the follower stands in the journal. offset is how many journal bytes have
@@ -227,11 +234,26 @@ type watchStart struct {
 // refused (the Model returned unchanged) rather than parking a session mid-Exchange.
 //
 // The inert engine's getters answer what the owner's answered at entry, so the footer's
-// confinement word and effort segment do not move across the swap.
+// confinement word and effort segment do not move across the swap. The git status chain moves to
+// the watched workspace with it ([Model.retargetGit]): the Cmd carries that read beside the
+// follower's.
 func (m Model) enterWatch(src watchSource) (Model, tea.Cmd) {
-	if m.watch.isActive || m.state != stateIdle {
+	if !m.canWatch() {
 		return m, nil
 	}
+	m, follow := m.startWatch(src)
+	gitRead := m.retargetGit()
+	return m, tea.Batch(follow, gitRead)
+}
+
+// canWatch reports whether a watch may start now: none is active and the session is idle.
+func (m Model) canWatch() bool {
+	return !m.watch.isActive && m.state == stateIdle
+}
+
+// startWatch is enterWatch past its gate and short of the git chain: the swap into the watch view,
+// returning the follower's first read.
+func (m Model) startWatch(src watchSource) (Model, tea.Cmd) {
 	override, profile := m.eng.ThinkingEffort()
 	inert := inertEngine{
 		isConfined:     m.eng.ConfineToWorkspace(),
@@ -303,23 +325,33 @@ func readRecordOnly(src watchSource, gen int) watchBatchMsg {
 // to send. The box names the
 // journal frame's title, else the session id — the record that might name one is the owner's, and
 // this run does not load it. A nil live, or a start the watch refuses, leaves the fresh session.
+//
+// No git read rides in startupWatchRead: Init's own status read, issued on the generation newModel
+// armed, reads [Model.gitRoot] — the watched workspace by then — so it IS the watched read and one
+// chain runs. Init cannot mark it in flight (a value receiver), so the mark newModel set is
+// re-derived here: a watch of an unknown workspace issues no read and leaves the chain idle.
 func (m *Model) enterStartupWatch(live *LiveSession) {
-	if live == nil {
+	if live == nil || !m.canWatch() {
 		return
 	}
-	next, read := m.enterWatch(watchSourceOf(*live, cmp.Or(live.Title, live.ID)))
+	next, read := m.startWatch(watchSourceOf(*live, cmp.Or(live.Title, live.ID)))
 	*m = next
 	m.startupWatchRead = read
+	m.git.inFlight = m.git.inFlight && m.gitStatusCmd() != nil
 }
 
 // leaveWatch is every way out of a watch — esc, ⏎-resume and quit before they act: the owner's
 // engine, session host and session view come back exactly as parked, the journal's descriptor is
 // closed, and every follower message still in flight — its probe included — is dropped by the
-// watch it names. The Cmd delivers the owner's held Msgs again, so they fold into the restored
-// session; it is nil when nothing was held or no watch was active.
-func (m Model) leaveWatch() (Model, tea.Cmd) {
+// watch it names. redelivered delivers the owner's held Msgs again, so they fold into the restored
+// session; it is nil when nothing was held or no watch was active. gitRead is the host workspace's
+// status read, issued at once on a fresh generation so a watched read or tick still in flight is
+// inert ([Model.retargetGit]); it is nil unwired or when no watch was active. The two are kept
+// apart so a caller that sequences work after the redelivery (resumeWatched) never holds it behind
+// a git read.
+func (m Model) leaveWatch() (left Model, redelivered, gitRead tea.Cmd) {
 	if !m.watch.isActive {
-		return m, nil
+		return m, nil, nil
 	}
 	held := m.watch.held
 	closeJournal(m.watch.journal)
@@ -329,7 +361,8 @@ func (m Model) leaveWatch() (Model, tea.Cmd) {
 	// The block-paint cache is keyed by entry index, and the indices now mean the restored
 	// transcript's entries again, not the watched one's (paintcache.go).
 	m.transcript.paints.clear()
-	return m, redeliver(held)
+	gitRead = m.retargetGit()
+	return m, redeliver(held), gitRead
 }
 
 // swapSessionView puts v in place as the session view the Model renders and returns the one it
@@ -388,6 +421,10 @@ const (
 // row), so one that lands began before the watch, its `git <verb>…` note sits in the parked
 // transcript, and its fold releases the owner's engine for a stashed rebind. A branch listing that
 // landed opens the branch picker over the view, so it waits for the watch like any other surface.
+//
+// The git status chain's Msgs fold as the view's: while watching, the chain reads the watched
+// workspace and its fold keeps that snapshot in the watch's own slot ([Model.keepGitSnapshot]); a
+// read of the host root issued before the watch carries a retired generation and is inert.
 func watchRouteOf(msg tea.Msg) watchRoute {
 	switch msg := msg.(type) {
 	case watchPollMsg, watchBatchMsg,

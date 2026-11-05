@@ -5,6 +5,7 @@ import (
 	"errors"
 	"go/parser"
 	"go/token"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -18,7 +19,7 @@ import (
 )
 
 // fakeGitHost is a scripted [GitStatusHost]. It answers every Status with the scripted snapshot,
-// inside flag and error, and counts the calls. With block set, a Status call parks until release is
+// inside flag and error, counts the calls and records the root each one read. With block set, a Status call parks until release is
 // closed or its ctx ends, recording the ctx error it saw — the slow read and the exit tests.
 type fakeGitHost struct {
 	mu       sync.Mutex
@@ -34,6 +35,8 @@ type fakeGitHost struct {
 
 	statusCalls int
 	fetchCalls  int
+	statusRoots []string
+	fetchRoots  []string
 }
 
 func newFakeGitHost(snap gitstatus.Snapshot) *fakeGitHost {
@@ -46,9 +49,10 @@ func newFakeGitHost(snap gitstatus.Snapshot) *fakeGitHost {
 	}
 }
 
-func (f *fakeGitHost) Status(ctx context.Context, _ string) (gitstatus.Snapshot, bool, error) {
+func (f *fakeGitHost) Status(ctx context.Context, root string) (gitstatus.Snapshot, bool, error) {
 	f.mu.Lock()
 	f.statusCalls++
+	f.statusRoots = append(f.statusRoots, root)
 	block, snap, inside, err := f.block, f.snap, f.inside, f.err
 	f.mu.Unlock()
 	if block {
@@ -63,10 +67,11 @@ func (f *fakeGitHost) Status(ctx context.Context, _ string) (gitstatus.Snapshot,
 	return snap, inside, err
 }
 
-func (f *fakeGitHost) Fetch(context.Context, string) error {
+func (f *fakeGitHost) Fetch(_ context.Context, root string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.fetchCalls++
+	f.fetchRoots = append(f.fetchRoots, root)
 	return f.fetchErr
 }
 
@@ -80,6 +85,13 @@ func (f *fakeGitHost) calls() (status, fetch int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.statusCalls, f.fetchCalls
+}
+
+// roots returns the roots the Status and Fetch calls read so far, in call order.
+func (f *fakeGitHost) roots() (status, fetch []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.statusRoots), slices.Clone(f.fetchRoots)
 }
 
 // tracked is a snapshot of a branch with an upstream and some state to count.
@@ -512,4 +524,239 @@ func TestGitStatusImportsNoGitRunner(t *testing.T) {
 			}
 		}
 	}
+}
+
+// foldAll folds msgs into m in order.
+func foldAll(t *testing.T, m Model, msgs []tea.Msg) Model {
+	t.Helper()
+	for _, msg := range msgs {
+		m = step(t, m, msg)
+	}
+	return m
+}
+
+// statusReads is the status reads among msgs.
+func statusReads(msgs []tea.Msg) []gitStatusMsg {
+	var reads []gitStatusMsg
+	for _, msg := range msgs {
+		if read, ok := msg.(gitStatusMsg); ok {
+			reads = append(reads, read)
+		}
+	}
+	return reads
+}
+
+// watchWithWorkspace is a watch fixture whose source names workspace as the watched session's.
+func watchWithWorkspace(t *testing.T, workspace string) *watchFixture {
+	t.Helper()
+	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	f.src.workspace = workspace
+	return f
+}
+
+// TestWatchReadsGitInTheWatchedWorkspace pins the one status chain's root across a watch: it reads
+// the watched workspace while watching, keeps that snapshot apart from the host's, runs no fetch,
+// reads nothing where the watch names no workspace, and reads the host again at once on leaving —
+// a watched read still in flight then landing inert. The Cmds enterWatch and leaveWatch return are
+// batches, so they are expanded rather than run as one Msg.
+func TestWatchReadsGitInTheWatchedWorkspace(t *testing.T) {
+	t.Parallel()
+
+	t.Run("entering and leaving move the chain", func(t *testing.T) {
+		t.Parallel()
+		host := newFakeGitHost(tracked())
+		m := gitModel(t, host, true)
+		hostRoot, watchedRoot := m.opts.Workspace, t.TempDir()
+		m, _ = land(t, m)
+		if !m.git.fetchLive {
+			t.Fatal("setup: the host read armed no fetch chain")
+		}
+		host.set(func(f *fakeGitHost) { f.snap = gitstatus.Snapshot{Branch: "theirs"} })
+
+		m, cmd := m.enterWatch(watchWithWorkspace(t, watchedRoot).src)
+		if !m.git.inFlight || m.gitFetchWanted() {
+			t.Errorf("after entry inFlight %v, fetch wanted %v; want the watched read in flight and no fetch",
+				m.git.inFlight, m.gitFetchWanted())
+		}
+		m = foldAll(t, m, expandBatch(cmd))
+		if status, _ := host.roots(); !slices.Equal(status, []string{hostRoot, watchedRoot}) {
+			t.Errorf("status roots = %q; want the host's, then the watched workspace's", status)
+		}
+		if !m.git.hasSnap || m.git.snap.Branch != "main" {
+			t.Errorf("host snapshot = %+v (%v); want the host's last read untouched", m.git.snap, m.git.hasSnap)
+		}
+		if !m.watch.hasGitSnap || m.watch.gitSnap.Branch != "theirs" {
+			t.Errorf("watched snapshot = %+v (%v); want the watched read", m.watch.gitSnap, m.watch.hasGitSnap)
+		}
+
+		// The fetch in flight at entry lands: the chain retires and no further fetch runs. Its
+		// status refresh reads the watched workspace, and is still in flight when the watch ends.
+		m, cmd = stepCmd(t, m, gitFetchMsg{gen: m.git.fetchGen})
+		if m.git.fetchLive {
+			t.Error("the fetch chain stayed live during the watch")
+		}
+		var late []gitStatusMsg
+		for _, msg := range gitMsgs(cmd, shortWindow) {
+			switch msg := msg.(type) {
+			case gitFetchMsg, gitFetchTickMsg:
+				t.Errorf("the watch issued a fetch step %#v", msg)
+			case gitStatusMsg:
+				late = append(late, msg)
+			}
+		}
+		if _, fetches := host.calls(); fetches != 0 {
+			t.Errorf("fetch calls = %d during the watch; want none", fetches)
+		}
+		if len(late) != 1 || !m.git.inFlight {
+			t.Fatalf("the landed fetch refreshed %d reads, inFlight %v; setup wants one watched read in flight",
+				len(late), m.git.inFlight)
+		}
+
+		host.set(func(f *fakeGitHost) { f.snap = tracked() })
+		m, cmd = stepCmd(t, m, keyEsc())
+		if m.watch.isActive || !m.git.inFlight {
+			t.Fatalf("after esc watching %v, inFlight %v; want the host read issued at once", m.watch.isActive, m.git.inFlight)
+		}
+		leaving := expandBatch(cmd)
+		if status, _ := host.roots(); status[len(status)-1] != hostRoot {
+			t.Errorf("status roots = %q; want the host's read last, on leaving", status)
+		}
+		m = step(t, m, late[0])
+		if !m.git.inFlight || m.git.snap.Branch != "main" {
+			t.Errorf("a late watched read folded after the watch: snapshot %+v, inFlight %v", m.git.snap, m.git.inFlight)
+		}
+		m = foldAll(t, m, leaving)
+		if m.git.inFlight || !m.git.fetchLive {
+			t.Errorf("after the host read inFlight %v, fetch live %v; want it landed and the fetch chain re-armed",
+				m.git.inFlight, m.git.fetchLive)
+		}
+	})
+
+	t.Run("an unknown workspace reads nothing until esc", func(t *testing.T) {
+		t.Parallel()
+		host := newFakeGitHost(tracked())
+		m := gitModel(t, host, false)
+		hostRoot := m.opts.Workspace
+		m, _ = land(t, m)
+
+		m, cmd := m.enterWatch(watchWithWorkspace(t, "").src)
+		msgs := expandBatch(cmd)
+		if m.git.inFlight || len(statusReads(msgs)) != 0 {
+			t.Errorf("entry issued %d reads, inFlight %v; want none", len(statusReads(msgs)), m.git.inFlight)
+		}
+		m = foldAll(t, m, msgs)
+		refreshed := m
+		if read := refreshed.refreshGit(); read != nil || refreshed.git.inFlight {
+			t.Errorf("refreshGit while watching an unknown workspace issued a read (inFlight %v)", refreshed.git.inFlight)
+		}
+		if ticked, read := m.foldGitStatusTick(gitStatusTickMsg{gen: m.git.gen}); read != nil || ticked.(Model).git.inFlight {
+			t.Error("a tick while watching an unknown workspace issued a read")
+		}
+
+		m, cmd = stepCmd(t, m, keyEsc())
+		reads := statusReads(expandBatch(cmd))
+		if !m.git.inFlight || len(reads) != 1 || reads[0].gen != m.git.gen {
+			t.Errorf("esc issued %d reads, inFlight %v; want the host read of the live generation", len(reads), m.git.inFlight)
+		}
+		if status, _ := host.roots(); !slices.Equal(status, []string{hostRoot, hostRoot}) {
+			t.Errorf("status roots = %q; want the host's only", status)
+		}
+	})
+
+	t.Run("a --resume start watch runs one chain at the watched root", func(t *testing.T) {
+		t.Parallel()
+		host := newFakeGitHost(tracked())
+		f := newWatchFixture(t, "", recordHeadEntries(), 0)
+		watchedRoot := t.TempDir()
+		opts := testOpts
+		opts.Workspace, opts.GitStatus = t.TempDir(), host
+		opts.Watch = &LiveSession{
+			ID: f.src.id, RecordPath: f.src.recordPath, JournalPath: f.src.journalPath, Workspace: watchedRoot,
+		}
+
+		m := newTestModelEng(t, watchEngine(), opts)
+
+		if !m.watch.isActive || m.git.gen != 1 || !m.git.inFlight {
+			t.Fatalf("watching %v, git %+v; want the watch entered and Init's read armed on generation 1",
+				m.watch.isActive, m.git)
+		}
+		if reads := statusReads(expandBatch(m.startupWatchRead)); len(reads) != 0 {
+			t.Errorf("the startup watch read carries %d git reads; want Init's to be the only one", len(reads))
+		}
+		read := awaitGitMsg[gitStatusMsg](t, m.Init(), "Init's status read")
+		<-time.After(shortWindow)
+		if status, _ := host.roots(); read.gen != 1 || !slices.Equal(status, []string{watchedRoot}) {
+			t.Errorf("Init read generation %d at %q; want one read, generation 1, at the watched root", read.gen, status)
+		}
+		m = step(t, m, read)
+		if !m.watch.hasGitSnap || m.git.hasSnap {
+			t.Errorf("watched snapshot held %v, host snapshot held %v; want the read in the watch's slot only",
+				m.watch.hasGitSnap, m.git.hasSnap)
+		}
+	})
+
+	t.Run("a --resume start watch of an unknown workspace reads the host on esc", func(t *testing.T) {
+		t.Parallel()
+		host := newFakeGitHost(tracked())
+		f := newWatchFixture(t, "", recordHeadEntries(), 0)
+		opts := testOpts
+		opts.Workspace, opts.GitStatus = t.TempDir(), host
+		opts.Watch = &LiveSession{ID: f.src.id, RecordPath: f.src.recordPath, JournalPath: f.src.journalPath}
+
+		m := newTestModelEng(t, watchEngine(), opts)
+
+		if !m.watch.isActive || m.git.inFlight || m.gitStatusCmd() != nil {
+			t.Fatalf("watching %v, inFlight %v; want the watch entered with no read in flight or to issue",
+				m.watch.isActive, m.git.inFlight)
+		}
+		m, cmd := stepCmd(t, m, keyEsc())
+		reads := statusReads(expandBatch(cmd))
+		if !m.git.inFlight || len(reads) != 1 {
+			t.Fatalf("esc issued %d reads, inFlight %v; want the host read at once", len(reads), m.git.inFlight)
+		}
+		if status, _ := host.roots(); !slices.Equal(status, []string{opts.Workspace}) {
+			t.Errorf("status roots = %q; want the host's only", status)
+		}
+	})
+
+	t.Run("⏎ resume never waits for the host re-read", func(t *testing.T) {
+		t.Parallel()
+		f, probe := probedFixture(t)
+		host := newFakeGitHost(tracked())
+		host.set(func(f *fakeGitHost) { f.block = true })
+		t.Cleanup(func() { close(host.release) })
+		eng := watchEngine()
+		m := newModel(context.Background(), eng, Options{
+			Sessions: ownerHostFor(t, f), UI: testUIPrefs, Workspace: t.TempDir(), GitStatus: host,
+		}, nil)
+		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		m.transcript.addUser("my own question", nil)
+		m.cacheBoundary(domain.Session{})
+		m = endWatchedOwner(t, m, f, probe, true)
+		if !m.isWatchResumable() {
+			t.Fatalf("legend %q; setup: the watch did not reach the resumable finish", m.legend())
+		}
+
+		_, cmd := stepCmd(t, m, keyEnter())
+		out := runCmdTree(cmd)
+		budget := time.After(testtime.Budget(5 * time.Second))
+		select {
+		case <-host.started:
+		case <-budget:
+			t.Fatal("⏎ issued no host re-read")
+		}
+		for {
+			select {
+			case msg := <-out:
+				if loaded, ok := msg.(sessionLoadedMsg); ok {
+					if loaded.err != nil {
+						t.Fatalf("the resume's load failed: %v", loaded.err)
+					}
+					return
+				}
+			case <-budget:
+				t.Fatal("the record load waited behind the blocked host re-read")
+			}
+		}
+	})
 }

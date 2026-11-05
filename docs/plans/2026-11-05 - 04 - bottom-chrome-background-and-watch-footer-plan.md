@@ -112,7 +112,12 @@ internal/tui/mouse_test.go — TestClickOnTheFooterGitSegmentOpensTheGitActionsP
 - `go test -race -count=1 -run 'TestWatchRefusesTheGitActionsPicker|TestWatchRoutesGitActionLandingsToTheOwner|TestGitAction|TestClickOnTheFooterGitSegment' ./internal/tui/`
 **Commit:** `fix(tui): refuse the git actions picker while watching`
 
-## 4. Retarget the git status chain to the watched workspace
+## 4. Retarget the git status chain to the watched workspace — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the route table is unchanged — git chain Msgs keep routing to the view, and foldGitStatus itself stores a read taken while watching in watchState.gitSnap/hasGitSnap (keepGitSnapshot); watchRouteOf's comment says so. TestWatchIsolatesRoutesEveryFoldedMsg passes untouched.
+NOTES (2026-11-05): gitSnapshot (the footer's reader) still answers the host snapshot during a watch; surfacing the watched snapshot in the footer is item 5's.
+NOTES (2026-11-05): enterWatch is split into canWatch (gate) + startWatch (the swap) + retargetGit (gen bump, dirty cleared, one read, inFlight only beside a non-nil Cmd), so enterStartupWatch can call startWatch with no git read and re-derive inFlight; leaveWatch now returns (left, redelivered, gitRead) and esc/quit batch the read while resumeWatched returns tea.Batch(tea.Sequence(redelivered, opened), gitRead).
+NOTES (2026-11-05): the new tests live in gitstatus_test.go (beside fakeGitHost, which now records the roots); watch_test.go needed no change — TestWatchRefusesTheGitActionsPicker's source names no workspace, so its enterWatch Cmd is still the follower read alone.
 
 **What:**
 Recast at the regression check (2026-11-05).
