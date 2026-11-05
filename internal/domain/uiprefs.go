@@ -585,7 +585,7 @@ func UIKeys() []string {
 // the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
 // umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
 // the unicode glyph set, the terminal bell when apogee waits on the human, the footer's
-// periodic git fetch on, and the footer laid out on one row.
+// periodic git fetch on, and the footer laid out on two rows, the upstream above the workspace.
 // Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{

@@ -202,7 +202,7 @@ func (l footerLayout) span(id footerSegmentID) (footerSegmentSpan, bool) {
 	return footerSegmentSpan{}, false
 }
 
-// footerFit composes the footer's row to the width it has, dropping segments in priority order
+// footerFit composes one footer row to the width it has, dropping segments in priority order
 // until the left run and the mode marker both fit. It is pure — the same input always yields the
 // same layout — and TOTAL: every width, including 0 and a negative one, yields a layout the
 // painter can spend.

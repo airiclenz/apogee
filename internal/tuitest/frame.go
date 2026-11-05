@@ -213,7 +213,7 @@ func (f Frame) Find(text string) (int, int, bool) {
 // borders, borders excluded — and ok=false when the frame holds no such box. Pop-ups and the
 // command palette draw the same rounded border (`theme.inputBorder`, `lipgloss.RoundedBorder()`),
 // so the box is found by position rather than by glyph: the prompt box is always the LOWEST
-// rounded box in the bottom chrome, above the footer line and the `▁` bottom rule (`layout.md`
+// rounded box in the bottom chrome, above the footer's rows and the `▁` bottom rule (`layout.md`
 // §bottom chrome). The scan therefore runs bottom-up for the last row that opens with `╭` — an
 // elision marker on that border (`╭─ … +3 ────╮`) still opens with the corner — and forward from
 // there to the next row that opens with `╰`. The rows come back as plain text, trailing spaces

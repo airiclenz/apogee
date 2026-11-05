@@ -3455,7 +3455,7 @@ func (m Model) withFrameSpans() Model {
 const frameBlocks = 14
 
 // View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
-// the bordered input box, the footer line and the ▁ bottom-edge hairline, filling the alternate
+// the bordered input box, the footer's rows and the ▁ bottom-edge hairline, filling the alternate
 // screen (layout.md). Before
 // the first WindowSizeMsg there is no geometry to lay out, so it shows a minimal placeholder —
 // on the alternate screen as well, so no frame apogee emits ever touches the primary one. The

@@ -1173,7 +1173,8 @@ update-check: true
 # `footer.rows` lays the footer out: one or two rows, top to bottom, each a list of the segments it
 # shows, left to right — `host`, `model`, `effort`, `mode`, `workdir`, `git` and `spend`, each at
 # most once. `mode` must appear exactly once; its marker sits at the right edge of its row. Default
-# one row, `[[host, model, effort, workdir, git, spend, mode]]`. Edit it here, in the file.
+# two rows, the upstream above the workspace: `[[host, model, effort, mode], [workdir, git, spend]]`.
+# Edit it here, in the file.
 #
 # `footer.colors` paints a footer segment in a colour-scheme role of your choosing, in place of its
 # own tone: a map from `host`, `model`, `effort`, `workdir`, `branch` or `spend` to a role name your
