@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 2
 labels: [tui]
+plan: 2026-11-05 - 04 - bottom-chrome-background-and-watch-footer-plan
 created: 2026-11-05T15:08:02Z
 ---
 
