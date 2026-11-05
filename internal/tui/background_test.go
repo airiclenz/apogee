@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -44,9 +43,10 @@ func sameColor(a, b color.Color) bool {
 	return ar == br && ag == bg && ab == bb && aa == ba
 }
 
-// The terminal's default background is the active scheme's `surface` while apogee runs — under
-// either built-in scheme, and after a live switch — and is never set on a colourless profile.
-func TestViewSetsSurfaceAsTerminalBackground(t *testing.T) {
+// apogee never sets the terminal's default background: the transcript stands on the terminal's own
+// background under either built-in scheme and after a live switch, and only the bottom chrome paints
+// `surface` (TestBottomChromePaintsOneBackground).
+func TestViewKeepsTheTerminalBackground(t *testing.T) {
 	t.Parallel()
 	dark, light := scheme.Default(), lightScheme(t)
 	for _, tc := range []struct {
@@ -56,8 +56,8 @@ func TestViewSetsSurfaceAsTerminalBackground(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			m := schemeModel(t, tc.s, tc.s)
-			if got := m.View().BackgroundColor; got == nil || !sameColor(got, m.th.surface) {
-				t.Errorf("View().BackgroundColor = %v, want the scheme's surface %v", got, m.th.surface)
+			if got := m.View().BackgroundColor; got != nil {
+				t.Errorf("View().BackgroundColor = %v, want nil (the terminal's own background)", got)
 			}
 		})
 	}
@@ -65,37 +65,17 @@ func TestViewSetsSurfaceAsTerminalBackground(t *testing.T) {
 	t.Run("after a scheme switch", func(t *testing.T) {
 		t.Parallel()
 		m := schemeModel(t, dark, light)
-		before := m.th.surface
 		if _, _, err := m.applyColorScheme("light"); err != nil {
 			t.Fatalf("applyColorScheme: %v", err)
 		}
-		if sameColor(before, m.th.surface) {
-			t.Fatalf("the dark and light schemes share the surface %v; the switch proves nothing", before)
-		}
-		if got := m.View().BackgroundColor; got == nil || !sameColor(got, m.th.surface) {
-			t.Errorf("View().BackgroundColor = %v after the switch, want the new surface %v", got, m.th.surface)
+		if got := m.View().BackgroundColor; got != nil {
+			t.Errorf("View().BackgroundColor = %v after the switch, want nil (the terminal's own background)", got)
 		}
 	})
-
-	for _, p := range []colorprofile.Profile{colorprofile.Ascii, colorprofile.NoTTY} {
-		t.Run(p.String(), func(t *testing.T) {
-			t.Parallel()
-			m := step(t, schemeModel(t, dark, light), tea.ColorProfileMsg{Profile: p})
-			if got := m.View().BackgroundColor; got != nil {
-				t.Errorf("View().BackgroundColor = %v on a colourless profile, want nil", got)
-			}
-			if _, _, err := m.applyColorScheme("light"); err != nil {
-				t.Fatalf("applyColorScheme: %v", err)
-			}
-			if got := m.View().BackgroundColor; got != nil {
-				t.Errorf("View().BackgroundColor = %v after a scheme switch on a colourless profile, want nil", got)
-			}
-		})
-	}
 }
 
-// Every cell from the gap row above the chrome down to the closing ▁ rule is painted on `surface`
-// to the full width — the cells past each row's text included (footer row 2 holding only the
+// The gap row above the chrome stays on the terminal's own background, like the transcript, and
+// every cell from the ▔ rule down to the closing ▁ rule is painted on `surface` to the full width — the cells past each row's text included (footer row 2 holding only the
 // workdir, footer row 1 after the mode label, the status line's margin after the gauge) — so the
 // bottom of the screen is one band rather than chrome bands over the terminal's own background.
 // The one exception is the gauge's own groove: its empty track and partial cell are painted on
@@ -116,12 +96,17 @@ func TestBottomChromePaintsOneBackground(t *testing.T) {
 			uv.NewStyledString(m.View().Content).Draw(buf, buf.Bounds())
 
 			// With no overlay open the gap row sits directly under the transcript and the chrome
-			// runs from there to the last row of the window; the status line is under the gap row
-			// and the ▔ rule.
+			// runs from the ▔ rule under it to the last row of the window; the status line is under
+			// the ▔ rule.
 			gap := m.transcriptRows()
+			for x := range m.width {
+				if c := buf.CellAt(x, gap); c == nil || c.Style.Bg != nil {
+					t.Fatalf("gap row %d column %d: background set, want the terminal's own", gap, x)
+				}
+			}
 			status := gap + gapHeight + topRuleHeight
 			groove := 0 // the status line's chrome cells: the gauge's track and partial cell
-			for y := gap; y < m.height; y++ {
+			for y := gap + gapHeight; y < m.height; y++ {
 				grooveEnd := -1
 				for x := range m.width {
 					c := buf.CellAt(x, y)

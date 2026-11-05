@@ -660,10 +660,9 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	// (Update's tea.ColorProfileMsg case), and a new palette does not give a colourless terminal
 	// colour to paint the half rows in. The glyph set is the human's `ui.glyphs` rather than the
 	// palette's, so a new scheme keeps whichever set the screen is drawn in.
-	// The terminal-background flag is the same profile answer, carried for the same reason.
-	measure, padPrompts, setsBackground, glyphs := m.th.measure, m.th.padPrompts, m.th.setsBackground, m.th.glyphs
+	measure, padPrompts, glyphs := m.th.measure, m.th.padPrompts, m.th.glyphs
 	m.th = newTheme(s)
-	m.th.measure, m.th.padPrompts, m.th.setsBackground, m.th.glyphs = measure, padPrompts, setsBackground, glyphs
+	m.th.measure, m.th.padPrompts, m.th.glyphs = measure, padPrompts, glyphs
 	fillInput(&m.input, m.th.surface)
 	m.transcript.paints.clear()
 	m.opts.ColorScheme, m.opts.UI.ColorScheme = s, name

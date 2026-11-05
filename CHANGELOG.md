@@ -11,7 +11,7 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
-- **The bottom of the screen is one band under every colour scheme.** apogee now sets the terminal's background to the scheme's `surface` while it runs (restored on exit, never sent to a terminal with no colour), and the blank row above the status line and the context gauge's filled cells paint it explicitly too, so the prompt box, status line and footer no longer show stripes of the terminal's own background between them. (prompt-box-uneven-background)
+- **The bottom of the screen is one band under every colour scheme.** The context gauge's filled cells now paint the scheme's `surface` like the rest of the bottom chrome, so the prompt box, status line and footer no longer show stripes of the terminal's own background between them. The chat area, and the blank row between it and the chrome, keep the terminal's own background. (prompt-box-uneven-background)
 - **Fixed:** while watching a live session, a click on the footer's git segment no longer opens the git actions picker over the watched view; it raises the watch's read-only flash, as `/git` already did.
 - While you watch a live session, the footer's git poll reads the watched session's workspace instead of yours (nothing at all where the watch names no workspace) and the background `git fetch` pauses; leaving the watch reads your own workspace again at once.
 - **Fixed:** while you watch a live session, the footer now names the watched session's folder and branch, led by a `watching` marker in the footer's accent tone, instead of your own workspace's; a watch whose session names no folder shows the marker alone, and `esc` puts your own folder and branch back.
