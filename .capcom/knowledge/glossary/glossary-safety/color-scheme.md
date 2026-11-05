@@ -20,7 +20,9 @@ unreadable file or an unknown name each cost a default plus a **warning as a tra
 note**, never the run. The scheme in force is switched live — a picker row on the
 Settings surface and `/color-scheme <name>`, both rebuilding the `theme`
 and clearing the block paint cache — and schemes recolor **only what apogee already colors**: no
-full-screen background is painted and no glyph, marker or layout is themed.
+glyph, marker or layout is themed. The terminal's background is the scheme's **`surface`** while
+apogee runs — set on every frame and restored on exit, never on a terminal with no colour — so the
+whole screen stands on the scheme's own field (ADR 0040, amended 2026-11-05).
 _Avoid_: "theme" (that is the internal struct of built lipgloss styles the scheme is compiled
 into), "dark mode" / "light mode" (nothing is auto-detected — the key is the user's declaration
 about their own terminal), "color palette" for the file (a palette is a bag of colors; a scheme

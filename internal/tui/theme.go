@@ -260,6 +260,13 @@ type theme struct {
 	// the blank separators come back. applyColorScheme carries it across a rebuild like measure.
 	padPrompts bool
 
+	// setsBackground says whether View sets the terminal's default background to `surface`
+	// (tea.View.BackgroundColor, an OSC 11 the renderer resets on exit). newTheme sets it; the
+	// terminal's colour-profile answer clears it on the same colour test padPrompts takes
+	// (Update's tea.ColorProfileMsg case, padsPrompts), so a NO_COLOR or non-TTY run is never sent
+	// a colour it did not ask for. applyColorScheme carries it across a rebuild like padPrompts.
+	setsBackground bool
+
 	// spinnerStops are the status-line colour loop's waypoints — the scheme's four `spinner-*`
 	// roles, converted into the space the blend works in (buildSpinnerStops, spinner.go). They ride
 	// on the theme rather than in a package var because a package var is built once at init and a
@@ -297,7 +304,7 @@ type theme struct {
 // shared pointer is as safe as reading a copy; writing one is what the sharing forbids.
 type themeStyles struct {
 	userBlock     lipgloss.Style // white on dark-gray, full-width block (the last user prompt)
-	promptPad     lipgloss.Style // the ▄/▀ half rows padding a sent prompt block (renderUserBlock): the block's `chrome` gray as the glyph's FOREGROUND on no background, so half of each cell is the block's field and the other half the terminal's own
+	promptPad     lipgloss.Style // the ▄/▀ half rows padding a sent prompt block (renderUserBlock): the block's `chrome` gray as the glyph's FOREGROUND on no background, so half of each cell is the block's field and the other half the terminal's background — `surface` while apogee runs (theme.setsBackground, View), the terminal's own on a colourless profile
 	breadcrumb    lipgloss.Style // the run view's sticky header (breadcrumbRow): prompt-white on the `surface` field the input box and the status line already share, so the header reads as one of the frame's black bands rather than as a prompt block it is not
 	promptToggle  lipgloss.Style // the see-more / see-less marker a long prompt block carries near its right edge (renderUserBlock): bold light gray-blue on the block's OWN dark-gray field, held a promptMarkerMargin off the edge, so the toggle reads as an affordance sitting inside the block rather than as another row of what the human wrote
 	toolHeader    lipgloss.Style // the ✦ Label target header
@@ -480,9 +487,10 @@ func newTheme(s scheme.Scheme) theme {
 		// (settingsapply.go) rebuilds the theme for a new palette while the painter stayed where
 		// it was, so it reads the measure off the outgoing theme and re-arms it on this one.
 		// Any future live rebuild owes the same carry-over.
-		measure:    newWidthAuthority(),
-		glyphs:     defaultGlyphs,
-		padPrompts: true,
+		measure:        newWidthAuthority(),
+		glyphs:         defaultGlyphs,
+		padPrompts:     true,
+		setsBackground: true,
 
 		// The colour loop's waypoints, in the order it visits them: violet → green → amber → pink
 		// and back to violet under the dark scheme. Converting them here is what makes the loop a
@@ -612,7 +620,7 @@ func newTheme(s scheme.Scheme) theme {
 			footerAccent:  lipgloss.NewStyle().Foreground(footerAccentFg).Background(surface),
 			scrollThumb:   lipgloss.NewStyle().Foreground(muted),
 			scrollTrack:   lipgloss.NewStyle().Foreground(chrome),
-			gaugeFill:     lipgloss.NewStyle().Foreground(gauge),
+			gaugeFill:     lipgloss.NewStyle().Foreground(gauge).Background(surface),
 			gaugeTrack:    lipgloss.NewStyle().Background(chrome),
 		},
 	}

@@ -1174,7 +1174,10 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// no colour paints no half rows and the blank separators return (padsPrompts, theme.go). The
 		// frame follows through settle's frameKey compare, and the message still reaches the widgets
 		// it reached before this case existed.
+		// The terminal background follows the same test: a profile with no colour is never sent the
+		// `surface` OSC 11 (View).
 		m.th.padPrompts = padsPrompts(msg.Profile)
+		m.th.setsBackground = padsPrompts(msg.Profile)
 		return m.foldWidgetMsg(msg)
 
 	case uv.UnknownOscEvent:
@@ -3531,7 +3534,9 @@ func (m Model) View() tea.View {
 	// open the frame is unchanged: the blank row still lands directly above the ▔. Either way the
 	// frame spends exactly one gap row, so the row arithmetic (frameFixedRows(), transcriptBudget)
 	// does not know or care which side of the slot it falls on.
-	rows = append(rows, "")
+	// The row is painted on the `surface` field to the full width, like the chrome under it, so the
+	// bottom of the screen reads as one band even on a terminal that ignores the OSC 11 below.
+	rows = append(rows, squareOnField(m.th.measure, m.th.statusBar, "", m.width))
 	// Then the transcript-side overlay slot — the approval or ask prompt, the /sessions browser, the
 	// picker, the /settings pane and the four reports — stacked in the one order the frame states for
 	// it and starting directly below that gap row. The walk also PUBLISHES where each pane landed and
@@ -3555,6 +3560,13 @@ func (m Model) View() tea.View {
 
 	v := tea.NewView(m.joinFrame(rows))
 	v.AltScreen = true
+	// The terminal's default background is the scheme's `surface` while apogee runs, so the cells
+	// no row paints — the transcript's margins, a row's erased tail — take the same field as the
+	// chrome; the renderer resets it on exit. Read off the theme, so a scheme switch moves it, and
+	// left nil on a colourless profile (theme.setsBackground).
+	if m.th.setsBackground {
+		v.BackgroundColor = m.th.surface
+	}
 	// Wheel scrolling, clicks and drags always (Update routes the mouse Msgs); all-motion hover
 	// reports only while the pointer-shape gate is open (mouseMode, pointerprobe.go).
 	v.MouseMode = m.mouseMode()

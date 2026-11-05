@@ -40,7 +40,12 @@
 - 5: guard folded (marker seated before workdir in footerRow, priority below workdir, per-root fakeGitHost, watched display form computed at enterWatch; writer decision on TestWatchRefusesTheGitActionsPicker).
 - 4 (re-check): guard folded (gitRoot answers the watch's root while any watch is active; inFlight set only beside a non-nil gitStatusCmd at every site, enterStartupWatch re-derives it, leaveWatch issues directly; doc.go and layout.md chain prose names the watch).
 
-## 1. Paint the scheme surface as the terminal background
+## 1. Paint the scheme surface as the terminal background — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the colour-profile guard is a new theme field `setsBackground`, set from `padsPrompts(msg.Profile)` in Update's tea.ColorProfileMsg case beside padPrompts (same colour test, no new predicate) and carried across applyColorScheme with measure/padPrompts/glyphs; gofmt realigned the neighbouring `measure:`/`glyphs:` lines of newTheme's literal.
+NOTES (2026-11-05): the gauge's empty track and partial cell keep their `chrome` groove by design (renderGaugeBar), so TestBottomChromePaintsOneBackground allows one contiguous run of 1..gaugeWidth chrome cells on the status line and requires `surface` on every other cell (gauge filled cells included); the test seeds ctxUsed so the gauge is drawn — the literal "every cell carries surface" would forbid the groove.
+NOTES (2026-11-05): TestViewSetsSurfaceAsTerminalBackground covers NoTTY beside Ascii and asserts the nil background survives a scheme switch on a colourless profile.
+NOTES (2026-11-05): layout.md sentences at the breadcrumb (~1441) and staged-interjection band (~2200) saying "the terminal's own background never shows through" were left as written: they describe explicit row painting, which still holds and still matters on terminals that ignore OSC 11 or carry no colour.
 
 **What:**
 **Goal:** `Model.View` returns a `tea.View` whose `BackgroundColor` is the active scheme's `surface` (following a live scheme switch), and every cell of the gap row above the prompt box, the top rule, status line, prompt box rows, both footer rows and the bottom rule carries the `surface` background to the full terminal width.

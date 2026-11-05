@@ -19,7 +19,8 @@
   straight afterwards, and says so.
   The block is padded by half a row at each end: a row of `▄` above its first line and
   a row of `▀` below its last, drawn in the block's own gray as the glyph's colour on
-  the terminal's own background, so the gray field reads half a row taller at the top
+  the terminal's background — the scheme's `surface` while apogee runs (see the colour
+  scheme paragraph below) — so the gray field reads half a row taller at the top
   and at the bottom. That holds for every sent block — a submitted `❯` prompt, a
   delivered `⧖` interjection and a run view's task row alike. The pad rows stand where
   the blank separator would: a half row stands in for the empty line above or below the
@@ -111,8 +112,16 @@ apogee paints until someone picks another — and is named with the role key tha
 scheme swap moves all of them at once, live, with the screen repainted from scratch.
 
 **What a scheme cannot do is change any shape in this document.** It recolours only what apogee
-already colours: no full-screen background is painted, so the terminal's own background stays the
-field everything below is drawn on, and no glyph, marker, width or row budget is themed. Two roles
+already colours, and no glyph, marker, width or row budget is themed. **The terminal's background
+is the scheme's `surface` while apogee runs:** every frame sets the terminal's default background to
+it (OSC 11), so the whole screen — transcript included — is drawn on one field that a scheme switch
+moves with everything else, and the terminal's own background comes back when apogee exits. A
+terminal with no colour (`NO_COLOR`, an Ascii or non-TTY profile) is sent no background at all.
+The bottom chrome does not lean on that alone: the gap row above the `▔` hairline, the hairlines,
+the status line (the gauge's filled cells included), the input box and both footer rows each paint
+`surface` explicitly to the full width, so the bottom of the screen reads as one band even on a
+terminal that ignores OSC 11. Only the gauge's empty track keeps its `chrome` groove (ADR 0040,
+amended 2026-11-05). Two roles
 are load-bearing rather than decorative and every shipped scheme is tested for them: `skill` and
 `file-ref` must stay tellable apart (ADR 0027), as must the four `mode-*` tones — and the footer's
 git tones, `warning` and `success`, must stay apart from those four and from `error`, and so must
