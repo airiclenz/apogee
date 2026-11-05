@@ -4033,9 +4033,16 @@ func (m Model) footerLeft(lead string, layout footerLayout) string {
 // ([Model.footerOverride]); and the model the file leaves alone is the footer's one accent, painted
 // whole in the `footer-accent` role. Painted whole means the cut text too, where the priority-0 rung
 // truncated the segment.
+//
+// While a watch is active the `watching` marker and the watched workdir are painted in the
+// `footer-accent` role ahead of any override: they state the watch, and `ui.footer.colors`
+// recolours facts, never state.
 func (m Model) footerToned(span footerSegmentSpan) (string, bool) {
 	if span.id == footerSegGit {
 		return m.footerGit(span), true
+	}
+	if m.watch.isActive && (span.id == footerSegWatching || span.id == footerSegWorkdir) {
+		return m.th.footerAccent.Render(span.text), true
 	}
 	if style, ok := m.footerOverride(domain.FooterSegment(span.id)); ok {
 		return style.Render(span.text), true
@@ -4118,7 +4125,8 @@ func (m Model) footerGit(git footerSegmentSpan) string {
 // The row's segments are the ones its layout names, in the order it names them; each row is fitted
 // on its own, so a narrow window spends each row's priorities against that row alone. Only the row
 // naming `mode` seats the marker, and the offline word with it — `offline` is not a segment, it
-// sits just left of the marker — so every other row's input carries neither.
+// sits just left of the marker — so every other row's input carries neither. The watch's `watching`
+// marker is no layout name either: it is seated just before `workdir`, on the row that names it.
 //
 // Measurement is the theme's own width authority (ADR 0030 §5) and the margin is bodyIndent in that
 // same measure — a row laid out in a measure the painter did not choose is off by a column per wide
@@ -4137,8 +4145,12 @@ func (m Model) footerRow(row, w int) footerLayout {
 				)
 				continue
 			}
+			ids := []footerSegmentID{id}
+			if id == footerSegWorkdir {
+				ids = []footerSegmentID{footerSegWatching, footerSegWorkdir}
+			}
 			for _, seg := range all.segments {
-				if seg.id == id {
+				if slices.Contains(ids, seg.id) {
 					in.segments = append(in.segments, seg)
 				}
 			}
@@ -4170,6 +4182,11 @@ func (m Model) footerRow(row, w int) footerLayout {
 // pane's session row states — so the footer and the pane never name two amounts for one session.
 // It is present only once some call was priced (spendText): a session on servers with no `price:`
 // shows no segment at all rather than a zero no server charged.
+//
+// While a watch is active the workdir is the WATCHED session's ([watchState.workdir]), led by the
+// `watching` marker ([footerSegWatching]) that says so, and the git segment reads the watched
+// snapshot ([Model.footerGitSegment]); a watch of an unknown workspace shows the marker alone. The
+// host, model and effort stay the watcher's own.
 func (m Model) footerLeftText() footerInput {
 	var effort string
 	override, profile := m.eng.ThinkingEffort()
@@ -4177,12 +4194,17 @@ func (m Model) footerLeftText() footerInput {
 	if label, show := footerEffortLabel(override, profile, stripEscapes(support.Default), support.Supported); show {
 		effort = label
 	}
+	workdir, watching := m.workdir, ""
+	if m.watch.isActive {
+		workdir, watching = m.watch.workdir, watchingLabel
+	}
 	in := footerInput{
 		segments: []footerSegment{
 			{id: footerSegHost, text: stripEscapes(hostDisplay(m.opts))},
 			{id: footerSegModel, text: footerRun(m.th.glyphs, m.upstreamSegments()...)},
 			{id: footerSegEffort, text: effort},
-			{id: footerSegWorkdir, text: m.workdir},
+			{id: footerSegWatching, text: watching},
+			{id: footerSegWorkdir, text: workdir},
 			m.footerGitSegment(),
 			{id: footerSegSpend, text: spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency())},
 		},
@@ -4196,9 +4218,14 @@ func (m Model) footerLeftText() footerInput {
 
 // footerGitSegment is the git segment, worded into its toned pieces ([gitFooterSegment]), or an
 // empty one — the segment absent WITH its separator — while no snapshot is held: unwired, not yet
-// landed, or a workspace outside any work tree.
+// landed, or a workspace outside any work tree. While a watch is active it is the WATCHED
+// workspace's snapshot ([watchState.gitSnap]), never the host's, so a watch of an unknown
+// workspace — which reads none — shows no git segment at all.
 func (m Model) footerGitSegment() footerSegment {
 	snap, ok := m.gitSnapshot()
+	if m.watch.isActive {
+		snap, ok = m.watch.gitSnap, m.watch.hasGitSnap
+	}
 	if !ok {
 		return gitFooterSegment(nil)
 	}
@@ -4257,6 +4284,9 @@ const (
 	connectingLabel = "connecting…"
 	// offlineLabel is the footer's own word for the state a send is refused in.
 	offlineLabel = "offline"
+	// watchingLabel is the marker a watch puts before the watched workspace, so the path and branch
+	// that follow are never read as apogee's own ([footerSegWatching]).
+	watchingLabel = "watching"
 )
 
 // upstreamSegments is the footer's upstream fact: the display model, or the single word

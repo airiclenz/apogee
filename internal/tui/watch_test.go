@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -19,9 +20,12 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
+	"github.com/airiclenz/apogee/internal/gitstatus"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
@@ -483,23 +487,205 @@ func TestWatchKeepsBackgroundWorkflowEventsOutOfTheConversation(t *testing.T) {
 	}
 }
 
-func TestWatchLeavesTheFooterUnchanged(t *testing.T) {
-	t.Parallel()
-	f := newWatchFixture(t, "watched", nil, 0)
+// The two workspaces the watch-footer cases tell apart, the watched one deep enough for the fit to
+// elide, and the branch each one's git answers.
+const (
+	watchFooterHostWorkspace    = "/ws/host"
+	watchFooterWatchedWorkspace = "/srv/watched/deep/nested/project"
+	watchFooterHostBranch       = "host-branch"
+	watchFooterWatchedBranch    = "watched-branch"
+)
+
+// watchFooterOpts is a git-wired Options over the host workspace, its footer laid out in rows (""
+// for the default layout), whose git answers each workspace its own branch.
+func watchFooterOpts(rows domain.FooterRows) Options {
+	git := newFakeGitHost(gitstatus.Snapshot{Branch: watchFooterHostBranch})
+	git.byRoot = map[string]gitstatus.Snapshot{watchFooterWatchedWorkspace: {Branch: watchFooterWatchedBranch}}
 	opts := testOpts
+	opts.UI.FooterRows = rows
+	opts.Workspace = watchFooterHostWorkspace
+	opts.GitStatus = git
 	opts.Mode = domain.ModeAuto
-	m := newTestModelEng(t, watchEngine(), opts)
+	return opts
+}
+
+// watchFooterModel builds an idle model over opts in a window width wide, its effort word showing
+// and the host's first git read landed.
+func watchFooterModel(t *testing.T, opts Options, width int) Model {
+	t.Helper()
+	m := newModel(context.Background(), watchEngine(), opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 30})
 	m.hb.effort = domain.EffortSupport{Supported: true}
-	footer := func(m Model) string {
-		return m.footerLeftText().segment(footerSegEffort) + "|" + confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace())
-	}
-	before := footer(m)
+	m, _ = land(t, m)
+	return m
+}
 
-	m, _ = m.enterWatch(f.src)
-
-	if got := footer(m); got != before || before == "|" {
-		t.Errorf("footer facts %q across enter; want %q unchanged (and non-empty)", got, before)
+// watchFooterInto enters a watch of a fixture whose session runs in workspace ("" for an unknown
+// one) and folds the follower's first read and the watched git read.
+func watchFooterInto(t *testing.T, m Model, workspace string) Model {
+	t.Helper()
+	f := newWatchFixture(t, "watched", nil, 0)
+	f.src.workspace = workspace
+	m, cmd := m.enterWatch(f.src)
+	if !m.watch.isActive {
+		t.Fatal("setup: enterWatch did not enter watch mode")
 	}
+	return foldAll(t, m, expandBatch(cmd))
+}
+
+// plainFooter is the footer as painted in the model's own window, escapes stripped.
+func plainFooter(m Model) string {
+	return ansiPattern.ReplaceAllString(m.footerContent(m.width), "")
+}
+
+// TestWatchFooterNamesTheWatchedWorkspace: while watching, the footer's workdir is the watched
+// session's, led by the `watching` marker, and the git segment is the watched workspace's; the
+// host and effort stay the watcher's own. Leaving puts the host's folder and branch back unmarked.
+func TestWatchFooterNamesTheWatchedWorkspace(t *testing.T) {
+	t.Parallel()
+
+	t.Run("entered from a live browser row", func(t *testing.T) {
+		t.Parallel()
+		f := newWatchFixture(t, "headless run", nil, 0)
+		sessions := &fakeSessionHost{}
+		sessions.live = []LiveSession{liveRowWith(f, "headless run", watchFooterWatchedWorkspace, time.Now())}
+		opts := watchFooterOpts("")
+		opts.Sessions = sessions
+		m := watchFooterModel(t, opts, 160)
+		facts := func(m Model) string {
+			in := m.footerLeftText()
+			return in.segment(footerSegHost) + "|" + in.segment(footerSegEffort)
+		}
+		before := facts(m)
+		sep := " " + m.th.glyphs.assistant + " "
+
+		m = openBrowser(t, m)
+		m = step(t, m, keyCtrl('a')) // the live row is another folder's: widen to every workspace
+		m, cmd := stepCmd(t, m, keyEnter())
+		if !m.watch.isActive {
+			t.Fatal("⏎ on the live row did not enter watch mode")
+		}
+		m = foldAll(t, m, expandBatch(cmd))
+
+		footer := plainFooter(m)
+		if want := watchingLabel + sep + watchFooterWatchedWorkspace + sep + watchFooterWatchedBranch; !strings.Contains(footer, want) {
+			t.Errorf("watched footer lacks %q:\n%s", want, footer)
+		}
+		for _, host := range []string{watchFooterHostWorkspace, watchFooterHostBranch} {
+			if strings.Contains(footer, host) {
+				t.Errorf("watched footer still names the host's %q:\n%s", host, footer)
+			}
+		}
+		if got := facts(m); got != before || strings.HasSuffix(before, "|") {
+			t.Errorf("host|effort %q while watching; want %q unchanged (and an effort word)", got, before)
+		}
+
+		m, cmd = stepCmd(t, m, keyEsc())
+		if m.watch.isActive {
+			t.Fatal("esc did not leave the watch")
+		}
+		m = foldAll(t, m, expandBatch(cmd))
+		footer = plainFooter(m)
+		if want := watchFooterHostWorkspace + sep + watchFooterHostBranch; !strings.Contains(footer, want) {
+			t.Errorf("footer after esc lacks %q:\n%s", want, footer)
+		}
+		for _, watched := range []string{watchingLabel, watchFooterWatchedWorkspace, watchFooterWatchedBranch} {
+			if strings.Contains(footer, watched) {
+				t.Errorf("footer after esc still names %q:\n%s", watched, footer)
+			}
+		}
+	})
+
+	t.Run("a narrowing window elides the path and keeps the marker", func(t *testing.T) {
+		t.Parallel()
+		m := watchFooterInto(t, watchFooterModel(t, watchFooterOpts(""), 160), watchFooterWatchedWorkspace)
+		var sawElided, sawMarkerAlone bool
+		for w := 160; w >= 10; w-- {
+			for row := range m.footerLines() {
+				layout := m.footerRow(row, w)
+				path, hasPath := layout.span(footerSegWorkdir)
+				marker, hasMarker := layout.span(footerSegWatching)
+				if hasPath && !hasMarker {
+					t.Errorf("width %d row %d: the path %q shows without the marker", w, row, path.text)
+				}
+				if hasMarker && marker.text != watchingLabel {
+					t.Errorf("width %d row %d: the marker reads %q, want %q whole", w, row, marker.text, watchingLabel)
+				}
+				sawElided = sawElided || hasPath && hasMarker && path.text != watchFooterWatchedWorkspace
+				sawMarkerAlone = sawMarkerAlone || hasMarker && !hasPath
+			}
+		}
+		if !sawElided {
+			t.Error("no width elided the watched path beside the marker")
+		}
+		if !sawMarkerAlone {
+			t.Error("no width dropped the path while keeping the marker")
+		}
+	})
+
+	t.Run("a configured layout seats the marker before the workdir", func(t *testing.T) {
+		t.Parallel()
+		opts := watchFooterOpts("[[workdir, git], [host, model, effort, spend, mode]]")
+		m := watchFooterInto(t, watchFooterModel(t, opts, 160), watchFooterWatchedWorkspace)
+		sep := " " + m.th.glyphs.assistant + " "
+		rows := strings.Split(plainFooter(m), "\n")
+		if want := bodyIndent + watchingLabel + sep + watchFooterWatchedWorkspace + sep + watchFooterWatchedBranch; !strings.HasPrefix(rows[0], want) {
+			t.Errorf("row 0 = %q; want it to open with %q", rows[0], want)
+		}
+
+		opts = watchFooterOpts("[[host, model, effort, mode], [git, spend]]")
+		m = watchFooterInto(t, watchFooterModel(t, opts, 160), watchFooterWatchedWorkspace)
+		footer := plainFooter(m)
+		if strings.Contains(footer, watchingLabel) {
+			t.Errorf("a layout naming no workdir shows the marker:\n%s", footer)
+		}
+		if !strings.Contains(footer, watchFooterWatchedBranch) {
+			t.Errorf("a layout naming no workdir lacks the watched branch:\n%s", footer)
+		}
+	})
+
+	t.Run("an unknown workspace shows the marker alone", func(t *testing.T) {
+		t.Parallel()
+		m := watchFooterInto(t, watchFooterModel(t, watchFooterOpts(""), 160), "")
+		footer := plainFooter(m)
+		if !strings.Contains(footer, watchingLabel) {
+			t.Errorf("footer lacks the marker:\n%s", footer)
+		}
+		for _, other := range []string{watchFooterHostWorkspace, watchFooterHostBranch, watchFooterWatchedBranch} {
+			if strings.Contains(footer, other) {
+				t.Errorf("footer names %q while watching an unknown workspace:\n%s", other, footer)
+			}
+		}
+		if _, _, _, ok := m.footerGitSpan(m.width); ok {
+			t.Error("a git segment shows while watching an unknown workspace")
+		}
+	})
+
+	t.Run("a workdir colour override recolours neither the marker nor the watched path", func(t *testing.T) {
+		t.Parallel()
+		for _, name := range scheme.Discover("") {
+			s, _ := scheme.Resolve(name, "")
+			host := withFooterColors(t, watchFooterModel(t, watchFooterOpts(""), 160), s, "{workdir: user-text}")
+			userText := sgrOpener(t, host.th.footerText.Foreground(lipgloss.Color(s.UserText)))
+			accent := sgrOpener(t, host.th.footerAccent)
+			if userText == accent {
+				continue
+			}
+			m := watchFooterInto(t, host, watchFooterWatchedWorkspace)
+			footer := m.footerContent(m.width)
+			for _, run := range []string{accent + watchingLabel, accent + watchFooterWatchedWorkspace} {
+				if !strings.Contains(footer, run) {
+					t.Errorf("watched footer under %q lacks the accent run %q: %q", name, run, footer)
+				}
+			}
+			if strings.Contains(footer, userText+watchFooterWatchedWorkspace) {
+				t.Errorf("the override recoloured the watched path under %q: %q", name, footer)
+			}
+			if unwatched := host.footerContent(host.width); !strings.Contains(unwatched, userText+watchFooterHostWorkspace) {
+				t.Errorf("the override no longer paints the host workdir under %q: %q", name, unwatched)
+			}
+		}
+	})
 }
 
 func TestWatchRepaintsOnTruncation(t *testing.T) {
@@ -1653,13 +1839,18 @@ func TestWatchRoutesGitActionLandingsToTheOwner(t *testing.T) {
 // watch-refused flash; after esc the same click opens the git actions picker.
 func TestWatchRefusesTheGitActionsPicker(t *testing.T) {
 	t.Parallel()
-	base, _ := gitActionsModelWith(t, tracked(), &fakeGitActionsHost{}, func(*Options) {})
+	base, git := gitActionsModelWith(t, tracked(), &fakeGitActionsHost{}, func(*Options) {})
+	git.byRoot = map[string]gitstatus.Snapshot{watchFooterWatchedWorkspace: untracked()}
 	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	f.src.workspace = watchFooterWatchedWorkspace
 	m, cmd := base.enterWatch(f.src)
 	if !m.watch.isActive || cmd == nil {
 		t.Fatal("setup: enterWatch did not enter watch mode")
 	}
-	m = step(t, m, cmd())
+	m = foldAll(t, m, expandBatch(cmd))
+	if !m.watch.hasGitSnap || m.watch.gitSnap.Branch != untracked().Branch {
+		t.Fatalf("setup: the watched git read did not land (%+v), so the footer shows no watched git segment", m.watch.gitSnap)
+	}
 
 	y, first, _ := footerGitCells(t, m)
 	watched := step(t, m, leftClick(first, y))

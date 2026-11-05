@@ -172,6 +172,10 @@ type watchState struct {
 	// left it. Its entry lists are nil, and leaveWatch drops it with the rest of the watch.
 	gitSnap    gitstatus.Snapshot
 	hasGitSnap bool
+	// workdir is the watched workspace as the footer spells it ([workdirDisplay], escape-stripped),
+	// resolved once at entry as newModel resolves m.workdir; "" when the watched workspace is
+	// unknown. leaveWatch drops it with the rest of the watch.
+	workdir string
 }
 
 // journalCursor is where the follower stands in the journal. offset is how many journal bytes have
@@ -269,6 +273,7 @@ func (m Model) startWatch(src watchSource) (Model, tea.Cmd) {
 		owner:         m.eng,
 		ownerSessions: m.sessions,
 		parked:        m.sessionView,
+		workdir:       watchedWorkdir(src.workspace),
 	}
 	m.eng, m.sessions = inert, nil
 	// The block-paint cache is keyed by entry index (paintcache.go). The parked transcript's is
@@ -285,6 +290,17 @@ func (m Model) startWatch(src watchSource) (Model, tea.Cmd) {
 	}
 	read := m.readJournalCmd()
 	return m, read
+}
+
+// watchedWorkdir is the footer's spelling of a watched workspace: [workdirDisplay] against the
+// watcher's home, escape-stripped — the watched session's path is another process's text. A failed
+// home lookup leaves the path unrespelled, as newModel's does for the host workspace.
+func watchedWorkdir(workspace string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return stripEscapes(workdirDisplay(workspace, home))
 }
 
 // watchSourceOf is the source a watch of live follows: its record, its journal, its workspace, its

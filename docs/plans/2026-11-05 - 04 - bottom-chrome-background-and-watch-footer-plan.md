@@ -138,7 +138,13 @@ internal/tui/model.go — newModel (git.gen/inFlight arm); internal/tui/sessions
 - `go test -race -count=1 -run 'TestWatchReadsGitInTheWatchedWorkspace|TestGit|TestWatchIsolatesRoutesEveryFoldedMsg' ./internal/tui/`
 **Commit:** `fix(tui): read git in the watched workspace while watching`
 
-## 5. Footer names the watched folder and branch
+## 5. Footer names the watched folder and branch — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the marker is an internal footer segment id (`footerSegWatching`, "watching") outside `footerSegmentNames`; footerRow seats it before `workdir` on the row naming `workdir`, and footerRun joins it with the row's own ✦ separator (`watching ✦ <path>`).
+NOTES (2026-11-05): footerGitSegment reads the watched snapshot (watchState.gitSnap) while watching; gitSnapshot() itself is unchanged and still answers the host's snapshot for its other readers.
+NOTES (2026-11-05): the watched display form lives in watchState.workdir, set once in startWatch (so the in-session and the `--resume` startup watch both get it) via a new watchedWorkdir helper in watch.go.
+NOTES (2026-11-05): mode_test.go needed no change (no footer test there enumerates segments or watch state); the new cases live in watch_test.go, reusing gitstatus_test.go's existing foldAll and mode_test.go's withFooterColors/sgrOpener.
+NOTES (2026-11-05): consequential edit — docs/manual/sessions.md: made necessary by the watch footer naming the watched folder and branch (the "While you watch" bullet now says so).
 
 **What:**
 **Goal:** while watching, the footer's workdir segment shows a `watching` marker piece followed by the watched session's workspace (display form, escape-stripped), both in the `footer-accent` tone and immune to a `ui.footer.colors` `workdir` override; the git segment shows the watched snapshot; with an unknown workspace only the marker shows and no git segment; on leaving, the host's folder and git segment return unmarked. `layout.md` documents the watch-state footer.

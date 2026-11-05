@@ -67,15 +67,23 @@ const (
 	footerSegSpend   footerSegmentID = "spend"
 )
 
+// footerSegWatching is the `watching` marker a watch puts in front of the workdir, there to say the
+// path and branch that follow are the watched session's, not apogee's own workspace. It is no name
+// a row layout lists (`ui.footer.rows` accepts none by it): [Model.footerRow] seats it just before
+// the workdir wherever a row names `workdir`, so a layout without the workdir shows no marker.
+const footerSegWatching footerSegmentID = "watching"
+
 // footerTopPriority is the highest priority a segment carries — the first one a narrowing row gives
 // up — and the ladder's starting rung keeps every segment below it plus one.
 const footerTopPriority = 5
 
 // priority is the rung a segment leaves the row on: the higher, the sooner. The session's spend
 // goes first (5), then the workspace's git state (4), then the row spends its columns outward-in —
-// the effort word (3), the workdir (2), the host (1). The model is priority 0, the floor the ladder
-// never drops ([footerFit] spends it in halves instead), and so is any name the fit does not
-// know, which keeps the fit total rather than silently losing a segment.
+// the effort word (3), the workdir (2), the host (1). The watch's `watching` marker shares the
+// host's 1, below the workdir it introduces: the path elides and then drops while the marker still
+// says whose it was, and the two leave together only at the priority-0 cut. The model is priority
+// 0, the floor the ladder never drops ([footerFit] spends it in halves instead), and so is any name
+// the fit does not know, which keeps the fit total rather than silently losing a segment.
 func (id footerSegmentID) priority() int {
 	switch id {
 	case footerSegSpend:
@@ -86,7 +94,7 @@ func (id footerSegmentID) priority() int {
 		return 3
 	case footerSegWorkdir:
 		return 2
-	case footerSegHost:
+	case footerSegHost, footerSegWatching:
 		return 1
 	default:
 		return 0

@@ -136,7 +136,9 @@ mapped to a role such as `success` — so an override is still a role, resolved 
 active and moving with a scheme switch; a raw colour is not accepted. `branch` recolours the git
 segment's branch alone; its counts keep their meaning's tones. The **mode marker stays the loudest
 thing on the footer**: it and the offline marker carry the session's state, take no override, and
-keep their `mode-*` and `error` tones. An unknown segment, `mode`, `offline` or an unknown role is
+keep their `mode-*` and `error` tones. A watch's `watching` marker is state too, and so is the
+watched workdir it leads ("While you watch", below): both wear `footer-accent`, and a `workdir`
+override recolours neither. An unknown segment, `mode`, `offline` or an unknown role is
 refused at load, naming the key and the value — the role set is compiled in, so unlike a scheme
 file's unknown role it is never forgiven (ADR 0040 decision 8, amended 2026-11-05). An override
 changes colour only: no segment's text, width or place moves with it.
@@ -1951,9 +1953,19 @@ tones and from `muted`. A custom scheme that names no `footer-accent` inherits `
 as it does any role it omits. Two segments that are not about the upstream can follow the workdir: the workspace's git
 state and the session's spend (both below).
 
-**While you watch.** A read-only watch leaves the footer alone: it keeps naming your own host,
-model and effort, the binding of the session you parked and that `esc` returns you to. Only the
-status line's context gauge is the watched run's (see "The status line's right slot").
+**While you watch.** A read-only watch keeps naming your own host, model and effort, the binding
+of the session you parked and that `esc` returns you to. The workdir and the git state become the
+watched session's, and the workdir is led by a `watching` marker of its own, so neither is ever
+read as apogee's own workspace — `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high ✦ watching ✦
+~/Repos/other ✦ feature 2Δ 0↓ 0↑`. The marker and the path both wear `footer-accent`: they state
+the watch rather than a fact, so a `workdir` override in `ui.footer.colors` recolours neither. The
+marker is no segment a layout names; it sits just before the workdir in whichever row names
+`workdir` (a layout without it shows no marker), at the host's priority 1 below the workdir's 2,
+so a narrowing row elides the path, then drops it, and still says `watching`. A watch whose
+session names no workspace shows the marker alone, with no git segment. The git segment's click
+opens nothing while you watch (below, "And the git state is a control too"). Leaving the watch
+puts your own folder and branch back, unmarked. Beyond the footer, the status line's context gauge
+is the watched run's too (see "The status line's right slot").
 
 **The spend.** Once any call of the session has been priced (a `servers:` entry with a `price:`,
 ADR 0093), the run gains one more segment at its end, after the workdir and the git state: the

@@ -20,10 +20,13 @@ import (
 
 // fakeGitHost is a scripted [GitStatusHost]. It answers every Status with the scripted snapshot,
 // inside flag and error, counts the calls and records the root each one read. With block set, a Status call parks until release is
-// closed or its ctx ends, recording the ctx error it saw — the slow read and the exit tests.
+// closed or its ctx ends, recording the ctx error it saw — the slow read and the exit tests. A root
+// byRoot names answers its own snapshot instead, so a watched workspace's branch reads apart from
+// the host's.
 type fakeGitHost struct {
 	mu       sync.Mutex
 	snap     gitstatus.Snapshot
+	byRoot   map[string]gitstatus.Snapshot
 	inside   bool
 	err      error
 	fetchErr error
@@ -54,6 +57,9 @@ func (f *fakeGitHost) Status(ctx context.Context, root string) (gitstatus.Snapsh
 	f.statusCalls++
 	f.statusRoots = append(f.statusRoots, root)
 	block, snap, inside, err := f.block, f.snap, f.inside, f.err
+	if rooted, ok := f.byRoot[root]; ok {
+		snap = rooted
+	}
 	f.mu.Unlock()
 	if block {
 		f.started <- struct{}{}
