@@ -1,10 +1,12 @@
 ---
 title: "run_tests ignores markers under its path: detects the runner only at the workspace root"
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-05 - 01 - run-tests-subdir-marker-plan.md
 created: 2026-11-05T08:51:43Z
+closed: 2026-11-05T10:13:40Z
+reason: "Resolved by plan '2026-11-05 - 01 - run-tests-subdir-marker-plan' (archived at 56419ba1): items 1-3 detect the runner at or above path and run from the marker dir, name the searched dirs in the refusal, and document how path picks the runner."
 ---
 
 `run_tests` detects its runner only at the workspace root. `internal/tools/run_tests.go:260` calls `detectTestRunner(t.root)` before the `path` argument is resolved, so a project in a subdirectory gets "no test runner detected", even when that directory holds `go.mod`. The refusal also doesn't say where it looked, so it reads as if nothing was found anywhere. Still true on main (2f57f04b, after v0.32.0).
