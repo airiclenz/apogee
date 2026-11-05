@@ -128,8 +128,13 @@ func (m Model) gitActionsRefusal() (string, bool) {
 
 // openGitActions opens the git actions picker, or notes why it does not open
 // ([Model.gitActionsRefusal]). It is the one opener of /git and of a click on the footer's git
-// segment ([Model.handleFooterGitClick]).
+// segment ([Model.handleFooterGitClick]). While a watch is active it never opens: the footer shows
+// another session's run, the actions would act on apogee's own workspace, and the opener answers
+// with the watch-refused flash every refused key raises ([watchRefusedFlash]).
 func (m Model) openGitActions() (Model, tea.Cmd) {
+	if m.watch.isActive {
+		return m, m.showFlash(watchRefusedFlash)
+	}
 	if note, refused := m.gitActionsRefusal(); refused {
 		m.transcript.addNote(note)
 		return m, nil

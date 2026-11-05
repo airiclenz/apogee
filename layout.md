@@ -2007,7 +2007,8 @@ and asks for a read at once, so the counts show what it did. The segment answers
 marker's terms (a live state, no picker already open, no `/sessions` browser and no `/settings`
 pane owning input) but for one difference: a Turn running or a decision pending does not close it,
 and the click is answered there with the note `git actions wait for the Turn to end`, because the
-picker opens only at idle. While an action runs, a submitted prompt and a second action wait for it
+picker opens only at idle. During a watch the click opens nothing either: it raises the watch's
+`read-only — you are watching this session; esc goes back` flash, as `/git` does there. While an action runs, a submitted prompt and a second action wait for it
 (`git push is still running — git actions wait for it to finish`) and a quit holds its exit until it
 lands; it is bounded only by a generous backstop, never by a deadline a slow box would miss.
 Repository hooks never run on these acts — the hardened runner empties them — so a hook you rely

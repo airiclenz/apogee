@@ -1648,6 +1648,38 @@ func TestWatchRoutesGitActionLandingsToTheOwner(t *testing.T) {
 	}
 }
 
+// TestWatchRefusesTheGitActionsPicker drives a click on the footer's git segment through the one
+// opener's gate (openGitActions): while watching, the click opens no picker and raises the
+// watch-refused flash; after esc the same click opens the git actions picker.
+func TestWatchRefusesTheGitActionsPicker(t *testing.T) {
+	t.Parallel()
+	base, _ := gitActionsModelWith(t, tracked(), &fakeGitActionsHost{}, func(*Options) {})
+	f := newWatchFixture(t, "watched", recordHeadEntries(), 3)
+	m, cmd := base.enterWatch(f.src)
+	if !m.watch.isActive || cmd == nil {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	m = step(t, m, cmd())
+
+	y, first, _ := footerGitCells(t, m)
+	watched := step(t, m, leftClick(first, y))
+	if watched.picker.open {
+		t.Errorf("a click on the git segment while watching opened picker %+v, want none", watched.picker)
+	}
+	if watched.flash != watchRefusedFlash {
+		t.Errorf("flash = %q, want the watch-refused flash %q", watched.flash, watchRefusedFlash)
+	}
+
+	left := step(t, m, keyEsc())
+	if left.watch.isActive {
+		t.Fatal("setup: esc did not leave the watch")
+	}
+	y, first, _ = footerGitCells(t, left)
+	if live := step(t, left, leftClick(first, y)); !live.picker.open || live.picker.kind != pickerGitActions {
+		t.Errorf("a click on the git segment after esc gave picker %+v, want the git actions picker", live.picker)
+	}
+}
+
 func TestWatchIsolatesHoldsTheOwnersSurfacesUntilEsc(t *testing.T) {
 	t.Parallel()
 	host := &fakeSessionHost{}

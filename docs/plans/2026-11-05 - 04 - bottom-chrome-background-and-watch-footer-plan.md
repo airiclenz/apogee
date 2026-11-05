@@ -91,7 +91,10 @@ cmd/apogee/wire_session.go — liveSessionOf; internal/tui/watch_test.go — new
 - `go test -race -count=1 -run 'TestWatch|TestSessionBrowser|TestSessionsStartupWatch|TestSessionViewHoldsEveryFieldTheBoundariesReset' ./internal/tui/`
 **Commit:** `fix(tui): carry the watched session's workspace into the watch`
 
-## 3. Refuse the footer git actions picker while watching
+## 3. Refuse the footer git actions picker while watching — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): consequential edit — layout.md: made necessary by openGitActions' watch gate (the git segment's click paragraph listed when a click opens nothing; it now names the watch and its flash)
+NOTES (2026-11-05): mouse.go changed in a comment only (handleFooterGitClick names the watch refusal); the click already routes through openGitActions, so footerGitHit is unchanged and the pointer still shows during a watch, like the Turn-running case
 
 **What:**
 **Goal:** while a watch is active, no entry point opens the git actions picker: a footer git-segment click and any other opener show the watch-refused flash; outside a watch the picker opens as before, and a git action landing during a watch still routes to its owner.

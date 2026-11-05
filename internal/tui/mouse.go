@@ -550,7 +550,8 @@ func (m Model) footerModeHit(pre Model, x, y int) bool {
 // handleFooterGitClick gives the footer's git segment its pointer: a click anywhere on it opens the
 // git actions picker (pickerGitActions, gitactions.go) through the one opener /git uses
 // ([Model.openGitActions]) — so a click while a Turn runs, a decision is pending or a git action is
-// still running answers with the same note /git would, and opens nothing. Whether a click lands on
+// still running answers with the same note /git would, a click during a watch with the
+// watch-refused flash, and none of them opens anything. Whether a click lands on
 // the segment is [Model.footerGitHit]'s to say, the predicate the pointer shape asks as well.
 func (m Model) handleFooterGitClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	if !m.footerGitHit(pre, msg.X, msg.Y) {
