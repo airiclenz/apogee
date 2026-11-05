@@ -2,6 +2,7 @@ package scheme
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -181,6 +182,38 @@ func TestBuiltinSchemesKeepModeColorsDistinct(t *testing.T) {
 				for _, b := range modes[i+1:] {
 					if a.value == b.value {
 						t.Errorf("%s and %s are both %q — each autonomy mode needs its own color", a.key, b.key, a.value)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestBuiltinSchemesKeepFooterGitTonesDistinct: the footer's git counts take `warning` and
+// `success` on the row the mode marker ends and the offline word (`error`) stands in, so neither
+// tone may be read as a rung of the privilege ladder or as the offline fault — nor as each other.
+func TestBuiltinSchemesKeepFooterGitTonesDistinct(t *testing.T) {
+	t.Parallel()
+	for _, name := range builtinNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := builtinScheme(t, name)
+			tones := []struct{ key, value string }{
+				{"warning", got.Warning},
+				{"success", got.Success},
+			}
+			others := []struct{ key, value string }{
+				{"success", got.Success},
+				{"error", got.Error},
+				{"mode-plan", got.ModePlan},
+				{"mode-ask-before", got.ModeAskBefore},
+				{"mode-allow-edits", got.ModeAllowEdits},
+				{"mode-auto", got.ModeAuto},
+			}
+			for _, tone := range tones {
+				for _, other := range others {
+					if tone.key != other.key && strings.EqualFold(tone.value, other.value) {
+						t.Errorf("%s and %s are both %q — a footer git count must not read as %s", tone.key, other.key, tone.value, other.key)
 					}
 				}
 			}

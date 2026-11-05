@@ -281,9 +281,6 @@ type theme struct {
 	chrome  color.Color // the `chrome` role: the user block's field, the borders, the gauge's track
 	muted   color.Color // the `muted` role: the dim tone, and modeColor's off-ladder fallback
 	errorFg color.Color // the `error` role: the footer's offline segment, painted onto footerText
-	// the `muted-bright` role: a non-zero count in the footer's git segment, painted onto footerText
-	// so a count that asks for attention lifts out of the muted run without a role of its own
-	mutedBright color.Color
 
 	// The four autonomy-mode marker colours, warming up the privilege ladder (least → most
 	// autonomous): plan turquoise-green, ask-before green, allow-edits blue, auto orange.
@@ -391,6 +388,8 @@ type themeStyles struct {
 	chromeRule    lipgloss.Style // the prompt box's own border hairline (dark gray on black): the rule runes and corners inputElisionEdge composes the box's top border row from
 	hairline      lipgloss.Style // both chrome hairlines — the ▔ above the status line and the ▁ under the footer — a dimmer rule (the `divider` role) so they recede
 	footerText    lipgloss.Style // the footer's content (faint on black)
+	footerWarning lipgloss.Style // a footer git count in the warning tone (footerToneWarning): the `warning` role on the footer's black
+	footerSuccess lipgloss.Style // a footer git count in the success tone (footerToneSuccess): the `success` role on the footer's black
 	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 
@@ -415,6 +414,19 @@ func (th theme) modeColor(m domain.Mode) color.Color {
 		return th.modeAuto
 	default:
 		return th.muted
+	}
+}
+
+// footerToneStyle is the style a piece of the footer's git segment paints in: the tone's role on
+// the footer's own field, and the footer's own muted text for the muted tone or an unknown one.
+func (th theme) footerToneStyle(tone footerTone) lipgloss.Style {
+	switch tone {
+	case footerToneWarning:
+		return th.footerWarning
+	case footerToneSuccess:
+		return th.footerSuccess
+	default:
+		return th.footerText
 	}
 }
 
@@ -485,7 +497,6 @@ func newTheme(s scheme.Scheme) theme {
 		chrome:         chrome,
 		muted:          muted,
 		errorFg:        errFg,
-		mutedBright:    openDetail,
 		modePlan:       modePlan,
 		modeAskBefore:  modeAskBefore,
 		modeAllowEdits: modeAllowEdits,
@@ -590,6 +601,10 @@ func newTheme(s scheme.Scheme) theme {
 			chromeRule:    lipgloss.NewStyle().Foreground(chrome).Background(surface),
 			hairline:      lipgloss.NewStyle().Foreground(divider).Background(surface),
 			footerText:    lipgloss.NewStyle().Foreground(muted).Background(surface),
+			// A git count's tone is its meaning (footerTone): the footer's own field, with the
+			// role's colour and no weight, so a count reads as a fact in the row rather than an alarm.
+			footerWarning: lipgloss.NewStyle().Foreground(warningFg).Background(surface),
+			footerSuccess: lipgloss.NewStyle().Foreground(successFg).Background(surface),
 			scrollThumb:   lipgloss.NewStyle().Foreground(muted),
 			scrollTrack:   lipgloss.NewStyle().Foreground(chrome),
 			gaugeFill:     lipgloss.NewStyle().Foreground(gauge),

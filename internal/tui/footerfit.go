@@ -508,14 +508,30 @@ func footerRun(glyphs glyphSet, segments ...string) string {
 	return strings.Join(nonEmpty(segments...), " "+glyphs.assistant+" ")
 }
 
-// footerSpan is one piece of the footer's git segment and the tone it is read in: the branch and a
-// zero count sit in the footer's own muted tone, and a non-zero count is bright — the brighter muted
-// step ([theme.mutedBright]), never a role of its own — so a tree with something to say lifts out of
-// the row while a clean one stays quiet. isBranch marks the one piece the fit may middle-elide
-// ([footerInput.shortenings]): a count is never shortened.
+// footerTone is the meaning a piece of the footer's git segment is read in, and through it the
+// scheme role it is painted in ([theme.footerToneStyle]). The zero value is the footer's own muted
+// tone, so a piece nothing has toned stays quiet.
+type footerTone int
+
+const (
+	// footerToneMuted is the footer's own tone: the branch, and a count that is zero.
+	footerToneMuted footerTone = iota
+	// footerToneWarning is the `warning` role: work not yet where it belongs — changed paths not
+	// committed, upstream commits not yet merged.
+	footerToneWarning
+	// footerToneSuccess is the `success` role: commits made here and ready to push.
+	footerToneSuccess
+)
+
+// footerSpan is one piece of the footer's git segment and the tone it is read in
+// ([footerTone]): the branch and a zero count sit in the footer's own muted tone, a non-zero `Δ`
+// or `↓` in the warning tone and a non-zero `↑` in the success tone, so a tree with something to
+// say lifts out of the row in the colour of what it says while a clean one stays quiet. isBranch
+// marks the one piece the fit may middle-elide ([footerInput.shortenings]): a count is never
+// shortened.
 type footerSpan struct {
 	text     string
-	bright   bool
+	tone     footerTone
 	isBranch bool
 }
 
@@ -533,13 +549,16 @@ func gitFooterSpans(snap gitstatus.Snapshot, glyphs glyphSet) []footerSpan {
 	if branch := stripEscapes(snap.Branch); branch != "" && !snap.Detached {
 		spans = append(spans, footerSpan{text: branch, isBranch: true})
 	}
-	count := func(n int, mark string) {
-		spans = append(spans, footerSpan{text: strconv.Itoa(n) + mark, bright: n != 0})
+	count := func(n int, mark string, tone footerTone) {
+		if n == 0 {
+			tone = footerToneMuted
+		}
+		spans = append(spans, footerSpan{text: strconv.Itoa(n) + mark, tone: tone})
 	}
-	count(snap.Dirty, glyphs.gitDirty)
+	count(snap.Dirty, glyphs.gitDirty, footerToneWarning)
 	if snap.HasAheadBehind {
-		count(snap.Behind, glyphs.gitBehind)
-		count(snap.Ahead, glyphs.gitAhead)
+		count(snap.Behind, glyphs.gitBehind, footerToneWarning)
+		count(snap.Ahead, glyphs.gitAhead, footerToneSuccess)
 	}
 	return spans
 }

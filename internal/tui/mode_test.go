@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/gitstatus"
@@ -271,7 +273,7 @@ func TestFooterStatesTheGitSegment(t *testing.T) {
 		t.Parallel()
 
 		m := withGitSnapshot(footerFactsModel(t), footerLongBranchSnapshot)
-		bright := footerBrightOpener(t, m)
+		tones := footerToneOpeners(t, m)
 		elided := 0
 		for w := 160; w > 0; w-- {
 			run := footerLeftRun(t, m, w)
@@ -283,9 +285,12 @@ func TestFooterStatesTheGitSegment(t *testing.T) {
 			}
 			elided++
 			footer := m.footerContent(w)
-			for _, count := range []string{"5Δ", "4↑"} {
-				if !strings.Contains(footer, bright+count) {
-					t.Errorf("footer at width %d does not paint %q bright beside the elided branch: %q", w, count, footer)
+			for _, count := range []struct {
+				tone footerTone
+				text string
+			}{{footerToneWarning, "5Δ"}, {footerToneSuccess, "4↑"}} {
+				if !strings.Contains(footer, tones[count.tone]+count.text) {
+					t.Errorf("footer at width %d does not paint %q in its tone beside the elided branch: %q", w, count.text, footer)
 				}
 			}
 		}
@@ -413,46 +418,147 @@ func footerNarrowingRuns(t *testing.T, m Model, width int, until string) []strin
 	return nil
 }
 
-// footerBrightOpener is the escape sequence the footer opens its bright tone (theme.mutedBright)
-// with, refused where it would be indistinguishable from the footer's own tone.
-func footerBrightOpener(t *testing.T, m Model) string {
+// sgrOpener is the escape sequence style opens a run with: what it renders before the text.
+func sgrOpener(t *testing.T, style lipgloss.Style) string {
 	t.Helper()
 
-	probe := m.th.footerText.Foreground(m.th.mutedBright).Render("X")
-	bright := probe[:strings.Index(probe, "X")]
-	if bright == "" || strings.HasPrefix(m.th.footerText.Render("X"), bright) {
-		t.Fatalf("the bright tone opens with %q, indistinguishable from the footer's own", bright)
-	}
-	return bright
+	probe := style.Render("X")
+	return probe[:strings.Index(probe, "X")]
 }
 
-// TestFooterTonesOnlyNonZeroGitCounts reads the styled bytes: a non-zero count opens the brighter
-// muted step (theme.mutedBright) and a zero count or the branch never does, so a clean tree stays
-// on the footer's own tone and the row draws no new role.
+// footerToneOpeners is the escape sequence each of the footer git segment's tones opens a run
+// with under m's theme, refused where a lit tone would be indistinguishable from the footer's own.
+func footerToneOpeners(t *testing.T, m Model) map[footerTone]string {
+	t.Helper()
+
+	openers := map[footerTone]string{}
+	for _, tone := range []footerTone{footerToneMuted, footerToneWarning, footerToneSuccess} {
+		openers[tone] = sgrOpener(t, m.th.footerToneStyle(tone))
+	}
+	for _, tone := range []footerTone{footerToneWarning, footerToneSuccess} {
+		if openers[tone] == "" || openers[tone] == openers[footerToneMuted] {
+			t.Fatalf("tone %d opens with %q, indistinguishable from the footer's own", tone, openers[tone])
+		}
+	}
+	return openers
+}
+
+// TestFooterTonesOnlyNonZeroGitCounts reads the styled bytes: a non-zero `Δ` opens the warning
+// tone and a non-zero `↑` the success tone, while a zero count and the branch stay on the footer's
+// own muted tone, so a clean tree draws no lit tone at all.
 func TestFooterTonesOnlyNonZeroGitCounts(t *testing.T) {
 	t.Parallel()
 
 	m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
-	bright := footerBrightOpener(t, m)
+	tones := footerToneOpeners(t, m)
 
 	footer := m.footerContent(160)
-	if n := strings.Count(footer, bright); n != 2 {
-		t.Errorf("footer opens the bright tone %d times, want 2 (5Δ and 4↑): %q", n, footer)
-	}
-	for _, count := range []string{"5Δ", "4↑"} {
-		if !strings.Contains(footer, bright+count) {
-			t.Errorf("footer does not paint %q bright: %q", count, footer)
+	for _, tc := range []struct {
+		name string
+		tone footerTone
+		run  string
+	}{
+		{"warning", footerToneWarning, "5Δ"},
+		{"success", footerToneSuccess, "4↑"},
+	} {
+		if n := strings.Count(footer, tones[tc.tone]); n != 1 {
+			t.Errorf("footer opens the %s tone %d times, want 1 (%s): %q", tc.name, n, tc.run, footer)
+		}
+		if !strings.Contains(footer, tones[tc.tone]+tc.run) {
+			t.Errorf("footer does not paint %q in the %s tone: %q", tc.run, tc.name, footer)
 		}
 	}
-	for _, quiet := range []string{"0↓", "main"} {
-		if strings.Contains(footer, bright+quiet) || strings.Contains(footer, bright+" "+quiet) {
-			t.Errorf("footer paints %q bright: %q", quiet, footer)
+	for _, quiet := range []string{"main ", " 0↓ "} {
+		if !strings.Contains(footer, tones[footerToneMuted]+quiet) {
+			t.Errorf("footer does not paint %q in its own muted tone: %q", quiet, footer)
 		}
 	}
 
 	clean := withGitSnapshot(footerFactsModel(t), gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true})
-	if footer := clean.footerContent(160); strings.Contains(footer, bright) {
-		t.Errorf("a clean, level tree opens the bright tone: %q", footer)
+	footer = clean.footerContent(160)
+	for _, lit := range []footerTone{footerToneWarning, footerToneSuccess} {
+		if strings.Contains(footer, tones[lit]) {
+			t.Errorf("a clean, level tree opens a lit tone (%d): %q", lit, footer)
+		}
+	}
+}
+
+// withScheme rebuilds m's theme from s the way a live scheme switch does (applyColorScheme),
+// keeping the measure and glyph set the screen is drawn in.
+func withScheme(m Model, s scheme.Scheme) Model {
+	measure, glyphs := m.th.measure, m.th.glyphs
+	m.th = newTheme(s)
+	m.th.measure, m.th.glyphs = measure, glyphs
+	return m
+}
+
+// TestFooterGitCountsTakeTheirRoleUnderEveryBuiltinScheme reads the git segment's SGR under each
+// built-in scheme, with each tone's escape derived from the scheme's own role values rather than
+// from the theme: a non-zero `Δ` and `↓` in `warning`, a non-zero `↑` in `success`, the branch and
+// a zero count in `muted` — every one on the footer's `surface` field.
+func TestFooterGitCountsTakeTheirRoleUnderEveryBuiltinScheme(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range scheme.Discover("") {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, warnings := scheme.Resolve(name, "")
+			if len(warnings) != 0 {
+				t.Fatalf("built-in %q warned: %v", name, warnings)
+			}
+			role := func(fg string) string {
+				return sgrOpener(t, lipgloss.NewStyle().Foreground(lipgloss.Color(fg)).Background(lipgloss.Color(s.Surface)))
+			}
+			muted, warning, success := role(s.Muted), role(s.Warning), role(s.Success)
+			for _, tc := range []struct {
+				snap gitstatus.Snapshot
+				runs []string
+			}{
+				{footerGitTestSnapshot, []string{muted + "main ", warning + "5Δ", muted + " 0↓ ", success + "4↑"}},
+				{
+					gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Behind: 2},
+					[]string{muted + "main 0Δ ", warning + "2↓", muted + " 0↑"},
+				},
+			} {
+				m := withScheme(withGitSnapshot(footerFactsModel(t), tc.snap), s)
+				footer := m.footerContent(160)
+				for _, run := range tc.runs {
+					if !strings.Contains(footer, run) {
+						t.Errorf("footer under %q lacks the run %q: %q", name, run, footer)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestFooterGitCountsReadTheSameUnderAsciiProfile: a terminal with no colour loses the tones and
+// nothing else — the row the Ascii profile writes reads exactly as the coloured one does once its
+// escapes are stripped, and it carries no colour at all.
+func TestFooterGitCountsReadTheSameUnderAsciiProfile(t *testing.T) {
+	t.Parallel()
+
+	m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
+	coloured := ansiPattern.ReplaceAllString(m.footerContent(160), "")
+	m = step(t, m, tea.ColorProfileMsg{Profile: colorprofile.Ascii})
+
+	var written strings.Builder
+	w := &colorprofile.Writer{Forward: &written, Profile: colorprofile.Ascii}
+	if _, err := w.WriteString(m.footerContent(160)); err != nil {
+		t.Fatalf("writing the footer through the Ascii profile: %v", err)
+	}
+
+	if got := ansiPattern.ReplaceAllString(written.String(), ""); got != coloured {
+		t.Errorf("the Ascii footer reads %q, want the coloured footer's text %q", got, coloured)
+	}
+	if !strings.Contains(coloured, "main 5Δ 0↓ 4↑") {
+		t.Errorf("the footer lacks its git segment: %q", coloured)
+	}
+	for _, colour := range []string{"38;", "48;"} {
+		if strings.Contains(written.String(), colour) {
+			t.Errorf("the Ascii footer still carries a colour (%q): %q", colour, written.String())
+		}
 	}
 }
 

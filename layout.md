@@ -114,7 +114,8 @@ scheme swap moves all of them at once, live, with the screen repainted from scra
 already colours: no full-screen background is painted, so the terminal's own background stays the
 field everything below is drawn on, and no glyph, marker, width or row budget is themed. Two roles
 are load-bearing rather than decorative and every shipped scheme is tested for them: `skill` and
-`file-ref` must stay tellable apart (ADR 0027), as must the four `mode-*` tones.
+`file-ref` must stay tellable apart (ADR 0027), as must the four `mode-*` tones — and the footer's
+git tones, `warning` and `success`, must stay apart from those four and from `error`.
 
 **The glyphs this document draws are the default set.** `ui.glyphs: safe` swaps them, cell for cell
 at the same width, for shapes nearly every terminal font carries (`♦` for `✦`, `›` for `❯`, a `·`
@@ -1949,9 +1950,12 @@ against; a detached HEAD has no branch to name, so the counts stand alone (`5Δ`
 work tree — or in a repository the git tools refuse, one whose own config names a command to run —
 the segment is absent with its separator. The branch is the repository's text, so its escape
 sequences are stripped before it is measured or painted. The branch and every zero count sit in
-the footer's own muted tone and a non-zero count in the brighter muted step (`MutedBright`, the
-tone a tool card's bright detail uses — no role of its own), so a tree with something to say lifts
-out of the row while a clean one stays quiet. git never runs on the render path: a poll reads the
+the footer's own muted tone; a non-zero count takes the tone of what it means — a non-zero `Δ` (work
+not yet committed) and `↓` (upstream commits not yet merged) in `warning` (`#d7af5f`), a non-zero
+`↑` (commits ready to push) in `success` (`#43d389`) — so a tree with something to say lifts out of
+the row in the colour of what it says while a clean one stays quiet. Both roles are tested to stay
+apart from every `mode-*` tone and from `error` in every shipped scheme, and under a colourless
+terminal profile the segment reads exactly as it does in colour. git never runs on the render path: a poll reads the
 state off the frame every 5 s after the last read landed (stretched when a read was slow, and
 backed off to a minute where the read failed or found no work tree), and a Turn's end asks for one
 more read at once, so what the model just changed is counted when it stops. A failed read keeps

@@ -456,7 +456,7 @@ func TestFooterFitPaintsTheElidedBranchFromItsPieces(t *testing.T) {
 	if footerSpansText(git.pieces) != git.text {
 		t.Errorf("git span pieces re-join to %q, want %q", footerSpansText(git.pieces), git.text)
 	}
-	want := []footerSpan{{text: "feat…name", isBranch: true}, {text: "5Δ", bright: true}, {text: "0↓"}, {text: "4↑", bright: true}}
+	want := []footerSpan{{text: "feat…name", isBranch: true}, {text: "5Δ", tone: footerToneWarning}, {text: "0↓"}, {text: "4↑", tone: footerToneSuccess}}
 	if !slices.Equal(git.pieces, want) {
 		t.Errorf("git span pieces = %+v, want %+v", git.pieces, want)
 	}
@@ -554,32 +554,40 @@ func TestFooterFitLeavesNoDanglingSeparator(t *testing.T) {
 
 // TestGitFooterSpansWordTheWorkingTree pins the git segment's words: the branch, the changed-path
 // count, and — only where git compared the branch with an upstream — how far it is behind and
-// ahead. Each count is bright exactly when it is not zero; the branch is never bright.
+// ahead. A non-zero `Δ` or `↓` is in the warning tone and a non-zero `↑` in the success tone; a
+// zero count and the branch stay muted.
 func TestGitFooterSpansWordTheWorkingTree(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name   string
-		snap   gitstatus.Snapshot
-		want   string
-		bright []string
+		name             string
+		snap             gitstatus.Snapshot
+		want             string
+		warning, success []string
 	}{
 		{
-			name:   "a branch with an upstream",
-			snap:   gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Dirty: 5, Ahead: 4},
-			want:   "main 5Δ 0↓ 4↑",
-			bright: []string{"5Δ", "4↑"},
+			name:    "a branch with an upstream",
+			snap:    gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Dirty: 5, Ahead: 4},
+			want:    "main 5Δ 0↓ 4↑",
+			warning: []string{"5Δ"},
+			success: []string{"4↑"},
 		},
 		{
-			name:   "no upstream drops both upstream counts",
-			snap:   gitstatus.Snapshot{Branch: "main", Dirty: 5},
-			want:   "main 5Δ",
-			bright: []string{"5Δ"},
+			name:    "a branch behind its upstream",
+			snap:    gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Behind: 2},
+			want:    "main 0Δ 2↓ 0↑",
+			warning: []string{"2↓"},
+		},
+		{
+			name:    "no upstream drops both upstream counts",
+			snap:    gitstatus.Snapshot{Branch: "main", Dirty: 5},
+			want:    "main 5Δ",
+			warning: []string{"5Δ"},
 		},
 		{
 			name: "a detached HEAD drops the branch",
 			snap: gitstatus.Snapshot{Detached: true, Dirty: 5},
-			want: "5Δ", bright: []string{"5Δ"},
+			want: "5Δ", warning: []string{"5Δ"},
 		},
 		{
 			name: "a clean level tree is all muted",
@@ -589,7 +597,7 @@ func TestGitFooterSpansWordTheWorkingTree(t *testing.T) {
 		{
 			name: "an escape-laden branch is stripped",
 			snap: gitstatus.Snapshot{Branch: "ma\x1b]8;;http://evil\x07in\x1b[31m", Dirty: 1},
-			want: "main 1Δ", bright: []string{"1Δ"},
+			want: "main 1Δ", warning: []string{"1Δ"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -599,14 +607,21 @@ func TestGitFooterSpansWordTheWorkingTree(t *testing.T) {
 			if got := footerSpansText(spans); got != tc.want {
 				t.Errorf("gitFooterSpans(%+v) = %q, want %q", tc.snap, got, tc.want)
 			}
-			var bright []string
+			toned := map[footerTone][]string{}
 			for _, span := range spans {
-				if span.bright {
-					bright = append(bright, span.text)
-				}
+				toned[span.tone] = append(toned[span.tone], span.text)
 			}
-			if strings.Join(bright, ",") != strings.Join(tc.bright, ",") {
-				t.Errorf("gitFooterSpans(%+v) bright spans = %q, want %q", tc.snap, bright, tc.bright)
+			for _, role := range []struct {
+				name string
+				tone footerTone
+				want []string
+			}{
+				{"warning", footerToneWarning, tc.warning},
+				{"success", footerToneSuccess, tc.success},
+			} {
+				if got := toned[role.tone]; !slices.Equal(got, role.want) {
+					t.Errorf("gitFooterSpans(%+v) %s spans = %q, want %q", tc.snap, role.name, got, role.want)
+				}
 			}
 		})
 	}

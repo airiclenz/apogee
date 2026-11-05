@@ -3989,9 +3989,10 @@ func (m Model) footerLeft(lead string, layout footerLayout) string {
 	return left
 }
 
-// footerGit paints the git segment the layout kept: the branch and every zero count on the
-// footer's own muted tone, every non-zero count in the brighter muted step (theme.mutedBright),
-// adjacent pieces of one tone joined into one styled run. The pieces are the ones the layout KEPT
+// footerGit paints the git segment the layout kept: every piece in its span's tone
+// ([footerTone], [theme.footerToneStyle]) — the branch and every zero count on the footer's own
+// muted tone, a non-zero `Δ` or `↓` in the `warning` role, a non-zero `↑` in `success` — adjacent
+// pieces of one tone joined into one styled run. The pieces are the ones the layout KEPT
 // ([footerSegmentSpan]) — an elided branch included — never re-worded from the snapshot, which
 // would no longer re-join to the text the fit measured once the branch is shortened. Should they
 // ever fail to re-join to that text, the segment is painted plain rather than in cells the layout
@@ -4013,14 +4014,10 @@ func (m Model) footerGit(git footerSegmentSpan) string {
 	var out string
 	for start := 0; start < len(pieces); {
 		end, run := start, ""
-		for ; end < len(pieces) && pieces[end].bright == pieces[start].bright; end++ {
+		for ; end < len(pieces) && pieces[end].tone == pieces[start].tone; end++ {
 			run += pieces[end].text
 		}
-		style := m.th.footerText
-		if pieces[start].bright {
-			style = style.Foreground(m.th.mutedBright)
-		}
-		out += style.Render(run)
+		out += m.th.footerToneStyle(pieces[start].tone).Render(run)
 		start = end
 	}
 	return out

@@ -228,7 +228,10 @@ cmd/apogee/e2e_hostile_test.go — footerRowIndex, hostileRedactions; internal/c
 
 **Commit:** `feat(tui): the footer defaults to two rows, upstream then workspace`
 
-## 7. Git counts carry their meaning's tone
+## 7. Git counts carry their meaning's tone — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): footerSpan's `bright` bool became a `footerTone` enum (muted / warning / success); theme.go gained `footerWarning` and `footerSuccess` styles in themeStyles, read through `theme.footerToneStyle`. The theme's raw `mutedBright` colour had no other reader, so it was deleted.
+NOTES (2026-11-05): the mode_test.go subtest "an elided branch keeps its counts' tone" (in the branch-elision test) used the removed `footerBrightOpener`, so it now checks the per-role openers. layout.md's "What colour means" now also names the new warning/success distinctness guard.
 
 **What:** Depends on item 1.
 
