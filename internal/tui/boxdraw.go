@@ -2,8 +2,11 @@ package tui
 
 import (
 	"strings"
+	"sync"
 
 	lipgloss "charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -193,8 +196,127 @@ func (m Model) joinFrame(blocks []string) string {
 	lines := make([]string, 0, len(blocks))
 	for _, block := range blocks {
 		for _, ln := range strings.Split(block, "\n") {
-			lines = append(lines, squareLine(m.th.measure, ln, m.width))
+			lines = append(lines, sealRowEdges(m.th.measure, squareLine(m.th.measure, ln, m.width), m.width))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// rowEdgeBuffers holds the one-row screen buffers [sealRowEdges] parses a line into. A pool rather
+// than a Model field or a package-level buffer: View runs on value copies of the Model, in parallel
+// under test, and the theme it paints with is shared and immutable (doc.go), so the scratch a parse
+// writes into belongs to the one call that took it.
+var rowEdgeBuffers = sync.Pool{New: func() any {
+	buf := uv.NewScreenBuffer(0, 1)
+	return &buf
+}}
+
+// sealRowEdges returns ln — one frame line, already squared to w columns — with its last cell, and
+// separately its first, written as a concealed space when that cell is a painted blank: a width-1
+// space with a background set. Every other line comes back unchanged and unallocated, and so does
+// every cell but the two edges, which keep their content (a space, so copied text is unchanged) and
+// their style, conceal added.
+//
+// It exists because of how ultraviolet's renderer finishes a row. A row whose trailing run is
+// blanks it may clear with (canClearWith: a plain space, no underline, no link, no attribute
+// beyond bold, faint, italic or blink) is not written out: clearToEnd sends EL 0 with that run's
+// pen set, and transformLine's leading-run path sends EL 1 the same way. That is correct only on a
+// terminal that erases in the current background (bce). Terminal.app erases in its own background
+// instead, so every painted field reaching the right border — the bottom chrome, a sent prompt
+// block, the breadcrumb, the staged band — showed the terminal's background through its tail
+// there and nowhere else. Conceal (SGR 8) is outside canClearWith's set, so a sealed edge makes
+// the renderer write the row's run as characters, and a concealed space paints its background like
+// any other. Mid-row runs the renderer sends as ECH render correctly and are left alone; an
+// unpainted edge (no background) erases in the default pen and is left alone too.
+//
+// The decision reads ultraviolet's own parse of the line, the one the renderer runs, and widths go
+// through measure as squareLine's do. Only a line whose bytes carry a background SGR is parsed.
+func sealRowEdges(measure widthAuthority, ln string, w int) string {
+	if w <= 0 || !carriesBackgroundSGR(ln) {
+		return ln
+	}
+	buf := rowEdgeBuffers.Get().(*uv.ScreenBuffer)
+	defer rowEdgeBuffers.Put(buf)
+	if buf.Width() != w {
+		buf.Resize(w, 1)
+	}
+	buf.Method = measure.Method()
+	uv.NewStyledString(ln).Draw(buf, buf.Bounds())
+
+	first, last := buf.CellAt(0, 0), buf.CellAt(w-1, 0)
+	if w == 1 {
+		if isPaintedBlank(last) {
+			return sealedBlank(last.Style)
+		}
+		return ln
+	}
+	if isPaintedBlank(last) {
+		ln = measure.Truncate(ln, w-1, "") + sealedBlank(last.Style)
+	}
+	if isPaintedBlank(first) {
+		ln = sealedBlank(first.Style) + measure.Cut(ln, 1, w)
+	}
+	return ln
+}
+
+// isPaintedBlank reports whether c is a cell ultraviolet's renderer would leave to an erase on a
+// painted field: a width-1 space with a background set, not already concealed.
+func isPaintedBlank(c *uv.Cell) bool {
+	return c != nil && c.Width == 1 && c.Content == " " && c.Style.Bg != nil &&
+		c.Style.Attrs&uv.AttrConceal == 0
+}
+
+// sealedBlank is one space in st with conceal added, reset on both sides: uv's Style.String emits
+// no reset of its own, so without the leading one the line's open attributes (an underline, say)
+// would carry into the cell, and without the trailing one the conceal would carry past it.
+func sealedBlank(st uv.Style) string {
+	st.Attrs |= uv.AttrConceal
+	return ansi.ResetStyle + st.String() + " " + ansi.ResetStyle
+}
+
+// carriesBackgroundSGR reports whether ln holds an SGR sequence that may set a background: a 48
+// (extended colour), 40–47 or 100–107 parameter. It is the cheap gate in front of
+// [sealRowEdges]'s parse, so it errs towards yes — a colour index or channel value that happens to
+// read 41 passes it, and the parse then decides — and never answers no for a painted line.
+func carriesBackgroundSGR(ln string) bool {
+	for {
+		start := strings.Index(ln, csiIntroducer)
+		if start < 0 {
+			return false
+		}
+		ln = ln[start+len(csiIntroducer):]
+		end := strings.IndexFunc(ln, func(r rune) bool { return !isSGRParamByte(r) })
+		if end < 0 {
+			return false
+		}
+		if ln[end] == sgrFinal && sgrSetsBackground(ln[:end]) {
+			return true
+		}
+		ln = ln[end:]
+	}
+}
+
+// csiIntroducer opens a control sequence, and sgrFinal closes one that is an SGR.
+const (
+	csiIntroducer = "\x1b["
+	sgrFinal      = 'm'
+)
+
+// isSGRParamByte reports whether r may sit in an SGR's parameter string: a digit, or the ';' and ':'
+// separators.
+func isSGRParamByte(r rune) bool {
+	return r >= '0' && r <= '9' || r == ';' || r == ':'
+}
+
+// sgrSetsBackground reports whether an SGR's parameter string holds a parameter that may set the
+// background: 48, 40–47 or 100–107.
+func sgrSetsBackground(params string) bool {
+	for param := range strings.FieldsFuncSeq(params, func(r rune) bool { return r == ';' || r == ':' }) {
+		if param == "48" ||
+			len(param) == 2 && param[0] == '4' && param[1] <= '7' ||
+			len(param) == 3 && param[:2] == "10" && param[2] <= '7' {
+			return true
+		}
+	}
+	return false
 }

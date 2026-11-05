@@ -34,7 +34,11 @@
 - Mid-row blank runs (`ECH`).
 - Patching or forking ultraviolet, or overriding its terminal capabilities.
 
-## 1. Seal painted row edges so the renderer writes them instead of erasing
+## 1. Seal painted row edges so the renderer writes them instead of erasing — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): of the four frames TestPaintedRowEdgesAreSealed judges, the sent prompt block (its row ends in the unpainted scrollbar column) and the open popup (rows end in border glyphs) contribute no painted-edge row of their field; per the item's text they are dropped from the coverage claim and count for the whole-frame assertions only. The unsealed-parse comparison runs on the rows the test can rebuild unsealed: the footer rows always and the status line while idle (a running status line states an elapsed time a second call could read differently).
+
+NOTES (2026-11-05): Acceptance's whole-package `go test -race -count=1 ./internal/tui/` was not run (machine rule: no -race over a whole heavy package); the suite was run as `APOGEE_TEST_SLOW=1 GOMEMLIMIT=2GiB make test` instead.
 
 **What:** fix for `bottom-chrome-erased-cells` (present since fields were first painted to the full width; `prompt-box-uneven-background` closed without it). The cell buffer is already right; the bytes the renderer emits for it are not.
 **Regression guard.** Emit a sealed cell as `ansi.ResetStyle + st.String() + " " + ansi.ResetStyle` (uv `Style.String()` emits no reset, so an unbracketed seal leaks conceal or an open underline into the row). Parse only lines whose bytes carry a background SGR (`48;`, `4x`/`10x`), and take the one-row buffer from a `sync.Pool` — never a Model field or package var (doc.go: "the theme's styles are shared and immutable"; View runs on parallel copies). Parse route: `uv.NewStyledString(ln).Draw` into a w×1 `uv.ScreenBuffer` with `Method = m.th.measure.Method()`, then read `CellAt(0,0)` and `CellAt(w-1,0)` — never `StyledString.Lines`, which yields no cells at this pin (styled.go:207, zero Rectangle).
