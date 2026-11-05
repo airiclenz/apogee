@@ -593,7 +593,7 @@ func TestSettingsPaneFitsEveryWindowItIsDrawnIn(t *testing.T) {
 
 					plainFrame := strip(m.View().Content)
 					frame := strings.Split(plainFrame, "\n")
-					if len(frame) > max(height, frameFloorRows) {
+					if len(frame) > max(height, m.frameFloorRows()) {
 						t.Errorf("composed frame is %d rows on a %d-row terminal (+%d):\n%s",
 							len(frame), height, len(frame)-height, plainFrame)
 					}

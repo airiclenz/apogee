@@ -54,12 +54,12 @@ func noneMotion(x, y int) tea.MouseMotionMsg {
 // TestClickPositionsCaret feeds a click through Update and checks the caret landed on the
 // clicked character. The content rectangle for an 80x24, single-row prompt starts at x=2
 // (border + padding) and the text row sits at
-// y = height - bottomRuleHeight - footerHeight - inputBorderRows = 20 — the box's own bottom
+// y = height - bottomRuleHeight - footerRows() - inputBorderRows = 20 — the box's own bottom
 // border, the footer's single line and the ▁ hairline are what stand below it.
 func TestClickPositionsCaret(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
-	const textRowY = 24 - bottomRuleHeight - footerHeight - inputBorderRows // single content row, bottom-anchored above the footer
+	textRowY := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows // single content row, bottom-anchored above the footer
 
 	m = step(t, m, leftClick(2+6, textRowY)) // x0(2) + column 6 → the 'w'
 	if got := m.input.Line(); got != 0 {
@@ -79,8 +79,8 @@ func TestClickPositionsCaretMultiline(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "ab\ncd")
 	// Two content rows, bottom-anchored: the LAST one ("cd") sits at
-	// y = height - bottomRuleHeight - footerHeight - inputBorderRows, whatever the box's height.
-	const row1Y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	// y = height - bottomRuleHeight - footerRows() - inputBorderRows, whatever the box's height.
+	row1Y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+1, row1Y)) // x0(2) + column 1 → the 'd'
 	if m.input.Line() != 1 || m.input.Column() != 1 {
@@ -179,7 +179,7 @@ func TestClickBelowPhantomWrappedLineSeatsCaret(t *testing.T) {
 func TestDragSelectsAndCopies(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y)) // anchor at column 0
 	m = step(t, m, leftDrag(2+5, y))  // drag head to column 5 → "hello"
@@ -263,7 +263,7 @@ func TestDragCopyAlsoWritesTheSystemClipboard(t *testing.T) {
 	wrote := recordSystemClipboard(t, nil)
 
 	m := modelWithInput(t, "hello world")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y))
 	m = step(t, m, leftDrag(2+5, y))
@@ -293,7 +293,7 @@ func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 	wrote := recordSystemClipboard(t, errors.New("no clipboard program on this host"))
 
 	m := modelWithInput(t, "hello world")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y))
 	m = step(t, m, leftDrag(2+5, y))
@@ -327,7 +327,7 @@ func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 func TestTmuxClipboardReceivesTheDragCopy(t *testing.T) {
 	wrote := recordTmuxClipboard(t, nil)
 	m := modelWithInput(t, "héllo wörld")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y))
 	m = step(t, m, leftDrag(2+5, y))
@@ -356,7 +356,7 @@ func TestTmuxClipboardReceivesTheDragCopy(t *testing.T) {
 func TestTmuxClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 	wrote := recordTmuxClipboard(t, errors.New("tmux: no server running"))
 	m := modelWithInput(t, "hello world")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y))
 	m = step(t, m, leftDrag(2+5, y))
@@ -385,7 +385,7 @@ func TestTmuxClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 func TestBareClickReleaseDoesNotCopy(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+3, y))
 	m, cmd := stepCmd(t, m, leftRelease(2+3, y))
@@ -424,7 +424,7 @@ func TestClickOnBottomChromeSelectsNothing(t *testing.T) {
 	}{
 		{"box top border", y0 - 1},
 		{"box bottom border", y0 + h},
-		{"footer line", m.height - bottomRuleHeight - footerHeight},
+		{"footer line", m.height - bottomRuleHeight - m.footerRows()},
 		{"bottom hairline", m.height - bottomRuleHeight},
 	}
 	for i := 2; i < len(rows); i++ {
@@ -479,7 +479,7 @@ func TestClickPositionsCaretWhileRunning(t *testing.T) {
 	startStubWorker(t, &m)
 	m.input.MoveToEnd()
 
-	m = step(t, m, leftClick(2+0, 24-bottomRuleHeight-footerHeight-inputBorderRows)) // column 0 of the single content row
+	m = step(t, m, leftClick(2+0, 24-bottomRuleHeight-m.footerRows()-inputBorderRows)) // column 0 of the single content row
 	if got := m.input.Column(); got != 0 {
 		t.Fatalf("click did not position the caret while running (col %d, want 0)", got)
 	}
@@ -661,7 +661,7 @@ var selectionBg = func() string {
 func TestViewRendersSelectionHighlight(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 	m = step(t, m, leftClick(2+0, y))
 	m = step(t, m, leftDrag(2+5, y))
 
@@ -683,7 +683,7 @@ func TestViewRendersSelectionHighlight(t *testing.T) {
 func TestClickPositionsCaretCJK(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "日本語 text")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+4, y)) // display cell 4 = the start of 語
 	if m.input.Line() != 0 || m.input.Column() != 2 {
@@ -701,7 +701,7 @@ func TestClickPositionsCaretCJK(t *testing.T) {
 func TestDragCopyCJKMatchesHighlight(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "日本語 text")
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y)) // anchor at cell 0
 	m = step(t, m, leftDrag(2+6, y))  // head at cell 6 → the three wide glyphs
@@ -2392,7 +2392,7 @@ func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
 	}
 
 	// A click into the prompt arms the prompt selection and clears the transcript one.
-	const yInput = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	yInput := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 	m = step(t, m, leftClick(2, yInput))
 	if m.transcriptSel.active {
 		t.Fatal("a prompt click did not clear the transcript selection")
@@ -2433,7 +2433,7 @@ func TestPromptDragSelectsWhileRunning(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	startStubWorker(t, &m)
-	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+	y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y)) // anchor at column 0
 	m = step(t, m, leftDrag(2+5, y))  // head at column 5 → "hello"
@@ -2509,7 +2509,7 @@ func TestPromptClickRefusedAtApprovalAndErrored(t *testing.T) {
 	for _, state := range []uiState{stateAwaitingApproval, stateErrored} {
 		m := modelWithInput(t, "hello world")
 		m.state = state
-		const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+		y := 24 - bottomRuleHeight - m.footerRows() - inputBorderRows
 		caret := m.input.Column() // SetValue leaves it after the text
 
 		m = step(t, m, leftClick(2+0, y))

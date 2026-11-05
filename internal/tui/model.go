@@ -2771,8 +2771,9 @@ func (m Model) busy() bool { return m.state.busy() }
 // whatever comes next — the bottom chrome, or a pane in the transcript-side overlay slot, which
 // then seats flush on that chrome (layout.md, View); the ▔ top-edge hairline is one row; the
 // status line is one row;
-// the footer is ONE frameless content line — it has no divider above it and no bordered rule below
-// it, because the prompt box closes its own frame; and the ▁ bottom-edge hairline is one row,
+// the footer is frameless content lines, [Model.footerRows]() of them — it has no divider above it
+// and no bordered rule below it, because the prompt box closes its own frame; and the ▁ bottom-edge
+// hairline is one row,
 // closing the screen under the footer. The two hairlines are one role in two positions, which is
 // why they are the same height under two names rather than one shared constant: what stands ABOVE
 // the input box and what stands BELOW it are different questions, and the mouse mapping asks the
@@ -2782,13 +2783,7 @@ const (
 	topRuleHeight    = 1 // the ▔ top-edge hairline that caps the bottom chrome, above the status line
 	statusHeight     = 1
 	gapHeight        = 1
-	footerHeight     = 1 // one frameless content line, the status line's posture one row below the box
 	bottomRuleHeight = 1 // the ▁ bottom-edge hairline that closes the screen under the footer
-
-	// frameFixedRows is what every frame spends below the transcript whatever is open: the blank gap
-	// row, both hairlines, the status line and the footer. The input box sits on top of that (its
-	// content rows plus its own two border rows) and the viewport gets what is left (layout).
-	frameFixedRows = gapHeight + topRuleHeight + statusHeight + footerHeight + bottomRuleHeight
 
 	scrollbarWidth = 1 // the transcript's right-hand scroll-bar gutter (reserved while the bar is shown)
 
@@ -2797,22 +2792,42 @@ const (
 	inputBorderRows = 2  // the box's own top AND bottom borders — the frame it closes itself
 	borderFrame     = 2  // the input border's left + right columns
 	inputPadding    = 2  // the input border's left + right padding columns
-
-	// frameFloorRows is the shortest frame Apogee can compose: the blank gap row, the ▔ hairline,
-	// the status line, the input box at its one-row floor plus its top and bottom borders, the
-	// footer's single line, and the ▁ hairline under it — eight rows. Every one of them is something
-	// layout.md forbids giving way — the box and the footer are the frame's floor, and the box keeps
-	// one content row so what the human is typing is on the screen — so there is nothing left to shed
-	// below this and the number is a FLOOR, not a budget. The transcript is already gone at it
-	// (transcriptBudget reaches zero), which is what makes the arithmetic tight: at exactly this many
-	// rows the frame is the chrome and nothing else.
-	//
-	// Below it the frame composes its floor and the terminal has fewer rows than that — the one
-	// window size at which the frame does not fit, stated in layout.md rather than papered over with
-	// a clip, because a clip would make the frame-height property trivially true at every size and
-	// hide the next real overflow (docs/plans, FOLLOW-UP-K).
-	frameFloorRows = frameFixedRows + inputBorderRows + minInputRows
 )
+
+// footerRows is the footer's row count: the frameless content lines it stands on between the input
+// box and the ▁ hairline, the status line's posture below the box. It is the ONE place the frame
+// learns how tall the footer is — the transcript budget, the draft ceiling, the pending-image line,
+// the frame's floor, the input box's top and the footer's hit row all read it (frameFixedRows(),
+// inputContentRect, footerRowY()) — so a footer laid out in more rows moves every one of them
+// together. The footer is one row.
+func (m Model) footerRows() int {
+	return 1
+}
+
+// frameFixedRows() is what every frame spends below the transcript whatever is open: the blank gap
+// row, both hairlines, the status line and the footer's rows (footerRows()). The input box sits on
+// top of that (its content rows plus its own two border rows) and the viewport gets what is left
+// (layout).
+func (m Model) frameFixedRows() int {
+	return gapHeight + topRuleHeight + statusHeight + m.footerRows() + bottomRuleHeight
+}
+
+// frameFloorRows() is the shortest frame Apogee can compose: the blank gap row, the ▔ hairline, the
+// status line, the input box at its one-row floor plus its top and bottom borders, the footer's rows
+// (footerRows()), and the ▁ hairline under them — eight rows under a one-row footer. Every one of
+// them is something layout.md forbids giving way — the box and the footer are the frame's floor, and
+// the box keeps one content row so what the human is typing is on the screen — so there is nothing
+// left to shed below this and the number is a FLOOR, not a budget. The transcript is already gone at
+// it (transcriptBudget reaches zero), which is what makes the arithmetic tight: at exactly this many
+// rows the frame is the chrome and nothing else.
+//
+// Below it the frame composes its floor and the terminal has fewer rows than that — the one window
+// size at which the frame does not fit, stated in layout.md rather than papered over with a clip,
+// because a clip would make the frame-height property trivially true at every size and hide the next
+// real overflow (docs/plans, FOLLOW-UP-K).
+func (m Model) frameFloorRows() int {
+	return m.frameFixedRows() + inputBorderRows + minInputRows
+}
 
 // layout sizes the viewport and input box to the current window. The input box auto-grows with its
 // content, clamped by its own taste and by what the frame can pay for (draftRowsCeiling), and the
@@ -2937,7 +2952,7 @@ func (m Model) inputBoxRows() int {
 // pendingImageRows is the rows the pending-image line takes: one while any image is attached and
 // the frame can pay for it, none otherwise.
 //
-// The line is not part of the frame's floor (frameFloorRows) — the box, its one content row and
+// The line is not part of the frame's floor (frameFloorRows()) — the box, its one content row and
 // the footer are — so it gives way where the floor leaves no row for it, exactly as the draft's
 // extra rows do (draftRowsCeiling): at the eight-row floor and below it, a pending image would
 // otherwise put the frame one row past the terminal's last line. While the approval or ask prompt
@@ -2948,7 +2963,7 @@ func (m Model) pendingImageRows() int {
 	if len(m.images) == 0 {
 		return 0
 	}
-	spare := m.height - frameFixedRows - inputBorderRows - minInputRows
+	spare := m.height - m.frameFixedRows() - inputBorderRows - minInputRows
 	if m.openPanes().has(panePrompt) {
 		spare -= popupChrome
 	}
@@ -2984,7 +2999,7 @@ func (m Model) pendingImageRow() string {
 // the alternate screen. The widget keeps its floor and its overlay shrink; the frame spends the
 // budget, and so cannot compose a row the window never paid for.
 func (m Model) transcriptBudget() int {
-	return max(0, m.height-frameFixedRows-m.inputBoxRows())
+	return max(0, m.height-m.frameFixedRows()-m.inputBoxRows())
 }
 
 // transcriptWidth is the column budget the transcript body wraps to: the viewport's own width
@@ -3041,11 +3056,11 @@ func (m *Model) inputRows() int {
 // shrinking. They still fit, because the frame bound above is not about panes at all.
 func (m Model) draftRowsCeiling() int {
 	box := inputBorderRows + m.pendingImageRows() // what the box spends besides the draft's own rows
-	ceiling := m.height - frameFixedRows - box
+	ceiling := m.height - m.frameFixedRows() - box
 	if m.openPanes().has(panePrompt) {
 		// The prompt needs popupChrome of the transcript's budget to be seated at all (frameRowPlan),
 		// so the rows the draft may keep are what is left after it.
-		ceiling = min(ceiling, m.height-frameFixedRows-popupChrome-box)
+		ceiling = min(ceiling, m.height-m.frameFixedRows()-popupChrome-box)
 	}
 	return max(minInputRows, ceiling)
 }
@@ -3470,7 +3485,7 @@ func (m Model) View() tea.View {
 	// hairline rather than painting an empty row against the bottom chrome — the asymmetry the
 	// dropdown and the staged band never had, since they already hug the input box. With no pane
 	// open the frame is unchanged: the blank row still lands directly above the ▔. Either way the
-	// frame spends exactly one gap row, so the row arithmetic (frameFixedRows, transcriptBudget)
+	// frame spends exactly one gap row, so the row arithmetic (frameFixedRows(), transcriptBudget)
 	// does not know or care which side of the slot it falls on.
 	rows = append(rows, "")
 	// Then the transcript-side overlay slot — the approval or ask prompt, the /sessions browser, the

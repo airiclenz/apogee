@@ -806,7 +806,8 @@ func withPendingImage(t *testing.T, m Model) Model {
 // line gives way, and from the first row the floor can spare it is drawn again.
 func TestAttachLineKeepsTheFrameInsideTheTerminal(t *testing.T) {
 	t.Parallel()
-	for _, height := range []int{frameFloorRows, frameFloorRows + 1, 10, smallestOverlayWindow, 24} {
+	floor := modelWithOverlayRoomAt(t, 80, 24, testOpts).frameFloorRows()
+	for _, height := range []int{floor, floor + 1, 10, smallestOverlayWindow, 24} {
 		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
 			t.Parallel()
 			m := withPendingImage(t, modelWithOverlayRoomAt(t, 80, height, testOpts))
@@ -820,7 +821,7 @@ func TestAttachLineKeepsTheFrameInsideTheTerminal(t *testing.T) {
 				t.Errorf("input box is %d rows, want at least %d", got, minInputRows)
 			}
 			drawn := strings.Contains(plainFrame, "attached: shot.png")
-			if want := height > frameFloorRows; drawn != want {
+			if want := height > m.frameFloorRows(); drawn != want {
 				t.Errorf("attach line drawn = %v at %d rows, want %v:\n%s", drawn, height, want, plainFrame)
 			}
 			if len(m.images) != 1 {

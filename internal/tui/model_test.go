@@ -5164,8 +5164,8 @@ func TestFooterViewIsOneFramelessLine(t *testing.T) {
 	m := newTestModel(t)
 	view := m.footerView()
 
-	if got := lipgloss.Height(view); got != footerHeight {
-		t.Fatalf("footer is %d rows, want %d — the one frameless content line", got, footerHeight)
+	if got, want := lipgloss.Height(view), m.footerRows(); got != want {
+		t.Fatalf("footer is %d rows, want %d — the one frameless content line", got, want)
 	}
 
 	flat := ansiPattern.ReplaceAllString(view, "")
@@ -5234,7 +5234,7 @@ func TestTopRuleHairlineRow(t *testing.T) {
 	}
 
 	want := m.height - topRuleHeight - statusHeight - gapHeight -
-		(m.inputRows() + inputBorderRows) - footerHeight - bottomRuleHeight
+		(m.inputRows() + inputBorderRows) - m.footerRows() - bottomRuleHeight
 	if got := m.viewport.Height(); got != want {
 		t.Errorf("viewport height = %d, want %d (window less both rules, status, gap, input box, footer)", got, want)
 	}
@@ -7754,6 +7754,7 @@ func TestPromptScrollClampAtMaxHeight(t *testing.T) {
 // says how much it is not showing, whether the bound came from the window or from maxInputRows.
 func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
 	t.Parallel()
+	floor := modelWithOverlayRoomAt(t, 80, 24, testOpts).frameFloorRows()
 	cases := []struct {
 		name       string
 		width      int
@@ -7770,7 +7771,7 @@ func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
 		// composed a 14-row frame on a 12-row terminal before the cap existed.
 		{"box at the frame's cap", 80, 12, 8, 3, "… (+3 more lines)"},
 		// The frame's floor, where the box is one row and the draft is eleven rows of nowhere.
-		{"box at its one-row floor", 80, frameFloorRows, 12, 11, "… (+11 more lines)"},
+		{"box at its one-row floor", 80, floor, 12, 11, "… (+11 more lines)"},
 		// A short window is usually a narrow one: the phrase sheds its noun rather than the row
 		// shedding the count off its end.
 		{"too narrow for the phrase", 20, 12, 8, 3, "… +3"},
@@ -7850,7 +7851,7 @@ func assertInputBoxWindowFollowsTheCaret(t *testing.T, height int) {
 
 func TestInputBoxWindowFollowsTheCaretAt8Rows(t *testing.T) {
 	t.Parallel()
-	assertInputBoxWindowFollowsTheCaret(t, frameFloorRows)
+	assertInputBoxWindowFollowsTheCaret(t, modelWithOverlayRoomAt(t, 80, 24, testOpts).frameFloorRows())
 }
 
 func TestInputBoxWindowFollowsTheCaretAt10Rows(t *testing.T) {

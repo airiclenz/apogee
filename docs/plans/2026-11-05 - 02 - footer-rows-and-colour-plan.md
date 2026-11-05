@@ -133,7 +133,10 @@ cmd/apogee/settingsedit.go — settingKeyLine; internal/config/configwrite_scala
 
 **Commit:** `feat(config): ui.footer.rows names the footer's rows and their order`
 
-## 4. The frame's row budget follows the footer's row count
+## 4. The frame's row budget follows the footer's row count — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the doc comments of the two new methods open with `frameFixedRows()` / `frameFloorRows()` (call form) rather than the bare name, so the item's constant-free grep (comments included) holds.
+NOTES (2026-11-05): table-driven tests whose height list named the floor before any model exists (TestFrameFitsEveryHeightDownToItsFloor, TestAttachLineKeepsTheFrameInsideTheTerminal, TestInputBoxCountsTheDraftRowsItCannotShow, TestInputBoxWindowFollowsTheCaretAt8Rows) read it from a reference model built with the same options (`modelWithOverlayRoomAt(t, 80, 24, opts).frameFloorRows()`); per-case assertions read the case's own model.
 
 **What:** a refactor; the footer is still one row.
 

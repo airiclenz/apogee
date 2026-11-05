@@ -2357,7 +2357,7 @@ func TestFrameNeverExceedsTheTerminalHeightNoPane(t *testing.T) {
 // layout() floors the viewport WIDGET at one row and the frame composed that row whether or not the
 // window had paid for it.
 //
-// Two properties, on either side of frameFloorRows:
+// Two properties, on either side of frameFloorRows():
 //
 //   - At and above the floor the frame FITS, at every draft length and with the band and every pane
 //     open beside it. The transcript is what has already gone to nothing here (transcriptBudget), so
@@ -2389,11 +2389,12 @@ func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
 		}},
 	}
 
+	floor := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a"}).frameFloorRows()
 	for _, o := range openers {
 		for _, staged := range []int{0, 5} {
 			for _, draft := range []int{1, 3, 6, 12} {
 				for _, width := range []int{80, narrowOverlayWindow} {
-					for _, height := range []int{1, 4, 6, 7, frameFloorRows, 9, 10, 11, smallestOverlayWindow} {
+					for _, height := range []int{1, 4, 6, 7, floor, 9, 10, 11, smallestOverlayWindow} {
 						runParallelCase(t, fmt.Sprintf("%s+%d staged+%d draft/%d×%d", o.name, staged, draft, width, height), func(t *testing.T) {
 							m := withStagedRows(modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), staged)
 							m = withDraft(t, o.open(m), draft)
@@ -2402,13 +2403,13 @@ func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
 							plainFrame := ansiPattern.ReplaceAllString(content, "")
 							rows := len(strings.Split(content, "\n"))
 
-							if height >= frameFloorRows && rows > height {
+							if height >= m.frameFloorRows() && rows > height {
 								t.Fatalf("composed frame is %d rows on a %d-row terminal (+%d):\n%s",
 									rows, height, rows-height, plainFrame)
 							}
-							if height < frameFloorRows && rows != frameFloorRows {
+							if height < m.frameFloorRows() && rows != m.frameFloorRows() {
 								t.Fatalf("composed frame is %d rows on a %d-row terminal, want the %d-row floor:\n%s",
-									rows, height, frameFloorRows, plainFrame)
+									rows, height, m.frameFloorRows(), plainFrame)
 							}
 							// The floor is a floor because of what is standing on it: the box the human types
 							// into, with a row of their draft on it, and the footer under it (layout.md).
