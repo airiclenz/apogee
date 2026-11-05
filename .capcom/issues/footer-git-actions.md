@@ -1,10 +1,12 @@
 ---
 title: Click the footer's git segment for a git actions panel (push, pull, sync, switch branch...)
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-05 - 03 - footer-git-actions-plan.md
 created: 2026-11-05T08:48:26Z
+closed: 2026-11-05T14:59:12Z
+reason: "Resolved by plan 2026-11-05 - 03 - footer-git-actions-plan (archived a17b1ed5): git segment click and /git open the git actions picker (fetch, pull, push, sync, switch, rebase) with driven tests and docs."
 ---
 
 Clicking the footer's git segment (`<branch> NΔ N↓ N↑`, layout.md "The git state") does nothing today: the mode marker is the footer's only clickable control (`handleFooterModeClick`, `internal/tui/mouse.go`). Clicking the branch should open a pop-up panel of git actions on the workspace.
