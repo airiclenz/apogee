@@ -3908,16 +3908,17 @@ func (m Model) footerContent(w int) string {
 // it, as the old narrow branch did, offline lost its error tone exactly where the row is most
 // cramped.
 //
-// Where the layout kept the git segment, the fact line is cut at the span the layout names and the
-// segment is painted span by span between the two halves ([Model.footerGit]); every cell keeps the
-// column the fit measured, since the painted spans re-join to exactly the layout's text.
+// Where the layout kept the git segment, the fact line is cut at the git entry of the layout's span
+// table and the segment is painted span by span between the two halves ([Model.footerGit]); every
+// cell keeps the column the fit measured, since the painted spans re-join to exactly the layout's
+// text.
 func (m Model) footerLeft(lead string, layout footerLayout) string {
 	var left string
-	if layout.git == "" {
+	if git, ok := layout.span(footerSegGit); !ok {
 		left = m.th.footerText.Render(lead + layout.info)
 	} else {
-		left = m.th.footerText.Render(lead+layout.info[:layout.gitAt]) + m.footerGit(layout.git)
-		if rest := layout.info[layout.gitAt+len(layout.git):]; rest != "" {
+		left = m.th.footerText.Render(lead+layout.info[:git.at]) + m.footerGit(git.text)
+		if rest := layout.info[git.at+len(git.text):]; rest != "" {
 			left += m.th.footerText.Render(rest)
 		}
 	}
@@ -3982,7 +3983,7 @@ func (m Model) footerRow(w int) footerLayout {
 	return footerFit(in)
 }
 
-// footerLeftText composes the footer's left half as PLAIN, UNJOINED segments: the outward-in facts
+// footerLeftText composes the footer's left half as PLAIN, UNJOINED, NAMED segments in row order: the outward-in facts
 // (host, model, effort, workdir), the workspace's git segment while a snapshot is held
 // ([Model.gitSnapshot], [gitFooterSpans]), the session's spend, and the bare word for the state a send is
 // refused in, each one empty where nothing has named it. They stay apart because the fit spends them one at a time — a
@@ -4005,18 +4006,22 @@ func (m Model) footerRow(w int) footerLayout {
 // It is present only once some call was priced (spendText): a session on servers with no `price:`
 // shows no segment at all rather than a zero no server charged.
 func (m Model) footerLeftText() footerInput {
-	in := footerInput{
-		host:    stripEscapes(hostDisplay(m.opts)),
-		model:   footerRun(m.th.glyphs, m.upstreamSegments()...),
-		workdir: m.workdir,
-		git:     m.footerGitText(),
-		spend:   spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency()),
-		glyphs:  m.th.glyphs,
-	}
+	var effort string
 	override, profile := m.eng.ThinkingEffort()
 	support := m.effortSupport()
-	if effort, show := footerEffortLabel(override, profile, stripEscapes(support.Default), support.Supported); show {
-		in.effort = effort
+	if label, show := footerEffortLabel(override, profile, stripEscapes(support.Default), support.Supported); show {
+		effort = label
+	}
+	in := footerInput{
+		segments: []footerSegment{
+			{footerSegHost, stripEscapes(hostDisplay(m.opts))},
+			{footerSegModel, footerRun(m.th.glyphs, m.upstreamSegments()...)},
+			{footerSegEffort, effort},
+			{footerSegWorkdir, m.workdir},
+			{footerSegGit, m.footerGitText()},
+			{footerSegSpend, spendText(domain.Sum(m.usage, m.delegateUsageTotal()), m.currency())},
+		},
+		glyphs: m.th.glyphs,
 	}
 	if m.hb.offline {
 		in.offline = offlineLabel

@@ -839,7 +839,7 @@ func assertSpend(t *testing.T, m Model, want, why string) {
 	t.Helper()
 	const costCell = 5 // agent, calls, prompt, completion, total, cost, ctx
 
-	if got := m.footerLeftText().spend; got != want {
+	if got := m.footerLeftText().segment(footerSegSpend); got != want {
 		t.Errorf("footer spend = %q, want %q — %s", got, want, why)
 	}
 	m.usagePane = usagePane{open: true}

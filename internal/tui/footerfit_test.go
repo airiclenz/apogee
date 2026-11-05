@@ -34,18 +34,34 @@ const (
 func footerFitCase() footerInput {
 	measure := newWidthAuthority()
 	return footerInput{
-		host:    footerTestHost,
-		model:   footerTestModel,
-		effort:  footerTestEffort,
-		workdir: footerTestWorkdir,
-		git:     footerTestGit,
-		spend:   footerTestSpend,
+		segments: []footerSegment{
+			{footerSegHost, footerTestHost},
+			{footerSegModel, footerTestModel},
+			{footerSegEffort, footerTestEffort},
+			{footerSegWorkdir, footerTestWorkdir},
+			{footerSegGit, footerTestGit},
+			{footerSegSpend, footerTestSpend},
+		},
 		offline: offlineLabel,
 		mode:    footerTestMode,
 		margin:  measure.Width(bodyIndent),
 		measure: measure,
 		glyphs:  defaultGlyphs,
 	}
+}
+
+// withSegment is in with the named segment's text replaced — on a copy of the segment list, so the
+// input it was taken from keeps its own.
+func withSegment(in footerInput, id footerSegmentID, text string) footerInput {
+	segments := make([]footerSegment, len(in.segments))
+	copy(segments, in.segments)
+	for i := range segments {
+		if segments[i].id == id {
+			segments[i].text = text
+		}
+	}
+	in.segments = segments
+	return in
 }
 
 // footerSeatWidth is the narrowest window a given left run seats the marker in, stated from the
@@ -95,13 +111,14 @@ func TestFooterFitDropsSegmentsInPriorityOrder(t *testing.T) {
 			if got.offline != footerOfflineJoined {
 				t.Errorf("footerFit(width %d).offline = %q, want %q", w, got.offline, footerOfflineJoined)
 			}
+			git, hasGit := got.span(footerSegGit)
 			if rung.keepsGit {
-				if got.git != footerTestGit || got.info[got.gitAt:got.gitAt+len(got.git)] != footerTestGit {
+				if !hasGit || git.text != footerTestGit || got.info[git.at:git.at+len(git.text)] != footerTestGit {
 					t.Errorf("footerFit(width %d) = (git %q at %d in %q), want %q named where it sits",
-						w, got.git, got.gitAt, got.info, footerTestGit)
+						w, git.text, git.at, got.info, footerTestGit)
 				}
-			} else if got.git != "" {
-				t.Errorf("footerFit(width %d).git = %q, want none once the segment has gone", w, got.git)
+			} else if hasGit {
+				t.Errorf("footerFit(width %d).git = %q, want none once the segment has gone", w, git.text)
 			}
 			if !got.hasMode || got.mode != footerTestMode {
 				t.Errorf("footerFit(width %d) = (mode %q, hasMode %t), want the marker whole", w, got.mode, got.hasMode)
@@ -199,8 +216,8 @@ func TestFooterFitDropsTheMarkerOnlyBelowItsOwnFloor(t *testing.T) {
 	if !strings.HasPrefix(footerRunFull, strings.TrimSuffix(got.info, "…")) {
 		t.Errorf("footerFit(width %d).info = %q, want the full left run truncated", at.width, got.info)
 	}
-	if got.git != "" {
-		t.Errorf("footerFit(width %d).git = %q, want the truncated floor run painted plain", at.width, got.git)
+	if len(got.spans) != 0 {
+		t.Errorf("footerFit(width %d).spans = %+v, want the truncated floor run painted plain", at.width, got.spans)
 	}
 	if spent := in.measure.Width(got.info) + in.measure.Width(got.offline); spent > at.width-in.margin {
 		t.Errorf("footerFit(width %d) spends %d columns beside its margin, want at most %d",
@@ -259,9 +276,9 @@ func TestFooterFitSkipsASegmentNothingNamed(t *testing.T) {
 	t.Parallel()
 
 	in := footerFitCase()
-	in.spend = ""
-	in.git = ""
-	in.effort = ""
+	in = withSegment(in, footerSegSpend, "")
+	in = withSegment(in, footerSegGit, "")
+	in = withSegment(in, footerSegEffort, "")
 
 	const runNoEffort = "apollo ✦ gpt-oss-20b ✦ ~/apogee"
 	at := in
@@ -300,8 +317,7 @@ func TestFooterFitLeavesNoDanglingSeparator(t *testing.T) {
 	t.Parallel()
 
 	withGit := footerFitCase()
-	noGit := footerFitCase()
-	noGit.git = ""
+	noGit := withSegment(footerFitCase(), footerSegGit, "")
 	for _, in := range []footerInput{withGit, noGit} {
 		for w := 0; w <= footerSeatWidth(t, in, footerRunFull, footerOfflineJoined)+10; w++ {
 			at := in
@@ -311,7 +327,7 @@ func TestFooterFitLeavesNoDanglingSeparator(t *testing.T) {
 			row := got.info + got.offline
 			if strings.HasPrefix(row, " ") || strings.HasSuffix(row, " ") ||
 				strings.HasPrefix(row, defaultGlyphs.assistant) || strings.HasSuffix(row, defaultGlyphs.assistant) {
-				t.Errorf("footerFit(width %d, git %q) left run = %q, want no dangling separator", w, in.git, row)
+				t.Errorf("footerFit(width %d, git %q) left run = %q, want no dangling separator", w, in.segment(footerSegGit), row)
 			}
 		}
 	}
@@ -385,5 +401,39 @@ func TestGitFooterSpansKeepTheirMarksUnderSafeGlyphs(t *testing.T) {
 	snap := gitstatus.Snapshot{Branch: "main", Upstream: "origin/main", HasAheadBehind: true, Dirty: 5, Ahead: 4}
 	if got := footerSpansText(gitFooterSpans(snap, safeGlyphs)); got != footerTestGit {
 		t.Errorf("gitFooterSpans under safe glyphs = %q, want %q", got, footerTestGit)
+	}
+}
+
+// TestFooterSpanTableAgreesWithThePaintedRow sweeps a painted footer through every rung — the git
+// segment kept and dropped, each priority drop, the model cut and gone, the floor — and reads each
+// entry of the layout's span table off the row the painter drew: the cells the entry names hold
+// exactly its text, and its byte offset names the same text in the layout's info run. The painter
+// and the span table are one layout, so a segment's cells can be addressed without searching the
+// row for it.
+func TestFooterSpanTableAgreesWithThePaintedRow(t *testing.T) {
+	t.Parallel()
+
+	m := withGitSnapshot(footerFactsModel(t), footerGitTestSnapshot)
+	m.hb.offline = true
+
+	sawGit, sawCut := false, false
+	for w := 160; w >= 0; w-- {
+		layout := m.footerRow(w)
+		flat := ansiPattern.ReplaceAllString(m.footerContent(w), "")
+		for _, span := range layout.spans {
+			if got := m.th.measure.Cut(flat, span.col, span.col+span.cells); got != span.text {
+				t.Errorf("width %d: %s span cells [%d, %d) of %q = %q, want %q",
+					w, span.id, span.col, span.col+span.cells, flat, got, span.text)
+			}
+			if !strings.HasPrefix(layout.info[span.at:], span.text) {
+				t.Errorf("width %d: %s span at byte %d of info %q, want it to begin %q",
+					w, span.id, span.at, layout.info, span.text)
+			}
+			sawGit = sawGit || span.id == footerSegGit
+			sawCut = sawCut || strings.HasSuffix(span.text, "…")
+		}
+	}
+	if !sawGit || !sawCut {
+		t.Errorf("the sweep named the git span %t and a cut model %t, want both rungs crossed", sawGit, sawCut)
 	}
 }

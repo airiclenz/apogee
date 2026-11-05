@@ -406,7 +406,7 @@ func TestWatchLeavesTheFooterUnchanged(t *testing.T) {
 	m := newTestModelEng(t, watchEngine(), opts)
 	m.hb.effort = domain.EffortSupport{Supported: true}
 	footer := func(m Model) string {
-		return m.footerLeftText().effort + "|" + confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace())
+		return m.footerLeftText().segment(footerSegEffort) + "|" + confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace())
 	}
 	before := footer(m)
 

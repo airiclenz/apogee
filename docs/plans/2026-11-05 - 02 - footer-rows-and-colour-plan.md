@@ -47,7 +47,9 @@
 - 8 (re-check): guard folded (role-count grep widened to ADR 0040; 30th key by a dated ADR 0040 amendment); supersedes the count at adr-0040-amend-0815.md:10 and adr-0040-consequences.md:6
 - 9 (re-check): recast (extends item 3's parseable `Read` and `Set` arm; arm in `settingsApplyLocal`; ADR 0040 decision 8 amendment); guard folded (overrides resolved at newModel, applyColorScheme and the colors arm, off `themeStyles`)
 
-## 1. Footer segments by name
+## 1. Footer segments by name — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): footerModeSpan keeps reading the layout's mode/col/hasMode: the mode marker stays the fit's own atom (footerSegMode names where it sits, for item 3's rows) rather than an entry in the span table, which holds the six left-run segments; the priority-0 rung truncates the joined priority-0 run (today the model alone) and names the cut segment by its cut text.
 
 **What:** a refactor with no visible change, so later items can order and colour segments.
 

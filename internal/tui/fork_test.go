@@ -204,7 +204,7 @@ func TestForkStartsAtZeroSpend(t *testing.T) {
 	if got := m.delegateUsageTotal(); got != (domain.Usage{}) {
 		t.Errorf("child delegate total = %+v; want zero", got)
 	}
-	if got := m.footerLeftText().spend; got != "" {
+	if got := m.footerLeftText().segment(footerSegSpend); got != "" {
 		t.Errorf("child footer spend = %q; want none", got)
 	}
 
