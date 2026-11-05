@@ -1,10 +1,12 @@
 ---
 title: Colour the footer's segments (meaning-driven, per-segment, or user-set)
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-05 - 02 - footer-rows-and-colour-plan.md
 created: 2026-11-05T08:49:40Z
+closed: 2026-11-05T13:11:04Z
+reason: "Resolved by plan 2026-11-05 - 02 - footer-rows-and-colour-plan (archived at 3d8e0070): git counts in warning/success, footer-accent role for the model, ui.footer.colors overrides refused at load when bad, layout.md and configuration.md updated, per-scheme and Ascii-profile tests."
 ---
 
 The footer is almost all one muted tone. Only the mode marker carries its mode's colour, `✦ offline` and `unconfined` take the `error` tone, and non-zero git counts lift to `MutedBright` (layout.md, "The git state" and the mode marker). Give the segments colour so the row is easier to scan.

@@ -1,10 +1,12 @@
 ---
 title: "Footer overflows with long paths or branch names: configurable row layout"
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-05 - 02 - footer-rows-and-colour-plan.md
 created: 2026-11-05T08:48:26Z
+closed: 2026-11-05T13:11:04Z
+reason: "Resolved by plan 2026-11-05 - 02 - footer-rows-and-colour-plan (archived at 3d8e0070): ui.footer.rows with a two-row default, middle-elision before drop, layout.md and configuration.md updated, tests at narrow, normal and wide widths."
 ---
 
 The footer is one row: `host ✦ model ✦ effort ✦ workdir ✦ git ✦ spend` plus the mode marker. With a long workdir path or a long branch name the run does not fit, and the priority ladder (`internal/tui/footerfit.go`) gives segments up whole: spend, then git, then effort, then workdir, then host. On a normal-width window a deep path or a long branch can push out the git state or the effort word that would otherwise fit.
