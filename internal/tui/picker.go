@@ -96,6 +96,8 @@ const (
 	pickerWorkflowBoundary                     // stop or keep the running workflows — /clear, a switch, /fork
 	pickerAdoption                             // adopt, defer or reject one proposed project rule — adoption.go
 	pickerGitActions                           // fetch, pull, push, sync, switch, rebase — /git and the footer's git segment
+	pickerGitBranch                            // the local branches a switch may check out — the git actions' switch branch
+	pickerGitRebase                            // rebase or cancel, latched — the git actions' rebase onto upstream
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -140,9 +142,14 @@ type picker struct {
 	// shape, so the same whole-struct zeroing ends the round and esc leaves every remaining entry
 	// proposed.
 	adoption []domain.Proposal
+	// branches are the branch picker's rows (pickerGitBranch, gitactions.go): the local branch
+	// names the listing landed, read once per open like profiles because the listing is a git
+	// process run off the loop. A plain slice of plain strings, safe in the copied Model (ADR 0011).
+	branches []string
 	// latched marks a pane whose ⏎ and second click ANSWER a question the human has to have read —
 	// set only by an opener that goes through [Model.openDecisionLatch] (raiseAdoption, adoption.go;
-	// raiseKeyMigration and openSubAgentsMigration, keymigration.go). Every other kind leaves it false and stays armed from the moment it opens.
+	// raiseKeyMigration and openSubAgentsMigration, keymigration.go; raiseGitRebaseConfirm,
+	// gitactions.go). Every other kind leaves it false and stays armed from the moment it opens.
 	latched bool
 	// latch is a latched pane's arming state, the approval pane's [decisionLatch] on the overlay: it
 	// rides here so the whole-struct zeroing every close and accept already does forgets it, and no
@@ -163,8 +170,9 @@ func (p picker) isArmed() bool {
 const maxPickerRows = 8
 
 // pickerHint is the one-line key legend shown at the foot of the overlay, for the three kinds that
-// MOVE this session (/model, /server) — "switch" is the honest verb only where accepting a row
-// re-points the session at something else.
+// MOVE this session (/model, /server) and for the branch picker, which moves the workspace — "switch"
+// is the honest verb only where accepting a row re-points the session or its workspace at something
+// else.
 //
 // Every variant on a kind that filters LEADS with "type to filter", because that is the one key
 // nobody can guess: there is no activation key to name (pickerKey — any printable key types) and
@@ -180,7 +188,7 @@ const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 // pickerChooseHint and pickerStopHint are the legends for the kinds whose ⏎ answers a question
 // rather than moving the session: "choose" where a row is an answer (/schedule's two popups, /effort,
 // /sub-agents-server, the mode marker, the git actions), "stop" where it ends something (/schedule-stop). The key
-// migration offers and the adoption pane carry their own (keyMigrationHint) and /fork its "⏎ fork" (forkPickerHint) — four
+// migration offers, the adoption pane and the rebase confirm carry their own (keyMigrationHint) and /fork its "⏎ fork" (forkPickerHint) — four
 // verbs, because a legend that promised a switch would be wrong on every kind that is not one.
 const (
 	pickerChooseHint = "type to filter · ↑/↓ select · ⏎ choose · esc close"
@@ -419,6 +427,22 @@ func init() {
 			filters: true,
 			noun:    "action",
 			accept:  Model.acceptGitAction,
+		},
+		pickerGitBranch: {
+			title:   Model.gitBranchPickerTitle,
+			hint:    pickerHint,
+			rows:    Model.gitBranchRows,
+			matched: matchLeadCell,
+			filters: true,
+			noun:    "branch",
+			accept:  Model.acceptGitBranch,
+		},
+		pickerGitRebase: {
+			title:   Model.gitRebasePickerTitle,
+			hint:    keyMigrationHint,
+			rows:    Model.gitRebaseRows,
+			matched: matchLabelAndGloss,
+			accept:  Model.acceptGitRebase,
 		},
 	}
 }

@@ -87,6 +87,10 @@ type gitState struct {
 	// actionWaits reports that action has not been issued yet: it waits for the in-flight
 	// background fetch, whose landing issues it ([Model.foldGitFetch]).
 	actionWaits bool
+	// branch is the local branch a switch checks out, chosen in the branch picker; empty while
+	// the switch's first step — the branch listing — runs ([Model.startGitBranches]). It is
+	// cleared with action.
+	branch string
 }
 
 // gitStatusMsg carries one landed status read into the Update loop, stamped with the generation

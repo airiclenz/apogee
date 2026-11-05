@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,11 +15,14 @@ import (
 )
 
 // fakeGitActionsHost stands in for cmd/apogee's git actions host: each action answers with its own
-// verb's result (or err), and every call is recorded by verb.
+// verb's result (or err), and every call is recorded by verb. Branches answers branches (["main"]
+// when unset), or branchesErr.
 type fakeGitActionsHost struct {
-	mu    sync.Mutex
-	err   error
-	calls []string
+	mu          sync.Mutex
+	err         error
+	calls       []string
+	branches    []string
+	branchesErr error
 }
 
 func (f *fakeGitActionsHost) record(verb string) (string, error) {
@@ -37,7 +41,16 @@ func (f *fakeGitActionsHost) Push(context.Context, string) (string, error)  { re
 func (f *fakeGitActionsHost) Sync(context.Context, string) (string, error)  { return f.record("sync") }
 
 func (f *fakeGitActionsHost) Branches(context.Context, string) ([]string, error) {
-	return []string{"main"}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "branches")
+	if f.branchesErr != nil {
+		return nil, f.branchesErr
+	}
+	if f.branches == nil {
+		return []string{"main"}, nil
+	}
+	return append([]string(nil), f.branches...), nil
 }
 
 func (f *fakeGitActionsHost) Switch(_ context.Context, _, name string) (string, error) {
@@ -376,5 +389,268 @@ func TestGitActionQuitMidActionExitsAfterCompletion(t *testing.T) {
 	}
 	if got := lastNote(m); !strings.HasPrefix(got, "git sync") {
 		t.Errorf("last note = %q, want the sync's result noted before the exit", got)
+	}
+}
+
+// listBranches takes the git actions picker's switch branch row and lands the branch listing it
+// issues, returning the Model the listing's landing left.
+func listBranches(t *testing.T, m Model) Model {
+	t.Helper()
+	m, cmd := acceptGitRow(t, m, gitActionSwitch)
+	listed := awaitGitMsg[gitActionDoneMsg](t, cmd, "the branch listing")
+	if !listed.listing {
+		t.Fatalf("switch branch issued %+v, want the branch listing first", listed)
+	}
+	return step(t, m, listed)
+}
+
+// TestGitActionBranchPickerOpensOnTheListing: taking switch branch runs Branches off the loop under
+// the git action hold, opens nothing and notes nothing at the accept, and the branch picker opens on
+// the listing's landing, the checked-out branch left out.
+func TestGitActionBranchPickerOpensOnTheListing(t *testing.T) {
+	t.Parallel()
+	actions := &fakeGitActionsHost{branches: []string{"main", "feature/login", "fix-parser"}}
+	m, _ := gitActionsModel(t, tracked(), actions, false)
+
+	m, cmd := acceptGitRow(t, m, gitActionSwitch)
+	notes := len(noteTexts(m))
+	if m.picker.open {
+		t.Fatalf("the accept opened picker %+v at once, want it to wait for the listing", m.picker)
+	}
+	if !m.engineHolds().holding(holdGitAction) {
+		t.Fatal("the branch listing runs without the git action hold")
+	}
+	if got := actions.called(); len(got) != 0 {
+		t.Fatalf("host calls at the accept = %v, want none — Branches runs in the Cmd, off the loop", got)
+	}
+	listed := awaitGitMsg[gitActionDoneMsg](t, cmd, "the branch listing")
+	if got := actions.called(); !reflect.DeepEqual(got, []string{"branches"}) {
+		t.Errorf("host calls = %v, want [branches]", got)
+	}
+
+	m = step(t, m, listed)
+
+	if !m.picker.open || m.picker.kind != pickerGitBranch {
+		t.Fatalf("the listing's landing gave picker %+v, want the branch picker", m.picker)
+	}
+	if got, want := m.picker.branches, []string{"feature/login", "fix-parser"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("branch rows = %v, want %v — every local branch but the checked-out one", got, want)
+	}
+	if got := m.gitBranchPickerTitle(); got != "switch branch — from main" {
+		t.Errorf("title = %q, want it to name the branch switched from", got)
+	}
+	if m.engineHolds().holding(holdGitAction) {
+		t.Error("the hold outlived the listing's landing")
+	}
+	if got := len(noteTexts(m)); got != notes {
+		t.Errorf("the listing added %d notes, want none on success", got-notes)
+	}
+}
+
+// TestGitActionBranchListFilters: typed letters prune the branch picker's rows, and ⏎ switches to
+// the branch the filtered row names.
+func TestGitActionBranchListFilters(t *testing.T) {
+	t.Parallel()
+	actions := &fakeGitActionsHost{branches: []string{"main", "feature/login", "fix-parser", "release"}}
+	m, _ := gitActionsModel(t, tracked(), actions, false)
+	m = listBranches(t, m)
+
+	m = typeText(t, m, "fix")
+	if got := m.pickerCount(); got != 1 {
+		t.Fatalf("pickerCount() after \"fix\" = %d, want the one branch that matches", got)
+	}
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	if m.picker.open {
+		t.Errorf("the accept left the picker open: %+v", m.picker)
+	}
+	if got := lastNote(m); got != "git switch…" {
+		t.Errorf("start note = %q, want the switch's", got)
+	}
+	done := awaitGitMsg[gitActionDoneMsg](t, cmd, "git switch")
+	if got := actions.called(); !reflect.DeepEqual(got, []string{"branches", "switch fix-parser"}) {
+		t.Errorf("host calls = %v, want the listing then a switch to fix-parser", got)
+	}
+	m = step(t, m, done)
+	if got := lastNote(m); got != "git switch fix-parser: done" {
+		t.Errorf("result note = %q, want the switch's result", got)
+	}
+}
+
+// TestGitActionSwitchNotesItsResult: a switch notes the host's result and asks for a status read;
+// a dirty tree's refusal is noted with git's own reason; a listing with no other branch, or one
+// that fails, says so and opens nothing.
+func TestGitActionSwitchNotesItsResult(t *testing.T) {
+	t.Parallel()
+
+	t.Run("switch and dirty refusal", func(t *testing.T) {
+		t.Parallel()
+		for _, dirty := range []bool{false, true} {
+			actions := &fakeGitActionsHost{branches: []string{"main", "topic"}}
+			if dirty {
+				actions.err = errors.New("git switch: the working tree has uncommitted changes; commit or stash them first")
+			}
+			m, _ := gitActionsModel(t, tracked(), actions, false)
+			m = listBranches(t, m)
+			gen := m.git.gen
+
+			m, cmd := stepCmd(t, m, keyEnter())
+			m = step(t, m, awaitGitMsg[gitActionDoneMsg](t, cmd, "git switch"))
+
+			want := "git switch topic: done"
+			if dirty {
+				want = "git switch failed — the working tree has uncommitted changes; commit or stash them first"
+			}
+			if got := lastNote(m); got != want {
+				t.Errorf("dirty %v: result note = %q, want %q", dirty, got, want)
+			}
+			if m.engineHolds().holding(holdGitAction) || m.git.branch != "" {
+				t.Errorf("dirty %v: the switch's state outlived its landing (git %+v)", dirty, m.git)
+			}
+			if m.git.gen == gen || !m.git.inFlight {
+				t.Errorf("dirty %v: git = %+v, want a fresh status read issued after the switch", dirty, m.git)
+			}
+		}
+	})
+
+	t.Run("no other branch", func(t *testing.T) {
+		t.Parallel()
+		m, _ := gitActionsModel(t, tracked(), &fakeGitActionsHost{branches: []string{"main"}}, false)
+		m = listBranches(t, m)
+		if m.picker.open || lastNote(m) != gitNoOtherBranchNote {
+			t.Errorf("a lone branch gave picker %+v and note %q, want the no-other-branch note", m.picker, lastNote(m))
+		}
+	})
+
+	t.Run("listing fails", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeGitActionsHost{branchesErr: errors.New("git switch: not a git repository")}
+		m, _ := gitActionsModel(t, tracked(), actions, false)
+		m = listBranches(t, m)
+		if m.picker.open || lastNote(m) != "git switch failed — not a git repository" {
+			t.Errorf("a failed listing gave picker %+v and note %q, want the failure noted", m.picker, lastNote(m))
+		}
+		if m.engineHolds().holding(holdGitAction) {
+			t.Error("the hold outlived the failed listing")
+		}
+	})
+
+	t.Run("listing waits for an in-flight fetch", func(t *testing.T) {
+		t.Parallel()
+		m, _ := gitActionsModel(t, tracked(), &fakeGitActionsHost{branches: []string{"main", "topic"}}, true)
+		if !m.git.fetchInFlight {
+			t.Fatal("no background fetch in flight; this case needs one")
+		}
+		m, cmd := acceptGitRow(t, m, gitActionSwitch)
+		if cmd != nil || !m.git.actionWaits {
+			t.Fatalf("the listing was issued beside the in-flight fetch (cmd %v, git %+v)", cmd != nil, m.git)
+		}
+		m, cmd = stepCmd(t, m, gitFetchMsg{gen: m.git.fetchGen})
+		m = step(t, m, awaitGitMsg[gitActionDoneMsg](t, cmd, "the waiting branch listing"))
+		if !m.picker.open || m.picker.kind != pickerGitBranch {
+			t.Errorf("the waiting listing's landing gave picker %+v, want the branch picker", m.picker)
+		}
+	})
+}
+
+// rebaseConfirm builds a Model over actions and takes the git actions picker's rebase row, failing
+// the test where that does not put up the latched rebase confirm.
+func rebaseConfirm(t *testing.T, actions *fakeGitActionsHost) Model {
+	t.Helper()
+	m, _ := gitActionsModel(t, tracked(), actions, false)
+	m, _ = acceptGitRow(t, m, gitActionRebase)
+	if !m.picker.open || m.picker.kind != pickerGitRebase || !m.picker.latched {
+		t.Fatalf("rebase gave picker %+v, want the latched rebase confirm", m.picker)
+	}
+	return m
+}
+
+// TestGitActionRebaseConfirm: rebase onto upstream first asks a latched confirm that opens on
+// cancel. A ⏎ before it arms answers nothing; armed, cancel runs nothing, and the rebase row runs
+// Rebase under the hold and notes its result.
+func TestGitActionRebaseConfirm(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unarmed", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeGitActionsHost{}
+		m := rebaseConfirm(t, actions)
+		if got := m.gitRebasePickerTitle(); got != "rebase main onto its upstream?" {
+			t.Errorf("title = %q, want it to name the branch", got)
+		}
+		if m.picker.selected != gitRebaseCancel {
+			t.Errorf("the confirm opened on row %d, want cancel (%d)", m.picker.selected, gitRebaseCancel)
+		}
+		m.picker.selected = gitRebaseGo
+		m = step(t, m, keyEnter())
+		if !m.picker.open || m.picker.kind != pickerGitRebase {
+			t.Fatalf("a ⏎ before the latch armed answered the confirm: picker %+v", m.picker)
+		}
+		if got := actions.called(); len(got) != 0 || m.engineHolds().holding(holdGitAction) {
+			t.Errorf("an unarmed ⏎ ran %v (hold %v), want nothing", got, m.engineHolds().holding(holdGitAction))
+		}
+	})
+
+	t.Run("cancel runs nothing", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeGitActionsHost{}
+		m := armOffer(t, rebaseConfirm(t, actions))
+		m, cmd := stepCmd(t, m, keyEnter()) // on cancel, the row it opens on
+		if m.picker.open || lastNote(m) != gitRebaseCancelledNote {
+			t.Errorf("cancel gave picker %+v and note %q, want the cancelled note", m.picker, lastNote(m))
+		}
+		out, expired := runCmdTree(cmd), time.After(shortWindow)
+	drain:
+		for {
+			select {
+			case msg := <-out:
+				if _, ran := msg.(gitActionDoneMsg); ran {
+					t.Error("cancel issued a git action")
+				}
+			case <-expired:
+				break drain
+			}
+		}
+		if got := actions.called(); len(got) != 0 || m.engineHolds().holding(holdGitAction) {
+			t.Errorf("cancel ran %v (hold %v), want nothing", got, m.engineHolds().holding(holdGitAction))
+		}
+	})
+
+	t.Run("rebase runs", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeGitActionsHost{}
+		m := armOffer(t, rebaseConfirm(t, actions))
+		m.picker.selected = gitRebaseGo
+		m, cmd := stepCmd(t, m, keyEnter())
+		if got := lastNote(m); got != "git rebase…" || !m.engineHolds().holding(holdGitAction) {
+			t.Fatalf("the rebase row gave note %q (hold %v), want it started under the hold",
+				got, m.engineHolds().holding(holdGitAction))
+		}
+		m = step(t, m, awaitGitMsg[gitActionDoneMsg](t, cmd, "git rebase"))
+		if got := actions.called(); !reflect.DeepEqual(got, []string{"rebase"}) {
+			t.Errorf("host calls = %v, want [rebase]", got)
+		}
+		if got := lastNote(m); got != "git rebase: done" {
+			t.Errorf("result note = %q, want the rebase's", got)
+		}
+	})
+}
+
+// TestGitActionRebaseConflictNamesTheFiles: a rebase the host aborted on a conflict is noted with
+// the conflicting files its error names.
+func TestGitActionRebaseConflictNamesTheFiles(t *testing.T) {
+	t.Parallel()
+	actions := &fakeGitActionsHost{err: errors.New("git rebase: conflict in internal/a.go, docs/b.md")}
+	m := armOffer(t, rebaseConfirm(t, actions))
+	m.picker.selected = gitRebaseGo
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = step(t, m, awaitGitMsg[gitActionDoneMsg](t, cmd, "git rebase"))
+
+	if got, want := lastNote(m), "git rebase failed — conflict in internal/a.go, docs/b.md"; got != want {
+		t.Errorf("conflict note = %q, want %q", got, want)
+	}
+	if m.engineHolds().holding(holdGitAction) {
+		t.Error("the hold outlived the aborted rebase")
 	}
 }

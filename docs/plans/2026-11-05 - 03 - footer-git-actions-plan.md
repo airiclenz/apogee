@@ -179,7 +179,14 @@ internal/tui/engineholds.go — engineHoldSources, holdsTakingAgent; internal/tu
 
 **Commit:** `feat(tui): click the footer's git segment or run /git for git actions`
 
-## 6. Switch branch and rebase in the picker
+## 6. Switch branch and rebase in the picker — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the branch to switch to rides on `gitState.branch` (internal/tui/gitstatus.go, not in **Files:**), next to `gitState.action`. It has to live on the Model because a switch that waits for an in-flight background fetch is issued later, by the fetch's landing (`issueWaitingGitAction` → `gitActionCmd`). An empty `branch` with `action == gitActionSwitch` marks the switch's first step, the `Branches` listing.
+NOTES (2026-11-05): the `Branches` landing reuses `gitActionDoneMsg` (new `listing` and `branches` fields) and folds in `foldGitActionDone` instead of having a Msg type of its own, so model.go's Update dispatch stays as it was. The branch picker opens from that fold (`offerGitBranches`) after the queued commands have run. If another pane is up by then, or the gate is shut, it notes why and opens nothing.
+NOTES (2026-11-05): the branch picker leaves out the checked-out branch (/model's "a row that switches nothing is not a choice" posture). With no other branch it notes "git switch: no other local branch to switch to". Its legend is `pickerHint` ("⏎ switch"), and the pickerHint comment now says the verb also covers the workspace.
+NOTES (2026-11-05): the confirm's carrier is a third kind, `pickerGitRebase`, latched as `raiseAdoption` is (`raiseGitRebaseConfirm`: `latched: true` + `openDecisionLatch`) and seated on its cancel row. The cancel row notes "git rebase cancelled — nothing ran"; esc closes silently. The new kinds are `pickerGitBranch` and `pickerGitRebase`; item 7's layout.md kind list must name both. TestQuestionPickersDoNotFilter gained the rebase confirm.
+NOTES (2026-11-05): consequential edit — internal/tui/approval.go: made necessary by raiseGitRebaseConfirm, a new latched-picker opener that openDecisionLatch's doc comment lists.
+NOTES (2026-11-05): consequential edit — internal/tui/engineholds.go: made necessary by switch (with its branch listing) and rebase now running under holdGitAction, whose comment named only fetch, pull, push and sync.
 
 **What:** Depends on items 4 and 5.
 

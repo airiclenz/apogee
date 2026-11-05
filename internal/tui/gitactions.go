@@ -91,6 +91,17 @@ const (
 	gitActionRunningFormat = "git %s is still running — git actions wait for it to finish"
 	// gitActionsTitle is the picker's title; a branch, where HEAD is on one, follows it.
 	gitActionsTitle = "git actions"
+	// gitBranchTitle is the branch picker's title; the branch HEAD is on, where it is on one,
+	// follows it.
+	gitBranchTitle = "switch branch"
+	// gitNoOtherBranchNote answers "switch branch" when the listing found no local branch but the
+	// one checked out.
+	gitNoOtherBranchNote = "git switch: no other local branch to switch to"
+	// gitBranchesGaveWayNote answers a listing that landed under another pane — one a command
+	// queued behind it opened — so the branch picker does not open over it.
+	gitBranchesGaveWayNote = "git switch: the branch list gave way to another pane — /git lists the branches again"
+	// gitRebaseCancelledNote answers the rebase confirm's cancel row: nothing ran.
+	gitRebaseCancelledNote = "git rebase cancelled — nothing ran"
 )
 
 // gitActionsWired reports whether the footer's git actions exist at all: a host is wired and there
@@ -188,9 +199,11 @@ func (m Model) gitActionsPickerTitle() string {
 
 // acceptGitAction takes the picker's highlighted row, named by its index into the OFFERING
 // (acceptPicker resolves the filter first), re-derived rather than trusted from the frame that drew
-// it. Fetch, pull, push and sync start at once ([Model.startGitAction]); an index naming no row
-// closes the overlay and moves nothing. The gate is asked again: the overlay may have stood open
-// across a fold that changed the answer.
+// it. Fetch, pull, push and sync start at once ([Model.startGitAction]); switch branch first lists
+// the local branches off the loop ([Model.startGitBranches]), and rebase first asks a latched
+// confirm ([Model.raiseGitRebaseConfirm]). An index naming no row closes the overlay and moves
+// nothing. The gate is asked again: the overlay may have stood open across a fold that changed the
+// answer.
 func (m Model) acceptGitAction(offered int) (tea.Model, tea.Cmd) {
 	rows := m.gitActionsOffered()
 	m.picker = picker{}
@@ -200,19 +213,150 @@ func (m Model) acceptGitAction(offered int) (tea.Model, tea.Cmd) {
 	if note, refused := m.gitActionsRefusal(); refused {
 		return m.pickerNote(note)
 	}
-	action := rows[offered].action
-	if action == gitActionSwitch || action == gitActionRebase {
-		return m.pickerNote("git " + action.word() + " is not available yet")
+	switch action := rows[offered].action; action {
+	case gitActionSwitch:
+		return m.startGitBranches()
+	case gitActionRebase:
+		return m, m.raiseGitRebaseConfirm()
+	default:
+		return m.startGitAction(action)
 	}
-	return m.startGitAction(action)
+}
+
+// startGitBranches is switch branch's first step: it lists the local branches off the loop under
+// the git action hold, waiting out an in-flight background fetch as every action does, and the
+// branch picker opens on the listing's landing ([Model.foldGitActionDone]) — never at the click,
+// because the listing is a git process and Update never waits on one. It notes nothing: the
+// listing changes nothing, and the switch the picker leads to notes its own start.
+func (m Model) startGitBranches() (tea.Model, tea.Cmd) {
+	m.git.branch = ""
+	return m.issueGitAction(gitActionSwitch)
+}
+
+// offerGitBranches opens the branch picker over the names the listing landed, the branch HEAD is on
+// left out — a row that switches nothing is not a choice (offeredModels' posture). With no other
+// branch, or with another pane up or the gate shut by the time the listing lands, it notes why
+// instead. The names are the repository's text, kept raw for the switch and stripped where painted
+// ([gitBranchRows]).
+func (m Model) offerGitBranches(names []string) Model {
+	current := ""
+	if m.git.hasSnap {
+		current = m.git.snap.Branch
+	}
+	offered := make([]string, 0, len(names))
+	for _, name := range names {
+		if name != current {
+			offered = append(offered, name)
+		}
+	}
+	if len(offered) == 0 {
+		m.transcript.addNote(gitNoOtherBranchNote)
+		return m
+	}
+	if m.picker.open || m.settings.open {
+		m.transcript.addNote(gitBranchesGaveWayNote)
+		return m
+	}
+	if note, refused := m.gitActionsRefusal(); refused {
+		m.transcript.addNote(note)
+		return m
+	}
+	m.picker = picker{open: true, kind: pickerGitBranch, branches: offered}
+	return m
+}
+
+// gitBranchRows paints the branch picker's rows: one cell per branch, its name stripped of escapes.
+func (m Model) gitBranchRows() []popupRow {
+	rows := make([]popupRow, 0, len(m.picker.branches))
+	for _, name := range m.picker.branches {
+		rows = append(rows, popupRow{stripEscapes(name)})
+	}
+	return rows
+}
+
+// gitBranchPickerTitle names the branch picker: "switch branch", and the branch it switches from
+// where HEAD is on one.
+func (m Model) gitBranchPickerTitle() string {
+	if branch := stripEscapes(m.git.snap.Branch); m.git.hasSnap && branch != "" {
+		return gitBranchTitle + " — from " + branch
+	}
+	return gitBranchTitle
+}
+
+// acceptGitBranch takes the branch picker's highlighted row, named by its index into the names the
+// picker carries (acceptPicker resolves the filter first), and switches to it. The gate is asked
+// again, for acceptGitAction's reason; an index naming no row closes the overlay and moves nothing.
+func (m Model) acceptGitBranch(offered int) (tea.Model, tea.Cmd) {
+	names := m.picker.branches
+	m.picker = picker{}
+	if offered < 0 || offered >= len(names) {
+		return m, nil
+	}
+	if note, refused := m.gitActionsRefusal(); refused {
+		return m.pickerNote(note)
+	}
+	m.git.branch = names[offered]
+	return m.startGitAction(gitActionSwitch)
+}
+
+// The rebase confirm's answers, in row order.
+const (
+	gitRebaseGo = iota
+	gitRebaseCancel
+)
+
+// raiseGitRebaseConfirm puts up the rebase confirm: a pane that asks before a rebase rewrites the
+// branch. It is latched as [Model.raiseAdoption]'s pane is — closed until its drain marker (or the
+// backstop) arms it, so a ⏎ already in flight from the git actions picker answers nothing — and it
+// opens on cancel, so a stray ⏎ once armed runs nothing either.
+func (m *Model) raiseGitRebaseConfirm() tea.Cmd {
+	m.picker = picker{open: true, kind: pickerGitRebase, latched: true}
+	m.picker.seat(gitRebaseCancel, len(m.gitRebaseRows()))
+	return m.openDecisionLatch()
+}
+
+// gitRebaseRows is the rebase confirm's offering, in answer order: rebase, then cancel.
+func (m Model) gitRebaseRows() []popupRow {
+	onto := "its upstream"
+	if upstream := stripEscapes(m.git.snap.Upstream); m.git.hasSnap && upstream != "" {
+		onto = upstream
+	}
+	return []popupRow{
+		{"rebase", "— onto " + onto + " as last fetched; a conflict is aborted and changes nothing"},
+		{"cancel", "— run nothing"},
+	}
+}
+
+// gitRebasePickerTitle asks the confirm's question, naming the branch where HEAD is on one.
+func (m Model) gitRebasePickerTitle() string {
+	if branch := stripEscapes(m.git.snap.Branch); m.git.hasSnap && branch != "" {
+		return "rebase " + branch + " onto its upstream?"
+	}
+	return "rebase onto the upstream?"
+}
+
+// acceptGitRebase answers the rebase confirm: rebase starts the rebase, the gate asked again for
+// acceptGitAction's reason; cancel notes that nothing ran.
+func (m Model) acceptGitRebase(choice int) (tea.Model, tea.Cmd) {
+	m.picker = picker{}
+	if choice != gitRebaseGo {
+		return m.pickerNote(gitRebaseCancelledNote)
+	}
+	if note, refused := m.gitActionsRefusal(); refused {
+		return m.pickerNote(note)
+	}
+	return m.startGitAction(gitActionRebase)
 }
 
 // gitActionDoneMsg carries one landed footer git action into the Update loop: the host's one-line
-// result, or its error.
+// result, or its error. listing marks switch branch's first step, whose landing carries the local
+// branch names rather than a result.
 type gitActionDoneMsg struct {
-	action gitAction
-	result string
-	err    error
+	action   gitAction
+	result   string
+	err      error
+	listing  bool
+	branches []string
 }
 
 // startGitAction takes the git action hold and notes `git <verb>…`, then issues the action off the
@@ -222,9 +366,16 @@ type gitActionDoneMsg struct {
 // (holdGitAction), no background fetch is issued ([Model.foldGitFetchTick]), and a quit defers its
 // exit ([Model.quitSession]).
 func (m Model) startGitAction(action gitAction) (tea.Model, tea.Cmd) {
+	m.transcript.addNote("git " + action.word() + "…")
+	return m.issueGitAction(action)
+}
+
+// issueGitAction takes the git action hold for action and issues it off the loop, or leaves it
+// waiting for the in-flight background fetch — the half of [Model.startGitAction] the branch
+// listing shares, which notes nothing.
+func (m Model) issueGitAction(action gitAction) (tea.Model, tea.Cmd) {
 	m.holds.hold(holdGitAction)
 	m.git.action = action
-	m.transcript.addNote("git " + action.word() + "…")
 	if m.git.fetchInFlight {
 		m.git.actionWaits = true
 		return m, nil
@@ -243,7 +394,7 @@ func (m *Model) issueWaitingGitAction() tea.Cmd {
 	m.git.actionWaits = false
 	if m.quitting {
 		m.holds.release(holdGitAction)
-		m.git.action = gitActionNone
+		m.git.action, m.git.branch = gitActionNone, ""
 		if m.writeBusy {
 			return nil
 		}
@@ -252,9 +403,9 @@ func (m *Model) issueWaitingGitAction() tea.Cmd {
 	return m.gitActionCmd()
 }
 
-// gitActionCall is the host call one action runs, and nil for an action the picker does not run
-// through this path.
-func gitActionCall(host GitActionsHost, action gitAction) func(context.Context, string) (string, error) {
+// gitActionCall is the host call one action runs — a switch to branch — and nil for an action the
+// picker does not run through this path.
+func gitActionCall(host GitActionsHost, action gitAction, branch string) func(context.Context, string) (string, error) {
 	switch action {
 	case gitActionFetch:
 		return host.Fetch
@@ -264,15 +415,26 @@ func gitActionCall(host GitActionsHost, action gitAction) func(context.Context, 
 		return host.Push
 	case gitActionSync:
 		return host.Sync
+	case gitActionSwitch:
+		return func(ctx context.Context, root string) (string, error) { return host.Switch(ctx, root, branch) }
+	case gitActionRebase:
+		return host.Rebase
 	}
 	return nil
 }
 
 // gitActionCmd runs the current action off the Update loop under the program context, so a shutdown
-// cancels a git child still running; the host bounds it only by its generous backstop.
+// cancels a git child still running; the host bounds it only by its generous backstop. A switch
+// with no branch chosen yet is its first step, the branch listing.
 func (m Model) gitActionCmd() tea.Cmd {
-	call := gitActionCall(m.opts.GitActions, m.git.action)
-	action, ctx, root := m.git.action, m.parent, m.opts.Workspace
+	host, action, ctx, root := m.opts.GitActions, m.git.action, m.parent, m.opts.Workspace
+	if action == gitActionSwitch && m.git.branch == "" {
+		return func() tea.Msg {
+			names, err := host.Branches(ctx, root)
+			return gitActionDoneMsg{action: action, err: err, listing: true, branches: names}
+		}
+	}
+	call := gitActionCall(host, action, m.git.branch)
 	return func() tea.Msg {
 		if call == nil {
 			return gitActionDoneMsg{action: action, err: fmt.Errorf("git %s: not an action this picker runs", action.word())}
@@ -286,23 +448,33 @@ func (m Model) gitActionCmd() tea.Cmd {
 // error, git's own message — and asks for a status read so the footer's counts show what the action
 // did. A quit that waited for the action exits from here once the write queue has drained too
 // ([Model.pumpOrQuit]); otherwise the engine is the loop's again, so a stashed rebind is applied
-// and the commands queued behind the action run. A Msg with no action held is inert.
+// and the commands queued behind the action run. The branch listing changed nothing, so it notes
+// only its failure and asks for no read; once the queued commands have run, its names open the
+// branch picker ([Model.offerGitBranches]). A Msg with no action held is inert.
 func (m Model) foldGitActionDone(msg gitActionDoneMsg) (tea.Model, tea.Cmd) {
 	if !m.holds.has(holdGitAction) {
 		return m, nil
 	}
 	m.holds.release(holdGitAction)
-	m.git.action, m.git.actionWaits = gitActionNone, false
-	m.transcript.addNote(gitActionNote(msg))
+	m.git.action, m.git.branch, m.git.actionWaits = gitActionNone, "", false
+	if !msg.listing || msg.err != nil {
+		m.transcript.addNote(gitActionNote(msg))
+	}
 	if m.quitting {
 		if m.writeBusy {
 			return m, nil
 		}
 		return m, m.pumpOrQuit()
 	}
-	refresh := m.refreshGit()
+	var refresh tea.Cmd
+	if !msg.listing {
+		refresh = m.refreshGit()
+	}
 	m.releaseEngine()
 	next, cmd := m.runDeferredCommands()
+	if msg.listing && msg.err == nil {
+		next = next.offerGitBranches(msg.branches)
+	}
 	return next, tea.Batch(refresh, cmd)
 }
 

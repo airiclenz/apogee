@@ -28,9 +28,9 @@ const (
 	// behind an inert one and nothing idle-only — a wake, a workflow resume, a waiting prompt or
 	// adoption pane, a queued command — may act on the parked session until the watch ends.
 	holdWatching
-	// holdGitAction: a footer git action — fetch, pull, push or sync, chosen from the git actions
-	// picker (gitactions.go) — is running off the loop, or waiting for a background fetch to land
-	// first. It drives no engine, but what it changes is the workspace the next Turn reads, so a
+	// holdGitAction: a footer git action — fetch, pull, push, sync, switch (its branch listing
+	// included) or rebase, chosen from the git actions picker (gitactions.go) — is running off the
+	// loop, or waiting for a background fetch to land first. It drives no engine, but what it changes is the workspace the next Turn reads, so a
 	// prompt, a wake, a workflow resume and an idle-only command wait for it to land.
 	holdGitAction
 )

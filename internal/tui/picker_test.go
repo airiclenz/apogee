@@ -2566,9 +2566,9 @@ func TestQuestionPickerPasteIsDropped(t *testing.T) {
 }
 
 // The panes that ASK rather than list — the workflow-boundary confirm, the key migration offer, the
-// sub-agents migration offer and the adoption pane — have no List filter (ADR 0053, 2026-10-14
-// amendment): a letter they do not bind prunes nothing, backspace edits nothing, and their legend
-// never offers "type to filter". The probe letter is `q` because it is in no row of any of the four
+// sub-agents migration offer, the adoption pane and the rebase confirm — have no List filter (ADR 0053,
+// 2026-10-14 amendment): a letter they do not bind prunes nothing, backspace edits nothing, and their
+// legend never offers "type to filter". The probe letter is `q` because it is in no row of any of the five
 // and is not the boundary's own `y`/`n`, so a filter that still listened would empty the pane.
 func TestQuestionPickersDoNotFilter(t *testing.T) {
 	t.Parallel()
@@ -2594,6 +2594,12 @@ func TestQuestionPickersDoNotFilter(t *testing.T) {
 		{"adoption", pickerAdoption, func(t *testing.T) Model {
 			t.Helper()
 			return armAdoption(t, newTestModelEng(t, &fakeEngine{}, adoptionOpts(&adoptionLog{}, goTestRule)))
+		}},
+		{"rebase confirm", pickerGitRebase, func(t *testing.T) Model {
+			t.Helper()
+			m, _ := gitActionsModel(t, tracked(), &fakeGitActionsHost{}, false)
+			m, _ = acceptGitRow(t, m, gitActionRebase)
+			return armOffer(t, m)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2629,7 +2635,7 @@ func TestQuestionPickersDoNotFilter(t *testing.T) {
 // kind added to the enum without a row would fail here rather than as a nil call on the first ⏎.
 func TestEveryPickerKindHasAnOffering(t *testing.T) {
 	t.Parallel()
-	for kind := pickerModel; kind <= pickerGitActions; kind++ {
+	for kind := pickerModel; kind <= pickerGitRebase; kind++ {
 		offering, ok := pickerOfferings[kind]
 		if !ok {
 			t.Errorf("pickerOfferings[%v]: no row", kind)
@@ -2642,7 +2648,7 @@ func TestEveryPickerKindHasAnOffering(t *testing.T) {
 				offering.accept != nil)
 		}
 	}
-	if got, want := len(pickerOfferings), int(pickerGitActions)+1; got != want {
+	if got, want := len(pickerOfferings), int(pickerGitRebase)+1; got != want {
 		t.Errorf("len(pickerOfferings) = %d, want %d — a row for every kind and nothing beyond the enum", got, want)
 	}
 }
