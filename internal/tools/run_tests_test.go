@@ -120,7 +120,7 @@ func TestRunTestsDetectsRunnerByMarkerPrecedence(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runner, ok := detectTestRunner(writeProject(t, tc.files))
+			runner, markerDir, _, ok := detectTestRunner(writeProject(t, tc.files), "")
 			if !ok {
 				if tc.want != "" {
 					t.Fatalf("no runner detected, want %q", tc.want)
@@ -132,6 +132,238 @@ func TestRunTestsDetectsRunnerByMarkerPrecedence(t *testing.T) {
 			}
 			if runner.name != tc.want {
 				t.Errorf("detected %q, want %q", runner.name, tc.want)
+			}
+			if markerDir != "" {
+				t.Errorf("marker directory = %q, want the root (\"\")", markerDir)
+			}
+		})
+	}
+}
+
+// TestRunTestsDetectionWalksUpFromStart pins the search itself: it starts at the given directory,
+// climbs to the workspace root and stops at the FIRST directory holding any marker — so the nearest
+// project wins even over a higher-precedence marker further up — and it never looks below where it
+// started. searched is every directory probed, nearest first, "" naming the root.
+func TestRunTestsDetectionWalksUpFromStart(t *testing.T) {
+	t.Parallel()
+
+	const goMod = "module example.test/x\n\ngo 1.21\n"
+	const npmPkg = `{"name":"x","scripts":{"test":"jest"}}`
+
+	cases := []struct {
+		name         string
+		files        map[string]string
+		start        string
+		wantRunner   string // "" when none should be detected
+		wantDir      string
+		wantSearched []string
+	}{
+		{
+			name:         "a marker at start is found there",
+			files:        map[string]string{"sub/proj/go.mod": goMod},
+			start:        "sub/proj",
+			wantRunner:   "go test",
+			wantDir:      "sub/proj",
+			wantSearched: []string{"sub/proj"},
+		},
+		{
+			name:         "a marker two levels up is reached from below",
+			files:        map[string]string{"a/b/pytest.ini": "[pytest]\n", "a/b/c/d/test_y.py": ""},
+			start:        "a/b/c/d",
+			wantRunner:   "pytest",
+			wantDir:      "a/b",
+			wantSearched: []string{"a/b/c/d", "a/b/c", "a/b"},
+		},
+		{
+			name:         "the nearest marker outranks a higher-precedence one above it",
+			files:        map[string]string{"go.mod": goMod, "web/package.json": npmPkg},
+			start:        "web",
+			wantRunner:   "npm test",
+			wantDir:      "web",
+			wantSearched: []string{"web"},
+		},
+		{
+			name:         "a root marker is reached from a marker-less subtree",
+			files:        map[string]string{"go.mod": goMod, "internal/x/a.go": "package x\n"},
+			start:        "internal/x",
+			wantRunner:   "go test",
+			wantDir:      "",
+			wantSearched: []string{"internal/x", "internal", ""},
+		},
+		{
+			name:         "a marker below start is never found",
+			files:        map[string]string{"sub/go.mod": goMod},
+			start:        "",
+			wantSearched: []string{""},
+		},
+		{
+			name:         "nothing at or above start detects nothing",
+			files:        map[string]string{"a/b/README.md": "no tests\n"},
+			start:        "a/b",
+			wantSearched: []string{"a/b", "a", ""},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runner, markerDir, searched, ok := detectTestRunner(writeProject(t, tc.files), tc.start)
+			if ok != (tc.wantRunner != "") {
+				t.Fatalf("detected = %v (%q), want a runner: %v", ok, runner.name, tc.wantRunner != "")
+			}
+			if ok && runner.name != tc.wantRunner {
+				t.Errorf("detected %q, want %q", runner.name, tc.wantRunner)
+			}
+			if markerDir != tc.wantDir {
+				t.Errorf("marker directory = %q, want %q", markerDir, tc.wantDir)
+			}
+			if !slices.Equal(searched, tc.wantSearched) {
+				t.Errorf("searched = %q, want %q", searched, tc.wantSearched)
+			}
+		})
+	}
+}
+
+// TestRunTestsRunsFromTheMarkerDirectory pins what the model's path does to the launch: the runner
+// starts in the directory holding the nearest marker at or above path, and is handed path relative
+// to that directory — so a nested module is built as itself, and a root-marked project with a
+// marker-less path launches exactly as it always has.
+func TestRunTestsRunsFromTheMarkerDirectory(t *testing.T) {
+	t.Parallel()
+
+	const goMod = "module example.test/x\n\ngo 1.21\n"
+
+	cases := []struct {
+		name     string
+		files    map[string]string
+		path     string
+		wantDir  string // workspace-relative slash path, "" for the root
+		wantArgv []string
+	}{
+		{
+			name:     "a nested go.mod at path runs the whole nested module",
+			files:    map[string]string{"go.mod": goMod, "sub/proj/go.mod": goMod},
+			path:     "sub/proj",
+			wantDir:  "sub/proj",
+			wantArgv: []string{"test", "./..."},
+		},
+		{
+			name:     "a path below the nested module is its package pattern",
+			files:    map[string]string{"sub/proj/go.mod": goMod, "sub/proj/pkg/a.go": "package pkg\n"},
+			path:     "sub/proj/pkg",
+			wantDir:  "sub/proj",
+			wantArgv: []string{"test", "./pkg/..."},
+		},
+		{
+			name:     "a file path is positional relative to the marker directory",
+			files:    map[string]string{"py/pytest.ini": "[pytest]\n", "py/tests/test_x.py": ""},
+			path:     "py/tests/test_x.py",
+			wantDir:  "py",
+			wantArgv: []string{"tests/test_x.py"},
+		},
+		{
+			name:     "a pytest.ini two levels below the root is reached from deeper",
+			files:    map[string]string{"a/b/pytest.ini": "[pytest]\n", "a/b/c/d/test_y.py": ""},
+			path:     "a/b/c/d",
+			wantDir:  "a/b",
+			wantArgv: []string{"c/d"},
+		},
+		{
+			name:     "an npm marker runs its script from its own directory",
+			files:    map[string]string{"web/package.json": `{"name":"x","scripts":{"test":"jest"}}`, "web/src/x.js": ""},
+			path:     "web/src",
+			wantDir:  "web",
+			wantArgv: []string{"test", "--", "src"},
+		},
+		{
+			name:     "a root-only marker keeps the root and today's argv",
+			files:    map[string]string{"go.mod": goMod, "internal/x/a.go": "package x\n"},
+			path:     "internal/x",
+			wantDir:  "",
+			wantArgv: []string{"test", "./internal/x/..."},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			program := filepath.Join(t.TempDir(), "runner")
+			h, captured := capturedRunHost(t)
+			h.look = fakeLook(true, program)
+
+			root := writeProject(t, tc.files)
+			res := runTestsCallOn(t, root, h, map[string]any{"path": tc.path})
+
+			if len(captured.Argv) == 0 {
+				t.Fatalf("no spec reached the host's run: %q", res.Content)
+			}
+			if want := filepath.Join(root, filepath.FromSlash(tc.wantDir)); captured.Dir != want {
+				t.Errorf("spec.Dir = %q, want %q", captured.Dir, want)
+			}
+			if got := captured.Argv[1:]; !slices.Equal(got, tc.wantArgv) {
+				t.Errorf("argv after the program = %q, want %q", got, tc.wantArgv)
+			}
+		})
+	}
+}
+
+// TestRunTestsRefusesABadPathBeforeDetection pins the order: detection starts FROM the path, so a
+// path that is not there is refused as itself — never reported as a project with no runner, which
+// would send the model looking for a marker instead of fixing its path.
+func TestRunTestsRefusesABadPathBeforeDetection(t *testing.T) {
+	t.Parallel()
+
+	res := runTestsCall(t, writeProject(t, map[string]string{"README.md": "no tests here\n"}), map[string]any{"path": "nope"})
+	if !res.IsError {
+		t.Fatalf("a missing path must be refused: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "path not found") {
+		t.Errorf("refusal should say %q: %q", "path not found", res.Content)
+	}
+	if strings.Contains(res.Content, "no test runner detected") {
+		t.Errorf("a bad path must be refused before detection runs: %q", res.Content)
+	}
+}
+
+// TestRunTestsFullLogHintNamesTheMarkerWorkdir pins the rerun the closing note suggests: a runner
+// that ran from a nested marker directory is only reproducible from there, so the note names that
+// terminal workdir; a root run keeps the note it has always had.
+func TestRunTestsFullLogHintNamesTheMarkerWorkdir(t *testing.T) {
+	t.Parallel()
+
+	const goMod = "module example.test/x\n\ngo 1.21\n"
+
+	cases := []struct {
+		name  string
+		files map[string]string
+		path  string
+		want  string
+	}{
+		{
+			name:  "a nested run names its workdir",
+			files: map[string]string{"sub/proj/go.mod": goMod},
+			path:  "sub/proj",
+			want:  "[condensed from 0 bytes of output; run `go test ./...` with terminal (workdir sub/proj) for the full log]",
+		},
+		{
+			name:  "a root run keeps today's note",
+			files: map[string]string{"go.mod": goMod},
+			path:  "",
+			want:  "[condensed from 0 bytes of output; run `go test ./...` with terminal for the full log]",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			program := filepath.Join(t.TempDir(), "go")
+			h, _ := capturedRunHost(t)
+			h.look = fakeLook(true, program)
+
+			res := runTestsCallOn(t, writeProject(t, tc.files), h, map[string]any{"path": tc.path})
+
+			if !strings.HasSuffix(res.Content, tc.want) {
+				t.Errorf("closing note = %q, want it to end %q", res.Content, tc.want)
 			}
 		})
 	}
@@ -536,7 +768,7 @@ func TestRunTestsTimeoutLineQuotesTheAppliedBudget(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{
+			got := condenseTestOutput(goTestRunner, "go test ./...", "", subprocess.SubprocessResult{
 				CombinedOutput: "ok  \texample.test/x\n", TimedOut: true,
 			}, tc.budget)
 			if !strings.Contains(firstLineOf(got), tc.want) {
@@ -575,7 +807,7 @@ func TestRunTestsCondensesRunnerReportedCounts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := condenseTestOutput(tc.runner, "cmd", subprocess.SubprocessResult{CombinedOutput: tc.output, ExitCode: 1}, runTestsTimeout)
+			got := condenseTestOutput(tc.runner, "cmd", "", subprocess.SubprocessResult{CombinedOutput: tc.output, ExitCode: 1}, runTestsTimeout)
 			if !strings.HasPrefix(got, "FAIL ("+tc.runner.name+")") {
 				t.Errorf("the verdict must lead: %q", firstLineOf(got))
 			}
@@ -596,7 +828,7 @@ func TestRunTestsCondensesAFailureWithNoRecognisableTest(t *testing.T) {
 	t.Parallel()
 
 	output := "# example.test/x [example.test/x.test]\n./x_test.go:6:2: undefined: helper\nFAIL\texample.test/x [build failed]\n"
-	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: output, ExitCode: 2}, runTestsTimeout)
+	got := condenseTestOutput(goTestRunner, "go test ./...", "", subprocess.SubprocessResult{CombinedOutput: output, ExitCode: 2}, runTestsTimeout)
 
 	if !strings.Contains(got, "undefined: helper") {
 		t.Errorf("a build failure's own message must survive the condensing:\n%s", got)
@@ -618,7 +850,7 @@ func TestRunTestsCapKeepsTheClosingNote(t *testing.T) {
 		fmt.Fprintf(&out, "--- FAIL: TestHuge%03d (0.00s)\n", i)
 		out.WriteString("    " + strings.Repeat("d", 400) + "\n")
 	}
-	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: out.String(), ExitCode: 1}, runTestsTimeout)
+	got := condenseTestOutput(goTestRunner, "go test ./...", "", subprocess.SubprocessResult{CombinedOutput: out.String(), ExitCode: 1}, runTestsTimeout)
 
 	assertUnderCap(t, got)
 	if !strings.HasSuffix(strings.TrimRight(got, "\n"), "full log]") {
@@ -637,7 +869,7 @@ func TestRunTestsCapHoldsAgainstAnOversizedFilter(t *testing.T) {
 
 	filter := strings.Repeat("T", 20000)
 	display := displayCommand(goTestRunner, goTestRunner.args("", filter))
-	got := condenseTestOutput(goTestRunner, display, subprocess.SubprocessResult{CombinedOutput: "ok\n", ExitCode: 0}, runTestsTimeout)
+	got := condenseTestOutput(goTestRunner, display, "", subprocess.SubprocessResult{CombinedOutput: "ok\n", ExitCode: 0}, runTestsTimeout)
 
 	assertUnderCap(t, got)
 	if !strings.HasSuffix(strings.TrimRight(got, "\n"), "full log]") {

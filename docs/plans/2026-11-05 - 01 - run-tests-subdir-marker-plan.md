@@ -34,7 +34,13 @@
 - New runners or markers; searching below `path`; monorepo "run every project" fan-out.
 - Answering Seqcom's request (the owner runs the feedback-reply script after the plan ships).
 
-## 1. Detect the runner at or above `path` and run it from the marker directory
+## 1. Detect the runner at or above `path` and run it from the marker directory — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): `detectTestRunner` already returns the list of directories it searched (nearest first, "" for the root), and `TestRunTestsDetectionWalksUpFromStart` tests it; `Execute` discards it with `_` until item 2 passes it to `noTestRunnerMessage`.
+
+NOTES (2026-11-05): the path is now resolved before detection, and the option-shaped-filter check moved after it, because that check still names the detected runner. A call with both a bad path and a bad filter now reports the path first.
+
+NOTES (2026-11-05): the footer's workdir goes through `clipLine`, like the command echo, so a long model-supplied path cannot push the reserved footer past the 8 KB cap.
 
 **What:** Recast at the regression check (2026-11-05). fix — `run_tests` detects its runner only at the workspace root, so a project in a subdirectory (a `checkouts/<id>` clone, a nested module) is refused, and a nested Go module cannot be tested from the outer root.
 

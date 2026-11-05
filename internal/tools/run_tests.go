@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -31,6 +32,13 @@ import (
 // `npm test`, in that precedence order. Detection is a fact about the workspace, so a model
 // that has never seen this repository can still run its tests — the discovery lesson this
 // plan's poll round produced (capabilities are found by tool NAME, not by parameters).
+//
+// Detection starts at `path` (its parent directory when `path` names a file) and walks up to the
+// workspace root, never below `path`: the first directory holding any marker wins, and inside
+// that one directory call 6's precedence decides (2026-11-05). The runner then runs FROM that
+// marker directory, handed `path` relative to it — so a project in a subdirectory (a clone under
+// checkouts/, a nested Go module) is tested as itself, with its own module or config, rather
+// than refused or driven from an outer root that cannot build it.
 //
 // It is a SubprocessTool with terminal's disposition (not read-only: a test suite runs the
 // project's own code, which writes): the dispatch disposition confines it in Auto and gates
@@ -120,8 +128,9 @@ type testRunner struct {
 	program string
 	// marker is the sentence naming what detection looked for, quoted back when nothing matched.
 	marker string
-	// detect reports whether this runner's marker is present at the workspace root.
-	detect func(root string) bool
+	// detect reports whether this runner's marker is present in dir — a workspace-relative slash
+	// path, "" for the root — read through the fence of the workspace at root.
+	detect func(root, dir string) bool
 	// args builds the argv AFTER the program for an optional workspace-relative subtree and an
 	// optional test-name filter, each in this runner's native spelling.
 	args func(subtree, filter string) []string
@@ -143,7 +152,7 @@ var goTestRunner = testRunner{
 	name:    "go test",
 	program: "go",
 	marker:  "go.mod (go test)",
-	detect:  func(root string) bool { return markerFileExists("go.mod", root) },
+	detect:  func(root, dir string) bool { return markerFileExists(markerPath(dir, "go.mod"), root) },
 	args: func(subtree, filter string) []string {
 		argv := []string{"test"}
 		if filter != "" {
@@ -257,7 +266,14 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return fail, nil
 	}
 
-	runner, ok := detectTestRunner(t.root)
+	// The path is resolved BEFORE detection, because detection starts from it: a bad path is
+	// refused as itself rather than as a project with no runner.
+	subtree, start, errMsg := t.subtree(args.Path)
+	if errMsg != "" {
+		return errorResult(call.ID, errMsg), nil
+	}
+
+	runner, markerDir, _, ok := detectTestRunner(t.root, start)
 	if !ok {
 		return errorResult(call.ID, noTestRunnerMessage()), nil
 	}
@@ -267,10 +283,6 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		// The runner is handed an argv (no shell), so a filter beginning with "-" is the one
 		// remaining argument-injection class — the same guard the git tools put on a ref.
 		return errorResult(call.ID, `filter must not begin with "-": it would be read as an option flag by `+runner.name), nil
-	}
-	subtree, errMsg := t.subtree(args.Path)
-	if errMsg != "" {
-		return errorResult(call.ID, errMsg), nil
 	}
 
 	program, err := security.ResolveProgram(t.host.look, runner.program, t.root, confinementBox(ctx))
@@ -288,7 +300,9 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, fmt.Sprintf("%s not available: the project's markers select %s, but no %q executable was found on PATH", runner.name, runner.name, runner.program)), nil
 	}
 
-	runnerArgs := runner.args(subtree, filter)
+	// The program is still judged against the workspace root above — the fence is the
+	// workspace's, wherever inside it the runner starts.
+	runnerArgs := runner.args(relativeToMarker(subtree, markerDir), filter)
 	// The environment is the caller's MINUS the credential variables (plain subprocessEnv, with
 	// PATH left unscoped — unlike terminal and python_exec, which take subprocessEnvScopedPath,
 	// because a workspace-resident runner such as node_modules/.bin/jest IS the test command
@@ -300,7 +314,7 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	budget := runTestsBudget(args.TimeoutSeconds)
 	res, err := t.host.run(ctx, subprocess.SubprocessSpec{
 		Argv:    append([]string{program}, runnerArgs...),
-		Dir:     t.root,
+		Dir:     filepath.Join(t.root, filepath.FromSlash(markerDir)),
 		Timeout: budget,
 		Env:     subprocessEnv(t.secretEnv.Names()),
 	})
@@ -308,38 +322,67 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return domain.ToolResult{}, err
 	}
 
-	condensed := condenseTestOutput(runner, displayCommand(runner, runnerArgs), res, budget)
+	condensed := condenseTestOutput(runner, displayCommand(runner, runnerArgs), markerDir, res, budget)
 	if res.ExitCode != 0 || res.TimedOut {
 		return errorResult(call.ID, condensed), nil
 	}
 	return okResult(call.ID, condensed), nil
 }
 
-// subtree resolves the optional path argument to the workspace-relative directory the runner is
-// handed, or "" when the call names none. The second return is the model-facing refusal (empty
-// when the path is fine): an option-shaped path, a path that escapes the fence, and a path that
-// is not there are each reported as themselves rather than as a runner error the model would
-// have to decode.
-func (t *RunTests) subtree(input string) (rel, errMsg string) {
+// subtree resolves the optional path argument to its workspace-relative slash form, or "" when the
+// call names none or names the root. start is the directory runner detection begins at: rel
+// itself for a directory, its parent for a file, "" for the root. errMsg is the model-facing
+// refusal (empty when the path is fine): an option-shaped path, a path that escapes the fence,
+// and a path that is not there are each reported as themselves rather than as a runner error the
+// model would have to decode.
+func (t *RunTests) subtree(input string) (rel, start, errMsg string) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return "", ""
+		return "", "", ""
 	}
 	if looksLikeOption(input) {
-		return "", `path must not begin with "-": it would be read as an option flag by the test runner`
+		return "", "", `path must not begin with "-": it would be read as an option flag by the test runner`
 	}
 	abs, err := security.ResolveInRoot(input, t.root)
 	if err != nil {
-		return "", err.Error()
+		return "", "", err.Error()
 	}
 	rel = filepath.ToSlash(workspaceRelative(abs, t.root))
-	if _, err := statInRoot(rel, t.root); err != nil {
-		return "", notFoundOrRefusal(err, "path not found: ", t.root, filepath.FromSlash(rel), input)
+	info, err := statInRoot(rel, t.root)
+	if err != nil {
+		return "", "", notFoundOrRefusal(err, "path not found: ", t.root, filepath.FromSlash(rel), input)
 	}
 	if rel == "." {
-		return "", ""
+		return "", "", ""
 	}
-	return rel, ""
+	if info.IsDir() {
+		return rel, rel, ""
+	}
+	return rel, parentDir(rel), ""
+}
+
+// parentDir returns the workspace-relative slash parent of rel, "" when that parent is the root.
+func parentDir(rel string) string {
+	parent := path.Dir(rel)
+	if parent == "." || parent == "/" {
+		return ""
+	}
+	return parent
+}
+
+// relativeToMarker rebases a workspace-relative subtree onto the marker directory the runner runs
+// from — the target as the runner, started there, spells it: "" when the two are the same
+// directory, the subtree untouched when the marker sits at the root. markerDir is always subtree
+// itself or one of its ancestors, because detection only ever walks up from it.
+func relativeToMarker(subtree, markerDir string) string {
+	switch {
+	case markerDir == "":
+		return subtree
+	case subtree == markerDir:
+		return ""
+	default:
+		return strings.TrimPrefix(subtree, markerDir+"/")
+	}
 }
 
 // goPackagePattern renders a workspace-relative subtree as the package pattern `go test` takes:
@@ -353,15 +396,25 @@ func goPackagePattern(subtree string) string {
 	return "./" + strings.Trim(subtree, "/") + "/..."
 }
 
-// detectTestRunner returns the first runner whose marker is present at root, in the ratified
-// precedence order, and ok=false when the project carries none of them.
-func detectTestRunner(root string) (testRunner, bool) {
-	for _, runner := range testRunners {
-		if runner.detect(root) {
-			return runner, true
+// detectTestRunner walks from start — a workspace-relative slash directory, "" for the root — up
+// to the workspace root and returns the first runner found: the nearest directory holding any
+// marker wins, and inside that directory the ratified precedence order decides. markerDir is the
+// directory the marker sits in ("" for the root), searched lists every directory probed, nearest
+// first, and ok is false when none of them carries a marker. The walk never goes below start.
+func detectTestRunner(root, start string) (runner testRunner, markerDir string, searched []string, ok bool) {
+	dir := start
+	for {
+		searched = append(searched, dir)
+		for _, candidate := range testRunners {
+			if candidate.detect(root, dir) {
+				return candidate, dir, searched, true
+			}
 		}
+		if dir == "" {
+			return testRunner{}, "", searched, false
+		}
+		dir = parentDir(dir)
 	}
-	return testRunner{}, false
 }
 
 // noTestRunnerMessage tells the model exactly which markers were looked for and where to go
@@ -376,14 +429,21 @@ func noTestRunnerMessage() string {
 		". Use terminal to run this project's own test command."
 }
 
-// markerFileExists reports whether name is a regular file at the workspace root, statted THROUGH
-// the fence (a marker reached by a symlink pointing out of the workspace is not this project's).
+// markerPath joins a marker file's name onto the workspace-relative slash directory it is probed
+// in, in the host's own separator — the form the fenced stat and read take.
+func markerPath(dir, name string) string {
+	return filepath.Join(filepath.FromSlash(dir), name)
+}
+
+// markerFileExists reports whether name — a workspace-relative path — is a regular file, statted
+// THROUGH the fence (a marker reached by a symlink pointing out of the workspace is not this
+// project's).
 func markerFileExists(name, root string) bool {
 	info, err := statInRoot(name, root)
 	return err == nil && !info.IsDir()
 }
 
-// readMarkerFile returns the content of a marker file at the workspace root, or "" when it is
+// readMarkerFile returns the content of a marker file at a workspace-relative path, or "" when it is
 // absent, unreadable, over the read cap, or refused by the fence — every one of which means the
 // same thing here: this marker does not select a runner.
 func readMarkerFile(name, root string) string {
@@ -398,22 +458,22 @@ func readMarkerFile(name, root string) string {
 // pytest. The pyproject half looks for the "[tool.pytest" table prefix rather than the mere
 // presence of the file, because almost every modern Python project has a pyproject.toml and
 // only some of them are tested with pytest.
-func detectPytest(root string) bool {
-	if markerFileExists("pytest.ini", root) {
+func detectPytest(root, dir string) bool {
+	if markerFileExists(markerPath(dir, "pytest.ini"), root) {
 		return true
 	}
-	return strings.Contains(readMarkerFile("pyproject.toml", root), "[tool.pytest")
+	return strings.Contains(readMarkerFile(markerPath(dir, "pyproject.toml"), root), "[tool.pytest")
 }
 
 // detectNPMTest reports the npm marker: a package.json whose scripts carry a non-empty "test"
 // entry. A package.json without one gives `npm test` nothing to run, so it is not a marker.
-func detectNPMTest(root string) bool {
+func detectNPMTest(root, dir string) bool {
 	var pkg struct {
 		Scripts struct {
 			Test string `json:"test"`
 		} `json:"scripts"`
 	}
-	if err := json.Unmarshal([]byte(readMarkerFile("package.json", root)), &pkg); err != nil {
+	if err := json.Unmarshal([]byte(readMarkerFile(markerPath(dir, "package.json"), root)), &pkg); err != nil {
 		return false
 	}
 	return strings.TrimSpace(pkg.Scripts.Test) != ""
@@ -428,18 +488,25 @@ func displayCommand(runner testRunner, args []string) string {
 // condenseTestOutput renders a finished run for the model: the verdict, the counts the runner
 // reported (or the failing count derived from the blocks recognised here), the first failing
 // tests with their first error lines, and a closing note stating the FULL output size beside the
-// command that produced it. The model is told plainly that it is reading a summary, so it can
+// command that produced it — and, when the runner ran from a marker directory below the root
+// (workdir, workspace-relative; "" for the root), the terminal workdir that command needs, so
+// the rerun the note suggests runs where this one did. The model is told plainly that it is reading a summary, so it can
 // reach for terminal when it needs everything; the whole result is capped.
 //
 // A failing run with no recognisable failing test — a compile error, a pytest collection error —
 // falls back to the HEAD of the log, because that is where all three runners report the failure
 // that stopped them before any test ran.
-func condenseTestOutput(runner testRunner, display string, res subprocess.SubprocessResult, budget time.Duration) string {
+func condenseTestOutput(runner testRunner, display, workdir string, res subprocess.SubprocessResult, budget time.Duration) string {
 	// The command echo is model-supplied text (a filter is copied into it verbatim), so it is
 	// clipped like any other quoted line BEFORE the footer reserves room for it. Unclipped, a
 	// filter longer than the cap would push the footer alone past the byte limit this tool
 	// advertises — the one thing capCondensed cannot cut back.
 	display = clipLine(display)
+	rerun := "terminal"
+	if workdir != "" {
+		// The workdir is clipped on the same grounds: it is derived from the model's path.
+		rerun = "terminal (workdir " + clipLine(workdir) + ")"
+	}
 	lines := strings.Split(res.CombinedOutput, "\n")
 	failed := res.ExitCode != 0 || res.TimedOut
 	blocks := collectFailureBlocks(runner, lines)
@@ -487,8 +554,8 @@ func condenseTestOutput(runner testRunner, display string, res subprocess.Subpro
 		}
 	}
 
-	footer = append(footer, fmt.Sprintf("[condensed from %d bytes of output; run `%s` with terminal for the full log]",
-		len(res.CombinedOutput), display))
+	footer = append(footer, fmt.Sprintf("[condensed from %d bytes of output; run `%s` with %s for the full log]",
+		len(res.CombinedOutput), display, rerun))
 	return capCondensed(b.String(), footer)
 }
 
