@@ -290,12 +290,12 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 // The uniform shape shows as the fact that every header here — umbrella, standalone, railed — is a
 // label and nothing else, with the target always leading its own branch row, the summary standing in
 // the outcome slot flush against that row's right edge behind a leader, and the body beneath. The
-// ▶/▼ at the right edge of every row that hides something — on the HEADER only in the targetless
-// mcp_search block, which paints no leader row for it to sit at the edge of — and its absence
+// ▶/▼ at the right edge of every row that hides something — the umbrella's own header among them,
+// at the end of its breakdown's leader, and of the other blocks' headers only the targetless
+// mcp_search block's, which paints no leader row for it to sit at the edge of — and its absence
 // everywhere else is the affordance rule in the same picture: exactly the rows here that hide
-// something say so, the umbrella's own header wearing none because its floor is the type rows. A
-// regression in any of them changes this golden, and the golden doubles as the living example of
-// what the canon spec sketches.
+// something say so. A regression in any of them changes this golden, and the golden doubles as the
+// living example of what the canon spec sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
 	t.Parallel()
 
