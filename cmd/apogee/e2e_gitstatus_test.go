@@ -8,6 +8,10 @@ package main
 // upstream from somewhere else reaches the behind count through the background fetch alone — no
 // keystroke, no Turn. The cadences are shortened per session (launchTUIInGitPolling) so the run
 // does not sit out the 5 s and 5 min defaults.
+//
+// The segment is also a control (ADR 0108): the same clones carry the git actions a click on it
+// opens — a pull and a push taken through the picker — and a repository the git tools refuse,
+// which shows no segment and whose /git refuses.
 
 import (
 	"os"
@@ -64,6 +68,132 @@ func TestE2EGitStatusFollowsTheUpstream(t *testing.T) {
 	if got := footerWorkspaceRow(t, drv.Frame()); !strings.Contains(got, behind) {
 		t.Fatalf("the behind count %q is on the frame but not on the footer's workspace row %q", behind, got)
 	}
+}
+
+// TestE2EGitActionsPullAndPushFromTheFooter drives the footer's git actions over the same clones:
+// a click on the git segment opens the git actions picker, pull fast-forwards the commit a second
+// clone pushed, and push sends a commit made in the workspace — each landing as a transcript note,
+// with the segment's counts read again so the footer shows what the action did.
+//
+// Pull is clicked before the local commit is made: `--ff-only` refuses a branch that has diverged,
+// so the order is the claim's, not the test's convenience. Both chains poll every gitStatusEvery,
+// so a background fetch is often in flight when an action is taken; the action waits for it rather
+// than racing it for the remote-tracking ref.
+func TestE2EGitActionsPullAndPushFromTheFooter(t *testing.T) {
+	t.Parallel()
+
+	ws, pusher := gitStatusClones(t)
+	stub := stubllm.New(t, loadScript(t, "livestate"))
+	drv := tuitest.NewDriver(t, liveStateSize)
+	launchTUIInGitPolling(t, drv, stub, ws, gitStatusEvery)
+	waitIdle(drv)
+	awaitGitSegment(t, drv, gitStatusBranch+" 0Δ 0↓ 0↑")
+
+	gitCommitFile(t, pusher, "b.txt", "upstream\n", "an upstream commit")
+	gitOutput(t, pusher, "push", "-q", "origin", gitStatusBranch)
+	behind := gitStatusBranch + " 0Δ 1↓ 0↑"
+	awaitGitSegment(t, drv, behind)
+
+	runGitActionFromTheFooter(t, drv, behind, gitPullGloss)
+	drv.WaitText(gitPullNote)
+	awaitGitSegment(t, drv, gitStatusBranch+" 0Δ 0↓ 0↑")
+	if _, err := os.Stat(filepath.Join(ws, "b.txt")); err != nil {
+		t.Fatalf("the pull reported %q but the upstream's file is not in the workspace: %v", gitPullNote, err)
+	}
+
+	gitCommitFile(t, ws, "c.txt", "local\n", "a local commit")
+	ahead := gitStatusBranch + " 0Δ 0↓ 1↑"
+	awaitGitSegment(t, drv, ahead)
+
+	runGitActionFromTheFooter(t, drv, ahead, gitPushGloss)
+	drv.WaitText(gitPushNote)
+	awaitGitSegment(t, drv, gitStatusBranch+" 0Δ 0↓ 0↑")
+	head := strings.TrimSpace(gitOutput(t, ws, "rev-parse", "HEAD"))
+	remote := strings.Fields(gitOutput(t, pusher, "ls-remote", "origin", "refs/heads/"+gitStatusBranch))
+	if len(remote) == 0 || remote[0] != head {
+		t.Fatalf("the push reported %q but the remote's %s is %v, want the workspace's HEAD %s",
+			gitPushNote, gitStatusBranch, remote, head)
+	}
+}
+
+// TestE2EGitActionsRefusedRepository opens the run in a repository the git tools refuse — its own
+// config names an ssh command to run — and finds no git segment on the footer and /git answering
+// with its refusal rather than a picker.
+//
+// The absence is watched over a window of many status cadences rather than asserted once: a
+// segment that is merely slow to appear would pass a single look. The sibling tests show the same
+// clones seating the segment within that cadence when nothing is refused.
+func TestE2EGitActionsRefusedRepository(t *testing.T) {
+	t.Parallel()
+
+	ws, _ := gitStatusClones(t)
+	gitOutput(t, ws, "config", "core.sshCommand", "ssh -v")
+	stub := stubllm.New(t, loadScript(t, "livestate"))
+	drv := tuitest.NewDriver(t, liveStateSize)
+	launchTUIInGitPolling(t, drv, stub, ws, gitStatusEvery)
+	waitIdle(drv)
+
+	submit(drv, "/git")
+	drv.WaitText(gitRefusedNote)
+	if frameHas(drv.Frame(), gitActionsPickerTitle) {
+		t.Fatalf("/git in a refused repository opened the git actions picker:\n%s", drv.Frame())
+	}
+
+	for watched := testtime.Expiry(gitRefusedWatch); !watched(); {
+		if row := footerWorkspaceRow(t, drv.Frame()); strings.Contains(row, glyphGitDirty) {
+			t.Fatalf("a refused repository shows a git segment on the footer's workspace row %q", row)
+		}
+		time.Sleep(testtime.Fixed(50 * time.Millisecond))
+	}
+}
+
+// The git actions' own words (internal/tui/gitactions.go and cmd/apogee/gitactions_host.go): the
+// picker's title over these clones, the glosses that filter it down to one row, and the notes the
+// actions and the refusal land as.
+const (
+	gitActionsPickerTitle = "git actions — " + gitStatusBranch
+	gitPullGloss          = "fast-forward"
+	gitPushGloss          = "never forced"
+	gitPullNote           = "git pull: fast-forwarded 1 commit"
+	gitPushNote           = "git push: pushed " + gitStatusBranch + " to origin/" + gitStatusBranch
+	gitRefusedNote        = "no git here — git actions need a workspace in a git repository"
+	// glyphGitDirty is the changed-paths mark every git segment carries, a detached HEAD's
+	// included — the one mark no other footer segment paints.
+	glyphGitDirty = "Δ"
+)
+
+// gitRefusedWatch is how long a refused repository is watched for a git segment: eight status
+// cadences, each of which would have seated one in a repository the tools accept.
+var gitRefusedWatch = testtime.Fixed(8 * gitStatusEvery)
+
+// awaitGitSegment waits for the footer to read segment and checks it stands on the footer's
+// workspace row rather than anywhere else on the frame.
+func awaitGitSegment(t *testing.T, drv *tuitest.Driver, segment string) {
+	t.Helper()
+
+	drv.WaitFor(func() bool { return strings.Contains(drv.Frame().String(), segment) },
+		tuitest.Awaiting("the footer's git segment "+segment))
+	if got := footerWorkspaceRow(t, drv.Frame()); !strings.Contains(got, segment) {
+		t.Fatalf("the git segment %q is on the frame but not on the footer's workspace row %q", segment, got)
+	}
+}
+
+// runGitActionFromTheFooter clicks the footer's git segment, reading segment, and takes the one
+// action whose row the filter text leaves in the picker — the gloss words a single row says.
+func runGitActionFromTheFooter(t *testing.T, drv *tuitest.Driver, segment, filter string) {
+	t.Helper()
+
+	f := drv.Frame()
+	x, y, ok := f.Find(segment)
+	if !ok || y != footerRowIndex(f, footerWorkspace) {
+		t.Fatalf("no git segment %q on the footer's workspace row to click:\n%s", segment, f)
+	}
+	click(drv, x, y)
+	drv.WaitText(gitActionsPickerTitle)
+	drv.Type(filter)
+	drv.WaitText(gitActionsPickerTitle + filterTitleJoin + filter)
+	drv.Press(tuitest.Enter)
+	drv.WaitGone(gitActionsPickerTitle)
 }
 
 // gitStatusClones builds a bare remote holding one commit and two clones of it: the workspace the

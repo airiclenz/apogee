@@ -274,6 +274,10 @@ The full tour is in [the manual](docs/manual/README.md).
   terminal's own cmd/ctrl-click opens them.
 - **The mouse answers everything.** Every approval, picker, menu and browser takes two
   clicks — the first highlights, the second sends.
+- **Git from the footer.** Click the branch and its counts in the footer — the mode marker
+  is the footer's other click target — or run `/git`, for fetch, pull, push, sync, switch
+  branch or rebase onto upstream: each your own act, reported as a note, the counts read
+  again at once. See [git actions](docs/manual/commands.md#git-actions--git-and-the-footers-git-segment).
 - **Side-by-side diffs** for every file the agent writes.
 - **`/thinking`** shows the model's reasoning as plain text, **`/advice`** shows what
   your `advise:` reactions told it, by Turn, **`/inspect`** lists every attempt each

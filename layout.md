@@ -183,7 +183,7 @@ and whether the click is spent on closing it:
 | `/sessions` browser, `/model` \| `/server` picker | dismisses the pane, and the click is spent on that — these two are modal |
 | `/workflows` view | dismisses the pane, and the click is spent on that — it is modal; while a recipe is being named (the `^s` name row is up) every click, inside the box or out, is claimed and ignored, and the pane and the name typed so far stay |
 | `/` \| `@` dropdown | dismisses the menu, and the click still lands where it was aimed — the menu decides nothing, and the next keystroke re-derives it |
-| approval prompt, ask prompt | leaves the question standing and is not the pane's at all: it seats the caret, starts a transcript drag, opens the mode picker, exactly as it would with no prompt up |
+| approval prompt, ask prompt | leaves the question standing and is not the pane's at all: it seats the caret, starts a transcript drag, opens the mode picker, answers a click on the footer's git segment with the note that git actions wait for the Turn to end, exactly as it would with no prompt up |
 
 The last row is why the two decision panes are *soft*-modal to the pointer as they already are to
 the wheel: the prompt stays live under an ask question, and a pane that swallowed every outside
@@ -200,7 +200,7 @@ chain's own order — so the pointer never promises a click the frame would refu
 | Under the pointer | Shape |
 | --- | --- |
 | the input box's text rows while the box is editable; the open `/settings` field's text | `text` (I-beam) |
-| a row a pane's click acts on — a `/settings` key, a session, a picker or `/workflows` row, an approval or ask choice, a `/` \| `@` entry; the footer's mode marker; a transcript block that hides something, anywhere on it | `pointer` (hand) |
+| a row a pane's click acts on — a `/settings` key, a session, a picker or `/workflows` row, an approval or ask choice, a `/` \| `@` entry; the footer's mode marker and its git segment; a transcript block that hides something, anywhere on it | `pointer` (hand) |
 | any other transcript line — it is drag-selectable | `text` (I-beam) |
 | a pane's chrome and prose, the inside of a report, the outside of a modal list (where a click only dismisses it), and everywhere else, the transcript's rows past its content included | `default` (arrow) |
 
@@ -1986,6 +1986,24 @@ are what the repository already knows. It is priority 4: a narrow row gives it u
 and before the effort word, because it is a fact about the working tree that `git status` restates
 rather than one about where the session points.
 
+**And the git state is a control too** (ADR 0108). The whole segment — the branch and its counts,
+on every cell the fit leaves it — is a click target, the footer's second beside the mode marker,
+and `/git` is its keyboard reach. A click opens the git actions picker (below, "And the same
+overlay offers the git actions"): fetch, pull, push, sync, switch branch and rebase onto upstream,
+each the user's own act — outside the Approver and the mode, like `/undo`, and through the same
+hardened runner the reads use, so a refused repository stays refused and has no segment to click
+(`/git` there notes `no git here — …`). An action notes `git <verb>…` as it starts and its result
+as it lands — `git pull: fast-forwarded 1 commit`, or `git <verb> failed — ` and git's own message —
+and asks for a read at once, so the counts show what it did. The segment answers a click on the
+marker's terms (a live state, no picker already open, no `/sessions` browser and no `/settings`
+pane owning input) but for one difference: a Turn running or a decision pending does not close it,
+and the click is answered there with the note `git actions wait for the Turn to end`, because the
+picker opens only at idle. While an action runs, a submitted prompt and a second action wait for it
+(`git push is still running — git actions wait for it to finish`) and a quit holds its exit until it
+lands; it is bounded only by a generous backstop, never by a deadline a slow box would miss.
+Repository hooks never run on these acts — the hardened runner empties them — so a hook you rely
+on, a git-lfs `pre-push` among them, needs that git run in a shell.
+
 **The effort word.** The thinking-effort segment sits with the upstream facts and before the
 workdir, because how hard the model is asked to think is a property of the model answering, not of
 where the session is pointed. It states the level the NEXT request will actually carry, resolved
@@ -2698,9 +2716,9 @@ profile already loaded — the answer is one honest line in the transcript and n
 ([`docs/layout/settings-screen-layout.md`](docs/layout/settings-screen-layout.md)) — stated once
 here (ADR 0053, 2026-10-14 amendment). **A list you search filters; a question you answer does
 not.** Every kind that lists things — models, Launch profiles, servers, delegation targets, effort
-levels, modes, cycles, schedules, fork points — filters; the panes that ask a question with two or
-three fixed answers — the workflow-boundary confirm (`stop running workflows? (y/n)`), the two
-start-up offers and the adoption pane below — do not, like the approval and ask_user menus: every
+levels, modes, cycles, schedules, fork points, git actions, branches — filters; the panes that ask a
+question with two or three fixed answers — the workflow-boundary confirm (`stop running workflows?
+(y/n)`), the two start-up offers, the adoption pane and the rebase confirm below — do not, like the approval and ask_user menus: every
 answer is already on screen, so a typed letter could only hide one. Their legends carry no `type
 to filter`; a key that is not one of the pane's own (the confirm's `y`/`n`) does nothing, and a
 paste over them is dropped.
@@ -2713,7 +2731,8 @@ and the filter never touches the draft standing in it. **A row survives when the
 lowercased, appears in what the row *says it is*** — never in its live state. Each kind names its
 matched text: a model by its id; a Launch profile by its name and backend; a server or a delegation
 target by its name (`auto` included); an effort level, a mode, a cycle or a schedule by its label and
-the `—` gloss after it, where it has one; a fork point by its prompt's text, never its ordinal. The marks and measured cells
+the `—` gloss after it, where it has one; a fork point by its prompt's text, never its ordinal; a
+git action by its label and its gloss; a branch by its name. The marks and measured cells
 painted beside them — the context window, the port, `· running`, `· current`, `· unavailable`,
 `· plan`, the endpoint and the `ttft … tok/s` summary — are never matched: a filter that found rows
 by their live state would find different rows from one moment to the next, so `run` no longer finds
@@ -2737,7 +2756,7 @@ Empty, it leads with `type to filter`; once text is typed, `type to filter` drop
 stands just before `esc close`, every other entry in its place (`↑/↓ select · ⏎ switch · ⌫ trim ·
 esc close`). **A filter matching nothing** leaves the pane open, titled, with one faint row that
 cannot be selected — `no model matches "zzz"`, in the kind's own noun (`server`, `profile`, `level`,
-`mode`, `cycle`, `schedule`, `prompt`) with control characters stripped — no highlight for `⏎` to
+`mode`, `cycle`, `schedule`, `prompt`, `action`, `branch`) with control characters stripped — no highlight for `⏎` to
 take, and the legend down to `⌫ trim · esc close`: a verb with no row to act on is a promise the
 pane cannot keep, and `⌫` is the way back to a wider list.
 
@@ -2806,6 +2825,27 @@ with mockups at eighty and fifty columns — in
 [`docs/layout/user-questions-layout.md`](docs/layout/user-questions-layout.md) §Adoption pane. The
 same entries are listed with their state, and can be adopted later, in `/settings`
 ([`docs/layout/settings-screen-layout.md`](docs/layout/settings-screen-layout.md)).
+
+**And the same overlay offers the git actions** (ADR 0108). `/git`, or a click on the footer's git
+segment, opens the **git actions picker**, titled `git actions — <branch>`, two cells per row —
+the action and its `—` gloss — under a `⏎ choose` legend: `fetch`; `pull`, `— fast-forward to
+origin/main — never a merge commit`; `push`, never forced, which on a branch with no upstream
+pushes to `origin` and sets it as the upstream, and with no `origin` is refused with a note naming
+the remotes there are; `sync`, pull then push, stopping at the first failure; `switch branch`; and
+`rebase onto upstream`. Pull, sync and rebase act against an upstream, so they are offered only
+while the branch has one; the rows are derived from the last read, so a read landing under the open
+pane moves them, and an accept re-reads the list it drew. `switch branch` lists the local branches
+first — the listing is a git process, so its pane opens when the listing lands, never at the click
+— in the **branch picker**, titled `switch branch — from <branch>`, one cell per branch with the one
+HEAD is on left out, since a row that switches nothing is not a choice; with no other branch it
+notes `git switch: no other local branch to switch to` instead, and a dirty tree refuses the
+switch. Both kinds are lists, so both filter. `rebase onto upstream` asks first: the **rebase
+confirm**, titled `rebase <branch> onto its upstream?`, two rows — `rebase` and `cancel` — that opens
+on `cancel` and arms on the approval prompt's latch, so a `⏎` still in flight from the picker answers
+nothing and a stray one once armed runs nothing; it is a question, so it does not filter, and
+`cancel` notes `git rebase cancelled — nothing ran`. A dirty tree refuses the rebase, and a rebase
+that stops on a conflict is aborted — the branch and the tree as they were — with the note naming
+the conflicting files.
 
 **The `/sessions` browser types too, which is why its verbs are chords.** The browser filters
 exactly as those panes do — any printable key, and any paste folded onto one line, builds the same
@@ -2956,7 +2996,9 @@ exactly when its verb runs there and then — the four reports (`/usage`, `/insp
 `/advice`), the `/workflows` view, and the picker as `/effort`, `/schedule`, `/schedule-stop` and
 `/sub-agents-server` open it — and every other pane-opening verb (`/model`, `/server`, `/sessions`,
 `/settings`, …) wears the tag and opens at the next idle. The one pane no verb opens, a background
-workflow's waiting prompt, waits for idle too.
+workflow's waiting prompt, waits for idle too. `/git` runs there and then as well, but its picker
+opens only at idle: typed while the model works it answers at once with the note that git actions
+wait for the Turn to end, rather than queueing a pane to open later.
 
 **Prompt recall — ↑ walks what this workspace has already sent.** On an **empty** box ↑ loads the
 newest prompt sent from this workspace, caret at its end; further ↑ steps older and stops at the

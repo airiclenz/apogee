@@ -207,7 +207,11 @@ internal/tui/approval.go — openDecisionLatch; internal/tui/adoption.go — rai
 
 **Commit:** `feat(tui): switch branch and rebase from the git actions picker`
 
-## 7. Driven test and docs
+## 7. Driven test and docs — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): README.md — the git segment gained its own feature bullet ("Git from the footer", beside "The mouse answers everything") rather than a clause in the autonomy-modes bullet at README.md:245, since that bullet is about modes and the git segment changes none; the new bullet names the mode marker as the footer's other click target.
+NOTES (2026-11-05): layout.md — beyond "The git state" control paragraph, the outside-click and pointer-shape tables and the picker section's git actions paragraph, the picker filter contract's enumerations (kinds that filter, the question panes that do not, each kind's matched text, the zero-match nouns) gained the git action, branch and rebase-confirm kinds, and the mid-run pane rule gained `/git`'s answer-now-but-open-at-idle behaviour.
+NOTES (2026-11-05): the refused-repository e2e asserts the segment's absence over a fixed window of eight status cadences (`gitRefusedWatch`), since an absent segment has no positive readiness signal; a mutation run with the refusing config line removed failed the test, so it discriminates.
 
 **What:** Depends on item 6.
 

@@ -17,7 +17,8 @@ commands that need a quiet engine wear a `— runs at idle` tag for as long as t
 is busy, and picking one anyway **queues** it — it shows as a `queued command: /…` row above
 the box and runs as soon as the model is done — while `/version`, `/help`, `/usage`,
 `/inspect`, `/thinking`, `/advice`, `/workflows`, `/effort`, `/schedule`, `/schedule-stop`, `/sub-agents-server`, `/skills`' listing and
-`/confine`'s status report answer immediately. Once the engine is idle that tag is gone from the menu entirely — there
+`/confine`'s status report answer immediately — and so does `/git`, though while the model works its answer is
+the note that git actions wait for the Turn to end. Once the engine is idle that tag is gone from the menu entirely — there
 is nothing left for it to warn about. A token
 lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
 has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
@@ -39,6 +40,7 @@ a typo is visible before you send.
 | `/effort` | Set how hard the model thinks this session — opens a picker of the levels this model supports, plus `auto` (back to the profile); the resolved effort reads in the footer, and the command is hidden when the model reports no dial — see [configuration](configuration.md#how-hard-a-model-thinks--effort) | ✅ |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright. A firing that comes due while the footer says the server is **not there at all** — the dial refused, the name unresolvable, the connection timed out — is refused before the prompt is sent, with the same sentence a send earns: `cannot send — server offline (<endpoint>)`, no record written and no tokens spent; a server that answers anything at all still runs | ✅ |
 | `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |
+| `/git` | Git actions on the workspace — a picker of fetch, pull, push, sync, switch branch and rebase onto upstream, the same one a click on the footer's git segment opens; each runs as your own act and lands as a note — see [below](#git-actions--git-and-the-footers-git-segment) | ✅ answers now — mid-run it notes that git actions wait for the Turn to end |
 | `/clear` (or `/new`) | Close this session into history and start a fresh one. With a background workflow running it first asks `stop running workflows? (y/n)`: `y` stops them and keeps their finished items, `n` keeps them running and their finish notes go to the new conversation, `esc` clears nothing. While the question is up, commands and messages queued behind the `/clear` wait for the answer | ⧖ |
 | `/compact` | Summarise the conversation to reclaim context — the summary is written under fixed headings (Goal, Constraints & preferences, Progress, Key decisions, Relevant files, Next steps), see [compaction](configuration.md#keeping-the-window-from-overflowing--compaction-and-pruning) | ⧖ |
 | `/continue` | Ask the model to keep going | ⧖ |
@@ -168,7 +170,9 @@ target — opens a picker listing the four rungs, so you can name the one you wa
 of cycling to it; the picker takes the rung through exactly the path `⇧⇥` does. The
 marker answers a click only when the picker could actually be answered — not while
 another picker, the `/sessions` browser or the `/settings` screen is up, and not while a
-call is awaiting approval or a question from the model is up — and `⇧⇥` stays the route that works in every state. When a mode gates a
+call is awaiting approval or a question from the model is up — and `⇧⇥` stays the route that works in every state. The footer's git segment is the
+other click target there: clicking it opens the
+[git actions](#git-actions--git-and-the-footers-git-segment) picker, as `/git` does. When a mode gates a
 call, the approval prompt's decision keys — `a`, `s`, `d`, and the `⏎` that takes the
 highlighted row — take effect a moment after the prompt appears, so a keystroke already
 in flight cannot answer a call you have not read; `esc` is live from the instant the
@@ -627,6 +631,43 @@ works on those. When there is nothing to take back it names the reason in the sa
 so the narrower answer never reads as a broken one.
 
 Both verbs **run at idle** — typed while the model works, they queue and run once it has finished.
+
+## Git actions — `/git` and the footer's git segment
+
+In a git workspace the footer shows the branch and its counts — `main 5Δ 0↓ 4↑`: changed paths,
+commits behind the upstream, commits ahead. **Click that segment, or run `/git`, for a picker of
+git actions on the workspace**, titled `git actions — <branch>`:
+
+| Action | Does |
+|---|---|
+| `fetch` | Updates the remote-tracking refs from the default remote |
+| `pull` | Fetches, then fast-forwards the branch to its upstream (`--ff-only`) — a branch that has diverged is refused, never merged |
+| `push` | Pushes the branch, never forced. A branch with no upstream is pushed to `origin` and set to track it; with no remote named `origin` it is refused, and the note names the remotes there are |
+| `sync` | Pull, then push — it stops at the first failure |
+| `switch branch` | Lists your local branches (the one you are on left out) in a second picker and checks out the one you choose; a tree with uncommitted changes is refused |
+| `rebase onto upstream` | Asks first — `rebase` or `cancel`, opening on `cancel` — then rebases the branch onto its upstream as last fetched. A tree with uncommitted changes is refused, and a rebase that hits a conflict is aborted, leaving the branch and the tree as they were, with the note naming the conflicting files |
+
+`pull`, `sync` and `rebase onto upstream` are listed only while the branch has an upstream. Type
+to filter the list, as in every picker. Each action notes `git <verb>…` when it starts and its
+result when it lands — `git pull: fast-forwarded 1 commit`, or `git push failed — ` followed by
+git's own message — and the footer's counts are read again at once, so they show what it did.
+
+**They are your own acts.** Like `/undo`, a git action runs outside the approval prompt and the
+mode — choosing it is the approval — but through the same hardened git runner every other git apogee
+runs goes through: it never prompts (an ssh key not in your agent, or a remote that wants a typed
+password, fails with git's message in the note), and a repository apogee's git tools refuse — one
+whose own config names a command to run — stays refused: it shows no git segment, and `/git`
+answers `no git here — git actions need a workspace in a git repository apogee can act on`.
+**Repository hooks never run** on these acts, so no `pre-push` runs on a push (a git-lfs upload
+included), no `post-merge` on a pull and no `post-checkout` on a switch; when you rely on a hook,
+run that git in a shell. Your global git config still applies.
+
+**They wait for a quiet moment, and the session waits for them.** The picker opens only while the
+agent is idle: mid-run, or with an approval or a question waiting on you, the click and `/git`
+answer `git actions wait for the Turn to end`. While an action runs, a message you send waits for it
+to finish, a second action is refused with `git <verb> is still running`, and quitting waits for it
+to land. A slow push or pull is bounded only by a generous backstop, never by a short deadline.
+The git actions exist in the interactive TUI only — not in `apogee daemon` or `apogee headless`.
 
 ## The settings screen — `/settings`
 
