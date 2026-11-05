@@ -477,16 +477,15 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		}
 	case domain.UIKeyFooterRows:
 		// The footer's row count is frame height (footerRows), so the transcript gives up or takes
-		// back a row per footer row: the frame is laid out again here rather than left to the next
-		// resize. No pane edits the key — it is structured, edited in the file — so the edit that
-		// reaches here is a re-read of a hand-edited file (applyReloaded), applied live rather than
-		// refused at the binary's dispatcher. Before the first WindowSizeMsg there is no frame to lay
-		// out; that message lays it out from the value landed here.
+		// back a row per footer row. Landing the value is the whole apply: the transcript widget's
+		// height no longer matches the rows left for it, and Update's tail lays the frame out again
+		// on that ground (freshenTranscriptClamp; doc.go, "an arm mutates") — this arm reads no
+		// geometry after the write. No pane edits the key — it is structured, edited in the file — so
+		// the edit that reaches here is a re-read of a hand-edited file (applyReloaded, from the
+		// editor-return and file-watch folds), applied live rather than refused at the binary's
+		// dispatcher.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
-		}
-		if m.ready {
-			m.layout()
 		}
 	case domain.UIKeyFooterColors:
 		// The overrides are resolved where the footer is painted, in the scheme the screen is drawn in

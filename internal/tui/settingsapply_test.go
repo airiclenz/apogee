@@ -164,10 +164,11 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 
 // TestSettingsReReadOfFooterRowsRelaysTheFrame: `ui.footer.rows` is structured — edited in the
 // file, never on a row — so it reaches the session as a re-read of a hand-edited file, and the
-// renderer applies it itself: the footer takes the rows the file names and the frame is laid out
-// again for them, the transcript giving up the row the second footer row takes. The key never goes
-// out to the binary's dispatcher, which has no seam for it and would answer that it cannot be
-// applied. A layout the parser refuses lands nothing and the row carries the refusal.
+// renderer applies it itself: the footer takes the rows the file names and Update's tail lays the
+// frame out again for them, the transcript giving up the row the second footer row takes. The re-read
+// is driven through Update (the file-watch report) because the arm leaves the re-lay to that tail.
+// The key never goes out to the binary's dispatcher, which has no seam for it and would answer that
+// it cannot be applied. A layout the parser refuses lands nothing and the row carries the refusal.
 func TestSettingsReReadOfFooterRowsRelaysTheFrame(t *testing.T) {
 	t.Parallel()
 
@@ -182,7 +183,7 @@ func TestSettingsReReadOfFooterRowsRelaysTheFrame(t *testing.T) {
 	m := configWatchModel(t, rows, log, edit)
 	widget := m.viewport.Height()
 
-	m, _ = m.applyReloaded(rows, edit.applied, true)
+	m = step(t, m, configChangedMsg{alive: true})
 
 	if got := m.footerRows(); got != 2 {
 		t.Fatalf("footer rows after the re-read = %d, want the 2 the file names", got)
@@ -191,8 +192,9 @@ func TestSettingsReReadOfFooterRowsRelaysTheFrame(t *testing.T) {
 		t.Errorf("the footer paints %d rows after the re-read, want 2", got)
 	}
 	if got := m.viewport.Height(); got != widget-1 {
-		t.Errorf("transcript widget = %d rows after the re-read, want %d — laid out again by the apply", got, widget-1)
+		t.Errorf("transcript widget = %d rows after the re-read, want %d — laid out again by Update's tail", got, widget-1)
 	}
+	assertSettled(t, m)
 	if len(log.applies) != 0 {
 		t.Errorf("the re-read went out to the dispatcher: %+v; the renderer applies ui.footer.rows itself", log.applies)
 	}
