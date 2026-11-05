@@ -565,8 +565,10 @@ func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 }
 
 // watchLive enters watch mode (watch.go) on the live session meta's row lists. The title the box
-// shows until the journal names one is the journal frame's, else the record's.
+// shows until the journal names one, and the workspace the watch names, are the journal frame's,
+// else the record's: a row whose frame will not decode is listed with neither.
 func (m Model) watchLive(meta session.Meta, live LiveSession) (tea.Model, tea.Cmd) {
+	live.Workspace = cmp.Or(live.Workspace, meta.Workspace)
 	return m.enterWatch(watchSourceOf(live, cmp.Or(live.Title, meta.Title)))
 }
 
@@ -576,6 +578,7 @@ func (m Model) watchLive(meta session.Meta, live LiveSession) (tea.Model, tea.Cm
 func (m Model) watchFinished(meta session.Meta, watched WatchedSession) (tea.Model, tea.Cmd) {
 	return m.enterWatch(watchSourceOf(LiveSession{
 		ID:         meta.ID,
+		Workspace:  meta.Workspace,
 		RecordPath: watched.RecordPath,
 		Home:       watched.Home,
 	}, meta.Title))

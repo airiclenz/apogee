@@ -93,7 +93,9 @@ var watchVerbs = map[string]bool{
 }
 
 // watchSource names the session a watch follows: its id, the record it paints from, the journal it
-// follows, and the title the box shows until the journal names one. isForeign marks a session of a
+// follows, the title the box shows until the journal names one, and the watched session's
+// workspace root — the journal frame's, else the record's, "" when neither names one
+// ([Model.watchedWorkspace]). isForeign marks a session of a
 // watched home (ADR 0103 decision 7), which is never resumable. probe asks whether the owner still
 // holds the session — the door that opens the watch binds it to Store.ProbeHold, so the TUI keeps
 // no store of its own — and a nil probe never ends the watch.
@@ -102,6 +104,7 @@ type watchSource struct {
 	recordPath  string
 	journalPath string
 	title       string
+	workspace   string
 	isForeign   bool
 	probe       holdProbe
 }
@@ -262,15 +265,16 @@ func (m Model) enterWatch(src watchSource) (Model, tea.Cmd) {
 	return m, read
 }
 
-// watchSourceOf is the source a watch of live follows: its record, its journal, its probe, and a
-// session of a watched home marked foreign (ADR 0103 decision 7). title is what the box shows until
-// the journal names one.
+// watchSourceOf is the source a watch of live follows: its record, its journal, its workspace, its
+// probe, and a session of a watched home marked foreign (ADR 0103 decision 7). title is what the box
+// shows until the journal names one.
 func watchSourceOf(live LiveSession, title string) watchSource {
 	return watchSource{
 		id:          live.ID,
 		recordPath:  live.RecordPath,
 		journalPath: live.JournalPath,
 		title:       title,
+		workspace:   live.Workspace,
 		isForeign:   live.Home != "",
 		probe:       live.Probe,
 	}

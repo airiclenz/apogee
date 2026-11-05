@@ -162,6 +162,91 @@ func recordHeadEntries() []session.Entry {
 	}
 }
 
+// Every door into a watch carries the watched session's workspace root — the journal frame's, else
+// the record's, "" when neither names one — and leaving the watch drops it.
+func TestWatchCarriesTheWatchedWorkspace(t *testing.T) {
+	t.Parallel()
+	const browserWorkspace = "/ws/a"
+	cases := []struct {
+		name  string
+		enter func(t *testing.T, f *watchFixture) Model
+		want  string
+	}{
+		{
+			name: "a live browser row takes its frame's workspace",
+			enter: func(t *testing.T, f *watchFixture) Model {
+				host := &fakeSessionHost{live: []LiveSession{liveRowWith(f, "headless run", browserWorkspace, time.Now())}}
+				return openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, browserWorkspace))
+			},
+			want: browserWorkspace,
+		},
+		{
+			name: "a live browser row whose frame names none takes the record's",
+			enter: func(t *testing.T, f *watchFixture) Model {
+				host := &fakeSessionHost{}
+				storeMeta(host, f.src.id, "running elsewhere", browserWorkspace, time.Now(), 0, nil)
+				host.live = []LiveSession{liveRowWith(f, "", "", time.Now())}
+				return openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, browserWorkspace))
+			},
+			want: browserWorkspace,
+		},
+		{
+			name: "a finished row of a watched home takes the record's",
+			enter: func(t *testing.T, f *watchFixture) Model {
+				host := &fakeSessionHost{watched: []WatchedSession{
+					watchedFinished(f, "bobs finished run", browserWorkspace, time.Now()),
+				}}
+				return openBrowser(t, newBrowserModel(t, &fakeEngine{}, host, browserWorkspace))
+			},
+			want: browserWorkspace,
+		},
+		{
+			name: "the startup watch takes its frame's workspace",
+			enter: func(t *testing.T, f *watchFixture) Model {
+				opts := testOpts
+				opts.Watch = &LiveSession{
+					ID:          f.src.id,
+					Workspace:   "/ws/watched",
+					RecordPath:  f.src.recordPath,
+					JournalPath: f.src.journalPath,
+				}
+				return newTestModelEng(t, watchEngine(), opts)
+			},
+			want: "/ws/watched",
+		},
+		{
+			name: "a startup watch whose frame names none stays empty",
+			enter: func(t *testing.T, f *watchFixture) Model {
+				opts := testOpts
+				opts.Watch = &LiveSession{ID: f.src.id, RecordPath: f.src.recordPath, JournalPath: f.src.journalPath}
+				return newTestModelEng(t, watchEngine(), opts)
+			},
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newWatchFixture(t, "headless run", recordHeadEntries(), 3)
+			m := tc.enter(t, f)
+
+			if m.sessionBrowser.open {
+				m = step(t, m, keyEnter())
+			}
+			workspace, isWatching := m.watchedWorkspace()
+			left := step(t, m, keyEsc())
+			leftWorkspace, isStillWatching := left.watchedWorkspace()
+
+			if !isWatching || workspace != tc.want {
+				t.Errorf("watchedWorkspace() = %q, %v; want %q, true", workspace, isWatching, tc.want)
+			}
+			if isStillWatching || leftWorkspace != "" {
+				t.Errorf("after esc watchedWorkspace() = %q, %v; want \"\", false", leftWorkspace, isStillWatching)
+			}
+		})
+	}
+}
+
 func TestWatchPaintsTheRecordHeadWithoutResumeNotices(t *testing.T) {
 	t.Parallel()
 	f := newWatchFixture(t, "fix the parser", recordHeadEntries(), 3)

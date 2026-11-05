@@ -4959,6 +4959,13 @@ func (m Model) topLevelModel() string {
 	return m.opts.Model
 }
 
+// watchedWorkspace is the workspace root of the session a read-only watch follows — the journal
+// frame's, else the record's, "" when neither names one — and whether a watch is active at all, so
+// a watch of an unknown workspace is told apart from no watch. Leaving the watch clears it.
+func (m Model) watchedWorkspace() (workspace string, isWatching bool) {
+	return m.watch.source.workspace, m.watch.isActive
+}
+
 // contextUsage is the live context-window gauge's data: tokens Used out of the window Limit, and
 // whether Used is an estimate rather than a server reading (Estimated: the value is prefixed `~`).
 // It is self-hiding — view paints nothing while Used or Limit is not known (0), so a gauge with

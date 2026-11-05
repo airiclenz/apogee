@@ -69,7 +69,10 @@ internal/tui/boxdraw.go — squareOnField; internal/tui/paint_test.go — paintF
 **Closes:** prompt-box-uneven-background
 **Commit:** `fix(tui): paint the scheme surface as the terminal background`
 
-## 2. Carry the watched session's workspace into the watch
+## 2. Carry the watched session's workspace into the watch — ✅ DONE (2026-11-05)
+
+NOTES (2026-11-05): the workspace lives on watchSource only, not also as a separate watchState field: watchState already holds the source, so a second copy would duplicate it; leaveWatch's reset of watchState clears it all the same. Accessor is `watchedWorkspace() (workspace string, isWatching bool)` beside topLevelModel, the bool telling a watch of an unknown workspace from no watch.
+NOTES (2026-11-05): sessions_test.go needed no change (the test reuses its liveRowWith/watchedFinished/storeMeta helpers); newWatchFixture needed no workspace argument since the browser rows and Options.Watch carry it.
 
 **What:**
 **Goal:** while a watch is active, the model can answer the watched session's workspace path (the journal frame's workspace, else the record's; empty when neither carries one), for watches entered from a live browser row, a finished browser row and the `--resume` startup watch; leaving the watch clears it.
