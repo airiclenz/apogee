@@ -3556,11 +3556,13 @@ func TestSettingsPaneRefusesTheExternalEditMidRun(t *testing.T) {
 	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
 	m.actuation.inFlight = true
 
+	// The Cmd may carry the spinner's tick — the in-flight actuation is an idle wait the status line
+	// spins for (busy.go) — and nothing else.
 	next, cmd := stepCmd(t, m, keyEnter())
 	m = next
 
-	if cmd != nil || len(edit.asked) != 0 {
-		t.Errorf("a mid-run ⏎ launched an editor (cmd=%v, asked=%v)", cmd != nil, edit.asked)
+	if msgs := untickedAll(t, cmd); len(msgs) != 0 || len(edit.asked) != 0 {
+		t.Errorf("a mid-run ⏎ launched an editor (msgs=%v, asked=%v)", msgs, edit.asked)
 	}
 	if got := m.settingsNote(rows[0]); got != "✗ "+settingsEditBusyNote {
 		t.Errorf("note = %q, want the wait note %q", got, settingsEditBusyNote)

@@ -222,7 +222,8 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 // inside a collapsed run (insideCollapsedRun) — there the head already blinks and carries the live
 // gist, and the status line names the delegate.
 //
-// blink is this frame's phase of the live star ([spinnerAnim.blink]): it reaches only the header
+// blink is this frame's phase of the live star ([spinnerAnim.blink], as [Model.liveStarBlink] gates
+// it to a running Turn): it reaches only the header
 // glyph of a block that still holds an open call, and every other line of the transcript paints
 // identically at either phase. It is a PARAMETER rather than transcript state because the phase
 // belongs to the frame being drawn and not to the scrollback — the same entries painted a tick

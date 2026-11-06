@@ -71,7 +71,14 @@ internal/tui/watch.go — foldWatchBatch; internal/tui/worker.go — worker.gen,
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSpinner|TestTickRepaint|TestBlinkingStar|TestTranscriptClickTogglesALiveBlockAcrossTheBlink' ./internal/tui/`
 **Commit:** `refactor(tui): the spinner chain owns its generation`
 
-## 2. Busy waits keep the spinner turning in the status line
+## 2. Busy waits keep the spinner turning in the status line — ✅ DONE (2026-11-06)
+
+NOTES (2026-11-06): retry of an interrupted attempt — its uncommitted production work (busy.go; spinner.go `isLive` + idle `spinning()` + `liveStarBlink`; model.go `busySince`, Update-tail `busyAfterFold`, idle `busyPhrase` branch and the rewritten THREE-exceptions comment; paintcache.go/render.go blink gated on `stateRunning`) was reviewed against the item and kept unchanged; this attempt added busy_test.go and the test migrations.
+NOTES (2026-11-06): the shared tick-stripping helper is `untickedMsgs` (streams a Cmd tree's Msgs, nested batches flattened, nil and spinnerTickMsg dropped) with `untickedAll` (drains it, for "no Cmd but the tick" asserts), both in busy_test.go; `pumpItem` now reads through it and its old `msgWithin` helper, left without a caller, was removed.
+NOTES (2026-11-06): prebound_test.go (TestPreboundChoiceBindsRecordsAndEndsTheState) and picker_test.go (TestServerSwitchHappyPath) were moved onto `untickedAll` beyond the item's **Files:** list, under the item's own regression guard: a bind or switch unbinds the model, so its Cmd now carries the connecting wait's first tick beside the beat; found by a non-race whole-package run of internal/tui (all else green).
+NOTES (2026-11-06): the item's CLOSES is empty — the plan's `**Closes:** idle-wait-no-spinner` belongs to the plan as a whole (items 3–4 cover the rest of that issue's waits).
+NOTES (2026-11-06): cmd/apogee was checked only with `-run TestE2ELiveState` (the gated-launcher load e2e, green); its full driven suite is left to the closeout's make check.
+NOTES (2026-11-06): consequential edit — internal/tui/doc.go: busy.go joins the package narration (TestDocMapNamesEveryFile); spinnerAnim now holds "plain ints and one flag"
 
 Depends on item 1.
 

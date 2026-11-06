@@ -499,9 +499,11 @@ func TestWorkflowsViewCtrlRRerunRefusedWhileAnActuationIsInFlight(t *testing.T) 
 	eng := m.eng.(*fakeEngine)
 	m.actuation.inFlight, m.actuation.verb, m.actuation.profile = true, verbLoad, "big"
 
+	// The Cmd may carry the spinner's tick — the in-flight actuation is an idle wait the status line
+	// spins for (busy.go) — and nothing else.
 	pressed, cmd := stepCmd(t, m, keyCtrl('r'))
-	if cmd != nil {
-		t.Error("^r during an actuation returned a launch Cmd")
+	if msgs := untickedAll(t, cmd); len(msgs) != 0 {
+		t.Errorf("^r during an actuation returned a launch Cmd: %v", msgs)
 	}
 	if pressed.holds.has(holdBgLaunch) {
 		t.Error("^r during an actuation latched the /bg launch")

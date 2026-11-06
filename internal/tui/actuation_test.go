@@ -241,49 +241,25 @@ func launcherOpts(fake *fakeLauncher) Options {
 // guard, not a timing assumption: every fake answers immediately.
 var pumpTimeout = testtime.Budget(5 * time.Second)
 
-// msgWithin runs cmd on its own goroutine — the listen Cmd BLOCKS on the pump, exactly as it does in
-// the program — and returns the Msg it yielded.
-func msgWithin(t *testing.T, cmd tea.Cmd) tea.Msg {
-	t.Helper()
-	out := make(chan tea.Msg, 1)
-	go func() { out <- cmd() }()
-	select {
-	case msg := <-out:
-		return msg
-	case <-time.After(pumpTimeout):
-		t.Fatal("the actuation pump produced nothing — the latch would never release")
-		return nil
-	}
-}
-
 // pumpItem takes the next item the actuation has for the Update loop. The FIRST Cmd is the batch of
 // producer and listener (the producer's own Msg is nil, so the item is whichever member carries
-// one); every re-arm after that is the listener alone.
+// one) — itself batched beside the spinner's first tick when the verb began an idle wait
+// (busyAfterFold); every re-arm after that is the listener alone. untickedMsgs runs the tree as the
+// program does and leaves the tick out, so the item is the first Msg it yields.
 func pumpItem(t *testing.T, cmd tea.Cmd) tea.Msg {
 	t.Helper()
 	if cmd == nil {
 		t.Fatal("the actuation stopped pumping before the latch released")
 	}
-	msg := msgWithin(t, cmd)
-	batch, ok := msg.(tea.BatchMsg)
-	if !ok {
-		return msg // a re-arm: one listen Cmd, one item
-	}
-	out := make(chan tea.Msg, len(batch))
-	for _, c := range batch {
-		go func(c tea.Cmd) { out <- c() }(c)
-	}
-	for range batch {
-		select {
-		case landed := <-out:
-			if landed != nil {
-				return landed
-			}
-		case <-time.After(pumpTimeout):
-			t.Fatal("the actuation batch produced nothing")
+	select {
+	case msg, open := <-untickedMsgs(cmd):
+		if !open {
+			t.Fatal("the actuation's Cmd carried no pump item")
 		}
+		return msg
+	case <-time.After(pumpTimeout):
+		t.Fatal("the actuation pump produced nothing — the latch would never release")
 	}
-	t.Fatal("the actuation batch carried no pump item")
 	return nil
 }
 

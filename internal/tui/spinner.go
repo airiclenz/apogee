@@ -289,7 +289,7 @@ func (th theme) spinnerColor(frame, framesPerLoop int) color.Color {
 	return lipgloss.Color(from.BlendOkLch(to, pos-float64(arc)).Hex())
 }
 
-// spinnerAnim is the animation state carried on the value-copied Model (ADR 0011): plain ints,
+// spinnerAnim is the animation state carried on the value-copied Model (ADR 0011): plain ints and one flag,
 // no RNG handle, no self-referential type. It holds the frame counter — the widget it replaced
 // held its own the same way — and the chain bookkeeping beside it: the generation a tick must carry
 // to be live ([spinnerAnim.gen]). The chain is the animation's own, not any one caller's, so every
@@ -310,6 +310,11 @@ type spinnerAnim struct {
 	// a new Exchange in the same Update, so that tick is in flight by construction — and
 	// foldSpinnerTick would accept the stale tick: two chains, 2× spin.
 	gen int
+	// isLive is whether a tick of the current generation is still in flight — whether the chain is
+	// running at all. Every arm sets it, and only a drop of the CURRENT generation clears it
+	// (foldSpinnerTick): a stale tick dropped after a re-arm says nothing about the chain that
+	// replaced it. Update's tail reads it to arm an idle wait's chain exactly once (busyAfterFold).
+	isLive bool
 }
 
 // spec resolves a style's animation. An unregistered style — the zero value, or a name this
@@ -404,6 +409,7 @@ func (s spinnerAnim) view(th theme, style SpinnerStyle, color bool) string {
 func (s *spinnerAnim) arm(style SpinnerStyle) tea.Cmd {
 	s.gen++
 	s.frame = 0
+	s.isLive = true
 	return s.tick(style)
 }
 
@@ -425,9 +431,15 @@ type spinnerTickMsg struct{ gen int }
 // The chain is kept alive only while the Model is spinning ([Model.spinning]), and only for the
 // current generation: dropping the tick once spinning stops lets the chain die naturally, and
 // dropping a tick from a previous arm means a re-arm (an approval answered, an ask replied to)
-// cannot leave two chains running and double the frame rate.
+// cannot leave two chains running and double the frame rate. Only the current generation's drop
+// marks the chain dead (spinnerAnim.isLive): a stale tick's chain was retired by an arm that left a
+// live one behind it.
 func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
-	if msg.gen != m.spin.gen || !m.spinning() {
+	if msg.gen != m.spin.gen {
+		return m, nil
+	}
+	if !m.spinning() {
+		m.spin.isLive = false
 		return m, nil
 	}
 	// The frame the status line spins on is also the LIVE STAR's clock: a block still holding an
@@ -446,7 +458,22 @@ func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 
 // spinning is the ONE predicate the spinner's tick chain lives by: a tick that lands while it holds
 // advances the frame and schedules the next, one that lands while it does not is dropped and the
-// chain dies. Today it is the running state — the Turn the status line's spinner narrates.
+// chain dies. It holds in the running state — the Turn the status line's spinner narrates — and in
+// an idle session that is waiting on something slow (busy.go, [Model.busyWait]), whose status line
+// carries the same glyph beside the wait's phrase.
 func (m Model) spinning() bool {
-	return m.state == stateRunning
+	if m.state == stateRunning {
+		return true
+	}
+	_, waiting := m.busyWait()
+	return m.state == stateIdle && waiting
+}
+
+// liveStarBlink is the live star's phase as the transcript is painted with it ([spinnerAnim.blink]):
+// the frame's phase while a Turn runs, and the settled ✦-showing phase in every other state. The star
+// says "this call or workflow is still going under the running Turn"; an idle busy wait advances the
+// frame for the status line's glyph and must not flip a header the Turn is not driving (layout.md,
+// "The live star"). Every reader of the blink — the frame key and the paint — goes through here.
+func (m Model) liveStarBlink() bool {
+	return m.state == stateRunning && m.spin.blink(m.opts.UI.Spinner)
 }

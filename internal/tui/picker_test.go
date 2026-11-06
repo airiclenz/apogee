@@ -1022,9 +1022,15 @@ func TestServerSwitchHappyPath(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("the switch returned no Cmd — the new server would not be observed for a full Interval")
 	}
-	beat, ok := cmd().(beatMsg)
+	// Beside the beat the Cmd may carry the spinner's tick: until that beat binds a model the session
+	// is waiting on it, and the status line spins for the wait (busy.go).
+	msgs := untickedAll(t, cmd)
+	beat, ok := beatMsg{}, len(msgs) == 1
+	if ok {
+		beat, ok = msgs[0].(beatMsg)
+	}
 	if !ok {
-		t.Fatalf("the switch's Cmd yielded %T, want the new chain's first beatMsg", cmd())
+		t.Fatalf("the switch's Cmd yielded %v, want the new chain's first beatMsg alone", msgs)
 	}
 	if beat.gen != m.hb.gen {
 		t.Errorf("the first beat carries generation %d, want the switched-in %d", beat.gen, m.hb.gen)

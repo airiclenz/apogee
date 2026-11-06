@@ -451,7 +451,7 @@ func (m Model) frameKey() frameKey {
 		padPrompts:    m.th.padPrompts,
 		width:         m.width,
 		showScrollbar: m.opts.UI.ShowScrollbar,
-		blink:         m.spin.blink(m.opts.UI.Spinner) && m.transcript.hasLiveStar(),
+		blink:         m.liveStarBlink() && m.transcript.hasLiveStar(),
 		backHint:      m.backHint(),
 	}
 }

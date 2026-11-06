@@ -256,6 +256,11 @@ type Model struct {
 	// function of the counter rather than of an RNG handle a copy would share (ADR 0011).
 	spin spinnerAnim
 
+	// busySince is when the wait an idle session is holding began — the busy indicator's clock (busy.go,
+	// [Model.busyWait]). A string and a time, so it copies with the Model (ADR 0011); Update's tail
+	// restamps it whenever the wait's phrase changes and clears it when the wait ends.
+	busySince busyClock
+
 	// hb is the upstream heartbeat's state — the tick chain's generation, the offline debounce,
 	// and what the last landed beat observed (see heartbeatState). Plain values and one slice, so
 	// it is safe inside the value-copied Model (ADR 0011). It stays zero when the Upstream seam is
@@ -1128,12 +1133,16 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// their adoption pane are offered (adoptAfterFold) — before the prompt and the wake, because a
 	// rule the human adopts is one the turn a wake starts can already use. That idle fold is what
 	// makes "the next turn boundary" (ADR 0096 §4): a file that changed mid-turn is asked about at
-	// the fold that ends the turn, and one that changed while idle at the fold that saw it.
+	// the fold that ends the turn, and one that changed while idle at the fold that saw it. After the
+	// wake, and for the same any-fold reason, the busy indicator is kept in step (busyAfterFold,
+	// busy.go): a wait an idle fold began gets its clock and its spinner chain — after the wake,
+	// because a wake that launched a worker has left the session running, not waiting.
 	defer func() {
 		next = resumeAfterFold(next)
 		next, cmd = adoptAfterFold(next, cmd)
 		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
+		next, cmd = busyAfterFold(next, cmd)
 		next = reportActivity(settleFrame(msg, next))
 	}()
 
@@ -3148,7 +3157,7 @@ func (m Model) hiddenDraftRows() int {
 // is still down — is exempt and always survives: it shades nothing, and the release still needs the
 // line the press named to toggle the block under it (spanUnchanged, mouse.go).
 func (m *Model) refreshViewport() {
-	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink(m.opts.UI.Spinner), m.backHint()).
+	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.liveStarBlink(), m.backHint()).
 		reserveWidgetCells(m.viewport.Width())
 	if !m.transcriptSel.spanUnchanged(m.lines, rendered.lines) {
 		m.transcriptSel = transcriptSel{} // the ground under the span moved: let go (mouse.go)
@@ -4632,17 +4641,23 @@ func (m Model) statusLeftWithin(width int, withTotal bool) string {
 	var richer []string
 	switch m.state {
 	case stateIdle:
-		// Idle says nothing for itself — the input box below already invites a message — with TWO
+		// Idle says nothing for itself — the input box below already invites a message — with THREE
 		// exceptions. An open /settings pane the frame could not seat leaves its fact here, the licence
-		// layout.md gives every surface that gives way entirely (settingsGiveWayPhrase); and a session
+		// layout.md gives every surface that gives way entirely (settingsGiveWayPhrase); a session
 		// with no server bound carries its standing fact here for as long as that holds, which is what
-		// survives the esc that closes the pane asking about it (preboundPhrase, ADR 0036). The pane's
-		// fact wins where both are owed: a modal swallowing every key but the frame chords on a window
-		// showing none of it is the more urgent of the two, and the session's fact is still there when
-		// it closes. Every other idle frame leaves the slot to the queue, as before.
+		// survives the esc that closes the pane asking about it (preboundPhrase, ADR 0036); and a
+		// session waiting on something slow — a launcher verb, the first beat — shows the spinner, the
+		// footer's word for that wait and its clock, so a slow box never looks stuck (busyPhrase,
+		// busy.go). They rank in that order: a modal swallowing every key but the frame chords on a
+		// window showing none of it is the most urgent fact, the session's standing fact is still
+		// there when it closes, and a wait is narrated only once neither is owed. Every other idle
+		// frame leaves the slot to the queue, as before.
 		phrase = m.settingsGiveWayPhrase()
 		if phrase == "" {
 			phrase = m.preboundPhrase()
+		}
+		if phrase == "" {
+			phrase = m.busyPhrase(time.Now())
 		}
 	case stateRunning:
 		phrase, richer = m.runningForms(withTotal)

@@ -583,11 +583,18 @@
 // would be shared across the copies and advance from the ones Update discards, so the same frame
 // would paint differently depending on how often View ran — which is why glitter HASHES
 // (frame, cell) into its density bucket instead of drawing from a generator, and why the state is
-// four plain ints. What the widget did give for free is chain safety: its TickMsg carried a tag,
+// plain ints and one flag. What the widget did give for free is chain safety: its TickMsg carried a tag,
 // so re-arming while a tick was still in flight could not leave two chains running. [spinnerAnim]
 // reproduces that as a generation counter — arm opens a new generation and the Update loop drops a
 // tick carrying an older one — which is what keeps the frame rate from doubling after an approval
 // prompt or an ask_user question re-arms the chain.
+//
+// busy.go turns that same chain for an IDLE session that is waiting on something slow — a launcher
+// verb in flight, a heartbeat that has not bound a model yet: [Model.busyWait] derives the wait from
+// those latches at call time (never a mirrored flag), the status line carries it in the running
+// row's shape (glyph, the footer's word for the wait, a clock from [busyClock]), and Update's tail
+// arms the chain once when such a wait finds none alive (busyAfterFold). The transcript's live star
+// blinks only under a running Turn ([Model.liveStarBlink]), so an idle wait's ticks never flip it.
 //
 // The upstream heartbeat is the package's SECOND tick chain, and it deliberately reuses the
 // first one's shape. [ServerHost.Beat] is a narrow seam the binary backs with an
