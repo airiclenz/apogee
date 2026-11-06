@@ -30,7 +30,10 @@ still remembers.
   instead (see [watching a live session](#watching-a-live-session)).
 - `/sessions` opens the in-TUI browser (newest first): typing filters the list,
   `⏎` resumes (or watches a `● live` row), `^r` renames inline, `^d` deletes after a confirm, `^a` toggles
-  between this workspace and all workspaces. The verbs are chords precisely so
+  between this workspace and all workspaces. The pane opens at once on one `loading…` row,
+  with the legend `esc close` alone, and the sessions replace that row once the list is read.
+  If the store holds no sessions, the pane closes again with the note `no saved sessions`; if
+  the list cannot be read, with `could not list sessions: …`. The verbs are chords precisely so
   the letters are free to type with — every pop-up that lists things to search
   (`/sessions`, `/settings`, and the `/model`, `/server`, `/sub-agents-server`,
   `/effort`, `/fork`, `/schedule` and mode pickers) filters as you type. A paste

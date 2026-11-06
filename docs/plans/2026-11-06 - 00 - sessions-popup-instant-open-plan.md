@@ -145,7 +145,7 @@ and the rename/delete tests stay green.
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSessionBrowser|TestFrameNeverExceedsTheTerminalHeightSessionBrowser|TestWatchIsolatesHoldsTheOwnersSurfacesUntilEsc' ./internal/tui/`
 **Commit:** `fix(tui): /sessions opens its pop-up at once with a loading row`
 
-## 3. Document the loading row
+## 3. Document the loading row — ✅ DONE (2026-11-06)
 
 **What:**
 Recast at the regression check (2026-11-06).

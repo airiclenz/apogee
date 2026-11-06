@@ -2897,7 +2897,12 @@ for, and the toggle only changes where they are looking — and re-derives the r
 `no sessions in this workspace — press ^a to see all`, and that note wins over a filter; a filter
 that matched nothing in a workspace that has sessions gets the picker's zero-match row instead,
 `no session matches "zzz"`, with the legend down to `^a this/all · ⌫ trim · esc close` — the scope
-toggle stays because widening the scope is the other way such a filter can come to match.
+toggle stays because widening the scope is the other way such a filter can come to match. The pane
+opens on the frame after `/sessions`, before the store has answered, on one `loading…` row with the
+legend `esc close` alone: every other key, a click on the row and a paste are inert, so no other key
+is advertised, and the full hint returns with the rows. An empty store closes the pane again with the
+note `no saved sessions`, and a list that fails with `could not list sessions: …`. A list that
+arrives after `esc` closed the pane, or for an earlier opening of it, changes nothing.
 
 **A firing browses like any other session, and says whose it is.** Each run of a schedule saves a
 record of its own, so it appears in the `/sessions` browser among the sessions the human held
