@@ -1,11 +1,13 @@
 ---
 title: /sessions pop-up opens seconds late on a slow box
-status: open
+status: done
 type: bug
 priority: 2
 labels: [slow-box]
 plan: 2026-11-06 - 00 - sessions-popup-instant-open-plan
 created: 2026-11-06T19:30:09Z
+closed: 2026-11-06T20:17:41Z
+reason: "Resolved by plan 2026-11-06 - 00 - sessions-popup-instant-open-plan (archived at 42087861): /sessions opens at once with a loading row; Store.List reads only the meta header (BenchmarkListLargeRecords)."
 ---
 
 On a slow box (RPi 4), after typing `/sessions` and pressing enter, the sessions pop-up appears only after a few seconds. Nothing on screen shows that the command was taken.
