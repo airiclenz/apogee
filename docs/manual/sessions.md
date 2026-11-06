@@ -30,8 +30,11 @@ still remembers.
   instead (see [watching a live session](#watching-a-live-session)).
 - `/sessions` opens the in-TUI browser (newest first): typing filters the list,
   `⏎` resumes (or watches a `● live` row), `^r` renames inline, `^d` deletes after a confirm, `^a` toggles
-  between this workspace and all workspaces. The pane opens at once on one `loading…` row,
-  with the legend `esc close` alone, and the sessions replace that row once the list is read.
+  between this workspace and all workspaces. The pane opens at once on one `loading…` row
+  — the spinner turning ahead of the word — with the legend `esc close` alone, and the
+  sessions replace that row once the list is read. Resuming one reads its record the same way:
+  until it is restored the status line spins `loading session…` with a clock, so a slow disk
+  never looks like a frozen screen.
   If the store holds no sessions, the pane closes again with the note `no saved sessions`; if
   the list cannot be read, with `could not list sessions: …`. The verbs are chords precisely so
   the letters are free to type with — every pop-up that lists things to search

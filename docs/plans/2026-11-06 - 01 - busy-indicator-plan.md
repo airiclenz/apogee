@@ -179,7 +179,11 @@ internal/tui/sessions.go — browserListContent; internal/tui/workflows.go — w
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSessionBrowser|TestWorkflowItem|TestPopupLoading|TestWorkflowsView|TestAutoTitle|TestSessionName|TestWatchCarries|TestWatchFooter|TestRestoreCachesBoundarySnapshot|TestResumedRecord|TestSessionSwitch' ./internal/tui/`
 **Commit:** `feat(tui): pop-up loading rows turn the spinner`
 
-## 5. Document the busy indicator
+## 5. Document the busy indicator — ✅ DONE (2026-11-06)
+
+NOTES (2026-11-06): layout.md beyond the plan's named sites — the idle-facts paragraph ("And the two facts an *idle* frame may still carry") now names three, the busy indicator ranked last (matching model.go's THREE-exceptions comment); the firing block's "the spinner belongs to the worker" reason now reads "a star blinks only while this session's own Turn runs" (item 1 retired worker ownership of the chain).
+NOTES (2026-11-06): the `/workflows` item view's loading row was documented nowhere; it is named in layout.md (the status line's spinner section and the `/sessions` loading sentence) and the glossary Note, not in docs/manual/workflows.md (not in the item's Files).
+NOTES (2026-11-06): the glossary Note was added with `capcom know add --id busy-indicator --parent glossary-safety` (beside color-scheme) carrying refs to internal/tui/busy.go and layout.md; `capcom check` exits 0. No CHANGELOG entry (items 2–4 carry the user-facing ones) and no CLOSES (the plan header's `idle-wait-no-spinner` belongs to the plan, as items 2–4 left it). `go test -count=1 -run 'TestManual|TestDocs|TestLayout' ./cmd/apogee/` green.
 
 Depends on items 3 and 4.
 

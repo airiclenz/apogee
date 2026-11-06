@@ -1109,7 +1109,11 @@ Fifteen more keys live under `ui:`. Nine of them change how the screen looks rat
 says; the other six, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch` and the footer's
 layout and colours, `ui.footer.rows` and `ui.footer.colors`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
-default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
+default — `glitter`, or `classic`. The same animation is the busy indicator outside a turn: while
+an idle session waits on something slow — a `/model` profile load, a footer git action, a
+`/sessions` record load, a bare `/rename`, the first heartbeat — the status line shows it beside
+that wait's word and a clock (`⠶⠶ loading qwen3… · 01:04s`), and the `loading…` row of a pop-up
+still reading its list turns it too. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
 `ui.spinner-color` is a separate bool, on by default, that runs a slow colour loop over whichever
 glyph the spinner draws; it is deliberately independent of `ui.spinner`, so all six combinations are

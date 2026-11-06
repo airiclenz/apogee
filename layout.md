@@ -1296,6 +1296,8 @@ glyph settles to `✦` and the block repaints once, final. A workflow block's he
 same way while its Workflow has not ended — waiting on an ask's answer included — and settles to
 `✦` once it finishes, stops or fails; a workflow block replayed from a record never blinks. While a
 turn is paused (an ask or an approval) the spinner's tick stops, and so every live star holds still.
+A star blinks only while a Turn runs: at idle the tick may still turn for a wait the busy indicator
+narrates (the status line's spinner, below), and that tick advances its glyph but never flips a star.
 
 **The firing block.** A scheduled Firing wears this same shape and is deliberately not a tool call
 of this session's: its header leads with `⟳ Schedule` — the glyph `/sessions` tags a Firing's record
@@ -1323,8 +1325,8 @@ command the headless and daemon reports name, and no line when the runner had no
 neither shown at all on a run that wrote nothing,
 and the record pointer (`saved as "…" — find it in /sessions`), dropped when nothing was persisted.
 A failed Firing words its branch `error: …` and shows no answer — a partial answer under an error
-reads as a result — while keeping the stats and any salvaged pointer. The `⟳` is **static**: the
-spinner belongs to the worker driving this session's Exchange and this session is idle while a
+reads as a result — while keeping the stats and any salvaged pointer. The `⟳` is **static**: a
+star blinks only while this session's own Turn runs and this session is idle while a
 Firing runs, so the header never blinks whatever the frame's phase, and the branch's own word is
 what says the run is going. Everything else a Schedule does — created, skipped, stopped — stays a
 one-line note: those are lifecycle facts with no body, and a block around them would be an empty
@@ -1762,6 +1764,29 @@ the styles existed. The loop is quantised downstream by the terminal, so on a 25
 terminal it steps visibly and on a 16-colour one it collapses to a couple of tones; that is what
 turning it off is for.
 
+**Outside a Turn: the busy indicator.** The spinner is not the running row's alone. An idle session
+can still be waiting on something slow, and on a slow box such a wait runs for a minute or more,
+where a word that never moves reads as a frozen screen. So while the session is idle and waiting, the
+status line carries the wait in the running row's shape — `⠶⠶ loading qwen3… · 01:04s`: the glyph in
+the selected `ui.spinner` style under the `ui.spinner-color` loop, the wait's word, and a clock
+counting from when the wait began. The word is the one apogee already shows for that wait, and the
+waits rank most specific first: a launcher verb in flight (`loading <profile>…`, `unload-model…`,
+`stop-server…` — the footer's model slot keeps its own word beside it, unchanged), a footer git
+action (`git pull…`, `git push…`, `git sync…` and the rest — the note its start writes; the branch
+listing that opens switch branch is not one, since it switches nothing and lands in a moment), a
+`/sessions` record load (`loading session…`), a bare `/rename`'s naming call (`naming this
+session…`), and a wired heartbeat that has not bound a model yet (`connecting…` — never on an
+offline session, nor on one that started with no server bound, since neither has a beat coming
+soon to end it). One shows at a time, the highest ranked, and a wait whose word changes — a load
+handing over to `connecting…` — is a new wait whose clock starts again. The busy form carries no
+`· quiet` qualifier, no throughput and no Exchange total: those speak for an Exchange's stream, and a
+wait has none. It is the third of the facts an idle frame may carry (below), and the other two
+outrank it. A pop-up still reading what it lists — the `/sessions` browser before its listing, the
+`/workflows` item view before its item — is a wait too, but one its own `loading…` row narrates with
+the same turning glyph (see the `/sessions` pop-up), so the status line stays blank for it. When the
+wait ends the slot is as it was. The tick that turns an idle busy glyph never flips a live star:
+stars blink only while a Turn runs (the live star, above).
+
 **When the phrase says nothing is happening.** A spinner keeps turning whether or not the engine is
 still answering, so a running phrase gains a qualifier once the engine has gone silent: the
 `thinking · 21:03s` of a moment ago reads `thinking · quiet · 21:03s`, with the inserted `· quiet`
@@ -1922,9 +1947,9 @@ and `background sub_agent <name> failed — <reason>` for a run that could not p
 `· sub_agent` after the id, and its detail's hint offers no `^s save as recipe`. Pressing `^s` there
 gives a note saying why, and `⏎` on its one stage's row opens that stage's one item.
 
-**And the two facts an *idle* frame may still carry.** Idle otherwise says nothing for itself — the
+**And the three facts an *idle* frame may still carry.** Idle otherwise says nothing for itself — the
 input box below already invites a message — but the slot is where a surface that has gone leaves its
-fact, and two of them are owed at idle. The first is the `/settings` pane's `settings — esc close`
+fact, and two of them are owed at idle; the third is a wait in flight. The first is the `/settings` pane's `settings — esc close`
 (above), for a window that could seat none of it. The second belongs to the **session** rather than
 to a pane: a run that started with **no server bound** — nothing recorded to start on, a `server:`
 naming an entry that is gone, or nothing configured at all (ADR 0036) — carries its state here for
@@ -1936,7 +1961,10 @@ read-only `servers` row is the pointer — and the fact is what survives the `es
 pane, so a frame the human dismissed the question on never looks like an ordinary idle session. The
 pane's fact wins where both are owed, being the more urgent of the two: a modal is swallowing every
 keypress but the frame chords on a window showing none of it, and the session's fact is still there when it closes. The
-fact goes the moment a server is bound.
+fact goes the moment a server is bound. The third is the **busy indicator** — `<glyph> <phrase> ·
+<clock>` while the session waits on a launcher verb, a git action, a record load, a naming call or a
+first beat (the status line's spinner, above). It ranks below both, and the slot holds one at a
+time: a wait is narrated only once neither of the other two is owed.
 
 ---
 
@@ -2898,9 +2926,13 @@ for, and the toggle only changes where they are looking — and re-derives the r
 that matched nothing in a workspace that has sessions gets the picker's zero-match row instead,
 `no session matches "zzz"`, with the legend down to `^a this/all · ⌫ trim · esc close` — the scope
 toggle stays because widening the scope is the other way such a filter can come to match. The pane
-opens on the frame after `/sessions`, before the store has answered, on one `loading…` row with the
-legend `esc close` alone: every other key, a click on the row and a paste are inert, so no other key
-is advertised, and the full hint returns with the rows. An empty store closes the pane again with the
+opens on the frame after `/sessions`, before the store has answered, on one `loading…` row that
+turns the spinner's glyph ahead of the word (`⠶⠶ loading…`) and the legend `esc close` alone:
+every other key, a click on the row and a paste are inert, so no other key is advertised, and the
+full hint returns with the rows. The glyph is the status line's own — the same `ui.spinner` frame
+and colour loop, one column under `classic` and `ui.glyphs: safe` — and it turns while the session
+is idle, the one wait the busy indicator leaves to the pane rather than the status line (the status
+line's spinner, above); the `/workflows` item view opens on the same row until its item arrives. An empty store closes the pane again with the
 note `no saved sessions`, and a list that fails with `could not list sessions: …`. A list that
 arrives after `esc` closed the pane, or for an earlier opening of it, changes nothing.
 
