@@ -828,6 +828,11 @@ func popupCellColumn(th theme, widths []int, i int) int {
 	return col
 }
 
+// popupLoadingRow is the one prose row a pane paints while what it lists is still being read off the
+// Update loop: the /workflows item view before its output arrives, the /sessions browser before
+// its first listing does. One spelling, so no two panes word the wait differently.
+const popupLoadingRow = "loading…"
+
 // singleCellRows lifts a plain label list into one-cell popup rows — the shape a producer with
 // nothing to align (a file suggestion, an ask_user choice) hands the module. One cell is one
 // column, so the composed line is the label itself: the contract's promise that a single-cell row

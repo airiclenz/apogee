@@ -23,8 +23,10 @@ import (
 // delete. It renders as a bordered popup pane above the input through the shared popup module
 // (renderPopup) and, while open, claims every keypress but the frame chords ctrl+c and ctrl+l
 // (handleKey answers those first — frameChord — then routes to sessionBrowserKey). All persistence I/O
-// (List/Load/Delete/Rename) runs off the Update loop through a tea.Cmd against the [SessionHost],
-// so a slow disk never stalls the UI; the results fold back as sessionListMsg / sessionLoadedMsg.
+// (List/Load/Delete/Rename) runs off the Update loop through a tea.Cmd against the [SessionHost]:
+// the pane opens at once over a single loading row and fills in when the listing folds back as a
+// sessionListMsg, so a slow disk delays the rows but never the pane; a load folds back as
+// sessionLoadedMsg.
 // The engine restore itself happens on the Update loop at idle, where the Model owns the Engine.
 
 // sessionBrowser is the overlay's inline state on the Model (its zero value is "closed", so it is
@@ -34,7 +36,12 @@ import (
 // rows (browserView). confirming arms a "delete? y/n" confirm on the selected row; renaming arms an
 // inline title edit whose in-progress text is renameBuf.
 type sessionBrowser struct {
-	open          bool
+	open bool
+	// loading marks the pane its opening put up before the listing arrived (openSessionBrowser): it
+	// paints one loading row under an esc-only legend, and every key, click and paste but esc is
+	// inert. Only the opening sets it and every fold that seats rows clears it, so its zero value
+	// is "loaded" and a pane built as sessionBrowser{open: true} paints its rows as ever.
+	loading       bool
 	metas         []session.Meta
 	allWorkspaces bool
 	confirming    bool
@@ -83,10 +90,15 @@ const maxSessionRows = 8
 // surface (filterLegend, listsurface.go). sessionBrowserScopeEntry is the one verb a zero-match
 // legend keeps beside "⌫ trim" and "esc close", because widening the scope is the other way a filter
 // that matched nothing here can come to match something.
+//
+// sessionBrowserCloseEntry is the whole legend while the pane is loading: esc is the one key that
+// does anything before the rows arrive, so it is the one key named. The full legend returning is
+// what says the rows are up.
 const (
 	sessionBrowserScopeEntry = "^a this/all"
+	sessionBrowserCloseEntry = "esc close"
 	sessionBrowserHint       = "type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · " +
-		sessionBrowserScopeEntry + " · esc close"
+		sessionBrowserScopeEntry + " · " + sessionBrowserCloseEntry
 )
 
 // liveRowCell is the cell a row of a session another instance is running wears (withLiveCell).
@@ -144,12 +156,16 @@ const resumeBusyNote = "session not loaded — the agent is busy; resume it from
 const progressSavedNote = "this record was saved while a delegation was still running — that unfinished work was not kept; /continue re-runs the step that started it, a new message discards it"
 
 // sessionListMsg carries the result of an off-loop Sessions.List() back to the Update loop: the
-// metas to render (newest first) or the error that aborts the open (foldSessionList), and beside
-// them the sessions other instances are running (Sessions.LiveSessions) or the error that kept them
-// from being listed — which costs the pane its live rows, never the open. hasWatched says the read
-// asked the watched homes too (the open, listSessions), and watched and unreadable are their
-// answer; a re-list leaves it false, and the fold keeps the watched rows the open listed.
+// metas to render (newest first) or the error that closes the loading pane (foldSessionList), and
+// beside them the sessions other instances are running (Sessions.LiveSessions) or the error that
+// kept them from being listed — which costs the pane its live rows, never the open. hasWatched says
+// the read asked the watched homes too (the open, listSessions), and watched and unreadable are
+// their answer; a re-list leaves it false, and the fold keeps the watched rows the open listed.
+//
+// seq is the opening the listing answers (Model.sessionListSeq): the fold drops a stamped reply
+// whose opening was closed or superseded. A re-list leaves it zero and folds unconditionally.
 type sessionListMsg struct {
+	seq        uint64
 	metas      []session.Meta
 	live       []LiveSession
 	err        error
@@ -189,25 +205,31 @@ var (
 	_ tea.Msg = sessionLoadedMsg{}
 )
 
-// openSessionBrowser starts the /sessions overlay: it dispatches Sessions.List() off the Update
-// loop (sessionListMsg opens the pane when it returns). Without a wired host there is nothing to
-// browse, so it notes "no saved sessions" and opens nothing — the same degrade as an empty store.
+// openSessionBrowser starts the /sessions overlay: it puts the pane up at once, loading, and
+// dispatches Sessions.List() off the Update loop under a fresh opening number; the sessionListMsg
+// that answers it fills the pane in, or closes it with a note (foldSessionList). Without a wired
+// host there is nothing to browse, so it notes "no saved sessions" and opens nothing — the same
+// degrade as an empty store.
 func (m Model) openSessionBrowser() (tea.Model, tea.Cmd) {
 	if m.sessions == nil {
 		m.transcript.addNote("no saved sessions")
 		return m, nil
 	}
-	return m, m.listSessions()
+	m.sessionListSeq++
+	m.sessionBrowser = sessionBrowser{open: true, loading: true}
+	return m, m.listSessions(m.sessionListSeq)
 }
 
 // listSessions builds the Cmd that reads Sessions.List() off the Update loop and reports it as a
-// sessionListMsg. It captures the host by value so the closure holds no pointer into the
-// value-copied Model. It is the one read that asks the watched homes as well
-// (Sessions.WatchedSessions): the re-list a rename or delete carries reads the own home only.
-func (m Model) listSessions() tea.Cmd {
+// sessionListMsg stamped with the opening seq it answers. It captures the host by value so the
+// closure holds no pointer into the value-copied Model. It is the one read that asks the watched
+// homes as well (Sessions.WatchedSessions): the re-list a rename or delete carries reads the own
+// home only.
+func (m Model) listSessions(seq uint64) tea.Cmd {
 	sessions := m.sessions
 	return func() tea.Msg {
 		msg := readSessionList(sessions)
+		msg.seq = seq
 		if msg.err != nil {
 			return msg
 		}
@@ -217,13 +239,18 @@ func (m Model) listSessions() tea.Cmd {
 	}
 }
 
-// foldSessionList folds a List() result: an error or a completely empty store notes the outcome
-// and opens no overlay; otherwise the browser opens (or refreshes, after a delete/rename) over the
-// metas with the selection clamped into range. The empty-store note fires on the raw List result,
+// foldSessionList folds a List() result: an error or a completely empty store closes the pane and
+// notes the outcome; otherwise the rows replace the loading row (or refresh the pane, after a
+// delete/rename) with the selection clamped into range. A stamped reply whose opening is no longer
+// the one on screen — the human closed it, or closed and opened again — changes nothing and notes
+// nothing. An unstamped re-list folds whatever the pane's state, opening it as it always has. The empty-store note fires on the raw List result,
 // not the workspace-filtered view — a store with sessions only in OTHER workspaces still opens so
 // the human can widen with `a`. The live sessions merge in first (mergeLive), so a store holding
 // only a headless run's journal still opens over that run's row.
 func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
+	if msg.seq != 0 && (msg.seq != m.sessionListSeq || !m.sessionBrowser.open) {
+		return nil
+	}
 	if msg.err != nil {
 		m.sessionBrowser = sessionBrowser{}
 		m.transcript.addNote("could not list sessions: " + msg.err.Error())
@@ -251,6 +278,7 @@ func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
 	m.sessionBrowser.watchedList = watchedList
 	m.sessionBrowser.watched = watched
 	m.sessionBrowser.open = true
+	m.sessionBrowser.loading = false
 	m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
 	return nil
 }
@@ -499,6 +527,14 @@ func (m Model) sessionBrowserView() browserView {
 // readings of the store. A key the surface hands back (listUnclaimed) is this pane's own to answer,
 // and what it does not answer either is swallowed whole — the browser is modal.
 func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.sessionBrowser.loading {
+		// Nothing is listed yet, so there is no row to move to, resume or filter: esc, the one key the
+		// loading legend names, is the one key answered.
+		if msg.String() == "esc" {
+			m.sessionBrowser = sessionBrowser{}
+		}
+		return m, nil
+	}
 	if m.sessionBrowser.renaming {
 		return m.sessionRenameKey(msg)
 	}
@@ -660,13 +696,14 @@ func (m *Model) refuseWatchedVerb(meta session.Meta) bool {
 // sessionBrowserPaste lands a bracketed paste where the browser's keys would land it (listPaste):
 // in the rename field while a rename is open, folded onto its one line like the filter
 // ([lineEditor.editMsg]); nowhere during a delete-confirm, whose only answers are y and n and which
-// no pasted text may answer; and in the filter otherwise, re-seating the highlight as a typed key
+// no pasted text may answer, nor while the pane is loading, which has no rows to filter yet; and in
+// the filter otherwise, re-seating the highlight as a typed key
 // does. paste is the edit that carries the text into a field. It always claims: the browser is modal.
 func (m Model) sessionBrowserPaste(paste func(*lineEditor) tea.Cmd) (Model, tea.Cmd, bool) {
 	switch {
 	case m.sessionBrowser.renaming:
 		return m, m.sessionBrowser.renameBuf.edit(paste), true
-	case m.sessionBrowser.confirming:
+	case m.sessionBrowser.confirming, m.sessionBrowser.loading:
 		return m, nil, true
 	}
 	rows, _ := m.sessionBrowser.unfilteredRows(m.th, m.opts.Workspace, time.Now())
@@ -779,7 +816,7 @@ func (m Model) browserWheel(msg tea.MouseWheelMsg) (Model, bool) {
 	if !ok || msg.Y < y0 || msg.Y >= y0+h {
 		return m, false
 	}
-	if m.sessionBrowser.renaming || m.sessionBrowser.confirming {
+	if m.sessionBrowser.renaming || m.sessionBrowser.confirming || m.sessionBrowser.loading {
 		return m, true
 	}
 	m.sessionBrowser.wheel(msg, len(m.sessionBrowserView().rows))
@@ -805,7 +842,7 @@ func (m *Model) renameSession(id, title string) tea.Cmd {
 
 // setSessionTitle is renameSession's QUIET twin: it queues id's title and reports nothing back to
 // the human. It is the apply path for a title the model generated (autotitle.go), where the re-list
-// would be actively wrong — foldSessionList opens the overlay over every list it folds, so reusing
+// would be actively wrong — foldSessionList opens the overlay over every re-list it folds, so reusing
 // renameSession would make the /sessions browser appear unbidden partway through the first answer.
 // Nothing is displayed either way: a title surfaces in the browser the next time it is opened, and
 // in the resume note, and nowhere else.
@@ -1034,7 +1071,8 @@ func (m Model) renderSessionBrowserPlaced() (string, popupPlacement) {
 
 // browserListContent is everything the browser says about itself to the shared list surface — its
 // slot, its title, its legend, its taste in rows, and either the filtered session rows or the one
-// line of prose an empty workspace gets — or, when the filter matched nothing, the zero-match row
+// line of prose an empty workspace gets, or the loading row under the esc-only legend before the
+// listing has arrived — or, when the filter matched nothing, the zero-match row
 // and its legend (listContent.statingFilter). ok is false with the overlay closed, which is what makes
 // both renders above answer with nothing rather than with a pane.
 func (m Model) browserListContent() (listContent, bool) {
@@ -1056,6 +1094,11 @@ func (m Model) browserListContent() (listContent, bool) {
 		hint:      sessionBrowserHint,
 		rowCap:    maxSessionRows,
 		selected:  -1, // no rows ⇒ no highlight (the popup module's own convention)
+	}
+	if b.loading {
+		c.rows = singleCellRows([]string{popupLoadingRow})
+		c.hint = sessionBrowserCloseEntry
+		return c, true
 	}
 	matches := 0
 	if len(b.visible(m.opts.Workspace)) == 0 {

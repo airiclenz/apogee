@@ -90,7 +90,12 @@ returns its load error, never the next-newest). `TestLegacyBareEnvelopeIsWrapped
 - `GOMEMLIMIT=2GiB go test -count=1 -run '^$' -bench BenchmarkListLargeRecords -benchtime 3x ./internal/session/`
 **Commit:** `perf(session): list reads only each record's meta header`
 
-## 2. /sessions opens its pop-up at once with a loading row
+## 2. /sessions opens its pop-up at once with a loading row — ✅ DONE (2026-11-06)
+
+NOTES (2026-11-06): shared loading constant — the item says to share one constant with `workflowItemLoading`; it is now `popupLoadingRow` in `internal/tui/popup.go` (beside `singleCellRows`, the popup module both panes paint through), and `workflows.go` uses it in place of its own `workflowItemLoading`, which is removed. Same spelling, `loading…`. popup.go and workflows.go are outside the item's **Files:** for that reason.
+NOTES (2026-11-06): consequential edit — internal/tui/sessionsave.go: made necessary by the seq guard (the `relist` comment said foldSessionList "opens the overlay over every list it folds"; now "every re-list", since a stamped reply to a closed pane no longer opens it). Same wording fix in `setSessionTitle`'s doc in sessions.go.
+NOTES (2026-11-06): clicks on the loading pane were already inert with no mouse.go change: browserHit counts the pane's rows from the (empty) metas, so a click on the loading row is hitInert; an outside click still dismisses, as esc does, and the stale reply is then dropped. The wheel is made explicitly inert while loading (browserWheel, sessions.go).
+NOTES (2026-11-06): `sessionBrowserHint` now ends with the new `sessionBrowserCloseEntry` constant ("esc close", the loading legend) instead of the literal; its value is unchanged.
 
 **What:**
 Recast at the regression check (2026-11-06).

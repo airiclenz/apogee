@@ -245,7 +245,7 @@ type recordWrite struct {
 
 	// relist re-reads the store once the write lands, so the /sessions overlay repaints over the
 	// result — what the browser's own verbs want, and what the QUIET title apply must not have
-	// (foldSessionList opens the overlay over every list it folds, so a generated title would pop
+	// (foldSessionList opens the overlay over every re-list it folds, so a generated title would pop
 	// the browser open partway through the first answer).
 	relist bool
 

@@ -124,6 +124,12 @@ type Model struct {
 	// value-copied Model like autocompleteState (ADR 0011). It is driven only at idle.
 	sessionBrowser sessionBrowser
 
+	// sessionListSeq numbers the /sessions openings (openSessionBrowser): each stamps its listing
+	// with the next value, and foldSessionList seats only the reply of the opening still on screen.
+	// It lives beside sessionBrowser rather than in it, so the zeroing that closes the pane never
+	// resets it and a reopen never reuses the number of an opening whose reply is still in flight.
+	sessionListSeq uint64
+
 	// actuation is the launcher latch (actuation.go, ADR 0029 D5): which blocking launcher verb is
 	// in flight, on what, and the channel its narration is pumped back through. Its zero value is
 	// "nothing in flight", and everything on it is a plain value or a channel — a reference header —
@@ -1490,8 +1496,9 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.foldWorkflowSaved(msg)
 
 	case sessionListMsg:
-		// Sessions.List() returned off the Update loop: open (or refresh) the /sessions browser
-		// over the metas, or note the empty/error case with no overlay (sessions.go).
+		// Sessions.List() returned off the Update loop: fill the /sessions browser its opening put
+		// up as loading (or refresh it, after a rename or delete), or close it and note the
+		// empty/error case; a reply to an opening closed or superseded since is dropped (sessions.go).
 		return m, m.foldSessionList(msg)
 
 	case sessionLoadedMsg:

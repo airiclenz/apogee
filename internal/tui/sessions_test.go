@@ -922,6 +922,169 @@ func TestSessionBrowserRefusesToOpenWhileBusy(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The pane opens at once, loading, and fills in when the listing lands
+// ----------------------------------------------------------------------------
+
+// beginBrowserOpen submits /sessions and hands back the List Cmd UNRUN, so the frame the pane opens
+// on — before the store has answered — can be judged; folding cmdMsg(cmd) is the release.
+func beginBrowserOpen(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	m, cmd := typeCommand(t, m, "/sessions")
+	if cmd == nil {
+		t.Fatal("/sessions dispatched no List Cmd")
+	}
+	return m, cmd
+}
+
+// browserPaneHolds reports whether any interior line of the open pane reads exactly want.
+func browserPaneHolds(t *testing.T, m Model, want string) bool {
+	t.Helper()
+	return slices.Contains(browserPaneLines(t, m), want)
+}
+
+// assertBrowserLoading fails unless the pane is up over its one loading row under the esc-only
+// legend.
+func assertBrowserLoading(t *testing.T, m Model) {
+	t.Helper()
+	if !m.sessionBrowser.open {
+		t.Fatal("no pane on the frame; want the browser up while the listing is read")
+	}
+	if !strings.Contains(plain(m.View()), popupLoadingRow) {
+		t.Errorf("frame does not hold %q:\n%s", popupLoadingRow, plain(m.View()))
+	}
+	if !browserPaneHolds(t, m, sessionBrowserCloseEntry) {
+		t.Errorf("pane legend is not %q alone: %q", sessionBrowserCloseEntry, browserPaneLines(t, m))
+	}
+}
+
+// The frame after /sessions + enter already holds the pane — one loading row, the legend naming esc
+// alone — before the store has answered; a paste then types no filter, and once the listing folds
+// the rows and the full legend take their place.
+func TestSessionBrowserOpensLoadingBeforeList(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", "render me", "/ws/a", time.Now().Add(-5*time.Minute), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+
+	m, cmd := beginBrowserOpen(t, m)
+	assertBrowserLoading(t, m)
+	m = step(t, m, tea.PasteMsg{Content: "render"})
+	if strings.Contains(plain(m.View()), pickerFilterLead) {
+		t.Errorf("a paste while loading typed a filter onto the title row:\n%s", plain(m.View()))
+	}
+	m = step(t, m, cmdMsg(cmd))
+
+	got := plain(m.View())
+	if strings.Contains(got, popupLoadingRow) {
+		t.Errorf("the loading row outlived the listing:\n%s", got)
+	}
+	if !strings.Contains(got, "render me") {
+		t.Errorf("the listed session is not on the frame:\n%s", got)
+	}
+	if !browserPaneHolds(t, m, sessionBrowserHint) {
+		t.Errorf("pane legend is not the full one %q: %q", sessionBrowserHint, browserPaneLines(t, m))
+	}
+}
+
+// esc while the pane is loading closes it, and the listing that lands afterwards changes nothing:
+// no pane reappears and no note is added — neither the rows of a full store nor the note an empty
+// or failing one would have raised.
+func TestSessionBrowserEscWhileLoadingDropsReply(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		seed    bool
+		listErr error
+	}{
+		{name: "rows", seed: true},
+		{name: "empty store"},
+		{name: "list error", listErr: errors.New("disk on fire")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host := &fakeSessionHost{listErr: tc.listErr}
+			if tc.seed {
+				storeMeta(host, "sess-1", "a session", "/ws/a", time.Now(), 0, nil)
+			}
+			m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+			m, cmd := beginBrowserOpen(t, m)
+			m = step(t, m, keyEsc())
+			if m.sessionBrowser.open {
+				t.Fatal("esc did not close the loading pane")
+			}
+			before := len(m.transcript.entries)
+
+			m = step(t, m, cmdMsg(cmd))
+
+			if m.sessionBrowser.open {
+				t.Error("the reply to a closed opening put the pane back up")
+			}
+			if got := len(m.transcript.entries); got != before {
+				t.Errorf("transcript grew from %d to %d entries; a dropped reply notes nothing", before, got)
+			}
+		})
+	}
+}
+
+// A reply belonging to an earlier opening is stale: after close-and-reopen, the first opening's
+// listing landing leaves the second still loading, and only the second's own listing fills it.
+func TestSessionBrowserStaleReplyIgnored(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", "a session", "/ws/a", time.Now(), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m, first := beginBrowserOpen(t, m)
+	m = step(t, m, keyEsc())
+	m, second := beginBrowserOpen(t, m)
+
+	m = step(t, m, cmdMsg(first))
+
+	assertBrowserLoading(t, m)
+	m = step(t, m, cmdMsg(second))
+	if m.sessionBrowser.loading || len(m.sessionBrowser.metas) != 1 {
+		t.Errorf("the current opening's listing did not fill the pane: loading=%v metas=%d",
+			m.sessionBrowser.loading, len(m.sessionBrowser.metas))
+	}
+}
+
+// A listing that fails after the instant open closes the pane and notes the failure, as the open
+// always has.
+func TestSessionBrowserLoadingErrorClosesWithNote(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{listErr: errors.New("disk on fire")}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m, cmd := beginBrowserOpen(t, m)
+	assertBrowserLoading(t, m)
+
+	m = step(t, m, cmdMsg(cmd))
+
+	if m.sessionBrowser.open {
+		t.Error("a failed listing left the pane up")
+	}
+	if !hasEntry(m, entryNote, "could not list sessions: disk on fire") {
+		t.Error("a failed listing was not noted")
+	}
+}
+
+// An empty store found after the instant open closes the pane and notes "no saved sessions".
+func TestSessionBrowserLoadingEmptyClosesWithNote(t *testing.T) {
+	t.Parallel()
+	m := newBrowserModel(t, &fakeEngine{}, &fakeSessionHost{}, "/ws/a")
+	m, cmd := beginBrowserOpen(t, m)
+	assertBrowserLoading(t, m)
+
+	m = step(t, m, cmdMsg(cmd))
+
+	if m.sessionBrowser.open {
+		t.Error("an empty store left the pane up")
+	}
+	if !hasEntry(m, entryNote, "no saved sessions") {
+		t.Error("an empty store did not note 'no saved sessions'")
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The overlay pane spans the full window width (selector-popup plan §2)
 // ----------------------------------------------------------------------------
 

@@ -70,7 +70,6 @@ const (
 	workflowsListFailed   = "could not list workflows: "
 	workflowsGone         = "this workflow is no longer listed"
 	workflowsNoStages     = "no stages yet"
-	workflowItemLoading   = "loading…"
 	workflowItemGone      = "this item is no longer listed"
 	workflowItemNoChild   = "this stage runs no child: no output and no conversation"
 	workflowOutputMissing = " — not written"
@@ -599,7 +598,7 @@ func (m Model) workflowsRows() ([]popupRow, bool) {
 		return rows, true
 	case workflowsAtItem:
 		if pane.lines == nil {
-			return singleCellRows([]string{workflowItemLoading}), false
+			return singleCellRows([]string{popupLoadingRow}), false
 		}
 		return singleCellRows(pane.lines), true
 	}
