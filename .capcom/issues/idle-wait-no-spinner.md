@@ -1,10 +1,12 @@
 ---
 title: Slow idle-state waits show no busy indicator
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-11-06 - 01 - busy-indicator-plan
 created: 2026-11-06T20:34:31Z
+closed: 2026-11-06T22:08:11Z
+reason: "Resolved by plan 2026-11-06 - 01 - busy-indicator-plan (archived at 22114dee): status-line busy indicator for idle waits, animated pop-up loading rows, docs and glossary Note."
 ---
 
 The status-line spinner (`internal/tui/spinner.go`) runs only while a Turn runs (`stateRunning`); its tick chain is keyed on `worker.gen`. Every other wait leaves the status line blank, so on a slow box apogee looks stuck:
