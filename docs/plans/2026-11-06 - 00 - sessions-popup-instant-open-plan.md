@@ -43,7 +43,11 @@ holding many large records too.
 - Speeding up `Prune`, `Load`, or `Store.Live`'s journal probe.
 - Opening the pop-up while busy (still refused).
 
-## 1. Store.List reads only each record's meta header
+## 1. Store.List reads only each record's meta header — ✅ DONE (2026-11-06)
+
+NOTES (2026-11-06): `TestListSkipsCorruptFile` gained a third file, cut off inside `meta`, so the "corrupt before or in meta is still skipped" claim is asserted rather than assumed.
+NOTES (2026-11-06): `TestListLegacyEnvelopeStillListed` also covers a wrapper whose keys come in another order (meta before recordVersion), the other shape that takes the whole-decode fallback; `BenchmarkListLargeRecords` runs `header` and `whole` sub-benchmarks so the gain is on record.
+NOTES (2026-11-06): the header read stops after `meta`, so a file with a valid header that is broken further on in any way (trailing bytes, a later duplicate `recordVersion` or `meta` key) is listed, the same class as a damaged body. Load still refuses it.
 
 **What:**
 **Goal:** `Store.List` returns each wrapped

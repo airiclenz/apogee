@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -148,6 +149,11 @@ func TestListSkipsCorruptFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "stray.json"), []byte(`{"foo":1}`), filePerm); err != nil {
 		t.Fatalf("write stray: %v", err)
 	}
+	// Cut off inside meta itself: the header read cannot finish, so neither can the whole decode.
+	cutInMeta := fmt.Sprintf(`{"recordVersion":%d,"meta":{"id":"cut-in-meta","tit`, RecordVersion)
+	if err := os.WriteFile(filepath.Join(dir, "cut-in-meta.json"), []byte(cutInMeta), filePerm); err != nil {
+		t.Fatalf("write cut-in-meta: %v", err)
+	}
 
 	metas, err := st.List()
 	if err != nil {
@@ -168,6 +174,194 @@ func TestListMissingDirIsEmpty(t *testing.T) {
 	}
 	if len(metas) != 0 {
 		t.Errorf("List of missing dir = %+v, want empty", metas)
+	}
+}
+
+// damagedSuffix is what writeDamagedBody leaves of a record past its meta: the opening of a
+// transcript that never closes, so the header reads and the whole record never decodes.
+const damagedSuffix = `,"transcript":{"vers`
+
+// writeDamagedBody writes rec as Save would, then cuts it off just inside the transcript behind its
+// meta — the record a crash or a disk error leaves with a readable header and an unreadable body.
+func writeDamagedBody(t *testing.T, dir string, rec Record) {
+	t.Helper()
+	rec.RecordVersion = RecordVersion
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", rec.Meta.ID, err)
+	}
+	cut := bytes.Index(data, []byte(`,"transcript":`))
+	if cut < 0 {
+		t.Fatalf("marshalled %s has no transcript key: %s", rec.Meta.ID, data)
+	}
+	damaged := append(data[:cut:cut], damagedSuffix...)
+	if err := os.WriteFile(filepath.Join(dir, rec.Meta.ID+".json"), damaged, filePerm); err != nil {
+		t.Fatalf("write damaged %s: %v", rec.Meta.ID, err)
+	}
+}
+
+// writeDamagedHeader writes a hand-made record under name: a recordVersion of version and the
+// literal meta object, followed by a session that never closes.
+func writeDamagedHeader(t *testing.T, dir, name string, version int, meta string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"recordVersion":%d,"meta":%s,"session":{"Vers`, version, meta)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), filePerm); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+// List reads only each record's meta header, so a record whose bytes after a valid meta are
+// damaged is still listed with its whole Meta; resuming it is what fails, with the load error.
+func TestListReadsMetaOnlyListsDamagedBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+	updated := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	rec := sampleRecord("20261106T090000Z-dddd0001", updated)
+	writeDamagedBody(t, dir, rec)
+
+	metas, err := st.List()
+
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 || !reflect.DeepEqual(metas[0], rec.Meta) {
+		t.Fatalf("List = %+v, want only the damaged record's meta %+v", metas, rec.Meta)
+	}
+	if _, err := st.Load(rec.Meta.ID); err == nil {
+		t.Error("Load of a damaged body succeeded; want the decode error")
+	}
+}
+
+// The header read keeps the reject-forward rule: a record a newer apogee wrote is skipped even
+// when the body that a whole decode would also have refused is never reached.
+func TestListMetaOnlyRefusesTooNewVersion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+	writeDamagedHeader(t, dir, "future.json", RecordVersion+1, `{"id":"future"}`)
+
+	metas, err := st.List()
+
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Errorf("List surfaced a future-version record: %+v", metas)
+	}
+}
+
+// The header read clears an unsafe ParentID exactly as the whole decode does. The body is damaged,
+// so only the header read can list this record at all.
+func TestListMetaOnlyClearsBadParentID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+	writeDamagedHeader(t, dir, "20260916T120000Z-ffff0000.json", RecordVersion,
+		`{"id":"20260916T120000Z-ffff0000","title":"forked","parentID":"../../escape"}`)
+
+	metas, err := st.List()
+
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 || metas[0].ID != "20260916T120000Z-ffff0000" || metas[0].ParentID != "" {
+		t.Errorf("List = %+v, want the forked record with its ParentID cleared", metas)
+	}
+}
+
+// The header read refuses an id that could not address a file inside the store, whether or not the
+// body behind it would decode.
+func TestListMetaOnlySkipsInvalidID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range unsafeIDs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			st := NewStore(dir)
+			writeDamagedHeader(t, dir, "planted.json", RecordVersion, fmt.Sprintf(`{"id":%s}`, mustJSON(t, tc.id)))
+
+			metas, err := st.List()
+
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(metas) != 0 {
+				t.Errorf("List = %+v, want the planted record skipped", metas)
+			}
+		})
+	}
+}
+
+// Every file not in the header shape Save writes takes the whole decode, so a legacy bare envelope
+// still lists with its synthetic meta and a wrapper whose keys come in another order still lists.
+func TestListLegacyEnvelopeStillListed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+	legacy, err := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{}`)}.Encode()
+	if err != nil {
+		t.Fatalf("encode legacy envelope: %v", err)
+	}
+	reordered := fmt.Sprintf(`{"meta":{"id":"20260101T000000Z-eeee0002"},"recordVersion":%d,"session":{"Version":%d,"State":null}}`,
+		RecordVersion, domain.SessionVersion)
+	for name, body := range map[string][]byte{
+		"20260101T000000Z.json":          legacy,
+		"20260101T000000Z-eeee0002.json": []byte(reordered),
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), body, filePerm); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	metas, err := st.List()
+
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ids := make([]string, 0, len(metas))
+	for _, m := range metas {
+		ids = append(ids, m.ID)
+	}
+	sort.Strings(ids)
+	if want := []string{"20260101T000000Z", "20260101T000000Z-eeee0002"}; !slices.Equal(ids, want) {
+		t.Errorf("List ids = %v, want %v", ids, want)
+	}
+}
+
+// BenchmarkListLargeRecords lists a store of several multi-megabyte records, through List's header
+// read and through the whole decode Prune keeps, so the gap between the two is on record.
+func BenchmarkListLargeRecords(b *testing.B) {
+	const (
+		records         = 6
+		transcriptBytes = 4 << 20
+	)
+	st := NewStore(b.TempDir())
+	transcript := json.RawMessage(strconv.Quote(strings.Repeat("x", transcriptBytes)))
+	base := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	for i := range records {
+		rec := sampleRecord(fmt.Sprintf("20261106T%02d0000Z-bbbb%04d", i, i), base.Add(time.Duration(i)*time.Hour))
+		rec.Transcript = transcript
+		if err := st.Save(rec); err != nil {
+			b.Fatalf("Save: %v", err)
+		}
+	}
+	readers := []struct {
+		name string
+		read func(path string) (Meta, error)
+	}{
+		{name: "header", read: st.readMeta},
+		{name: "whole", read: st.loadMeta},
+	}
+	for _, r := range readers {
+		b.Run(r.name, func(b *testing.B) {
+			for b.Loop() {
+				found, err := st.scan(r.read)
+				if err != nil || len(found) != records {
+					b.Fatalf("scan = %d records, %v; want %d", len(found), err, records)
+				}
+			}
+		})
 	}
 }
 
@@ -1325,6 +1519,26 @@ func TestPruneLeavesUnreadableFiles(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(st.dir, name)); err != nil {
 			t.Errorf("%s: %v — an unreadable file must survive the sweep", name, err)
 		}
+	}
+}
+
+// Prune keeps the whole decode, so a record whose body is damaged behind a readable header — one
+// List still shows — is never swept, however far past the retention rules it is.
+func TestPruneSkipsDamagedBody(t *testing.T) {
+	t.Parallel()
+	st := pruneStore(t, nil)
+	writeDamagedBody(t, st.dir, sampleRecord(pruneOldID, pruneNow.Add(-7*24*time.Hour)))
+
+	removed, err := st.Prune(Retention{MaxAge: time.Minute, MaxCount: 1})
+
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed = %d, want 0 (the damaged record is no candidate)", removed)
+	}
+	if got := storedIDs(t, st); !slices.Equal(got, []string{pruneOldID}) {
+		t.Errorf("after Prune the store lists %v, want the damaged record %q still there", got, pruneOldID)
 	}
 }
 

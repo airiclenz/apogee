@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bufio"
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -66,13 +67,14 @@ var ErrRecordVersion = errors.New("apogee: unsupported session record version")
 // maxRecordBytes bounds the bytes a record file (or a transcript blob) may hold before the store
 // refuses it unread. A record is untrusted disk input decoded with plain json.Unmarshal, and the
 // three unmarshals loadPath and DecodeTranscript perform allocate in proportion to the bytes they
-// are handed — so the byte cap is what bounds the decode, not any check inside it. 256 MiB is far
+// are handed — so the byte cap is what bounds the decode, not any check inside it. List's header
+// read (readMeta) streams through the same cap, so it is bounded the same way. 256 MiB is far
 // past any session apogee itself writes and far under what an unbounded read of a planted file
 // would take from the host.
 const maxRecordBytes = 256 << 20
 
 // ErrRecordTooLarge is returned when a record file exceeds maxRecordBytes — refused at the read,
-// before any byte is decoded. List soft-skips such a file like any other it cannot decode.
+// before any byte is decoded. List soft-skips such a file like any other it cannot read.
 var ErrRecordTooLarge = errors.New("apogee: session record exceeds the 256 MiB limit")
 
 // ErrInvalidID is returned when a session id cannot address a file inside the store: an id is
@@ -399,12 +401,16 @@ func (s *Store) save(rec Record) error {
 	return nil
 }
 
-// List reads every *.json in the store, decodes each to its Meta, and returns them sorted
-// UpdatedAt descending. A file that fails to decode — corrupt, or a foreign file that
-// wandered into the directory — is skipped, so one bad record never kills the browser. A
-// missing store directory is an empty list, not an error.
+// List reads every *.json in the store to its Meta and returns them sorted UpdatedAt descending.
+// It reads only each wrapped record's meta header (readMeta), never its transcript or session, so
+// a listing costs a few hundred bytes per record however long the conversations are. That makes
+// List lenient about the body: a record whose meta reads cleanly but whose bytes after it are
+// damaged is listed, and only a Load of it fails. A file whose header does not read — corrupt
+// before or in meta, too new (ErrRecordVersion), over maxRecordBytes, declaring an unsafe id, or
+// a foreign file that wandered into the directory — is skipped, so one bad record never kills the
+// browser. A missing store directory is an empty list, not an error.
 func (s *Store) List() ([]Meta, error) {
-	found, err := s.scan()
+	found, err := s.scan(s.readMeta)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +422,7 @@ func (s *Store) List() ([]Meta, error) {
 }
 
 // stemmedMeta pairs a listed record's Meta with the filename stem it was read from. The two
-// need not agree: decodeRecord validates the id a record declares but never compares it to the
+// need not agree: vetMeta validates the id a record declares but never compares it to the
 // path the record came from, so a copied file (a hand-made backup.json carrying a live
 // record's id) declares an id that addresses ANOTHER file. Prune needs that distinction to
 // avoid deleting the wrong record; List does not, and drops the stem again.
@@ -425,11 +431,12 @@ type stemmedMeta struct {
 	meta Meta
 }
 
-// scan reads every *.json in the store, decodes each to its Meta, and returns them paired with
-// their filename stems, sorted UpdatedAt descending. A file that fails to decode — corrupt, or
-// a foreign file that wandered into the directory — is skipped, so one bad record never kills
-// the browser and never gets swept. A missing store directory is an empty list, not an error.
-func (s *Store) scan() ([]stemmedMeta, error) {
+// scan reads every *.json in the store to its Meta through read, and returns them paired with
+// their filename stems, sorted UpdatedAt descending. read decides how much of each file counts:
+// List passes readMeta (the meta header alone), Prune passes loadMeta (the whole record), so a
+// record with a damaged body is listed but never swept. A file read refuses is skipped, so one
+// bad record never kills the browser. A missing store directory is an empty list, not an error.
+func (s *Store) scan(read func(path string) (Meta, error)) ([]stemmedMeta, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -442,11 +449,11 @@ func (s *Store) scan() ([]stemmedMeta, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		rec, err := s.loadPath(filepath.Join(s.dir, e.Name()))
+		meta, err := read(filepath.Join(s.dir, e.Name()))
 		if err != nil {
 			continue // soft-skip: corrupt or foreign files must not fail the whole list
 		}
-		found = append(found, stemmedMeta{stem: strings.TrimSuffix(e.Name(), ".json"), meta: rec.Meta})
+		found = append(found, stemmedMeta{stem: strings.TrimSuffix(e.Name(), ".json"), meta: meta})
 	}
 	sort.SliceStable(found, func(i, j int) bool {
 		return found[i].meta.UpdatedAt.After(found[j].meta.UpdatedAt)
@@ -469,7 +476,8 @@ func (s *Store) Load(id string) (Record, error) {
 // a file rather than an id. Legacy bare envelopes are wrapped identically to Load.
 func (s *Store) LoadPath(path string) (Record, error) { return s.loadPath(path) }
 
-// loadPath reads and decodes one record file, shared by List, Load, and LoadPath. A file whose
+// loadPath reads and decodes one record file whole, shared by Load, LoadPath, Rename, Prune's scan
+// (loadMeta) and List's fallback for a file not in the wrapped header shape. A file whose
 // stat reports more than maxRecordBytes is refused with ErrRecordTooLarge before a byte of it is
 // read; the read itself is capped one byte past the limit so a file that grows between the stat
 // and the read is refused the same way rather than handed to the decoder whole. Only a SUCCESSFUL
@@ -484,6 +492,89 @@ func (s *Store) loadPath(path string) (Record, error) {
 		return Record{}, fmt.Errorf("apogee: read session %q: %w", path, err)
 	}
 	return decodeRecord(data, path)
+}
+
+// loadMeta is scan's whole-record reader: the Meta of a file only when the entire record decodes.
+// Prune sweeps through it, so retention never deletes a record whose body is damaged.
+func (s *Store) loadMeta(path string) (Meta, error) {
+	rec, err := s.loadPath(path)
+	if err != nil {
+		return Meta{}, err
+	}
+	return rec.Meta, nil
+}
+
+// readMeta is List's reader: a record file's Meta, decoded from its header without touching the
+// transcript or session behind it. A file in the shape Save writes — an object whose first key is
+// recordVersion and whose second is meta — is read that far and no further, under the same
+// maxRecordBytes bounds loadPath has; a version above RecordVersion is refused with
+// ErrRecordVersion. Every other shape (a legacy bare envelope, keys in another order, a header
+// that does not decode, a non-object) falls back to loadPath's whole decode, so wrapLegacy and
+// every refusal stay on that one path. Either way the Meta passes vetMeta.
+func (s *Store) readMeta(path string) (Meta, error) {
+	meta, isHeader, err := readMetaHeader(path)
+	if err != nil {
+		return Meta{}, err
+	}
+	if !isHeader {
+		return s.loadMeta(path)
+	}
+	return vetMeta(meta, path)
+}
+
+// readMetaHeader opens path and decodes its wrapped-record header (decodeMetaHeader). isHeader is
+// false when the file is not in that shape, the cue for readMeta to fall back to the whole decode;
+// err is set only for a refusal that fallback would repeat: an oversize file, an open failure, or
+// a too-new version.
+func readMetaHeader(path string) (meta Meta, isHeader bool, err error) {
+	if info, err := os.Stat(path); err == nil && info.Size() > maxRecordBytes {
+		return Meta{}, false, fmt.Errorf("apogee: read session %q: %w", path, ErrRecordTooLarge)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return Meta{}, false, fmt.Errorf("apogee: read session %q: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	// The limit is loadPath's cap: one byte past maxRecordBytes, so a file that grew after the stat
+	// is never streamed beyond what a whole read would have buffered.
+	dec := json.NewDecoder(bufio.NewReader(io.LimitReader(f, maxRecordBytes+1)))
+	return decodeMetaHeader(dec)
+}
+
+// decodeMetaHeader reads `{"recordVersion":N,"meta":{…}` from dec and stops there, leaving the
+// rest of the stream unread. isHeader is false, with no error, for any other opening.
+func decodeMetaHeader(dec *json.Decoder) (meta Meta, isHeader bool, err error) {
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return Meta{}, false, nil
+	}
+	if !nextKeyIs(dec, "recordVersion") {
+		return Meta{}, false, nil
+	}
+	var version int
+	if err := dec.Decode(&version); err != nil {
+		return Meta{}, false, nil
+	}
+	if version > RecordVersion {
+		return Meta{}, false, ErrRecordVersion
+	}
+	if !nextKeyIs(dec, "meta") {
+		return Meta{}, false, nil
+	}
+	if err := dec.Decode(&meta); err != nil {
+		return Meta{}, false, nil
+	}
+	return meta, true, nil
+}
+
+// nextKeyIs reports whether dec's next token is the object key want — matched exactly, where
+// json.Unmarshal would fold case, so any spelling but Save's own takes the whole-decode path.
+func nextKeyIs(dec *json.Decoder, want string) bool {
+	tok, err := dec.Token()
+	if err != nil {
+		return false
+	}
+	key, isKey := tok.(string)
+	return isKey && key == want
 }
 
 // readRecordFile reads path through a maxRecordBytes+1 limit: one byte past the cap is enough to
@@ -794,8 +885,8 @@ func NewReadOnlyStore(dir string) *ReadOnlyStore {
 	return &ReadOnlyStore{store: NewStore(dir)}
 }
 
-// List is [Store.List] over the viewed directory: every record's Meta, newest first, a file that
-// will not decode skipped, a missing directory an empty list.
+// List is [Store.List] over the viewed directory: every record's Meta read from its header, newest
+// first, a file whose header will not read skipped, a missing directory an empty list.
 func (r *ReadOnlyStore) List() ([]Meta, error) { return r.store.List() }
 
 // Live is [Store.Live] over the viewed directory: the sessions running there now, found by probe.
@@ -947,9 +1038,10 @@ type Retention struct {
 }
 
 // Prune applies r to the store and reports how many records it removed. Candidates are the
-// records scan can read, newest first: a corrupt or foreign file is never deleted, and neither
-// is a file whose name disagrees with the id the record inside it declares — deleting by that
-// id would take out the OTHER record, the live one the sweep meant to keep. MaxAge discards
+// records that decode whole (scan through loadMeta), newest first: a corrupt or foreign file is
+// never deleted, nor is a record whose body is damaged behind a readable header (which List still
+// shows), and neither is a file whose name disagrees with the id the record inside it declares —
+// deleting by that id would take out the OTHER record, the live one the sweep meant to keep. MaxAge discards
 // records last updated before now-MaxAge; MaxCount then keeps the newest N. An id in keep is
 // never deleted, but it still occupies one of those N slots: the session being resumed is
 // retained, not exempted from the budget. Deletion goes through Delete, so the store lock, the
@@ -960,7 +1052,7 @@ func (s *Store) Prune(r Retention, keep ...string) (int, error) {
 	if r.MaxAge <= 0 && r.MaxCount <= 0 {
 		return 0, nil
 	}
-	found, err := s.scan()
+	found, err := s.scan(s.loadMeta)
 	if err != nil {
 		return 0, err
 	}
@@ -1047,29 +1139,39 @@ func (s *Store) Rename(id, title string) error {
 	return s.save(rec)
 }
 
-// decodeRecord turns raw file bytes into a Record and refuses one whose id could not address a
-// file inside a store. The id is the only Meta field that becomes a path — every later Save and
-// Delete names <id>.json — so a file that declares a hostile id is rejected here, at the door,
-// rather than trusted by the writers downstream. List soft-skips such a file like any other it
-// cannot decode.
-//
-// ParentID is held to the same rule but with the opposite outcome: it names another record, and a
-// value that could not be a record's id is cleared instead of refusing the file, since a fork
-// with an unusable parent is still a whole session. The clear lives here, on the one decode path
-// List (scan), Load and LoadPath share, so the browser's list, an id resume and a path resume all
-// see the same cleared pointer rather than only one of them.
+// decodeRecord turns raw file bytes into a Record whose Meta has passed vetMeta.
 func decodeRecord(data []byte, path string) (Record, error) {
 	rec, err := decodeAnyRecord(data, path)
 	if err != nil {
 		return Record{}, err
 	}
-	if err := validateID(rec.Meta.ID); err != nil {
-		return Record{}, fmt.Errorf("apogee: session %q: %w", path, err)
+	meta, err := vetMeta(rec.Meta, path)
+	if err != nil {
+		return Record{}, err
 	}
-	if rec.Meta.ParentID != "" && validateID(rec.Meta.ParentID) != nil {
-		rec.Meta.ParentID = ""
-	}
+	rec.Meta = meta
 	return rec, nil
+}
+
+// vetMeta refuses a decoded Meta whose id could not address a file inside a store. The id is the
+// only Meta field that becomes a path — every later Save and Delete names <id>.json — so a file
+// that declares a hostile id is rejected here, at the door, rather than trusted by the writers
+// downstream. List soft-skips such a file like any other it cannot read.
+//
+// ParentID is held to the same rule but with the opposite outcome: it names another record, and a
+// value that could not be a record's id is cleared instead of refusing the file, since a fork
+// with an unusable parent is still a whole session. Both rules live here, on the one path the
+// whole decode (decodeRecord: Load, LoadPath, Prune) and List's header read (readMeta) share, so
+// the browser's list, an id resume and a path resume all see the same cleared pointer rather than
+// only one of them.
+func vetMeta(meta Meta, path string) (Meta, error) {
+	if err := validateID(meta.ID); err != nil {
+		return Meta{}, fmt.Errorf("apogee: session %q: %w", path, err)
+	}
+	if meta.ParentID != "" && validateID(meta.ParentID) != nil {
+		meta.ParentID = ""
+	}
+	return meta, nil
 }
 
 // decodeAnyRecord decodes either on-disk shape. It first sniffs for the recordVersion

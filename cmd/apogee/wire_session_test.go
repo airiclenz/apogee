@@ -796,6 +796,47 @@ func TestResolveContinuePicksWorkspaceNewest(t *testing.T) {
 	}
 }
 
+// The newest workspace record is the one --continue means even when only its header reads: List
+// still shows a record whose body is damaged, so --continue fails with that record's load error
+// rather than resuming the workspace's next-newest record in its place.
+func TestResolveContinueFailsOnDamagedNewestBody(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	base := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	older := saveAt(t, store, "/ws", base, "older")
+	newest := saveAt(t, store, "/ws", base.Add(time.Hour), "newest")
+	damageRecordBody(t, filepath.Join(store.Dir(), newest+".json"))
+	_, loadErr := store.Load(newest)
+	if loadErr == nil {
+		t.Fatal("Load of the damaged newest record succeeded; the fixture did not damage it")
+	}
+
+	rec, err := resolveContinue(store, "/ws")
+
+	if err == nil || err.Error() != loadErr.Error() {
+		t.Fatalf("resolveContinue = (%q, %v); want the newest record's load error %q, not a skip to %q",
+			rec.Meta.ID, err, loadErr, older)
+	}
+}
+
+// damageRecordBody rewrites the record at path as its recordVersion and meta followed by a session
+// that never closes: a header List reads and a body Load cannot decode.
+func damageRecordBody(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	damaged := fmt.Sprintf(`{"recordVersion":%s,"meta":%s,"session":{"Vers`, keys["recordVersion"], keys["meta"])
+	if err := os.WriteFile(path, []byte(damaged), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 // saveAt persists one fresh session in workspace ws stamped at when (controlling both its id and
 // UpdatedAt), returning the minted id. Each call uses its own host so it mints a distinct session, and
 // closes that host once the record is down: the record stands for a run that has ENDED, free for the
