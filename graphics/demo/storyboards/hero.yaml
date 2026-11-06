@@ -16,9 +16,9 @@
 
 clip: hero
 ship: ../../demo.gif             # relative to this storyboard file's own directory
-# 135 × 44 cells rasterize to ≈ 4988 × 3296 px at scale 2 (≈ 1.5 : 1); the render downscales to a
+# 100 × 40 cells rasterize to ≈ 3728 × 3008 px at scale 2 (≈ 1.24 : 1); the render downscales to a
 # 1250-wide GIF, so a zoom has ≥2× of real pixels to draw on.
-frame: {cols: 135, rows: 44, padding: 32, font_size: 30, line_height: 1.2, scale: 2, width: 1250, fps: 24, max_colors: 192}
+frame: {cols: 100, rows: 40, padding: 32, font_size: 30, line_height: 1.2, scale: 2, width: 1250, fps: 24, max_colors: 192}
 # The fix and the CHANGELOG entry are still in the stage repo after the take: nothing reverted them.
 expect:
   - run: test -n "$(git -C "$PHOTON_WORK/home/Repos/taskman" status --porcelain)"
