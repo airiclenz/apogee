@@ -11,20 +11,31 @@ import (
 // ----------------------------------------------------------------------------
 //
 // A Turn narrates itself: the running row's spinner, phrase and clock. Outside a Turn the session can
-// still be WAITING — a launcher verb in flight (actuation.go), a wired heartbeat that has not bound a
-// model yet — and on a slow box such a wait can run for a minute or more. The footer's model slot
-// already names it ("loading qwen3…", "connecting…"), but a word that never moves reads as a frozen
-// screen, so while the session is idle the status line carries the same wait in the running row's
-// shape: `<glyph> <phrase> · <clock>`.
+// still be WAITING — a launcher verb in flight (actuation.go), a footer git action (gitactions.go), a
+// /sessions record being read (sessions.go), a bare /rename's naming call (autotitle.go), a wired
+// heartbeat that has not bound a model yet — and on a slow box such a wait can run for a minute or
+// more. Each already has its word ("loading qwen3…", "git pull…", "naming this session…",
+// "connecting…"), but a word that never moves reads as a frozen screen, so while the session is idle
+// the status line carries the wait in the running row's shape: `<glyph> <phrase> · <clock>`.
 //
 // This file is the one place that knows what the TUI is waiting on. It holds no flag of its own: the
 // wait is DERIVED at call time from the latches that already record it (busyWait), so it cannot
 // disagree with the footer that reads the same latches. The only state it keeps is when the current
 // wait began (busyClock), restamped by Update's tail whenever the wait's phrase changes.
 
-// busyWait names the wait an idle session is holding, worded as the footer's model slot words it, and
-// reports false when there is none. An actuation in flight outranks connecting, exactly as it does in
-// [Model.upstreamSegments]: "loading <profile>…" is the more specific truth.
+// sessionLoadPhrase is the busy indicator's word for a /sessions record load in flight
+// (holdSessionLoad): the record is read off the loop and restored when it lands.
+const sessionLoadPhrase = "loading session…"
+
+// busyWait names the wait an idle session is holding, in the words apogee already shows for it, and
+// reports false when there is none. The sources rank most specific first: an actuation in flight
+// ("loading <profile>…", the footer's own word, outranking connecting exactly as it does in
+// [Model.upstreamSegments]), then a footer git action (the `git <verb>…` its start notes), a
+// /sessions record load, a bare /rename's naming call, and last connecting. Each is read from the
+// latch that already records it — the git action and session load holds (engineholds.go), the
+// naming flag — never a mirrored one. The branch listing that opens switch branch is held as a git
+// action too, but it is no `git switch…`: it switches nothing, notes nothing and lands in a moment,
+// so it is no busy wait.
 //
 // Connecting is the footer's own condition — no model bound while something observes the Upstream —
 // narrowed by the two states in which no beat is coming soon to end it. An offline session is not
@@ -34,6 +45,15 @@ import (
 func (m Model) busyWait() (phrase string, ok bool) {
 	if label := m.actuationLabel(); label != "" {
 		return label, true
+	}
+	if m.holds.has(holdGitAction) && !m.gitBranchListing() {
+		return m.git.action.runningNote(), true
+	}
+	if m.holds.has(holdSessionLoad) {
+		return sessionLoadPhrase, true
+	}
+	if m.naming {
+		return namingPhrase, true
 	}
 	if m.opts.Model == "" && m.observesUpstream() && !m.hb.offline && !m.prebound() {
 		return connectingLabel, true

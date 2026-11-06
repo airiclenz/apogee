@@ -110,7 +110,13 @@ internal/tui/prebound.go — prebound; internal/tui/actuation.go — actuationLa
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestBusy|TestLiveStar|TestSpinner|TestActuation|TestProfileLoad|TestServerActuation|TestWorkflowsView|TestSettingsPane' ./internal/tui/`
 **Commit:** `feat(tui): the status line spins while a launcher verb or the first beat is awaited`
 
-## 3. Session load, git actions and /rename naming are busy waits
+## 3. Session load, git actions and /rename naming are busy waits — ✅ DONE (2026-11-06)
+
+NOTES (2026-11-06): the branch listing (switch branch's first step) is skipped rather than given its own phrase — it notes nothing today, so there is no existing word to reuse; pinned in TestBusyGitAction's "switch branch" case. The one predicate is `Model.gitBranchListing` (gitactions.go), which `gitActionCmd` now reads too.
+NOTES (2026-11-06): the shared helpers are `gitAction.runningNote` (gitactions.go, the `git <verb>…` text startGitAction notes) and the `namingPhrase` / `sessionLoadPhrase` constants; the naming latch is a plain `naming bool` on the Model (model.go), set in runRename and cleared first thing in foldManualTitle. Two bare /renames in flight at once clear it on the first reply — accepted for the plan's plain bool.
+NOTES (2026-11-06): busy_test.go gains `untickedMsg` (the one non-tick Msg of a Cmd tree, built on item 2's `untickedAll`); every session-load, watch-resume and bare-/rename `cmdMsg(cmd).(` / `cmd().(` assert in sessions_test.go, watch_test.go and autotitle_test.go (foldResume and the three `cmdMsg(loadCmd)` sites included) reads through it, and TestGitActionNoBackgroundFetchMidAction's `cmd != nil` assert through `untickedAll`.
+NOTES (2026-11-06): a non-race whole-package run of internal/tui (APOGEE_TEST_SLOW=1 GOMEMLIMIT=2GiB) is green; cmd/apogee was not run — left to the closeout's make check.
+NOTES (2026-11-06): consequential edit — internal/tui/doc.go: made necessary by busyWait gaining three sources (the package narration listed only the launcher verb and the first beat)
 
 Depends on item 2.
 

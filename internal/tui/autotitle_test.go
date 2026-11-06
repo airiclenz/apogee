@@ -566,7 +566,7 @@ func TestAutoTitleLatchedByAResumedSession(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("resuming the selected session dispatched no load")
 	}
-	m = step(t, m, cmdMsg(cmd)) // …and its sessionLoadedMsg is what restores the record
+	m = step(t, m, untickedMsg(t, cmd)) // …and its sessionLoadedMsg is what restores the record
 
 	if !m.autoTitleFired {
 		t.Error("a resumed session left naming unlatched; it would rename a record that has a name")
@@ -731,7 +731,7 @@ func TestRenameBareRegeneratesOverAManualName(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("bare /rename dispatched no naming call")
 	}
-	msg, ok := cmdMsg(cmd).(manualTitleMsg)
+	msg, ok := untickedMsg(t, cmd).(manualTitleMsg)
 	if !ok {
 		t.Fatal("bare /rename did not yield a manualTitleMsg")
 	}
@@ -788,7 +788,7 @@ func TestRenameBareSendsTheWholeUserSide(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("bare /rename dispatched no naming call")
 	}
-	if _, ok := cmdMsg(cmd).(manualTitleMsg); !ok {
+	if _, ok := untickedMsg(t, cmd).(manualTitleMsg); !ok {
 		t.Fatal("bare /rename did not yield a manualTitleMsg")
 	}
 	want := [][]string{prompts}

@@ -261,6 +261,12 @@ type Model struct {
 	// restamps it whenever the wait's phrase changes and clears it when the wait ends.
 	busySince busyClock
 
+	// naming marks a bare /rename's naming call in flight: set where runRename issues it and cleared
+	// where its manualTitleMsg folds (foldManualTitle, autotitle.go). The call drives no engine and
+	// holds nothing back, so no hold records it; this flag is its one latch, read by the busy
+	// indicator (busy.go, [Model.busyWait]). The zero value is "not naming".
+	naming bool
+
 	// hb is the upstream heartbeat's state — the tick chain's generation, the offline debounce,
 	// and what the last landed beat observed (see heartbeatState). Plain values and one slice, so
 	// it is safe inside the value-copied Model (ADR 0011). It stays zero when the Upstream seam is
@@ -4646,9 +4652,9 @@ func (m Model) statusLeftWithin(width int, withTotal bool) string {
 		// layout.md gives every surface that gives way entirely (settingsGiveWayPhrase); a session
 		// with no server bound carries its standing fact here for as long as that holds, which is what
 		// survives the esc that closes the pane asking about it (preboundPhrase, ADR 0036); and a
-		// session waiting on something slow — a launcher verb, the first beat — shows the spinner, the
-		// footer's word for that wait and its clock, so a slow box never looks stuck (busyPhrase,
-		// busy.go). They rank in that order: a modal swallowing every key but the frame chords on a
+		// session waiting on something slow — a launcher verb, a git action, a session load, a bare
+		// /rename, the first beat — shows the spinner, the word for that wait and its clock, so a slow
+		// box never looks stuck (busyPhrase, busy.go). They rank in that order: a modal swallowing every key but the frame chords on a
 		// window showing none of it is the most urgent fact, the session's standing fact is still
 		// there when it closes, and a wait is narrated only once neither is owed. Every other idle
 		// frame leaves the slot to the queue, as before.

@@ -78,6 +78,12 @@ func (a gitAction) word() string {
 	return ""
 }
 
+// runningNote is the note an action's start leaves in the transcript ([Model.startGitAction]) and the
+// busy indicator's phrase while it runs (busy.go): "git pull…".
+func (a gitAction) runningNote() string {
+	return "git " + a.word() + "…"
+}
+
 // The git actions notes: the refusals /git and the footer click answer with, and the title the
 // picker carries.
 const (
@@ -371,8 +377,14 @@ type gitActionDoneMsg struct {
 // (holdGitAction), no background fetch is issued ([Model.foldGitFetchTick]), and a quit defers its
 // exit ([Model.quitSession]).
 func (m Model) startGitAction(action gitAction) (tea.Model, tea.Cmd) {
-	m.transcript.addNote("git " + action.word() + "…")
+	m.transcript.addNote(action.runningNote())
 	return m.issueGitAction(action)
+}
+
+// gitBranchListing reports whether the git action held is switch branch's first step, the branch
+// listing ([Model.startGitBranches]): a switch with no branch chosen yet.
+func (m Model) gitBranchListing() bool {
+	return m.git.action == gitActionSwitch && m.git.branch == ""
 }
 
 // issueGitAction takes the git action hold for action and issues it off the loop, or leaves it
@@ -433,7 +445,7 @@ func gitActionCall(host GitActionsHost, action gitAction, branch string) func(co
 // with no branch chosen yet is its first step, the branch listing.
 func (m Model) gitActionCmd() tea.Cmd {
 	host, action, ctx, root := m.opts.GitActions, m.git.action, m.parent, m.opts.Workspace
-	if action == gitActionSwitch && m.git.branch == "" {
+	if m.gitBranchListing() {
 		return func() tea.Msg {
 			names, err := host.Branches(ctx, root)
 			return gitActionDoneMsg{action: action, err: err, listing: true, branches: names}

@@ -68,7 +68,7 @@ func typeIntoBrowser(t *testing.T, m Model, text string) Model {
 // session — or drives a save against it — has to let the queue settle first.
 func foldResume(t *testing.T, m Model, loadCmd tea.Cmd) Model {
 	t.Helper()
-	m, cmd := stepCmd(t, m, cmdMsg(loadCmd))
+	m, cmd := stepCmd(t, m, untickedMsg(t, loadCmd))
 	return runWrites(t, m, cmd)
 }
 
@@ -409,7 +409,7 @@ func TestSessionBrowserResumeErrorLeavesViewUntouched(t *testing.T) {
 
 	m = openBrowser(t, m)
 	m, cmd := stepCmd(t, m, keyEnter())
-	m = step(t, m, cmdMsg(cmd))
+	m = step(t, m, untickedMsg(t, cmd))
 
 	if !hasEntry(m, entryUser, seededUserText) {
 		t.Error("the failed resume wiped the outgoing conversation; the view must be left untouched")
@@ -722,7 +722,7 @@ func TestSessionBrowserResumeQueuesTheActivate(t *testing.T) {
 	if loadCmd == nil {
 		t.Fatal("enter dispatched no Load Cmd")
 	}
-	m, cmd := stepCmd(t, m, cmdMsg(loadCmd)) // fold sessionLoadedMsg → resumeLoaded
+	m, cmd := stepCmd(t, m, untickedMsg(t, loadCmd)) // fold sessionLoadedMsg → resumeLoaded
 	if cmd != nil {
 		t.Fatal("the resume dispatched an Activate beside the in-flight save")
 	}
@@ -1798,9 +1798,10 @@ func TestSessionBrowserFilteredResumeOpensTheRowShown(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("⏎ on the filtered row dispatched no Load")
 	}
-	msg, ok := cmdMsg(cmd).(sessionLoadedMsg)
+	loaded := untickedMsg(t, cmd)
+	msg, ok := loaded.(sessionLoadedMsg)
 	if !ok {
-		t.Fatalf("Cmd returned %T, want a sessionLoadedMsg", cmdMsg(cmd))
+		t.Fatalf("Cmd returned %T, want a sessionLoadedMsg", loaded)
 	}
 	if msg.rec.Meta.ID != "audit" {
 		t.Errorf("resumed %q, want the filtered row's own record %q", msg.rec.Meta.ID, "audit")
@@ -1955,7 +1956,7 @@ func TestSessionBrowserToggleRederivesTheFilteredView(t *testing.T) {
 		t.Errorf("filter = %q, want the toggle to widen the search rather than end it", m.sessionBrowser.filter.value())
 	}
 	m, cmd := stepCmd(t, m, keyEnter())
-	if msg, ok := cmdMsg(cmd).(sessionLoadedMsg); !ok || msg.rec.Meta.ID != "elsewhere" {
+	if msg, ok := untickedMsg(t, cmd).(sessionLoadedMsg); !ok || msg.rec.Meta.ID != "elsewhere" {
 		t.Errorf("resumed %+v, want the foreign session the widened filter showed", msg.rec.Meta)
 	}
 }
@@ -3028,7 +3029,7 @@ func TestResumeLoadedWhileBusy(t *testing.T) {
 	m, loadCmd := loadingBrowserModel(t, eng)
 	startStubWorker(t, &m) // forced: a worker running when the record lands
 
-	m = step(t, m, cmdMsg(loadCmd))
+	m = step(t, m, untickedMsg(t, loadCmd))
 
 	if got := eng.restores(); len(got) != 0 {
 		t.Errorf("RestoreSession calls = %v, want none while a worker runs", got)
@@ -3309,7 +3310,7 @@ func TestSessionsBrowserPaintsAWatchedFinishedRowReadOnly(t *testing.T) {
 		t.Errorf("active %v, flash %q; want ⏎ refused with the watch kept", m.watch.isActive, m.flash)
 	}
 	if cmd != nil {
-		if _, isLoad := cmd().(sessionLoadedMsg); isLoad {
+		if _, isLoad := untickedMsg(t, cmd).(sessionLoadedMsg); isLoad {
 			t.Error("⏎ on a finished watched session loaded it")
 		}
 	}

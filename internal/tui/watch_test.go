@@ -1979,7 +1979,7 @@ func TestWatchOwnerFinishedResumesInTheOwnHome(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("⏎ on a finished watch started no load")
 	}
-	loaded, ok := cmd().(sessionLoadedMsg)
+	loaded, ok := untickedMsg(t, cmd).(sessionLoadedMsg)
 	if !ok || loaded.err != nil {
 		t.Fatalf("the resume's Cmd answered %#v; want the record loaded", loaded)
 	}
@@ -2008,7 +2008,7 @@ func TestWatchOwnerFinishedInAWatchedHomeStaysRefused(t *testing.T) {
 		t.Errorf("active %v, flash %q; want ⏎ refused with the watch kept", m.watch.isActive, m.flash)
 	}
 	if cmd != nil {
-		if _, isLoad := cmd().(sessionLoadedMsg); isLoad {
+		if _, isLoad := untickedMsg(t, cmd).(sessionLoadedMsg); isLoad {
 			t.Error("⏎ in a watched home loaded the record")
 		}
 	}
@@ -2103,7 +2103,7 @@ func TestWatchOwnerResumeAsksTheSwitchConfirmWithAWorkflowRunning(t *testing.T) 
 		t.Fatalf("picker %+v; want the switch confirm for %s", m.picker, watchSessionID)
 	}
 	if cmd != nil {
-		if _, isLoad := cmd().(sessionLoadedMsg); isLoad {
+		if _, isLoad := untickedMsg(t, cmd).(sessionLoadedMsg); isLoad {
 			t.Error("the load ran before the confirm was answered")
 		}
 	}
@@ -2172,7 +2172,7 @@ func TestWatchOwnerResumeWithAProbeInFlightIsNotRefusedAsHeld(t *testing.T) {
 	m, load := stepCmd(t, m, keyEnter())
 	probed := make(chan tea.Msg, 1)
 	go func() { probed <- inFlight() }()
-	loaded, ok := load().(sessionLoadedMsg)
+	loaded, ok := untickedMsg(t, load).(sessionLoadedMsg)
 	m = step(t, step(t, m, loaded), <-probed)
 
 	if !ok || loaded.err != nil {

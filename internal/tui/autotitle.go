@@ -230,8 +230,10 @@ func (m *Model) foldAutoTitle(msg autoTitleMsg) tea.Cmd {
 // in its turn, so an automatic call still in flight cannot land on top of it afterwards. And it
 // speaks either way: a title they asked for and never see is indistinguishable from a command that
 // did nothing, so a failure earns the one form that always works instead of the silence the
-// automatic path is right to keep.
+// automatic path is right to keep. The naming call is no longer in flight either way, so the busy
+// indicator's naming flag clears first.
 func (m *Model) foldManualTitle(msg manualTitleMsg) tea.Cmd {
+	m.naming = false
 	name, ok := title.Sanitize(msg.title)
 	if msg.err != nil || !ok {
 		note := "could not name this session"
@@ -339,6 +341,10 @@ func (m *Model) flushPendingTitle() {
 // works. A human who asked for a name must never be left holding only a refusal.
 const renameUsage = "try /rename <name>"
 
+// namingPhrase is the note a bare /rename leaves when its naming call goes out ([Model.runRename]) and
+// the busy indicator's phrase until that call's reply folds (busy.go).
+const namingPhrase = "naming this session…"
+
 // runRename drives the /rename verb (command.go, runCommand). Two forms, one apply path:
 //
 //   - `/rename <text>` names the session outright. The tokens re-join with single spaces and run
@@ -391,7 +397,8 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 		m.transcript.addNote("nothing to name yet — ask something first, or " + renameUsage)
 		return m, nil
 	}
-	m.transcript.addNote("naming this session…")
+	m.transcript.addNote(namingPhrase)
+	m.naming = true
 	return m, m.titleCmd(prompts, func(raw string, err error) tea.Msg {
 		return manualTitleMsg{title: raw, err: err}
 	})

@@ -355,8 +355,8 @@ func TestGitActionNoBackgroundFetchMidAction(t *testing.T) {
 		}
 
 		m, cmd := acceptGitRow(t, m, gitActionPull)
-		if cmd != nil || !m.git.actionWaits {
-			t.Fatalf("the action was issued beside the in-flight fetch (cmd %v, git %+v)", cmd != nil, m.git)
+		if issued := untickedAll(t, cmd); len(issued) != 0 || !m.git.actionWaits {
+			t.Fatalf("the action was issued beside the in-flight fetch (cmd %v, git %+v)", issued, m.git)
 		}
 
 		m, cmd = stepCmd(t, m, gitFetchMsg{gen: m.git.fetchGen})
