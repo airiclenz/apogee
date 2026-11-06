@@ -879,8 +879,8 @@
 // uses — rendezvous, mailbox ([interjectBox]), fire-and-forget ([uiPresenter],
 // [Bridge.NotifySchedule], [Bridge.NotifyRouting]) — and separates them from ADR 0011's three
 // legality classes for touching the ENGINE; worker.go the
-// cancellable engine driver and the in-flight [worker] value the Model holds it as (the CancelFunc,
-// the mailbox and the tick-chain generation behind three verbs), whose between-Steps drain also
+// cancellable engine driver and the in-flight [worker] value the Model holds it as (the CancelFunc and
+// the mailbox behind two verbs), whose between-Steps drain also
 // commits a background workflow's finish note ([deliverWorkflowNotes]) and whose wake driver
 // Steps the Exchange a wake opened ([startWake]); model.go the [Model] itself — the lifecycle state machine, the
 // layout, the frame's one stacking order and the block spans View publishes while walking it

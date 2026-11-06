@@ -250,8 +250,8 @@ type Model struct {
 	// Sub-models (Bubbles widgets). The input textarea lives on the embedded promptEditor above.
 	viewport viewport.Model
 
-	// spin is the status-line spinner's animation state — the style, the colour flag and the frame
-	// counter (spinner.go); the tick chain's generation is the worker's (worker.gen). Plain ints in
+	// spin is the status-line spinner's animation state — the frame counter and the tick chain's
+	// generation (spinner.go); the chain lives while the Model is spinning (spinning). Plain ints in
 	// a plain value, so it is safe inside the value-copied Model, and every frame is a pure
 	// function of the counter rather than of an RNG handle a copy would share (ADR 0011).
 	spin spinnerAnim
@@ -2421,15 +2421,14 @@ func (m Model) refuseRecipe(note string) (tea.Model, tea.Cmd) {
 // (launchExchange), both /continue arms and /compact (commandrun.go) — enters "an Exchange is in
 // flight" through it, so the writes that state is made of are spelled once, in their load-bearing
 // order: the boundary (cacheBoundaryAtIdle — the last one the Model can see before the worker owns
-// the engine), the worker value (worker.start: the CancelFunc the stop key calls (C4), the
-// mailbox — the Exchange's own box, or nil for a /compact nothing can be interjected into — and a
-// new tick-chain generation), the Bridge's copy of that mailbox (installBox), the state flip and
+// the engine), the worker value (worker.start: the CancelFunc the stop key calls (C4) and the
+// mailbox — the Exchange's own box, or nil for a /compact nothing can be interjected into), the Bridge's copy of that mailbox (installBox), the state flip and
 // the queue legend (markRunning), the opening activity phrase (the caller's: actThinking for a
 // request in flight, actCompacting for a summary call — set here because nothing has come back
 // yet; the first Event re-derives it, activity.go), the thinking board's commit (the last
 // Exchange's thinking is finished, not inherited — thinking.go; every launch commits, which is
 // what keeps a /continue or /compact from leaning on finishWorker to close a board it never
-// opened), and the spinner tick (spin.arm, on the generation the worker just opened). It returns
+// opened), and the spinner tick (spin.arm, on a new generation of the spinner's own). It returns
 // the batched Cmd the caller hands back from Update: the worker and the first tick.
 //
 // cmd and cancel arrive already built (startExchange, startResume, startCompact — worker.go), and
@@ -2451,7 +2450,7 @@ func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelCauseFunc, box *i
 	m.markRunning()
 	m.setActivity(runRef{}, kind, "")
 	m.thinking.commitAll()
-	tick := m.spin.arm(m.worker.gen, m.opts.UI.Spinner)
+	tick := m.spin.arm(m.opts.UI.Spinner)
 	return tea.Batch(cmd, tick)
 }
 
@@ -2460,14 +2459,13 @@ func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelCauseFunc, box *i
 // running WITHOUT a launch. The worker never died, so there is no boundary to cache, no box to
 // install and no CancelFunc to store; what the pane's departure changes is the state flip and the
 // legend (markRunning), the layout — the pane is gone, so a draft it had clamped grows back
-// (draftRowsCeiling) — and the spinner, re-armed on a new generation (worker.resume) because the
+// (draftRowsCeiling) — and the spinner, re-armed on a new generation (spin.arm) because the
 // tick chain died when the prompt went up. It returns that tick; the same pointer rule as
 // enterRunning applies (bind it, then return).
 func (m *Model) resumeRunning() tea.Cmd {
 	m.markRunning()
 	m.layout()
-	m.worker.resume()
-	return m.spin.arm(m.worker.gen, m.opts.UI.Spinner)
+	return m.spin.arm(m.opts.UI.Spinner)
 }
 
 // markRunning is the tail the two launch verbs share and the ONLY writer of stateRunning. The

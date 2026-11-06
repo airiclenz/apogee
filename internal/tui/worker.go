@@ -14,13 +14,13 @@ import (
 // ----------------------------------------------------------------------------
 
 // worker is the in-flight worker as the Model holds it: one value carrying everything "an
-// Exchange is in flight" is made of on the Model's side — the cancel the stop key calls (C4),
-// the Exchange's interjection mailbox, and the spinner tick chain's generation — so the three are
-// written by three verbs (start, resume, finish) rather than by a run of assignments a launch path
-// can leave one out of. The four-state machine itself stays on the Model (Model.state): it is what
+// Exchange is in flight" is made of on the Model's side — the cancel the stop key calls (C4) and
+// the Exchange's interjection mailbox — so the two are written by two verbs (start, finish) rather
+// than by a run of assignments a launch path can leave one out of. The spinner's tick chain is not
+// part of it: that chain owns its own generation (spinnerAnim.gen). The four-state machine itself stays on the Model (Model.state): it is what
 // the keys and the folds route on, and a worker exists in three of its four states.
 //
-// It rides the value-copied Model by value (ADR 0011): a func, a pointer, an int and a bool, no
+// It rides the value-copied Model by value (ADR 0011): a func, a pointer and a bool, no
 // mutex and no self-pointer — the mailbox itself carries a mutex, which is exactly why it is held BY
 // POINTER (interjectBox).
 type worker struct {
@@ -37,23 +37,14 @@ type worker struct {
 	// worker, which drives no Exchange). The display copy of the queue is the Model's
 	// (pendingInterjections), and the Bridge is told about every change here (Model.installBox).
 	box *interjectBox
-	// gen is the spinner tick chain's generation — a Model-lifetime MONOTONIC counter. start and
-	// resume open a new chain by bumping it; finish never resets it. A finish that zeroed it would
-	// let the next start re-open the generation whose last tick is still in flight — a natural
-	// completion flushes a held queue into a new Exchange in the same Update, so that tick is in
-	// flight by construction — and foldSpinnerTick would accept the stale tick: two chains, 2×
-	// spin, the bug the generation exists to prevent (spinner.go).
-	gen int
 }
 
 // start records a launched worker: the cancel the stop key reaches and the mailbox the worker
-// drains (nil for a /compact, which drives no Exchange), and opens a new tick-chain generation.
-// Its caller is the one launch verb (Model.enterRunning).
+// drains (nil for a /compact, which drives no Exchange). Its caller is the one launch verb (Model.enterRunning).
 func (w *worker) start(cancel context.CancelCauseFunc, box *interjectBox) {
 	w.cancel = cancel
 	w.box = box
 	w.stopped = false
-	w.gen++
 }
 
 // stop cancels the running worker with cause, once: it reports whether an earlier stop had
@@ -70,16 +61,11 @@ func (w *worker) stop(cause error) (again bool) {
 	return false
 }
 
-// resume re-opens the tick chain for a worker that never died — a blocked Step a decision has
-// just unblocked (Model.resumeRunning). The chain died when the prompt went up, so a new generation
-// is what keeps a tick still in flight from the old one inert.
-func (w *worker) resume() { w.gen++ }
-
 // finish releases the worker at its terminal Msg: it CALLS the CancelFunc before clearing it — a
 // completed Exchange leaves its cancellable child context un-cancelled otherwise, leaking one
 // context (and its goroutine's timer resources) per completed exchange for the life of the session;
 // cancelling a context whose work already finished is the documented, idempotent way to release it
-// — and drops the mailbox, which has no reader left. The generation is kept (see the field).
+// — and drops the mailbox, which has no reader left.
 func (w *worker) finish() {
 	if w.cancel != nil {
 		w.cancel(nil)

@@ -647,12 +647,12 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 	running := newTestModel(t)
 	running.input.SetValue("hello")
 	running = step(t, running, keyEnter()) // submit armed the chain
-	if running.worker.gen == 0 {
+	if running.spin.gen == 0 {
 		t.Fatal("submit did not arm the tick chain")
 	}
 
 	// The live generation's tick advances exactly one frame and keeps the chain alive.
-	advanced, cmd := stepCmd(t, running, spinnerTickMsg{gen: running.worker.gen})
+	advanced, cmd := stepCmd(t, running, spinnerTickMsg{gen: running.spin.gen})
 	if cmd == nil {
 		t.Error("a live tick did not re-arm the chain — the spinner would freeze mid-turn")
 	}
@@ -665,15 +665,15 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 	if tick := rearmed.resumeRunning(); tick == nil {
 		t.Fatal("resume scheduled no tick")
 	}
-	if rearmed.worker.gen == running.worker.gen {
-		t.Fatalf("resume reused generation %d instead of opening a new one", rearmed.worker.gen)
+	if rearmed.spin.gen == running.spin.gen {
+		t.Fatalf("resume reused generation %d instead of opening a new one", rearmed.spin.gen)
 	}
 	if rearmed.spin.frame != 0 {
 		t.Errorf("resume re-armed at frame %d, want 0", rearmed.spin.frame)
 	}
 
 	// A tick left over from the retired chain is inert: no advance, no re-arm.
-	stale, cmd := stepCmd(t, rearmed, spinnerTickMsg{gen: running.worker.gen})
+	stale, cmd := stepCmd(t, rearmed, spinnerTickMsg{gen: running.spin.gen})
 	if cmd != nil {
 		t.Error("a tick from a retired generation re-armed the chain — two chains would run at 2x")
 	}
@@ -684,7 +684,7 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 	// Off the running state the chain dies even for the live generation.
 	idle := rearmed
 	idle.state = stateIdle
-	if _, cmd := stepCmd(t, idle, spinnerTickMsg{gen: idle.worker.gen}); cmd != nil {
+	if _, cmd := stepCmd(t, idle, spinnerTickMsg{gen: idle.spin.gen}); cmd != nil {
 		t.Error("the tick chain outlived the run instead of dying at idle")
 	}
 
@@ -702,12 +702,52 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 	if relaunched.state != stateRunning {
 		t.Fatalf("state after the second submit = %v, want running", relaunched.state)
 	}
-	if relaunched.worker.gen <= rearmed.worker.gen {
+	if relaunched.spin.gen <= rearmed.spin.gen {
 		t.Fatalf("generation after finish→start = %d, want above the finished chain's %d — finish reset the counter",
-			relaunched.worker.gen, rearmed.worker.gen)
+			relaunched.spin.gen, rearmed.spin.gen)
 	}
-	if _, cmd := stepCmd(t, relaunched, spinnerTickMsg{gen: rearmed.worker.gen}); cmd != nil {
+	if _, cmd := stepCmd(t, relaunched, spinnerTickMsg{gen: rearmed.spin.gen}); cmd != nil {
 		t.Error("the finished chain's leftover tick re-armed the relaunched chain — two chains would run at 2x")
+	}
+}
+
+// TestSpinnerChainOwnsGeneration pins the guard on the animation itself, with no worker verb in
+// the path: each arm opens a generation of the spinner's own, a tick stamped with the first arm's
+// generation is inert once a second arm has run, and a tick stamped with the second advances the
+// frame and keeps the chain alive.
+func TestSpinnerChainOwnsGeneration(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	m.state = stateRunning // the one predicate the chain lives by (Model.spinning)
+	style := m.opts.UI.Spinner
+
+	if tick := m.spin.arm(style); tick == nil {
+		t.Fatal("the first arm scheduled no tick")
+	}
+	first := m.spin.gen
+	if tick := m.spin.arm(style); tick == nil {
+		t.Fatal("the second arm scheduled no tick")
+	}
+	second := m.spin.gen
+	if second == first {
+		t.Fatalf("a re-arm reused generation %d instead of opening a new one", first)
+	}
+
+	stale, cmd := stepCmd(t, m, spinnerTickMsg{gen: first})
+	if cmd != nil {
+		t.Error("a tick from the first arm re-armed the chain — two chains would run at 2x")
+	}
+	if got, want := stale.spin.frame, m.spin.frame; got != want {
+		t.Errorf("a retired generation's tick moved the frame to %d, want %d", got, want)
+	}
+
+	live, cmd := stepCmd(t, m, spinnerTickMsg{gen: second})
+	if cmd == nil {
+		t.Error("a tick from the live arm did not re-arm the chain — the spinner would freeze")
+	}
+	if got, want := live.spin.frame, m.spin.frame+1; got != want {
+		t.Errorf("frame after the live arm's tick = %d, want %d", got, want)
 	}
 }
 
@@ -754,7 +794,7 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	idle := running
 	idle.spin.frame = boundary
 	idle.lines = []string{sentinel}
-	idle = step(t, idle, spinnerTickMsg{gen: idle.worker.gen})
+	idle = step(t, idle, spinnerTickMsg{gen: idle.spin.gen})
 	if got := strings.Join(idle.lines, "\n"); got != sentinel {
 		t.Errorf("a flipping tick with no call open repainted the transcript:\n%s", got)
 	}
@@ -767,7 +807,7 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	openCall(&steady, "c1", "go test ./...")
 	steady.refreshViewport()
 	steady.lines = []string{sentinel}
-	steady = step(t, steady, spinnerTickMsg{gen: steady.worker.gen})
+	steady = step(t, steady, spinnerTickMsg{gen: steady.spin.gen})
 	if got := strings.Join(steady.lines, "\n"); got != sentinel {
 		t.Errorf("a non-flipping tick repainted the transcript for an identical frame:\n%s", got)
 	}
@@ -779,7 +819,7 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	live.refreshViewport()
 	live.spin.frame = boundary
 	live.lines = []string{sentinel}
-	live = step(t, live, spinnerTickMsg{gen: live.worker.gen})
+	live = step(t, live, spinnerTickMsg{gen: live.spin.gen})
 	if got := strings.Join(live.lines, "\n"); got == sentinel {
 		t.Error("the flipping tick with a call open did not repaint — the live star would never flip")
 	}
@@ -811,7 +851,7 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 	}
 
 	m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1 // the next tick is the one that crosses the phase
-	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
+	m = step(t, m, spinnerTickMsg{gen: m.spin.gen})
 
 	if !m.detached {
 		t.Error("the tick's repaint re-attached a scrolled-up view")
@@ -846,7 +886,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 
 	// Row 0 IS the live header: the flip rewrites the very line the span covers.
 	spanning := live(t, func(*Model) {})
-	spanning = step(t, spanning, spinnerTickMsg{gen: spanning.worker.gen})
+	spanning = step(t, spanning, spinnerTickMsg{gen: spanning.spin.gen})
 	if spanning.transcriptSel.active {
 		t.Error("a selection spanning the flipping header survived the flip")
 	}
@@ -854,7 +894,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 	// Row 0 is a settled user block and the live header sits below it: the flip is none of the
 	// span's business.
 	elsewhere := live(t, func(m *Model) { m.transcript.addUser("run the tests", nil) })
-	elsewhere = step(t, elsewhere, spinnerTickMsg{gen: elsewhere.worker.gen})
+	elsewhere = step(t, elsewhere, spinnerTickMsg{gen: elsewhere.spin.gen})
 	if !elsewhere.transcriptSel.active {
 		t.Error("the star's flip dropped a selection over settled lines it never touched")
 	}
@@ -978,7 +1018,7 @@ func TestSpinnerFlipRepaintsForRunningWorkflow(t *testing.T) {
 	m.refreshViewport()
 	m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1
 	m.lines = []string{sentinel}
-	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
+	m = step(t, m, spinnerTickMsg{gen: m.spin.gen})
 	if got := strings.Join(m.lines, "\n"); got == sentinel {
 		t.Error("the flipping tick with a running workflow block did not repaint — its star would never blink")
 	}
@@ -998,7 +1038,7 @@ func TestSpinnerFlipIsSettledByTheTail(t *testing.T) {
 	m.spin.frame = m.spin.framesPerBlinkHalf(m.opts.UI.Spinner) - 1 // the next tick is the one that crosses the phase
 	before := m.painted
 
-	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
+	m = step(t, m, spinnerTickMsg{gen: m.spin.gen})
 
 	if m.painted.blink == before.blink {
 		t.Fatalf("precondition: the painted blink stayed %v across the flipping tick", before.blink)

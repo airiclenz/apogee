@@ -789,8 +789,7 @@ func (m Model) foldWatchBatch(msg watchBatchMsg) (tea.Model, tea.Cmd) {
 	if m.state == stateRunning && !wasRunning {
 		// One spinner chain per running stretch: a fresh generation retires any chain an earlier
 		// stretch in this batch armed (spinnerAnim.arm).
-		m.worker.resume()
-		cmds = append(cmds, m.spin.arm(m.worker.gen, m.opts.UI.Spinner))
+		cmds = append(cmds, m.spin.arm(m.opts.UI.Spinner))
 	}
 	return m, tea.Batch(cmds...)
 }

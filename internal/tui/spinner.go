@@ -29,11 +29,12 @@ import (
 // matter how often View runs, and testable without a clock.
 //
 // What the widget gave for free and this file must replace: its TickMsg carried an id and a tag,
-// so re-arming while a tick was still in flight could not leave two chains running. The in-flight
-// worker value reproduces that as a generation counter ([worker.gen]) — every worker start and
-// resume opens a new generation, [spinnerAnim.arm] schedules the first tick of it, and the Update
-// loop drops a tick from any older one, which is what keeps the frame rate from doubling after an
-// approval prompt or an ask_user question re-arms the chain.
+// so re-arming while a tick was still in flight could not leave two chains running. The animation
+// reproduces that as a generation counter of its own ([spinnerAnim.gen]) — every [spinnerAnim.arm]
+// opens a new generation and schedules the first tick of it, and the Update loop drops a tick from
+// any older one, which is what keeps the frame rate from doubling after an approval prompt or an
+// ask_user question re-arms the chain. WHEN the chain runs is the Model's one predicate
+// ([Model.spinning]): a tick that lands while it does not hold is dropped and the chain dies.
 
 // SpinnerStyle names a status-line animation. The vocabulary itself — the names, the default and
 // the parse — lives in [domain] (uivocab.go), so internal/config can validate a `ui.spinner:`
@@ -289,10 +290,11 @@ func (th theme) spinnerColor(frame, framesPerLoop int) color.Color {
 }
 
 // spinnerAnim is the animation state carried on the value-copied Model (ADR 0011): plain ints,
-// no RNG handle, no self-referential type. It is the animation's STATE only — the widget it
-// replaced held its frame counter the same way; the chain bookkeeping (the generation a tick must
-// carry to be live) is the in-flight worker's ([worker.gen]), because a chain is opened exactly
-// when a worker starts or resumes.
+// no RNG handle, no self-referential type. It holds the frame counter — the widget it replaced
+// held its own the same way — and the chain bookkeeping beside it: the generation a tick must carry
+// to be live ([spinnerAnim.gen]). The chain is the animation's own, not any one caller's, so every
+// wait that arms it shares the one guard; whether it should be running at all is the Model's
+// question ([Model.spinning]), asked on every tick.
 //
 // What it animates is not its own: the style and the colour loop are the human's preferences,
 // whose one record is the Model's Options.UI (Spinner, SpinnerColor), and every method that paints
@@ -302,6 +304,12 @@ func (th theme) spinnerColor(frame, framesPerLoop int) color.Color {
 // zero value is the still, unarmed animation: it schedules nothing until a run arms it (arm).
 type spinnerAnim struct {
 	frame int // frames elapsed since the chain was armed
+	// gen is the tick chain's generation — a Model-lifetime MONOTONIC counter. arm opens a new chain
+	// by bumping it and nothing ever resets it: a reset would let the next arm re-open the
+	// generation whose last tick is still in flight — a natural completion flushes a held queue into
+	// a new Exchange in the same Update, so that tick is in flight by construction — and
+	// foldSpinnerTick would accept the stale tick: two chains, 2× spin.
+	gen int
 }
 
 // spec resolves a style's animation. An unregistered style — the zero value, or a name this
@@ -386,24 +394,24 @@ func (s spinnerAnim) view(th theme, style SpinnerStyle, color bool) string {
 	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop(style))).Render(s.drawn(th, style))
 }
 
-// arm opens a fresh tick chain on generation gen: back at frame 0, with the first tick scheduled.
-// Every return to stateRunning calls it — a submit, an approval decision, an answered question —
-// with the generation the worker value just opened (worker.start, worker.resume), and that new
-// generation is what makes a tick still in flight from the previous chain inert, so the frame
-// rate cannot double. It takes a pointer because the frame reset must land on the Model copy the
-// caller returns — which is also why every caller arms in a statement of its own: in
-// `return m, m.spin.arm(…)` the order of the reset and the copy of m is unspecified. style paces
-// the first tick ([spinnerAnim.tick]).
-func (s *spinnerAnim) arm(gen int, style SpinnerStyle) tea.Cmd {
+// arm opens a fresh tick chain: a new generation, back at frame 0, with the first tick scheduled.
+// Every return to stateRunning calls it — a submit, an approval decision, an answered question, a
+// watched run resuming — and the new generation is what makes a tick still in flight from the
+// previous chain inert, so the frame rate cannot double. It takes a pointer because the generation
+// bump and the frame reset must land on the Model copy the caller returns — which is also why every
+// caller arms in a statement of its own: in `return m, m.spin.arm(…)` the order of the reset and
+// the copy of m is unspecified. style paces the first tick ([spinnerAnim.tick]).
+func (s *spinnerAnim) arm(style SpinnerStyle) tea.Cmd {
+	s.gen++
 	s.frame = 0
-	return s.tick(gen, style)
+	return s.tick(style)
 }
 
-// tick schedules the next frame of generation gen — the CURRENT one, worker.gen, at every caller
-// — snapshotting it into the Msg so a chain the Update loop has since retired identifies itself.
-// It waits style's interval, read afresh on every tick, so a style swapped mid-run re-paces the
-// chain from its next frame on.
-func (s spinnerAnim) tick(gen int, style SpinnerStyle) tea.Cmd {
+// tick schedules the next frame of the CURRENT generation, snapshotting it into the Msg so a chain
+// the Update loop has since retired identifies itself. It waits style's interval, read afresh on
+// every tick, so a style swapped mid-run re-paces the chain from its next frame on.
+func (s spinnerAnim) tick(style SpinnerStyle) tea.Cmd {
+	gen := s.gen
 	return tea.Tick(s.interval(style), func(time.Time) tea.Msg { return spinnerTickMsg{gen: gen} })
 }
 
@@ -414,11 +422,12 @@ type spinnerTickMsg struct{ gen int }
 // foldSpinnerTick folds one frame of the spinner chain: advance the animation and re-arm. The
 // live star's repaint on the ticks that flip its blink phase is Update's tail's, not this fold's.
 //
-// The chain is kept alive only while running, and only for the current generation: dropping the tick
-// when idle lets the chain die naturally, and dropping a tick from a previous arm means a re-arm (an
-// approval answered, an ask replied to) cannot leave two chains running and double the frame rate.
+// The chain is kept alive only while the Model is spinning ([Model.spinning]), and only for the
+// current generation: dropping the tick once spinning stops lets the chain die naturally, and
+// dropping a tick from a previous arm means a re-arm (an approval answered, an ask replied to)
+// cannot leave two chains running and double the frame rate.
 func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
-	if m.state != stateRunning || msg.gen != m.worker.gen {
+	if msg.gen != m.spin.gen || !m.spinning() {
 		return m, nil
 	}
 	// The frame the status line spins on is also the LIVE STAR's clock: a block still holding an
@@ -432,5 +441,12 @@ func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 	// human and every drag-selection they hold through a turn. A selection spanning a header that
 	// DOES flip is dropped, which is that same rule doing its ordinary job on a line that changed.
 	m.spin.frame++
-	return m, m.spin.tick(m.worker.gen, m.opts.UI.Spinner)
+	return m, m.spin.tick(m.opts.UI.Spinner)
+}
+
+// spinning is the ONE predicate the spinner's tick chain lives by: a tick that lands while it holds
+// advances the frame and schedules the next, one that lands while it does not is dropped and the
+// chain dies. Today it is the running state — the Turn the status line's spinner narrates.
+func (m Model) spinning() bool {
+	return m.state == stateRunning
 }

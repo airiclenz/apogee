@@ -42,7 +42,10 @@ never looks stuck. Pure TUI presentation (Driver-local); the engine is untouched
 - Sub-second waits with no pane (`/workflows` list, `/bg` launch, `/skills` rescan, clipboard paste).
 - A new spinner style or a busy-indicator setting; headless and daemon Drivers.
 
-## 1. The spinner chain owns its generation
+## 1. The spinner chain owns its generation — ✅ DONE (2026-11-06)
+
+NOTES (2026-11-06): retired `worker.gen` and `worker.resume` (no production reader left); watch.go's follower and `resumeRunning` now call `spin.arm(style)` alone, and the monotonic-generation rationale moved from worker.go's field doc to `spinnerAnim.gen`.
+NOTES (2026-11-06): consequential edit — internal/tui/doc.go: made necessary by retiring the worker's tick-chain generation (the worker.go overview said "the tick-chain generation behind three verbs").
 
 **What:**
 **Goal:** the spinner's tick chain is guarded by a generation `spinnerAnim` owns, and it stays alive exactly while a
