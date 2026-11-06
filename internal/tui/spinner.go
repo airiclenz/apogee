@@ -385,8 +385,9 @@ func (s spinnerAnim) framesPerColorLoop(style SpinnerStyle) int {
 }
 
 // view paints this frame's glyph under style, in th's glyph set ([spinnerAnim.drawn]), for the
-// status line — coloured by the loop when color is set, on the bare field when not — on the
-// theme's spinner field — the status bar's black background. This is the single place the glyph
+// status line and a pop-up's loading row (popupLoading) — coloured by the loop when color is set, on
+// the bare field when not — on the theme's spinner field — the status bar's black background, which
+// is the pop-up's own surface too. This is the single place the glyph
 // animation and the colour loop compose: the two are orthogonal settings, so no style carries a
 // colour of its own and nothing here branches on the style to decide one. Uncoloured, the field adds no foreground at all and the
 // glyph keeps the terminal's own text colour — byte for byte what the pre-plan spinner rendered

@@ -382,7 +382,7 @@ type themeStyles struct {
 	popupAccent   lipgloss.Style // the SELECTED row of a MENU-style popup (popupSpec.menuRows): its ❯ and its label lit as one bold run of the `code` role on the pane's black, with no highlight bar behind them — the cue th.userBlock's full-width bar is replaced by wherever a pane is a menu rather than a list
 	statusFaint   lipgloss.Style // dim status text, bg-free (approval/ask prompts)
 	statusBar     lipgloss.Style // status-line segments: faint on black
-	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
+	spinnerBase   lipgloss.Style // the spinner's field (status line and pop-up loading row): the surface black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
 	statusWarning lipgloss.Style // status-line qualifier (the `warning` role on the bar's black): amber, and deliberately NOT bold — it tints a fact onto a running phrase rather than announcing a fault the way statusError does
 	chromeRule    lipgloss.Style // the prompt box's own border hairline (dark gray on black): the rule runes and corners inputElisionEdge composes the box's top border row from

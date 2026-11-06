@@ -87,10 +87,11 @@ func openWorkflowsLine(t *testing.T, m Model) Model {
 }
 
 // foldWorkflowMsgs runs cmd and folds the view's own messages it produced, and any Cmd those folds
-// hand back, in order.
+// hand back. An item's loading row batches the spinner's first tick beside the item's load
+// (busyAfterFold); untickedAll strips it, so the walk never waits out a frame interval.
 func foldWorkflowMsgs(t *testing.T, m Model, cmd tea.Cmd) Model {
 	t.Helper()
-	for _, msg := range cmdMsgs(cmd) {
+	for _, msg := range untickedAll(t, cmd) {
 		switch msg.(type) {
 		case workflowsListMsg, workflowItemMsg:
 			var next tea.Cmd
@@ -189,6 +190,38 @@ func TestWorkflowsViewWalksDownToAnItemAndEscGoesBackUp(t *testing.T) {
 	m = workflowsKeyStep(t, m, keyEsc())
 	if m.workflowsPane.open {
 		t.Errorf("the pane is still open after esc on the list")
+	}
+}
+
+// An item still loading paints its loading row with the spinner's frame, the chain turns it while the
+// load is out, and the item's rows landing end the wait: the next tick lets the chain die.
+func TestWorkflowItemLoadingAnimates(t *testing.T) {
+	t.Parallel()
+	m := workflowsPaneModel(t, workflowsAtDetail)
+	m.opts.UI.Spinner = SpinnerSnake
+	m = workflowsKeyStep(t, m, keyDown()) // off the stage's own row, onto its first item
+
+	m, cmd := stepCmd(t, m, keyEnter())
+	if !m.workflowsPane.itemLoading() {
+		t.Fatalf("precondition: pane = level %d lines %q, want the item loading", m.workflowsPane.level, m.workflowsPane.lines)
+	}
+	assertLoadingRowTurns(t, m, func(m Model) []string {
+		var rows []string
+		for _, ln := range popupLines(m.renderWorkflows()) {
+			rows = append(rows, popupInterior(ln))
+		}
+		return rows
+	})
+
+	m = foldWorkflowMsgs(t, m, cmd)
+	if m.workflowsPane.itemLoading() {
+		t.Fatal("the item's load landed and the pane is still loading")
+	}
+	if painted := strip(m.renderWorkflows()); strings.Contains(painted, popupLoadingRow) {
+		t.Errorf("the loading row outlived the item's rows:\n%s", painted)
+	}
+	if m = step(t, m, spinnerTickMsg{gen: m.spin.gen}); m.spin.isLive {
+		t.Error("the chain outlived the wait — a tick after the item landed kept it alive")
 	}
 }
 

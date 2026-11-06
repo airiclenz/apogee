@@ -652,6 +652,9 @@ type listContent struct {
 	// before any answer's label does (answersBudget).
 	answers  bool
 	selected int
+	// spinner is the spinner frame a pane still loading leads its one row with (popupLoading): set,
+	// the row is painted as the loading row (popupRowLoading) with the frame's own run.
+	spinner popupSpinner
 }
 
 // statingFilter folds a filtering pane's filter STATE into c, the last step of composing it: the
@@ -763,6 +766,10 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	// the row stays under the pointer for the second click; a key or a notch drops the arm and the
 	// window re-centres on the cursor.
 	rowTop, pinTop := m.clickArmed.pin(c.pane, c.selected)
+	var kinds []popupRowKind
+	if c.spinner.text != "" {
+		kinds = []popupRowKind{popupRowLoading}
+	}
 	return popupSpec{
 		title:       c.title,
 		titleTail:   c.titleTail,
@@ -779,6 +786,8 @@ func (m Model) listSpec(c listContent) (popupSpec, bool) {
 		hint:        c.hint,
 		maxRows:     budget.shown,
 		scrollbar:   m.popupScrollbarOn(),
+		rowKinds:    kinds,
+		spinner:     c.spinner,
 	}, true
 }
 

@@ -45,7 +45,7 @@ func openBrowser(t *testing.T, m Model) Model {
 	if cmd == nil {
 		t.Fatal("/sessions dispatched no List Cmd")
 	}
-	return step(t, m, cmdMsg(cmd))
+	return step(t, m, untickedMsg(t, cmd)) // the loading row's wait batched the spinner's first tick on
 }
 
 // keyCtrl is a control chord on a letter — the shape the three browse verbs took when the letters
@@ -926,14 +926,16 @@ func TestSessionBrowserRefusesToOpenWhileBusy(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // beginBrowserOpen submits /sessions and hands back the List Cmd UNRUN, so the frame the pane opens
-// on — before the store has answered — can be judged; folding cmdMsg(cmd) is the release.
+// on — before the store has answered — can be judged; folding cmdMsg(cmd) is the release. The Cmd
+// handed back is the listing alone: the loading row's wait batches the spinner's first tick beside it
+// (busyAfterFold), and untickedMsg strips that tick when the release runs it.
 func beginBrowserOpen(t *testing.T, m Model) (Model, tea.Cmd) {
 	t.Helper()
 	m, cmd := typeCommand(t, m, "/sessions")
 	if cmd == nil {
 		t.Fatal("/sessions dispatched no List Cmd")
 	}
-	return m, cmd
+	return m, func() tea.Msg { return untickedMsg(t, cmd) }
 }
 
 // browserPaneHolds reports whether any interior line of the open pane reads exactly want.
@@ -965,9 +967,11 @@ func TestSessionBrowserOpensLoadingBeforeList(t *testing.T) {
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "render me", "/ws/a", time.Now().Add(-5*time.Minute), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m.opts.UI.Spinner = SpinnerSnake
 
 	m, cmd := beginBrowserOpen(t, m)
 	assertBrowserLoading(t, m)
+	assertLoadingRowTurns(t, m, func(m Model) []string { return browserPaneLines(t, m) })
 	m = step(t, m, tea.PasteMsg{Content: "render"})
 	if strings.Contains(plain(m.View()), pickerFilterLead) {
 		t.Errorf("a paste while loading typed a filter onto the title row:\n%s", plain(m.View()))
@@ -983,6 +987,94 @@ func TestSessionBrowserOpensLoadingBeforeList(t *testing.T) {
 	}
 	if !browserPaneHolds(t, m, sessionBrowserHint) {
 		t.Errorf("pane legend is not the full one %q: %q", sessionBrowserHint, browserPaneLines(t, m))
+	}
+}
+
+// assertLoadingRowTurns fails unless the loading pane m paints — its interior lines as pane reads
+// them, the marker column trimmed — leads its loading row with the spinner's current frame, the chain
+// that turns it is alive, the status line stays blank for a wait the row narrates itself, and two
+// ticks later the row carries the new frame.
+func assertLoadingRowTurns(t *testing.T, m Model, pane func(Model) []string) {
+	t.Helper()
+	row := plainGlyph(m) + " " + popupLoadingRow
+	if lines := pane(m); !slices.Contains(lines, row) {
+		t.Errorf("the pane's loading row is not %q: %q", row, lines)
+	}
+	if !m.spin.isLive {
+		t.Fatal("the pane is loading with no spinner chain alive — its glyph would never turn")
+	}
+	if phrase := m.busyPhrase(time.Now()); phrase != "" {
+		t.Errorf("status line busy form = %q while a pop-up loads, want it blank", phrase)
+	}
+	ticked := step(t, step(t, m, spinnerTickMsg{gen: m.spin.gen}), spinnerTickMsg{gen: m.spin.gen})
+	if plainGlyph(ticked) == plainGlyph(m) {
+		t.Fatalf("two ticks left the glyph at %q, want the frame to move", plainGlyph(m))
+	}
+	turned := plainGlyph(ticked) + " " + popupLoadingRow
+	if lines := pane(ticked); !slices.Contains(lines, turned) {
+		t.Errorf("two ticks on, the loading row is not %q: %q", turned, lines)
+	}
+}
+
+// Under `ui.glyphs: safe` the loading row turns the font-safe line — one ASCII cell a frame — and
+// measures it as one column, so the word sits one space after it.
+func TestPopupLoadingRowSafeGlyphs(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	storeMeta(host, "sess-1", "a session", "/ws/a", time.Now(), 0, nil)
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m.th.glyphs = safeGlyphs
+
+	m, _ = beginBrowserOpen(t, m)
+	if want := "| " + popupLoadingRow; !browserPaneHolds(t, m, want) {
+		t.Errorf("the safe loading row is not %q: %q", want, browserPaneLines(t, m))
+	}
+	ticked := step(t, m, spinnerTickMsg{gen: m.spin.gen})
+	if want := "/ " + popupLoadingRow; !browserPaneHolds(t, ticked, want) {
+		t.Errorf("a tick on, the safe loading row is not %q: %q", want, browserPaneLines(t, ticked))
+	}
+	c, _ := ticked.browserListContent()
+	if got := ticked.th.measure.Width(c.spinner.text); got != 1 {
+		t.Errorf("the safe frame %q measures %d columns, want 1", c.spinner.text, got)
+	}
+}
+
+// The loading row paints the frame's own styled run between two faint runs — never one faint wrapper
+// around a styled glyph, whose reset would strip the faint from the word after it.
+func TestPopupLoadingRowPaintsAdjacentRuns(t *testing.T) {
+	t.Parallel()
+	m := newBrowserModel(t, &fakeEngine{}, &fakeSessionHost{}, "/ws/a")
+	m, _ = beginBrowserOpen(t, m)
+
+	c, _ := m.browserListContent()
+	blackFill := lipgloss.NewStyle().Background(m.th.surface)
+	row := "  " + c.spinner.text + " " + popupLoadingRow
+	want := blackFill.Render(m.th.statusFaint.Render("  ")) + c.spinner.painted +
+		blackFill.Render(m.th.statusFaint.Render(" "+popupLoadingRow))
+	if got := popupLoadingLine(m.th, c.spinner, blackFill, row); got != want {
+		t.Errorf("loading line = %q, want the adjacent runs %q", got, want)
+	}
+	if !strings.Contains(m.renderSessionBrowser(), c.spinner.painted) {
+		t.Errorf("the pane does not paint the spinner's own run %q", c.spinner.painted)
+	}
+}
+
+// A pop-up loading over a wait that has a word of its own leaves that wait narrating the status line:
+// an in-flight /model load keeps `loading <profile>… · <clock>`, its clock unmoved.
+func TestPopupLoadingKeepsLoadPhrase(t *testing.T) {
+	t.Parallel()
+	m, _ := wireLauncher(t, newLauncher())
+	m, _ = startLoad(t, m, "alpha")
+	since := m.busySince.since
+
+	m.sessionBrowser.open, m.sessionBrowser.loading = true, true
+	m = step(t, m, tea.FocusMsg{})
+
+	if want := plainGlyph(m) + " loading alpha… · "; !strings.Contains(busyLeft(m), want) {
+		t.Errorf("status line = %q with a pop-up loading over the load, want it to carry %q", busyLeft(m), want)
+	}
+	if !m.busySince.since.Equal(since) {
+		t.Errorf("the load's clock moved from %v to %v when a pop-up began loading", since, m.busySince.since)
 	}
 }
 

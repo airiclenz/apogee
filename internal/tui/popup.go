@@ -180,6 +180,7 @@ const (
 	popupRowPlain   popupRowKind = iota // content: faint, or the selection's own bar/accent
 	popupRowHeading                     // a section label dividing the list (th.popupHeading)
 	popupRowEditing                     // the row the pane is being typed into (th.popupEdit)
+	popupRowLoading                     // a pane's loading row, led by the spinner's frame (popupSpec.spinner)
 )
 
 // popupSpec describes one boxed selector popup. title and hint each drop their row when empty;
@@ -272,8 +273,8 @@ const (
 // other pane's ladder exactly as it was.
 //
 // rowKinds says what each row IS where that changes how it is painted (popupRowKind) — a section
-// header, a row being edited — parallel to rows, and short or nil for a pane whose rows are all
-// content, which is every pane but /settings. It is a list rather than a flag pair because the fact
+// header, a row being edited, a loading row — parallel to rows, and short or nil for a pane whose
+// rows are all content, which is every pane but /settings and a pane still loading (popupLoading). It is a list rather than a flag pair because the fact
 // belongs to a ROW: a header is one whether or not the selection is near it, and the selection
 // itself already travels as an index.
 //
@@ -307,6 +308,11 @@ const (
 // the painter will pay. The module bolds it where the first line still opens with it and paints the
 // line plain where truncation took it, so the styling can never claim a label the pane is not
 // showing.
+//
+// spinner is the spinner's current frame a popupRowLoading row leads with (popupSpinner): the row's
+// cell carries the frame as plain text, so the module measures and lays it out like any other cell,
+// and the painter draws the frame's own styled run in that text's place. The zero value is every pane
+// that is not loading.
 type popupSpec struct {
 	title         string
 	titleTail     string
@@ -326,6 +332,7 @@ type popupSpec struct {
 	hint          string
 	maxRows       int
 	scrollbar     bool
+	spinner       popupSpinner
 }
 
 // popupRowStyle is how a pane that asks in SENTENCES draws its row list — the ask prompt's shape
@@ -833,6 +840,30 @@ func popupCellColumn(th theme, widths []int, i int) int {
 // its first listing does. One spelling, so no two panes word the wait differently.
 const popupLoadingRow = "loading…"
 
+// popupSpinner is a loading row's spinner frame two ways: text, the frame as the plain characters the
+// row's cell carries (cells arrive escape-stripped, so this is what the module measures — two columns
+// under snake and glitter, one under classic and `ui.glyphs: safe`), and painted, the frame's styled
+// run ([spinnerAnim.view]) the painter draws where that text stands (popupRowLine). The zero value
+// paints nothing of its own.
+type popupSpinner struct {
+	text    string
+	painted string
+}
+
+// popupLoading fills c as a pane still reading what it lists: its one row is the spinner's current
+// frame, a space and popupLoadingRow, prose with no highlight, and the frame's painted run rides
+// beside it (listContent.spinner) so the row turns with the status line's glyph — the same frame, the
+// same colour loop — while the chain ticks for the wait (busy.go, [Model.busyWait]). It is the one
+// composition of a loading row, so the /sessions browser and the /workflows item view cannot word or
+// draw the wait differently.
+func (m Model) popupLoading(c listContent) listContent {
+	frame := m.spin.drawn(m.th, m.opts.UI.Spinner)
+	c.rows = singleCellRows([]string{frame + " " + popupLoadingRow})
+	c.selected = -1
+	c.spinner = popupSpinner{text: frame, painted: m.spin.view(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor)}
+	return c
+}
+
 // singleCellRows lifts a plain label list into one-cell popup rows — the shape a producer with
 // nothing to align (a file suggestion, an ask_user choice) hands the module. One cell is one
 // column, so the composed line is the label itself: the contract's promise that a single-cell row
@@ -1129,6 +1160,8 @@ func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string
 		return th.popupEdit.Render(squareLine(th.measure, row, inner))
 	case kind == popupRowHeading:
 		return blackFill.Render(th.popupHeading.Render(row))
+	case kind == popupRowLoading:
+		return popupLoadingLine(th, spec.spinner, blackFill, row)
 	case selected && spec.menuRows:
 		// No squareLine here, deliberately: the accent is on the CHOSEN WORDS, so it stops where
 		// they do and the rest of the row stays the pane's own black (drawTitledBox pads it out on
@@ -1144,6 +1177,21 @@ func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string
 	default:
 		return blackFill.Render(th.statusFaint.Render(row))
 	}
+}
+
+// popupLoadingLine paints a loading row as adjacent styled runs: the faint text before the spinner's
+// frame, the frame's own painted run (popupSpinner.painted, on spinnerBase — the same surface black
+// as blackFill), and the faint text after it. Runs rather than one faint wrapper around a painted
+// glyph, because the glyph's reset would strip the wrapper's faint from every cell after it — the
+// way the status line composes `glyph + statusBar.Render(" ")` (runningForms). A row that no longer
+// holds the frame — truncated through it on a pane too narrow for the word — paints faint whole, as a
+// plain row does.
+func popupLoadingLine(th theme, spinner popupSpinner, blackFill lipgloss.Style, row string) string {
+	before, after, found := strings.Cut(row, spinner.text)
+	if spinner.text == "" || !found {
+		return blackFill.Render(th.statusFaint.Render(row))
+	}
+	return blackFill.Render(th.statusFaint.Render(before)) + spinner.painted + blackFill.Render(th.statusFaint.Render(after))
 }
 
 // popupRowIndent is the width of the marker column every row leads with — the user glyph,

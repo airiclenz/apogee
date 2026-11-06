@@ -155,6 +155,12 @@ type workflowsPane struct {
 	itemSeq uint64
 }
 
+// itemLoading reports whether the pane is open on an item whose load has not landed yet — the level
+// that paints its loading row (popupLoading) and holds a busy wait while it does (busy.go).
+func (p workflowsPane) itemLoading() bool {
+	return p.open && p.level == workflowsAtItem && p.lines == nil
+}
+
 // workflowsListMsg carries an off-loop Engine.Workflows read back to the Update loop. opening is
 // true for the /workflows verb's own read, false for a refresh of the open pane.
 type workflowsListMsg struct {
@@ -620,6 +626,9 @@ func (m Model) workflowsListContent() (listContent, bool) {
 	c := listContent{pane: paneWorkflows, rows: rows, selected: -1}
 	if choices {
 		c.selected = pane.cursor().highlight(len(rows))
+	}
+	if pane.itemLoading() {
+		c = m.popupLoading(c) // the row turns with the spinner until the item's load lands
 	}
 	switch pane.level {
 	case workflowsAtList:

@@ -1096,7 +1096,7 @@ func (m Model) browserListContent() (listContent, bool) {
 		selected:  -1, // no rows ⇒ no highlight (the popup module's own convention)
 	}
 	if b.loading {
-		c.rows = singleCellRows([]string{popupLoadingRow})
+		c = m.popupLoading(c)
 		c.hint = sessionBrowserCloseEntry
 		return c, true
 	}

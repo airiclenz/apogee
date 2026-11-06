@@ -594,7 +594,9 @@
 // heartbeat that has not bound a model yet: [Model.busyWait] derives the wait from those latches at
 // call time (never a mirrored flag), the status line carries it in the running row's shape (glyph,
 // the word apogee already shows for the wait, a clock from [busyClock]), and Update's tail
-// arms the chain once when such a wait finds none alive (busyAfterFold). The transcript's live star
+// arms the chain once when such a wait finds none alive (busyAfterFold). A pop-up still loading its
+// listing (popupLoading) keeps the chain turning for its own loading row's glyph and adds no word to
+// the status line. The transcript's live star
 // blinks only under a running Turn ([Model.liveStarBlink]), so an idle wait's ticks never flip it.
 //
 // The upstream heartbeat is the package's SECOND tick chain, and it deliberately reuses the

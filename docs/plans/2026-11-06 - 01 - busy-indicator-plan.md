@@ -142,7 +142,16 @@ internal/tui/engineholds.go — holdGitAction, holdSessionLoad; internal/tui/ses
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestBusy|TestSessionBrowser|TestWatchOwner|TestRename|TestGitAction' ./internal/tui/`
 **Commit:** `feat(tui): session loads, git actions and /rename naming show the busy spinner`
 
-## 4. Pop-up loading rows animate
+## 4. Pop-up loading rows animate — ✅ DONE (2026-11-06)
+
+NOTES (2026-11-06): re-derived from the assumption that a pane's rows reach the painter directly — they pass through `listContent` → `listSpec` (listsurface.go), so `listContent` gains a `spinner popupSpinner` field that `listSpec` hands to the new `popupSpec.spinner` with the row marked by a new `popupRowLoading` kind; `popupRowLine` paints that kind as adjacent runs (`popupLoadingLine`: faint marker, the frame's own `spinnerAnim.view` run, faint ` loading…`). The cell carries the frame as plain text, so the module still measures escape-stripped cells (2 columns snake/glitter, 1 classic/safe).
+NOTES (2026-11-06): no new theme style — per the item's regression guard `spinnerBase` is already `Background(surface)`, the pop-up's `blackFill`, so the glyph paints through `spinnerAnim.view` unchanged; theme.go carries only the field-comment update.
+NOTES (2026-11-06): the pop-up source in `busyWait` returns `("", true)`, ranked last; `busyPhrase` and `restampBusy` treat an empty phrase as "no slot, no clock". Predicate: `sessionBrowser.open && .loading`, or the new `workflowsPane.itemLoading()` (open, item level, lines nil); `workflowsRows` keeps its own `lines == nil` check.
+NOTES (2026-11-06): `openBrowser` and `beginBrowserOpen` (sessions_test.go) and `foldWorkflowMsgs` (workflows_test.go) now read through item 2's `untickedMsg` / `untickedAll`, which covers the autotitle/watch/sessionsave/commandrun tests the plan's Files listed — those files needed no edit, nor did model.go. New tests: `assertLoadingRowTurns` (extends TestSessionBrowserOpensLoadingBeforeList), TestWorkflowItemLoadingAnimates, TestPopupLoadingRowSafeGlyphs, TestPopupLoadingRowPaintsAdjacentRuns, TestPopupLoadingKeepsLoadPhrase.
+NOTES (2026-11-06): consequential edit — internal/tui/spinner.go: made necessary by `spinnerAnim.view` now painting the pop-up loading row too (its comment named the status line alone)
+NOTES (2026-11-06): consequential edit — internal/tui/doc.go: made necessary by `busyWait` gaining the pop-up loading source (the package narration of busy waits)
+NOTES (2026-11-06): consequential edit — internal/tui/listsurface.go: made necessary by the loading row's frame having to travel from `listContent` into `popupSpec` (see the re-derivation note)
+NOTES (2026-11-06): sanity runs — the Acceptance -run pattern and `TestBusy|TestSession|TestWorkflow|TestStage|TestSpinner|TestLiveStar|TestPopup|TestList|TestRename|TestSave|TestCommandRun|TestWatch|TestResume` (race, one package) green; whole-suite run left to the closeout.
 
 Depends on item 2.
 
