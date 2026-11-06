@@ -48,12 +48,12 @@ end:
   keys: [ctrl+c, ctrl+c]
 
 # The bands of apogee's screen a target is searched in, found afresh on every screen:
-#   footer     — the row above the lowest ▁ floor hairline;
+#   footer     — the rows between the prompt box's lowest ╰ corner and the lowest ▁ floor hairline;
 #   status     — the row below the lowest ▔ top rule above the prompt box's lowest ╭ corner;
 #   transcript — every row above that ▔ top rule.
 areas:
   footer:
-    top: {match: '^ *▁', pick: last, offset: -1}
+    top: {match: '^ *╰', pick: last, offset: 1}
     bottom: {match: '^ *▁', pick: last, offset: -1}
   status:
     top:
