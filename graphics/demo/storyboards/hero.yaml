@@ -83,7 +83,7 @@ beats:
     do:
       - wait: {screen: "Sub-Agent", timeout: 90s}
       - wait: {screen: "tool calls", timeout: 90s}
-    duration: 10s
+    duration: 7.2s
     expect:
       - run: >-
           "$PHOTON_WORK/bin/sessionexpect" --entry 'kind=toolCall,tool=Sub-Agent' --contains Sub-Agent
@@ -194,7 +194,6 @@ beats:
       - wait: {screen: "\\d+(\\.\\d)?[kMG]?/\\d+(\\.\\d)?[kMG] \\d+%", timeout: 30s}
       - pause: {for: 2s}
     cut: true
-    zoom: {target: {text: "\\d+(\\.\\d)?[kMG]?/\\d+(\\.\\d)?[kMG] \\d+%", area: status}, factor: 2}
     notes: |
       Cut: on the rig's model (a 1.3M-token window) the zoom lands on `9k/1.3M 0%`, which sells
       nothing. Pinning a small `context-window:` would make the gauge read well but misstate the

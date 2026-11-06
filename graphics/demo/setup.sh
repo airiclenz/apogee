@@ -29,7 +29,7 @@ PORT=18181
 # leaves the model id out, so a changed model still replays the old model's replies without
 # complaint — change either and re-capture.
 HOST_ALIAS=openrouter
-MODEL='~deepseek/deepseek-v4-flash-latest'
+MODEL='z-ai/glm-5.3-flash'
 
 DEMO_HOME="$WORK/home"
 STAGE="$DEMO_HOME/Repos/taskman"
