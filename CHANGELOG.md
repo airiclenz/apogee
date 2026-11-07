@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.33.1] — 2026-11-07
+
 - **A `url-safety` deny of a failed MCP server's kept connection re-dials its configured endpoint.** When a server's reconnect to a new endpoint had failed, its old session kept serving; a `url-safety:` edit (or an `mcp-servers:` request) that then closed that old endpoint left the server absent until a retry gesture. The deny now queues one dial to the configured endpoint on the keystroke, mid-Turn included, when the server's last request and the edit's lists both admit it and no dial for it is pending (ADR 0109 decision 7, amended 2026-11-07). (`denied-endpoint-no-redial`)
 - **Fixed:** a `url-safety:` edit that denies the endpoint a live MCP session runs on now closes that session on the keystroke even when the config file does not parse; the row names the disconnected server before it reports the file it could not read.
 - **Listing sessions reads only each record's header.** `/sessions`, watched homes, `--continue` and the snapshot sweep now read each saved session's `meta` and stop there, rather than decoding the whole conversation, so listing a store of large records is fast on a slow box (six 4 MiB records: about 0.15 ms against 375 ms). A record whose header reads but whose body is damaged is now listed; resuming it fails with its load error, and `--continue` reports that error rather than picking the next-newest session. Retention (`Prune`) still decodes each record whole, so it never sweeps a damaged one.
