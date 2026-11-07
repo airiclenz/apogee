@@ -187,8 +187,10 @@ func (m *liveMCP) session(name string) mcpSession {
 // guard now denies has that session closed the same way, but a dial in flight for a config guard
 // still admits — the server moved off the denied endpoint — is left to land. Every other server is diffed against the LAST-REQUESTED set — its resolved
 // ServerConfig and its admit verdict under guard — so a server whose first dial failed is dialled
-// again only when its own config or verdict moves, or when retryFailed asks for every server whose
-// last dial failed (the `mcp-servers` row's retry gesture, ADR 0109 decision 7). A server that moved
+// again only when its own config or verdict moves, when retryFailed asks for every server whose
+// last dial failed (the `mcp-servers` row's retry gesture, ADR 0109 decision 7), or when the deny
+// above closed its kept connection while its configured endpoint is still admitted and no dial for
+// it is pending (canRedialDroppedLocked). A server that moved
 // gets one queued dial job, which supersedes (cancels or discards) any older dial for it; a server
 // moved back onto the config its live session already runs drops that work and gets none. A set
 // that puts the live servers in a new order dials none of them for it, but marks a rebuild wanted,
@@ -241,11 +243,13 @@ func (m *liveMCP) requestServerLocked(server mcp.ServerConfig, guard security.UR
 		m.servers[server.Name] = state
 	}
 	live, isLive := m.entries[server.Name]
-	if isLive && !mcpAdmits(live.config, guard) {
+	isDropped := isLive && !mcpAdmits(live.config, guard)
+	if isDropped {
 		// The lists now close the endpoint the server is connected on: the deny takes effect now. It
 		// closes that session alone — a dial already running for a config the lists still admit is
 		// left to land (or to fail into hasFailed, which retry-failed re-dials); the diff below drops
-		// it only when the server's own config or verdict moved.
+		// it only when the server's own config or verdict moved, and dials the configured endpoint
+		// when the closed session was a kept connection with no dial pending.
 		m.dropLiveLocked(server.Name)
 		isLive = false
 	}
@@ -269,7 +273,30 @@ func (m *liveMCP) requestServerLocked(server mcp.ServerConfig, guard security.UR
 		state.hasFailed = false
 	case isMoved || (retryFailed && state.hasFailed):
 		m.queueDialLocked(state, guard)
+	case isDropped && m.canRedialDroppedLocked(state, guard):
+		// The deny closed a kept connection — the server's dial to its configured endpoint failed —
+		// and that endpoint is still admitted, so it is dialled there now (ADR 0109 decision 7).
+		m.queueDialLocked(state, guard)
 	}
+}
+
+// canRedialDroppedLocked reports whether a server whose live session a deny has just closed is owed
+// one dial to its configured endpoint (ADR 0109 decision 7, amended 2026-11-07). The closed session
+// was a kept connection — the server's dial to the endpoint it is configured on failed, so the old
+// session went on serving — and once it is gone nothing else would bring the server back. It holds
+// when state is known, its last request admitted its config (isAdmitted, under the lists then in
+// force), guard admits that config too, no dial for it is queued or running, and it holds no
+// successful result: a held failed one is superseded by the new dial (queueDialLocked), and its
+// "previous connection kept" note would be false once the kept session is closed. The caller holds
+// the lock, and queues the dial under guard; commit re-admits it under the live lists.
+func (m *liveMCP) canRedialDroppedLocked(state *mcpServerState, guard security.URLGuard) bool {
+	if state == nil || !state.isAdmitted || !mcpAdmits(state.config, guard) || state.cancel != nil {
+		return false
+	}
+	if state.result != nil && state.result.err == nil {
+		return false
+	}
+	return !slices.ContainsFunc(m.jobs, func(job mcpDialJob) bool { return job.server == state.config.Name })
 }
 
 // disconnectLocked marks the server named name closed: any dial for it is superseded, and its live
@@ -301,7 +328,10 @@ func (m *liveMCP) dropLiveLocked(name string) {
 // dropDenied closes, now, every live session whose OWN endpoint guard denies — whatever endpoint its
 // server is configured on — and returns their names in config order. Each one is retired at once,
 // dropped from the installed set and closed off the loop (dropLiveLocked), while a dial in flight for
-// its server is left to land, or to fail into hasFailed, which retry-failed re-dials. It is the deny
+// its server is left to land, or to fail into hasFailed, which retry-failed re-dials. A server whose
+// closed session was a kept connection — its dial to its configured endpoint failed — with no dial
+// pending is dialled on that endpoint now, under guard, when its last request and guard both admit it
+// (canRedialDroppedLocked); takeWork hands that dial out. It is the deny
 // half of a `url-safety:` edit for a server already moving off the endpoint the edit closes: the deny
 // takes effect on the keystroke (ADR 0109 decision 5), and a dial to the still-admitted endpoint that
 // fails can never keep or bring back the session on the denied one.
@@ -316,6 +346,9 @@ func (m *liveMCP) dropDenied(guard security.URLGuard) []string {
 		if !mcpAdmits(m.entries[name].config, guard) {
 			m.dropLiveLocked(name)
 			dropped = append(dropped, name)
+			if state := m.servers[name]; m.canRedialDroppedLocked(state, guard) {
+				m.queueDialLocked(state, guard)
+			}
 		}
 	}
 	return dropped

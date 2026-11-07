@@ -20,7 +20,10 @@
 - 2: guard folded — tests seed docs on its own configured endpoint; the load-error path may queue item 1's re-dial; comment rule widened and the in-flight-dial wording scoped to lists in force.
 - 1 (re-check): guard folded — the ADR Acceptance grep names this plan's path (the `Amended 2026-11-07` grep already matches the 00-plan's D8 amendment); the refused-mid-Turn test seeds B denied through `allow-hosts [a.example.com]`; the docs grep adds `again only when`; every gatedDial seed closes `dial.release` before `drainMCP` (owner decision).
 
-## 1. A deny that closes a failed server's kept session re-dials its configured endpoint
+## 1. A deny that closes a failed server's kept session re-dials its configured endpoint — ✅ DONE (2026-11-07)
+
+NOTES (2026-11-07): consequential edit — cmd/apogee/wire_settings.go: made necessary by the dropDenied re-dial (denyMCP's doc and its in-body comment said a dropped session's server is only "left to land"; both now name the queued re-dial)
+NOTES (2026-11-07): a dial job already handed out by takeWork but not yet started is invisible to the predicate (not in m.jobs, cancel still nil), so a deny in that window queues a second dial; it supersedes the first (gen bump), which then never dials at startDial, so exactly one dial still runs
 
 **What:**
 Recast at the regression check (2026-11-07). Fixes `denied-endpoint-no-redial` (left over from the archived plan's item 9, 5ff32123). When a server's dial to its new endpoint B has failed, its old session on A is kept (D7). A `url-safety:` deny of A then closes that session, and nothing dials B, because `readmitMCP` sees the same admitted names and does not request.

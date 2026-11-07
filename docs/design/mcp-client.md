@@ -250,7 +250,8 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   it); the finished dials join the registry at the next idle point in one rebuild and one
   `SwapTools`, re-admitted under the live url-safety lists. A failed re-dial keeps that server's old
   session, a new server whose first dial fails stays absent, and a removed or denied server is
-  refused at once. Each outcome is one transcript note per server (`mcp <server> reconnected`,
+  refused at once. A deny that closes such a kept connection dials the server's configured endpoint
+  again when the lists, at its last request and now, admit it and no dial for it is pending. Each outcome is one transcript note per server (`mcp <server> reconnected`,
   `mcp reconnect failed: <server>: … — previous connection kept`, …). Startup's `Connect` stays
   all-or-nothing and fatal.
 - **Close** joins every session's teardown error and clears the sessions; it is safe on a dormant or

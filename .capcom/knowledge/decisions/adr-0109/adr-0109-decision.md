@@ -40,6 +40,17 @@ the next idle point.**
    decision 1's "re-committing the row retries the apply"; with nothing failed, an unchanged round
    trip stays a no-op), or by a restart. A watched save, an adoption or a `url-safety` edit that leaves a
    failed server untouched never re-dials it, and there is no automatic retry.
+
+   > **Amended 2026-11-07 (`docs/plans/2026-11-07 - 01 - url-safety-mcp-deny-gaps-plan.md`, item
+   > 1).** A deny that closes a failed server's kept connection — its last dial failed, so the old
+   > session went on serving — counts as touching that server, whether the deny comes from a
+   > `url-safety` edit or from a request under lists that close the session's endpoint. One dial to
+   > its configured endpoint is queued on the keystroke, mid-Turn included, when the verdict its last
+   > request recorded and the deny's lists both admit that endpoint, no dial for it is queued or
+   > running, and no successful result is held (a held failed one is superseded, so no `previous
+   > connection kept` note outlives the closed session). The dial is re-admitted under the live lists
+   > at commit. A server whose configured endpoint the lists deny as well is retired and dialled
+   > nowhere, and a failed server whose session no deny closes still stays un-dialled.
 8. **The outcome arrives per server, after the keystroke.**
    - Each server's outcome is one ephemeral transcript note under the `mcp` label: `mcp <server> reconnected` (or
      `mcp <server> connected` for a new server), `mcp reconnect failed: <server>: … — previous connection kept`, or

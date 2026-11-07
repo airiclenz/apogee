@@ -629,7 +629,10 @@ same edit: an `sse` or `streamable-http` endpoint your new lists close is discon
 then, and the row names it (`mcp server docs disconnected — its endpoint is denied`). The rest of
 your servers keep their connections, and an edit that closes no endpoint a server is configured or
 connected on leaves every one of them untouched. A server your new lists open again is dialled in the background, and its
-outcome arrives as a transcript note of its own (`mcp docs connected`). Webhook Reactions are the exception: a running session's own webhooks keep
+outcome arrives as a transcript note of its own (`mcp docs connected`). A server whose last
+reconnect failed is still serving on its kept connection; when your lists close that kept connection
+but still admit the endpoint the server is configured on, it is dialled there in the background too,
+with the same note. Webhook Reactions are the exception: a running session's own webhooks keep
 the lists it started with, so an edit reaches them at the next start — while a `/schedule` firing
 raised after the edit composes its webhooks from the new lists, as it does its tools. The block is
 file-only (no flag, no environment variable) and global: it applies to every model this config runs.
@@ -906,7 +909,8 @@ docs: … — previous connection kept`, or `mcp connect failed: docs: …`. A s
 back keeps its old connection serving; a new one whose first dial fails stays absent. A removed
 server's tools are refused at once. Nothing retries a failed server on its own: a save that changes
 it does, and so does the `/settings` round trip, even one that changes nothing, which re-dials
-every server whose last dial failed. Startup is different: there connecting is all-or-nothing, and
+every server whose last dial failed. So does a `url-safety` edit that closes the kept connection of
+a server whose reconnect failed while still admitting the endpoint it is configured on. Startup is different: there connecting is all-or-nothing, and
 a server that cannot connect stops the launch. A save to the Project config, or an answer to one of
 its servers — here or from another terminal — reconnects the same way; a Project config that stops
 parsing disconnects its servers, and leaves yours serving, until it parses again.

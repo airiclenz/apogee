@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -741,6 +742,9 @@ func TestURLSafetyDenyOfTheLiveEndpointRetiresItWhileTheNewDialLands(t *testing.
 	t.Parallel()
 	dial := newGatedDial("docs")
 	fixture, onA, spy, finished := denyLiveEndpointThroughURLSafety(t, dial)
+	if fixture.set.isDialQueued() {
+		t.Error("the deny queued a second dial while the dial to B was still running")
+	}
 	close(dial.release)
 	awaitClosed(t, finished, "the dial to B to return")
 
@@ -795,6 +799,226 @@ func TestURLSafetyDenyOfTheLiveEndpointLeavesAFailedNewDialRetryable(t *testing.
 	if got := fixture.set.session("docs"); got != mcpSession(dial.session) {
 		t.Errorf("docs is on %p after the retry, want the session on B (%p)", got, dial.session)
 	}
+}
+
+// keptSessionSeed is the shape the kept-session deny tests start from: docs is connected on host A,
+// the config file at path has it on host B, and B's dial has run and failed, so the session on A is
+// a kept connection. dial is already released, so every later dial answers at once — refused while
+// dial.err is set, with dial.session once a test clears it.
+type keptSessionSeed struct {
+	fixture *mcpFixture
+	onA     *fakeMCPSession
+	onB     mcp.ServerConfig
+	dial    *gatedDial
+	spy     *applySettingSpy
+	path    string
+}
+
+// seedKeptSession builds a keptSessionSeed whose dial to B has failed but is NOT yet committed: its
+// failed result is held for the next commit. allowHosts, when non-nil, is put in force on the live
+// tool set before docs is requested onto B, and the request runs under it.
+func seedKeptSession(t *testing.T, allowHosts []string) keptSessionSeed {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, "mcp-servers:\n"+
+		"  - name: docs\n"+
+		"    transport: streamable-http\n"+
+		"    endpoint: https://b.example.com/\n")
+	onB := resolvedMCPServer(t, path, "docs")
+	configA := onB
+	configA.Endpoint = "https://a.example.com/"
+	docs, onA := liveServer(configA)
+	dial := newGatedDial("docs")
+	dial.err = errors.New("dial: connection refused")
+	close(dial.release)
+	fixture := newMCPFixtureDialling([]mcpEntry{docs}, "", dial.connect)
+	spy := &applySettingSpy{}
+	if allowHosts != nil {
+		if err := fixture.tools.setAllowHosts(allowHosts, spy); err != nil {
+			t.Fatalf("setAllowHosts: %v", err)
+		}
+	}
+	if err := fixture.set.request([]mcp.ServerConfig{onB}, mcpGuard(allowHosts, nil), false); err != nil {
+		t.Fatalf("request B: %v", err)
+	}
+	for _, job := range fixture.set.takeWork() {
+		job.run(context.Background())
+	}
+	return keptSessionSeed{fixture: fixture, onA: onA, onB: onB, dial: dial, spy: spy, path: path}
+}
+
+// seedCommittedKeptSession is seedKeptSession with B's failed dial committed: the note says the
+// previous connection was kept, and docs is still on A.
+func seedCommittedKeptSession(t *testing.T, allowHosts []string) keptSessionSeed {
+	t.Helper()
+	seed := seedKeptSession(t, allowHosts)
+	outcomes, err := drainMCP(t, seed.fixture.set, seed.fixture.tools, seed.spy)
+	if err != nil {
+		t.Fatalf("commit B's failed dial: %v", err)
+	}
+	if notes := outcomeNotes(outcomes); len(notes) != 1 || !strings.HasSuffix(notes[0], "— previous connection kept") {
+		t.Fatalf("notes = %q, want one `mcp reconnect failed: docs: … — previous connection kept`", notes)
+	}
+	if got := seed.fixture.set.session("docs"); got != mcpSession(seed.onA) {
+		t.Fatalf("docs is on %p after B's dial failed, want the kept session on A (%p)", got, seed.onA)
+	}
+	return seed
+}
+
+// applyURLSafety commits one `url-safety:` row on the seed's fixture, as the settings screen would.
+func (s keptSessionSeed) applyURLSafety(t *testing.T, key, value string) (string, error) {
+	t.Helper()
+	applier := fakeApplier(t)
+	applier.engine = s.spy
+	applier.tools = s.fixture.tools
+	applier.mcp = s.fixture.set
+	applier.configPath = s.path
+	return applySettingFor(applier)(key, value)
+}
+
+// assertLandsOnB clears the seed's dial refusal, drains the queued re-dial and checks docs ends on B,
+// the kept session on A closed, with the one note a landed dial writes.
+func (s keptSessionSeed) assertLandsOnB(t *testing.T) {
+	t.Helper()
+	s.dial.err = nil
+	outcomes, err := drainMCP(t, s.fixture.set, s.fixture.tools, s.spy)
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if got := s.fixture.set.session("docs"); got != mcpSession(s.dial.session) {
+		t.Errorf("docs is on %p, want the session on B (%p)", got, s.dial.session)
+	}
+	if !s.onA.isClosed() {
+		t.Error("the kept session on the denied endpoint A was left open")
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+}
+
+// A `url-safety:` deny of the endpoint a failed server's kept session runs on closes that session on
+// the keystroke and dials the server's configured endpoint, which the edit still admits: docs ends
+// connected on B rather than absent until a retry gesture (ADR 0109 decision 7).
+func TestURLSafetyDenyOfAKeptSessionRedialsTheConfiguredEndpoint(t *testing.T) {
+	t.Parallel()
+	seed := seedCommittedKeptSession(t, nil)
+	if !seed.fixture.set.hasFailedDial() {
+		t.Fatal("the seed's dial to B is not marked failed")
+	}
+
+	note, err := seed.applyURLSafety(t, "url-safety.deny-hosts", "[a.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	if want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied"; note != want {
+		t.Errorf("note = %q, want %q", note, want)
+	}
+	if !seed.onA.isRetired() {
+		t.Error("the kept session on the denied endpoint A still answers calls after the row returned")
+	}
+	if !seed.fixture.set.isDialQueued() {
+		t.Fatal("no dial to the still-admitted endpoint B was queued on the keystroke")
+	}
+	seed.assertLandsOnB(t)
+}
+
+// A deny that closes both the kept session's endpoint and the configured one retires the server and
+// dials nothing: there is no admitted endpoint left to dial.
+func TestURLSafetyDenyOfAKeptSessionWithBothEndpointsDeniedDialsNothing(t *testing.T) {
+	t.Parallel()
+	seed := seedCommittedKeptSession(t, nil)
+
+	if _, err := seed.applyURLSafety(t, "url-safety.deny-hosts", "[a.example.com, b.example.com]"); err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+
+	if !seed.onA.isRetired() {
+		t.Error("the kept session on the denied endpoint A still answers calls")
+	}
+	if got := seed.fixture.set.session("docs"); got != nil {
+		t.Errorf("docs is on %p, want no live entry", got)
+	}
+	if seed.fixture.set.isDialQueued() {
+		t.Error("a dial was queued for docs though both its endpoints are denied")
+	}
+}
+
+// An edit that closes no endpoint a failed server is connected or configured on leaves it as it was:
+// its kept session serves on and nothing dials it.
+func TestURLSafetyDenyLeavesAnUntouchedFailedServerUndialled(t *testing.T) {
+	t.Parallel()
+	seed := seedCommittedKeptSession(t, nil)
+
+	if _, err := seed.applyURLSafety(t, "url-safety.deny-hosts", "[c.example.com]"); err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+
+	if seed.fixture.set.isDialQueued() {
+		t.Error("an edit that denies neither of docs' endpoints queued a dial")
+	}
+	if got := seed.fixture.set.session("docs"); got != mcpSession(seed.onA) {
+		t.Errorf("docs is on %p, want the kept session on A (%p)", got, seed.onA)
+	}
+}
+
+// The request path's deny (requestServerLocked) re-dials a kept session's server the same way: a
+// request under lists that close A, with the retry-failed flag off, queues the dial to B on its own.
+func TestLiveMCPRequestDenyOfAKeptSessionRedialsTheConfiguredEndpoint(t *testing.T) {
+	t.Parallel()
+	seed := seedCommittedKeptSession(t, nil)
+
+	err := seed.fixture.set.request([]mcp.ServerConfig{seed.onB}, mcpGuard(nil, []string{"a.example.com"}), false)
+
+	if err != nil {
+		t.Fatalf("request under the deny: %v", err)
+	}
+	if !seed.onA.isRetired() {
+		t.Error("the kept session on the denied endpoint A still answers calls")
+	}
+	if !seed.fixture.set.isDialQueued() {
+		t.Fatal("no dial to the still-admitted endpoint B was queued")
+	}
+	seed.assertLandsOnB(t)
+}
+
+// A server whose configured endpoint was denied at its last request is not dialled when a deny closes
+// its kept session, even though the edit's own lists would admit it: here the host-list swap is
+// refused mid-Turn, so those lists never come into force, and the dial would run under lists that
+// are not the session's.
+func TestURLSafetyDenyRefusedMidTurnOfAKeptSessionOnADeniedConfigDialsNothing(t *testing.T) {
+	t.Parallel()
+	seed := seedCommittedKeptSession(t, []string{"a.example.com"})
+	seed.spy.swapErr = errors.New("engine busy")
+
+	_, err := seed.applyURLSafety(t, "url-safety.allow-hosts", "[b.example.com]")
+
+	if !errors.Is(err, seed.spy.swapErr) {
+		t.Fatalf("apply url-safety.allow-hosts = %v, want the mid-Turn refusal", err)
+	}
+	if !seed.onA.isRetired() {
+		t.Error("the kept session on the denied endpoint A still answers calls after the refused swap")
+	}
+	if seed.fixture.set.isDialQueued() {
+		t.Error("a dial was queued for a config the last request denied")
+	}
+}
+
+// A deny that lands after B's dial failed but before that failure was committed still re-dials: the
+// held failed result is superseded, so no `previous connection kept` note is written about the session
+// the deny has just closed, and docs ends on B.
+func TestURLSafetyDenyOfAKeptSessionWithAnUncommittedFailedDialRedials(t *testing.T) {
+	t.Parallel()
+	seed := seedKeptSession(t, nil)
+
+	if _, err := seed.applyURLSafety(t, "url-safety.deny-hosts", "[a.example.com]"); err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+
+	if !seed.fixture.set.isDialQueued() {
+		t.Fatal("no dial to the still-admitted endpoint B was queued")
+	}
+	seed.assertLandsOnB(t)
 }
 
 // Every finished dial lands in ONE swap, its tools in config order whatever order the dials
