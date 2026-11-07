@@ -178,6 +178,52 @@ func TestLiveMCPToolsFollowConfigOrder(t *testing.T) {
 	}
 }
 
+// A save that only reorders unchanged live servers dials none of them, yet the tools still follow
+// config order (ADR 0109 decision 4): the request marks a commit wanted, and that commit swaps the
+// same sessions in, in the new order.
+func TestLiveMCPReorderOnlySaveReappliesToolOrder(t *testing.T) {
+	t.Parallel()
+	docs, docsSession := liveServer(stdioServer("docs", "docs-mcp"))
+	wiki, wikiSession := liveServer(stdioServer("wiki", "wiki-mcp"))
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith([]mcpEntry{docs, wiki}, "", dials.connect)
+	spy := &applySettingSpy{}
+
+	err := fixture.set.request([]mcp.ServerConfig{
+		stdioServer("wiki", "wiki-mcp"), stdioServer("docs", "docs-mcp"),
+	}, openGuard, false)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if !fixture.set.wantsRebuild() {
+		t.Error("a reorder-only request wants no commit, so the new order never reaches the engine")
+	}
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if len(dials.dialled) != 0 {
+		t.Errorf("a reorder re-dialled %v, want no dial", dials.dialled)
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want one carrying the new order", len(spy.swaps))
+	}
+	want := []string{"wiki__live", "docs__live"}
+	if got := toolNames(spy.swaps[0].All()); !slices.Equal(got, want) {
+		t.Errorf("swapped tools = %v, want %v", got, want)
+	}
+	if len(outcomes) != 0 {
+		t.Errorf("a reorder wrote notes %q, want none: no server reconnected", outcomeNotes(outcomes))
+	}
+	if docsSession.isClosed() || wikiSession.isClosed() {
+		t.Error("a reorder closed a live session")
+	}
+	if fixture.set.wantsRebuild() {
+		t.Error("the commit left a rebuild wanted")
+	}
+}
+
 // Re-committing the same config after a failure is the retry (ADR 0037 decision 1, ADR 0109
 // decision 7): it dials each server whose last dial failed — a new server that stayed absent, and a
 // changed server whose old session was kept — exactly once more, and the healthy server not at all.

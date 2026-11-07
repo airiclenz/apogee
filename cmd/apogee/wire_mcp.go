@@ -125,8 +125,9 @@ type liveMCP struct {
 	requested []string
 	// jobs are the queued dials takeWork has not handed out yet, in request order.
 	jobs []mcpDialJob
-	// needsRebuild says a server was marked closed since the last commit, so the next one rebuilds
-	// even when no dial finished: the closed server's tools leave the registry there.
+	// needsRebuild says a server was marked closed, or the live servers were reordered, since the
+	// last commit, so the next one rebuilds even when no dial finished: the closed server's tools
+	// leave the registry there, and the live ones take their new config order.
 	needsRebuild bool
 	// lastGen is the newest generation handed out, across every server, so a server removed and
 	// re-added never reuses one.
@@ -188,7 +189,9 @@ func (m *liveMCP) session(name string) mcpSession {
 // again only when its own config or verdict moves, or when retryFailed asks for every server whose
 // last dial failed (the `mcp-servers` row's retry gesture, ADR 0109 decision 7). A server that moved
 // gets one queued dial job, which supersedes (cancels or discards) any older dial for it; a server
-// moved back onto the config its live session already runs drops that work and gets none.
+// moved back onto the config its live session already runs drops that work and gets none. A set
+// that puts the live servers in a new order dials none of them for it, but marks a rebuild wanted,
+// so the next commit surfaces their tools in the new config order (ADR 0109 decision 4).
 func (m *liveMCP) request(servers []mcp.ServerConfig, guard security.URLGuard, retryFailed bool) error {
 	if err := mcp.ValidateServers(servers); err != nil {
 		return err
@@ -214,7 +217,19 @@ func (m *liveMCP) request(servers []mcp.ServerConfig, guard security.URLGuard, r
 		requested = append(requested, server.Name)
 	}
 	m.requested = requested
+	if !slices.Equal(m.order, m.liveInRequestedLocked()) {
+		m.needsRebuild = true
+	}
 	return nil
+}
+
+// liveInRequestedLocked is the installed servers' names in the last-requested config order — the
+// order the next commit installs. The caller holds the lock.
+func (m *liveMCP) liveInRequestedLocked() []string {
+	return slices.DeleteFunc(slices.Clone(m.requested), func(name string) bool {
+		_, isLive := m.entries[name]
+		return !isLive
+	})
 }
 
 // requestServerLocked is request's diff for ONE configured server. The caller holds the lock.
@@ -332,8 +347,9 @@ func (m *liveMCP) takeWork() []mcpDialJob {
 	return jobs
 }
 
-// wantsRebuild reports whether a server was marked closed since the last commit, so a commit is
-// wanted with no dial behind it: the closed server's tools leave the registry there.
+// wantsRebuild reports whether a server was marked closed, or the live servers reordered, since the
+// last commit, so a commit is wanted with no dial behind it: the closed server's tools leave the
+// registry there, and the live ones take their new config order.
 func (m *liveMCP) wantsRebuild() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -435,9 +451,10 @@ func (m *liveMCP) storeDial(gen uint64, result mcpDialResult) {
 // A failed dial keeps the server's old session, or leaves it absent. Replaced and denied sessions
 // close off the loop once the engine has taken the registry.
 //
-// The outcomes are one per result taken, in config order. With nothing finished and nothing marked
-// closed it does nothing. The error is the engine refusing the swap (mcpPendingError): every result
-// stays pending for the next commit, nothing is closed and no outcome is returned.
+// The outcomes are one per result taken, in config order. With nothing finished, nothing marked
+// closed and nothing reordered it does nothing. The error is the engine refusing the swap
+// (mcpPendingError): every result stays pending for the next commit, nothing is closed and no
+// outcome is returned.
 func (m *liveMCP) commit(set *liveTools, engine settingsEngine) ([]mcpOutcome, error) {
 	spec := set.built()
 	guard := mcpGuard(spec.allowHosts, spec.denyHosts)
@@ -809,7 +826,7 @@ func (w *rootWiring) mcpHost() tui.MCPHost {
 
 // TakeMCPWork hands the TUI the dial jobs the requests since the last call queued, each once, to run
 // off the Update loop, and whether a commit is wanted with no dial behind it (a closed server's
-// tools must leave the registry).
+// tools must leave the registry, or the live servers' tools must take a new config order).
 func (w *rootWiring) TakeMCPWork() ([]tui.MCPDial, bool) {
 	jobs := w.mcpSet.takeWork()
 	dials := make([]tui.MCPDial, 0, len(jobs))

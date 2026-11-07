@@ -18,7 +18,8 @@ const MCPReconnectingNote = "reconnecting MCP…"
 // and it runs on a Cmd goroutine. A nil host is inert: no work, no commit.
 type MCPHost interface {
 	// TakeMCPWork hands out the dials queued since the last call, each exactly once, and reports
-	// whether a commit is wanted with no dial behind it (a removed server's tools must leave).
+	// whether a commit is wanted with no dial behind it (a removed server's tools must leave, or the
+	// live servers' tools must take a new config order).
 	TakeMCPWork() (dials []MCPDial, commit bool)
 	// CommitMCP takes every finished dial into the live tool set in one rebuild and one tool swap,
 	// returning one outcome per server it settled. pending reports that the swap was refused
