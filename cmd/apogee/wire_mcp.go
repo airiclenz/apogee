@@ -8,8 +8,8 @@ package main
 // once and queues one dial job per server it adds or changes; the jobs run off the caller; a commit at
 // the next idle point folds every finished dial into one rebuild and one SwapTools, then closes the
 // sessions it replaced — so a server that cannot be reached keeps its old session, or stays absent,
-// and costs the healthy ones nothing. The synchronous reconnect is those three steps run inline. The
-// wiring itself is the TUI's tui.MCPHost over this holder: the TUI runs the jobs as Cmds and commits
+// and costs the healthy ones nothing. A `url-safety:` edit that newly denies a server marks it closed
+// on its own (retire), ahead of the host-list swap. The wiring itself is the TUI's tui.MCPHost over this holder: the TUI runs the jobs as Cmds and commits
 // at its idle point.
 
 import (
@@ -100,8 +100,9 @@ type mcpDialJob struct {
 //
 // The lifecycle is three calls. request (on the caller) marks a removed or newly denied server closed
 // at once and queues a dial job per server that moved; the jobs (takeWork) run anywhere; commit (on
-// the caller, at an idle point) takes the finished dials in with one rebuild. close is the run's
-// teardown: it cancels every dial, waits for them, and closes everything still open.
+// the caller, at an idle point) takes the finished dials in with one rebuild. retire is request's
+// removal alone, for a `url-safety:` edit whose deny must land before its host lists move. close is
+// the run's teardown: it cancels every dial, waits for them, and closes everything still open.
 //
 // The holder is what makes the tool registry's rebuild honest afterwards: the build recipe folds in
 // whatever this holder currently carries, so a rebuild driven by any reason at all — a search endpoint
@@ -136,9 +137,6 @@ type liveMCP struct {
 	dials  sync.WaitGroup
 	closes sync.WaitGroup
 
-	// ctx is the wiring's session context, the one a synchronous reconnect dials under (see
-	// mcpConnect).
-	ctx context.Context
 	// connect dials one server, as startup dialled each — bar a repo server whose pin moved, which the
 	// session it returns reports as skipped (mcpSession.Skipped).
 	connect mcpConnect
@@ -146,9 +144,9 @@ type liveMCP struct {
 
 // newLiveMCP holds the servers this run connected at startup, in config order, as the
 // last-requested set (each admitted, since startup refuses a denied endpoint), and the recipe for
-// dialling another under ctx.
-func newLiveMCP(ctx context.Context, entries []mcpEntry, connect mcpConnect) *liveMCP {
-	m := &liveMCP{ctx: ctx, connect: connect, servers: make(map[string]*mcpServerState, len(entries))}
+// dialling another.
+func newLiveMCP(entries []mcpEntry, connect mcpConnect) *liveMCP {
+	m := &liveMCP{connect: connect, servers: make(map[string]*mcpServerState, len(entries))}
 	held := make(map[string]mcpEntry, len(entries))
 	order := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -272,6 +270,26 @@ func (m *liveMCP) disconnectLocked(name string) {
 	m.installLocked(entries, slices.DeleteFunc(slices.Clone(m.order), func(n string) bool { return n == name }))
 	m.closeOffLoopLocked(live)
 	m.needsRebuild = true
+}
+
+// retire marks the servers named names closed now and drops them from the last-requested set —
+// request's removal path, with no request behind it: each one's tools are refused from here on
+// (mcpSession.Retire), its in-flight dial is cancelled, its session closes off the loop, and its tools
+// leave the registry at the next commit. It is the deny half of a `url-safety:` edit (ADR 0109),
+// which runs before the host lists move, mid-Turn included, so a swap the engine refuses cannot keep
+// a server the operator has just closed talking. A name the holder does not know is skipped; a server
+// retired here and configured again is a new one to the next request, so it is dialled.
+func (m *liveMCP) retire(names []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.isStopped {
+		return
+	}
+	for _, name := range names {
+		m.disconnectLocked(name)
+		delete(m.servers, name)
+	}
+	m.requested = slices.DeleteFunc(slices.Clone(m.requested), func(n string) bool { return slices.Contains(names, n) })
 }
 
 // supersedeLocked moves the server named name to a fresh generation, so no older dial for it lands:
@@ -659,44 +677,6 @@ func (e mcpPendingError) Error() string {
 // Unwrap keeps the engine's refusal reachable.
 func (e mcpPendingError) Unwrap() error { return e.cause }
 
-// reconnect moves the session onto servers synchronously, on its caller: request, then every queued
-// dial run inline under the wiring's context, then commit — and it waits for the closes it queued
-// before it returns. An unchanged server is left alone, a removed one is dropped, an added or changed
-// one is dialled; a failed re-dial keeps that server's old session and its OLD config, a failed new
-// server stays absent, and neither costs any other server anything. Every server whose last dial
-// failed is dialled again (the retry-failed flag).
-//
-// The outcomes are one per server dialled, in config order; the unchanged and removed servers have
-// none. A repo server whose pin moved is a failed dial whose cause is the pin's refusal: it keeps an
-// old session as any other failure does, and the re-read the connect cued asks about it again.
-//
-// The error is for a refusal of the WHOLE call, worded by mcpReconnectFailed: a busy engine, a set
-// mcp.ValidateServers refuses, or a registry the engine would not take (whose results stay pending).
-// A busy engine is asked FIRST (CanSwapTools), before anything is retired or dialled: a swap that is
-// going to be refused has no use for the connections, and dialling them mid-Turn would only spend a
-// server's handshake to close it straight down.
-func (m *liveMCP) reconnect(servers []mcp.ServerConfig, set *liveTools, engine settingsEngine) ([]mcpOutcome, error) {
-	if err := engine.CanSwapTools(); err != nil {
-		return nil, mcpReconnectFailed(err)
-	}
-	// The dials are guarded by the host lists the live tool set is on NOW, which is the same read the
-	// network tools' own rebuild makes.
-	spec := set.built()
-	if err := m.request(servers, mcpGuard(spec.allowHosts, spec.denyHosts), true); err != nil {
-		return nil, mcpReconnectFailed(err)
-	}
-	for _, job := range m.takeWork() {
-		job.run(m.ctx)
-	}
-	outcomes, err := m.commit(set, engine)
-	// The sync callers read a replaced session's state straight after, so its close is joined here.
-	m.closes.Wait()
-	if pending, isPending := errors.AsType[mcpPendingError](err); isPending {
-		return nil, mcpReconnectFailed(pending.cause)
-	}
-	return outcomes, err
-}
-
 // dial connects one server under ctx and guard's host lists. A session that skipped the server for a
 // moved pin is closed (it holds nothing) and reported as the dial's failure, its cause the pin's own
 // refusal.
@@ -718,8 +698,8 @@ func mcpAdmits(server mcp.ServerConfig, guard security.URLGuard) bool {
 	return len(denied) == 0
 }
 
-// mcpRowFailures is what a synchronous reconnect that landed reports (liveMCP.reconnect): nil when
-// every dial answered, otherwise an error whose text is the failed servers' clauses joined by "; " —
+// mcpRowFailures is what the outcomes of a commit that landed (liveMCP.commit) say as one row error: nil
+// when every dial answered, otherwise an error whose text is the failed servers' clauses joined by "; " —
 // the row that asked reads `saved — live apply failed: <server>: …` — and which still wraps each
 // cause.
 func mcpRowFailures(outcomes []mcpOutcome) error {
@@ -775,8 +755,8 @@ func closeSession(s mcpSession) error {
 }
 
 // mcpReconnectFailed is what the row says when a reconnect was refused WHOLE, with nothing moved — a
-// busy engine, a set that fails validation, a registry the engine would not take (liveMCP.reconnect);
-// one server's failed dial is worded per server instead (mcpFailed). It names the outcome the human
+// busy engine, a set that fails validation (liveMCP.request), a registry the engine would not take
+// (liveMCP.commit); one server's failed dial is worded per server instead (mcpFailed). It names the outcome the human
 // most needs to know — that the servers they were talking to a moment ago are still connected —
 // because the alternative reading of a failed reconnect is that the session now has no MCP tools.
 //

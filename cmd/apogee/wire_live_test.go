@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -148,7 +149,7 @@ func TestMCPReconnectUsesTheLiveURLSafetyLists(t *testing.T) {
 	if err := w.toolSet.setDenyHosts([]string{"localhost"}, engine); err != nil {
 		t.Fatalf("setDenyHosts: %v", err)
 	}
-	outcomes, err := w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	outcomes, err := requestAndDrainMCP(t, w.mcpSet, []mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
 	if err != nil {
 		t.Fatalf("reconnect: %v, want the call to land with the server's own failure in its outcome", err)
 	}
@@ -166,7 +167,7 @@ func TestMCPReconnectUsesTheLiveURLSafetyLists(t *testing.T) {
 	if err := w.toolSet.setDenyHosts(nil, engine); err != nil {
 		t.Fatalf("setDenyHosts(nil): %v", err)
 	}
-	outcomes, err = w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	outcomes, err = requestAndDrainMCP(t, w.mcpSet, []mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
 	if err != nil {
 		t.Fatalf("reconnect: %v, want the call to land with the server's own failure in its outcome", err)
 	}
@@ -232,12 +233,12 @@ func TestWireSessionFencesTheSettingsEditorAgainstTheWorkspace(t *testing.T) {
 }
 
 // A `url-safety:` edit binds BOTH surfaces the lists reach, and the MCP one is only reachable by
-// dialling again: the guard is consumed at connect time and never retained (internal/mcp/
+// closing or dialling again: the guard is consumed at connect time and never retained (internal/mcp/
 // transport.go), so a connection made under the old lists keeps talking to a host the operator has
-// just closed until something else happens to reconnect. This is the re-admission that closes it
-// (audit 2026-08-28: "after a `/settings` url-safety edit, network tools and the MCP connection
-// disagree about which hosts are allowed") — and the denied server is DROPPED and named, never
-// re-dialled: a failed re-dial would keep the very connection the operator has just closed.
+// just closed until something else happens to reconnect. This is the deny that closes it (audit
+// 2026-08-28: "after a `/settings` url-safety edit, network tools and the MCP connection disagree
+// about which hosts are allowed") — and the denied server is DROPPED and named on the keystroke,
+// never re-dialled: a failed re-dial would keep the very connection the operator has just closed.
 func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -245,10 +246,11 @@ func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T
 
 	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
 	var dialled [][]mcp.ServerConfig
-	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "docs"}, session: old}}, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
-		dialled = append(dialled, servers)
-		return &fakeMCPSession{}, nil
-	})
+	fixture := newMCPFixtureWith([]mcpEntry{{config: resolvedMCPServer(t, path, "docs"), session: old}}, "",
+		func(servers []mcp.ServerConfig) (mcpSession, error) {
+			dialled = append(dialled, servers)
+			return &fakeMCPSession{}, nil
+		})
 	spy := &applySettingSpy{}
 	applier := fakeApplier(t)
 	applier.engine = spy
@@ -265,6 +267,17 @@ func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T
 	if want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied"; note != want {
 		t.Errorf("note = %q, want %q — a server the edit disconnected is news the row owes the human", note, want)
 	}
+	// Retired before Apply returned: the deny takes effect on the keystroke, not at the idle commit.
+	if !old.isRetired() {
+		t.Error("the denied server's session still answers calls after the apply returned")
+	}
+	if got := fixture.set.session("docs"); got != nil {
+		t.Errorf("the holder still carries %p for docs after the deny; want no live entry", got)
+	}
+
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
 	if len(dialled) != 0 {
 		t.Fatalf("dialled = %+v, want no dial at all: the only server was denied", dialled)
 	}
@@ -274,6 +287,99 @@ func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T
 	}
 	if names := toolNames(fixture.set.tools()); len(names) != 0 {
 		t.Errorf("live MCP tools = %v, want none: the only server was dropped", names)
+	}
+}
+
+// The deny half lands before, and regardless of, the host-list swap: SwapTools is idle-only and
+// refuses mid-Turn, but a server the operator has just closed must stop answering now. The row's
+// error is the engine's refusal with the deny clause after it, so the row still names the server
+// the edit disconnected.
+func TestApplySettingURLSafetyDenyRefusedMidTurnNamesTheServer(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
+	fixture := newMCPFixtureWith([]mcpEntry{{config: resolvedMCPServer(t, path, "docs"), session: old}}, "",
+		func([]mcp.ServerConfig) (mcpSession, error) { return &fakeMCPSession{}, nil })
+	busy := errors.New("input pending: the tool set can only be swapped between runs")
+	spy := &applySettingSpy{swapErr: busy}
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
+
+	_, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
+
+	if err == nil {
+		t.Fatal("apply url-safety.deny-hosts mid-Turn: want the engine's refusal, got none")
+	}
+	if !errors.Is(err, busy) {
+		t.Errorf("apply error = %v, want it to wrap the engine's refusal", err)
+	}
+	if clause := "; mcp server docs disconnected — its endpoint is denied"; !strings.HasSuffix(err.Error(), clause) {
+		t.Errorf("apply error = %q, want it to end with the deny clause %q", err, clause)
+	}
+	if !old.isRetired() {
+		t.Error("a host-list swap refused mid-Turn kept the denied server answering")
+	}
+	if got := fixture.set.session("docs"); got != nil {
+		t.Errorf("the holder still carries %p for docs after the deny; want no live entry", got)
+	}
+}
+
+// A widening edit dials the newly admitted server under the lists the edit has put in force, never
+// under the old ones, and off the caller: the row says nothing about it, and the server's own note
+// arrives when its dial is committed.
+func TestApplySettingURLSafetyWideningDialsUnderTheNewLists(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	var denyLists [][]string
+	fixture := newMCPFixtureDialling(nil, "",
+		func(_ context.Context, server mcp.ServerConfig, _, denyHosts []string) (mcpSession, error) {
+			denyLists = append(denyLists, denyHosts)
+			return &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: server.Name + "__echo"}}}, nil
+		})
+	spy := &applySettingSpy{}
+	if err := fixture.tools.setDenyHosts([]string{"mcp.example.com"}, spy); err != nil {
+		t.Fatalf("seed the deny list: %v", err)
+	}
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	apply := applySettingFor(applier)
+
+	note, err := apply("url-safety.deny-hosts", "")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	if note != toolRosterNote {
+		t.Errorf("note = %q, want just %q: a newly admitted server reports by its own note", note, toolRosterNote)
+	}
+	if len(denyLists) != 0 {
+		t.Fatalf("the apply dialled %d time(s) on its caller; want the dial queued for the idle point", len(denyLists))
+	}
+
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if len(denyLists) != 1 || len(denyLists[0]) != 0 {
+		t.Errorf("the dial ran under deny lists %v, want one dial under the moved (empty) list", denyLists)
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+	if fixture.set.session("docs") == nil {
+		t.Error("the newly admitted server holds no live entry after its dial was committed")
 	}
 }
 
@@ -310,9 +416,9 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 	if note != toolRosterNote {
 		t.Errorf("note = %q, want just %q: no server moved, so there is nothing to report", note, toolRosterNote)
 	}
-	if dials != 0 {
-		t.Errorf("the edit dialled %d time(s); a list that closes no configured endpoint must leave "+
-			"the live connections untouched", dials)
+	if jobs := fixture.set.takeWork(); len(jobs) != 0 || dials != 0 {
+		t.Errorf("the edit queued %d dial(s) and dialled %d time(s); a list that closes no configured "+
+			"endpoint must leave the live connections untouched", len(jobs), dials)
 	}
 	if serving.isClosed() {
 		t.Error("the connections that are still admitted were torn down and re-made")
@@ -325,28 +431,24 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 }
 
 // The failure posture, and it is the opposite of the `mcp-servers:` row's. The tool rebuild has
-// already COMMITTED by the time the re-admission dials, so the primary effect of the edit is in
-// force — returning the dial's failure as the row's error would make the pane say `saved — live
-// apply failed` about an edit that applied. It goes in the note instead, in liveMCP's own words, so
-// the human is still told the two things that matter: which server failed, and that the connection
-// it had is still theirs.
+// already COMMITTED by the time the re-admission is requested, so the primary effect of the edit is
+// in force — a dial's failure on the row's error would make the pane say `saved — live apply failed`
+// about an edit that applied. The newly admitted server's failed dial is its own transcript note
+// instead, in liveMCP's words, and the row says nothing about it.
 func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	// Closing docs' host moves the admitted set, which is what makes the row reconnect at all; wiki,
-	// on another host, is still admitted and is the server the reconnect re-dials. Its live entry is
-	// seeded with a config the file no longer matches, so the re-dial is a CHANGED server's and its
-	// failure keeps the old session.
-	writeSettingsFixture(t, path, mcpServersFixture+
-		"  - name: wiki\n"+
-		"    transport: streamable-http\n"+
-		"    endpoint: https://wiki.example.com/\n")
+	// docs starts denied and the edit lifts the list, which is what makes the row request a dial at
+	// all; the fixture's connect then fails it.
+	writeSettingsFixture(t, path, mcpServersFixture)
 
-	serving := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "wiki__echo"}}}
-	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "wiki"}, session: serving}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
+	fixture := newMCPFixtureWith(nil, "", func([]mcp.ServerConfig) (mcpSession, error) {
 		return nil, errors.New("dial: connection refused")
 	})
 	spy := &applySettingSpy{}
+	if err := fixture.tools.setDenyHosts([]string{"mcp.example.com"}, spy); err != nil {
+		t.Fatalf("seed the deny list: %v", err)
+	}
 	applier := fakeApplier(t)
 	applier.engine = spy
 	applier.tools = fixture.tools
@@ -354,22 +456,25 @@ func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T
 	applier.configPath = path
 	apply := applySettingFor(applier)
 
-	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
+	note, err := apply("url-safety.deny-hosts", "")
 
 	if err != nil {
 		t.Fatalf("apply url-safety.deny-hosts = %v; the host lists ARE in force, so the row must not "+
 			"report the edit as failed over the half that could not follow", err)
 	}
-	want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied" +
-		"; mcp reconnect failed: wiki: dial: connection refused — previous connection kept"
-	if note != want {
-		t.Errorf("note = %q, want %q", note, want)
+	if note != toolRosterNote {
+		t.Errorf("note = %q, want just %q: the dial reports by its own note", note, toolRosterNote)
 	}
-	if got := fixture.set.session("wiki"); got != mcpSession(serving) {
-		t.Errorf("the holder is on %p for wiki, want the session it kept (%p)", got, serving)
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+	if err != nil {
+		t.Fatalf("drain: %v", err)
 	}
-	if serving.isClosed() {
-		t.Error("the sessions that are still serving were torn down by a reconnect that never happened")
+	want := "mcp connect failed: docs: dial: connection refused"
+	if len(outcomes) != 1 || outcomes[0].note != want {
+		t.Errorf("notes = %q, want [%q]", outcomeNotes(outcomes), want)
+	}
+	if fixture.set.session("docs") != nil {
+		t.Error("the server whose first dial failed holds a live entry; it stays absent")
 	}
 }
 

@@ -415,8 +415,8 @@ type settingsEngine interface {
 	SetContextFiles(enable bool, names []string)
 	SwapTools(*apogee.ToolRegistry) error
 	// CanSwapTools answers what SwapTools would answer about the boundary now, without swapping: nil
-	// when a swap would be taken, the idle-only refusal while a Step runs or an Exchange is open. A
-	// reconnect asks it before dialling, so a busy engine costs no connection at all.
+	// when a swap would be taken, the idle-only refusal while a Step runs or an Exchange is open. An
+	// MCP commit asks it before rebuilding (rootWiring.CommitMCP), so a busy engine costs no rebuild.
 	CanSwapTools() error
 	SetProfile(apogee.ModelProfile) error
 }

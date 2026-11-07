@@ -152,30 +152,31 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// this line connected would leave the live ones orphaned and close some that were already closed
 	// hours ago.
 	//
-	// The reconnect runs LATER, when an `mcp-servers:` edit lands (liveMCP.reconnect), by which time
+	// The reconnect runs LATER, when an `mcp-servers:` edit lands (liveMCP.request), by which time
 	// the host lists may have moved through `/settings` — so each dial is guarded by the lists the live
 	// tool set is currently on, which the request hands the recipe below, rather than by the snapshot
 	// this line closed over. That is the same read the network tools' own rebuild makes. Every dial
-	// runs under a context of its own derived from one that outlives it (this session's ctx, for the
-	// synchronous reconnect), cancelled only by a newer request, by teardown, or once its session is
+	// runs under a context of its own derived from one that outlives it (the TUI program's, which runs
+	// the dial as a Cmd), cancelled only by a newer request, by teardown, or once its session is
 	// closed — never when the dial returns: go-sdk's SSE transport binds its stream to the Connect
 	// context, so the session lives exactly as long as it.
 	//
 	// Reading the live spec is only HALF of what keeps the MCP endpoint check and the network tools
 	// agreeing about which hosts are closed, though, and on its own it would leave them disagreeing
 	// until the next `mcp-servers:` edit — which may never come. The other half is that a host-list
-	// edit RECONNECTS on its own account when the new lists change which servers are admitted
-	// (applyURLSafetyHosts), so a server the operator has just closed is dropped there and then
-	// rather than kept until something else happens to dial.
-	w.mcpSet = newLiveMCP(ctx, mcpEntries, func(dialCtx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
+	// edit moves the connections on its own account when the new lists change which servers are
+	// admitted (applyURLSafetyHosts): a server the operator has just closed is dropped on the
+	// keystroke, mid-Turn included, and one the lists newly admit is requested and dialled off the
+	// loop, rather than either waiting until something else happens to dial.
+	w.mcpSet = newLiveMCP(mcpEntries, func(dialCtx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
 		// It never offers a login: a server that needs one fails its dial with the error naming
-		// `apogee mcp login <name>`, which the settings row relays.
+		// `apogee mcp login <name>`, which that server's transcript note carries.
 		client, err := mcp.ConnectWith(dialCtx, w.mcpLogin.mcpHost(w.roots.config), []mcp.ServerConfig{server},
 			mcpGuard(allowHosts, denyHosts), w.roots.workspace)
 		if err != nil {
 			return nil, err
 		}
-		// A repo server skipped for a moved pin is that server's failed dial (liveMCP.reconnect), and
+		// A repo server skipped for a moved pin is that server's failed dial (liveMCP.dial), and
 		// the re-read cued here asks about it again.
 		w.cueSkippedMCP(client.Skipped())
 		return client, nil
@@ -649,7 +650,7 @@ func (w *rootWiring) openSessionJournal(ctx context.Context, id string) {
 
 // mcpGuard builds the url-safety guard an MCP connect is made under, from the host lists whichever
 // call site holds — the startup snapshot at wireSession, the live tool set's spec at a reconnect,
-// and the spec a `url-safety:` edit has just installed at the re-admission that edit drives
+// and the lists a `url-safety:` edit lands at the deny and the re-admission that edit drives
 // (applyURLSafetyHosts). It exists so those cannot drift: the guard is built through the same
 // constructor, off the same two fields, that registryWithMCP hands every network tool
 // (wire_tools.go), so a host the operator closed is closed on every path or on none.

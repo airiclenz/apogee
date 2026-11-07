@@ -44,7 +44,7 @@ func fakeApplier(t *testing.T) settingsApplier {
 		}),
 		tools: newLiveTools(apogee.NewToolRegistry(), toolSetSpec{},
 			func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
-		mcp: newLiveMCP(context.Background(), []mcpEntry{{config: mcp.ServerConfig{Name: mcpFixtureSeed}, session: &fakeMCPSession{}}},
+		mcp: newLiveMCP([]mcpEntry{{config: mcp.ServerConfig{Name: mcpFixtureSeed}, session: &fakeMCPSession{}}},
 			func(context.Context, mcp.ServerConfig, []string, []string) (mcpSession, error) {
 				return &fakeMCPSession{}, nil
 			}),

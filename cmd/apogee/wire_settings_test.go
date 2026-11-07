@@ -2663,36 +2663,6 @@ func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T
 	}
 }
 
-// A reconnect asks the engine first: while an Exchange runs the swap would be refused, so connect is
-// never entered and the answer is the same sentence a refused swap has always produced,
-// mcpReconnectFailed over the engine's own refusal, byte for byte.
-func TestMCPReconnectRefusesBeforeDiallingWhileAnExchangeRuns(t *testing.T) {
-	t.Parallel()
-	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
-	connected := false
-	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) {
-		connected = true
-		return &fakeMCPSession{}, nil
-	})
-	busy := errors.New("input pending: the tool set can only be swapped between runs")
-	spy := &applySettingSpy{swapErr: busy}
-
-	outcomes, err := fixture.set.reconnect([]mcp.ServerConfig{{Name: "docs"}}, fixture.tools, spy)
-
-	if connected {
-		t.Error("a reconnect the engine would refuse still dialled the servers")
-	}
-	if err == nil || err.Error() != mcpReconnectFailed(busy).Error() {
-		t.Errorf("reconnect err = %v, want %q", err, mcpReconnectFailed(busy))
-	}
-	if outcomes != nil {
-		t.Errorf("reconnect outcomes = %+v, want none beside an error", outcomes)
-	}
-	if spy.drove() != 0 || len(fixture.built) != 0 {
-		t.Errorf("a refused reconnect still moved the tool set (swaps %d, rebuilds %v)", len(spy.swaps), fixture.built)
-	}
-}
-
 // The url-safety row's MCP clause is composed by mcpNoteFor, and the `mcp ` it prepends is the row's
 // own label for whose subsystem is speaking — not part of the error. internal/mcp words the refusals
 // it owns with an `mcp: server "<name>":` lead of its own (ratified wording, not this side's to
@@ -2750,9 +2720,10 @@ func TestMCPNoteForDoesNotDoubleTheLabel(t *testing.T) {
 // The row itself, end to end, against a refusal internal/mcp really produced rather than a copy of
 // its wording: the file names a server the dial cannot build a transport for, the operator closes the
 // host the OTHER server sits on, and the re-admission that follows dials what is left and fails. What
-// the human reads on the `url-safety:` row is asserted whole, because the defect this pins is a
-// property of the composed sentence and of nothing smaller — the helper reads correctly in isolation
-// either way. The broken server is new to the session, so its clause is the connect-failed sentence.
+// the human reads on the `url-safety:` row, and the note the dial's commit answers, are asserted
+// whole, because the defect this pins is a property of the composed sentences and of nothing smaller
+// — the helper reads correctly in isolation either way. The broken server is new to the session, so
+// its note is the connect-failed sentence; docs is denied, so it is never dialled.
 func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -2775,19 +2746,29 @@ func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 	applier.configPath = path
 	apply := applySettingFor(applier)
 
-	// Closing the docs host changes WHICH servers are admitted, which is what makes the row dial at
-	// all; the dial then fails on the block behind it and the row reports that in one sentence.
+	// Closing the docs host changes WHICH servers are admitted, which is what makes the row request a
+	// dial at all; the dial then fails on the block behind it and its note says so in one sentence.
 	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
 	if err != nil {
 		t.Fatalf("apply url-safety.deny-hosts: %v — the MCP half of this row cannot fail it", err)
 	}
-	want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied" +
-		`; mcp connect failed: broken: server "broken" has no transport configured`
-	if note != want {
+	if want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied"; note != want {
 		t.Errorf("row note = %q, want %q", note, want)
 	}
-	if strings.Contains(note, mcpErrorPrefix) {
-		t.Errorf("row note = %q; internal/mcp's own label reached the human under the row's", note)
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+	if err != nil {
+		t.Fatalf("drain the re-admission's dial: %v", err)
+	}
+	if len(outcomes) != 1 {
+		t.Fatalf("outcomes = %+v, want one: broken's dial (docs is denied and never dialled)", outcomes)
+	}
+	if want := `mcp connect failed: broken: server "broken" has no transport configured`; outcomes[0].note != want {
+		t.Errorf("broken's note = %q, want %q", outcomes[0].note, want)
+	}
+	for _, said := range []string{note, outcomes[0].note} {
+		if strings.Contains(said, mcpErrorPrefix) {
+			t.Errorf("%q: internal/mcp's own label reached the human under the row's", said)
+		}
 	}
 	if fixture.set.session("broken") != nil {
 		t.Error("the server whose first dial failed holds a live entry; it stays absent")
@@ -4898,7 +4879,7 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 
 	// readmitMCP is the one caller that dresses the refusal rather than returning it: this half cannot
 	// fail the row, so a file it cannot parse leaves the connections where they are and says so.
-	if got, wantNote := a.readmitMCP(toolSetSpec{}), mcpNoteFor(mcpReconnectFailed(loadErr)); got != wantNote {
+	if got, wantNote := a.readmitMCP(a.denyMCP(toolSetSpec{}, toolSetSpec{})), mcpNoteFor(mcpReconnectFailed(loadErr)); got != wantNote {
 		t.Errorf("readmitMCP note = %q, want %q", got, wantNote)
 	}
 }

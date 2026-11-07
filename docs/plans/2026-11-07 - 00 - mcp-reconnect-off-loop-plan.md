@@ -351,7 +351,15 @@ internal/tui/adoption.go — answerProposalNote call site; cmd/apogee/projectrul
 **Depends on:** item 7
 **Commit:** `feat(projectrules): an adoption's MCP dials run off the Update loop`
 
-## 9. url-safety re-admit is per server
+## 9. url-safety re-admit is per server — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): applyURLSafetyHosts is split around `move`. `settingsApplier.denyMCP(before, after)` partitions the layered set under the old lists and under the landed key's lists, then retires only the newly denied servers through a new `liveMCP.retire(names)`, which is request's removal path (disconnectLocked plus dropping the name from the last-requested set). It returns an `mcpReadmit` plan. `readmitMCP(plan)` runs only after a successful `move` and calls `request(admitted, guard from the moved set.built(), false)`. A refused `move` returns `mcpReadmit.refused(err)`, which is the engine's refusal (still wrapped) with the deny clause after it.
+NOTES (2026-11-07): the deny clause now names only the servers that were in `was` (newly denied), as the plan's Approach specifies. Before, every server denied under the new lists was named.
+NOTES (2026-11-07): consequential edit — cmd/apogee/wire_mcp.go: made necessary by deleting `liveMCP.reconnect`. The `liveMCP.ctx` field and `newLiveMCP`'s ctx parameter are removed because nothing reads them any more (dead code). The header and the mcpRowFailures / mcpReconnectFailed comments no longer name reconnect.
+NOTES (2026-11-07): consequential edit — cmd/apogee/wire.go: made necessary by deleting `liveMCP.reconnect`. The `CanSwapTools` doc now names `rootWiring.CommitMCP` as the caller that asks it first.
+NOTES (2026-11-07): consequential edit — cmd/apogee/settingsapplier_helper_test.go: made necessary by the `newLiveMCP` signature change (the ctx argument is dropped).
+NOTES (2026-11-07): consequential edit — cmd/apogee/wire_helpers_test.go: made necessary by the `newLiveMCP` signature change. It also gains `requestAndDrainMCP` (request with the retry-failed flag under the live tool set's lists, then `drainMCP`), which every former `.reconnect(` caller now goes through, and `resolvedMCPServer`, which seeds a live `docs` entry with `mcpServersFixture`'s resolved config.
+NOTES (2026-11-07): deleted `TestLiveMCPReconnectRefusedWhileBusyTouchesNothing` (wire_mcp_test.go) together with `TestMCPReconnectRefusesBeforeDiallingWhileAnExchangeRuns`. Both pinned the CanSwapTools pre-check of the deleted `reconnect`; `request` marks servers closed and dials mid-Turn by design (ADR 0109 D3), and `TestLiveMCPRefusedSwapLeavesResultsPending` covers a busy commit.
+NOTES (2026-11-07): `TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote` and the new widening test start docs denied by seeding the fixture's deny list with `liveTools.setDenyHosts`, then lift it with an empty `deny-hosts` value. The driven e2e test denies `127.0.0.1` (the httptest MCP server's host) through `appendHomeConfig` and reads the refusal from the role-tool message of the stub's next request.
 
 **What:** Recast at the regression check (2026-11-07).
 **Goal:**

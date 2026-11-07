@@ -66,7 +66,7 @@ func TestLiveMCPReconnectLeavesAnUnchangedServerAlone(t *testing.T) {
 	fixture := newMCPFixtureWith([]mcpEntry{docs, wiki}, "", dials.connect)
 	spy := &applySettingSpy{}
 
-	outcomes, err := fixture.set.reconnect(
+	outcomes, err := requestAndDrainMCP(t, fixture.set,
 		[]mcp.ServerConfig{stdioServer("docs", "docs-mcp"), stdioServer("wiki", "wiki-mcp-v2")}, fixture.tools, spy)
 
 	if err != nil {
@@ -100,7 +100,7 @@ func TestLiveMCPFailedRedialKeepsTheOldSession(t *testing.T) {
 	fixture := newMCPFixtureWith([]mcpEntry{docs}, "", dials.connect)
 	spy := &applySettingSpy{}
 
-	outcomes, err := fixture.set.reconnect([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, fixture.tools, spy)
+	outcomes, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, fixture.tools, spy)
 
 	if err != nil {
 		t.Fatalf("reconnect: %v, want the failure as the server's outcome", err)
@@ -133,7 +133,7 @@ func TestLiveMCPBrokenServerSparesTheHealthyOne(t *testing.T) {
 	fixture := newMCPFixtureWith(nil, "", dials.connect)
 	spy := &applySettingSpy{}
 
-	outcomes, err := fixture.set.reconnect(
+	outcomes, err := requestAndDrainMCP(t, fixture.set,
 		[]mcp.ServerConfig{stdioServer("broken", "broken-mcp"), stdioServer("docs", "docs-mcp")}, fixture.tools, spy)
 
 	if err != nil {
@@ -165,7 +165,7 @@ func TestLiveMCPToolsFollowConfigOrder(t *testing.T) {
 	dials := newMCPDialRecorder()
 	fixture := newMCPFixtureWith([]mcpEntry{docs}, "", dials.connect)
 
-	_, err := fixture.set.reconnect([]mcp.ServerConfig{
+	_, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{
 		stdioServer("alpha", "alpha-mcp"), stdioServer("docs", "docs-mcp"), stdioServer("zeta", "zeta-mcp"),
 	}, fixture.tools, &applySettingSpy{})
 
@@ -191,14 +191,14 @@ func TestLiveMCPRecommitRedialsOnlyTheFailedServer(t *testing.T) {
 	servers := []mcp.ServerConfig{
 		stdioServer("docs", "docs-mcp"), stdioServer("broken", "broken-mcp"), stdioServer("wiki", "wiki-mcp-v2"),
 	}
-	if _, err := fixture.set.reconnect(servers, fixture.tools, &applySettingSpy{}); err != nil {
+	if _, err := requestAndDrainMCP(t, fixture.set, servers, fixture.tools, &applySettingSpy{}); err != nil {
 		t.Fatalf("first reconnect: %v", err)
 	}
 	dials.dialled = nil
 	delete(dials.failing, "broken")
 	delete(dials.failing, "wiki")
 
-	outcomes, err := fixture.set.reconnect(servers, fixture.tools, &applySettingSpy{})
+	outcomes, err := requestAndDrainMCP(t, fixture.set, servers, fixture.tools, &applySettingSpy{})
 
 	if err != nil {
 		t.Fatalf("re-commit: %v", err)
@@ -367,32 +367,6 @@ func TestLiveMCPRetryFailedRedialsEveryFailedServer(t *testing.T) {
 	}
 	if want := []string{"docs", "broken"}; !slices.Equal(retried, want) {
 		t.Errorf("the retry queued %v, want %v: every failed server, never the healthy wiki", retried, want)
-	}
-}
-
-// A reconnect the engine is going to refuse touches nothing: no entry is retired or closed and no
-// server is dialled.
-func TestLiveMCPReconnectRefusedWhileBusyTouchesNothing(t *testing.T) {
-	t.Parallel()
-	docs, docsSession := liveServer(stdioServer("docs", "docs-mcp"))
-	dials := newMCPDialRecorder()
-	fixture := newMCPFixtureWith([]mcpEntry{docs}, "", dials.connect)
-	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
-
-	_, err := fixture.set.reconnect([]mcp.ServerConfig{stdioServer("alpha", "alpha-mcp")}, fixture.tools, spy)
-
-	if err == nil {
-		t.Fatal("reconnect: want the engine's refusal, got none")
-	}
-	if docsSession.isRetired() || docsSession.isClosed() {
-		t.Errorf("docs retired %v, closed %v: a refused reconnect marked a server closed",
-			docsSession.isRetired(), docsSession.isClosed())
-	}
-	if len(dials.dialled) != 0 {
-		t.Errorf("a refused reconnect dialled %v", dials.dialled)
-	}
-	if got := fixture.set.session("docs"); got != mcpSession(docsSession) {
-		t.Errorf("docs is on %p, want its live session %p", got, docsSession)
 	}
 }
 

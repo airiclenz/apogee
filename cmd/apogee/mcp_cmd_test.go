@@ -715,7 +715,7 @@ func TestStartupMCPLoginRetriesAConnectWhoseRefreshWasRejected(t *testing.T) {
 }
 
 // A mid-session reconnect to a server with no saved token never prompts: that server's dial fails
-// with the row's clause naming `apogee mcp login <name>`, and the terminal is never read.
+// with the transcript note naming `apogee mcp login <name>`, and the terminal is never read.
 func TestStartupMCPLoginReconnectNeverPrompts(t *testing.T) {
 	t.Parallel()
 	fake := newFakeOAuthMCP(t, &atomic.Int64{})
@@ -725,14 +725,14 @@ func TestStartupMCPLoginReconnectNeverPrompts(t *testing.T) {
 		t.Fatalf("wireSession: %v", err)
 	}
 
-	outcomes, err := w.mcpSet.reconnect([]mcp.ServerConfig{fake.serverConfig("remote")}, w.toolSet, &applySettingSpy{})
+	outcomes, err := requestAndDrainMCP(t, w.mcpSet, []mcp.ServerConfig{fake.serverConfig("remote")}, w.toolSet, &applySettingSpy{})
 
 	if err != nil {
 		t.Fatalf("reconnect: %v, want the call to land with the server's own failure in its outcome", err)
 	}
-	if len(outcomes) != 1 || !strings.HasPrefix(outcomes[0].rowFailure, "remote: ") ||
-		!strings.Contains(outcomes[0].rowFailure, "apogee mcp login remote") {
-		t.Errorf("reconnect outcomes = %+v; want one row failure for remote naming `apogee mcp login remote`", outcomes)
+	if len(outcomes) != 1 || !strings.HasPrefix(outcomes[0].note, "mcp connect failed: remote: ") ||
+		!strings.Contains(outcomes[0].note, "apogee mcp login remote") {
+		t.Errorf("reconnect outcomes = %+v; want one note `mcp connect failed: remote: …` naming `apogee mcp login remote`", outcomes)
 	}
 	if input.openCount() != 0 {
 		t.Errorf("the reconnect read the terminal %d times; want never", input.openCount())
@@ -902,7 +902,7 @@ func TestReconnectSkipsARepoServerWhosePinMoved(t *testing.T) {
 	}
 	writeRepoWikiScript(t, w.roots.project, "echo edited")
 
-	outcomes, err := w.mcpSet.reconnect(servers, w.toolSet, &applySettingSpy{})
+	outcomes, err := requestAndDrainMCP(t, w.mcpSet, servers, w.toolSet, &applySettingSpy{})
 
 	if err != nil {
 		t.Fatalf("reconnect: %v, want the healthy server to land past the skipped repo server", err)
@@ -968,7 +968,7 @@ func TestSessionResolvesReactionMCPThroughTheLiveSet(t *testing.T) {
 		assertMCPAnswer(t, label, resolve, "llm", "ping", "pong")
 	}
 
-	if _, err := w.mcpSet.reconnect([]mcp.ServerConfig{newPingMCPServer(t, "other")}, w.toolSet, &applySettingSpy{}); err != nil {
+	if _, err := requestAndDrainMCP(t, w.mcpSet, []mcp.ServerConfig{newPingMCPServer(t, "other")}, w.toolSet, &applySettingSpy{}); err != nil {
 		t.Fatalf("reconnect: %v", err)
 	}
 

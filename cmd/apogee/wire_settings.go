@@ -1606,92 +1606,135 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 	// whether the MCP half below has anything to do is a question about the DIFFERENCE the edit
 	// makes, and after the rebuild there is nothing left to compare against.
 	before := a.tools.built()
+	// after is before with the landed key's list swapped in: the lists the edit puts in force.
+	after := before
 	hosts, move := landed.URLAllowHosts, a.tools.setAllowHosts
 	if key == "url-safety.deny-hosts" {
 		hosts, move = landed.URLDenyHosts, a.tools.setDenyHosts
+		after.denyHosts = hosts
+	} else {
+		after.allowHosts = hosts
 	}
+	// The MCP deny half lands FIRST, before and regardless of the swap door: SwapTools is idle-only
+	// and refuses mid-Turn, and a server the operator has just closed must stop answering now rather
+	// than at whichever later edit happens to land (ADR 0109).
+	readmit := a.denyMCP(before, after)
 	if err := move(hosts, a.engine); err != nil {
-		return "", err
+		return "", readmit.refused(err)
 	}
 	a.recordToolSet()
 	// The same boundary the roster reports, because it is the same boundary: the set is
 	// swapped on commit and the next request runs against the guard it carries. The MCP
-	// connections are the other surface these lists bind, and they follow here rather than on
-	// the next `mcp-servers:` edit — its note rides this one.
-	return toolRosterNote + a.readmitMCP(before), nil
+	// connections are the other surface these lists bind: a server they closed was named by the
+	// deny half above, and one they newly admit is requested here and reports by its own note.
+	return toolRosterNote + a.readmitMCP(readmit), nil
 }
 
-// readmitMCP moves the live MCP connections onto the servers the host lists NOW admit, and answers
-// with what the url-safety row has to add about it — the empty string when there is nothing to say.
+// mcpReadmit is one `url-safety:` edit's MCP half, planned by settingsApplier.denyMCP before the host
+// lists move and finished by settingsApplier.readmitMCP once they have.
+type mcpReadmit struct {
+	// admitted is the layered `mcp-servers:` set the landed lists admit, in config order.
+	admitted []mcp.ServerConfig
+	// isMoved says the edit changed WHICH servers are admitted, so the request has something to do.
+	isMoved bool
+	// denyNote is the row's clause per server the edit newly denied, each `; mcp server <name>
+	// disconnected — …`, or "".
+	denyNote string
+	// loadErr is the layered config's read refusal; nothing was planned or retired under it.
+	loadErr error
+}
+
+// refused is the row's error for a host-list swap the engine refused (mid-Turn): the refusal, with
+// the deny clause after it, since the deny half landed regardless and the row still owes the human
+// the servers it disconnected. The refusal stays wrapped.
+func (r mcpReadmit) refused(err error) error {
+	if r.denyNote == "" {
+		return err
+	}
+	return fmt.Errorf("%w%s", err, r.denyNote)
+}
+
+// denyMCP is the MCP half of a `url-safety:` edit that runs before the host lists move: it partitions
+// the layered `mcp-servers:` set (mcp.Admit) under the lists the set is on (before) and under the
+// lists the edit lands (after), and marks closed now every server the edit newly denies
+// (liveMCP.retire) — retired, its dial cancelled, its session closed off the loop. It returns the
+// plan readmitMCP finishes once the lists are in force.
 //
 // It exists because the two surfaces the `url-safety:` lists bind are reached differently. Every
-// network tool is handed the guard at construction, so the swap door above puts the new lists in
-// force the moment it returns; the MCP guard is consumed at CONNECT time and never retained
-// (internal/mcp/transport.go), so the only way a live connection follows a list is to dial again.
-// Without this, an operator who closed a host kept talking to the MCP server on it until something
-// else happened to reconnect (audit 2026-08-28: "after a `/settings` url-safety edit, network tools
-// and the MCP connection disagree about which hosts are allowed").
+// network tool is handed the guard at construction, so the swap door puts the new lists in force the
+// moment it returns; the MCP guard is consumed at CONNECT time and never retained
+// (internal/mcp/transport.go), so the only way a live connection follows a list is to be closed or
+// dialled again. Without this, an operator who closed a host kept talking to the MCP server on it
+// until something else happened to reconnect (audit 2026-08-28: "after a `/settings` url-safety
+// edit, network tools and the MCP connection disagree about which hosts are allowed").
 //
-// The set is PARTITIONED first (mcp.Admit) and only the admitted servers are reconnected: a server
-// the new lists close is dropped and named. Dialling it instead would fail only that server's dial,
-// since a reconnect is per server (ADR 0109), but a failed re-dial KEEPS the old session — the very
-// connection the operator has just closed.
-//
-// Three things it deliberately does not do.
-//
-// It does not dial when the admitted set is unchanged. A reconnect is a new process per stdio
-// server and a handshake per HTTP one, run synchronously on the Update goroutine — so dialling on
-// every host-list edit would freeze the frame, reset every server's state and break a stdio server
-// that holds a lock or a port, all for a verdict that did not move. The common edit (a web-tool host,
-// while a stdio server is connected) changes no verdict at all and must stay as instant as it is
-// today, which is what comparing the admission under the OLD lists against the NEW one buys.
-//
-// It does not return an error. The tool rebuild above has already COMMITTED — the primary effect of
-// the edit is in force — so a failed dial that came back as the row's error would report `saved —
-// live apply failed` about an edit that applied. Each failed dial lands in the note instead, as the
-// per-server sentence liveMCP.reconnect words for it (mcpFailed), so the human is told the same two
-// things: which server failed, and whether the connection it had is still theirs.
-//
-// And it does nothing at all over a nil MCP holder or an empty config path, the shape ADR 0031's
-// documented embedder holds (wire_mcp.go). The host lists still reach the tools; there is simply no
-// connection for them to reach.
-func (a settingsApplier) readmitMCP(before toolSetSpec) string {
+// A server the new lists close is dropped and named, never re-dialled: a failed re-dial KEEPS the old
+// session — the very connection the operator has just closed. It does nothing over a nil MCP holder
+// or an empty config path, the shape ADR 0031's documented embedder holds (wire_mcp.go): the host
+// lists still reach the tools; there is simply no connection for them to reach.
+func (a settingsApplier) denyMCP(before, after toolSetSpec) mcpReadmit {
 	if a.mcp == nil || a.configPath == "" {
-		return ""
+		return mcpReadmit{}
 	}
 	// Only the config FILES name an MCP server (no flag, no environment variable), so the set to
 	// partition is read exactly as requestMCP reads it — the layered set, adopted repo servers
 	// included. A global file that no longer parses leaves the connections where they are and says
-	// so, for the reason above: this half cannot fail the row.
+	// so once the lists have moved: this half cannot fail the row.
 	layered, err := a.layeredConfig()
 	if err != nil {
-		return mcpNoteFor(mcpReconnectFailed(err))
+		return mcpReadmit{loadErr: err}
 	}
-	now := a.tools.built()
 	was, _ := mcp.Admit(layered.MCPServers, mcpGuard(before.allowHosts, before.denyHosts))
-	admitted, denied := mcp.Admit(layered.MCPServers, mcpGuard(now.allowHosts, now.denyHosts))
-	if sameServerNames(was, admitted) {
-		return ""
-	}
-	outcomes, err := a.mcp.reconnect(admitted, a.tools, a.engine)
-	if err != nil {
-		return mcpNoteFor(err)
-	}
+	admitted, denied := mcp.Admit(layered.MCPServers, mcpGuard(after.allowHosts, after.denyHosts))
+	plan := mcpReadmit{admitted: admitted, isMoved: !sameServerNames(was, admitted)}
+	var retired []string
 	var note strings.Builder
 	for _, d := range denied {
+		if !slices.ContainsFunc(was, func(s mcp.ServerConfig) bool { return s.Name == d.Name }) {
+			continue
+		}
+		retired = append(retired, d.Name)
 		note.WriteString("; mcp server " + d.Name + " disconnected — " + deniedReason(d))
 	}
-	// A server whose dial failed — a repo server skipped for a moved pin among them — is named after
-	// the ones the lists closed, each in its own `; mcp … failed: <server>: …` clause.
-	for _, outcome := range outcomes {
-		if outcome.rowFailure != "" {
-			note.WriteString("; " + outcome.note)
-		}
+	if len(retired) > 0 {
+		a.mcp.retire(retired)
 	}
-	return note.String()
+	plan.denyNote = note.String()
+	return plan
 }
 
-// deniedReason is what the note says about ONE server the re-admission dropped. A host the operator
+// readmitMCP finishes a `url-safety:` edit's MCP half once the host lists are in force, and answers
+// with what the url-safety row has to add about it — the empty string when there is nothing to say.
+// It requests the admitted set (liveMCP.request) under the lists the live tool set is on NOW, so a
+// widening edit never dials under the old lists: the request dials nothing on its caller, and a
+// newly admitted server's dial reports by its own transcript note when it is committed at the next
+// idle point (ADR 0109). The note is the deny clauses denyMCP composed.
+//
+// It does not request when the admitted set is unchanged. A re-dial is a new process per stdio server
+// and a handshake per HTTP one, so dialling on every host-list edit would reset every server's state
+// and break a stdio server that holds a lock or a port, all for a verdict that did not move. The
+// common edit (a web-tool host, while a stdio server is connected) changes no verdict at all, which
+// is what comparing the admission under the OLD lists against the NEW one buys.
+//
+// It does not return an error. The tool rebuild has already COMMITTED — the primary effect of the
+// edit is in force — so a refusal that came back as the row's error would report `saved — live apply
+// failed` about an edit that applied. A file that no longer parses, or a set the request refuses,
+// lands in the note instead, after the deny clauses.
+func (a settingsApplier) readmitMCP(plan mcpReadmit) string {
+	if plan.loadErr != nil {
+		return mcpNoteFor(mcpReconnectFailed(plan.loadErr))
+	}
+	if !plan.isMoved {
+		return plan.denyNote
+	}
+	spec := a.tools.built()
+	if err := a.mcp.request(plan.admitted, mcpGuard(spec.allowHosts, spec.denyHosts), false); err != nil {
+		return plan.denyNote + mcpNoteFor(mcpReconnectFailed(err))
+	}
+	return plan.denyNote
+}
+
+// deniedReason is what the note says about ONE server the edit newly denied. A host the operator
 // closed is reported as the policy decision it is — they have just edited that policy and the server
 // name is the whole news. Anything else (an endpoint that is empty, or that does not parse) is a
 // fault in the file the human has to see spelled out, and calling it "denied" would send them

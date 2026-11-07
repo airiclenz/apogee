@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -249,7 +250,7 @@ func newMCPFixtureWith(entries []mcpEntry, endpoint string, connect func([]mcp.S
 // dial's context — a dial held open until it is cancelled.
 func newMCPFixtureDialling(entries []mcpEntry, endpoint string, connect mcpConnect) *mcpFixture {
 	f := &mcpFixture{}
-	f.set = newLiveMCP(context.Background(), entries, connect)
+	f.set = newLiveMCP(entries, connect)
 	f.tools = newLiveTools(apogee.NewToolRegistry(), toolSetSpec{endpoint: endpoint}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		f.built = append(f.built, spec.endpoint)
 		registry := apogee.NewToolRegistry()
@@ -276,6 +277,18 @@ func drainMCP(t *testing.T, set *liveMCP, tools *liveTools, engine settingsEngin
 	return outcomes, err
 }
 
+// requestAndDrainMCP is a whole reconnect inline: it requests servers under the url-safety lists the
+// live tool set is on, with the retry-failed flag (liveMCP.request), then drains the dials it queued
+// (drainMCP). The error is the request's refusal or the commit's.
+func requestAndDrainMCP(t *testing.T, set *liveMCP, servers []mcp.ServerConfig, tools *liveTools, engine settingsEngine) ([]mcpOutcome, error) {
+	t.Helper()
+	spec := tools.built()
+	if err := set.request(servers, mcpGuard(spec.allowHosts, spec.denyHosts), true); err != nil {
+		return nil, err
+	}
+	return drainMCP(t, set, tools, engine)
+}
+
 // toolNames is what a set advertises, for an assertion about WHICH connections a holder is on.
 func toolNames(tools []apogee.Tool) []string {
 	names := make([]string, 0, len(tools))
@@ -291,6 +304,23 @@ const mcpServersFixture = "mcp-servers:\n" +
 	"  - name: docs\n" +
 	"    transport: streamable-http\n" +
 	"    endpoint: https://mcp.example.com/\n"
+
+// resolvedMCPServer is the server named name as the config file at path resolves it — the config a
+// live entry dialled from that file would carry, so a request over the same file diffs it unchanged.
+func resolvedMCPServer(t *testing.T, path, name string) mcp.ServerConfig {
+	t.Helper()
+	options, err := config.LoadFileConfig(path, os.ReadFile, func(string) {})
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	for _, server := range options.MCPServers {
+		if server.Name == name {
+			return server
+		}
+	}
+	t.Fatalf("%s names no mcp server %q", path, name)
+	return mcp.ServerConfig{}
+}
 
 // assertFiringScratchDir pins the pair every Driver's Firing composition owes the run it raises:
 // a record id minted BEFORE the run, a scratch dir that is that id's own dir under this Driver's
