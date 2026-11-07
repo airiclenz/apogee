@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1427,6 +1428,167 @@ func TestConnect_OAuthServerRefusals(t *testing.T) {
 			}
 			if n := o.seen.Load(); n != 0 {
 				t.Errorf("the MCP server saw %d request(s); want none", n)
+			}
+		})
+	}
+}
+
+// TestServerConfigEqual pins that Equal is true exactly when a re-dial would connect the same way:
+// a clone is equal, and a change to any one field a connect reads makes the pair unequal.
+func TestServerConfigEqual(t *testing.T) {
+	emptyAllowlist := []string{}
+	allowlist := []string{"HOME"}
+	base := ServerConfig{
+		Name:            "remote",
+		Transport:       TransportStreamableHTTP,
+		Command:         "server",
+		Args:            []string{"--a", "--b"},
+		Env:             []string{"K=V"},
+		EnvAllowlist:    &allowlist,
+		Endpoint:        "https://mcp.example.com/mcp",
+		Headers:         map[string]string{"X-Tenant": "acme"},
+		HeadersEnv:      map[string]string{"Authorization": "TOKEN_VAR"},
+		Auth:            AuthOAuth,
+		ClientID:        "client",
+		ClientSecretEnv: "SECRET_VAR",
+		Project:         true,
+		Pin:             fakeProjectPin{root: "/repo", programs: []string{"/repo/bin/a"}},
+	}
+	tests := []struct {
+		name   string
+		change func(a, b *ServerConfig)
+		want   bool
+	}{
+		{name: "an equal clone", change: func(_, _ *ServerConfig) {}, want: true},
+		{name: "a nil and an empty Args", change: func(a, b *ServerConfig) { a.Args = []string{}; b.Args = nil }, want: true},
+		{name: "the Name", change: func(_, c *ServerConfig) { c.Name = "other" }},
+		{name: "the Transport", change: func(_, c *ServerConfig) { c.Transport = TransportSSE }},
+		{name: "the Command", change: func(_, c *ServerConfig) { c.Command = "other" }},
+		{name: "the args order", change: func(_, c *ServerConfig) { c.Args = []string{"--b", "--a"} }},
+		{name: "an env entry", change: func(_, c *ServerConfig) { c.Env = []string{"K=W"} }},
+		{name: "an allowlist entry", change: func(_, c *ServerConfig) { c.EnvAllowlist = &[]string{"PATH"} }},
+		{name: "a nil vs an empty EnvAllowlist", change: func(a, b *ServerConfig) {
+			a.EnvAllowlist = &emptyAllowlist
+			b.EnvAllowlist = nil
+		}},
+		{name: "the Endpoint", change: func(_, c *ServerConfig) { c.Endpoint = "https://mcp.example.com/other" }},
+		{name: "a header value", change: func(_, c *ServerConfig) { c.Headers = map[string]string{"X-Tenant": "other"} }},
+		{name: "a HeadersEnv name", change: func(_, c *ServerConfig) {
+			c.HeadersEnv = map[string]string{"Authorization": "OTHER_VAR"}
+		}},
+		{name: "the auth", change: func(_, c *ServerConfig) { c.Auth = "" }},
+		{name: "the ClientID", change: func(_, c *ServerConfig) { c.ClientID = "other" }},
+		{name: "the ClientSecretEnv", change: func(_, c *ServerConfig) { c.ClientSecretEnv = "OTHER_VAR" }},
+		{name: "the Project flag", change: func(_, c *ServerConfig) { c.Project = false }},
+		{name: "a pin with different files", change: func(_, c *ServerConfig) {
+			c.Pin = fakeProjectPin{root: "/repo", programs: []string{"/repo/bin/b"}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first, second := base.Clone(), base.Clone()
+			tt.change(&first, &second)
+
+			got := first.Equal(second)
+
+			if got != tt.want {
+				t.Errorf("Equal = %v, want %v\n  a: %+v\n  b: %+v", got, tt.want, first, second)
+			}
+			if reverse := second.Equal(first); reverse != got {
+				t.Errorf("Equal is not symmetric: a.Equal(b) = %v, b.Equal(a) = %v", got, reverse)
+			}
+		})
+	}
+}
+
+// TestServerConfigEqual_CoversEveryField fails when ServerConfig gains a field, so Equal (and the
+// table above) are revisited rather than silently ignoring what a new field changes about a dial.
+func TestServerConfigEqual_CoversEveryField(t *testing.T) {
+	const comparedFields = 14
+
+	got := reflect.TypeOf(ServerConfig{}).NumField()
+
+	if got != comparedFields {
+		t.Errorf("ServerConfig has %d fields, Equal compares %d: extend Equal and TestServerConfigEqual", got, comparedFields)
+	}
+}
+
+// TestValidateServersRefusesADuplicateName pins that the exported whole-set check refuses a set
+// naming one server twice, naming the server, and passes the same set once the names differ.
+func TestValidateServersRefusesADuplicateName(t *testing.T) {
+	first := ServerConfig{Name: "docs", Transport: TransportStdio, Command: "a"}
+	second := ServerConfig{Name: "docs", Transport: TransportStdio, Command: "b"}
+
+	err := ValidateServers([]ServerConfig{first, second})
+
+	if err == nil || !strings.Contains(err.Error(), `duplicate server name "docs"`) {
+		t.Fatalf("ValidateServers = %v; want the duplicate-name refusal naming docs", err)
+	}
+	second.Name = "notes"
+	if err := ValidateServers([]ServerConfig{first, second}); err != nil {
+		t.Errorf("ValidateServers over distinct names = %v; want nil", err)
+	}
+}
+
+// TestClientRetireRefusesEveryToolCall pins that a retired Client's tools — through Execute and
+// through CallText — refuse with the not-connected text and never reach the server, and that
+// Close retires the same way. The control call before retirement proves the counter counts.
+func TestClientRetireRefusesEveryToolCall(t *testing.T) {
+	tests := []struct {
+		name   string
+		retire func(*Client)
+	}{
+		{name: "Retire", retire: func(c *Client) { c.Retire() }},
+		{name: "Close", retire: func(c *Client) { _ = c.Close() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "count", Version: "v0.0.1"}, nil)
+			server.AddTool(&mcpsdk.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
+				func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+					calls.Add(1)
+					return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}}}, nil
+				})
+			srv := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+			defer func() {
+				srv.CloseClientConnections()
+				srv.Close()
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
+			defer cancel()
+			c, err := Connect(ctx, []ServerConfig{{
+				Name:      "remote",
+				Transport: TransportStreamableHTTP,
+				Endpoint:  srv.URL + "/mcp",
+			}}, security.URLGuard{}, t.TempDir())
+			if err != nil {
+				t.Fatalf("Connect: %v", err)
+			}
+			defer func() { _ = c.Close() }()
+			tools := c.Tools()
+			if len(tools) != 1 {
+				t.Fatalf("Tools = %d, want the one ping tool", len(tools))
+			}
+			ping := tools[0]
+			if res, err := ping.Execute(ctx, domain.ToolCall{ID: "control", Tool: ping.Name()}); err != nil || res.IsError {
+				t.Fatalf("control Execute = %+v, %v; want the pong result", res, err)
+			}
+			before := calls.Load()
+
+			tt.retire(c)
+			res, execErr := ping.Execute(ctx, domain.ToolCall{ID: "call-1", Tool: ping.Name()})
+			_, textErr := ping.(ReactionTool).CallText(ctx, nil)
+
+			const want = `mcp server "remote" is not connected`
+			if execErr != nil || !res.IsError || res.Content != want {
+				t.Errorf("Execute after retire = %+v, %v; want the error result %q", res, execErr, want)
+			}
+			if textErr == nil || textErr.Error() != want {
+				t.Errorf("CallText after retire = %v; want %q", textErr, want)
+			}
+			if after := calls.Load(); after != before {
+				t.Errorf("the server saw %d call(s) after retirement; want none", after-before)
 			}
 		})
 	}

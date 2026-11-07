@@ -81,7 +81,11 @@ cmd/apogee/wire_helpers_test.go — applySettingSpy; cmd/apogee/wire_settings_te
 **Closes:** mcp-swap-midturn-race
 **Commit:** `fix(agent): a mid-Turn MCP reconnect never races the worker`
 
-## 2. internal/mcp: per-server primitives
+## 2. internal/mcp: per-server primitives — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): consequential edit — internal/mcp/mcp_test.go: made necessary by listServerTools taking the Client's retire switch (the one direct test call passes nil, which reads live).
+NOTES (2026-11-07): tool_test.go is unchanged: newServerTool keeps its signature and the retire switch is set by listServerTools beside `project`, so every direct construction carries a nil switch that reads live; its existing tests pass as they stand.
+NOTES (2026-11-07): TestClientRetireRefusesEveryToolCall makes one control call before retiring (so the counter is shown to count) and asserts the count does not move after retirement, rather than staying at zero; it also runs a Close row (Close implies Retire). TestServerConfigEqual_CoversEveryField pins ServerConfig's field count (14) so a new field forces Equal to be revisited.
+NOTES (2026-11-07): the refusal text is one constant, mcpNotConnectedFormat, shared by the retired-tool failure and Resolver's not-connected error (same words as before).
 
 **What:**
 **Goal:** `internal/mcp` offers:

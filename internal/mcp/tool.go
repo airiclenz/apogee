@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -46,6 +47,7 @@ type serverTool struct {
 	schema      json.RawMessage          // the server's input schema, normalised to JSON (untrusted)
 	caller      toolCaller               // the live session this tool forwards a call to
 	redactor    *security.OriginRedactor // cuts the server's endpoint from surfaced error text (nil for stdio)
+	retired     *atomic.Bool             // the owning Client's retire switch (Client.Retire); nil reads as live
 }
 
 // toolCaller is the narrow seam serverTool forwards a call through — the single method of a
@@ -264,11 +266,16 @@ const mcpToolErrorWithoutText = "mcp: tool reported an error with no text"
 // ctx — the transport Execute and CallText share. It returns the server's result; or, when the
 // call failed while ctx is still live, failure: the text Execute surfaces as an error result and
 // CallText as an error (the tool not connected, the deadline missed, a transport error with the
-// endpoint cut to its origin). Only a cancelled ctx is err (ADR 0007). A result returned with an
-// empty failure and nil err is non-nil.
+// endpoint cut to its origin, the owning Client retired). Only a cancelled ctx is err (ADR 0007). A
+// result returned with an empty failure and nil err is non-nil.
 func (t serverTool) call(ctx context.Context, args json.RawMessage) (res *mcpsdk.CallToolResult, failure string, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
+	}
+	if t.isRetired() {
+		// The Client this tool came from was retired (a reconnect replaced it, or it is closing):
+		// the call is refused here so it never reaches a session that is going away.
+		return nil, fmt.Sprintf(mcpNotConnectedFormat, t.alias), nil
 	}
 	if t.caller == nil {
 		// A surfaced tool with no live session can never run — surface it as a failure rather
@@ -307,6 +314,17 @@ func (t serverTool) call(ctx context.Context, args json.RawMessage) (res *mcpsdk
 	}
 	return res, "", nil
 }
+
+// isRetired reports whether the Client that surfaced this tool was retired. A tool built without a
+// Client (a nil switch) is never retired.
+func (t serverTool) isRetired() bool {
+	return t.retired != nil && t.retired.Load()
+}
+
+// mcpNotConnectedFormat is the refusal, formatted with the server alias, for a server that has no
+// live connection to answer through: a retired tool's call failure and Resolver's unknown-server
+// error, so a model and a reaction read the same words.
+const mcpNotConnectedFormat = "mcp server %q is not connected"
 
 // mcpCallTimeout bounds how long one Execute waits on a server before surfacing a timeout error
 // result: 5 minutes, fixed (no config key). It is a package var only to give the timeout test a
@@ -421,7 +439,7 @@ func Resolver(tools func() []domain.Tool) domain.MCPResolver {
 			return reactionTool.CallText, nil
 		}
 		if !isServerConnected {
-			return nil, fmt.Errorf("mcp server %q is not connected", server)
+			return nil, fmt.Errorf(mcpNotConnectedFormat, server)
 		}
 		return nil, fmt.Errorf("mcp server %q has no tool %q", server, tool)
 	}

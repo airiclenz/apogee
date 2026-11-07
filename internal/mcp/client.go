@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -39,11 +40,13 @@ const (
 // zero-server Client is valid and dormant (no tools, a no-op Close), so a host without MCP
 // configured pays nothing. It is not safe for concurrent use; drive it from the goroutine
 // that owns the Agent (the SDK sessions themselves are concurrency-safe, but the Client's own
-// connection bookkeeping is not).
+// connection bookkeeping is not). The one exception is Retire, which any goroutine may call while
+// the Client's tools are running.
 type Client struct {
 	sessions []liveSession // one per connected server, in config order
 	tools    []domain.Tool // surfaced server tools, in (server, tool) order
 	skipped  []Denied      // Project servers left undialled for a moved pin, in config order
+	retired  atomic.Bool   // set by Retire (and Close); every surfaced tool reads it before a call
 }
 
 // liveSession is one connected server: the SDK session, plus — for a stdio server — the process
@@ -264,7 +267,7 @@ func (c *Client) connectOne(ctx context.Context, host Host, cfg ServerConfig, gu
 	}
 	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td, cancel: cancel})
 
-	tools, err := listServerTools(ctx, cfg.Name, cfg.Project, session, redactor)
+	tools, err := listServerTools(ctx, cfg.Name, cfg.Project, &c.retired, session, redactor)
 	if err != nil {
 		return err
 	}
@@ -298,8 +301,16 @@ const (
 // rather than failing the whole server, and so is one whose schema exceeds maxMCPToolSchemaBytes.
 // redactor cuts the server's endpoint from a list error and is handed to every surfaced tool for
 // its own call errors; nil for stdio. project is the server's ServerConfig.Project, carried on every
-// surfaced tool for the Allow rule match.
-func listServerTools(ctx context.Context, serverAlias string, project bool, session *mcpsdk.ClientSession, redactor *security.OriginRedactor) ([]domain.Tool, error) {
+// surfaced tool for the Allow rule match. retired is the owning Client's retire switch, shared by
+// every surfaced tool so Retire reaches the tools already registered; nil reads as never retired.
+func listServerTools(
+	ctx context.Context,
+	serverAlias string,
+	project bool,
+	retired *atomic.Bool,
+	session *mcpsdk.ClientSession,
+	redactor *security.OriginRedactor,
+) ([]domain.Tool, error) {
 	var (
 		out    []domain.Tool
 		cursor string
@@ -315,6 +326,7 @@ func listServerTools(ctx context.Context, serverAlias string, project bool, sess
 			}
 			tool := newServerTool(serverAlias, t, session, redactor)
 			tool.project = project
+			tool.retired = retired
 			if len(tool.schema) > maxMCPToolSchemaBytes {
 				continue
 			}
@@ -358,6 +370,19 @@ func (c *Client) Skipped() []Denied {
 	return out
 }
 
+// Retire switches every tool this Client surfaced off: from the moment it returns, a call to any of
+// them — through Execute or CallText — is refused with the failure text
+// `mcp server "<alias>" is not connected`, without touching the session it was bound to. The sessions
+// themselves stay open; closing them is Close's job, which a host may run later and off the
+// goroutine that retired the Client. Retire is safe to call from any goroutine, on a nil or dormant
+// Client, and more than once. A call already in flight when Retire runs is not interrupted.
+func (c *Client) Retire() {
+	if c == nil {
+		return
+	}
+	c.retired.Store(true)
+}
+
 // Close tears down every live session, returning the joined error of any that failed to close
 // cleanly (so a single bad session does not hide the others). It is safe to call on a nil or
 // dormant Client (no sessions ⇒ nil) and idempotent in effect — after Close the sessions are
@@ -375,10 +400,13 @@ func (c *Client) Skipped() []Denied {
 // teardown's Reap then kills the group (POSIX) or terminates the Job Object (Windows), which is the
 // only thing that reaches those descendants, and Release drops the handle the teardown has owned
 // since before the process existed. Reaping first would turn every clean shutdown into a kill.
+//
+// Close retires the Client first (see Retire), so no surfaced tool reaches a session being closed.
 func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
+	c.Retire()
 	var errs []error
 	for _, s := range c.sessions {
 		if err := s.session.Close(); err != nil {
@@ -408,6 +436,14 @@ func reapProcess(cmd *exec.Cmd, td platform.ProcessTeardown) {
 	}
 	td.Reap(cmd)
 	td.Release()
+}
+
+// ValidateServers is the whole-set check ConnectWith runs before it dials anything (validateServers),
+// exported so a host that dials its servers one at a time can refuse the same sets up front: an
+// empty, duplicate or ambiguous name, unsendable headers, or auth keys that cannot do what they say.
+// It dials nothing, and a nil or empty set passes.
+func ValidateServers(servers []ServerConfig) error {
+	return validateServers(servers)
 }
 
 // validateServers rejects an empty or duplicate server name before any connection is made: the

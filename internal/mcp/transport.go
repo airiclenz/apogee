@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strings"
 	"syscall"
@@ -151,6 +152,39 @@ func (c ServerConfig) Clone() ServerConfig {
 	c.Headers = maps.Clone(c.Headers)
 	c.HeadersEnv = maps.Clone(c.HeadersEnv)
 	return c
+}
+
+// Equal reports whether c and other would connect the same way, so a host that holds a live session
+// for c knows whether other needs a fresh dial. Every field compares by value; Args, Env, Headers
+// and HeadersEnv compare by content (a nil and an empty list or map are alike, since neither sends
+// anything); EnvAllowlist by the list it points at, nil distinct from a pointer to an empty list,
+// as the two scope a stdio child differently; HeadersEnv by the environment-variable NAMES it maps
+// each header to, never by what those variables hold now. Pin compares by reflect.DeepEqual, the
+// content comparison domain.ProjectPin's contract promises.
+func (c ServerConfig) Equal(other ServerConfig) bool {
+	return c.Name == other.Name &&
+		c.Transport == other.Transport &&
+		c.Command == other.Command &&
+		slices.Equal(c.Args, other.Args) &&
+		slices.Equal(c.Env, other.Env) &&
+		envAllowlistsEqual(c.EnvAllowlist, other.EnvAllowlist) &&
+		c.Endpoint == other.Endpoint &&
+		maps.Equal(c.Headers, other.Headers) &&
+		maps.Equal(c.HeadersEnv, other.HeadersEnv) &&
+		c.Auth == other.Auth &&
+		c.ClientID == other.ClientID &&
+		c.ClientSecretEnv == other.ClientSecretEnv &&
+		c.Project == other.Project &&
+		reflect.DeepEqual(c.Pin, other.Pin)
+}
+
+// envAllowlistsEqual compares two EnvAllowlist values: both nil, or both set to lists of the same
+// keys in the same order.
+func envAllowlistsEqual(a, b *[]string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return slices.Equal(*a, *b)
 }
 
 // AuthOAuth is the one recognised ServerConfig.Auth value: apogee authorises to the server with an
