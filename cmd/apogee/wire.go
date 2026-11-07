@@ -350,7 +350,8 @@ func (w *rootWiring) close() {
 	}
 
 	// Whatever set of MCP connections the holder is on NOW — which after a mid-session reconnect is
-	// not the set startup dialled.
+	// not the set startup dialled — with every dial still in flight cancelled and joined first, and
+	// every close already queued off the loop waited for (ADR 0109 decision 10).
 	if w.mcpSet != nil {
 		_ = w.mcpSet.close()
 	}
@@ -432,14 +433,17 @@ type settingsSkills interface {
 	Reload() error
 }
 
-// mcpSession is one server's connected-MCP surface a reconnect drives: the tools the server
-// advertises, whether the connect skipped it for a moved pin (the reconnect reports that as the
-// server's failed dial), and the teardown that ends the connection. *mcp.Client over one server is the
-// only implementation that ships — it is an interface for settingsEngine's reason, so the reconnect's
-// ORDER (dial, swap, close) is exercisable against a fake without a server process behind it.
+// mcpSession is one server's connected-MCP surface liveMCP drives: the tools the server advertises,
+// whether the connect skipped it for a moved pin (reported as the server's failed dial), the switch
+// that refuses every one of its tools at once while the session stays open (Retire — a removal or a
+// deny takes effect on the keystroke, ADR 0109 decision 5), and the teardown that ends the connection,
+// run off the Update loop. *mcp.Client over one server is the only implementation that ships — it is
+// an interface for settingsEngine's reason, so the lifecycle's ORDER (dial, swap, close) is
+// exercisable against a fake without a server process behind it.
 type mcpSession interface {
 	Tools() []apogee.Tool
 	Skipped() []mcp.Denied
+	Retire()
 	Close() error
 }
 

@@ -154,10 +154,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	//
 	// The reconnect runs LATER, when an `mcp-servers:` edit lands (liveMCP.reconnect), by which time
 	// the host lists may have moved through `/settings` — so each dial is guarded by the lists the live
-	// tool set is currently on, which the reconnect hands the recipe below, rather than by the snapshot
+	// tool set is currently on, which the request hands the recipe below, rather than by the snapshot
 	// this line closed over. That is the same read the network tools' own rebuild makes. Every dial
-	// runs under this session's ctx, never a context that ends when the reconnect returns: go-sdk's SSE
-	// transport binds its stream to the Connect context, so the session lives exactly as long as it.
+	// runs under a context of its own derived from one that outlives it (this session's ctx, for the
+	// synchronous reconnect), cancelled only by a newer request, by teardown, or once its session is
+	// closed — never when the dial returns: go-sdk's SSE transport binds its stream to the Connect
+	// context, so the session lives exactly as long as it.
 	//
 	// Reading the live spec is only HALF of what keeps the MCP endpoint check and the network tools
 	// agreeing about which hosts are closed, though, and on its own it would leave them disagreeing

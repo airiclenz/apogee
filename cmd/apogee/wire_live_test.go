@@ -268,7 +268,7 @@ func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T
 	if len(dialled) != 0 {
 		t.Fatalf("dialled = %+v, want no dial at all: the only server was denied", dialled)
 	}
-	if !old.closed {
+	if !old.isClosed() {
 		t.Error("the connection to the denied host is still open; the tool set followed the new list " +
 			"and the connection did not, which is the disagreement this closes")
 	}
@@ -314,7 +314,7 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 		t.Errorf("the edit dialled %d time(s); a list that closes no configured endpoint must leave "+
 			"the live connections untouched", dials)
 	}
-	if serving.closed {
+	if serving.isClosed() {
 		t.Error("the connections that are still admitted were torn down and re-made")
 	}
 	// Identity, not equivalence: a re-dial that happened to reach the same servers would still have
@@ -368,7 +368,7 @@ func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T
 	if got := fixture.set.session("wiki"); got != mcpSession(serving) {
 		t.Errorf("the holder is on %p for wiki, want the session it kept (%p)", got, serving)
 	}
-	if serving.closed {
+	if serving.isClosed() {
 		t.Error("the sessions that are still serving were torn down by a reconnect that never happened")
 	}
 }

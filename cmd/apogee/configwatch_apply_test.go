@@ -282,7 +282,7 @@ func TestWatchedConfigRepointedMCPServerReconnects(t *testing.T) {
 	if got := dialled[0][0].Endpoint; got != "https://192.0.2.1/mcp" {
 		t.Errorf("dialled %q, want the endpoint the file now names", got)
 	}
-	if !old.closed {
+	if !old.isClosed() {
 		t.Error("the old sessions are still open; a reconnect that landed leaves no orphan behind it")
 	}
 }
@@ -622,10 +622,10 @@ func TestWatchedBrokenProjectConfigDropsAdoptedServerUntilItParses(t *testing.T)
 	if !dialled[1][0].Project || !dialled[2][0].Project {
 		t.Errorf("dialled %+v, want wiki dialled as the adopted repo server both times", dialled)
 	}
-	if !sessions[1].closed {
+	if !sessions[1].isClosed() {
 		t.Error("the session holding the adopted repo server is still open after the teardown")
 	}
-	if sessions[0].closed {
+	if sessions[0].isClosed() {
 		t.Error("the global docs server's session was closed; dropping the repo server must leave it alone")
 	}
 	assertStillAdopted(t, c, 1)

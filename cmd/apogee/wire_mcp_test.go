@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // mcpDialRecorder stands in for one server's dial: it records every server it is asked for, refuses
@@ -72,10 +75,10 @@ func TestLiveMCPReconnectLeavesAnUnchangedServerAlone(t *testing.T) {
 	if want := []string{"wiki"}; !slices.Equal(dials.dialled, want) {
 		t.Errorf("dialled %v, want %v: an unchanged server is left alone", dials.dialled, want)
 	}
-	if got := fixture.set.session("docs"); got != mcpSession(docsSession) || docsSession.closed {
-		t.Errorf("docs is on %p (closed %v), want its own session, open (%p)", got, docsSession.closed, docsSession)
+	if got := fixture.set.session("docs"); got != mcpSession(docsSession) || docsSession.isClosed() {
+		t.Errorf("docs is on %p (closed %v), want its own session, open (%p)", got, docsSession.isClosed(), docsSession)
 	}
-	if !wikiSession.closed {
+	if !wikiSession.isClosed() {
 		t.Error("wiki's replaced session is still open")
 	}
 	if want := []string{"mcp wiki reconnected"}; !slices.Equal(outcomeNotes(outcomes), want) {
@@ -102,8 +105,8 @@ func TestLiveMCPFailedRedialKeepsTheOldSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconnect: %v, want the failure as the server's outcome", err)
 	}
-	if got := fixture.set.session("docs"); got != mcpSession(docsSession) || docsSession.closed {
-		t.Errorf("docs is on %p (closed %v), want its old session kept open (%p)", got, docsSession.closed, docsSession)
+	if got := fixture.set.session("docs"); got != mcpSession(docsSession) || docsSession.isClosed() {
+		t.Errorf("docs is on %p (closed %v), want its old session kept open (%p)", got, docsSession.isClosed(), docsSession)
 	}
 	entries, _ := fixture.set.snapshot()
 	if !entries["docs"].config.Equal(before) {
@@ -206,5 +209,510 @@ func TestLiveMCPRecommitRedialsOnlyTheFailedServer(t *testing.T) {
 	}
 	if want := []string{"mcp broken connected", "mcp wiki reconnected"}; !slices.Equal(outcomeNotes(outcomes), want) {
 		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+}
+
+// openGuard is a url-safety guard that admits every endpoint the tests below configure.
+var openGuard = mcpGuard(nil, nil)
+
+// mcpWaitBudget bounds every wait below on a condition another goroutine makes true.
+var mcpWaitBudget = testtime.Budget(10 * time.Second)
+
+// mcpQuietWindow is how long a test watches for something that must NOT happen yet.
+var mcpQuietWindow = testtime.Fixed(50 * time.Millisecond)
+
+// jobServers are the servers a batch of dial jobs dials, in order.
+func jobServers(jobs []mcpDialJob) []string {
+	names := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		names = append(names, job.server)
+	}
+	return names
+}
+
+// awaitClosed waits, within mcpWaitBudget, for ch to close; what names it in the failure.
+func awaitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(mcpWaitBudget):
+		t.Fatalf("timed out after %s waiting for %s", mcpWaitBudget, what)
+	}
+}
+
+// heldDial is a connect seam that answers every server at once, bar the one launching held: that
+// dial signals entered, waits for its context to end, signals cancelled, and still answers with
+// stale — the result a superseded dial hands back.
+type heldDial struct {
+	held      string
+	entered   chan struct{}
+	cancelled chan struct{}
+	stale     *fakeMCPSession
+	sessions  map[string]*fakeMCPSession
+}
+
+func newHeldDial(held string) *heldDial {
+	return &heldDial{
+		held: held, entered: make(chan struct{}), cancelled: make(chan struct{}),
+		stale: &fakeMCPSession{}, sessions: map[string]*fakeMCPSession{},
+	}
+}
+
+func (d *heldDial) connect(ctx context.Context, server mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+	if server.Command != d.held {
+		session := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: server.Name + "__tool"}}}
+		d.sessions[server.Command] = session
+		return session, nil
+	}
+	close(d.entered)
+	<-ctx.Done()
+	close(d.cancelled)
+	return d.stale, nil
+}
+
+// A request dials nothing on its caller: it queues one job per server whose config moved — the
+// changed one and the added one, in config order — and none for the server left as it was.
+func TestLiveMCPRequestDialsOnlyChangedServers(t *testing.T) {
+	t.Parallel()
+	docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+	wiki, _ := liveServer(stdioServer("wiki", "wiki-mcp"))
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith([]mcpEntry{docs, wiki}, "", dials.connect)
+
+	err := fixture.set.request([]mcp.ServerConfig{
+		stdioServer("docs", "docs-mcp"), stdioServer("wiki", "wiki-mcp-v2"), stdioServer("alpha", "alpha-mcp"),
+	}, openGuard, false)
+
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if len(dials.dialled) != 0 {
+		t.Errorf("request dialled %v on its caller, want nothing until a job runs", dials.dialled)
+	}
+	if got, want := jobServers(fixture.set.takeWork()), []string{"wiki", "alpha"}; !slices.Equal(got, want) {
+		t.Errorf("jobs = %v, want %v", got, want)
+	}
+	if jobs := fixture.set.takeWork(); len(jobs) != 0 {
+		t.Errorf("takeWork handed out %v a second time", jobServers(jobs))
+	}
+}
+
+// A new server whose first dial failed is diffed as configured-but-failed (ADR 0109 decision 7): a
+// save that changes only another server queues nothing for it, and a save of its own config does.
+func TestLiveMCPUnrelatedSaveNeverRedialsAFailedNewServer(t *testing.T) {
+	t.Parallel()
+	dials := newMCPDialRecorder()
+	dials.failing["broken"] = errors.New("dial: connection refused")
+	fixture := newMCPFixtureWith(nil, "", dials.connect)
+	spy := &applySettingSpy{}
+	first := []mcp.ServerConfig{stdioServer("docs", "docs-mcp"), stdioServer("broken", "broken-mcp")}
+	if err := fixture.set.request(first, openGuard, false); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+
+	unrelated := []mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2"), stdioServer("broken", "broken-mcp")}
+	if err := fixture.set.request(unrelated, openGuard, false); err != nil {
+		t.Fatalf("unrelated request: %v", err)
+	}
+	unrelatedJobs := jobServers(fixture.set.takeWork())
+	own := []mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2"), stdioServer("broken", "broken-mcp-v2")}
+	if err := fixture.set.request(own, openGuard, false); err != nil {
+		t.Fatalf("own request: %v", err)
+	}
+	ownJobs := jobServers(fixture.set.takeWork())
+
+	if want := []string{"docs"}; !slices.Equal(unrelatedJobs, want) {
+		t.Errorf("a save that changed only docs queued %v, want %v", unrelatedJobs, want)
+	}
+	if want := []string{"broken"}; !slices.Equal(ownJobs, want) {
+		t.Errorf("a save of broken's own config queued %v, want %v", ownJobs, want)
+	}
+}
+
+// The retry-failed flag re-dials every server whose last dial failed — a new server left absent and a
+// changed server whose old session was kept — and never the healthy one; without it, an unchanged
+// request queues nothing.
+func TestLiveMCPRetryFailedRedialsEveryFailedServer(t *testing.T) {
+	t.Parallel()
+	wiki, _ := liveServer(stdioServer("wiki", "wiki-mcp"))
+	docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+	dials := newMCPDialRecorder()
+	dials.failing["docs"] = errors.New("dial: connection refused")
+	dials.failing["broken"] = errors.New("dial: connection refused")
+	fixture := newMCPFixtureWith([]mcpEntry{wiki, docs}, "", dials.connect)
+	servers := []mcp.ServerConfig{
+		stdioServer("wiki", "wiki-mcp"), stdioServer("docs", "docs-mcp-v2"), stdioServer("broken", "broken-mcp"),
+	}
+	if err := fixture.set.request(servers, openGuard, false); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, &applySettingSpy{}); err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+
+	if err := fixture.set.request(servers, openGuard, false); err != nil {
+		t.Fatalf("plain request: %v", err)
+	}
+	plain := jobServers(fixture.set.takeWork())
+	if err := fixture.set.request(servers, openGuard, true); err != nil {
+		t.Fatalf("retry request: %v", err)
+	}
+	retried := jobServers(fixture.set.takeWork())
+
+	if len(plain) != 0 {
+		t.Errorf("an unchanged request without the flag queued %v, want nothing", plain)
+	}
+	if want := []string{"docs", "broken"}; !slices.Equal(retried, want) {
+		t.Errorf("the retry queued %v, want %v: every failed server, never the healthy wiki", retried, want)
+	}
+}
+
+// A reconnect the engine is going to refuse touches nothing: no entry is retired or closed and no
+// server is dialled.
+func TestLiveMCPReconnectRefusedWhileBusyTouchesNothing(t *testing.T) {
+	t.Parallel()
+	docs, docsSession := liveServer(stdioServer("docs", "docs-mcp"))
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith([]mcpEntry{docs}, "", dials.connect)
+	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
+
+	_, err := fixture.set.reconnect([]mcp.ServerConfig{stdioServer("alpha", "alpha-mcp")}, fixture.tools, spy)
+
+	if err == nil {
+		t.Fatal("reconnect: want the engine's refusal, got none")
+	}
+	if docsSession.isRetired() || docsSession.isClosed() {
+		t.Errorf("docs retired %v, closed %v: a refused reconnect marked a server closed",
+			docsSession.isRetired(), docsSession.isClosed())
+	}
+	if len(dials.dialled) != 0 {
+		t.Errorf("a refused reconnect dialled %v", dials.dialled)
+	}
+	if got := fixture.set.session("docs"); got != mcpSession(docsSession) {
+		t.Errorf("docs is on %p, want its live session %p", got, docsSession)
+	}
+}
+
+// A request that moves a server back onto the config its live session runs drops the dial it was
+// waiting on — cancelled in flight, or discarded once finished — and queues none: no re-dial, no
+// tool churn (ADR 0109 decision 2).
+func TestLiveMCPRevertToTheLiveConfigDialsNothing(t *testing.T) {
+	t.Parallel()
+	t.Run("in flight", func(t *testing.T) {
+		t.Parallel()
+		docs, docsSession := liveServer(stdioServer("docs", "docs-mcp"))
+		dial := newHeldDial("docs-mcp-v2")
+		fixture := newMCPFixtureDialling([]mcpEntry{docs}, "", dial.connect)
+		spy := &applySettingSpy{}
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+			t.Fatalf("request v2: %v", err)
+		}
+		finished := runJobsAsync(fixture.set.takeWork())
+		awaitClosed(t, dial.entered, "the v2 dial to start")
+
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+			t.Fatalf("revert: %v", err)
+		}
+		awaitClosed(t, dial.cancelled, "the revert to cancel the v2 dial")
+		awaitClosed(t, finished, "the cancelled job to return")
+		outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+		assertRevertLeftDocsAlone(t, fixture, spy, docsSession, outcomes, err)
+		if !dial.stale.isClosed() {
+			t.Error("the cancelled dial's session was left open")
+		}
+	})
+	t.Run("pending", func(t *testing.T) {
+		t.Parallel()
+		docs, docsSession := liveServer(stdioServer("docs", "docs-mcp"))
+		dials := newMCPDialRecorder()
+		fixture := newMCPFixtureWith([]mcpEntry{docs}, "", dials.connect)
+		spy := &applySettingSpy{}
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+			t.Fatalf("request v2: %v", err)
+		}
+		for _, job := range fixture.set.takeWork() {
+			job.run(context.Background())
+		}
+
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+			t.Fatalf("revert: %v", err)
+		}
+		outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+		assertRevertLeftDocsAlone(t, fixture, spy, docsSession, outcomes, err)
+		if !dials.sessions["docs"].isClosed() {
+			t.Error("the discarded v2 session was left open")
+		}
+	})
+}
+
+// runJobsAsync runs every job on a goroutine of its own and closes the channel it returns once all
+// have returned.
+func runJobsAsync(jobs []mcpDialJob) <-chan struct{} {
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for _, job := range jobs {
+			job.run(context.Background())
+		}
+	}()
+	return finished
+}
+
+// assertRevertLeftDocsAlone is the revert test's claim: no outcome, no swap, and docs still on its
+// own live session.
+func assertRevertLeftDocsAlone(
+	t *testing.T, fixture *mcpFixture, spy *applySettingSpy, docsSession *fakeMCPSession, outcomes []mcpOutcome, err error,
+) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if jobs := fixture.set.takeWork(); len(jobs) != 0 {
+		t.Errorf("the revert queued %v, want nothing", jobServers(jobs))
+	}
+	if len(outcomes) != 0 || spy.drove() != 0 {
+		t.Errorf("outcomes %q, swaps %d: want neither for a revert", outcomeNotes(outcomes), len(spy.swaps))
+	}
+	if got := fixture.set.session("docs"); got != mcpSession(docsSession) || docsSession.isClosed() {
+		t.Errorf("docs is on %p (closed %v), want its live session %p, open", got, docsSession.isClosed(), docsSession)
+	}
+}
+
+// A removal takes effect on the keystroke (ADR 0109 decision 5): the server's session is retired
+// before request returns, with no swap, and its tools leave the registry at the next commit.
+func TestLiveMCPRemovalRefusesItsToolsAtOnce(t *testing.T) {
+	t.Parallel()
+	docs, docsSession := liveServer(stdioServer("docs", "docs-mcp"))
+	wiki, _ := liveServer(stdioServer("wiki", "wiki-mcp"))
+	fixture := newMCPFixtureWith([]mcpEntry{docs, wiki}, "", newMCPDialRecorder().connect)
+	spy := &applySettingSpy{}
+
+	err := fixture.set.request([]mcp.ServerConfig{stdioServer("wiki", "wiki-mcp")}, openGuard, false)
+
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if !docsSession.isRetired() {
+		t.Error("the removed server's tools still answer after request returned")
+	}
+	if len(spy.swaps) != 0 {
+		t.Errorf("request swapped the tool set %d time(s); the swap waits for the commit", len(spy.swaps))
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want 1 to take the removed server's tools out", len(spy.swaps))
+	}
+	if _, isFound := spy.swaps[0].Lookup("docs__live"); isFound {
+		t.Error("the committed registry still carries the removed server's tools")
+	}
+	if !docsSession.isClosed() {
+		t.Error("the removed server's session was never closed")
+	}
+}
+
+// A newer request for a server cancels the dial in flight for it (ADR 0109 decision 6): the stale
+// result is closed when it returns and yields no outcome, and only the newest dial lands.
+func TestLiveMCPNewerRequestCancelsTheInFlightDial(t *testing.T) {
+	t.Parallel()
+	docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+	dial := newHeldDial("docs-mcp-v2")
+	fixture := newMCPFixtureDialling([]mcpEntry{docs}, "", dial.connect)
+	spy := &applySettingSpy{}
+	if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+		t.Fatalf("request v2: %v", err)
+	}
+	finished := runJobsAsync(fixture.set.takeWork())
+	awaitClosed(t, dial.entered, "the v2 dial to start")
+
+	if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v3")}, openGuard, false); err != nil {
+		t.Fatalf("request v3: %v", err)
+	}
+	awaitClosed(t, dial.cancelled, "the v3 request to cancel the v2 dial")
+	awaitClosed(t, finished, "the cancelled job to return")
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if !dial.stale.isClosed() {
+		t.Error("the superseded dial's session was left open")
+	}
+	if want := []string{"mcp docs reconnected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q: the superseded dial says nothing", outcomeNotes(outcomes), want)
+	}
+	if got := fixture.set.session("docs"); got != mcpSession(dial.sessions["docs-mcp-v3"]) {
+		t.Errorf("docs is on %p, want the v3 session", got)
+	}
+}
+
+// Every finished dial lands in ONE swap, its tools in config order whatever order the dials
+// finished in, with the outcomes in config order too.
+func TestLiveMCPCommitIsOneSwapInConfigOrder(t *testing.T) {
+	t.Parallel()
+	docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+	fixture := newMCPFixtureWith([]mcpEntry{docs}, "", newMCPDialRecorder().connect)
+	spy := &applySettingSpy{}
+	err := fixture.set.request([]mcp.ServerConfig{
+		stdioServer("alpha", "alpha-mcp"), stdioServer("docs", "docs-mcp"), stdioServer("zeta", "zeta-mcp"),
+	}, openGuard, false)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	jobs := fixture.set.takeWork()
+	slices.Reverse(jobs)
+	for _, job := range jobs {
+		job.run(context.Background())
+	}
+
+	outcomes, err := fixture.set.commit(fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want one for every finished dial", len(spy.swaps))
+	}
+	if want := []string{"alpha__tool", "docs__live", "zeta__tool"}; !slices.Equal(toolNames(fixture.set.tools()), want) {
+		t.Errorf("tools = %v, want %v", toolNames(fixture.set.tools()), want)
+	}
+	if want := []string{"mcp alpha connected", "mcp zeta connected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+}
+
+// A dial that answered is admitted again at commit under the lists the session is on THEN: one they
+// now deny is closed instead of installed and noted as the disconnection it is, never as a failure.
+func TestLiveMCPCommitReadmitsUnderTheLiveLists(t *testing.T) {
+	t.Parallel()
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith(nil, "", dials.connect)
+	spy := &applySettingSpy{}
+	server := mcp.ServerConfig{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}
+	if err := fixture.set.request([]mcp.ServerConfig{server}, openGuard, false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	for _, job := range fixture.set.takeWork() {
+		job.run(context.Background())
+	}
+	if err := fixture.tools.setDenyHosts([]string{"mcp.example.com"}, spy); err != nil {
+		t.Fatalf("setDenyHosts: %v", err)
+	}
+
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if want := []string{"mcp server docs disconnected — its endpoint is denied"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+	if err := mcpRowFailures(outcomes); err != nil {
+		t.Errorf("row failure = %v, want none: a denial is not a failed dial", err)
+	}
+	if fixture.set.session("docs") != nil {
+		t.Error("the denied server was installed")
+	}
+	if !dials.sessions["docs"].isClosed() {
+		t.Error("the denied dial's session was left open")
+	}
+}
+
+// A swap the engine refuses at commit is the "still pending" outcome: no outcome, no close, and the
+// results wait for the next commit, which lands them.
+func TestLiveMCPRefusedSwapLeavesResultsPending(t *testing.T) {
+	t.Parallel()
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith(nil, "", dials.connect)
+	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
+	if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	refused, refusal := drainMCP(t, fixture.set, fixture.tools, spy)
+	spy.swapErr = nil
+	landed, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if _, isPending := errors.AsType[mcpPendingError](refusal); !isPending {
+		t.Fatalf("refused commit error = %v, want the still-pending outcome", refusal)
+	}
+	if len(refused) != 0 {
+		t.Errorf("the refused commit wrote notes %q", outcomeNotes(refused))
+	}
+	if err != nil {
+		t.Fatalf("later commit: %v", err)
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(landed), want) {
+		t.Errorf("later notes = %q, want %q", outcomeNotes(landed), want)
+	}
+	session := dials.sessions["docs"]
+	if got := fixture.set.session("docs"); got != mcpSession(session) || session.isClosed() {
+		t.Errorf("docs is on %p (closed %v), want the pending dial's session %p, open", got, session.isClosed(), session)
+	}
+}
+
+// Teardown leaves nothing behind (ADR 0109 decision 10): close cancels the dial in flight and waits
+// for it, and waits for a live session that is slow to shut down.
+func TestLiveMCPCloseCancelsAndJoinsEverything(t *testing.T) {
+	t.Parallel()
+	slow := &fakeMCPSession{closeGate: make(chan struct{})}
+	dial := newHeldDial("gated-mcp")
+	fixture := newMCPFixtureDialling(
+		[]mcpEntry{{config: stdioServer("slow", "slow-mcp"), session: slow}}, "", dial.connect)
+	servers := []mcp.ServerConfig{stdioServer("slow", "slow-mcp"), stdioServer("gated", "gated-mcp")}
+	if err := fixture.set.request(servers, openGuard, false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	runJobsAsync(fixture.set.takeWork())
+	awaitClosed(t, dial.entered, "the gated dial to start")
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		_ = fixture.set.close()
+	}()
+
+	awaitClosed(t, dial.cancelled, "close to cancel the gated dial")
+	select {
+	case <-closed:
+		t.Fatal("close returned while a live session was still shutting down")
+	case <-time.After(mcpQuietWindow):
+	}
+	close(slow.closeGate)
+	awaitClosed(t, closed, "close to return once the slow session shut down")
+	if !slow.isClosed() || !dial.stale.isClosed() {
+		t.Errorf("slow closed %v, gated dial's session closed %v: want both", slow.isClosed(), dial.stale.isClosed())
+	}
+}
+
+// A dial job the program never ran before teardown is inert: run after close it dials nothing and
+// installs nothing.
+func TestLiveMCPJobNeverRunAfterCloseIsInert(t *testing.T) {
+	t.Parallel()
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith(nil, "", dials.connect)
+	if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	jobs := fixture.set.takeWork()
+	if err := fixture.set.close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	for _, job := range jobs {
+		job.run(context.Background())
+	}
+
+	if len(dials.dialled) != 0 {
+		t.Errorf("a job run after close dialled %v", dials.dialled)
+	}
+	if fixture.set.session("docs") != nil {
+		t.Error("a job run after close installed a session")
 	}
 }

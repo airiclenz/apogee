@@ -162,7 +162,18 @@ cmd/apogee/mcp_cmd_test.go — TestStartupMCPLoginOffersEveryServerBeforeTheConn
 **Depends on:** item 1, item 2
 **Commit:** `refactor(mcp): the live set holds one connection per server`
 
-## 4. liveMCP async API (cmd/apogee side)
+## 4. liveMCP async API (cmd/apogee side) — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): liveMCP keeps two WaitGroups, `dials` (running jobs) and `closes` (off-loop closes), not the one the approach names. close() waits on both. The sync `reconnect` waits on `closes` only, so it never blocks on an unrelated dial that hangs.
+NOTES (2026-11-07): the rebuild flag is named `needsRebuild` (the boolean-prefix rule), not `rebuild`.
+NOTES (2026-11-07): `request` takes a `security.URLGuard`. The `mcpConnect` seam still takes host lists, so each job passes `guard.AllowHosts` and `guard.DenyHosts`, and the item-3 seam and `settingsapplier_helper_test.go` stay as they are.
+NOTES (2026-11-07): deny at request time. A live entry whose own dialled config the guard now denies is disconnected at once (retired, dropped from the set, closed off the loop). A not-live server whose verdict alone moves to denied has its pending work dropped and is not dialled. A config edit onto a denied endpoint still queues a dial: connect refuses it with today's text and the old session is kept, so the sync callers see no change.
+NOTES (2026-11-07): when a commit re-admits a result and the lists now deny it, the server's live old session is closed too, so the `mcp server <name> disconnected — its endpoint is denied` note is true. The still-pending outcome is the `mcpPendingError` type, and the sync `reconnect` maps it to `mcpReconnectFailed(cause)`.
+NOTES (2026-11-07): consequential edit — cmd/apogee/configwatch_apply_test.go: made necessary by fakeMCPSession's state now being read only through isClosed() (the off-loop close).
+NOTES (2026-11-07): consequential edit — cmd/apogee/wire_live_test.go: made necessary by fakeMCPSession's state now being read only through isClosed().
+NOTES (2026-11-07): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by fakeMCPSession's state now being read only through isClosed().
+NOTES (2026-11-07): consequential edit — cmd/apogee/doc.go: made necessary by wire_mcp.go's role changing from the sync reconnect to the request/dial/commit lifecycle (one map line).
+NOTES (2026-11-07): `grep -n '\.closed\b' cmd/apogee/*_test.go` still matches `headless_test.go:3587,3595`. That is the `closed` counter of a different fake, not fakeMCPSession, and it is left alone.
+NOTES (2026-11-07): wire_mcp.go is now about 700 lines, past the ~400-line guidance. It stays one file, as the item's Where line says.
 
 **What:** Recast at the regression check (2026-11-07).
 **Goal:**

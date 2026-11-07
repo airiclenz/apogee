@@ -2291,10 +2291,10 @@ func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing
 	if _, ok := spy.swaps[0].Lookup("gone__echo"); ok {
 		t.Error("the swapped-in registry still carries the old server's tools")
 	}
-	if !old.closed {
+	if !old.isClosed() {
 		t.Error("the old sessions are still open; a reconnect that landed leaves no orphan behind it")
 	}
-	if next.closed {
+	if next.isClosed() {
 		t.Error("the sessions the session is now running on were torn down")
 	}
 	if endpoints := []string{"https://search.example.com/s"}; !slices.Equal(fixture.built, endpoints) {
@@ -2362,7 +2362,7 @@ func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.
 	if want := `docs: connect to server "docs": dial: connection refused`; err.Error() != want {
 		t.Errorf("error = %q, want %q", err, want)
 	}
-	if old.closed {
+	if old.isClosed() {
 		t.Error("the session that is still serving was torn down by a reconnect that never happened")
 	}
 	if spy.drove() != 0 || len(fixture.built) != 0 {
@@ -2406,7 +2406,7 @@ func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T
 	if dials != 0 {
 		t.Errorf("a reconnect the engine refused dialled %d time(s), want none", dials)
 	}
-	if old.closed {
+	if old.isClosed() {
 		t.Error("a refused swap tore down the sessions the run is still using")
 	}
 	if names := toolNames(fixture.set.tools()); !slices.Equal(names, []string{"serving__echo"}) {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -149,20 +150,60 @@ func writeSettingsFixture(t *testing.T, path, body string) {
 	}
 }
 
-// fakeMCPSession stands in for a connected set of MCP servers: what it advertises, and whether it has
-// been torn down. The reconnect is exercised against the mcpSession seam rather than a real
+// fakeMCPSession stands in for one connected MCP server: what it advertises, and whether it has been
+// retired or torn down. The lifecycle is exercised against the mcpSession seam rather than a real
 // *mcp.Client because what lives in the composition root is the ORDER of the act — dial, swap, tear
 // down, and each failure's way back to the set that was serving — while the dialling itself is
 // internal/mcp's, and its own tests connect to a real fixture server over a real transport.
+//
+// liveMCP closes a session off the caller's goroutine, so its state is read only through isClosed
+// and isRetired, under the mutex.
 type fakeMCPSession struct {
 	tools   []apogee.Tool
 	skipped []mcp.Denied
+	// closeGate, when set, holds Close until it is closed: a server slow to shut down.
+	closeGate chan struct{}
+
+	mu      sync.Mutex
 	closed  bool
+	retired bool
 }
 
 func (f *fakeMCPSession) Tools() []apogee.Tool  { return f.tools }
 func (f *fakeMCPSession) Skipped() []mcp.Denied { return f.skipped }
-func (f *fakeMCPSession) Close() error          { f.closed = true; return nil }
+
+// Retire records that the session's tools were switched off.
+func (f *fakeMCPSession) Retire() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retired = true
+}
+
+// Close waits for closeGate, if set, then records the teardown — which, as *mcp.Client's does,
+// retires the session first.
+func (f *fakeMCPSession) Close() error {
+	if f.closeGate != nil {
+		<-f.closeGate
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retired, f.closed = true, true
+	return nil
+}
+
+// isClosed reports whether Close has run.
+func (f *fakeMCPSession) isClosed() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed
+}
+
+// isRetired reports whether the session's tools were switched off, by Retire or by Close.
+func (f *fakeMCPSession) isRetired() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.retired
+}
 
 // mcpFixtureTool is one tool a fake server advertises, named so a registry can be asked whose tools
 // reached it.
@@ -198,11 +239,17 @@ const mcpFixtureSeed = "seed"
 // newMCPFixtureWith is newMCPFixture over the live entries a test names, for a test whose intent needs
 // a server the reconnect CHANGES or leaves alone rather than one it removes.
 func newMCPFixtureWith(entries []mcpEntry, endpoint string, connect func([]mcp.ServerConfig) (mcpSession, error)) *mcpFixture {
-	f := &mcpFixture{}
-	f.set = newLiveMCP(context.Background(), entries,
+	return newMCPFixtureDialling(entries, endpoint,
 		func(_ context.Context, server mcp.ServerConfig, _, _ []string) (mcpSession, error) {
 			return connect([]mcp.ServerConfig{server})
 		})
+}
+
+// newMCPFixtureDialling is newMCPFixtureWith over the whole connect seam, for a test that needs the
+// dial's context — a dial held open until it is cancelled.
+func newMCPFixtureDialling(entries []mcpEntry, endpoint string, connect mcpConnect) *mcpFixture {
+	f := &mcpFixture{}
+	f.set = newLiveMCP(context.Background(), entries, connect)
 	f.tools = newLiveTools(apogee.NewToolRegistry(), toolSetSpec{endpoint: endpoint}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		f.built = append(f.built, spec.endpoint)
 		registry := apogee.NewToolRegistry()
@@ -214,6 +261,19 @@ func newMCPFixtureWith(entries []mcpEntry, endpoint string, connect func([]mcp.S
 		return registry
 	})
 	return f
+}
+
+// drainMCP is what the idle point does with a request, inline: it takes the queued dial jobs
+// (takeWork), runs each, commits, and joins every close liveMCP queued before it returns, so a test
+// reads a session's state after it race-free.
+func drainMCP(t *testing.T, set *liveMCP, tools *liveTools, engine settingsEngine) ([]mcpOutcome, error) {
+	t.Helper()
+	for _, job := range set.takeWork() {
+		job.run(context.Background())
+	}
+	outcomes, err := set.commit(tools, engine)
+	set.closes.Wait()
+	return outcomes, err
 }
 
 // toolNames is what a set advertises, for an assertion about WHICH connections a holder is on.

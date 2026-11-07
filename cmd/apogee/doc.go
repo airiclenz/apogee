@@ -47,7 +47,7 @@
 // toolchain_roots.go the once-per-process probe of the Go toolchain's GOROOT and module
 // cache and the composed read-roots func that lists them after the skill libraries;
 // wire_mcp.go the connected MCP sessions, one per server,
-// and the per-server reconnect that moves a session onto another set (adr-0037-amend-1107);
+// and their per-server request, dial and commit lifecycle (ADR 0109, adr-0037-amend-1107);
 // wire_present.go the presentation ladder this host can walk and the holder that
 // rebuilds and re-installs it; wire_session.go the session-persistence host plus
 // the resume resolution a --resume/--continue start goes through (the prompt-recall
