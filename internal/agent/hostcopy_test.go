@@ -82,6 +82,7 @@ var backgroundHostFields = map[string]hostField{
 	"scratchMu":             {hostZero, "the host's own lock, over its frozen copy"},
 	"genMu":                 {hostZero, "the host's own lock, over its frozen copy"},
 	"swapMu":                {hostZero, "the host is never swapped (SetReactions)"},
+	"stepMu":                {hostZero, "the host's own lock, never the session's (built inside a Step that holds it); the host runs no Step and is never tool-swapped"},
 	"forkNext":              {hostZero, "the host restores no session"},
 	"briefing":              {hostZero, "the host opens no Session boundary"},
 	"compactionMu":          {hostZero, "the host's own lock, over its frozen copy"},
