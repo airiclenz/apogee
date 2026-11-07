@@ -51,7 +51,11 @@
 - Startup MCP connect semantics; the OAuth login flow (ADR 0095 D4: a mid-session dial never prompts).
 - headless / daemon Drivers; the `/mcp` live status view.
 
-## 1. Mid-Turn MCP reconnect never races the Agent
+## 1. Mid-Turn MCP reconnect never races the Agent — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): the TryLock-and-inExchange check is one helper, `Agent.holdIdleForSwap`, shared by `SwapTools` and `CanSwapTools`. The plan describes the check, not where it lives.
+NOTES (2026-11-07): added `TestSwapToolsCanSwapAtIdle` (the probe answers nil at idle) and a `CanSwapTools` assertion inside the existing `TestSwapToolsRefusedMidExchange`. Both are extra coverage, inside the plan's `TestSwapTools` acceptance pattern.
+NOTES (2026-11-07): the e2e test's request-counting server is a local helper, `newCountingPingMCPServer`, in `e2e_mcpmidturn_test.go`, because `newPingMCPServer` (mcp_cmd_test.go, not in this item's Files) exposes no counter. The test was checked to be discriminating: with the `CanSwapTools` pre-check disabled it fails (the second server saw 5 requests).
+NOTES (2026-11-07): the `agent.go` call-class comment now states that SwapTools alone checks its boundary under stepMu and may be called from any goroutine. The `swaptools.go` "discipline IS the synchronization" paragraph is rewritten per the item's comment rule.
 
 **What:**
 **Goal:** `Agent.SwapTools` and a new `Agent.CanSwapTools() error` read the Agent's Exchange state race-free against the worker, and no swap takes effect while a Step or Run is in progress or an Exchange is open. A watched `mcp-servers` save folded mid-Turn dials nothing and swaps nothing; its outcome is today's text, `mcpReconnectFailed(errSwapToolsInExchange)` byte for byte, and the old tools stay.

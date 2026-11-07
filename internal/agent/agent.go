@@ -53,7 +53,9 @@ import (
 // The methods touching loop state fall into three call classes, and each one's own doc states
 // which class it is in. Idle-only calls (Submit, ClearContext, RestoreSession, Compact, Rebind,
 // SwitchUpstream, SwapTools, SetProfile, SetJournal, AbortExchange) need a quiescent boundary
-// with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
+// with no Exchange mid-flight; SwapTools alone (with its CanSwapTools probe) checks that boundary
+// under stepMu, so it may be called from any goroutine and is refused, never raced, while a Step
+// or Run is in progress. Between-Steps calls by the goroutine DRIVING the loop
 // (Snapshot, Interject) are additionally valid at the boundary between two Steps of an open
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
@@ -176,6 +178,14 @@ type Agent struct {
 	// announcement takes it too (announceSessionStart), so a swap falls wholly before or wholly
 	// after the boundary its newly armed entries are read against (sessionBriefing).
 	swapMu sync.Mutex
+
+	// stepMu is held by the exported Step and Run for the whole call (never by the private step or
+	// finishAtStepCap, which only ever run inside one of them). It is what makes SwapTools callable
+	// from a goroutine other than the one driving the loop: SwapTools and CanSwapTools take it with
+	// TryLock, so a swap either finds no Step in progress and reads turns.inExchange under it, or is
+	// refused without waiting. A bare flag would not do — it leaves a window between the check and the
+	// swap in which a Step can start on the worker.
+	stepMu sync.Mutex
 
 	// forkNext is the MarkFork mark: it makes the next RestoreSession announce start "fork" rather
 	// than "resume". The next ClearContext or RestoreSession takes it at its top, whether or not that
@@ -1126,7 +1136,12 @@ func (a *Agent) Submit(in domain.UserInput) error {
 // converted to an ErrorEvent, and the loop degrades to the quiescent boundary
 // rather than unwinding into the host (ADR 0007 / ADR 0002). Step returns a non-nil
 // error only for loop-level faults the Agent itself cannot localise.
+//
+// Step holds stepMu for the whole call, as Run does, so a SwapTools from another goroutine is
+// refused while it runs rather than racing it (swaptools.go).
 func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) {
+	a.stepMu.Lock()
+	defer a.stepMu.Unlock()
 	res, err := a.step(ctx)
 	a.emitTurn(res)
 	return res, err
@@ -1176,6 +1191,8 @@ func (a *Agent) emitTurn(res domain.StepResult) {
 // a continuation needs is written first, so the parent can retain the faulted child as it retains
 // a capped one (runSubAgent) — a top-level Run is exempt from that too.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
+	a.stepMu.Lock()
+	defer a.stepMu.Unlock()
 	// The time bound counts from the child's first request, which this Run is about to make; the
 	// reading is taken once, so a resumed loop never restarts the clock.
 	a.limits.startClock(a.now)

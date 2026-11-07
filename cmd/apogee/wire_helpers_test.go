@@ -99,6 +99,9 @@ func (s *applySettingSpy) SwapTools(registry *apogee.ToolRegistry) error {
 	return nil
 }
 
+// CanSwapTools answers what SwapTools would: the configured idle-only refusal, else nil.
+func (s *applySettingSpy) CanSwapTools() error { return s.swapErr }
+
 func (s *applySettingSpy) SetProfile(p apogee.ModelProfile) error {
 	if s.profileErr != nil {
 		return s.profileErr

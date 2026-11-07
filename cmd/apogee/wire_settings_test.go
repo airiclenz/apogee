@@ -2375,17 +2375,20 @@ func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.
 }
 
 // The other failure is the engine's: SwapTools is idle-only, so a reconnect committed mid-run is
-// refused. The session keeps the connections and the tools it had — and the sessions dialled for the
-// swap that did not happen are torn down rather than left orphaned, exactly as a half-connected set
-// is rolled back at startup.
+// refused. It is refused BEFORE anything is dialled (CanSwapTools), so the session keeps the
+// connections and the tools it had and no server sees a handshake for a swap that was never going to
+// happen.
 func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeSettingsFixture(t, path, mcpServersFixture)
 
 	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
-	next := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__search"}}}
-	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) { return next, nil })
+	dials := 0
+	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		dials++
+		return &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__search"}}}, nil
+	})
 	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
 	applier := fakeApplier(t)
 	applier.engine = spy
@@ -2401,14 +2404,44 @@ func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T
 	if !strings.Contains(err.Error(), "previous connections kept") {
 		t.Errorf("error = %q, want the row told the old connections stand", err)
 	}
+	if dials != 0 {
+		t.Errorf("a reconnect the engine refused dialled %d time(s), want none", dials)
+	}
 	if old.closed {
 		t.Error("a refused swap tore down the sessions the run is still using")
 	}
-	if !next.closed {
-		t.Error("the sessions dialled for a swap that was refused are orphaned")
-	}
 	if names := toolNames(fixture.set.tools()); !slices.Equal(names, []string{"serving__echo"}) {
-		t.Errorf("live MCP tools = %v, want the holder back on the set that is serving", names)
+		t.Errorf("live MCP tools = %v, want the holder still on the set that is serving", names)
+	}
+}
+
+// A reconnect asks the engine first: while an Exchange runs the swap would be refused, so connect is
+// never entered and the answer is the same sentence a refused swap has always produced,
+// mcpReconnectFailed over the engine's own refusal, byte for byte.
+func TestMCPReconnectRefusesBeforeDiallingWhileAnExchangeRuns(t *testing.T) {
+	t.Parallel()
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
+	connected := false
+	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		connected = true
+		return &fakeMCPSession{}, nil
+	})
+	busy := errors.New("input pending: the tool set can only be swapped between runs")
+	spy := &applySettingSpy{swapErr: busy}
+
+	note, err := fixture.set.reconnect([]mcp.ServerConfig{{Name: "docs"}}, fixture.tools, spy)
+
+	if connected {
+		t.Error("a reconnect the engine would refuse still dialled the servers")
+	}
+	if err == nil || err.Error() != mcpReconnectFailed(busy).Error() {
+		t.Errorf("reconnect err = %v, want %q", err, mcpReconnectFailed(busy))
+	}
+	if note != "" {
+		t.Errorf("reconnect note = %q, want none beside an error", note)
+	}
+	if spy.drove() != 0 || len(fixture.built) != 0 {
+		t.Errorf("a refused reconnect still moved the tool set (swaps %d, rebuilds %v)", len(spy.swaps), fixture.built)
 	}
 }
 

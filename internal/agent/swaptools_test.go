@@ -114,11 +114,76 @@ func TestSwapToolsRefusedMidExchange(t *testing.T) {
 	if !errors.Is(err, domain.ErrInputPending) {
 		t.Errorf("SwapTools mid-Exchange err = %v, want it to match ErrInputPending", err)
 	}
+	if probe := a.CanSwapTools(); !errors.Is(probe, domain.ErrInputPending) {
+		t.Errorf("CanSwapTools mid-Exchange err = %v, want it to match ErrInputPending", probe)
+	}
 	if a.tools != before {
 		t.Error("a refused SwapTools replaced the tool set")
 	}
 	if _, found := a.lookupTool("old_tool"); !found {
 		t.Error("the old tool stopped resolving after a refused swap")
+	}
+}
+
+// TestSwapToolsRefusedWhileAStepRuns: a host's swap arrives from another goroutine than the worker
+// driving the loop (the TUI folds a watched config save on its Update goroutine). While a Step is
+// held inside the provider both SwapTools and CanSwapTools answer the idle-only refusal at once,
+// without waiting for the Step, and the registry the Step runs on stays the one it had. Run under
+// -race this is the check that the refusal reads the Exchange state race-free.
+func TestSwapToolsRefusedWhileAStepRuns(t *testing.T) {
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "old_tool", readOnly: true, result: "old"})
+	responder := blockingResponder{started: make(chan struct{})}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "slow"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	before := a.tools
+	ctx, cancel := context.WithCancel(context.Background())
+	stepped := make(chan error, 1)
+	go func() {
+		_, err := a.Step(ctx)
+		stepped <- err
+	}()
+	<-responder.started
+
+	swapErr := a.SwapTools(toolRegistry(t, fakeTool{name: "new_tool", readOnly: true, result: "new"}))
+	probeErr := a.CanSwapTools()
+	cancel()
+	if err := <-stepped; err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if !errors.Is(swapErr, domain.ErrInputPending) {
+		t.Errorf("SwapTools while a Step runs err = %v, want it to match ErrInputPending", swapErr)
+	}
+	if !errors.Is(probeErr, domain.ErrInputPending) {
+		t.Errorf("CanSwapTools while a Step runs err = %v, want it to match ErrInputPending", probeErr)
+	}
+	if a.tools != before {
+		t.Error("a SwapTools refused while a Step ran still replaced the tool set")
+	}
+}
+
+// TestSwapToolsCanSwapAtIdle: the probe agrees with the door at a quiescent boundary — nil on a
+// fresh Agent — and asking moves nothing.
+func TestSwapToolsCanSwapAtIdle(t *testing.T) {
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "old_tool", readOnly: true, result: "old"})
+	a, err := newAgent(cfg, blockingResponder{started: make(chan struct{})})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	before := a.tools
+
+	err = a.CanSwapTools()
+
+	if err != nil {
+		t.Errorf("CanSwapTools at idle = %v, want nil", err)
+	}
+	if a.tools != before {
+		t.Error("CanSwapTools moved the tool set")
 	}
 }
 

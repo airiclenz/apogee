@@ -744,6 +744,17 @@ func (e *lateEngine) SwapTools(registry *apogee.ToolRegistry) error {
 	return agent.SwapTools(registry)
 }
 
+// CanSwapTools asks the bound Agent whether a swap would be taken now ([apogee.Agent.CanSwapTools]).
+// Unbound it answers what SwapTools answers there, errNoServerBound, so a probe and the swap it
+// stands in front of never disagree.
+func (e *lateEngine) CanSwapTools() error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.CanSwapTools()
+}
+
 // SetProfile swaps the dialect the session reads responses in (`model-profiles`, ADR 0037's other
 // idle-only door — the SAME-model half of ADR 0044's two doors, a model change taking Rebind). Unbound it is REMEMBERED and seeded into the Agent the bind constructs (Config.Profile), like the anytime-safe setters
 // above and unlike SwapTools: a tool registry has a carrier across the bind already — Config.Tools,

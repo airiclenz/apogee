@@ -26,7 +26,8 @@ var (
 	// dropped build result from silently disarming every tool the session had.
 	errSwapToolsMissingRegistry = errors.New("apogee: SwapTools: a tool registry is required (pass an empty registry for a tool-less Agent)")
 
-	// errSwapToolsInExchange refuses a swap mid-Exchange. It WRAPS domain.ErrInputPending so the
+	// errSwapToolsInExchange refuses a swap while a Step or Run is in progress or an Exchange is
+	// open. It WRAPS domain.ErrInputPending so the
 	// idle-only class stays matchable with errors.Is, and adds the reason because this refusal is
 	// user-facing: the settings surface renders it on the row whose edit could not be applied.
 	errSwapToolsInExchange = fmt.Errorf("%w: the tool set can only be swapped between runs", domain.ErrInputPending)
@@ -38,13 +39,16 @@ var (
 // build the WHOLE set, exactly as the composition root builds it at construction; this is a
 // replacement, never a merge, so a tool absent from registry is gone from the session.
 //
-// Idle-only, like Rebind and ClearContext: it refuses mid-Exchange (errSwapToolsInExchange, which
-// matches domain.ErrInputPending) and the host applies a change observed mid-run at the terminal
-// boundary — or lets the user re-commit the edit, since the value is already persisted. That
-// discipline IS the synchronization: the loop's tool reads (the per-request menu in toolMenu, the
-// per-call resolution in toolByName) all run inside Step on the host's worker goroutine, and the
-// boundary the host crosses to call this establishes happens-before in both directions, so the
-// hot path needs no lock (ADR 0011's idle-only engine-call class).
+// Idle-only, like Rebind and ClearContext: it refuses while a Step or Run is in progress or an
+// Exchange is open (errSwapToolsInExchange, which matches domain.ErrInputPending), and the host
+// applies a change observed mid-run at the terminal boundary — or lets the user re-commit the edit,
+// since the value is already persisted. Unlike the other idle-only doors it may be CALLED from any
+// goroutine: the loop's tool reads (the per-request menu in toolMenu, the per-call resolution in
+// toolByName) all run inside Step or Run, which hold stepMu for the whole call, and this takes
+// stepMu with TryLock. A held lock is a Step in progress and is refused at once, without waiting
+// for it; a free one is held across the inExchange read and the commit, so no Step can start in
+// between, and the hot path itself still takes no lock. CanSwapTools asks the same question
+// without swapping.
 //
 // Validate-then-commit: the registry is checked whole — non-nil, and every entry a real tool with
 // a non-empty, unique name — before anything is mutated, so a malformed set leaves the session on
@@ -64,9 +68,11 @@ var (
 // has been taken. Config.Tools stays the immutable construction seed (only resolveTools reads
 // it), so a swapped Agent's live tools are a.tools alone.
 func (a *Agent) SwapTools(registry *domain.ToolRegistry) error {
-	if a.turns.inExchange {
-		return errSwapToolsInExchange
+	release, err := a.holdIdleForSwap()
+	if err != nil {
+		return err
 	}
+	defer release()
 	if registry == nil {
 		return errSwapToolsMissingRegistry
 	}
@@ -95,4 +101,32 @@ func (a *Agent) SwapTools(registry *domain.ToolRegistry) error {
 	// roster deltas in where it builds.
 	a.ownsToolSet = false
 	return nil
+}
+
+// CanSwapTools reports whether SwapTools would accept a registry now: nil at an idle boundary, and
+// errSwapToolsInExchange (matching domain.ErrInputPending) while a Step or Run is in progress or an
+// Exchange is open — the same refusal, read the same way under stepMu. It swaps nothing, so a host
+// can ask before doing expensive work whose only use is a swap (dialling MCP servers). The answer is
+// a snapshot: a Step may start the moment it returns, which is why SwapTools checks again itself.
+func (a *Agent) CanSwapTools() error {
+	release, err := a.holdIdleForSwap()
+	if err != nil {
+		return err
+	}
+	release()
+	return nil
+}
+
+// holdIdleForSwap takes stepMu without waiting and checks the boundary under it: a held lock (a Step
+// or Run in progress) or an open Exchange is errSwapToolsInExchange with nothing held, and an idle
+// boundary hands back the release the caller runs once it is done with that boundary.
+func (a *Agent) holdIdleForSwap() (release func(), err error) {
+	if !a.stepMu.TryLock() {
+		return nil, errSwapToolsInExchange
+	}
+	if a.turns.inExchange {
+		a.stepMu.Unlock()
+		return nil, errSwapToolsInExchange
+	}
+	return a.stepMu.Unlock, nil
 }

@@ -84,8 +84,14 @@ func (m *liveMCP) swap(next mcpSession) mcpSession {
 // none, and always empty beside an error — for the caller to relay on its own surface.
 //
 // A busy engine is one of those failures: SwapTools is idle-only, so a reconnect committed mid-run is
-// refused and reported on the row over a value the file already carries (ADR 0037 binding A).
+// refused and reported on the row over a value the file already carries (ADR 0037 binding A). It is
+// asked FIRST (CanSwapTools), before anything is dialled: a swap that is going to be refused has no
+// use for the connections, and dialling them mid-Turn would only spend a server's handshake to tear
+// it straight down.
 func (m *liveMCP) reconnect(servers []mcp.ServerConfig, set *liveTools, engine settingsEngine) (note string, err error) {
+	if err := engine.CanSwapTools(); err != nil {
+		return "", mcpReconnectFailed(err)
+	}
 	next, err := m.connect(servers)
 	if err != nil {
 		return "", mcpReconnectFailed(err)
