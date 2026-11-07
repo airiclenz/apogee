@@ -591,8 +591,8 @@
 //
 // busy.go turns that same chain for an IDLE session that is waiting on something slow — a launcher
 // verb in flight, a footer git action, a /sessions record load, a bare /rename's naming call, a
-// heartbeat that has not bound a model yet, an MCP server's dial: [Model.busyWait] derives the wait from those latches at
-// call time (never a mirrored flag), the status line carries it in the running row's shape (glyph,
+// heartbeat that has not bound a model yet, an MCP server's dial ("reconnecting MCP…"):
+// [Model.busyWait] derives the wait from those latches at call time (never a mirrored flag), the status line carries it in the running row's shape (glyph,
 // the word apogee already shows for the wait, a clock from [busyClock]), and Update's tail
 // arms the chain once when such a wait finds none alive (busyAfterFold). A pop-up still loading its
 // listing (popupLoading) keeps the chain turning for its own loading row's glyph and adds no word to

@@ -373,7 +373,8 @@ func buildTransport(ctx context.Context, host Host, cfg ServerConfig, guard secu
 // model could have authored — or a PATH entry pointing into the box — is refused at connect time
 // rather than executed. Connect being all-or-nothing (bar a Project server whose pin moved or could
 // not be checked, which it skips and reports — Client.Skipped), the operator meets that refusal at
-// startup, where every other misconfigured server is met. For a global server cmd.Dir is
+// startup, where every other misconfigured server is met — or, for a server a mid-session edit adds,
+// in that server's own connect-failed note (ADR 0109). For a global server cmd.Dir is
 // deliberately NOT set: the server keeps starting in apogee's own working directory, the
 // workspace, which is what filesystem-style MCP servers expect, and with argv[0] an absolute
 // fenced path there is no relative lookup left for the working directory to decide.
@@ -682,7 +683,8 @@ func newOAuthHandler(
 // HeadersEnv is read here, so each connect and reconnect sends the variable's current value; an
 // unset variable fails the connect.
 //
-// Every refusal names the server — the settings row's reconnect note has no other source for it —
+// Every refusal names the server — a reconnect's per-server transcript note and the settings row's
+// failure have no other source for it —
 // and none names a proxy value or its credentials, nor a header value.
 func vetEndpoint(ctx context.Context, host Host, cfg ServerConfig, guard security.URLGuard) (string, *http.Client, error) {
 	u, err := checkEndpoint(ctx, cfg, guard)

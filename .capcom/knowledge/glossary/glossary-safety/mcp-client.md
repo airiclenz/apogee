@@ -40,7 +40,11 @@ own, and sends it on every request. The **bearer reaches only the endpoint's ori
 the same origin-pinned client as the headers — while the **authorization server**, named by the MCP
 server rather than by you, runs **under the SSRF floor** and url-safety with bounded bodies: the
 endpoint's floor exemption never extends to it. `auth:` on stdio or sse, or beside an
-`Authorization` header, is a refusal rather than a note. Mid-session nothing prompts: a reconnect
+`Authorization` header, is a refusal rather than a note. A live `mcp-servers:` edit **reconnects
+server by server** (ADR 0109): only the servers it adds or changes are dialled, off the TUI's Update
+loop, and the finished dials join the registry at the next idle point; a failed re-dial keeps that
+server's old session, and each outcome is a transcript note of its own. Startup connect stays
+all-or-nothing and fatal. Mid-session nothing prompts: a reconnect
 that needs a login fails naming `apogee mcp login <name>` (ADR
 0095). **Resume reconnects
 fresh** — no server-side state is restored (ADR 0008). The *client shape* is

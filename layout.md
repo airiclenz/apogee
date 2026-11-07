@@ -1775,12 +1775,14 @@ waits rank most specific first: a launcher verb in flight (`loading <profile>…
 action (`git pull…`, `git push…`, `git sync…` and the rest — the note its start writes; the branch
 listing that opens switch branch is not one, since it switches nothing and lands in a moment), a
 `/sessions` record load (`loading session…`), a bare `/rename`'s naming call (`naming this
-session…`), and a wired heartbeat that has not bound a model yet (`connecting…` — never on an
+session…`), a wired heartbeat that has not bound a model yet (`connecting…` — never on an
 offline session, nor on one that started with no server bound, since neither has a beat coming
-soon to end it). One shows at a time, the highest ranked, and a wait whose word changes — a load
-handing over to `connecting…` — is a new wait whose clock starts again. The busy form carries no
-`· quiet` qualifier, no throughput and no Exchange total: those speak for an Exchange's stream, and a
-wait has none. It is the third of the facts an idle frame may carry (below), and the other two
+soon to end it), and an MCP server's dial running off the loop after a live config change
+(`reconnecting MCP…` — one word however many servers are dialling, ranked below `connecting…`
+because the dials change only which tools the next Turn sees). One shows at a time, the highest
+ranked, and a wait whose word changes — a load handing over to `connecting…` — is a new wait whose
+clock starts again. The busy form carries no `· quiet` qualifier, no throughput and no Exchange
+total: those speak for an Exchange's stream, and a wait has none. It is the third of the facts an idle frame may carry (below), and the other two
 outrank it. A pop-up still reading what it lists — the `/sessions` browser before its listing, the
 `/workflows` item view before its item — is a wait too, but one its own `loading…` row narrates with
 the same turning glyph (see the `/sessions` pop-up), so the status line stays blank for it. When the
@@ -1962,8 +1964,8 @@ pane, so a frame the human dismissed the question on never looks like an ordinar
 pane's fact wins where both are owed, being the more urgent of the two: a modal is swallowing every
 keypress but the frame chords on a window showing none of it, and the session's fact is still there when it closes. The
 fact goes the moment a server is bound. The third is the **busy indicator** — `<glyph> <phrase> ·
-<clock>` while the session waits on a launcher verb, a git action, a record load, a naming call or a
-first beat (the status line's spinner, above). It ranks below both, and the slot holds one at a
+<clock>` while the session waits on a launcher verb, a git action, a record load, a naming call, a
+first beat or an MCP server's dial (the status line's spinner, above). It ranks below both, and the slot holds one at a
 time: a wait is narrated only once neither of the other two is owed.
 
 ---

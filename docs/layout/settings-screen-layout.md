@@ -226,7 +226,11 @@ The ` *` says *this session changed this key here* and is cleared only by a rela
 it already names the file the save landed in. The note beside
 it is the one deferral wording the surface has: `context-files:` is part of the prefix every request
 is cached against, so it lands at the next `/clear`. Every other key is already in force by the time
-the row repaints. Where an environment variable or a flag outranks the file the note reads
+the row repaints, bar one in-progress note: a changed `mcp-servers:` dials the servers it adds or
+changes off the loop (ADR 0109), so its row reads `· reconnecting MCP…` while those dials run, and
+once they are committed the note leaves the row — or, if one failed and the pane is still open,
+the row reads `✗ saved — live apply failed: <server>: …`. Each server's outcome is a transcript note
+as well. Where an environment variable or a flag outranks the file the note reads
 `· APOGEE_MODE outranks at next launch` — about the next start, not about this edit, which applied;
 a global save under a value the Project config sets reads `· saved to global; the project config
 outranks it`, since the project's value stays in force —

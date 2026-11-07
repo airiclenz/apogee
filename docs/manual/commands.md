@@ -782,9 +782,13 @@ editor, your desktop's opener — is started **detached**: the pane stays up, no
 window that opened somewhere else, and the row says `· opened in your editor`. Either way the
 edit lands the same way, because what applies it is the file being **saved**, not the editor
 exiting. Every key that changed is applied the way an in-pane edit is — a changed `mcp-servers:`
-**reconnects**, connecting the new set first and swapping the tools over only once it is up, so a
-server that will not come back leaves the old connections serving and the reason on the row; a
-changed `model-profiles:` swaps the parser and re-composes the tool set under the bound model's
+**reconnects server by server**: only the servers the edit adds or changes are dialled, in the
+background, so the pane stays live and the row reads `· reconnecting MCP…` while they dial. Each
+server's tools join at the next idle moment and its outcome arrives as a transcript note
+(`mcp docs reconnected`); a server that will not come back keeps its old connection serving, and
+the row reads `✗ saved — live apply failed: docs: …` if the pane is still open. A removed server's
+tools are refused at once, and a round trip that changes nothing re-dials every server whose last
+dial failed. A changed `model-profiles:` swaps the parser and re-composes the tool set under the bound model's
 `tools:` roster. The jump is offered between runs only — mid-run the
 row asks you to wait, while in-pane edits stay open. The confinement keys are the one pair that
 goes nowhere near it: they carry `· use /confine`, because switching Auto's fence off asks for an

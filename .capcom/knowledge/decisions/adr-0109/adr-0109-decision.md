@@ -44,6 +44,11 @@ the next idle point.**
    - Each server's outcome is one ephemeral transcript note under the `mcp` label: `mcp <server> reconnected` (or
      `mcp <server> connected` for a new server), `mcp reconnect failed: <server>: … — previous connection kept`, or
      `mcp connect failed: <server>: …` for a new server. A resume does not replay it.
+
+     > **Amended 2026-11-07 (`docs/plans/2026-11-07 - 00 - mcp-reconnect-off-loop-plan.md`, items 4
+     > and 11).** There is a fifth note. A finished dial that decision 4's re-admit denies at commit
+     > is closed and noted `mcp server <server> disconnected — its endpoint is denied`: a policy
+     > decision the human made, worded as the url-safety row words it, never as a failed dial.
    - The `mcp-servers` row shows `reconnecting MCP…` while any dial it started runs. When they
      finish, and the settings surface is still open, the row shows the outcome: `saved`, or
      `saved — live apply failed: <server>: …`.

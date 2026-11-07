@@ -426,7 +426,10 @@ cmd/apogee/e2e_approval_test.go — awaitArmed, waitIdle, promptPlaceholder; cmd
 **Depends on:** item 8, item 9
 **Commit:** `test(e2e): a slow or broken MCP server leaves the TUI and the healthy servers working`
 
-## 11. Docs: per-server MCP reconnect
+## 11. Docs: per-server MCP reconnect — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): ADR check found one drift — ADR 0109 decision 8 listed four per-server notes, but item 4 shipped a fifth (`mcp server <server> disconnected — its endpoint is denied` for a dial the commit-time re-admit denies); corrected by a dated `> **Amended 2026-11-07**` blockquote under that bullet, named on the record's Status line. `adr-0037-amend-1107` matches what shipped.
+NOTES (2026-11-07): `internal/tui/busy.go` already carried `reconnecting MCP…` from item 6 and was left unchanged; the reconnect-rule grep over non-test `cmd/apogee`, `internal/tui` and `internal/agent/swaptools.go` found no stale whole-set wording (earlier items rewrote it), so the code edits are the two `internal/mcp/transport.go` comments and the `internal/tui/doc.go` busy list.
+NOTES (2026-11-07): `internal/config/defaults/config.yaml` ("when a reconnect lands") was checked and left as is: still true under the commit-time re-admit.
 
 **What:**
 **Goal:** every doc and comment that describes MCP live reconnect states the per-server, off-loop, idle-commit, per-server-note behaviour, and every list of busy-indicator waits includes `reconnecting MCP…`.

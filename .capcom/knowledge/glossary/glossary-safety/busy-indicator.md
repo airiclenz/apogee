@@ -7,10 +7,11 @@ refs: [internal/tui/busy.go, layout.md]
 The **spinner, word and clock an idle session shows while it waits on something slow**, so a slow
 box never looks stuck. A Turn narrates itself on the running row; outside one the session can still
 be waiting — a launcher verb in flight, a footer git action, a `/sessions` record load, a bare
-`/rename`'s naming call, a wired heartbeat that has not bound a model yet — and while it is idle the
+`/rename`'s naming call, a wired heartbeat that has not bound a model yet, an MCP server's dial
+running off the loop — and while it is idle the
 status line carries that wait in the running row's shape, `⠶⠶ loading qwen3… · 01:04s`. The **word
 is the one apogee already shows for the wait** (`loading <profile>…`, `git <verb>…`, `loading
-session…`, `naming this session…`, `connecting…`), one wait at a time, the most specific first; a
+session…`, `naming this session…`, `connecting…`, `reconnecting MCP…`), one wait at a time, the most specific first; a
 changed word is a new wait whose clock starts again. A pop-up still reading what it lists — the
 `/sessions` browser, the `/workflows` item view — is a wait too, but **its own `loading…` row turns
 the glyph** and the status line stays blank. The wait is **derived at call time from the latches that

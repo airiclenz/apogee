@@ -68,7 +68,8 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   launched is an absolute path and a program resolving **inside the workspace** — bytes a confined
   call is allowed to write — is refused at connect time rather than executed; `Connect` being
   all-or-nothing (a moved Project pin, skipped instead, aside), the operator meets that refusal at
-  startup. It still **starts in the workspace**
+  startup — or, for a server a mid-session edit adds, in that server's own `mcp connect failed`
+  note. It still **starts in the workspace**
   (apogee's own working directory, which filesystem-style servers expect): with argv[0] absolute
   and fenced there is no relative lookup left for the working directory to decide. An adopted
   **repo** server (`ServerConfig.Project`, ADR 0104 §4, 2026-10-18) is the one exception: its pin is
@@ -240,8 +241,18 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
 - **Resume reconnects FRESH (ADR 0008).** The Client holds no serializable state; a resumed Session
   simply calls `Connect` again from the same config. No server-side state is restored — there is no
   server-side-state promise. (`cmd/apogee/wire_live.go` establishes the connection on every launch,
-  resume included; `cmd/apogee/wire_mcp.go` holds the connected set and the reconnect an
+  resume included; `cmd/apogee/wire_mcp.go` holds one connection per server and the reconnect an
   `mcp-servers:` edit drives.)
+- **A live edit reconnects server by server (ADR 0109).** Mid-session, each server is its own
+  one-server `Client`, dialled through the same `ConnectWith`, so `Admit`, the pin check and the
+  OAuth handler are unchanged. A save dials only the servers it adds or changes, on a goroutine off
+  the TUI's Update loop, with no deadline of its own (a newer request for the same server cancels
+  it); the finished dials join the registry at the next idle point in one rebuild and one
+  `SwapTools`, re-admitted under the live url-safety lists. A failed re-dial keeps that server's old
+  session, a new server whose first dial fails stays absent, and a removed or denied server is
+  refused at once. Each outcome is one transcript note per server (`mcp <server> reconnected`,
+  `mcp reconnect failed: <server>: … — previous connection kept`, …). Startup's `Connect` stays
+  all-or-nothing and fatal.
 - **Close** joins every session's teardown error and clears the sessions; it is safe on a dormant or
   already-closed Client. The composition root `defer`s it so no process or connection survives exit.
 

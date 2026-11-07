@@ -45,8 +45,10 @@ every structured key (nine besides `unconfined-hosts`: `servers`, `system-prompt
 `sub-agents-server`, `sessions.share-group`,
 `tools.enabled`, the three `workflow-*` keys, `present.command-on-model-documents`): ⏎ opens the
 human's own editor at that key's line, and every changed key is applied through those same two homes (a changed `mcp-servers:`
-**reconnects**, validate-then-commit: the new set is dialled first and the old sessions keep serving
-on failure; startup connect stays fatal). Which editor is the **editor ladder** — the `editor`
+**reconnects server by server** (ADR 0109): only the servers it adds or changes are dialled, off the
+Update loop, the row reading `reconnecting MCP…` meanwhile; the finished dials join at the next idle
+point in one rebuild, each outcome a transcript note of its own, and a failed re-dial keeps that
+server's old session; startup connect stays all-or-nothing and fatal). Which editor is the **editor ladder** — the `editor`
 config key, then `$VISUAL`, then `$EDITOR`, then the platform's **OS opener** (`open` / `xdg-open` /
 `cmd /c start`) — an explicit setting outranking an ambient one, so a command set for apogee is
 never quietly beaten by a variable the row cannot show. How it is started splits on that answer: a

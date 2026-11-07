@@ -628,7 +628,8 @@ mid-turn is reported on the row and re-committing retries it. The connected MCP 
 same edit: an `sse` or `streamable-http` endpoint your new lists close is disconnected there and
 then, and the row names it (`mcp server docs disconnected — its endpoint is denied`). The rest of
 your servers keep their connections, and an edit that closes no configured endpoint leaves every
-one of them untouched. Webhook Reactions are the exception: a running session's own webhooks keep
+one of them untouched. A server your new lists open again is dialled in the background, and its
+outcome arrives as a transcript note of its own (`mcp docs connected`). Webhook Reactions are the exception: a running session's own webhooks keep
 the lists it started with, so an edit reaches them at the next start — while a `/schedule` firing
 raised after the edit composes its webhooks from the new lists, as it does its tools. The block is
 file-only (no flag, no environment variable) and global: it applies to every model this config runs.
@@ -847,7 +848,8 @@ connect skips rather than fails the set over: a notice names it and the moved fi
 set connects, and the server is proposed for adoption again. One whose pinned file cannot be read is
 skipped the same way, its notice saying why, but it is not proposed again: the config re-read that
 follows drops it with a notice naming the file it could not read.) Mid-session nothing ever prompts: a reconnect that needs a
-login fails, and the `mcp-servers:` row in `/settings` names the same command.
+login fails and keeps that server's old connection serving, and its transcript note — and the
+`mcp-servers:` row in `/settings`, while the pane is open — names the same command.
 
 The login always prints the full authorization URL. On a local desktop, `⏎` opens it in your
 browser — nothing opens without that keypress, and only an `https` or loopback `http` URL is
@@ -893,9 +895,19 @@ total, so a long-lived SSE stream is never cut.
 
 The block is file-only (no flag, no environment variable) and it is **live**: save the file — or use
 `⏎` on the `mcp-servers:` row in [`/settings`](commands.md#the-settings-screen--settings), which
-opens your editor because no row can write a list this shape — and apogee reconnects, bringing the
-new set up before swapping the tools over, so a server that will not come back leaves the old
-connections serving and says why on the row. A save to the Project config, or an answer to one of
+opens your editor because no row can write a list this shape — and apogee reconnects **server by
+server**. Only the servers the save adds or changes are dialled, and an unchanged one keeps its
+connection and its tools untouched. The dials run in the background, so the screen stays live: the
+status line shows `reconnecting MCP…` while a dial runs between turns, a slow or dead server holds back none of
+the others, and quitting cancels the dials rather than waiting on them. Each server's tools join
+at the next idle moment, mid-turn dials included, and each outcome arrives as a transcript note of
+its own: `mcp docs reconnected` (or `mcp docs connected` for a new server), `mcp reconnect failed:
+docs: … — previous connection kept`, or `mcp connect failed: docs: …`. A server that will not come
+back keeps its old connection serving; a new one whose first dial fails stays absent. A removed
+server's tools are refused at once. Nothing retries a failed server on its own: a save that changes
+it does, and so does the `/settings` round trip, even one that changes nothing, which re-dials
+every server whose last dial failed. Startup is different: there connecting is all-or-nothing, and
+a server that cannot connect stops the launch. A save to the Project config, or an answer to one of
 its servers — here or from another terminal — reconnects the same way; a Project config that stops
 parsing disconnects its servers, and leaves yours serving, until it parses again.
 
@@ -1111,7 +1123,8 @@ layout and colours, `ui.footer.rows` and `ui.footer.colors`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. The same animation is the busy indicator outside a turn: while
 an idle session waits on something slow — a `/model` profile load, a footer git action, a
-`/sessions` record load, a bare `/rename`, the first heartbeat — the status line shows it beside
+`/sessions` record load, a bare `/rename`, the first heartbeat, an MCP server's reconnect
+(`reconnecting MCP…`) — the status line shows it beside
 that wait's word and a clock (`⠶⠶ loading qwen3… · 01:04s`), and the `loading…` row of a pop-up
 still reading its list turns it too. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
