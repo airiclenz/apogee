@@ -402,7 +402,8 @@ cmd/apogee/mcp_cmd_test.go — newPingMCPServer, TestSessionResolvesReactionMCPT
 **Depends on:** item 8
 **Commit:** `feat(settings): a url-safety re-admit dials MCP servers one by one`
 
-## 10. Driven end-to-end: a slow MCP dial keeps the TUI live
+## 10. Driven end-to-end: a slow MCP dial keeps the TUI live — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): the typed key is the turn's own prompt — typed while the dial is held, its echo asserted in the prompt box beside the still-shown `reconnecting MCP…`, then sent with Enter once `mcp slow connected` lands — so the prompt needs no clearing between the two halves.
 
 **What:**
 **Goal:** two driven `cmd/apogee` tests over a real streamable-HTTP MCP server:
