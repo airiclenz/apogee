@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os/exec"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -180,6 +181,9 @@ func (m Model) foldDetachedEdit(msg settingsDetachedMsg) (tea.Model, tea.Cmd) {
 // rather than a row's condition ([settingFailure]), and this is one attempt. What the LOADER had to
 // say about the file — an unknown key the edit just introduced — is a different kind of news: it is
 // about no row, so it goes to the transcript (noteLoaderNotices), exactly as a watched save's does.
+//
+// The `mcp-servers` row is the one whose round trip means something with the key unchanged: it is
+// the retry gesture for every server whose last dial failed (retryFailedMCP).
 func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 	rows := m.settingRows()
 	launched, ok := settingRowOf(rows, msg.path)
@@ -194,9 +198,36 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 		return m.settingsFailed(launched, stripEscapes(err.Error()))
 	}
 	m, cmds := m.applyReloaded(rows, reload.Applied, false)
+	if msg.path == settingKeyMCPServers && !slices.ContainsFunc(reload.Applied, isMCPServersSetting) {
+		m = m.retryFailedMCP(launched)
+	}
 	m = m.noteLoaderNotices(reload.Notices)
 	return m, tea.Batch(cmds...)
 }
+
+// retryFailedMCP is the `mcp-servers` row's retry gesture (ADR 0109 decision 7): a round trip that
+// left the key unchanged applies nothing, yet asks [MCPHost.RetryFailedMCP] to re-dial every server
+// whose last dial failed. Its in-progress note is the row's answer and arms the row watch, as an
+// apply's does (settingsApplied); "" — nothing had failed — leaves the row exactly as it was, and a
+// refusal is the row's failure. Unwired, it is inert.
+func (m Model) retryFailedMCP(row SettingRow) Model {
+	if m.opts.MCP == nil {
+		return m
+	}
+	note, err := m.opts.MCP.RetryFailedMCP()
+	if err != nil {
+		m.settings.failure = settingFailure{path: row.Path, msg: settingsApplyFailedNote + stripEscapes(err.Error())}
+		return m
+	}
+	if note == MCPReconnectingNote {
+		m.settings.answer = settingAnswer{path: row.Path, msg: note}
+		m.armMCPRow()
+	}
+	return m
+}
+
+// isMCPServersSetting reports whether a re-read moved the `mcp-servers` key.
+func isMCPServersSetting(a AppliedSetting) bool { return a.Path == settingKeyMCPServers }
 
 // applyReloaded journals and applies every key a re-read found changed. It is the one apply loop the
 // round trip's TWO triggers share (ADR 0041 decision 6: one apply path, two triggers) — an editor

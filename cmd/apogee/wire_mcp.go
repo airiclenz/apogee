@@ -8,7 +8,9 @@ package main
 // once and queues one dial job per server it adds or changes; the jobs run off the caller; a commit at
 // the next idle point folds every finished dial into one rebuild and one SwapTools, then closes the
 // sessions it replaced — so a server that cannot be reached keeps its old session, or stays absent,
-// and costs the healthy ones nothing. The synchronous reconnect is those three steps run inline.
+// and costs the healthy ones nothing. The synchronous reconnect is those three steps run inline. The
+// wiring itself is the TUI's tui.MCPHost over this holder: the TUI runs the jobs as Cmds and commits
+// at its idle point.
 
 import (
 	"context"
@@ -21,6 +23,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // mcpEntry is one configured server the session is connected to: the resolved config it was dialled
@@ -311,6 +314,50 @@ func (m *liveMCP) takeWork() []mcpDialJob {
 	return jobs
 }
 
+// wantsRebuild reports whether a server was marked closed since the last commit, so a commit is
+// wanted with no dial behind it: the closed server's tools leave the registry there.
+func (m *liveMCP) wantsRebuild() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.needsRebuild
+}
+
+// isDialQueued reports whether a dial job waits for takeWork — what a request that just ran says
+// about whether it started a dial.
+func (m *liveMCP) isDialQueued() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.jobs) > 0
+}
+
+// hasFailedDial reports whether any configured server's last finished dial failed: what the
+// `mcp-servers` row's retry gesture re-dials (ADR 0109 decision 7).
+func (m *liveMCP) hasFailedDial() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, state := range m.servers {
+		if state.hasFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// cancelDials is the quit's first half: from it on nothing is dialled, queued or installed, every
+// queued job is dropped and every running dial cancelled. It closes nothing — close, the run's own
+// defer, still tears every server down after it.
+func (m *liveMCP) cancelDials() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.isStopped = true
+	m.jobs = nil
+	for _, state := range m.servers {
+		if state.cancel != nil {
+			state.cancel()
+		}
+	}
+}
+
 // runDial is a dial job's body: it dials server under a context of its own, derived from parent and
 // cancelled by a newer request or by close, then stores the result. A job whose generation is stale,
 // or that runs after close began, never dials.
@@ -505,15 +552,7 @@ func (m *liveMCP) closeOffLoopLocked(entry mcpEntry) {
 // parallel, and waits for those and for every close already queued. Nothing is dialled or installed
 // after it begins.
 func (m *liveMCP) close() error {
-	m.mu.Lock()
-	m.isStopped = true
-	m.jobs = nil
-	for _, state := range m.servers {
-		if state.cancel != nil {
-			state.cancel()
-		}
-	}
-	m.mu.Unlock()
+	m.cancelDials()
 	m.dials.Wait()
 
 	m.mu.Lock()
@@ -625,7 +664,7 @@ func (e mcpPendingError) Unwrap() error { return e.cause }
 // before it returns. An unchanged server is left alone, a removed one is dropped, an added or changed
 // one is dialled; a failed re-dial keeps that server's old session and its OLD config, a failed new
 // server stays absent, and neither costs any other server anything. Every server whose last dial
-// failed is dialled again (the retry-failed flag), as re-committing the row has always retried.
+// failed is dialled again (the retry-failed flag).
 //
 // The outcomes are one per server dialled, in config order; the unchanged and removed servers have
 // none. A repo server whose pin moved is a failed dial whose cause is the pin's refusal: it keeps an
@@ -679,9 +718,10 @@ func mcpAdmits(server mcp.ServerConfig, guard security.URLGuard) bool {
 	return len(denied) == 0
 }
 
-// mcpRowFailures is what the `mcp-servers` row reports about a reconnect that landed: nil when every
-// dial answered, otherwise an error whose text is the failed servers' clauses joined by "; " — the
-// row reads `saved — live apply failed: <server>: …` — and which still wraps each cause.
+// mcpRowFailures is what a synchronous reconnect that landed reports (reconnectMCPFrom): nil when
+// every dial answered, otherwise an error whose text is the failed servers' clauses joined by "; " —
+// the row that asked reads `saved — live apply failed: <server>: …` — and which still wraps each
+// cause.
 func mcpRowFailures(outcomes []mcpOutcome) error {
 	var failed mcpRowError
 	for _, outcome := range outcomes {
@@ -772,4 +812,70 @@ const mcpErrorPrefix = "mcp: "
 // surface has already labelled `mcp`. An error that never carried the label comes back byte for byte.
 func mcpSentence(err error) string {
 	return strings.TrimPrefix(err.Error(), mcpErrorPrefix)
+}
+
+// ----------------------------------------------------------------------------
+// The TUI's MCP seam (ADR 0109): the wiring as a tui.MCPHost
+// ----------------------------------------------------------------------------
+
+// mcpHost is the wiring as the TUI's [tui.MCPHost] over w.mcpSet, w.toolSet and w.engine, or nil —
+// the TUI's inert host — when no MCP holder or tool set is wired.
+func (w *rootWiring) mcpHost() tui.MCPHost {
+	if w.mcpSet == nil || w.toolSet == nil {
+		return nil
+	}
+	return w
+}
+
+// TakeMCPWork hands the TUI the dial jobs the requests since the last call queued, each once, to run
+// off the Update loop, and whether a commit is wanted with no dial behind it (a closed server's
+// tools must leave the registry).
+func (w *rootWiring) TakeMCPWork() ([]tui.MCPDial, bool) {
+	jobs := w.mcpSet.takeWork()
+	dials := make([]tui.MCPDial, 0, len(jobs))
+	for _, job := range jobs {
+		dials = append(dials, job.run)
+	}
+	return dials, w.mcpSet.wantsRebuild()
+}
+
+// CommitMCP takes every finished dial into the live tool set in one rebuild and one SwapTools, and
+// answers one outcome per server it settled. The engine is asked first (CanSwapTools): a refusal —
+// an Exchange open, or no server bound yet — rebuilds nothing and answers pending, with every result
+// kept for the next commit and the refusal as the one outcome's row failure, so the `mcp-servers`
+// row resolves on it. A swap the engine refuses after the rebuild answers the same way.
+func (w *rootWiring) CommitMCP() ([]tui.MCPOutcome, bool) {
+	if err := w.engine.CanSwapTools(); err != nil {
+		return mcpRefusedCommit(err), true
+	}
+	outcomes, err := w.mcpSet.commit(w.toolSet, w.engine)
+	if pending, isPending := errors.AsType[mcpPendingError](err); isPending {
+		return mcpRefusedCommit(pending.cause), true
+	}
+	answered := make([]tui.MCPOutcome, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		answered = append(answered, tui.MCPOutcome{Note: outcome.note, RowFailure: outcome.rowFailure})
+	}
+	return answered, false
+}
+
+// mcpRefusedCommit is a refused commit's one outcome: no transcript note — nothing moved and the
+// next idle point asks again — and the row's failure, worded as a refused reconnect.
+func mcpRefusedCommit(refusal error) []tui.MCPOutcome {
+	return []tui.MCPOutcome{{RowFailure: mcpReconnectFailed(refusal).Error()}}
+}
+
+// CancelMCPDials cancels every dial in flight and drops the queued ones; the run's teardown closes
+// the servers after the program returns (liveMCP.close).
+func (w *rootWiring) CancelMCPDials() { w.mcpSet.cancelDials() }
+
+// RetryFailedMCP is the `mcp-servers` row's retry gesture over an unchanged file (ADR 0109 decision
+// 7): when some server's last dial failed it requests the configured set with the retry-failed flag,
+// answering the request's note; when none did it requests nothing and answers "". The error is the
+// request's refusal (settingsApplier.requestMCP).
+func (w *rootWiring) RetryFailedMCP() (string, error) {
+	if !w.mcpSet.hasFailedDial() {
+		return "", nil
+	}
+	return w.settingsApplier().requestMCP(true)
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -21,11 +22,16 @@ type MCPHost interface {
 	TakeMCPWork() (dials []MCPDial, commit bool)
 	// CommitMCP takes every finished dial into the live tool set in one rebuild and one tool swap,
 	// returning one outcome per server it settled. pending reports that the swap was refused
-	// because the engine was busy: every result is kept for the next commit and no outcome is
-	// returned for it.
+	// because the engine was busy: every result is kept for the next commit, and the one outcome
+	// returned is the refusal as a RowFailure with no Note.
 	CommitMCP() (outcomes []MCPOutcome, pending bool)
 	// CancelMCPDials cancels every dial in flight; after it no dial the host handed out does work.
 	CancelMCPDials()
+	// RetryFailedMCP is the `mcp-servers` row's retry gesture over an unchanged file (ADR 0109
+	// decision 7): when some server's last dial failed it requests every failed server again and
+	// answers [MCPReconnectingNote]; when none did it requests nothing and answers "". The error is
+	// a refused request, with nothing requested.
+	RetryFailedMCP() (note string, err error)
 }
 
 // MCPDial is one server's dial. It blocks until the server answers, fails or ctx is cancelled, and
@@ -52,6 +58,17 @@ type mcpState struct {
 	// nothing commits. It is its own latch because quitSession's immediate exit never sets
 	// quitting, so the holdQuitting gates alone would not cover it.
 	stopped bool
+	// row watches the `mcp-servers` settings row while the dials its apply requested are in flight.
+	row mcpRowWatch
+}
+
+// mcpRowWatch is the `mcp-servers` row's watch: armed by an apply or a retry that answered
+// [MCPReconnectingNote], it collects each commit's row failures and resolves the row once no dial is
+// in flight and nothing is left uncommitted (settleMCPRow). failures is the joined text rather than
+// a slice, so a value-copied Model shares no array (ADR 0011).
+type mcpRowWatch struct {
+	isArmed  bool
+	failures string
 }
 
 // mcpDialDoneMsg is one dial Cmd's return: the dial has stored its result on the host.
@@ -59,7 +76,9 @@ type mcpDialDoneMsg struct{}
 
 // mcpAfterFold is Update's tail hook for the MCP reconnect, asked after every fold: while dials may
 // start it takes the host's queued work and runs each dial as a Cmd under the program context, and
-// while the engine is free for a tool swap it commits what has finished. Asking here rather than at
+// while the engine is free for a tool swap it commits what has finished. Once no dial is in flight
+// and nothing is left uncommitted — or the commit was refused — it resolves the watched
+// `mcp-servers` row (settleMCPRow). Asking here rather than at
 // a list of sites is what makes the commit land at whichever fold first leaves the engine free —
 // every engine release included — and what starts a dial requested mid-Turn at once. After a quit
 // ([Model.stopMCP]) it does neither, whichever of the quit's exits was taken.
@@ -74,8 +93,12 @@ func mcpAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 		m, dials = m.startMCPDials()
 		cmd = tea.Batch(cmd, dials)
 	}
+	isRefused := false
 	if m.mcp.uncommitted && holds.canSwapTools() {
-		m.commitMCP()
+		isRefused = m.commitMCP()
+	}
+	if m.mcp.row.isArmed && m.mcp.inFlight == 0 && (!m.mcp.uncommitted || isRefused) {
+		m.settleMCPRow()
 	}
 	return m, cmd
 }
@@ -129,14 +152,73 @@ func (m *Model) stopMCP() {
 	m.mcp.stopped = true
 }
 
-// commitMCP lands the finished work and writes each outcome's note, verbatim and display-only. A
-// pending answer keeps the commit wanted, so the next fold that finds the engine free asks again.
-func (m *Model) commitMCP() {
+// commitMCP lands the finished work and writes each outcome's note, verbatim and display-only, and
+// hands each row failure to an armed row watch. A pending answer keeps the commit wanted, so the next
+// fold that finds the engine free asks again; it reports whether the commit was refused.
+func (m *Model) commitMCP() (pending bool) {
 	outcomes, pending := m.opts.MCP.CommitMCP()
 	m.mcp.uncommitted = pending
 	for _, outcome := range outcomes {
 		if outcome.Note != "" {
 			m.transcript.addEphemeralNote(outcome.Note)
 		}
+		if outcome.RowFailure != "" && m.mcp.row.isArmed {
+			m.mcp.row.failures = joinRowFailure(m.mcp.row.failures, outcome.RowFailure)
+		}
 	}
+	return pending
+}
+
+// mcpRowFailureSeparator joins the failed servers' clauses on the row.
+const mcpRowFailureSeparator = "; "
+
+// joinRowFailure appends failure to the clauses already collected.
+func joinRowFailure(collected, failure string) string {
+	if collected == "" {
+		return failure
+	}
+	return strings.Join([]string{collected, failure}, mcpRowFailureSeparator)
+}
+
+// armMCPRow starts watching the `mcp-servers` row afresh: a newer request's outcome is the one the
+// row reports.
+func (m *Model) armMCPRow() {
+	m.mcp.row = mcpRowWatch{isArmed: true}
+}
+
+// settleMCPRow resolves the watched row with the dials' outcome. The in-progress note always clears
+// — from the journaled edit and from the answer slot — so on success the row reads as the value and
+// its ` *`, the pane's "saved". Any collected failure becomes the row's, while the settings surface
+// is still open to show it.
+func (m *Model) settleMCPRow() {
+	failures := m.mcp.row.failures
+	m.mcp.row = mcpRowWatch{}
+	m.clearMCPReconnectingNote()
+	if failures != "" && m.settings.open {
+		m.settings.failure = settingFailure{
+			path: settingKeyMCPServers,
+			msg:  settingsApplyFailedNote + stripEscapes(failures),
+		}
+	}
+}
+
+// clearMCPReconnectingNote takes [MCPReconnectingNote] off the `mcp-servers` row wherever it was
+// put: the journaled edit's note (rebuilt FRESH, the value-copied Model's rule, ADR 0011) and the
+// answer slot.
+func (m *Model) clearMCPReconnectingNote() {
+	if m.settings.answer.path == settingKeyMCPServers && m.settings.answer.msg == MCPReconnectingNote {
+		m.settings.answer = settingAnswer{}
+	}
+	edit, isEdited := m.settingEditOf(settingKeyMCPServers)
+	if !isEdited || edit.note != MCPReconnectingNote {
+		return
+	}
+	next := make([]settingEdit, 0, len(m.settingEdits))
+	for _, e := range m.settingEdits {
+		if e.path == settingKeyMCPServers {
+			e.note = ""
+		}
+		next = append(next, e)
+	}
+	m.settingEdits = next
 }

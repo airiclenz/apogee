@@ -1,13 +1,14 @@
 package main
 
-// A watched `mcp-servers:` save that lands while a Turn is running dials nothing.
+// A watched `mcp-servers:` save that lands while a Turn is running dials at once and swaps only at
+// the next idle point.
 //
 // The tool set is idle-only (Agent.SwapTools), and the save is folded on the Update goroutine while
-// the worker is inside a Step. The reconnect therefore asks the engine first (CanSwapTools): the swap
-// it would end in is refused, so no server is dialled for it, the row's outcome is the refusal it has
-// always been, and the session stays on the tools it had. Before the probe, the reconnect dialled the
-// new set mid-Turn only to tear it down again, and its swap read the Agent's Exchange state off the
-// worker without a lock.
+// the worker is inside a Step. The request dials the changed server off the Update loop straight away
+// (ADR 0109 decision 3), but its commit waits for the Turn to end: until then nothing is swapped and
+// the session stays on the tools it had, and the per-server note arrives once the swap has landed.
+// Before the probe, the reconnect's swap read the Agent's Exchange state off the worker without a
+// lock.
 //
 // Driven in-process rather than through the pty: the binary the pty tests launch is built without
 // -race (main_test.go buildE2EBinary), and the race half of this claim is only visible to a process
@@ -18,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -64,7 +66,7 @@ func newCountingPingMCPServer(t *testing.T, name string) (mcp.ServerConfig, *ato
 	return mcp.ServerConfig{Name: name, Transport: mcp.TransportStreamableHTTP, Endpoint: srv.URL + "/mcp"}, &requests
 }
 
-func TestE2EWatchedMCPSaveMidTurnDialsNothing(t *testing.T) {
+func TestE2EWatchedMCPSaveMidTurnSwapsOnlyAtIdle(t *testing.T) {
 	t.Parallel()
 
 	first := newPingMCPServer(t, "first")
@@ -87,17 +89,22 @@ func TestE2EWatchedMCPSaveMidTurnDialsNothing(t *testing.T) {
 	}, tuitest.Awaiting("the prompt's request to reach the held turn"))
 
 	renameHomeConfig(t, sess.Home(), first.Endpoint, second.Endpoint)
-	// The note posts after the key's apply has returned, in the same fold: by the time it paints, a
-	// reconnect that was going to dial has dialled.
 	drv.WaitText("config changed on disk — applied: mcp-servers")
+	// The dial does not wait for the Turn: the repointed server is reached while the reply is held.
+	drv.WaitFor(func() bool { return secondRequests.Load() > 0 },
+		tuitest.Awaiting("the repointed server to be dialled mid-Turn"))
 
-	if got := secondRequests.Load(); got != 0 {
-		t.Errorf("the repointed server saw %d request(s) from a save folded mid-Turn; want none", got)
+	if strings.Contains(drv.Frame().String(), mcpMidTurnReconnected) {
+		t.Error("the repointed server's tools were swapped in mid-Turn; want the swap held for the idle point")
 	}
 
 	stub.Release(mcpMidTurnGate)
 	waitIdle(drv)
+	drv.WaitText(mcpMidTurnReconnected)
 	if err := sess.Quit(); err != nil {
 		t.Errorf("the run returned %v; want a clean quit", err)
 	}
 }
+
+// mcpMidTurnReconnected is the note the repointed server's commit writes once the swap has landed.
+const mcpMidTurnReconnected = "mcp docs reconnected"

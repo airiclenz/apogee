@@ -46,8 +46,14 @@ func (w *rootWiring) options() tui.Options {
 
 	// The apply dispatcher, built ahead of the literal rather than inside it, because the settingsHost
 	// below is composed out of it as well as out of the two paths that splice the file — one value the
-	// pane's own ⏎ ([tui.SettingsHost.Apply]) reaches every key through (ADR 0037 decision 1).
-	applySetting := applySettingFor(w.settingsApplier())
+	// pane's own ⏎ ([tui.SettingsHost.Apply]) reaches every key through (ADR 0037 decision 1). A
+	// watched save is told apart from the row's own commit only for `mcp-servers:`, whose commit also
+	// re-dials every server whose last dial failed (ADR 0109 decision 7).
+	applySetting := func(key, value string, watched bool) (string, error) {
+		applier := w.settingsApplier()
+		applier.retryFailedMCP = !watched
+		return applySettingFor(applier)(key, value)
+	}
 
 	// The resolution this run made at launch as a Snapshot (bootSnapshot), read from no file: the
 	// adoption pane's start-up offer, and the offer the `/settings` rows' boot options are counted
@@ -285,6 +291,9 @@ func (w *rootWiring) options() tui.Options {
 		Resumed: resumedSession(w.resumed, w.opts.Currency, w.engine.InExchange()),
 		// The live session a --resume start opens watching (resolveResume), nil otherwise.
 		Watch: w.watch,
+		// The live MCP servers' seam (wire_mcp.go, ADR 0109): the dials a `mcp-servers:` apply
+		// queued, which the renderer runs off its Update loop and commits at its idle point.
+		MCP: w.mcpHost(),
 	}
 }
 
@@ -456,9 +465,10 @@ type settingsHost struct {
 	// reading of the files the rows' source marks and editability come from (layeredOpts). nil marks
 	// the rows off opts alone.
 	edits *externalEdit
-	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the root composes
-	// it out of the members this Driver holds, which is not a shape this seam could have as a method.
-	apply func(key, value string) (string, error)
+	// apply is the live-apply dispatcher (wire_settings.go), told whether a watched save is applying.
+	// It stays a func because the root composes it out of the members this Driver holds, which is not
+	// a shape this seam could have as a method.
+	apply func(key, value string, watched bool) (string, error)
 	// promptSeed is what the `system-prompt-text` editor opens on when the session's whole prompt
 	// resolution IS the embedded default ([liveSettings.promptEditorSeed], wire_settings.go) —
 	// apogee's embedded default prompt, or nothing at all when anything the user configured (a
@@ -565,7 +575,8 @@ func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
 // Every landed write re-takes the external edit's baseline (ADR 0041 decision 8). The pane applies
 // the key it just persisted in the same keypress, and the watcher is looking at the very file this
 // wrote: without the refresh, apogee's own write comes back a second later as somebody's edit and
-// applies twice — which for `mcp-servers:` is a second dial of every server. A write that FAILED
+// applies twice — which for `mcp-servers:` is a second request of a set already requested. A write
+// that FAILED
 // changed no file and refreshes nothing.
 func (h settingsHost) Write(key, value string) error {
 	if err := config.SaveConfigSetting(h.configPath, key, value); err != nil {
@@ -698,7 +709,9 @@ func (h settingsHost) landed(key string, fallback tui.SettingOutcome) tui.Settin
 // Apply is the apply half of the same keypress (ADR 0037): what the file now says, the session now
 // runs. The dispatcher owns the resolution from a registry path and a file-spelled value onto a live
 // engine seam — the renderer holds neither schema nor engine mutator.
-func (h settingsHost) Apply(key, value string) (string, error) { return h.apply(key, value) }
+func (h settingsHost) Apply(key, value string, watched bool) (string, error) {
+	return h.apply(key, value, watched)
+}
 
 // schemeHost is this binary's [tui.SchemeHost]: the schemes folder, and the three things the program
 // does with it (ADR 0040). All three read the folder on the ask rather than answering from a

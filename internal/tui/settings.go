@@ -192,7 +192,9 @@ type settingsPendingSave struct {
 // note is what the APPLY had to say about the value — the boundary sentence for a key that lands at
 // the next session boundary rather than at once ("applies at next clear"), empty for a key already
 // in force, which is almost all of them. It is carried on the edit rather than in a slot of its own
-// because it describes THIS key's landing and stays true for as long as the edit does.
+// because it describes THIS key's landing and stays true for as long as the edit does — bar the one
+// in-progress note, `mcp-servers:`'s [MCPReconnectingNote], which the dials' outcome clears once
+// they are committed (mcpreconnect.go).
 //
 // watched marks WHERE the edit came from: a save on disk this program had nothing to do with (the
 // config watcher, ADR 0041 decision 5) rather than an in-pane commit or the pane's own editor round
@@ -234,12 +236,13 @@ type settingFailure struct {
 // was. It is neither a change nor a refusal, so it can be neither of the two things a row already
 // says — a ` *` claiming this session changed the key, or a ✗ claiming the act was refused.
 //
-// Two acts have that shape. One is the `server` row's: choosing the server the session is already on
+// Three acts have that shape. One is the `server` row's: choosing the server the session is already on
 // is answered rather than acted on ([Model.switchToServer]), and the answer goes to the TRANSCRIPT,
 // which this full-height pane is covering, so a ⏎ that is honestly a no-op looks from inside the pane
-// like a keypress that did nothing at all. The other is a detached editor launch, which moves no row
-// either and whose window may not even be on this screen ([Model.foldDetachedEdit]). The row says it
-// in both cases, and that is all this slot is for.
+// like a keypress that did nothing at all. Another is a detached editor launch, which moves no row
+// either and whose window may not even be on this screen ([Model.foldDetachedEdit]). The third is the
+// `mcp-servers` row's retry over an unchanged file ([Model.retryFailedMCP]), whose in-progress note
+// the dials' outcome then clears. The row says it in each case, and that is all this slot is for.
 //
 // Its lifetime is settingFailure's: one slot describing the last act rather than a row's condition,
 // replaced by the next landed edit (recordSettingEdit) or the next refusal (settingsFailed), and gone

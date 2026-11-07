@@ -779,7 +779,7 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 
 	flip := func(t *testing.T, opts tui.Options, on string) {
 		t.Helper()
-		if _, err := opts.Settings.Apply("remember-model", on); err != nil {
+		if _, err := opts.Settings.Apply("remember-model", on, false); err != nil {
 			t.Fatalf("apply remember-model=%s: %v", on, err)
 		}
 	}

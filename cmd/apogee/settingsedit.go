@@ -312,9 +312,9 @@ func newNotices(before, after []string) []string {
 
 // refresh re-takes the baseline from the file as it stands NOW — the whole of ADR 0041 decision 8 on
 // this side of the seam. The pane persists a key and applies it in the same keypress, so a watcher
-// that then reported that same key would apply it a SECOND time: harmless for most keys, and a second
-// dial of every server for `mcp-servers:`. Refreshing here means a change apogee itself made is not a
-// change at all by the time the watcher looks.
+// that then reported that same key would apply it a SECOND time: harmless for most keys, and for
+// `mcp-servers:` a second request of a set already requested. Refreshing here means a change apogee
+// itself made is not a change at all by the time the watcher looks.
 //
 // It is called after a write has LANDED, so what it projects is the file the human's next edit will
 // be diffed against. A projection that fails leaves the previous baseline standing, for spec's reason:

@@ -276,6 +276,9 @@ func TestWatchedConfigRepointedMCPServerReconnects(t *testing.T) {
 	if _, err := apply(applied[0].Path, applied[0].Value); err != nil {
 		t.Fatalf("apply %s: %v", applied[0].Path, err)
 	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
 	if len(dialled) != 1 || len(dialled[0]) != 1 {
 		t.Fatalf("dialled = %+v, want exactly one dial of one server", dialled)
 	}
@@ -493,6 +496,9 @@ func TestWatchedProjectConfigAdoptedServerConnects(t *testing.T) {
 	if _, err := applySettingFor(applier)(row.Path, row.Value); err != nil {
 		t.Fatalf("apply %s: %v", row.Path, err)
 	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, applier.engine); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
 
 	if len(dialled) != 2 || len(dialled[0]) != 1 || len(dialled[1]) != 1 {
 		t.Fatalf("dialled %+v, want two one-server dials", dialled)
@@ -536,8 +542,9 @@ func TestWatchedAdoptionRecordReloadsARepoReaction(t *testing.T) {
 const brokenProjectConfigYAML = "mcp-servers: [\n"
 
 // reloadAndApply waits for the watcher's report of why, re-reads, and applies the row at path
-// through the dispatcher an in-pane commit uses — what the renderer does with a report — answering
-// the whole re-read so a caller can read its notices.
+// through the dispatcher an in-pane commit uses — what the renderer does with a report — then drains
+// the MCP work the apply queued as the idle point would, answering the whole re-read so a caller can
+// read its notices.
 func reloadAndApply(t *testing.T, c *watchedConfig, applier settingsApplier, path, why string) tui.ConfigReload {
 	t.Helper()
 	reload, err := c.reloadWhole(t, why)
@@ -547,6 +554,9 @@ func reloadAndApply(t *testing.T, c *watchedConfig, applier settingsApplier, pat
 	row := appliedPath(t, reload.Applied, path)
 	if _, err := applySettingFor(applier)(row.Path, row.Value); err != nil {
 		t.Fatalf("apply %s (%s): %v", row.Path, why, err)
+	}
+	if _, err := drainMCP(t, applier.mcp, applier.tools, applier.engine); err != nil {
+		t.Fatalf("drain (%s): %v", why, err)
 	}
 	return reload
 }

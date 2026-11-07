@@ -367,6 +367,9 @@ func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd
 	if applyErr != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: settingsApplyFailedNote + applyErr.Error()}
 	}
+	if row.Path == settingKeyMCPServers && edit.note == MCPReconnectingNote {
+		m.armMCPRow()
+	}
 	return m, cmd
 }
 
@@ -401,7 +404,7 @@ func (m Model) settingsApplyLive(edit settingEdit) (Model, string, tea.Cmd, erro
 	if m.opts.Settings == nil {
 		return m, "", nil, nil // no live apply wired: the write stands on its own (ADR 0031's nil-seam degrade)
 	}
-	note, err := m.opts.Settings.Apply(path, value)
+	note, err := m.opts.Settings.Apply(path, value, edit.watched)
 	if err != nil {
 		return m, "", nil, err
 	}
@@ -702,6 +705,9 @@ const (
 	settingKeyMode        = "mode"
 	settingKeyAutoTitle   = "auto-title"
 	settingKeyCursorShape = "cursor-shape"
+	// settingKeyMCPServers is spelled here for its row alone: the binary still applies it, and the
+	// renderer only watches the row until the dials it requested are committed (mcpreconnect.go).
+	settingKeyMCPServers = "mcp-servers"
 )
 
 // taskListOpenSource is the label the fold gesture's one failure notice carries — the key's own

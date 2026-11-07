@@ -860,7 +860,7 @@ func layeredSettingsHost(t *testing.T, global, project string) (settingsHost, st
 		projectRoot:   projectSaveRoot(opts, root),
 		workspacesDir: config.WorkspacesDir(home),
 		edits:         newExternalEdit(opts, config.ProjectOffer{}, workspace, noEnvironment),
-		apply:         func(string, string) (string, error) { return "", nil },
+		apply:         func(string, string, bool) (string, error) { return "", nil },
 	}, projectPath
 }
 

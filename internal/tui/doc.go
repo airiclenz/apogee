@@ -963,8 +963,9 @@
 // each action runs off the loop under holdGitAction and folds as [Model.foldGitActionDone]; mcpreconnect.go
 // the [MCPHost] seam the live MCP servers reconnect through one by one (ADR 0109): Update's tail
 // (mcpAfterFold, after wakeAfterFold and before busyAfterFold) runs each queued dial as a Cmd and
-// commits the finished ones once the engine is free for a tool swap, writing each outcome's note,
-// until a quit cancels the dials and stops both ([Model.stopMCP]);
+// commits the finished ones once the engine is free for a tool swap, writing each outcome's note and
+// resolving the watched `mcp-servers` settings row (settleMCPRow), until a quit cancels the dials and
+// stops both ([Model.stopMCP]);
 // theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps

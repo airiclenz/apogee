@@ -309,12 +309,18 @@ type SettingsHost interface {
 	// the answer for almost every key — and the answer a host with no live apply at all gives for
 	// every key, leaving the write to stand on its own: the degrade a bench or headless Driver
 	// composes deliberately (ADR 0031). It never defers to a restart: a key that could only take
-	// effect the next time the process starts has no business in this seam.
+	// effect the next time the process starts has no business in this seam. The one other note is
+	// an in-progress one: `mcp-servers:` answers [MCPReconnectingNote] while the dials it requested
+	// run, and the row's note is replaced by their outcome once they are committed ([MCPHost]).
+	//
+	// watched says the edit came from a watched save on disk rather than from the pane or its
+	// `$EDITOR` round trip. Only `mcp-servers:` reads it: the row's own commit also re-dials every
+	// server whose last dial failed, and a watched save does not (ADR 0109 decision 7).
 	//
 	// An error is REPORTED and does not unwind the write (ADR 0037 decision 1): the file already
 	// expresses the intent, so the row says "saved — live apply failed: …" and a re-committed edit
 	// retries the apply.
-	Apply(path, value string) (note string, err error)
+	Apply(path, value string, watched bool) (note string, err error)
 }
 
 // ConfigHost is the config FILE as one host capability: the thirteen acts a running session performs

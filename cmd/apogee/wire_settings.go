@@ -990,8 +990,8 @@ type settingsApplier struct {
 	// tools is the session's live tool set — where a tool is re-pointed in place, and the door a
 	// set-level change goes through.
 	tools *liveTools
-	// mcp is the session's live MCP connections: the one key whose apply is a reconnect rather than a
-	// write, and the source of half the tool set the door above swaps.
+	// mcp is the session's live MCP connections: the one key whose apply is a request for connections
+	// rather than a write, and the source of half the tool set the door above swaps.
 	mcp *liveMCP
 	// present is the presentation ladder, which rebuilds from a changed `present:` block and
 	// re-installs itself on the presenter the engine holds.
@@ -1015,6 +1015,10 @@ type settingsApplier struct {
 	// per call (apogee.Config.SecretEnv): a reload of the layered MCP servers or reactions widens it
 	// by the token variables the re-read names (widenSecretEnv). nil widens nothing.
 	secretEnv *apogee.SecretEnv
+	// retryFailedMCP says this apply is the `mcp-servers` row's own commit — its `$EDITOR` round trip
+	// or a reset, never a watched save — which re-dials every server whose last dial failed beside
+	// the ones the edit changed (ADR 0109 decision 7). settingsHost.Apply sets it per apply.
+	retryFailedMCP bool
 }
 
 // applySettingFor builds the dispatcher behind [tui.SettingsHost.Apply]: the one place a key the pane has
@@ -1226,12 +1230,13 @@ var settingsTable = slices.Concat([]settingsEntry{
 		key: "mcp-servers",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The one key whose value is a set of live CONNECTIONS. It is not pushed and not
-			// re-resolved into a holder either: it is dialled, server by server, and the session moves
-			// onto the servers that answered (ADR 0037 decision 6, adr-0037-amend-1107). The value the
-			// pane persisted is not read, for the `servers:` reason — a list of blocks is a shape no
-			// single string spells. A server whose dial failed — a repo server skipped for a moved pin
-			// among them — is the row's error, `<server>: …`: the healthy servers landed.
-			return "", a.reconnectMCP()
+			// re-resolved into a holder either: each server it adds or changes is requested here and
+			// dialled off the Update loop, and the session moves onto the servers that answered at the
+			// next idle point (ADR 0109, adr-0037-amend-1107). The value the pane persisted is not
+			// read, for the `servers:` reason — a list of blocks is a shape no single string spells.
+			// The note is the in-progress one while a dial runs; each server's outcome arrives later,
+			// as a transcript note and on the row (tui.MCPHost).
+			return a.requestMCP(a.retryFailedMCP)
 		},
 	},
 	{
@@ -1655,7 +1660,7 @@ func (a settingsApplier) readmitMCP(before toolSetSpec) string {
 		return ""
 	}
 	// Only the config FILES name an MCP server (no flag, no environment variable), so the set to
-	// partition is read exactly as reconnectMCP reads it — the layered set, adopted repo servers
+	// partition is read exactly as requestMCP reads it — the layered set, adopted repo servers
 	// included. A global file that no longer parses leaves the connections where they are and says
 	// so, for the reason above: this half cannot fail the row.
 	layered, err := a.layeredConfig()
@@ -2020,25 +2025,45 @@ func (a settingsApplier) reloadServers() (bool, error) {
 	return moved, nil
 }
 
-// reconnectMCP re-reads the `mcp-servers:` block — layered: the global servers plus the adopted
-// repo ones (layeredConfig) — and moves the session onto it. The dial and the registry swap are
-// liveMCP.reconnect's; what belongs here is the same one thing every structured key's apply does —
-// resolve the files exactly as startup resolved them — because only the config files carry this key
-// (no flag, no environment variable names an MCP server). The scrub widens first (widenSecretEnv).
+// requestMCP re-reads the `mcp-servers:` block — layered: the global servers plus the adopted repo
+// ones (layeredConfig) — and records the session's request for it; it dials nothing on its caller
+// (ADR 0109). What belongs here is the same one thing every structured key's apply does — resolve
+// the files exactly as startup resolved them — because only the config files carry this key (no
+// flag, no environment variable names an MCP server). retryFailed also re-dials every server whose
+// last dial failed: the row's own commit sets it, a watched save never does.
 //
-// A global file that no longer parses is refused before anything is dialled, so a typo in an
-// unrelated key cannot cost the session the servers it is talking to. The error is
-// reconnectMCPFrom's.
-func (a settingsApplier) reconnectMCP() error {
+// A global file that no longer parses is refused before anything is requested, so a typo in an
+// unrelated key cannot cost the session the servers it is talking to; that error is the loader's,
+// unwrapped. The rest are requestMCPFrom's.
+func (a settingsApplier) requestMCP(retryFailed bool) (string, error) {
 	layered, err := a.layeredConfig()
 	if err != nil {
-		return err
+		return "", err
 	}
-	return a.reconnectMCPFrom(layered)
+	return a.requestMCPFrom(layered, retryFailed)
 }
 
-// reconnectMCPFrom moves the session onto layered's `mcp-servers:` block — reconnectMCP without the
+// requestMCPFrom records the request for layered's `mcp-servers:` block — requestMCP without the
 // read, for a caller that already holds the resolved layered set. It widens the scrub first
+// (widenSecretEnv), reads no file, and guards each dial by the url-safety host lists the live tool
+// set is on now. The note is tui.MCPReconnectingNote when the request queued a dial and "" when it
+// queued none (an unchanged set, or a removal only). The error is a set mcp.ValidateServers refuses,
+// worded by mcpReconnectFailed; nothing is requested then.
+func (a settingsApplier) requestMCPFrom(layered config.Options, retryFailed bool) (string, error) {
+	a.widenSecretEnv(layered)
+	spec := a.tools.built()
+	if err := a.mcp.request(layered.MCPServers, mcpGuard(spec.allowHosts, spec.denyHosts), retryFailed); err != nil {
+		return "", mcpReconnectFailed(err)
+	}
+	if a.mcp.isDialQueued() {
+		return tui.MCPReconnectingNote, nil
+	}
+	return "", nil
+}
+
+// reconnectMCPFrom moves the session onto layered's `mcp-servers:` block synchronously, on its
+// caller — the adoption answers' path (applyMovedKinds), for a caller that already holds the resolved
+// layered set. It widens the scrub first
 // (widenSecretEnv) and reads no file. The error is the reconnect's whole-call refusal
 // (mcpReconnectFailed) or, when the reconnect landed, each failed server's `<server>: …` clause,
 // joined by "; " (mcpRowFailures) — a repo server skipped for a moved pin among them.
@@ -2053,7 +2078,7 @@ func (a settingsApplier) reconnectMCPFrom(layered config.Options) error {
 
 // reloadReactions re-reads the `reactions:` block — layered: the global reactions plus the adopted
 // repo ones (layeredConfig, ADR 0104 §12) — and moves the session onto it (ADR 0073 §9, ADR 0076).
-// It is reconnectMCP's shape for reconnectMCP's reason — only the config files carry this key, so
+// It is requestMCP's shape for requestMCP's reason — only the config files carry this key, so
 // resolving them as startup resolved them IS most of the apply, the scrub widened first — and it
 // differs in what it does with the answer: the re-read list is hung on the generation the session
 // is RUNNING and pushed through the one swap door, so the Floor gates and `bypass:` cross the edit

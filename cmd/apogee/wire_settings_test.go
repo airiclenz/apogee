@@ -2247,10 +2247,11 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 	}
 }
 
-// The headline of ADR 0037 decision 6: a committed `mcp-servers:` edit DIALS. The added server
-// answers first, the whole tool registry is rebuilt around what it advertises and handed to the
-// engine, and only then is the removed server's session closed — so at no instant is the session
-// without the tools of one set or the other.
+// The headline of ADR 0037 decision 6, per server (ADR 0109): a committed `mcp-servers:` edit is
+// REQUESTED on its caller and dialled off it. Once the dial is taken in, the whole tool registry is
+// rebuilt around what the added server advertises and handed to the engine, and only then is the
+// removed server's session closed — so at no instant is the session without the tools of one set or
+// the other.
 func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -2272,9 +2273,13 @@ func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing
 	apply := applySettingFor(applier)
 
 	note, err := apply("mcp-servers", "1 server")
-	if err != nil || note != "" {
-		t.Fatalf("apply mcp-servers = (%q, %v), want a silent success: the servers are connected NOW", note, err)
+	if err != nil || note != tui.MCPReconnectingNote {
+		t.Fatalf("apply mcp-servers = (%q, %v), want (%q, nil): the dial runs off the caller", note, err, tui.MCPReconnectingNote)
 	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
 	if len(dialled) != 1 || len(dialled[0]) != 1 {
 		t.Fatalf("dialled = %+v, want exactly one dial of one server", dialled)
 	}
@@ -2299,6 +2304,236 @@ func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing
 	}
 	if endpoints := []string{"https://search.example.com/s"}; !slices.Equal(fixture.built, endpoints) {
 		t.Errorf("rebuilds = %v, want %v: a rebuild carries the endpoint the session is on", fixture.built, endpoints)
+	}
+}
+
+// Applying `mcp-servers:` records the request and dials nothing on its caller: a connect that would
+// block is never entered during the apply, and the dial waits as one job for its taker.
+func TestApplySettingMCPServersRecordsADialWithoutDialling(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	var entered atomic.Bool
+	fixture := newMCPFixtureDialling(nil, "", func(ctx context.Context, _ mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+		entered.Store(true)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	applier := fakeApplier(t)
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+
+	note, err := applySettingFor(applier)("mcp-servers", "1 server")
+
+	if err != nil || note != tui.MCPReconnectingNote {
+		t.Fatalf("apply mcp-servers = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	}
+	if entered.Load() {
+		t.Error("the apply entered connect on its caller")
+	}
+	if got := jobServers(fixture.set.takeWork()); !slices.Equal(got, []string{"docs"}) {
+		t.Errorf("queued dials = %v, want one of docs", got)
+	}
+}
+
+// A request that only removes a server queues no dial, so the row has nothing in progress to say:
+// the note is empty, and the removed server's tools leave at the next commit.
+func TestApplySettingMCPServersRemovalOnlyNotesNothing(t *testing.T) {
+	t.Parallel()
+	fixture := newMCPFixture(&fakeMCPSession{}, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		return &fakeMCPSession{}, nil
+	})
+	applier := fakeApplier(t)
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+
+	note, err := applySettingFor(applier)("mcp-servers", "none")
+
+	if err != nil || note != "" {
+		t.Fatalf("apply mcp-servers = (%q, %v), want a silent request", note, err)
+	}
+	if jobs := fixture.set.takeWork(); len(jobs) != 0 {
+		t.Errorf("queued dials = %v, want none for a removal", jobServers(jobs))
+	}
+	if !fixture.set.wantsRebuild() {
+		t.Error("the removal wants no commit; the seed's tools would never leave the registry")
+	}
+}
+
+// mcpTwoServersFixture is mcpServersFixture plus a wiki server, and mcpThreeServersFixture that plus
+// a news server: the sets a retry test moves between.
+const (
+	mcpTwoServersFixture = mcpServersFixture +
+		"  - name: wiki\n" +
+		"    transport: streamable-http\n" +
+		"    endpoint: https://wiki.example.com/\n"
+	mcpThreeServersFixture = mcpTwoServersFixture +
+		"  - name: news\n" +
+		"    transport: streamable-http\n" +
+		"    endpoint: https://news.example.com/\n"
+)
+
+// mcpWikiFailsFixture is an applier over a file naming docs and wiki whose first request has been
+// drained: docs answered and is live, wiki's dial failed. The file path is returned for the edit.
+func mcpWikiFailsFixture(t *testing.T) (settingsApplier, *mcpFixture, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpTwoServersFixture)
+	fixture := newMCPFixture(&fakeMCPSession{}, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		if servers[0].Name == "wiki" {
+			return nil, errors.New("dial: connection refused")
+		}
+		return &fakeMCPSession{}, nil
+	})
+	applier := fakeApplier(t)
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	if _, err := applySettingFor(applier)("mcp-servers", "2 servers"); err != nil {
+		t.Fatalf("apply mcp-servers: %v", err)
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, applier.engine); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if !fixture.set.hasFailedDial() {
+		t.Fatal("wiki's dial did not fail; the fixture has nothing to retry")
+	}
+	return applier, fixture, path
+}
+
+// The row's own commit is the retry gesture (ADR 0109 decision 7): a changed round trip re-dials the
+// failed server once beside the server it added, and leaves the untouched healthy one alone.
+func TestApplySettingMCPServersRowCommitRetriesTheFailedServer(t *testing.T) {
+	t.Parallel()
+	applier, fixture, path := mcpWikiFailsFixture(t)
+	writeSettingsFixture(t, path, mcpThreeServersFixture)
+	applier.retryFailedMCP = true
+
+	note, err := applySettingFor(applier)("mcp-servers", "3 servers")
+
+	if err != nil || note != tui.MCPReconnectingNote {
+		t.Fatalf("apply mcp-servers = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	}
+	if got, want := jobServers(fixture.set.takeWork()), []string{"wiki", "news"}; !slices.Equal(got, want) {
+		t.Errorf("queued dials = %v, want %v: the failed server and the added one, never docs", got, want)
+	}
+}
+
+// A watched save is never the retry gesture: with the failed server's config unchanged it queues no
+// dial of it, whether the save moved nothing about MCP or added a server.
+func TestApplySettingMCPServersWatchedSaveNeverRedialsAFailedServer(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, body string
+		want       []string
+	}{
+		{name: "unchanged", body: mcpTwoServersFixture, want: []string{}},
+		{name: "a server added", body: mcpThreeServersFixture, want: []string{"news"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			applier, fixture, path := mcpWikiFailsFixture(t)
+			writeSettingsFixture(t, path, tc.body)
+
+			if _, err := applySettingFor(applier)("mcp-servers", "servers"); err != nil {
+				t.Fatalf("apply mcp-servers: %v", err)
+			}
+
+			if got := jobServers(fixture.set.takeWork()); !slices.Equal(got, tc.want) {
+				t.Errorf("queued dials = %v, want %v: a watched save retried the failed wiki", got, tc.want)
+			}
+		})
+	}
+}
+
+// mcpHostWiring is a rootWiring carrying only what its tui.MCPHost half reads — the MCP holder, the
+// tool set and an engine — plus the config home the retry's re-read resolves.
+func mcpHostWiring(t *testing.T, fixture *mcpFixture, engine *lateEngine, configHome string) *rootWiring {
+	t.Helper()
+	return &rootWiring{mcpSet: fixture.set, toolSet: fixture.tools, engine: engine, roots: stateRoots{config: configHome}}
+}
+
+// An unchanged `$EDITOR` round trip on the row, after a failed dial, is the retry: RetryFailedMCP
+// answers the in-progress note and the drained work is exactly one dial, of the failed server.
+func TestMCPUnchangedRoundTripRedialsOnlyTheFailedServer(t *testing.T) {
+	t.Parallel()
+	_, fixture, path := mcpWikiFailsFixture(t)
+	var dialled []string
+	fixture.set.connect = func(_ context.Context, server mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+		dialled = append(dialled, server.Name)
+		return &fakeMCPSession{}, nil
+	}
+	w := mcpHostWiring(t, fixture, &lateEngine{}, filepath.Dir(path))
+
+	note, err := w.RetryFailedMCP()
+
+	if err != nil || note != tui.MCPReconnectingNote {
+		t.Fatalf("RetryFailedMCP = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, &applySettingSpy{}); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if !slices.Equal(dialled, []string{"wiki"}) {
+		t.Errorf("dialled %v, want exactly one dial, of the failed wiki", dialled)
+	}
+}
+
+// With no failed dial the same round trip is the no-op it has always been: no note, no work.
+func TestMCPUnchangedRoundTripWithNothingFailedDialsNothing(t *testing.T) {
+	t.Parallel()
+	fixture := newMCPFixture(&fakeMCPSession{}, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		return &fakeMCPSession{}, nil
+	})
+	w := mcpHostWiring(t, fixture, &lateEngine{}, t.TempDir())
+
+	note, err := w.RetryFailedMCP()
+
+	if err != nil || note != "" {
+		t.Errorf("RetryFailedMCP = (%q, %v), want a silent no-op", note, err)
+	}
+	if dials, commit := w.TakeMCPWork(); len(dials) != 0 || commit {
+		t.Errorf("TakeMCPWork = (%d dials, commit %t), want no work", len(dials), commit)
+	}
+}
+
+// CommitMCP asks the engine first: an unbound engine refuses the swap, so nothing is rebuilt, the
+// finished dial stays pending, and the one outcome is the refusal as the row's failure.
+func TestMCPCommitRefusedByAnUnboundEngineRebuildsNothing(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+	fixture := newMCPFixture(&fakeMCPSession{}, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		return &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__search"}}}, nil
+	})
+	applier := fakeApplier(t)
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+	if _, err := applySettingFor(applier)("mcp-servers", "1 server"); err != nil {
+		t.Fatalf("apply mcp-servers: %v", err)
+	}
+	w := mcpHostWiring(t, fixture, &lateEngine{}, t.TempDir())
+	dials, _ := w.TakeMCPWork()
+	for _, dial := range dials {
+		dial(context.Background())
+	}
+
+	outcomes, pending := w.CommitMCP()
+
+	if !pending {
+		t.Error("CommitMCP landed a swap an unbound engine refuses")
+	}
+	want := []tui.MCPOutcome{{RowFailure: mcpReconnectFailed(errNoServerBound).Error()}}
+	if !slices.Equal(outcomes, want) {
+		t.Errorf("outcomes = %+v, want %+v", outcomes, want)
+	}
+	if len(fixture.built) != 0 {
+		t.Errorf("rebuilds = %v, want none behind a refused swap", fixture.built)
+	}
+	if names := toolNames(fixture.set.tools()); slices.Contains(names, "docs__search") {
+		t.Errorf("live MCP tools = %v, want the dialled server still pending", names)
 	}
 }
 
@@ -2329,6 +2564,9 @@ func TestMCPReconnectRebuildsWithTheEndpointTheSessionIsOn(t *testing.T) {
 	if _, err := apply("mcp-servers", "1 server"); err != nil {
 		t.Fatalf("apply mcp-servers: %v", err)
 	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
 	want := []string{"https://moved.example.com/s", "https://moved.example.com/s"}
 	if !slices.Equal(fixture.built, want) {
 		t.Errorf("rebuilds = %v, want %v — the reconnect rebuilt from the startup endpoint", fixture.built, want)
@@ -2336,13 +2574,13 @@ func TestMCPReconnectRebuildsWithTheEndpointTheSessionIsOn(t *testing.T) {
 }
 
 // A changed server that cannot be reached costs the session nothing: its re-dial fails before
-// anything has moved, the session it is using stays open, and the row names the server and why.
+// anything has moved, the session it is using stays open, and the commit names the server and why.
 func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeSettingsFixture(t, path, mcpServersFixture)
 
-	// docs is live on a config the file no longer matches, so the commit re-dials it.
+	// docs is live on a config the file no longer matches, so the request re-dials it.
 	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
 	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "docs"}, session: old}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
 		return nil, errors.New("mcp: connect to server \"docs\": dial: connection refused")
@@ -2355,12 +2593,20 @@ func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.
 	applier.configPath = path
 	apply := applySettingFor(applier)
 
-	_, err := apply("mcp-servers", "1 server")
-	if err == nil {
-		t.Fatal("apply mcp-servers: want the dial's failure reported, got none")
+	if _, err := apply("mcp-servers", "1 server"); err != nil {
+		t.Fatalf("apply mcp-servers: %v", err)
 	}
-	if want := `docs: connect to server "docs": dial: connection refused`; err.Error() != want {
-		t.Errorf("error = %q, want %q", err, want)
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+	if err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	failure := mcpRowFailures(outcomes)
+	if failure == nil {
+		t.Fatal("the commit reported no failure for a dial that failed")
+	}
+	if want := `docs: connect to server "docs": dial: connection refused`; failure.Error() != want {
+		t.Errorf("row failure = %q, want %q", failure, want)
 	}
 	if old.isClosed() {
 		t.Error("the session that is still serving was torn down by a reconnect that never happened")
@@ -2373,18 +2619,20 @@ func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.
 	}
 }
 
-// The other failure is the engine's: SwapTools is idle-only, so a reconnect committed mid-run is
-// refused. It is refused BEFORE anything is dialled (CanSwapTools), so the session keeps the
-// connections and the tools it had and no server sees a handshake for a swap that was never going to
-// happen.
+// The other failure is the engine's: SwapTools is idle-only. The request no longer asks the engine
+// first (ADR 0109 decision 3) — the dial runs at once, mid-Turn included — so the server is dialled,
+// and the swap the commit then asks for is refused: the result stays pending for the next idle
+// point, and the session keeps the connections and the tools it had.
 func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeSettingsFixture(t, path, mcpServersFixture)
 
+	// docs is live on a config the file no longer matches, so the request re-dials it; a REMOVED
+	// server would be closed at the request itself (ADR 0109), whatever the engine says.
 	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
 	dials := 0
-	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) {
+	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "docs"}, session: old}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
 		dials++
 		return &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__search"}}}, nil
 	})
@@ -2396,15 +2644,16 @@ func TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy(t *testing.T
 	applier.configPath = path
 	apply := applySettingFor(applier)
 
-	_, err := apply("mcp-servers", "1 server")
-	if err == nil {
-		t.Fatal("apply mcp-servers: want the engine's refusal, got none")
+	if _, err := apply("mcp-servers", "1 server"); err != nil {
+		t.Fatalf("apply mcp-servers: %v", err)
 	}
-	if !strings.Contains(err.Error(), "previous connections kept") {
-		t.Errorf("error = %q, want the row told the old connections stand", err)
+	_, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if _, isPending := errors.AsType[mcpPendingError](err); !isPending {
+		t.Errorf("commit err = %v, want the engine's refusal with the result still pending", err)
 	}
-	if dials != 0 {
-		t.Errorf("a reconnect the engine refused dialled %d time(s), want none", dials)
+	if dials != 1 {
+		t.Errorf("the request dialled %d time(s), want once: the dial does not wait for the engine", dials)
 	}
 	if old.isClosed() {
 		t.Error("a refused swap tore down the sessions the run is still using")
@@ -2827,7 +3076,10 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if rec.opts.Settings == nil {
 		t.Fatal("tui.Options.Settings is nil; the composition root did not wire the settings host")
 	}
-	note, err := rec.opts.Settings.Apply("context-files.enable", "true")
+	if rec.opts.MCP == nil {
+		t.Error("tui.Options.MCP is nil; the composition root did not wire the MCP host")
+	}
+	note, err := rec.opts.Settings.Apply("context-files.enable", "true", false)
 	if err != nil {
 		t.Fatalf("Settings.Apply: %v", err)
 	}
@@ -2837,16 +3089,16 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	// The two keys whose seam is a live OBJECT rather than an engine call — the tool registry the
 	// root holds and the shared skill Provider — so an unwired member would panic rather than
 	// degrade, and this is where the wiring is proved.
-	if _, err := rec.opts.Settings.Apply("web-search-endpoint", "off"); err != nil {
+	if _, err := rec.opts.Settings.Apply("web-search-endpoint", "off", false); err != nil {
 		t.Errorf("Settings.Apply(web-search-endpoint): %v", err)
 	}
-	if _, err := rec.opts.Settings.Apply("use-project-skills", "false"); err != nil {
+	if _, err := rec.opts.Settings.Apply("use-project-skills", "false", false); err != nil {
 		t.Errorf("Settings.Apply(use-project-skills): %v", err)
 	}
-	// And the third live object: the MCP connections. With no servers configured the reconnect dials
-	// a dormant set and swaps the registry around it, which is a no-op the session cannot tell from
-	// the outside — but an unwired holder would panic here rather than degrade quietly.
-	if _, err := rec.opts.Settings.Apply("mcp-servers", "none"); err != nil {
+	// And the third live object: the MCP connections. With no servers configured the request records
+	// an empty set and queues nothing, which is a no-op the session cannot tell from the outside — but
+	// an unwired holder would panic here rather than degrade quietly.
+	if _, err := rec.opts.Settings.Apply("mcp-servers", "none", false); err != nil {
 		t.Errorf("Settings.Apply(mcp-servers): %v", err)
 	}
 	// And the fourth: the `reactions:` row, whose swap reaches the Reaction Runner (ADR 0073) through
@@ -2854,17 +3106,17 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	// "cannot be applied" rather than for success, because runRoot has already returned here and
 	// close() ends the Runner with everything else it opened: reaching a CLOSED Runner is the wiring
 	// being right.
-	if _, err := rec.opts.Settings.Apply("reactions", "none"); err != nil &&
+	if _, err := rec.opts.Settings.Apply("reactions", "none", false); err != nil &&
 		strings.Contains(err.Error(), "cannot be applied") {
 		t.Errorf("Settings.Apply(reactions): %v; the running binary's applier has no reactions row", err)
 	}
-	if _, err := rec.opts.Settings.Apply("model-profiles", "1 model profile"); err != nil {
+	if _, err := rec.opts.Settings.Apply("model-profiles", "1 model profile", false); err != nil {
 		t.Errorf("Settings.Apply(model-profiles): %v", err)
 	}
 	// `server` is the key with no dispatcher home BY DESIGN and permanently: its live apply is the
 	// picker's own switch (ADR 0037 decision 4), so a value arriving here is a value nothing can do
 	// anything with, and the refusal has to name it.
-	if _, err := rec.opts.Settings.Apply("server", "anything"); err == nil {
+	if _, err := rec.opts.Settings.Apply("server", "anything", false); err == nil {
 		t.Error("a key with no live seam applied silently; want a refusal naming it")
 	}
 }
@@ -4623,7 +4875,13 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 			}
 			return err
 		}},
-		{"reconnectMCP", func(*testing.T) error { return a.reconnectMCP() }},
+		{"requestMCP", func(t *testing.T) error {
+			note, err := a.requestMCP(true)
+			if note != "" {
+				t.Errorf("requestMCP noted %q off a file it refused", note)
+			}
+			return err
+		}},
 		{"reloadReactions", func(*testing.T) error { return a.reloadReactions() }},
 		{"reloadModelProfiles", func(*testing.T) error { return a.reloadModelProfiles() }},
 	} {

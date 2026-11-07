@@ -23,6 +23,9 @@ type fakeMCPHost struct {
 	pending      bool
 	commits      int
 	cancels      int
+	// retryNote is what every RetryFailedMCP answers, and retries counts the calls.
+	retryNote string
+	retries   int
 }
 
 func (f *fakeMCPHost) TakeMCPWork() ([]MCPDial, bool) {
@@ -45,6 +48,20 @@ func (f *fakeMCPHost) CancelMCPDials() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancels++
+}
+
+// RetryFailedMCP answers the scripted retryNote and counts the call.
+func (f *fakeMCPHost) RetryFailedMCP() (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retries++
+	return f.retryNote, nil
+}
+
+func (f *fakeMCPHost) retryCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.retries
 }
 
 // queue adds dials for the next TakeMCPWork; with none, it queues removal-only work (a commit
@@ -364,4 +381,157 @@ func TestMCPQuitCancelsDialsAndCommitsNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mcpServersRow is the `mcp-servers` row as the binary projects it: a structured key its own editor
+// round trip edits.
+func mcpServersRow() SettingRow {
+	return SettingRow{
+		Path: settingKeyMCPServers, Section: "Tools", Kind: SettingStructured, Value: "1 server",
+		EditPointer: pointerForTest, ExternalEdit: true, Desc: "The MCP servers.",
+	}
+}
+
+// mcpRowApplies records what the `mcp-servers` apply was asked: whether each ask was a watched save.
+type mcpRowApplies struct {
+	mu      sync.Mutex
+	watched []bool
+}
+
+// apply answers every apply with the in-progress note, as the binary does for a request that dials.
+func (a *mcpRowApplies) apply(_, _ string, watched bool) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.watched = append(a.watched, watched)
+	return MCPReconnectingNote, nil
+}
+
+// mcpRowModel opens the settings pane over the `mcp-servers` row with host as the MCP seam; the
+// row's round trip re-reads applied, and every apply goes to applies.
+func mcpRowModel(t *testing.T, host *fakeMCPHost, applied []AppliedSetting, applies *mcpRowApplies) Model {
+	t.Helper()
+	rows := []SettingRow{mcpServersRow()}
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return rows }, applyWatched: applies.apply}
+	edit := &externalEditLog{applied: applied}
+	opts.Config = fakeConfigHost{externalEditSpec: edit.spec, reloadConfig: edit.reload}
+	opts.MCP = host
+	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
+}
+
+// TestMCPRowShowsTheOutcomeWhenTheDialsLand: a changed round trip on the `mcp-servers` row applies
+// as the row's own commit (not a watched save), the row reads `reconnecting MCP…` while the dial
+// runs, and once it is committed the note clears — the value and its ` *` — or, on a failure, the
+// row carries the joined failures while the pane is open, and nothing once it has closed.
+func TestMCPRowShowsTheOutcomeWhenTheDialsLand(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		outcomes    []MCPOutcome
+		isPending   bool
+		closesPane  bool
+		wantFailure string
+	}{
+		{name: "success clears the note", outcomes: []MCPOutcome{{Note: "mcp docs reconnected"}}},
+		{
+			name: "failures join on the row",
+			outcomes: []MCPOutcome{
+				{Note: "mcp connect failed: docs: refused", RowFailure: "docs: refused"},
+				{Note: "mcp connect failed: wiki: refused", RowFailure: "wiki: refused"},
+			},
+			wantFailure: settingsApplyFailedNote + "docs: refused; wiki: refused",
+		},
+		{
+			name:        "a refused commit resolves on the refusal",
+			outcomes:    []MCPOutcome{{RowFailure: "reconnect failed: busy — previous connections kept"}},
+			isPending:   true,
+			wantFailure: settingsApplyFailedNote + "reconnect failed: busy — previous connections kept",
+		},
+		{
+			name:       "a closed pane shows no failure",
+			outcomes:   []MCPOutcome{{Note: "mcp connect failed: docs: refused", RowFailure: "docs: refused"}},
+			closesPane: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host := &fakeMCPHost{}
+			applies := &mcpRowApplies{}
+			m := mcpRowModel(t, host, []AppliedSetting{{Path: settingKeyMCPServers, Value: "2 servers"}}, applies)
+			host.script(tc.outcomes, tc.isPending)
+			host.queue(instantDial)
+
+			m, cmd := stepCmd(t, m, settingsEditedMsg{path: settingKeyMCPServers})
+
+			if got, want := m.settingsNote(mcpServersRow()), "· "+MCPReconnectingNote; got != want {
+				t.Fatalf("row note while dialling = %q, want %q", got, want)
+			}
+			if !slices.Equal(applies.watched, []bool{false}) || host.retryCount() != 0 {
+				t.Errorf("applies watched %v, retries %d; want one row commit and no retry", applies.watched, host.retryCount())
+			}
+			if tc.closesPane {
+				m = step(t, m, keyEsc())
+			}
+			m = landDial(t, m, cmd)
+
+			if m.mcp.row.isArmed {
+				t.Error("the row watch is still armed after the dial was committed")
+			}
+			if edit, _ := m.settingEditOf(settingKeyMCPServers); edit.note != "" {
+				t.Errorf("journaled note = %q, want it cleared", edit.note)
+			}
+			if got := m.settings.failure; got.msg != tc.wantFailure {
+				t.Errorf("row failure = %q, want %q", got.msg, tc.wantFailure)
+			}
+			if tc.wantFailure == "" && !tc.closesPane {
+				if got, want := m.settingsNote(mcpServersRow()), ""; got != want {
+					t.Errorf("row note after the commit = %q, want the empty cell of a saved row", got)
+				}
+			}
+		})
+	}
+}
+
+// TestMCPRowUnchangedRoundTrip: a round trip that leaves `mcp-servers` unchanged applies nothing and
+// asks RetryFailedMCP. A `reconnecting MCP…` answer arms the row and resolves once the dial lands;
+// a "" answer leaves the row exactly as it was.
+func TestMCPRowUnchangedRoundTrip(t *testing.T) {
+	t.Parallel()
+	t.Run("a retry arms the row and resolves", func(t *testing.T) {
+		t.Parallel()
+		host := &fakeMCPHost{retryNote: MCPReconnectingNote}
+		applies := &mcpRowApplies{}
+		m := mcpRowModel(t, host, nil, applies)
+		host.script([]MCPOutcome{{Note: "mcp docs connected"}}, false)
+		host.queue(instantDial)
+		before := m.settingsNote(mcpServersRow())
+
+		m, cmd := stepCmd(t, m, settingsEditedMsg{path: settingKeyMCPServers})
+
+		if host.retryCount() != 1 || len(applies.watched) != 0 {
+			t.Fatalf("retries %d, applies %d; want one retry and no apply", host.retryCount(), len(applies.watched))
+		}
+		if got, want := m.settingsNote(mcpServersRow()), "· "+MCPReconnectingNote; got != want {
+			t.Fatalf("row note while retrying = %q, want %q", got, want)
+		}
+		m = landDial(t, m, cmd)
+		if got := m.settingsNote(mcpServersRow()); got != before || m.mcp.row.isArmed {
+			t.Errorf("row note after the retry = %q (armed %t), want %q and the watch resolved", got, m.mcp.row.isArmed, before)
+		}
+	})
+	t.Run("nothing failed writes nothing", func(t *testing.T) {
+		t.Parallel()
+		host := &fakeMCPHost{}
+		m := mcpRowModel(t, host, nil, &mcpRowApplies{})
+		before := m.settingsNote(mcpServersRow())
+
+		m = step(t, m, settingsEditedMsg{path: settingKeyMCPServers})
+
+		if host.retryCount() != 1 {
+			t.Errorf("retries %d, want 1", host.retryCount())
+		}
+		if got := m.settingsNote(mcpServersRow()); got != before || m.mcp.row.isArmed {
+			t.Errorf("row note = %q (armed %t), want %q untouched", got, m.mcp.row.isArmed, before)
+		}
+	})
 }

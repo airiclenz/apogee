@@ -270,7 +270,18 @@ internal/tui/doc.go — busy.go narration; cmd/apogee/wire.go — rootWiring.clo
 **Depends on:** item 5
 **Commit:** `feat(tui): MCP dials show the busy indicator and yield to quit`
 
-## 7. Route the `mcp-servers` row and the watched save through the async path
+## 7. Route the `mcp-servers` row and the watched save through the async path — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): the retry-failed flag crosses the `Settings.Apply` seam as a new `watched bool` parameter on `tui.SettingsHost.Apply` (the TUI passes `settingEdit.watched`). `settingsHost.Apply` sets the new `settingsApplier.retryFailedMCP` to `!watched`, and the `mcp-servers` table entry calls `requestMCP(a.retryFailedMCP)`.
+NOTES (2026-11-07): `MCPHost.RetryFailedMCP` returns `(note string, err error)`, not the plan's `(note string)`: a refused request (an unreadable layered file, a set `mcp.ValidateServers` refuses) is shown as the row's failure instead of being dropped silently.
+NOTES (2026-11-07): the unchanged round trip's `reconnecting MCP…` goes into the pane's answer slot (`settingAnswer`), not the journal. That round trip changed no key, so the row gets no ` *`. The settle clears the note from the answer slot and from the journaled edit alike. The `settingAnswer` doc now names this as a third act of that shape.
+NOTES (2026-11-07): a refused commit (`CommitMCP` answering pending) returns one outcome whose RowFailure is `mcpReconnectFailed(refusal)` and whose Note is empty, so the row resolves on the refusal. The `MCPHost.CommitMCP` doc is updated to match. The TUI settles the row when nothing is in flight and either nothing is uncommitted or the commit was refused.
+NOTES (2026-11-07): renamed `TestE2EWatchedMCPSaveMidTurnDialsNothing` to `TestE2EWatchedMCPSaveMidTurnSwapsOnlyAtIdle`, because the old name is now false. The re-pinned test checks that the repointed server is dialled mid-Turn, that no `mcp docs reconnected` note appears while the reply is held, and that the note appears after idle. "The old tools still serve" is checked only through that missing note, never by calling a tool.
+NOTES (2026-11-07): `settingsApplier.reconnectMCP` is deleted (no caller left). `reconnectMCPFrom` stays synchronous for `applyMovedKinds` (item 8). liveMCP gains `wantsRebuild`, `isDialQueued`, `hasFailedDial` and `cancelDials`, and `close` now starts with `cancelDials`. The rootWiring `tui.MCPHost` methods and `mcpHost()` (nil without an MCP holder or tool set) live in wire_mcp.go.
+NOTES (2026-11-07): `TestApplySettingMCPReconnectKeepsEverythingWhenTheEngineIsBusy` now seeds a live `docs` server on a stale config instead of the `seed` server. A removed server is closed at the request itself (ADR 0109), so it could never show an old session kept open through a refused swap.
+NOTES (2026-11-07): consequential edit — internal/tui/settings_test.go: made necessary by the `SettingsHost.Apply` signature change (the fake also gains an optional `applyWatched` that sees the flag).
+NOTES (2026-11-07): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by the `settingsHost.apply` func type change.
+NOTES (2026-11-07): consequential edit — cmd/apogee/upstream_test.go: made necessary by the `SettingsHost.Apply` signature change.
+NOTES (2026-11-07): consequential edit — internal/tui/doc.go: made necessary by the row watch in mcpreconnect.go (the file-map entry now names settleMCPRow).
 
 **What:** Recast at the regression check (2026-11-07).
 **Goal:**

@@ -665,6 +665,8 @@ type fakeSettingsHost struct {
 	saveTo  func(target SettingTarget, path, value string) (SettingOutcome, error)
 	resetIn func(target SettingTarget, path string) (SettingOutcome, error)
 	apply   func(path, value string) (string, error)
+	// applyWatched, when set, answers Apply in apply's place and is told whether a watched save asked.
+	applyWatched func(path, value string, watched bool) (string, error)
 }
 
 func (h fakeSettingsHost) Rows() []SettingRow {
@@ -702,7 +704,10 @@ func (h fakeSettingsHost) ResetIn(target SettingTarget, path string) (SettingOut
 	return h.resetIn(target, path)
 }
 
-func (h fakeSettingsHost) Apply(path, value string) (string, error) {
+func (h fakeSettingsHost) Apply(path, value string, watched bool) (string, error) {
+	if h.applyWatched != nil {
+		return h.applyWatched(path, value, watched)
+	}
 	if h.apply == nil {
 		return "", nil
 	}
