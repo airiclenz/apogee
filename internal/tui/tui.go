@@ -1542,6 +1542,11 @@ type Options struct {
 	// own fetch, pull, push, sync, switch and rebase on the workspace (ADR 0108). nil ⇒ no git actions.
 	GitActions GitActionsHost
 
+	// MCP is the live MCP servers' seam (mcpreconnect.go, ADR 0109): the host whose queued dials
+	// the Model runs off the Update loop and whose finished dials it commits at the next idle
+	// point. nil ⇒ no MCP reconnect.
+	MCP MCPHost
+
 	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3, 4
 	// and 7). The zero value is the ordinary start — the binary determined a startup server and the
 	// engine was constructed before the program began — and everything below it is unchanged.

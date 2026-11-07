@@ -946,7 +946,7 @@
 // which overlap rather than exclude one another, the snapshot [Model.engineHolds] takes of it with
 // the non-hold facts the gates also read, and the named questions asked of that snapshot
 // (commandRunnable, canRunDeferred, canRebind, beatMayCount, canEditConfigExternally, canLaunchBg,
-// quiescent, canResumeWorkflows, canWake), and [Model.releaseEngine], the one release transition
+// quiescent, canResumeWorkflows, canWake, canStartMCPDials, canSwapTools), and [Model.releaseEngine], the one release transition
 // every fold that hands the engine back runs; heartbeat.go the fourth cluster lifted out of
 // model.go beside them (ADR 0043) — the upstream heartbeat end to end (ADR 0024): the
 // [heartbeatState] the footer and the send gate read, the tick chain that keeps it current
@@ -960,7 +960,11 @@
 // ([Model.refreshGit], [Model.armGitFetch], [Model.foldGitStatus], [Model.foldGitFetch]); gitactions.go
 // the [GitActionsHost] seam the user's own fetch, pull, push, sync, switch and rebase run through (ADR 0108),
 // and the git actions picker /git and a click on the footer's git segment open ([Model.openGitActions]):
-// each action runs off the loop under holdGitAction and folds as [Model.foldGitActionDone]; theme.go the palette, the
+// each action runs off the loop under holdGitAction and folds as [Model.foldGitActionDone]; mcpreconnect.go
+// the [MCPHost] seam the live MCP servers reconnect through one by one (ADR 0109): Update's tail
+// (mcpAfterFold, after wakeAfterFold and before busyAfterFold) runs each queued dial as a Cmd and
+// commits the finished ones once the engine is free for a tool swap, writing each outcome's note;
+// theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps
 // that palette under the running frame (status, pick, and the `export` that is the only way to

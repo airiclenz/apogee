@@ -210,7 +210,13 @@ cmd/apogee/wire_settings_test.go — TestApplySettingMCPReconnectKeepsEverything
 **Depends on:** item 3
 **Commit:** `feat(mcp): request, dial and commit MCP servers one by one`
 
-## 5. TUI: MCPHost seam, dial Cmds and the idle-point commit
+## 5. TUI: MCPHost seam, dial Cmds and the idle-point commit — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): the commit is not gated on `inFlight == 0`: each finished dial's done Msg sets `uncommitted`, and the next fold that finds `canSwapTools` true commits whatever has finished, so a slow server never holds back a healthy one's commit (the header's per-server lifecycle).
+NOTES (2026-11-07): `TakeMCPWork`'s `commit` flag sets `uncommitted` directly (removal-only work). A started dial sets it only when its done Msg folds back.
+NOTES (2026-11-07): `foldMCPDialDone` is inert when `Options.MCP` is nil, so the nil host leaves `mcpState` zero.
+NOTES (2026-11-07): `commitMCP` writes every non-empty `Note` even on a pending answer and sets `uncommitted = pending`. Item 4's pending commit returns no outcomes, so a pending commit writes no note.
+NOTES (2026-11-07): consequential edit — internal/tui/doc.go: made necessary by the two new engineHolds questions (the engineholds.go map line lists every named question) and the new mcpreconnect.go file (map entry, with the tail hook's place between wakeAfterFold and busyAfterFold).
+NOTES (2026-11-07): the `engineholds_test.go` table has no watching or git-action row, so `canSwapTools`' holdWatching and holdGitAction terms are covered by `TestMCPDialStartsWhileWatching` (watching) and not by the table. The `fakeMCPHost.CancelMCPDials` is a no-op until item 6's quit tests need it to record calls.
 
 **What:**
 **Goal:**

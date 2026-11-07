@@ -19,12 +19,15 @@ type engineAnswers struct {
 	isQuiescent     bool
 	resumesWorkflow bool
 	wakes           bool
+	startsMCPDials  bool
+	swapsTools      bool
 }
 
 // atRest is the answer set of a Model nothing holds: every question says yes.
 var atRest = engineAnswers{
 	runsIdleOnly: true, runsReport: true, runsDeferred: true, rebinds: true, beatCounts: true,
 	editsConfig: true, launchesBg: true, isQuiescent: true, resumesWorkflow: true, wakes: true,
+	startsMCPDials: true, swapsTools: true,
 }
 
 // TestEngineHolds_Questions pins the holds × questions table: each row puts the Model under one
@@ -49,12 +52,12 @@ func TestEngineHolds_Questions(t *testing.T) {
 		{
 			name:  "worker running",
 			setup: func(m *Model) { m.state = stateRunning },
-			want:  engineAnswers{runsReport: true},
+			want:  engineAnswers{runsReport: true, startsMCPDials: true},
 		},
 		{
 			name:  "worker blocked on an approval",
 			setup: func(m *Model) { m.state = stateAwaitingApproval },
-			want:  engineAnswers{runsReport: true},
+			want:  engineAnswers{runsReport: true, startsMCPDials: true},
 		},
 		{
 			name:  "errored counts idle for quiescent, not for wake or resume",
@@ -73,35 +76,44 @@ func TestEngineHolds_Questions(t *testing.T) {
 			setup: func(m *Model) { m.holds.hold(holdBgLaunch) },
 			want: atRestExcept(func(a *engineAnswers) {
 				a.runsIdleOnly, a.runsDeferred, a.rebinds, a.launchesBg = false, false, false, false
-				a.resumesWorkflow, a.wakes = false, false
+				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
 			}),
 		},
 		{
 			name:  "session loading",
 			setup: func(m *Model) { m.holds.hold(holdSessionLoad) },
-			want:  atRestExcept(func(a *engineAnswers) { a.resumesWorkflow, a.wakes = false, false }),
+			want: atRestExcept(func(a *engineAnswers) {
+				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+			}),
 		},
 		{
 			name:  "record write in flight",
 			setup: func(m *Model) { m.writeBusy = true },
-			want:  atRestExcept(func(a *engineAnswers) { a.resumesWorkflow, a.wakes = false, false }),
+			want: atRestExcept(func(a *engineAnswers) {
+				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+			}),
 		},
 		{
 			name:  "record write queued",
 			setup: func(m *Model) { m.pendingWrites = []recordWrite{{}} },
-			want:  atRestExcept(func(a *engineAnswers) { a.resumesWorkflow, a.wakes = false, false }),
+			want: atRestExcept(func(a *engineAnswers) {
+				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+			}),
 		},
 		{
 			name:  "quitting",
 			setup: func(m *Model) { m.quitting = true },
 			want: atRestExcept(func(a *engineAnswers) {
 				a.runsDeferred, a.resumesWorkflow, a.wakes = false, false, false
+				a.startsMCPDials, a.swapsTools = false, false
 			}),
 		},
 		{
 			name:  "prebound",
 			setup: func(m *Model) { m.opts.Prebound.Reason = domain.PreboundFirstBoot },
-			want:  atRestExcept(func(a *engineAnswers) { a.resumesWorkflow, a.wakes = false, false }),
+			want: atRestExcept(func(a *engineAnswers) {
+				a.resumesWorkflow, a.wakes, a.swapsTools = false, false, false
+			}),
 		},
 		{
 			name:  "interjection held",
@@ -131,7 +143,7 @@ func TestEngineHolds_Questions(t *testing.T) {
 				m.state = stateRunning
 				m.actuation.inFlight = true
 			},
-			want: engineAnswers{runsReport: true},
+			want: engineAnswers{runsReport: true, startsMCPDials: true},
 		},
 	}
 	for _, tt := range tests {
@@ -152,6 +164,8 @@ func TestEngineHolds_Questions(t *testing.T) {
 				isQuiescent:     holds.quiescent(),
 				resumesWorkflow: holds.canResumeWorkflows(),
 				wakes:           holds.canWake(),
+				startsMCPDials:  holds.canStartMCPDials(),
+				swapsTools:      holds.canSwapTools(),
 			}
 			today := engineAnswers{
 				runsIdleOnly:    m.commandRunnable(idleOnly),

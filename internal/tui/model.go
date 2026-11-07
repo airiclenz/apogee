@@ -277,6 +277,11 @@ type Model struct {
 	// safe inside the value-copied Model (ADR 0011); zero when the git seam is unwired.
 	git gitState
 
+	// mcp is the MCP reconnect's count of dials in flight and its commit-wanted latch
+	// (mcpreconnect.go). Plain values, so it is safe inside the value-copied Model (ADR 0011); zero
+	// when the MCP seam is unwired.
+	mcp mcpState
+
 	// Lifecycle. The state the keys route on is the session view's (sessionView.state).
 	//
 	// worker is the in-flight worker as one value (worker.go): the CancelFunc the stop key calls
@@ -1140,7 +1145,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	// rule the human adopts is one the turn a wake starts can already use. That idle fold is what
 	// makes "the next turn boundary" (ADR 0096 §4): a file that changed mid-turn is asked about at
 	// the fold that ends the turn, and one that changed while idle at the fold that saw it. After the
-	// wake, and for the same any-fold reason, the busy indicator is kept in step (busyAfterFold,
+	// wake, the MCP reconnect takes its queued dials and commits what has finished once the engine
+	// is free for a tool swap (mcpAfterFold, mcpreconnect.go) — asked at every fold so a commit lands
+	// at whichever fold releases the engine, and a dial requested mid-Turn starts at once. After
+	// both, and for the same any-fold reason, the busy indicator is kept in step (busyAfterFold,
 	// busy.go): a wait an idle fold began gets its clock and its spinner chain — after the wake,
 	// because a wake that launched a worker has left the session running, not waiting.
 	defer func() {
@@ -1148,6 +1156,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		next, cmd = adoptAfterFold(next, cmd)
 		next, cmd = offerAfterFold(next, cmd)
 		next, cmd = wakeAfterFold(next, cmd)
+		next, cmd = mcpAfterFold(next, cmd)
 		next, cmd = busyAfterFold(next, cmd)
 		next = reportActivity(settleFrame(msg, next))
 	}()
@@ -1609,6 +1618,11 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A footer git action landed (gitactions.go): note its result, release its hold and ask
 		// for a status read.
 		return m.foldGitActionDone(msg)
+
+	case mcpDialDoneMsg:
+		// An MCP server's dial finished off the loop (mcpreconnect.go): count it in, so Update's
+		// tail commits it once the engine is free for a tool swap.
+		return m.foldMCPDialDone()
 
 	case heartbeatTickMsg:
 		// The interval since the last landed beat has elapsed: issue the next one. Same generation

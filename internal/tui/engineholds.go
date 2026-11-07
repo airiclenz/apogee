@@ -189,6 +189,21 @@ func (h engineHolds) canWake() bool {
 	return h.canResumeWorkflows() && !h.hasInterjections && !h.isModalPaneOpen
 }
 
+// canStartMCPDials reports whether an MCP server's dial may start now (mcpreconnect.go): any time
+// but an exit. A dial touches no engine — it runs off the loop and only stores its result — so it
+// starts mid-Turn and under a watch alike (ADR 0109 decision 3).
+func (h engineHolds) canStartMCPDials() bool {
+	return !h.holding(holdQuitting)
+}
+
+// canSwapTools reports whether finished MCP dials may be committed now — one rebuild and one tool
+// swap into the engine: nothing takes the Agent, no session load restores it and no record write
+// snapshots it, the program is not exiting, no watch has the real engine parked behind an inert one,
+// and an engine is bound to swap into.
+func (h engineHolds) canSwapTools() bool {
+	return !h.holding(holdsTakingAgent | holdSessionLoad | holdRecordWrite | holdQuitting | holdWatching | holdPrebound)
+}
+
 // releaseEngine is the one transition every fold that hands the engine back runs once its own hold
 // is released — finishWorker for a worker's Exchange, foldActuationDone for a launcher verb,
 // foldBgStarted for a /bg launch, closeWorkflowPrompt for a background prompt's pane. It applies a
