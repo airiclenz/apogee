@@ -2247,10 +2247,10 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 	}
 }
 
-// The headline of ADR 0037 decision 6: a committed `mcp-servers:` edit DIALS. The new set answers
-// first, the whole tool registry is rebuilt around what it advertises and handed to the engine, and
-// only then are the connections it replaced torn down — so at no instant is the session without the
-// tools of one set or the other.
+// The headline of ADR 0037 decision 6: a committed `mcp-servers:` edit DIALS. The added server
+// answers first, the whole tool registry is rebuilt around what it advertises and handed to the
+// engine, and only then is the removed server's session closed — so at no instant is the session
+// without the tools of one set or the other.
 func TestApplySettingMCPReconnectSwapsTheToolsAndClosesTheOldSessions(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -2335,15 +2335,16 @@ func TestMCPReconnectRebuildsWithTheEndpointTheSessionIsOn(t *testing.T) {
 	}
 }
 
-// A set that cannot be reached costs the session nothing: the dial fails before anything has moved,
-// the connections it is using stay open, and the row is told both halves of that in one sentence.
+// A changed server that cannot be reached costs the session nothing: its re-dial fails before
+// anything has moved, the session it is using stays open, and the row names the server and why.
 func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeSettingsFixture(t, path, mcpServersFixture)
 
+	// docs is live on a config the file no longer matches, so the commit re-dials it.
 	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "serving__echo"}}}
-	fixture := newMCPFixture(old, "", func([]mcp.ServerConfig) (mcpSession, error) {
+	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "docs"}, session: old}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
 		return nil, errors.New("mcp: connect to server \"docs\": dial: connection refused")
 	})
 	spy := &applySettingSpy{}
@@ -2358,13 +2359,11 @@ func TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails(t *testing.
 	if err == nil {
 		t.Fatal("apply mcp-servers: want the dial's failure reported, got none")
 	}
-	for _, want := range []string{"reconnect failed", "connection refused", "previous connections kept"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, want it to contain %q", err, want)
-		}
+	if want := `docs: connect to server "docs": dial: connection refused`; err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
 	}
 	if old.closed {
-		t.Error("the sessions that are still serving were torn down by a reconnect that never happened")
+		t.Error("the session that is still serving was torn down by a reconnect that never happened")
 	}
 	if spy.drove() != 0 || len(fixture.built) != 0 {
 		t.Errorf("a failed dial still moved the tool set (swaps %d, rebuilds %v)", len(spy.swaps), fixture.built)
@@ -2429,7 +2428,7 @@ func TestMCPReconnectRefusesBeforeDiallingWhileAnExchangeRuns(t *testing.T) {
 	busy := errors.New("input pending: the tool set can only be swapped between runs")
 	spy := &applySettingSpy{swapErr: busy}
 
-	note, err := fixture.set.reconnect([]mcp.ServerConfig{{Name: "docs"}}, fixture.tools, spy)
+	outcomes, err := fixture.set.reconnect([]mcp.ServerConfig{{Name: "docs"}}, fixture.tools, spy)
 
 	if connected {
 		t.Error("a reconnect the engine would refuse still dialled the servers")
@@ -2437,8 +2436,8 @@ func TestMCPReconnectRefusesBeforeDiallingWhileAnExchangeRuns(t *testing.T) {
 	if err == nil || err.Error() != mcpReconnectFailed(busy).Error() {
 		t.Errorf("reconnect err = %v, want %q", err, mcpReconnectFailed(busy))
 	}
-	if note != "" {
-		t.Errorf("reconnect note = %q, want none beside an error", note)
+	if outcomes != nil {
+		t.Errorf("reconnect outcomes = %+v, want none beside an error", outcomes)
 	}
 	if spy.drove() != 0 || len(fixture.built) != 0 {
 		t.Errorf("a refused reconnect still moved the tool set (swaps %d, rebuilds %v)", len(spy.swaps), fixture.built)
@@ -2504,7 +2503,7 @@ func TestMCPNoteForDoesNotDoubleTheLabel(t *testing.T) {
 // host the OTHER server sits on, and the re-admission that follows dials what is left and fails. What
 // the human reads on the `url-safety:` row is asserted whole, because the defect this pins is a
 // property of the composed sentence and of nothing smaller — the helper reads correctly in isolation
-// either way.
+// either way. The broken server is new to the session, so its clause is the connect-failed sentence.
 func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -2533,16 +2532,16 @@ func TestApplySettingURLSafetyRowCarriesTheMCPLabelOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply url-safety.deny-hosts: %v — the MCP half of this row cannot fail it", err)
 	}
-	want := toolRosterNote + `; mcp reconnect failed: server "broken" has no transport configured` +
-		" — previous connections kept"
+	want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied" +
+		`; mcp connect failed: broken: server "broken" has no transport configured`
 	if note != want {
 		t.Errorf("row note = %q, want %q", note, want)
 	}
 	if strings.Contains(note, mcpErrorPrefix) {
 		t.Errorf("row note = %q; internal/mcp's own label reached the human under the row's", note)
 	}
-	if !old.closed && len(fixture.set.tools()) == 0 {
-		t.Error("a failed re-admission left the session with no MCP tools; the previous set is what it keeps")
+	if fixture.set.session("broken") != nil {
+		t.Error("the server whose first dial failed holds a live entry; it stays absent")
 	}
 }
 
@@ -4624,7 +4623,7 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 			}
 			return err
 		}},
-		{"reconnectMCP", func(*testing.T) error { _, err := a.reconnectMCP(); return err }},
+		{"reconnectMCP", func(*testing.T) error { return a.reconnectMCP() }},
 		{"reloadReactions", func(*testing.T) error { return a.reloadReactions() }},
 		{"reloadModelProfiles", func(*testing.T) error { return a.reloadModelProfiles() }},
 	} {

@@ -297,18 +297,15 @@ func (w *rootWiring) installSnapshot(old, next project.Snapshot) error {
 // lanes. A wiring that holds no live MCP set or engine (a Driver that composes none) has nothing to
 // move.
 //
-// Errors: the reconnect's and the reload's, joined — and a repo server the reconnect skipped for a
-// moved pin, worded as the reconnect's note: the rest of the set landed, but that server is not in
-// force, and the answer's row is the one surface a mid-session adoption reports on.
+// Errors: the reconnect's and the reload's, joined. The reconnect's is its whole-call refusal or each
+// server whose dial failed — a repo server skipped for a moved pin among them — as `<server>: …`
+// (settingsApplier.reconnectMCPFrom): the healthy servers landed, but that one is not in force, and
+// the answer's row is the one surface a mid-session adoption reports on.
 func (w *rootWiring) applyMovedKinds(moved project.Moved, layered config.Options) error {
 	applier := w.settingsApplier()
 	var errs []error
 	if moved.Servers && w.mcpSet != nil && w.toolSet != nil {
-		note, err := applier.reconnectMCPFrom(layered)
-		errs = append(errs, err)
-		if note != "" {
-			errs = append(errs, errors.New(note))
-		}
+		errs = append(errs, applier.reconnectMCPFrom(layered))
 	}
 	if moved.Reactions && w.engine != nil && w.live != nil {
 		errs = append(errs, applier.reloadReactionsFrom(layered))

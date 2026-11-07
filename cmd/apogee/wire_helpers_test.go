@@ -185,9 +185,24 @@ type mcpFixture struct {
 	built []string // the endpoints the whole set was rebuilt for, in order
 }
 
+// newMCPFixture seeds start as ONE live server named `seed` with an empty config, so a reconnect onto
+// any configured set removes it and closes it. connect stands in for one server's dial, handed that
+// server as a one-element set, so a test can record its dials as a list of sets.
 func newMCPFixture(start mcpSession, endpoint string, connect func([]mcp.ServerConfig) (mcpSession, error)) *mcpFixture {
+	return newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: mcpFixtureSeed}, session: start}}, endpoint, connect)
+}
+
+// mcpFixtureSeed is the name newMCPFixture's start session is held under.
+const mcpFixtureSeed = "seed"
+
+// newMCPFixtureWith is newMCPFixture over the live entries a test names, for a test whose intent needs
+// a server the reconnect CHANGES or leaves alone rather than one it removes.
+func newMCPFixtureWith(entries []mcpEntry, endpoint string, connect func([]mcp.ServerConfig) (mcpSession, error)) *mcpFixture {
 	f := &mcpFixture{}
-	f.set = newLiveMCP(start, connect)
+	f.set = newLiveMCP(context.Background(), entries,
+		func(_ context.Context, server mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+			return connect([]mcp.ServerConfig{server})
+		})
 	f.tools = newLiveTools(apogee.NewToolRegistry(), toolSetSpec{endpoint: endpoint}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		f.built = append(f.built, spec.endpoint)
 		registry := apogee.NewToolRegistry()

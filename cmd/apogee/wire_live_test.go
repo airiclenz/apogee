@@ -148,13 +148,17 @@ func TestMCPReconnectUsesTheLiveURLSafetyLists(t *testing.T) {
 	if err := w.toolSet.setDenyHosts([]string{"localhost"}, engine); err != nil {
 		t.Fatalf("setDenyHosts: %v", err)
 	}
-	_, err := w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	outcomes, err := w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	if err != nil {
+		t.Fatalf("reconnect: %v, want the call to land with the server's own failure in its outcome", err)
+	}
+	failure := mcpRowFailures(outcomes)
 
-	if err == nil {
+	if failure == nil {
 		t.Fatal("reconnect under a live deny list: want the url-safety refusal, got none")
 	}
-	if !strings.Contains(err.Error(), "blocked by url-safety") {
-		t.Errorf("reconnect error = %v; want the live deny list to close the endpoint", err)
+	if !strings.Contains(failure.Error(), "blocked by url-safety") {
+		t.Errorf("reconnect failure = %v; want the live deny list to close the endpoint", failure)
 	}
 
 	// The same reconnect with the deny list lifted reaches the dial instead — the guard, not the
@@ -162,13 +166,17 @@ func TestMCPReconnectUsesTheLiveURLSafetyLists(t *testing.T) {
 	if err := w.toolSet.setDenyHosts(nil, engine); err != nil {
 		t.Fatalf("setDenyHosts(nil): %v", err)
 	}
-	_, err = w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	outcomes, err = w.mcpSet.reconnect([]mcp.ServerConfig{deniedMCPServer}, w.toolSet, engine)
+	if err != nil {
+		t.Fatalf("reconnect: %v, want the call to land with the server's own failure in its outcome", err)
+	}
+	failure = mcpRowFailures(outcomes)
 
-	if err == nil {
+	if failure == nil {
 		t.Fatal("reconnect with no deny list: want the connection error, got none")
 	}
-	if strings.Contains(err.Error(), "blocked by url-safety") {
-		t.Errorf("reconnect error = %v; want a connection error once no list closes the host", err)
+	if strings.Contains(failure.Error(), "blocked by url-safety") {
+		t.Errorf("reconnect failure = %v; want a connection error once no list closes the host", failure)
 	}
 }
 
@@ -228,9 +236,8 @@ func TestWireSessionFencesTheSettingsEditorAgainstTheWorkspace(t *testing.T) {
 // transport.go), so a connection made under the old lists keeps talking to a host the operator has
 // just closed until something else happens to reconnect. This is the re-admission that closes it
 // (audit 2026-08-28: "after a `/settings` url-safety edit, network tools and the MCP connection
-// disagree about which hosts are allowed") — and because Connect is all-or-nothing over an endpoint
-// refusal, the denied server is DROPPED and named rather than costing the session the servers it may
-// still talk to.
+// disagree about which hosts are allowed") — and the denied server is DROPPED and named, never
+// re-dialled: a failed re-dial would keep the very connection the operator has just closed.
 func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -238,7 +245,7 @@ func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T
 
 	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
 	var dialled [][]mcp.ServerConfig
-	fixture := newMCPFixture(old, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "docs"}, session: old}}, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
 		dialled = append(dialled, servers)
 		return &fakeMCPSession{}, nil
 	})
@@ -258,8 +265,8 @@ func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T
 	if want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied"; note != want {
 		t.Errorf("note = %q, want %q — a server the edit disconnected is news the row owes the human", note, want)
 	}
-	if len(dialled) != 1 || len(dialled[0]) != 0 {
-		t.Fatalf("dialled = %+v, want exactly one reconnect, to no server at all", dialled)
+	if len(dialled) != 0 {
+		t.Fatalf("dialled = %+v, want no dial at all: the only server was denied", dialled)
 	}
 	if !old.closed {
 		t.Error("the connection to the denied host is still open; the tool set followed the new list " +
@@ -283,7 +290,7 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 
 	serving := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
 	dials := 0
-	fixture := newMCPFixture(serving, "", func([]mcp.ServerConfig) (mcpSession, error) {
+	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "docs"}, session: serving}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
 		dials++
 		return &fakeMCPSession{}, nil
 	})
@@ -311,9 +318,8 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 		t.Error("the connections that are still admitted were torn down and re-made")
 	}
 	// Identity, not equivalence: a re-dial that happened to reach the same servers would still have
-	// cost every one of them its state. swap is the holder's only reader of the session itself, and
-	// putting `serving` back is a no-op exactly when the assertion passes.
-	if got := fixture.set.swap(serving); got != mcpSession(serving) {
+	// cost every one of them its state.
+	if got := fixture.set.session("docs"); got != mcpSession(serving) {
 		t.Errorf("the holder is on %p, want the very session it started on (%p)", got, serving)
 	}
 }
@@ -322,15 +328,22 @@ func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T
 // already COMMITTED by the time the re-admission dials, so the primary effect of the edit is in
 // force — returning the dial's failure as the row's error would make the pane say `saved — live
 // apply failed` about an edit that applied. It goes in the note instead, in liveMCP's own words, so
-// the human is still told the two things that matter: what failed, and that the connections they had
-// are still theirs.
+// the human is still told the two things that matter: which server failed, and that the connection
+// it had is still theirs.
 func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	writeSettingsFixture(t, path, mcpServersFixture)
+	// Closing docs' host moves the admitted set, which is what makes the row reconnect at all; wiki,
+	// on another host, is still admitted and is the server the reconnect re-dials. Its live entry is
+	// seeded with a config the file no longer matches, so the re-dial is a CHANGED server's and its
+	// failure keeps the old session.
+	writeSettingsFixture(t, path, mcpServersFixture+
+		"  - name: wiki\n"+
+		"    transport: streamable-http\n"+
+		"    endpoint: https://wiki.example.com/\n")
 
-	serving := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
-	fixture := newMCPFixture(serving, "", func([]mcp.ServerConfig) (mcpSession, error) {
+	serving := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "wiki__echo"}}}
+	fixture := newMCPFixtureWith([]mcpEntry{{config: mcp.ServerConfig{Name: "wiki"}, session: serving}}, "", func([]mcp.ServerConfig) (mcpSession, error) {
 		return nil, errors.New("dial: connection refused")
 	})
 	spy := &applySettingSpy{}
@@ -347,10 +360,13 @@ func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T
 		t.Fatalf("apply url-safety.deny-hosts = %v; the host lists ARE in force, so the row must not "+
 			"report the edit as failed over the half that could not follow", err)
 	}
-	for _, want := range []string{toolRosterNote, "mcp reconnect failed", "connection refused", "previous connections kept"} {
-		if !strings.Contains(note, want) {
-			t.Errorf("note = %q, want it to contain %q", note, want)
-		}
+	want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied" +
+		"; mcp reconnect failed: wiki: dial: connection refused — previous connection kept"
+	if note != want {
+		t.Errorf("note = %q, want %q", note, want)
+	}
+	if got := fixture.set.session("wiki"); got != mcpSession(serving) {
+		t.Errorf("the holder is on %p for wiki, want the session it kept (%p)", got, serving)
 	}
 	if serving.closed {
 		t.Error("the sessions that are still serving were torn down by a reconnect that never happened")

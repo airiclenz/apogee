@@ -1226,11 +1226,12 @@ var settingsTable = slices.Concat([]settingsEntry{
 		key: "mcp-servers",
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The one key whose value is a set of live CONNECTIONS. It is not pushed and not
-			// re-resolved into a holder either: it is dialled, and the session moves onto the servers
-			// that answered (ADR 0037 decision 6). The value the pane persisted is not read, for the
-			// `servers:` reason — a list of blocks is a shape no single string spells. A repo server
-			// skipped for a moved pin is the row's note: the rest of the set landed.
-			return a.reconnectMCP()
+			// re-resolved into a holder either: it is dialled, server by server, and the session moves
+			// onto the servers that answered (ADR 0037 decision 6, adr-0037-amend-1107). The value the
+			// pane persisted is not read, for the `servers:` reason — a list of blocks is a shape no
+			// single string spells. A server whose dial failed — a repo server skipped for a moved pin
+			// among them — is the row's error, `<server>: …`: the healthy servers landed.
+			return "", a.reconnectMCP()
 		},
 	},
 	{
@@ -1626,10 +1627,10 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 // else happened to reconnect (audit 2026-08-28: "after a `/settings` url-safety edit, network tools
 // and the MCP connection disagree about which hosts are allowed").
 //
-// Connect is all-or-nothing over an endpoint refusal (only a moved repo pin is skipped instead), so
-// the set is PARTITIONED first (mcp.Admit) and only the admitted servers are dialled: a server the
-// new lists close is dropped and named, rather than costing the session every other server it was
-// talking to.
+// The set is PARTITIONED first (mcp.Admit) and only the admitted servers are reconnected: a server
+// the new lists close is dropped and named. Dialling it instead would fail only that server's dial,
+// since a reconnect is per server (ADR 0109), but a failed re-dial KEEPS the old session — the very
+// connection the operator has just closed.
 //
 // Three things it deliberately does not do.
 //
@@ -1642,9 +1643,9 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 //
 // It does not return an error. The tool rebuild above has already COMMITTED — the primary effect of
 // the edit is in force — so a failed dial that came back as the row's error would report `saved —
-// live apply failed` about an edit that applied. It lands in the note instead, in the same sentence
-// liveMCP.reconnect words for the `mcp-servers:` row, so the human is told the same two things:
-// what failed, and that the connections they had are still theirs.
+// live apply failed` about an edit that applied. Each failed dial lands in the note instead, as the
+// per-server sentence liveMCP.reconnect words for it (mcpFailed), so the human is told the same two
+// things: which server failed, and whether the connection it had is still theirs.
 //
 // And it does nothing at all over a nil MCP holder or an empty config path, the shape ADR 0031's
 // documented embedder holds (wire_mcp.go). The host lists still reach the tools; there is simply no
@@ -1667,7 +1668,7 @@ func (a settingsApplier) readmitMCP(before toolSetSpec) string {
 	if sameServerNames(was, admitted) {
 		return ""
 	}
-	skipNote, err := a.mcp.reconnect(admitted, a.tools, a.engine)
+	outcomes, err := a.mcp.reconnect(admitted, a.tools, a.engine)
 	if err != nil {
 		return mcpNoteFor(err)
 	}
@@ -1675,10 +1676,12 @@ func (a settingsApplier) readmitMCP(before toolSetSpec) string {
 	for _, d := range denied {
 		note.WriteString("; mcp server " + d.Name + " disconnected — " + deniedReason(d))
 	}
-	// A repo server the dial skipped for a moved pin is named after the ones the lists closed, in
-	// the same `; mcp server X …` clause shape.
-	if skipNote != "" {
-		note.WriteString("; " + skipNote)
+	// A server whose dial failed — a repo server skipped for a moved pin among them — is named after
+	// the ones the lists closed, each in its own `; mcp … failed: <server>: …` clause.
+	for _, outcome := range outcomes {
+		if outcome.rowFailure != "" {
+			note.WriteString("; " + outcome.note)
+		}
 	}
 	return note.String()
 }
@@ -2024,22 +2027,28 @@ func (a settingsApplier) reloadServers() (bool, error) {
 // (no flag, no environment variable names an MCP server). The scrub widens first (widenSecretEnv).
 //
 // A global file that no longer parses is refused before anything is dialled, so a typo in an
-// unrelated key cannot cost the session the servers it is talking to. The note is the reconnect's:
-// the repo servers it skipped for a moved pin, or empty.
-func (a settingsApplier) reconnectMCP() (note string, err error) {
+// unrelated key cannot cost the session the servers it is talking to. The error is
+// reconnectMCPFrom's.
+func (a settingsApplier) reconnectMCP() error {
 	layered, err := a.layeredConfig()
 	if err != nil {
-		return "", err
+		return err
 	}
 	return a.reconnectMCPFrom(layered)
 }
 
 // reconnectMCPFrom moves the session onto layered's `mcp-servers:` block — reconnectMCP without the
 // read, for a caller that already holds the resolved layered set. It widens the scrub first
-// (widenSecretEnv) and reads no file; the note is the reconnect's.
-func (a settingsApplier) reconnectMCPFrom(layered config.Options) (note string, err error) {
+// (widenSecretEnv) and reads no file. The error is the reconnect's whole-call refusal
+// (mcpReconnectFailed) or, when the reconnect landed, each failed server's `<server>: …` clause,
+// joined by "; " (mcpRowFailures) — a repo server skipped for a moved pin among them.
+func (a settingsApplier) reconnectMCPFrom(layered config.Options) error {
 	a.widenSecretEnv(layered)
-	return a.mcp.reconnect(layered.MCPServers, a.tools, a.engine)
+	outcomes, err := a.mcp.reconnect(layered.MCPServers, a.tools, a.engine)
+	if err != nil {
+		return err
+	}
+	return mcpRowFailures(outcomes)
 }
 
 // reloadReactions re-reads the `reactions:` block — layered: the global reactions plus the adopted

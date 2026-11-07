@@ -46,8 +46,8 @@
 // tool registry and the builders that assemble one — built-ins plus MCP;
 // toolchain_roots.go the once-per-process probe of the Go toolchain's GOROOT and module
 // cache and the composed read-roots func that lists them after the skill libraries;
-// wire_mcp.go the connected MCP sessions
-// and the validate-then-commit reconnect that moves a session onto another set;
+// wire_mcp.go the connected MCP sessions, one per server,
+// and the per-server reconnect that moves a session onto another set (adr-0037-amend-1107);
 // wire_present.go the presentation ladder this host can walk and the holder that
 // rebuilds and re-installs it; wire_session.go the session-persistence host plus
 // the resume resolution a --resume/--continue start goes through (the prompt-recall

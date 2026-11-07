@@ -714,8 +714,8 @@ func TestStartupMCPLoginRetriesAConnectWhoseRefreshWasRejected(t *testing.T) {
 	}
 }
 
-// A mid-session reconnect to a server with no saved token never prompts: it fails on the settings
-// row with the sentence naming `apogee mcp login <name>`, and the terminal is never read.
+// A mid-session reconnect to a server with no saved token never prompts: that server's dial fails
+// with the row's clause naming `apogee mcp login <name>`, and the terminal is never read.
 func TestStartupMCPLoginReconnectNeverPrompts(t *testing.T) {
 	t.Parallel()
 	fake := newFakeOAuthMCP(t, &atomic.Int64{})
@@ -725,13 +725,14 @@ func TestStartupMCPLoginReconnectNeverPrompts(t *testing.T) {
 		t.Fatalf("wireSession: %v", err)
 	}
 
-	_, err := w.mcpSet.reconnect([]mcp.ServerConfig{fake.serverConfig("remote")}, w.toolSet, &applySettingSpy{})
+	outcomes, err := w.mcpSet.reconnect([]mcp.ServerConfig{fake.serverConfig("remote")}, w.toolSet, &applySettingSpy{})
 
-	if err == nil {
-		t.Fatal("reconnect with no saved token: want the login-required failure, got none")
+	if err != nil {
+		t.Fatalf("reconnect: %v, want the call to land with the server's own failure in its outcome", err)
 	}
-	if !strings.HasPrefix(err.Error(), "reconnect failed: ") || !strings.Contains(err.Error(), "apogee mcp login remote") {
-		t.Errorf("reconnect error = %q; want the row's sentence naming `apogee mcp login remote`", err)
+	if len(outcomes) != 1 || !strings.HasPrefix(outcomes[0].rowFailure, "remote: ") ||
+		!strings.Contains(outcomes[0].rowFailure, "apogee mcp login remote") {
+		t.Errorf("reconnect outcomes = %+v; want one row failure for remote naming `apogee mcp login remote`", outcomes)
 	}
 	if input.openCount() != 0 {
 		t.Errorf("the reconnect read the terminal %d times; want never", input.openCount())
@@ -886,8 +887,9 @@ func TestStartupSkipsARepoServerWhosePinIsUnreadable(t *testing.T) {
 }
 
 // A live reconnect onto a set holding a repo server whose pinned script was edited after its options
-// were resolved lands the rest of the set: the reconnect's note names the server and the edited file,
-// the global server is connected, and the config wait wakes so the entry is asked about again.
+// were resolved lands the healthy server: the skipped server's outcome is a failed dial naming the
+// server and the edited file, the global server is connected, and the config wait wakes so the entry
+// is asked about again.
 func TestReconnectSkipsARepoServerWhosePinMoved(t *testing.T) {
 	t.Parallel()
 	global := newPingMCPServer(t, "remote")
@@ -900,14 +902,18 @@ func TestReconnectSkipsARepoServerWhosePinMoved(t *testing.T) {
 	}
 	writeRepoWikiScript(t, w.roots.project, "echo edited")
 
-	note, err := w.mcpSet.reconnect(servers, w.toolSet, &applySettingSpy{})
+	outcomes, err := w.mcpSet.reconnect(servers, w.toolSet, &applySettingSpy{})
 
 	if err != nil {
-		t.Fatalf("reconnect: %v, want the rest of the set to land past the skipped repo server", err)
+		t.Fatalf("reconnect: %v, want the healthy server to land past the skipped repo server", err)
 	}
-	want := "mcp server wiki skipped — stdio server \"wiki\": refusing to launch — bin/wiki.sh changed since you adopted it"
-	if !strings.HasPrefix(note, want) {
-		t.Errorf("reconnect note = %q, want it opening %q", note, want)
+	want := "wiki: stdio server \"wiki\": refusing to launch — bin/wiki.sh changed since you adopted it"
+	failure := mcpRowFailures(outcomes)
+	if failure == nil || !strings.HasPrefix(failure.Error(), want) {
+		t.Errorf("reconnect row failure = %v, want it opening %q", failure, want)
+	}
+	if w.mcpSet.session("wiki") != nil {
+		t.Error("the skipped repo server holds a live entry; a failed new server stays absent")
 	}
 	if !hasMCPTool(w, "ping") {
 		t.Error("the global server's tools are missing; a pin skip must spare the rest of the set")

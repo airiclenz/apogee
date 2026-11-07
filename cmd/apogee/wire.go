@@ -24,8 +24,8 @@ package main
 //     applied through, plus the per-model re-resolution a heartbeat rebind drives.
 //   - wire_tools.go — the live tool registry and the builders that assemble one (built-ins plus
 //     MCP).
-//   - wire_mcp.go — the connected MCP sessions and the validate-then-commit reconnect that moves a
-//     session onto another set of servers.
+//   - wire_mcp.go — the connected MCP sessions, one per server, and the per-server reconnect that
+//     moves a session onto another set of servers (adr-0037-amend-1107).
 //   - wire_present.go — the presentation ladder this host can walk, and the holder that rebuilds it
 //     and re-installs it on the presenter.
 //   - wire_session.go — the session-persistence host, and the resume resolution a --resume/--continue
@@ -432,11 +432,11 @@ type settingsSkills interface {
 	Reload() error
 }
 
-// mcpSession is the connected-MCP surface a reconnect drives: the tools the servers advertise, the
-// repo servers the connect skipped for a moved pin (the reconnect's note names them), and the
-// teardown that ends the connections. *mcp.Client is the only implementation that ships — it is an
-// interface for settingsEngine's reason, so the reconnect's ORDER (dial, swap, tear down) is
-// exercisable against a fake without a server process behind it.
+// mcpSession is one server's connected-MCP surface a reconnect drives: the tools the server
+// advertises, whether the connect skipped it for a moved pin (the reconnect reports that as the
+// server's failed dial), and the teardown that ends the connection. *mcp.Client over one server is the
+// only implementation that ships — it is an interface for settingsEngine's reason, so the reconnect's
+// ORDER (dial, swap, close) is exercisable against a fake without a server process behind it.
 type mcpSession interface {
 	Tools() []apogee.Tool
 	Skipped() []mcp.Denied

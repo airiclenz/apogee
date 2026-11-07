@@ -469,7 +469,8 @@ func appliedPath(t *testing.T, applied []tui.AppliedSetting, path string) tui.Ap
 
 // A Project config's server adopted mid-session — the answer recorded by another terminal, so
 // neither config file moves — is reported by the adoption-record watcher, and the reconnect it
-// drives dials it beside the global servers, marked as the project's own.
+// drives dials it beside the global servers, marked as the project's own: one dial per server, docs
+// (global) then wiki (Project).
 func TestWatchedProjectConfigAdoptedServerConnects(t *testing.T) {
 	t.Parallel()
 	c := newWatchedLayeredConfig(t, mcpServersFixture, projectWikiServerYAML)
@@ -493,12 +494,11 @@ func TestWatchedProjectConfigAdoptedServerConnects(t *testing.T) {
 		t.Fatalf("apply %s: %v", row.Path, err)
 	}
 
-	if len(dialled) != 1 {
-		t.Fatalf("dialled %d times, want one reconnect", len(dialled))
+	if len(dialled) != 2 || len(dialled[0]) != 1 || len(dialled[1]) != 1 {
+		t.Fatalf("dialled %+v, want two one-server dials", dialled)
 	}
-	got := dialled[0]
-	if len(got) != 2 || got[0].Name != "docs" || got[0].Project || got[1].Name != "wiki" || !got[1].Project {
-		t.Errorf("dialled %+v, want the global docs server and the adopted repo wiki server", got)
+	if docs, wiki := dialled[0][0], dialled[1][0]; docs.Name != "docs" || docs.Project || wiki.Name != "wiki" || !wiki.Project {
+		t.Errorf("dialled %+v, want the global docs server and then the adopted repo wiki server", dialled)
 	}
 }
 
@@ -577,9 +577,10 @@ func assertStillAdopted(t *testing.T, c *watchedConfig, want int) {
 }
 
 // A Project config that stops parsing mid-session degrades the layered re-read to the global set
-// (settingsApplier.layeredConfig): the adopted repo server is torn down by a reconnect onto the global
-// servers alone, with the skipped-layer notice saying why. The first save that parses again dials it
-// back on the adoption already recorded — nothing re-asks — and the scrub it widened stays wide.
+// (settingsApplier.layeredConfig): the adopted repo server is dropped and its session closed by a
+// reconnect onto the global servers alone, which leaves docs alone, with the skipped-layer notice
+// saying why. The first save that parses again dials it back on the adoption already recorded —
+// nothing re-asks — and the scrub it widened stays wide.
 func TestWatchedBrokenProjectConfigDropsAdoptedServerUntilItParses(t *testing.T) {
 	t.Parallel()
 	c := newWatchedLayeredConfig(t, mcpServersFixture, projectWikiServerYAML)
@@ -605,18 +606,27 @@ func TestWatchedBrokenProjectConfigDropsAdoptedServerUntilItParses(t *testing.T)
 	writeSettingsFixture(t, c.projectPath, projectWikiServerYAML)
 	reloadAndApply(t, c, applier, "mcp-servers", "the Project config that parses again")
 
-	if len(dialled) != 3 {
-		t.Fatalf("dialled %d times, want three reconnects (adopted, broken, repaired)", len(dialled))
+	// docs is dialled once, on adoption; while broken nothing is dialled (docs is unchanged and wiki
+	// is dropped); once repaired only wiki is dialled again.
+	names := make([][]string, 0, len(dialled))
+	for _, set := range dialled {
+		var named []string
+		for _, server := range set {
+			named = append(named, server.Name)
+		}
+		names = append(names, named)
 	}
-	if got := dialled[1]; len(got) != 1 || got[0].Name != "docs" || got[0].Project {
-		t.Errorf("while broken dialled %+v, want the global docs server alone", got)
+	if want := [][]string{{"docs"}, {"wiki"}, {"wiki"}}; !slices.EqualFunc(names, want, slices.Equal[[]string]) {
+		t.Fatalf("dialled %v, want %v", names, want)
 	}
-	if !sessions[0].closed {
+	if !dialled[1][0].Project || !dialled[2][0].Project {
+		t.Errorf("dialled %+v, want wiki dialled as the adopted repo server both times", dialled)
+	}
+	if !sessions[1].closed {
 		t.Error("the session holding the adopted repo server is still open after the teardown")
 	}
-	if got := dialled[2]; len(got) != 2 || got[0].Name != "docs" || got[0].Project ||
-		got[1].Name != "wiki" || !got[1].Project {
-		t.Errorf("once repaired dialled %+v, want the global docs server and the adopted repo wiki server", got)
+	if sessions[0].closed {
+		t.Error("the global docs server's session was closed; dropping the repo server must leave it alone")
 	}
 	assertStillAdopted(t, c, 1)
 	if !slices.Contains(applier.secretEnv.Names(), "WIKI_MCP_TOKEN") {

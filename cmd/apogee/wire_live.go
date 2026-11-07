@@ -125,10 +125,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// Agent's registry. With no servers configured this is dormant (a no-op Client, nil tools).
 	// On resume the connection is established FRESH here — no server-side state is restored
 	// (ADR 0008). An MCP connect failure is fatal: a configured server that cannot be reached is
-	// a misconfiguration the user should see, not a silently-dropped capability. The one exception is
-	// a repo server whose pin moved: the connect skips it rather than failing the set
-	// (mcp.Client.Skipped), and connectMCPServers announces the skip and cues the re-read that asks
-	// about the server again, so the session starts on the rest (announceSkippedMCP).
+	// a misconfiguration the user should see, not a silently-dropped capability — startup stays
+	// all-or-nothing, though it dials server by server so the session holds one connection per server
+	// (ADR 0109). The one exception is a repo server whose pin moved: the connect skips it rather than
+	// failing the set (mcp.Client.Skipped), and connectMCPServers announces the skip and cues the
+	// re-read that asks about the server again, so the session starts on the rest (announceSkippedMCP).
 	//
 	// The endpoint of an `sse`/`streamable-http` server is checked against the operator's OWN
 	// url-safety host lists — scheme/host allow-deny, with the resolved-IP floor disabled for it
@@ -140,20 +141,23 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// An `auth: oauth` server with no usable token is offered a login on stderr first, before the
 	// alternate screen opens (connectMCPServers, mcp_cmd.go); declined, or with no terminal to ask
 	// on, the launch aborts naming `apogee mcp login <name>`.
-	mcpClient, err := w.connectMCPServers(ctx)
+	mcpEntries, err := w.connectMCPServers(ctx)
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
 	// The connections are held rather than captured, because `mcp-servers:` is editable mid-session
-	// (ADR 0037 decision 6): a reconnect dials a new set, swaps it in and tears the old one down, so
-	// what has to be closed at the end of the run is whatever the holder is on NOW — closing the
-	// client this line connected would leave the live sessions orphaned and tear down a set that was
-	// already closed hours ago.
+	// (ADR 0037 decision 6): a reconnect dials the servers an edit adds or changes, swaps them in and
+	// closes the sessions they replaced, one server at a time (ADR 0109, adr-0037-amend-1107), so what
+	// has to be closed at the end of the run is whatever the holder is on NOW — closing the sessions
+	// this line connected would leave the live ones orphaned and close some that were already closed
+	// hours ago.
 	//
 	// The reconnect runs LATER, when an `mcp-servers:` edit lands (liveMCP.reconnect), by which time
-	// the host lists may have moved through `/settings` — so its guard is built from the spec the
-	// live tool set is currently on rather than from the snapshot this line closed over. That is the
-	// same read the network tools' own rebuild makes.
+	// the host lists may have moved through `/settings` — so each dial is guarded by the lists the live
+	// tool set is currently on, which the reconnect hands the recipe below, rather than by the snapshot
+	// this line closed over. That is the same read the network tools' own rebuild makes. Every dial
+	// runs under this session's ctx, never a context that ends when the reconnect returns: go-sdk's SSE
+	// transport binds its stream to the Connect context, so the session lives exactly as long as it.
 	//
 	// Reading the live spec is only HALF of what keeps the MCP endpoint check and the network tools
 	// agreeing about which hosts are closed, though, and on its own it would leave them disagreeing
@@ -161,16 +165,16 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// edit RECONNECTS on its own account when the new lists change which servers are admitted
 	// (applyURLSafetyHosts), so a server the operator has just closed is dropped there and then
 	// rather than kept until something else happens to dial.
-	w.mcpSet = newLiveMCP(mcpClient, func(servers []mcp.ServerConfig) (mcpSession, error) {
-		spec := w.toolSet.built()
-		// It never offers a login: a server that needs one fails the reconnect with the error naming
+	w.mcpSet = newLiveMCP(ctx, mcpEntries, func(dialCtx context.Context, server mcp.ServerConfig, allowHosts, denyHosts []string) (mcpSession, error) {
+		// It never offers a login: a server that needs one fails its dial with the error naming
 		// `apogee mcp login <name>`, which the settings row relays.
-		client, err := mcp.ConnectWith(ctx, w.mcpLogin.mcpHost(w.roots.config), servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
+		client, err := mcp.ConnectWith(dialCtx, w.mcpLogin.mcpHost(w.roots.config), []mcp.ServerConfig{server},
+			mcpGuard(allowHosts, denyHosts), w.roots.workspace)
 		if err != nil {
 			return nil, err
 		}
-		// A repo server skipped for a moved pin lets the rest of the set land: the reconnect's note
-		// names it (liveMCP.reconnect), and the re-read cued here asks about it again.
+		// A repo server skipped for a moved pin is that server's failed dial (liveMCP.reconnect), and
+		// the re-read cued here asks about it again.
 		w.cueSkippedMCP(client.Skipped())
 		return client, nil
 	})
