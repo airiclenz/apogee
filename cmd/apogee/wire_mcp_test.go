@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -601,8 +602,11 @@ func (d *gatedDial) connect(_ context.Context, _ mcp.ServerConfig, _, _ []string
 }
 
 // denyOldEndpointMidDial moves docs from host A to host B, and — while B's dial is held in dial —
-// denies A the way a `url-safety:` edit does: the live lists move, then the admitted set is requested
-// under them. It releases the dial and returns once the job has returned, with nothing committed yet.
+// denies A through the request path: the live tool set's deny list moves, then the admitted set is
+// requested under it, as a later `mcp-servers:` save would, so the drop under test is
+// requestServerLocked's. (The `url-safety:` row's own deny half, settingsApplier.denyMCP, is driven by
+// denyLiveEndpointThroughURLSafety.) It releases the dial and returns once the job has returned, with
+// nothing committed yet.
 func denyOldEndpointMidDial(t *testing.T, dial *gatedDial) (*mcpFixture, *fakeMCPSession, *applySettingSpy) {
 	t.Helper()
 	onB := mcp.ServerConfig{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://b.example.com/"}
@@ -678,6 +682,116 @@ func TestLiveMCPDenyOfTheOldEndpointLeavesAFailedNewDialRetryable(t *testing.T) 
 		t.Fatalf("retry: %v", err)
 	}
 
+	if got := fixture.set.session("docs"); got != mcpSession(dial.session) {
+		t.Errorf("docs is on %p after the retry, want the session on B (%p)", got, dial.session)
+	}
+}
+
+// denyLiveEndpointThroughURLSafety is the `url-safety:` row's deny of a server's LIVE endpoint while
+// its config has already moved on: docs is connected on host A, the config file has it on host B, and
+// B's dial is held in dial when the row commits `url-safety.deny-hosts [a.example.com]`. The edit
+// changes no configured server's verdict, so only the live endpoint's deny can close A. It returns,
+// with the dial still held, once the row has answered, after checking the A session was retired and
+// dropped on the keystroke and that the row named it.
+func denyLiveEndpointThroughURLSafety(t *testing.T, dial *gatedDial) (*mcpFixture, *fakeMCPSession, *applySettingSpy, <-chan struct{}) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, "mcp-servers:\n"+
+		"  - name: docs\n"+
+		"    transport: streamable-http\n"+
+		"    endpoint: https://b.example.com/\n")
+	onB := resolvedMCPServer(t, path, "docs")
+	configA := onB
+	configA.Endpoint = "https://a.example.com/"
+	docs, onA := liveServer(configA)
+	fixture := newMCPFixtureDialling([]mcpEntry{docs}, "", dial.connect)
+	spy := &applySettingSpy{}
+	if err := fixture.set.request([]mcp.ServerConfig{onB}, openGuard, false); err != nil {
+		t.Fatalf("request B: %v", err)
+	}
+	finished := runJobsAsync(fixture.set.takeWork())
+	awaitClosed(t, dial.entered, "the dial to B to start")
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+
+	note, err := applySettingFor(applier)("url-safety.deny-hosts", "[a.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	if want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied"; note != want {
+		t.Errorf("note = %q, want %q", note, want)
+	}
+	if !onA.isRetired() {
+		t.Error("the session on the denied endpoint A still answers calls after the row returned")
+	}
+	if got := fixture.set.session("docs"); got != nil {
+		t.Errorf("the holder still carries %p for docs after A's deny; want no live entry", got)
+	}
+	return fixture, onA, spy, finished
+}
+
+// A `url-safety:` deny of the endpoint a server is still connected on closes that session on the
+// keystroke, though its config is already on another, still-admitted endpoint: the dial to that one
+// is left to land, and docs ends connected on B.
+func TestURLSafetyDenyOfTheLiveEndpointRetiresItWhileTheNewDialLands(t *testing.T) {
+	t.Parallel()
+	dial := newGatedDial("docs")
+	fixture, onA, spy, finished := denyLiveEndpointThroughURLSafety(t, dial)
+	close(dial.release)
+	awaitClosed(t, finished, "the dial to B to return")
+
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if got := fixture.set.session("docs"); got != mcpSession(dial.session) {
+		t.Errorf("docs is on %p, want the session on B (%p)", got, dial.session)
+	}
+	if !onA.isClosed() {
+		t.Error("the session on the denied endpoint A was left open")
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+}
+
+// A dial to the new endpoint that fails after the row denied the live one leaves docs absent and
+// retryable — never on the denied session, which no failed dial may keep or bring back.
+func TestURLSafetyDenyOfTheLiveEndpointLeavesAFailedNewDialRetryable(t *testing.T) {
+	t.Parallel()
+	dial := newGatedDial("docs")
+	dial.err = errors.New("dial: connection refused")
+	fixture, onA, spy, finished := denyLiveEndpointThroughURLSafety(t, dial)
+	close(dial.release)
+	awaitClosed(t, finished, "the dial to B to return")
+
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if got := fixture.set.session("docs"); got != nil {
+		t.Errorf("docs is on %p after B's dial failed, want no session: A is denied", got)
+	}
+	if !onA.isClosed() {
+		t.Error("the session on the denied endpoint A was left open")
+	}
+	if names := toolNames(fixture.set.tools()); len(names) != 0 {
+		t.Errorf("live MCP tools = %v, want none", names)
+	}
+	if !fixture.set.hasFailedDial() {
+		t.Fatal("the failed dial to B is not marked failed: the retry gesture cannot bring docs back")
+	}
+	dial.err = nil
+	if _, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{
+		{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://b.example.com/"},
+	}, fixture.tools, spy); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
 	if got := fixture.set.session("docs"); got != mcpSession(dial.session) {
 		t.Errorf("docs is on %p after the retry, want the session on B (%p)", got, dial.session)
 	}

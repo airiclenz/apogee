@@ -627,8 +627,8 @@ tool set around the new guard; that swap waits for the session to be idle, so a 
 mid-turn is reported on the row and re-committing retries it. The connected MCP servers follow the
 same edit: an `sse` or `streamable-http` endpoint your new lists close is disconnected there and
 then, and the row names it (`mcp server docs disconnected — its endpoint is denied`). The rest of
-your servers keep their connections, and an edit that closes no configured endpoint leaves every
-one of them untouched. A server your new lists open again is dialled in the background, and its
+your servers keep their connections, and an edit that closes no endpoint a server is configured or
+connected on leaves every one of them untouched. A server your new lists open again is dialled in the background, and its
 outcome arrives as a transcript note of its own (`mcp docs connected`). Webhook Reactions are the exception: a running session's own webhooks keep
 the lists it started with, so an edit reaches them at the next start — while a `/schedule` firing
 raised after the edit composes its webhooks from the new lists, as it does its tools. The block is

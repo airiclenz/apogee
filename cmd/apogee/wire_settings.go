@@ -1657,8 +1657,10 @@ func (r mcpReadmit) refused(err error) error {
 // denyMCP is the MCP half of a `url-safety:` edit that runs before the host lists move: it partitions
 // the layered `mcp-servers:` set (mcp.Admit) under the lists the set is on (before) and under the
 // lists the edit lands (after), and marks closed now every server the edit newly denies
-// (liveMCP.retire) — retired, its dial cancelled, its session closed off the loop. It returns the
-// plan readmitMCP finishes once the lists are in force.
+// (liveMCP.retire) — retired, its dial cancelled, its session closed off the loop. A live session
+// whose own endpoint the after lists deny closes now as well, whatever endpoint its server is
+// configured on (liveMCP.dropDenied), while a dial to a configured endpoint they still admit is left
+// to land. It returns the plan readmitMCP finishes once the lists are in force.
 //
 // It exists because the two surfaces the `url-safety:` lists bind are reached differently. Every
 // network tool is handed the guard at construction, so the swap door puts the new lists in force the
@@ -1698,6 +1700,12 @@ func (a settingsApplier) denyMCP(before, after toolSetSpec) mcpReadmit {
 	}
 	if len(retired) > 0 {
 		a.mcp.retire(retired)
+	}
+	// A server whose configured endpoint the lists still admit may yet be connected on one they now
+	// close — its dial to the configured endpoint still in flight. That session closes now too, and
+	// the dial is left to land: it must not wait for the dial, nor survive the dial failing.
+	for _, name := range a.mcp.dropDenied(mcpGuard(after.allowHosts, after.denyHosts)) {
+		note.WriteString("; mcp server " + name + " disconnected — its endpoint is denied")
 	}
 	plan.denyNote = note.String()
 	return plan

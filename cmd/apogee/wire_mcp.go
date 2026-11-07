@@ -298,6 +298,29 @@ func (m *liveMCP) dropLiveLocked(name string) {
 	m.needsRebuild = true
 }
 
+// dropDenied closes, now, every live session whose OWN endpoint guard denies — whatever endpoint its
+// server is configured on — and returns their names in config order. Each one is retired at once,
+// dropped from the installed set and closed off the loop (dropLiveLocked), while a dial in flight for
+// its server is left to land, or to fail into hasFailed, which retry-failed re-dials. It is the deny
+// half of a `url-safety:` edit for a server already moving off the endpoint the edit closes: the deny
+// takes effect on the keystroke (ADR 0109 decision 5), and a dial to the still-admitted endpoint that
+// fails can never keep or bring back the session on the denied one.
+func (m *liveMCP) dropDenied(guard security.URLGuard) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.isStopped {
+		return nil
+	}
+	var dropped []string
+	for _, name := range slices.Clone(m.order) {
+		if !mcpAdmits(m.entries[name].config, guard) {
+			m.dropLiveLocked(name)
+			dropped = append(dropped, name)
+		}
+	}
+	return dropped
+}
+
 // retire marks the servers named names closed now and drops them from the last-requested set —
 // request's removal path, with no request behind it: each one's tools are refused from here on
 // (mcpSession.Retire), its in-flight dial is cancelled, its session closes off the loop, and its tools
