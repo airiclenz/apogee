@@ -247,7 +247,11 @@ internal/tui/transcript.go — transcript.addEphemeralNote; internal/tui/engineh
 **Depends on:** item 4
 **Commit:** `feat(tui): dial MCP servers on Cmds and commit them at the idle point`
 
-## 6. TUI: busy word and quit for in-flight dials
+## 6. TUI: busy word and quit for in-flight dials — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): consequential edit — internal/tui/doc.go: made necessary by the new busy wait (busy.go narration lists every wait) and the quit latch (mcpreconnect.go map entry now names `Model.stopMCP`).
+NOTES (2026-11-07): `Model.stopMCP` (mcpreconnect.go) is called once at the head of `quitSession`, after the workflow-prompt dismissal and ahead of all three exits, so a single call covers every exit; it calls `CancelMCPDials` and sets `mcpState.stopped`, which `mcpAfterFold` checks ahead of both gates.
+NOTES (2026-11-07): the busy word follows the goal literally (`inFlight > 0`); it is not suppressed after a quit, so a cancelled dial still folding back during a deferred quit may show `reconnecting MCP…` until its done Msg lands.
+NOTES (2026-11-07): `fakeMCPHost.CancelMCPDials` now counts calls (`cancelCount`), and `queuedCount` reports untaken dials; `TestBusyMCPRanksBelowConnecting` also pins the rank above a pop-up's loading row.
 
 **What:**
 **Goal:** while `inFlight > 0` the idle status line shows the busy indicator with `MCPReconnectingNote`, ranked below `connecting…` and above a pop-up's loading row. A quit calls `CancelMCPDials` on every exit of `quitSession`; after it no dial starts and nothing commits.

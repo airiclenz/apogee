@@ -13,9 +13,9 @@ import (
 // A Turn narrates itself: the running row's spinner, phrase and clock. Outside a Turn the session can
 // still be WAITING — a launcher verb in flight (actuation.go), a footer git action (gitactions.go), a
 // /sessions record being read (sessions.go), a bare /rename's naming call (autotitle.go), a wired
-// heartbeat that has not bound a model yet — and on a slow box such a wait can run for a minute or
-// more. Each already has its word ("loading qwen3…", "git pull…", "naming this session…",
-// "connecting…"), but a word that never moves reads as a frozen screen, so while the session is idle
+// heartbeat that has not bound a model yet, an MCP server's dial (mcpreconnect.go) — and on a slow
+// box such a wait can run for a minute or more. Each already has its word ("loading qwen3…",
+// "git pull…", "naming this session…", "connecting…", "reconnecting MCP…"), but a word that never moves reads as a frozen screen, so while the session is idle
 // the status line carries the wait in the running row's shape: `<glyph> <phrase> · <clock>`. A pop-up
 // still reading what it lists — the /sessions browser before its listing, the /workflows item view
 // before its item — is a wait too, but one its own loading row narrates (popupLoading): the chain
@@ -34,9 +34,10 @@ const sessionLoadPhrase = "loading session…"
 // reports false when there is none. The sources rank most specific first: an actuation in flight
 // ("loading <profile>…", the footer's own word, outranking connecting exactly as it does in
 // [Model.upstreamSegments]), then a footer git action (the `git <verb>…` its start notes), a
-// /sessions record load, a bare /rename's naming call, connecting, and last a pop-up's loading row.
-// Each is read from the latch that already records it — the git action and session load holds
-// (engineholds.go), the naming flag, the pane's own loading state — never a mirrored one. The branch listing that opens switch branch is held as a git
+// /sessions record load, a bare /rename's naming call, connecting, an MCP server's dial in flight,
+// and last a pop-up's loading row. Each is read from the latch that already records it — the git
+// action and session load holds (engineholds.go), the naming flag, the count of MCP dials running
+// off the loop (mcpState), the pane's own loading state — never a mirrored one. The branch listing that opens switch branch is held as a git
 // action too, but it is no `git switch…`: it switches nothing, notes nothing and lands in a moment,
 // so it is no busy wait.
 //
@@ -45,6 +46,10 @@ const sessionLoadPhrase = "loading session…"
 // waiting on a first beat but refused (the footer says offline beside it), and a pre-bound one has no
 // server for a beat to reach until the human picks one (ADR 0036); [ServerActs.CanObserve] holds in
 // both, so without the narrowing an idle session in either would tick forever for nothing.
+//
+// An MCP dial in flight is one word whatever the count of servers dialling ([MCPReconnectingNote],
+// ADR 0109). It ranks below connecting: with no model bound the session cannot run a Turn at all,
+// which is the wait that matters more, while the dials only change which tools the next Turn sees.
 //
 // A pop-up loading row (popupLoading) is the one source with NO phrase: ok with an empty phrase. The
 // row says `loading…` beside its own glyph, so a second word in the status line would narrate the
@@ -65,6 +70,9 @@ func (m Model) busyWait() (phrase string, ok bool) {
 	}
 	if m.opts.Model == "" && m.observesUpstream() && !m.hb.offline && !m.prebound() {
 		return connectingLabel, true
+	}
+	if m.mcp.inFlight > 0 {
+		return MCPReconnectingNote, true
 	}
 	if (m.sessionBrowser.open && m.sessionBrowser.loading) || m.workflowsPane.itemLoading() {
 		return "", true

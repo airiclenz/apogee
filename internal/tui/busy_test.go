@@ -356,6 +356,64 @@ func busyLeft(m Model) string {
 	return ansiPattern.ReplaceAllString(m.statusLeft(), "")
 }
 
+// An MCP server's dial in flight is a busy wait: the status line carries the glyph,
+// "reconnecting MCP…" and the clock from the fold that starts the dial, the chain turns, and the
+// dial's done Msg clears the slot.
+func TestBusyMCPReconnect(t *testing.T) {
+	t.Parallel()
+	host := &fakeMCPHost{}
+	m := mcpModel(t, host)
+	gate := make(chan struct{})
+	host.queue(gatedDial(gate))
+
+	m, cmd := startQueuedDials(t, m)
+	done := runCmdTree(cmd)
+
+	if want := plainGlyph(m) + " " + MCPReconnectingNote + " · "; !strings.Contains(busyLeft(m), want) {
+		t.Errorf("status line = %q while dialling, want it to carry %q", busyLeft(m), want)
+	}
+	if !m.spin.isLive {
+		t.Fatal("the dial began with no spinner chain alive")
+	}
+
+	close(gate)
+	m = landDialFrom(t, m, done)
+	if left := busyLeft(m); strings.Contains(left, MCPReconnectingNote) {
+		t.Errorf("status line = %q once the dial landed, want the wait gone from it", left)
+	}
+	if m.busySince != (busyClock{}) {
+		t.Errorf("busy clock after the dial = %+v, want it cleared", m.busySince)
+	}
+}
+
+// An MCP dial ranks below connecting — with no model bound, that is the wait the status line names —
+// and above a pop-up's loading row, which carries no word of its own.
+func TestBusyMCPRanksBelowConnecting(t *testing.T) {
+	t.Parallel()
+	host := &fakeMCPHost{}
+	opts := unbound(testOpts)
+	opts.MCP = host
+	m := wireRebind(t, opts, &fakeHeartbeat{}, &fakeRebind{})
+	host.queue(instantDial)
+	m = step(t, m, keyRune('x')) // the tail starts the dial; its Cmd is never run, so it stays in flight
+	if m.mcp.inFlight != 1 {
+		t.Fatalf("setup: in flight %d, want the dial started", m.mcp.inFlight)
+	}
+
+	if phrase, _ := m.busyWait(); phrase != connectingLabel {
+		t.Errorf("busy wait = %q while connecting and dialling, want %q", phrase, connectingLabel)
+	}
+
+	bound := foldBeatMsg(t, m, upBeat("served-model", 32768))
+	if bound.opts.Model == "" {
+		t.Fatal("precondition: the beat bound no model")
+	}
+	bound.sessionBrowser.open, bound.sessionBrowser.loading = true, true
+	if phrase, ok := bound.busyWait(); !ok || phrase != MCPReconnectingNote {
+		t.Errorf("busy wait = %q (%t) once bound with a pop-up loading, want %q", phrase, ok, MCPReconnectingNote)
+	}
+}
+
 // A /sessions record load is a busy wait from the ⏎ that issues it until its record lands: the status
 // line carries the glyph, "loading session…" and the clock, and the restore clears the slot.
 func TestBusySessionLoad(t *testing.T) {

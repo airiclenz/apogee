@@ -591,7 +591,7 @@
 //
 // busy.go turns that same chain for an IDLE session that is waiting on something slow — a launcher
 // verb in flight, a footer git action, a /sessions record load, a bare /rename's naming call, a
-// heartbeat that has not bound a model yet: [Model.busyWait] derives the wait from those latches at
+// heartbeat that has not bound a model yet, an MCP server's dial: [Model.busyWait] derives the wait from those latches at
 // call time (never a mirrored flag), the status line carries it in the running row's shape (glyph,
 // the word apogee already shows for the wait, a clock from [busyClock]), and Update's tail
 // arms the chain once when such a wait finds none alive (busyAfterFold). A pop-up still loading its
@@ -963,7 +963,8 @@
 // each action runs off the loop under holdGitAction and folds as [Model.foldGitActionDone]; mcpreconnect.go
 // the [MCPHost] seam the live MCP servers reconnect through one by one (ADR 0109): Update's tail
 // (mcpAfterFold, after wakeAfterFold and before busyAfterFold) runs each queued dial as a Cmd and
-// commits the finished ones once the engine is free for a tool swap, writing each outcome's note;
+// commits the finished ones once the engine is free for a tool swap, writing each outcome's note,
+// until a quit cancels the dials and stops both ([Model.stopMCP]);
 // theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps

@@ -2787,13 +2787,17 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 	return next, tea.Batch(redeliver, gitRead, cmd)
 }
 
-// quitSession is quit past the watch: the prompt-pane dismissal, the busy stop or the closing flush.
+// quitSession is quit past the watch: the prompt-pane dismissal, the MCP dials' stop, the busy stop
+// or the closing flush.
 func (m Model) quitSession() (tea.Model, tea.Cmd) {
 	// A background workflow's prompt pane stands at idle with no worker to wait for: it goes back
 	// to the engine's queue first, so the quit is the idle one below.
 	if m.workflowPromptOrigin() != nil {
 		m, _ = m.dismissWorkflowPrompt()
 	}
+	// Every exit below is the program leaving, so the MCP dials stop here, ahead of all three: the
+	// immediate one never sets quitting, which the holdQuitting gates alone would miss.
+	m.stopMCP()
 	if m.busy() {
 		// A quit is the program leaving, so the cancel carries that cause and the engine settles
 		// the run without folding a single delegation (ADR 0088).

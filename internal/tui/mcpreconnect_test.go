@@ -22,6 +22,7 @@ type fakeMCPHost struct {
 	outcomes     []MCPOutcome
 	pending      bool
 	commits      int
+	cancels      int
 }
 
 func (f *fakeMCPHost) TakeMCPWork() ([]MCPDial, bool) {
@@ -39,8 +40,12 @@ func (f *fakeMCPHost) CommitMCP() ([]MCPOutcome, bool) {
 	return f.outcomes, f.pending
 }
 
-// CancelMCPDials is a no-op: the dials these tests queue end through their own gates.
-func (f *fakeMCPHost) CancelMCPDials() {}
+// CancelMCPDials only counts the call: the dials these tests queue end through their own gates.
+func (f *fakeMCPHost) CancelMCPDials() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancels++
+}
 
 // queue adds dials for the next TakeMCPWork; with none, it queues removal-only work (a commit
 // wanted with no dial behind it).
@@ -62,6 +67,19 @@ func (f *fakeMCPHost) commitCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.commits
+}
+
+func (f *fakeMCPHost) cancelCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancels
+}
+
+// queuedCount is how many dials wait for the next TakeMCPWork.
+func (f *fakeMCPHost) queuedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.dials)
 }
 
 // gatedDial is a dial that blocks until gate is closed or its ctx is cancelled.
@@ -301,5 +319,49 @@ func TestMCPNilHostIsInert(t *testing.T) {
 
 	if m.mcp != (mcpState{}) {
 		t.Errorf("MCP state %+v unwired, want zero", m.mcp)
+	}
+}
+
+// TestMCPQuitCancelsDialsAndCommitsNothing: each of quitSession's exits — the busy stop, the
+// deferred flush and the idle immediate one, which never sets quitting — cancels the dials in
+// flight, and after it a dial's done Msg commits nothing and a later fold takes no queued work.
+func TestMCPQuitCancelsDialsAndCommitsNothing(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, m *Model)
+	}{
+		{name: "busy stop", setup: func(t *testing.T, m *Model) { startStubWorker(t, m) }},
+		{name: "deferred flush", setup: func(_ *testing.T, m *Model) { m.writeBusy = true }},
+		{name: "idle immediate", setup: func(*testing.T, *Model) {}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			host := &fakeMCPHost{}
+			m := mcpModel(t, host)
+			host.queue(instantDial)
+			m, _ = startQueuedDials(t, m)
+			if m.mcp.inFlight != 1 {
+				t.Fatalf("setup: in flight %d, want the dial started", m.mcp.inFlight)
+			}
+			tc.setup(t, &m)
+
+			m, _ = ctrlCQuit(t, m)
+
+			if host.cancelCount() != 1 || !m.mcp.stopped {
+				t.Fatalf("cancels %d, stopped %t after the quit; want 1 and true", host.cancelCount(), m.mcp.stopped)
+			}
+			m = step(t, m, mcpDialDoneMsg{})
+			if host.commitCount() != 0 {
+				t.Errorf("commits %d after a dial landed past the quit, want 0", host.commitCount())
+			}
+			host.queue(instantDial)
+			m = step(t, m, keyRune('x'))
+			if host.queuedCount() != 1 || host.commitCount() != 0 {
+				t.Errorf("queued %d, commits %d after a later fold; want the work left untaken and no commit",
+					host.queuedCount(), host.commitCount())
+			}
+		})
 	}
 }

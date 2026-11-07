@@ -48,6 +48,10 @@ type mcpState struct {
 	// uncommitted reports that a dial finished, or removal-only work was taken, and no commit has
 	// landed it yet — including a commit the host answered pending.
 	uncommitted bool
+	// stopped latches the quit: the dials were cancelled, and from then on no dial starts and
+	// nothing commits. It is its own latch because quitSession's immediate exit never sets
+	// quitting, so the holdQuitting gates alone would not cover it.
+	stopped bool
 }
 
 // mcpDialDoneMsg is one dial Cmd's return: the dial has stored its result on the host.
@@ -57,10 +61,11 @@ type mcpDialDoneMsg struct{}
 // start it takes the host's queued work and runs each dial as a Cmd under the program context, and
 // while the engine is free for a tool swap it commits what has finished. Asking here rather than at
 // a list of sites is what makes the commit land at whichever fold first leaves the engine free —
-// every engine release included — and what starts a dial requested mid-Turn at once.
+// every engine release included — and what starts a dial requested mid-Turn at once. After a quit
+// ([Model.stopMCP]) it does neither, whichever of the quit's exits was taken.
 func mcpAfterFold(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	m, ok := next.(Model)
-	if !ok || m.opts.MCP == nil {
+	if !ok || m.opts.MCP == nil || m.mcp.stopped {
 		return next, cmd
 	}
 	holds := m.engineHolds()
@@ -111,6 +116,17 @@ func (m Model) foldMCPDialDone() (tea.Model, tea.Cmd) {
 	}
 	m.mcp.uncommitted = true
 	return m, nil
+}
+
+// stopMCP is the quit's half of the MCP reconnect: it cancels every dial in flight and latches
+// stopped, so no later fold starts a dial or commits one. The teardown that closes the servers runs
+// after the program returns, outside the Model. Unwired, it is inert.
+func (m *Model) stopMCP() {
+	if m.opts.MCP == nil {
+		return
+	}
+	m.opts.MCP.CancelMCPDials()
+	m.mcp.stopped = true
 }
 
 // commitMCP lands the finished work and writes each outcome's note, verbatim and display-only. A
