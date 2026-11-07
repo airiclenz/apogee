@@ -181,10 +181,11 @@ func (m *liveMCP) session(name string) mcpSession {
 // request moves the holder's intent onto servers (ADR 0109). It runs on its caller and dials nothing.
 //
 // It validates the whole set first (mcp.ValidateServers), as startup does before its first dial, and
-// a refusal touches nothing. Then a server no longer configured, or whose live endpoint guard now
-// denies, is marked closed at once: its tools are refused from here on (mcpSession.Retire), its
-// in-flight dial is cancelled, and its session closes off the loop; its tools leave the registry at
-// the next commit. Every other server is diffed against the LAST-REQUESTED set — its resolved
+// a refusal touches nothing. Then a server no longer configured is marked closed at once: its tools
+// are refused from here on (mcpSession.Retire), its in-flight dial is cancelled, and its session
+// closes off the loop; its tools leave the registry at the next commit. A server whose live endpoint
+// guard now denies has that session closed the same way, but a dial in flight for a config guard
+// still admits — the server moved off the denied endpoint — is left to land. Every other server is diffed against the LAST-REQUESTED set — its resolved
 // ServerConfig and its admit verdict under guard — so a server whose first dial failed is dialled
 // again only when its own config or verdict moves, or when retryFailed asks for every server whose
 // last dial failed (the `mcp-servers` row's retry gesture, ADR 0109 decision 7). A server that moved
@@ -241,8 +242,11 @@ func (m *liveMCP) requestServerLocked(server mcp.ServerConfig, guard security.UR
 	}
 	live, isLive := m.entries[server.Name]
 	if isLive && !mcpAdmits(live.config, guard) {
-		// The lists now close the endpoint the server is connected on: the deny takes effect now.
-		m.disconnectLocked(server.Name)
+		// The lists now close the endpoint the server is connected on: the deny takes effect now. It
+		// closes that session alone — a dial already running for a config the lists still admit is
+		// left to land (or to fail into hasFailed, which retry-failed re-dials); the diff below drops
+		// it only when the server's own config or verdict moved.
+		m.dropLiveLocked(server.Name)
 		isLive = false
 	}
 	isAdmitted := mcpAdmits(server, guard)
@@ -269,12 +273,19 @@ func (m *liveMCP) requestServerLocked(server mcp.ServerConfig, guard security.UR
 }
 
 // disconnectLocked marks the server named name closed: any dial for it is superseded, and its live
-// entry, if any, is retired at once, dropped from the installed set and closed off the loop. The next
-// commit rebuilds the registry without it. The caller holds the lock.
+// entry, if any, is dropped (dropLiveLocked). The caller holds the lock.
 func (m *liveMCP) disconnectLocked(name string) {
 	if state := m.servers[name]; state != nil {
 		m.supersedeLocked(name, state)
 	}
+	m.dropLiveLocked(name)
+}
+
+// dropLiveLocked closes the live entry of the server named name, if any, and nothing else: it is
+// retired at once, dropped from the installed set and closed off the loop, while any dial for the
+// server is left as it is. The next commit rebuilds the registry without it. The caller holds the
+// lock.
+func (m *liveMCP) dropLiveLocked(name string) {
 	live, isLive := m.entries[name]
 	if !isLive {
 		return

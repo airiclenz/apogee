@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -569,6 +570,116 @@ func TestLiveMCPNewerRequestCancelsTheInFlightDial(t *testing.T) {
 	}
 	if got := fixture.set.session("docs"); got != mcpSession(dial.sessions["docs-mcp-v3"]) {
 		t.Errorf("docs is on %p, want the v3 session", got)
+	}
+}
+
+// gatedDial is a connect seam that holds every dial until release is closed, whatever its context
+// does, then answers with session — or with err when it is set. entered closes when the first dial
+// starts.
+type gatedDial struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	err     error
+	session *fakeMCPSession
+}
+
+func newGatedDial(name string) *gatedDial {
+	return &gatedDial{
+		entered: make(chan struct{}), release: make(chan struct{}),
+		session: &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: name + "__tool"}}},
+	}
+}
+
+func (d *gatedDial) connect(_ context.Context, _ mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+	d.once.Do(func() { close(d.entered) })
+	<-d.release
+	if d.err != nil {
+		return nil, d.err
+	}
+	return d.session, nil
+}
+
+// denyOldEndpointMidDial moves docs from host A to host B, and — while B's dial is held in dial —
+// denies A the way a `url-safety:` edit does: the live lists move, then the admitted set is requested
+// under them. It releases the dial and returns once the job has returned, with nothing committed yet.
+func denyOldEndpointMidDial(t *testing.T, dial *gatedDial) (*mcpFixture, *fakeMCPSession, *applySettingSpy) {
+	t.Helper()
+	onB := mcp.ServerConfig{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://b.example.com/"}
+	docs, onA := liveServer(mcp.ServerConfig{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://a.example.com/"})
+	fixture := newMCPFixtureDialling([]mcpEntry{docs}, "", dial.connect)
+	spy := &applySettingSpy{}
+	if err := fixture.set.request([]mcp.ServerConfig{onB}, openGuard, false); err != nil {
+		t.Fatalf("request B: %v", err)
+	}
+	finished := runJobsAsync(fixture.set.takeWork())
+	awaitClosed(t, dial.entered, "the dial to B to start")
+
+	deny := []string{"a.example.com"}
+	if err := fixture.tools.setDenyHosts(deny, spy); err != nil {
+		t.Fatalf("setDenyHosts: %v", err)
+	}
+	if err := fixture.set.request([]mcp.ServerConfig{onB}, mcpGuard(nil, deny), false); err != nil {
+		t.Fatalf("request under the deny: %v", err)
+	}
+	if fixture.set.session("docs") != nil {
+		t.Error("the session on the denied endpoint A still serves after the deny")
+	}
+	close(dial.release)
+	awaitClosed(t, finished, "the dial to B to return")
+	return fixture, onA, spy
+}
+
+// A deny of a server's OLD endpoint closes the session on it and nothing else: the dial already
+// running for the new, still-admitted endpoint lands at the next commit, so the server ends
+// connected on B.
+func TestLiveMCPDenyOfTheOldEndpointKeepsTheDialToTheNewOne(t *testing.T) {
+	t.Parallel()
+	dial := newGatedDial("docs")
+	fixture, onA, spy := denyOldEndpointMidDial(t, dial)
+
+	outcomes, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if got := fixture.set.session("docs"); got != mcpSession(dial.session) {
+		t.Errorf("docs is on %p, want the session on B (%p)", got, dial.session)
+	}
+	if dial.session.isClosed() {
+		t.Error("the session on B was closed")
+	}
+	if !onA.isClosed() {
+		t.Error("the session on the denied endpoint A was left open")
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+}
+
+// A dial to the new endpoint that survived the old endpoint's deny and then failed is a failed dial
+// like any other: the retry gesture re-dials it and the server comes back on B.
+func TestLiveMCPDenyOfTheOldEndpointLeavesAFailedNewDialRetryable(t *testing.T) {
+	t.Parallel()
+	dial := newGatedDial("docs")
+	dial.err = errors.New("dial: connection refused")
+	fixture, _, spy := denyOldEndpointMidDial(t, dial)
+	if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if !fixture.set.hasFailedDial() {
+		t.Fatal("the failed dial to B is not marked failed: the retry gesture cannot bring docs back")
+	}
+	dial.err = nil
+
+	if _, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{
+		{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://b.example.com/"},
+	}, fixture.tools, spy); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+
+	if got := fixture.set.session("docs"); got != mcpSession(dial.session) {
+		t.Errorf("docs is on %p after the retry, want the session on B (%p)", got, dial.session)
 	}
 }
 
