@@ -326,7 +326,10 @@ cmd/apogee/configwatch_apply_test.go — TestWatchedBrokenProjectConfigDropsAdop
 **Depends on:** item 6
 **Commit:** `fix(settings): an mcp-servers save dials off the Update loop`
 
-## 8. Adoption and rejection request per-server dials
+## 8. Adoption and rejection request per-server dials — ✅ DONE (2026-11-07)
+NOTES (2026-11-07): re-derived from the assumption that a dial job taken with `TakeMCPWork` before `RejectRules` and run after it still connects: `liveMCP.startDial` refuses a stale-generation job before it reaches the connect seam, so `TestProjectRuleRejectSupersedesAnInFlightAdoptionDial` runs the taken dial on a goroutine, holds it inside the connect seam, rejects (asserting the dial's context is cancelled), then releases it and calls `CommitMCP` — the returned session is closed, and no wiki tool or outcome lands.
+NOTES (2026-11-07): consequential edit — cmd/apogee/wire_mcp.go: made necessary by deleting `reconnectMCPFrom` (the `mcpRowFailures` doc named it as its caller; it now names `liveMCP.reconnect`).
+NOTES (2026-11-07): `answerProjectRules`' doc in cmd/apogee/projectrules.go reworded too (its installSnapshot error is now a refused server-set request, not a server the session could not move onto) — the grep the item names found it.
 
 **What:**
 **Goal:** `applyMovedKinds` puts a moved MCP set into force through `requestMCPFrom`. It never turns an MCP outcome or note into an `AdoptRules` / `RejectRules` error, the answer returns at once, and a moved-pin skip reaches the transcript as that server's note. `reconnectMCPFrom` is gone. The reactions reload in the same answer stays synchronous, in its current order.

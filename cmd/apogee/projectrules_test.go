@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1027,9 +1028,9 @@ func proposedOnly(t *testing.T, host configHost, kind apogee.ProposalKind) []apo
 }
 
 // A repo server is adopted only as the file holds it at the answer: an edit after the pane offered
-// it refuses the yes by name and dials nothing, and the entry as it stands now, adopted, is dialled
-// at once — marked as the project's — with no watcher report needed, since apogee's own record
-// write re-takes the baseline.
+// it refuses the yes by name and requests no dial, and the entry as it stands now, adopted, is
+// dialled at the idle point that follows — marked as the project's — with no watcher report needed,
+// since apogee's own record write re-takes the baseline.
 func TestProjectRuleAdoptsARepoServerTheFileHolds(t *testing.T) {
 	t.Parallel()
 	srv := scriptedTerminalModel(t)
@@ -1050,6 +1051,11 @@ func TestProjectRuleAdoptsARepoServerTheFileHolds(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no longer holds the mcp-server entry `wiki` as it was offered") {
 		t.Fatalf("AdoptRules of the stale offer = %v, want the refusal naming the entry", err)
 	}
+	// The idle point runs whatever the refused answer queued, so the check below cannot pass only
+	// because nothing has run the dials yet.
+	if _, err := drainMCP(t, fixture.set, fixture.tools, w.engine); err != nil {
+		t.Fatalf("drain after the refused adoption: %v", err)
+	}
 	if len(dialled) != 0 {
 		t.Fatalf("a refused adoption dialled %+v", dialled)
 	}
@@ -1057,8 +1063,11 @@ func TestProjectRuleAdoptsARepoServerTheFileHolds(t *testing.T) {
 	if err := host.AdoptRules(proposedOnly(t, host, apogee.ProposalMCPServer)); err != nil {
 		t.Fatalf("AdoptRules: %v", err)
 	}
+	if _, err := drainMCP(t, fixture.set, fixture.tools, w.engine); err != nil {
+		t.Fatalf("drain after the adoption: %v", err)
+	}
 	if len(dialled) != 1 {
-		t.Fatalf("dialled %d times, want the one reconnect the adoption drives", len(dialled))
+		t.Fatalf("dialled %d times, want the one dial the adoption requests", len(dialled))
 	}
 	i := slices.IndexFunc(dialled[0], func(s mcp.ServerConfig) bool { return s.Name == "wiki" })
 	if i < 0 || !dialled[0][i].Project || dialled[0][i].Endpoint != "https://wiki.example.org/mcp" {
@@ -1068,6 +1077,106 @@ func TestProjectRuleAdoptsARepoServerTheFileHolds(t *testing.T) {
 		t.Errorf("ProposedRules after adopting = %+v, %v; want none", after, err)
 	}
 	assertNoReloadedKey(t, host)
+}
+
+// An adoption that moves the server set only requests the dial (ADR 0109 decision 8): the answer
+// returns with the connect seam never entered, and the dial waits on the wiring as work for the
+// TUI to run off its Update loop.
+func TestProjectRuleAdoptionRequestsADialWithoutDialling(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	var entered atomic.Int32
+	fixture := newMCPFixtureDialling(nil, "",
+		func(_ context.Context, _ mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+			entered.Add(1)
+			return &fakeMCPSession{}, nil
+		})
+	w.mcpSet, w.toolSet = fixture.set, fixture.tools
+	host := configHost{w: w}
+	writeProjectConfig(t, w.roots.project, projectWikiServerYAML)
+
+	err := host.AdoptRules(proposedOnly(t, host, apogee.ProposalMCPServer))
+
+	if err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+	if got := entered.Load(); got != 0 {
+		t.Fatalf("the answer entered the connect seam %d times, want none — the dial runs off the loop", got)
+	}
+	dials, _ := w.TakeMCPWork()
+	if len(dials) != 1 {
+		t.Fatalf("the adoption queued %d dials, want the wiki server's one", len(dials))
+	}
+	dials[0](context.Background())
+	if got := entered.Load(); got != 1 {
+		t.Errorf("running the queued dial entered the connect seam %d times, want once", got)
+	}
+}
+
+// A rejection that lands while the adoption's dial is still in flight supersedes it: the dial's
+// context is cancelled, the session it returns anyway is closed, and the commit lands neither a
+// wiki tool nor an outcome — a superseded dial is silent (ADR 0109 decision 6).
+func TestProjectRuleRejectSupersedesAnInFlightAdoptionDial(t *testing.T) {
+	t.Parallel()
+	srv := scriptedTerminalModel(t)
+	w := projectRuleWiring(t, srv.URL, &e2eApprover{}, &e2eSink{})
+	session := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "wiki__search"}}}
+	dialCtx, release := make(chan context.Context, 1), make(chan struct{})
+	fixture := newMCPFixtureDialling(nil, "",
+		func(ctx context.Context, _ mcp.ServerConfig, _, _ []string) (mcpSession, error) {
+			dialCtx <- ctx
+			<-release
+			return session, nil
+		})
+	w.mcpSet, w.toolSet = fixture.set, fixture.tools
+	host := configHost{w: w}
+	writeProjectConfig(t, w.roots.project, projectWikiServerYAML)
+	wiki := proposedOnly(t, host, apogee.ProposalMCPServer)
+	if err := host.AdoptRules(wiki); err != nil {
+		t.Fatalf("AdoptRules: %v", err)
+	}
+	dials, _ := w.TakeMCPWork()
+	if len(dials) != 1 {
+		t.Fatalf("the adoption queued %d dials, want the wiki server's one", len(dials))
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		dials[0](context.Background())
+	}()
+	var ctx context.Context
+	select {
+	case ctx = <-dialCtx:
+	case <-time.After(testtime.Budget(30 * time.Second)):
+		t.Fatal("the adoption's dial never reached the connect seam")
+	}
+
+	err := host.RejectRules(wiki)
+
+	if err != nil {
+		t.Fatalf("RejectRules: %v", err)
+	}
+	if ctx.Err() == nil {
+		t.Error("the rejection left the adoption's dial running, want its context cancelled")
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(testtime.Budget(30 * time.Second)):
+		t.Fatal("the superseded dial never returned")
+	}
+	outcomes, _ := w.CommitMCP()
+	fixture.set.closes.Wait()
+	if !session.isClosed() {
+		t.Error("the superseded dial's session is still open, want it closed")
+	}
+	if len(outcomes) != 0 {
+		t.Errorf("the commit after the rejection answered %+v, want no outcome for a superseded dial", outcomes)
+	}
+	if names := toolNames(fixture.set.tools()); slices.Contains(names, "wiki__search") {
+		t.Errorf("the live set advertises %v, want no wiki tool after the rejection", names)
+	}
 }
 
 // Rejecting an adopted repo server moves the server set, but a wiring that holds no live MCP set

@@ -718,7 +718,7 @@ func mcpAdmits(server mcp.ServerConfig, guard security.URLGuard) bool {
 	return len(denied) == 0
 }
 
-// mcpRowFailures is what a synchronous reconnect that landed reports (reconnectMCPFrom): nil when
+// mcpRowFailures is what a synchronous reconnect that landed reports (liveMCP.reconnect): nil when
 // every dial answered, otherwise an error whose text is the failed servers' clauses joined by "; " —
 // the row that asked reads `saved — live apply failed: <server>: …` — and which still wraps each
 // cause.

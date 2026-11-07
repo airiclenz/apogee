@@ -118,8 +118,8 @@ func (w *rootWiring) addProjectRule(kind apogee.AllowRuleKind, text string) erro
 // config that cannot be re-read for the held check (nothing is recorded then), one refusal per
 // entry the file no longer holds as offered, the store's errors, a next snapshot that cannot be
 // loaded — the answer is recorded then, and nothing is installed — and installSnapshot's: a server
-// or reaction the session could not move onto, the answer recorded, and the next watched re-read
-// or start applies it.
+// set the session refuses to request or a reaction set it could not move onto, the answer recorded,
+// and the next watched re-read or start applies it.
 func (w *rootWiring) answerProjectRules(proposals []apogee.Proposal, adopt bool) error {
 	store, err := w.adoptionStore()
 	if err != nil {
@@ -292,20 +292,24 @@ func (w *rootWiring) installSnapshot(old, next project.Snapshot) error {
 }
 
 // applyMovedKinds puts the servers and reactions of layered into force when moved says their set
-// moved, through the doors a watched re-read of the layered set uses (settingsApplier.reconnectMCPFrom
-// and reloadReactionsFrom, ADR 0104 §12): the servers re-dialled, the reactions swapped onto their
-// lanes. A wiring that holds no live MCP set or engine (a Driver that composes none) has nothing to
-// move.
+// moved, through the doors a watched re-read of the layered set uses (settingsApplier.requestMCPFrom
+// and reloadReactionsFrom, ADR 0104 §12): a dial requested for each server the set adds or changes,
+// the reactions swapped onto their lanes. The request dials nothing here (ADR 0109 D8): the TUI runs
+// the dials off its Update loop and commits them at the next idle point, so the answer returns at
+// once and each server's outcome — a repo server skipped for a moved pin among them — reaches the
+// transcript as that server's note, never this answer's error. A wiring that holds no live MCP set
+// or engine (a Driver that composes none) has nothing to move.
 //
-// Errors: the reconnect's and the reload's, joined. The reconnect's is its whole-call refusal or each
-// server whose dial failed — a repo server skipped for a moved pin among them — as `<server>: …`
-// (settingsApplier.reconnectMCPFrom): the healthy servers landed, but that one is not in force, and
-// the answer's row is the one surface a mid-session adoption reports on.
+// Errors: the request's refusal of a set mcp.ValidateServers rejects (nothing is requested then) and
+// the reload's, joined.
 func (w *rootWiring) applyMovedKinds(moved project.Moved, layered config.Options) error {
 	applier := w.settingsApplier()
 	var errs []error
 	if moved.Servers && w.mcpSet != nil && w.toolSet != nil {
-		errs = append(errs, applier.reconnectMCPFrom(layered))
+		// The note is the `mcp-servers` row's; an answer has no such row, and the busy indicator
+		// shows the dials while they run.
+		_, err := applier.requestMCPFrom(layered, false)
+		errs = append(errs, err)
 	}
 	if moved.Reactions && w.engine != nil && w.live != nil {
 		errs = append(errs, applier.reloadReactionsFrom(layered))

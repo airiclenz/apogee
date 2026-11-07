@@ -2061,21 +2061,6 @@ func (a settingsApplier) requestMCPFrom(layered config.Options, retryFailed bool
 	return "", nil
 }
 
-// reconnectMCPFrom moves the session onto layered's `mcp-servers:` block synchronously, on its
-// caller — the adoption answers' path (applyMovedKinds), for a caller that already holds the resolved
-// layered set. It widens the scrub first
-// (widenSecretEnv) and reads no file. The error is the reconnect's whole-call refusal
-// (mcpReconnectFailed) or, when the reconnect landed, each failed server's `<server>: …` clause,
-// joined by "; " (mcpRowFailures) — a repo server skipped for a moved pin among them.
-func (a settingsApplier) reconnectMCPFrom(layered config.Options) error {
-	a.widenSecretEnv(layered)
-	outcomes, err := a.mcp.reconnect(layered.MCPServers, a.tools, a.engine)
-	if err != nil {
-		return err
-	}
-	return mcpRowFailures(outcomes)
-}
-
 // reloadReactions re-reads the `reactions:` block — layered: the global reactions plus the adopted
 // repo ones (layeredConfig, ADR 0104 §12) — and moves the session onto it (ADR 0073 §9, ADR 0076).
 // It is requestMCP's shape for requestMCP's reason — only the config files carry this key, so

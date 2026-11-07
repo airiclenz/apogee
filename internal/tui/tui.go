@@ -482,7 +482,8 @@ type ConfigHost interface {
 
 	// AdoptRules records the proposals the human accepted — the adoption pane's "adopt", for an
 	// Allow rule, a repo MCP server or a repo reaction alike (ADR 0104) — and brings them into force
-	// at once: an Allow rule into the effective set, a server dialled, a reaction onto its lane.
+	// at once: an Allow rule into the effective set, a server's dial started (its outcome arrives as
+	// that server's transcript note, never in this error), a reaction onto its lane.
 	// Only the record moves, and only for an entry the Project config still holds, pin for pin, at
 	// the moment of the answer: each one an edit changed or took out since it was offered is
 	// REPORTED by name in the error, and nothing is recorded for it.
