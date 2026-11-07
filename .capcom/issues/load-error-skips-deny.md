@@ -3,6 +3,7 @@ title: url-safety deny keeps denied MCP sessions when the config fails to load
 status: open
 type: bug
 priority: 2
+plan: 2026-11-07 - 01 - url-safety-mcp-deny-gaps-plan
 created: 2026-11-07T13:23:47Z
 ---
 
