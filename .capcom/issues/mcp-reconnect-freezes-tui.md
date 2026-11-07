@@ -24,3 +24,8 @@ A frozen frame on a slow box is indistinguishable from a hang (AGENTS.md: a slow
 - None of the three paths calls the MCP reconnect on the Update loop
 - The status line shows the busy indicator while a reconnect is in flight
 - A test drives a slow reconnect and sees keys still handled meanwhile
+
+## Log
+
+- 2026-11-07 Airic Lenz: Plan docs/plans/2026-11-07 - 00 - mcp-reconnect-off-loop-plan.md written (whole-set async reconnect, unexecuted). Owner then chose a per-server MCP connection redesign instead (needs an ADR superseding ADR 0037 D7 all-or-nothing); the plan is to be rewritten. Known: the live MCP holder is one mcp.Client per set with no per-server close.
+- 2026-11-07 Airic Lenz: 2026-11-07: per-server design grilled and recorded as ADR 0109 (amends ADR 0037 via adr-0037-amend-1107); the whole-set plan is being rewritten for it. mcp-swap-midturn-race lands first. /mcp status view split out as mcp-live-status-view.
