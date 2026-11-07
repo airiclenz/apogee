@@ -58,7 +58,9 @@ Recast at the regression check (2026-11-07). Fixes `denied-endpoint-no-redial` (
 - `capcom check`
 **Commit:** `fix(mcp): a url-safety deny that closes a failed server's kept session re-dials its configured endpoint`
 
-## 2. A url-safety deny closes denied MCP sessions when the config does not load
+## 2. A url-safety deny closes denied MCP sessions when the config does not load — ✅ DONE (2026-11-07)
+
+NOTES (2026-11-07): the extracted helper is settingsApplier.dropDeniedMCP(after toolSetSpec) string; the tests deny the fixture's own endpoint `mcp.example.com` (the plan's abstract "a.example.com"), resolving the server before breaking the file through a shared unparseableMCPFixture helper
 
 **What:**
 Fixes `load-error-skips-deny`. `settingsApplier.denyMCP` returns `mcpReadmit{loadErr: err}` before any drop when the layered config fails to load, so a live session on a newly denied endpoint keeps serving. That breaks ADR 0109 decision 5 (the deny lands on the keystroke). With item 1 in, the load-error path may queue a re-dial from the last-requested config, which is expected.

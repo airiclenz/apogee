@@ -1640,7 +1640,9 @@ type mcpReadmit struct {
 	// denyNote is the row's clause per server the edit newly denied, each `; mcp server <name>
 	// disconnected — …`, or "".
 	denyNote string
-	// loadErr is the layered config's read refusal; nothing was planned or retired under it.
+	// loadErr is the layered config's read refusal. No admitted set was planned and no configured
+	// server retired under it; only the live sessions on an endpoint the edit denies were closed
+	// (settingsApplier.dropDeniedMCP), and denyNote names them.
 	loadErr error
 }
 
@@ -1682,11 +1684,15 @@ func (a settingsApplier) denyMCP(before, after toolSetSpec) mcpReadmit {
 	}
 	// Only the config FILES name an MCP server (no flag, no environment variable), so the set to
 	// partition is read exactly as requestMCP reads it — the layered set, adopted repo servers
-	// included. A global file that no longer parses leaves the connections where they are and says
-	// so once the lists have moved: this half cannot fail the row.
+	// included. A global file that no longer parses plans and retires nothing, and says so once the
+	// lists have moved: this half cannot fail the row. The live sessions on an endpoint the edit
+	// denies still close on the keystroke (ADR 0109 decision 5) — that half reads the sessions, not
+	// the file — and a dial still in flight to a now-denied endpoint is closed by the commit's
+	// re-admit under the live lists, once those lists are in force: a refused swap leaves the old
+	// lists live, and that dial lands.
 	layered, err := a.layeredConfig()
 	if err != nil {
-		return mcpReadmit{loadErr: err}
+		return mcpReadmit{loadErr: err, denyNote: a.dropDeniedMCP(after)}
 	}
 	was, _ := mcp.Admit(layered.MCPServers, mcpGuard(before.allowHosts, before.denyHosts))
 	admitted, denied := mcp.Admit(layered.MCPServers, mcpGuard(after.allowHosts, after.denyHosts))
@@ -1703,15 +1709,27 @@ func (a settingsApplier) denyMCP(before, after toolSetSpec) mcpReadmit {
 	if len(retired) > 0 {
 		a.mcp.retire(retired)
 	}
-	// A server whose configured endpoint the lists still admit may yet be connected on one they now
-	// close — its dial to the configured endpoint still in flight, or already failed. That session
-	// closes now too, and the dial is left to land: it must not wait for the dial, nor survive the
-	// dial failing. A server whose dial already failed is dialled on its configured endpoint again.
+	note.WriteString(a.dropDeniedMCP(after))
+	plan.denyNote = note.String()
+	return plan
+}
+
+// dropDeniedMCP closes now every live MCP session whose own endpoint the after lists deny
+// (liveMCP.dropDenied) and returns the row's clause for each, `; mcp server <name> disconnected — its
+// endpoint is denied`, or "". A server whose configured endpoint the lists still admit may yet be
+// connected on one they now close — its dial to the configured endpoint still in flight, or already
+// failed. That session closes now too, and the dial is left to land: it must not wait for the dial,
+// nor survive the dial failing. A server whose dial already failed is dialled on its configured
+// endpoint again.
+//
+// It is the one half of denyMCP that needs no config file — it reads the live sessions and the
+// server's last-requested config, never the layered set — so it runs whether or not that file loads.
+func (a settingsApplier) dropDeniedMCP(after toolSetSpec) string {
+	var note strings.Builder
 	for _, name := range a.mcp.dropDenied(mcpGuard(after.allowHosts, after.denyHosts)) {
 		note.WriteString("; mcp server " + name + " disconnected — its endpoint is denied")
 	}
-	plan.denyNote = note.String()
-	return plan
+	return note.String()
 }
 
 // readmitMCP finishes a `url-safety:` edit's MCP half once the host lists are in force, and answers
@@ -1731,9 +1749,14 @@ func (a settingsApplier) denyMCP(before, after toolSetSpec) mcpReadmit {
 // edit is in force — so a refusal that came back as the row's error would report `saved — live apply
 // failed` about an edit that applied. A file that no longer parses, or a set the request refuses,
 // lands in the note instead, after the deny clauses.
+//
+// A file that no longer parses leaves one gap open: the retire half — a configured server the edit
+// newly denies, dropped from the last-requested set and its in-flight dial cancelled — needs the
+// layered set, so it is skipped and nothing is requested. Only the live sessions denyMCP closed
+// without the file are named.
 func (a settingsApplier) readmitMCP(plan mcpReadmit) string {
 	if plan.loadErr != nil {
-		return mcpNoteFor(mcpReconnectFailed(plan.loadErr))
+		return plan.denyNote + mcpNoteFor(mcpReconnectFailed(plan.loadErr))
 	}
 	if !plan.isMoved {
 		return plan.denyNote

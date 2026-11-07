@@ -4878,9 +4878,90 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 	}
 
 	// readmitMCP is the one caller that dresses the refusal rather than returning it: this half cannot
-	// fail the row, so a file it cannot parse leaves the connections where they are and says so.
+	// fail the row, so a file it cannot parse plans and retires no configured server and says so. With
+	// nothing denied, the note is the refusal alone.
 	if got, wantNote := a.readmitMCP(a.denyMCP(toolSetSpec{}, toolSetSpec{})), mcpNoteFor(mcpReconnectFailed(loadErr)); got != wantNote {
 		t.Errorf("readmitMCP note = %q, want %q", got, wantNote)
+	}
+}
+
+// unparseableMCPFixture is docs live on its own configured endpoint, resolved from a config file that
+// is then broken: the layered config refuses to load, and the server has no dial to queue.
+func unparseableMCPFixture(t *testing.T) (*mcpFixture, *fakeMCPSession, string, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
+	fixture := newMCPFixtureWith([]mcpEntry{{config: resolvedMCPServer(t, path, "docs"), session: old}}, "",
+		func([]mcp.ServerConfig) (mcpSession, error) { return &fakeMCPSession{}, nil })
+	writeSettingsFixture(t, path, "servers: [\n")
+	_, loadErr := config.LoadFileConfig(path, os.ReadFile, func(string) {})
+	if loadErr == nil {
+		t.Fatal("the fixture parses; want a file the loader refuses")
+	}
+	return fixture, old, path, loadErr
+}
+
+// A url-safety deny lands on the keystroke even when the config file does not parse (ADR 0109
+// decision 5): the live session on the newly denied endpoint is closed before Apply returns, and the
+// row names it before it reports the file it could not read.
+func TestURLSafetyDenyWithAnUnreadableConfigClosesTheDeniedSession(t *testing.T) {
+	t.Parallel()
+	fixture, old, path, loadErr := unparseableMCPFixture(t)
+	spy := &applySettingSpy{}
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+
+	note, err := applySettingFor(applier)("url-safety.deny-hosts", "[mcp.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied" +
+		mcpNoteFor(mcpReconnectFailed(loadErr))
+	if note != want {
+		t.Errorf("note = %q, want %q", note, want)
+	}
+	if !old.isRetired() {
+		t.Error("an unreadable config kept the denied server's session answering calls")
+	}
+	if got := fixture.set.session("docs"); got != nil {
+		t.Errorf("the holder still carries %p for docs after the deny; want no live entry", got)
+	}
+}
+
+// The same deny refused mid-Turn: the swap door refuses, but the session still closes, and the row's
+// error still names the server the edit disconnected.
+func TestURLSafetyDenyRefusedMidTurnWithAnUnreadableConfigNamesTheServer(t *testing.T) {
+	t.Parallel()
+	fixture, old, path, _ := unparseableMCPFixture(t)
+	busy := errors.New("input pending: the tool set can only be swapped between runs")
+	spy := &applySettingSpy{swapErr: busy}
+	applier := fakeApplier(t)
+	applier.engine = spy
+	applier.tools = fixture.tools
+	applier.mcp = fixture.set
+	applier.configPath = path
+
+	_, err := applySettingFor(applier)("url-safety.deny-hosts", "[mcp.example.com]")
+
+	if err == nil {
+		t.Fatal("apply url-safety.deny-hosts mid-Turn: want the engine's refusal, got none")
+	}
+	if !errors.Is(err, busy) {
+		t.Errorf("apply error = %v, want it to wrap the engine's refusal", err)
+	}
+	if clause := "mcp server docs disconnected — its endpoint is denied"; !strings.Contains(err.Error(), clause) {
+		t.Errorf("apply error = %q, want it to carry %q", err, clause)
+	}
+	if !old.isRetired() {
+		t.Error("a host-list swap refused mid-Turn with an unreadable config kept the denied server answering")
+	}
+	if got := fixture.set.session("docs"); got != nil {
+		t.Errorf("the holder still carries %p for docs after the deny; want no live entry", got)
 	}
 }
 
