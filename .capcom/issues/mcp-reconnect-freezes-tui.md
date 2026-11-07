@@ -1,10 +1,12 @@
 ---
 title: MCP reconnect freezes the TUI on the Update loop
-status: open
+status: done
 type: bug
 priority: 2
 deps: [idle-wait-no-spinner]
 created: 2026-11-06T20:34:31Z
+closed: 2026-11-07T13:33:32Z
+reason: "Resolved by plan 2026-11-07 - 00 - mcp-reconnect-off-loop-plan (all items; archived at 478cce8e): per-server MCP dials run on Cmds and commit at the idle point for the settings row, watched save and adoption; busy word 'reconnecting MCP…'; TestE2EMCPSlowDialKeepsTheTUILive drives a slow dial with keys handled."
 ---
 
 An MCP reconnect runs synchronously on the Bubble Tea Update loop, so the whole TUI freezes while the servers dial (seconds; a stdio spawn or a dead remote can be longer), and no busy indicator can tick:

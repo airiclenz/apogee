@@ -1,9 +1,11 @@
 ---
 title: A watched config save mid-Turn calls SwapTools from Update while the worker runs
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-07T09:09:06Z
+closed: 2026-11-07T13:33:32Z
+reason: "Resolved by plan 2026-11-07 - 00 - mcp-reconnect-off-loop-plan (item 1; archived at 478cce8e): SwapTools/CanSwapTools check the Exchange under stepMu, a mid-Turn watched save dials and swaps nothing, driven -race test TestE2EWatchedMCPSaveMidTurnDialsNothing."
 ---
 
 A watched config save that changes `mcp-servers` folds mid-run by design (`foldConfigChanged`, `internal/tui/settingswatcher.go`, no idle gate), so the reconnect dials on the Update loop and then calls `engine.SwapTools` → `agent.SwapTools` (`internal/agent/swaptools.go`). That reads `a.turns.inExchange`, a plain bool the worker goroutine writes, with no lock — a probable data race (found by reading, not yet reproduced under `-race`). The swap is then refused as engine-busy, so the dial is also wasted.
