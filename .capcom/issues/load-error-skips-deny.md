@@ -1,10 +1,12 @@
 ---
 title: url-safety deny keeps denied MCP sessions when the config fails to load
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-07 - 01 - url-safety-mcp-deny-gaps-plan
 created: 2026-11-07T13:23:47Z
+closed: 2026-11-07T15:01:38Z
+reason: Resolved by plan 2026-11-07 - 01 - url-safety-mcp-deny-gaps-plan item 2 (archived at e5a5b49a)
 ---
 
 When the layered config fails to load, `denyMCP` returns `mcpReadmit{loadErr: err}` (`cmd/apogee/wire_settings.go:1686-1688`) before any drop, so a live MCP session on a newly denied endpoint keeps serving until the file parses again. `liveMCP.dropDenied` (`cmd/apogee/wire_mcp.go:308`) needs no config, so it could run on that path too. Pre-run ceb331e4's `readmitMCP` also returned on the load error before disconnecting anything.

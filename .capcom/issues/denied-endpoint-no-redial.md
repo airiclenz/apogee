@@ -1,10 +1,12 @@
 ---
 title: url-safety deny of a server's old endpoint leaves it un-redialled
-status: open
+status: done
 type: bug
 priority: 2
 plan: 2026-11-07 - 01 - url-safety-mcp-deny-gaps-plan
 created: 2026-11-07T13:23:47Z
+closed: 2026-11-07T15:01:38Z
+reason: Resolved by plan 2026-11-07 - 01 - url-safety-mcp-deny-gaps-plan item 1 (archived at e5a5b49a)
 ---
 
 When a `url-safety:` deny closes a live MCP session on a server's OLD endpoint (`liveMCP.dropDenied`, `cmd/apogee/wire_mcp.go:308`) while the layered config's new endpoint stays admitted, the admitted set under the old and new lists names the same servers (`sameServerNames`, `cmd/apogee/wire_settings.go:1691`), so `readmitMCP` returns at `if !plan.isMoved` (`cmd/apogee/wire_settings.go:1735`) and queues no request. The server is therefore not re-dialled at its admitted endpoint. Companion to the item 4 `requestServerLocked` finding. Deferred from plan item 9 (5ff32123); pre-run ceb331e4 had the same `sameServerNames` skip.
