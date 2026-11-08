@@ -119,9 +119,10 @@ type TaskRow struct {
 
 // FileRow is one file the scope wrote, merged across its writes: Stat sums their Edit-region
 // diffstats, HasStat says whether any write carried regions, and IsDelegated whether a sub-agent
-// wrote it. Path is the absolute write target; trimming it to the column is the painter's. Run and
-// CallID name the latest of those writes — the run that landed it and its tool call — which is the
-// tool block a click on the row opens (call ids are only unique within a run).
+// wrote it. Path is the write target as the Driver folded it — the TUI keys one inside the workspace
+// relative to it, so a live write and a resumed record's agree; trimming it to the column is the
+// painter's. Run and CallID name the latest of those writes — the run that landed it and its tool
+// call — which is the tool block a click on the row opens (call ids are only unique within a run).
 type FileRow struct {
 	Path        string
 	Stat        domain.DiffStat

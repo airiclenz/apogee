@@ -14,7 +14,9 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/sidepanel"
+	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
 // sidePanelModel builds a ready, idle model under show and the scroll-bar setting, sized width × 30.
@@ -1092,4 +1094,319 @@ func TestSidePanelDragStopsAtTheSeparator(t *testing.T) {
 	if fromPanel.transcriptSel.active || fromPanel.sel.active {
 		t.Error("a drag that started in the column armed a selection")
 	}
+}
+
+// panelHelpWords reads the /panel line /help prints and returns its two word groups — the show
+// modes and the section verbs — so the tests drive exactly the strings the human is shown.
+func panelHelpWords(t *testing.T) (shows, verbs []string) {
+	t.Helper()
+	line := ""
+	for _, ln := range strings.Split(helpNote(false), "\n") {
+		if strings.HasPrefix(ln, "/panel — ") {
+			line = ln
+		}
+	}
+	var groups [][]string
+	for _, field := range strings.Fields(line) {
+		if strings.Contains(field, "|") {
+			groups = append(groups, strings.Split(strings.TrimSuffix(field, ","), "|"))
+		}
+	}
+	if len(groups) != 2 {
+		t.Fatalf("the /help line %q names %d word groups, want the show modes and the section verbs", line, len(groups))
+	}
+	return groups[0], groups[1]
+}
+
+// noteHolding reports whether the transcript holds a note containing text.
+func noteHolding(m Model, text string) bool {
+	return slices.ContainsFunc(m.transcript.entries, func(e entry) bool {
+		return e.kind == entryNote && strings.Contains(e.text, text)
+	})
+}
+
+// TestSidePanelCommandDrivesTheSettings drives every /panel form /help lists: each show mode sets
+// and writes `ui.side-panel.show` and moves the column at once; each section verb sets that
+// section's mode through the section writer, `unpin` meaning `auto`; and each answers with the
+// settings now in force.
+func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
+	t.Parallel()
+	shows, verbs := panelHelpWords(t)
+
+	for _, word := range shows {
+		t.Run("/panel "+word, func(t *testing.T) {
+			t.Parallel()
+			start := domain.SidePanelShowOff
+			if word == string(domain.SidePanelShowOff) {
+				start = domain.SidePanelShowOn
+			}
+			m := sidePanelModel(t, start, true, 140)
+			spy := &settingsSpy{}
+			m.opts.Settings = spy.host(nil)
+
+			m = sendLine(t, m, "/panel "+word)
+
+			if m.opts.UI.SidePanelShow != domain.SidePanelShow(word) {
+				t.Errorf("show mode = %q, want %q", m.opts.UI.SidePanelShow, word)
+			}
+			if want := []string{domain.UIKeySidePanelShow + "=" + word}; !slices.Equal(spy.writes, want) {
+				t.Errorf("writes %v, want %v", spy.writes, want)
+			}
+			if len(m.settingEdits) != 1 || m.settingEdits[0].path != domain.UIKeySidePanelShow {
+				t.Errorf("journal %+v, want one %s entry", m.settingEdits, domain.UIKeySidePanelShow)
+			}
+			if wantShown := word != string(domain.SidePanelShowOff); m.panelShown() != wantShown {
+				t.Errorf("column shown = %v at 140 columns under %q, want %v", m.panelShown(), word, wantShown)
+			}
+			if !noteHolding(m, "side panel: "+word+" — ") {
+				t.Errorf("no report of the new mode:\n%s", plain(m.View()))
+			}
+		})
+	}
+
+	modes := map[string]domain.SidePanelMode{
+		"pin": domain.SidePanelModePinned, "unpin": domain.SidePanelModeAuto, "hide": domain.SidePanelModeHidden,
+	}
+	for _, verb := range verbs {
+		t.Run("/panel "+verb+" tasks", func(t *testing.T) {
+			t.Parallel()
+			want, ok := modes[verb]
+			if !ok {
+				t.Fatalf("/help lists a section verb %q this test does not know", verb)
+			}
+			m := sidePanelModel(t, domain.SidePanelShowAuto, true, 140)
+			spy := &settingsSpy{}
+			m.opts.Settings = spy.host(nil)
+
+			m = sendLine(t, m, "/panel "+verb+" tasks")
+
+			if w := []domain.SidePanelEntry{{Section: domain.SidePanelTasks, Mode: want}}; !slices.Equal(spy.sections, w) {
+				t.Errorf("section writes %v, want %v", spy.sections, w)
+			}
+			if !strings.Contains(string(m.opts.UI.SidePanelSections), "tasks: "+string(want)) {
+				t.Errorf("sections = %q, want tasks %s", m.opts.UI.SidePanelSections, want)
+			}
+			if !noteHolding(m, "tasks "+string(want)) {
+				t.Errorf("no report of the new section mode:\n%s", plain(m.View()))
+			}
+		})
+	}
+
+	t.Run("a failed show write keeps the mode and says so", func(t *testing.T) {
+		t.Parallel()
+		m := sidePanelModel(t, domain.SidePanelShowOff, true, 140)
+		m.opts.Settings = fakeSettingsHost{write: func(string, string) error { return fmt.Errorf("disk full") }}
+
+		m = sendLine(t, m, "/panel on")
+
+		if !m.panelShown() {
+			t.Error("the column did not move on the failed write")
+		}
+		if !strings.Contains(plain(m.View()), sidePanelShowSource+": "+taskListNotSavedNote+"disk full") {
+			t.Error("the failed write is not reported in the transcript")
+		}
+	})
+}
+
+// TestSidePanelCommandRefusesAnUnknownSection pins the refusal: a section this build does not know
+// is named back with the sections there are and the usage line, and nothing is written or changed.
+func TestSidePanelCommandRefusesAnUnknownSection(t *testing.T) {
+	t.Parallel()
+	m := sidePanelModel(t, domain.SidePanelShowAuto, true, 140)
+	spy := &settingsSpy{}
+	m.opts.Settings = spy.host(nil)
+	before := m.opts.UI
+
+	m = sendLine(t, m, "/panel pin mcp")
+
+	if !noteHolding(m, `unknown side-panel section "mcp" (known sections: sub-agents, tasks, changed-files, usage). `+panelUsage) {
+		t.Errorf("no refusal naming the sections:\n%s", plain(m.View()))
+	}
+	if len(spy.sections) != 0 || len(spy.writes) != 0 || m.opts.UI != before {
+		t.Errorf("a refused line wrote %v / %v and left %+v", spy.sections, spy.writes, m.opts.UI)
+	}
+	for _, line := range []string{"/panel sideways", "/panel on now", "/panel hide"} {
+		if _, err := parsePanel(strings.Fields(line)[1:]); err == nil || !strings.Contains(err.Error(), panelUsage) {
+			t.Errorf("parsePanel(%q) = %v, want an error carrying the usage line", line, err)
+		}
+	}
+}
+
+// TestSidePanelCommandBareReports pins the bare form: it reports the show mode and every section's
+// mode in display order, writes nothing, says when the window is too narrow to draw the column,
+// and answers mid-run where the writing forms wait for idle.
+func TestSidePanelCommandBareReports(t *testing.T) {
+	t.Parallel()
+	m := sidePanelModel(t, domain.SidePanelShowAuto, true, 100)
+	m.opts.UI.SidePanelSections = "[usage: pinned, tasks: hidden]"
+	spy := &settingsSpy{}
+	m.opts.Settings = spy.host(nil)
+
+	m = sendLine(t, m, "/panel")
+
+	want := "side panel: auto — usage pinned · tasks hidden · sub-agents auto · changed-files auto" +
+		" (not drawn: the window is narrower than 137 columns)"
+	if !noteHolding(m, want) {
+		t.Errorf("no report %q:\n%s", want, plain(m.View()))
+	}
+	if len(spy.sections) != 0 || len(spy.writes) != 0 {
+		t.Errorf("the report wrote %v / %v", spy.sections, spy.writes)
+	}
+	for line, wantSafe := range map[string]bool{"/panel": true, "/panel on": false, "/panel pin tasks": false} {
+		if got := parseInput(line, nil).safeWhileRunning(); got != wantSafe {
+			t.Errorf("%q safe while running = %v, want %v", line, got, wantSafe)
+		}
+	}
+}
+
+// TestSidePanelCommandIsRefusedWhileWatching pins /panel outside the watch verbs: a watch is
+// read-only, so the line flashes the refusal and the viewer's settings stay as they were.
+func TestSidePanelCommandIsRefusedWhileWatching(t *testing.T) {
+	t.Parallel()
+	m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
+	before := m.opts.UI.SidePanelShow
+
+	m = sendLine(t, m, "/panel on")
+
+	if m.flash != watchRefusedFlash || m.opts.UI.SidePanelShow != before {
+		t.Errorf("flash %q, show %q; want the refusal and the show mode %q kept", m.flash, m.opts.UI.SidePanelShow, before)
+	}
+}
+
+// panelResumeWorkspace is the workspace the resume tests' writes land in.
+const panelResumeWorkspace = "/w"
+
+// panelResumeUsage is the resumed record's accounting: a fill past the usage section's live rule,
+// and the totals its in/out row states.
+var panelResumeUsage = session.Usage{Calls: 3, PromptTokens: 9000, CompletionTokens: 700, TotalTokens: 9700}
+
+// panelTaskListPair is a task_list call by base's run that came back with items, the result
+// content internal/tasklist renders for them.
+func panelTaskListPair(t *testing.T, base domain.EventBase, id string, items ...tasklist.Item) []domain.Event {
+	t.Helper()
+	list := tasklist.New()
+	if err := list.Replace(items); err != nil {
+		t.Fatalf("replace the task list: %v", err)
+	}
+	return []domain.Event{
+		domain.ToolCallEvent{EventBase: base, Call: domain.ToolCall{ID: id, Tool: "task_list", Arguments: []byte(`{"tasks":[]}`)}},
+		domain.ToolResultEvent{EventBase: base, Result: domain.ToolResult{CallID: id, Content: list.Render()}},
+	}
+}
+
+// panelResumeRecord is the stored scrollback of a session that kept a task list, had a child keep
+// one of its own, failed a later task_list call, and wrote two files — one argument absolute, one
+// relative to the workspace.
+func panelResumeRecord(t *testing.T) []byte {
+	t.Helper()
+	opts := testOpts
+	opts.Workspace = panelResumeWorkspace
+	src := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	failed := domain.ToolResultEvent{Result: domain.ToolResult{CallID: "tl2", Content: "too many tasks", IsError: true}}
+	events := panelEvents(
+		panelTaskListPair(t, domain.EventBase{}, "tl1",
+			tasklist.Item{Text: "read the plan", Done: true}, tasklist.Item{Text: "write the code"}),
+		[]domain.Event{
+			panelDelegationCall(t, "r1", "scout"),
+			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		},
+		panelTaskListPair(t, delegationBase("r1"), "c1", tasklist.Item{Text: "child's task"}),
+		[]domain.Event{
+			domain.ToolCallEvent{Call: domain.ToolCall{ID: "tl2", Tool: "task_list", Arguments: []byte(`{"tasks":[]}`)}},
+			failed,
+		},
+		panelWrite(domain.EventBase{}, "w1", panelResumeWorkspace+"/src/a.go"),
+		panelToolPair(domain.EventBase{}, "w2", "write_file", `{"path":"src/b.go","content":"x\n"}`, panelResumeWorkspace+"/src/b.go"),
+	)
+	for _, e := range events {
+		src = src.foldEvent(e)
+	}
+	blob, err := encodeTranscript(&src.transcript)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	return blob
+}
+
+// assertResumedPanel checks the panel a resume rebuilt: the session's own task list (not the
+// child's, not the failed call's), both writes keyed workspace-relative, sub-agents empty.
+func assertResumedPanel(t *testing.T, m Model) {
+	t.Helper()
+	tasks := m.panel.Tasks(sidepanel.RunKey{}).Rows
+	if len(tasks) != 2 || tasks[0].Text != "read the plan" || !tasks[0].IsDone || tasks[1].Text != "write the code" {
+		t.Errorf("the session's tasks = %+v, want its own two-task list", tasks)
+	}
+	if child := m.panel.Tasks(sidepanel.RunOf(delegationBase("r1"))).Rows; len(child) != 1 || child[0].Text != "child's task" {
+		t.Errorf("the child's tasks = %+v, want its own one task", child)
+	}
+	files := m.panel.ChangedFiles(sidepanel.RunKey{}).Rows
+	if len(files) != 2 || files[0].Path != "src/a.go" || files[1].Path != "src/b.go" || files[0].CallID != "w1" {
+		t.Errorf("changed files = %+v, want src/a.go (w1) and src/b.go", files)
+	}
+	if view := m.panel.SubAgents(); len(view.Rows) != 0 {
+		t.Errorf("sub-agents = %+v, want it empty after a resume", view.Rows)
+	}
+	column := strings.Join(panelText(t, m), "\n")
+	for _, want := range []string{"Tasks", "write the code", "Changed files", "src/b.go"} {
+		if !strings.Contains(column, want) {
+			t.Errorf("the column paints no %q:\n%s", want, column)
+		}
+	}
+	if strings.Contains(column, "Sub-agents") {
+		t.Errorf("the column paints a sub-agents section after a resume:\n%s", column)
+	}
+}
+
+// TestSidePanelResumeRebuildsThroughBothDoors resumes one record through each door — a start-up
+// --resume and a /sessions restore — and finds the same panel rebuilt from it, its usage section
+// reading the record's accounting, and a file rewritten live afterwards kept on its one row.
+func TestSidePanelResumeRebuildsThroughBothDoors(t *testing.T) {
+	t.Parallel()
+	blob := panelResumeRecord(t)
+	opts := testOpts
+	opts.Workspace = panelResumeWorkspace
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	inOut := "in " + panelTokens(panelResumeUsage.PromptTokens) + sidePanelPartSeparator +
+		"out " + panelTokens(panelResumeUsage.CompletionTokens)
+
+	t.Run("start-up resume", func(t *testing.T) {
+		t.Parallel()
+		startup := opts
+		startup.Resumed = &ResumedSession{Transcript: blob, Title: "t", CtxUsed: panelUsed, Usage: panelResumeUsage}
+		m := newModel(context.Background(), &fakeEngine{}, startup, nil)
+		m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+
+		assertResumedPanel(t, m)
+		if totals := m.panel.Usage(sidepanel.RunKey{}).Totals; totals.PromptTokens != panelResumeUsage.PromptTokens {
+			t.Errorf("usage totals = %+v, want the record's", totals)
+		}
+
+		m = m.foldEvent(panelWrite(domain.EventBase{}, "w9", panelResumeWorkspace+"/src/a.go")[0])
+		m = m.foldEvent(panelWrite(domain.EventBase{}, "w9", panelResumeWorkspace+"/src/a.go")[1])
+		if files := m.panel.ChangedFiles(sidepanel.RunKey{}).Rows; len(files) != 2 || files[0].CallID != "w9" {
+			t.Errorf("after a live rewrite changed files = %+v, want two rows, src/a.go's naming w9", files)
+		}
+	})
+
+	t.Run("/sessions restore", func(t *testing.T) {
+		t.Parallel()
+		m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+		m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+		m = m.foldEvent(taskList(0, "outgoing task"))
+
+		m = step(t, m, sessionLoadedMsg{rec: session.Record{
+			Meta:       session.Meta{ID: "sess-1", Title: "t", CtxUsed: panelUsed, Usage: panelResumeUsage},
+			Session:    domain.Session{Version: domain.SessionVersion},
+			Transcript: blob,
+		}})
+
+		assertResumedPanel(t, m)
+		column := strings.Join(panelText(t, m), "\n")
+		if !strings.Contains(column, inOut) {
+			t.Errorf("the usage section paints no %q:\n%s", inOut, column)
+		}
+		if strings.Contains(column, "outgoing task") {
+			t.Errorf("the outgoing session's task survived the restore:\n%s", column)
+		}
+	})
 }

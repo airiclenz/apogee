@@ -449,7 +449,14 @@ task-row click writes no setting.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'SidePanelClick|SidePanelPin|SidePanelDrag' ./internal/tui/`
 **Commit:** `feat(tui): open details and pin sections from the side panel`
 
-## 12. `/panel` command and resume
+## 12. `/panel` command and resume — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): re-derived from "writes keyed workspace-relative on both sides — Clean(Join(workspace, args path)) on replay, Rel(workspace, WriteTarget) live": one key function, panelWriteKey (internal/tui/sidepanel.go), serves both — a relative path is joined to the workspace, then a path inside the workspace is keyed relative to it and one outside (or with no workspace) stays absolute; the live fold applies it to ToolResultEvent.WriteTarget in foldSidePanel before sidepanel.Fold, and replay applies it to the stored card's target argument (`path`, or `destination` for copy_file/move_file). A configured workspace root that is itself a symlink is not resolved (the live WriteTarget is symlink-resolved), so there a live write could key absolute where its replayed twin keys relative.
+NOTES (2026-11-08): consequential edit — internal/sidepanel/sidepanel.go: made necessary by the TUI now folding workspace-relative write keys; FileRow's doc no longer says Path is the absolute write target.
+NOTES (2026-11-08): /panel is whileRunning with the /skills nuance (safeWhileRunning gains a panelReport test): the bare report answers mid-run and the two writing forms queue for idle, per command.go's idle-only rule for config-writing verbs; it stays out of watchVerbs, so watch.go and help.go (which lists commandSpecs itself) needed no edit. No runsBareAtAccept: the menu completes `/panel ` for the arguments.
+NOTES (2026-11-08): every /panel form ends with the report note (`side panel: <mode> — <section> <mode> · …`, plus `(not drawn: the window is narrower than N columns)` where the mode would draw the column but the window is too narrow); a failed `ui.side-panel.show` write reports `side-panel.show: not saved: …` and keeps the change for the session, setPanelSectionMode's posture. panelShown's floor arithmetic moved unchanged into sidePanelLeastWindow (model.go → sidepanel.go) so the report names the same width.
+NOTES (2026-11-08): resume rebuild reads a stored task_list card's rows (the markers taskListCount reads) for the tasks; usage seeds Sum(usageBase, delegateUsageTotal()) under the top-level run after both doors restore the accounting (seedSidePanelUsage), the fill staying the gauge's (item 10); the State is left nil when a record holds nothing the panel shows. resumeLoaded's `m.panel = nil` moved ahead of replayScrollback.
+NOTES (2026-11-08): the parser-verb pin in TestCommandTableDrivesParserAndMenu (internal/tui/command_test.go) gained "panel" beside the grammar-verb pin the plan named.
 
 **What:**
 Recast at the regression check (2026-11-08).

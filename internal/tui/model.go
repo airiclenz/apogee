@@ -926,6 +926,7 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	m.servedModels = slices.Clone(r.ServedModels)   // …and the models that answered it, so the first save keeps them
 	m.sessionCurrency = stripEscapes(r.Currency)    // …and the label its amount counts under, record-authored text
 	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
+	m.seedSidePanelUsage() // …and the side panel's usage section, from the accounting restored above
 }
 
 // replayScrollback repaints a stored session's scrollback into the view that is about to become it,
@@ -961,6 +962,10 @@ func (m *Model) replayScrollback(blob []byte, title string, inExchange bool) {
 		// is a claim nothing later withdraws (closeInterruptedCalls).
 		closed := closeInterruptedCalls(entries)
 		m.transcript.replay(entries)
+		// The side panel has no Event journal to fold here, so its tasks and changed files are
+		// rebuilt from the same closed entries (rebuildSidePanel); its usage is seeded by the caller,
+		// once the record's accounting is restored.
+		m.rebuildSidePanel(entries)
 		m.transcript.addEphemeralNote("resumed: " + title)
 		if closed > 0 {
 			m.transcript.addEphemeralNote(progressSavedNote)
@@ -3099,16 +3104,8 @@ func (m Model) transcriptBudget() int {
 // unset key to `auto` before it reaches the renderer (domain.DefaultUIPrefs), and the renderer
 // draws a zero UIPrefs as the classic frame rather than special-casing it into a default.
 func (m Model) panelShown() bool {
-	var floor int
-	switch m.opts.UI.SidePanelShow {
-	case domain.SidePanelShowAuto:
-		floor = sidePanelAutoFloor
-	case domain.SidePanelShowOn:
-		floor = sidePanelOnFloor
-	default:
-		return false
-	}
-	return m.width-sidePanelWidth-scrollbarWidth >= floor
+	least, ok := sidePanelLeastWindow(m.opts.UI.SidePanelShow)
+	return ok && m.width >= least
 }
 
 // slotWidth is the transcript slot's column budget: the window less the side panel's column while

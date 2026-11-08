@@ -955,6 +955,10 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.nameSession(title) // the frame follows the restore, as it follows every other naming route
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
+	// The side panel's folded state falls with the outgoing session, whose Events it was folded
+	// from — BEFORE the replay below, which rebuilds the resumed session's tasks and writes from
+	// its stored entries (replayScrollback).
+	m.panel = nil
 	// Repaint the stored scrollback and say what was reopened, through the one repaint a --resume
 	// start goes through too (replayScrollback): the facts are read off the record just loaded and
 	// off the live engine, the wording of all three notices is the shared function's.
@@ -977,8 +981,6 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// The /thinking and /advice boards fall for the same reason, through the one call /clear makes:
 	// neither is stored, so there is no resumed session's own to reopen them at (resetSessionBoards).
 	m.resetSessionBoards()
-	// The side panel's folded state falls with them: it was folded from the outgoing session's Events.
-	m.panel = nil
 	// The live reading belongs to the conversation that just went away, so it falls whole and the
 	// gauge is relit from the record — the same one call /clear makes, differing only in having a
 	// stored fill to reopen at (liveStats.reset).
@@ -990,6 +992,8 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// brings back the run heads that carry their own readings, and those replace this the moment
 	// one reports (delegateUsageTotal). A record whose blob no longer decodes keeps it instead.
 	m.delegateUsage = domain.Usage(msg.rec.Meta.DelegateUsage)
+	// The side panel's usage section reopens at the same accounting, now that it is all restored.
+	m.seedSidePanelUsage()
 	// A background workflow running across the switch spent its runs' readings so far in the session
 	// just left, whose record counted them: the view is rebased, as /clear rebases it, so the
 	// reopened session counts only what it spends from here (backgroundWorkflows.rebased).

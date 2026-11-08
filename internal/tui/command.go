@@ -248,6 +248,15 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // exchange writes — a redo across newer work would re-apply an old tree over what was just asked
 // for, so that exchange clears the stack.
 //
+// /panel is the side panel's verb (sidepanel.go, ADR 0110): bare it reports `ui.side-panel.show`
+// and each section's mode, `on|off|auto` sets the show mode, and `pin|unpin|hide <section>` sets one
+// section's mode (`unpin` is `auto`) — every write going through the seams the panel's own pin
+// glyph and the settings pane use, so a setting changed by command reads the same in the file and
+// on the screen. Its grammar follows /skills' down to the posture: the report answers mid-run, and
+// both writing forms are idle-only like every other verb that writes config. It is not a watch verb
+// (watchVerbs): a watch runs only the verbs that read what the view already holds, and this one
+// writes config.
+//
 // /settings opens the configuration pane (settings.go): every config key with the value this run
 // resolved for it, over the binary's declarative key registry (ADR 0035). Idle-only and modal like
 // /sessions, and noRecall like the reset pair — it opens a surface rather than saying anything to the
@@ -314,6 +323,7 @@ func init() {
 		{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true, run: bareVerb(Model.runInspectCommand)},
 		{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true, run: tokenVerb(Model.runModelCommand)},
 		{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true, run: bareVerb(Model.startNewSession)},
+		{name: "panel", summary: "set the side panel — on|off|auto, or pin|unpin|hide <section> (bare = report)", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parsePanel), run: typedVerb(Model.runPanelCommand)},
 		{name: "redo", summary: "put back what the last /undo removed (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseRedo), run: typedVerb(Model.runRedo)},
 		{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true, run: tokenVerb(Model.runRename)},
 		{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true, run: restVerb(Model.runSchedule)},
@@ -495,23 +505,27 @@ func verbArgsOf[T any](p parsedInput) T {
 // dropdown's accept (acceptAutocomplete) read, so the menu's "— runs at idle" tag and what the key
 // actually does — run now, or queue for the next idle — can never disagree.
 //
-// Three tests, because the policy is about the line and not only about the verb. The verb's own
+// Four tests, because the policy is about the line and not only about the verb. The verb's own
 // commandSpec.whileRunning says it does nothing this session's engine must be quiescent for —
 // /version, /skills, /confine report, and the Schedule pair /schedule, /schedule-stop touches only
-// the scheduler library (ADR 0033, see commandSpecs). Two of those verbs then add the same nuance,
-// once each: /confine's STATUS form reports (Engine.ConfineToWorkspace is goroutine-safe, read under
-// the engine's own confineMu), while "/confine off|on" swaps Auto's blast radius under a Step that
-// is already dispatching tool calls and is idle-only for the same reason /clear is; and /skills'
-// LISTING answers from disk alone, while "/skills export <id>" writes a folder into the user's
-// library and is idle-only like every other config-writing form. Each grammar's zero value IS its
-// reporting form (confineStatus, skillsList), so those two tests read true for every other verb
-// without naming one — and an argument error, which both parses report as the zero value, stays
-// runnable so a mistyped line earns its usage line mid-run exactly as it does at idle.
+// the scheduler library (ADR 0033, see commandSpecs). Three of those verbs then add the same
+// nuance, once each: /confine's STATUS form reports (Engine.ConfineToWorkspace is goroutine-safe,
+// read under the engine's own confineMu), while "/confine off|on" swaps Auto's blast radius under a
+// Step that is already dispatching tool calls and is idle-only for the same reason /clear is;
+// /skills' LISTING answers from disk alone, while "/skills export <id>" writes a folder into the
+// user's library and is idle-only like every other config-writing form; and bare /panel reports
+// the side panel's settings, while "/panel on|off|auto" and "/panel pin|unpin|hide <section>"
+// write `ui.side-panel.*` and are idle-only for /skills export's reason. Each grammar's zero value
+// IS its reporting form (confineStatus, skillsList, panelReport), so those three tests read true
+// for every other verb without naming one — and an argument error, which every one of these parses
+// reports as the zero value, stays runnable so a mistyped line earns its usage line mid-run exactly
+// as it does at idle.
 func (p parsedInput) safeWhileRunning() bool {
 	spec, ok := commandByName(p.command)
 	return ok && spec.whileRunning &&
 		verbArgsOf[confineArgs](p).action == confineStatus &&
-		verbArgsOf[skillsArgs](p).action == skillsList
+		verbArgsOf[skillsArgs](p).action == skillsList &&
+		verbArgsOf[panelArgs](p).action == panelReport
 }
 
 // opensExchange reports whether driving this parsed command LINE would open an Exchange with the

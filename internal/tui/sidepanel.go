@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -69,10 +70,16 @@ type panelSection struct {
 // foldSidePanel folds e into the side panel's state, copy-on-write: an Event the panel reads goes
 // into a clone of the held State (a fresh one on the first such Event) and the clone replaces the
 // pointer, so a State another Model copy still holds is never written (ADR 0011). window is the
-// Event's run's bound window, the fill's fallback where a reading names none.
+// Event's run's bound window, the fill's fallback where a reading names none. A landed write is
+// folded under its workspace-relative key ([Model.panelWriteKey]), the key a resumed record's write
+// is rebuilt under ([Model.rebuildSidePanel]), so a file rewritten after a resume stays one row.
 func (m Model) foldSidePanel(e domain.Event, window int) Model {
 	if !sidepanel.Reads(e) {
 		return m
+	}
+	if result, ok := e.(domain.ToolResultEvent); ok && result.WriteTarget != "" {
+		result.WriteTarget = m.panelWriteKey(result.WriteTarget)
+		e = result
 	}
 	next := m.panel.Clone()
 	if next == nil {
@@ -648,4 +655,290 @@ func withSectionMode(
 		}
 	}
 	return domain.SpellSidePanelSections(entries)
+}
+
+// sidePanelLeastWindow is the narrowest window show draws the column in: the floor the transcript
+// keeps beside it — sidePanelAutoFloor under `auto`, sidePanelOnFloor under `on` — plus the column
+// and the scroll-bar column, counted painted or not ([Model.panelShown]). ok is false for a mode
+// that never draws it: `off`, and the zero UIPrefs' empty mode.
+func sidePanelLeastWindow(show domain.SidePanelShow) (least int, ok bool) {
+	switch show {
+	case domain.SidePanelShowAuto:
+		return sidePanelAutoFloor + sidePanelWidth + scrollbarWidth, true
+	case domain.SidePanelShowOn:
+		return sidePanelOnFloor + sidePanelWidth + scrollbarWidth, true
+	default:
+		return 0, false
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /panel — the side panel's settings from the prompt box (ADR 0110 decision 8)
+// ----------------------------------------------------------------------------
+
+// sidePanelShowSource is the label a failed `/panel on|off|auto` write's transcript error carries —
+// the key's own name, sidePanelSectionsSource's posture.
+const sidePanelShowSource = "side-panel.show"
+
+// panelAction is the subcommand of a parsed /panel line. The zero value is panelReport, so a bare
+// "/panel" — and a line the parser never ran this grammar over, which is what the completion menu's
+// accept builds — reports rather than writes anything (the /skills posture).
+type panelAction int
+
+const (
+	panelReport     panelAction = iota // report the show mode and every section's mode
+	panelSetShow                       // set `ui.side-panel.show`
+	panelSetSection                    // set one section's mode in `ui.side-panel.sections`
+)
+
+// panelArgs is the parsed argument list of a /panel line: what was asked for, and the show mode or
+// the section and mode it was asked of.
+type panelArgs struct {
+	action  panelAction
+	show    domain.SidePanelShow
+	section domain.SidePanelSection
+	mode    domain.SidePanelMode
+}
+
+// panelUsage is the one-line grammar every /panel argument error carries, so a mistyped line teaches
+// the syntax instead of quietly reporting as though nothing had been asked.
+const panelUsage = "usage: /panel | /panel on|off|auto | /panel pin|unpin|hide <section>"
+
+// panelSectionVerbs maps each section subcommand onto the mode it sets: `unpin` takes a section back
+// to `auto`, the mode a pin-glyph click unpins it to (followPanelTarget).
+var panelSectionVerbs = map[string]domain.SidePanelMode{
+	"pin":   domain.SidePanelModePinned,
+	"unpin": domain.SidePanelModeAuto,
+	"hide":  domain.SidePanelModeHidden,
+}
+
+// parsePanel parses the argument tokens that followed a "/panel" verb. No arguments means the
+// report; a show mode (`on`, `off`, `auto`) alone sets the show mode; `pin`, `unpin` or `hide` takes
+// exactly one section this build knows. Everything else is an error carrying panelUsage — a refused
+// section names the sections there are.
+func parsePanel(args []string) (panelArgs, error) {
+	if len(args) == 0 {
+		return panelArgs{action: panelReport}, nil
+	}
+	if show, err := domain.ParseSidePanelShow(args[0]); err == nil {
+		if len(args) != 1 {
+			return panelArgs{}, fmt.Errorf("/panel %s takes nothing after it. %s", args[0], panelUsage)
+		}
+		return panelArgs{action: panelSetShow, show: show}, nil
+	}
+	mode, ok := panelSectionVerbs[args[0]]
+	if !ok {
+		return panelArgs{}, fmt.Errorf("unknown /panel subcommand %q. %s", args[0], panelUsage)
+	}
+	if len(args) != 2 {
+		return panelArgs{}, fmt.Errorf("/panel %s takes exactly one section. %s", args[0], panelUsage)
+	}
+	sections := domain.SidePanelSectionNames()
+	section := domain.SidePanelSection(args[1])
+	if !slices.Contains(sections, section) {
+		known := make([]string, 0, len(sections))
+		for _, name := range sections {
+			known = append(known, string(name))
+		}
+		return panelArgs{}, fmt.Errorf("unknown side-panel section %q (known sections: %s). %s",
+			args[1], strings.Join(known, ", "), panelUsage)
+	}
+	return panelArgs{action: panelSetSection, section: section, mode: mode}, nil
+}
+
+// runPanelCommand routes a parsed /panel line: set the show mode, or one section's mode, and either
+// way — the bare report included — answer with the settings now in force (panelReportNote), so
+// the human sees what the panel does even where this window is too narrow to draw it.
+//
+// No upstream call and no worker: a write is one config key through the seams the settings pane and
+// the pin glyph use, synchronous like theirs.
+func (m Model) runPanelCommand(args panelArgs) (tea.Model, tea.Cmd) {
+	switch args.action {
+	case panelSetShow:
+		m = m.setPanelShow(args.show)
+	case panelSetSection:
+		m = m.setPanelSectionMode(args.section, args.mode)
+	}
+	m.transcript.addNote(m.panelReportNote())
+	return m, nil
+}
+
+// setPanelShow sets `ui.side-panel.show` and writes it back through [SettingsHost.Write], with
+// setPanelSectionMode's whole contract: the column moves first, a landed write is journalled
+// (recordSettingEdit), a failed one speaks as one transcript error naming the key and the change
+// stands for the session, and a nil seam changes the session alone (ADR 0031).
+func (m Model) setPanelShow(show domain.SidePanelShow) Model {
+	m.opts.UI.SidePanelShow = show
+	if m.opts.Settings == nil {
+		return m
+	}
+	if err := m.opts.Settings.Write(domain.UIKeySidePanelShow, string(show)); err != nil {
+		m.transcript.addError(sidePanelShowSource, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelShow, value: string(show)})
+}
+
+// panelReportNote words the side panel's settings in force: the show mode, then every section with
+// its mode in display order — `side panel: auto — sub-agents auto · tasks pinned · …` — and, where
+// the mode would draw the column but this window is too narrow for it, the width it needs.
+func (m Model) panelReportNote() string {
+	show := m.opts.UI.SidePanelShow
+	if show == "" {
+		show = domain.SidePanelShowOff // the renderer draws the zero UIPrefs' empty mode as off (panelShown)
+	}
+	entries, err := domain.ParseSidePanelSections(string(m.opts.UI.SidePanelSections))
+	if err != nil {
+		// Unreachable from a running session, for panelSections' reason: the default list stands in.
+		entries, _ = domain.ParseSidePanelSections("")
+	}
+	modes := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		modes = append(modes, string(entry.Section)+" "+string(entry.Mode))
+	}
+	note := "side panel: " + string(show) + " — " + strings.Join(modes, sidePanelPartSeparator)
+	if least, ok := sidePanelLeastWindow(show); ok && !m.panelShown() {
+		note += " (not drawn: the window is narrower than " + strconv.Itoa(least) + " columns)"
+	}
+	return note
+}
+
+// ----------------------------------------------------------------------------
+// Resume — the panel rebuilt from a stored record (ADR 0110 decision 4)
+// ----------------------------------------------------------------------------
+
+// taskListToolName is the model's own checklist tool (ADR 0072), whose cards a resumed session's
+// task lists are rebuilt from.
+const taskListToolName = "task_list"
+
+// panelWriterTargetArgs names, for each of apogee's workspace-scoped writer tools — the tools whose
+// landed results carry a write target (domain.ToolResultEvent.WriteTarget) — the argument naming
+// that target. A stored card keeps its call's arguments (toolView.argsWire) and not the engine's
+// resolved target, so a resumed session's writes are rebuilt from this argument.
+var panelWriterTargetArgs = map[string]string{
+	"write_file":              "path",
+	"edit_existing_file":      "path",
+	"single_find_and_replace": "path",
+	"multi_find_and_replace":  "path",
+	"delete_file":             "path",
+	"copy_file":               "destination",
+	"move_file":               "destination",
+}
+
+// rebuildSidePanel folds a resumed record's replayed entries into a fresh panel state, in place of
+// the Event journal a resumed session does not have (docs/layout/side-panel-layout.md, "Replay").
+// Every card that came off counts and none that failed, was refused or was interrupted does — the
+// live fold's rule, which reads only a successful result: each run's task list is its LAST such
+// task_list card, keyed by the run that called it, so a child's card sets the child's list alone;
+// and each such writer card is a landed write, keyed as the live fold keys one
+// ([Model.panelWriteKey]). Sub-agents starts empty — the record keeps no phase to fold — and usage
+// is seeded by the caller once the record's accounting is restored ([Model.seedSidePanelUsage]).
+//
+// The state is replaced whole, and left nil where the record holds nothing the panel shows: the
+// caller has already dropped the outgoing session's.
+func (m *Model) rebuildSidePanel(entries []entry) {
+	var state *sidepanel.State
+	ensure := func() *sidepanel.State {
+		if state == nil {
+			state = sidepanel.New(time.Now)
+		}
+		return state
+	}
+	for _, e := range entries {
+		if e.kind != entryToolCall || !e.done || e.tool.Summary.failed {
+			continue
+		}
+		run := panelRunKey(e.run())
+		if e.tool.name == taskListToolName {
+			ensure().SetTasks(run, panelTaskItems(e.tool.Details.all()))
+			continue
+		}
+		if path, ok := m.replayedWriteKey(e.tool); ok {
+			ensure().AddWrite(run, e.depth, e.callID, path, regionsStat(e.tool.Regions))
+		}
+	}
+	if state != nil {
+		m.panel = state
+	}
+}
+
+// panelTaskItems reads a task_list card's tasks back off the rows its body lays out — the rows
+// taskListCount counts, by the same two markers — in order. A card with no rows is a cleared list.
+func panelTaskItems(lines []detailLine) []domain.TaskItem {
+	items := make([]domain.TaskItem, 0, len(lines))
+	for _, ln := range lines {
+		switch {
+		case strings.HasPrefix(ln.Text, taskListDoneMarker):
+			items = append(items, domain.TaskItem{Text: strings.TrimPrefix(ln.Text, taskListDoneMarker), Done: true})
+		case strings.HasPrefix(ln.Text, taskListOpenMarker):
+			items = append(items, domain.TaskItem{Text: strings.TrimPrefix(ln.Text, taskListOpenMarker)})
+		}
+	}
+	return items
+}
+
+// replayedWriteKey is the key a stored writer card's write folds under: its target argument
+// (panelWriterTargetArgs) as panelWriteKey keys it. A card of any other tool, or one whose stored
+// arguments no longer name the target — elided whole, or the path itself bounded to a byte count
+// (boundedArgValue's `…[N bytes]`) — names no write.
+func (m Model) replayedWriteKey(tv toolView) (string, bool) {
+	arg, ok := panelWriterTargetArgs[tv.name]
+	if !ok {
+		return "", false
+	}
+	path, ok := parseArgs(tv.argsWire)[arg].(string)
+	if !ok || path == "" || strings.HasPrefix(path, "…[") {
+		return "", false
+	}
+	return m.panelWriteKey(path), true
+}
+
+// regionsStat is the diffstat a write's Edit regions add up to — what the live fold reads off the
+// result's domain.EditRegions — and nil for a write that kept none.
+func regionsStat(regions []domain.EditRegion) *domain.DiffStat {
+	if len(regions) == 0 {
+		return nil
+	}
+	stat := domain.EditRegions{Regions: regions}.Stat()
+	return &stat
+}
+
+// panelWriteKey is the one key a changed file is folded under, live and on resume alike: the path
+// relative to the workspace where it lies inside it, cleaned and absolute where it lies outside or
+// no workspace is known. A relative path is read against the workspace, as the writer tools read
+// it. One key on both sides is what keeps a file rewritten after a resume on one row, whether the
+// stored argument spelled it relative or absolute; the painter shortens either the same way
+// (panelFileRow).
+func (m Model) panelWriteKey(path string) string {
+	root := m.transcript.ws.root
+	if !filepath.IsAbs(path) && root != "" {
+		path = filepath.Join(root, path)
+	}
+	path = filepath.Clean(path)
+	if root == "" {
+		return path
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return path
+	}
+	return rel
+}
+
+// seedSidePanelUsage seeds the usage section's totals from a resumed record's accounting, once both
+// resume doors have restored it (replayResumed, resumeLoaded): the main agent's base and the
+// delegates' total, as /usage sums the session. The restored ctxUsed rides along for the State's
+// own fill, but this Driver's section reads the gauge's ([Model.panelFill]), which that same
+// restored ctxUsed relights. A record that counted no call seeds nothing.
+func (m *Model) seedSidePanelUsage() {
+	totals := domain.Sum(m.usageBase, m.delegateUsageTotal())
+	if totals.Calls <= 0 {
+		return
+	}
+	next := m.panel.Clone()
+	if next == nil {
+		next = sidepanel.New(time.Now)
+	}
+	next.SetUsage(sidepanel.RunKey{}, totals, m.ctxUsed)
+	m.panel = next
 }
