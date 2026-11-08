@@ -233,7 +233,10 @@ moving drag starts a drag; reset with a failing host → one note.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSidePanel' ./internal/tui/`.
 **Commit:** `feat(tui): double-click the side panel separator to reset its width`
 
-## 6. `/panel width <n>|reset`
+## 6. `/panel width <n>|reset` — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the parsed width forms reuse items 4/5's `setPanelWidth` and `resetPanelWidth` (write via `SettingsHost.Write`, reset via `SettingsHost.Reset` journalled as `settingEdit{reset: true}`) rather than new writers; `parsePanelWidth` is split out of `parsePanel` and appends `panelUsage` to the domain's refusal sentence. A missing or extra width token is refused with "/panel width takes a number of columns or reset." plus the usage line.
+NOTES (2026-11-08): the bare `/panel` report still names no width (not in the item's goal); it answers after a width change with the show mode and sections only.
 
 Depends on item 2.
 **What:**

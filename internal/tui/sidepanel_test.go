@@ -1024,10 +1024,11 @@ func entryOnScreen(m Model, at int) bool {
 }
 
 // settingsSpy is a settings host that records every write it is handed: the section writes it
-// answers with the list a fresh file would resolve to, and any other write.
+// answers with the list a fresh file would resolve to, any other write, and every reset.
 type settingsSpy struct {
 	sections []domain.SidePanelEntry
 	writes   []string
+	resets   []string
 }
 
 // host is the spy as a SettingsHost, its section write failing with failure where one is given.
@@ -1035,6 +1036,10 @@ func (s *settingsSpy) host(failure error) fakeSettingsHost {
 	return fakeSettingsHost{
 		write: func(path, value string) error {
 			s.writes = append(s.writes, path+"="+value)
+			return nil
+		},
+		reset: func(path string) error {
+			s.resets = append(s.resets, path)
 			return nil
 		},
 		writeSection: func(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error) {
@@ -1671,9 +1676,10 @@ func TestSidePanelSeparatorDoubleClick(t *testing.T) {
 	})
 }
 
-// panelHelpWords reads the /panel line /help prints and returns its two word groups — the show
-// modes and the section verbs — so the tests drive exactly the strings the human is shown.
-func panelHelpWords(t *testing.T) (shows, verbs []string) {
+// panelHelpWords reads the /panel line /help prints and returns its three word groups — the show
+// modes, the section verbs and the width forms — so the tests drive exactly the strings the human
+// is shown.
+func panelHelpWords(t *testing.T) (shows, verbs, widths []string) {
 	t.Helper()
 	line := ""
 	for _, ln := range strings.Split(helpNote(false), "\n") {
@@ -1687,10 +1693,11 @@ func panelHelpWords(t *testing.T) (shows, verbs []string) {
 			groups = append(groups, strings.Split(strings.TrimSuffix(field, ","), "|"))
 		}
 	}
-	if len(groups) != 2 {
-		t.Fatalf("the /help line %q names %d word groups, want the show modes and the section verbs", line, len(groups))
+	if len(groups) != 3 {
+		t.Fatalf("the /help line %q names %d word groups, want the show modes, the section verbs and the width forms",
+			line, len(groups))
 	}
-	return groups[0], groups[1]
+	return groups[0], groups[1], groups[2]
 }
 
 // noteHolding reports whether the transcript holds a note containing text.
@@ -1702,11 +1709,12 @@ func noteHolding(m Model, text string) bool {
 
 // TestSidePanelCommandDrivesTheSettings drives every /panel form /help lists: each show mode sets
 // and writes `ui.side-panel.show` and moves the column at once; each section verb sets that
-// section's mode through the section writer, `unpin` meaning `auto`; and each answers with the
-// settings now in force.
+// section's mode through the section writer, `unpin` meaning `auto`; `width <n>` writes the width
+// and `width reset` resets it through the host's Reset, each moving the column at once; and each
+// answers with the settings now in force.
 func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 	t.Parallel()
-	shows, verbs := panelHelpWords(t)
+	shows, verbs, widths := panelHelpWords(t)
 
 	for _, word := range shows {
 		t.Run("/panel "+word, func(t *testing.T) {
@@ -1767,6 +1775,33 @@ func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 		})
 	}
 
+	for _, form := range widths {
+		t.Run("/panel width "+form, func(t *testing.T) {
+			t.Parallel()
+			m := sidePanelModel(t, domain.SidePanelShowOn, true, 140)
+			m.opts.UI.SidePanelWidth = panelCommandWidth
+			spy := &settingsSpy{}
+			m.opts.Settings = spy.host(nil)
+			line, want := panelWidthLine(t, form)
+
+			m = sendLine(t, m, line)
+
+			if m.panelWidth() != want.width {
+				t.Errorf("panel width = %d, want %d", m.panelWidth(), want.width)
+			}
+			if !slices.Equal(spy.writes, want.writes) || !slices.Equal(spy.resets, want.resets) {
+				t.Errorf("writes %v, resets %v; want %v, %v", spy.writes, spy.resets, want.writes, want.resets)
+			}
+			wantEdit := settingEdit{path: domain.UIKeySidePanelWidth, value: strconv.Itoa(want.width), reset: want.resets != nil}
+			if len(m.settingEdits) != 1 || m.settingEdits[0] != wantEdit {
+				t.Errorf("journal %+v, want %+v", m.settingEdits, wantEdit)
+			}
+			if !noteHolding(m, "side panel: on — ") {
+				t.Errorf("no report of the settings in force:\n%s", plain(m.View()))
+			}
+		})
+	}
+
 	t.Run("a failed show write keeps the mode and says so", func(t *testing.T) {
 		t.Parallel()
 		m := sidePanelModel(t, domain.SidePanelShowOff, true, 140)
@@ -1781,6 +1816,67 @@ func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 			t.Error("the failed write is not reported in the transcript")
 		}
 	})
+}
+
+// panelCommandWidth is the stored width the /panel width tests start from: neither the width they
+// set nor the default, and paintable in their 140-column window under `on`.
+const panelCommandWidth = 50
+
+// panelWidthWant is what one /panel width form must leave: the painted width, and the host's
+// writes and resets.
+type panelWidthWant struct {
+	width  int
+	writes []string
+	resets []string
+}
+
+// panelWidthLine turns one width form /help lists into the line that drives it and what that line
+// must leave: `<n>` is filled with a width of 40, `reset` returns the default through Reset.
+func panelWidthLine(t *testing.T, form string) (string, panelWidthWant) {
+	t.Helper()
+	switch form {
+	case "<n>":
+		return "/panel width 40", panelWidthWant{width: 40, writes: []string{domain.UIKeySidePanelWidth + "=40"}}
+	case panelWidthReset:
+		return "/panel width reset", panelWidthWant{
+			width:  domain.DefaultSidePanelWidth,
+			resets: []string{domain.UIKeySidePanelWidth},
+		}
+	}
+	t.Fatalf("/help lists a width form %q this test does not know", form)
+	return "", panelWidthWant{}
+}
+
+// TestSidePanelCommandRefusesABadWidth pins the width refusals: a width below the minimum, 0, a
+// non-integer, no width and two widths are each refused — the first three in the sentence a config
+// file stating them is refused in — with the usage line, and nothing is written or changed.
+func TestSidePanelCommandRefusesABadWidth(t *testing.T) {
+	t.Parallel()
+	refusals := map[string]string{
+		"/panel width 23":    "apogee: invalid ui.side-panel.width 23: want 24 columns or more. " + panelUsage,
+		"/panel width 0":     "apogee: invalid ui.side-panel.width 0: want 24 columns or more. " + panelUsage,
+		"/panel width wide":  `apogee: invalid ui.side-panel.width "wide": want a number of columns, 24 or more. ` + panelUsage,
+		"/panel width":       "/panel width takes a number of columns or reset. " + panelUsage,
+		"/panel width 40 50": "/panel width takes a number of columns or reset. " + panelUsage,
+	}
+	for line, want := range refusals {
+		t.Run(line, func(t *testing.T) {
+			t.Parallel()
+			m := sidePanelModel(t, domain.SidePanelShowOn, true, 140)
+			spy := &settingsSpy{}
+			m.opts.Settings = spy.host(nil)
+			before := m.opts.UI
+
+			m = sendLine(t, m, line)
+
+			if !noteHolding(m, want) {
+				t.Errorf("no refusal %q:\n%s", want, plain(m.View()))
+			}
+			if len(spy.writes) != 0 || len(spy.resets) != 0 || m.opts.UI != before {
+				t.Errorf("a refused line wrote %v, reset %v and left %+v", spy.writes, spy.resets, m.opts.UI)
+			}
+		})
+	}
 }
 
 // TestSidePanelCommandRefusesAnUnknownSection pins the refusal: a section this build does not know
@@ -1827,7 +1923,10 @@ func TestSidePanelCommandBareReports(t *testing.T) {
 	if len(spy.sections) != 0 || len(spy.writes) != 0 {
 		t.Errorf("the report wrote %v / %v", spy.sections, spy.writes)
 	}
-	for line, wantSafe := range map[string]bool{"/panel": true, "/panel on": false, "/panel pin tasks": false} {
+	for line, wantSafe := range map[string]bool{
+		"/panel": true, "/panel on": false, "/panel pin tasks": false,
+		"/panel width 40": false, "/panel width reset": false,
+	} {
 		if got := parseInput(line, nil).safeWhileRunning(); got != wantSafe {
 			t.Errorf("%q safe while running = %v, want %v", line, got, wantSafe)
 		}
@@ -1835,16 +1934,22 @@ func TestSidePanelCommandBareReports(t *testing.T) {
 }
 
 // TestSidePanelCommandIsRefusedWhileWatching pins /panel outside the watch verbs: a watch is
-// read-only, so the line flashes the refusal and the viewer's settings stay as they were.
+// read-only, so each writing form flashes the refusal and the viewer's settings stay as they were.
 func TestSidePanelCommandIsRefusedWhileWatching(t *testing.T) {
 	t.Parallel()
-	m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
-	before := m.opts.UI.SidePanelShow
+	for _, line := range []string{"/panel on", "/panel width 40", "/panel width reset"} {
+		t.Run(line, func(t *testing.T) {
+			t.Parallel()
+			m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
+			m.opts.UI.SidePanelWidth = panelCommandWidth
+			before := m.opts.UI
 
-	m = sendLine(t, m, "/panel on")
+			m = sendLine(t, m, line)
 
-	if m.flash != watchRefusedFlash || m.opts.UI.SidePanelShow != before {
-		t.Errorf("flash %q, show %q; want the refusal and the show mode %q kept", m.flash, m.opts.UI.SidePanelShow, before)
+			if m.flash != watchRefusedFlash || m.opts.UI != before {
+				t.Errorf("flash %q, settings %+v; want the refusal and %+v kept", m.flash, m.opts.UI, before)
+			}
+		})
 	}
 }
 

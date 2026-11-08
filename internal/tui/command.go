@@ -249,10 +249,11 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // for, so that exchange clears the stack.
 //
 // /panel is the side panel's verb (sidepanel.go, ADR 0110): bare it reports `ui.side-panel.show`
-// and each section's mode, `on|off|auto` sets the show mode, and `pin|unpin|hide <section>` sets one
-// section's mode (`unpin` is `auto`) — every write going through the seams the panel's own pin
-// glyph and the settings pane use, so a setting changed by command reads the same in the file and
-// on the screen. Its grammar follows /skills' down to the posture: the report answers mid-run, and
+// and each section's mode, `on|off|auto` sets the show mode, `pin|unpin|hide <section>` sets one
+// section's mode (`unpin` is `auto`), and `width <n>|reset` sets `ui.side-panel.width` or returns it
+// to its default (adr-0110-amend-1108) — every write going through the seams the panel's own pin
+// glyph, its separator and the settings pane use, so a setting changed by command reads the same in
+// the file and on the screen. Its grammar follows /skills' down to the posture: the report answers mid-run, and
 // both writing forms are idle-only like every other verb that writes config. It is not a watch verb
 // (watchVerbs): a watch runs only the verbs that read what the view already holds, and this one
 // writes config.
@@ -323,7 +324,7 @@ func init() {
 		{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true, run: bareVerb(Model.runInspectCommand)},
 		{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true, run: tokenVerb(Model.runModelCommand)},
 		{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true, run: bareVerb(Model.startNewSession)},
-		{name: "panel", summary: "set the side panel — on|off|auto, or pin|unpin|hide <section> (bare = report)", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parsePanel), run: typedVerb(Model.runPanelCommand)},
+		{name: "panel", summary: "set the side panel — on|off|auto, pin|unpin|hide <section>, or width <n>|reset (bare = report)", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parsePanel), run: typedVerb(Model.runPanelCommand)},
 		{name: "redo", summary: "put back what the last /undo removed (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseRedo), run: typedVerb(Model.runRedo)},
 		{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true, run: tokenVerb(Model.runRename)},
 		{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true, run: restVerb(Model.runSchedule)},
@@ -514,8 +515,8 @@ func verbArgsOf[T any](p parsedInput) T {
 // Step that is already dispatching tool calls and is idle-only for the same reason /clear is;
 // /skills' LISTING answers from disk alone, while "/skills export <id>" writes a folder into the
 // user's library and is idle-only like every other config-writing form; and bare /panel reports
-// the side panel's settings, while "/panel on|off|auto" and "/panel pin|unpin|hide <section>"
-// write `ui.side-panel.*` and are idle-only for /skills export's reason. Each grammar's zero value
+// the side panel's settings, while "/panel on|off|auto", "/panel pin|unpin|hide <section>" and
+// "/panel width <n>|reset" write `ui.side-panel.*` and are idle-only for /skills export's reason. Each grammar's zero value
 // IS its reporting form (confineStatus, skillsList, panelReport), so those three tests read true
 // for every other verb without naming one — and an argument error, which every one of these parses
 // reports as the zero value, stays runnable so a mistyped line earns its usage line mid-run exactly

@@ -797,11 +797,11 @@ func (m Model) setPanelWidth(width int) Model {
 }
 
 // resetPanelWidth returns `ui.side-panel.width` to its default — the double-click on the grip
-// (adr-0110-amend-1108 (b)) — through [SettingsHost.Reset], which removes the key's line rather than
-// writing the default into it (ADR 0035), with setPanelWidth's contract otherwise: the column moves
-// first, a landed reset is journalled as the reset it is, a failed one speaks as one transcript
-// error naming the key and the default stands for the session, and a nil seam changes the session
-// alone (ADR 0031).
+// (adr-0110-amend-1108 (b)) and `/panel width reset` — through [SettingsHost.Reset], which removes
+// the key's line rather than writing the default into it (ADR 0035), with setPanelWidth's contract
+// otherwise: the column moves first, a landed reset is journalled as the reset it is, a failed one
+// speaks as one transcript error naming the key and the default stands for the session, and a nil
+// seam changes the session alone (ADR 0031).
 func (m Model) resetPanelWidth() Model {
 	m.opts.UI.SidePanelWidth = domain.DefaultSidePanelWidth
 	if m.opts.Settings == nil {
@@ -948,20 +948,30 @@ const (
 	panelReport     panelAction = iota // report the show mode and every section's mode
 	panelSetShow                       // set `ui.side-panel.show`
 	panelSetSection                    // set one section's mode in `ui.side-panel.sections`
+	panelSetWidth                      // set `ui.side-panel.width`
+	panelResetWidth                    // return `ui.side-panel.width` to its default
 )
 
-// panelArgs is the parsed argument list of a /panel line: what was asked for, and the show mode or
-// the section and mode it was asked of.
+// panelArgs is the parsed argument list of a /panel line: what was asked for, and the show mode,
+// the section and mode, or the width it was asked of.
 type panelArgs struct {
 	action  panelAction
 	show    domain.SidePanelShow
 	section domain.SidePanelSection
 	mode    domain.SidePanelMode
+	width   int
 }
 
 // panelUsage is the one-line grammar every /panel argument error carries, so a mistyped line teaches
 // the syntax instead of quietly reporting as though nothing had been asked.
-const panelUsage = "usage: /panel | /panel on|off|auto | /panel pin|unpin|hide <section>"
+const panelUsage = "usage: /panel | /panel on|off|auto | /panel pin|unpin|hide <section> | /panel width <n>|reset"
+
+// panelWidthVerb is the subcommand that sets `ui.side-panel.width`, and panelWidthReset the word that
+// takes it back to its default in place of a number of columns.
+const (
+	panelWidthVerb  = "width"
+	panelWidthReset = "reset"
+)
 
 // panelSectionVerbs maps each section subcommand onto the mode it sets: `unpin` takes a section back
 // to `auto`, the mode a pin-glyph click unpins it to (followPanelTarget).
@@ -973,11 +983,14 @@ var panelSectionVerbs = map[string]domain.SidePanelMode{
 
 // parsePanel parses the argument tokens that followed a "/panel" verb. No arguments means the
 // report; a show mode (`on`, `off`, `auto`) alone sets the show mode; `pin`, `unpin` or `hide` takes
-// exactly one section this build knows. Everything else is an error carrying panelUsage — a refused
-// section names the sections there are.
+// exactly one section this build knows; `width` takes a width or `reset` ([parsePanelWidth]).
+// Everything else is an error carrying panelUsage — a refused section names the sections there are.
 func parsePanel(args []string) (panelArgs, error) {
 	if len(args) == 0 {
 		return panelArgs{action: panelReport}, nil
+	}
+	if args[0] == panelWidthVerb {
+		return parsePanelWidth(args[1:])
 	}
 	if show, err := domain.ParseSidePanelShow(args[0]); err == nil {
 		if len(args) != 1 {
@@ -1005,8 +1018,27 @@ func parsePanel(args []string) (panelArgs, error) {
 	return panelArgs{action: panelSetSection, section: section, mode: mode}, nil
 }
 
-// runPanelCommand routes a parsed /panel line: set the show mode, or one section's mode, and either
-// way — the bare report included — answer with the settings now in force (panelReportNote), so
+// parsePanelWidth parses the tokens that followed "/panel width": exactly one, either `reset` or a
+// width [domain.ParseSidePanelWidth] takes — so a non-integer, 0 or a width below the minimum is
+// refused in the sentence a config file stating it is, with panelUsage after it. A width the
+// window cannot paint is no error: the layout clamps it and never rewrites the setting.
+func parsePanelWidth(args []string) (panelArgs, error) {
+	if len(args) != 1 {
+		return panelArgs{}, fmt.Errorf("/panel %s takes a number of columns or %s. %s",
+			panelWidthVerb, panelWidthReset, panelUsage)
+	}
+	if args[0] == panelWidthReset {
+		return panelArgs{action: panelResetWidth}, nil
+	}
+	width, err := domain.ParseSidePanelWidth(args[0])
+	if err != nil {
+		return panelArgs{}, fmt.Errorf("%w. %s", err, panelUsage)
+	}
+	return panelArgs{action: panelSetWidth, width: width}, nil
+}
+
+// runPanelCommand routes a parsed /panel line: set the show mode, one section's mode or the width,
+// or reset the width, and every way — the bare report included — answer with the settings now in force (panelReportNote), so
 // the human sees what the panel does even where this window is too narrow to draw it.
 //
 // No upstream call and no worker: a write is one config key through the seams the settings pane and
@@ -1017,6 +1049,10 @@ func (m Model) runPanelCommand(args panelArgs) (tea.Model, tea.Cmd) {
 		m = m.setPanelShow(args.show)
 	case panelSetSection:
 		m = m.setPanelSectionMode(args.section, args.mode)
+	case panelSetWidth:
+		m = m.setPanelWidth(args.width)
+	case panelResetWidth:
+		m = m.resetPanelWidth()
 	}
 	m.transcript.addNote(m.panelReportNote())
 	return m, nil
