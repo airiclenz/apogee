@@ -22,6 +22,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/recall"
@@ -578,12 +579,34 @@ func withBootUnreportedKeys(current, boot map[string]bool) map[string]bool {
 // applies twice — which for `mcp-servers:` is a second request of a set already requested. A write
 // that FAILED
 // changed no file and refreshes nothing.
+//
+// The two keys of the `ui.side-panel:` block sit a level deeper than the scalar writer reaches, so
+// they go to the writer that owns that block (config.SaveSidePanelSetting), the same writer
+// WriteSidePanelSection persists one section's mode through.
 func (h settingsHost) Write(key, value string) error {
-	if err := config.SaveConfigSetting(h.configPath, key, value); err != nil {
+	save := config.SaveConfigSetting
+	if config.IsSidePanelKey(key) {
+		save = config.SaveSidePanelSetting
+	}
+	if err := save(h.configPath, key, value); err != nil {
 		return err
 	}
 	h.edits.refresh()
 	return nil
+}
+
+// WriteSidePanelSection persists one side-panel section's mode — a pin, unpin or hide (ADR 0110) —
+// through the `ui.side-panel:` block's writer, and answers the list the file now resolves to. A
+// landed write re-takes the external-edit baseline for Write's reason (ADR 0041 decision 8); a
+// refused one changed no file and refreshes nothing.
+func (h settingsHost) WriteSidePanelSection(section domain.SidePanelSection,
+	mode domain.SidePanelMode) (domain.SidePanelSections, error) {
+	sections, err := config.SaveSidePanelSection(h.configPath, section, mode)
+	if err != nil {
+		return "", err
+	}
+	h.edits.refresh()
+	return sections, nil
 }
 
 // Reset is the same write in reverse: the key's active line is REMOVED, so the value goes back to

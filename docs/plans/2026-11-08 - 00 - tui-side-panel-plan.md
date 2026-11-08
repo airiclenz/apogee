@@ -263,7 +263,10 @@ internal/domain/uiprefs_test.go — TestUIPrefsSetLandsEveryKey; cmd/apogee/wire
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'Settings.*Apply' ./internal/tui/`
 **Commit:** `feat(config): add ui.side-panel.show and its section list`
 
-## 6. Sections write-back
+## 6. Sections write-back — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the new SettingsHost method is `WriteSidePanelSection(section, mode) (domain.SidePanelSections, error)`; it answers the list the file now resolves to, so the TUI caller (items 11/12) lands it and journals it via recordSettingEdit under `ui.side-panel.sections` — no TUI caller is added here.
+NOTES (2026-11-08): a section the file's list does not name (or no list at all) writes the whole resolved list with the one mode changed, so display order is kept; a list written one entry per line, or a `side-panel:` block in flow style, is refused ("edit the file by hand"), the scalar writer's posture.
 
 **What:**
 Recast at the regression check (2026-11-08).

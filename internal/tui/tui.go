@@ -236,14 +236,14 @@ type Scheduler interface {
 // row makes to the config files (the global file, or — for a project-capable key — the file the
 // human picks), and the live apply that puts a persisted key into effect on the
 // running session — ADR 0035's one key per deliberate edit and ADR 0037's validate → persist →
-// apply, named as one host capability rather than spelled as six bare funcs (ADR 0054). It is
+// apply, named as one host capability rather than spelled as seven bare funcs (ADR 0054). It is
 // defined here like [SessionHost], so the renderer stays unit-testable with a fake while the
 // composition root owns the key registry, the schema, the file format, and the resolution from a
 // file-spelled value onto whatever live seam the key moves.
 //
 // A nil host means `/settings` is unwired whole: the pane has nothing to show and says so, the
 // nil-seam degrade every seam in [Options] takes. A host that IS wired but cannot do one of the
-// six says so in that method's own answer — no rows, an error out of a write or a reset, an Apply
+// seven says so in that method's own answer — no rows, an error out of a write or a reset, an Apply
 // that reports nothing — so a Driver that persists without applying (ADR 0031) needs no second
 // interface to say it.
 type SettingsHost interface {
@@ -295,6 +295,17 @@ type SettingsHost interface {
 	// what the files then say for the key — the global file's value after a project reset, the
 	// project's after a global one, the default when neither sets it. Same contract as SaveTo.
 	ResetIn(target SettingTarget, path string) (SettingOutcome, error)
+
+	// WriteSidePanelSection persists one side-panel section's mode — what a pin, an unpin or a hide
+	// of that section means (ADR 0110) — into `ui.side-panel.sections` in the global config, the
+	// file's other entries kept with their modes and in their order. It answers the list the file
+	// now resolves to, in the canonical spelling [domain.UIPrefs.Set] lands for that key, so the
+	// caller lands it in the session and journals it (recordSettingEdit) under that one key.
+	//
+	// The [SettingsHost.Write] contract otherwise: synchronous on the keypress, errors reported and
+	// never swallowed, and the external-edit baseline re-taken after a landed write so the watcher
+	// does not report the write back as somebody's edit.
+	WriteSidePanelSection(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error)
 
 	// Apply makes one persisted key take effect in the RUNNING session — the apply half of every
 	// `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path and
