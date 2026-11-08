@@ -395,7 +395,19 @@ func (m Model) promptHeight() int {
 	if !seated {
 		return 0
 	}
-	return popupHeight(m.th, spec, m.width)
+	return popupHeight(m.th, spec, m.slotWidth())
+}
+
+// paneWidth is the total box width the pane p paints in, read off its slot: a transcript-side pane
+// takes the transcript slot's width ([Model.slotWidth]), so it never overpaints the side panel's
+// column beside it, and an input-side pane — the dropdown — keeps the window's, flush with the input
+// box it hugs. A painter shared by panes of both slots (the list surface) asks this rather than
+// either width outright.
+func (m Model) paneWidth(p framePane) int {
+	if paneSpecs[p].slot == slotTranscript {
+		return m.slotWidth()
+	}
+	return m.width
 }
 
 // sessionBrowserHeight is the rows renderSessionBrowser paints the browser in, answered without

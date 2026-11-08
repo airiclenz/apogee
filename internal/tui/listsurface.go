@@ -679,7 +679,8 @@ func (c listContent) statingFilter(filter, noun string, matches int, rowSetEntri
 }
 
 // renderList paints an open list overlay through the shared popup module (renderPopup): a titled,
-// bordered pane spanning the full window width (m.width, flush with the input box below) holding the
+// bordered pane spanning its slot's width (paneWidth: the transcript slot's, which leaves the side
+// panel's column clear, or the window's for the dropdown, flush with the input box below) holding the
 // body block, the rows and a key legend, the selected row highlighted. It is the one budget→render
 // call behind every list pane — the picker, the /sessions browser, the /settings sub-lists and the
 // "/" | "@" dropdown — and it returns "" when the frame cannot seat the pane beside its siblings, so
@@ -712,7 +713,7 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 	if !seated {
 		return "", popupPlacement{}, false // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
-	view, place := renderPopupPlaced(m.th, spec, m.width)
+	view, place := renderPopupPlaced(m.th, spec, m.paneWidth(c.pane))
 	return view, place, true
 }
 
@@ -724,7 +725,7 @@ func (m Model) listHeight(c listContent) int {
 	if !seated {
 		return 0
 	}
-	return popupHeight(m.th, spec, m.width)
+	return popupHeight(m.th, spec, m.paneWidth(c.pane))
 }
 
 // listSpec composes the list pane c's [popupSpec] for THIS frame — the budget the frame granted it and
@@ -733,7 +734,7 @@ func (m Model) listHeight(c listContent) int {
 func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	claim := popupFloor{}
 	if c.body != "" {
-		claim.body = popupBodyLineCount(m.th, c.body, m.width)
+		claim.body = popupBodyLineCount(m.th, c.body, m.paneWidth(c.pane))
 	}
 	// The house blanks around the ROW block (popupSpec.rowPadAbove, popupRowStyle.padBelow): one under
 	// whatever stands above the rows, one over the key legend. The upper one is spent on every list,
@@ -812,7 +813,7 @@ type listBudget struct {
 // popupSpec.rows), so a cut gloss is counted exactly as it is drawn.
 func (m Model) answersBudget(c listContent, claim popupFloor, budget listBudget) (listBudget, []popupRow, bool) {
 	ask := func(rows []popupRow, pad int) (int, int, int, bool) {
-		heights := popupWrappedRowHeights(m.th, rows, m.width)
+		heights := popupWrappedRowHeights(m.th, rows, m.paneWidth(c.pane))
 		demand := popupRowBlockLines(heights, 0, pad)
 		capped := popupRowBlockLines(heights[:min(len(heights), c.rowCap)], 0, pad)
 		claim.rows = demand
@@ -829,7 +830,7 @@ func (m Model) answersBudget(c listContent, claim popupFloor, budget listBudget)
 		if !seated || shown >= demand {
 			break
 		}
-		rows = answerGlossesCut(m.th, c.rows, m.width, glossLines)
+		rows = answerGlossesCut(m.th, c.rows, m.paneWidth(c.pane), glossLines)
 		demand, maxBody, shown, seated = ask(rows, 0)
 	}
 	budget.maxBody, budget.shown = maxBody, shown

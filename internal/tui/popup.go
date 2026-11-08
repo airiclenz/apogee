@@ -24,8 +24,11 @@ import (
 //   - width is the TOTAL box width: the rounded border and the padding fold INTO width, so every
 //     rendered line is exactly width display cells in the painter's own measure, and the pane is
 //     exactly as many painted rows as it composed (drawBox, like renderStartupBox). Callers pass
-//     m.width — the full window width, the same value the input box spans — so the pane's right
-//     border lands on the terminal's last column, flush with the prompt box below it.
+//     their pane's slot width (Model.paneWidth): the input-side dropdown passes m.width — the full
+//     window width, the same value the input box spans — so its right border lands on the
+//     terminal's last column, flush with the prompt box below it; a transcript-side pane passes
+//     Model.slotWidth, which is that same width unless the side panel's column (ADR 0110) stands
+//     beside the slot, where the pane's right border lands on the slot's last column instead.
 //   - The pane is filled solid black: the border style paints its border and padding cells black,
 //     and every content line is padded out to the full inner width on the same black field, so no
 //     interior cell (including the gap after a short row) is left on the terminal background.

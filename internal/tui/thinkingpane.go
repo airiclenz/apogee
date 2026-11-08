@@ -69,7 +69,7 @@ const minThinkingWrapColumn = 20
 // lands elsewhere in the text. That is the correction [Model.reportSpec]'s clamp already applies on
 // every frame, and it is the price of never cutting a rune off a line the reader cannot get back.
 func (m Model) thinkingWrapColumn() int {
-	return max(popupInnerWidth(m.th, m.width)-popupRowIndent-popupScrollbarGutter, minThinkingWrapColumn)
+	return max(popupInnerWidth(m.th, m.slotWidth())-popupRowIndent-popupScrollbarGutter, minThinkingWrapColumn)
 }
 
 // scopedThinking is the record list the pane speaks for in THIS frame, oldest first, with the

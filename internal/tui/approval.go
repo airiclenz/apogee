@@ -615,7 +615,7 @@ func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPl
 	if !seated {
 		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
-	return renderPopupPlaced(m.th, spec, m.width)
+	return renderPopupPlaced(m.th, spec, m.slotWidth())
 }
 
 // approvalPromptSpec composes the approval pane's [popupSpec] for THIS frame — the one composition

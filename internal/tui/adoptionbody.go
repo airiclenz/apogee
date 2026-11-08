@@ -65,7 +65,7 @@ func (m Model) adoptionBody() string {
 	if len(m.picker.adoption) == 0 || !isStructured(m.picker.adoption[0]) {
 		return ""
 	}
-	inner := popupInnerWidth(m.th, m.width)
+	inner := popupInnerWidth(m.th, m.slotWidth())
 	var wrapped []string
 	for _, line := range proposalBodyLines(m.picker.adoption[0], argumentValueMaxLines) {
 		wrapped = append(wrapped, wrapBodyLine(m.th, line, inner)...)

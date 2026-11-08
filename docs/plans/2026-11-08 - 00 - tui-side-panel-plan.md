@@ -333,7 +333,12 @@ an empty column's top row reads `nothing live` and every row from `topRule` down
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EApprovalForcedLookSurvivesAutoMode|TestE2ELiveState|TestE2EParallel|TestE2EGuardSecrets' ./cmd/apogee/`
 **Commit:** `feat(tui): reserve the side-panel column on wide terminals`
 
-## 8. Slot panes take the slot width
+## 8. Slot panes take the slot width — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the list surface (listsurface.go) is shared by transcript-side panes and the input-side dropdown, so its width reads go through a new `Model.paneWidth(framePane)` in panes.go (slotTranscript → slotWidth(), slotInput → m.width); every other slot reader calls `slotWidth()` directly.
+NOTES (2026-11-08): `testUIPrefs` is left as it was rather than pinned to `off`: since item 7 the zero UIPrefs' empty `SidePanelShow` already draws no column, so hand-built tests keep the classic frame; pinning `off` would move TestSettingsApplyLocalLandsEveryUIKeyThroughSet's seed (its accepted value is `off`). Panel tests opt in by setting `SidePanelShow: auto`.
+NOTES (2026-11-08): the settings-click test is `TestSettingsClickBesideTheSidePanel` (key-row selection and edit-buffer caret at 140×40 with the panel shown), placed in model_test.go beside TestSlotPanesFitBesideTheSidePanel; both match the Acceptance `-run` pattern.
+NOTES (2026-11-08): model.go's View comment ("into the full window width layout() then gave it", ~line 3583) went stale with item 7, which gives the viewport the slot width; model.go is outside this item's files, so it is left as is.
 
 **What:**
 **Goal:** every pane painted in the transcript slot sizes itself from `slotWidth()`, so none

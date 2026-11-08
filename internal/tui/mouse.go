@@ -1274,7 +1274,7 @@ func (m Model) settingsPaint() (settingsPaint, bool) {
 	}
 	return settingsPaint{
 		display: display,
-		render:  func() (string, popupPlacement) { return renderPopupPlaced(m.th, spec, m.width) },
+		render:  func() (string, popupPlacement) { return renderPopupPlaced(m.th, spec, m.slotWidth()) },
 	}, true
 }
 
@@ -1426,7 +1426,7 @@ func (m Model) settingsFieldPaint() (settingsFieldPaint, bool) {
 		if !seated {
 			return settingsFieldPaint{}, false
 		}
-		_, place := renderPopupPlaced(m.th, spec, m.width)
+		_, place := renderPopupPlaced(m.th, spec, m.slotWidth())
 		return m.settingsFieldGeometry(place, &display, paneTop), true
 	case settingsTextEditor:
 		if _, open := m.settingsTextTarget(rows); !open {
@@ -1436,7 +1436,7 @@ func (m Model) settingsFieldPaint() (settingsFieldPaint, bool) {
 		if !seated {
 			return settingsFieldPaint{}, false
 		}
-		_, place := renderPopupPlaced(m.th, spec, m.width)
+		_, place := renderPopupPlaced(m.th, spec, m.slotWidth())
 		return m.settingsFieldGeometry(place, nil, paneTop), true
 	}
 	return settingsFieldPaint{}, false

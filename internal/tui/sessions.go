@@ -1036,7 +1036,8 @@ func (m Model) canResumeWorkflows() bool {
 // ----------------------------------------------------------------------------
 
 // renderSessionBrowser paints the /sessions overlay through the shared popup module (renderPopup):
-// a titled, bordered pane spanning the full window width (m.width, flush with the input box below)
+// a titled, bordered pane spanning the transcript slot's width (slotWidth: the window's, flush with the
+// input box below, unless the side panel's column stands beside it)
 // holding the session rows and a key legend, the selected row highlighted. Row composition —
 // which facts each row states, in which cells, including the inline delete-confirm or rename-edit
 // decoration — stays caller-side in sessionRows, while the module owns the marker, highlight,

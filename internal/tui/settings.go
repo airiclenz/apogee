@@ -1925,7 +1925,7 @@ func (m Model) settingsNoteWidth(rows []SettingRow, pending settingEdit) int {
 		cells = append(cells, m.settingRowCellsPending(row, pending))
 	}
 	widths := popupColumnWidths(m.th, cells)
-	width := popupInnerWidth(m.th, m.width) - popupRowIndent - settingsNoteMarkerCells
+	width := popupInnerWidth(m.th, m.slotWidth()) - popupRowIndent - settingsNoteMarkerCells
 	for i := 0; i+1 < len(widths); i++ {
 		if widths[i] == 0 {
 			continue
@@ -1933,7 +1933,7 @@ func (m Model) settingsNoteWidth(rows []SettingRow, pending settingEdit) int {
 		width -= widths[i] + m.th.measure.Width(popupGutter)
 	}
 	spec, _, seated := m.settingsKeyListSpec(rows)
-	if seated && popupScrollbarShown(m.th, spec, popupInnerWidth(m.th, m.width)) {
+	if seated && popupScrollbarShown(m.th, spec, popupInnerWidth(m.th, m.slotWidth())) {
 		width -= popupScrollbarGutter
 	}
 	return width
@@ -1985,7 +1985,7 @@ func (m Model) settingsBody(rows []SettingRow) string {
 	// the one that trims it back move neither the header nor the title above it.
 	var lines []string
 	if sel >= 0 {
-		inner := popupInnerWidth(m.th, m.width)
+		inner := popupInnerWidth(m.th, m.slotWidth())
 		lead := settingsDescLabel + " " + stripEscapes(rows[sel].Desc)
 		lines = wrapText(m.th, strings.TrimRight(lead, " "), inner)
 		if len(lines) > settingsDescLines {
@@ -2004,10 +2004,10 @@ func (m Model) settingsBody(rows []SettingRow) string {
 }
 
 // renderSettings paints the open pane through the shared popup module: a titled, bordered pane
-// spanning the full window width (m.width, flush with the input box below), the selected key's
-// description as its header, the key rows under their spaced section labels, and the key legend. It returns
-// "" when the pane is closed or when the frame cannot seat it, so View treats it exactly like the
-// picker's slot.
+// spanning the transcript slot's width (slotWidth: the window's, flush with the input box below,
+// unless the side panel's column stands beside it), the selected key's description as its header,
+// the key rows under their spaced section labels, and the key legend. It returns "" when the pane is
+// closed or when the frame cannot seat it, so View treats it exactly like the picker's slot.
 //
 // The row window is the SCREEN's to grant and there is no taste cap above it: this pane asks for
 // every row it has and popupBudget answers with what the frame allotted it, which for this pane is
@@ -2034,7 +2034,7 @@ func (m Model) renderSettings() string {
 	if !ok {
 		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
 	}
-	view, place := renderPopupPlaced(m.th, spec, m.width)
+	view, place := renderPopupPlaced(m.th, spec, m.slotWidth())
 	// The drag-selection is overlaid on the COMPOSED pane, the highlightInput idiom: the module takes
 	// plain cells and styles rows whole (doc.go), so a shaded run cannot be handed to it as a cell.
 	return m.highlightSettingsField(view, m.settingsFieldGeometry(place, &display, 0))
@@ -2059,7 +2059,7 @@ func (m Model) settingsHeight() int {
 	if !ok {
 		return 0
 	}
-	return popupHeight(m.th, spec, m.width)
+	return popupHeight(m.th, spec, m.slotWidth())
 }
 
 // settingsKeyListSpec composes the key list's [popupSpec] for THIS frame — the display rows, the
@@ -2089,7 +2089,7 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 	// only by the one line the rows keep for the row the window is anchored on, so it is the LIST
 	// that scrolls and never the header that goes.
 	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(display.rows)+pad, len(display.rows)+pad,
-		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
+		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.slotWidth())})
 	if !seated {
 		return popupSpec{}, settingsDisplay{}, false
 	}
@@ -2136,7 +2136,7 @@ func (m Model) renderSettingsText(rows []SettingRow) string {
 	if !ok {
 		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
 	}
-	view, place := renderPopupPlaced(m.th, spec, m.width)
+	view, place := renderPopupPlaced(m.th, spec, m.slotWidth())
 	// The drag-selection is overlaid on the COMPOSED field, the key list's own idiom one state along:
 	// the module takes plain cells and styles rows whole (doc.go), so a shaded run cannot be handed to
 	// it as a cell.
@@ -2150,7 +2150,7 @@ func (m Model) settingsTextHeight(rows []SettingRow) int {
 	if !ok {
 		return 0
 	}
-	return popupHeight(m.th, spec, m.width)
+	return popupHeight(m.th, spec, m.slotWidth())
 }
 
 // settingsTextLines is the field as the pane PAINTS it: one string per LINE of the value, the caret
@@ -2185,14 +2185,14 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 	// The claim is in painted LINES, and a wrapping row costs more than one — so it is measured with
 	// the painter's own composition rather than counted off the value, which would ask for too few the
 	// moment a line wrapped and hide the tail of a prompt the pane had room for.
-	claim := popupRowBlockLines(popupRowHeights(popupRowBlocks(m.th, text, true, popupInnerWidth(m.th, m.width))), 0, 0)
+	claim := popupRowBlockLines(popupRowHeights(popupRowBlocks(m.th, text, true, popupInnerWidth(m.th, m.slotWidth()))), 0, 0)
 	hint := m.settingsPaneHint(rows)
 	// The blank over the key legend, booked into the claim in LINES for the reason the key list books
 	// it (settingsKeyListSpec) — the field breathes above its legend exactly as the list does, and no
 	// blank above the block, the description region having closed with one.
 	pad := popupRowPadLines(false, hint != "")
 	maxBody, maxRows, seated := m.popupBudget(paneSettings, claim+pad, claim+pad, popupChrome,
-		popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
+		popupFloor{body: popupBodyLineCount(m.th, body, m.slotWidth())})
 	if !seated {
 		return popupSpec{}, false
 	}
@@ -2236,7 +2236,7 @@ func (m Model) settingsSubListContent(row SettingRow, values []popupRow, hint st
 	return listContent{
 		pane:     paneSettings,
 		title:    settingsTitle,
-		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width)),
+		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.slotWidth())),
 		hint:     hint,
 		rowCap:   len(values), // the whole content is the taste; popupBudget answers with the frame's
 		rows:     values,
@@ -2338,7 +2338,7 @@ func (m Model) settingsEnumCellWidth(row SettingRow, vocabulary []string) int {
 		value = max(value, m.th.measure.Width(stripEscapes(v)))
 		probe = append(probe, popupRow{stripEscapes(v)})
 	}
-	inner := popupInnerWidth(m.th, m.width)
+	inner := popupInnerWidth(m.th, m.slotWidth())
 	width := inner - popupRowIndent - value - m.th.measure.Width(popupGutter)
 	content := m.settingsSubListContent(row, probe, settingsEnumHint, len(probe))
 	if spec, seated := m.listSpec(content); seated && popupScrollbarShown(m.th, spec, inner) {

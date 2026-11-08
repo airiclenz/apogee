@@ -279,10 +279,10 @@ func (m Model) reportFullWindow(spec popupSpec) int {
 // asks the painter itself. Both that clamp and the scroll keys' window ([Model.reportWindow]) read it.
 func (m Model) reportRowSeat(spec popupSpec) (start, end int) {
 	if spec.wrapRows {
-		_, place := renderPopupPlaced(m.th, spec, m.width)
+		_, place := renderPopupPlaced(m.th, spec, m.slotWidth())
 		return place.start, place.end
 	}
-	if m.width <= m.th.popupBorder.GetHorizontalFrameSize() {
+	if m.slotWidth() <= m.th.popupBorder.GetHorizontalFrameSize() {
 		return 0, 0 // the painter draws no pane here, so it seats no row either (renderPopupPlaced)
 	}
 	seat := popupRowSeat(spec, popupFlatRowHeights(len(spec.rows)))
@@ -298,7 +298,7 @@ func (m Model) renderReport(r reportKind) string {
 	if !seated {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
-	return renderPopup(m.th, spec, m.width)
+	return renderPopup(m.th, spec, m.slotWidth())
 }
 
 // reportHeight is the rows renderReport paints the named report in, answered without painting it
@@ -313,7 +313,7 @@ func (m Model) reportHeight(r reportKind) int {
 	if !seated {
 		return 0
 	}
-	return popupHeight(m.th, spec, m.width)
+	return popupHeight(m.th, spec, m.slotWidth())
 }
 
 // dismissReport takes the named report off the frame and gives its rows back to the transcript. Both

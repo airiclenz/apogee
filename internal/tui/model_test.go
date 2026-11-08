@@ -8927,3 +8927,95 @@ func TestContextGaugeToolResultEstimateYieldsToEnterDismiss(t *testing.T) {
 	}
 	assertStatusRightTail(t, m, "enter dismiss"+bodyIndent)
 }
+
+// TestSlotPanesFitBesideTheSidePanel opens every pane of the pane table with the side panel's column
+// shown (ADR 0110) and pins whose width each one takes. A transcript-side pane is exactly the
+// transcript slot's width — its right border on the slot's last column, so nothing it paints reaches
+// the separator — and the frame's every row above the session-name rule still carries the separator
+// at the slot's edge. The dropdown is the input slot's tenant and keeps the window's width, flush
+// with the input box it hugs.
+func TestSlotPanesFitBesideTheSidePanel(t *testing.T) {
+	t.Parallel()
+
+	const width, height = 140, 40
+	for _, fx := range paneFixtures() {
+		t.Run(fx.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := fx.build(t)
+			m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+			m = step(t, m, tea.WindowSizeMsg{Width: width, Height: height})
+			if !m.panelShown() {
+				t.Fatalf("the side panel is not shown at %d×%d", width, height)
+			}
+			row := paneSpecs[fx.pane]
+			pane := row.render(m)
+			if pane == "" {
+				t.Fatalf("the %s paints nothing at %d×%d", row.name, width, height)
+			}
+			want := m.width
+			if row.slot == slotTranscript {
+				want = m.slotWidth()
+			}
+			for i, ln := range strings.Split(pane, "\n") {
+				if got := m.th.measure.Width(ln); got != want {
+					t.Errorf("the %s's line %d is %d cells, want %d: %q", row.name, i, got, want, ansi.Strip(ln))
+				}
+			}
+
+			lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+			slot := m.slotWidth()
+			for i, ln := range lines {
+				if strings.HasPrefix(ln, "▔") {
+					break
+				}
+				if sep := ansi.Cut(ln, slot, slot+1); sep != sidePanelSeparator {
+					t.Errorf("frame row %d carries %q at the slot's edge (column %d), want the separator: %q",
+						i, sep, slot, ln)
+				}
+			}
+		})
+	}
+}
+
+// TestSettingsClickBesideTheSidePanel aims the /settings pointer at a pane painted beside the side
+// panel's column: the click map composes the pane at the width the painter does (the transcript
+// slot's), so a click on a key row selects that row and a click in the open edit buffer seats the
+// caret on the glyph under the pointer.
+func TestSettingsClickBesideTheSidePanel(t *testing.T) {
+	t.Parallel()
+
+	panelShown := func(t *testing.T, m Model) Model {
+		t.Helper()
+		m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+		m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+		if !m.panelShown() {
+			t.Fatal("the side panel is not shown at 140×40")
+		}
+		return m
+	}
+
+	t.Run("key row", func(t *testing.T) {
+		t.Parallel()
+		m := panelShown(t, settingsFrameModel(t, 80, 30, 8))
+		x, y := frameCell(t, m, "key-02")
+		if m = step(t, m, leftClick(x, y)); m.settings.selected != 2 {
+			t.Errorf("selected = %d, want the row the pointer was on (2)", m.settings.selected)
+		}
+	})
+
+	t.Run("edit buffer caret", func(t *testing.T) {
+		t.Parallel()
+		row := settingsStringRow()
+		row.Value = "http://box:1111"
+		m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
+		m = step(t, panelShown(t, m), keyEnter())
+		if m.settings.kind != settingsValueBuffer {
+			t.Fatalf("pane = %+v, want the edit buffer open", m.settings)
+		}
+		x, y := frameCell(t, m, "box")
+		if m = step(t, m, leftClick(x, y)); m.settings.editor.caretRune() != 7 {
+			t.Errorf("caret at rune %d, want 7 (the %q the pointer was on)", m.settings.editor.caretRune(), "box")
+		}
+	})
+}

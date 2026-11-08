@@ -352,7 +352,7 @@ func (m Model) askPromptPlaced(req domain.AskRequest) (string, popupPlacement) {
 	if !seated {
 		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
-	return renderPopupPlaced(m.th, spec, m.width)
+	return renderPopupPlaced(m.th, spec, m.slotWidth())
 }
 
 // askPromptSpec composes the ask pane's [popupSpec] for THIS frame — the one composition
@@ -408,12 +408,12 @@ func (m Model) askPromptSpec(req domain.AskRequest) (popupSpec, bool) {
 	// step: a pane that over-books spends a line of the question on a blank it never draws, and one
 	// that under-books draws a blank out of the body's lines.
 	rows := askChoiceRows(m.th, stripEscapesAll(req.Choices), req.MultiSelect, m.askChecked)
-	heights := popupWrappedRowHeights(m.th, rows, m.width)
+	heights := popupWrappedRowHeights(m.th, rows, m.slotWidth())
 	askPad := popupRowPadLines(len(rows) > 0, askRowStyle.padBelow)
 	wanted := popupRowBlockLines(heights, askRowStyle.gapLines(), askPad)
 	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowStyle.gapLines(), askPad)
 	floor := popupFloor{
-		body: min(askQuestionFloor, popupBodyLineCount(m.th, question, m.width)),
+		body: min(askQuestionFloor, popupBodyLineCount(m.th, question, m.slotWidth())),
 		rows: askAnchorRowLines(selected, heights),
 	}
 	maxBodyRows, rowLines, seated := m.popupBudget(panePrompt, wanted, capped, popupTitleBorderChrome, floor)

@@ -880,7 +880,7 @@ func (m Model) subAgentsServerRows() []popupRow {
 // row keeps its endpoints at every width, the rows it drew before summaries existed.
 func (m Model) fitServerRows(choices []ServerChoice, compose func(withEndpoint bool) []popupRow) []popupRow {
 	rows := compose(true)
-	if !anyServerStats(choices) || popupRowsFit(m.th, rows, popupInnerWidth(m.th, m.width)) {
+	if !anyServerStats(choices) || popupRowsFit(m.th, rows, popupInnerWidth(m.th, m.slotWidth())) {
 		return rows
 	}
 	return compose(false)
@@ -1449,9 +1449,10 @@ func (m Model) pickerFilteredView() pickerView {
 // ----------------------------------------------------------------------------
 
 // renderPicker paints the open picker through the shared list surface (renderListPlaced,
-// listsurface.go): a titled, bordered pane spanning the full window width holding the rows and a key
-// legend, the selected row highlighted, and — while one is typed — the filter on its title row. It
-// returns "" when the picker is closed, so View treats it exactly like the /sessions browser's slot.
+// listsurface.go): a titled, bordered pane spanning the transcript slot's width (slotWidth) holding
+// the rows and a key legend, the selected row highlighted, and — while one is typed — the filter on
+// its title row. It returns "" when the picker is closed, so View treats it exactly like the
+// /sessions browser's slot.
 //
 // What this file states is what only this pane knows — its slot in the frame, its name, its legend,
 // its taste in rows and the rows themselves. How the filter is worded (overlayFilterTail) and the
