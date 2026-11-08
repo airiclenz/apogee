@@ -169,7 +169,14 @@ bumped again; item 1's sweep entries; an `eventBaseOf` case; `run.jsonl` re-reco
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestManualListsEveryEventLineKind|TestE2EEventLinesGolden' ./cmd/apogee/`
 **Commit:** `feat(engine): emit the standing context cost at each Turn's end`
 
-## 4. Driver-neutral panel fold
+## 4. Driver-neutral panel fold — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): API as built: `New(now)`, `SetFallbackWindow(n)`, `Fold(domain.Event)`, `SetTasks(run, items)`, `AddWrite(run, depth, path, stat *domain.DiffStat)` (nil stat = the write carried no Edit regions), `SetUsage(run, totals domain.Usage, used int)` (resume seed: totals kept under later live Cumulative readings, used = last observed fill); queries `SubAgents()` (every run whatever the scope, decision 12), `Tasks(scope)`, `ChangedFiles(scope)`, `Usage(scope)` returning `View[R]{Rows, Summary, IsLive}` / `UsageView`; queries are nil-safe, mutators are not.
+NOTES (2026-11-08): `RunKey` is keyed by the run id alone when one is set, else by (depth, spawning call id) — the stated runRef semantics; the zero RunKey is the top-level run, and `RunOf(domain.EventBase)` is the one constructor (items 10-12 build a key from a runRef through it).
+NOTES (2026-11-08): fill mirrors the TUI's contextGauge: the top-level scope shows the newer ContextEstimateEvent over the reading (IsEstimate), a delegated run its reading alone; top-level Usage totals sum every run's base + latest Cumulative, a run scope its own.
+NOTES (2026-11-08): the two tool-surface ContextCostRow names ("tool menu", "tool instructions") are local constants: internal/agent's own are unexported and the package may not import it — a rename there would silently move tools into the system share.
+NOTES (2026-11-08): sidepanel.go is 556 lines (doc-heavy), over the ~400-line [should] guideline; kept as one file because the item's Files line names only it.
+NOTES (2026-11-08): no CHANGELOG entry — the package has no user-visible surface until the panel paints (item 13 documents the feature).
 
 **What:**
 Recast at the regression check (2026-11-08).
