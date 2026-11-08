@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -260,6 +261,48 @@ func TestDelegationPhases_SerialDelegationEmitsThePair(t *testing.T) {
 	}
 	if !strings.Contains(phases[1].Result.Content, "Go TUI agent") {
 		t.Errorf("finished carried %q, want the child's report", phases[1].Result.Content)
+	}
+}
+
+// TestSubAgentPhaseEventCarriesAt pins the moment every phase is stamped with: both the started
+// and the finished phase carry an At read from the emitting Agent's injected clock (Agent.now), not
+// from the wall clock, and the finished one is later than the started one — the pair a Driver
+// subtracts for a run's elapsed time.
+func TestSubAgentPhaseEventCarriesAt(t *testing.T) {
+	sink := &recordingSink{}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "summarise the repo"),
+		contentTurn("the repo is a Go TUI agent"),
+		contentTurn("done — delegated and summarised"),
+	)
+	a, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// A stepping clock far from the wall clock: every read is a second after the last, so a stamp
+	// from it is recognisable and two reads are ordered. It is atomic because a child may read the
+	// clock it was handed while the parent reads its own.
+	epoch := time.Date(2031, 1, 2, 3, 4, 5, 0, time.UTC)
+	var ticks atomic.Int64
+	a.now = func() time.Time { return epoch.Add(time.Duration(ticks.Add(1)) * time.Second) }
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	phases := subAgentPhases(sink.events)
+	if len(phases) != 2 || phases[0].Phase != domain.SubAgentStarted || phases[1].Phase != domain.SubAgentFinished {
+		t.Fatalf("phases = %+v, want the started/finished pair", phases)
+	}
+	for _, p := range phases {
+		if !p.At.After(epoch) || p.At.After(epoch.Add(time.Duration(ticks.Load())*time.Second)) {
+			t.Errorf("%s phase At = %v, want a stamp from the Agent's clock (after %v)", p.Phase, p.At, epoch)
+		}
+	}
+	if !phases[1].At.After(phases[0].At) {
+		t.Errorf("finished At %v is not after started At %v", phases[1].At, phases[0].At)
 	}
 }
 

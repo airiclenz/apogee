@@ -183,22 +183,24 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "sub_agent_phase",
 			wantBase: domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9"},
 			wantData: `{"phase":"started","result":{"call_id":"","content":"","is_error":false,"summary":null},` +
-				`"cancelled":false,"step_cap":0,"cap_requested":0}`,
+				`"cancelled":false,"step_cap":0,"cap_requested":0,"at":null}`,
 		},
 		{
 			// The started phase carries the step cap the child runs under, and the larger
-			// max_steps its call asked for when the configured cap clamped it.
+			// max_steps its call asked for when the configured cap clamped it; `at`, last, is the
+			// moment the phase was crossed, and `null` on the two cases built without one.
 			name: "sub_agent_phase started under a clamped step cap",
 			event: domain.SubAgentPhaseEvent{
 				EventBase:    domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9", RunID: "0badc0de.2"},
 				Phase:        domain.SubAgentStarted,
 				StepCap:      20,
 				CapRequested: 50,
+				At:           time.Date(2026, 11, 8, 9, 30, 0, 123000000, time.UTC),
 			},
 			wantKind: "sub_agent_phase",
 			wantBase: domain.EventBase{Depth: 1, Turn: 1, CallID: "call-9", RunID: "0badc0de.2"},
 			wantData: `{"phase":"started","result":{"call_id":"","content":"","is_error":false,"summary":null},` +
-				`"cancelled":false,"step_cap":20,"cap_requested":50}`,
+				`"cancelled":false,"step_cap":20,"cap_requested":50,"at":"2026-11-08T09:30:00.123Z"}`,
 		},
 		{
 			// A cancel settles a delegation with a result (ADR 0088), so the finished phase carries
@@ -218,7 +220,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Depth: 1, Turn: 6, CallID: "call-9"},
 			wantData: `{"phase":"finished","result":{"call_id":"call-9","content":"stopped","is_error":true,` +
 				`"summary":{"kind":"delegation_outcome","bound":"","stopped_by_user":true,"has_no_report":false,` +
-				`"steered_messages":1}},"cancelled":false,"step_cap":0,"cap_requested":0}`,
+				`"steered_messages":1}},"cancelled":false,"step_cap":0,"cap_requested":0,"at":null}`,
 		},
 		{
 			name: "workflow_phase started",

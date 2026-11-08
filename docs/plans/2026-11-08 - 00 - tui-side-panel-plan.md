@@ -99,7 +99,11 @@ a `TestEncodeMapsEveryEventVariant` map entry, a `roundTripEvents` fixture, a `T
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFoldEventCoversEveryEventVariant' ./internal/tui/`
 **Commit:** `feat(engine): emit a typed task-list Event at every depth`
 
-## 2. Sub-agent start time
+## 2. Sub-agent start time — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): consequential edit — .capcom/knowledge/decisions/adr-0075.md: made necessary by extending adr-0075-amend-1108 with `data.at` (the record's Status line names what each amendment adds)
+NOTES (2026-11-08): tests landed in internal/agent/delegationphase_test.go (TestSubAgentPhaseEventCarriesAt, beside the other phase tests) and internal/eventjson/decode_test.go (TestDecodeRoundTripsSubAgentPhaseAt, TestDecodeRejectsAnUnparsableSubAgentPhaseAt, and an `At` on the round-trip started phase); neither file is on the item's Files line
+NOTES (2026-11-08): a malformed `data.at` is a decode error, like a malformed envelope `time`; Decode's lossy-form doc now says At comes back without its monotonic reading and in a fixed zone of its offset
 
 **What:**
 Recast at the regression check (2026-11-08).

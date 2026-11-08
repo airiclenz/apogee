@@ -60,6 +60,7 @@ func roundTripEvents() []domain.Event {
 		},
 		domain.SubAgentPhaseEvent{
 			EventBase: delegatedBase, Phase: domain.SubAgentStarted, StepCap: 30, CapRequested: 50,
+			At: time.Date(2026, 11, 8, 9, 30, 0, 123456789, time.UTC),
 		},
 		domain.SubAgentPhaseEvent{
 			EventBase: delegatedBase,
@@ -308,6 +309,70 @@ func TestDecodeRoundTripsBudgetStop(t *testing.T) {
 				t.Errorf("decoded budget_stop %+v, want %+v", got, tc.stop)
 			}
 		})
+	}
+}
+
+// TestDecodeRoundTripsSubAgentPhaseAt writes a sub_agent_phase line without and with its moment
+// and decodes each back: `at` is always on the line, `null` for a zero time and an RFC3339Nano stamp
+// otherwise, and it reads back as the same instant — the zero time for `null`.
+func TestDecodeRoundTripsSubAgentPhaseAt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		at         time.Time
+		wantMember string
+	}{
+		{name: "zero time", at: time.Time{}, wantMember: `"at":null}`},
+		{
+			name:       "stamped",
+			at:         time.Date(2026, 11, 8, 9, 30, 0, 5, time.UTC),
+			wantMember: `"at":"2026-11-08T09:30:00.000000005Z"}`,
+		},
+		{
+			name:       "stamped in a local zone",
+			at:         time.Date(2026, 11, 8, 10, 30, 0, 0, time.FixedZone("CET", 3600)),
+			wantMember: `"at":"2026-11-08T10:30:00+01:00"}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var out bytes.Buffer
+			w := New(&out, Options{Session: "sess-9", Now: fixedClock})
+			w.Emit(domain.SubAgentPhaseEvent{EventBase: delegatedBase, Phase: domain.SubAgentStarted, At: tc.at})
+
+			raw := lines(t, &out)
+			if len(raw) != 1 || !strings.HasSuffix(raw[0], tc.wantMember+"}") {
+				t.Fatalf("wrote %q, want one line ending in %s}", raw, tc.wantMember)
+			}
+			line, err := Decode([]byte(raw[0]))
+			if err != nil {
+				t.Fatalf("Decode(%s): %v", raw[0], err)
+			}
+			phase, ok := line.Event.(domain.SubAgentPhaseEvent)
+			if !ok {
+				t.Fatalf("decoded %T, want a domain.SubAgentPhaseEvent", line.Event)
+			}
+			if !phase.At.Equal(tc.at) || phase.At.IsZero() != tc.at.IsZero() {
+				t.Errorf("decoded at %v, want %v", phase.At, tc.at)
+			}
+		})
+	}
+}
+
+// TestDecodeRejectsAnUnparsableSubAgentPhaseAt pins that a malformed `at` is an error, as a
+// malformed envelope time is, rather than a silent zero.
+func TestDecodeRejectsAnUnparsableSubAgentPhaseAt(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"event":"sub_agent_phase","v":2,"seq":1,"time":"2026-11-08T09:30:00Z","session":null,` +
+		`"turn":1,"depth":1,"call_id":"c1","run_id":"r1","data":{"phase":"started","result":` +
+		`{"call_id":"","content":"","is_error":false,"summary":null},"cancelled":false,"step_cap":0,` +
+		`"cap_requested":0,"at":"yesterday"}}`
+	if _, err := Decode([]byte(raw)); err == nil {
+		t.Fatal("Decode accepted an unparsable `at`, want an error")
 	}
 }
 

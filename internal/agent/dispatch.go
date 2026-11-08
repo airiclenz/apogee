@@ -953,9 +953,11 @@ func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
 // (skipDelegation): it never started.
 //
 // The caller fills what the phase carries — Phase, and Result on a finished one, StepCap and
-// CapRequested on a started one (stepCapFor) — and this stamps the identity.
+// CapRequested on a started one (stepCapFor) — and this stamps the identity and the moment, At,
+// read from the Agent's injected clock so every phase of every caller is timed in one place.
 func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, runID string, event domain.SubAgentPhaseEvent) {
 	event.EventBase = a.childBase(turn, call.ID, runID)
+	event.At = a.now()
 	a.cfg.Events.Emit(event)
 }
 

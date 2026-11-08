@@ -57,7 +57,8 @@ type Line struct {
 // or carries it in a lossy form: SeamClosedEvent.Value, an image's bytes and a usage line's
 // currency label are not on the line, and a sub_agent_phase line's constant `cancelled` has no
 // field to land in; UpstreamAttemptEvent durations and UpstreamSwitchedEvent.Waited come back
-// truncated to whole milliseconds; a nil Fired comes back as an empty slice and nil receipt Fields
+// truncated to whole milliseconds; a SubAgentPhaseEvent's At comes back without its monotonic
+// clock reading and in a fixed zone of its offset; a nil Fired comes back as an empty slice and nil receipt Fields
 // as an empty map, while empty Rules, Images and task-list Items come back nil; argument JSON comes back compacted
 // and HTML-escaped, a null one as nil; MalformedArguments.Err comes back as an error carrying only
 // the text, its sentinel chain not rebuilt; a Tool summary of an unknown kind comes back nil.
@@ -231,15 +232,22 @@ func toolResultEventFrom(base domain.EventBase, d toolResultData) (domain.Event,
 }
 
 // subAgentPhaseEventFrom rebuilds a domain.SubAgentPhaseEvent. The line's `cancelled` is the
-// constant false the variant no longer carries a field for, so it is read and dropped.
+// constant false the variant no longer carries a field for, so it is read and dropped. A null or
+// absent `at` — a zero time, or a line written before the key existed — reads back as the zero time.
 func subAgentPhaseEventFrom(base domain.EventBase, d subAgentPhaseData) (domain.Event, error) {
 	result, err := toolResultFrom(d.Result)
 	if err != nil {
 		return nil, err
 	}
+	var at time.Time
+	if d.At != nil {
+		if at, err = time.Parse(time.RFC3339Nano, *d.At); err != nil {
+			return nil, fmt.Errorf("at: %w", err)
+		}
+	}
 	return domain.SubAgentPhaseEvent{
 		EventBase: base, Phase: domain.SubAgentPhase(d.Phase), Result: result, StepCap: d.StepCap,
-		CapRequested: d.CapRequested,
+		CapRequested: d.CapRequested, At: at,
 	}, nil
 }
 

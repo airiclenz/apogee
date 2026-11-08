@@ -2,6 +2,7 @@ package eventjson
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -152,6 +153,7 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 			Result:       toolResultOf(e.Result),
 			StepCap:      e.StepCap,
 			CapRequested: e.CapRequested,
+			At:           timeOrNull(e.At),
 		}, true
 	case domain.SubAgentGroupEvent:
 		return kindSubAgentGroup, e.EventBase, subAgentGroupData{Size: e.Size, Width: e.Width}, true
@@ -306,12 +308,26 @@ type toolResultData struct {
 // StepCap and CapRequested are the child's step-cap facts on the started phase — the cap it runs
 // under (0 for unbounded) and the `max_steps` its call asked for when that ask was clamped to a
 // lower configured cap (0 otherwise) — and 0 on every finished phase.
+//
+// At is the moment the phase was crossed, RFC3339Nano, on both phases (adr-0075-amend-1108). It
+// joined the line last, additively, and is always written: a pointer, so a zero time is `null`
+// rather than a year-one stamp — never omitted (ADR 0075 decision 3).
 type subAgentPhaseData struct {
 	Phase        string     `json:"phase"`
 	Result       toolResult `json:"result"`
 	Cancelled    bool       `json:"cancelled"`
 	StepCap      int        `json:"step_cap"`
 	CapRequested int        `json:"cap_requested"`
+	At           *string    `json:"at"`
+}
+
+// timeOrNull renders a moment as an RFC3339Nano string, nil — written `null` — for the zero time.
+func timeOrNull(at time.Time) *string {
+	if at.IsZero() {
+		return nil
+	}
+	stamp := at.Format(time.RFC3339Nano)
+	return &stamp
 }
 
 // subAgentGroupData is the sub_agent_group line: a reply's group of two or more delegations

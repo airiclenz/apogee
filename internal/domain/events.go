@@ -255,12 +255,18 @@ const (
 // clamped to it, 0 otherwise — no ask, an ask that bound, or an ask against an unbounded cap. They
 // let a Driver show the human the bound a delegate was spawned under while it runs; the model's
 // own account of the clamp stays on the result.
+//
+// At is the moment the phase was crossed, set on BOTH phases by the emitting agent's clock, so any
+// Driver can compute a run's elapsed time — a started phase's At to now while it runs, to its
+// finished phase's At once it is done — without keeping a clock of its own. It is the zero time
+// only on an event built outside the engine (a decoded line written before the field existed).
 type SubAgentPhaseEvent struct {
 	EventBase
 	Phase        SubAgentPhase
 	Result       ToolResult
 	StepCap      int
 	CapRequested int
+	At           time.Time
 }
 
 // SubAgentGroupEvent announces a reply's group of sub_agent delegations BEFORE the first of them is
