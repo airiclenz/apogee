@@ -260,7 +260,7 @@ internal/tui/command.go — panel commandSpec, safeWhileRunning; internal/tui/tu
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSidePanelCommand' ./internal/tui/`.
 **Commit:** `feat(tui): /panel width sets or resets the side panel width`
 
-## 7. Drag journey through the terminal driver
+## 7. Drag journey through the terminal driver — ✅ DONE (2026-11-08)
 
 Depends on item 4.
 **What:**

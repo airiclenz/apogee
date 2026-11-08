@@ -67,11 +67,11 @@ func osc52For(text string) string {
 }
 
 // dragAcross selects the cells [x0, x1) on row y the way a terminal in SGR mouse mode reports a
-// drag: a left press at x0, a motion report with the button held (button 0 + the motion bit 32) at
-// x1, and the release at x1. The release is what copies (mouse.go handleMouseRelease).
+// drag: a left press at x0, a motion report with the button held ([tuitest.Drag]) at x1, and the
+// release at x1. The release is what copies (mouse.go handleMouseRelease).
 func dragAcross(drv *tuitest.Driver, x0, x1, y int) {
 	drv.Press(tuitest.Click(x0, y))
-	drv.Press(tuitest.Key(fmt.Sprintf("\x1b[<32;%d;%dM", x1+1, y+1)))
+	drv.Press(tuitest.Drag(x1, y))
 	drv.Press(tuitest.Release(x1, y))
 }
 

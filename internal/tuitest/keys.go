@@ -78,13 +78,28 @@ const (
 // The press and the release are separate because a terminal sends them separately: apogee's own
 // release handler ends a drag and copies a selection (mouse.go), so a driver that pressed without
 // releasing would leave the program mid-gesture.
-func Click(x, y int) Key { return sgrMouse(x, y, 'M') }
+func Click(x, y int) Key { return sgrMouse(sgrLeft, x, y, 'M') }
 
 // Release ends the click Click began, at the same cell.
-func Release(x, y int) Key { return sgrMouse(x, y, 'm') }
+func Release(x, y int) Key { return sgrMouse(sgrLeft, x, y, 'm') }
 
-// sgrMouse is the one place the report's shape is written: button 0 (left), the 1-based column and
-// row, and the final byte that tells a press from a release.
-func sgrMouse(x, y int, final rune) Key {
-	return Key(fmt.Sprintf("\x1b[<0;%d;%d%c", x+1, y+1, final))
+// Drag is the pointer moving to a cell with the left button held — the motion report a terminal in
+// SGR mouse mode sends between a [Click] and its [Release]: `ESC [ < 32 ; col ; row M`, the left
+// button with the motion bit set. A gesture is the three in order — Click where it starts, a Drag
+// per cell it moves through, Release where it ends — and, like the other two, it is pinned by
+// TestKeysDecodeAsIntended.
+func Drag(x, y int) Key { return sgrMouse(sgrLeft|sgrMotion, x, y, 'M') }
+
+// The SGR report's button codes this file sends: the left button, and the bit a terminal adds to it
+// for a motion with that button held.
+const (
+	sgrLeft   = 0
+	sgrMotion = 32
+)
+
+// sgrMouse is the one place the report's shape is written: the button code (sgrLeft, with
+// sgrMotion for a held-button motion), the 1-based column and row, and the final byte that tells a
+// press or a motion (`M`) from a release (`m`).
+func sgrMouse(button, x, y int, final rune) Key {
+	return Key(fmt.Sprintf("\x1b[<%d;%d;%d%c", button, x+1, y+1, final))
 }
