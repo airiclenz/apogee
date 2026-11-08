@@ -54,11 +54,13 @@ const (
 	watchedMark = " ~"
 	editedMark  = " *"
 
-	// The two live-appliable keys the watcher step saves, and the block that sets them. They are
-	// registry paths, which is what the applied-keys note names them by.
+	// The two live-appliable keys the watcher step saves, and the lines that set them. They are
+	// registry paths, which is what the applied-keys note names them by. The scheme's line opens no
+	// `ui:` block of its own: it continues the one the home's config closes on (sidePanelOffConfig),
+	// since a second `ui:` key would be a file the loader refuses.
 	watchedSchemeKey  = settingKeyColorScheme
 	watchedCompactKey = "auto-compact"
-	watchedConfigBody = "ui:\n  color-scheme: light\nauto-compact: false\n"
+	watchedConfigBody = "  color-scheme: light\nauto-compact: false\n"
 
 	// fanoutTask is the lead of every delegated task testdata/stubllm/fanout.yaml hands a child, and
 	// is how a child's request is told from the parent's in the moved server's log.
@@ -80,7 +82,7 @@ func TestE2ELiveStateFollowsTheRunningSession(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "livestate"))
 	drv := tuitest.NewDriver(t, liveStateSize)
-	sess := launchTUI(t, drv, stub)
+	sess := launchTUIConfigured(t, drv, stub, sidePanelOffConfig)
 	waitIdle(drv)
 	drv.WaitQuiet(settled)
 
@@ -237,7 +239,7 @@ func TestE2ESettingsTypeToFilter(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "livestate"))
 	drv := tuitest.NewDriver(t, liveStateSize)
-	sess := launchTUI(t, drv, stub)
+	sess := launchTUIConfigured(t, drv, stub, sidePanelOffConfig)
 	waitIdle(drv)
 	openSettings(drv)
 	if _, _, ok := drv.Frame().Find(settingsOtherRow); !ok {
@@ -311,7 +313,7 @@ func TestE2ELiveStateSaysWhatTheLoaderNoticed(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "livestate"))
 	drv := tuitest.NewDriver(t, liveStateSize)
-	sess := launchTUI(t, drv, stub)
+	sess := launchTUIConfigured(t, drv, stub, sidePanelOffConfig)
 	waitIdle(drv)
 	drv.WaitQuiet(settled)
 
@@ -603,14 +605,15 @@ func rowsContaining(f tuitest.Frame, want string) int {
 // `delegate-fanout-rounds: 0` switches the fan-out ceiling off: the moved session's width is 1
 // (no pin, no `/props`), so at the default two rounds fanout.yaml's third delegation would be
 // refused — and step 12 is about the launcher move keeping the session delegating, not about the
-// ceiling. It is a top-level key, so a launcher move does not touch it.
+// ceiling. It is a top-level key, so a launcher move does not touch it. The side panel is pinned off
+// as every launch here pins it (sidePanelOffConfig).
 func launcherHome(t *testing.T, stub *stubllm.Server) string {
 	t.Helper()
 
 	home := t.TempDir()
 	body := "servers:\n  - name: probe-target\n    endpoint: " + stub.URL +
 		"\n    model: " + stub.Model + "\n    llama-launcher: auto\nserver: probe-target\n" +
-		"delegate-fanout-rounds: 0\n"
+		"delegate-fanout-rounds: 0\n" + sidePanelOffConfig
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write the launcher home's config: %v", err)
 	}

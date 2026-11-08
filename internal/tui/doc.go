@@ -1008,7 +1008,9 @@
 // frame wears on its own top rule — the ▔ hairline above the status line, which carries the name
 // centered in place of the rule runes it would otherwise draw there, and which is where
 // [Model.topRule] gets both the name (the landed one, else the first prompt's heuristic, else none)
-// and the cell arithmetic that centers and clips it;
+// and the cell arithmetic that centers and clips it; sidepanel.go the side panel's column (ADR 0110)
+// — its width, the floors its gate keeps ([Model.panelShown]) and the rows it paints, hung off the
+// rows above the session-name rule by View;
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace

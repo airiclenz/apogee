@@ -2927,8 +2927,9 @@ func (m *Model) layout() {
 	// Options.UI.ShowScrollbar as the config spells it): a hidden bar gives the column back to the
 	// body rather than eating it invisibly. A `/settings` edit of the key moves it mid-session (ADR 0037) and
 	// lays out again from here, so the transcript re-wraps exactly once per deliberate change —
-	// see bodyRightGutter (theme.go).
-	width := m.width
+	// see bodyRightGutter (theme.go). The side panel's column comes off first (slotWidth): the
+	// transcript slot is what is left of the window beside it.
+	width := m.slotWidth()
 	if m.opts.UI.ShowScrollbar {
 		width -= scrollbarWidth
 	}
@@ -3084,6 +3085,41 @@ func (m Model) pendingImageRow() string {
 // budget, and so cannot compose a row the window never paid for.
 func (m Model) transcriptBudget() int {
 	return max(0, m.height-m.frameFixedRows()-m.inputBoxRows())
+}
+
+// panelShown reports whether the side panel's column (ADR 0110) is on this frame: the show mode
+// names the floor the transcript must keep beside it — 100 columns under `auto`, 80 under `on` —
+// and the column shows while the window pays for that floor, the column itself and the scroll-bar
+// column. The bar's column is counted whether or not the bar is painted (ui.show-scrollbar), so a
+// bar switched on or off never carries the panel across a threshold; and nothing the panel SHOWS
+// is an input here, so the column moves only on a resize across a threshold or a change of
+// `ui.side-panel.show` (layout.md, "The side panel").
+//
+// `off` never shows it, and neither does the zero UIPrefs' empty mode: the config resolves an
+// unset key to `auto` before it reaches the renderer (domain.DefaultUIPrefs), and the renderer
+// draws a zero UIPrefs as the classic frame rather than special-casing it into a default.
+func (m Model) panelShown() bool {
+	var floor int
+	switch m.opts.UI.SidePanelShow {
+	case domain.SidePanelShowAuto:
+		floor = sidePanelAutoFloor
+	case domain.SidePanelShowOn:
+		floor = sidePanelOnFloor
+	default:
+		return false
+	}
+	return m.width-sidePanelWidth-scrollbarWidth >= floor
+}
+
+// slotWidth is the transcript slot's column budget: the window less the side panel's column while
+// it shows ([Model.panelShown]), the whole window otherwise. The slot is every row above the
+// session-name rule; the rule, the status line, the prompt box and the footer below it keep the
+// window's width whatever this says.
+func (m Model) slotWidth() int {
+	if m.panelShown() {
+		return m.width - sidePanelWidth
+	}
+	return m.width
 }
 
 // transcriptWidth is the column budget the transcript body wraps to: the viewport's own width
@@ -3582,6 +3618,12 @@ func (m Model) View() tea.View {
 	// reads them off the same composition rather than re-deriving a prefix sum per pane
 	// (paneSpecs, frameSpans).
 	rows, spans, belowSlot := stackTranscriptSlot(rows, ov, transcriptHeight+gapHeight)
+	// While the side panel shows, its column is hung off the right edge of every row above the ▔
+	// rule — the body, the gap row and the slot's blocks — once they are stacked, and not inside
+	// the walk above: that walk is the one frameSpans shares, and the column moves no row of it.
+	if m.panelShown() {
+		rows = []string{joinColumn(m.th.measure, rows, m.slotWidth(), m.sidePanelColumn(belowSlot))}
+	}
 	// Then the ▔ top-edge hairline capping the chrome, and the status line under it.
 	rows = append(rows, m.topRule(), m.statusLine())
 	// Then the input-side slot — the autocomplete dropdown, then the staged-interjection strip closest

@@ -135,7 +135,7 @@ func TestE2EApprovalForcedLookSurvivesAutoMode(t *testing.T) {
 	// row gives up segments and then the mode marker when it runs out of room — which a temp
 	// workspace path under a long test name manages at a hundred columns under a one-row footer.
 	drv := tuitest.NewDriver(t, tuitest.Size{W: 140, H: 30})
-	sess := launchTUI(t, drv, stub, "--mode", "auto")
+	sess := launchTUIConfigured(t, drv, stub, sidePanelOffConfig, "--mode", "auto")
 
 	// The rung is asserted before the claim about it, so a run that quietly failed to reach auto
 	// cannot pass this test by paning for the ordinary reason instead.
@@ -438,6 +438,12 @@ func TestJudgeForcedApprovalPaneReadsAsHelp(t *testing.T) {
 // ----------------------------------------------------------------------------
 // Reading an approval pane
 // ----------------------------------------------------------------------------
+
+// sidePanelOffConfig is the `ui:` block a driven run wider than the side panel's `auto` threshold
+// (137 columns) seeds its home with: the panel pinned off, so the row scanners these runs read the
+// frame with see transcript cells only, edge to edge, rather than a panel's column beside them. It
+// closes the home's config, which is what lets a later save continue the block (watchedConfigBody).
+const sidePanelOffConfig = "ui:\n  side-panel:\n    show: off\n"
 
 // guardHome points HOME at a throwaway directory that HAS an `.apogee` in it, and returns it. The
 // guard reads the command's TEXT, so it fires either way; the home matters only to the one step

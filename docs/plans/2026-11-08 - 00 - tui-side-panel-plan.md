@@ -296,7 +296,12 @@ external-edit baseline (cmd/apogee).
 - `GOMEMLIMIT=2GiB go vet ./internal/tui/` (compiles the tui test package)
 **Commit:** `feat(config): write one side-panel section's mode back`
 
-## 7. Slot width and the column
+## 7. Slot width and the column — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): panelShown() shows the column only for an explicit `auto` or `on`; the zero UIPrefs' empty `SidePanelShow` draws no column (the config always resolves an unset key to `auto`, and testUIPrefs leaves it empty), so hand-built internal/tui tests keep the classic frame.
+NOTES (2026-11-08): the driven-test pin covers every 140-column launch in the four named files (eight launches, including TestE2ESettingsTypeToFilter and the launcher and parallel homes), not only the five the guard counts; the pin is one shared `sidePanelOffConfig` const in e2e_approval_test.go, and watchedConfigBody now continues the `ui:` block that pin closes the home's config on (a second `ui:` key would be refused by the loader).
+NOTES (2026-11-08): the transcript-slot panes still render at m.width until item 8; joinColumn squares every row above the rule to the slot width, so while the panel shows a pane's right edge is cut at the slot edge until item 8 sizes panes to the slot.
+NOTES (2026-11-08): the separator `│` and the `nothing live` line paint in the existing `statusFaint` style (muted, bg-free); no new theme role was added.
 
 **What:**
 **Goal:** while the panel shows, the transcript slot is `m.width − 36` wide and the panel column

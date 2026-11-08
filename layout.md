@@ -1446,7 +1446,9 @@ its task's first line, else the generic word) — with its key hint held `bodyIn
 edge: `esc back · ^x stop` while the run on screen is still running (or still queued for a pooled
 worker) and a stop can reach it, and `esc back` alone once it is over or never learned the run id a
 stop addresses it by, in the same column the status line's right slot ends in, so the two rows on screen
-advertising a key end together. It is the **one sticky header a view has**: a rooted paint collects
+advertising a key end together — except while the side panel shows: the breadcrumb is a row of the
+transcript slot, so its hint then ends at the slot's edge, left of the panel's column, and the two
+hints no longer share a column. It is the **one sticky header a view has**: a rooted paint collects
 no `❯` block to stick, so the breadcrumb holds the top row for as long as the view is open, and it
 is squared out to the full width so the terminal's own background never shows through beside it. It
 is painted on the **`surface`** role — the same black field the prompt box's interior and the status

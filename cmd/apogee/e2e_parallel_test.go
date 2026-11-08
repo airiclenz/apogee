@@ -316,7 +316,8 @@ func fanOutScript(t *testing.T, parentFixture, childFixture string) stubllm.Scri
 // It is spelled out here rather than taken from [e2eHome] for the reason [launcherHome] is: the key
 // under test sits INSIDE a `servers:` entry, and no line appended to the file afterwards can reach in
 // there. The list is also the reason the run needs a home of its own at all — e2eHome writes exactly
-// one server, and a switch needs somewhere to go.
+// one server, and a switch needs somewhere to go. The side panel is pinned off (sidePanelOffConfig),
+// so the run's row scanners read transcript cells only at parallelSize.
 func parallelHome(t *testing.T, start, fanOut *stubllm.Server, entryLines string) string {
 	t.Helper()
 
@@ -328,7 +329,8 @@ func parallelHome(t *testing.T, start, fanOut *stubllm.Server, entryLines string
 		"    endpoint: " + fanOut.URL + "\n" +
 		"    model: " + fanOut.Model + "\n" +
 		entryLines +
-		"server: " + parallelStartServer + "\n"
+		"server: " + parallelStartServer + "\n" +
+		sidePanelOffConfig
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write the two-server home's config: %v", err)

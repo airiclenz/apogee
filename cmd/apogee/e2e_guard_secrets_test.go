@@ -49,7 +49,7 @@ func TestE2EGuardSecretsForcesALookAtTheCommit(t *testing.T) {
 	ws := secretsRepoWorkspace(t, ".env", secretsEnvLine)
 	stub := stubllm.New(t, loadScript(t, "guard-secrets"))
 	drv := tuitest.NewDriver(t, tuitest.Size{W: 140, H: 30})
-	sess := launchTUIInWith(t, drv, stub, ws, "", deps, "--mode", "auto")
+	sess := launchTUIInWith(t, drv, stub, ws, sidePanelOffConfig, deps, "--mode", "auto")
 
 	submit(drv, secretsCommitPrompt)
 	pane := awaitForcedPane(drv)
@@ -91,7 +91,7 @@ func TestE2EGuardSecretsCleanCommitNeedsNoLook(t *testing.T) {
 	ws := secretsRepoWorkspace(t, "notes.txt", "a line of prose\n")
 	stub := stubllm.New(t, loadScript(t, "guard-secrets"))
 	drv := tuitest.NewDriver(t, tuitest.Size{W: 140, H: 30})
-	sess := launchTUIInWith(t, drv, stub, ws, "", deps, "--mode", "auto")
+	sess := launchTUIInWith(t, drv, stub, ws, sidePanelOffConfig, deps, "--mode", "auto")
 
 	// The wrap-up arriving is the claim: a pane would have held the call — and the whole run —
 	// until somebody answered it, and nobody here does.

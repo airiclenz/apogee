@@ -182,6 +182,30 @@ func (m Model) joinScrollbar(body, bar string) string {
 	return strings.Join(rows, "\n")
 }
 
+// joinColumn hangs a column off the right edge of a run of stacked blocks and returns them as one
+// block: every physical line of blocks is squared to w in the painter's measure (squareLine), then
+// the column's row of the same index is appended. A line past the column's last row keeps its w
+// columns and nothing after them; a column row past the blocks' last line is not drawn.
+//
+// It is joinScrollbar's reason one block wider: a lipgloss.JoinHorizontal or a Style.Width would
+// pad the left side to a width measured in GraphemeWidth, so on a terminal painting in WcWidth a
+// row carrying a VS16 grapheme would start the column a cell left of every other row's (ADR 0030).
+// The side panel's column hangs here, off the rows above the session-name rule (View).
+func joinColumn(measure widthAuthority, blocks []string, w int, column []string) string {
+	lines := make([]string, 0, len(column))
+	for _, block := range blocks {
+		lines = append(lines, strings.Split(block, "\n")...)
+	}
+	for i, ln := range lines {
+		ln = squareLine(measure, ln, w)
+		if i < len(column) {
+			ln += column[i]
+		}
+		lines[i] = ln
+	}
+	return strings.Join(lines, "\n")
+}
+
 // joinFrame stacks the frame's blocks into the one string the View hands bubbletea, squaring every
 // physical line to the window width in the painter's measure.
 //

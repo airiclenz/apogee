@@ -431,6 +431,10 @@ type frameKey struct {
 	// reserves (layout()), which is the width renderView wraps to and the widget measures at.
 	width         int
 	showScrollbar bool
+	// sidePanel is whether the side panel's column takes its columns off that budget
+	// ([Model.panelShown]). The column's CONTENT is no input of the transcript's paint, so only its
+	// visibility is named here: a section showing or hiding repaints no line of the scrollback.
+	sidePanel bool
 	// blink is the live star's phase, and only while some header is still live
 	// (transcript.hasLiveStar): a settled transcript paints identically at either phase, so folding
 	// the bare phase in would repaint the scrollback on every flip of an idle session's clock
@@ -451,6 +455,7 @@ func (m Model) frameKey() frameKey {
 		padPrompts:    m.th.padPrompts,
 		width:         m.width,
 		showScrollbar: m.opts.UI.ShowScrollbar,
+		sidePanel:     m.panelShown(),
 		blink:         m.liveStarBlink() && m.transcript.hasLiveStar(),
 		backHint:      m.backHint(),
 	}
