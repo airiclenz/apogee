@@ -141,6 +141,8 @@ type UsageView struct {
 	Totals   domain.Usage
 	Summary  string
 	IsLive   bool
+
+	standing int // the cost report's own estimate of its standing rows, history's subtrahend
 }
 
 // State is the folded panel state of one session. It is not safe for concurrent use. Its queries
@@ -514,17 +516,27 @@ func (s *State) Usage(scope RunKey) UsageView {
 	if state == nil {
 		return view
 	}
-	view.Fill = s.scopeFill(scope, state)
 	if len(state.cost.Rows) > 0 {
 		view.HasSplit = true
 		view.System, view.Tools = splitStanding(state.cost.Rows)
-		view.History = max(view.Fill.Used-state.cost.Tokens, 0)
+		view.standing = state.cost.Tokens
 	}
-	if view.Fill.Window > 0 && view.Fill.Used > 0 {
-		view.Summary = strconv.Itoa(view.Fill.Percent()) + "%"
-		view.IsLive = view.Fill.Used*percentScale >= usageLivePercent*view.Fill.Window
+	return view.WithFill(s.scopeFill(scope, state))
+}
+
+// WithFill is v measured against fill instead: the history share, the summary and the live rule all
+// follow it. A Driver that states a fill of its own — the TUI's status-line gauge — hands it in
+// here, so its panel and its gauge never disagree.
+func (v UsageView) WithFill(fill Fill) UsageView {
+	v.Fill, v.Summary, v.IsLive = fill, "", false
+	if v.HasSplit {
+		v.History = max(fill.Used-v.standing, 0)
 	}
-	return view
+	if fill.Window > 0 && fill.Used > 0 {
+		v.Summary = strconv.Itoa(fill.Percent()) + "%"
+		v.IsLive = fill.Used*percentScale >= usageLivePercent*fill.Window
+	}
+	return v
 }
 
 // scopeFill is the fill the status-line gauge states for scope: at the top level the engine's

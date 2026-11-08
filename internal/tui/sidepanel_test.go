@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 )
 
@@ -245,10 +246,15 @@ func landedEdit(base domain.EventBase, path string, added, removed int) domain.T
 	return domain.ToolResultEvent{EventBase: base, WriteTarget: path, Result: domain.ToolResult{Summary: summary}}
 }
 
-// panelUsageReading is a top-level reading of used tokens of window, its cumulative totals beside it.
-func panelUsageReading(used, window int) domain.UsageEvent {
+// panelUsed is a top-level fill of 62% of the session's window: past the usage section's live rule.
+const panelUsed = 20480
+
+// panelUsageReading is a top-level reading of used tokens of the session's window, its cumulative
+// totals beside it. The window is the session's because the top-level fill is the gauge's, which
+// measures against [Model.topLevelWindow].
+func panelUsageReading(used int) domain.UsageEvent {
 	return domain.UsageEvent{
-		PromptTokens: used - 20, CompletionTokens: 20, TotalTokens: used, ContextWindow: window,
+		PromptTokens: used - 20, CompletionTokens: 20, TotalTokens: used, ContextWindow: testOpts.ContextWindow,
 		Cumulative: domain.Usage{
 			Calls: 2, PromptTokens: 4000, CachedPromptTokens: 1000, CompletionTokens: 300, TotalTokens: 4300,
 		},
@@ -319,12 +325,12 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 		{
 			name: "usage",
 			events: func(*testing.T) []domain.Event {
-				return []domain.Event{panelUsageReading(620, 1000), standingCost(200, 100)}
+				return []domain.Event{panelUsageReading(panelUsed), standingCost(200, 100)}
 			},
 			want: []string{
 				"◆ Usage 62%                      ⊙",
-				"██████▎    620/1k",
-				"sys 200 · tools 100 · hist 320",
+				"██████▎    20k/32k",
+				"sys 200 · tools 100 · hist 20k",
 				"in 4k · out 300",
 				"cache hit 25%",
 			},
@@ -417,7 +423,7 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 			taskList(0, "one", "two", "three"),
 			panelDelegationCall(t, "r1", "scout"),
 			landedEdit(domain.EventBase{}, "a.go", 0, 0),
-			panelUsageReading(620, 1000),
+			panelUsageReading(panelUsed),
 		}
 	}
 	cases := []struct {
@@ -537,5 +543,185 @@ func TestSidePanelAllocatesOnTheFirstEventItReads(t *testing.T) {
 
 	if !m.panel.Tasks(sidepanel.RunKey{}).IsLive {
 		t.Error("the first task list did not reach a freshly allocated panel")
+	}
+}
+
+// runTasks is a task list the run base belongs to emitted, none of it done.
+func runTasks(base domain.EventBase, texts ...string) domain.TaskListEvent {
+	e := taskList(0, texts...)
+	e.EventBase = base
+	return e
+}
+
+// runUsage is a reading by the run base belongs to: used tokens of window (0 names none), a
+// Maintenance one when isMaintenance.
+func runUsage(base domain.EventBase, used, window int, isMaintenance bool) domain.UsageEvent {
+	return domain.UsageEvent{
+		EventBase: base, TotalTokens: used, ContextWindow: window, Maintenance: isMaintenance,
+		Cumulative: domain.Usage{Calls: 1, PromptTokens: used, TotalTokens: used},
+	}
+}
+
+// legacyDelegationCall is the parent's sub_agent call spawning a run recorded before run ids: the
+// call carries no SpawnRunID, so its run is named by depth and the call id alone.
+func legacyDelegationCall(t *testing.T, callID, name string) domain.ToolCallEvent {
+	t.Helper()
+	call := panelDelegationCall(t, "", name)
+	call.Call.ID, call.SpawnRunID = callID, ""
+	return call
+}
+
+// openViewOf opens Run view on the run base belongs to, as the transcript keys it, and fails the
+// test unless the view's head is in the transcript.
+func openViewOf(t *testing.T, m Model, base domain.EventBase) Model {
+	t.Helper()
+	m = m.openRun(runOf(base))
+	if _, ok := m.viewedChild(); !ok {
+		t.Fatalf("setup: no head answers the run %+v", base)
+	}
+	return m
+}
+
+// gaugeFigures is the status line's gauge as figures: its leading used/window, or "" with none shown.
+func gaugeFigures(m Model) string {
+	fields := strings.Fields(plainSlot(m.contextGauge()))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// TestSidePanelRunViewFollowsTheViewedRun pins ADR 0110 decision 12: while Run view shows a run,
+// tasks, changed files and usage are that run's, and sub-agents still lists every run with the
+// viewed one marked `▸`; backing out with esc gives the column back to the top level.
+func TestSidePanelRunViewFollowsTheViewedRun(t *testing.T) {
+	t.Parallel()
+
+	m := panelModel(t, domain.DefaultSidePanelSections, 30,
+		taskList(0, "top-level task"),
+		landedEdit(domain.EventBase{}, "top.go", 1, 0),
+		panelUsageReading(panelUsed),
+		panelDelegationCall(t, "r1", "scout"),
+		delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		panelDelegationCall(t, "r2", "planner"),
+		runTasks(delegationBase("r1"), "scout the parser"),
+		landedEdit(delegationBase("r1"), "child.go", 2, 1),
+		runUsage(delegationBase("r1"), 6000, 8192, false),
+	)
+	top := panelText(t, m)
+
+	m = openViewOf(t, m, delegationBase("r1"))
+
+	got := panelText(t, m)
+	figures := format.Tokens(6000) + "/" + format.Tokens(8192)
+	for _, want := range []string{"▸ scout the parser", "child.go", "Changed files 1", "Usage 73%", figures} {
+		if !slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, want) }) {
+			t.Errorf("r1's view paints no %q:\n%s", want, strings.Join(got, "\n"))
+		}
+	}
+	for _, unwanted := range []string{"top-level task", "top.go"} {
+		if slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, unwanted) }) {
+			t.Errorf("r1's view paints the top level's %q:\n%s", unwanted, strings.Join(got, "\n"))
+		}
+	}
+	if !slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, "▸ scout") }) ||
+		!slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, "○ planner") }) {
+		t.Errorf("sub-agents does not list every run with r1 marked:\n%s", strings.Join(got, "\n"))
+	}
+	if gauge := gaugeFigures(m); gauge != figures {
+		t.Errorf("the gauge states %q in r1's view; want %q, the panel's figure", gauge, figures)
+	}
+
+	m = step(t, m, keyEsc())
+
+	if m.inRunView() {
+		t.Fatal("setup: esc did not leave the view")
+	}
+	if back := panelText(t, m); !slices.Equal(back, top) {
+		t.Errorf("back at the top level the column paints\n%s\nwant the top level's\n%s",
+			strings.Join(back, "\n"), strings.Join(top, "\n"))
+	}
+	if slices.ContainsFunc(top, func(row string) bool { return strings.Contains(row, "▸ scout") }) {
+		t.Errorf("the top level marks a viewed run:\n%s", strings.Join(top, "\n"))
+	}
+}
+
+// TestSidePanelRunViewUsageMatchesTheGauge pins the usage fill inside a view to the gauge's own
+// figure ([Model.viewedFill]), on the two readings where a fold of its own could part from it: a
+// Maintenance reading, which moves neither, and a reading naming no window, which both measure
+// against the top-level window.
+func TestSidePanelRunViewUsageMatchesTheGauge(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		reading domain.UsageEvent
+		want    string
+	}{
+		{
+			name:    "a Maintenance reading after a counted one",
+			reading: runUsage(delegationBase("r1"), 9000, 16384, true),
+			want:    format.Tokens(5000) + "/" + format.Tokens(16384),
+		},
+		{
+			name:    "a reading naming no window",
+			reading: runUsage(delegationBase("r1"), 7000, 0, false),
+			want:    format.Tokens(7000) + "/" + format.Tokens(testOpts.ContextWindow),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := panelModel(t, "[usage: pinned]", 30,
+				panelUsageReading(panelUsed),
+				panelDelegationCall(t, "r1", "scout"),
+				delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+				runUsage(delegationBase("r1"), 5000, 16384, false),
+				tc.reading,
+			)
+
+			m = openViewOf(t, m, delegationBase("r1"))
+
+			if gauge := gaugeFigures(m); gauge != tc.want {
+				t.Fatalf("setup: the gauge states %q; want %q", gauge, tc.want)
+			}
+			got := panelText(t, m)
+			if len(got) < 2 || !strings.HasSuffix(got[1], tc.want) {
+				t.Errorf("the usage fill reads\n%s\nwant the gauge's %q", strings.Join(got, "\n"), tc.want)
+			}
+		})
+	}
+}
+
+// TestSidePanelRunViewScopesALegacyRunByDepthAndSpawn pins a run recorded before run ids: its
+// events carry no RunID, so its view and its folded state both name it by depth and spawning call,
+// and a sibling at the same depth stays apart.
+func TestSidePanelRunViewScopesALegacyRunByDepthAndSpawn(t *testing.T) {
+	t.Parallel()
+
+	first := domain.EventBase{Depth: 1, CallID: "call-a"}
+	second := domain.EventBase{Depth: 1, CallID: "call-b"}
+	m := panelModel(t, domain.DefaultSidePanelSections, 30,
+		legacyDelegationCall(t, "call-a", "first"),
+		domain.SubAgentPhaseEvent{EventBase: first, Phase: domain.SubAgentStarted, At: panelNow},
+		legacyDelegationCall(t, "call-b", "second"),
+		domain.SubAgentPhaseEvent{EventBase: second, Phase: domain.SubAgentStarted, At: panelNow},
+		runTasks(first, "first's task"),
+		runTasks(second, "second's task"),
+	)
+
+	m = openViewOf(t, m, second)
+
+	got := panelText(t, m)
+	if !slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, "▸ second's task") }) {
+		t.Errorf("the legacy run's view paints not its own task:\n%s", strings.Join(got, "\n"))
+	}
+	if slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, "first's task") }) {
+		t.Errorf("the legacy run's view paints its sibling's task:\n%s", strings.Join(got, "\n"))
+	}
+	// A legacy call names no run, so the rows are unnamed: the second row is the second run's.
+	if len(got) < 3 || strings.Contains(got[1], glyphPanelCurrent) || !strings.Contains(got[2], glyphPanelCurrent) {
+		t.Errorf("sub-agents does not mark the viewed legacy run alone:\n%s", strings.Join(got, "\n"))
 	}
 }

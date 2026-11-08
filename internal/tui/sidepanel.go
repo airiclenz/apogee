@@ -163,13 +163,19 @@ func (m Model) panelSections() []panelSection {
 }
 
 // panelSection paints one section from the folded state, and reports whether its live rule holds.
-// Every section but sub-agents reads the top-level run's state.
+// Every section but sub-agents reads the run the human is looking at ([Model.viewedRun]) — the
+// top-level run outside Run view — and the usage section measures that run's fill as the
+// status-line gauge states it ([Model.viewedFill]). Sub-agents lists every run and marks the viewed
+// one (ADR 0110 decision 12).
 func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool) {
-	scope := sidepanel.RunKey{}
+	scope := panelRunKey(m.viewedRun())
 	switch section {
 	case domain.SidePanelSubAgents:
 		view := m.panel.SubAgents()
-		return panelSection{title: "Sub-agents", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelSubAgentRow)},
+		paint := func(row sidepanel.SubAgentRow) string {
+			return m.panelSubAgentRow(row, m.inRunView() && row.Run == scope)
+		}
+		return panelSection{title: "Sub-agents", summary: view.Summary, body: paintPanelRows(view.Rows, paint)},
 			view.IsLive
 	case domain.SidePanelTasks:
 		view := m.panel.Tasks(scope)
@@ -180,11 +186,29 @@ func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool
 		return panelSection{title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelFileRow)},
 			view.IsLive
 	case domain.SidePanelUsage:
-		view := m.panel.Usage(scope)
+		view := m.panel.Usage(scope).WithFill(m.panelFill())
 		return panelSection{title: "Usage", summary: view.Summary, body: m.panelUsageRows(view)}, view.IsLive
 	default:
 		return panelSection{}, false
 	}
+}
+
+// panelRunKey is ref as the side panel keys the Events of its run: [sidepanel.RunOf] over the same
+// three values [runOf] reads off an Event's base, so a run's view and its folded state name it alike —
+// by run id, or by depth and spawning call for a run recorded before run ids. The top-level run's
+// zero ref is the zero key.
+func panelRunKey(ref runRef) sidepanel.RunKey {
+	return sidepanel.RunOf(domain.EventBase{Depth: ref.depth, CallID: ref.spawn, RunID: ref.id})
+}
+
+// panelFill is the usage section's fill: the gauge's own ([Model.viewedFill]), and none where the
+// gauge states none.
+func (m Model) panelFill() sidepanel.Fill {
+	usage, ok := m.viewedFill()
+	if !ok {
+		return sidepanel.Fill{}
+	}
+	return sidepanel.Fill{Used: usage.Used, Window: usage.Limit, IsEstimate: usage.Estimated}
 }
 
 // paintPanelRows paints each of a section's rows with paint.
@@ -227,8 +251,9 @@ func (m Model) panelHeaderRow(section panelSection) string {
 }
 
 // panelSubAgentRow is one delegation: its phase glyph — the status line's spinner frame while it
-// runs — its name, and its phase, elapsed time and context fill.
-func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow) string {
+// runs — its name, and its phase, elapsed time and context fill. The run Run view shows (isViewed)
+// is marked as the current task is: `▸` before its name, both in the current task's style.
+func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string {
 	var glyph, phase string
 	switch row.Phase {
 	case sidepanel.PhaseQueued:
@@ -249,7 +274,11 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow) string {
 		fill = strconv.Itoa(min(percent, percentCap)) + "%"
 	}
 	facts := m.th.statusFaint.Render(fmt.Sprintf(subAgentFactsFormat, phase, elapsed, fill))
-	return m.panelRow(glyph+" ", row.Name, lipgloss.NewStyle(), facts)
+	lead, style := glyph+" ", lipgloss.NewStyle()
+	if isViewed {
+		lead, style = lead+m.th.panelCurrent.Render(glyphPanelCurrent)+" ", m.th.panelCurrent
+	}
+	return m.panelRow(lead, row.Name, style, facts)
 }
 
 // panelTaskRow is one task: done, the current one (the first unfinished, marked ▸), or still open.

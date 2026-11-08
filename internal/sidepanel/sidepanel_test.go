@@ -461,6 +461,35 @@ func TestUsage_HistoryArithmetic(t *testing.T) {
 	}
 }
 
+// TestUsage_WithFillRemeasures pins the Driver's own fill: handed in, it replaces the State's and
+// carries the history share, the summary and the live rule with it, leaving the split and totals.
+func TestUsage_WithFillRemeasures(t *testing.T) {
+	state, _ := newState(t)
+	state.Fold(domain.UsageEvent{TotalTokens: 9000, ContextWindow: 20000, Cumulative: domain.Usage{Calls: 1, TotalTokens: 9000}})
+	state.Fold(domain.ContextCostEvent{Cost: domain.ContextCost{
+		Rows:   []domain.ContextCostRow{{Name: "prompt", Tokens: 1500}, {Name: "tool menu", Tokens: 2500}},
+		Tokens: 4000,
+	}})
+
+	view := state.Usage(sidepanel.RunKey{}).WithFill(sidepanel.Fill{Used: 6000, Window: 10000, IsEstimate: true})
+
+	if view.Fill != (sidepanel.Fill{Used: 6000, Window: 10000, IsEstimate: true}) {
+		t.Errorf("fill = %+v, want the one handed in", view.Fill)
+	}
+	if view.History != 2000 || view.System != 1500 || view.Tools != 2500 {
+		t.Errorf("split = system %d tools %d history %d, want 1500 2500 2000", view.System, view.Tools, view.History)
+	}
+	if view.Summary != "60%" || !view.IsLive {
+		t.Errorf("summary %q live %v, want 60%% and live", view.Summary, view.IsLive)
+	}
+	if view.Totals.TotalTokens != 9000 {
+		t.Errorf("totals = %d tokens, want the State's 9000", view.Totals.TotalTokens)
+	}
+	if empty := view.WithFill(sidepanel.Fill{}); empty.Summary != "" || empty.IsLive || empty.History != 0 {
+		t.Errorf("an empty fill left summary %q live %v history %d", empty.Summary, empty.IsLive, empty.History)
+	}
+}
+
 func TestUsage_Totals(t *testing.T) {
 	state, _ := newState(t)
 	state.SetUsage(sidepanel.RunKey{}, domain.Usage{Calls: 2, PromptTokens: 100}, 0)

@@ -5027,22 +5027,34 @@ func (m Model) statusRight(room int) string {
 // A stage level shows no gauge either: it lists runs and fills no window of its own
 // ([Model.viewedChild] answers none there).
 func (m Model) contextGauge() string {
+	usage, ok := m.viewedFill()
+	if !ok {
+		return ""
+	}
+	return usage.view(m.th)
+}
+
+// viewedFill is the fill [Model.contextGauge] states, by the rules its comment gives, and false
+// where the gauge states none: inside a view whose run has no head, or at a stage level. It is the
+// one reading of whose fill the chrome shows, so the side panel's usage section ([Model.panelSection])
+// can never disagree with the gauge.
+func (m Model) viewedFill() (contextUsage, bool) {
 	if !m.inRunView() {
 		limit := m.topLevelWindow()
 		if (m.ctxUsed == 0 || m.isEstimateNewer) && m.state != stateErrored {
-			return contextUsage{Used: m.ctxEstimate, Limit: limit, Estimated: true}.view(m.th)
+			return contextUsage{Used: m.ctxEstimate, Limit: limit, Estimated: true}, true
 		}
-		return contextUsage{Used: m.ctxUsed, Limit: limit}.view(m.th)
+		return contextUsage{Used: m.ctxUsed, Limit: limit}, true
 	}
 	head, ok := m.viewedChild()
 	if !ok {
-		return ""
+		return contextUsage{}, false
 	}
 	limit := head.ctxLimit
 	if limit == 0 {
 		limit = m.topLevelWindow()
 	}
-	return contextUsage{Used: head.ctxUsed, Limit: limit}.view(m.th)
+	return contextUsage{Used: head.ctxUsed, Limit: limit}, true
 }
 
 // topLevelWindow is the window the top-level fill is measured against, read by the gauge

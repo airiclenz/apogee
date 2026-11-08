@@ -394,7 +394,12 @@ folds without a panic; `/clear` empties the panel; a discarded Model copy's fold
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'SidePanel|TestSessionView' ./internal/tui/`
 **Commit:** `feat(tui): paint side-panel sections from folded Events`
 
-## 10. Run view scoping
+## 10. Run view scoping — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): re-derived from the assumption that asking `sidepanel.State` for the viewed run gives the gauge's fill: the State measures the top level against the reading's own window, while `contextGauge` uses `topLevelWindow()` and also handles `stateErrored` and the resume and watch seeds of `ctxUsed`. The panel now takes the gauge's own figure instead. In `internal/tui/model.go`, `contextGauge`'s body moved into `viewedFill() (contextUsage, bool)`, and `contextGauge` renders it. `internal/sidepanel` gains `UsageView.WithFill(Fill)`, which recomputes history, summary and the live rule from the fill it is given. `Usage` now computes through it and behaves as before.
+NOTES (2026-11-08): this changes the top level too. The usage section now measures against `topLevelWindow()`, as the gauge does, so item 9's paint and overflow tests now read on the session window (`panelUsed` = 20480 of 32768) instead of a reading naming 1000.
+NOTES (2026-11-08): the spec leaves the viewed sub-agent's mark open. It is a `▸` before the run's name, both in the current task's `panelCurrent` style. Item 13 should write this into docs/layout/side-panel-layout.md §Run view.
+NOTES (2026-11-08): a run recorded before run ids paints an unnamed sub-agent row: `sidepanel.foldDelegationCall` (item 4) skips a call that has no SpawnRunID. Scoping by depth plus spawn still works and is tested.
 
 **What:**
 **Goal:** while Run view shows a run, the tasks, changed-files and usage sections show that run's
