@@ -1,10 +1,12 @@
 ---
 title: Resize the side panel by dragging its separator
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-11-08 - 02 - side-panel-drag-resize-plan
 created: 2026-11-08T16:28:51Z
+closed: 2026-11-08T17:50:41Z
+reason: "Resolved by plan 2026-11-08 - 02 - side-panel-drag-resize-plan (archived at 63b40d9b): separator drag with live reflow and limits, ui.side-panel.width persisted on release, double-click and /panel width reset, tests, ADR 0110 amended (adr-0110-amend-1108 records the motion-repaint exception and why ADR 0106 needs no amendment, per the plan's ratified recast), layout and manual docs updated."
 ---
 
 The **Side panel** has a fixed width of 36 columns (`sidePanelWidth`, ADR 0110 Decisions 6–7).
