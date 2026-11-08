@@ -976,6 +976,8 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.notify",
 	"ui.git-fetch",
 	"ui.pointer-shapes",
+	"ui.side-panel.show",
+	"ui.side-panel.sections",
 	"ui.footer.rows",
 	"ui.footer.colors",
 	"cursor-shape",

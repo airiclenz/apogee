@@ -114,10 +114,16 @@ var uiKeyCases = map[string]uiKeyCase{
 		want:  true,
 		bad:   map[string]string{"maybe": `apogee: invalid ui.pointer-shapes "maybe": want true or false`},
 	},
+	UIKeySidePanelShow: {
+		value: "off",
+		read:  func(u UIPrefs) any { return u.SidePanelShow },
+		want:  SidePanelShowOff,
+		bad:   map[string]string{"always": `apogee: invalid ui.side-panel.show: unknown side-panel mode "always"`},
+	},
 }
 
 // TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase pins the sweep the other tests run on: the
-// fourteen keys in the order the starter template presents them, each with a case above, and a slice
+// fifteen keys in the order the starter template presents them, each with a case above, and a slice
 // a caller cannot reorder under this package.
 func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	t.Parallel()
@@ -125,7 +131,7 @@ func TestUIKeysAreTheTemplateOrderAndEveryKeyHasACase(t *testing.T) {
 	want := []string{
 		"ui.spinner", "ui.spinner-color", "ui.glyphs", "ui.show-scrollbar", "ui.color-scheme",
 		"ui.stall-after", "ui.inspector", "ui.skill-suggestions", "ui.task-list-open", "ui.tools-open",
-		"ui.tools-fold-over", "ui.pointer-shapes", "ui.notify", "ui.git-fetch",
+		"ui.tools-fold-over", "ui.pointer-shapes", "ui.notify", "ui.git-fetch", "ui.side-panel.show",
 	}
 	if got := UIKeys(); !slices.Equal(got, want) {
 		t.Errorf("UIKeys() = %v; want the template order %v", got, want)

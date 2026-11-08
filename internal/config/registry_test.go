@@ -170,6 +170,21 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		}
 	})
 
+	t.Run("ui.side-panel.show", func(t *testing.T) {
+		t.Parallel()
+		values := enumValues(t, "ui.side-panel.show")
+		for _, v := range values {
+			if _, err := domain.ParseSidePanelShow(v); err != nil {
+				t.Errorf("registry offers side-panel mode %q but domain.ParseSidePanelShow rejects it: %v", v, err)
+			}
+		}
+		for _, mode := range domain.SidePanelShowNames() {
+			if !slices.Contains(values, string(mode)) {
+				t.Errorf("domain knows side-panel mode %q but the registry does not offer it", mode)
+			}
+		}
+	})
+
 	t.Run("workflow-wake", func(t *testing.T) {
 		t.Parallel()
 		// Parsed in THIS package, sub-agents-choice's reason below; the row is file-only, so
@@ -1093,7 +1108,8 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
 		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI", "ui.pointer-shapes": "UI",
 		"ui.tools-open": "UI", "ui.tools-fold-over": "UI", "ui.notify": "UI", "ui.git-fetch": "UI",
-		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions", "sessions.share-group": "Sessions",
+		"ui.side-panel.show": "UI",
+		"sessions.max-age":   "Sessions", "sessions.max-count": "Sessions", "sessions.share-group": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
 		"currency": "Currency",
 	}
@@ -1172,7 +1188,7 @@ func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
 		"ui.color-scheme": "light", "ui.stall-after": "1m30s", "ui.inspector": "true",
 		"ui.skill-suggestions": "false", "ui.task-list-open": "false", "ui.tools-open": "true",
 		"ui.tools-fold-over": "12", "ui.notify": "both", "ui.git-fetch": "false",
-		"ui.pointer-shapes": "true",
+		"ui.pointer-shapes": "true", "ui.side-panel.show": "off",
 	}
 
 	for _, key := range domain.UIKeys() {

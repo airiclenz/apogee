@@ -2904,6 +2904,19 @@ type uiConfig struct {
 	// Footer is the nested `footer:` block: how the footer lays its segments out. A pointer so an
 	// absent block is told from one that states nothing.
 	Footer *uiFooterConfig `yaml:"footer"`
+	// SidePanel is the nested `side-panel:` block: when the side panel is drawn and which of its
+	// sections it shows (ADR 0110). A pointer for Footer's reason.
+	SidePanel *uiSidePanelConfig `yaml:"side-panel"`
+}
+
+// uiSidePanelConfig is the on-disk `ui.side-panel:` block.
+type uiSidePanelConfig struct {
+	// Show names when the column is drawn — auto | on | off. Empty ⇒ the default (auto). A raw
+	// string for uiConfig.Spinner's reason: UIPrefs.Validate parses it once, at startup.
+	Show string `yaml:"show"`
+	// Sections is `ui.side-panel.sections`: the sections with their modes, kept as written. Nil for
+	// an absent (or null) key, which keeps the default. The judgement is fileSidePanelSections'.
+	Sections sidePanelSectionsConfig `yaml:"sections"`
 }
 
 // uiFooterConfig is the on-disk `ui.footer:` block.
@@ -3037,6 +3050,62 @@ func fileFooterRows(o *Options, fc fileConfig) error {
 		return err
 	}
 	o.UI.FooterRows = spelled
+	return nil
+}
+
+// sidePanelSectionsConfig is the on-disk `ui.side-panel.sections:` list, its section/mode entries
+// kept in the order written, a repeated section included, so the refusal can quote what the file
+// says.
+type sidePanelSectionsConfig []domain.SidePanelEntry
+
+// UnmarshalYAML reads the list as written. It refuses only a shape no entry can be made of — a
+// scalar or a map where the list belongs, or an entry that is not one `section: mode` pair — in a
+// sentence naming the key, and judges nothing else: the names and the modes are
+// domain.ParseSidePanelSections'.
+func (f *sidePanelSectionsConfig) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	shape := func(at *yaml.Node) error {
+		return fmt.Errorf("apogee: invalid ui.side-panel.sections at line %d: want a list of "+
+			"section: mode entries, like [sub-agents: auto, tasks: pinned, changed-files: auto, usage: hidden]",
+			at.Line)
+	}
+	if node.Kind != yaml.SequenceNode {
+		return shape(node)
+	}
+	entries := make(sidePanelSectionsConfig, 0, len(node.Content))
+	for _, entryNode := range node.Content {
+		entryNode = resolveAlias(entryNode)
+		if entryNode.Kind != yaml.MappingNode || len(entryNode.Content) != 2 {
+			return shape(entryNode)
+		}
+		section, mode := resolveAlias(entryNode.Content[0]), resolveAlias(entryNode.Content[1])
+		if section.Kind != yaml.ScalarNode || mode.Kind != yaml.ScalarNode {
+			return shape(entryNode)
+		}
+		entries = append(entries, domain.SidePanelEntry{
+			Section: domain.SidePanelSection(section.Value),
+			Mode:    domain.SidePanelMode(mode.Value),
+		})
+	}
+	*f = entries
+	return nil
+}
+
+// fileSidePanelSections projects `ui.side-panel.sections:` onto its one field of the block,
+// writing it on every pass so a re-read over a file that no longer names the key lands the default
+// again. The entries are spelled as written and read through domain.ParseSidePanelSections, which
+// refuses — naming the key and quoting the list — an unknown section or mode and a section given
+// twice; a list it accepts is carried in its canonical spelling, every section named.
+func fileSidePanelSections(o *Options, fc fileConfig) error {
+	o.UI.SidePanelSections = domain.DefaultSidePanelSections
+	if fc.UI == nil || fc.UI.SidePanel == nil || fc.UI.SidePanel.Sections == nil {
+		return nil
+	}
+	entries, err := domain.ParseSidePanelSections(string(domain.SpellSidePanelSections(fc.UI.SidePanel.Sections)))
+	if err != nil {
+		return err
+	}
+	o.UI.SidePanelSections = domain.SpellSidePanelSections(entries)
 	return nil
 }
 

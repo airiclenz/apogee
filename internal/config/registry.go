@@ -290,6 +290,7 @@ var (
 	spinnerValues     = []string{"snake", "glitter", "classic"}
 	glyphsValues      = []string{string(domain.GlyphsUnicode), string(domain.GlyphsSafe)}
 	notifyValues      = []string{string(domain.NotifyOff), string(domain.NotifyBell), string(domain.NotifyOSC9), string(domain.NotifyBoth)}
+	sidePanelValues   = []string{string(domain.SidePanelShowAuto), string(domain.SidePanelShowOn), string(domain.SidePanelShowOff)}
 	cursorShapeValues = []string{"block", "underline", "bar"}
 	// The one vocabulary internal/domain does not own: who picks a delegation's seat is a fact about
 	// the CONFIG rather than about the agent loop, so the two words live here (options.go) and this
@@ -1217,6 +1218,40 @@ var KeyRegistry = bindRows([]Key{
 			func(u *uiConfig) *bool { return u.GitFetch }),
 	},
 	{
+		// A word of the nested `side-panel:` block, applied by the renderer itself (settingsApplyLocal)
+		// since its whole effect is the column on THIS screen. Copied across as the file names it,
+		// ui.spinner's posture: UIPrefs.Validate judges the name at ResolveOptions. The path is three
+		// segments deep, past the scalar writer's reach (scalarPathDepth), so a write of it goes
+		// through the `side-panel:` block as a whole.
+		Path: "ui.side-panel.show", Kind: KindEnum, Default: string(domain.DefaultSidePanelShow),
+		EnumValues: sidePanelValues,
+		Editable:   true,
+		Validate:   validateSidePanelShow,
+		Desc: "When the side panel is drawn right of the transcript: auto on a wide window, on down to " +
+			"its floor width, or off.",
+		field: uiField(domain.UIKeySidePanelShow, named[domain.SidePanelShow], spelled[domain.SidePanelShow],
+			func(u *domain.UIPrefs) *domain.SidePanelShow { return &u.SidePanelShow },
+			func(u *uiConfig) *domain.SidePanelShow {
+				if u.SidePanel == nil {
+					return nil
+				}
+				return nonEmptyName[domain.SidePanelShow](u.SidePanel.Show)
+			}),
+	},
+	{
+		// An ordered list of section/mode pairs, so structured and edited in the file — ui.footer.rows'
+		// posture, global-only by the same zero class. Its Read is the canonical spelling, every
+		// section named, a text domain.ParseSidePanelSections reads back (UIPrefs.Set lands it), so a
+		// live re-read lands through the parse the file does. No Default: the default lives in
+		// domain.DefaultUIPrefs and the starter template. Judged by fileSidePanelSections at the load.
+		Path: "ui.side-panel.sections", Kind: KindStructured,
+		Desc: "The side panel's sections in display order, each pinned, auto or hidden: " +
+			"sub-agents, tasks, changed-files, usage.",
+		Read:      func(o Options) string { return string(o.UI.SidePanelSections) },
+		Structure: func(o Options) any { return o.UI.SidePanelSections },
+		fromFile:  fileSidePanelSections,
+	},
+	{
 		// A list of lists, so structured — sessions.watch-homes' shape: no one-line row holds it,
 		// and it is edited in the file. Global-only by the zero class, like every `ui:` key. Its
 		// Read is the canonical spelling rather than a summary, a text domain.ParseFooterRows reads
@@ -1799,6 +1834,12 @@ func validateGlyphSetName(value string) error {
 // itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
 func validateNotifyMode(value string) error {
 	return domain.UIPrefs{Notify: domain.NotifyMode(value)}.Validate()
+}
+
+// validateSidePanelShow refuses a side-panel show mode this build does not know, through the
+// startup check itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
+func validateSidePanelShow(value string) error {
+	return domain.UIPrefs{SidePanelShow: domain.SidePanelShow(value)}.Validate()
 }
 
 // validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the

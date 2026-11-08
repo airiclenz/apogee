@@ -239,7 +239,8 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 // on both the seeded template and a hand-edited file — the result parsing, resolving the key to the
 // value asked for, and differing from the input at that key ALONE. It is also what pins the
 // template: a key whose commented example went missing or got duplicated would land at the end of
-// the file or refuse, and either shows up here.
+// the file or refuse, and either shows up here. A key deeper than scalarPathDepth is not the scalar
+// writer's — writableKey refuses it before any splice — so the sweep leaves it to its block's writer.
 func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"the seeded template", editedConfigFixture} {
@@ -250,7 +251,7 @@ func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 				input = readFixture(t, name)
 			}
 			for _, k := range KeyRegistry {
-				if !k.Editable {
+				if !k.Editable || len(strings.Split(k.Path, ".")) > scalarPathDepth {
 					continue
 				}
 				t.Run(k.Path, func(t *testing.T) {

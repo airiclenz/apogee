@@ -213,7 +213,13 @@ skipped for fill, `ContextWindow` 0 fallback, refused write ignored, history ari
 Depends on item 3.
 **Commit:** `feat(sidepanel): fold engine Events into side-panel state`
 
-## 5. Settings keys
+## 5. Settings keys — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the side-panel vocabulary (SidePanelShow, SidePanelSection, SidePanelMode, SidePanelEntry, SidePanelSections with Parse/Spell) lives in a new file internal/domain/sidepanelprefs.go (+ its _test.go) rather than in uiprefs.go, which was already 808 lines; UIPrefs fields, UIKey* constants, Validate and Set stay in uiprefs.go; the new file is named in internal/domain/doc.go.
+NOTES (2026-11-08): design call: a section `ui.side-panel.sections` leaves out is appended after the listed ones in `auto`, in default order (so a list written before a later section exists still loads); `[]` therefore reads as the default. The parse always returns every section, and Set/the file pass land that full canonical spelling.
+NOTES (2026-11-08): the section list is judged at the file pass (fileSidePanelSections, ui.footer.colors' posture) and stored canonical; the show word is judged by UIPrefs.Validate (ui.spinner's posture). The YAML shape is a list of single `section: mode` maps, so the canonical flow spelling is itself valid YAML.
+NOTES (2026-11-08): consequential edit — internal/config/configwrite_scalar_test.go: made necessary by making the depth-3 `ui.side-panel.show` Editable; TestSpliceScalarSettingRoundTripsEveryEditableKey now skips keys deeper than scalarPathDepth (writableKey already refuses them), leaving them to item 6's block writer. SaveConfigSetting and its depth guard are unchanged, so until item 6 lands a /settings commit of ui.side-panel.show is refused "nested too deeply"; the manual already says /settings edits it.
+NOTES (2026-11-08): template: `side-panel:` with a live `show: auto` and a commented `sections:` example, after `git-fetch`; ui.side-panel.show is last in uiKeys (fifteen keys), sections kept out of uiKeys like the footer keys. internal/domain/doc.go's "Twenty-eight files" count was already stale (34 non-test files) before this item and is left as is.
 
 **What:**
 Recast at the regression check (2026-11-08).

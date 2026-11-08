@@ -1121,9 +1121,10 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Fifteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
-says; the other six, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch` and the footer's
-layout and colours, `ui.footer.rows` and `ui.footer.colors`, come further down.
+Seventeen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
+says; the other eight, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch`, the footer's
+layout and colours, `ui.footer.rows` and `ui.footer.colors`, and the side panel's,
+`ui.side-panel.show` and `ui.side-panel.sections`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. The same animation is the busy indicator outside a turn: while
 an idle session waits on something slow — a `/model` profile load, a footer git action, a
@@ -1288,6 +1289,30 @@ scheme it is drawn in; it is global-only too.
 ui:
   footer:
     colors: {model: success, branch: warning}
+```
+
+`ui.side-panel.show` is when the side panel is drawn: a 36-column column right of the transcript
+that shows the sub-agents at work, the task list, the files changed this session and the usage
+([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md)). `auto` — the default — draws it while
+the transcript keeps at least 100 columns beside it, `on` while it keeps at least 80, and `off`
+never. Any other word is a startup error that names the key. It lives in a nested `side-panel:`
+block, and `/settings` edits it.
+
+`ui.side-panel.sections` lists the panel's sections in the order it shows them — `sub-agents`,
+`tasks`, `changed-files` and `usage` — each in a mode: `pinned` (always shown), `auto` (shown while
+it has something live) or `hidden` (never shown). The default is every section `auto`, in that
+order. A section the list leaves out follows the ones it names, in `auto`, so a list written before a
+section existed still loads. A name that is not a section, a mode that is not one of the three, and
+a section named twice are startup errors that name the key and the value. Like `ui.footer.rows` it
+is edited in the file, and the saved list reaches the running session at once; like every `ui:` key
+both are global-only.
+
+```yaml
+# ~/.apogee/config.yaml
+ui:
+  side-panel:
+    show: on
+    sections: [usage: pinned, tasks: auto, changed-files: auto, sub-agents: hidden]
 ```
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter

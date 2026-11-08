@@ -12,7 +12,8 @@ import (
 // spinner and its colour loop, the scroll bar, the palette, the quiet threshold, the Inspector's
 // wire capture, the skill-suggestion band, the two fold states the transcript writes back, the
 // glyph set the screen's symbols are drawn from, and how the terminal is told apogee waits on the
-// human, and the rows the footer's segments are laid out in.
+// human, the rows the footer's segments are laid out in, and when the side panel is drawn and
+// which of its sections it shows.
 // It is one struct because the keys describe one subsystem and travel together, from the on-disk
 // block through resolution (internal/config) to the wire (tui.Options) to the live apply — and it
 // lives here, beside the vocabularies its fields are spelled in, so every layer that carries the
@@ -124,6 +125,17 @@ type UIPrefs struct {
 	// the scheme vocabulary declares is judged at load by internal/config, which can read that
 	// vocabulary where this package cannot.
 	FooterColors FooterColors
+	// SidePanelShow is `ui.side-panel.show`: when the side panel's column is drawn beside the
+	// transcript (ADR 0110). Default auto, and `""` reads as auto too — Glyphs' posture. Any other
+	// name is refused by [UIPrefs.Validate] naming the key. Screen-only: nothing about it reaches
+	// the model.
+	SidePanelShow SidePanelShow
+	// SidePanelSections is `ui.side-panel.sections`: each panel section with its mode, in display
+	// order, carried in its one canonical spelling so the block stays comparable with `==`, and
+	// read into entries through [ParseSidePanelSections]. Default every section auto; `""` reads
+	// as the default too, FooterRows' posture. A list [ParseSidePanelSections] refuses is refused by
+	// [UIPrefs.Validate] naming the key.
+	SidePanelSections SidePanelSections
 }
 
 // FooterSegment names one segment of the footer, as `ui.footer.rows` spells it.
@@ -562,6 +574,12 @@ const (
 	// UIKeyFooterColors is the `footer:` block's other key, structured and edited in the file like
 	// [UIKeyFooterRows].
 	UIKeyFooterColors = "ui.footer.colors"
+	// UIKeySidePanelShow is a key of the nested `side-panel:` block, and unlike the footer's keys it
+	// IS one of [UIKeys]: a one-word value a settings row edits.
+	UIKeySidePanelShow = "ui.side-panel.show"
+	// UIKeySidePanelSections is the `side-panel:` block's other key, structured and edited in the
+	// file like [UIKeyFooterRows], so not one of [UIKeys].
+	UIKeySidePanelSections = "ui.side-panel.sections"
 )
 
 // uiKeys is the block's keys in the order the starter template presents them, declared once so a
@@ -569,7 +587,7 @@ const (
 var uiKeys = []string{
 	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
 	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
-	UIKeyToolsFoldOver, UIKeyPointerShapes, UIKeyNotify, UIKeyGitFetch,
+	UIKeyToolsFoldOver, UIKeyPointerShapes, UIKeyNotify, UIKeyGitFetch, UIKeySidePanelShow,
 }
 
 // UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
@@ -585,22 +603,25 @@ func UIKeys() []string {
 // the Inspector disarmed, the skill-suggestion band on, the task-list cards open, the Tools
 // umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
 // the unicode glyph set, the terminal bell when apogee waits on the human, the footer's
-// periodic git fetch on, and the footer laid out on two rows, the upstream above the workspace.
+// periodic git fetch on, the footer laid out on two rows, the upstream above the workspace, and the
+// side panel drawn where the window has room for it, every section in auto.
 // Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
-		Spinner:          DefaultSpinnerStyle,
-		SpinnerColor:     true,
-		ShowScrollbar:    true,
-		ColorScheme:      DefaultColorSchemeName,
-		StallAfter:       DefaultStallAfter,
-		SkillSuggestions: true,
-		TaskListOpen:     true,
-		ToolsFoldOver:    DefaultToolsFoldOver,
-		Glyphs:           DefaultGlyphSet,
-		Notify:           DefaultNotifyMode,
-		GitFetch:         true,
-		FooterRows:       DefaultFooterRows,
+		Spinner:           DefaultSpinnerStyle,
+		SpinnerColor:      true,
+		ShowScrollbar:     true,
+		ColorScheme:       DefaultColorSchemeName,
+		StallAfter:        DefaultStallAfter,
+		SkillSuggestions:  true,
+		TaskListOpen:      true,
+		ToolsFoldOver:     DefaultToolsFoldOver,
+		Glyphs:            DefaultGlyphSet,
+		Notify:            DefaultNotifyMode,
+		GitFetch:          true,
+		FooterRows:        DefaultFooterRows,
+		SidePanelShow:     DefaultSidePanelShow,
+		SidePanelSections: DefaultSidePanelSections,
 	}
 }
 
@@ -647,7 +668,9 @@ func ParseToolsFoldOver(text string) (int, error) {
 
 // Validate rejects a block naming a spinner style this build has no animation for, a StallAfter
 // below zero, a ToolsFoldOver below zero, a glyph set this build does not know, a notify mode it
-// does not know, or footer rows [ParseFooterRows] refuses — the same six refusals the parsers make, so a block assembled field by field is judged as one read through
+// does not know, footer rows [ParseFooterRows] refuses, a side-panel show mode it does not know, or
+// side-panel sections [ParseSidePanelSections] refuses — the same eight refusals the parsers make,
+// so a block assembled field by field is judged as one read through
 // [UIPrefs.Set] would be. Catching them here makes a typo a startup error that names the key; left
 // to the renderer they would silently resolve to some other style, the shipped threshold or the
 // unicode glyphs, and the user would be left wondering why their setting did nothing.
@@ -667,6 +690,12 @@ func (u UIPrefs) Validate() error {
 	if _, err := ParseFooterRows(string(u.FooterRows)); err != nil {
 		return err
 	}
+	if _, err := ParseSidePanelShow(string(u.SidePanelShow)); err != nil {
+		return fmt.Errorf("apogee: invalid ui.side-panel.show: %w", err)
+	}
+	if _, err := ParseSidePanelSections(string(u.SidePanelSections)); err != nil {
+		return err
+	}
 	return validToolsFoldOver(u.ToolsFoldOver)
 }
 
@@ -675,7 +704,9 @@ func (u UIPrefs) Validate() error {
 // carry the key), and the value is parsed per key — the spinner through [ParseSpinnerStyle], the
 // glyph set through [ParseGlyphSet], the notify mode through [ParseNotifyMode], the footer rows
 // through [ParseFooterRows] (landing their canonical spelling), the footer colours through
-// [ParseFooterColors], the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
+// [ParseFooterColors], the side-panel show mode through [ParseSidePanelShow], the side-panel
+// sections through [ParseSidePanelSections] (landing their canonical spelling, every section
+// named), the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
 // name as it is. The edit runs on a COPY, [UIPrefs.Validate] judges the copy, and only a copy it
 // accepts is written back: a Set that fails has touched nothing. A key this block does not carry
 // is refused.
@@ -766,6 +797,18 @@ func (u *UIPrefs) land(key, value string) error {
 			return err
 		}
 		u.FooterColors = colors
+	case UIKeySidePanelShow:
+		show, err := ParseSidePanelShow(value)
+		if err != nil {
+			return fmt.Errorf("apogee: invalid ui.side-panel.show: %w", err)
+		}
+		u.SidePanelShow = show
+	case UIKeySidePanelSections:
+		entries, err := ParseSidePanelSections(value)
+		if err != nil {
+			return err
+		}
+		u.SidePanelSections = SpellSidePanelSections(entries)
 	default:
 		return fmt.Errorf("apogee: unknown ui key %q", key)
 	}

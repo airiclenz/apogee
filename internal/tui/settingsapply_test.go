@@ -103,6 +103,7 @@ func TestSettingsApplyLocalLandsEveryUIKeyThroughSet(t *testing.T) {
 		domain.UIKeyNotify:           {string(domain.NotifyOSC9), "beep"},
 		domain.UIKeyGitFetch:         {settingTrue, "maybe"},
 		domain.UIKeyPointerShapes:    {settingTrue, "maybe"},
+		domain.UIKeySidePanelShow:    {string(domain.SidePanelShowOff), "wide"},
 	}
 	model := func(t *testing.T, resolves bool) Model {
 		t.Helper()
