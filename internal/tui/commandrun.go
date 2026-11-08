@@ -362,6 +362,7 @@ func (m *Model) resetSessionView() {
 	// belongs to does.
 	m.spentSkills = nil
 	m.resetSessionBoards() // the /thinking and /advice boards fall with the conversation they recorded
+	m.panel = nil          // so does the side panel's folded state: every section it paints was the closed session's
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
 	// A bound reset's clear was a session boundary, so the engine re-read the workspace context files:

@@ -11,6 +11,7 @@ package sidepanel
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"time"
 
@@ -184,6 +185,44 @@ type write struct {
 // linger are testable without the wall clock.
 func New(now func() time.Time) *State {
 	return &State{now: now, runs: map[RunKey]*runState{}}
+}
+
+// Clone returns a copy of s that shares nothing a mutator writes: a holder that must never write a
+// State another holder still reads (the TUI's value-copied Model, ADR 0011) clones it and writes
+// the clone. A nil State clones to nil.
+func (s *State) Clone() *State {
+	if s == nil {
+		return nil
+	}
+	runs := make(map[RunKey]*runState, len(s.runs))
+	for key, state := range s.runs {
+		// A runState's slices (tasks, cost.Rows) are replaced whole by every writer, never
+		// written in place, so the shallow copy owns everything a later write touches.
+		copied := *state
+		runs[key] = &copied
+	}
+	return &State{
+		now:            s.now,
+		fallbackWindow: s.fallbackWindow,
+		runs:           runs,
+		delegations:    slices.Clone(s.delegations),
+		writes:         slices.Clone(s.writes),
+	}
+}
+
+// Reads reports whether Fold would change anything for event: false for every variant Fold
+// ignores, and for a tool call that spawns no delegation. A copy-on-write holder asks it first, so
+// the Events the panel never reads — every streamed text delta — cost it no Clone.
+func Reads(event domain.Event) bool {
+	switch e := event.(type) {
+	case domain.ToolCallEvent:
+		return e.SpawnRunID != ""
+	case domain.SubAgentPhaseEvent, domain.SubAgentNamedEvent, domain.ToolResultEvent,
+		domain.TaskListEvent, domain.UsageEvent, domain.ContextEstimateEvent, domain.ContextCostEvent:
+		return true
+	default:
+		return false
+	}
 }
 
 // SetFallbackWindow sets the window a fill is measured against when its reading names none

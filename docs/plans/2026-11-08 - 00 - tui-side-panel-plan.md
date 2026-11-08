@@ -363,7 +363,13 @@ a `/settings` click maps to the right row and field caret with the panel shown.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSlotPanesFitBesideTheSidePanel|SidePanel|TestThinkingWrapColumnFollowsTheWindow' ./internal/tui/`
 **Commit:** `feat(tui): size transcript-slot panes beside the side panel`
 
-## 9. Paint the sections
+## 9. Paint the sections — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): re-derived from the assumption that `sidepanel.State` could be held copy-on-write from the TUI alone: its fields are unexported, so the deep copy lives in its own package. `internal/sidepanel/sidepanel.go` adds `(*State).Clone()` (nil-safe) and `sidepanel.Reads(event)`, so an Event the panel never reads, such as a streamed token, costs no clone. Both are covered in sidepanel_test.go, and item 12's resume seeding can use the same Clone.
+NOTES (2026-11-08): paint differs from the spec's sketch in four places, for item 13 to align `docs/layout/side-panel-layout.md`: (1) finished rows use the glyph set's `done` (`✓`, `√` under `ui.glyphs: safe`) and a failed run uses `failure` (`✗`), not the sketch's `✔`; (2) elapsed time uses the status line's `formatElapsed` (`01:12s`), not `1m12`; (3) the phase column reads queued/running/done/failed, because the State carries no Delegation target to show the sketch's `explore`; (4) every header that has a summary shows it, Sub-agents and Changed files included.
+NOTES (2026-11-08): a running delegation is led by the status line's spinner frame (`m.spin.drawn`), so it animates with the spinner and honours `ui.glyphs: safe`. A queued delegation and an open task use `○`. New fixed glyphs and two styles (`panelHeader`, `panelCurrent`) are in theme.go.
+NOTES (2026-11-08): TestSessionViewHoldsEveryFieldTheBoundariesReset needed no edit. It enumerates sessionView by reflection, and both boundaries now write `panel` (resetSessionView and resumeLoaded set it to nil), so the guard sees the field as the plan requires.
+NOTES (2026-11-08): `tasks`, `changed-files` and `usage` read the top-level scope (`sidepanel.RunKey{}`), and the viewed run is not marked. Scoping to the run view is item 10's work.
 
 **What:**
 **Goal:** the column paints the shown sections per `docs/layout/side-panel-layout.md` — header row

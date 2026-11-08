@@ -12,9 +12,9 @@ import (
 // ----------------------------------------------------------------------------
 //
 // EVERY engine Event enters the view through foldEvent and nowhere else. The Update loop's
-// eventMsg case hands the Event straight here, so the six folds a view update is made of —
-// the status-line stats, the thinking board, the advice board, the Inspector's wire ring, the
-// transcript, the live activity phrase — have one caller, in one order, in one file, instead of switches in as many
+// eventMsg case hands the Event straight here, so the folds a view update is made of —
+// the status-line stats, the thinking board, the advice board, the Inspector's wire ring, the side
+// panel, the transcript, the live activity phrase — have one caller, in one order, in one file, instead of switches in as many
 // files ordered by a comment.
 //
 // The order is load-bearing, and it is a DATA dependency rather than prose: the activity's
@@ -35,7 +35,7 @@ import (
 const throughputWindowFloor = 250 * time.Millisecond
 
 // foldEvent folds one engine Event into the view: the live token stats, the thinking board, the
-// advice board, the wire and attempt rings, then the transcript, then the activity phrase. It mutates the local copy and returns
+// advice board, the wire and attempt rings, the side panel, then the transcript, then the activity phrase. It mutates the local copy and returns
 // it, like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
 // A sub-agent's reading is measured against the session's own bound window and model (m.opts).
 func (m Model) foldEvent(e domain.Event) Model {
@@ -64,6 +64,10 @@ func (m Model) foldEventAgainst(e domain.Event, window int, model string) Model 
 	// The Inspector's other ring, on the same terms: one upstream attempt's measurement is not a
 	// conversation entry either, and nothing but /inspect reads what this writes.
 	m = m.foldAttempt(e)
+	// Order-free as well: the side panel folds the Event into its own state (sidepanel.go) and reads
+	// nothing the other folds establish. It is handed the run's window for the readings that name
+	// none, by the rule applyUsage below is handed it.
+	m = m.foldSidePanel(e, window)
 	m.transcript.apply(e)
 	// A seat that fell over to a fallback server is news whichever seat it was: one host note per
 	// switch, naming both servers and both models (fallbackNote). Where the session's own seat moved,

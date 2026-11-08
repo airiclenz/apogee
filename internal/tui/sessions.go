@@ -977,6 +977,8 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// The /thinking and /advice boards fall for the same reason, through the one call /clear makes:
 	// neither is stored, so there is no resumed session's own to reopen them at (resetSessionBoards).
 	m.resetSessionBoards()
+	// The side panel's folded state falls with them: it was folded from the outgoing session's Events.
+	m.panel = nil
 	// The live reading belongs to the conversation that just went away, so it falls whole and the
 	// gauge is relit from the record — the same one call /clear makes, differing only in having a
 	// stored fill to reopen at (liveStats.reset).

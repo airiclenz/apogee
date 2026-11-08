@@ -29,6 +29,7 @@ import (
 	"github.com/airiclenz/apogee/internal/gitstatus"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
 
@@ -359,6 +360,36 @@ func TestWatchFollowsTheJournalLikeALiveSession(t *testing.T) {
 			t.Errorf("state = %v; want idle once the watched Exchange ended", m.state)
 		}
 	})
+}
+
+// A watch folds the watched journal into a side panel of its own: the watched view starts with none,
+// the journal's first Event the panel reads allocates it without a panic, and the owner's panel
+// waits parked, untouched.
+func TestWatchFoldsTheJournalIntoItsOwnSidePanel(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t, "fix the parser", nil, 0)
+	m := newTestModelEng(t, watchEngine(), testOpts)
+	m = m.foldEvent(domain.TaskListEvent{Items: []domain.TaskItem{{Text: "owner task", Done: true}}})
+	owner := m.panel
+	m, cmd := m.enterWatch(f.src)
+	if !m.watch.isActive || cmd == nil {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	m = step(t, m, cmd())
+
+	f.emit(domain.TaskListEvent{EventBase: domain.EventBase{Turn: 1}, Items: []domain.TaskItem{{Text: "watched task"}}})
+	m = pollWatch(t, m)
+
+	watched := m.panel.Tasks(sidepanel.RunKey{})
+	if len(watched.Rows) != 1 || watched.Rows[0].Text != "watched task" {
+		t.Errorf("the watched panel holds tasks %+v, want the journal's one task", watched.Rows)
+	}
+	if m.watch.parked.panel != owner {
+		t.Error("the watch replaced the owner's parked panel")
+	}
+	if rows := owner.Tasks(sidepanel.RunKey{}).Rows; len(rows) != 1 || rows[0].Text != "owner task" {
+		t.Errorf("the owner's panel holds tasks %+v, want its own one task", rows)
+	}
 }
 
 func TestWatchGateRefusesEverythingButTheViewVerbs(t *testing.T) {

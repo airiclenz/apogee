@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/airiclenz/apogee/internal/domain"
+import (
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sidepanel"
+)
 
 // sessionView is the session view the Model renders, whole: the event-derived half the fold
 // writes as Events arrive — the transcript, the /thinking and /advice boards, the status line's
@@ -18,7 +21,8 @@ import "github.com/airiclenz/apogee/internal/domain"
 // m.transcript, m.state and m.ctxUsed site reads as it did before the fields gained this owner.
 //
 // It holds plain values only — reference headers, small structs and no strings.Builder — so it
-// rides the value-copied Model safely (ADR 0011).
+// rides the value-copied Model safely (ADR 0011); the one pointer to mutable state, panel, is
+// copy-on-write, so no copy ever writes through it.
 type sessionView struct {
 	// transcript is the conversation as the view holds it: the entries, their run blocks and the
 	// display preferences a reset keeps (transcript.go).
@@ -96,6 +100,15 @@ type sessionView struct {
 	// Inspector only — never the transcript, the activity board or the stall clock — which is what
 	// keeps the conversation's own view, and a stop key, off work that runs beside it.
 	workflows backgroundWorkflows
+
+	// panel is the side panel's folded state (ADR 0110; internal/sidepanel): every Event the panel
+	// reads, folded by the same foldEventAgainst the transcript is, so live and watch mode paint one
+	// panel from one path. It is nil until the first Event the panel reads, and COPY-ON-WRITE:
+	// [Model.foldSidePanel] folds into a clone and replaces the pointer, never writes through it, so a
+	// discarded Model copy's fold leaves the kept one's panel as it was (ADR 0011). Both session
+	// boundaries drop it — /clear (resetSessionView) and an in-TUI restore (resumeLoaded) — and a
+	// watch starts its own at nil (clearWatchView).
+	panel *sidepanel.State
 
 	// acts is the live activity board the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go) — one slot per RUN

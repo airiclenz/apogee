@@ -493,3 +493,66 @@ func TestQueries_NilStateAnswersEmpty(t *testing.T) {
 		t.Error("a nil State answered a live section")
 	}
 }
+
+func TestClone_WritesToTheCloneLeaveTheOriginal(t *testing.T) {
+	original, _ := newState(t)
+	original.Fold(spawn(t, "r.1", map[string]any{"name": "scout", "task": "map it"}))
+	original.Fold(domain.TaskListEvent{Items: []domain.TaskItem{{Text: "one"}}})
+	original.Fold(domain.ToolResultEvent{WriteTarget: "/w/a.go"})
+
+	clone := original.Clone()
+	clone.Fold(spawn(t, "r.2", map[string]any{"name": "planner", "task": "plan it"}))
+	clone.Fold(phase("r.1", domain.SubAgentStarted, time.Time{}, false))
+	clone.Fold(domain.TaskListEvent{Items: []domain.TaskItem{{Text: "one", Done: true}}})
+	clone.Fold(domain.ToolResultEvent{WriteTarget: "/w/b.go"})
+
+	if got := len(original.SubAgents().Rows); got != 1 {
+		t.Errorf("original lists %d sub-agents after the clone's write, want 1", got)
+	}
+	if got := original.SubAgents().Rows[0].Phase; got != sidepanel.PhaseQueued {
+		t.Errorf("original's delegation moved to phase %v with the clone's", got)
+	}
+	if !original.Tasks(sidepanel.RunKey{}).IsLive {
+		t.Error("original's task list finished with the clone's")
+	}
+	if got := len(original.ChangedFiles(sidepanel.RunKey{}).Rows); got != 1 {
+		t.Errorf("original lists %d changed files after the clone's write, want 1", got)
+	}
+	if got := len(clone.SubAgents().Rows); got != 2 {
+		t.Errorf("clone lists %d sub-agents, want 2", got)
+	}
+}
+
+func TestClone_NilClonesToNil(t *testing.T) {
+	var state *sidepanel.State
+
+	if state.Clone() != nil {
+		t.Error("a nil State cloned to a non-nil one")
+	}
+}
+
+func TestReads_NamesExactlyTheVariantsFoldReads(t *testing.T) {
+	cases := []struct {
+		name  string
+		event domain.Event
+		want  bool
+	}{
+		{"a delegation's call", domain.ToolCallEvent{SpawnRunID: "r.1"}, true},
+		{"a plain tool call", domain.ToolCallEvent{}, false},
+		{"a phase", domain.SubAgentPhaseEvent{}, true},
+		{"a name", domain.SubAgentNamedEvent{}, true},
+		{"a tool result", domain.ToolResultEvent{}, true},
+		{"a task list", domain.TaskListEvent{}, true},
+		{"a usage reading", domain.UsageEvent{}, true},
+		{"an estimate", domain.ContextEstimateEvent{}, true},
+		{"a cost report", domain.ContextCostEvent{}, true},
+		{"a streamed token", domain.TokenEvent{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sidepanel.Reads(tc.event); got != tc.want {
+				t.Errorf("Reads = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
