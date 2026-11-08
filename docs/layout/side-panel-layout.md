@@ -5,7 +5,8 @@
 
 # The side panel
 
-The side panel is a fixed column on the right of the transcript slot. It keeps live session state in
+The side panel is a column on the right of the transcript slot, 36 columns wide by default and
+resized by dragging its separator. It keeps live session state in
 view: sub-agents, the task list, files changed this session, and usage. It is a glance. The detail
 views (Run view, the task-list card, `/usage`) stay where they are, and a click on a section opens
 its detail.
@@ -36,9 +37,12 @@ its detail.
 
 - **Rows:** every row above the session-name rule, the same rows the transcript slot spans. The
   session-name rule, status line, prompt box and footer keep the full window width.
-- **Columns:** 36 painted columns, the separator `│` included, measured by the width authority (ADR
-  0030). The transcript's scroll bar stays on the transcript's own right edge, left of the
-  separator.
+- **Columns:** `ui.side-panel.width` painted columns, the separator `│` included, measured by the
+  width authority (ADR 0030): 36 by default. The painted width is clamped to at least 24 and at most
+  the window less the transcript floor (100 under `auto`, 80 under `on`) less the scroll-bar column
+  ([adr-0110-amend-1108](../../.capcom/knowledge/decisions/adr-0110/adr-0110-amend-1108.md) (a)).
+  The clamp never rewrites the setting, so a window grown back paints the stored width again. The
+  transcript's scroll bar stays on the transcript's own right edge, left of the separator.
 - **The slot's panes** (`/settings`, approvals, report panes, Run view) paint in the narrowed slot
   while the panel shows. Popups keep their own placement rules.
 
@@ -51,12 +55,18 @@ its detail.
 | `off` | never |
 
 The thresholds always count the scroll-bar column, painted or not, so a bar appearing never moves
-the panel across a threshold (`layout.md`, "The scroll bar and the column it hangs in").
+the panel across a threshold (`layout.md`, "The scroll bar and the column it hangs in"). They are
+computed with the default width 36 whatever `ui.side-panel.width` says, so a wider or narrower panel
+never moves the window it shows from.
 
 - The column appears or vanishes **only** when the window crosses that row's threshold, or when the
-  setting changes (`/panel on|off|auto`, or `/settings`). Nothing inside the panel moves the column.
+  setting changes (`/panel on|off|auto`, or `/settings`).
+- Its width changes **only** on a deliberate act of the user's — a separator drag, a double-click on
+  the separator, `/panel width`, or a `/settings` edit of `ui.side-panel.width` — and, within the
+  clamp, on a terminal resize. Nothing a section shows or hides moves the column.
 - With no section to show, the column stays and paints one dim line, `nothing live`, at its top.
-- Crossing a threshold re-wraps the transcript once, like any deliberate width change.
+- Crossing a threshold re-wraps the transcript once, like any deliberate width change. A separator
+  drag re-wraps the panel and the transcript live, on every column the separator moves.
 
 ## Sections
 
@@ -124,8 +134,20 @@ When the shown sections need more rows than the slot has:
   - usage → `/usage`.
 - A click on the **pin glyph** toggles `pinned` ↔ `auto` and writes the list back to the setting.
 - A click on the header title does nothing. The panel never takes keyboard focus in v1.
+- A left-button press on the **grip** — the separator column or the gutter column right of it, on
+  any row above the session-name rule — starts a resize drag. The separator keeps its grab offset
+  from the pointer and moves with it, clamped to the limits under "Where it sits"; the panel and the
+  transcript re-wrap on every column it moves, and the separator is drawn in the accent tone, bold,
+  while the drag holds it. The release writes `ui.side-panel.width` to the global config once, and
+  only when the width differs from the one at the press; a failed save keeps the width for the
+  session and says `not saved`. A window narrowed until the column hides ends the drag with no write.
+- A **double-click** on the grip (two presses within 500 ms, the first moving nothing) resets the
+  width to the default 36 and starts no drag.
+- The hover shape over the grip is the default arrow: there is no resize cursor (ADR 0106 admits
+  only `default`, `text` and `pointer`). A drag starts nowhere else, and the grip is inert while
+  watching a session.
 - A drag-select that starts in the transcript stops at the separator; one that starts in the panel
-  selects nothing in v1.
+  away from the grip selects nothing in v1.
 
 ## Run view
 
@@ -138,14 +160,17 @@ conversation gives the panel back to the top level.
 
 - `/panel on|off|auto` sets `ui.side-panel.show`.
 - `/panel pin|unpin|hide <section>` sets one section's mode (`unpin` → `auto`).
+- `/panel width <n>` sets `ui.side-panel.width` to `<n>` columns (24 or more; a window too narrow
+  for it paints the clamped width without changing the setting), and `/panel width reset` returns it
+  to the default 36.
 - Bare `/panel` reports the mode and every section's mode
   (`side panel: auto — sub-agents auto · tasks pinned · …`), adding
   `(not drawn: the window is narrower than N columns)` when the mode would draw the column but the
   window is too narrow. Every form ends with that report.
-- Each write is saved to the global config as a pin-glyph click is; a failed save keeps the change
+- Each write is saved to the global config as a pin-glyph click or a separator drag is; a failed save keeps the change
   for the session and says `not saved`. The report answers mid-run, the writing forms wait for idle,
   and the command is refused while watching a session.
-- No key binding in v1 (ADR 0110 decision 8).
+- No key binding in v1 (ADR 0110 decision 8), for the panel or for its width.
 
 ## Replay
 

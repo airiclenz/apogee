@@ -282,7 +282,10 @@ cmd/apogee/e2e_support_test.go — launchTUIConfigured, appendHomeConfig; cmd/ap
 `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2ESidePanelDrag|TestE2ECopy' ./cmd/apogee/`.
 **Commit:** `test(e2e): drag the side panel separator through the terminal driver`
 
-## 8. Layout spec and manual
+## 8. Layout spec and manual — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the layout spec's §Pointer names the grip as the separator plus the gutter column right of it (as `panelGripAt` implements), where adr-0110-amend-1108 (b) says double-click "on the separator"; the manual says "the separator", calling the gutter "the blank column beside it" in the drag sentence.
+NOTES (2026-11-08): the manual's "blank cells … do nothing" now reads "other blank cells", since the gutter column starts a drag; the watch-mode paragraph gains "the separator does not drag".
 
 Depends on items 4, 5, 6.
 **What:**

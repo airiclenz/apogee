@@ -1350,16 +1350,18 @@ skill, and `/skills` lists them back so you can see what a skill declared.
 
 ### The side panel
 
-On a wide terminal apogee draws a 36-column panel on the right of the transcript that keeps the
+On a wide terminal apogee draws a panel on the right of the transcript, 36 columns wide unless you
+drag it wider or narrower (`ui.side-panel.width`), that keeps the
 session's live state in view: the sub-agents at work, the task list, the files changed this session
 and the usage. It is a glance, not a workspace — it never takes keyboard focus, and the views it
 summarises (a sub-agent's run view, the task-list card, `/usage`) stay where they were.
 
 **When it shows.** Under `ui.side-panel.show: auto` (the default) the panel appears once the window
 is at least 137 columns wide, which leaves the transcript 100; under `on`, from 117 columns, leaving
-80; under `off`, never. The panel appears or vanishes only when the window crosses that width or you
-change the setting — nothing inside it moves the transcript's edge, so live content never re-wraps
-your conversation. It takes the rows above the session-name rule; the status line, prompt box and
+80; under `off`, never. Those widths hold whatever width you give the panel. The panel appears or
+vanishes only when the window crosses that width or you change the setting, and it changes width
+only when you resize it — nothing inside it moves the transcript's edge, so live content never
+re-wraps your conversation. It takes the rows above the session-name rule; the status line, prompt box and
 footer keep the full width. With nothing to show it reads `nothing live`.
 
 **Its sections**, in the order `ui.side-panel.sections` lists them, each under a `◆ <Title>` header
@@ -1384,7 +1386,14 @@ reads `+N more`. The panel never scrolls.
 task-list card and scrolls to it; on a changed-file row it unfolds that write's tool block (opening
 the run that wrote it); on the usage section it opens `/usage`. A click on a header's pin glyph
 toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
-config. Header titles, blank cells and the mouse wheel do nothing there.
+config. Dragging the panel's separator — the `│` on its left edge, or the blank column beside it —
+resizes the panel: the panel and your conversation re-wrap as you drag, and the separator lights up
+in the accent colour while you hold it. The panel stays at least 24 columns wide, and leaves the
+transcript its 100 columns (80 under `on`) and its scroll bar. Letting go saves the new width as
+`ui.side-panel.width` to your global config; a double-click on the separator puts back the default
+36. A window too narrow for the width you chose draws the panel narrower without changing the
+setting, and a window grown back draws your width again. Header titles, other blank cells and the
+mouse wheel do nothing there.
 
 **Run view.** While a sub-agent's run view is open, the tasks, changed files and usage are that
 run's, and the usage fill matches the status-line gauge; the sub-agents section still lists every
@@ -1392,13 +1401,15 @@ run and marks the viewed one with `▸`. `esc` back to the conversation gives th
 top level.
 
 **From the prompt.** `/panel on`, `/panel off` and `/panel auto` set `ui.side-panel.show`;
-`/panel pin <section>`, `/panel unpin <section>` and `/panel hide <section>` set one section's mode.
-Bare `/panel` reports the settings in force and says when the window is too narrow to draw the
-panel. Every change is saved to your global config ([commands](commands.md)). There is no key
-binding for the panel.
+`/panel pin <section>`, `/panel unpin <section>` and `/panel hide <section>` set one section's mode;
+`/panel width <n>` sets `ui.side-panel.width` to `<n>` columns, and `/panel width reset` returns it
+to the default 36. Bare `/panel` reports the settings in force and says when the window is too
+narrow to draw the panel. Every change is saved to your global config ([commands](commands.md)).
+There is no key binding for the panel or its width.
 
 **Watching and resuming.** [Watching](sessions.md#watching-a-live-session) a session paints that
-session's panel, drawn by your own window and setting; `/panel` is not available while you watch. A
+session's panel, drawn by your own window and setting; `/panel` is not available while you watch,
+and the separator does not drag. A
 resumed session's panel shows its stored task list, changed files and usage; its sub-agents section
 starts empty. `/clear` empties the panel.
 

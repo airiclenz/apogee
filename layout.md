@@ -3135,12 +3135,18 @@ frame asks for focus reports, and a terminal that sends none never reads as blur
 
 ## The side panel
 
-On a wide terminal a fixed column on the right of the transcript slot keeps live session state in
-view (ADR 0110). Its shape, sections, thresholds and pointer rules are specced in
-[`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md). The rule that binds the
-rest of the frame is stated here: **the panel's column appears, vanishes or changes width only when
-the window crosses a threshold or the user changes `ui.side-panel.show`**. Nothing a section shows
-or hides moves it, so live content never re-wraps the transcript, the same promise the scroll bar
-keeps. While it shows, the transcript slot and every
+On a wide terminal a column on the right of the transcript slot keeps live session state in view
+(ADR 0110). It is 36 columns wide by default, and the user resizes it by dragging its separator,
+between 24 columns and the window less the transcript floor (100 under `auto`, 80 under `on`) less
+the scroll-bar column; a double-click on the separator or `/panel width reset` puts back the 36, and
+`/panel width <n>` sets it outright (adr-0110-amend-1108). Its shape, sections, thresholds and pointer
+rules are specced in [`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md). The
+rule that binds the rest of the frame is stated here: **the panel's column appears or vanishes only
+when the window crosses a threshold or the user changes `ui.side-panel.show`, and changes width
+only on a deliberate act of the user's — a separator drag, a double-click, `/panel width` or a
+`/settings` edit — or, within that clamp, on a terminal resize**. Nothing a section shows or hides
+moves it, so live content never re-wraps the transcript, the same promise the scroll bar keeps. A
+separator drag re-wraps the transcript live, on every column moved: the one mouse motion that
+repaints the frame. While it shows, the transcript slot and every
 pane painted in it are the slot's width, and the top rule, status line, prompt box and footer keep
 the window's.
