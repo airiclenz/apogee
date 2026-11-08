@@ -7317,7 +7317,9 @@ func TestANewPaneClaimingAKeyStillReachesLayout(t *testing.T) {
 // motion starts, exactly what the tail would repaint on any other Msg. A thousand motions with the
 // settings pane open — drags, then hovers under the pointer-shape gate — leave m.lines the same slice
 // (identity, not equality) and the widget's height where it was; the very next non-motion Msg then repaints, which is what says the miss was real
-// and the exemption was the only thing holding it back.
+// and the exemption was the only thing holding it back. No side-panel separator drag is active here
+// (the 80-column window shows no column): the one motion that does repaint, a drag that moved the
+// separator, is its sibling's to pin (TestMouseMotionRepaintsADraggedSeparator, adr-0110-amend-1108).
 func TestMouseMotionNeverRepaints(t *testing.T) {
 	t.Parallel()
 	m := openSettingsPane(t, modelWithOverlayRoomAt(t, 80, 24, settingsOpts(settingsTestRows(6))))
@@ -7366,6 +7368,34 @@ func TestMouseMotionNeverRepaints(t *testing.T) {
 		t.Error("the first non-motion Msg did not repaint — the injected miss was never a miss, and the pin bites nothing")
 	}
 	assertPaintFresh(t, m, "after the first non-motion Msg")
+}
+
+// TestMouseMotionRepaintsADraggedSeparator is the one exception to TestMouseMotionNeverRepaints
+// (adr-0110-amend-1108 (e)): a held-button motion that moves an active side-panel separator drag's
+// width settles, so the transcript re-wraps on every column the separator moves — and a motion of
+// the same drag that moves no width still repaints nothing, even over a key miss.
+func TestMouseMotionRepaintsADraggedSeparator(t *testing.T) {
+	t.Parallel()
+	m, _, sep := separatorDragModel(t, nil)
+	m = step(t, m, leftClick(sep, separatorRow))
+	m.transcript.addNote("a key miss a width-less motion must not settle")
+	lines := m.lines
+
+	still := step(t, m, leftDrag(sep, separatorRow))
+
+	if !sameLines(still.lines, lines) {
+		t.Error("a drag motion that moved no width repainted the transcript")
+	}
+
+	moved := step(t, still, leftDrag(sep-6, separatorRow))
+
+	if sameLines(moved.lines, lines) {
+		t.Error("a drag motion that moved the separator did not repaint")
+	}
+	if moved.viewport.Width() != sep-6-scrollbarWidth {
+		t.Errorf("viewport width %d after the motion, want %d", moved.viewport.Width(), sep-6-scrollbarWidth)
+	}
+	assertPaintFresh(t, moved, "after a drag motion that moved the separator")
 }
 
 // TestSettleWaitsForTheFirstWindowSize is the tail's other exemption: it is a no-op until a

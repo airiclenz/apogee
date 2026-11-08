@@ -411,6 +411,7 @@ type themeStyles struct {
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 	panelHeader   lipgloss.Style // a side-panel section's header row: ◆, title and summary in bold prompt-white, so the sections read as headings over their rows (sidepanel.go)
 	panelCurrent  lipgloss.Style // the side panel's current task (its ▸ and text) in the `code` role, the one row of the task list the eye is sent to
+	panelDragRule lipgloss.Style // the side panel's separator while a drag resizes it: bold in the `code` role, the accent tone, against the faint rule it is otherwise (sidepanel.go)
 
 	// Context-fill gauge (statusLine). The bar is a solid two-tone strip in the
 	// llama-launcher style: gaugeFill paints the filled portion (full blocks + an eighth-block
@@ -632,6 +633,7 @@ func newTheme(s scheme.Scheme) theme {
 			scrollTrack:   lipgloss.NewStyle().Foreground(chrome),
 			panelHeader:   lipgloss.NewStyle().Bold(true).Foreground(userText),
 			panelCurrent:  lipgloss.NewStyle().Foreground(code),
+			panelDragRule: lipgloss.NewStyle().Bold(true).Foreground(code),
 			gaugeFill:     lipgloss.NewStyle().Foreground(gauge).Background(surface),
 			gaugeTrack:    lipgloss.NewStyle().Background(chrome),
 		},

@@ -611,6 +611,10 @@ func (m Model) footerGitHit(pre Model, x, y int) bool {
 // (MouseNone) instead of a release, so while the press latch is armed such a motion IS the
 // release and is routed as one — otherwise the press stays armed for the rest of the session and
 // the drag never finishes. With nothing armed it is the hover it reads as.
+//
+// A held-button motion while a separator drag is active ([panelDrag], sidepanel.go) belongs to that
+// drag before any selection: it moves the separator, and it is the one motion the repaint tail lays
+// the frame out for ([settleFrame], adr-0110-amend-1108 (e)).
 func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 	if msg.Button == tea.MouseNone && m.mousePressed {
 		return m.handleMouseRelease(tea.MouseReleaseMsg{X: msg.X, Y: msg.Y, Button: tea.MouseLeft, Mod: msg.Mod})
@@ -620,6 +624,9 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Button != tea.MouseLeft {
 		return m, nil
+	}
+	if m.panelDrag.active {
+		return m.dragPanelSeparator(msg.X), nil
 	}
 	if next, claimed := m.handleSettingsMotion(msg); claimed {
 		return next, nil
@@ -764,6 +771,9 @@ func (m Model) dragEdgeLine() (int, bool) {
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
 	m.mousePressed = false // the press is over on every path out of here, selection or not
 	m.stopDragScroll()     // and so is any edge auto-scroll it was holding
+	if m.panelDrag.active {
+		return m.endPanelDrag(), nil // a separator drag holds no selection: the release ends it alone
+	}
 	switch {
 	case m.settings.sel.active:
 		// The /settings edit field copies what a release took, exactly as the prompt does: the value is

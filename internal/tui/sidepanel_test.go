@@ -1327,6 +1327,236 @@ func TestSidePanelDragStopsAtTheSeparator(t *testing.T) {
 	}
 }
 
+// separatorDragModel builds a ready model whose column shows at its default width in a 200-column
+// `auto` window — room to drag either way before a limit — with a settings spy wired whose writes
+// fail with failure where one is given; it returns the model, the spy and the separator's column.
+func separatorDragModel(t *testing.T, failure error) (Model, *settingsSpy, int) {
+	t.Helper()
+
+	m := sidePanelModel(t, domain.SidePanelShowAuto, true, 200)
+	spy := &settingsSpy{}
+	host := spy.host(nil)
+	host.write = func(path, value string) error {
+		spy.writes = append(spy.writes, path+"="+value)
+		return failure
+	}
+	m.opts.Settings = host
+	return m, spy, m.slotWidth()
+}
+
+// separatorRow is the screen row the separator drags press on: one above the slot's bottom.
+const separatorRow = 2
+
+// TestSidePanelSeparatorDrag pins the resize drag (adr-0110-amend-1108 (b), (c)): a press on the
+// separator or the gutter right of it grabs it, each held-button motion re-wraps the frame live at
+// the clamped width, and the release writes `ui.side-panel.width` once — only when the painted width
+// moved off the press's, so a drag that comes back where it began writes nothing and leaves a stored
+// width the window clamps as it stood.
+func TestSidePanelSeparatorDrag(t *testing.T) {
+	t.Parallel()
+
+	t.Run("drag moves live and writes once", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(sep-4, separatorRow))
+		live := m.viewport.Width()
+		m = step(t, m, leftDrag(sep-14, separatorRow))
+		m = step(t, m, leftRelease(sep-14, separatorRow))
+
+		if live != sep-4-scrollbarWidth {
+			t.Errorf("mid-drag viewport width %d, want %d — the transcript did not re-wrap live", live, sep-4-scrollbarWidth)
+		}
+		if m.panelWidth() != 50 || m.slotWidth() != sep-14 {
+			t.Errorf("panel %d, slot %d; want 50 and %d", m.panelWidth(), m.slotWidth(), sep-14)
+		}
+		if want := []string{domain.UIKeySidePanelWidth + "=50"}; !slices.Equal(spy.writes, want) {
+			t.Errorf("writes %v, want %v", spy.writes, want)
+		}
+		if len(m.settingEdits) != 1 || m.settingEdits[0].path != domain.UIKeySidePanelWidth {
+			t.Errorf("journal %+v, want one %s entry", m.settingEdits, domain.UIKeySidePanelWidth)
+		}
+	})
+
+	t.Run("the gutter grabs it at its offset", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+
+		m = step(t, m, leftClick(sep+1, separatorRow))
+		m = step(t, m, leftDrag(sep-9, separatorRow))
+		m = step(t, m, leftRelease(sep-9, separatorRow))
+
+		if m.slotWidth() != sep-10 {
+			t.Errorf("slot %d, want %d: the separator keeps one column left of the pointer", m.slotWidth(), sep-10)
+		}
+		if want := []string{domain.UIKeySidePanelWidth + "=46"}; !slices.Equal(spy.writes, want) {
+			t.Errorf("writes %v, want %v", spy.writes, want)
+		}
+	})
+
+	t.Run("a drag past either limit clamps", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(0, separatorRow))
+		widest := m.panelWidth()
+		m = step(t, m, leftDrag(m.width-1, separatorRow))
+		m = step(t, m, leftRelease(m.width-1, separatorRow))
+
+		if widthCap := m.width - sidePanelAutoFloor - scrollbarWidth; widest != widthCap {
+			t.Errorf("dragged to the left edge the panel is %d, want the cap %d", widest, widthCap)
+		}
+		if m.panelWidth() != domain.MinSidePanelWidth {
+			t.Errorf("dragged to the right edge the panel is %d, want the minimum %d", m.panelWidth(), domain.MinSidePanelWidth)
+		}
+		if want := []string{domain.UIKeySidePanelWidth + "=24"}; !slices.Equal(spy.writes, want) {
+			t.Errorf("writes %v, want %v", spy.writes, want)
+		}
+	})
+
+	t.Run("press and release writes nothing", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+		stored := m.opts.UI.SidePanelWidth
+
+		m = clickCell(t, m, sep, separatorRow)
+
+		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored || m.panelDrag.active {
+			t.Errorf("writes %v, stored %d, drag %+v; want none, %d, ended", spy.writes, m.opts.UI.SidePanelWidth, m.panelDrag, stored)
+		}
+	})
+
+	t.Run("a drag back to the press column writes nothing", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+		stored := m.opts.UI.SidePanelWidth
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(sep-10, separatorRow))
+		m = step(t, m, leftDrag(sep, separatorRow))
+		m = step(t, m, leftRelease(sep, separatorRow))
+
+		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored {
+			t.Errorf("writes %v, stored %d; want none and %d", spy.writes, m.opts.UI.SidePanelWidth, stored)
+		}
+	})
+
+	t.Run("a clamped stored width survives a drag that comes back", func(t *testing.T) {
+		t.Parallel()
+		opts := testOpts
+		opts.UI.SidePanelShow = domain.SidePanelShowAuto
+		opts.UI.SidePanelWidth = 60
+		spy := &settingsSpy{}
+		opts.Settings = spy.host(nil)
+		m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+		m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+		sep := m.slotWidth()
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(sep, separatorRow))
+		m = step(t, m, leftDrag(sep+9, separatorRow))
+		m = step(t, m, leftDrag(sep, separatorRow))
+		m = step(t, m, leftRelease(sep, separatorRow))
+
+		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != 60 {
+			t.Errorf("writes %v, stored %d; want none and the stored 60 the window clamps to %d",
+				spy.writes, m.opts.UI.SidePanelWidth, m.panelWidth())
+		}
+	})
+
+	t.Run("a failed write says so once and the width stands", func(t *testing.T) {
+		t.Parallel()
+		m, _, sep := separatorDragModel(t, fmt.Errorf("disk full"))
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(sep-14, separatorRow))
+		m = step(t, m, leftRelease(sep-14, separatorRow))
+
+		note := sidePanelWidthSource + ": " + taskListNotSavedNote + "disk full"
+		if got := strings.Count(plain(m.View()), note); got != 1 {
+			t.Errorf("the failed write is reported %d times, want once: %q", got, note)
+		}
+		if m.panelWidth() != 50 || len(m.settingEdits) != 0 {
+			t.Errorf("panel %d, journal %+v; want the dragged 50 standing and nothing journalled", m.panelWidth(), m.settingEdits)
+		}
+	})
+
+	t.Run("a resize that hides the column abandons the drag", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+		stored := m.opts.UI.SidePanelWidth
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(sep-14, separatorRow))
+		m = step(t, m, tea.WindowSizeMsg{Width: 120, Height: 30})
+		m = step(t, m, leftDrag(10, separatorRow))
+		m = step(t, m, leftRelease(10, separatorRow))
+		m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
+
+		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored || m.panelWidth() != sidePanelWidth {
+			t.Errorf("writes %v, stored %d, panel %d; want none, the press-time %d, and the default width back",
+				spy.writes, m.opts.UI.SidePanelWidth, m.panelWidth(), stored)
+		}
+	})
+
+	t.Run("a button-less motion mid-drag ends it", func(t *testing.T) {
+		t.Parallel()
+		m, spy, sep := separatorDragModel(t, nil)
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(sep-14, separatorRow))
+		m = step(t, m, tea.MouseMotionMsg{X: sep - 14, Y: separatorRow, Button: tea.MouseNone})
+		m = step(t, m, leftDrag(sep-20, separatorRow))
+
+		if m.panelDrag.active || m.mousePressed || m.panelWidth() != 50 {
+			t.Errorf("drag %+v, pressed %v, panel %d; want the SGR-35 release to end it at 50", m.panelDrag, m.mousePressed, m.panelWidth())
+		}
+		if want := []string{domain.UIKeySidePanelWidth + "=50"}; !slices.Equal(spy.writes, want) {
+			t.Errorf("writes %v, want %v", spy.writes, want)
+		}
+	})
+
+	t.Run("the separator is lit while the drag holds it", func(t *testing.T) {
+		t.Parallel()
+		m, _, sep := separatorDragModel(t, nil)
+		lit := m.th.panelDragRule.Render(sidePanelSeparator)
+		if lit == m.th.statusFaint.Render(sidePanelSeparator) {
+			t.Skip("no colour profile in this environment — the two separator styles are not observable")
+		}
+
+		held := step(t, step(t, m, leftClick(sep, separatorRow)), leftDrag(sep-4, separatorRow))
+		released := step(t, held, leftRelease(sep-4, separatorRow))
+
+		if !strings.HasPrefix(held.sidePanelColumn(1)[0], lit) {
+			t.Errorf("mid-drag the column opens %q, want the accent-bold separator %q", held.sidePanelColumn(1)[0], lit)
+		}
+		if strings.HasPrefix(released.sidePanelColumn(1)[0], lit) {
+			t.Error("the separator stays lit after the release")
+		}
+	})
+}
+
+// TestSidePanelSeparatorDragIsInertWhileWatching pins adr-0110-amend-1108 (c): watching another
+// session, a press on the separator is claimed as any column cell is and starts no drag.
+func TestSidePanelSeparatorDragIsInertWhileWatching(t *testing.T) {
+	t.Parallel()
+	m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
+	m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
+	sep, stored := m.slotWidth(), m.opts.UI.SidePanelWidth
+
+	m = step(t, m, leftClick(sep, separatorRow))
+	m = step(t, m, leftDrag(sep-14, separatorRow))
+	m = step(t, m, leftRelease(sep-14, separatorRow))
+
+	if m.slotWidth() != sep || m.opts.UI.SidePanelWidth != stored || m.transcriptSel.active {
+		t.Errorf("slot %d, stored %d, selection %+v; want the separator unmoved at %d and nothing selected",
+			m.slotWidth(), m.opts.UI.SidePanelWidth, m.transcriptSel, sep)
+	}
+}
+
 // panelHelpWords reads the /panel line /help prints and returns its two word groups — the show
 // modes and the section verbs — so the tests drive exactly the strings the human is shown.
 func panelHelpWords(t *testing.T) (shows, verbs []string) {

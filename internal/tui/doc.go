@@ -1296,7 +1296,9 @@
 // [Model.stageChildMessage] (follow-the-tail re-armed for the message just sent, interject.go),
 // and the claim walk's [Model.freshenTranscriptClamp] (a pane key answered with its height fresh
 // for whatever the claimant reads next). Everything else is a mutation and a return.
-// TestMouseMotionNeverRepaints pins the one exemption the tail itself makes.
+// TestMouseMotionNeverRepaints pins the one exemption the tail itself makes — mouse motion — and
+// TestMouseMotionRepaintsADraggedSeparator its one exception: a held-button motion that moved an
+// active side-panel separator drag's width settles, so the frame re-wraps live (adr-0110-amend-1108).
 //
 // Invariant — untrusted text is escape-stripped at the SEAM it enters the view through, never
 // at each producer. The frame is painted through ultraviolet's cell buffer, which drops most

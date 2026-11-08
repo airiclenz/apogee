@@ -80,8 +80,16 @@ func (m Model) panelWidth() int {
 	if !m.panelShown() {
 		return 0
 	}
+	return m.clampPanelWidth(m.configuredPanelWidth())
+}
+
+// clampPanelWidth is width held to the column's limits in this window (adr-0110-amend-1108 (a)):
+// at least [domain.MinSidePanelWidth], at most the window less the show mode's transcript floor
+// and the scroll-bar column. The layout ([Model.panelWidth]) and a separator drag
+// ([Model.dragPanelSeparator]) clamp through it, so the drag stops exactly where the paint does.
+func (m Model) clampPanelWidth(width int) int {
 	floor, _ := sidePanelTranscriptFloor(m.opts.UI.SidePanelShow)
-	return min(max(m.configuredPanelWidth(), domain.MinSidePanelWidth), m.width-floor-scrollbarWidth)
+	return min(max(width, domain.MinSidePanelWidth), m.width-floor-scrollbarWidth)
 }
 
 // panelContentWidth is the columns the panel's content has: the painted column less its separator
@@ -163,9 +171,14 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 // sidePanelColumn paints the column's rows rows, each exactly [Model.panelWidth] columns in the width
 // authority's measure: the separator, the gutter, and the content squared to the rest. With no
 // section to show it paints `nothing live` on its top row and leaves the rest blank — the column
-// stays on the frame either way, because nothing it shows may move it ([Model.panelShown]).
+// stays on the frame either way, because nothing it shows may move it ([Model.panelShown]). The
+// separator is faint, and accent-bold while a drag holds it ([panelDrag]).
 func (m Model) sidePanelColumn(rows int) []string {
-	rule := m.th.statusFaint.Render(sidePanelSeparator) + sidePanelGutter
+	ruleStyle := m.th.statusFaint
+	if m.panelDrag.active {
+		ruleStyle = m.th.panelDragRule // the separator the pointer holds is lit (adr-0110-amend-1108 (b))
+	}
+	rule := ruleStyle.Render(sidePanelSeparator) + sidePanelGutter
 	content := m.sidePanelContent(rows)
 	contentWidth := m.panelContentWidth()
 	column := make([]string, rows)
@@ -631,16 +644,125 @@ func (m Model) panelWriteAt(row sidepanel.FileRow) (int, bool) {
 // handleSidePanelClick answers a left-click on the column, asked before every other region of the
 // click chain: the column claims each of its cells, and a click there drops the prompt's and the
 // transcript's selections, so nothing under it — a pane's row, a block's header, a drag anchor —
-// is reached through it. A target acts on the press (followPanelTarget); a cell that targets
-// nothing is claimed and does nothing. pre is the pre-click frame the chain reads geometry off.
+// is reached through it. A press on the grip — the separator or the gutter right of it — starts a
+// resize drag ([panelDrag]) and follows no target; elsewhere a target acts on the press
+// (followPanelTarget), and a cell that targets nothing is claimed and does nothing. pre is the
+// pre-click frame the chain reads geometry off.
 func (m Model) handleSidePanelClick(pre Model, msg tea.MouseClickMsg) (tea.Model, tea.Cmd, bool) {
 	target, isPanel := pre.panelTargetAt(msg.X, msg.Y)
 	if !isPanel {
 		return m, nil, false
 	}
 	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
+	if grab, isGrip := pre.panelGripAt(msg.X); isGrip {
+		return m.startPanelDrag(grab), nil, true
+	}
 	next, cmd := m.followPanelTarget(target)
 	return next, cmd, true
+}
+
+// panelDrag is a resize drag of the column's separator (adr-0110-amend-1108 (b)): armed by a press
+// on the grip ([Model.panelGripAt]), moved by the held-button motions after it
+// ([Model.dragPanelSeparator]) and ended by the release ([Model.endPanelDrag]) or by a resize that
+// hides the column ([Model.abandonHiddenPanelDrag]). Plain values, so it rides the value-copied
+// Model (ADR 0011).
+type panelDrag struct {
+	// active is true from the press on the grip until the drag ends.
+	active bool
+	// grabOffset is the pointer's column less the separator's at the press: 0 on the separator, 1 on
+	// the gutter — kept, so the separator stays that far left of the pointer however it moves.
+	grabOffset int
+	// startWidth is the painted width at the press ([Model.panelWidth]): the release writes only a
+	// width that differs from it.
+	startWidth int
+	// startStored is `ui.side-panel.width` as it stood at the press, put back by a drag that ends at
+	// startWidth or is abandoned, so a stored width the window clamps is never rewritten by a drag
+	// that changed nothing.
+	startStored int
+}
+
+// panelGripAt answers whether column x of a press already on the column ([Model.panelTargetAt]) is
+// its grip — the separator or the gutter right of it — and how far right of the separator it is.
+// While watching the grip is inert: the press is claimed as any column cell is, and starts nothing.
+func (m Model) panelGripAt(x int) (grab int, isGrip bool) {
+	grab = x - m.slotWidth()
+	if m.watch.isActive || grab < 0 || grab >= sidePanelChromeWidth {
+		return 0, false
+	}
+	return grab, true
+}
+
+// startPanelDrag arms a separator drag grabbed grab columns right of the separator, recording the
+// press-time widths the release and an abandon read.
+func (m Model) startPanelDrag(grab int) Model {
+	m.panelDrag = panelDrag{
+		active:      true,
+		grabOffset:  grab,
+		startWidth:  m.panelWidth(),
+		startStored: m.opts.UI.SidePanelWidth,
+	}
+	return m
+}
+
+// dragPanelSeparator moves the separator of an active drag to the pointer's column x less the grab
+// offset, clamped ([Model.clampPanelWidth]). It changes the stored width only when the clamped width
+// differs from the one painted, so a pointer held past a limit leaves a stored width the window
+// clamps untouched; the repaint tail relayouts the frame for the one motion that moved it
+// ([Model.panelDragResized]).
+func (m Model) dragPanelSeparator(x int) Model {
+	width := m.clampPanelWidth(m.width - (x - m.panelDrag.grabOffset))
+	if width != m.panelWidth() {
+		m.opts.UI.SidePanelWidth = width
+	}
+	return m
+}
+
+// panelDragResized reports whether an active separator drag has moved the painted width off the one
+// the frame was last laid out at — the one mouse motion [settleFrame] settles (adr-0110-amend-1108 (e)).
+func (m Model) panelDragResized() bool {
+	return m.panelDrag.active && m.painted.sidePanelWidth != m.panelWidth()
+}
+
+// endPanelDrag ends an active separator drag on the release: a painted width that differs from the
+// press's is written as `ui.side-panel.width` ([Model.setPanelWidth]), once; one that does not puts
+// the press-time stored width back and writes nothing.
+func (m Model) endPanelDrag() Model {
+	drag := m.panelDrag
+	m.panelDrag = panelDrag{}
+	width := m.panelWidth()
+	if width == drag.startWidth {
+		m.opts.UI.SidePanelWidth = drag.startStored
+		return m
+	}
+	return m.setPanelWidth(width)
+}
+
+// abandonHiddenPanelDrag ends an active separator drag without a write when the window no longer
+// shows the column — the resize that hid it took the separator from under the pointer — and puts
+// the press-time stored width back.
+func (m *Model) abandonHiddenPanelDrag() {
+	if !m.panelDrag.active || m.panelShown() {
+		return
+	}
+	m.opts.UI.SidePanelWidth = m.panelDrag.startStored
+	m.panelDrag = panelDrag{}
+}
+
+// setPanelWidth sets `ui.side-panel.width` and writes it back through [SettingsHost.Write], with
+// setPanelSectionMode's whole contract: the column moves first, a landed write is journalled
+// (recordSettingEdit), a failed one speaks as one transcript error naming the key and the width
+// stands for the session, and a nil seam changes the session alone (ADR 0031).
+func (m Model) setPanelWidth(width int) Model {
+	m.opts.UI.SidePanelWidth = width
+	if m.opts.Settings == nil {
+		return m
+	}
+	value := strconv.Itoa(width)
+	if err := m.opts.Settings.Write(domain.UIKeySidePanelWidth, value); err != nil {
+		m.transcript.addError(sidePanelWidthSource, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelWidth, value: value})
 }
 
 // followPanelTarget does what a click on target means: a pin toggles its section between pinned
@@ -762,6 +884,10 @@ func sidePanelTranscriptFloor(show domain.SidePanelShow) (floor int, ok bool) {
 // sidePanelShowSource is the label a failed `/panel on|off|auto` write's transcript error carries —
 // the key's own name, sidePanelSectionsSource's posture.
 const sidePanelShowSource = "side-panel.show"
+
+// sidePanelWidthSource is the label a failed width write's transcript error carries — the key's own
+// name, sidePanelShowSource's posture.
+const sidePanelWidthSource = "side-panel.width"
 
 // panelAction is the subcommand of a parsed /panel line. The zero value is panelReport, so a bare
 // "/panel" — and a line the parser never ran this grammar over, which is what the completion menu's

@@ -478,6 +478,9 @@ type Model struct {
 	// transcript's edge the pointer last sat, and the generation of the one tick loop scrolling
 	// toward it. Plain values, so it rides the value-copied Model (ADR 0011).
 	dragScroll dragScroll
+	// panelDrag is a resize drag of the side panel's separator (sidepanel.go): armed by a press on
+	// its grip, ended by the release or by a resize that hides the column. Plain values (ADR 0011).
+	panelDrag panelDrag
 	// clickArmed is the row the POINTER itself highlighted on a boxed pane, and the whole of what
 	// lets a click activate one: a pane's click handler latches the row here when it moves the
 	// highlight onto it, and activates on the next click only where that click lands on the very row
@@ -1194,6 +1197,7 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.sel = fieldSel{} // the box moved/reflowed: its stored visual coords are stale
 		m.dropRecall()     // and the box the human recalled into is no longer the box in front of them
+		m.abandonHiddenPanelDrag()
 		m.layout()
 		// A resize is also the cheapest moment to say the mouse mode again: the renderer only
 		// writes it on a MouseMode DIFF, so a terminal that lost tracking while a tool child held
@@ -1652,15 +1656,15 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouseClick(msg)
 
 	case tea.MouseMotionMsg:
-		// A drag (button held) extends whichever selection is live — prompt or transcript; a
-		// BUTTON-LESS motion while a press is armed is the release some terminals encode that way
-		// and is routed as one, and with none armed it is a hover that may write the pointer shape
-		// (mouse.go, pointershape.go).
+		// A drag (button held) moves a held side-panel separator, or else extends whichever
+		// selection is live — prompt or transcript; a BUTTON-LESS motion while a press is armed is
+		// the release some terminals encode that way and is routed as one, and with none armed it is
+		// a hover that may write the pointer shape (mouse.go, pointershape.go).
 		return m.handleMouseMotion(msg)
 
 	case tea.MouseReleaseMsg:
-		// Releasing after a drag copies the live selection — prompt or transcript — to the
-		// clipboard (mouse.go).
+		// Releasing after a drag ends a separator drag, writing the width it set, or else copies the
+		// live selection — prompt or transcript — to the clipboard (mouse.go).
 		return m.handleMouseRelease(msg)
 
 	case skillHintTickMsg:
@@ -3013,6 +3017,9 @@ func (m *Model) freshenTranscriptClamp() {
 // selection's head or, hovering, the pointer shape last written, and nothing else; View overlays the
 // shade, and a key miss that motion happens to be the first Update after waits for the next Msg
 // rather than repainting the scrollback at the mouse's sampling rate (TestMouseMotionNeverRepaints).
+// The exemption's one exception is a held-button motion that moved an active side-panel separator
+// drag's width ([Model.panelDragResized], adr-0110-amend-1108 (e)): the panel and the transcript
+// re-wrap live on every column the separator moves (TestMouseMotionRepaintsADraggedSeparator).
 func (m *Model) settle() {
 	if !m.ready {
 		return
@@ -3027,13 +3034,14 @@ func (m *Model) settle() {
 // settleFrame is [Model.settle] as Update's deferred rewrite of its return value sees it, the shape
 // reportActivity takes (schedule.go): anything that is not a Model is handed straight back, and so is
 // a Model after a tea.MouseMotionMsg — the one Msg the tail never repaints on (ratified, plan
-// "2026-09-16 - 00" item 18).
+// "2026-09-16 - 00" item 18), save the motion that moved an active separator drag's width, which
+// that rule's one exception narrows it by (adr-0110-amend-1108 (e), [Model.panelDragResized]).
 func settleFrame(msg tea.Msg, next tea.Model) tea.Model {
 	m, ok := next.(Model)
 	if !ok {
 		return next
 	}
-	if _, motion := msg.(tea.MouseMotionMsg); motion {
+	if _, motion := msg.(tea.MouseMotionMsg); motion && !m.panelDragResized() {
 		return next
 	}
 	m.settle()

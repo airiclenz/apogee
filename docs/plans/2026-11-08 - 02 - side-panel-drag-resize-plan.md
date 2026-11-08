@@ -167,7 +167,12 @@ width changes and not on a section change (`TestSidePanelSectionChangeMovesNothi
 **Acceptance:** `go build ./internal/tui/`; `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSidePanel' ./internal/tui/`.
 **Commit:** `feat(tui): paint the side panel at the configured width`
 
-## 4. Drag the separator
+## 4. Drag the separator — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): drag state carries a fourth field, startStored (the press-time `ui.side-panel.width`), beside active/grabOffset/startWidth: a drag that ends at the press-time painted width, or is abandoned by a hiding resize, puts the stored value back, so a stored width the window clamps (60 at a 140-col `auto` window) is not rewritten for the session by a drag that changed nothing.
+NOTES (2026-11-08): the failed-write note reads `side-panel.width: not saved: …` (source label sidePanelWidthSource = the key's own name, setPanelShow's posture) rather than the plan's prose `side panel width: not saved: …`.
+NOTES (2026-11-08): relayout lives in model.go: settleFrame settles a motion only while [Model.panelDragResized] holds (active drag whose painted width moved off m.painted's), so no `// geometry:` call in mouse.go; the clamp is factored into Model.clampPanelWidth, shared by panelWidth and the drag; the write is Model.setPanelWidth, ready for item 6's `/panel width` to reuse.
+NOTES (2026-11-08): a drag ended by an SGR-35 button-less motion with a failed write shows its transcript note on the next non-motion Msg, since motion does not settle once the drag has ended (the existing motion exemption).
 
 Depends on item 3.
 **What:**
