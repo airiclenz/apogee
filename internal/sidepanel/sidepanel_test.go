@@ -194,6 +194,66 @@ func TestSubAgents_LiveRule(t *testing.T) {
 	}
 }
 
+func TestSubAgentLinger(t *testing.T) {
+	cases := []struct {
+		name    string
+		finish  bool
+		queue   bool
+		advance time.Duration
+		want    func(end time.Time) sidepanel.Linger
+	}{
+		{
+			name: "after the last run ends", finish: true, advance: testtime.Fixed(12 * time.Second),
+			want: func(end time.Time) sidepanel.Linger {
+				return sidepanel.Linger{Until: end.Add(30 * time.Second), Left: 18 * time.Second}
+			},
+		},
+		{
+			name: "while one runs", advance: testtime.Fixed(12 * time.Second),
+			want: func(time.Time) sidepanel.Linger { return sidepanel.Linger{} },
+		},
+		{
+			name: "while one queues behind an ended one", finish: true, queue: true, advance: testtime.Fixed(12 * time.Second),
+			want: func(time.Time) sidepanel.Linger { return sidepanel.Linger{} },
+		},
+		{
+			name: "once the deadline has passed", finish: true, advance: testtime.Fixed(30 * time.Second),
+			want: func(time.Time) sidepanel.Linger { return sidepanel.Linger{} },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, clock := newState(t)
+			end := clock.at
+			state.Fold(spawn(t, "r.1", map[string]any{"name": "a"}))
+			state.Fold(phase("r.1", domain.SubAgentStarted, end, false))
+			if tc.finish {
+				state.Fold(phase("r.1", domain.SubAgentFinished, end, false))
+			}
+			if tc.queue {
+				state.Fold(spawn(t, "r.2", map[string]any{"name": "b"}))
+			}
+
+			clock.advance(tc.advance)
+
+			if got, want := state.SubAgentLinger(), tc.want(end); got != want {
+				t.Errorf("linger = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestSubAgentLinger_NilAndEmpty(t *testing.T) {
+	var none *sidepanel.State
+	if got := none.SubAgentLinger(); got != (sidepanel.Linger{}) {
+		t.Errorf("nil state linger = %+v, want zero", got)
+	}
+	state, _ := newState(t)
+	if got := state.SubAgentLinger(); got != (sidepanel.Linger{}) {
+		t.Errorf("empty state linger = %+v, want zero", got)
+	}
+}
+
 func TestSubAgents_SummaryAndEmpty(t *testing.T) {
 	state, clock := newState(t)
 	if view := state.SubAgents(); view.IsLive || view.Summary != "" || len(view.Rows) != 0 {

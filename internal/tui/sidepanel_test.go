@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/tasklist"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // sidePanelModel builds a ready, idle model under show and the scroll-bar setting, sized width × 30.
@@ -363,6 +364,105 @@ func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {
 	want := ansi.Strip(m.spin.drawn(m.th, m.opts.UI.Spinner)) + " repo-scout   running 01:12s"
 	if len(got) != 2 || got[0] != "◆ Sub-agents 1 running           ⊙" || got[1] != want {
 		t.Errorf("the column paints\n%s\nwant the running header over %q", strings.Join(got, "\n"), want)
+	}
+}
+
+// TestSidePanelRepaintsWhenTheSubAgentsLingerEnds pins the repaint armed for the end of the
+// sub-agents section's linger: each Event that moves the deadline arms one tick for it on the
+// panel's clock and retires the one before, a tick from a retired arm changes nothing, and the
+// current tick — delivered by hand, never run — repaints an otherwise idle frame without the section.
+func TestSidePanelRepaintsWhenTheSubAgentsLingerEnds(t *testing.T) {
+	t.Parallel()
+
+	m := panelModel(t, domain.DefaultSidePanelSections, 30)
+	clock := panelNow
+	m.panel = sidepanel.New(func() time.Time { return clock })
+	event := func(e domain.Event) tea.Cmd {
+		t.Helper()
+		var cmd tea.Cmd
+		m, cmd = stepCmd(t, m, eventMsg{Event: e})
+		return cmd
+	}
+	at := func(id string, p domain.SubAgentPhase, offset time.Duration) domain.SubAgentPhaseEvent {
+		return domain.SubAgentPhaseEvent{EventBase: delegationBase(id), Phase: p, At: panelNow.Add(offset)}
+	}
+	paintsSubAgents := func() bool {
+		return strings.Contains(strings.Join(panelText(t, m), "\n"), "Sub-agents")
+	}
+
+	event(panelDelegationCall(t, "r1", "planner"))
+	event(at("r1", domain.SubAgentStarted, -testtime.Fixed(time.Minute)))
+	if !m.panelLingerUntil.IsZero() {
+		t.Fatalf("a running delegation armed a linger for %v", m.panelLingerUntil)
+	}
+	if cmd := event(at("r1", domain.SubAgentFinished, -testtime.Fixed(10*time.Second))); cmd == nil {
+		t.Fatal("the last delegation's end armed no repaint")
+	}
+	if want := panelNow.Add(testtime.Fixed(20 * time.Second)); !m.panelLingerUntil.Equal(want) {
+		t.Fatalf("armed linger = %v, want %v", m.panelLingerUntil, want)
+	}
+	retired := m.panelLingerGen
+
+	event(panelDelegationCall(t, "r2", "repo-scout"))
+	if !m.panelLingerUntil.IsZero() || m.panelLingerGen == retired {
+		t.Fatalf("a queued delegation left the linger armed at %v (gen %d)", m.panelLingerUntil, m.panelLingerGen)
+	}
+	event(at("r2", domain.SubAgentStarted, -testtime.Fixed(5*time.Second)))
+	event(at("r2", domain.SubAgentFinished, 0))
+	deadline := panelNow.Add(testtime.Fixed(30 * time.Second))
+	if !m.panelLingerUntil.Equal(deadline) {
+		t.Fatalf("re-armed linger = %v, want %v", m.panelLingerUntil, deadline)
+	}
+	if left := m.panel.SubAgentLinger().Left; left != testtime.Fixed(30*time.Second) {
+		t.Errorf("the panel answers %v left, want 30s on its own clock", left)
+	}
+	gen := m.panelLingerGen
+
+	clock = panelNow.Add(testtime.Fixed(25 * time.Second))
+	m, cmd := stepCmd(t, m, panelLingerMsg{gen: retired})
+	if cmd != nil || m.panelLingerGen != gen || !m.panelLingerUntil.Equal(deadline) {
+		t.Errorf("a retired tick moved the arm to %v (gen %d), want %v (gen %d)", m.panelLingerUntil, m.panelLingerGen, deadline, gen)
+	}
+	if !paintsSubAgents() {
+		t.Errorf("the column dropped the sub-agents section inside its linger:\n%s", strings.Join(panelText(t, m), "\n"))
+	}
+
+	clock = deadline.Add(testtime.Fixed(time.Second))
+	m, cmd = stepCmd(t, m, panelLingerMsg{gen: gen})
+	if cmd != nil || !m.panelLingerUntil.IsZero() {
+		t.Errorf("the spent tick left the linger armed at %v (cmd %v)", m.panelLingerUntil, cmd != nil)
+	}
+	if paintsSubAgents() {
+		t.Errorf("the repaint at the linger's end still paints the sub-agents section:\n%s", strings.Join(panelText(t, m), "\n"))
+	}
+}
+
+// TestSidePanelEarlyLingerTickArmsTheRemainder pins the guard against a tick that lands before the
+// panel's clock reaches the deadline: it arms the time still left instead of leaving the section up.
+func TestSidePanelEarlyLingerTickArmsTheRemainder(t *testing.T) {
+	t.Parallel()
+
+	m := panelModel(t, domain.DefaultSidePanelSections, 30)
+	clock := panelNow
+	m.panel = sidepanel.New(func() time.Time { return clock })
+	for _, e := range []domain.Event{
+		panelDelegationCall(t, "r1", "planner"),
+		delegationPhase("r1", domain.SubAgentStarted, testtime.Fixed(time.Minute)),
+		delegationPhase("r1", domain.SubAgentFinished, 0),
+	} {
+		m, _ = stepCmd(t, m, eventMsg{Event: e})
+	}
+	gen := m.panelLingerGen
+
+	clock = panelNow.Add(testtime.Fixed(29 * time.Second))
+	m, cmd := stepCmd(t, m, panelLingerMsg{gen: gen})
+
+	if cmd == nil || m.panelLingerGen == gen || !m.panelLingerUntil.Equal(panelNow.Add(testtime.Fixed(30*time.Second))) {
+		t.Errorf("an early tick armed %v (gen %d, cmd %v), want the same deadline under a new generation",
+			m.panelLingerUntil, m.panelLingerGen, cmd != nil)
+	}
+	if left := m.panel.SubAgentLinger().Left; left != testtime.Fixed(time.Second) {
+		t.Errorf("the panel answers %v left, want the 1s remainder", left)
 	}
 }
 

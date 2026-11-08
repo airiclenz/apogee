@@ -1338,10 +1338,14 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// last save put it.
 		// A blocking fan_out's phase moves what the open /workflows view lists too (workflows.go).
 		refresh := m.refreshWorkflows(msg.Event)
+		// The Event may have ended the last delegation, or started one: the panel's repaint at the end
+		// of the sub-agents section's linger is armed, or retired, to match (sidepanel.go).
+		var linger tea.Cmd
+		m, linger = m.armPanelLinger()
 		if progressSaveTrigger(msg.Event) {
-			return m, tea.Batch(m.progressSave(), reassert, resumed, refresh, followed)
+			return m, tea.Batch(m.progressSave(), reassert, resumed, refresh, followed, linger)
 		}
-		return m, tea.Batch(reassert, resumed, refresh, followed)
+		return m, tea.Batch(reassert, resumed, refresh, followed, linger)
 
 	case watchPollMsg:
 		// Watch mode's follower asks for its next journal read (watch.go).
@@ -1664,6 +1668,11 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the suggestion band over it — unless a later edit or a send has retired this generation
 		// (suggestband.go).
 		return m.foldSkillHintTick(msg), nil
+
+	case panelLingerMsg:
+		// The sub-agents section's linger has run out with nothing else to repaint the frame: this
+		// Msg is that repaint (sidepanel.go) — unless an Event has since moved the deadline.
+		return m.foldPanelLinger(msg)
 
 	case flashClearMsg:
 		// The transient mouse-copy note has lingered long enough; clear it (mouse.go) — unless a

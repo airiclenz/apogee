@@ -413,8 +413,51 @@ func (s *State) SubAgents() View[SubAgentRow] {
 		}
 	}
 	view.Summary = subAgentSummary(running, queued, len(view.Rows))
-	view.IsLive = running+queued > 0 || (!lastEnd.IsZero() && now.Sub(lastEnd) < subAgentLinger)
+	view.IsLive = running+queued > 0 || lingerAfter(lastEnd, now).Left > 0
 	return view
+}
+
+// Linger is when the sub-agents section's live rule next turns false on the clock alone: Until is
+// the instant the linger after the last delegation's end runs out, and Left is the time from now
+// to it on the State's own clock. Both are zero while no linger is running — while a delegation is
+// queued or running (an Event, not the clock, ends that), before any delegation has ended, and once
+// the linger has passed.
+type Linger struct {
+	Until time.Time
+	Left  time.Duration
+}
+
+// SubAgentLinger answers when the sub-agents section stops being live with no further Event, so a
+// Driver can repaint at that instant rather than on its next unrelated frame. It applies the same
+// rule [State.SubAgents] judges IsLive by.
+func (s *State) SubAgentLinger() Linger {
+	if s == nil {
+		return Linger{}
+	}
+	var lastEnd time.Time
+	for _, key := range s.delegations {
+		state := s.runs[key]
+		if state.phase.isActive() {
+			return Linger{}
+		}
+		if state.endedAt.After(lastEnd) {
+			lastEnd = state.endedAt
+		}
+	}
+	return lingerAfter(lastEnd, s.now())
+}
+
+// lingerAfter is the linger that follows the last delegation ending at lastEnd, read at now: zero
+// when nothing has ended or the linger has already run out.
+func lingerAfter(lastEnd, now time.Time) Linger {
+	if lastEnd.IsZero() {
+		return Linger{}
+	}
+	until := lastEnd.Add(subAgentLinger)
+	if !now.Before(until) {
+		return Linger{}
+	}
+	return Linger{Until: until, Left: until.Sub(now)}
 }
 
 // elapsed is the run's time from start to end, or to now while it runs; 0 while it is queued or

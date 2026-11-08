@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 )
@@ -109,6 +111,14 @@ type sessionView struct {
 	// boundaries drop it — /clear (resetSessionView) and an in-TUI restore (resumeLoaded) — and a
 	// watch starts its own at nil (clearWatchView).
 	panel *sidepanel.State
+
+	// panelLingerUntil is the sub-agents section's linger deadline the side panel last armed a
+	// repaint for ([Model.armPanelLinger]), zero while none is armed, and panelLingerGen numbers
+	// those arms: a panelLingerMsg from an arm since replaced is dropped. They live beside panel
+	// because they answer its clock, and a watch parks them with it, so the owner's tick finds the
+	// owner's generation.
+	panelLingerUntil time.Time
+	panelLingerGen   int
 
 	// acts is the live activity board the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go) — one slot per RUN

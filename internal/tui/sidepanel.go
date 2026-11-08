@@ -91,6 +91,42 @@ func (m Model) foldSidePanel(e domain.Event, window int) Model {
 	return m
 }
 
+// panelLingerMsg is the repaint armed for the instant the sub-agents section's linger runs out
+// ([Model.armPanelLinger]). gen is the arm that scheduled it (sessionView.panelLingerGen); a tick
+// for a deadline an Event has since moved or retired is dropped.
+type panelLingerMsg struct{ gen int }
+
+// armPanelLinger keeps one repaint armed for the end of the sub-agents section's linger. The
+// section's live rule is judged only at paint time, so without it an idle frame would show the
+// section until some unrelated repaint. The deadline and the time left to it are the panel's own
+// answer on the panel's own clock ([sidepanel.State.SubAgentLinger]); a deadline unchanged since the
+// last arm arms nothing, and any change — a later end, or a delegation starting — retires the tick
+// before it by moving the generation.
+func (m Model) armPanelLinger() (Model, tea.Cmd) {
+	linger := m.panel.SubAgentLinger()
+	if linger.Until.Equal(m.panelLingerUntil) {
+		return m, nil
+	}
+	m.panelLingerUntil = linger.Until
+	m.panelLingerGen++
+	if linger.Until.IsZero() {
+		return m, nil
+	}
+	gen := m.panelLingerGen
+	return m, tea.Tick(linger.Left, func(time.Time) tea.Msg { return panelLingerMsg{gen: gen} })
+}
+
+// foldPanelLinger takes the armed linger tick. Returning the Model is the repaint; the armed
+// deadline is spent, and arming again re-reads the panel, so a tick that landed before the panel's
+// clock reached the deadline arms the remainder instead of leaving the section up.
+func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
+	if msg.gen != m.panelLingerGen {
+		return m, nil
+	}
+	m.panelLingerUntil = time.Time{}
+	return m.armPanelLinger()
+}
+
 // sidePanelColumn paints the column's rows rows, each exactly sidePanelWidth columns in the width
 // authority's measure: the separator, the gutter, and the content squared to the rest. With no
 // section to show it paints `nothing live` on its top row and leaves the rest blank — the column

@@ -28,7 +28,12 @@
   - 1: guard folded — arm from `Model.fold`'s eventMsg arm, route the tick in `watchRouteOf`; deadline timed on the panel's clock.
   - 2: guard folded — driven test runs resume-then-live, Model built through `newModel` with a symlinked `opts.Workspace`.
 
-## 1. Sub-agents section leaves the panel at its linger deadline on an idle frame
+## 1. Sub-agents section leaves the panel at its linger deadline on an idle frame — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the deadline is answered by a new `State.SubAgentLinger()` (type `sidepanel.Linger{Until, Left}`, Left on the State's own clock) sharing one `lingerAfter` rule with `SubAgents().IsLive`, rather than a new field on the generic `View[R]` every section returns.
+NOTES (2026-11-08): internal/tui/fold.go is untouched — per the plan's regression guard the arm leaves from `Model.fold`'s `case eventMsg` (both returns, via `Model.armPanelLinger`), since `foldEventAgainst` returns no Cmd.
+NOTES (2026-11-08): the handled tick (`foldPanelLinger`) also re-arms the remainder when it lands before the panel's clock reaches the deadline (wall-clock vs monotonic skew), pinned by TestSidePanelEarlyLingerTickArmsTheRemainder; an Event that moves the deadline to zero (a new delegation queued) also bumps the generation, retiring the outstanding tick.
+NOTES (2026-11-08): only the live eventMsg path arms; a watch's own panel (repainted by the follower's poll anyway) and an in-TUI restore's rebuilt panel arm nothing, and the session boundaries leave the arm fields as they were (a stale arm is retired by the next Event or spends itself as a harmless repaint).
 
 **What:** fix for `panel-linger-idle-repaint`: the sub-agents section's linger (`subAgentLinger`) is
 judged only at paint time, so an idle frame keeps the section past 30 s until an unrelated repaint.
