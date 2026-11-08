@@ -481,6 +481,11 @@ type Model struct {
 	// panelDrag is a resize drag of the side panel's separator (sidepanel.go): armed by a press on
 	// its grip, ended by the release or by a resize that hides the column. Plain values (ADR 0011).
 	panelDrag panelDrag
+	// now is the Model's clock: what time a press on the side panel's grip landed, so two of them
+	// close together read as a double-click ([panelDoubleClick], sidepanel.go). Seeded time.Now by
+	// newModel; a test overwrites it to stub the gap between two presses. A func value, so it rides
+	// the value-copied Model (ADR 0011).
+	now func() time.Time
 	// clickArmed is the row the POINTER itself highlighted on a boxed pane, and the whole of what
 	// lets a click activate one: a pane's click handler latches the row here when it moves the
 	// highlight onto it, and activates on the next click only where that click lands on the very row
@@ -781,6 +786,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		th:           th,
 		sessionView:  sessionView{state: stateIdle},
 		notifyTmux:   os.Getenv("TMUX") != "",
+		now:          time.Now,
 	}
 
 	// Arm the heartbeat's tick chain when the monitor is wired: generation 1 is the chain Init's

@@ -1557,6 +1557,120 @@ func TestSidePanelSeparatorDragIsInertWhileWatching(t *testing.T) {
 	}
 }
 
+// doubleClickModel is separatorDragModel at a stored width of 50, its settings host also recording
+// each reset (failing with failure where one is given) and its clock stubbed: set *clock to place
+// the next press in time.
+func doubleClickModel(t *testing.T, failure error) (Model, *settingsSpy, *[]string, *time.Time) {
+	t.Helper()
+
+	m, spy, _ := separatorDragModel(t, nil)
+	var resets []string
+	host := m.opts.Settings.(fakeSettingsHost)
+	host.reset = func(path string) error {
+		resets = append(resets, path)
+		return failure
+	}
+	m.opts.Settings = host
+	clock := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return clock }
+	m.opts.UI.SidePanelWidth = 50
+	m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
+	return m, spy, &resets, &clock
+}
+
+// pressSeparator presses and releases the grip at column x, without moving.
+func pressSeparator(t *testing.T, m Model, x int) Model {
+	t.Helper()
+	return step(t, step(t, m, leftClick(x, separatorRow)), leftRelease(x, separatorRow))
+}
+
+// TestSidePanelSeparatorDoubleClick pins adr-0110-amend-1108 (b)'s reset: two presses on the grip
+// within 500 ms return `ui.side-panel.width` to 36 through the settings host's Reset and start no
+// drag; presses further apart, or a press right after a drag that moved the separator, are drags.
+func TestSidePanelSeparatorDoubleClick(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a double-click resets and starts no drag", func(t *testing.T) {
+		t.Parallel()
+		m, spy, resets, clock := doubleClickModel(t, nil)
+		sep := m.slotWidth()
+
+		m = pressSeparator(t, m, sep)
+		*clock = clock.Add(400 * time.Millisecond)
+		m = step(t, m, leftClick(sep, separatorRow))
+		pressed := m.panelDrag
+		m = step(t, m, leftRelease(sep, separatorRow))
+
+		if pressed.active {
+			t.Errorf("the second press armed a drag %+v, want none", pressed)
+		}
+		if want := []string{domain.UIKeySidePanelWidth}; !slices.Equal(*resets, want) || len(spy.writes) != 0 {
+			t.Errorf("resets %v, writes %v; want %v and no write", *resets, spy.writes, want)
+		}
+		if m.panelWidth() != domain.DefaultSidePanelWidth || m.slotWidth() != sep+50-domain.DefaultSidePanelWidth {
+			t.Errorf("panel %d, slot %d; want %d and %d", m.panelWidth(), m.slotWidth(),
+				domain.DefaultSidePanelWidth, sep+50-domain.DefaultSidePanelWidth)
+		}
+		if m.viewport.Width() != m.slotWidth()-scrollbarWidth {
+			t.Errorf("viewport width %d, want %d — the transcript did not re-wrap at the reset width",
+				m.viewport.Width(), m.slotWidth()-scrollbarWidth)
+		}
+		if len(m.settingEdits) != 1 || !m.settingEdits[0].reset || m.settingEdits[0].path != domain.UIKeySidePanelWidth {
+			t.Errorf("journal %+v, want one %s reset", m.settingEdits, domain.UIKeySidePanelWidth)
+		}
+	})
+
+	t.Run("two slow presses keep the width", func(t *testing.T) {
+		t.Parallel()
+		m, spy, resets, clock := doubleClickModel(t, nil)
+		sep := m.slotWidth()
+
+		m = pressSeparator(t, m, sep)
+		*clock = clock.Add(600 * time.Millisecond)
+		m = pressSeparator(t, m, sep)
+
+		if len(*resets) != 0 || len(spy.writes) != 0 || m.panelWidth() != 50 {
+			t.Errorf("resets %v, writes %v, panel %d; want none, none and 50", *resets, spy.writes, m.panelWidth())
+		}
+	})
+
+	t.Run("a press after a moving drag starts a drag", func(t *testing.T) {
+		t.Parallel()
+		m, _, resets, clock := doubleClickModel(t, nil)
+		sep := m.slotWidth()
+
+		m = step(t, m, leftClick(sep, separatorRow))
+		m = step(t, m, leftDrag(sep-4, separatorRow))
+		m = step(t, m, leftRelease(sep-4, separatorRow))
+		*clock = clock.Add(100 * time.Millisecond)
+		m = step(t, m, leftClick(sep-4, separatorRow))
+
+		if !m.panelDrag.active || len(*resets) != 0 || m.panelWidth() != 54 {
+			t.Errorf("drag %+v, resets %v, panel %d; want a drag armed, no reset and the dragged 54",
+				m.panelDrag, *resets, m.panelWidth())
+		}
+	})
+
+	t.Run("a failed reset says so once and the default stands", func(t *testing.T) {
+		t.Parallel()
+		m, _, _, clock := doubleClickModel(t, fmt.Errorf("disk full"))
+		sep := m.slotWidth()
+
+		m = pressSeparator(t, m, sep)
+		*clock = clock.Add(100 * time.Millisecond)
+		m = pressSeparator(t, m, sep)
+
+		note := sidePanelWidthSource + ": " + taskListNotSavedNote + "disk full"
+		if got := strings.Count(plain(m.View()), note); got != 1 {
+			t.Errorf("the failed reset is reported %d times, want once: %q", got, note)
+		}
+		if m.panelWidth() != domain.DefaultSidePanelWidth || len(m.settingEdits) != 0 {
+			t.Errorf("panel %d, journal %+v; want the default %d standing and nothing journalled",
+				m.panelWidth(), m.settingEdits, domain.DefaultSidePanelWidth)
+		}
+	})
+}
+
 // panelHelpWords reads the /panel line /help prints and returns its two word groups — the show
 // modes and the section verbs — so the tests drive exactly the strings the human is shown.
 func panelHelpWords(t *testing.T) (shows, verbs []string) {

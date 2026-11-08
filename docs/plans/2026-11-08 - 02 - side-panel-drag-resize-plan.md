@@ -210,7 +210,9 @@ the separator (`TestSidePanelDragStopsAtTheSeparator`); accent separator mid-dra
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSidePanel|TestMouseMotion|TestArmsLeaveLayoutToTail' ./internal/tui/`.
 **Commit:** `feat(tui): resize the side panel by dragging its separator`
 
-## 5. Double-click on the separator resets the width
+## 5. Double-click on the separator resets the width — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): panelDrag gains two fields beside item 4's — moved (set by any motion that moved the separator, even one that later came back) and pressedAt (from the new Model clock `now`); endPanelDrag keeps pressedAt only for a drag that never moved, so "a press right after a drag that moved the separator" covers a drag that went out and came back too. The reset is Model.resetPanelWidth (sets the session width to domain.DefaultSidePanelWidth, then Settings.Reset; journalled as settingEdit{reset: true}; failure note reuses sidePanelWidthSource + taskListNotSavedNote, setPanelWidth's wording).
 
 Depends on item 4.
 **What:**

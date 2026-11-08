@@ -645,9 +645,10 @@ func (m Model) panelWriteAt(row sidepanel.FileRow) (int, bool) {
 // click chain: the column claims each of its cells, and a click there drops the prompt's and the
 // transcript's selections, so nothing under it — a pane's row, a block's header, a drag anchor —
 // is reached through it. A press on the grip — the separator or the gutter right of it — starts a
-// resize drag ([panelDrag]) and follows no target; elsewhere a target acts on the press
-// (followPanelTarget), and a cell that targets nothing is claimed and does nothing. pre is the
-// pre-click frame the chain reads geometry off.
+// resize drag ([panelDrag]) and follows no target, unless it is the second press of a double-click
+// ([Model.panelDoubleClicked]), which resets the width instead and starts nothing; elsewhere a
+// target acts on the press (followPanelTarget), and a cell that targets nothing is claimed and does
+// nothing. pre is the pre-click frame the chain reads geometry off.
 func (m Model) handleSidePanelClick(pre Model, msg tea.MouseClickMsg) (tea.Model, tea.Cmd, bool) {
 	target, isPanel := pre.panelTargetAt(msg.X, msg.Y)
 	if !isPanel {
@@ -655,7 +656,12 @@ func (m Model) handleSidePanelClick(pre Model, msg tea.MouseClickMsg) (tea.Model
 	}
 	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
 	if grab, isGrip := pre.panelGripAt(msg.X); isGrip {
-		return m.startPanelDrag(grab), nil, true
+		at := m.now()
+		if m.panelDoubleClicked(at) {
+			m.panelDrag = panelDrag{}
+			return m.resetPanelWidth(), nil, true
+		}
+		return m.startPanelDrag(grab, at), nil, true
 	}
 	next, cmd := m.followPanelTarget(target)
 	return next, cmd, true
@@ -679,6 +685,25 @@ type panelDrag struct {
 	// startWidth or is abandoned, so a stored width the window clamps is never rewritten by a drag
 	// that changed nothing.
 	startStored int
+	// moved is true once a motion of this drag has moved the separator, even back where it began:
+	// such a drag was a resize, never the first press of a double-click.
+	moved bool
+	// pressedAt is when the press that armed this drag landed ([Model.now]). The release of a drag
+	// that never moved keeps it, so a second press within [panelDoubleClick] reads as a
+	// double-click; every other end zeroes it.
+	pressedAt time.Time
+}
+
+// panelDoubleClick is the longest gap between two presses on the grip that reads as a double-click
+// (adr-0110-amend-1108 (b)).
+const panelDoubleClick = 500 * time.Millisecond
+
+// panelDoubleClicked reports whether a press on the grip at time at is the second press of a
+// double-click: the first armed a drag that ended without moving the separator, no longer than
+// [panelDoubleClick] before it.
+func (m Model) panelDoubleClicked(at time.Time) bool {
+	first := m.panelDrag.pressedAt
+	return !m.panelDrag.active && !first.IsZero() && at.Sub(first) <= panelDoubleClick
 }
 
 // panelGripAt answers whether column x of a press already on the column ([Model.panelTargetAt]) is
@@ -692,14 +717,15 @@ func (m Model) panelGripAt(x int) (grab int, isGrip bool) {
 	return grab, true
 }
 
-// startPanelDrag arms a separator drag grabbed grab columns right of the separator, recording the
-// press-time widths the release and an abandon read.
-func (m Model) startPanelDrag(grab int) Model {
+// startPanelDrag arms a separator drag grabbed grab columns right of the separator at time at,
+// recording the press-time widths the release and an abandon read.
+func (m Model) startPanelDrag(grab int, at time.Time) Model {
 	m.panelDrag = panelDrag{
 		active:      true,
 		grabOffset:  grab,
 		startWidth:  m.panelWidth(),
 		startStored: m.opts.UI.SidePanelWidth,
+		pressedAt:   at,
 	}
 	return m
 }
@@ -713,6 +739,7 @@ func (m Model) dragPanelSeparator(x int) Model {
 	width := m.clampPanelWidth(m.width - (x - m.panelDrag.grabOffset))
 	if width != m.panelWidth() {
 		m.opts.UI.SidePanelWidth = width
+		m.panelDrag.moved = true
 	}
 	return m
 }
@@ -725,10 +752,14 @@ func (m Model) panelDragResized() bool {
 
 // endPanelDrag ends an active separator drag on the release: a painted width that differs from the
 // press's is written as `ui.side-panel.width` ([Model.setPanelWidth]), once; one that does not puts
-// the press-time stored width back and writes nothing.
+// the press-time stored width back and writes nothing. A drag that never moved the separator keeps
+// its press time, the first half of a double-click ([Model.panelDoubleClicked]).
 func (m Model) endPanelDrag() Model {
 	drag := m.panelDrag
 	m.panelDrag = panelDrag{}
+	if !drag.moved {
+		m.panelDrag.pressedAt = drag.pressedAt
+	}
 	width := m.panelWidth()
 	if width == drag.startWidth {
 		m.opts.UI.SidePanelWidth = drag.startStored
@@ -763,6 +794,25 @@ func (m Model) setPanelWidth(width int) Model {
 		return m
 	}
 	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelWidth, value: value})
+}
+
+// resetPanelWidth returns `ui.side-panel.width` to its default — the double-click on the grip
+// (adr-0110-amend-1108 (b)) — through [SettingsHost.Reset], which removes the key's line rather than
+// writing the default into it (ADR 0035), with setPanelWidth's contract otherwise: the column moves
+// first, a landed reset is journalled as the reset it is, a failed one speaks as one transcript
+// error naming the key and the default stands for the session, and a nil seam changes the session
+// alone (ADR 0031).
+func (m Model) resetPanelWidth() Model {
+	m.opts.UI.SidePanelWidth = domain.DefaultSidePanelWidth
+	if m.opts.Settings == nil {
+		return m
+	}
+	if err := m.opts.Settings.Reset(domain.UIKeySidePanelWidth); err != nil {
+		m.transcript.addError(sidePanelWidthSource, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	value := strconv.Itoa(domain.DefaultSidePanelWidth)
+	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelWidth, value: value, reset: true})
 }
 
 // followPanelTarget does what a click on target means: a pin toggles its section between pinned
