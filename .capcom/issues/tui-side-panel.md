@@ -1,10 +1,12 @@
 ---
 title: Side panel for live session state on wide terminals
-status: open
+status: done
 type: feature
 priority: 2
 plan: 2026-11-08 - 00 - tui-side-panel-plan
 created: 2026-11-07T21:03:21Z
+closed: 2026-11-08T13:35:20Z
+reason: "Resolved by 2026-11-08 - 00 - tui-side-panel-plan (archived 65efc682): all 13 items shipped; follow-ups panel-linger-idle-repaint and panel-write-key-symlink filed separately."
 ---
 
 The TUI has one column: the transcript, with session state scattered across popups (`/usage`,
