@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -2163,7 +2164,9 @@ func pipelineOrder(ids []string, width int) []string {
 // perCallEvents digests every event attributable to one call — its ToolCallEvent, its
 // ToolResultEvent, its AuditEvents and, for a delegation, its lifecycle phases — in emission order,
 // so two widths can be compared call by call. Approval has no call id on the wire and is counted
-// by the rows that care.
+// by the rows that care. A phase's At is the wall-clock moment it was emitted, never a per-call
+// fact, so the digest keeps only whether it was stamped: two widths must both stamp every phase,
+// not stamp it at the same instant (the stamp itself is pinned by TestSubAgentPhaseEventCarriesAt).
 func perCallEvents(events []domain.Event) map[string][]string {
 	out := map[string][]string{}
 	for _, e := range events {
@@ -2189,6 +2192,10 @@ func perCallEvents(events []domain.Event) map[string][]string {
 				continue
 			}
 			id = ev.CallID
+			if !ev.At.IsZero() {
+				ev.At = stampedPhaseAt
+			}
+			e = ev
 		default:
 			continue
 		}
@@ -2196,6 +2203,9 @@ func perCallEvents(events []domain.Event) map[string][]string {
 	}
 	return out
 }
+
+// stampedPhaseAt stands in for any non-zero SubAgentPhaseEvent.At in perCallEvents' digest.
+var stampedPhaseAt = time.Unix(1, 0).UTC()
 
 // assertNoApproval fails when the Approver was consulted or an ApprovalEvent reached the sink.
 func assertNoApproval(t *testing.T, sink *recordingSink, approver *fakeApprover) {
