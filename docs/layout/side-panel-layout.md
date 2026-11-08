@@ -1,4 +1,4 @@
-> **Status:** shipped (2026-11-08, `docs/plans/2026-11-08 - 00 - tui-side-panel-plan.md`), from the
+> **Status:** shipped (2026-11-08, `docs/plans/archived/2026-11-08 - 00 - tui-side-panel-plan.md`), from the
 > 2026-11-07 grill ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md), issue `tui-side-panel`).
 > This file describes the panel as built. `layout.md` §"The side panel" holds the rule that binds the
 > rest of the frame; the user-facing account is `docs/manual/configuration.md` (the `ui:` section).
