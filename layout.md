@@ -3130,3 +3130,15 @@ A Turn that ends under its own power — `apogee: turn finished`, or `apogee: tu
 faulted Exchange or a loop error — notifies only while the terminal reports the window blurred: the
 frame asks for focus reports, and a terminal that sends none never reads as blurred. A stop and a
 `/compact` are the human's own act and stay silent.
+
+## The side panel
+
+On a wide terminal a fixed column on the right of the transcript slot keeps live session state in
+view (ADR 0110). Its shape, sections, thresholds and pointer rules are specced in
+[`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md) (design of record, not yet
+implemented). The rule that binds the rest of the frame is stated here: **the panel's column
+appears, vanishes or changes width only when the window crosses a threshold or the user changes
+`ui.side-panel.show`**. Nothing a section shows or hides moves it, so live content never re-wraps the
+transcript, the same promise the scroll bar keeps. While it shows, the transcript slot and every
+pane painted in it are the slot's width, and the top rule, status line, prompt box and footer keep
+the window's.
