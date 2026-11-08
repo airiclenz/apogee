@@ -3402,8 +3402,9 @@ type blockSpan struct {
 // near-identical prefix sums re-derived it, one per pane, on every click and every wheel notch, each
 // of them re-rendering every overlay of the frame to do so.
 //
-// It is a bool and a fixed-size ARRAY of plain ints: it copies with the Model by value and holds no
-// pointer, no map and no no-copy type, so no two Model values can share a byte of it (ADR 0011).
+// It is a bool, a fixed-size ARRAY of plain ints and one plain int: it copies with the Model by
+// value and holds no pointer, no map and no no-copy type, so no two Model values can share a byte
+// of it (ADR 0011).
 //
 // composed separates "no pane is on the frame" from "this value was never composed" — the spans alone
 // cannot tell those apart, and the difference is what lets a snapshot carry a drawn frame's geometry
@@ -3419,6 +3420,9 @@ type blockSpan struct {
 type frameSpans struct {
 	composed bool
 	panes    [paneKinds]blockSpan
+	// slotBottom is the screen row directly under the transcript-side slot — the ▔ hairline's row,
+	// and the first row the side panel's column does not reach (stackTranscriptSlot's `below`).
+	slotBottom int
 }
 
 // pane reports where the named pane is drawn: the screen row its top border lands on and how many rows
@@ -3468,6 +3472,7 @@ func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, fra
 		y0 += h
 		rows = append(rows, block)
 	}
+	spans.slotBottom = y0
 	return rows, spans, y0
 }
 

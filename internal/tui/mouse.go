@@ -380,7 +380,9 @@ func promptPointerClick(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bo
 }
 
 // handleMouseClick starts a fresh, collapsed selection under a left-click. It arbitrates by
-// region: a click on the open /settings pane's row list belongs to the pane (selecting a row, or
+// region: a click on the side panel's column belongs to the column, asked before every other
+// region ([Model.handleSidePanelClick]); a click on the open /settings pane's row list belongs to
+// the pane (selecting a row, or
 // seating the caret in the row being typed into); a click on the footer's mode marker opens the mode
 // picker ([Model.handleFooterModeClick]) and one on its git segment the git actions picker
 // ([Model.handleFooterGitClick]), and neither selects anything; a click in the prompt's editable text area
@@ -447,6 +449,12 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// here, and every rect below is a READ of it rather than a fresh render of every overlay
 	// ([Model.withFrameSpans], model.go).
 	pre := m.withFrameSpans()
+	// The side panel's column is asked first: the panes' hits are y-only and the column stands
+	// beside every row they are drawn on, so a click on it must never reach a pane's row — an
+	// approval's included — or the transcript row under it (handleSidePanelClick, sidepanel.go).
+	if next, cmd, claimed := m.handleSidePanelClick(pre, msg); claimed {
+		return next, cmd
+	}
 	// The panes, in the one order both gestures ask them in (pointerPanes), each answering with its
 	// row's click (paneSpecs). A pane that does not claim the click hands the model on — dismissed
 	// where its currency says so — and the next pane's rect is still read off pre, never off the model
@@ -2126,6 +2134,11 @@ func (m Model) highlightTranscript(view string) string {
 // gate — pointerprobe.go); the viewport's own Update turns the
 // wheel into a scroll.
 func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	// Nothing scrolls inside the side panel in v1 (docs/layout/side-panel-layout.md), and a notch
+	// over it reaches no pane and no transcript beside it: the panes' wheels are y-only.
+	if m.panelCell(msg.X, msg.Y) {
+		return m, nil
+	}
 	// A notch drops any click-armed row, whichever pane below takes it: the wheel MOVES the highlight
 	// on every list in this chain, and the latch means "the pointer highlighted this row". Cleared
 	// here rather than in each pane's wheel handler, the pair of the drop handleKey makes (model.go)

@@ -344,13 +344,13 @@ func TestChangedFiles(t *testing.T) {
 			scope: sidepanel.RunKey{},
 			want: []sidepanel.FileRow{
 				{Path: "/w/parser.go", Stat: domain.DiffStat{Added: 4, Removed: 2}, HasStat: true},
-				{Path: "/w/lexer_test.go", IsDelegated: true},
+				{Path: "/w/lexer_test.go", IsDelegated: true, Run: sidepanel.RunOf(child("r.1"))},
 			},
 		},
 		{
 			name:  "run scope holds the run's own",
 			scope: sidepanel.RunOf(child("r.1")),
-			want:  []sidepanel.FileRow{{Path: "/w/lexer_test.go", IsDelegated: true}},
+			want:  []sidepanel.FileRow{{Path: "/w/lexer_test.go", IsDelegated: true, Run: sidepanel.RunOf(child("r.1"))}},
 		},
 	}
 	for _, tc := range cases {

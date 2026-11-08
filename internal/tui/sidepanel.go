@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -45,14 +47,19 @@ const (
 	// percentCap is a whole percentage: the scale a share is spelled in, and the most a fill
 	// reads — a conversation carried into a smaller window overfills it (usageFillCell's clamp).
 	percentCap = 100
+	// sidePanelSectionsSource is the label a failed pin write-back's transcript error carries — the
+	// key's own name, taskListOpenSource's posture.
+	sidePanelSectionsSource = "side-panel.sections"
 )
 
 // sidePanelContentWidth is the columns the panel's content has: the column less its separator and
 // the gutter beside it.
 const sidePanelContentWidth = sidePanelWidth - len(sidePanelGutter) - 1
 
-// panelSection is one section the column shows: what its header says and its body rows, painted.
+// panelSection is one section the column shows: which it is, what its header says and its body
+// rows, painted.
 type panelSection struct {
+	kind     domain.SidePanelSection
 	title    string
 	summary  string
 	isPinned bool
@@ -102,16 +109,47 @@ func (m Model) sidePanelContent(rows int) []string {
 	if len(sections) == 0 {
 		return []string{m.th.statusFaint.Render(sidePanelEmpty)}
 	}
+	layout := panelLayout(sections, rows)
+	lines := make([]string, 0, len(layout))
+	for _, line := range layout {
+		switch {
+		case line.more > 0:
+			lines = append(lines, m.th.statusFaint.Render("+"+strconv.Itoa(line.more)+sidePanelMore))
+		case line.body < 0:
+			lines = append(lines, m.panelHeaderRow(sections[line.section]))
+		default:
+			lines = append(lines, sections[line.section].body[line.body])
+		}
+	}
+	return lines
+}
+
+// panelLine is what one content row of the column is: a section's header (body −1) or one of its
+// body rows, or — section −1, more the count — the `+N more` row.
+type panelLine struct {
+	section int
+	body    int
+	more    int
+}
+
+// panelLayout lays the shown sections out over rows rows by the overflow rule ([panelAllocation]):
+// one panelLine per content row, from the top. It is the one layout the paint
+// ([Model.sidePanelContent]) and the pointer ([Model.panelTargetAt]) both read, so a click names
+// the row it lands on.
+func panelLayout(sections []panelSection, rows int) []panelLine {
 	kept, isExpanded := panelAllocation(sections, rows)
-	lines := make([]string, 0, rows)
-	for i, section := range sections[:kept] {
-		lines = append(lines, m.panelHeaderRow(section))
-		if isExpanded[i] {
-			lines = append(lines, section.body...)
+	lines := make([]panelLine, 0, rows)
+	for i := range sections[:kept] {
+		lines = append(lines, panelLine{section: i, body: -1})
+		if !isExpanded[i] {
+			continue
+		}
+		for j := range sections[i].body {
+			lines = append(lines, panelLine{section: i, body: j})
 		}
 	}
 	if left := len(sections) - kept; left > 0 {
-		lines = append(lines, m.th.statusFaint.Render("+"+strconv.Itoa(left)+sidePanelMore))
+		lines = append(lines, panelLine{section: -1, body: -1, more: left})
 	}
 	return lines
 }
@@ -156,7 +194,7 @@ func (m Model) panelSections() []panelSection {
 		if entry.Mode == domain.SidePanelModeAuto && !isLive {
 			continue
 		}
-		section.isPinned = entry.Mode == domain.SidePanelModePinned
+		section.kind, section.isPinned = entry.Section, entry.Mode == domain.SidePanelModePinned
 		shown = append(shown, section)
 	}
 	return shown
@@ -378,4 +416,236 @@ func panelTokens(n int) string {
 		return "0"
 	}
 	return format.Tokens(n)
+}
+
+// panelTargetKind is what a click on one cell of the column does (docs/layout/side-panel-layout.md,
+// "Pointer").
+type panelTargetKind int
+
+const (
+	panelTargetNone  panelTargetKind = iota // a header title, the `+N more` row, a blank cell: nothing
+	panelTargetPin                          // a header's pin glyph: toggle pinned ↔ auto, written back
+	panelTargetRun                          // a sub-agent row: open that run's Run view
+	panelTargetBlock                        // a task or changed-file row: unfold its block and scroll to it
+	panelTargetUsage                        // a usage row: open /usage
+)
+
+// panelTarget is one column cell's click: what it does, and what it does it to — the section a pin
+// toggles, or the transcript entry a run row opens or a block row unfolds, with the run whose view
+// shows that block.
+type panelTarget struct {
+	kind     panelTargetKind
+	section  domain.SidePanelSection
+	isPinned bool
+	entry    int
+	run      runRef
+}
+
+// panelCell reports whether (x, y) is one of the column's cells: right of the transcript slot, on
+// a row above the session-name rule, while the column shows.
+func (m Model) panelCell(x, y int) bool {
+	return m.panelShown() && x >= m.slotWidth() && x < m.width && y >= 0 && y < m.frameSpans().slotBottom
+}
+
+// panelTargetAt answers what a click at (x, y) does on the column of the frame m composes (pre in
+// the click chain, which carries that frame's spans), and whether (x, y) is a column cell at all. A
+// cell is claimed whether or not it targets anything, so no click on the column falls through to
+// the panes or the transcript under it; the hover shape asks the same question (pointershape.go),
+// so the pointer promises a click exactly where one acts.
+func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
+	if !m.panelCell(x, y) {
+		return panelTarget{}, false
+	}
+	sections := m.panelSections()
+	layout := panelLayout(sections, m.frameSpans().slotBottom)
+	if len(sections) == 0 || y >= len(layout) || layout[y].section < 0 {
+		return panelTarget{}, true
+	}
+	line, section := layout[y], sections[layout[y].section]
+	if line.body >= 0 {
+		return m.panelBodyTarget(section.kind, line.body), true
+	}
+	if x == m.width-1 {
+		return panelTarget{kind: panelTargetPin, section: section.kind, isPinned: section.isPinned}, true
+	}
+	return panelTarget{}, true
+}
+
+// panelBodyTarget is the click on body row row of section kind: the detail view that row opens,
+// or none where the transcript holds nothing it could open.
+func (m Model) panelBodyTarget(kind domain.SidePanelSection, row int) panelTarget {
+	switch kind {
+	case domain.SidePanelSubAgents:
+		rows := m.panel.SubAgents().Rows
+		if row >= len(rows) {
+			return panelTarget{}
+		}
+		at := m.panelRunHeadAt(rows[row].Run)
+		if _, ok := m.runOpenableAt(at); !ok {
+			return panelTarget{}
+		}
+		return panelTarget{kind: panelTargetRun, entry: at}
+	case domain.SidePanelTasks:
+		if at, ok := m.panelTaskCardAt(); ok {
+			return panelTarget{kind: panelTargetBlock, entry: at, run: m.viewedRun()}
+		}
+	case domain.SidePanelChangedFiles:
+		rows := m.panel.ChangedFiles(panelRunKey(m.viewedRun())).Rows
+		if row >= len(rows) {
+			return panelTarget{}
+		}
+		if at, ok := m.panelWriteAt(rows[row]); ok {
+			return panelTarget{kind: panelTargetBlock, entry: at, run: m.transcript.entries[at].run()}
+		}
+	case domain.SidePanelUsage:
+		return panelTarget{kind: panelTargetUsage}
+	}
+	return panelTarget{}
+}
+
+// panelRunHeadAt is where the delegation heading run sits in the transcript, −1 where none does.
+func (m Model) panelRunHeadAt(run sidepanel.RunKey) int {
+	entries := m.transcript.entries
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].headsRun() && panelRunKey(entries[i].spawned()) == run {
+			return i
+		}
+	}
+	return -1
+}
+
+// panelTaskCardAt is where the viewed run's latest task-list card sits: the card the task section
+// reads, since each task-list call replaces the list.
+func (m Model) panelTaskCardAt() (int, bool) {
+	entries, scope := m.transcript.entries, m.viewedRun()
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].tool.collapsesToHeader && entries[i].run() == scope {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// panelWriteAt is where the tool block of row's latest write sits: the call of that id in the run
+// that landed it, and only where the view could show it — the viewed run's own, or a run with a
+// head to open.
+func (m Model) panelWriteAt(row sidepanel.FileRow) (int, bool) {
+	if row.CallID == "" {
+		return -1, false
+	}
+	entries := m.transcript.entries
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.kind != entryToolCall || e.callID != row.CallID || panelRunKey(e.run()) != row.Run {
+			continue
+		}
+		if run := e.run(); run != m.viewedRun() && run != (runRef{}) {
+			if _, ok := runHeadAt(entries, run); !ok {
+				return -1, false
+			}
+		}
+		return i, true
+	}
+	return -1, false
+}
+
+// handleSidePanelClick answers a left-click on the column, asked before every other region of the
+// click chain: the column claims each of its cells, and a click there drops the prompt's and the
+// transcript's selections, so nothing under it — a pane's row, a block's header, a drag anchor —
+// is reached through it. A target acts on the press (followPanelTarget); a cell that targets
+// nothing is claimed and does nothing. pre is the pre-click frame the chain reads geometry off.
+func (m Model) handleSidePanelClick(pre Model, msg tea.MouseClickMsg) (tea.Model, tea.Cmd, bool) {
+	target, isPanel := pre.panelTargetAt(msg.X, msg.Y)
+	if !isPanel {
+		return m, nil, false
+	}
+	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
+	next, cmd := m.followPanelTarget(target)
+	return next, cmd, true
+}
+
+// followPanelTarget does what a click on target means: a pin toggles its section between pinned
+// and auto, a sub-agent row opens its Run view, a task or changed-file row unfolds that one block
+// — never the shared task-list fold, whose toggle writes `ui.task-list-open` — and scrolls it into
+// view (opening the run that holds it first), and a usage row opens /usage.
+func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
+	switch target.kind {
+	case panelTargetPin:
+		mode := domain.SidePanelModePinned
+		if target.isPinned {
+			mode = domain.SidePanelModeAuto
+		}
+		return m.setPanelSectionMode(target.section, mode), nil
+	case panelTargetRun:
+		next, _ := m.openRunAt(target.entry)
+		return next, nil
+	case panelTargetBlock:
+		if target.run != m.viewedRun() {
+			m = m.openRun(target.run)
+		}
+		m.transcript.setExpanded(target.entry, true)
+		m.revealEntry(target.entry)
+		return m, nil
+	case panelTargetUsage:
+		return m.runUsageCommand()
+	default:
+		return m, nil
+	}
+}
+
+// revealEntry repaints the transcript and scrolls it so entries[index]'s first marked line sits on
+// the top row the sticky header leaves uncovered — [Model.followBlockCursor]'s park, asked again
+// after the first one because the header's span is a function of the offset. An entry the paint
+// marks no line for leaves the view where the repaint put it.
+func (m *Model) revealEntry(index int) {
+	m.refreshViewport()
+	line := slices.IndexFunc(m.lineTargets, func(t lineTarget) bool {
+		return t.kind != targetNone && t.entry == index
+	})
+	if line < 0 {
+		return
+	}
+	m.refreshViewportAnchored(line, 0)
+	if _, header := m.stickyHeaderSpan(); header > 0 && header < m.transcriptRows() {
+		m.refreshViewportAnchored(line, header)
+	}
+}
+
+// setPanelSectionMode sets one section's mode — what a pin-glyph click, and `/panel pin|unpin|hide`,
+// mean (ADR 0110) — and writes it back through [SettingsHost.WriteSidePanelSection]. The column
+// moves first: the screen shows what the human asked for whatever the file then does. A landed
+// write puts the list the files resolve to in force and journals it (recordSettingEdit); a failed
+// one speaks as one transcript error naming the key, and the change stands for the session — the
+// task-list fold's posture (toggleTaskListFold). A nil seam changes the session alone, the Driver
+// degrade (ADR 0031).
+func (m Model) setPanelSectionMode(section domain.SidePanelSection, mode domain.SidePanelMode) Model {
+	m.opts.UI.SidePanelSections = withSectionMode(m.opts.UI.SidePanelSections, section, mode)
+	if m.opts.Settings == nil {
+		return m
+	}
+	sections, err := m.opts.Settings.WriteSidePanelSection(section, mode)
+	if err != nil {
+		m.transcript.addError(sidePanelSectionsSource, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	m.opts.UI.SidePanelSections = sections
+	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelSections, value: string(sections)})
+}
+
+// withSectionMode is list with section's entry set to mode, every other entry kept with its mode
+// and in its order, in the canonical spelling.
+func withSectionMode(
+	list domain.SidePanelSections, section domain.SidePanelSection, mode domain.SidePanelMode,
+) domain.SidePanelSections {
+	entries, err := domain.ParseSidePanelSections(string(list))
+	if err != nil {
+		// Unreachable from a running session, for panelSections' reason: the default list stands in.
+		entries, _ = domain.ParseSidePanelSections("")
+	}
+	for i := range entries {
+		if entries[i].Section == section {
+			entries[i].Mode = mode
+		}
+	}
+	return domain.SpellSidePanelSections(entries)
 }

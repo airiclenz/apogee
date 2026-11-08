@@ -249,12 +249,23 @@ func (m Model) legendFor(top string) string {
 // the task by the view's own state ([transcript.setTaskExpanded]), which is what its see-more
 // marker advertises, and never re-opens the run.
 func (m Model) openRunAt(index int) (Model, bool) {
-	if index < 0 || index >= len(m.transcript.entries) {
+	ref, ok := m.runOpenableAt(index)
+	if !ok {
 		return m, false
+	}
+	return m.openRun(ref), true
+}
+
+// runOpenableAt is [Model.openRunAt]'s question without its move: the run entries[index] heads,
+// and whether opening it would push a view. The side panel's hover asks it (sidepanel.go), so the
+// pointer shape promises a sub-agent row's click exactly where the click would open its run.
+func (m Model) runOpenableAt(index int) (runRef, bool) {
+	if index < 0 || index >= len(m.transcript.entries) {
+		return runRef{}, false
 	}
 	head := m.transcript.entries[index]
 	if !head.headsRun() {
-		return m, false
+		return runRef{}, false
 	}
 	// The refs are compared WHOLE rather than by spawn id: at the top level the viewed run is the
 	// zero ref, which no head's ref can equal — a run's entries stand one level below the call that
@@ -263,12 +274,12 @@ func (m Model) openRunAt(index int) (Model, bool) {
 	// one of two siblings whose call ids collide scopes to that sibling alone.
 	ref := head.spawned()
 	if m.viewedRun() == ref {
-		return m, false
+		return runRef{}, false
 	}
 	if subAgentSpan(m.transcript.entries, index) == 0 && subAgentReported(head.painted()) {
-		return m, false
+		return runRef{}, false
 	}
-	return m.openRun(ref), true
+	return ref, true
 }
 
 // openRun pushes ref onto the view stack and repaints the transcript rooted at it.

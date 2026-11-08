@@ -30,11 +30,13 @@ func (s pointerShape) name() string {
 
 // pointerShapeAt answers which shape a click at (x, y) implies, for the frame pre was composed for
 // (pre is m.withFrameSpans(), handleMouseClick's snapshot). It walks the click chain's own order —
-// the panes ([pointerPanes], each asked through its row's hover), the footer's mode marker and its
-// git segment, the editable prompt, the transcript — and every region answers through the hit predicate its click
+// the side panel's column, the panes ([pointerPanes], each asked through its row's hover), the
+// footer's mode marker and its git segment, the editable prompt, the transcript — and every region
+// answers through the hit predicate its click
 // handler decides by, geometry and state gate together, so the pointer can never promise a click the
 // handler would refuse:
 //
+//   - a side-panel cell ([Model.panelTargetAt]): pointer where a click there acts, default elsewhere;
 //   - a pane whose hover answers for the point: that pane's shape;
 //   - the mode marker, where [Model.footerModeHit] holds: pointer;
 //   - the git segment, where [Model.footerGitHit] holds: pointer;
@@ -45,6 +47,13 @@ func (s pointerShape) name() string {
 //
 // It has no side effects: the Model is a value (ADR 0011) and nothing here writes to it.
 func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
+	// The side panel's column first, as the click chain asks it (handleSidePanelClick).
+	if target, isPanel := pre.panelTargetAt(x, y); isPanel {
+		if target.kind == panelTargetNone {
+			return shapeDefault
+		}
+		return shapePointer
+	}
 	// The fast path: with no pane up, none can answer, and the walk would only ask each to say so.
 	if pre.openPanes() != 0 {
 		for _, p := range pointerPanes {

@@ -119,12 +119,16 @@ type TaskRow struct {
 
 // FileRow is one file the scope wrote, merged across its writes: Stat sums their Edit-region
 // diffstats, HasStat says whether any write carried regions, and IsDelegated whether a sub-agent
-// wrote it. Path is the absolute write target; trimming it to the column is the painter's.
+// wrote it. Path is the absolute write target; trimming it to the column is the painter's. Run and
+// CallID name the latest of those writes — the run that landed it and its tool call — which is the
+// tool block a click on the row opens (call ids are only unique within a run).
 type FileRow struct {
 	Path        string
 	Stat        domain.DiffStat
 	HasStat     bool
 	IsDelegated bool
+	Run         RunKey
+	CallID      string
 }
 
 // UsageView is the usage section's answer. Fill is the scoped run's context fill (the status-line
@@ -177,10 +181,11 @@ type runState struct {
 
 // write is one landed file write.
 type write struct {
-	run   RunKey
-	depth int
-	path  string
-	stat  *domain.DiffStat
+	run    RunKey
+	depth  int
+	callID string
+	path   string
+	stat   *domain.DiffStat
 }
 
 // New returns an empty State reading the time from now — injected so elapsed time and the
@@ -265,10 +270,10 @@ func (s *State) SetTasks(run RunKey, items []domain.TaskItem) {
 	s.run(run).tasks = append([]domain.TaskItem(nil), items...)
 }
 
-// AddWrite records a landed write to path by run at depth. stat is the write's Edit-region
-// diffstat, nil when the write carried no regions.
-func (s *State) AddWrite(run RunKey, depth int, path string, stat *domain.DiffStat) {
-	s.writes = append(s.writes, write{run: run, depth: depth, path: path, stat: stat})
+// AddWrite records a landed write to path by run at depth, made by the tool call callID. stat is
+// the write's Edit-region diffstat, nil when the write carried no regions.
+func (s *State) AddWrite(run RunKey, depth int, callID, path string, stat *domain.DiffStat) {
+	s.writes = append(s.writes, write{run: run, depth: depth, callID: callID, path: path, stat: stat})
 }
 
 // SetUsage seeds run's accounting from a stored record: totals is what the record had spent, kept
@@ -330,7 +335,7 @@ func (s *State) foldToolResult(e domain.ToolResultEvent) {
 		diff := regions.Stat()
 		stat = &diff
 	}
-	s.AddWrite(RunOf(e.EventBase), e.Depth, e.WriteTarget, stat)
+	s.AddWrite(RunOf(e.EventBase), e.Depth, e.Result.CallID, e.WriteTarget, stat)
 }
 
 // foldUsage folds one reading: the cumulative totals take every counted reading, latest-wins; the
@@ -502,6 +507,7 @@ func (f *FileRow) add(w write) {
 	if w.depth > 0 {
 		f.IsDelegated = true
 	}
+	f.Run, f.CallID = w.run, w.callID
 }
 
 // Usage answers the usage section for scope: its fill as the status-line gauge states it, the

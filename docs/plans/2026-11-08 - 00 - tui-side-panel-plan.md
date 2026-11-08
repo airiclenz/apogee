@@ -419,7 +419,13 @@ a run with an empty RunID is scoped by depth+spawn.
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'SidePanelRunView' ./internal/tui/`
 **Commit:** `feat(tui): scope the side panel to the viewed run`
 
-## 11. Pointer
+## 11. Pointer — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): re-derived from "a changed-file row names its write's tool block" — sidepanel.FileRow carried no call id, so FileRow gains Run and CallID (the latest write's run and tool call; call ids are only unique within a run) and State.AddWrite takes the call id (internal/sidepanel/sidepanel.go); the expected delegated row in internal/sidepanel/sidepanel_test.go now names its Run.
+NOTES (2026-11-08): consequential edit — internal/tui/model.go: made necessary by the panel hit needing the column's row extent; frameSpans gains slotBottom, set by stackTranscriptSlot, so the hit reads the same composition the paint stacks (frameSpans doc line updated).
+NOTES (2026-11-08): consequential edit — internal/tui/runview.go: made necessary by the hover shape over a sub-agent row; openRunAt's guards moved unchanged into runOpenableAt, which openRunAt and the panel's target resolution both ask (no behaviour change).
+NOTES (2026-11-08): panel targets act on the press (the click chain's claim), not on the release; the paint and the pointer share one layout (panelLayout), and setPanelSectionMode (the pin write-back through SettingsHost.WriteSidePanelSection) is written for item 12's `/panel pin|unpin|hide` to reuse — the column moves first, a failed write keeps it and reports `side-panel.sections: not saved: …`, a nil host changes the session alone.
+NOTES (2026-11-08): a changed-file row merges several writes; its click opens the latest write's block.
 
 **What:**
 **Goal:** a body click opens the section's detail (sub-agent row → its Run view; task row → the

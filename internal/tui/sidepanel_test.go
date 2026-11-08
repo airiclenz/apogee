@@ -725,3 +725,371 @@ func TestSidePanelRunViewScopesALegacyRunByDepthAndSpawn(t *testing.T) {
 		t.Errorf("sub-agents does not mark the viewed legacy run alone:\n%s", strings.Join(got, "\n"))
 	}
 }
+
+// panelToolPair is one finished call by base's run — its call, then its result — landing a write
+// to target where target is not "".
+func panelToolPair(base domain.EventBase, id, tool, args, target string) []domain.Event {
+	return []domain.Event{
+		domain.ToolCallEvent{EventBase: base, Call: domain.ToolCall{ID: id, Tool: tool, Arguments: []byte(args)}},
+		domain.ToolResultEvent{
+			EventBase: base, WriteTarget: target,
+			Result: domain.ToolResult{CallID: id, Content: "line one\nline two\nline three\nline four"},
+		},
+	}
+}
+
+// panelWrite is a finished write_file call by base's run, landing a write to path.
+func panelWrite(base domain.EventBase, id, path string) []domain.Event {
+	return panelToolPair(base, id, "write_file", `{"path":"`+path+`","content":"x\n"}`, path)
+}
+
+// panelTaskCard is a finished task_list call at the top level — the card the transcript draws —
+// and the TaskListEvent the panel's tasks section reads from it.
+func panelTaskCard() []domain.Event {
+	return append(panelToolPair(domain.EventBase{}, "tl1", "task_list", string(taskListCall.Arguments), ""),
+		taskList(1, "read the plan", "write the code", "run the tests"))
+}
+
+// panelEvents flattens groups of events into one stream.
+func panelEvents(groups ...[]domain.Event) []domain.Event {
+	return slices.Concat(groups...)
+}
+
+// panelRowY is the screen row the column paints the first row containing text on.
+func panelRowY(t *testing.T, m Model, text string) int {
+	t.Helper()
+	at := slices.IndexFunc(panelText(t, m), func(row string) bool { return strings.Contains(row, text) })
+	if at < 0 {
+		t.Fatalf("the column paints no %q:\n%s", text, strings.Join(panelText(t, m), "\n"))
+	}
+	return at
+}
+
+// panelBodyX is a column a click on a panel body row lands on: inside the content, clear of the
+// separator and the gutter.
+func panelBodyX(m Model) int { return m.slotWidth() + 4 }
+
+// entryAt is the transcript index of the call id by run, failing the test where none is.
+func entryAt(t *testing.T, m Model, run runRef, callID string) int {
+	t.Helper()
+	at := slices.IndexFunc(m.transcript.entries, func(e entry) bool {
+		return e.kind == entryToolCall && e.callID == callID && e.run() == run
+	})
+	if at < 0 {
+		t.Fatalf("no tool block %q in run %+v", callID, run)
+	}
+	return at
+}
+
+// entryOnScreen reports whether entries[at]'s first marked line is on a transcript row the frame
+// shows.
+func entryOnScreen(m Model, at int) bool {
+	line := slices.IndexFunc(m.lineTargets, func(target lineTarget) bool {
+		return target.kind != targetNone && target.entry == at
+	})
+	return line >= m.viewport.YOffset() && line < m.viewport.YOffset()+m.transcriptRows()
+}
+
+// settingsSpy is a settings host that records every write it is handed: the section writes it
+// answers with the list a fresh file would resolve to, and any other write.
+type settingsSpy struct {
+	sections []domain.SidePanelEntry
+	writes   []string
+}
+
+// host is the spy as a SettingsHost, its section write failing with failure where one is given.
+func (s *settingsSpy) host(failure error) fakeSettingsHost {
+	return fakeSettingsHost{
+		write: func(path, value string) error {
+			s.writes = append(s.writes, path+"="+value)
+			return nil
+		},
+		writeSection: func(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error) {
+			s.sections = append(s.sections, domain.SidePanelEntry{Section: section, Mode: mode})
+			if failure != nil {
+				return "", failure
+			}
+			return withSectionMode(domain.DefaultSidePanelSections, section, mode), nil
+		},
+	}
+}
+
+// TestSidePanelClickOpensTheRowsDetail drives one click per body target (docs/layout/
+// side-panel-layout.md, "Pointer"): a sub-agent row opens its Run view, a task row unfolds the
+// task-list card and scrolls to it, a changed-file row unfolds that write's tool block and scrolls
+// to it — opening the run that landed it, matched by run as well as call id — and a usage row
+// opens /usage.
+func TestSidePanelClickOpensTheRowsDetail(t *testing.T) {
+	t.Parallel()
+
+	events := panelEvents(
+		panelTaskCard(),
+		panelWrite(domain.EventBase{}, "w1", "/w/top.go"),
+		[]domain.Event{
+			panelUsageReading(panelUsed),
+			panelDelegationCall(t, "r1", "scout"),
+			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		},
+		panelWrite(delegationBase("r1"), "w1", "/w/child.go"),
+	)
+	child := runOf(delegationBase("r1"))
+	cases := []struct {
+		name  string
+		row   string
+		check func(t *testing.T, m Model)
+	}{
+		{
+			name: "sub-agent row opens its Run view",
+			row:  "scout",
+			check: func(t *testing.T, m Model) {
+				if !m.inRunView() || m.viewedRun() != child {
+					t.Errorf("viewed run = %+v (in view %v), want r1's view", m.viewedRun(), m.inRunView())
+				}
+			},
+		},
+		{
+			name: "task row unfolds the card and scrolls to it",
+			row:  "write the code",
+			check: func(t *testing.T, m Model) {
+				at := entryAt(t, m, runRef{}, "tl1")
+				if !m.transcript.entries[at].expanded || !entryOnScreen(m, at) {
+					t.Errorf("card expanded %v, on screen %v; want both", m.transcript.entries[at].expanded, entryOnScreen(m, at))
+				}
+			},
+		},
+		{
+			name: "top-level file row unfolds its write's block",
+			row:  "top.go",
+			check: func(t *testing.T, m Model) {
+				at := entryAt(t, m, runRef{}, "w1")
+				if m.inRunView() || !m.transcript.entries[at].expanded || !entryOnScreen(m, at) {
+					t.Errorf("in view %v, expanded %v, on screen %v; want the top level's block open and shown",
+						m.inRunView(), m.transcript.entries[at].expanded, entryOnScreen(m, at))
+				}
+			},
+		},
+		{
+			name: "delegated file row opens the run and unfolds its write's block",
+			row:  "child.go",
+			check: func(t *testing.T, m Model) {
+				at, top := entryAt(t, m, child, "w1"), entryAt(t, m, runRef{}, "w1")
+				if m.viewedRun() != child || !m.transcript.entries[at].expanded || !entryOnScreen(m, at) {
+					t.Errorf("viewed %+v, expanded %v, on screen %v; want r1's block open in r1's view",
+						m.viewedRun(), m.transcript.entries[at].expanded, entryOnScreen(m, at))
+				}
+				if m.transcript.entries[top].expanded {
+					t.Error("the top level's w1 opened: the row's call id was matched without its run")
+				}
+			},
+		},
+		{
+			name: "usage row opens /usage",
+			row:  "cache hit",
+			check: func(t *testing.T, m Model) {
+				if !m.usagePane.open {
+					t.Error("the /usage report is not open")
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := streamOneScreen(t, panelModel(t, domain.DefaultSidePanelSections, 30, events...))
+
+			m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, tc.row))
+
+			tc.check(t, m)
+		})
+	}
+}
+
+// TestSidePanelClickTaskRowWritesNoSetting pins the regression guard of the task row: it unfolds
+// the one card through its own block state, never through the shared task-list fold, whose toggle
+// writes `ui.task-list-open`.
+func TestSidePanelClickTaskRowWritesNoSetting(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
+	spy := &settingsSpy{}
+	m.opts.Settings = spy.host(nil)
+	m.refreshViewport()
+	wasOpen := m.opts.UI.TaskListOpen
+
+	m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "run the tests"))
+
+	if len(spy.writes) != 0 || len(spy.sections) != 0 || len(m.settingEdits) != 0 {
+		t.Errorf("a task-row click wrote %v / %v (journal %v); want nothing", spy.writes, spy.sections, m.settingEdits)
+	}
+	if m.opts.UI.TaskListOpen != wasOpen {
+		t.Errorf("ui.task-list-open moved to %v", m.opts.UI.TaskListOpen)
+	}
+}
+
+// TestSidePanelClickHeaderTitleBlankAndWheelDoNothing pins the cells that target nothing: the
+// header title, a blank cell below the sections and a wheel notch over the column leave the model
+// as it was — no view opened, no section toggled, the transcript not scrolled.
+func TestSidePanelClickHeaderTitleBlankAndWheelDoNothing(t *testing.T) {
+	t.Parallel()
+	m := streamOneScreen(t, panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...))
+	m = step(t, m, tea.MouseWheelMsg{X: 4, Y: 2, Button: tea.MouseWheelUp}) // off the tail, so a notch could move it
+	offset, sections := m.viewport.YOffset(), m.opts.UI.SidePanelSections
+	header := panelRowY(t, m, "Tasks")
+
+	for _, cell := range [][2]int{{panelBodyX(m), header}, {panelBodyX(m), m.transcriptRows() - 1}} {
+		m = clickCell(t, m, cell[0], cell[1])
+	}
+	m = step(t, m, tea.MouseWheelMsg{X: panelBodyX(m), Y: header, Button: tea.MouseWheelUp})
+
+	if m.viewport.YOffset() != offset || m.opts.UI.SidePanelSections != sections || m.inRunView() {
+		t.Errorf("offset %d→%d, sections %q→%q, in view %v; want all unchanged",
+			offset, m.viewport.YOffset(), sections, m.opts.UI.SidePanelSections, m.inRunView())
+	}
+	if m.transcriptSel.active || m.sel.active {
+		t.Error("a click on the column armed a selection")
+	}
+}
+
+// TestSidePanelClickHoverShapeMatches pins the pointer shape over the column to what a click there
+// does: the hand over a body row and the pin glyph, the arrow over a header title and a blank cell.
+func TestSidePanelClickHoverShapeMatches(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
+	m.refreshViewport()
+	pre := m.withFrameSpans()
+	header := panelRowY(t, m, "Tasks")
+	cases := []struct {
+		name string
+		x, y int
+		want pointerShape
+	}{
+		{"body row", panelBodyX(m), panelRowY(t, m, "read the plan"), shapePointer},
+		{"pin glyph", m.width - 1, header, shapePointer},
+		{"header title", panelBodyX(m), header, shapeDefault},
+		{"blank cell", panelBodyX(m), m.transcriptRows() - 1, shapeDefault},
+	}
+	for _, tc := range cases {
+		if got := m.pointerShapeAt(pre, tc.x, tc.y); got != tc.want {
+			t.Errorf("%s: shape %q, want %q", tc.name, got.name(), tc.want.name())
+		}
+	}
+}
+
+// TestSidePanelClickTakesNoApprovalDecision pins the panel hit before the panes: the approval
+// pane's hits are y-only, so two clicks on the column beside its Deny row must take no decision.
+func TestSidePanelClickTakesNoApprovalDecision(t *testing.T) {
+	t.Parallel()
+	reply := make(chan domain.ApprovalDecision, 1)
+	m := streamOneScreen(t, panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...))
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
+		Reply:   reply,
+	})
+	if m.state != stateAwaitingApproval {
+		t.Fatalf("setup: state = %v, want the call waiting on the human", m.state)
+	}
+	m = armApproval(t, m)
+	_, y := frameCell(t, m, "Deny")
+
+	m = clickCell(t, clickCell(t, m, m.width-3, y), m.width-3, y)
+
+	if decision, sent := sentDecision(t, reply); sent {
+		t.Errorf("two clicks on the column beside Deny ruled %q", decision)
+	}
+	if m.state != stateAwaitingApproval {
+		t.Errorf("state = %v, want the call still waiting", m.state)
+	}
+}
+
+// TestSidePanelClickBesideABlockHeaderLeavesIt pins the column's claim on every cell: a click on a
+// blank panel cell on the row of a tool block's header does not reach the block.
+func TestSidePanelClickBesideABlockHeaderLeavesIt(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30,
+		panelToolPair(domain.EventBase{}, "r1", "terminal", `{"command":"go test ./..."}`, "")...)
+	m.refreshViewport()
+	at := entryAt(t, m, runRef{}, "r1")
+	line := slices.IndexFunc(m.lineTargets, func(target lineTarget) bool { return target.entry == at && target.kind != targetNone })
+	if line < 0 {
+		t.Fatal("setup: the read_file block marks no click surface")
+	}
+	y := screenRow(t, m, line)
+	if rows := panelText(t, m); y < len(rows) && strings.TrimSpace(rows[y]) != "" {
+		t.Fatalf("setup: the column paints %q beside the header; want a blank cell", rows[y])
+	}
+	before := expandedFlags(m)
+
+	m = clickCell(t, m, m.width-3, y)
+
+	if got := expandedFlags(m); !slices.Equal(got, before) {
+		t.Errorf("expanded %v → %v: the click beside the header reached the block", before, got)
+	}
+}
+
+// TestSidePanelPinTogglesAndWritesBack drives the pin glyph: a click on an auto section's ⊙ pins
+// it, through the settings host, and lands the list the host answers; a second click unpins it. A
+// failed write leaves the section pinned on screen and says so in the transcript.
+func TestSidePanelPinTogglesAndWritesBack(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pin then unpin", func(t *testing.T) {
+		t.Parallel()
+		m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
+		spy := &settingsSpy{}
+		m.opts.Settings = spy.host(nil)
+
+		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+		pinned := m.opts.UI.SidePanelSections
+		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+
+		want := []domain.SidePanelEntry{
+			{Section: domain.SidePanelTasks, Mode: domain.SidePanelModePinned},
+			{Section: domain.SidePanelTasks, Mode: domain.SidePanelModeAuto},
+		}
+		if !slices.Equal(spy.sections, want) {
+			t.Errorf("section writes %v, want %v", spy.sections, want)
+		}
+		if !strings.Contains(string(pinned), "tasks: pinned") || m.opts.UI.SidePanelSections != domain.DefaultSidePanelSections {
+			t.Errorf("lists %q then %q; want tasks pinned, then the default", pinned, m.opts.UI.SidePanelSections)
+		}
+		if len(m.settingEdits) != 1 || m.settingEdits[0].path != domain.UIKeySidePanelSections {
+			t.Errorf("journal %+v, want one %s entry", m.settingEdits, domain.UIKeySidePanelSections)
+		}
+	})
+
+	t.Run("a failed write keeps the pin and says so", func(t *testing.T) {
+		t.Parallel()
+		m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
+		m.opts.Settings = (&settingsSpy{}).host(fmt.Errorf("disk full"))
+
+		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+
+		if !strings.Contains(panelText(t, m)[panelRowY(t, m, "Tasks")], glyphPanelPinned) {
+			t.Errorf("the header does not wear %s after the pin:\n%s", glyphPanelPinned, strings.Join(panelText(t, m), "\n"))
+		}
+		if !strings.Contains(plain(m.View()), sidePanelSectionsSource+": "+taskListNotSavedNote+"disk full") {
+			t.Error("the failed write is not reported in the transcript")
+		}
+	})
+}
+
+// TestSidePanelDragStopsAtTheSeparator pins the drag rule: a drag-select from the transcript stops
+// at the separator however far into the column it is carried, and one that starts in the column
+// selects nothing.
+func TestSidePanelDragStopsAtTheSeparator(t *testing.T) {
+	t.Parallel()
+	m := streamOneScreen(t, panelModel(t, domain.DefaultSidePanelSections, 30))
+	const y = 3
+
+	dragged := step(t, step(t, m, leftClick(2, y)), leftDrag(m.width-2, y))
+
+	if !dragged.transcriptSel.active || dragged.transcriptSel.head.col > dragged.viewport.Width() {
+		t.Errorf("selection %+v; want a live drag whose head stops at the slot's edge (%d)",
+			dragged.transcriptSel, dragged.viewport.Width())
+	}
+
+	fromPanel := step(t, step(t, step(t, m, leftClick(m.width-2, y)), leftDrag(2, y)), leftRelease(2, y))
+
+	if fromPanel.transcriptSel.active || fromPanel.sel.active {
+		t.Error("a drag that started in the column armed a selection")
+	}
+}
