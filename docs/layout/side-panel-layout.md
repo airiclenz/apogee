@@ -1,6 +1,7 @@
-> **Status:** design of record from the 2026-11-07 grill ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md),
-> issue `tui-side-panel`). **Not yet implemented.** The plan that builds it amends this file where the
-> two differ. `layout.md` §"The side panel" holds the rule that binds the rest of the frame.
+> **Status:** shipped (2026-11-08, `docs/plans/2026-11-08 - 00 - tui-side-panel-plan.md`), from the
+> 2026-11-07 grill ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md), issue `tui-side-panel`).
+> This file describes the panel as built. `layout.md` §"The side panel" holds the rule that binds the
+> rest of the frame; the user-facing account is `docs/manual/configuration.md` (the `ui:` section).
 
 # The side panel
 
@@ -12,16 +13,16 @@ its detail.
 ## Where it sits
 
 ```
- ❯ refactor the parser                                    │ ◆ Sub-agents                     ⊙
-                                                          │ ⠋ repo-scout   explore  1m12  41%
- I'll start by mapping the call sites…                    │ ✔ planner      done       38s
-                                                          │ ◆ Tasks 2/5                      ⊙
- ⏺ Read internal/parse/lexer.go                           │ ✔ map call sites
+ ❯ refactor the parser                                    │ ◆ Sub-agents 1 running           ⊙
+                                                          │ ⠋ repo-scout   running 01:12s  41%
+ I'll start by mapping the call sites…                    │ ✓ planner      done       38s  27%
+                                                          │ ◆ Tasks 1/3                      ⊙
+ ⏺ Read internal/parse/lexer.go                           │ ✓ map call sites
  ⏺ Edit internal/parse/parser.go  +12 −4                  │ ▸ split the tokenizer
                                                           │ ○ port the tests
-                                                          │ ◆ Changed files                  ⊙
-                                                          │ …/parse/parser.go         +12 −4
-                                                          │ …/parse/lexer_test.go   ↳  +30 −0
+                                                          │ ◆ Changed files 2                ⊙
+                                                          │ …/parse/parser.go           +12 −4
+                                                          │ …/parse/lexer_test.go     ↳ +30 −0
                                                          ▐│ ◆ Usage 62%                      ⊙
  ── session name ────────────────────────────────────────────────────────────────────────────────
  ⠋ thinking…                                                                     ctx 62% ▕████▍▏
@@ -72,16 +73,36 @@ Default list, all `auto`: `sub-agents`, `tasks`, `changed-files`, `usage`.
 
 | Section | Live while (auto) | Row content |
 |---|---|---|
-| `sub-agents` | any run is running, and for 30 s after the last one ends | spinner or end glyph, Delegation name, phase, elapsed, context fill |
+| `sub-agents` | any run is queued or running, and for 30 s after the last one ends | phase glyph, Delegation name, phase word, elapsed, context fill |
 | `tasks` | the list has an unfinished task | status glyph and task text; the first unfinished task marked `▸` |
-| `changed-files` | the session (any depth) has written a file | path trimmed from the left, `+N −M` from Edit regions where present, `↳` when a sub-agent wrote it |
-| `usage` | context fill ≥ 50% | fill bar; system / tools / history split (history = estimate − standing rows); tokens in/out; cache hit %; spend |
+| `changed-files` | the session (any depth) has written a file | path trimmed from the left, `↳` when a sub-agent wrote it, `+N −M` from Edit regions where present |
+| `usage` | context fill ≥ 50% | fill bar with `used/window`; `sys · tools · hist` split (history = estimate − standing rows); `in · out` tokens; cache hit %; spend |
 
 The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune; the rules are ADR
 0110's.
 
-**Header row:** `◆ <Title>` with a summary where it has one (`Tasks 2/5`, `Usage 62%`), and the pin
-glyph `⊙` (unpinned) or `●` (pinned) at the right edge.
+**Sub-agent rows.** The phase glyph is the status line's spinner frame while the run is running
+(`ui.spinner`, so it turns with the status line), `○` while it is queued, the glyph set's done mark
+(`✓`, `√` under `ui.glyphs: safe`) once it has finished, and its failure mark (`✗`, `x` under `safe`) when it failed.
+The phase word is `queued`, `running`, `done` or `failed`. Elapsed time is the status line's clock
+form (`38s`, `01:12s`), blank while queued; the fill is the run's latest reading against its own
+window, blank before it has one. Phase, elapsed and fill sit in fixed-width columns at the right
+edge, so the facts of every row line up.
+
+**Task rows.** A finished task is the done mark, dim; the current task (the first unfinished one) is
+`▸` in the current-task style; any other open task is `○`. The task list stores only done / not
+done, so there is no separate in-progress state.
+
+**Changed-file rows.** One row per path, in first-write order; several writes to one path merge
+into its row. A path inside the workspace is shown relative to it, one outside it absolute, then
+trimmed from the left a whole component at a time behind `…/`. Only apogee's file tools count —
+the ones that name the file they write, a deletion included — and a failed write is not counted. A
+file changed through the `terminal` tool is not shown (ADR 0110 decision 13).
+
+**Header row:** `◆ <Title>` with a summary wherever the section has one — `Sub-agents 1 running`
+(`2 running · 1 queued`, `3 queued`, or `3 done` once all have ended), `Tasks 2/5`,
+`Changed files 4` (the file count), `Usage 62%` — and the pin glyph `⊙` (auto) or `●` (pinned) at
+the right edge.
 
 ## Overflow
 
@@ -108,18 +129,28 @@ When the shown sections need more rows than the slot has:
 
 ## Run view
 
-While Run view shows a run, `tasks`, `changed-files` and `usage` show that run's state, matching
-the status-line gauge. `sub-agents` keeps listing every run, and the viewed one is marked.
+While Run view shows a run, `tasks`, `changed-files` and `usage` show that run's state, and the
+usage fill reads exactly what the status-line gauge reads. `sub-agents` keeps listing every run, and
+the viewed one is marked with `▸` before its name, both in the current-task style. `esc` back to the
+conversation gives the panel back to the top level.
 
 ## Commands
 
 - `/panel on|off|auto` sets `ui.side-panel.show`.
 - `/panel pin|unpin|hide <section>` sets one section's mode (`unpin` → `auto`).
+- Bare `/panel` reports the mode and every section's mode
+  (`side panel: auto — sub-agents auto · tasks pinned · …`), adding
+  `(not drawn: the window is narrower than N columns)` when the mode would draw the column but the
+  window is too narrow. Every form ends with that report.
+- Each write is saved to the global config as a pin-glyph click is; a failed save keeps the change
+  for the session and says `not saved`. The report answers mid-run, the writing forms wait for idle,
+  and the command is refused while watching a session.
 - No key binding in v1 (ADR 0110 decision 8).
 
 ## Replay
 
-Watch mode folds the Event journal, so it paints the live session's panel. A resumed session has
+Watch mode folds the Event journal, so it paints the live session's panel. `/clear` empties the
+panel. A resumed session has
 no journal and folds its stored record instead: the task list, changed files and usage come back,
 and the sub-agents section starts empty. The visibility rule is the viewer's own window and
 setting.

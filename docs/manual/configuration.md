@@ -1296,7 +1296,8 @@ that shows the sub-agents at work, the task list, the files changed this session
 ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md)). `auto` — the default — draws it while
 the transcript keeps at least 100 columns beside it, `on` while it keeps at least 80, and `off`
 never. Any other word is a startup error that names the key. It lives in a nested `side-panel:`
-block, and `/settings` edits it.
+block, and `/settings` edits it. What the panel shows, and what a click on it does, is under [The
+side panel](#the-side-panel) below.
 
 `ui.side-panel.sections` lists the panel's sections in the order it shows them — `sub-agents`,
 `tasks`, `changed-files` and `usage` — each in a mode: `pinned` (always shown), `auto` (shown while
@@ -1339,6 +1340,60 @@ alone, and it admits the skill on its own, with no other evidence required — t
 the general one, that a draft carry at least three words before anything is suggested.
 Phrases are lowercased and their whitespace normalised, capped at 64 characters each and 32 to a
 skill, and `/skills` lists them back so you can see what a skill declared.
+
+### The side panel
+
+On a wide terminal apogee draws a 36-column panel on the right of the transcript that keeps the
+session's live state in view: the sub-agents at work, the task list, the files changed this session
+and the usage. It is a glance, not a workspace — it never takes keyboard focus, and the views it
+summarises (a sub-agent's run view, the task-list card, `/usage`) stay where they were.
+
+**When it shows.** Under `ui.side-panel.show: auto` (the default) the panel appears once the window
+is at least 137 columns wide, which leaves the transcript 100; under `on`, from 117 columns, leaving
+80; under `off`, never. The panel appears or vanishes only when the window crosses that width or you
+change the setting — nothing inside it moves the transcript's edge, so live content never re-wraps
+your conversation. It takes the rows above the session-name rule; the status line, prompt box and
+footer keep the full width. With nothing to show it reads `nothing live`.
+
+**Its sections**, in the order `ui.side-panel.sections` lists them, each under a `◆ <Title>` header
+with its summary and a pin glyph — `⊙` for `auto`, `●` for `pinned`:
+
+| Section | Shown in `auto` while | Each row |
+|---|---|---|
+| `sub-agents` | a delegation is queued or running, and for 30 s after the last one ends | the status line's spinner while it runs, `○` queued, `✓` done, `✗` failed; its name, phase, elapsed time and context fill |
+| `tasks` | the task list has an unfinished task | `✓` done, `▸` the current task (the first unfinished one), `○` still open |
+| `changed-files` | the session has written a file, at any depth | the path, trimmed from the left to fit; `↳` when a sub-agent wrote it; `+N −M` lines where the edit reports them |
+| `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
+
+Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
+shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√` and the failed one `x`.
+
+When the sections need more rows than the panel has, pinned sections get their rows first, then
+the `auto` ones in list order. A section that does not get its full height folds to its header
+(`◆ Tasks 2/5`); when not even every header fits, the last ones are left out and the bottom row
+reads `+N more`. The panel never scrolls.
+
+**The mouse.** A click on a sub-agent row opens its run view; on a task row it unfolds the
+task-list card and scrolls to it; on a changed-file row it unfolds that write's tool block (opening
+the run that wrote it); on the usage section it opens `/usage`. A click on a header's pin glyph
+toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
+config. Header titles, blank cells and the mouse wheel do nothing there.
+
+**Run view.** While a sub-agent's run view is open, the tasks, changed files and usage are that
+run's, and the usage fill matches the status-line gauge; the sub-agents section still lists every
+run and marks the viewed one with `▸`. `esc` back to the conversation gives the panel back to the
+top level.
+
+**From the prompt.** `/panel on`, `/panel off` and `/panel auto` set `ui.side-panel.show`;
+`/panel pin <section>`, `/panel unpin <section>` and `/panel hide <section>` set one section's mode.
+Bare `/panel` reports the settings in force and says when the window is too narrow to draw the
+panel. Every change is saved to your global config ([commands](commands.md)). There is no key
+binding for the panel.
+
+**Watching and resuming.** [Watching](sessions.md#watching-a-live-session) a session paints that
+session's panel, drawn by your own window and setting; `/panel` is not available while you watch. A
+resumed session's panel shows its stored task list, changed files and usage; its sub-agents section
+starts empty. `/clear` empties the panel.
 
 ## Keeping the window from overflowing — compaction and pruning
 

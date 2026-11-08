@@ -11,6 +11,6 @@ workspace: a click on a section opens its detail view (**Run view**, the task-li
 and it takes no keyboard focus. The column itself appears or vanishes only when the window crosses
 a width threshold or `ui.side-panel.show` changes, so live content never re-wraps the transcript. Every
 section folds from engine **Events**, so **Watch mode** and a resumed session show the same panel.
-Ratified 2026-11-07 (ADR 0110); not yet implemented.
+Ratified 2026-11-07 (ADR 0110); shipped 2026-11-08, set with `/panel` and the `ui.side-panel` keys.
 _Avoid_: "sidebar" (the docs' word is side panel), "dashboard" (it is display state beside the
 transcript, not a separate screen).

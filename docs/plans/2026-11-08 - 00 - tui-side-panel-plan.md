@@ -489,7 +489,12 @@ card and an errored card do not replace the session's list; watch mode refuses `
 **Acceptance:** `GOMEMLIMIT=2GiB go test -race -count=1 -run 'SidePanelCommand|SidePanelResume|TestHelpNoteListsEveryVerb|TestOnlyTheGrammarVerbsCarryAParseArgsHook' ./internal/tui/`
 **Commit:** `feat(tui): add /panel and rebuild the side panel on resume`
 
-## 13. Docs go live
+## 13. Docs go live — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the spec now describes what shipped, not the grill sketch: the sketch's panel side was redrawn from the paint (✓ not ✔, `running 01:12s` not `explore 1m12`, a summary on every header, `Tasks 1/3` so the sketch obeys its own fold rule), and new paragraphs record items 9–12's choices: sub-agent, task and changed-file row rules, header summaries, the `▸` mark on the viewed run (item 10), bare `/panel`'s report and save posture (item 12), and `/clear` emptying the panel.
+NOTES (2026-11-08): the manual section is a `### The side panel` subsection at the end of configuration.md's `ui:` section (after the skill-suggestion `triggers:` prose, so that prose keeps its place), with a one-line pointer to it from the `ui.side-panel.show` paragraph; the key paragraphs themselves are unchanged.
+NOTES (2026-11-08): the rule grep still hits two layout.md lines (1537 "not yet started", 2027 "not yet committed"/"not yet merged"); both are about other surfaces, not the panel, and stay.
+NOTES (2026-11-08): this item names no ticket; the plan header's `Closes: tui-side-panel` is the run's to collect now that the last item lands.
 
 **What:**
 **Goal:** the shipped docs describe the panel as implemented: the spec's status line, `layout.md`
