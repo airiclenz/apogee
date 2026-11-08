@@ -53,7 +53,10 @@
 - 7: guard folded (`internal/tuitest/driver_test.go`, `msgLog.mouse()` keeps motion; `sgrMouse` takes a button).
 - 8: guard folded (rule + grep incl. `config.yaml`; owns `/panel width` in §Commands and "From the prompt.").
 
-## 1. Amend ADR 0110 and ADR 0106, update the glossary term
+## 1. Amend ADR 0110 and ADR 0106, update the glossary term — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): ADR 0110's superseded original sentences (summary :8,:12, decision headline, D6, D7, consequences re-key bullet, the Rejected "Proportional or user-set width" entry) are left verbatim and named in adr-0110-amend-1108's "What this supersedes" paragraph, per the house rule that a record is corrected by amendment, not by rewriting its Decision text; adr-0110.md gained only the Status-line and reading-order mentions.
+NOTES (2026-11-08): no ADR 0106 Note or edit, per the plan's recast item; the issue side-panel-resize's Acceptance line still says "ADR 0110 and 0106 amended" — the amendment records why 0106 needs none (its Decision 5 covers button-less motion only).
 
 **What:**
 Recast at the regression check (2026-11-08).
