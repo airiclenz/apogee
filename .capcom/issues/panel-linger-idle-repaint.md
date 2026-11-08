@@ -3,6 +3,7 @@ title: Side panel sub-agents section outlives its 30 s linger on an idle frame
 status: open
 type: bug
 priority: 2
+plan: 2026-11-08 - 01 - side-panel-followups-plan
 created: 2026-11-08T13:24:46Z
 ---
 
