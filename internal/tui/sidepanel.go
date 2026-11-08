@@ -605,7 +605,7 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 // after the first one because the header's span is a function of the offset. An entry the paint
 // marks no line for leaves the view where the repaint put it.
 func (m *Model) revealEntry(index int) {
-	m.refreshViewport()
+	m.refreshViewport() // geometry: the lookup below reads lineTargets off the repaint that carries the block just unfolded, and the anchor reads its line
 	line := slices.IndexFunc(m.lineTargets, func(t lineTarget) bool {
 		return t.kind != targetNone && t.entry == index
 	})
