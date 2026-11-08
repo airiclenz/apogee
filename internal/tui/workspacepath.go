@@ -3,6 +3,8 @@ package tui
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
@@ -34,6 +36,12 @@ import (
 type workspaceRoot struct {
 	// root is the cleaned absolute workspace path, or "" when there is nothing to shorten against.
 	root string
+
+	// realRoot is root with every symlink resolved (security.EvalRealPath), or "" exactly when root
+	// is. It is not a spelling the shortener uses: it keys the side panel's changed files
+	// (Model.panelWriteKey), where the engine reports a landed write by its real path, so a root
+	// reached through a symlink would otherwise key the same file two ways.
+	realRoot string
 }
 
 // newWorkspaceRoot resolves the root paths are printed relative to. An empty or relative path
@@ -45,6 +53,9 @@ type workspaceRoot struct {
 // reason: it would make every absolute path on the machine "inside the workspace", so `/etc/passwd`
 // would print as `etc/passwd` and the one distinction this whole file exists to preserve — in the
 // project versus genuinely elsewhere — would collapse.
+//
+// The root's real path is resolved here too, once per session rather than once per write; a root
+// that does not exist resolves to its own spelling below its deepest existing ancestor.
 func newWorkspaceRoot(path string) workspaceRoot {
 	p := strings.TrimSpace(path)
 	if p == "" || !filepath.IsAbs(p) {
@@ -54,7 +65,7 @@ func newWorkspaceRoot(path string) workspaceRoot {
 	if clean == filepath.VolumeName(clean)+string(filepath.Separator) {
 		return workspaceRoot{}
 	}
-	return workspaceRoot{root: clean}
+	return workspaceRoot{root: clean, realRoot: security.EvalRealPath(clean)}
 }
 
 // shorten rewrites one display line so every path it names inside the workspace reads relative to

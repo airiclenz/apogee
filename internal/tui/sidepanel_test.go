@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1509,4 +1511,99 @@ func TestSidePanelResumeRebuildsThroughBothDoors(t *testing.T) {
 			t.Errorf("the outgoing session's task survived the restore:\n%s", column)
 		}
 	})
+}
+
+// symlinkedWorkspace makes a real workspace directory and a symlink to it, returning both spelled
+// with every other symlink already resolved, so a temp directory that itself sits under one (macOS's
+// /var) cannot stand in for the link under test.
+func symlinkedWorkspace(t *testing.T) (link, realRoot string) {
+	t.Helper()
+	realRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temp workspace: %v", err)
+	}
+	linkDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temp link directory: %v", err)
+	}
+	link = filepath.Join(linkDir, "workspace")
+	if err := os.Symlink(realRoot, link); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+	return link, realRoot
+}
+
+// TestPanelWriteKeyUnderSymlinkedRoot keys one file one way whatever spelling reaches the panel —
+// relative, absolute through the symlinked root, absolute through the real root the engine's
+// WriteTarget names — keeps a file outside the workspace absolute, and with no workspace only
+// cleans the path.
+func TestPanelWriteKeyUnderSymlinkedRoot(t *testing.T) {
+	t.Parallel()
+	link, realRoot := symlinkedWorkspace(t)
+	outsideDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the outside directory: %v", err)
+	}
+	opts := testOpts
+	opts.Workspace = link
+	linked := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	opts.Workspace = ""
+	unrooted := newModel(context.Background(), &fakeEngine{}, opts, nil)
+
+	cases := []struct {
+		name string
+		m    Model
+		path string
+		want string
+	}{
+		{"relative", linked, "src/a.go", "src/a.go"},
+		{"through the symlinked root", linked, link + "/src/a.go", "src/a.go"},
+		{"through the real root", linked, realRoot + "/src/a.go", "src/a.go"},
+		{"uncleaned through the symlinked root", linked, link + "/src/../src/a.go", "src/a.go"},
+		{"outside the workspace", linked, outsideDir + "/x.go", outsideDir + "/x.go"},
+		{"no workspace, relative", unrooted, "src/./a.go", "src/a.go"},
+		{"no workspace, absolute", unrooted, "/elsewhere/../x.go", "/x.go"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.m.panelWriteKey(tc.path)
+
+			if got != tc.want {
+				t.Errorf("panelWriteKey(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSidePanelResumeThenLiveWriteUnderSymlinkedRootIsOneRow resumes a record whose write_file call
+// spelled its path relative, under a workspace reached through a symlink, then lands a live rewrite
+// of the same file whose WriteTarget is the engine's real path: one changed-files row, naming the
+// live call.
+func TestSidePanelResumeThenLiveWriteUnderSymlinkedRootIsOneRow(t *testing.T) {
+	t.Parallel()
+	link, realRoot := symlinkedWorkspace(t)
+	opts := testOpts
+	opts.Workspace = link
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	src := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	for _, e := range panelToolPair(domain.EventBase{}, "w1", "write_file", `{"path":"src/a.go","content":"x\n"}`, realRoot+"/src/a.go") {
+		src = src.foldEvent(e)
+	}
+	blob, err := encodeTranscript(&src.transcript)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	opts.Resumed = &ResumedSession{Transcript: blob, Title: "t"}
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	for _, e := range panelToolPair(domain.EventBase{}, "w9", "write_file", `{"path":"src/a.go","content":"y\n"}`, realRoot+"/src/a.go") {
+		m = m.foldEvent(e)
+	}
+
+	if files := m.panel.ChangedFiles(sidepanel.RunKey{}).Rows; len(files) != 1 || files[0].Path != "src/a.go" || files[0].CallID != "w9" {
+		t.Errorf("changed files = %+v, want one src/a.go row naming w9", files)
+	}
 }

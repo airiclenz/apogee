@@ -13,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 )
 
@@ -939,22 +940,23 @@ func regionsStat(regions []domain.EditRegion) *domain.DiffStat {
 	return &stat
 }
 
-// panelWriteKey is the one key a changed file is folded under, live and on resume alike: the path
-// relative to the workspace where it lies inside it, cleaned and absolute where it lies outside or
-// no workspace is known. A relative path is read against the workspace, as the writer tools read
-// it. One key on both sides is what keeps a file rewritten after a resume on one row, whether the
-// stored argument spelled it relative or absolute; the painter shortens either the same way
-// (panelFileRow).
+// panelWriteKey is the one key a changed file is folded under, live and on resume alike: its real
+// path (security.EvalRealPath) relative to the workspace's real path where it lies inside it, the
+// cleaned absolute real path where it lies outside, and the path merely cleaned where no workspace
+// is known. A relative path is read against the workspace, as the writer tools read it. One key on
+// both sides is what keeps a file rewritten after a resume on one row, whether the stored argument
+// spelled it relative, absolute through a symlinked root, or absolute through the real root the
+// live result's WriteTarget names; the painter shortens either the same way (panelFileRow).
 func (m Model) panelWriteKey(path string) string {
-	root := m.transcript.ws.root
-	if !filepath.IsAbs(path) && root != "" {
-		path = filepath.Join(root, path)
+	ws := m.transcript.ws
+	if ws.root == "" {
+		return filepath.Clean(path)
 	}
-	path = filepath.Clean(path)
-	if root == "" {
-		return path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(ws.root, path)
 	}
-	rel, err := filepath.Rel(root, path)
+	path = security.EvalRealPath(path)
+	rel, err := filepath.Rel(ws.realRoot, path)
 	if err != nil || !filepath.IsLocal(rel) {
 		return path
 	}

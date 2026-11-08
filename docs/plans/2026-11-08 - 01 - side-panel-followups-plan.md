@@ -85,7 +85,10 @@ ends, and that repaint no longer shows the section; a test pins it on an otherwi
 
 **Commit:** `fix(tui): repaint the side panel when the sub-agents linger ends`
 
-## 2. One changed-files row for a file written under a symlinked workspace root
+## 2. One changed-files row for a file written under a symlinked workspace root — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the root's real path is a new `realRoot` field on `workspaceRoot`, set by `newWorkspaceRoot` via `security.EvalRealPath`; `root` and the shortener are unchanged. A hand-built `workspaceRoot{root: …}` literal leaves `realRoot` empty, so `panelWriteKey` returns the absolute real path there (no production code builds one; tests build through `newModel`/`newWorkspaceRoot`).
+NOTES (2026-11-08): `panelWriteKey` with no workspace returns the path only cleaned, as before (no symlink resolution); a path outside the workspace now keys as its absolute real path, which a resumed row shows the way the live write already did.
 
 **What:** fix for `panel-write-key-symlink`: `Model.panelWriteKey` takes `filepath.Rel` against the
 configured root only. The live `ToolResultEvent.WriteTarget` is the engine's real path
