@@ -41,8 +41,8 @@ const (
 )
 
 // IsSidePanelKey reports whether key is one of the `ui.side-panel:` block's two keys, which
-// [SaveSidePanelSetting] writes rather than [SaveConfigSetting]: the scalar writer refuses a path
-// three segments deep.
+// [SaveSidePanelSetting] writes and [ResetSidePanelSetting] resets rather than [SaveConfigSetting] and
+// [ResetConfigSetting]: the scalar writer refuses a path three segments deep.
 func IsSidePanelKey(key string) bool {
 	return key == domain.UIKeySidePanelShow || key == domain.UIKeySidePanelSections
 }
@@ -66,6 +66,34 @@ func SaveSidePanelSetting(path, key, value string) error {
 			return entries, nil
 		})
 		return err
+	}
+	return fmt.Errorf("apogee: %q is not a key of the %s block", key, sidePanelBlockPath)
+}
+
+// ResetSidePanelSetting removes one key of the `ui.side-panel:` block from the file, so the key
+// resolves from its default again — [ResetConfigSetting] for the block the scalar writer cannot reach.
+// The key's active line goes, and with it each block the removal leaves empty (`side-panel:`, then
+// `ui:`), as the scalar reset drops a block it empties; comments, order and every other key stay as
+// found. A key the file does not set is already at its default: a no-op, and nothing is written.
+//
+// Only `ui.side-panel.show` is reset here. `ui.side-panel.sections` is a structured list edited in
+// the file, which no settings surface resets — refused as [ResetConfigSetting] refuses such a key.
+func ResetSidePanelSetting(path, key string) error {
+	switch key {
+	case domain.UIKeySidePanelShow:
+		k, ok := LookupKey(key)
+		if !ok {
+			return fmt.Errorf("apogee: %q is not a setting apogee knows", key)
+		}
+		splice := func(_ fileConfig, data []byte) ([]byte, error) {
+			return spliceSidePanelDelete(data, sidePanelShowLeaf, k.Kind)
+		}
+		verify := func(before, after fileConfig, updated []byte) error {
+			return verifyScalarEdit(before, after, updated, k, "", false)
+		}
+		return edit(path, splice, verify)
+	case domain.UIKeySidePanelSections:
+		return fmt.Errorf("apogee: %s is not a simple value; edit it in config.yaml", key)
 	}
 	return fmt.Errorf("apogee: %q is not a key of the %s block", key, sidePanelBlockPath)
 }
@@ -254,6 +282,35 @@ func spliceSidePanelLine(data []byte, leaf string, kind Kind, text string) ([]by
 	out := slices.Clone(lines)
 	out[spot.leaf.KeyNode.Line-1] = line
 	return joinConfigLines(out), nil
+}
+
+// spliceSidePanelDelete removes the block's leaf key: its active line, then `side-panel:` when the
+// key was the block's only one, then `ui:` when that block was the only one there. It returns nil
+// bytes when the file does not set the key.
+func spliceSidePanelDelete(data []byte, leaf string, kind Kind) ([]byte, error) {
+	doc, err := Document(data)
+	if err != nil {
+		return nil, err
+	}
+	lines := SplitConfigLines(data)
+	spot, err := sidePanelSpotIn(doc, leaf, kind)
+	if err != nil {
+		return nil, err
+	}
+	if !spot.leaf.IsSet() {
+		return nil, nil
+	}
+	if _, _, _, err := scalarLineParts(lines, spot.leaf); err != nil {
+		return nil, err
+	}
+	drop := []int{spot.leaf.KeyNode.Line}
+	if len(spot.leaf.ParentBody.Content) == 2 {
+		drop = append(drop, spot.block.KeyNode.Line)
+		if spot.block.ParentBody != nil && len(spot.block.ParentBody.Content) == 2 {
+			drop = append(drop, spot.block.ParentKey.Line)
+		}
+	}
+	return deleteLines(lines, drop...)
 }
 
 // sidePanelInsertion is the lines to insert for a block key the file does not set, and the 1-based

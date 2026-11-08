@@ -77,6 +77,41 @@ func TestSettingsHostSidePanelSectionsWriteRefreshesTheBaseline(t *testing.T) {
 	}
 }
 
+// The `/settings` Reset of `ui.side-panel.show` goes to the block's writer too — the scalar reset
+// refuses a path three segments deep, so the pane announced a key it then could not reset — and
+// re-takes the baseline as every landed write does. The file reads back at the default.
+func TestSettingsHostResetsSidePanelShow(t *testing.T) {
+	t.Parallel()
+	c := newWatchedConfig(t, "ui:\n  spinner: glitter\n  side-panel:\n    show: \"off\"\n    sections: [usage: hidden]\n")
+	h := settingsHost{configPath: c.path, edits: c.edits}
+
+	if err := h.Reset(domain.UIKeySidePanelShow); err != nil {
+		t.Fatalf("Reset show: %v", err)
+	}
+
+	data, err := os.ReadFile(c.path)
+	if err != nil {
+		t.Fatalf("read the config back: %v", err)
+	}
+	if want := "ui:\n  spinner: glitter\n  side-panel:\n    sections: [usage: hidden]\n"; string(data) != want {
+		t.Errorf("config =\n%s\nwant\n%s", data, want)
+	}
+	opts, err := config.LoadFileConfig(c.path, os.ReadFile, func(string) {})
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if opts.UI.SidePanelShow != domain.DefaultSidePanelShow {
+		t.Errorf("show reads back %q, want the default %q", opts.UI.SidePanelShow, domain.DefaultSidePanelShow)
+	}
+	applied, err := c.reload(t, "apogee's own side-panel reset")
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 0 {
+		t.Errorf("the watcher reported %+v for apogee's own reset; it would apply twice", applied)
+	}
+}
+
 // The `/settings` write of either `ui.side-panel` key goes to the block's writer — the scalar
 // writer refuses a path three segments deep — and re-takes the baseline as every landed write does.
 func TestSettingsHostWritesBothSidePanelSectionsBlockKeys(t *testing.T) {

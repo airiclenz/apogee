@@ -309,3 +309,82 @@ func TestSidePanelSectionsRefusedWriteSeedsNothing(t *testing.T) {
 		t.Errorf("a refused write created the config (stat: %v)", statErr)
 	}
 }
+
+// A reset of `ui.side-panel.show` removes its line through the block's writer — the scalar reset
+// refuses a path three segments deep — so the key reads back at its default. Comments, order and the
+// other keys stay as found; a block the removal empties goes with it, and `ui:` too when the block
+// was all it held.
+func TestSidePanelSectionsBlockResetsShow(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, body, want string
+	}{
+		{
+			name: "beside the list",
+			body: "# mine\nui:\n  spinner: glitter\n  side-panel:\n    show: \"off\"   # by hand\n" +
+				"    # the order I like\n    sections: [tasks: pinned]\n  notify: bell\n",
+			want: "# mine\nui:\n  spinner: glitter\n  side-panel:\n" +
+				"    # the order I like\n    sections: [tasks: pinned]\n  notify: bell\n",
+		},
+		{
+			name: "the block's only key",
+			body: "ui:\n  spinner: glitter\n  side-panel:\n    show: on\ncurrency: EUR\n",
+			want: "ui:\n  spinner: glitter\ncurrency: EUR\n",
+		},
+		{
+			name: "ui's only block",
+			body: "currency: EUR\nui:\n  side-panel:\n    show: on\n",
+			want: "currency: EUR\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeSectionsConfig(t, tc.body)
+
+			if err := ResetSidePanelSetting(path, domain.UIKeySidePanelShow); err != nil {
+				t.Fatalf("ResetSidePanelSetting: %v", err)
+			}
+
+			if got := readSectionsConfig(t, path); got != tc.want {
+				t.Errorf("config =\n%s\nwant\n%s", got, tc.want)
+			}
+			opts, err := LoadFileConfig(path, os.ReadFile, func(string) {})
+			if err != nil {
+				t.Fatalf("LoadFileConfig: %v", err)
+			}
+			if opts.UI.SidePanelShow != domain.DefaultSidePanelShow {
+				t.Errorf("show reads back %q, want the default %q", opts.UI.SidePanelShow, domain.DefaultSidePanelShow)
+			}
+		})
+	}
+}
+
+// A reset of a key the file does not set is already at its default: the file is not rewritten. The
+// structured list no surface resets, and a key outside the block, are refused with the file untouched.
+func TestSidePanelSectionsBlockResetNoOpAndRefusals(t *testing.T) {
+	t.Parallel()
+	const body = "ui:\n  side-panel:\n    sections: [tasks: pinned]\n"
+	path := writeSectionsConfig(t, body)
+	stale := time.Unix(1, 0)
+	if err := os.Chtimes(path, stale, stale); err != nil {
+		t.Fatalf("age the file: %v", err)
+	}
+
+	if err := ResetSidePanelSetting(path, domain.UIKeySidePanelShow); err != nil {
+		t.Fatalf("ResetSidePanelSetting of an unset key: %v", err)
+	}
+	for _, key := range []string{domain.UIKeySidePanelSections, "ui.spinner"} {
+		if err := ResetSidePanelSetting(path, key); err == nil {
+			t.Errorf("ResetSidePanelSetting(%q) succeeded; want a refusal", key)
+		}
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !info.ModTime().Equal(stale) || readSectionsConfig(t, path) != body {
+		t.Error("a no-op or refused reset rewrote the file")
+	}
+}

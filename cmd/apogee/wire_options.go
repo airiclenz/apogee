@@ -611,9 +611,15 @@ func (h settingsHost) WriteSidePanelSection(section domain.SidePanelSection,
 
 // Reset is the same write in reverse: the key's active line is REMOVED, so the value goes back to
 // the binary's default rather than being pinned to today's spelling of it. It refreshes the same
-// baseline for the same reason — a removed line is a change to the file like any other.
+// baseline for the same reason — a removed line is a change to the file like any other. A key of the
+// `ui.side-panel:` block goes to that block's own reset (config.ResetSidePanelSetting), for Write's
+// reason.
 func (h settingsHost) Reset(key string) error {
-	if err := config.ResetConfigSetting(h.configPath, key); err != nil {
+	reset := config.ResetConfigSetting
+	if config.IsSidePanelKey(key) {
+		reset = config.ResetSidePanelSetting
+	}
+	if err := reset(h.configPath, key); err != nil {
 		return err
 	}
 	h.edits.refresh()
