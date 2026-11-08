@@ -393,14 +393,25 @@ func (s *State) SubAgents() View[SubAgentRow] {
 	}
 	now := s.now()
 	view := View[SubAgentRow]{Rows: make([]SubAgentRow, 0, len(s.delegations))}
-	var running, queued int
-	var lastEnd time.Time
 	for _, key := range s.delegations {
 		state := s.runs[key]
 		view.Rows = append(view.Rows, SubAgentRow{
 			Run: key, Depth: state.depth, Name: state.name, Phase: state.phase,
 			Elapsed: state.elapsed(now), Fill: s.readingFill(state),
 		})
+	}
+	running, queued, lastEnd := s.delegationTally()
+	view.Summary = subAgentSummary(running, queued, len(view.Rows))
+	view.IsLive = running+queued > 0 || lingerAfter(lastEnd, now).Left > 0
+	return view
+}
+
+// delegationTally counts the running and queued delegations and finds the latest end among the
+// rest — the inputs of the sub-agents section's live rule, shared by [State.SubAgents] and
+// [State.SubAgentLinger] so the two cannot judge it differently.
+func (s *State) delegationTally() (running, queued int, lastEnd time.Time) {
+	for _, key := range s.delegations {
+		state := s.runs[key]
 		switch state.phase {
 		case PhaseRunning:
 			running++
@@ -412,9 +423,7 @@ func (s *State) SubAgents() View[SubAgentRow] {
 			}
 		}
 	}
-	view.Summary = subAgentSummary(running, queued, len(view.Rows))
-	view.IsLive = running+queued > 0 || lingerAfter(lastEnd, now).Left > 0
-	return view
+	return running, queued, lastEnd
 }
 
 // Linger is when the sub-agents section's live rule next turns false on the clock alone: Until is
@@ -434,15 +443,9 @@ func (s *State) SubAgentLinger() Linger {
 	if s == nil {
 		return Linger{}
 	}
-	var lastEnd time.Time
-	for _, key := range s.delegations {
-		state := s.runs[key]
-		if state.phase.isActive() {
-			return Linger{}
-		}
-		if state.endedAt.After(lastEnd) {
-			lastEnd = state.endedAt
-		}
+	running, queued, lastEnd := s.delegationTally()
+	if running+queued > 0 {
+		return Linger{}
 	}
 	return lingerAfter(lastEnd, s.now())
 }
