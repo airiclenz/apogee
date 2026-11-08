@@ -9,11 +9,16 @@ import (
 	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
+// TaskListToolName is the stable name the model calls to replace its task list. It is exported so
+// the dispatch layer (internal/agent) can key the TaskListEvent it emits after a successful call on
+// it without re-declaring the spelling.
+const TaskListToolName = "task_list"
+
 // taskListSpec is built with the package's own caps rather than repeating them, so the numbers
 // the model is told and the numbers [tasklist.List.Replace] enforces cannot drift apart — a
 // schema promising a limit the code refuses is a refusal the model cannot see coming.
 var taskListSpec = toolSpec{
-	name: "task_list",
+	name: TaskListToolName,
 	description: "Keep your own checklist for this job. Every call REPLACES the whole list — send" +
 		" the COMPLETE set of tasks each time, never just the new or changed ones — so you tick a" +
 		" task off by resending it with done set to true, and you clear the list by sending an empty" +

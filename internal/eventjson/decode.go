@@ -58,7 +58,7 @@ type Line struct {
 // currency label are not on the line, and a sub_agent_phase line's constant `cancelled` has no
 // field to land in; UpstreamAttemptEvent durations and UpstreamSwitchedEvent.Waited come back
 // truncated to whole milliseconds; a nil Fired comes back as an empty slice and nil receipt Fields
-// as an empty map, while empty Rules and Images come back nil; argument JSON comes back compacted
+// as an empty map, while empty Rules, Images and task-list Items come back nil; argument JSON comes back compacted
 // and HTML-escaped, a null one as nil; MalformedArguments.Err comes back as an error carrying only
 // the text, its sentinel chain not rebuilt; a Tool summary of an unknown kind comes back nil.
 //
@@ -203,6 +203,19 @@ var eventDecoders = map[string]eventDecoder{
 		return domain.MalformedChunksEvent{EventBase: base, Count: d.Count}, nil
 	}),
 	kindUpstreamSwitched: decodeWith(upstreamSwitchedEventFrom),
+	kindTaskList:         decodeWith(taskListEventFrom),
+}
+
+// taskListEventFrom rebuilds a domain.TaskListEvent; an empty list comes back with nil Items.
+func taskListEventFrom(base domain.EventBase, d taskListData) (domain.Event, error) {
+	if len(d.Items) == 0 {
+		return domain.TaskListEvent{EventBase: base}, nil
+	}
+	items := make([]domain.TaskItem, 0, len(d.Items))
+	for _, item := range d.Items {
+		items = append(items, domain.TaskItem{Text: item.Text, Done: item.Done})
+	}
+	return domain.TaskListEvent{EventBase: base, Items: items}, nil
 }
 
 // toolResultEventFrom rebuilds a domain.ToolResultEvent, its Tool summary included.

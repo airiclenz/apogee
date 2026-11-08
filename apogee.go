@@ -475,12 +475,16 @@ type (
 	MalformedChunksEvent   = domain.MalformedChunksEvent
 	UsageEvent             = domain.UsageEvent
 	ContextEstimateEvent   = domain.ContextEstimateEvent
+	TaskListEvent          = domain.TaskListEvent
 	AuditEvent             = domain.AuditEvent
 	WireEvent              = domain.WireEvent
 	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent
 	WorkflowPhaseEvent     = domain.WorkflowPhaseEvent
 	UpstreamSwitchedEvent  = domain.UpstreamSwitchedEvent
 )
+
+// TaskItem is one row of a TaskListEvent's list.
+type TaskItem = domain.TaskItem
 
 // UpstreamSeat is the seat an UpstreamSwitchedEvent moved.
 type UpstreamSeat = domain.UpstreamSeat

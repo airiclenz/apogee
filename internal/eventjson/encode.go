@@ -6,9 +6,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-six line kinds of ADR 0075 §4 — twenty-four Event variants, workflow_phase (ADR 0087),
-// malformed_chunks, sub_agent_group (ADR 0103 decision 13), context_estimate and upstream_switched
-// (adr-0075-amend-1102) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// The twenty-seven line kinds of ADR 0075 §4 — twenty-five Event variants, workflow_phase (ADR 0087),
+// malformed_chunks, sub_agent_group (ADR 0103 decision 13), context_estimate, upstream_switched
+// (adr-0075-amend-1102) and task_list (adr-0075-amend-1108) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -37,6 +37,7 @@ const (
 	kindSubAgentGroup     = "sub_agent_group"
 	kindContextEstimate   = "context_estimate"
 	kindUpstreamSwitched  = "upstream_switched"
+	kindTaskList          = "task_list"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -83,6 +84,7 @@ func Kinds() []string {
 		kindSubAgentGroup,
 		kindContextEstimate,
 		kindUpstreamSwitched,
+		kindTaskList,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -192,6 +194,8 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 		return kindUsage, e.EventBase, usageOf(e, currency), true
 	case domain.ContextEstimateEvent:
 		return kindContextEstimate, e.EventBase, contextEstimateData{Tokens: e.Tokens, Calibrated: e.Calibrated}, true
+	case domain.TaskListEvent:
+		return kindTaskList, e.EventBase, taskListOf(e), true
 	case domain.AuditEvent:
 		return kindAudit, e.EventBase, auditData{
 			Tool:     e.Tool,
@@ -524,6 +528,28 @@ type malformedChunksData struct {
 type contextEstimateData struct {
 	Tokens     int  `json:"tokens"`
 	Calibrated bool `json:"calibrated"`
+}
+
+// taskListData is the task_list line: the emitting agent's whole task list as a successful
+// task_list call left it, in the model's order. items is always an array — `[]` for a list the
+// call cleared — and never null, so a reader replaces its copy without a nil test.
+type taskListData struct {
+	Items []taskItemData `json:"items"`
+}
+
+// taskItemData is one row of a task_list line: the task's text and whether it is finished.
+type taskItemData struct {
+	Text string `json:"text"`
+	Done bool   `json:"done"`
+}
+
+// taskListOf maps a TaskListEvent to its line, an empty list included as `[]`.
+func taskListOf(e domain.TaskListEvent) taskListData {
+	items := make([]taskItemData, 0, len(e.Items))
+	for _, item := range e.Items {
+		items = append(items, taskItemData{Text: item.Text, Done: item.Done})
+	}
+	return taskListData{Items: items}
 }
 
 // usageData is the usage line: the token accounting an Upstream reply carried, the emitting

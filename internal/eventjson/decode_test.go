@@ -117,6 +117,11 @@ func roundTripEvents() []domain.Event {
 			},
 		},
 		domain.ContextEstimateEvent{EventBase: delegatedBase, Tokens: 18342, Calibrated: true},
+		domain.TaskListEvent{
+			EventBase: delegatedBase,
+			Items:     []domain.TaskItem{{Text: "read the spec", Done: true}, {Text: "write the test"}},
+		},
+		domain.TaskListEvent{EventBase: topLevelBase, Items: []domain.TaskItem{}},
 		domain.AuditEvent{
 			EventBase: delegatedBase, Tool: "terminal", CallID: "call-audited", Decision: "allow",
 			Reason: "rule", IsError: true,
@@ -375,6 +380,11 @@ func lossyView(event domain.Event) domain.Event {
 	case domain.UpstreamAttemptEvent:
 		e.TTFB, e.TTFT = e.TTFB.Truncate(time.Millisecond), e.TTFT.Truncate(time.Millisecond)
 		e.Last, e.Duration = e.Last.Truncate(time.Millisecond), e.Duration.Truncate(time.Millisecond)
+		return e
+	case domain.TaskListEvent:
+		if len(e.Items) == 0 {
+			e.Items = nil
+		}
 		return e
 	case domain.UpstreamSwitchedEvent:
 		e.Waited = e.Waited.Truncate(time.Millisecond)

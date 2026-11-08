@@ -2059,7 +2059,8 @@ func pathWithin(abs, root string) bool {
 // The same seam is where the context estimate moves (contextReading): the event carries the
 // committed message's token estimate as EstimatedTokens, and a ContextEstimateEvent at the same
 // depth follows it — on every route, structural and under Bypass too, since it shapes nothing the
-// model sees — so a Driver's gauge tracks a step's results as they land.
+// model sees — so a Driver's gauge tracks a step's results as they land. A successful task_list
+// call's result adds one more: a TaskListEvent with the list as it now stands, after the estimate.
 //
 // call is the call the result answers, as the pre-tool-exec Moment left it: its Tool is the
 // resolved name the ToolResultEvent carries. writeTarget is the call's classified write target —
@@ -2132,6 +2133,24 @@ func (a *Agent) appendToolResult(
 		EstimatedTokens: room.budget.EstimateTokens(chars),
 	})
 	a.cfg.Events.Emit(a.contextEstimateEvent(turn, room))
+	// A successful task_list call replaced this Agent's list, so the list as it now stands follows
+	// the estimate — never between the ToolResultEvent and it, which a Driver reads as one pair.
+	// A refused or failed call changed nothing and reports nothing.
+	if call.Tool == tools.TaskListToolName && !result.IsError {
+		a.cfg.Events.Emit(a.taskListEvent(turn))
+	}
+}
+
+// taskListEvent is the TaskListEvent a successful task_list call's append emits: this Agent's
+// whole list as it now stands, in domain types, stamped with this Agent's own identity — a
+// delegation's list is its own (ADR 0072), so its event carries the child's depth and run id.
+func (a *Agent) taskListEvent(turn int) domain.TaskListEvent {
+	held := a.tasks.Items()
+	items := make([]domain.TaskItem, 0, len(held))
+	for _, item := range held {
+		items = append(items, domain.TaskItem{Text: item.Text, Done: item.Done})
+	}
+	return domain.TaskListEvent{EventBase: a.base(turn), Items: items}
 }
 
 // withTrailers returns msg with its trailers rendered on in the fence order: the advise slot the

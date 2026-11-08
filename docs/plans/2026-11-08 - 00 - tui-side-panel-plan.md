@@ -55,7 +55,12 @@
   - 6 (round 2): recast — the writer owns the whole `ui.side-panel` block; settingsHost.Write routes both keys to it.
   - 12 (round 2): guard folded — usage seeded after both doors restore totals, one write key both sides, last non-error card per run.
 
-## 1. Task-list Event
+## 1. Task-list Event — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): deviation — internal/tools/task_list.go: added the exported `TaskListToolName` const (the house `XToolName` pattern beside FanOutToolName/WriteFileToolName) so dispatch keys the emit on it instead of re-spelling "task_list"; the tool spec now reads its name from it.
+NOTES (2026-11-08): deviation — internal/agent/tasklist_test.go: the item's two agent tests (plus a refused-call-emits-nothing assertion) live in the existing task-list test file, driving the real tools.NewTaskList tool; the plan's Files line did not name a test file for them.
+NOTES (2026-11-08): consequential edit — cmd/apogee/headless_test.go: made necessary by the new kind (TestHeadlessFormatJSONStreamsEveryEvent enumerates one emitted Event per default-stream kind; its count comment now says twenty-four).
+NOTES (2026-11-08): TestKindsAreTwentySix renamed TestKindsAreTwentySeven (count 27), following the amend-1102 precedent; `data.items` encodes `[]` (never null) for a cleared list and decodes an empty list as nil Items, recorded in Decode's lossy-points comment and lossyView.
 
 **What:**
 Recast at the regression check (2026-11-08).

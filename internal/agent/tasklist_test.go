@@ -1,18 +1,21 @@
 package agent
 
 // The task list as ENGINE state on the Agent (ADR 0072): that a tool call reaches it through the
-// context seam at all, that a delegation is handed its OWN empty one rather than the parent's, and
-// that the /clear boundary empties it. Its snapshot half lives in state_test.go.
+// context seam at all, that a delegation is handed its OWN empty one rather than the parent's, that
+// the /clear boundary empties it, and that a successful task_list call reports the list as a
+// TaskListEvent at every depth. Its snapshot half lives in state_test.go.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tasklist"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // ---------------------------------------------------------------------------
@@ -186,5 +189,119 @@ func TestClearContextEmptiesTheTaskList(t *testing.T) {
 
 	if items := a.tasks.Items(); len(items) != 0 {
 		t.Errorf("the task list after /clear = %v, want empty", items)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The TaskListEvent
+// ---------------------------------------------------------------------------
+
+// taskListScripts returns the scripted stream pairs for one Exchange per argument set: each asks
+// for one task_list call with those arguments and then finishes.
+func taskListScripts(arguments ...string) []stubllm.Turn {
+	scripts := make([]stubllm.Turn, 0, 2*len(arguments))
+	for i, args := range arguments {
+		scripts = append(scripts,
+			toolCallTurn(fmt.Sprintf("tl%d", i), tools.TaskListToolName, args),
+			contentTurn("noted"))
+	}
+	return scripts
+}
+
+// newRealTaskListAgent builds a top-level Agent offering the real task_list tool, recording into
+// sink and scripted with the given task_list calls.
+func newRealTaskListAgent(t *testing.T, sink *recordingSink, arguments ...string) *Agent {
+	t.Helper()
+
+	a, err := newAgent(configWithTools(sink, tools.NewTaskList()), scriptedResponder(t, taskListScripts(arguments...)...))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	return a
+}
+
+// taskListEvents returns every TaskListEvent the sink recorded, in order.
+func taskListEvents(events []domain.Event) []domain.TaskListEvent {
+	var found []domain.TaskListEvent
+	for _, e := range events {
+		if tl, ok := e.(domain.TaskListEvent); ok {
+			found = append(found, tl)
+		}
+	}
+	return found
+}
+
+// TestTaskListEmitsTaskListEvent pins the event a successful task_list call adds: the whole list
+// as the call left it, at the emitting agent's identity, landing right after the ContextEstimateEvent
+// that follows the call's ToolResultEvent — never between the two, which a Driver reads as a pair.
+// A call the tool refuses changed nothing and emits nothing.
+func TestTaskListEmitsTaskListEvent(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	a := newRealTaskListAgent(t, sink,
+		`{"tasks":[{"text":"read the spec","done":true},{"text":"write the test"}]}`,
+		`{"tasks":"not a list"}`)
+
+	runOneExchange(t, a, "keep a checklist")
+	runOneExchange(t, a, "send a broken list")
+
+	got := taskListEvents(sink.events)
+	if len(got) != 1 {
+		t.Fatalf("recorded %d TaskListEvents, want 1 (the refused call emits none): %+v", len(got), got)
+	}
+	want := []domain.TaskItem{{Text: "read the spec", Done: true}, {Text: "write the test"}}
+	if !slices.Equal(got[0].Items, want) {
+		t.Errorf("TaskListEvent.Items = %+v, want %+v", got[0].Items, want)
+	}
+	if got[0].Depth != 0 || got[0].RunID != "" {
+		t.Errorf("TaskListEvent identity = %+v, want the top-level agent's", got[0].EventBase)
+	}
+
+	for i, e := range sink.events {
+		if _, ok := e.(domain.TaskListEvent); !ok {
+			continue
+		}
+		if i < 2 {
+			t.Fatalf("the TaskListEvent is event %d; want a ToolResultEvent and a ContextEstimateEvent before it", i)
+		}
+		if _, ok := sink.events[i-1].(domain.ContextEstimateEvent); !ok {
+			t.Errorf("the event before the TaskListEvent is %T, want domain.ContextEstimateEvent", sink.events[i-1])
+		}
+		result, ok := sink.events[i-2].(domain.ToolResultEvent)
+		if !ok || result.Tool != tools.TaskListToolName {
+			t.Errorf("two events before the TaskListEvent is %T %+v, want the task_list ToolResultEvent", sink.events[i-2], sink.events[i-2])
+		}
+	}
+}
+
+// TestDelegateTaskListEventCarriesChildDepth pins the event at depth: a delegation keeps its own
+// list (ADR 0072), so the event its task_list call emits carries the CHILD's identity — its depth,
+// spawning call and run id — and the child's list, while the parent's list stays untouched.
+func TestDelegateTaskListEventCarriesChildDepth(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	parent := newRealTaskListAgent(t, sink, `{"tasks":[{"text":"the delegated step"}]}`)
+	child, err := parent.newChildAgent("call_sub", "the delegated task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+
+	runOneExchange(t, child, "keep the delegation's checklist")
+
+	got := taskListEvents(sink.events)
+	if len(got) != 1 {
+		t.Fatalf("recorded %d TaskListEvents, want 1: %+v", len(got), got)
+	}
+	wantBase := domain.EventBase{Depth: 1, Turn: got[0].Turn, CallID: "call_sub", RunID: child.runID}
+	if got[0].EventBase != wantBase || child.runID == "" {
+		t.Errorf("TaskListEvent identity = %+v, want the child's %+v", got[0].EventBase, wantBase)
+	}
+	if want := []domain.TaskItem{{Text: "the delegated step"}}; !slices.Equal(got[0].Items, want) {
+		t.Errorf("TaskListEvent.Items = %+v, want %+v", got[0].Items, want)
+	}
+	if items := parent.tasks.Items(); len(items) != 0 {
+		t.Errorf("the parent's list = %v, want it untouched by the child's call", items)
 	}
 }

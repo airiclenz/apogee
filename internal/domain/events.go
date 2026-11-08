@@ -684,6 +684,29 @@ type ContextEstimateEvent struct {
 	Calibrated bool
 }
 
+// TaskItem is one row of a TaskListEvent: the task's text as the model wrote it and whether the
+// model has marked it finished. It mirrors the engine's own task-list row in domain-only types, so
+// a Driver folds the list without importing the engine's task-list package (ADR 0010).
+type TaskItem struct {
+	Text string
+	Done bool
+}
+
+// TaskListEvent reports the EMITTING agent's task list as it now stands, after a successful
+// task_list call replaced it (ADR 0072): Items is the COMPLETE list in the model's order — never a
+// delta, because the tool itself replaces the whole list — and empty when the call cleared it.
+// Every depth emits its own: a delegation keeps a list of its own, so a child's event carries the
+// child's identity and its list, never the parent's. It follows the ContextEstimateEvent of the
+// call's tool-result append, so a Driver's panel moves when the model ticks a task off rather
+// than at the next reply.
+//
+// It reports a CHANGE the model made and nothing else: the /clear boundary and a resume do not
+// emit one — a Driver resets its fold at /clear and rebuilds it on resume from the stored entries.
+type TaskListEvent struct {
+	EventBase
+	Items []TaskItem
+}
+
 // AuditEvent surfaces one audit entry — a tool call, the guardrail decision it
 // cleared/was blocked by, and whether its result errored — to the EventSink as the
 // executor decides it (security-review M1). The event stream IS the audit trail: no

@@ -632,6 +632,25 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"tokens":900,"calibrated":false}`,
 		},
 		{
+			name: "task_list",
+			event: domain.TaskListEvent{
+				EventBase: domain.EventBase{Depth: 1, Turn: 2, CallID: "call-9", RunID: "0badc0de.2"},
+				Items:     []domain.TaskItem{{Text: "read the spec", Done: true}, {Text: "write the test"}},
+			},
+			wantKind: "task_list",
+			wantBase: domain.EventBase{Depth: 1, Turn: 2, CallID: "call-9", RunID: "0badc0de.2"},
+			wantData: `{"items":[{"text":"read the spec","done":true},{"text":"write the test","done":false}]}`,
+		},
+		{
+			// A cleared list is an empty array, never null: a reader replaces its copy without a
+			// nil test.
+			name:     "task_list a call cleared",
+			event:    domain.TaskListEvent{EventBase: domain.EventBase{Turn: 3}},
+			wantKind: "task_list",
+			wantBase: domain.EventBase{Turn: 3},
+			wantData: `{"items":[]}`,
+		},
+		{
 			// The envelope takes the SPAWNING delegation's id off the embedded EventBase while
 			// data.call_id carries the AUDITED call — two different facts the variant's shadowing
 			// field would otherwise braid into one.
@@ -1101,6 +1120,7 @@ func TestEncodeMapsEveryEventVariant(t *testing.T) {
 		"MalformedChunksEvent":   domain.MalformedChunksEvent{},
 		"UsageEvent":             domain.UsageEvent{},
 		"ContextEstimateEvent":   domain.ContextEstimateEvent{},
+		"TaskListEvent":          domain.TaskListEvent{},
 		"AuditEvent":             domain.AuditEvent{},
 		"WireEvent":              domain.WireEvent{},
 		"UpstreamAttemptEvent":   domain.UpstreamAttemptEvent{},
@@ -1199,16 +1219,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentySix pins the vocabulary itself — the twenty-four serialized variants, the
+// TestKindsAreTwentySeven pins the vocabulary itself — the twenty-five serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentySix(t *testing.T) {
+func TestKindsAreTwentySeven(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 26 {
-		t.Fatalf("len(Kinds()) = %d, want 26: %v", len(kinds), kinds)
+	if len(kinds) != 27 {
+		t.Fatalf("len(Kinds()) = %d, want 27: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {
