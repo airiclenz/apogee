@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestSidePanelGate(t *testing.T) {
 
 // TestSidePanelSectionChangeMovesNothing pins the stability rule's other half: a change to the
 // section list is no input of the transcript's paint, so the frame key and the transcript's wrap
-// width stand where they were — while a change of the show mode moves both, once.
+// width stand where they were — while a change of the show mode or of the width moves both, once.
 func TestSidePanelSectionChangeMovesNothing(t *testing.T) {
 	t.Parallel()
 
@@ -110,6 +111,134 @@ func TestSidePanelSectionChangeMovesNothing(t *testing.T) {
 	}
 	if got, want := off.transcriptWidth(), wrap+sidePanelWidth; got != want {
 		t.Errorf("switching the panel off wraps the transcript at %d columns, want %d", got, want)
+	}
+
+	narrow, _, _, _, err := m.settingsApplyLocal(domain.UIKeySidePanelWidth, strconv.Itoa(domain.MinSidePanelWidth))
+	if err != nil {
+		t.Fatalf("apply the width: %v", err)
+	}
+	narrow.settle()
+	if narrow.frameKey() == key {
+		t.Errorf("narrowing the panel left the frame key where it was")
+	}
+	if narrow.painted != narrow.frameKey() {
+		t.Errorf("narrowing the panel left the frame unsettled: painted %+v, key %+v", narrow.painted, narrow.frameKey())
+	}
+	if got, want := narrow.transcriptWidth(), wrap+sidePanelWidth-domain.MinSidePanelWidth; got != want {
+		t.Errorf("narrowing the panel wraps the transcript at %d columns, want %d", got, want)
+	}
+}
+
+// TestSidePanelPaintedWidth pins the clamp the configured width paints through: an unset width
+// paints the default, a stated one paints as set while the window leaves the show mode's
+// transcript floor and the scroll-bar column beside it, and is held to that room — never below the
+// minimum — otherwise; the show gate counts the default width whatever is configured. The slot is
+// the window less the painted width, and the setting is never rewritten by the clamp.
+func TestSidePanelPaintedWidth(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		show   domain.SidePanelShow
+		stored int
+		window int
+		want   int
+	}{
+		{name: "unset paints the default", show: domain.SidePanelShowAuto, stored: 0, window: 140, want: 36},
+		{name: "stated fits", show: domain.SidePanelShowAuto, stored: 60, window: 200, want: 60},
+		{name: "minimum fits", show: domain.SidePanelShowOn, stored: 24, window: 117, want: 24},
+		{name: "auto floor caps", show: domain.SidePanelShowAuto, stored: 60, window: 140, want: 39},
+		{name: "on floor caps", show: domain.SidePanelShowOn, stored: 60, window: 130, want: 49},
+		{name: "below the minimum floors", show: domain.SidePanelShowAuto, stored: 10, window: 140, want: 24},
+		{name: "auto gate ignores a narrow width", show: domain.SidePanelShowAuto, stored: 24, window: 136, want: 0},
+		{name: "on gate ignores a narrow width", show: domain.SidePanelShowOn, stored: 24, window: 116, want: 0},
+		{name: "auto gate ignores a wide width", show: domain.SidePanelShowAuto, stored: 60, window: 137, want: 36},
+		{name: "off never paints", show: domain.SidePanelShowOff, stored: 60, window: 200, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := testOpts
+			opts.UI.SidePanelShow = tc.show
+			opts.UI.SidePanelWidth = tc.stored
+			opts.UI.ShowScrollbar = true
+			m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+			m = step(t, m, tea.WindowSizeMsg{Width: tc.window, Height: 30})
+
+			if got := m.panelWidth(); got != tc.want {
+				t.Errorf("panelWidth() = %d, want %d", got, tc.want)
+			}
+			if got, want := m.slotWidth(), tc.window-tc.want; got != want {
+				t.Errorf("slotWidth() = %d, want %d", got, want)
+			}
+			if got, want := m.viewport.Width(), tc.window-tc.want-scrollbarWidth; got != want {
+				t.Errorf("viewport width = %d, want %d", got, want)
+			}
+			if m.opts.UI.SidePanelWidth != tc.stored {
+				t.Errorf("the clamp rewrote ui.side-panel.width to %d, was %d", m.opts.UI.SidePanelWidth, tc.stored)
+			}
+		})
+	}
+}
+
+// TestSidePanelSeparatorAtANonDefaultWidth paints a 60-column panel in a 200-column window: the
+// separator stands at the slot's edge on every row above the session-name rule, and each of those
+// rows is the window's width.
+func TestSidePanelSeparatorAtANonDefaultWidth(t *testing.T) {
+	t.Parallel()
+
+	const width = 200
+	opts := testOpts
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	opts.UI.SidePanelWidth = 60
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 30})
+	slot := m.slotWidth()
+	if slot != width-60 {
+		t.Fatalf("slotWidth() = %d, want %d", slot, width-60)
+	}
+
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	rule := slices.IndexFunc(lines, func(ln string) bool { return strings.HasPrefix(ln, "▔") })
+	if rule < 1 {
+		t.Fatalf("no ▔ rule below the slot's rows:\n%s", strings.Join(lines, "\n"))
+	}
+	for i, ln := range lines[:rule] {
+		if sep := ansi.Cut(ln, slot, slot+1); sep != sidePanelSeparator {
+			t.Errorf("row %d carries %q at the slot's edge (column %d), want the separator: %q", i, sep, slot, ln)
+		}
+		if got := ansi.StringWidth(ln); got != width {
+			t.Errorf("row %d paints %d columns, want the window's %d: %q", i, got, width, ln)
+		}
+	}
+}
+
+// TestSidePanelNarrowestColumnPaintsLongRows paints the column at its minimum width with the rows
+// whose right-hand facts outrun its room — a viewed running sub-agent past an hour, its facts
+// beside the `▸` mark — and pins that each row is squared to the column, not panicked on.
+func TestSidePanelNarrowestColumnPaintsLongRows(t *testing.T) {
+	t.Parallel()
+
+	m := panelModel(t, domain.DefaultSidePanelSections, 30,
+		panelDelegationCall(t, "r1", "a-sub-agent-with-a-long-name"),
+		delegationPhase("r1", domain.SubAgentStarted, 2*time.Hour),
+		landedEdit(delegationBase("r1"), "internal/a/very/deep/path/to/a/file.go", 1200, 3400),
+	)
+	m = openViewOf(t, m, delegationBase("r1"))
+	m.opts.UI.SidePanelWidth = domain.MinSidePanelWidth
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+	if got := m.panelWidth(); got != domain.MinSidePanelWidth {
+		t.Fatalf("setup: panelWidth() = %d, want %d", got, domain.MinSidePanelWidth)
+	}
+
+	for i, row := range m.sidePanelColumn(30) {
+		if got := m.th.measure.Width(row); got != domain.MinSidePanelWidth {
+			t.Errorf("row %d paints %d columns, want %d: %q", i, got, domain.MinSidePanelWidth, ansi.Strip(row))
+		}
+	}
+	if got := panelText(t, m); !slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, "▸ running") }) {
+		t.Errorf("the narrow column paints no viewed run:\n%s", strings.Join(got, "\n"))
 	}
 }
 
@@ -201,7 +330,7 @@ func panelText(t *testing.T, m Model) []string {
 func columnText(m Model, rows int) []string {
 	column := m.sidePanelColumn(rows)
 	for i, row := range column {
-		column[i] = strings.TrimRight(ansi.Cut(ansi.Strip(row), 2, sidePanelWidth), " ")
+		column[i] = strings.TrimRight(ansi.Cut(ansi.Strip(row), sidePanelChromeWidth, m.panelWidth()), " ")
 	}
 	return column
 }

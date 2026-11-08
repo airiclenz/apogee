@@ -431,10 +431,12 @@ type frameKey struct {
 	// reserves (layout()), which is the width renderView wraps to and the widget measures at.
 	width         int
 	showScrollbar bool
-	// sidePanel is whether the side panel's column takes its columns off that budget
-	// ([Model.panelShown]). The column's CONTENT is no input of the transcript's paint, so only its
-	// visibility is named here: a section showing or hiding repaints no line of the scrollback.
-	sidePanel bool
+	// sidePanelWidth is the columns the side panel's column takes off that budget
+	// ([Model.panelWidth]: its clamped width while it shows, 0 while it does not), so a show-mode
+	// switch and a width change alike re-key. The column's CONTENT is no input of the transcript's
+	// paint, so only its width is named here: a section showing or hiding repaints no line of the
+	// scrollback.
+	sidePanelWidth int
 	// blink is the live star's phase, and only while some header is still live
 	// (transcript.hasLiveStar): a settled transcript paints identically at either phase, so folding
 	// the bare phase in would repaint the scrollback on every flip of an idle session's clock
@@ -448,16 +450,16 @@ type frameKey struct {
 // lines it just rendered (Model.painted), and the one settle compares it against.
 func (m Model) frameKey() frameKey {
 	return frameKey{
-		generation:    m.transcript.generation,
-		scheme:        m.opts.UI.ColorScheme,
-		glyphs:        m.th.glyphs,
-		measure:       m.th.measure,
-		padPrompts:    m.th.padPrompts,
-		width:         m.width,
-		showScrollbar: m.opts.UI.ShowScrollbar,
-		sidePanel:     m.panelShown(),
-		blink:         m.liveStarBlink() && m.transcript.hasLiveStar(),
-		backHint:      m.backHint(),
+		generation:     m.transcript.generation,
+		scheme:         m.opts.UI.ColorScheme,
+		glyphs:         m.th.glyphs,
+		measure:        m.th.measure,
+		padPrompts:     m.th.padPrompts,
+		width:          m.width,
+		showScrollbar:  m.opts.UI.ShowScrollbar,
+		sidePanelWidth: m.panelWidth(),
+		blink:          m.liveStarBlink() && m.transcript.hasLiveStar(),
+		backHint:       m.backHint(),
 	}
 }
 

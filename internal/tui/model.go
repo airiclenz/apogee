@@ -3103,10 +3103,12 @@ func (m Model) transcriptBudget() int {
 
 // panelShown reports whether the side panel's column (ADR 0110) is on this frame: the show mode
 // names the floor the transcript must keep beside it — 100 columns under `auto`, 80 under `on` —
-// and the column shows while the window pays for that floor, the column itself and the scroll-bar
-// column. The bar's column is counted whether or not the bar is painted (ui.show-scrollbar), so a
-// bar switched on or off never carries the panel across a threshold; and nothing the panel SHOWS
-// is an input here, so the column moves only on a resize across a threshold or a change of
+// and the column shows while the window pays for that floor, the column at its default width and
+// the scroll-bar column. The bar's column is counted whether or not the bar is painted
+// (ui.show-scrollbar), so a bar switched on or off never carries the panel across a threshold;
+// the configured width is no input either, so a wider or narrower panel shows from the same
+// window ([Model.panelWidth] clamps it to what the window leaves); and nothing the panel SHOWS is
+// an input here, so the column appears or goes only on a resize across a threshold or a change of
 // `ui.side-panel.show` (layout.md, "The side panel").
 //
 // `off` never shows it, and neither does the zero UIPrefs' empty mode: the config resolves an
@@ -3117,15 +3119,12 @@ func (m Model) panelShown() bool {
 	return ok && m.width >= least
 }
 
-// slotWidth is the transcript slot's column budget: the window less the side panel's column while
-// it shows ([Model.panelShown]), the whole window otherwise. The slot is every row above the
-// session-name rule; the rule, the status line, the prompt box and the footer below it keep the
-// window's width whatever this says.
+// slotWidth is the transcript slot's column budget: the window less the side panel's painted
+// column while it shows ([Model.panelWidth], 0 otherwise), so the whole window while it does not.
+// The slot is every row above the session-name rule; the rule, the status line, the prompt box and
+// the footer below it keep the window's width whatever this says.
 func (m Model) slotWidth() int {
-	if m.panelShown() {
-		return m.width - sidePanelWidth
-	}
-	return m.width
+	return m.width - m.panelWidth()
 }
 
 // transcriptWidth is the column budget the transcript body wraps to: the viewport's own width

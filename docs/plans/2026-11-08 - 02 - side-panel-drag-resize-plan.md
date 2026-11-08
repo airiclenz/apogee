@@ -135,7 +135,10 @@ keeping `show` and `sections` (`configwrite_sections_test.go`); registry read/se
 `-run 'TestManualDocumentsEverySettingsKey|TestSettingsRowsFormatEffectiveValues|TestEveryEditableSettingKeyHasAnApply' ./cmd/apogee/`.
 **Commit:** `feat(config): add ui.side-panel.width`
 
-## 3. Variable side panel width in the layout
+## 3. Variable side panel width in the layout — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the const `sidePanelWidth` stays as the gate's default width (now `= domain.DefaultSidePanelWidth`); the const `sidePanelContentWidth` is replaced by `Model.panelContentWidth()` plus a `sidePanelChromeWidth` const; new methods `configuredPanelWidth()` (the one 0→36 resolution), `panelWidth()` (clamped, 0 while hidden) and helper `sidePanelTranscriptFloor()`; `frameKey.sidePanel bool` replaced by `sidePanelWidth int`.
+NOTES (2026-11-08): the width-change re-wrap check lives in `TestSidePanelSectionChangeMovesNothing` (frame key moves, settles once, wraps 12 columns wider); new tests `TestSidePanelPaintedWidth`, `TestSidePanelSeparatorAtANonDefaultWidth`, `TestSidePanelNarrowestColumnPaintsLongRows` (confirmed to panic with the pad floor removed).
 
 Depends on item 2.
 **What:**

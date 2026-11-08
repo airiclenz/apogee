@@ -17,14 +17,16 @@ import (
 	"github.com/airiclenz/apogee/internal/sidepanel"
 )
 
-// The side panel's column (ADR 0110, docs/layout/side-panel-layout.md): a fixed column right of the
-// transcript slot, on every row above the session-name rule, drawn while [Model.panelShown] holds.
+// The side panel's column (ADR 0110, docs/layout/side-panel-layout.md): a column right of the
+// transcript slot, `ui.side-panel.width` wide within the window's clamp ([Model.panelWidth]), on every row above the session-name rule, drawn while [Model.panelShown] holds.
 // It paints the sections the `ui.side-panel.sections` list shows, from the sidepanel.State the
 // Event fold keeps ([Model.foldSidePanel]).
 
 const (
-	// sidePanelWidth is the column's painted width, its separator included.
-	sidePanelWidth = 36
+	// sidePanelWidth is the column's default width, its separator included — the width the show
+	// gate counts whatever `ui.side-panel.width` says ([sidePanelLeastWindow]), so a wider or
+	// narrower panel never moves the window it shows from. The painted width is [Model.panelWidth].
+	sidePanelWidth = domain.DefaultSidePanelWidth
 	// sidePanelAutoFloor is the transcript width `ui.side-panel.show: auto` keeps beside the column,
 	// counting the scroll-bar column painted or not: the column shows from a 137-column window.
 	sidePanelAutoFloor = 100
@@ -54,9 +56,39 @@ const (
 	sidePanelSectionsSource = "side-panel.sections"
 )
 
-// sidePanelContentWidth is the columns the panel's content has: the column less its separator and
-// the gutter beside it.
-const sidePanelContentWidth = sidePanelWidth - len(sidePanelGutter) - 1
+// sidePanelChromeWidth is the columns the column spends before its content: the separator and the
+// gutter beside it.
+const sidePanelChromeWidth = len(sidePanelGutter) + 1
+
+// configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the zero UIPrefs'
+// unset width (a test harness's, a block assembled field by field) resolves to
+// [domain.DefaultSidePanelWidth] here and nowhere else.
+func (m Model) configuredPanelWidth() int {
+	if m.opts.UI.SidePanelWidth == 0 {
+		return domain.DefaultSidePanelWidth
+	}
+	return m.opts.UI.SidePanelWidth
+}
+
+// panelWidth is the column's painted width, its separator included, while it shows
+// ([Model.panelShown]); 0 while it does not, so the frame key and the slot read one value. The
+// configured width ([Model.configuredPanelWidth]) is clamped to the window: never narrower than
+// [domain.MinSidePanelWidth], never wider than leaves the show mode's transcript floor and the
+// scroll-bar column. The clamp is the layout's alone — it never writes the setting back, so a
+// window grown again paints the width the user chose.
+func (m Model) panelWidth() int {
+	if !m.panelShown() {
+		return 0
+	}
+	floor, _ := sidePanelTranscriptFloor(m.opts.UI.SidePanelShow)
+	return min(max(m.configuredPanelWidth(), domain.MinSidePanelWidth), m.width-floor-scrollbarWidth)
+}
+
+// panelContentWidth is the columns the panel's content has: the painted column less its separator
+// and the gutter beside it, 0 while the column does not show.
+func (m Model) panelContentWidth() int {
+	return max(0, m.panelWidth()-sidePanelChromeWidth)
+}
 
 // panelSection is one section the column shows: which it is, what its header says and its body
 // rows, painted.
@@ -128,20 +160,21 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 	return m.armPanelLinger()
 }
 
-// sidePanelColumn paints the column's rows rows, each exactly sidePanelWidth columns in the width
+// sidePanelColumn paints the column's rows rows, each exactly [Model.panelWidth] columns in the width
 // authority's measure: the separator, the gutter, and the content squared to the rest. With no
 // section to show it paints `nothing live` on its top row and leaves the rest blank — the column
 // stays on the frame either way, because nothing it shows may move it ([Model.panelShown]).
 func (m Model) sidePanelColumn(rows int) []string {
 	rule := m.th.statusFaint.Render(sidePanelSeparator) + sidePanelGutter
 	content := m.sidePanelContent(rows)
+	contentWidth := m.panelContentWidth()
 	column := make([]string, rows)
 	for i := range column {
 		line := ""
 		if i < len(content) {
 			line = content[i]
 		}
-		column[i] = rule + squareLine(m.th.measure, line, sidePanelContentWidth)
+		column[i] = rule + squareLine(m.th.measure, line, contentWidth)
 	}
 	return column
 }
@@ -304,9 +337,11 @@ func paintPanelRows[R any](rows []R, paint func(R) string) []string {
 
 // panelRow lays one content row out: lead (painted, measured as it stands), then text — clipped
 // with an ellipsis to the room left — painted in style, then right (painted) flush against the
-// column's right edge, one blank cell at least from the text.
+// column's right edge, one blank cell at least from the text. On a narrow column the lead and the
+// right-hand facts alone can outrun the room: the pad then floors at nothing and the row runs long,
+// for sidePanelColumn's squareLine to cut.
 func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) string {
-	room := sidePanelContentWidth - m.th.measure.Width(lead)
+	room := m.panelContentWidth() - m.th.measure.Width(lead)
 	if right != "" {
 		room -= m.th.measure.Width(right) + 1
 	}
@@ -315,7 +350,7 @@ func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) s
 	if right == "" {
 		return row
 	}
-	return row + strings.Repeat(" ", room-m.th.measure.Width(text)+1) + right
+	return row + strings.Repeat(" ", max(0, room-m.th.measure.Width(text)+1)) + right
 }
 
 // panelHeaderRow is a section's header: `◆ <Title>` with its summary, and the pin glyph — ⊙ while
@@ -392,7 +427,7 @@ func (m Model) panelFileRow(row sidepanel.FileRow) string {
 	if len(facts) > 0 {
 		right = m.th.statusFaint.Render(strings.Join(facts, " "))
 	}
-	room := sidePanelContentWidth
+	room := m.panelContentWidth()
 	if right != "" {
 		room -= m.th.measure.Width(right) + 1
 	}
@@ -695,15 +730,26 @@ func withSectionMode(
 }
 
 // sidePanelLeastWindow is the narrowest window show draws the column in: the floor the transcript
-// keeps beside it — sidePanelAutoFloor under `auto`, sidePanelOnFloor under `on` — plus the column
-// and the scroll-bar column, counted painted or not ([Model.panelShown]). ok is false for a mode
-// that never draws it: `off`, and the zero UIPrefs' empty mode.
+// keeps beside it ([sidePanelTranscriptFloor]) plus the column at its default width and the
+// scroll-bar column, counted painted or not ([Model.panelShown]). ok is false for a mode that never
+// draws it: `off`, and the zero UIPrefs' empty mode.
 func sidePanelLeastWindow(show domain.SidePanelShow) (least int, ok bool) {
+	floor, ok := sidePanelTranscriptFloor(show)
+	if !ok {
+		return 0, false
+	}
+	return floor + sidePanelWidth + scrollbarWidth, true
+}
+
+// sidePanelTranscriptFloor is the transcript width show keeps beside the column, the scroll-bar
+// column not counted: sidePanelAutoFloor under `auto`, sidePanelOnFloor under `on`. ok is false
+// for a mode that never draws the column.
+func sidePanelTranscriptFloor(show domain.SidePanelShow) (floor int, ok bool) {
 	switch show {
 	case domain.SidePanelShowAuto:
-		return sidePanelAutoFloor + sidePanelWidth + scrollbarWidth, true
+		return sidePanelAutoFloor, true
 	case domain.SidePanelShowOn:
-		return sidePanelOnFloor + sidePanelWidth + scrollbarWidth, true
+		return sidePanelOnFloor, true
 	default:
 		return 0, false
 	}
