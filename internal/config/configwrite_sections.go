@@ -14,14 +14,14 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The `ui.side-panel:` block (ADR 0110) sits one level deeper than the scalar writer reaches
-// (scalarPathDepth): both its keys are three segments long, `ui.side-panel.show` and
-// `ui.side-panel.sections`. So this writer owns the whole block. It finds `ui:` and `side-panel:`
+// (scalarPathDepth): its keys are three segments long, `ui.side-panel.show`, `ui.side-panel.width`
+// and `ui.side-panel.sections`. So this writer owns the whole block. It finds `ui:` and `side-panel:`
 // in the parsed document, creates whichever of the two is absent, and splices the one line its key
 // sits on, under the contract every config writer keeps (configedit.go): comments, key order and the
 // other keys stay exactly as found, the result is re-parsed and compared before anything is written,
 // and a shape it cannot read surgically is refused ("edit the file by hand"), never folded.
 //
-// `show` is a scalar, written like any enum. `sections` is a list of `section: mode` entries, and the
+// `show` and `width` are scalars, written like any enum or count. `sections` is a list of `section: mode` entries, and the
 // file carries it as one flow line, the template's own spelling. A pin, unpin or hide changes ONE
 // entry's mode (SaveSidePanelSection): the entries the file writes keep their order and their modes,
 // and a section the file does not name brings in the whole list as the session resolves it, so the
@@ -33,30 +33,42 @@ import (
 const (
 	sidePanelBlockKey = "side-panel"
 	uiBlockKey        = "ui"
-	// sidePanelBlockPath is the block's dotted path, the registry paths of both keys less their leaf.
+	// sidePanelBlockPath is the block's dotted path, the registry paths of its keys less their leaf.
 	sidePanelBlockPath = uiBlockKey + "." + sidePanelBlockKey
-	// sidePanelShowLeaf and sidePanelSectionsLeaf are the two keys of the block as the file spells them.
+	// sidePanelShowLeaf, sidePanelWidthLeaf and sidePanelSectionsLeaf are the block's keys as the
+	// file spells them.
 	sidePanelShowLeaf     = "show"
+	sidePanelWidthLeaf    = "width"
 	sidePanelSectionsLeaf = "sections"
 )
 
-// IsSidePanelKey reports whether key is one of the `ui.side-panel:` block's two keys, which
+// sidePanelScalarLeaves maps each scalar key of the `ui.side-panel:` block — the ones a settings row
+// edits and resets — to its leaf as the file spells it.
+var sidePanelScalarLeaves = map[string]string{
+	domain.UIKeySidePanelShow:  sidePanelShowLeaf,
+	domain.UIKeySidePanelWidth: sidePanelWidthLeaf,
+}
+
+// IsSidePanelKey reports whether key is one of the `ui.side-panel:` block's keys, which
 // [SaveSidePanelSetting] writes and [ResetSidePanelSetting] resets rather than [SaveConfigSetting] and
 // [ResetConfigSetting]: the scalar writer refuses a path three segments deep.
 func IsSidePanelKey(key string) bool {
-	return key == domain.UIKeySidePanelShow || key == domain.UIKeySidePanelSections
+	_, scalar := sidePanelScalarLeaves[key]
+	return scalar || key == domain.UIKeySidePanelSections
 }
 
 // SaveSidePanelSetting writes one key of the `ui.side-panel:` block, value spelled as the file and the
-// registry row spell it: `auto`, `on` or `off` for `ui.side-panel.show`, and the whole bracketed list
+// registry row spell it: `auto`, `on` or `off` for `ui.side-panel.show`, a number of columns for
+// `ui.side-panel.width`, and the whole bracketed list
 // for `ui.side-panel.sections`, which lands in its canonical spelling with every section named. A
 // value the key cannot hold is refused before the file is opened. The write is [SaveConfigSetting]'s
 // in every other respect: an absent config is seeded from the template, a re-set of what the file
 // already says writes nothing, and the replace is atomic and mode-preserving.
 func SaveSidePanelSetting(path, key, value string) error {
+	if leaf, scalar := sidePanelScalarLeaves[key]; scalar {
+		return saveSidePanelScalar(path, key, leaf, value)
+	}
 	switch key {
-	case domain.UIKeySidePanelShow:
-		return saveSidePanelShow(path, value)
 	case domain.UIKeySidePanelSections:
 		entries, err := domain.ParseSidePanelSections(value)
 		if err != nil {
@@ -76,22 +88,24 @@ func SaveSidePanelSetting(path, key, value string) error {
 // `ui:`), as the scalar reset drops a block it empties; comments, order and every other key stay as
 // found. A key the file does not set is already at its default: a no-op, and nothing is written.
 //
-// Only `ui.side-panel.show` is reset here. `ui.side-panel.sections` is a structured list edited in
-// the file, which no settings surface resets — refused as [ResetConfigSetting] refuses such a key.
+// Only the block's scalars, `ui.side-panel.show` and `ui.side-panel.width`, are reset here.
+// `ui.side-panel.sections` is a structured list edited in the file, which no settings surface
+// resets — refused as [ResetConfigSetting] refuses such a key.
 func ResetSidePanelSetting(path, key string) error {
-	switch key {
-	case domain.UIKeySidePanelShow:
+	if leaf, scalar := sidePanelScalarLeaves[key]; scalar {
 		k, ok := LookupKey(key)
 		if !ok {
 			return fmt.Errorf("apogee: %q is not a setting apogee knows", key)
 		}
 		splice := func(_ fileConfig, data []byte) ([]byte, error) {
-			return spliceSidePanelDelete(data, sidePanelShowLeaf, k.Kind)
+			return spliceSidePanelDelete(data, leaf, k.Kind)
 		}
 		verify := func(before, after fileConfig, updated []byte) error {
 			return verifyScalarEdit(before, after, updated, k, "", false)
 		}
 		return edit(path, splice, verify)
+	}
+	switch key {
 	case domain.UIKeySidePanelSections:
 		return fmt.Errorf("apogee: %s is not a simple value; edit it in config.yaml", key)
 	}
@@ -137,12 +151,13 @@ func withSectionMode(written []domain.SidePanelEntry, section domain.SidePanelSe
 	return next, nil
 }
 
-// saveSidePanelShow writes `ui.side-panel.show`, judged by the key's own registry row first — the
-// enum's vocabulary and the startup check (validateSettingValue) — so a refused value touches nothing.
-func saveSidePanelShow(path, value string) error {
-	k, ok := LookupKey(domain.UIKeySidePanelShow)
+// saveSidePanelScalar writes one scalar key of the block onto its leaf, judged by the key's own
+// registry row first — the kind's shape and the startup check (validateSettingValue) — so a refused
+// value touches nothing.
+func saveSidePanelScalar(path, key, leaf, value string) error {
+	k, ok := LookupKey(key)
 	if !ok {
-		return fmt.Errorf("apogee: %q is not a setting apogee knows", domain.UIKeySidePanelShow)
+		return fmt.Errorf("apogee: %q is not a setting apogee knows", key)
 	}
 	if err := validateSettingValue(k, value); err != nil {
 		return err
@@ -152,7 +167,7 @@ func saveSidePanelShow(path, value string) error {
 		return fmt.Errorf("apogee: %w", err)
 	}
 	splice := func(_ fileConfig, data []byte) ([]byte, error) {
-		return spliceSidePanelLine(data, sidePanelShowLeaf, KindEnum, text)
+		return spliceSidePanelLine(data, leaf, k.Kind, text)
 	}
 	verify := func(before, after fileConfig, updated []byte) error {
 		return verifyScalarEdit(before, after, updated, k, want, true)

@@ -30,6 +30,7 @@ import (
 // workflow-continuations, workflow-wake, headless-max-turns, headless-max-wall-time, working-window,
 // cursor-shape), so a bad value refuses at
 // the pass in the row's own sentence; `ui.stall-after`, refused at the pass by the block's own duration parser;
+// `ui.side-panel.width`, refused at the pass by the block's own width parser;
 // and `sessions.max-age`, whose unparseable text is carried as written for the block's validator
 // to refuse at ResolveOptions.
 //
@@ -234,6 +235,24 @@ func uiStallAfter() scalarField[time.Duration] {
 		return fc.UI.StallAfter
 	}
 	f.fileLand = land(domain.ParseStallAfter, f.at)
+	return f
+}
+
+// uiSidePanelWidth is the descriptor of `ui.side-panel.width`, a count the file pass reads through
+// domain.ParseSidePanelWidth — uiStallAfter's shape — so a width the key cannot take (`width: 0`,
+// `width: 10`) is refused at the load in that parser's sentence, never carried to the screen. The
+// file's whole number is spelled back as text for the parse (countText).
+func uiSidePanelWidth() scalarField[int] {
+	f := uiField(domain.UIKeySidePanelWidth, domain.ParseSidePanelWidth, strconv.Itoa,
+		func(u *domain.UIPrefs) *int { return &u.SidePanelWidth }, nil)
+	f.file = nil
+	f.fileText = func(fc fileConfig) *string {
+		if fc.UI == nil || fc.UI.SidePanel == nil {
+			return nil
+		}
+		return countText(fc.UI.SidePanel.Width)
+	}
+	f.fileLand = land(domain.ParseSidePanelWidth, f.at)
 	return f
 }
 

@@ -1121,10 +1121,10 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Seventeen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
-says; the other eight, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch`, the footer's
+Eighteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
+says; the other nine, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch`, the footer's
 layout and colours, `ui.footer.rows` and `ui.footer.colors`, and the side panel's,
-`ui.side-panel.show` and `ui.side-panel.sections`, come further down.
+`ui.side-panel.show`, `ui.side-panel.width` and `ui.side-panel.sections`, come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. The same animation is the busy indicator outside a turn: while
 an idle session waits on something slow — a `/model` profile load, a footer git action, a
@@ -1291,13 +1291,19 @@ ui:
     colors: {model: success, branch: warning}
 ```
 
-`ui.side-panel.show` is when the side panel is drawn: a 36-column column right of the transcript
+`ui.side-panel.show` is when the side panel is drawn: a column right of the transcript
 that shows the sub-agents at work, the task list, the files changed this session and the usage
 ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md)). `auto` — the default — draws it while
 the transcript keeps at least 100 columns beside it, `on` while it keeps at least 80, and `off`
 never. Any other word is a startup error that names the key. It lives in a nested `side-panel:`
 block, and `/settings` edits it. What the panel shows, and what a click on it does, is under [The
 side panel](#the-side-panel) below.
+
+`ui.side-panel.width` is the panel's width in columns: a whole number of 24 or more, default 36.
+A window too narrow to keep the transcript's floor beside a panel that wide draws the panel
+narrower, without changing the setting. A width below 24 — `0` included — or one that
+is not a whole number is a startup error that names the key. It lives in the same `side-panel:`
+block, and `/settings` edits it, live.
 
 `ui.side-panel.sections` lists the panel's sections in the order it shows them — `sub-agents`,
 `tasks`, `changed-files` and `usage` — each in a mode: `pinned` (always shown), `auto` (shown while
@@ -1313,6 +1319,7 @@ both are global-only.
 ui:
   side-panel:
     show: on
+    width: 44
     sections: [usage: pinned, tasks: auto, changed-files: auto, sub-agents: hidden]
 ```
 

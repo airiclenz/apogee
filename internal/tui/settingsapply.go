@@ -500,12 +500,13 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
-	case domain.UIKeySidePanelShow, domain.UIKeySidePanelSections:
+	case domain.UIKeySidePanelShow, domain.UIKeySidePanelWidth, domain.UIKeySidePanelSections:
 		// The side panel paints from the block (ADR 0110), so landing the value is the whole apply:
-		// the next frame reads the mode and the section list off the Options. The show mode reaches
-		// here from the /settings row; the section list, structured and edited in the file, as a
-		// re-read of a hand-edited file (applyReloaded) — either way applied live rather than
-		// refused at the binary's dispatcher, which has no seam for a screen-only key.
+		// the next frame reads the mode, the width and the section list off the Options. The show
+		// mode and the width reach here from their /settings rows; the section list, structured and
+		// edited in the file, as a re-read of a hand-edited file (applyReloaded) — either way
+		// applied live rather than refused at the binary's dispatcher, which has no seam for a
+		// screen-only key.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}

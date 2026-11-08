@@ -92,7 +92,7 @@ func fabricatedSettings() config.Options {
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, Notify: domain.NotifyBoth, GitFetch: false,
 			PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]",
-			FooterColors: fixtureFooterColors(), SidePanelShow: domain.SidePanelShowOn,
+			FooterColors: fixtureFooterColors(), SidePanelShow: domain.SidePanelShowOn, SidePanelWidth: 48,
 			SidePanelSections: "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]"},
 		// The retention keys stay unset; the two watch keys are set, so their rows report a value.
 		Sessions: config.SessionSettings{
@@ -505,6 +505,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.git-fetch":                       "false", // off in the fixture, against its true default
 		"ui.pointer-shapes":                  "true",  // on in the fixture, against its false default
 		"ui.side-panel.show":                 "on",    // on in the fixture, against its auto default
+		"ui.side-panel.width":                "48",    // a count prints itself, and the fixture's 48 is not the default 36
 		// Reordered in the fixture, against every section auto in the default order: the row reads
 		// the canonical spelling, a text the key takes back rather than a summary.
 		"ui.side-panel.sections": "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]",

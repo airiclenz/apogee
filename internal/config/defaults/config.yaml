@@ -1182,10 +1182,13 @@ update-check: true
 # colours the session's state gives them, and a segment or role apogee does not know is refused at
 # startup. Default none. Edit it here, in the file.
 #
-# `side-panel.show` is when the side panel is drawn: a 36-column column right of the transcript
-# showing the sub-agents at work, the task list, the files changed this session and the usage.
-# `auto` draws it while the transcript keeps at least 100 columns beside it, `on` while it keeps
-# at least 80, and `off` never. Default `auto`. Switch live from /settings.
+# `side-panel.show` is when the side panel is drawn: a column right of the transcript showing the
+# sub-agents at work, the task list, the files changed this session and the usage. `auto` draws it
+# while the transcript keeps at least 100 columns beside it, `on` while it keeps at least 80, and
+# `off` never. Default `auto`. Switch live from /settings.
+#
+# `side-panel.width` is the panel's width in columns: 24 or more, default 36. A window too narrow
+# for it draws the panel narrower without changing the setting. Change it live from /settings.
 #
 # `side-panel.sections` lists the panel's sections in the order it shows them — `sub-agents`,
 # `tasks`, `changed-files` and `usage` — each `pinned` (always shown), `auto` (shown while it has
@@ -1209,6 +1212,7 @@ ui:
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched
   side-panel:
     show: auto           # auto | on | off — the side panel right of the transcript, by window width
+    # width: 36          # columns, 24 or more
     # sections: [sub-agents: auto, tasks: auto, changed-files: auto, usage: auto]  # pinned | auto | hidden
   # footer:
   #   rows: [[host, model, effort, mode], [workdir, git, spend]]

@@ -388,3 +388,54 @@ func TestSidePanelSectionsBlockResetNoOpAndRefusals(t *testing.T) {
 		t.Error("a no-op or refused reset rewrote the file")
 	}
 }
+
+// `ui.side-panel.width` lands through the block writer beside the block's other keys and resets
+// back off the file, `show` and `sections` kept as found both ways; a width below 24 is refused
+// before the file is opened, and the file is left as it was.
+func TestSidePanelSectionsBlockWritesAndResetsWidth(t *testing.T) {
+	t.Parallel()
+	const body = "ui:\n  side-panel:\n    show: on             # by hand\n" +
+		"    sections: [tasks: pinned]\n"
+	path := writeSectionsConfig(t, body)
+
+	if err := SaveSidePanelSetting(path, domain.UIKeySidePanelWidth, "23"); err == nil {
+		t.Error("SaveSidePanelSetting(width 23) succeeded; want a refusal")
+	}
+	if got := readSectionsConfig(t, path); got != body {
+		t.Fatalf("a refused width rewrote the file:\n%s", got)
+	}
+	if err := SaveSidePanelSetting(path, domain.UIKeySidePanelWidth, "48"); err != nil {
+		t.Fatalf("SaveSidePanelSetting(width 48): %v", err)
+	}
+	if got, want := readSectionsConfig(t, path), body+"    width: 48\n"; got != want {
+		t.Errorf("config after save =\n%s\nwant\n%s", got, want)
+	}
+	if err := SaveSidePanelSetting(path, domain.UIKeySidePanelWidth, "40"); err != nil {
+		t.Fatalf("SaveSidePanelSetting(width 40): %v", err)
+	}
+	if got, want := readSectionsConfig(t, path), body+"    width: 40\n"; got != want {
+		t.Errorf("config after a rewrite in place =\n%s\nwant\n%s", got, want)
+	}
+	opts, err := LoadFileConfig(path, os.ReadFile, func(string) {})
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if opts.UI.SidePanelWidth != 40 || opts.UI.SidePanelShow != domain.SidePanelShowOn {
+		t.Errorf("read back width %d show %q; want 40 and on", opts.UI.SidePanelWidth, opts.UI.SidePanelShow)
+	}
+
+	if err := ResetSidePanelSetting(path, domain.UIKeySidePanelWidth); err != nil {
+		t.Fatalf("ResetSidePanelSetting(width): %v", err)
+	}
+
+	if got := readSectionsConfig(t, path); got != body {
+		t.Errorf("config after reset =\n%s\nwant\n%s", got, body)
+	}
+	opts, err = LoadFileConfig(path, os.ReadFile, func(string) {})
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if opts.UI.SidePanelWidth != domain.DefaultSidePanelWidth {
+		t.Errorf("width reads back %d after reset, want the default %d", opts.UI.SidePanelWidth, domain.DefaultSidePanelWidth)
+	}
+}

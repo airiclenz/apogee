@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +48,52 @@ func ParseSidePanelShow(s string) (SidePanelShow, error) {
 		names = append(names, string(mode))
 	}
 	return "", fmt.Errorf("unknown side-panel mode %q (known modes: %s)", s, strings.Join(names, ", "))
+}
+
+// DefaultSidePanelWidth is the side panel's width in columns for a config that names no
+// `ui.side-panel.width:`, and what a zero [UIPrefs.SidePanelWidth] resolves to.
+const DefaultSidePanelWidth = 36
+
+// MinSidePanelWidth is the narrowest `ui.side-panel.width` a config may state: below it a section's
+// header and its rows no longer fit beside their marks.
+const MinSidePanelWidth = 24
+
+// ParseSidePanelWidth reads a `ui.side-panel.width:` value: a number of columns, at least
+// [MinSidePanelWidth], or — trimmed — the empty value, which is the key's way of saying "the
+// default". Text that is no number, and a width below the minimum (0 included: a stated width is
+// a width, and the "unset" a zero field carries is a block's, never a value's), are refused in the
+// sentences every surface that reads the key refuses them in.
+func ParseSidePanelWidth(text string) (int, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return DefaultSidePanelWidth, nil
+	}
+	width, err := strconv.Atoi(text)
+	if err != nil {
+		return 0, fmt.Errorf("apogee: invalid ui.side-panel.width %q: want a number of columns, %d or more",
+			text, MinSidePanelWidth)
+	}
+	if width < MinSidePanelWidth {
+		return 0, sidePanelTooNarrow(width)
+	}
+	return width, nil
+}
+
+// validSidePanelWidth is [UIPrefs.Validate]'s judgement on the width: 0 is the unset field, which
+// resolves to [DefaultSidePanelWidth], so only a stated width below the minimum is refused — in
+// the parser's sentence.
+func validSidePanelWidth(width int) error {
+	if width != 0 && width < MinSidePanelWidth {
+		return sidePanelTooNarrow(width)
+	}
+	return nil
+}
+
+// sidePanelTooNarrow is the one refusal of a width below [MinSidePanelWidth], spoken by the parser
+// and by Validate alike.
+func sidePanelTooNarrow(width int) error {
+	return fmt.Errorf("apogee: invalid ui.side-panel.width %d: want %d columns or more",
+		width, MinSidePanelWidth)
 }
 
 // SidePanelSection names one section of the side panel, as `ui.side-panel.sections` spells it.

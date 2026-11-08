@@ -89,7 +89,13 @@ the grep above returns, besides `adr-0110-rejected.md`'s "list order stays fixed
 originals the amendment names, only sentences that state the default 36 beside the drag and its limits.
 **Commit:** `docs(adr): amend ADR 0110 for a user-dragged side panel width`
 
-## 2. The `ui.side-panel.width` setting
+## 2. The `ui.side-panel.width` setting — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): the block writer's show-only save and reset were folded into one scalar path (`saveSidePanelScalar` plus a `sidePanelScalarLeaves` map) serving `show` and `width`, instead of a second copy of `saveSidePanelShow` for the width.
+NOTES (2026-11-08): `UIPrefs.SidePanelWidth` is a plain int whose 0 means unset; the one resolution method that turns 0 into 36 for the layout is left to item 3, as its regression-check note assigns.
+NOTES (2026-11-08): besides `wantUIDefault`, the eleven other full `domain.UIPrefs` literals in `internal/config/config_test.go` gained `SidePanelWidth: 36` (they compare against a resolved default block).
+NOTES (2026-11-08): consequential edit — cmd/apogee/wire_options.go: made necessary by the width becoming a third key of the `ui.side-panel:` block ("The two keys of the block" comment now reads "The keys of the block"; no code change).
+NOTES (2026-11-08): docs/manual/configuration.md §"The side panel" still says "a 36-column panel" (line ~1353); left for item 8, which owns the manual's side-panel section.
 
 **What:**
 Recast at the regression check (2026-11-08).

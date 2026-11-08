@@ -2914,6 +2914,11 @@ type uiSidePanelConfig struct {
 	// Show names when the column is drawn — auto | on | off. Empty ⇒ the default (auto). A raw
 	// string for uiConfig.Spinner's reason: UIPrefs.Validate parses it once, at startup.
 	Show string `yaml:"show"`
+	// Width is `ui.side-panel.width`: the panel's width in columns. A pointer for ToolsFoldOver's
+	// reason — an absent key keeps the default of 36, and a stated `0` is a width the load refuses
+	// rather than an absent one — and a WholeCount for the same reason as that key. The judgement
+	// (a whole number of 24 or more) is domain.ParseSidePanelWidth's, at the file pass.
+	Width *WholeCount `yaml:"width"`
 	// Sections is `ui.side-panel.sections`: the sections with their modes, kept as written. Nil for
 	// an absent (or null) key, which keeps the default. The judgement is fileSidePanelSections'.
 	Sections sidePanelSectionsConfig `yaml:"sections"`

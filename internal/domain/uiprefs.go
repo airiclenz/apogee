@@ -12,8 +12,8 @@ import (
 // spinner and its colour loop, the scroll bar, the palette, the quiet threshold, the Inspector's
 // wire capture, the skill-suggestion band, the two fold states the transcript writes back, the
 // glyph set the screen's symbols are drawn from, and how the terminal is told apogee waits on the
-// human, the rows the footer's segments are laid out in, and when the side panel is drawn and
-// which of its sections it shows.
+// human, the rows the footer's segments are laid out in, and when the side panel is drawn, how
+// wide, and which of its sections it shows.
 // It is one struct because the keys describe one subsystem and travel together, from the on-disk
 // block through resolution (internal/config) to the wire (tui.Options) to the live apply — and it
 // lives here, beside the vocabularies its fields are spelled in, so every layer that carries the
@@ -130,6 +130,12 @@ type UIPrefs struct {
 	// name is refused by [UIPrefs.Validate] naming the key. Screen-only: nothing about it reaches
 	// the model.
 	SidePanelShow SidePanelShow
+	// SidePanelWidth is `ui.side-panel.width`: the side panel's width in columns while it is drawn
+	// (ADR 0110, amended 2026-11-08). Default [DefaultSidePanelWidth], and 0 reads as unset and
+	// resolves to it — Glyphs' posture, so a block assembled field by field still validates. A
+	// stated width below [MinSidePanelWidth] is refused by [UIPrefs.Validate] naming the key; how
+	// wide the window lets the panel be is the layout's clamp, never a rewrite of this value.
+	SidePanelWidth int
 	// SidePanelSections is `ui.side-panel.sections`: each panel section with its mode, in display
 	// order, carried in its one canonical spelling so the block stays comparable with `==`, and
 	// read into entries through [ParseSidePanelSections]. Default every section auto; `""` reads
@@ -577,7 +583,10 @@ const (
 	// UIKeySidePanelShow is a key of the nested `side-panel:` block, and unlike the footer's keys it
 	// IS one of [UIKeys]: a one-word value a settings row edits.
 	UIKeySidePanelShow = "ui.side-panel.show"
-	// UIKeySidePanelSections is the `side-panel:` block's other key, structured and edited in the
+	// UIKeySidePanelWidth is the `side-panel:` block's width, a number a settings row edits, so one
+	// of [UIKeys] like [UIKeySidePanelShow].
+	UIKeySidePanelWidth = "ui.side-panel.width"
+	// UIKeySidePanelSections is the `side-panel:` block's structured key, and edited in the
 	// file like [UIKeyFooterRows], so not one of [UIKeys].
 	UIKeySidePanelSections = "ui.side-panel.sections"
 )
@@ -588,6 +597,7 @@ var uiKeys = []string{
 	UIKeySpinner, UIKeySpinnerColor, UIKeyGlyphs, UIKeyShowScrollbar, UIKeyColorScheme,
 	UIKeyStallAfter, UIKeyInspector, UIKeySkillSuggestions, UIKeyTaskListOpen, UIKeyToolsOpen,
 	UIKeyToolsFoldOver, UIKeyPointerShapes, UIKeyNotify, UIKeyGitFetch, UIKeySidePanelShow,
+	UIKeySidePanelWidth,
 }
 
 // UIKeys returns the `ui:` block's keys in template order. It hands back a fresh slice on every
@@ -604,7 +614,7 @@ func UIKeys() []string {
 // umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
 // the unicode glyph set, the terminal bell when apogee waits on the human, the footer's
 // periodic git fetch on, the footer laid out on two rows, the upstream above the workspace, and the
-// side panel drawn where the window has room for it, every section in auto.
+// side panel drawn 36 columns wide where the window has room for it, every section in auto.
 // Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
@@ -621,6 +631,7 @@ func DefaultUIPrefs() UIPrefs {
 		GitFetch:          true,
 		FooterRows:        DefaultFooterRows,
 		SidePanelShow:     DefaultSidePanelShow,
+		SidePanelWidth:    DefaultSidePanelWidth,
 		SidePanelSections: DefaultSidePanelSections,
 	}
 }
@@ -668,8 +679,9 @@ func ParseToolsFoldOver(text string) (int, error) {
 
 // Validate rejects a block naming a spinner style this build has no animation for, a StallAfter
 // below zero, a ToolsFoldOver below zero, a glyph set this build does not know, a notify mode it
-// does not know, footer rows [ParseFooterRows] refuses, a side-panel show mode it does not know, or
-// side-panel sections [ParseSidePanelSections] refuses — the same eight refusals the parsers make,
+// does not know, footer rows [ParseFooterRows] refuses, a side-panel show mode it does not know, a
+// side-panel width stated below [MinSidePanelWidth], or side-panel sections [ParseSidePanelSections]
+// refuses — the same nine refusals the parsers make (a zero width is the unset field, not a refusal),
 // so a block assembled field by field is judged as one read through
 // [UIPrefs.Set] would be. Catching them here makes a typo a startup error that names the key; left
 // to the renderer they would silently resolve to some other style, the shipped threshold or the
@@ -693,6 +705,9 @@ func (u UIPrefs) Validate() error {
 	if _, err := ParseSidePanelShow(string(u.SidePanelShow)); err != nil {
 		return fmt.Errorf("apogee: invalid ui.side-panel.show: %w", err)
 	}
+	if err := validSidePanelWidth(u.SidePanelWidth); err != nil {
+		return err
+	}
 	if _, err := ParseSidePanelSections(string(u.SidePanelSections)); err != nil {
 		return err
 	}
@@ -704,8 +719,8 @@ func (u UIPrefs) Validate() error {
 // carry the key), and the value is parsed per key — the spinner through [ParseSpinnerStyle], the
 // glyph set through [ParseGlyphSet], the notify mode through [ParseNotifyMode], the footer rows
 // through [ParseFooterRows] (landing their canonical spelling), the footer colours through
-// [ParseFooterColors], the side-panel show mode through [ParseSidePanelShow], the side-panel
-// sections through [ParseSidePanelSections] (landing their canonical spelling, every section
+// [ParseFooterColors], the side-panel show mode through [ParseSidePanelShow], the side-panel width
+// through [ParseSidePanelWidth], the side-panel sections through [ParseSidePanelSections] (landing their canonical spelling, every section
 // named), the bools through strconv.ParseBool, the threshold and the count through their parsers, the scheme
 // name as it is. The edit runs on a COPY, [UIPrefs.Validate] judges the copy, and only a copy it
 // accepts is written back: a Set that fails has touched nothing. A key this block does not carry
@@ -803,6 +818,12 @@ func (u *UIPrefs) land(key, value string) error {
 			return fmt.Errorf("apogee: invalid ui.side-panel.show: %w", err)
 		}
 		u.SidePanelShow = show
+	case UIKeySidePanelWidth:
+		width, err := ParseSidePanelWidth(value)
+		if err != nil {
+			return err
+		}
+		u.SidePanelWidth = width
 	case UIKeySidePanelSections:
 		entries, err := ParseSidePanelSections(value)
 		if err != nil {

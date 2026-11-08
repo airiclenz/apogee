@@ -2,6 +2,7 @@ package domain
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -148,5 +149,51 @@ func TestSidePanelShowZeroValidatesAndBadIsRefusedNamingTheKey(t *testing.T) {
 	u.SidePanelShow = "wide"
 	if err := u.Validate(); err == nil || !strings.HasPrefix(err.Error(), "apogee: invalid ui.side-panel.show: ") {
 		t.Errorf("Validate() with SidePanelShow wide = %v; want refused naming ui.side-panel.show", err)
+	}
+}
+
+// TestSidePanelWidthValidateAndSetJudgeTheStatedWidth: the default is 36 and `""` reads as it; a
+// zero field is the unset width and validates, while Set — a stated value — refuses 0 as it refuses
+// any width below 24; 24 and up land as written; and the parser refuses text that is no number.
+func TestSidePanelWidthValidateAndSetJudgeTheStatedWidth(t *testing.T) {
+	t.Parallel()
+
+	if got := DefaultUIPrefs().SidePanelWidth; got != 36 {
+		t.Errorf("DefaultUIPrefs().SidePanelWidth = %d; want 36", got)
+	}
+	if got, err := ParseSidePanelWidth("  "); err != nil || got != DefaultSidePanelWidth {
+		t.Errorf(`ParseSidePanelWidth("  ") = %d, %v; want the default`, got, err)
+	}
+	for _, tt := range []struct {
+		width               int
+		validates, setLands bool
+	}{
+		{width: 0, validates: true, setLands: false},
+		{width: 23, validates: false, setLands: false},
+		{width: 24, validates: true, setLands: true},
+		{width: 36, validates: true, setLands: true},
+		{width: 200, validates: true, setLands: true},
+	} {
+		u := DefaultUIPrefs()
+		u.SidePanelWidth = tt.width
+		if err := u.Validate(); (err == nil) != tt.validates {
+			t.Errorf("Validate() with SidePanelWidth %d = %v; want validates %t", tt.width, err, tt.validates)
+		}
+		set := DefaultUIPrefs()
+		err := set.Set(UIKeySidePanelWidth, strconv.Itoa(tt.width))
+		if (err == nil) != tt.setLands {
+			t.Errorf("Set(%d) = %v; want lands %t", tt.width, err, tt.setLands)
+		}
+		if tt.setLands && set.SidePanelWidth != tt.width {
+			t.Errorf("Set(%d) landed %d", tt.width, set.SidePanelWidth)
+		}
+		if !tt.setLands && err != nil && !strings.HasPrefix(err.Error(), "apogee: invalid ui.side-panel.width ") {
+			t.Errorf("Set(%d) = %q; want refused naming ui.side-panel.width", tt.width, err)
+		}
+	}
+	for _, text := range []string{"wide", "36.5", "-24"} {
+		if _, err := ParseSidePanelWidth(text); err == nil {
+			t.Errorf("ParseSidePanelWidth(%q) accepted; want refused", text)
+		}
 	}
 }

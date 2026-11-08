@@ -1239,6 +1239,18 @@ var KeyRegistry = bindRows([]Key{
 			}),
 	},
 	{
+		// A count of the nested `side-panel:` block, applied by the renderer itself (settingsApplyLocal)
+		// as ui.side-panel.show is, and written through the same block writer. The floor is the whole
+		// contract — ui.tools-fold-over's shape with a floor of 24 — and the window's own limit is the
+		// layout's clamp, never a rewrite of the value. A pointer on disk: a stated `0` is refused at
+		// the load by domain.ParseSidePanelWidth rather than read as an absent key.
+		Path: "ui.side-panel.width", Kind: KindInt, Default: strconv.Itoa(domain.DefaultSidePanelWidth),
+		Editable: true,
+		Validate: validateSidePanelWidth,
+		Desc:     "The side panel's width in columns, 24 or more; a narrow window draws it narrower.",
+		field:    uiSidePanelWidth(),
+	},
+	{
 		// An ordered list of section/mode pairs, so structured and edited in the file — ui.footer.rows'
 		// posture, global-only by the same zero class. Its Read is the canonical spelling, every
 		// section named, a text domain.ParseSidePanelSections reads back (UIPrefs.Set lands it), so a
@@ -1840,6 +1852,14 @@ func validateNotifyMode(value string) error {
 // startup check itself — domain.UIPrefs.Validate, validateSpinnerName's posture.
 func validateSidePanelShow(value string) error {
 	return domain.UIPrefs{SidePanelShow: domain.SidePanelShow(value)}.Validate()
+}
+
+// validateSidePanelWidth refuses a `ui.side-panel.width:` that is not a number of columns of at
+// least 24, through the one parser every surface reads the key with (domain.ParseSidePanelWidth) —
+// validateToolsFoldOver's shape.
+func validateSidePanelWidth(value string) error {
+	_, err := domain.ParseSidePanelWidth(value)
+	return err
 }
 
 // validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the
