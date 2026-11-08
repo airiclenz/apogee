@@ -59,7 +59,7 @@ type Line struct {
 // field to land in; UpstreamAttemptEvent durations and UpstreamSwitchedEvent.Waited come back
 // truncated to whole milliseconds; a SubAgentPhaseEvent's At comes back without its monotonic
 // clock reading and in a fixed zone of its offset; a nil Fired comes back as an empty slice and nil receipt Fields
-// as an empty map, while empty Rules, Images and task-list Items come back nil; argument JSON comes back compacted
+// as an empty map, while empty Rules, Images, task-list Items and context-cost Rows come back nil; argument JSON comes back compacted
 // and HTML-escaped, a null one as nil; MalformedArguments.Err comes back as an error carrying only
 // the text, its sentinel chain not rebuilt; a Tool summary of an unknown kind comes back nil.
 //
@@ -205,6 +205,16 @@ var eventDecoders = map[string]eventDecoder{
 	}),
 	kindUpstreamSwitched: decodeWith(upstreamSwitchedEventFrom),
 	kindTaskList:         decodeWith(taskListEventFrom),
+	kindContextCost:      decodeWith(contextCostEventFrom),
+}
+
+// contextCostEventFrom rebuilds a domain.ContextCostEvent; an empty rows list comes back nil.
+func contextCostEventFrom(base domain.EventBase, d ContextCost) (domain.Event, error) {
+	cost := domain.ContextCost{Bytes: d.Bytes, Tokens: d.Tokens, Calibrated: d.Calibrated}
+	for _, row := range d.Rows {
+		cost.Rows = append(cost.Rows, domain.ContextCostRow{Name: row.Name, Bytes: row.Bytes, Tokens: row.Tokens})
+	}
+	return domain.ContextCostEvent{EventBase: base, Cost: cost}, nil
 }
 
 // taskListEventFrom rebuilds a domain.TaskListEvent; an empty list comes back with nil Items.

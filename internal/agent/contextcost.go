@@ -37,7 +37,8 @@ const (
 //
 // Like ContextFilesReport this is an idle-only read: it renders the prompt (Mode, date, scratch
 // dir), composes the mode-filtered menu and reads the token accounting, so a Driver calls it with
-// no worker driving the Agent.
+// no worker driving the Agent. The engine's own read is emitTurn's, at each Turn boundary Step and
+// Run return at — no request in flight there either — which reports it as a ContextCostEvent.
 func (a *Agent) ContextCost() domain.ContextCost {
 	return a.contextCost(a.requestRoom())
 }

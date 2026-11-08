@@ -18,8 +18,9 @@ import (
 const manualHeadlessPath = "../../docs/manual/headless.md"
 
 // TestManualListsEveryEventLineKind holds the manual's table of line kinds to eventjson.Kinds(),
-// which IS the vocabulary the writer emits (ADR 0075 §4): every name appears on the page as a
-// backticked token, so a kind added to the encoder without a row here fails before it ships. The
+// which IS the vocabulary the writer emits (ADR 0075 §4): every name opens a row of the table as
+// a "| `kind` |" cell, so a kind added to the encoder without a row here fails before it ships — a
+// mention elsewhere on the page (context_cost is also a run_finished member) does not count. The
 // four fixed phrases beside it are the section's load-bearing ones — the flag that turns the stream
 // on, the two frames that bracket it, and the one stderr line that says the stream has stopped.
 func TestManualListsEveryEventLineKind(t *testing.T) {
@@ -36,9 +37,9 @@ func TestManualListsEveryEventLineKind(t *testing.T) {
 		t.Fatal("eventjson.Kinds() named no line kinds; the vocabulary scan has stopped working")
 	}
 	for _, kind := range kinds {
-		if !strings.Contains(page, "`"+kind+"`") {
-			t.Errorf("%s does not name the %q line kind as a `%s` token; the Event lines table has drifted",
-				manualHeadlessPath, kind, kind)
+		if row := "| `" + kind + "` |"; !strings.Contains(page, row) {
+			t.Errorf("%s has no %q table row for the %q line kind; the Event lines table has drifted",
+				manualHeadlessPath, row, kind)
 		}
 	}
 

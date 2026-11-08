@@ -476,6 +476,7 @@ type (
 	UsageEvent             = domain.UsageEvent
 	ContextEstimateEvent   = domain.ContextEstimateEvent
 	TaskListEvent          = domain.TaskListEvent
+	ContextCostEvent       = domain.ContextCostEvent
 	AuditEvent             = domain.AuditEvent
 	WireEvent              = domain.WireEvent
 	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent

@@ -1152,13 +1152,19 @@ func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) {
 // inside step(): StepCapped is decided only after step() returns, and the capped fallback boundary
 // finishAtStepCap builds from turns.end never passes through step() at all, so an emit down there
 // would misreport both. One StepResult, one event.
+//
+// Each boundary's TurnEvent is followed by one ContextCostEvent at the same identity: the standing
+// rows this agent's ContextCost reports as the Turn leaves them, read here — never computed twice —
+// so every boundary (Step's, Run's and the step-capped fallback) carries exactly one of each.
 func (a *Agent) emitTurn(res domain.StepResult) {
+	base := a.base(res.TurnIndex)
 	a.cfg.Events.Emit(domain.TurnEvent{
-		EventBase:  a.base(res.TurnIndex),
+		EventBase:  base,
 		Status:     res.Status,
 		Faulted:    res.Faulted,
 		StepCapped: res.StepCapped,
 	})
+	a.cfg.Events.Emit(domain.ContextCostEvent{EventBase: base, Cost: a.ContextCost()})
 }
 
 // Run steps the loop until the Exchange completes (a final no-tool response),

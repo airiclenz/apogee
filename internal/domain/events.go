@@ -713,6 +713,18 @@ type TaskListEvent struct {
 	Items []TaskItem
 }
 
+// ContextCostEvent reports the EMITTING agent's standing context cost at a Turn's end: Cost is the
+// agent's own ContextCost report (ADR 0079) as that boundary leaves it — the standing system rows
+// and the tool surface, each with its bytes and token estimate. It is emitted once per Turn
+// boundary, right after that boundary's TurnEvent, at every depth with the emitting agent's
+// identity, so a Driver can split its latest context estimate into the standing rows and the
+// conversation history (history = estimate − Cost.Tokens) without a call into the engine. It is an
+// estimate over the session's chars→token ratio, never a reading, and adds nothing to the totals.
+type ContextCostEvent struct {
+	EventBase
+	Cost ContextCost
+}
+
 // AuditEvent surfaces one audit entry — a tool call, the guardrail decision it
 // cleared/was blocked by, and whether its result errored — to the EventSink as the
 // executor decides it (security-review M1). The event stream IS the audit trail: no

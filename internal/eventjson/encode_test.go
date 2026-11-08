@@ -653,6 +653,28 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"items":[]}`,
 		},
 		{
+			// The run_finished frame's context_cost shape, at the emitting agent's identity.
+			name: "context_cost",
+			event: domain.ContextCostEvent{
+				EventBase: domain.EventBase{Depth: 1, Turn: 2, CallID: "call-9", RunID: "0badc0de.2"},
+				Cost: domain.ContextCost{
+					Rows:  []domain.ContextCostRow{{Name: "prompt", Bytes: 40, Tokens: 10}, {Name: "tool menu", Bytes: 80, Tokens: 20}},
+					Bytes: 120, Tokens: 30, Calibrated: true,
+				},
+			},
+			wantKind: "context_cost",
+			wantBase: domain.EventBase{Depth: 1, Turn: 2, CallID: "call-9", RunID: "0badc0de.2"},
+			wantData: `{"rows":[{"name":"prompt","bytes":40,"tokens":10},{"name":"tool menu","bytes":80,"tokens":20}],"bytes":120,"tokens":30,"calibrated":true}`,
+		},
+		{
+			// An agent that seeds nothing still writes its rows as an array, never null.
+			name:     "context_cost with no standing rows",
+			event:    domain.ContextCostEvent{EventBase: domain.EventBase{Turn: 3}},
+			wantKind: "context_cost",
+			wantBase: domain.EventBase{Turn: 3},
+			wantData: `{"rows":[],"bytes":0,"tokens":0,"calibrated":false}`,
+		},
+		{
 			// The envelope takes the SPAWNING delegation's id off the embedded EventBase while
 			// data.call_id carries the AUDITED call — two different facts the variant's shadowing
 			// field would otherwise braid into one.
@@ -1123,6 +1145,7 @@ func TestEncodeMapsEveryEventVariant(t *testing.T) {
 		"UsageEvent":             domain.UsageEvent{},
 		"ContextEstimateEvent":   domain.ContextEstimateEvent{},
 		"TaskListEvent":          domain.TaskListEvent{},
+		"ContextCostEvent":       domain.ContextCostEvent{},
 		"AuditEvent":             domain.AuditEvent{},
 		"WireEvent":              domain.WireEvent{},
 		"UpstreamAttemptEvent":   domain.UpstreamAttemptEvent{},
@@ -1221,16 +1244,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentySeven pins the vocabulary itself — the twenty-five serialized variants, the
+// TestKindsAreTwentyEight pins the vocabulary itself — the twenty-six serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentySeven(t *testing.T) {
+func TestKindsAreTwentyEight(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 27 {
-		t.Fatalf("len(Kinds()) = %d, want 27: %v", len(kinds), kinds)
+	if len(kinds) != 28 {
+		t.Fatalf("len(Kinds()) = %d, want 28: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

@@ -7,9 +7,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-seven line kinds of ADR 0075 §4 — twenty-five Event variants, workflow_phase (ADR 0087),
+// The twenty-eight line kinds of ADR 0075 §4 — twenty-six Event variants, workflow_phase (ADR 0087),
 // malformed_chunks, sub_agent_group (ADR 0103 decision 13), context_estimate, upstream_switched
-// (adr-0075-amend-1102) and task_list (adr-0075-amend-1108) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// (adr-0075-amend-1102), task_list and context_cost (adr-0075-amend-1108) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -39,6 +39,7 @@ const (
 	kindContextEstimate   = "context_estimate"
 	kindUpstreamSwitched  = "upstream_switched"
 	kindTaskList          = "task_list"
+	kindContextCost       = "context_cost"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -86,6 +87,7 @@ func Kinds() []string {
 		kindContextEstimate,
 		kindUpstreamSwitched,
 		kindTaskList,
+		kindContextCost,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -198,6 +200,8 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 		return kindContextEstimate, e.EventBase, contextEstimateData{Tokens: e.Tokens, Calibrated: e.Calibrated}, true
 	case domain.TaskListEvent:
 		return kindTaskList, e.EventBase, taskListOf(e), true
+	case domain.ContextCostEvent:
+		return kindContextCost, e.EventBase, contextCostOf(e.Cost), true
 	case domain.AuditEvent:
 		return kindAudit, e.EventBase, auditData{
 			Tool:     e.Tool,
@@ -566,6 +570,18 @@ func taskListOf(e domain.TaskListEvent) taskListData {
 		items = append(items, taskItemData{Text: item.Text, Done: item.Done})
 	}
 	return taskListData{Items: items}
+}
+
+// contextCostOf maps a ContextCostEvent's report to its line, in the run_finished frame's own
+// context_cost shape (ContextCost, writer.go) so a reader parses the two with one type. Unlike the
+// frame — whose null rows mark a run that never built a session — the line always has a session
+// behind it, so rows is always an array, `[]` for an agent that seeds nothing, never null.
+func contextCostOf(report domain.ContextCost) ContextCost {
+	rows := make([]ContextCostRow, 0, len(report.Rows))
+	for _, row := range report.Rows {
+		rows = append(rows, ContextCostRow{Name: row.Name, Bytes: row.Bytes, Tokens: row.Tokens})
+	}
+	return ContextCost{Rows: rows, Bytes: report.Bytes, Tokens: report.Tokens, Calibrated: report.Calibrated}
 }
 
 // usageData is the usage line: the token accounting an Upstream reply carried, the emitting

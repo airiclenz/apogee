@@ -346,6 +346,16 @@ func foldCases() []foldCase {
 			event: domain.TaskListEvent{Items: []domain.TaskItem{{Text: "read the spec", Done: true}, {Text: "write the test"}}},
 		},
 		{
+			name: "ContextCostEvent is inert in the TUI for now",
+			// An agent's standing context cost at a Turn's end. The TUI does not fold it yet: no
+			// entry, no gauge, no phrase, no progress save. The side panel's usage section is a
+			// later change to this row.
+			event: domain.ContextCostEvent{Cost: domain.ContextCost{
+				Rows:  []domain.ContextCostRow{{Name: "prompt", Bytes: 40, Tokens: 10}},
+				Bytes: 40, Tokens: 10,
+			}},
+		},
+		{
 			name: "AuditEvent is inert in the TUI",
 			// Nothing at all: the audit trail is observable through the EventSink for other
 			// hosts (a log shipper), and the transcript deliberately renders none of it.

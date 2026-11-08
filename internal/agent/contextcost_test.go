@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -262,5 +264,132 @@ func TestContextCostCalibrationCountsTheSentToolSurface(t *testing.T) {
 	if got := a.budget().CharsPerToken; got != want.CharsPerToken() {
 		t.Errorf("CharsPerToken = %v, want %v (calibrated over the sent instruction block; the menu JSON gives %v)",
 			got, want.CharsPerToken(), menuJSON.CharsPerToken())
+	}
+}
+
+// assertTurnEventsPairedWithContextCost pins the ContextCostEvent's place in the stream: every
+// TurnEvent is followed at once by exactly one ContextCostEvent under the same identity, and no
+// ContextCostEvent stands anywhere else. It returns the ContextCostEvents in emission order.
+func assertTurnEventsPairedWithContextCost(t *testing.T, events []domain.Event) []domain.ContextCostEvent {
+	t.Helper()
+
+	var costs []domain.ContextCostEvent
+	turns := 0
+	for i, e := range events {
+		if cost, ok := e.(domain.ContextCostEvent); ok {
+			costs = append(costs, cost)
+			turn, follows := domain.TurnEvent{}, false
+			if i > 0 {
+				turn, follows = events[i-1].(domain.TurnEvent)
+			}
+			if !follows {
+				t.Errorf("ContextCostEvent %d follows %T, want the TurnEvent of its boundary", i, events[max(i-1, 0)])
+				continue
+			}
+			if cost.EventBase != turn.EventBase {
+				t.Errorf("ContextCostEvent base = %+v, want its TurnEvent's %+v", cost.EventBase, turn.EventBase)
+			}
+			continue
+		}
+		if _, ok := e.(domain.TurnEvent); ok {
+			turns++
+		}
+	}
+	if len(costs) != turns {
+		t.Errorf("recorded %d ContextCostEvents for %d TurnEvents, want one per Turn boundary", len(costs), turns)
+	}
+	return costs
+}
+
+// TestTurnEndEmitsContextCostEvent pins the standing cost a Turn boundary reports: one
+// ContextCostEvent right after each TurnEvent, at the same identity, carrying the agent's own
+// ContextCost — the standing rows and the tool surface, never a second computation. It holds
+// whether a host drives Step or Run, and at depth: a delegation's boundaries report under the
+// child's identity, the step-capped fallback boundary included.
+func TestTurnEndEmitsContextCostEvent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("top level", func(t *testing.T) {
+		t.Parallel()
+
+		sink := &recordingSink{}
+		a := newProfileAgent(t, contextCostConfig(t, sink), scriptedResponder(t,
+			toolCallTurn("c1", "read_file", `{"path":"main.go"}`),
+			contentTurn("all done"),
+		))
+		if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if _, err := a.Run(context.Background()); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+
+		costs := assertTurnEventsPairedWithContextCost(t, sink.events)
+		if len(costs) != 2 {
+			t.Fatalf("recorded %d ContextCostEvents, want 2 (one per Turn of the Exchange)", len(costs))
+		}
+		last := costs[len(costs)-1]
+		if want := a.ContextCost(); !reflect.DeepEqual(last.Cost, want) {
+			t.Errorf("last ContextCostEvent.Cost = %+v, want the agent's own ContextCost %+v", last.Cost, want)
+		}
+		if _, ok := rowBytes(last.Cost, contextCostToolMenu); !ok || len(last.Cost.Rows) < 2 {
+			t.Errorf("ContextCostEvent rows = %v, want the standing rows and the tool menu", rowNames(last.Cost))
+		}
+	})
+
+	cases := []struct {
+		name   string
+		wrapUp stubllm.Turn
+	}{
+		{"step-capped child, the wrap-up Turn completes", contentTurn("here is what I found")},
+		{"step-capped child, the fallback boundary", errorScript("upstream exploded on the wrap-up")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+			cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+			cfg.Delegation.MaxSteps = 3
+
+			scripts := []stubllm.Turn{subAgentCallTurn("c1", "trawl the repo")}
+			scripts = append(scripts, narratedChildTurns(3)...)
+			scripts = append(scripts, contentTurn(childFoldSummary), tc.wrapUp, contentTurn("parent done"))
+
+			a, err := newAgent(cfg, scriptedResponder(t, scripts...))
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			assertTurnEventsPairedWithContextCost(t, sink.events)
+			capped := 0
+			for i, e := range sink.events {
+				turn, ok := e.(domain.TurnEvent)
+				if !ok || !turn.StepCapped {
+					continue
+				}
+				capped++
+				if i+1 >= len(sink.events) {
+					t.Fatal("the capped TurnEvent is the last event; want its ContextCostEvent after it")
+				}
+				cost, ok := sink.events[i+1].(domain.ContextCostEvent)
+				if !ok {
+					t.Fatalf("the capped TurnEvent is followed by %T, want a ContextCostEvent", sink.events[i+1])
+				}
+				if cost.Depth != 1 || cost.CallID != "c1" {
+					t.Errorf("capped boundary's ContextCostEvent base = %+v, want the child's (Depth 1, CallID %q)", cost.EventBase, "c1")
+				}
+			}
+			if capped != 1 {
+				t.Fatalf("%d capped TurnEvents, want exactly 1", capped)
+			}
+		})
 	}
 }

@@ -130,7 +130,16 @@ writes `null`); the three `sub_agent_phase` `TestEncodeJSONGolden` cases updated
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'SubAgentPhase' ./internal/agent/`
 **Commit:** `feat(engine): stamp sub-agent phase Events with their time`
 
-## 3. Context-cost Event at Turn end
+## 3. Context-cost Event at Turn end — ✅ DONE (2026-11-08)
+
+NOTES (2026-11-08): The ContextCostEvent is emitted right AFTER each boundary's TurnEvent under the same EventBase, so the TurnEvent opens the boundary and the cost follows it. The plan left the order open. The headless manual and ADR 0075 amendment 1108 state this order.
+NOTES (2026-11-08): The `context_cost` line's data reuses the run_finished frame's exported `eventjson.ContextCost`/`ContextCostRow` types, so a reader parses both with one type. On the line, `rows` is always `[]`, never null, because a line always has a session behind it. The frame keeps null rows.
+NOTES (2026-11-08): TestTurnEndEmitsContextCostEvent lives in internal/agent/contextcost_test.go, which the plan's Files line does not name. It is a new test beside the other ContextCost tests, and the `ContextCost` Acceptance pattern matches it.
+NOTES (2026-11-08): consequential edit — cmd/apogee/headless_test.go: made necessary by the new variant. TestHeadlessFormatJSONStreamsEveryEvent builds its expectation from Kinds(), so its emission list gains a ContextCostEvent. Its comment now counts twenty-five default-stream variants.
+NOTES (2026-11-08): consequential edit — internal/agent/contextcost.go: ContextCost's doc comment now names emitTurn as the engine's own idle-boundary reader. No helper was added: the emit is inline in emitTurn, which is the one call site.
+NOTES (2026-11-08): TestManualListsEveryEventLineKind now asserts a "| `<kind>` |" table row instead of a bare backticked token, as the plan asks. Every existing kind already has such a row.
+NOTES (2026-11-08): A non-race run of all of ./internal/agent fails TestDispatchGroup_OnePipelineAtEveryWidth. It fails the same way at HEAD a1b3a9e4 with this item's changes stashed. Item 2's wall-clock SubAgentPhaseEvent.At makes the width-1 and width-2 per-call events differ.
+NOTES (2026-11-08): consequential edit — .capcom/knowledge/decisions/adr-0075.md: made necessary by extending adr-0075-amend-1108 with the context_cost kind (the Status line names what each amendment adds; decision 4's count is now twenty-eight)
 
 **What:**
 **Goal:** at the end of every Turn, at every depth, the engine emits

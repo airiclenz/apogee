@@ -123,6 +123,14 @@ func roundTripEvents() []domain.Event {
 			Items:     []domain.TaskItem{{Text: "read the spec", Done: true}, {Text: "write the test"}},
 		},
 		domain.TaskListEvent{EventBase: topLevelBase, Items: []domain.TaskItem{}},
+		domain.ContextCostEvent{
+			EventBase: delegatedBase,
+			Cost: domain.ContextCost{
+				Rows:  []domain.ContextCostRow{{Name: "prompt", Bytes: 40, Tokens: 10}, {Name: "tool menu", Bytes: 80, Tokens: 20}},
+				Bytes: 120, Tokens: 30, Calibrated: true,
+			},
+		},
+		domain.ContextCostEvent{EventBase: topLevelBase, Cost: domain.ContextCost{Rows: []domain.ContextCostRow{}}},
 		domain.AuditEvent{
 			EventBase: delegatedBase, Tool: "terminal", CallID: "call-audited", Decision: "allow",
 			Reason: "rule", IsError: true,
@@ -449,6 +457,11 @@ func lossyView(event domain.Event) domain.Event {
 	case domain.TaskListEvent:
 		if len(e.Items) == 0 {
 			e.Items = nil
+		}
+		return e
+	case domain.ContextCostEvent:
+		if len(e.Cost.Rows) == 0 {
+			e.Cost.Rows = nil
 		}
 		return e
 	case domain.UpstreamSwitchedEvent:
