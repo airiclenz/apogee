@@ -35,12 +35,13 @@ func TestSidePanelShowDefaultsToAutoAndKnowsThreeModes(t *testing.T) {
 }
 
 // TestSidePanelSectionsDefaultToEverySectionAuto: the default list names every section in auto in
-// the documented order — sub-agents, tasks, changed-files, usage — and `""` reads as it.
+// the documented order — sub-agents, tasks, changed-files, usage, mcp — and `""` reads as it.
 func TestSidePanelSectionsDefaultToEverySectionAuto(t *testing.T) {
 	t.Parallel()
 	want := []SidePanelEntry{
 		{SidePanelSubAgents, SidePanelModeAuto}, {SidePanelTasks, SidePanelModeAuto},
 		{SidePanelChangedFiles, SidePanelModeAuto}, {SidePanelUsage, SidePanelModeAuto},
+		{SidePanelMCP, SidePanelModeAuto},
 	}
 
 	for _, text := range []string{string(DefaultUIPrefs().SidePanelSections), "", "  "} {
@@ -50,7 +51,7 @@ func TestSidePanelSectionsDefaultToEverySectionAuto(t *testing.T) {
 		}
 	}
 	if got := SidePanelSectionNames(); !slices.Equal(got,
-		[]SidePanelSection{SidePanelSubAgents, SidePanelTasks, SidePanelChangedFiles, SidePanelUsage}) {
+		[]SidePanelSection{SidePanelSubAgents, SidePanelTasks, SidePanelChangedFiles, SidePanelUsage, SidePanelMCP}) {
 		t.Errorf("SidePanelSectionNames() = %v; want the default display order", got)
 	}
 }
@@ -60,7 +61,7 @@ func TestSidePanelSectionsDefaultToEverySectionAuto(t *testing.T) {
 // same list lands through Set as the one canonical text, so two spellings never compare unequal.
 func TestSidePanelSectionsRoundTripThroughTheirCanonicalSpelling(t *testing.T) {
 	t.Parallel()
-	const canonical SidePanelSections = "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: pinned]"
+	const canonical SidePanelSections = "[usage: pinned, tasks: hidden, mcp: pinned, sub-agents: auto, changed-files: pinned]"
 
 	entries, err := ParseSidePanelSections(string(canonical))
 	if err != nil {
@@ -69,7 +70,7 @@ func TestSidePanelSectionsRoundTripThroughTheirCanonicalSpelling(t *testing.T) {
 	if got := SpellSidePanelSections(entries); got != canonical {
 		t.Errorf("SpellSidePanelSections(Parse(%q)) = %q; want it back", canonical, got)
 	}
-	for _, text := range []string{string(canonical), " [usage:pinned ,tasks : hidden, sub-agents: auto,changed-files: pinned ] "} {
+	for _, text := range []string{string(canonical), " [usage:pinned ,tasks : hidden,mcp :pinned, sub-agents: auto,changed-files: pinned ] "} {
 		u := DefaultUIPrefs()
 		if err := u.Set(UIKeySidePanelSections, text); err != nil || u.SidePanelSections != canonical {
 			t.Errorf("Set(ui.side-panel.sections, %q) = %v, landing %q; want %q", text, err, u.SidePanelSections, canonical)
@@ -92,9 +93,17 @@ func TestSidePanelSectionsAppendTheSectionsAListLeavesOut(t *testing.T) {
 	want := []SidePanelEntry{
 		{SidePanelUsage, SidePanelModePinned}, {SidePanelTasks, SidePanelModeHidden},
 		{SidePanelSubAgents, SidePanelModeAuto}, {SidePanelChangedFiles, SidePanelModeAuto},
+		{SidePanelMCP, SidePanelModeAuto},
 	}
 	if err != nil || !slices.Equal(got, want) {
 		t.Errorf("ParseSidePanelSections(partial) = %v, %v; want %v", got, err, want)
+	}
+	// A list naming every section but mcp — as one written before the section existed does —
+	// loads with mcp appended last, in auto.
+	const preMCP = "[sub-agents: auto, tasks: pinned, changed-files: auto, usage: hidden]"
+	if got, err := ParseSidePanelSections(preMCP); err != nil ||
+		SpellSidePanelSections(got) != "[sub-agents: auto, tasks: pinned, changed-files: auto, usage: hidden, mcp: auto]" {
+		t.Errorf("ParseSidePanelSections(%q) = %v, %v; want mcp appended in auto", preMCP, got, err)
 	}
 	if got, err := ParseSidePanelSections("[]"); err != nil || SpellSidePanelSections(got) != DefaultSidePanelSections {
 		t.Errorf("ParseSidePanelSections([]) = %v, %v; want the default list", got, err)
@@ -108,7 +117,7 @@ func TestSidePanelSectionsRefuseEveryBadList(t *testing.T) {
 	tests := []struct {
 		name, sections, reason string
 	}{
-		{"unknown section", "[mcp: auto]", `unknown section "mcp" (known sections: sub-agents, tasks, changed-files, usage)`},
+		{"unknown section", "[lsp: auto]", `unknown section "lsp" (known sections: sub-agents, tasks, changed-files, usage, mcp)`},
 		{"unknown mode", "[tasks: shown]", `unknown mode "shown" for section "tasks" (known modes: pinned, auto, hidden)`},
 		{"no mode", "[tasks: ]", `section "tasks" names no mode`},
 		{"named twice", "[tasks: auto, tasks: pinned]", `section "tasks" is named twice`},

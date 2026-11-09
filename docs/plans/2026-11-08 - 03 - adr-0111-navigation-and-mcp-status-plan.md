@@ -596,7 +596,12 @@ internal/tui/watch.go — watchVerbs; internal/tui/command_test.go — TestOnlyR
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestMCPPane|TestKeyClaimOrder|TestPointerPanes|TestHelpNote|TestReportKinds|TestDocMap|TestCommandTableDrivesParserAndMenu|TestOnlyResetAndPureUIVerbs' ./internal/tui/`
 **Commit:** `feat(tui): add the /mcp report pane`
 
-## 19. `mcp` joins the side-panel section names
+## 19. `mcp` joins the side-panel section names — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — internal/tui/navmode_test.go: made necessary by the new section — `onlySections` enumerates every section to hide the unnamed ones, so it gains `mcp`.
+NOTES (2026-11-09): the plan's `-run 'TestWireOptions'` matches no test in cmd/apogee (the edited tests are `TestSettingsHost*`); ran `-run 'SettingsHost|SidePanel|Sections|Settings'` and `-run 'Docs|Registry|Defaults|Template'` there instead — both pass.
+NOTES (2026-11-09): the `mcp` section paints as title "MCP" with no body and is never live (auto keeps it hidden; pinned paints the header only); it has no panel stop until item 20. New test `TestSidePanelMCPSectionIsNamedButNeverLive` pins the parse and the never-live rule.
+NOTES (2026-11-09): `cmd/apogee/settingsrows_test.go`'s fixture list `[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]` no longer names every section, but it is a hand-set UIPrefs value the row prints verbatim and the test passes; left as is.
 
 **What:** ADR 0111 D10's config half.
 **Regression guard.** `TestSidePanelCommandBareReports`'s pinned bare `/panel` note gains ` · mcp auto` (`panelReportNote` walks

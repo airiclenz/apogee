@@ -1258,7 +1258,7 @@ var KeyRegistry = bindRows([]Key{
 		// domain.DefaultUIPrefs and the starter template. Judged by fileSidePanelSections at the load.
 		Path: "ui.side-panel.sections", Kind: KindStructured,
 		Desc: "The side panel's sections in display order, each pinned, auto or hidden: " +
-			"sub-agents, tasks, changed-files, usage.",
+			"sub-agents, tasks, changed-files, usage, mcp.",
 		Read:      func(o Options) string { return string(o.UI.SidePanelSections) },
 		Structure: func(o Options) any { return o.UI.SidePanelSections },
 		fromFile:  fileSidePanelSections,

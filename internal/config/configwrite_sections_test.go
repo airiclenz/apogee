@@ -63,7 +63,7 @@ func TestSidePanelSectionsWriteKeepsCommentsOrderAndOtherKeys(t *testing.T) {
 	if got := readSectionsConfig(t, path); got != want {
 		t.Errorf("the write changed more than the one mode\n--- got ---\n%s--- want ---\n%s", got, want)
 	}
-	if want := domain.SidePanelSections("[tasks: pinned, usage: hidden, sub-agents: hidden, changed-files: auto]"); resolved != want {
+	if want := domain.SidePanelSections("[tasks: pinned, usage: hidden, sub-agents: hidden, changed-files: auto, mcp: auto]"); resolved != want {
 		t.Errorf("resolved = %q, want %q", resolved, want)
 	}
 }
@@ -79,7 +79,7 @@ func TestSidePanelSectionsWriteOfAnUnnamedSectionKeepsTheDisplayOrder(t *testing
 	if err != nil {
 		t.Fatalf("SaveSidePanelSection: %v", err)
 	}
-	const list = "[tasks: pinned, sub-agents: auto, changed-files: auto, usage: hidden]"
+	const list = "[tasks: pinned, sub-agents: auto, changed-files: auto, usage: hidden, mcp: auto]"
 	if got, want := readSectionsConfig(t, path), "ui:\n  side-panel:\n    sections: "+list+"\n"; got != want {
 		t.Errorf("config =\n%s\nwant\n%s", got, want)
 	}
@@ -103,7 +103,7 @@ func TestSidePanelSectionsWriteCreatesTheMissingListFromTheDefault(t *testing.T)
 	}
 
 	at, added := splicedInsertion(t, string(template), readSectionsConfig(t, path))
-	want := "    sections: [sub-agents: auto, tasks: pinned, changed-files: auto, usage: auto]"
+	want := "    sections: [sub-agents: auto, tasks: pinned, changed-files: auto, usage: auto, mcp: auto]"
 	if len(added) != 1 || added[0] != want {
 		t.Fatalf("inserted %q at line %d, want the one line %q", added, at, want)
 	}
@@ -116,7 +116,7 @@ func TestSidePanelSectionsWriteCreatesTheMissingListFromTheDefault(t *testing.T)
 // to whatever of them is already there at the indentation that block uses.
 func TestSidePanelSectionsWriteIntoAConfigWithNoSidePanelBlock(t *testing.T) {
 	t.Parallel()
-	const list = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: hidden]"
+	const list = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: hidden, mcp: auto]"
 	cases := []struct {
 		name, body, want string
 	}{
@@ -202,7 +202,7 @@ func TestSidePanelSectionsWholeListWrite(t *testing.T) {
 	}
 
 	want := "ui:\n  side-panel:\n    show: auto\n" +
-		"    sections: [usage: pinned, sub-agents: auto, tasks: auto, changed-files: auto]\n"
+		"    sections: [usage: pinned, sub-agents: auto, tasks: auto, changed-files: auto, mcp: auto]\n"
 	if got := readSectionsConfig(t, path); got != want {
 		t.Errorf("config =\n%s\nwant\n%s", got, want)
 	}
@@ -230,7 +230,7 @@ func TestSidePanelSectionsReSetWritesNothing(t *testing.T) {
 	if !info.ModTime().Equal(stale) || readSectionsConfig(t, path) != body {
 		t.Error("a re-set of the mode the file already says rewrote the file")
 	}
-	if want := domain.SidePanelSections("[tasks: pinned, usage: auto, sub-agents: auto, changed-files: auto]"); resolved != want {
+	if want := domain.SidePanelSections("[tasks: pinned, usage: auto, sub-agents: auto, changed-files: auto, mcp: auto]"); resolved != want {
 		t.Errorf("resolved = %q, want %q", resolved, want)
 	}
 }
@@ -262,7 +262,7 @@ func TestSidePanelSectionsWriteRefusals(t *testing.T) {
 		{
 			name:    "an unknown section",
 			body:    "model: qwen\n",
-			section: "mcp", mode: domain.SidePanelModeHidden,
+			section: "lsp", mode: domain.SidePanelModeHidden,
 			reason: "unknown section",
 		},
 		{

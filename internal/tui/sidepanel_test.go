@@ -2360,9 +2360,9 @@ func TestSidePanelCommandRefusesAnUnknownSection(t *testing.T) {
 	m.opts.Settings = spy.host(nil)
 	before := m.opts.UI
 
-	m = sendLine(t, m, "/panel pin mcp")
+	m = sendLine(t, m, "/panel pin lsp")
 
-	if !noteHolding(m, `unknown side-panel section "mcp" (known sections: sub-agents, tasks, changed-files, usage). `+panelUsage) {
+	if !noteHolding(m, `unknown side-panel section "lsp" (known sections: sub-agents, tasks, changed-files, usage, mcp). `+panelUsage) {
 		t.Errorf("no refusal naming the sections:\n%s", plain(m.View()))
 	}
 	if len(spy.sections) != 0 || len(spy.writes) != 0 || m.opts.UI != before {
@@ -2371,6 +2371,35 @@ func TestSidePanelCommandRefusesAnUnknownSection(t *testing.T) {
 	for _, line := range []string{"/panel sideways", "/panel on now", "/panel hide"} {
 		if _, err := parsePanel(strings.Fields(line)[1:]); err == nil || !strings.Contains(err.Error(), panelUsage) {
 			t.Errorf("parsePanel(%q) = %v, want an error carrying the usage line", line, err)
+		}
+	}
+}
+
+// TestSidePanelMCPSectionIsNamedButNeverLive pins the `mcp` section's config half (ADR 0111 D10):
+// `/panel pin|unpin|hide mcp` parses to that section, and until its state is folded the section is
+// never live — auto leaves it out of the column, pinned paints its header over an empty body.
+func TestSidePanelMCPSectionIsNamedButNeverLive(t *testing.T) {
+	t.Parallel()
+	for verb, mode := range map[string]domain.SidePanelMode{
+		"pin": domain.SidePanelModePinned, "unpin": domain.SidePanelModeAuto, "hide": domain.SidePanelModeHidden,
+	} {
+		got, err := parsePanel([]string{verb, "mcp"})
+		want := panelArgs{action: panelSetSection, section: domain.SidePanelMCP, mode: mode}
+		if err != nil || got != want {
+			t.Errorf("parsePanel(%s mcp) = %+v, %v; want %+v", verb, got, err, want)
+		}
+	}
+
+	if section, isLive := panelModel(t, "[mcp: pinned]", 30).panelSection(domain.SidePanelMCP); isLive || len(section.body) != 0 {
+		t.Errorf("panelSection(mcp) = %+v, live %v; want an empty section that is never live", section, isLive)
+	}
+	for sections, wantShown := range map[domain.SidePanelSections]bool{
+		domain.DefaultSidePanelSections: false, "[mcp: pinned]": true, "[mcp: hidden]": false,
+	} {
+		m := panelModel(t, sections, 30)
+		shown := slices.ContainsFunc(m.panelSections(), func(s panelSection) bool { return s.kind == domain.SidePanelMCP })
+		if shown != wantShown {
+			t.Errorf("sections %q: mcp shown = %v, want %v", sections, shown, wantShown)
 		}
 	}
 }
@@ -2390,7 +2419,7 @@ func TestSidePanelCommandBareReports(t *testing.T) {
 
 	m = sendLine(t, m, "/panel")
 
-	want := "side panel: auto — usage pinned · tasks hidden · sub-agents auto · changed-files auto" +
+	want := "side panel: auto — usage pinned · tasks hidden · sub-agents auto · changed-files auto · mcp auto" +
 		" (not docked: the window is narrower than 137 columns)"
 	if !noteHolding(m, want) {
 		t.Errorf("no report %q:\n%s", want, plain(m.View()))
@@ -2421,14 +2450,14 @@ func TestSidePanelCommandBareReports(t *testing.T) {
 		want     string
 	}{
 		{"off", domain.SidePanelShowOff, "[usage: pinned]", 100,
-			"side panel: off — usage pinned · sub-agents auto · tasks auto · changed-files auto"},
+			"side panel: off — usage pinned · sub-agents auto · tasks auto · changed-files auto · mcp auto"},
 		{"the zero UIPrefs' empty mode", "", "[usage: pinned]", 100,
-			"side panel: off — usage pinned · sub-agents auto · tasks auto · changed-files auto"},
+			"side panel: off — usage pinned · sub-agents auto · tasks auto · changed-files auto · mcp auto"},
 		{"nothing live", domain.SidePanelShowAuto, domain.DefaultSidePanelSections, 100,
-			"side panel: auto — sub-agents auto · tasks auto · changed-files auto · usage auto" +
+			"side panel: auto — sub-agents auto · tasks auto · changed-files auto · usage auto · mcp auto" +
 				" (not docked: the window is narrower than 137 columns)"},
 		{"docked", domain.SidePanelShowAuto, "[usage: pinned]", 140,
-			"side panel: auto — usage pinned · sub-agents auto · tasks auto · changed-files auto"},
+			"side panel: auto — usage pinned · sub-agents auto · tasks auto · changed-files auto · mcp auto"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

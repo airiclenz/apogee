@@ -46,7 +46,7 @@ const wantFooterRowsDefault domain.FooterRows = "[[host, model, effort, mode], [
 
 // wantSidePanelSectionsDefault is the `ui.side-panel.sections` a config that names none resolves to
 // — every section in auto, in the documented order — spelled out for wantUIDefault's reason.
-const wantSidePanelSectionsDefault domain.SidePanelSections = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: auto]"
+const wantSidePanelSectionsDefault domain.SidePanelSections = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: auto, mcp: auto]"
 
 // testHostID is the machine identity injected into resolution so the Host acknowledgement
 // ladder is pinned off whatever host the tests happen to run on.
@@ -6540,7 +6540,7 @@ func TestApplyConfigUIFooterColorsInAProjectFileAreDroppedAsGlobalOnly(t *testin
 // list — resolves to the defaults and leaves every other key of the block alone.
 func TestApplyConfigUISidePanelLoadsFromTheGlobalFile(t *testing.T) {
 	t.Parallel()
-	const reordered = "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]"
+	const reordered = "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto, mcp: auto]"
 	tests := []struct {
 		name, yaml string
 		show       domain.SidePanelShow
@@ -6617,8 +6617,8 @@ func TestApplyConfigUISidePanelRefusedAtLoad(t *testing.T) {
 		name, yaml string
 		want       []string
 	}{
-		{"an unknown section", sections + "[mcp: auto]\n",
-			[]string{`ui.side-panel.sections "[mcp: auto]"`, `unknown section "mcp"`}},
+		{"an unknown section", sections + "[lsp: auto]\n",
+			[]string{`ui.side-panel.sections "[lsp: auto]"`, `unknown section "lsp"`}},
 		{"an unknown mode", sections + "[tasks: shown]\n",
 			[]string{`ui.side-panel.sections "[tasks: shown]"`, `unknown mode "shown"`}},
 		{"a section twice", sections + "[tasks: auto, tasks: pinned]\n",

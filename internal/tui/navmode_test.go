@@ -56,6 +56,7 @@ func navModelWithGlyphs(
 func onlySections(shown ...domain.SidePanelSection) domain.SidePanelSections {
 	all := []domain.SidePanelSection{
 		domain.SidePanelSubAgents, domain.SidePanelTasks, domain.SidePanelChangedFiles, domain.SidePanelUsage,
+		domain.SidePanelMCP,
 	}
 	parts := make([]string, 0, len(all))
 	for _, section := range all {

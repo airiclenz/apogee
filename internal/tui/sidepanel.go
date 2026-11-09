@@ -364,6 +364,10 @@ func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool
 	case domain.SidePanelUsage:
 		view := m.panel.Usage(scope).WithFill(m.panelFill())
 		return panelSection{title: "Usage", summary: view.Summary, body: m.panelUsageRows(view)}, view.IsLive
+	case domain.SidePanelMCP:
+		// Named and configurable, but not yet folded: an empty section that is never live, so auto
+		// keeps it hidden and only pinned paints its header.
+		return panelSection{title: "MCP"}, false
 	default:
 		return panelSection{}, false
 	}

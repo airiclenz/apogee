@@ -57,7 +57,7 @@ func TestSettingsHostSidePanelSectionsWriteRefreshesTheBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteSidePanelSection: %v", err)
 	}
-	const want = "[sub-agents: auto, tasks: pinned, changed-files: auto, usage: auto]"
+	const want = "[sub-agents: auto, tasks: pinned, changed-files: auto, usage: auto, mcp: auto]"
 	if sections != want {
 		t.Errorf("sections = %q, want %q", sections, want)
 	}
@@ -131,7 +131,7 @@ func TestSettingsHostWritesBothSidePanelSectionsBlockKeys(t *testing.T) {
 		t.Fatalf("read the config back: %v", err)
 	}
 	want := "ui:\n  side-panel:\n    show: \"off\"\n" +
-		"    sections: [usage: hidden, sub-agents: auto, tasks: auto, changed-files: auto]\n"
+		"    sections: [usage: hidden, sub-agents: auto, tasks: auto, changed-files: auto, mcp: auto]\n"
 	if string(data) != want {
 		t.Errorf("config =\n%s\nwant\n%s", data, want)
 	}

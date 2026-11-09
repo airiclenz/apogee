@@ -1215,7 +1215,7 @@ ui:
   side-panel:
     show: auto           # auto | on | off — the side panel right of the transcript, by window width
     # width: 36          # columns, 24 or more
-    # sections: [sub-agents: auto, tasks: auto, changed-files: auto, usage: auto]  # pinned | auto | hidden
+    # sections: [sub-agents: auto, tasks: auto, changed-files: auto, usage: auto, mcp: auto]  # pinned | auto | hidden
   # footer:
   #   rows: [[host, model, effort, mode], [workdir, git, spend]]
   #   colors: {}             # e.g. {model: success, branch: warning}

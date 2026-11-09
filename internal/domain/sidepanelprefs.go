@@ -108,12 +108,14 @@ const (
 	SidePanelChangedFiles SidePanelSection = "changed-files"
 	// SidePanelUsage is the usage section: the context fill and the spend.
 	SidePanelUsage SidePanelSection = "usage"
+	// SidePanelMCP is the MCP section: the configured MCP servers and their connection state.
+	SidePanelMCP SidePanelSection = "mcp"
 )
 
 // sidePanelSectionNames is the vocabulary [ParseSidePanelSections] accepts, in the default display
 // order — the order a section the list leaves out is appended in.
 var sidePanelSectionNames = []SidePanelSection{
-	SidePanelSubAgents, SidePanelTasks, SidePanelChangedFiles, SidePanelUsage,
+	SidePanelSubAgents, SidePanelTasks, SidePanelChangedFiles, SidePanelUsage, SidePanelMCP,
 }
 
 // SidePanelSectionNames returns the sections this build knows, in their default display order. It
@@ -152,7 +154,7 @@ type SidePanelSections string
 
 // DefaultSidePanelSections is what a config that names no `ui.side-panel.sections:` resolves to:
 // every section in auto, in the default display order.
-const DefaultSidePanelSections SidePanelSections = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: auto]"
+const DefaultSidePanelSections SidePanelSections = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: auto, mcp: auto]"
 
 // sidePanelSectionsShape is the refusal for text that is not a list of entries at all.
 const sidePanelSectionsShape = "want a list of section: mode entries, like " +
