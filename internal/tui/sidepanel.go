@@ -104,13 +104,16 @@ func (m Model) panelContentWidth() int {
 }
 
 // panelSection is one section the column shows: which it is, what its header says and its body
-// rows, painted.
+// rows, painted. subAgents and files are the source rows a sub-agents or changed-files body was
+// painted from, one per body row, which its stops read ([Model.panelStops]).
 type panelSection struct {
-	kind     domain.SidePanelSection
-	title    string
-	summary  string
-	isPinned bool
-	body     []string
+	kind      domain.SidePanelSection
+	title     string
+	summary   string
+	isPinned  bool
+	body      []string
+	subAgents []sidepanel.SubAgentRow
+	files     []sidepanel.FileRow
 }
 
 // foldSidePanel folds e into the side panel's state, copy-on-write: an Event the panel reads goes
@@ -229,8 +232,8 @@ type panelLine struct {
 
 // panelLayout lays the shown sections out over rows rows by the overflow rule ([panelAllocation]):
 // one panelLine per content row, from the top. It is the one layout the paint
-// ([Model.sidePanelContent]) and the pointer ([Model.panelTargetAt]) both read, so a click names
-// the row it lands on.
+// ([Model.sidePanelContent]) and the stops ([Model.panelStops]) — so the pointer — both read, so a
+// click names the row it lands on.
 func panelLayout(sections []panelSection, rows int) []panelLine {
 	kept, isExpanded := panelAllocation(sections, rows)
 	lines := make([]panelLine, 0, rows)
@@ -308,16 +311,18 @@ func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool
 		paint := func(row sidepanel.SubAgentRow) string {
 			return m.panelSubAgentRow(row, m.inRunView() && row.Run == scope)
 		}
-		return panelSection{title: "Sub-agents", summary: view.Summary, body: paintPanelRows(view.Rows, paint)},
-			view.IsLive
+		return panelSection{
+			title: "Sub-agents", summary: view.Summary, body: paintPanelRows(view.Rows, paint), subAgents: view.Rows,
+		}, view.IsLive
 	case domain.SidePanelTasks:
 		view := m.panel.Tasks(scope)
 		return panelSection{title: "Tasks", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelTaskRow)},
 			view.IsLive
 	case domain.SidePanelChangedFiles:
 		view := m.panel.ChangedFiles(scope)
-		return panelSection{title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelFileRow)},
-			view.IsLive
+		return panelSection{
+			title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelFileRow), files: view.Rows,
+		}, view.IsLive
 	case domain.SidePanelUsage:
 		view := m.panel.Usage(scope).WithFill(m.panelFill())
 		return panelSection{title: "Usage", summary: view.Summary, body: m.panelUsageRows(view)}, view.IsLive
@@ -572,56 +577,23 @@ func (m Model) panelCell(x, y int) bool {
 // the click chain, which carries that frame's spans), and whether (x, y) is a column cell at all. A
 // cell is claimed whether or not it targets anything, so no click on the column falls through to
 // the panes or the transcript under it; the hover shape asks the same question (pointershape.go),
-// so the pointer promises a click exactly where one acts.
+// so the pointer promises a click exactly where one acts. A row resolves through the column's stops
+// ([Model.panelStops]): a body row to its stop's target, a header row to its pin toggle on the pin
+// glyph's cell alone, and a row no stop spans to nothing.
 func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
 	if !m.panelCell(x, y) {
 		return panelTarget{}, false
 	}
-	sections := m.panelSections()
-	layout := panelLayout(sections, m.frameSpans().slotBottom)
-	if len(sections) == 0 || y >= len(layout) || layout[y].section < 0 {
-		return panelTarget{}, true
-	}
-	line, section := layout[y], sections[layout[y].section]
-	if line.body >= 0 {
-		return m.panelBodyTarget(section.kind, line.body), true
-	}
-	if x == m.width-1 {
-		return panelTarget{kind: panelTargetPin, section: section.kind, isPinned: section.isPinned}, true
+	for _, stop := range m.panelStops(m.frameSpans().slotBottom) {
+		if !stop.spans(y) {
+			continue
+		}
+		if stop.id.isHeader && x != m.width-1 {
+			return panelTarget{}, true
+		}
+		return stop.target, true
 	}
 	return panelTarget{}, true
-}
-
-// panelBodyTarget is the click on body row row of section kind: the detail view that row opens,
-// or none where the transcript holds nothing it could open.
-func (m Model) panelBodyTarget(kind domain.SidePanelSection, row int) panelTarget {
-	switch kind {
-	case domain.SidePanelSubAgents:
-		rows := m.panel.SubAgents().Rows
-		if row >= len(rows) {
-			return panelTarget{}
-		}
-		at := m.panelRunHeadAt(rows[row].Run)
-		if _, ok := m.runOpenableAt(at); !ok {
-			return panelTarget{}
-		}
-		return panelTarget{kind: panelTargetRun, entry: at}
-	case domain.SidePanelTasks:
-		if at, ok := m.panelTaskCardAt(); ok {
-			return panelTarget{kind: panelTargetBlock, entry: at, run: m.viewedRun()}
-		}
-	case domain.SidePanelChangedFiles:
-		rows := m.panel.ChangedFiles(panelRunKey(m.viewedRun())).Rows
-		if row >= len(rows) {
-			return panelTarget{}
-		}
-		if at, ok := m.panelWriteAt(rows[row]); ok {
-			return panelTarget{kind: panelTargetBlock, entry: at, run: m.transcript.entries[at].run()}
-		}
-	case domain.SidePanelUsage:
-		return panelTarget{kind: panelTargetUsage}
-	}
-	return panelTarget{}
 }
 
 // panelRunHeadAt is where the delegation heading run sits in the transcript, −1 where none does.

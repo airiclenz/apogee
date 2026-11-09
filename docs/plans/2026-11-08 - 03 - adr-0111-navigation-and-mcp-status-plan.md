@@ -174,7 +174,10 @@ decided); `TestSidePanelWaitingClearsOnCancel`; `TestWatchShowsWaitingMarks` (`n
 **Closes:** subagent-row-waiting-mark
 **Commit:** `feat(tui): mark a sub-agent row waiting while its approval is outstanding`
 
-## 5. Give the side panel a stop list with identities
+## 5. Give the side panel a stop list with identities — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): `panelStops` takes the row count (`panelStops(rows int)`) rather than none, so `panelTargetAt` passes `frameSpans().slotBottom` and item 7's paint can pass `belowSlot`, per the plan's regression guard.
+NOTES (2026-11-09): `panelBodyTarget(kind, row)` is replaced by `panelBodyStop(section, row)` (target plus identity), reading the source rows `panelSection` now carries (`subAgents`, `files`) so a stop answers for exactly the painted row; items 20's Read-first anchors that name `panelBodyTarget` now resolve to `panelBodyStop` in `internal/tui/panelstops.go`.
 
 **What:** structural groundwork for ADR 0111 D4–5; no behaviour change.
 **Regression guard.** A `panelStop` carries a row span (first `y` plus height), not one row: `panelTargetAt` matches any

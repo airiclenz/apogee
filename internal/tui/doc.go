@@ -1010,7 +1010,9 @@
 // [Model.topRule] gets both the name (the landed one, else the first prompt's heuristic, else none)
 // and the cell arithmetic that centers and clips it; sidepanel.go the side panel's column (ADR 0110)
 // — its width, the floors its gate keeps ([Model.panelShown]) and the rows it paints, hung off the
-// rows above the session-name rule by View;
+// rows above the session-name rule by View; panelstops.go the column's stops ([Model.panelStops]) —
+// the rows a click acts on, in paint order, each with its row span, its target and an identity
+// (header, run, path, task card, usage) — through which the pointer resolves a body row;
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace

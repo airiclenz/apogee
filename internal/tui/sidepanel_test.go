@@ -1361,6 +1361,134 @@ func TestSidePanelClickOpensTheRowsDetail(t *testing.T) {
 	}
 }
 
+// panelStopEvents makes every section live with a target on each kind of body row: a task card, a
+// top-level and a delegated write, a usage reading with several rows, and a started sub-agent.
+func panelStopEvents(t *testing.T) []domain.Event {
+	t.Helper()
+	return panelEvents(
+		panelTaskCard(),
+		panelWrite(domain.EventBase{}, "w1", "/w/top.go"),
+		[]domain.Event{
+			panelUsageReading(panelUsed),
+			panelDelegationCall(t, "r1", "scout"),
+			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		},
+		panelWrite(delegationBase("r1"), "w1", "/w/child.go"),
+	)
+}
+
+// TestPanelStopsMatchClickTargets pins the stops to the pointer (ADR 0111 decisions 4–5): every
+// stop's target is the click at every row of its span — a header's on the pin glyph's cell, a body
+// stop's inside the content — a row no stop spans clicks nothing, and the stops come in paint order
+// with one identity per kind of section row, a task card and the usage report each one stop over
+// all their rows.
+func TestPanelStopsMatchClickTargets(t *testing.T) {
+	t.Parallel()
+	m := streamOneScreen(t, panelModel(t, domain.DefaultSidePanelSections, 30, panelStopEvents(t)...))
+	pre := m.withFrameSpans()
+	rows := pre.frameSpans().slotBottom
+
+	stops := pre.panelStops(rows)
+
+	isSpanned := make([]bool, rows)
+	for _, stop := range stops {
+		x := panelBodyX(pre)
+		if stop.id.isHeader {
+			x = pre.width - 1
+		}
+		for y := stop.y; y < stop.y+stop.height; y++ {
+			isSpanned[y] = true
+			if got, isPanel := pre.panelTargetAt(x, y); !isPanel || got != stop.target {
+				t.Errorf("stop %+v: the click at (%d, %d) is %+v (column %v), want %+v", stop.id, x, y, got, isPanel, stop.target)
+			}
+		}
+	}
+	for y, spanned := range isSpanned {
+		if got, _ := pre.panelTargetAt(panelBodyX(pre), y); !spanned && got.kind != panelTargetNone {
+			t.Errorf("row %d is no stop, yet a click there follows %+v", y, got)
+		}
+	}
+	want := []panelStopID{
+		{section: domain.SidePanelSubAgents, isHeader: true},
+		{section: domain.SidePanelSubAgents, run: sidepanel.RunOf(delegationBase("r1"))},
+		{section: domain.SidePanelTasks, isHeader: true},
+		{section: domain.SidePanelTasks},
+		{section: domain.SidePanelChangedFiles, isHeader: true},
+		{section: domain.SidePanelChangedFiles, path: pre.panelWriteKey("/w/top.go")},
+		{section: domain.SidePanelChangedFiles, path: pre.panelWriteKey("/w/child.go")},
+		{section: domain.SidePanelUsage, isHeader: true},
+		{section: domain.SidePanelUsage},
+	}
+	got := make([]panelStopID, 0, len(stops))
+	for _, stop := range stops {
+		got = append(got, stop.id)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("stop identities\n%+v\nwant\n%+v", got, want)
+	}
+	firstRows := map[int]string{0: "Sub-agents", 2: "Tasks", 4: "Changed files", 7: "Usage"}
+	for at, text := range firstRows {
+		if y := panelRowY(t, pre, text); stops[at].y != y {
+			t.Errorf("the %s header's stop sits on row %d, painted on %d", text, stops[at].y, y)
+		}
+	}
+	if tasks := stops[3]; tasks.y != panelRowY(t, pre, "read the plan") || tasks.height != 3 {
+		t.Errorf("the task card's stop spans rows %d+%d, want the three task rows from %d",
+			tasks.y, tasks.height, panelRowY(t, pre, "read the plan"))
+	}
+	if usage := stops[8]; usage.height < 2 || !usage.spans(panelRowY(t, pre, "cache hit")) {
+		t.Errorf("the usage stop spans rows %d+%d: want several, the cache-hit row among them", usage.y, usage.height)
+	}
+}
+
+// TestPanelStopsSkipTargetlessRows pins the rows that are no stop: the `+N more` row of an
+// overflowing column, and a changed-file row whose write names no tool call to open.
+func TestPanelStopsSkipTargetlessRows(t *testing.T) {
+	t.Parallel()
+	events := func(t *testing.T) []domain.Event {
+		return []domain.Event{
+			taskList(0, "one", "two", "three"),
+			panelDelegationCall(t, "r1", "scout"),
+			landedEdit(domain.EventBase{}, "a.go", 0, 0),
+			panelUsageReading(panelUsed),
+		}
+	}
+
+	t.Run("the +N more row", func(t *testing.T) {
+		t.Parallel()
+		m := panelModel(t, domain.DefaultSidePanelSections, 30, events(t)...)
+
+		stops := m.panelStops(3)
+
+		if column := columnText(m, 3); column[2] != "+2 more" {
+			t.Fatalf("the 3-row column's last row reads %q, want the +2 more row", column[2])
+		}
+		want := []panelStop{
+			{y: 0, height: 1, target: panelTarget{kind: panelTargetPin, section: domain.SidePanelSubAgents},
+				id: panelStopID{section: domain.SidePanelSubAgents, isHeader: true}},
+			{y: 1, height: 1, target: panelTarget{kind: panelTargetPin, section: domain.SidePanelTasks},
+				id: panelStopID{section: domain.SidePanelTasks, isHeader: true}},
+		}
+		if !slices.Equal(stops, want) {
+			t.Errorf("stops %+v, want the two headers alone", stops)
+		}
+	})
+	t.Run("a file row with no call", func(t *testing.T) {
+		t.Parallel()
+		m := panelModel(t, "[changed-files: pinned, sub-agents: hidden, tasks: hidden, usage: hidden]", 30, events(t)...)
+		pre := m.withFrameSpans()
+
+		stops := pre.panelStops(pre.frameSpans().slotBottom)
+
+		if len(stops) != 1 || !stops[0].id.isHeader {
+			t.Errorf("stops %+v, want the changed-files header alone", stops)
+		}
+		if got, _ := pre.panelTargetAt(panelBodyX(pre), panelRowY(t, pre, "a.go")); got.kind != panelTargetNone {
+			t.Errorf("a click on the call-less file row follows %+v, want nothing", got)
+		}
+	})
+}
+
 // TestSidePanelClickTaskRowWritesNoSetting pins the regression guard of the task row: it unfolds
 // the one card through its own block state, never through the shared task-list fold, whose toggle
 // writes `ui.task-list-open`.
