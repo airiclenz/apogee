@@ -184,7 +184,12 @@ const (
 	popupRowHeading                     // a section label dividing the list (th.popupHeading)
 	popupRowEditing                     // the row the pane is being typed into (th.popupEdit)
 	popupRowLoading                     // a pane's loading row, led by the spinner's frame (popupSpec.spinner)
+	popupRowFailed                      // a content row reporting a failure: faint, its popupFailureWord in errorText
 )
+
+// popupFailureWord is the verdict a [popupRowFailed] row's tone lands on — the word the side panel's
+// sub-agent and MCP rows and the /mcp state column all say a failure with, and paint in errorText.
+const popupFailureWord = "failed"
 
 // popupSpec describes one boxed selector popup. title and hint each drop their row when empty;
 // body is plain, escape-stripped prose the module word-wraps to the inner budget and caps at
@@ -1165,6 +1170,8 @@ func popupRowLine(th theme, spec popupSpec, blackFill lipgloss.Style, row string
 		return blackFill.Render(th.popupHeading.Render(row))
 	case kind == popupRowLoading:
 		return popupLoadingLine(th, spec.spinner, blackFill, row)
+	case kind == popupRowFailed && !selected:
+		return popupFailedLine(th, blackFill, row)
 	case selected && spec.menuRows:
 		// No squareLine here, deliberately: the accent is on the CHOSEN WORDS, so it stops where
 		// they do and the rest of the row stays the pane's own black (drawTitledBox pads it out on
@@ -1194,7 +1201,29 @@ func popupLoadingLine(th theme, spinner popupSpinner, blackFill lipgloss.Style, 
 	if spinner.text == "" || !found {
 		return blackFill.Render(th.statusFaint.Render(row))
 	}
-	return blackFill.Render(th.statusFaint.Render(before)) + spinner.painted + blackFill.Render(th.statusFaint.Render(after))
+	return popupFaintAround(th, blackFill, before, spinner.painted, after)
+}
+
+// popupFailedLine paints a failed row as adjacent styled runs, the way popupLoadingLine paints its
+// frame: the faint text before the failure word, the word in errorText on the pane's black, the
+// faint text after it — so the error tone's reset strips no faint from the cells that follow, and
+// the row's cells stay plain text up to the paint. The word is the row's LAST popupFailureWord,
+// because the pane that marks a row failed (/mcp) keeps its verdict in the state column and only a
+// tool count after it, where a server name before it could hold the word too. A row truncated
+// through the word paints faint whole, as a plain row does.
+func popupFailedLine(th theme, blackFill lipgloss.Style, row string) string {
+	at := strings.LastIndex(row, popupFailureWord)
+	if at < 0 {
+		return blackFill.Render(th.statusFaint.Render(row))
+	}
+	failure := blackFill.Render(th.errorText.Render(popupFailureWord))
+	return popupFaintAround(th, blackFill, row[:at], failure, row[at+len(popupFailureWord):])
+}
+
+// popupFaintAround is a row painted as three adjacent runs: before and after faint on the pane's
+// black, painted (already styled) between them.
+func popupFaintAround(th theme, blackFill lipgloss.Style, before, painted, after string) string {
+	return blackFill.Render(th.statusFaint.Render(before)) + painted + blackFill.Render(th.statusFaint.Render(after))
 }
 
 // popupRowIndent is the width of the marker column every row leads with — the user glyph,

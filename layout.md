@@ -2686,7 +2686,10 @@ prose, `  cause: …`, rather than as a cell, so a long cause never widens a col
 lost session is also the one MCP change the transcript notes, in one line: `mcp server <name>
 disconnected (lost): <cause>`. With no server configured the pane is one
 row, `no MCP servers configured`. Server names, transports and causes are untrusted text, shown with
-terminal escapes stripped.
+terminal escapes stripped. A row is faint like every report row, but a failed server's `failed` is
+in the error tone the side panel's `mcp` row and the transcript paint a failure in, painted as its
+own run beside the row's faint ones so the cells stay plain text (ADR 0111 decision 10, as amended
+by `adr-0111-amend-1109c`).
 
 **It reads the MCP fold, never the transcript.** The rows come from the MCP server state every
 Driver view folds from `MCPServerEvent`s (ADR 0111 decisions 8 and 9): the composition root emits
@@ -2708,9 +2711,9 @@ scrolls the rows one per notch. It is asked LAST of the five reports, in the slo
 so a click aimed here dismisses the panes above it first. **In the give-way order it sits below the
 `/advice` pane**, above only the dropdown.
 
-**The side panel's `mcp` section is its glance.** The section lists each server as `name · state ·
-N tools`, shows itself under `auto` while a server is dialling, failed or disconnected, and a click
-on it — or `⏎` on it in navigation mode — opens this pane
+**The side panel's `mcp` section is its glance.** The section lists each server by name with
+`state · N tools` right-aligned, shows itself under `auto` while a server is dialling, failed or
+disconnected, and a click on it — or `⏎` on it in navigation mode — opens this pane
 ([`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md)).
 
 ---

@@ -127,9 +127,9 @@ section out gets it appended in `auto`, so a list saved before `mcp` existed sho
 |---|---|---|
 | `sub-agents` | any run is queued or running, and for 30 s after the last one ends | phase glyph, Delegation name, phase word, elapsed, context fill |
 | `tasks` | the list has an unfinished task | status glyph and task text; the first unfinished task marked `▸` |
-| `changed-files` | the session (any depth) has written a file | `↳` in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present |
+| `changed-files` | the session (any depth) has written a file | `↳` in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present, right-aligned in the `tool-marker` role |
 | `usage` | context fill ≥ 50% | fill bar with `used/window`; `sys · tools · hist` split (history = estimate − standing rows); `in · out` tokens; cache hit %; spend |
-| `mcp` | any MCP server is `dialling`, `failed` or `disconnected` | `name · state · N tools`, one row per server in first-reported order |
+| `mcp` | any MCP server is `dialling`, `failed` or `disconnected` | the name, then `state · N tools` right-aligned, one row per server in first-reported order |
 
 The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune; the rules are ADR
 0110's.
@@ -154,10 +154,13 @@ foreground on no background), `○` while it is queued, the glyph set's done mar
 While a queued or running run has an approval requested and not yet decided — the one the approval
 pane shows or one queued behind it — its row reads `waiting` under the waiting mark `◷` (`?` under
 `safe`) in the `warning` foreground with no background, in place of its spinner or `○`; the phase
-word stays faint like every other, and only the gated run's own row is marked (ADR 0111 decision
-11). The gate closes on that run's decision, on the Approver's failure on it, or when the run or
+word `waiting` stays faint, as `queued` and `running` do, and only the gated run's own row is
+marked (ADR 0111 decision 11). The gate closes on that run's decision, on the Approver's failure on it, or when the run or
 the Turn finishes, so a done or failed row never reads `waiting`.
-The phase word is `queued`, `running`, `waiting`, `done` or `failed`. Elapsed time is the status line's clock
+The phase word is `queued`, `running`, `waiting`, `done` or `failed`, in the transcript's outcome
+tones (`adr-0111-amend-1109c`): `done` in the `success` role as a finished delegation's outcome
+slot paints it, `failed` in the error tone like its `✗` and the transcript's failure, the
+unfinished phases faint like the elapsed time and fill after them. Elapsed time is the status line's clock
 form (`38s`, `01:12s`) below an hour, then hours and minutes (`1h02m` to `23h59m`), then days and
 hours (`1d02h`), clamped at `99d23h` — never wider than six columns, where the status line's own
 `01:02:03s` would push the row's facts out of line — and blank while queued; the fill is the run's latest reading against its own
@@ -168,9 +171,10 @@ and fill sit in fixed-width columns at the right edge, so the facts of every row
 **MCP rows.** The section reads the process's MCP server state — the fold of every
 `MCPServerEvent` (ADR 0111 decision 8): emitted by the composition root as each server's dial starts
 and ends and as a live session is closed on purpose or lost on its own, and seeded at startup — not the viewed run's,
-since no run owns a server. A row is written behind a blank lead as `name · state · N tools` (`1 tool`), the
-name clipped first so the state and the count stay in view; the state is faint, `failed` in the
-error tone. The count is left off while no connection serves, and kept while a dial is under way
+since no run owns a server. A row is written behind a blank lead as the server's name, then
+`state · N tools` (`1 tool`) right-aligned at the content's edge like every other section's facts,
+the name clipped first so the state and the count stay in view; the state is faint, `failed` in the
+error tone — the tone `/mcp` paints `failed` in too. The count is left off while no connection serves, and kept while a dial is under way
 with the previous connection's tools in hand or a failed reconnect's previous connection still
 serves. A server removed from the configuration has no row; one a `url-safety` edit closed, or whose
 session ended on its own (reason `lost`), reads `disconnected`, with no count. Server names are untrusted text, escape-stripped at the fold and again at paint.

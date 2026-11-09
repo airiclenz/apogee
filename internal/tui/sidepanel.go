@@ -651,9 +651,12 @@ func paintPanelPin(th theme, marker string, _ bool) string {
 // place of its queued or running glyph (ADR 0111 decision 11); the fold only ever sets Waiting on
 // an active row, so a done or failed row keeps its own mark. The run Run view shows (isViewed) is
 // marked as the current task is: `▸` in the first cell of its body indent, and its name, both in
-// the current task's style.
+// the current task's style. The phase word speaks in the transcript's outcome tones
+// ([summaryStyle]): `done` in `successMark`, `failed` in `errorText` like its `✗`, and the
+// unfinished phases faint like the elapsed time and fill after them.
 func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string {
 	var glyph, phase string
+	tone := m.th.statusFaint
 	switch {
 	case row.Waiting:
 		glyph, phase = m.th.panelWaiting.Render(m.th.glyphs.waiting), "waiting"
@@ -662,9 +665,9 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	case row.Phase == sidepanel.PhaseRunning:
 		glyph, phase = m.spin.tinted(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor), "running"
 	case row.Phase == sidepanel.PhaseDone:
-		glyph, phase = m.th.successMark.Render(m.th.glyphs.done), "done"
+		glyph, phase, tone = m.th.successMark.Render(m.th.glyphs.done), "done", m.th.successMark
 	default:
-		glyph, phase = m.th.errorText.Render(m.th.glyphs.failure), "failed"
+		glyph, phase, tone = m.th.errorText.Render(m.th.glyphs.failure), "failed", m.th.errorText
 	}
 	elapsed := ""
 	if row.Elapsed > 0 {
@@ -674,7 +677,10 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	if percent := row.Fill.Percent(); percent > 0 {
 		fill = strconv.Itoa(percent) + "%"
 	}
-	facts := m.th.statusFaint.Render(fmt.Sprintf(subAgentFactsFormat, phase, elapsed, fill))
+	// The phase word leads the fixed-width facts, so its tone ends where the word does and the
+	// padding, elapsed time and fill after it stay faint.
+	laidOut := fmt.Sprintf(subAgentFactsFormat, phase, elapsed, fill)
+	facts := tone.Render(phase) + m.th.statusFaint.Render(laidOut[len(phase):])
 	marker, style := "", lipgloss.NewStyle()
 	if isViewed {
 		marker, style = m.th.panelCurrent.Render(glyphPanelCurrent), m.th.panelCurrent
@@ -698,23 +704,22 @@ func (m Model) panelLeadWidth() int {
 	return width
 }
 
-// panelMCPRow is one MCP server: `name · state · N tools`, the count left off while no connection
-// serves ([mcpPanelServes]), behind a blank body lead ([Model.panelBodyLead]). The name is clipped
-// first so the state and count stay in view; on a
-// column too narrow even for them the row runs long, for sidePanelColumn's squareLine to cut. The
-// name is untrusted text: the fold strips it and this strips it again, which is idempotent.
+// panelMCPRow is one MCP server: its name behind a blank body lead ([Model.panelBodyLead]), then
+// `state · N tools` right-aligned at the column's edge as every section's facts are ([Model.panelRow]),
+// the count left off while no connection serves ([mcpPanelServes]). The state is faint, `failed` in
+// `errorText` as /mcp paints it ([popupRowFailed]). The name is clipped first so the state and count
+// stay in view; on a column too narrow even for them the row runs long, for sidePanelColumn's
+// squareLine to cut. The name is untrusted text: the fold strips it and this strips it again, which
+// is idempotent.
 func (m Model) panelMCPRow(row sidepanel.MCPServerRow) string {
-	state := m.th.statusFaint.Render(string(row.Phase))
+	facts := m.th.statusFaint.Render(string(row.Phase))
 	if row.Phase == domain.MCPServerFailed {
-		state = m.th.errorText.Render(string(row.Phase))
+		facts = m.th.errorText.Render(string(row.Phase))
 	}
-	facts := m.th.statusFaint.Render(sidePanelPartSeparator) + state
 	if mcpPanelServes(row) {
 		facts += m.th.statusFaint.Render(sidePanelPartSeparator + plural(row.Tools, "tool"))
 	}
-	lead := m.panelBodyLead("", "")
-	name := truncateToWidth(m.th, firstLine(stripEscapes(row.Server)), m.panelTextRoom(lead, "")-m.th.measure.Width(facts))
-	return lead + name + facts
+	return m.panelRow(m.panelBodyLead("", ""), firstLine(stripEscapes(row.Server)), lipgloss.NewStyle(), facts)
 }
 
 // mcpPanelServes reports whether a connection serves row's server, so its tool count means
@@ -782,7 +787,8 @@ func (m Model) panelTaskRow(row sidepanel.TaskRow) string {
 
 // panelFileRow is one changed file: ↳ in its lead when a sub-agent wrote it (blank otherwise), its
 // path, relative to the workspace where it lies inside it and trimmed from the left to the room
-// the row has, then the `+N −M` its Edit regions add up to.
+// the row has, then the `+N −M` its Edit regions add up to, in `toolMarker` as the transcript's
+// outcome slot paints a diff's counts ([summaryStyle]).
 func (m Model) panelFileRow(row sidepanel.FileRow) string {
 	glyph := ""
 	if row.IsDelegated {
@@ -790,7 +796,7 @@ func (m Model) panelFileRow(row sidepanel.FileRow) string {
 	}
 	lead, right := m.panelBodyLead("", glyph), ""
 	if row.HasStat {
-		right = m.th.statusFaint.Render(diffCounts(row.Stat.Added, row.Stat.Removed))
+		right = m.th.toolMarker.Render(diffCounts(row.Stat.Added, row.Stat.Removed))
 	}
 	path := m.transcript.ws.shorten(firstLine(stripEscapes(row.Path)))
 	return m.panelRow(lead, trimPathLeft(m.th, path, m.panelTextRoom(lead, right)), lipgloss.NewStyle(), right)

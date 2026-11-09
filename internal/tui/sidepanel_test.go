@@ -1542,8 +1542,61 @@ func TestSidePanelRowsNearTheRoomLimitKeepTheirFacts(t *testing.T) {
 	}
 	servers, _ := m.panelSection(domain.SidePanelMCP)
 	server := ansi.Strip(servers.body[0])
-	if !strings.HasSuffix(server, "… · failed") || ansi.StringWidth(server) > m.panelContentWidth() {
-		t.Errorf("mcp row %q: want the name clipped and ` · failed` whole within %d cells", server, m.panelContentWidth())
+	if !strings.HasSuffix(server, "… failed") || ansi.StringWidth(server) != m.panelContentWidth() {
+		t.Errorf("mcp row %q: want the name clipped and `failed` whole at the edge, %d cells", server, m.panelContentWidth())
+	}
+}
+
+// TestSidePanelFactsPaintTheTranscriptOutcomeTones pins the panel's facts to the roles the
+// transcript's outcome slot paints the same facts in ([summaryStyle]): a changed file's `+N −M` in
+// `toolMarker`, a finished sub-agent's `done` in the success tone, and every failure — a failed
+// sub-agent's `✗` and `failed`, a failed MCP server's `failed` — in the transcript's failure style,
+// while an unfinished phase and the facts after a phase word stay faint.
+func TestSidePanelFactsPaintTheTranscriptOutcomeTones(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30)
+	failure := summaryStyle(m.th, branchSummary{failed: true}, false)
+	success := summaryStyle(m.th, branchSummary{succeeded: true}, false)
+
+	cases := []struct {
+		name    string
+		painted string
+		want    []string
+	}{
+		{
+			name:    "changed file",
+			painted: m.panelFileRow(sidepanel.FileRow{Path: "a.go", Stat: domain.DiffStat{Added: 12, Removed: 4}, HasStat: true}),
+			want:    []string{m.th.toolMarker.Render("+12 −4")},
+		},
+		{
+			name:    "done sub-agent",
+			painted: m.panelSubAgentRow(sidepanel.SubAgentRow{Name: "alpha", Phase: sidepanel.PhaseDone, Elapsed: 38 * time.Second}, false),
+			want: []string{
+				success.Render("done") + m.th.statusFaint.Render(fmt.Sprintf(subAgentFactsFormat, "done", "38s", "")[len("done"):]),
+			},
+		},
+		{
+			name:    "failed sub-agent",
+			painted: m.panelSubAgentRow(sidepanel.SubAgentRow{Name: "alpha", Phase: sidepanel.PhaseFailed}, false),
+			want:    []string{failure.Render(m.th.glyphs.failure), failure.Render("failed")},
+		},
+		{
+			name:    "running sub-agent",
+			painted: m.panelSubAgentRow(sidepanel.SubAgentRow{Name: "alpha", Phase: sidepanel.PhaseRunning}, false),
+			want:    []string{m.th.statusFaint.Render("running")},
+		},
+		{
+			name:    "failed MCP server",
+			painted: m.panelMCPRow(sidepanel.MCPServerRow{Server: "docs", Phase: domain.MCPServerFailed, Kept: true, Tools: 2}),
+			want:    []string{failure.Render("failed") + m.th.statusFaint.Render(" · 2 tools")},
+		},
+	}
+	for _, c := range cases {
+		for _, want := range c.want {
+			if !strings.Contains(c.painted, want) {
+				t.Errorf("%s: row %q paints no %q", c.name, c.painted, want)
+			}
+		}
 	}
 }
 
@@ -3353,7 +3406,16 @@ func panelMCPEvents() []domain.Event {
 	}
 }
 
-// TestSidePanelMCPSectionRows pins the mcp section's rows (ADR 0111 D10): `name · state · N tools`
+// panelFactsRow is a body row as the panel must lay it out behind a blank one-cell lead: the body
+// indent and lead, text, and facts right-aligned so they end at the content's right edge.
+func panelFactsRow(m Model, text, facts string) string {
+	lead := bodyIndent + "  "
+	pad := m.panelContentWidth() - len(lead) - ansi.StringWidth(text) - ansi.StringWidth(facts)
+	return lead + text + strings.Repeat(" ", max(1, pad)) + facts
+}
+
+// TestSidePanelMCPSectionRows pins the mcp section's rows (ADR 0111 D10, as amended by
+// adr-0111-amend-1109c): the name, then `state · N tools` right-aligned at the content's edge,
 // per server in the order they were first reported, `1 tool` in the singular, the count left off
 // while no connection serves and kept while a failed reconnect's previous connection still does,
 // the header summarising the servers not connected by phase, and a name's escapes stripped.
@@ -3366,18 +3428,21 @@ func TestSidePanelMCPSectionRows(t *testing.T) {
 		t.Error("the mcp section is not live with servers not connected")
 	}
 	want := []string{ // behind the body indent and the classic spinner's blank one-cell lead
-		"    alpha · connected · 1 tool",
-		"    beta · failed",
-		"    gamma · failed · 2 tools",
-		"    delta · dialling",
-		"    omega · disconnected",
+		panelFactsRow(m, "alpha", "connected · 1 tool"),
+		panelFactsRow(m, "beta", "failed"),
+		panelFactsRow(m, "gamma", "failed · 2 tools"),
+		panelFactsRow(m, "delta", "dialling"),
+		panelFactsRow(m, "omega", "disconnected"),
 	}
 	got := make([]string, 0, len(section.body))
 	for _, row := range section.body {
 		if strings.Contains(row, "\x1b]") || strings.Contains(row, "pwned") {
 			t.Errorf("row %q carries the server name's escape sequence", row)
 		}
-		got = append(got, strings.TrimRight(ansi.Strip(row), " "))
+		if width := ansi.StringWidth(row); width != m.panelContentWidth() {
+			t.Errorf("row %q paints %d cells; want its facts to end at the content's edge, %d", ansi.Strip(row), width, m.panelContentWidth())
+		}
+		got = append(got, ansi.Strip(row))
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("mcp rows = %q, want %q", got, want)
@@ -3435,7 +3500,7 @@ func TestSidePanelMCPSectionAuto(t *testing.T) {
 // its rows opens /mcp.
 func TestSidePanelMCPClickOpensReport(t *testing.T) {
 	t.Parallel()
-	for _, row := range []string{"alpha · connected", "omega · disconnected"} {
+	for _, row := range []string{"connected · 1 tool", "omega"} {
 		m := panelModel(t, domain.DefaultSidePanelSections, 30, panelMCPEvents()...)
 
 		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, row))

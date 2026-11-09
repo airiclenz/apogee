@@ -1410,12 +1410,15 @@ fold indicator at the right edge, as a tool block's header does: `▼` open, `�
 | `tasks` | the task list has an unfinished task | `✓` done, `▸` the current task (the first unfinished one), `○` still open |
 | `changed-files` | the session has written a file, at any depth | `↳` before the path when a sub-agent wrote it; the path, trimmed from the left to fit; `+N −M` lines where the edit reports them |
 | `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
-| `mcp` | an MCP server is dialling, failed or disconnected | the server's name, its state and its tool count (`docs · connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
+| `mcp` | an MCP server is dialling, failed or disconnected | the server's name, then its state and its tool count at the right edge (`docs` … `connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
 
 A header's title is bold in the tone a tool block's label wears, its summary muted beside it. The
 `sub-agents` header counts the running runs bare and names the others only while there are some —
 `○ Sub-agents (2)`, `(2 · 1 queued)`, `(1 queued)`, then `(3 done)` once none is active (a failed
 run is counted there; its row carries the `✗`) — and carries no count before the first run.
+A row's facts are coloured as the transcript colours the same facts: a file's `+N −M` in the tone a
+tool block's counts wear, a finished sub-agent's `done` green, and every failure — a sub-agent's
+`✗` and `failed`, an MCP server's `failed`, here and in `/mcp` — in the transcript's red.
 
 The `mcp` section's header counts the servers that are not connected, by state (`○ MCP (1 failed)`,
 `2 dialling · 1 failed`), and the section hides again once every server is connected. Its server

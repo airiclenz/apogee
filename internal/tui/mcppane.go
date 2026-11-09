@@ -23,7 +23,7 @@ import (
 // (mcpreconnect.go); this pane only says what the dials last reported.
 //
 // The rows are a table — one heading row, then one row per server in the order the servers were
-// first reported — laid out here into single-cell rows rather than handed to the popup module as
+// first reported, a failed one's `failed` painted in errorText at paint time (mcpRowKind) — laid out here into single-cell rows rather than handed to the popup module as
 // cells, because a failed or lost server's cause follows its row as wrapped prose, and a cause seated as a
 // cell would widen a column of the table to its own length. The table's columns are measured by
 // the popup module's own column arithmetic (popupColumnWidths, layoutPopupRow), so the layout is
@@ -98,7 +98,7 @@ func (m Model) mcpRows(column int) ([]popupRow, []popupRowKind) {
 	kinds := []popupRowKind{popupRowHeading}
 	for i, server := range servers {
 		rows = append(rows, popupRow{layoutPopupRow(m.th, table[i+1], widths)})
-		kinds = append(kinds, popupRowPlain)
+		kinds = append(kinds, mcpRowKind(server))
 		cause := strings.TrimRight(stripEscapes(server.Cause), "\n")
 		if !hasMCPCause(server) || cause == "" {
 			continue
@@ -109,6 +109,16 @@ func (m Model) mcpRows(column int) ([]popupRow, []popupRowKind) {
 		}
 	}
 	return rows, kinds
+}
+
+// mcpRowKind is how the popup module paints one server's table row: a failed server's as a failed
+// row, its `failed` in errorText as the side panel's mcp section paints it, the cells themselves
+// staying plain text (popupFailedLine); every other server's as a plain row.
+func mcpRowKind(row sidepanel.MCPServerRow) popupRowKind {
+	if row.Phase == domain.MCPServerFailed {
+		return popupRowFailed
+	}
+	return popupRowPlain
 }
 
 // hasMCPCause reports whether row's phase carries a cause the pane words beneath it: a failed dial,

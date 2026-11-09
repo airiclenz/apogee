@@ -307,7 +307,12 @@ graphics/demo/storyboards/hero.yaml
 - `capcom check`
 **Commit:** `feat(tui): name sub-agents and tasks alike in transcript and panel`
 
-## 12. Route panel facts through the transcript's outcome tones
+## 12. Route panel facts through the transcript's outcome tones — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): /mcp's failed tone is a new popup row kind, `popupRowFailed` (popup.go), set per server by `mcpRowKind` in mcppane.go and painted by `popupFailedLine` as adjacent runs on the row's LAST `failed` (the state column; only the tool count follows it), so `mcpServerCells`/`mcpRowTexts` stay ANSI-free; a selected failed row keeps the selection's paint, and a row truncated through the word paints faint whole. `popupLoadingLine` now shares the three-run helper `popupFaintAround` (byte-identical output, pinned by TestPopupLoadingRowPaintsAdjacentRuns).
+NOTES (2026-11-09): the new TestPopupFailedRowPaintsAdjacentRuns falls outside the Acceptance filter `Panel|MCP`; it was run on its own (`-run 'TestPopupFailedRowPaintsAdjacentRuns|TestPopupLoadingRowPaintsAdjacentRuns'`, green).
+NOTES (2026-11-09): TestSidePanelRowsNearTheRoomLimitKeepTheirFacts re-pinned too (its `… · failed` suffix becomes `… failed`, now at the content's exact width) — the plan's Tests line did not name it; the row-shape helpers `panelFactsRow` (sidepanel_test.go) and `strippedFactsRow` (fold_test.go) spell the right-aligned row for the re-pinned tests.
+NOTES (2026-11-09): the ADR amendment is `adr-0111-amend-1109c` (1109 and 1109b were taken), named on adr-0111's Status line and reading-order list; layout.md's `/mcp` popup section also gained a sentence on the failed tone, and configuration.md a sentence on the facts' tones.
 
 **What:** Closes `panel-fact-tones`. Depends on item 9.
 **Regression guard.** `mcpServerCells` stays plain and `mcpRowTexts` ANSI-free: `/mcp` paints the failed state as adjacent runs at paint time (`popupLoadingLine`'s cut-and-paint shape, or a per-cell tone the popup module applies), not as SGR inside a cell, whose reset would strip `popupRowLine`'s faint from the cells after it. Rule: every prose mention of the MCP row shape — `grep -rn 'name · state\|connected · 12 tools' layout.md docs/`. This supersedes the spec's "the phase word stays faint like every other" and "written flush left"; rewrite both.

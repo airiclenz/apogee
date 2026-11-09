@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -196,6 +197,63 @@ func TestMCPPaneStripsEscapes(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("rows lack %q:\n%s", want, joined)
 		}
+	}
+}
+
+// TestMCPPanePaintsFailedInTheErrorTone pins /mcp's failure to the side panel's (ADR 0111 D10, as
+// amended by adr-0111-amend-1109c): a failed server's row paints its `failed` — bare, or leading
+// `failed (previous connection kept)` — in errorText, the same run the panel's mcp row paints, while
+// the row's cells stay plain text and a connected server's row carries no error tone.
+func TestMCPPanePaintsFailedInTheErrorTone(t *testing.T) {
+	t.Parallel()
+	m := foldMCPEvents(t, newTestModel(t), mcpFixtureEvents()...)
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 60})
+	m, _ = typeCommand(t, m, "/mcp")
+	failed := m.th.errorText.Render(string(domain.MCPServerFailed))
+
+	painted := m.frameOverlays().block(paneMCP)
+
+	if got := strings.Count(painted, failed); got != 2 {
+		t.Errorf("the pane paints %d `failed` runs in errorText, want 2 (beta and gamma):\n%s", got, painted)
+	}
+	_, kinds := m.mcpRows(m.thinkingWrapColumn())
+	if want := []popupRowKind{popupRowHeading, popupRowPlain, popupRowFailed, popupRowPlain, popupRowFailed, popupRowPlain,
+		popupRowPlain}; !reflect.DeepEqual(kinds, want) {
+		t.Errorf("row kinds = %v, want %v", kinds, want)
+	}
+	for _, row := range mcpRowTexts(m) {
+		if strings.Contains(row, "\x1b") {
+			t.Errorf("row %q carries SGR in its cells", row)
+		}
+	}
+	panel := panelModel(t, "[mcp: pinned]", 30, domain.MCPServerEvent{Server: "beta", Phase: domain.MCPServerFailed})
+	section, _ := panel.panelSection(domain.SidePanelMCP)
+	if len(section.body) != 1 || !strings.Contains(section.body[0], failed) {
+		t.Errorf("the panel's failed mcp row %q does not paint the pane's %q", section.body, failed)
+	}
+}
+
+// TestPopupFailedRowPaintsAdjacentRuns pins the failed row's paint: the faint text, the row's last
+// `failed` in errorText, then the faint text again — adjacent runs rather than one faint wrapper
+// whose reset the error run would strip from the cells after it. A row with no failure word left
+// (truncated through it) paints faint whole.
+func TestPopupFailedRowPaintsAdjacentRuns(t *testing.T) {
+	t.Parallel()
+	th := newTestModel(t).th
+	blackFill := lipgloss.NewStyle().Background(th.surface)
+	row := "  failed-srv  stdio  failed (previous connection kept)  2 tools"
+
+	got := popupFailedLine(th, blackFill, row)
+
+	want := blackFill.Render(th.statusFaint.Render("  failed-srv  stdio  ")) +
+		blackFill.Render(th.errorText.Render("failed")) +
+		blackFill.Render(th.statusFaint.Render(" (previous connection kept)  2 tools"))
+	if got != want {
+		t.Errorf("failed line = %q, want the adjacent runs %q", got, want)
+	}
+	if got, want := popupFailedLine(th, blackFill, "  beta  sse  fai…"),
+		blackFill.Render(th.statusFaint.Render("  beta  sse  fai…")); got != want {
+		t.Errorf("a row cut through its failure word = %q, want it faint whole %q", got, want)
 	}
 }
 

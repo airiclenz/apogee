@@ -1204,8 +1204,8 @@ func TestMCPLostShowsInThePaneThePanelAndTheTranscript(t *testing.T) {
 	}
 	panel := panelModel(t, "[mcp: pinned]", 30, mcpConnected("files", 7), mcpLost("server exited: exit status 1"))
 	section, live := panel.panelSection(domain.SidePanelMCP)
-	if got := stripPanelRows(section.body); !live || !slices.Equal(got, []string{"files · disconnected"}) {
-		t.Errorf("panel mcp section live=%v rows %q; want one live row `files · disconnected`, no tool count", live, got)
+	if got := stripPanelRows(section.body); !live || !slices.Equal(got, []string{strippedFactsRow(panel, "files", "disconnected")}) {
+		t.Errorf("panel mcp section live=%v rows %q; want one live row `files … disconnected`, no tool count", live, got)
 	}
 
 	want := []string{
@@ -1236,8 +1236,8 @@ func TestMCPLostStripsEscapes(t *testing.T) {
 	}
 	panel := panelModel(t, "[mcp: pinned]", 30, lost)
 	section, _ := panel.panelSection(domain.SidePanelMCP)
-	if got := stripPanelRows(section.body); !slices.Equal(got, []string{"files · disconnected"}) {
-		t.Errorf("panel mcp rows = %q, want the stripped name `files · disconnected`", got)
+	if got := stripPanelRows(section.body); !slices.Equal(got, []string{strippedFactsRow(panel, "files", "disconnected")}) {
+		t.Errorf("panel mcp rows = %q, want the stripped name `files … disconnected`", got)
 	}
 	for _, row := range mcpRowTexts(m) {
 		if strings.ContainsAny(row, "\x1b\x07") {
@@ -1247,6 +1247,12 @@ func TestMCPLostStripsEscapes(t *testing.T) {
 	if joined := strings.Join(mcpRowTexts(m), "\n"); !strings.Contains(joined, "  cause: badthing") {
 		t.Errorf("/mcp rows lack the stripped cause:\n%s", joined)
 	}
+}
+
+// strippedFactsRow is a body row as stripPanelRows reads it: the text, then the facts right-aligned
+// at the content's edge ([panelFactsRow]), the blank body indent and lead trimmed.
+func strippedFactsRow(m Model, text, facts string) string {
+	return strings.TrimLeft(panelFactsRow(m, text, facts), " ")
 }
 
 // stripPanelRows is a panel section's painted rows as plain text, the blank body indent and lead
