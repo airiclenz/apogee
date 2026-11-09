@@ -457,27 +457,65 @@ func (e promptEditor) contentRows(innerWidth int) int {
 	return e.rowCount.rows(e.input.Value(), innerWidth)
 }
 
-// rowCountMemo is the last (value, width) the draft's rows were counted at and the count. The value
-// comparison is a byte compare at worst, where a recount re-wraps every rune of the draft.
+// rowCountMemo is the draft's row count at the last two widths it was measured at: the box measures
+// at its full text width to ask whether the overflow bar shows ([Model.inputScrollbarShown]) and at
+// the width the bar leaves to size and count the box ([Model.inputInnerWidth]), so one slot would
+// recount on every alternate ask. Each slot holds a (value, width) pair and its count; the value
+// comparison is a byte compare at worst, where a recount re-wraps every rune of the draft. A changed
+// draft invalidates both slots by value, so no explicit reset is needed.
 type rowCountMemo struct {
-	value  string
-	width  int
-	count  int
-	valid  bool
-	misses int // recounts taken; read by the tests that pin one measure per frame
+	slots  [rowCountSlots]rowCountSlot
+	last   int // index of the slot hit or filled most recently; the other is the eviction choice
+	misses int // recounts taken; read by the tests that pin one measure per width per frame
 }
 
-// rows reports inputContentRows(value, width), recounting only when the pair differs from the one
-// memoised. A nil memo recounts every time.
+// rowCountSlots is how many widths the memo keeps a count for: the box's full text width and the
+// one its overflow bar leaves.
+const rowCountSlots = 2
+
+// rowCountSlot is one memoised count: the draft value and width it was taken at.
+type rowCountSlot struct {
+	value string
+	width int
+	count int
+	valid bool
+}
+
+// rows reports inputContentRows(value, width), recounting only when neither slot holds the pair. A
+// recount evicts an empty slot first, then one holding another draft, and otherwise the slot not
+// hit last — so after a resize the stale pair of one draft gives way to the new full and narrow
+// widths in turn instead of the two new widths evicting each other. A nil memo recounts every time.
 func (c *rowCountMemo) rows(value string, width int) int {
 	if c == nil {
 		return inputContentRows(value, width)
 	}
-	if !c.valid || c.width != width || c.value != value {
-		c.value, c.width, c.count, c.valid = value, width, inputContentRows(value, width), true
-		c.misses++
+	for i := range c.slots {
+		if s := c.slots[i]; s.valid && s.width == width && s.value == value {
+			c.last = i
+			return s.count
+		}
 	}
-	return c.count
+	victim := c.victim(value)
+	c.slots[victim] = rowCountSlot{value: value, width: width, count: inputContentRows(value, width), valid: true}
+	c.last = victim
+	c.misses++
+	return c.slots[victim].count
+}
+
+// victim picks the slot a recount of value overwrites: an empty slot, else one holding a different
+// draft, else the least recently hit.
+func (c *rowCountMemo) victim(value string) int {
+	for i, s := range c.slots {
+		if !s.valid {
+			return i
+		}
+	}
+	for i, s := range c.slots {
+		if s.value != value {
+			return i
+		}
+	}
+	return (c.last + 1) % rowCountSlots
 }
 
 // foldKeyboardEnhancements folds the terminal's answer to bubbletea's kitty-keyboard query into

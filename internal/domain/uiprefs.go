@@ -36,10 +36,12 @@ type UIPrefs struct {
 	// false leaves the glyph in the terminal's own text colour, which is the escape hatch for a
 	// terminal whose colour depth turns the gradient into steps.
 	SpinnerColor bool
-	// ShowScrollbar paints the transcript's scroll bar and reserves the column it hangs in. Default
-	// true; false takes both away together — a hidden bar that still ate a column would read as a
-	// bug — and the transcript body takes that width instead. It is process-constant, so the wrap
-	// width it decides never changes mid-run.
+	// ShowScrollbar paints the scroll bars — the transcript's, and each overflowing pop-up's and
+	// prompt box's — and reserves the columns they hang in. Default true; false takes both away
+	// together — a hidden bar that still ate a column would read as a bug — and the transcript body,
+	// the pane rows and the draft take that width instead. `/settings` applies it to the running
+	// session (ADR 0037), so the wrap widths it decides move only on that deliberate change — and,
+	// for a pop-up or the prompt box, when its content starts or stops overflowing.
 	ShowScrollbar bool
 	// ColorScheme names the palette every coloured thing on the screen takes its colour from: a
 	// built-in (dark, light) or a `<apogee-home>/schemes/<name>.yaml` the user wrote, which shadows

@@ -155,6 +155,24 @@ func scrollbarThumb(start, window, total, height int) (pos, size int) {
 	return pos, size
 }
 
+// scrollbarCells paints a scroll bar's column: one cell per bar line, the thumb's lines (placed by
+// scrollbarThumb from the same four counts) in th.scrollThumb and the rest of the groove in
+// th.scrollTrack. It is the one painter of the stroke the transcript's gutter and the prompt box's
+// bar both draw; a window that shows the whole list comes back as bare track, so a caller that
+// keeps a blank gutter there asks for it before calling.
+func scrollbarCells(th theme, start, window, total, height int) []string {
+	cells := make([]string, max(0, height))
+	pos, size := scrollbarThumb(start, window, total, height) // pos: 0 (top) … height-size (bottom)
+	for i := range cells {
+		if i >= pos && i < pos+size {
+			cells[i] = th.scrollThumb.Render(glyphScrollThumb)
+		} else {
+			cells[i] = th.scrollTrack.Render(glyphScrollTrack)
+		}
+	}
+	return cells
+}
+
 // joinScrollbar hangs the scroll-bar gutter off the right edge of the transcript body: every body
 // row is squared to the viewport's width first (squareLine), then its bar cell is appended.
 //

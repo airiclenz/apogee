@@ -537,8 +537,9 @@ func (e *lineEditor) deleteSelection(sel fieldSel) {
 // a stale downward offset — the first content line scrolls out of sight with a phantom blank row
 // below (ISSUES #2). Re-seating the caret where it already stands is the whole fix: seatCaret
 // scrolls to the top and repositions onto the caret, which re-clamps the offset to the current
-// height and leaves the caret exactly where it was. layout() calls this only on a height change, which never
-// happens during vertical caret navigation, so the textarea's remembered goal column is untouched.
+// height and leaves the caret exactly where it was. layout() calls this only on a height or a width
+// change (the prompt box's text width moves with its overflow bar), neither of which happens during
+// vertical caret navigation, so the textarea's remembered goal column is untouched.
 func (e *lineEditor) reseatInput() {
 	e.seatCaret(e.input.Line(), e.input.Column())
 }

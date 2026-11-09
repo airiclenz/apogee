@@ -7767,6 +7767,7 @@ func TestPromptScrollClampAtMaxHeight(t *testing.T) {
 	m := newTestModel(t)
 	iw := m.inputInnerWidth()
 	m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows of content, well past the 10-row cap
+	iw = m.inputInnerWidth()                       // re-read: the overflow bar narrowed the text width
 	rows := inputContentRows(m.input.Value(), iw)
 	if rows <= maxInputRows {
 		t.Fatalf("content only wrapped to %d rows; expected more than the %d cap", rows, maxInputRows)
@@ -7865,6 +7866,7 @@ func assertInputBoxWindowFollowsTheCaret(t *testing.T, height int) {
 	m := modelWithOverlayRoomAt(t, 80, height, testOpts)
 	iw := m.inputInnerWidth()
 	m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows: past every cap these windows allow
+	iw = m.inputInnerWidth()                       // re-read: the overflow bar narrowed the text width
 
 	rows := inputContentRows(m.input.Value(), iw)
 	if rows <= m.input.Height() {
@@ -7926,6 +7928,208 @@ func TestInputBoxTooNarrowForTheCountKeepsAPlainBorder(t *testing.T) {
 	if strings.ContainsAny(edge, "…+") {
 		t.Errorf("box border = %q, want a plain border: no honest count fits this width", edge)
 	}
+}
+
+// inputBoxContentRows is the plain text of the prompt box's content rows: its rendered block with
+// the top and bottom border rows taken off, one string per row the draft is drawn on.
+func inputBoxContentRows(t *testing.T, m Model) [][]rune {
+	t.Helper()
+	lines := strings.Split(ansi.Strip(m.inputView()), "\n")
+	if len(lines) < inputBorderRows+1 {
+		t.Fatalf("input box rendered %d rows, want its borders and at least one content row", len(lines))
+	}
+	rows := make([][]rune, 0, len(lines)-inputBorderRows)
+	for _, ln := range lines[1 : len(lines)-1] {
+		rows = append(rows, []rune(ln))
+	}
+	return rows
+}
+
+// assertInputBoxBarAbsent fails when any content row's INTERIOR — the row less its first and last
+// cell, which are the border's own "│" sides, the very rune the track is drawn in — carries a bar
+// glyph, or when the box's text width gave up a column to a bar it does not draw.
+func assertInputBoxBarAbsent(t *testing.T, m Model) {
+	t.Helper()
+	for i, row := range inputBoxContentRows(t, m) {
+		if interior := string(row[1 : len(row)-1]); strings.ContainsAny(interior, glyphScrollThumb+glyphScrollTrack) {
+			t.Errorf("content row %d = %q carries a bar glyph inside the border, want none", i, string(row))
+		}
+	}
+	if got, want := m.inputInnerWidth(), m.width-borderFrame-inputPadding; got != want {
+		t.Errorf("inputInnerWidth = %d, want the full %d: a hidden bar gave up no column", got, want)
+	}
+	if got := m.input.Width(); got != m.inputInnerWidth() {
+		t.Errorf("textarea width = %d, want inputInnerWidth %d", got, m.inputInnerWidth())
+	}
+}
+
+// assertInputBoxBarShown fails unless every content row ends text | blank | bar | pad | border, the
+// text width gave up exactly inputScrollbarGutter columns to it, and the bar carries a thumb. It
+// returns the bar's column, one cell per content row.
+func assertInputBoxBarShown(t *testing.T, m Model) []rune {
+	t.Helper()
+	rows := inputBoxContentRows(t, m)
+	bar := make([]rune, 0, len(rows))
+	for i, row := range rows {
+		if got := m.th.measure.Width(string(row)); got != m.width {
+			t.Fatalf("content row %d is %d cells wide, want the window's %d: %q", i, got, m.width, string(row))
+		}
+		n := len(row)
+		if row[n-1] != '│' || row[n-2] != ' ' || row[n-4] != ' ' {
+			t.Errorf("content row %d = %q, want it to end <blank><bar><pad><border>", i, string(row))
+		}
+		cell := row[n-3]
+		if string(cell) != glyphScrollThumb && string(cell) != glyphScrollTrack {
+			t.Errorf("content row %d bar cell = %q, want a thumb or track glyph", i, string(cell))
+		}
+		bar = append(bar, cell)
+	}
+	if !strings.Contains(string(bar), glyphScrollThumb) {
+		t.Errorf("bar column %q carries no thumb", string(bar))
+	}
+	if got, want := m.inputInnerWidth(), m.width-borderFrame-inputPadding-inputScrollbarGutter; got != want {
+		t.Errorf("inputInnerWidth = %d, want %d: the bar and its blank column come out of the text", got, want)
+	}
+	if got := m.input.Width(); got != m.inputInnerWidth() {
+		t.Errorf("textarea width = %d, want inputInnerWidth %d", got, m.inputInnerWidth())
+	}
+	return bar
+}
+
+// TestInputBoxScrollbarShowsWhileTheDraftOverflows: a draft five rows past the box's ten-row taste
+// is a window onto the draft, and the box says where the window sits the way every other window on
+// the screen does — a bar down its right edge, set off from the text by one blank column. The caret
+// is at the end of the draft, so the window sits at the bottom and so does the thumb. The draft is
+// PASTED rather than assigned: the widget scrolls its window only inside its own Update.
+func TestInputBoxScrollbarShowsWhileTheDraftOverflows(t *testing.T) {
+	t.Parallel()
+	m := step(t, newTestModel(t), tea.PasteMsg{Content: draftLines(maxInputRows + 5)})
+
+	bar := assertInputBoxBarShown(t, m)
+
+	if m.input.Height() != maxInputRows {
+		t.Fatalf("box height = %d, want the %d-row cap", m.input.Height(), maxInputRows)
+	}
+	if last := string(bar[len(bar)-1]); last != glyphScrollThumb {
+		t.Errorf("bar column = %q: the caret on the draft's last row must seat the thumb on the last row", string(bar))
+	}
+}
+
+// TestInputBoxScrollbarAbsentWhileTheDraftFits: the bar is the overflow's, not the box's. A one-row
+// draft and a draft of exactly the ten-row cap both fit, so neither paints a bar or gives up the
+// columns one would hang in — the box is the box it always was.
+func TestInputBoxScrollbarAbsentWhileTheDraftFits(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		draft string
+	}{
+		{"one-line draft", "a short draft"},
+		{"draft of exactly the cap", draftLines(maxInputRows)},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModel(t)
+			m.input.SetValue(c.draft)
+			m.layout()
+
+			assertInputBoxBarAbsent(t, m)
+		})
+	}
+}
+
+// TestInputBoxScrollbarFollowsTheSetting: ui.show-scrollbar is the one switch every bar answers
+// to. Off, an overflowing draft paints no bar and keeps its full width — but hiding the BAR hides
+// no fact: the top border still counts the rows the box is not drawing.
+func TestInputBoxScrollbarFollowsTheSetting(t *testing.T) {
+	t.Parallel()
+	opts := testOpts
+	opts.UI.ShowScrollbar = false
+	m := withDraft(t, modelWithOverlayRoomAt(t, 80, 24, opts), maxInputRows+5)
+
+	assertInputBoxBarAbsent(t, m)
+
+	if edge := ansi.Strip(strings.Split(m.inputView(), "\n")[0]); !strings.Contains(edge, "+5") {
+		t.Errorf("box border = %q, want it to keep counting the 5 rows it is not drawing", edge)
+	}
+}
+
+// TestInputBoxScrollbarAtTheFrameCeiling: the box's window can be the frame's as well as its own
+// taste's — on a twelve-row terminal the frame lets the box keep five rows — and the bar follows
+// the window whichever bound made it.
+func TestInputBoxScrollbarAtTheFrameCeiling(t *testing.T) {
+	t.Parallel()
+	m := withDraft(t, modelWithOverlayRoomAt(t, 80, 12, testOpts), 8)
+	if m.draftRowsCeiling() >= maxInputRows || m.input.Height() >= 8 {
+		t.Fatalf("ceiling %d, box %d rows: the frame did not cap the box — test premise broken",
+			m.draftRowsCeiling(), m.input.Height())
+	}
+
+	assertInputBoxBarShown(t, m)
+}
+
+// TestInputBoxScrollbarAppearsWhenTypingCrossesTheCap drives the toggle the way a human does: typed
+// past the cap, the box narrows its text by the bar's two columns, so the draft re-wraps at the
+// narrower width at an unchanged height — and the widget, the hidden-rows count and the window must
+// all agree on that width. Deleting back under the cap gives the columns back and the window
+// returns to the top.
+func TestInputBoxScrollbarAppearsWhenTypingCrossesTheCap(t *testing.T) {
+	t.Parallel()
+	m := withDraft(t, newTestModel(t), maxInputRows)
+	full := m.inputInnerWidth()
+	m.input.CursorEnd()
+	for typed := 0; !m.inputScrollbarShown(); typed++ {
+		if typed > full*2 {
+			t.Fatalf("typed %d runes on the last row and the box never overflowed", typed)
+		}
+		m = step(t, m, keyRune('a'))
+	}
+
+	assertInputBoxBarShown(t, m)
+	rows := m.promptEditor.contentRows(m.inputInnerWidth())
+	if got, want := m.input.ScrollYOffset(), rows-m.input.Height(); got != want {
+		t.Errorf("ScrollYOffset = %d, want %d (%d rows at the narrowed width in a %d-row box)",
+			got, want, rows, m.input.Height())
+	}
+	hidden := m.hiddenDraftRows()
+	if hidden != rows-m.input.Height() {
+		t.Errorf("hiddenDraftRows = %d, want %d", hidden, rows-m.input.Height())
+	}
+	if edge := ansi.Strip(strings.Split(m.inputView(), "\n")[0]); !strings.Contains(edge, fmt.Sprintf("+%d", hidden)) {
+		t.Errorf("box border = %q, want it to count the %d rows hiddenDraftRows reports", edge, hidden)
+	}
+
+	for m.inputScrollbarShown() {
+		m = step(t, m, keyBackspace())
+	}
+	if got := m.input.ScrollYOffset(); got != 0 {
+		t.Errorf("ScrollYOffset back under the cap = %d, want 0", got)
+	}
+	assertInputBoxBarAbsent(t, m)
+}
+
+// TestInputBoxBarTogglesOnARecallAtTheSameHeight: a recall swaps the whole draft in one step, and a
+// ten-row entry and a fifteen-row one both lay the box out at its ten-row cap — so the step from one
+// to the other moves the box's WIDTH (the bar appears) without moving its height. The repaint tail
+// must lay the box out on that ground too, or the widget wraps the longer entry at the full width
+// and its rows run through the bar into the border.
+func TestInputBoxBarTogglesOnARecallAtTheSameHeight(t *testing.T) {
+	t.Parallel()
+	m, _ := recallModel(t, draftLines(maxInputRows+5), draftLines(maxInputRows))
+	m = step(t, m, keyUp())
+	if m.input.Height() != maxInputRows || m.inputScrollbarShown() {
+		t.Fatalf("newest entry: box %d rows, bar %v — want the %d-row cap and no bar",
+			m.input.Height(), m.inputScrollbarShown(), maxInputRows)
+	}
+
+	m = step(t, m, keyUp())
+
+	if m.input.Height() != maxInputRows {
+		t.Fatalf("older entry: box %d rows, want the same %d-row cap", m.input.Height(), maxInputRows)
+	}
+	assertInputBoxBarShown(t, m)
 }
 
 // TestPromptScrollShrinkBack deletes a grown box back to a single line: the box shrinks and the

@@ -472,9 +472,9 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 			m.opts.OnAutoTitle(m.opts.AutoTitle)
 		}
 	case domain.UIKeyShowScrollbar:
-		// The bar's gutter column is transcript width, which is why the option is in the frame key
-		// (paintcache.go): the repaint tail lays out again from it rather than leaving the column to
-		// the next resize.
+		// The bar's gutter column is transcript width — and, while a draft overflows, prompt box
+		// width (inputInnerWidth) — which is why the option is in the frame key (paintcache.go): the
+		// repaint tail lays out again from it rather than leaving the column to the next resize.
 		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}

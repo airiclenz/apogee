@@ -1303,11 +1303,12 @@
 // the tail's job ([Model.settle], deferred by Update itself): a moved paint input — the transcript
 // generation, the theme, the width, the scrollbar, a blink over an open call, the back hint
 // ([frameKey]) — lays out, and under an unchanged paint a height gone stale — a pane's rows, the
-// draft's rows ([Model.freshenTranscriptClamp]) — lays out too, so every pane open and every
-// editor write is carried by the tail rather than by a call each arm has to remember. An arm calls
-// layout() (or refreshViewport) itself only when it READS geometry afterwards in the same arm — the
-// offset, the widget's bottom, a placed pane's rows — and then says so beside the call, because
-// what it reads has to be the frame it just made rather than the one the tail has yet to settle.
+// draft's rows — or the box's text width its overflow bar moved ([Model.freshenTranscriptClamp])
+// lays out too, so every pane open and every editor write is carried by the tail rather than by a
+// call each arm has to remember. An arm calls layout() (or refreshViewport) itself only when it
+// READS geometry afterwards in the same arm — the offset, the widget's bottom, a placed pane's
+// rows — and then says so beside the call, because what it reads has to be the frame it just made
+// rather than the one the tail has yet to settle.
 // Outside model.go "says so" is literal: a layout() or refreshViewport() call, on any receiver,
 // carries a same-line "// geometry:" comment naming what the arm reads after it, and
 // TestArmsLeaveLayoutToTail (settled_test.go) fails on one that does not.

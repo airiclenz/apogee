@@ -337,19 +337,62 @@ func TestInputContentRowsWithoutAMemo(t *testing.T) {
 // transcript clamp and the hidden-row count on the border all read the one memoised count.
 func TestInputContentRowsMeasuredOncePerKeypressAndView(t *testing.T) {
 	t.Parallel()
-	m := newTestModel(t)
-	m.input.SetValue(strings.Repeat("a long draft that wraps ", 40))
-	m.input.CursorEnd()
-	memo := m.promptEditor.rowCount
-	memo.misses = 0
-	m = step(t, m, keyRune('x'))
-	_ = m.View()
-	if memo.misses != 1 {
-		t.Fatalf("one keypress + View counted the draft's rows %d times; want 1", memo.misses)
+	// A draft that fits is measured at one width; one past the cap is measured at two — the full
+	// width that asks whether the overflow bar shows, and the width the bar leaves. A resize while
+	// the draft overflows replaces both widths, after which repaints count nothing again.
+	cases := []struct {
+		name     string
+		draft    string
+		overflow bool
+		want     int
+		resizeTo int // window width to resize to after the first frame; 0 keeps it
+	}{
+		{"draft that fits", "a short draft", false, 1, 0},
+		{"draft past the cap", strings.Repeat("a long draft that wraps ", 40), true, 2, 0},
+		{"draft past the cap, window resized", strings.Repeat("a long draft that wraps ", 40), true, 2, 60},
 	}
-	_ = m.View()
-	if memo.misses != 1 {
-		t.Fatalf("a repaint of an unchanged draft recounted its rows (%d counts)", memo.misses)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModel(t)
+			m.input.SetValue(c.draft)
+			m.input.CursorEnd()
+			memo := m.promptEditor.rowCount
+			memo.misses = 0
+
+			m = step(t, m, keyRune('x'))
+			_ = m.View()
+
+			if m.inputScrollbarShown() != c.overflow {
+				t.Fatalf("bar shown = %v, want %v — test premise broken", m.inputScrollbarShown(), c.overflow)
+			}
+			if memo.misses != c.want {
+				t.Fatalf("one keypress + View counted the draft's rows %d times; want %d (one per measured width)",
+					memo.misses, c.want)
+			}
+			_ = m.View()
+			if memo.misses != c.want {
+				t.Fatalf("a repaint of an unchanged draft recounted its rows (%d counts)", memo.misses)
+			}
+			if c.resizeTo == 0 {
+				return
+			}
+
+			m = step(t, m, tea.WindowSizeMsg{Width: c.resizeTo, Height: 24})
+			_ = m.View()
+			if !m.inputScrollbarShown() {
+				t.Fatalf("bar hidden after the resize to %d columns — test premise broken", c.resizeTo)
+			}
+			memo.misses = 0
+			for range 3 {
+				_ = m.View()
+			}
+			if memo.misses != 0 {
+				t.Fatalf("after a resize, three repaints of an unchanged draft recounted its rows %d times; want 0",
+					memo.misses)
+			}
+		})
 	}
 }
 

@@ -2984,11 +2984,14 @@ func (m *Model) layout() {
 		width -= scrollbarWidth
 	}
 	m.viewport.SetWidth(max(1, width))
+	// The box's text width moves with its own overflow bar ([Model.inputInnerWidth]), so a keystroke
+	// that crosses the cap, a recall, or a live ui.show-scrollbar change can re-wrap the draft at an
+	// unchanged height: the caret is re-seated on either change.
+	widthBefore, heightBefore := m.input.Width(), m.input.Height()
 	m.input.SetWidth(m.inputInnerWidth())
-	before := m.input.Height()
 	m.input.SetHeight(m.inputRows())
-	if m.input.Height() != before {
-		m.reseatInput() // the box grew/shrank: re-clamp a scroll offset SetHeight left stale (ISSUES #2)
+	if m.input.Width() != widthBefore || m.input.Height() != heightBefore {
+		m.reseatInput() // the box grew/shrank or re-wrapped: re-clamp a stale scroll offset (ISSUES #2)
 	}
 
 	// The WIDGET's height IS the drawn height: transcriptRows is the budget less the rows THIS
@@ -3014,19 +3017,21 @@ func (m Model) transcriptWidgetRows() int {
 
 // freshenTranscriptClamp lays out again when the viewport widget's height no longer matches the rows
 // the transcript is drawn on — the state a pane opened, closed or redrawn at a new height leaves
-// behind — or when the input box's height no longer matches the rows its draft wants
-// ([Model.inputRows]) — the state an editor write leaves behind. It is the height half of the
-// repaint tail ([Model.settle]), and the ONE ground on which an arm that opens a pane or writes the
-// box owes no layout of its own (doc.go, "an arm mutates"). layout() stays the single setter of both
-// heights (design call 3): this asks only whether the last set still holds, and hands the setting
-// back to layout() when it does not.
+// behind — or when the input box's height or text width no longer matches the rows its draft wants
+// ([Model.inputRows]) or the width its overflow bar leaves ([Model.inputInnerWidth]) — the state an
+// editor write leaves behind, a recall that crosses the cap at an unchanged height included. It is
+// the height half of the repaint tail ([Model.settle]), and the ONE ground on which an arm that
+// opens a pane or writes the box owes no layout of its own (doc.go, "an arm mutates"). layout()
+// stays the single setter of both heights and the box's width (design call 3): this asks only
+// whether the last set still holds, and hands the setting back to layout() when it does not.
 //
 // The question is asked rather than the answer simply re-applied because layout() re-renders the whole
 // transcript: a pane key that moved no rows — a selection step in the browser, a scroll in /usage —
 // pays one measure of the overlays (each pane's height query, no paint) instead of a second full
 // repaint of the history.
 func (m *Model) freshenTranscriptClamp() {
-	if m.viewport.Height() == m.transcriptWidgetRows() && m.input.Height() == m.inputRows() {
+	if m.viewport.Height() == m.transcriptWidgetRows() && m.input.Height() == m.inputRows() &&
+		m.input.Width() == m.inputInnerWidth() {
 		return
 	}
 	m.layout()
@@ -3177,9 +3182,47 @@ func (m Model) transcriptWidth() int {
 }
 
 // inputInnerWidth is the textarea's text width: the window less the border and padding
-// columns, floored at one so a very narrow window does not produce a zero-width box.
+// columns, and less the overflow bar's two (inputScrollbarGutter) while the draft overflows the box
+// with the bar on ([Model.inputScrollbarShown]), floored at one so a very narrow window does not
+// produce a zero-width box. It is the ONE width producer for the box (ADR 0030): layout() sizes the
+// widget from it and every reader that maps into the box's text — the row counts, the content rect,
+// the accent and selection overlays — follows it unchanged.
 func (m *Model) inputInnerWidth() int {
+	if m.inputScrollbarShown() {
+		return max(1, m.inputFullWidth()-inputScrollbarGutter)
+	}
+	return m.inputFullWidth()
+}
+
+// inputFullWidth is the box's text width with no bar beside it: the window less the border and
+// padding columns, floored at one.
+func (m *Model) inputFullWidth() int {
 	return max(1, m.width-borderFrame-inputPadding)
+}
+
+// inputScrollbarGutter is what an OVERFLOWING prompt box gives up at the right edge of its text to
+// the overflow bar: the bar's own column and one blank column between it and the text — the pop-up
+// rule (popupScrollbarGutter) on the box. The box's right padding stays between the bar and the
+// border.
+const inputScrollbarGutter = scrollbarWidth + bodyRightGutter
+
+// inputScrollbarShown reports whether the prompt box paints its overflow bar this frame: the
+// human's ui.show-scrollbar is on (the one switch every bar answers to, [Model.popupScrollbarOn])
+// and the draft's wrapped rows at the FULL text width outnumber the rows the box may grow to — its
+// own taste (maxInputRows) or the frame's ceiling ([Model.draftRowsCeiling]), the tighter of the
+// two. A draft that fits paints no bar and gives up no column.
+//
+// It measures at the full width, never at [Model.inputInnerWidth] (which asks this), and that is
+// the whole answer rather than half of one: narrowing a wrapped draft can only cost it rows, never
+// win them back, so a draft that overflows at the full width overflows at the narrow one too — the
+// pop-up's measure-wide-then-narrow rule (popupScrollbarShown). A box too narrow to keep a column of
+// text beside the bar keeps its text.
+func (m *Model) inputScrollbarShown() bool {
+	full := m.inputFullWidth()
+	if !m.popupScrollbarOn() || full-inputScrollbarGutter <= 1 {
+		return false
+	}
+	return m.promptEditor.contentRows(full) > min(maxInputRows, m.draftRowsCeiling())
 }
 
 // inputRows is the textarea's height in visual rows at the current window width — the editor's
@@ -3890,8 +3933,8 @@ func (m Model) renderScrollbar(vp viewport.Model) string {
 		return ""
 	}
 	total := vp.TotalLineCount()
-	rows := make([]string, h)
 	if total <= h { // nothing to scroll — keep the gutter blank
+		rows := make([]string, h)
 		for i := range rows {
 			rows[i] = " "
 		}
@@ -3900,15 +3943,7 @@ func (m Model) renderScrollbar(vp viewport.Model) string {
 	// A painted line of this bar IS a transcript line, so the window over the content and the height
 	// the bar is drawn at are the same count here; the shared geometry takes the two apart for the
 	// popup bar, where one row can cost several lines.
-	pos, thumb := scrollbarThumb(vp.YOffset(), h, total, h) // pos: 0 (top) … h-thumb (bottom)
-	for i := range rows {
-		if i >= pos && i < pos+thumb {
-			rows[i] = m.th.scrollThumb.Render(glyphScrollThumb)
-		} else {
-			rows[i] = m.th.scrollTrack.Render(glyphScrollTrack)
-		}
-	}
-	return strings.Join(rows, "\n")
+	return strings.Join(scrollbarCells(m.th, vp.YOffset(), h, total, h), "\n")
 }
 
 // inputView renders the textarea inside the rounded, dark-gray, black-bg border, a CLOSED frame:
@@ -3923,9 +3958,15 @@ func (m Model) renderScrollbar(vp viewport.Model) string {
 // the drag-selection over whatever it covers. shadeCells strips the span it re-renders, so the last
 // pass wins on any overlap — and a selection must read as selected even across an accented token.
 //
+// While the draft overflows the box with ui.show-scrollbar on ([Model.inputScrollbarShown]), the
+// overflow bar is hung off the overlaid rows before the border goes round them (joinInputScrollbar):
+// the bar describes the window the rows ARE, so it joins after both content overlays and inside the
+// box's right padding.
+//
 // A third pass writes the elision marker onto the box's own TOP BORDER when the frame could not pay
 // for every row the draft wraps to (inputElisionEdge). It is last because it addresses the BORDER
-// row, which the two content overlays never touch.
+// row, which the two content overlays never touch; the bar leaves it alone, so the count stays on
+// the border whether or not the bar is drawn.
 //
 // The legend the empty box invites with is derived here, per frame ([Model.legend]), and set on a
 // LOCAL copy of the widget exactly as View sizes its local viewport: View stays a value receiver
@@ -3933,7 +3974,11 @@ func (m Model) renderScrollbar(vp viewport.Model) string {
 func (m Model) inputView() string {
 	in := m.input
 	in.Placeholder = m.legend()
-	box := m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.accentTokens(in.View())))
+	content := m.highlightInput(m.accentTokens(in.View()))
+	if m.inputScrollbarShown() {
+		content = m.joinInputScrollbar(content)
+	}
+	box := m.th.inputBorder.Width(m.width).Render(content)
 	edge := m.inputElisionEdge(m.hiddenDraftRows())
 	if edge == "" {
 		return box
@@ -3941,6 +3986,32 @@ func (m Model) inputView() string {
 	lines := strings.Split(box, "\n")
 	lines[0] = edge // the rounded border's top row; the widget's content starts at lines[1]
 	return strings.Join(lines, "\n")
+}
+
+// joinInputScrollbar hangs the prompt box's overflow bar off the right edge of its text rows: each
+// row is squared to the box's text width on the box's own field (squareOnField — a bare pad would
+// show the terminal's background inside the box), then the blank gutter column and the row's bar
+// cell are appended on the same field, so the box's right padding and border follow unchanged. The
+// join measures in the painter's measure rather than lipgloss.JoinHorizontal's, for joinColumn's
+// reason (ADR 0030).
+//
+// The thumb is placed by the shared geometry (scrollbarCells) over the widget's own window — its
+// first visible row and height — against the draft's rows at the width the widget wraps to, so a
+// caret on the draft's last row seats the thumb flush at the bottom.
+func (m Model) joinInputScrollbar(content string) string {
+	w, h := m.inputInnerWidth(), m.input.Height()
+	cells := scrollbarCells(m.th, m.input.ScrollYOffset(), h, m.promptEditor.contentRows(w), h)
+	field := lipgloss.NewStyle().Background(m.th.surface)
+	gap := field.Render(strings.Repeat(" ", inputScrollbarGutter-scrollbarWidth))
+	rows := strings.Split(content, "\n")
+	for i, row := range rows {
+		row = squareOnField(m.th.measure, field, row, w)
+		if i < len(cells) {
+			row += gap + field.Render(cells[i])
+		}
+		rows[i] = row
+	}
+	return strings.Join(rows, "\n")
 }
 
 // inputEdgeChrome is what the marker's row spends besides the marker itself: the two rounded
@@ -5507,10 +5578,12 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // `ui.show-scrollbar` (Options.UI.ShowScrollbar, the value as the config spells it), read HERE
 // rather than inside the popup module, which is not given a Model to read it from.
 //
-// One switch covers both bars because it is one preference. The key is about whether apogee draws
-// an indicator down a right-hand column at all — a reader who took the transcript's away did not
-// ask to keep the same stroke beside a list — so a pane asks the same question of the same field
-// and gets the same answer, and no popup has a switch of its own to fall out of step with.
+// One switch covers every bar — the transcript's, each pop-up's and the prompt box's
+// ([Model.inputScrollbarShown]) — because it is one preference. The key is about whether apogee
+// draws an indicator down a right-hand column at all — a reader who took the transcript's away did
+// not ask to keep the same stroke beside a list or a draft — so a pane and the box ask the same
+// question of the same field and get the same answer, and no surface has a switch of its own to
+// fall out of step with.
 //
 // It says nothing about OVERFLOW: a spec that sets the flag and fits paints no bar and gives up no
 // column (popupRowLines). What this decides is only whether the bar is available to the pane, and

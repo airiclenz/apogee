@@ -35,7 +35,19 @@
 - 2 (re-check): guard folded (edge seat by `CursorUp`/`CursorDown` from the caret's own visual row, never `reseatCaret`/`caretTo` or a per-notch reseat walk; first notch asserted to move exactly `MouseWheelDelta`; widened comment-sweep grep; picker.go, reportpane.go, sessions.go added to Files); yields to ADR 0025 decision 11
 - 3: guard folded (wheel-sentence sweep, "the width never moves" scoped to the transcript; writer decision: registry Desc joins the sweep)
 
-## 1. Prompt box draws a scrollbar column while its draft overflows
+## 1. Prompt box draws a scrollbar column while its draft overflows — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — internal/tui/lineeditor.go: made necessary by layout() now re-seating the caret on a width change as well as a height change (reseatInput's comment said "only on a height change")
+
+NOTES (2026-11-09): consequential edit — internal/tui/settingsapply.go: made necessary by ui.show-scrollbar now also moving the prompt box's text width (the apply arm's comment named only the transcript width)
+
+NOTES (2026-11-09): internal/domain/uiprefs.go's ShowScrollbar comment also dropped the false "process-constant, wrap width never changes mid-run" sentence (ADR 0037 applies it live), since the rewritten comment names which bars the key governs
+
+NOTES (2026-11-09): the bar's cells are painted by a new shared scrollbarCells (boxdraw.go), which renderScrollbar now calls too; popupRowScrollbar keeps its own loop (out of scope). The join squares each row on the box's surface field (squareOnField) rather than joinColumn's bare pad, so no terminal background shows inside the box
+
+NOTES (2026-11-09): TestInputBoxScrollbarShowsWhileTheDraftOverflows pastes its draft rather than using withDraft: the textarea only scrolls its window inside its own Update, so an assigned value leaves ScrollYOffset at 0
+
+NOTES (2026-11-09): retry fix — rowCountMemo evicts an empty slot, then one holding another draft, else the slot not hit last (a new last field), so a resize while the draft overflows no longer leaves the two new widths evicting each other; TestInputContentRowsMeasuredOncePerKeypressAndView gained a resized-window case pinning 0 recounts over three repaints (fails with 12 under the old victim choice)
 
 **What:**
 **Goal:** With `ui.show-scrollbar` on and the draft's wrapped rows at the full text width exceeding the box height (`maxInputRows` or the frame's `draftRowsCeiling`), `Model.inputView()` renders each content row as text, one blank column, one bar column (thumb `glyphScrollThumb`/`th.scrollThumb`, track `glyphScrollTrack`/`th.scrollTrack`), then the right pad and border; the thumb's position and size come from `scrollbarThumb` over the textarea's first visible row, its height and the draft's row count at the narrowed width. A fitting draft, or the setting off, renders exactly as before.
