@@ -98,7 +98,7 @@ func buildAgent(cfg domain.Config, seating seatBinding, d *delegation) (*Agent, 
 	// Every Event this Agent (and every sub-agent it spawns) emits goes through one serializing
 	// seam, so a depth-0 fan-out's concurrent children still hand the host a LINEAR stream
 	// (domain.EventSink). It is installed once, here, rather than at the ~20 emit sites.
-	cfg.Events = serializedEvents(cfg.Events)
+	cfg.Events = SerializeEvents(cfg.Events)
 	// And every Approval it raises goes through one queueing seam, for the same reason one level
 	// up: concurrent children may reach an Approval gate at the same instant, and the host is
 	// promised one request at a time (domain.Approver). The seam queues on the PROMPT SLOT this
@@ -370,11 +370,21 @@ func (s *serialEventSink) Emit(e domain.Event) {
 	s.inner.Emit(e)
 }
 
-// serializedEvents wraps sink in the serializing seam, unless it already IS one. The idempotence
+// Unwrap answers the host sink the seam serializes onto, so a composition root can check the chain
+// it built beneath the seam.
+func (s *serialEventSink) Unwrap() domain.EventSink { return s.inner }
+
+// SerializeEvents wraps sink in the serializing seam, unless it already IS one. The idempotence
 // is what keeps a nested sub-agent on the SAME mutex as its parent: newChildAgent copies the
 // parent's Config, so the child's construction sees an already-wrapped sink and re-uses it rather
 // than stacking a private, uncontended lock in front of it at every depth.
-func serializedEvents(sink domain.EventSink) domain.EventSink {
+//
+// It is exported for a Driver's composition root that emits an Event for a fact it owns (the MCP
+// server lifecycle, ADR 0111 decision 8): the root wraps its sink once, puts the result on
+// Config.Events, and emits through the same handle, so its Events share the engine's mutex and the
+// host still receives one linear stream. Construction then re-uses that seam rather than stacking
+// a second one in front of it.
+func SerializeEvents(sink domain.EventSink) domain.EventSink {
 	if _, already := sink.(*serialEventSink); already {
 		return sink
 	}
@@ -456,7 +466,7 @@ func (q *queuedApprover) Approve(ctx context.Context, req domain.ApprovalRequest
 }
 
 // queuedApprovals wraps ap in the queueing seam, unless it already IS one. The idempotence keeps a
-// nested sub-agent on the SAME wrapper as its parent, exactly as serializedEvents keeps it on the
+// nested sub-agent on the SAME wrapper as its parent, exactly as SerializeEvents keeps it on the
 // same mutex: newChildAgent copies the parent's Config, so a child re-uses the parent's seam instead
 // of stacking a private one at every depth. What actually keeps a whole tree in ONE queue is the
 // designated prompt slot, which rides the context a child inherits from its parent

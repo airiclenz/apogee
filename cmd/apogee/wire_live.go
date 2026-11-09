@@ -181,6 +181,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		w.cueSkippedMCP(client.Skipped())
 		return client, nil
 	})
+	// Every dial the holder starts and finishes, and every server it closes, is an MCPServerEvent
+	// (ADR 0111 decision 8), emitted through the engine's own serialised sink — the handle
+	// resolveConfig put on Config.Events — so it shares the engine's mutex, reaches the journal and
+	// every observer in one linear stream, and leaves the holder's outbox in the order its state moved,
+	// never under its lock and never on the Update goroutine (mcpOutbox).
+	w.mcpSet.emitThrough(w.cfg.Events)
 	// The resolver a user reaction's mcp: handler calls through (adr-0076-amend-1029), over the live
 	// set rather than this startup snapshot, so a reconnect's servers are what the next firing
 	// resolves against without a restart. It reads w.mcpSet through a closure, never a method value:

@@ -17,7 +17,12 @@ fan-out — but a linear stream is not a serial one, and the events of one agent
 their run id (by depth and call id on an event recorded before the run id existed), never by
 contiguity. Events are Go values and nothing more: the engine attaches no
 timestamp, no sequence number and no session identity, and a Driver stamps those itself if its
-surface needs them. See
+surface needs them. The engine is not the only emitter: a **Driver**'s composition root may emit an
+Event for a fact it owns and the engine cannot see — the MCP server lifecycle (`MCPServerEvent`),
+since the engine stays MCP-blind — through the engine's own serialised sink
+(`apogee.SerializeEvents`), so it joins the same linear stream and journal; such an Event's identity
+fields are zero, because the fact belongs to the session rather than to an agent or a Turn
+(ADR 0111). See
 ADR 0001 and
 ADR 0039.
 _Avoid_: "message" (that is a conversation message, the `Role`/`Content` kind), "notification",

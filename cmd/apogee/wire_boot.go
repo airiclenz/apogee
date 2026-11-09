@@ -289,7 +289,12 @@ func (w *rootWiring) resolveConfig() error {
 	// never inside reactions.Runner (ADR 0075 D9), and is built once: the session host swaps which
 	// record's journal it records into as the hold moves (sessionHost.attachEventJournal).
 	w.events = newLiveJournalSink(w.stats.wrap(w.cfg.Events))
-	w.cfg.Events = w.events
+	// Wrapped once in the engine's own serializing seam (apogee.SerializeEvents), and Config.Events
+	// keeps that handle: the engine re-uses the seam rather than stacking another, and the MCP dial
+	// owner (liveMCP's outbox, wire_live.go) emits its lifecycle Events through the same handle, so
+	// they share the engine's mutex and every observer still receives one linear stream (ADR 0111
+	// decision 8).
+	w.cfg.Events = apogee.SerializeEvents(w.events)
 	w.cfg.Approver = w.bridge.Approver()
 	w.cfg.Asker = w.bridge.Asker()
 	// The pre-emption seam (ADR 0025): the Bridge answers whether the TUI's queue holds a

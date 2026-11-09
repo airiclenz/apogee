@@ -55,6 +55,31 @@ func TestNewAgentBuildsATopLevelAgent(t *testing.T) {
 	}
 }
 
+// TestSerializeEventsReusesTheEngineSink pins the exported serialiser's idempotence (ADR 0111
+// decision 8): a composition root that wraps its sink once and emits through that handle shares
+// the engine's mutex only if wrapping again answers the same seam and New installs it as it is,
+// rather than stacking a private lock in front of it.
+func TestSerializeEventsReusesTheEngineSink(t *testing.T) {
+	t.Parallel()
+
+	host := &recordingSink{}
+	serial := SerializeEvents(host)
+	if again := SerializeEvents(serial); again != serial {
+		t.Fatalf("SerializeEvents(serialised sink) = %p, want the same seam %p", again, serial)
+	}
+	if inner := serial.(interface{ Unwrap() domain.EventSink }).Unwrap(); inner != domain.EventSink(host) {
+		t.Fatalf("the seam's Unwrap = %T, want the host sink it wraps", inner)
+	}
+
+	a, err := newAgent(baseConfig(serial), echoResponder(t, "ok"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if a.cfg.Events != serial {
+		t.Fatalf("the Agent's Events = %T, want the root's own serialised sink re-used", a.cfg.Events)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The dangerous-action ruleset (Config.DangerousRules → the top-level guard)
 // ---------------------------------------------------------------------------

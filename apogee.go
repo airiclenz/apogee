@@ -448,6 +448,13 @@ const (
 // EventSink receives typed Events as the loop produces them, including inside a Step.
 type EventSink = domain.EventSink
 
+// SerializeEvents wraps sink in the engine's serializing seam — the one New installs on
+// Config.Events — unless it already is one, so wrapping twice answers the same sink. A Driver's
+// composition root that emits an Event for a fact it owns (MCPServerEvent) wraps its sink with it
+// once, puts the result on Config.Events, and emits through that handle: its Events then share the
+// engine's mutex, and New re-uses the seam rather than stacking another.
+func SerializeEvents(sink EventSink) EventSink { return agent.SerializeEvents(sink) }
+
 // Event is the sealed sum type of everything the loop reports. The seal (an
 // unexported method) lives in internal/domain and is intentionally not re-exported,
 // so external code switches on the variants but cannot add new ones.

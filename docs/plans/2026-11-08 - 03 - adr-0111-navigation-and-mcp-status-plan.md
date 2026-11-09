@@ -493,7 +493,12 @@ internal/tui/sessionview.go — sessionView.panel (copy-on-write note); internal
 **Acceptance:** `go build ./internal/sidepanel/ ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/sidepanel/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestMCPFold|TestWatchFoldsMCP|TestFoldEvent|TestSessionView' ./internal/tui/`
 **Commit:** `feat(sidepanel): fold MCP server lifecycle state`
 
-## 16. The composition root emits MCP lifecycle Events
+## 16. The composition root emits MCP lifecycle Events — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the handle the root keeps is `w.cfg.Events` itself (now `apogee.SerializeEvents(w.events)`), not a new `rootWiring` field — wire_live.go hands that to `liveMCP.emitThrough`, so `cmd/apogee/wire.go` is untouched; item 17 reads the same handle. The serial seam gained an `Unwrap()` method so `TestRootWiringEmitsThroughTheHookRunner` can unwrap it to the journal → stats → Runner chain.
+NOTES (2026-11-09): the outbox (`mcpOutbox`, wire_mcp.go) states the two-lock contract on its type: `post` appends under `liveMCP.mu` taking only its own `mu`; `emitMu` is held by the single drainer while it pops and emits and is the lock a journal seed takes; Emit never runs under `liveMCP.mu` nor on the caller. `liveMCP.close` waits for posted Events to drain after the closes.
+NOTES (2026-11-09): a failed Event's Cause is the de-labelled cause (`mcpSentence`, as the transcript notes word it); Kept is whether the server holds a live entry when the dial finishes. A superseded dial with nothing replacing it (`postServingLocked`) posts only when the dial had been announced (started or finished) or the server's last dial failed — connected with the live count while a session serves, else disconnected/denied — so a never-started dial stays silent. Removal and `retire` post disconnected for every server the holder knows (removed/denied), even one with nothing live, so the fold drops or re-states its row.
+NOTES (2026-11-09): `request`'s removal loop now walks `m.requested` (config order) instead of the `m.servers` map, so removal Events leave in a deterministic order; the two hold the same names by construction.
 
 **What:** ADR 0111 D8's emission, by the ratified seam. Depends on item 14.
 **Regression guard.** item 16 fixes the outbox's locking contract once — append order under liveMCP.mu, a separate emit-order lock held while draining and while item 17 writes a journal seed, emit never under liveMCP.mu nor on Update — and states it in a comment on the outbox type; item 17 builds its seed on that contract and changes no lock.

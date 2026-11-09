@@ -141,6 +141,137 @@ type liveMCP struct {
 	// connect dials one server, as startup dialled each — bar a repo server whose pin moved, which the
 	// session it returns reports as skipped (mcpSession.Skipped).
 	connect mcpConnect
+
+	// outbox carries the lifecycle Events the holder decides on to the Event stream (mcpOutbox); nil
+	// until emitThrough points it at a sink, and then a holder that emits nothing.
+	outbox *mcpOutbox
+}
+
+// emitThrough points the holder's MCP server lifecycle Events (ADR 0111 decision 8) at sink — the
+// engine's own serialised sink (apogee.SerializeEvents) — through an ordered outbox drained off the
+// caller (mcpOutbox). It is called once, as the holder is wired and before any request.
+func (m *liveMCP) emitThrough(sink apogee.EventSink) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.outbox = &mcpOutbox{sink: sink}
+}
+
+// postLocked queues event for emission, in the order the holder's state moved. The caller holds
+// the lock; nothing is emitted under it (mcpOutbox).
+func (m *liveMCP) postLocked(event apogee.MCPServerEvent) {
+	if m.outbox != nil {
+		m.outbox.post(event)
+	}
+}
+
+// postDisconnectedLocked queues the disconnected phase of state's server, for reason. The caller
+// holds the lock.
+func (m *liveMCP) postDisconnectedLocked(state *mcpServerState, reason apogee.MCPDisconnectReason) {
+	event := mcpServerEvent(state.config, apogee.MCPServerDisconnected)
+	event.Reason = reason
+	m.postLocked(event)
+}
+
+// postServingLocked queues what holds for a server once a dial for it is dropped with nothing
+// replacing it, when what was said of it could read otherwise — the dropped dial had been announced
+// (wasAnnounced: it started, or it finished) or the server's last dial failed (hadFailed): connected
+// with the live session's tool count while one serves, else disconnected as denied, the one way a
+// dial is dropped with no session serving (requestServerLocked). A dial that never started, over a
+// server whose last word still holds, posts nothing. The caller holds the lock.
+func (m *liveMCP) postServingLocked(state *mcpServerState, wasAnnounced, hadFailed bool) {
+	if !wasAnnounced && !hadFailed {
+		return
+	}
+	live, isLive := m.entries[state.config.Name]
+	if !isLive {
+		m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
+		return
+	}
+	event := mcpServerEvent(state.config, apogee.MCPServerConnected)
+	event.Tools = len(live.session.Tools())
+	m.postLocked(event)
+}
+
+// mcpServerEvent is phase of the configured server's lifecycle, its identity fields filled from the
+// server's config. Its EventBase stays zero: a server belongs to the session, not to any agent.
+func mcpServerEvent(server mcp.ServerConfig, phase apogee.MCPServerPhase) apogee.MCPServerEvent {
+	return apogee.MCPServerEvent{
+		Server:    server.Name,
+		Transport: string(server.Transport),
+		Project:   server.Project,
+		Phase:     phase,
+	}
+}
+
+// mcpOutbox carries the MCP server lifecycle Events liveMCP decides on (ADR 0111 decision 8) to the
+// Event stream, in the order the holder decided them, and never on the caller: the holder's calls
+// run on the TUI's Update goroutine and on dial jobs, and the sink they reach — the engine's
+// serialised sink over the journal, the stats recorder, the Reaction Runner and the renderer — must
+// not be called from Update nor under the holder's lock, which the renderer's own Update takes.
+//
+// Its locking contract, fixed here once:
+//
+//   - post appends under liveMCP.mu (the holder's caller holds it) and takes only the outbox's own
+//     mu, so the outbox order is the order the holder's state moved in.
+//   - emitMu is the emit-order lock. The one drainer holds it while it pops and emits; a writer that
+//     must place Events relative to the drained stream — a journal seeded with the servers' current
+//     state as it opens — holds it too, so nothing drains past that write. post never takes it.
+//   - Emit is never called under liveMCP.mu and never on the caller: the drainer is a goroutine of
+//     its own, started by the post that finds none draining.
+//
+// Lock order: liveMCP.mu before mu, and emitMu before mu; nothing takes liveMCP.mu while holding
+// emitMu or mu.
+type mcpOutbox struct {
+	sink apogee.EventSink
+
+	emitMu sync.Mutex
+
+	mu         sync.Mutex
+	pending    []apogee.MCPServerEvent
+	isDraining bool
+	// drains counts the drainer running, so teardown can wait for the Events already posted.
+	drains sync.WaitGroup
+}
+
+// post queues event and, when no drainer is running, starts one. Its caller holds liveMCP.mu.
+func (o *mcpOutbox) post(event apogee.MCPServerEvent) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.pending = append(o.pending, event)
+	if o.isDraining {
+		return
+	}
+	o.isDraining = true
+	o.drains.Add(1)
+	go o.drain()
+}
+
+// drain emits the queued Events in order under the emit-order lock until none is left.
+func (o *mcpOutbox) drain() {
+	defer o.drains.Done()
+	o.emitMu.Lock()
+	defer o.emitMu.Unlock()
+	for {
+		o.mu.Lock()
+		batch := o.pending
+		o.pending = nil
+		if len(batch) == 0 {
+			o.isDraining = false
+			o.mu.Unlock()
+			return
+		}
+		o.mu.Unlock()
+		for _, event := range batch {
+			o.sink.Emit(event)
+		}
+	}
+}
+
+// wait blocks until every Event posted so far has been emitted. A nil outbox has none.
+func (o *mcpOutbox) wait() {
+	if o != nil {
+		o.drains.Wait()
+	}
 }
 
 // newLiveMCP holds the servers this run connected at startup, in config order, as the
@@ -208,9 +339,10 @@ func (m *liveMCP) request(servers []mcp.ServerConfig, guard security.URLGuard, r
 	for _, server := range servers {
 		configured[server.Name] = true
 	}
-	for name := range m.servers {
-		if !configured[name] {
+	for _, name := range m.requested {
+		if state := m.servers[name]; state != nil && !configured[name] {
 			m.disconnectLocked(name)
+			m.postDisconnectedLocked(state, apogee.MCPDisconnectRemoved)
 			delete(m.servers, name)
 		}
 	}
@@ -258,18 +390,27 @@ func (m *liveMCP) requestServerLocked(server mcp.ServerConfig, guard security.UR
 	isMoved := !isKnown || !state.config.Equal(server) || state.isAdmitted != isAdmitted
 	state.config, state.isAdmitted = server, isAdmitted
 
+	if isDropped {
+		m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
+	}
 	switch {
 	case isLive && live.config.Equal(server):
 		// Already on this config — unchanged, or an edit reverted: no re-dial, no tool churn, and any
-		// dial for another config is dropped (ADR 0109 decision 2).
+		// dial for another config is dropped (ADR 0109 decision 2). The live session is what serves,
+		// and is said so when the dropped dial had said otherwise.
 		if isMoved {
-			m.supersedeLocked(server.Name, state)
+			wasAnnounced := m.supersedeLocked(server.Name, state)
+			m.postServingLocked(state, wasAnnounced, state.hasFailed)
 		}
 		state.hasFailed = false
 	case !isAdmitted && wasAdmittedAsIs:
 		// Only the verdict moved, to denied: the dial the server was waiting on is dropped and none
-		// starts.
-		m.supersedeLocked(server.Name, state)
+		// starts. A session on an older, still-admitted config serves on; with none, the server is
+		// disconnected — said once, when the deny above has not already said it.
+		wasAnnounced := m.supersedeLocked(server.Name, state)
+		if !isDropped {
+			m.postServingLocked(state, wasAnnounced, state.hasFailed)
+		}
 		state.hasFailed = false
 	case isMoved || (retryFailed && state.hasFailed):
 		m.queueDialLocked(state, guard)
@@ -346,7 +487,11 @@ func (m *liveMCP) dropDenied(guard security.URLGuard) []string {
 		if !mcpAdmits(m.entries[name].config, guard) {
 			m.dropLiveLocked(name)
 			dropped = append(dropped, name)
-			if state := m.servers[name]; m.canRedialDroppedLocked(state, guard) {
+			state := m.servers[name]
+			if state != nil {
+				m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
+			}
+			if m.canRedialDroppedLocked(state, guard) {
 				m.queueDialLocked(state, guard)
 			}
 		}
@@ -368,6 +513,9 @@ func (m *liveMCP) retire(names []string) {
 		return
 	}
 	for _, name := range names {
+		if state := m.servers[name]; state != nil {
+			m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
+		}
 		m.disconnectLocked(name)
 		delete(m.servers, name)
 	}
@@ -376,8 +524,11 @@ func (m *liveMCP) retire(names []string) {
 
 // supersedeLocked moves the server named name to a fresh generation, so no older dial for it lands:
 // the queued job is dropped, the running dial cancelled (its result is closed when it returns), and a
-// finished result closed off the loop. The caller holds the lock.
-func (m *liveMCP) supersedeLocked(name string, state *mcpServerState) {
+// finished result closed off the loop. It reports whether the dial it dropped had been announced —
+// it had started, or it had finished — so a caller that replaces it with nothing can say what holds
+// instead (postServingLocked). The caller holds the lock.
+func (m *liveMCP) supersedeLocked(name string, state *mcpServerState) (wasAnnounced bool) {
+	wasAnnounced = state.cancel != nil || state.result != nil
 	m.lastGen++
 	state.gen = m.lastGen
 	m.jobs = slices.DeleteFunc(m.jobs, func(job mcpDialJob) bool { return job.server == name })
@@ -389,6 +540,7 @@ func (m *liveMCP) supersedeLocked(name string, state *mcpServerState) {
 		m.closeOffLoopLocked(state.result.entry)
 		state.result = nil
 	}
+	return wasAnnounced
 }
 
 // queueDialLocked supersedes the server's older dial and queues one for the config state carries,
@@ -485,6 +637,7 @@ func (m *liveMCP) startDial(parent context.Context, name string, gen uint64) (co
 	ctx, cancel := context.WithCancel(parent)
 	state.cancel = cancel
 	m.dials.Add(1)
+	m.postLocked(mcpServerEvent(state.config, apogee.MCPServerDialling))
 	return ctx, cancel, true
 }
 
@@ -509,6 +662,23 @@ func (m *liveMCP) storeDial(gen uint64, result mcpDialResult) {
 	}
 	state.hasFailed = result.err != nil
 	state.result = &result
+	m.postLocked(mcpFinishedEvent(result, m.entries))
+}
+
+// mcpFinishedEvent is the lifecycle Event of a current-generation dial that finished: connected with
+// the tool count its session offers, or failed with its de-labelled cause (mcpSentence) and whether
+// a live session from an earlier dial still serves (Kept) — entries is the installed set.
+func mcpFinishedEvent(result mcpDialResult, entries map[string]mcpEntry) apogee.MCPServerEvent {
+	server := result.entry.config
+	if result.err == nil {
+		event := mcpServerEvent(server, apogee.MCPServerConnected)
+		event.Tools = len(result.entry.session.Tools())
+		return event
+	}
+	event := mcpServerEvent(server, apogee.MCPServerFailed)
+	event.Cause = mcpSentence(result.err)
+	_, event.Kept = entries[server.Name]
+	return event
 }
 
 // commit takes every finished current-generation dial in, in one rebuild and one SwapTools in config
@@ -626,6 +796,7 @@ func (m *liveMCP) settleLocked(fold mcpFold) {
 	for _, name := range fold.denied {
 		if state := m.servers[name]; state != nil {
 			state.isAdmitted, state.hasFailed = false, false
+			m.postDisconnectedLocked(state, apogee.MCPDisconnectDenied)
 		}
 	}
 	if fold.needsSwap {
@@ -673,6 +844,11 @@ func (m *liveMCP) close() error {
 
 	errs := closeInParallel(open)
 	m.closes.Wait()
+	// No Event is posted once close has begun; the ones posted before it are emitted first.
+	m.mu.Lock()
+	outbox := m.outbox
+	m.mu.Unlock()
+	outbox.wait()
 	return errors.Join(errs...)
 }
 

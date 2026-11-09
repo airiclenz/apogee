@@ -4778,11 +4778,20 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 	if w.reactionHost == nil || w.reactionHost.Runner() == nil {
 		t.Fatal("the root built no Reaction Runner")
 	}
-	// The live Event journal's sink is outermost (ADR 0103 decision 1) and the root's own: unwrapped,
-	// it holds the stats recorder over the Runner — the journal never sits inside the Runner.
-	journal, ok := w.cfg.Events.(*liveJournalSink)
+	// Config.Events is the engine's own serializing seam, wrapped once by the root (ADR 0111 decision
+	// 8): wrapping it again answers the same sink, so the engine and the MCP dial owner share its mutex.
+	if apogee.SerializeEvents(w.cfg.Events) != w.cfg.Events {
+		t.Fatalf("Config.Events = %T, want the engine's serializing seam the root wrapped once", w.cfg.Events)
+	}
+	serial, ok := w.cfg.Events.(interface{ Unwrap() apogee.EventSink })
+	if !ok {
+		t.Fatalf("Config.Events = %T, want a seam that unwraps to the chain beneath it", w.cfg.Events)
+	}
+	// Beneath it, the live Event journal's sink is outermost (ADR 0103 decision 1) and the root's own:
+	// unwrapped, it holds the stats recorder over the Runner — the journal never sits inside the Runner.
+	journal, ok := serial.Unwrap().(*liveJournalSink)
 	if !ok || journal != w.events {
-		t.Fatalf("Config.Events = %T, want the root's own live Event journal sink outermost", w.cfg.Events)
+		t.Fatalf("the serial seam's inner = %T, want the root's own live Event journal sink outermost", serial.Unwrap())
 	}
 	sink, ok := journal.inner.(statsSink)
 	if !ok || sink.inner != domain.EventSink(w.reactionHost.Runner()) {

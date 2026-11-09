@@ -5,12 +5,14 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
@@ -1183,5 +1185,336 @@ func TestLiveMCPJobNeverRunAfterCloseIsInert(t *testing.T) {
 	}
 	if fixture.set.session("docs") != nil {
 		t.Error("a job run after close installed a session")
+	}
+}
+
+// mcpEventRecorder is the sink a holder's lifecycle Events reach in a test: it keeps every
+// MCPServerEvent in the order it was emitted. gate, when set, holds every Emit until it is closed,
+// and each Emit then checks that the holder's lock is free (lockHeld counts the ones that found it
+// taken).
+type mcpEventRecorder struct {
+	set  *liveMCP
+	gate chan struct{}
+
+	mu       sync.Mutex
+	events   []apogee.MCPServerEvent
+	lockHeld int
+}
+
+func (r *mcpEventRecorder) Emit(e apogee.Event) {
+	event, isMCP := e.(apogee.MCPServerEvent)
+	if !isMCP {
+		return
+	}
+	if r.gate != nil {
+		<-r.gate
+		if r.set.mu.TryLock() {
+			r.set.mu.Unlock()
+		} else {
+			r.mu.Lock()
+			r.lockHeld++
+			r.mu.Unlock()
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, event)
+}
+
+// take waits for every Event the holder has posted to be emitted, then answers them as lines
+// (mcpEventLines) and forgets them, so the next take reads only what came after.
+func (r *mcpEventRecorder) take() []string {
+	r.set.outbox.wait()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	lines := mcpEventLines(r.events)
+	r.events = nil
+	return lines
+}
+
+// recordMCPEvents points the fixture's holder at a fresh recorder.
+func recordMCPEvents(fixture *mcpFixture) *mcpEventRecorder {
+	recorder := &mcpEventRecorder{set: fixture.set}
+	fixture.set.emitThrough(recorder)
+	return recorder
+}
+
+// mcpEventLines spells each Event as one comparable line: `<server> <phase>`, then the tool count of
+// a connected one, ` kept` and the cause of a failed one, or the reason of a disconnected one.
+func mcpEventLines(events []apogee.MCPServerEvent) []string {
+	lines := make([]string, 0, len(events))
+	for _, event := range events {
+		line := event.Server + " " + string(event.Phase)
+		switch event.Phase {
+		case apogee.MCPServerConnected:
+			line += " " + strconv.Itoa(event.Tools)
+		case apogee.MCPServerFailed:
+			if event.Kept {
+				line += " kept"
+			}
+			line += ": " + event.Cause
+		case apogee.MCPServerDisconnected:
+			line += " " + string(event.Reason)
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// assertMCPEvents fails unless got is want, naming when in the failure.
+func assertMCPEvents(t *testing.T, when string, got []string, want ...string) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Errorf("%s: events = %q, want %q", when, got, want)
+	}
+}
+
+// runJobs runs every queued dial job inline, as the idle point's Cmds would.
+func runJobs(set *liveMCP) {
+	for _, job := range set.takeWork() {
+		job.run(context.Background())
+	}
+}
+
+// liveTwoToolServer is a live entry for config advertising two tools, so a count it reports is told
+// apart from a fresh dial's one.
+func liveTwoToolServer(config mcp.ServerConfig) mcpEntry {
+	return mcpEntry{config: config, session: &fakeMCPSession{tools: []apogee.Tool{
+		mcpFixtureTool{name: config.Name + "__a"}, mcpFixtureTool{name: config.Name + "__b"},
+	}}}
+}
+
+// The holder that owns the MCP dials emits each server's lifecycle (ADR 0111 decision 8): dialling
+// when a dial starts, connected or failed when the current-generation dial finishes — before the
+// idle-point commit, which emits nothing for a dial it lands — and disconnected when a live session
+// is closed on purpose, removed or denied. A dial superseded with nothing replacing it says what holds
+// instead; a stale or never-started dial says nothing; and every Event leaves in the order the
+// holder's state moved.
+func TestLiveMCPEmitsLifecycleEvents(t *testing.T) {
+	t.Parallel()
+	httpServer := mcp.ServerConfig{Name: "docs", Transport: mcp.TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}
+	denyExample := mcpGuard(nil, []string{"mcp.example.com"})
+
+	t.Run("reconnect", func(t *testing.T) {
+		t.Parallel()
+		docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+		fixture := newMCPFixtureWith([]mcpEntry{docs}, "", newMCPDialRecorder().connect)
+		events := recordMCPEvents(fixture)
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		assertMCPEvents(t, "a request, before its dial runs", events.take())
+
+		runJobs(fixture.set)
+		fixture.set.outbox.wait()
+		events.mu.Lock()
+		first := events.events[0]
+		events.mu.Unlock()
+		assertMCPEvents(t, "the dial", events.take(), "docs dialling", "docs connected 1")
+		if first.Transport != string(mcp.TransportStdio) || first.Project || first.EventBase != (domain.EventBase{}) {
+			t.Errorf("dialling = %+v, want the stdio server's identity and a zero EventBase", first)
+		}
+		if _, err := drainMCP(t, fixture.set, fixture.tools, &applySettingSpy{}); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		assertMCPEvents(t, "the commit that lands it", events.take())
+	})
+	t.Run("failed with the previous connection kept", func(t *testing.T) {
+		t.Parallel()
+		docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+		dials := newMCPDialRecorder()
+		dials.failing["docs"] = errors.New(`mcp: server "docs": exec: not found`)
+		fixture := newMCPFixtureWith([]mcpEntry{docs}, "", dials.connect)
+		events := recordMCPEvents(fixture)
+
+		if _, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, fixture.tools, &applySettingSpy{}); err != nil {
+			t.Fatalf("reconnect: %v", err)
+		}
+		assertMCPEvents(t, "a failed reconnect", events.take(), "docs dialling", `docs failed kept: server "docs": exec: not found`)
+	})
+	t.Run("failed with nothing kept", func(t *testing.T) {
+		t.Parallel()
+		dials := newMCPDialRecorder()
+		dials.failing["broken"] = errors.New("dial: connection refused")
+		fixture := newMCPFixtureWith(nil, "", dials.connect)
+		events := recordMCPEvents(fixture)
+
+		if _, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{stdioServer("broken", "broken-mcp")}, fixture.tools, &applySettingSpy{}); err != nil {
+			t.Fatalf("reconnect: %v", err)
+		}
+		assertMCPEvents(t, "a new server's failed dial", events.take(), "broken dialling", "broken failed: dial: connection refused")
+	})
+	t.Run("removed", func(t *testing.T) {
+		t.Parallel()
+		docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+		wiki, _ := liveServer(stdioServer("wiki", "wiki-mcp"))
+		fixture := newMCPFixtureWith([]mcpEntry{docs, wiki}, "", newMCPDialRecorder().connect)
+		events := recordMCPEvents(fixture)
+
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("wiki", "wiki-mcp")}, openGuard, false); err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		assertMCPEvents(t, "a removal", events.take(), "docs disconnected removed")
+	})
+	t.Run("denied by a request", func(t *testing.T) {
+		t.Parallel()
+		fixture := newMCPFixtureWith([]mcpEntry{liveTwoToolServer(httpServer)}, "", newMCPDialRecorder().connect)
+		events := recordMCPEvents(fixture)
+
+		if err := fixture.set.request([]mcp.ServerConfig{httpServer}, denyExample, false); err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		assertMCPEvents(t, "a request whose lists deny the live endpoint", events.take(), "docs disconnected denied")
+	})
+	t.Run("denied by a url-safety edit", func(t *testing.T) {
+		t.Parallel()
+		fixture := newMCPFixtureWith([]mcpEntry{liveTwoToolServer(httpServer)}, "", newMCPDialRecorder().connect)
+		events := recordMCPEvents(fixture)
+
+		fixture.set.dropDenied(denyExample)
+		assertMCPEvents(t, "dropDenied", events.take(), "docs disconnected denied")
+		fixture.set.retire([]string{"docs"})
+		assertMCPEvents(t, "retire", events.take(), "docs disconnected denied")
+	})
+	t.Run("denied at the commit's re-admit", func(t *testing.T) {
+		t.Parallel()
+		fixture := newMCPFixtureWith(nil, "", newMCPDialRecorder().connect)
+		events := recordMCPEvents(fixture)
+		spy := &applySettingSpy{}
+		if err := fixture.set.request([]mcp.ServerConfig{httpServer}, openGuard, false); err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		runJobs(fixture.set)
+		assertMCPEvents(t, "the dial", events.take(), "docs dialling", "docs connected 1")
+		if err := fixture.tools.setDenyHosts([]string{"mcp.example.com"}, spy); err != nil {
+			t.Fatalf("setDenyHosts: %v", err)
+		}
+
+		if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		assertMCPEvents(t, "the commit", events.take(), "docs disconnected denied")
+	})
+	t.Run("a deny cancels the dial in flight", func(t *testing.T) {
+		t.Parallel()
+		dial := newGatedDial("docs")
+		fixture := newMCPFixtureDialling(nil, "", dial.connect)
+		events := recordMCPEvents(fixture)
+		if err := fixture.set.request([]mcp.ServerConfig{httpServer}, openGuard, false); err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		finished := runJobsAsync(fixture.set.takeWork())
+		awaitClosed(t, dial.entered, "the dial to start")
+		assertMCPEvents(t, "the dial starting", events.take(), "docs dialling")
+
+		if err := fixture.set.request([]mcp.ServerConfig{httpServer}, denyExample, false); err != nil {
+			t.Fatalf("deny: %v", err)
+		}
+		assertMCPEvents(t, "the deny", events.take(), "docs disconnected denied")
+		close(dial.release)
+		awaitClosed(t, finished, "the cancelled job to return")
+		assertMCPEvents(t, "the stale result", events.take())
+	})
+	t.Run("a reverted edit supersedes the dial in flight", func(t *testing.T) {
+		t.Parallel()
+		dial := newHeldDial("docs-mcp-v2")
+		fixture := newMCPFixtureDialling([]mcpEntry{liveTwoToolServer(stdioServer("docs", "docs-mcp"))}, "", dial.connect)
+		events := recordMCPEvents(fixture)
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+			t.Fatalf("request v2: %v", err)
+		}
+		finished := runJobsAsync(fixture.set.takeWork())
+		awaitClosed(t, dial.entered, "the v2 dial to start")
+		assertMCPEvents(t, "the v2 dial starting", events.take(), "docs dialling")
+
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+			t.Fatalf("revert: %v", err)
+		}
+		assertMCPEvents(t, "the revert", events.take(), "docs connected 2")
+		awaitClosed(t, finished, "the cancelled job to return")
+		assertMCPEvents(t, "the stale result", events.take())
+	})
+	t.Run("a reverted edit supersedes a finished dial", func(t *testing.T) {
+		t.Parallel()
+		fixture := newMCPFixtureWith([]mcpEntry{liveTwoToolServer(stdioServer("docs", "docs-mcp"))}, "", newMCPDialRecorder().connect)
+		events := recordMCPEvents(fixture)
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+			t.Fatalf("request v2: %v", err)
+		}
+		runJobs(fixture.set)
+		assertMCPEvents(t, "the v2 dial", events.take(), "docs dialling", "docs connected 1")
+
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+			t.Fatalf("revert: %v", err)
+		}
+		assertMCPEvents(t, "the revert", events.take(), "docs connected 2")
+	})
+	t.Run("a never-started dial is silent", func(t *testing.T) {
+		t.Parallel()
+		dials := newMCPDialRecorder()
+		fixture := newMCPFixtureWith([]mcpEntry{liveTwoToolServer(stdioServer("docs", "docs-mcp"))}, "", dials.connect)
+		events := recordMCPEvents(fixture)
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+			t.Fatalf("request v2: %v", err)
+		}
+		jobs := fixture.set.takeWork()
+
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp")}, openGuard, false); err != nil {
+			t.Fatalf("revert: %v", err)
+		}
+		for _, job := range jobs {
+			job.run(context.Background())
+		}
+		assertMCPEvents(t, "a dial superseded before it started", events.take())
+		if len(dials.dialled) != 0 {
+			t.Errorf("the superseded job dialled %v", dials.dialled)
+		}
+	})
+	t.Run("order", func(t *testing.T) {
+		t.Parallel()
+		alpha, _ := liveServer(stdioServer("alpha", "alpha-mcp"))
+		beta, _ := liveServer(stdioServer("beta", "beta-mcp"))
+		gamma, _ := liveServer(stdioServer("gamma", "gamma-mcp"))
+		dials := newMCPDialRecorder()
+		dials.failing["beta"] = errors.New("dial: connection refused")
+		fixture := newMCPFixtureWith([]mcpEntry{alpha, beta, gamma}, "", dials.connect)
+		events := recordMCPEvents(fixture)
+
+		if _, err := requestAndDrainMCP(t, fixture.set,
+			[]mcp.ServerConfig{stdioServer("gamma", "gamma-mcp-v2"), stdioServer("beta", "beta-mcp-v2")}, fixture.tools, &applySettingSpy{}); err != nil {
+			t.Fatalf("reconnect: %v", err)
+		}
+		assertMCPEvents(t, "one reconnect", events.take(),
+			"alpha disconnected removed",
+			"gamma dialling", "gamma connected 1",
+			"beta dialling", "beta failed kept: dial: connection refused")
+	})
+}
+
+// The holder's Events are emitted off its caller — the TUI's Update goroutine, which runs request and
+// the idle-point commit — and never under its lock: a sink that blocks holds neither a request nor a
+// dial job, and each Emit finds the lock free.
+func TestLiveMCPNeverEmitsUnderLock(t *testing.T) {
+	t.Parallel()
+	old, _ := liveServer(stdioServer("old", "old-mcp"))
+	fixture := newMCPFixtureWith([]mcpEntry{old}, "", newMCPDialRecorder().connect)
+	events := &mcpEventRecorder{set: fixture.set, gate: make(chan struct{})}
+	fixture.set.emitThrough(events)
+
+	requested := make(chan struct{})
+	go func() {
+		defer close(requested)
+		if err := fixture.set.request([]mcp.ServerConfig{stdioServer("new", "new-mcp")}, openGuard, false); err != nil {
+			t.Errorf("request: %v", err)
+		}
+	}()
+	awaitClosed(t, requested, "the request to return while the sink is blocked")
+	awaitClosed(t, runJobsAsync(fixture.set.takeWork()), "the dial job to return while the sink is blocked")
+
+	close(events.gate)
+	assertMCPEvents(t, "the blocked sink, released", events.take(),
+		"old disconnected removed", "new dialling", "new connected 1")
+	if events.lockHeld != 0 {
+		t.Errorf("%d Event(s) were emitted while the holder's lock was held", events.lockHeld)
 	}
 }
