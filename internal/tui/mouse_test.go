@@ -7502,3 +7502,171 @@ func TestHoverPointerShapeWritesNothingWhileTheGateIsShut(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The wheel over the prompt box: the draft's while it overflows, the transcript's while it fits
+// ----------------------------------------------------------------------------
+
+// overflowingDraftModel builds a laid-out 80×24 model over a long transcript whose prompt box holds
+// a draft of rows rows, pasted so the widget's own Update scrolls its window onto the caret at the
+// draft's end, and returns it with the box's content rectangle's top row and height.
+func overflowingDraftModel(t *testing.T, rows int) (m Model, y0, h int) {
+	t.Helper()
+	m = step(t, modelWithOverlayRoomAt(t, 80, 24, testOpts), tea.PasteMsg{Content: draftLines(rows)})
+	if m.hiddenDraftRows() == 0 {
+		t.Fatalf("precondition: a %d-row draft fits the %d-row box", rows, m.input.Height())
+	}
+	_, y0, _, h = m.inputContentRect()
+	return m, y0, h
+}
+
+// inputThumbTop is the content row the prompt box's thumb starts on.
+func inputThumbTop(t *testing.T, m Model) int {
+	t.Helper()
+	for i, cell := range assertInputBoxBarShown(t, m) {
+		if string(cell) == glyphScrollThumb {
+			return i
+		}
+	}
+	t.Fatal("the prompt box's bar carries no thumb")
+	return 0
+}
+
+// TestWheelOverAnOverflowingPromptBoxScrollsTheDraft: a notch anywhere on the box — a content row or
+// either border row — is the draft's while it overflows. Every notch moves the window by the
+// transcript's own notch, the FIRST one included although the caret starts on the window's bottom
+// row, and the thumb climbs with it; the transcript never moves, and enough notches reach the top.
+func TestWheelOverAnOverflowingPromptBoxScrollsTheDraft(t *testing.T) {
+	t.Parallel()
+	m, y0, h := overflowingDraftModel(t, maxInputRows+8)
+	transcript := m.viewport.YOffset()
+	delta := m.viewport.MouseWheelDelta
+
+	offset, thumb := m.input.ScrollYOffset(), inputThumbTop(t, m)
+	first := wheelAt(t, m, tea.MouseWheelUp, y0)
+	if got := first.input.ScrollYOffset(); got != offset-delta {
+		t.Fatalf("first notch left the window at %d, want %d (one notch of %d rows above %d)", got, offset-delta, delta, offset)
+	}
+	if got := inputThumbTop(t, first); got >= thumb {
+		t.Errorf("thumb starts on row %d after the notch, want above row %d", got, thumb)
+	}
+
+	m = first
+	rows := []int{y0 - 1, y0 + h, y0} // the top border, the bottom border, a content row
+	for i := 0; m.input.ScrollYOffset() > 0; i++ {
+		if i > maxInputRows+8 {
+			t.Fatalf("the window never reached the draft's top: stuck at offset %d", m.input.ScrollYOffset())
+		}
+		before := m.input.ScrollYOffset()
+		m = wheelAt(t, m, tea.MouseWheelUp, rows[i%len(rows)])
+		if got := m.input.ScrollYOffset(); got >= before {
+			t.Fatalf("a notch on screen row %d left the window at %d, want it above %d", rows[i%len(rows)], got, before)
+		}
+	}
+	if got := m.viewport.YOffset(); got != transcript {
+		t.Errorf("transcript offset = %d after the notches, want it left at %d", got, transcript)
+	}
+
+	down := wheelAt(t, m, tea.MouseWheelDown, y0)
+	if got := down.input.ScrollYOffset(); got != delta {
+		t.Errorf("a notch down from the top left the window at %d, want %d", got, delta)
+	}
+}
+
+// TestWheelOverAFittingPromptBoxScrollsTheTranscript: a box whose draft fits has nothing out of
+// sight to scroll to, so a notch over it is the transcript's exactly as before the box could scroll.
+func TestWheelOverAFittingPromptBoxScrollsTheTranscript(t *testing.T) {
+	t.Parallel()
+	m := step(t, modelWithOverlayRoomAt(t, 80, 24, testOpts), tea.PasteMsg{Content: "a short draft"})
+	_, y0, _, _ := m.inputContentRect()
+	line, col := m.input.Line(), m.input.Column()
+
+	next := wheelAt(t, m, tea.MouseWheelUp, y0)
+	if next.viewport.YOffset() == m.viewport.YOffset() {
+		t.Errorf("transcript stayed at %d: a notch over a fitting box is the transcript's", m.viewport.YOffset())
+	}
+	if next.input.Line() != line || next.input.Column() != col {
+		t.Errorf("caret moved to (%d,%d), want it left at (%d,%d)", next.input.Line(), next.input.Column(), line, col)
+	}
+}
+
+// TestWheelOverAnInertOverflowingPromptBoxScrollsTheTranscript: the box takes a notch only where it
+// takes a click — while it is editable — so at the errored dismiss an overflowing draft stays still
+// and the notch scrolls the transcript.
+func TestWheelOverAnInertOverflowingPromptBoxScrollsTheTranscript(t *testing.T) {
+	t.Parallel()
+	m, y0, _ := overflowingDraftModel(t, maxInputRows+8)
+	m.state = stateErrored
+	line, col, offset := m.input.Line(), m.input.Column(), m.input.ScrollYOffset()
+
+	next := wheelAt(t, m, tea.MouseWheelUp, y0)
+	if next.viewport.YOffset() == m.viewport.YOffset() {
+		t.Errorf("transcript stayed at %d: a notch over an inert box is the transcript's", m.viewport.YOffset())
+	}
+	if next.input.Line() != line || next.input.Column() != col || next.input.ScrollYOffset() != offset {
+		t.Errorf("caret (%d,%d) window %d after the notch, want (%d,%d) window %d",
+			next.input.Line(), next.input.Column(), next.input.ScrollYOffset(), line, col, offset)
+	}
+}
+
+// TestWheelOverARecalledPromptBoxEndsRecall: a notch in the box is acting in it, as a click is, so a
+// recalled entry becomes an ordinary draft — the next ↑ moves the caret instead of walking recall.
+func TestWheelOverARecalledPromptBoxEndsRecall(t *testing.T) {
+	t.Parallel()
+	entry := draftLines(maxInputRows + 8)
+	m := step(t, modelWithOverlayRoomAt(t, 80, 24, testOpts), recallLoadedMsg{entries: []string{"older entry", entry}})
+	m = step(t, m, keyUp())
+	if !m.recall.active || m.input.Value() != entry {
+		t.Fatalf("precondition: ↑ on the empty box did not recall the newest entry (active %v)", m.recall.active)
+	}
+	_, y0, _, _ := m.inputContentRect()
+	// The frame paints between the two messages, as the program's does: the paint is what hands the
+	// widget's window the recalled entry's rows to scroll over (its View sets the shared viewport's
+	// content), and the notch then re-clamps that window onto the caret before it steps.
+	_ = m.inputView()
+
+	m = wheelAt(t, m, tea.MouseWheelUp, y0)
+	if m.recall.active {
+		t.Fatal("recall still active after a notch in the box")
+	}
+	row := m.caretVisualRow()
+	m = step(t, m, keyUp())
+	if got := m.input.Value(); got != entry {
+		t.Fatalf("↑ after the notch replaced the draft with %q, want the recalled entry kept", got)
+	}
+	if got := m.caretVisualRow(); got != row-1 {
+		t.Errorf("caret on row %d after ↑, want row %d", got, row-1)
+	}
+}
+
+// TestArrowKeysReachEveryRowOfAnOverflowingDraft: ↑/↓ are the caret's on a typed draft, whatever
+// recall holds, so they walk the window to the draft's first row and back to its last.
+func TestArrowKeysReachEveryRowOfAnOverflowingDraft(t *testing.T) {
+	t.Parallel()
+	m, _, _ := overflowingDraftModel(t, maxInputRows+8)
+	m = step(t, m, recallLoadedMsg{entries: []string{"a recorded prompt"}})
+	draft, last := m.input.Value(), m.input.LineCount()-1
+	bottom := m.input.ScrollYOffset()
+
+	for i := 0; m.caretVisualRow() > 0; i++ {
+		if i > maxInputRows+8 {
+			t.Fatalf("↑ never reached the first row: caret stuck on row %d", m.caretVisualRow())
+		}
+		m = step(t, m, keyUp())
+	}
+	if m.input.ScrollYOffset() != 0 || m.input.Line() != 0 {
+		t.Errorf("at the first row: window %d, line %d, want 0 and 0", m.input.ScrollYOffset(), m.input.Line())
+	}
+	for i := 0; m.input.Line() < last; i++ {
+		if i > maxInputRows+8 {
+			t.Fatalf("↓ never reached the last row: caret stuck on line %d", m.input.Line())
+		}
+		m = step(t, m, keyDown())
+	}
+	if got := m.input.ScrollYOffset(); got != bottom {
+		t.Errorf("at the last row: window %d, want %d", got, bottom)
+	}
+	if got := m.input.Value(); got != draft {
+		t.Errorf("the arrows changed the draft to %q: recall took a key", got)
+	}
+}

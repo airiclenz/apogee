@@ -1265,8 +1265,9 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // the keyboard's ↑/↓ under the wheel, against the FILTERED view pickerKey and the painter already
 // share (pickerFilteredView, counted by pickerCount), so a notch and an arrow can never disagree
 // about which row is highlighted and neither can move the human onto a row the filter has pruned
-// away. handled is false anywhere else, which leaves the notch to the transcript scrolling above and
-// behind the pane.
+// away. handled is false anywhere else, which leaves the notch to the rest of the chain
+// (foldMouseWheel, mouse.go): an overflowing prompt box under the pointer, else the transcript
+// scrolling above and behind the pane.
 //
 // Inside the rectangle it is ALWAYS handled, whatever kind is open: the picker is modal (its claim
 // in keyClaimOrder, model.go), and a notch over it must never reach the transcript behind it. No

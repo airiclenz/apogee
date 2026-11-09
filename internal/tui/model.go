@@ -1675,8 +1675,8 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.beatCmd()
 
 	case tea.MouseWheelMsg:
-		// A notch goes to whichever open pane is under the pointer, and to the transcript
-		// everywhere else (mouse.go).
+		// A notch goes to whichever open pane is under the pointer, to the prompt box under it
+		// while the draft overflows the box, and to the transcript everywhere else (mouse.go).
 		return m.foldMouseWheel(msg)
 
 	case tea.MouseClickMsg:
@@ -2178,7 +2178,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// PageUp/PageDown scroll the transcript in every state. They have no meaning in the input
 	// box, so intercept them before the state-gated routing below — the wheel does the same via
-	// MouseWheelMsg (Update); the other scroll keys stay state-gated so typing is unaffected.
+	// MouseWheelMsg (Update), everywhere but over an overflowing box, whose draft it scrolls
+	// (draftWheel, mouse.go); the other scroll keys stay state-gated so typing is unaffected.
 	switch msg.String() {
 	case "pgup", "pgdown":
 		return m.scrollViewport(msg)

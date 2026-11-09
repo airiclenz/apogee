@@ -1632,7 +1632,8 @@ func (m Model) handleSettingsMotion(msg tea.MouseMotionMsg) (Model, bool) {
 // settingsWheel walks the /settings key list one row per notch while the pointer is over the pane — the
 // keyboard's ↑/↓ under the wheel, with the scroll window following it exactly as it does for them
 // (popupRowWindow re-derives around the selection on every frame). handled is false anywhere else,
-// which leaves the notch to the transcript scrolling above and behind the pane.
+// which leaves the notch to the rest of the chain (foldMouseWheel): an overflowing prompt box under
+// the pointer, else the transcript scrolling above and behind the pane.
 //
 // It CLAMPS at the ends where the keys WRAP, and the difference is the gesture rather than an
 // inconsistency: ↑/↓ walk a list as a cycle, while a wheel is a scroll — rolling past the last key and
@@ -2116,9 +2117,10 @@ func (m Model) highlightTranscript(view string) string {
 	return strings.Join(lines, "\n")
 }
 
-// foldMouseWheel routes one wheel notch: to whichever open pane holds the pointer, and to the
-// transcript everywhere else. The chain asks every pane the frame can have open, in the one order
-// pointerPanes holds — the /settings pane (settingsWheel), the /usage, /inspect, /thinking and
+// foldMouseWheel routes one wheel notch: to whichever open pane holds the pointer, to the prompt box
+// under the pointer while its draft overflows the box (draftWheel), and to the transcript everywhere
+// else. The chain asks every pane the frame can have open, in the one order pointerPanes holds — the
+// /settings pane (settingsWheel), the /usage, /inspect, /thinking and
 // /advice reports (reportWheel), the /sessions browser (browserWheel), the /model | /server picker
 // (pickerWheel), the approval menu and the ask offering (promptWheel), the "/" | "@" autocomplete
 // dropdown (dropdownWheel) — and each one takes the notch only when the pointer is inside its own
@@ -2127,25 +2129,32 @@ func (m Model) highlightTranscript(view string) string {
 // only one rectangle can hold the pointer at a time.
 //
 // The transcript is the FLOOR of that chain rather than its default: scrollViewport is what a notch
-// reaches once no open pane has claimed it, so a pane never has to argue its way past a transcript
-// that took the notch first. That is the whole doctrine — the pane under the POINTER owns the notch —
-// and it is why the wheel answer does not follow focus or modality.
+// reaches once no open pane — and no overflowing box under the pointer — has claimed it, so a pane
+// never has to argue its way past a transcript that took the notch first. The box is asked after
+// every pane because a pane may be drawn over it (the dropdown hangs over the box it completes), and
+// it claims a notch on the same terms a pane does: only inside its own rectangle, and only while it
+// has rows out of sight to scroll to — a box whose draft fits leaves the notch to the transcript.
+// That is the whole doctrine — the pane under the POINTER owns the notch — and it is why the wheel
+// answer does not follow focus or modality.
 //
 // A CLICK follows the notch. handleMouseClick asks the same panes in the same order, off the same
 // rectangles and through the same shared hit-test (popupPaneHit over the painter's own placement),
 // so the row a notch would walk onto is the row a click highlights and a second click on that row
 // acts as ⏎ does. Only the answer to a point OUTSIDE every box differs between the two gestures,
-// because only the click has a dismissal to spend: a notch outside a pane simply scrolls the
-// transcript, while a click outside one may close the pane it missed — never cancel its question —
-// and the per-pane spelling of that is stated once, on handleMouseClick, rather than here.
+// because only the click has a dismissal to spend: a notch outside a pane simply carries on down the
+// chain — to an overflowing box under the pointer, else to the transcript — while a click outside
+// one may close the pane it missed — never cancel its question — and the per-pane spelling of that is
+// stated once, on handleMouseClick, rather than here.
 //
 // The approval menu and the ask offering are the frame's SOFT-modal panes: the transcript stays
 // scrollable underneath them, so what they claim is the notch INSIDE their box and only inside it,
-// while a notch anywhere outside carries on down the chain and scrolls the transcript exactly as it
-// did before they opened (ratified 2026-08-22). Their soft-modality stays a fact about KEYS.
+// while a notch anywhere outside carries on down the chain exactly as it did before they opened —
+// to an overflowing box under the pointer, else to the transcript (ratified 2026-08-22). Their
+// soft-modality stays a fact about KEYS.
 //
-// The wheel scrolls the transcript in every state — unlike the ordinary keyboard path, which is
-// state-gated (idle/ask/running feed the input; only PgUp/PgDn scroll from the keyboard everywhere).
+// Off an overflowing editable box the wheel scrolls the transcript in every state (ADR 0025 decision
+// 11) — unlike the ordinary keyboard path, which is state-gated (idle/ask/running feed the input;
+// only PgUp/PgDn scroll from the keyboard everywhere).
 // Mouse reporting is enabled in View (MouseModeCellMotion, or AllMotion behind the pointer-shape
 // gate — pointerprobe.go); the viewport's own Update turns the
 // wheel into a scroll.
@@ -2168,5 +2177,50 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 			return next, nil
 		}
 	}
+	if next, cmd, handled := m.draftWheel(msg); handled {
+		return next, cmd
+	}
 	return m.scrollViewport(msg)
+}
+
+// draftWheel scrolls an OVERFLOWING prompt box's draft while the pointer is over the box — its
+// content rows and its own two border rows, the rectangle the human sees as the box. handled is false
+// anywhere else, and false over a box whose draft fits, so such a notch carries on to the transcript
+// exactly as it did before the box could scroll (foldMouseWheel).
+//
+// A notch moves the CARET, because the window cannot be moved without it: the widget's viewport is
+// private and follows the caret. It moves it by the transcript's own notch (the viewport's
+// MouseWheelDelta), first seating it on the window's edge row so every notch moves the window
+// ([lineEditor.wheelRows]). The gate is the one a click in the box answers to ([Model.inputEditable]):
+// an inert box — an approval, the errored dismiss — keeps its draft still and the notch goes to the
+// transcript. Acting in the box ends recall, as a click in it does, so the next ↑ moves the caret
+// rather than walking the recorded prompts. A shift-notch is the viewport's horizontal scroll, which
+// the box has none of, so it is left to the chain's floor as before. The upkeep is the ↑/↓
+// keypress's tail in handleKey: the overlay re-derived from the moved caret where it is live, then a
+// re-flow.
+func (m Model) draftWheel(msg tea.MouseWheelMsg) (Model, tea.Cmd, bool) {
+	if !m.inputEditable() || m.hiddenDraftRows() == 0 || msg.Mod.Contains(tea.ModShift) {
+		return m, nil, false
+	}
+	_, y0, _, h := m.inputContentRect()
+	if msg.Y < y0-1 || msg.Y > y0+h { // y0-1 is the box's top border row, y0+h its bottom one
+		return m, nil, false
+	}
+	var delta int
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		delta = -m.viewport.MouseWheelDelta
+	case tea.MouseWheelDown:
+		delta = m.viewport.MouseWheelDelta
+	default:
+		return m, nil, false
+	}
+	m.dropRecall() // a notch IN the box is acting in it: the arrows go back to the caret
+	m.wheelRows(delta)
+	var cmd tea.Cmd
+	if m.state.live() {
+		m, cmd = m.recomputeAutocomplete() // the caret moved: re-derive the overlay, as an ↑/↓ keypress does
+	}
+	m.layout()
+	return m, cmd, true
 }

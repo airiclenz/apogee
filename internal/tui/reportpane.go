@@ -489,8 +489,9 @@ func reportHit(r reportKind, pre Model, y int) paneHit {
 }
 
 // reportWheel scrolls the named report one row per notch while the pointer is over it, and CLAMPS at
-// both ends. handled is false anywhere else, which leaves the notch to the transcript scrolling above
-// and behind the pane — and true over a report short enough to show every row it has, where the notch
+// both ends. handled is false anywhere else, which leaves the notch to the rest of the chain
+// (foldMouseWheel, mouse.go) — an overflowing prompt box under the pointer, else the transcript
+// scrolling above and behind the pane — and true over a report short enough to show every row it has, where the notch
 // moves nothing because there is nothing off the screen to move to.
 func (m Model) reportWheel(r reportKind, msg tea.MouseWheelMsg) (Model, bool) {
 	y0, h, ok := m.reportPaneRect(r)

@@ -76,7 +76,17 @@ internal/tui/boxdraw.go — scrollbarThumb; internal/tui/lineeditor.go — resea
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestInputBox|TestPromptScrollClampAtMaxHeight|TestInputContentRows|TestRenderPopupScrollbar|TestScrollbar|TestDocMap' ./internal/tui/`
 **Commit:** `feat(tui): show a scrollbar on the prompt box while its draft overflows`
 
-## 2. Wheel over an overflowing prompt box scrolls the draft
+## 2. Wheel over an overflowing prompt box scrolls the draft — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — internal/tui/approval.go: made necessary by draftWheel (promptWheel's doc said a notch outside the decision pane scrolls the transcript; at the ask the borrowed box is editable, so it can now scroll the draft)
+
+NOTES (2026-11-09): consequential edit — internal/tui/doc.go: made necessary by draftWheel (the ADR 0025 paragraph said the wheel keeps transcript scrolling in every state)
+
+NOTES (2026-11-09): the step helper is lineEditor.wheelRows plus a new lineEditor.caretVisualRow (wrapRowStarts over the lines above the caret at the widget's Width(), plus LineInfo().RowOffset); the Model side is Model.draftWheel in mouse.go, asked after pointerPanes and before scrollViewport
+
+NOTES (2026-11-09): wheelRows re-clamps the widget's window onto the caret (a no-op SetHeight, seatCaret's idiom) before reading the edge row: a recalled overflowing entry (showRecall sets the value outside the widget's Update) leaves ScrollYOffset at 0 while the caret stands on the last row, and an edge read off that stale window walked the caret to the draft's top on the first notch
+
+NOTES (2026-11-09): pre-existing debt the work exposed — after ↑ recalls an overflowing entry, layout's reseat repositions against the widget viewport's stale content, so the box shows the entry's first rows with the caret off-window (and item 1's thumb at the top) until the next widget Update; TestWheelOverARecalledPromptBoxEndsRecall paints once (inputView) between recall and notch, as the program's frame does
 
 **What:**
 Recast at the regression check (2026-11-09).

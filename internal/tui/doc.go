@@ -442,7 +442,8 @@
 // the box wherever [Model.inputEditable] says so — the same predicate the mouse arbitrates by, which
 // is what keeps the keyboard and the mouse from disagreeing about which states are live — and the
 // cost is the deliberate one the plan named: single-key transcript scrolling while running, with
-// PgUp/PgDn and the wheel keeping it in every state.
+// PgUp/PgDn and the wheel keeping it in every state — the wheel everywhere but over an overflowing
+// box, whose draft it scrolls (draftWheel, mouse.go).
 //
 // suggestband.go is the OTHER surface in that slot, and the only one nobody has to ask for: while
 // the draft is being typed it is ranked against the skill catalog by the engine's own matcher

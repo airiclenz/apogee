@@ -725,7 +725,8 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 // This is the one list of the package that is NOT modal: it hangs over a chat box the human is still
 // typing in. Its wheel keeps that posture exactly as its keys do — handled is true only for a notch
 // INSIDE its rectangle on a menu that has rows to walk, and false everywhere else, so every other
-// notch carries on down the chain and scrolls the transcript above it (foldMouseWheel, mouse.go).
+// notch carries on down the chain (foldMouseWheel, mouse.go): it scrolls the box's draft over an
+// overflowing box, and the transcript above it everywhere else.
 // That is also why the notch is not swallowed on an empty menu the way the modal panes swallow it:
 // with no rows there is no dropdown drawn, so there is no pane under the pointer to own the gesture.
 //

@@ -793,8 +793,9 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // browserWheel walks the /sessions highlight one row per notch while the pointer is over the pane —
 // the keyboard's ↑/↓ under the wheel, against the FILTERED view every key route and the painter
 // already share (sessionBrowserView), so a notch and an arrow can never disagree about which record
-// is highlighted. handled is false anywhere else, which leaves the notch to the transcript scrolling
-// above and behind the pane.
+// is highlighted. handled is false anywhere else, which leaves the notch to the rest of the chain
+// (foldMouseWheel, mouse.go): an overflowing prompt box under the pointer, else the transcript
+// scrolling above and behind the pane.
 //
 // Inside the rectangle it is ALWAYS handled, in every state the browser can be in: the browser is
 // modal, and a notch over it must never reach the transcript behind it. While a rename edit or a

@@ -383,9 +383,10 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // handled is false everywhere OUTSIDE that box, and that is the whole of what keeps "the pane under
 // the pointer owns the notch" (ratified 2026-08-22) compatible with these two panes being
 // SOFT-modal: they are soft-modal about the surface UNDER them, and there is no surface of theirs
-// under the pointer when the pointer is in their box. Outside it the transcript scrolls exactly as
-// it did before the pane went up, which is the same review-the-context floor handleApprovalKey
-// keeps for every key the menu does not claim.
+// under the pointer when the pointer is in their box. Outside it the notch carries on down the chain
+// exactly as it did before the pane went up (foldMouseWheel, mouse.go) — to an overflowing prompt
+// box under the pointer, else to the transcript — which is the same review-the-context floor
+// handleApprovalKey keeps for every key the menu does not claim.
 //
 // Inside it the notch is ALWAYS handled, including on a pane with nothing to walk — a question
 // offering no choices, so there is no highlight — because what decides is the pane under the

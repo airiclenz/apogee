@@ -420,6 +420,51 @@ func (e *lineEditor) reseatCaret(visRow int) {
 	e.input.SetHeight(e.input.Height())
 }
 
+// wheelRows moves the caret delta visual rows — up for a negative delta, down for a positive one —
+// the way a wheel notch over an overflowing prompt box does ([Model.draftWheel], mouse.go), so that
+// every notch moves the box's window and not only the caret inside it.
+//
+// It first seats the caret on the window's EDGE row in the notch's direction — the top visible row
+// for up, the bottom one for down — and only then steps delta rows. A caret in the middle of the
+// window would otherwise spend the notch reaching the edge and leave the window where it was. Both
+// halves are the widget's own CursorUp/CursorDown, the very steps ↑/↓ take, stepped from the
+// caret's own visual row ([lineEditor.caretVisualRow]): the seat stays inside the window, so it
+// scrolls nothing, and each further step past the edge scrolls the window one row (bubbles
+// repositions onto a caret that leaves it). The caret's goal column survives the walk the way it
+// survives a run of ↑ keypresses. A notch therefore costs at most Height()+|delta| steps, never the
+// O(lines²) walk a reseat from the top would ([lineEditor.seatCaret]'s doc). Past the draft's first
+// or last row a step moves nothing, as ↑ there does.
+func (e *lineEditor) wheelRows(delta int) {
+	e.fitWrapMemo() // the steps reposition through the widget's wrap memo (lineeditor.go)
+	// Re-clamp the window onto the caret first — a no-op SetHeight re-runs the widget's own
+	// repositioning, seatCaret's idiom — because a value set outside the widget's Update (a recalled
+	// entry, showRecall) leaves the window where it was while the caret stands past it, and an edge
+	// read off that stale window would walk the caret to the draft's top on the first notch.
+	e.input.SetHeight(e.input.Height())
+	top := e.input.ScrollYOffset()
+	step, seat := e.input.CursorUp, e.caretVisualRow()-top
+	if delta > 0 {
+		step, seat = e.input.CursorDown, top+e.input.Height()-1-e.caretVisualRow()
+	}
+	for range max(0, seat) + abs(delta) {
+		step()
+	}
+}
+
+// caretVisualRow is the caret's row among the draft's wrapped rows, counted from the draft's first
+// row — the same coordinate [textarea.Model.ScrollYOffset] counts the window in. It is the rows the
+// logical lines above the caret's wrap to, mirrored the way [inputCellSpans] counts them
+// (wrapRowStarts at the widget's own text width), plus the caret's sub-row within its own line,
+// which the widget reports itself (LineInfo().RowOffset).
+func (e lineEditor) caretVisualRow() int {
+	width := max(1, e.input.Width())
+	row := e.input.LineInfo().RowOffset
+	for _, line := range strings.Split(e.input.Value(), "\n")[:e.input.Line()] {
+		row += len(wrapRowStarts([]rune(line), width))
+	}
+	return row
+}
+
 // caretTo positions the textarea caret at the given absolute visual cell and returns the
 // caret's rune offset into the value. It re-seats to the target visual row through reseatCaret
 // (the widget's own wrap-aware walk), then LineInfo locates the landed visual line — so the
