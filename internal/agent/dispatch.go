@@ -1527,7 +1527,7 @@ func (a *Agent) approve(ctx context.Context, turn int, call domain.ToolCall, for
 		if ctx.Err() != nil {
 			return false, nil, dispatchCancelled
 		}
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: "approver: " + err.Error()})
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: domain.ApproverErrorPrefix + err.Error()})
 		return false, nil, dispatchDone
 	}
 

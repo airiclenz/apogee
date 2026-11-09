@@ -510,6 +510,12 @@ type ErrorEvent struct {
 	Err    string
 }
 
+// ApproverErrorPrefix opens the Err of the ErrorEvent the loop (Source "loop") emits when its
+// Approver fails on a raised gate — the outcome that closes an ApprovalRequested with no
+// ApprovalDecided. It is a shared constant so an observer that folds outstanding gates (the side
+// panel's sub-agent rows) recognises that close by the same text the emit writes.
+const ApproverErrorPrefix = "approver: "
+
 // PruneEvent reports that the engine dropped stale tool results from the conversation it
 // keeps — a structural rewrite of history at a Turn boundary, performed so a long Exchange
 // stops spending its window on output the model has already acted on. Like Compaction it is

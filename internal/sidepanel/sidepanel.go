@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -99,7 +100,9 @@ type View[R any] struct {
 
 // SubAgentRow is one delegation. Name is its label, already escape-stripped and reduced to one
 // line; Elapsed is measured from its start to its end, or to now while it runs, and is 0 while it
-// is queued; Fill is its own latest reading against its own window.
+// is queued; Fill is its own latest reading against its own window. Waiting is true while the
+// row's own run has an approval requested and not yet closed, and only while the row is queued or
+// running (ADR 0111 decision 11).
 type SubAgentRow struct {
 	Run     RunKey
 	Depth   int
@@ -107,6 +110,7 @@ type SubAgentRow struct {
 	Phase   Phase
 	Elapsed time.Duration
 	Fill    Fill
+	Waiting bool
 }
 
 // TaskRow is one task of the scoped run's list. IsCurrent marks the first unfinished task — the
@@ -168,6 +172,7 @@ type runState struct {
 	phase        Phase
 	startedAt    time.Time
 	endedAt      time.Time
+	isWaiting    bool // an approval this run requested is not yet closed
 
 	tasks []domain.TaskItem
 
@@ -225,8 +230,11 @@ func Reads(event domain.Event) bool {
 	switch e := event.(type) {
 	case domain.ToolCallEvent:
 		return e.SpawnRunID != ""
+	case domain.ErrorEvent:
+		return isApproverError(e)
 	case domain.SubAgentPhaseEvent, domain.SubAgentNamedEvent, domain.ToolResultEvent,
-		domain.TaskListEvent, domain.UsageEvent, domain.ContextEstimateEvent, domain.ContextCostEvent:
+		domain.TaskListEvent, domain.UsageEvent, domain.ContextEstimateEvent, domain.ContextCostEvent,
+		domain.ApprovalEvent, domain.TurnEvent:
 		return true
 	default:
 		return false
@@ -263,6 +271,14 @@ func (s *State) Fold(event domain.Event) {
 		}
 	case domain.ContextCostEvent:
 		s.run(RunOf(e.EventBase)).cost = e.Cost
+	case domain.ApprovalEvent:
+		s.foldApproval(e)
+	case domain.ErrorEvent:
+		if isApproverError(e) {
+			s.closeGate(RunOf(e.EventBase))
+		}
+	case domain.TurnEvent:
+		s.foldTurnEnd(e)
 	}
 }
 
@@ -356,6 +372,45 @@ func (s *State) foldUsage(e domain.UsageEvent) {
 	}
 }
 
+// foldApproval opens the run's gate on a requested phase and closes it on that run's decided one.
+// A gate an Allow rule answered emits its decided phase alone (domain.ApprovalDecided): nobody
+// was waited on, so it closes nothing. The gate is keyed through [State.run], never
+// [State.delegation], so a top-level or unseen run's gate adds no row.
+func (s *State) foldApproval(e domain.ApprovalEvent) {
+	key := RunOf(e.EventBase)
+	switch {
+	case e.Phase == domain.ApprovalRequested:
+		s.run(key).isWaiting = true
+	case e.Phase == domain.ApprovalDecided && e.Decision != domain.ApprovalAllowedByRule:
+		s.closeGate(key)
+	}
+}
+
+// foldTurnEnd closes the gate of the run whose Turn ended; a depth-0 Turn end closes every gate,
+// since no delegation outlives the top-level Turn that spawned it.
+func (s *State) foldTurnEnd(e domain.TurnEvent) {
+	if e.Depth == 0 {
+		for _, state := range s.runs {
+			state.isWaiting = false
+		}
+		return
+	}
+	s.closeGate(RunOf(e.EventBase))
+}
+
+// closeGate closes key's outstanding gate, if it has one; a run never seen gains no state.
+func (s *State) closeGate(key RunKey) {
+	if state, ok := s.runs[key]; ok {
+		state.isWaiting = false
+	}
+}
+
+// isApproverError reports whether e is the loop's report of an Approver that failed on a raised
+// gate — the close of an ApprovalRequested that no ApprovalDecided follows.
+func isApproverError(e domain.ErrorEvent) bool {
+	return e.Source == "loop" && strings.HasPrefix(e.Err, domain.ApproverErrorPrefix)
+}
+
 // run returns key's state, creating it on first sight.
 func (s *State) run(key RunKey) *runState {
 	state, ok := s.runs[key]
@@ -378,7 +433,7 @@ func (s *State) delegation(key RunKey, depth int) *runState {
 
 // finish closes the delegation at the given moment.
 func (r *runState) finish(at time.Time, isError bool) {
-	r.endedAt, r.phase = at, PhaseDone
+	r.endedAt, r.phase, r.isWaiting = at, PhaseDone, false
 	if isError {
 		r.phase = PhaseFailed
 	}
@@ -398,6 +453,7 @@ func (s *State) SubAgents() View[SubAgentRow] {
 		view.Rows = append(view.Rows, SubAgentRow{
 			Run: key, Depth: state.depth, Name: state.name, Phase: state.phase,
 			Elapsed: state.elapsed(now), Fill: s.readingFill(state),
+			Waiting: state.isWaiting && state.phase.isActive(),
 		})
 	}
 	running, queued, lastEnd := s.delegationTally()

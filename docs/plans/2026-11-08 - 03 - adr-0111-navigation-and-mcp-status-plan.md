@@ -122,7 +122,11 @@ docs/layout/side-panel-layout.md — "Sub-agent rows"
 **Closes:** subagent-row-elapsed-overflow
 **Commit:** `fix(tui): keep sub-agent row columns aligned past an hour`
 
-## 3. Fold approval gates into the sub-agent section state
+## 3. Fold approval gates into the sub-agent section state — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): no CHANGELOG entry — the fold changes nothing a user sees until item 4 paints `waiting`; that item carries the entry.
+NOTES (2026-11-09): `Reads` answers an ErrorEvent true only for the loop's approver failure (Source "loop" + `domain.ApproverErrorPrefix`), keeping its "Fold would change something" contract; an `ApprovalAllowedByRule` decided phase closes no gate (it never had a requested one).
+NOTES (2026-11-09): added two small sibling tests beside the planned table (`TestSubAgentWaiting_TopLevelGateAddsNoRow`, `TestSubAgentWaiting_FinishedRowIsNeverWaiting`); both match the Acceptance `-run` pattern.
 
 **What:** the fold half of ADR 0111 D11; item 4 paints it.
 **Regression guard.** The agent half of Acceptance runs `-run 'TestDispatch_ApproverErrorRefuses'` — no test in

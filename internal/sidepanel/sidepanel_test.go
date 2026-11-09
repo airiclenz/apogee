@@ -635,6 +635,11 @@ func TestReads_NamesExactlyTheVariantsFoldReads(t *testing.T) {
 		{"a usage reading", domain.UsageEvent{}, true},
 		{"an estimate", domain.ContextEstimateEvent{}, true},
 		{"a cost report", domain.ContextCostEvent{}, true},
+		{"an approval", domain.ApprovalEvent{}, true},
+		{"a Turn end", domain.TurnEvent{}, true},
+		{"an approver failure", domain.ErrorEvent{Source: "loop", Err: domain.ApproverErrorPrefix + "prompt closed"}, true},
+		{"a tool's error", domain.ErrorEvent{Source: "terminal", Err: domain.ApproverErrorPrefix + "x"}, false},
+		{"another loop error", domain.ErrorEvent{Source: "loop", Err: "model stalled"}, false},
 		{"a streamed token", domain.TokenEvent{}, false},
 	}
 	for _, tc := range cases {
@@ -643,5 +648,146 @@ func TestReads_NamesExactlyTheVariantsFoldReads(t *testing.T) {
 				t.Errorf("Reads = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// gate is one ApprovalEvent of the run base names.
+func gate(base domain.EventBase, phase domain.ApprovalPhase, decision domain.ApprovalDecision) domain.ApprovalEvent {
+	return domain.ApprovalEvent{EventBase: base, Phase: phase, Request: domain.ApprovalRequest{Tool: "write"}, Decision: decision}
+}
+
+// waitingByRun reads each row's Waiting flag, keyed by the run id the test spawned it under.
+func waitingByRun(t *testing.T, state *sidepanel.State, ids ...string) map[string]bool {
+	t.Helper()
+	got := map[string]bool{}
+	rows := state.SubAgents().Rows
+	for _, id := range ids {
+		key := sidepanel.RunOf(child(id))
+		for _, row := range rows {
+			if row.Run == key {
+				got[id] = row.Waiting
+			}
+		}
+	}
+	return got
+}
+
+func TestSubAgentWaitingOpensAndCloses(t *testing.T) {
+	requested := func(id string) domain.Event { return gate(child(id), domain.ApprovalRequested, "") }
+	decided := func(id string) domain.Event { return gate(child(id), domain.ApprovalDecided, domain.ApprovalAllow) }
+	cases := []struct {
+		name   string
+		events func(at time.Time) []domain.Event
+		want   map[string]bool
+	}{
+		{
+			name:   "a requested gate marks only its own run, queued or running",
+			events: func(at time.Time) []domain.Event { return []domain.Event{requested("r.1")} },
+			want:   map[string]bool{"r.1": true, "r.2": false},
+		},
+		{
+			name: "two gated runs are each cleared by their own decided",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), requested("r.2"), decided("r.2")}
+			},
+			want: map[string]bool{"r.1": true, "r.2": false},
+		},
+		{
+			name: "both decided clears both",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), requested("r.2"), decided("r.2"), decided("r.1")}
+			},
+			want: map[string]bool{"r.1": false, "r.2": false},
+		},
+		{
+			name: "the approver's failure for the run closes its gate",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), requested("r.2"), domain.ErrorEvent{
+					EventBase: child("r.1"), Source: "loop", Err: domain.ApproverErrorPrefix + "prompt closed",
+				}}
+			},
+			want: map[string]bool{"r.1": false, "r.2": true},
+		},
+		{
+			name: "a tool's error with the same text closes nothing",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), domain.ErrorEvent{
+					EventBase: child("r.1"), Source: "terminal", Err: domain.ApproverErrorPrefix + "x",
+				}}
+			},
+			want: map[string]bool{"r.1": true},
+		},
+		{
+			name: "the run finishing closes its gate",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), phase("r.1", domain.SubAgentFinished, at, false)}
+			},
+			want: map[string]bool{"r.1": false},
+		},
+		{
+			name: "the run's own Turn end closes only its gate",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), requested("r.2"), domain.TurnEvent{EventBase: child("r.1")}}
+			},
+			want: map[string]bool{"r.1": false, "r.2": true},
+		},
+		{
+			name: "a depth-0 Turn end clears every gate",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), requested("r.2"), domain.TurnEvent{}}
+			},
+			want: map[string]bool{"r.1": false, "r.2": false},
+		},
+		{
+			name: "an allow-rule decided with no request clears nothing",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{requested("r.1"), gate(child("r.1"), domain.ApprovalDecided, domain.ApprovalAllowedByRule)}
+			},
+			want: map[string]bool{"r.1": true},
+		},
+		{
+			name: "a top-level gate marks no row",
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{gate(domain.EventBase{}, domain.ApprovalRequested, "")}
+			},
+			want: map[string]bool{"r.1": false, "r.2": false},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, clock := newState(t)
+			state.Fold(spawn(t, "r.1", map[string]any{"name": "one"}))
+			state.Fold(spawn(t, "r.2", map[string]any{"name": "two"}))
+			state.Fold(phase("r.1", domain.SubAgentStarted, clock.at, false))
+			for _, event := range tc.events(clock.at) {
+				state.Fold(event)
+			}
+			got := waitingByRun(t, state, "r.1", "r.2")
+			for id, want := range tc.want {
+				if got[id] != want {
+					t.Errorf("%s Waiting = %v, want %v", id, got[id], want)
+				}
+			}
+		})
+	}
+}
+
+func TestSubAgentWaiting_TopLevelGateAddsNoRow(t *testing.T) {
+	state, _ := newState(t)
+	state.Fold(gate(domain.EventBase{}, domain.ApprovalRequested, ""))
+	state.Fold(gate(domain.EventBase{Depth: 1, CallID: "call-x", RunID: "unseen"}, domain.ApprovalRequested, ""))
+	if rows := state.SubAgents().Rows; len(rows) != 0 {
+		t.Errorf("rows = %+v, want none: a gate is keyed through run, never delegation", rows)
+	}
+}
+
+func TestSubAgentWaiting_FinishedRowIsNeverWaiting(t *testing.T) {
+	state, clock := newState(t)
+	state.Fold(spawn(t, "r.1", map[string]any{"name": "one"}))
+	state.Fold(phase("r.1", domain.SubAgentStarted, clock.at, false))
+	state.Fold(phase("r.1", domain.SubAgentFinished, clock.at, false))
+	state.Fold(gate(child("r.1"), domain.ApprovalRequested, ""))
+	if got := waitingByRun(t, state, "r.1")["r.1"]; got {
+		t.Errorf("a done row's Waiting = true, want false: only active rows wait")
 	}
 }
