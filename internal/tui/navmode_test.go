@@ -455,7 +455,8 @@ func cursorOnPanelStop(t *testing.T, m Model, id panelStopID) Model {
 }
 
 // panelOutcome is what following a panel target can change: the view on screen and where it is
-// scrolled to, the /usage and /mcp reports, the section list a pin writes, and every block's fold.
+// scrolled to, the /usage and /mcp reports, the section list a pin writes, the fold list a header's
+// title writes, and every block's fold.
 type panelOutcome struct {
 	viewed    runRef
 	isInView  bool
@@ -463,6 +464,7 @@ type panelOutcome struct {
 	isUsage   bool
 	isMCP     bool
 	sections  domain.SidePanelSections
+	folded    domain.SidePanelFolded
 	expansion string
 }
 
@@ -470,13 +472,15 @@ type panelOutcome struct {
 func panelOutcomeOf(m Model) panelOutcome {
 	return panelOutcome{
 		viewed: m.viewedRun(), isInView: m.inRunView(), yOffset: m.viewport.YOffset(), isUsage: m.usagePane.open,
-		isMCP: m.mcpPane.open, sections: m.opts.UI.SidePanelSections, expansion: fmt.Sprint(expandedFlags(m)),
+		isMCP: m.mcpPane.open, sections: m.opts.UI.SidePanelSections, folded: m.opts.UI.SidePanelFolded,
+		expansion: fmt.Sprint(expandedFlags(m)),
 	}
 }
 
 // TestNavModeEnterMatchesClickPerKind pins ⏎ on a panel stop as the click on its row (ADR 0111 D4):
 // for every kind of stop the two leave the same outcome, and it is not the untouched one. A stop that
-// opens a detail ends the mode; a header's pin toggle keeps it, on the header it toggled. events
+// opens a detail ends the mode; a header's pin toggle and its title's fold keep it, on the stop that
+// acted (adr-0111-amend-1109b). events
 // adds to panelStopEvents what a case's section needs to be live.
 func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 	t.Parallel()
@@ -514,7 +518,14 @@ func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 			},
 		},
 		{
-			name:       "header pin",
+			name: "header pin",
+			id: func(Model) panelStopID {
+				return panelStopID{section: domain.SidePanelTasks, isHeader: true, isPin: true}
+			},
+			isModeKept: true,
+		},
+		{
+			name:       "header title",
 			id:         func(Model) panelStopID { return panelStopID{section: domain.SidePanelTasks, isHeader: true} },
 			isModeKept: true,
 		},
@@ -531,7 +542,7 @@ func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 				t.Fatalf("setup: no stop %+v among %+v", id, stops)
 			}
 			x := panelBodyX(base)
-			if id.isHeader {
+			if id.isPin {
 				x = base.panelPinX()
 			}
 			walked := cursorOnPanelStop(t, base, id) // both ways in start from the one walked frame
@@ -550,10 +561,146 @@ func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 				t.Errorf("after ⏎ the mode is on = %v, want %v", keyed.cursor.active, tc.isModeKept)
 			}
 			if tc.isModeKept && panelCursorStop(t, keyed).id != id {
-				t.Errorf("after the pin toggle the cursor stands on %+v, want the header %+v", panelCursorStop(t, keyed).id, id)
+				t.Errorf("after ⏎ the cursor stands on %+v, want the header stop %+v", panelCursorStop(t, keyed).id, id)
 			}
 		})
 	}
+}
+
+// TestNavModePanelHeaderHasFoldAndPinStops pins a section header as two stops (ADR 0111 D4,
+// adr-0111-amend-1109b): the walk visits each header's lead pin cell, then its title; ⏎ on the title
+// folds the section and writes `ui.side-panel.folded`, ⏎ on the pin toggles pinned ↔ auto, and the
+// cursor stays on the stop that acted; a fold that moves the title's row re-seats the cursor on that
+// title by identity; and the two stops of one row paint apart.
+func TestNavModePanelHeaderHasFoldAndPinStops(t *testing.T) {
+	t.Parallel()
+	pin := panelStopID{section: domain.SidePanelTasks, isHeader: true, isPin: true}
+	title := panelStopID{section: domain.SidePanelTasks, isHeader: true}
+
+	t.Run("each header is its pin stop, then its title stop", func(t *testing.T) {
+		t.Parallel()
+		m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+		m = step(t, step(t, m, keyAltUp()), keyRight())
+		if !m.cursor.inPanel() {
+			t.Fatal("→ did not move the cursor into the panel")
+		}
+
+		stops := m.navPanelStops()
+
+		headers := 0
+		for i, stop := range stops {
+			if !stop.id.isPin {
+				continue
+			}
+			headers++
+			wantTitle := panelStopID{section: stop.id.section, isHeader: true}
+			if i+1 >= len(stops) || stops[i+1].id != wantTitle || stops[i+1].y != stop.y {
+				t.Errorf("the %s pin stop is not followed by its title stop on row %d: %+v", stop.id.section, stop.y, stops)
+			}
+		}
+		if headers == 0 {
+			t.Fatalf("setup: the column offers no header pin stop: %+v", stops)
+		}
+		m = cursorOnPanelStop(t, m, pin)
+		if got := panelCursorStop(t, step(t, m, keyDown())).id; got != title {
+			t.Errorf("↓ from the tasks pin stands on %+v, want its title %+v", got, title)
+		}
+	})
+
+	t.Run("⏎ on the title folds, ⏎ on the pin pins, the cursor stays", func(t *testing.T) {
+		t.Parallel()
+		m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+		spy := &settingsSpy{}
+		m.opts.Settings = spy.host(nil)
+		m = cursorOnPanelStop(t, m, title)
+		sections := m.opts.UI.SidePanelSections
+
+		m = step(t, m, keyEnter())
+
+		if want := []string{"tasks=true"}; !slices.Equal(spy.folds, want) || m.opts.UI.SidePanelFolded != "[tasks]" {
+			t.Errorf("fold writes %v, folded %q; want %v and [tasks]", spy.folds, m.opts.UI.SidePanelFolded, want)
+		}
+		if m.opts.UI.SidePanelSections != sections || len(spy.sections) != 0 {
+			t.Errorf("⏎ on the title moved a pin: sections %q→%q, writes %v", sections, m.opts.UI.SidePanelSections, spy.sections)
+		}
+		if got := panelCursorStop(t, m).id; got != title {
+			t.Errorf("after the fold the cursor stands on %+v, want the title %+v", got, title)
+		}
+
+		m = step(t, m, keyEnter())
+		m = step(t, m, keyUp())
+		if got := panelCursorStop(t, m).id; got != pin {
+			t.Fatalf("setup: ↑ from the title stands on %+v, want the pin %+v", got, pin)
+		}
+
+		m = step(t, m, keyEnter())
+
+		if want := string(domain.SidePanelTasks) + ": pinned"; !strings.Contains(string(m.opts.UI.SidePanelSections), want) {
+			t.Errorf("sections %q after ⏎ on the pin; want %q", m.opts.UI.SidePanelSections, want)
+		}
+		if want := []string{"tasks=true", "tasks=false"}; !slices.Equal(spy.folds, want) {
+			t.Errorf("fold writes %v, want %v: ⏎ on the pin folded", spy.folds, want)
+		}
+		if got := panelCursorStop(t, m).id; got != pin {
+			t.Errorf("after the pin toggle the cursor stands on %+v, want the pin %+v", got, pin)
+		}
+	})
+
+	t.Run("a fold above re-seats the cursor on its title by identity", func(t *testing.T) {
+		t.Parallel()
+		m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+		m = cursorOnPanelStop(t, m, title)
+		before := panelCursorStop(t, m).y
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Sub-agents"))
+
+		if m.opts.UI.SidePanelFolded != "[sub-agents]" {
+			t.Fatalf("setup: the click on the sub-agents title left folded %q", m.opts.UI.SidePanelFolded)
+		}
+		stop := panelCursorStop(t, m)
+		if stop.id != title || stop.y >= before {
+			t.Errorf("the cursor stands on %+v at row %d, want %+v moved up from row %d", stop.id, stop.y, title, before)
+		}
+		if got, id := m.panelCursorRow(m.frameSpans().slotBottom); got != stop.y || id != title {
+			t.Errorf("the cursor is painted on row %d as %+v, want row %d as %+v", got, id, stop.y, title)
+		}
+	})
+
+	t.Run("the pin stop and the title stop paint apart", func(t *testing.T) {
+		t.Parallel()
+		m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+		if !colorActive(m.th) {
+			t.Skip("this profile emits no styling to tell the two marks apart by")
+		}
+		onPin := cursorOnPanelStop(t, m, pin)
+		onTitle := step(t, onPin, keyDown())
+		y := panelCursorStop(t, onPin).y
+		row := func(m Model) string {
+			line := strings.Split(m.View().Content, "\n")[y]
+			return m.th.measure.Cut(line, m.slotWidth(), m.width)
+		}
+
+		pinRow, titleRow := row(onPin), row(onTitle)
+
+		if pinRow == titleRow {
+			t.Errorf("the header row paints alike on its pin stop and its title stop: %q", strip(pinRow))
+		}
+		for name, painted := range map[string]string{"pin": pinRow, "title": titleRow} {
+			if !strings.Contains(painted, glyphCursorMark) || !strings.Contains(painted, styleSGR(m.th.selection)) {
+				t.Errorf("the %s stop's row carries no cursor mark in the selection tone: %q", name, strip(painted))
+			}
+		}
+		shadesPin := func(row string) bool { // the pin glyph painted in the selection tone
+			bar := styleSGR(m.th.selection)
+			return strings.Contains(row, bar+glyphPanelOpen) || strings.Contains(row, bar+glyphPanelPinned)
+		}
+		if !shadesPin(pinRow) {
+			t.Errorf("the pin stop leaves its pin cell unshaded: %q", pinRow)
+		}
+		if shadesPin(titleRow) {
+			t.Errorf("the title stop shades the pin cell: %q", titleRow)
+		}
+	})
 }
 
 // TestNavModeEnterOnMCPOpensReport pins ⏎ on the mcp section's stop (ADR 0111 D10): it opens /mcp
@@ -620,6 +767,7 @@ func TestNavModeEnterRefusedUnderModal(t *testing.T) {
 	stops := []panelStopID{
 		{section: domain.SidePanelSubAgents, run: sidepanel.RunOf(delegationBase("r1"))},
 		{section: domain.SidePanelUsage},
+		{section: domain.SidePanelTasks, isHeader: true, isPin: true},
 		{section: domain.SidePanelTasks, isHeader: true},
 	}
 	for _, modal := range modals {
@@ -637,13 +785,14 @@ func TestNavModeEnterRefusedUnderModal(t *testing.T) {
 				if !m.modalPaneOpen() {
 					t.Fatal("setup: no modal pane is open")
 				}
-				sections := m.opts.UI.SidePanelSections
+				sections, folded := m.opts.UI.SidePanelSections, m.opts.UI.SidePanelFolded
 
 				m = step(t, m, keyEnter())
 
-				if m.inRunView() || m.usagePane.open || m.opts.UI.SidePanelSections != sections || len(spy.sections) != 0 {
-					t.Errorf("in view %v, /usage open %v, sections %q→%q, section writes %v; want no panel target followed",
-						m.inRunView(), m.usagePane.open, sections, m.opts.UI.SidePanelSections, spy.sections)
+				if m.inRunView() || m.usagePane.open || m.opts.UI.SidePanelSections != sections || len(spy.sections) != 0 ||
+					m.opts.UI.SidePanelFolded != folded || len(spy.folds) != 0 {
+					t.Errorf("in view %v, /usage open %v, sections %q→%q, section writes %v, fold writes %v; want no panel target followed",
+						m.inRunView(), m.usagePane.open, sections, m.opts.UI.SidePanelSections, spy.sections, spy.folds)
 				}
 			})
 		}
@@ -673,7 +822,7 @@ func TestNavModePanelCursorAnchorsToRow(t *testing.T) {
 		if stop.id != id || stop.y <= before {
 			t.Errorf("the cursor stands on %+v at row %d, want %+v moved down from row %d", stop.id, stop.y, id, before)
 		}
-		if got := m.panelCursorRow(m.frameSpans().slotBottom); got != stop.y {
+		if got, _ := m.panelCursorRow(m.frameSpans().slotBottom); got != stop.y {
 			t.Errorf("the cursor is painted on row %d, want its row %d", got, stop.y)
 		}
 	})

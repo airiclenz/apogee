@@ -7,9 +7,12 @@ refs: [docs/layout/side-panel-layout.md]
 The column on the right of the TUI's transcript slot that keeps live session state in view on
 a wide terminal: sub-agents, the task list, files changed this session, usage and the MCP servers, each a
 **section** that is `pinned`, `auto` (shown while live) or `hidden`. It is a glance, never a
-workspace: a click on a section opens its detail view (**Run view**, the task-list card, `/usage`, `/mcp`),
-and the keyboard reaches the same targets as the second region of **Navigation mode** (ADR 0111),
-whose `⏎` on a stop is that click. The column itself appears or vanishes only when the window crosses
+workspace: a click on a section opens its detail view (**Run view**, the task-list card, `/usage`, `/mcp`).
+Each section's header leads with its pin glyph: a click there toggles the section between `pinned`
+and `auto` (`ui.side-panel.sections`), and a click anywhere else on the header folds the section to
+that header or opens it again (`ui.side-panel.folded`). The keyboard reaches the same targets as the
+second region of **Navigation mode** (ADR 0111), whose `⏎` on a stop is that click — a header being
+two stops, its pin and its title (`adr-0111-amend-1109b`). The column itself appears or vanishes only when the window crosses
 a width threshold or `ui.side-panel.show` changes. It is 36 columns wide by default, and its width
 changes only when the user drags its separator (at least 24 columns, and never so wide that the
 transcript drops under its floor), double-clicks the separator to reset it, or sets

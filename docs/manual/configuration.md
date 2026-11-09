@@ -1454,11 +1454,13 @@ The width has no key of its own: drag the separator or use `/panel width`.
 
 **The keyboard.** `⌥↑`/`⌥↓` start navigation mode on the transcript, and `→` moves its bar into
 the panel — `⌥↑`/`⌥↓` start it in the panel when the transcript has nothing to stand on. There
-`↑`/`↓` walk the stops: every section header, each sub-agent row and changed-file row, and the
-tasks body, the usage rows and the mcp rows as one stop each. The bar's row is marked with a `▌` in the blank
-column right of the separator as well as in colour. `⏎` is the click on that stop, under the same
-rules as the mouse: on a header it toggles the pin and the bar stays; anything it opens ends the
-mode. `^x` on a sub-agent row stops that run, and `←` takes the bar back to the transcript row it
+`↑`/`↓` walk the stops: every section header twice — its pin glyph, then its title — each sub-agent
+row and changed-file row, and the tasks body, the usage rows and the mcp rows as one stop each. The bar's row is marked with a `▌` in the blank
+column right of the separator as well as in colour; on a header, the colour covers only the pin
+glyph or only the title, whichever stop the bar is on. `⏎` is the click on that stop, under the same
+rules as the mouse: on a header's pin it toggles the section between `pinned` and `auto`, on its
+title it folds the section or opens it again, and either way the bar stays; anything it opens ends
+the mode. `^x` on a sub-agent row stops that run, and `←` takes the bar back to the transcript row it
 left; `esc`, or typing your next message, leaves the mode
 ([commands](commands.md)).
 

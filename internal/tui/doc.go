@@ -337,8 +337,9 @@
 // ([Model.reseatPanelCursor]); suspended (keys and mark together) while an approval or ask prompt
 // owns ↑/↓/⏎; and painted only in the region it stands in, as [markCursorRow]: a ▌
 // (glyphCursorMark) over the row's first cell, so a terminal painting no colour still shows it, and
-// the theme's one selection field across the rest, which the drag-selection it replaces on entry
-// can therefore never be confused with.
+// the theme's one selection field across the rest — on a side-panel header, which is two stops,
+// across the pin cell or the title alone ([markPanelCursorRow]) — which the drag-selection it
+// replaces on entry can therefore never be confused with.
 //
 // runview.go is where those two reaches ARRIVE when what they open is a delegation. A run has two
 // shapes and no third (ADR 0063): the collapsed row it wears in the conversation, and its run VIEW —

@@ -199,8 +199,9 @@ func TestOverlayOffDoesNothing(t *testing.T) {
 
 // TestOverlayStopsMatchClickTargets pins the overlay's stops to its pointer (ADR 0111 D7: a click
 // inside acts as on the docked column): every stop's target is the click at every row of its span —
-// a header's on the pin glyph's cell, a body stop's inside the overlay's content — a row no stop spans
-// clicks nothing, and the transcript cell left of the overlay is no column cell.
+// a header's pin stop's on the pin glyph's cell, its title stop's and a body stop's inside the
+// overlay's content (adr-0111-amend-1109b) — a row no stop spans clicks nothing, and the transcript
+// cell left of the overlay is no column cell.
 func TestOverlayStopsMatchClickTargets(t *testing.T) {
 	t.Parallel()
 	pre := overlaidModel(t).withFrameSpans()
@@ -216,7 +217,7 @@ func TestOverlayStopsMatchClickTargets(t *testing.T) {
 	isSpanned := make([]bool, rows)
 	for _, stop := range stops {
 		x := bodyX
-		if stop.id.isHeader {
+		if stop.id.isPin {
 			x = pre.panelPinX()
 		}
 		for y := stop.y; y < stop.y+stop.height; y++ {
@@ -362,7 +363,7 @@ func TestOverlayInsideClickActsAsDocked(t *testing.T) {
 		t.Parallel()
 		m := overlaidModel(t)
 		stops := m.navPanelStops()
-		at := slices.IndexFunc(stops, func(s panelStop) bool { return s.id.isHeader && !s.target.isPinned })
+		at := slices.IndexFunc(stops, func(s panelStop) bool { return s.id.isPin && !s.target.isPinned })
 		if at < 0 {
 			t.Fatalf("setup: the overlay has no unpinned header among %+v", stops)
 		}

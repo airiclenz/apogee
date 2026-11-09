@@ -160,7 +160,10 @@ internal/tui/settingsapply.go — toggleTaskListFold; internal/tui/sidepanel_tes
 **Acceptance:** `go test -race -count=1 -run 'Panel|Overlay|SettingsApply' ./internal/tui/`
 **Commit:** `feat(tui): fold side-panel sections and keep the fold`
 
-## 6. Give the pin its own navigation stop and amend ADR 0111 D4
+## 6. Give the pin its own navigation stop and amend ADR 0111 D4 — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — internal/tui/doc.go: made necessary by the header's split cursor mark (the package map said the selection tone always runs across the whole row)
+NOTES (2026-11-09): panelCursorRow now returns the stop identity beside the row (used by markPanelCursorRow); its one test caller was updated. With no colour, a header's two stops show the same ▌ row — the tone alone tells them apart, as the amendment and spec say.
 
 **What:** Last step of `panel-section-user-fold`. Depends on item 5.
 **Regression guard.** `panelCursorRow`/`markCursorRow` mark a whole row, so the two stops on one header must differ on screen (e.g. the pin stop marks only the lead pin cell in selection, the title stop the rest of the row); pin it in `TestNavModePanelHeaderHasFoldAndPinStops` by comparing the two frames. `panelTargetAt` chooses between a header's two stops by x instead of taking the first stop that spans y, and `TestOverlayStopsMatchClickTargets` and `TestPanelStopsMatchClickTargets` click each stop at its kind's x. Rule: every doc or Note that says what ⏎ does on a panel header — `grep -rn -i "header.*toggles\|toggles.*pin" docs .capcom/knowledge/glossary` (archived/historical excluded). The item supersedes ADR 0111 D4 by its amendment; `adr-0111-amend-1109` exists, so a 2026-11-09 amendment is `adr-0111-amend-1109b`.

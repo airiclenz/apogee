@@ -11,9 +11,11 @@ regions, each remembering where it was, and `↑`/`↓`, `⏎`, `esc` and `^x` m
 the region's stops, act on the one the cursor stands on, leave the mode (as does typing, which still
 lands in the prompt), and stop the sub-agent run whose row it stands on (**Stop (a delegation)**). A
 region's stops are its click targets — the transcript's foldable blocks at their deepest visible
-level, the panel's section headers and rows — and `⏎` goes through the click's own path, so key and
-pointer cannot drift: on a framed delegation it opens the **Run view**, on a panel header it toggles
-the section's pin and the mode stays, and a panel stop that opens a detail ends the mode. The
+level, the panel's section headers and rows, each header two stops (its pin glyph, then its title)
+— and `⏎` goes through the click's own path, so key and pointer cannot drift: on a framed delegation
+it opens the **Run view**, on a panel header's pin it toggles the section between `pinned` and
+`auto` and on its title it folds or opens the section, the mode staying on the stop it acted on
+either way (`adr-0111-amend-1109b`), and a panel stop that opens a detail ends the mode. The
 cursor's row is marked by a `▌` as well as by the selection tone, so a terminal that paints no
 colour still shows it, and only the region it stands in is painted. A pending approval or ask
 suspends it, keys and mark together. It is **Driver state** on the TUI's `Model`, never written to a

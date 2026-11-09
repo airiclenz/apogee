@@ -200,7 +200,8 @@ the next — a tool call, a group member, a type row — `⏎` opens or closes t
 the bar, and `esc`, or simply typing your next message, gives the keys back. While the
 [side panel](configuration.md#the-side-panel) shows, `→` moves the bar into it and `←` back to
 the transcript row it left; there `↑`/`↓` walk the panel's headers and rows, and `⏎` does what a
-click on the row would — on a header it toggles the section's pin and the bar stays, while
+click on the row would — on a header's pin glyph it toggles the section's pin, on its title it
+folds or opens the section, and the bar stays, while
 opening a sub-agent's run view, the task-list card, a changed file's tool block, `/usage` or `/mcp`
 ends the mode, the keys going back to the prompt. `^x` on a
 delegation's row — a member of a `✦ Sub-Agent (N)` group, a nested delegation inside a run

@@ -197,8 +197,8 @@ When the shown sections need more rows than the slot has:
   section to its header row, or opens a folded one, and writes `ui.side-panel.folded` back to the
   global config silently, as a task-list card's fold writes `ui.task-list-open`. A failed write says
   `side-panel.folded: not saved: …` in the transcript and the fold stands for the session. The hover
-  there is the pointer hand. The keyboard reaches the body and pin targets through navigation mode
-  (Keyboard, below).
+  there is the pointer hand. The keyboard reaches every one of these targets — body, pin and fold —
+  through navigation mode (Keyboard, below).
 - While a modal pane is open — an approval, an ask, `/settings`, the sessions browser, a picker or
   the workflows view — a click on a body row, a pin glyph or a header is claimed and does nothing,
   and the hover there shows the default arrow. The grip stays live under them.
@@ -225,8 +225,10 @@ When the shown sections need more rows than the slot has:
 The panel is the second region of **navigation mode** (ADR 0111), the modal cursor that also walks
 the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same in both regions.
 
-- **Stops** are the click targets of "Pointer", in paint order: every section header, each sub-agent
-  row and each changed-file row; adjacent rows that share one target are one stop, so the tasks body
+- **Stops** are the click targets of "Pointer", in paint order: every section header, as two stops —
+  its pin glyph's cell first, then its title — each sub-agent row and each changed-file row
+  ([adr-0111-amend-1109b](../../.capcom/knowledge/decisions/adr-0111/adr-0111-amend-1109b.md)); adjacent
+  rows that share one target are one stop, so the tasks body
   is one stop (the task-list card), the usage rows are one (`/usage`) and the mcp rows are one
 (`/mcp`). The `+N more` row and a body
   row with nothing to open are none.
@@ -241,8 +243,10 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
 - **Moving.** `↑`/`↓` walk the column's stops, clamped at either end, never wrapping.
 - **`⏎` is the click** on the stop the cursor stands on, through the click's own path, so the rules
   under "Pointer" hold for it unchanged: under a modal pane it does nothing, and on a pin while
-  watching a session it flashes the watch refusal. On a header it toggles the section's pin and the
-  cursor stays on that header; a stop that opens a detail — a run's Run view, the task-list card, a
+  watching a session it flashes the watch refusal. On a header's pin stop it toggles `pinned` ↔
+  `auto`; on its title stop it folds the section, or opens a folded one, and writes
+  `ui.side-panel.folded`, as the header click does. Either way the cursor stays on the stop it acted
+  on; a stop that opens a detail — a run's Run view, the task-list card, a
   changed file's tool block, `/usage`, `/mcp` — ends the mode, the keys going back to the prompt.
 - **`^x`** on a sub-agent row stops that run (ADR 0086 D5), with no confirmation, and leaves the
   cursor where it was so the row can say how the run ended; while watching it flashes the watch
@@ -251,14 +255,15 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
   lands in the prompt. Inside a Run view, `esc` with the cursor in the panel leaves the mode and
   keeps the view open; with the cursor on the view's transcript it goes one level up, as before.
 - **Identity.** The column re-lays out under every Event, so the cursor holds its stop by identity —
-  a header by its section, a sub-agent row by its run, a changed-file row by its path, the task card,
+  a header's pin or title by its section, a sub-agent row by its run, a changed-file row by its path, the task card,
   the usage report, the mcp report — rather than by row. A stop that has gone falls back to the stop of the same
   section nearest the row it was on, then to the column's first stop; a column left with no stop
   hands the cursor to the transcript, or ends the mode where the transcript has none either.
 - **The mark.** The cursor's row wears a `▌` in the blank gutter cell right of the separator, plus the
   selection tone across its content, so a terminal that paints no colour still shows it (ADR 0111
   D6, ADR 0052 D4); the separator is untouched, so the grip stays put. A stop of several rows is
-  marked on its first. Only the region the cursor stands in is painted: the transcript's remembered
+  marked on its first. A header's two stops share its row, so the tone tells them apart: on the pin
+  stop it covers the pin glyph's cell alone, on the title stop the rest of the row past the pin. Only the region the cursor stands in is painted: the transcript's remembered
   row is not while the cursor is in the panel, and the panel's is not while it is in the transcript.
 - **Decisions come first.** While an approval or an `ask_user` question owns `↑`/`↓`/`⏎`, the mode is
   suspended, mark and keys together, and comes back on the same stop once the decision is taken.

@@ -391,10 +391,12 @@ func (m Model) enterPanelRegion() Model {
 	return entered
 }
 
-// activatePanelCursor is ⏎ on the panel stop the cursor stands on (ADR 0111 D4): exactly the click on
-// that stop's row, through the click's own [Model.followPanelTarget], so the two ways in are one
-// gesture — under a modal pane or on a watched pin it acts as the click does there. A pin toggle
-// keeps the mode, the cursor still on the header it toggled; a stop that opens a detail — a Run view,
+// activatePanelCursor is ⏎ on the panel stop the cursor stands on (ADR 0111 D4, adr-0111-amend-1109b):
+// exactly the click on that stop, through the click's own [Model.followPanelTarget], so the two ways
+// in are one gesture — under a modal pane or on a watched pin it acts as the click does there. A
+// header's two stops keep the mode, the cursor still on the stop it acted on: the pin stop toggles
+// pinned ↔ auto, the title stop folds ↔ opens the section, and the title's identity outlives the
+// re-layout the fold makes ([blockCursor.panelStopIndex]). A stop that opens a detail — a Run view,
 // a tool block, /usage, /mcp — ends it, as ⏎ on a delegation's transcript row does: the reader's
 // attention has moved to what opened. The stop is the one [Model.reseatPanelCursor] resolved for
 // this key.
@@ -405,7 +407,7 @@ func (m Model) activatePanelCursor() (Model, tea.Cmd) {
 		return m, nil
 	}
 	target := stops[at].target
-	isOpening := target.kind != panelTargetPin && m.panelTargetLive(target)
+	isOpening := !stops[at].id.isHeader && m.panelTargetLive(target)
 	next, cmd := m.followPanelTarget(target)
 	m = next.(Model)
 	if isOpening {
@@ -673,18 +675,39 @@ func markCursorRow(measure widthAuthority, line string, style lipgloss.Style) st
 	return style.Render(glyphCursorMark + ansi.Strip(rest))
 }
 
+// markPanelCursorRow paints line — a column row past its separator: the gutter cell, then the
+// content — as the panel cursor standing on the stop id wears it. A body stop's row is marked whole
+// ([markCursorRow]). A header row carries two stops (adr-0111-amend-1109b), so the mark tells them
+// apart by where the selection tone falls: the pin stop shades the lead pin cell alone, the title
+// stop the rest of the row past it, the pin cell left as painted — the ▌ over the gutter cell either
+// way, so a terminal painting no colour still shows the row.
+func markPanelCursorRow(measure widthAuthority, line string, id panelStopID, style lipgloss.Style) string {
+	if !id.isHeader {
+		return markCursorRow(measure, line, style)
+	}
+	width := measure.Width(line)
+	pin := measure.Width(sidePanelGutter) // the pin glyph's cell: the content's first
+	c0, c1 := pin, pin+1
+	if !id.isPin {
+		c0, c1 = pin+1, width
+	}
+	rest := measure.Cut(line, 1, width)
+	return style.Render(glyphCursorMark) + shadeCells(measure, rest, c0-1, c1-1, style)
+}
+
 // panelCursorRow is the column row the panel-standing cursor is painted on — its stop's first row
-// among the stops laid out over rows rows — or −1 where nothing is: the cursor stands in the
+// among the stops laid out over rows rows — and that stop's identity, which says how the row is
+// marked ([markPanelCursorRow]); the row is −1 where nothing is: the cursor stands in the
 // transcript, a decision holds the keys ([Model.blockCursorOwnsKeys], which takes the highlight with
 // them), or the column has no stop.
-func (m Model) panelCursorRow(rows int) int {
+func (m Model) panelCursorRow(rows int) (int, panelStopID) {
 	if !m.cursor.inPanel() || !m.blockCursorOwnsKeys() {
-		return -1
+		return -1, panelStopID{}
 	}
 	stops := m.panelStops(rows)
 	at, ok := m.cursor.panelStopIndex(stops)
 	if !ok {
-		return -1
+		return -1, panelStopID{}
 	}
-	return stops[at].y
+	return stops[at].y, stops[at].id
 }

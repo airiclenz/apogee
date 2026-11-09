@@ -215,9 +215,10 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 // section to show it paints `nothing live` on its top row and leaves the rest blank — the column
 // stays on the frame either way, because nothing it shows may move it ([Model.panelShown]). The
 // separator is faint, and accent-bold while a drag holds it ([panelDrag]). The row navigation mode's
-// cursor stands on, while it stands in the column, wears the transcript's bar ([markCursorRow],
+// cursor stands on, while it stands in the column, wears the transcript's bar ([markPanelCursorRow],
 // [Model.panelCursorRow]): the ▌ in its gutter cell right of the separator and the selection tone
-// across the content. The separator itself is untouched, so the grip stays where the pointer finds it.
+// across the content — on a header, across the part its stop is: the pin cell or the title. The
+// separator itself is untouched, so the grip stays where the pointer finds it.
 func (m Model) sidePanelColumn(rows int) []string {
 	ruleStyle := m.th.statusFaint
 	if m.panelDrag.active {
@@ -226,7 +227,7 @@ func (m Model) sidePanelColumn(rows int) []string {
 	separator := ruleStyle.Render(sidePanelSeparator)
 	content := m.sidePanelContent(rows)
 	contentWidth := m.panelContentWidth()
-	cursorRow := m.panelCursorRow(rows)
+	cursorRow, cursorStop := m.panelCursorRow(rows)
 	column := make([]string, rows)
 	for i := range column {
 		line := ""
@@ -235,7 +236,7 @@ func (m Model) sidePanelColumn(rows int) []string {
 		}
 		line = sidePanelGutter + squareLine(m.th.measure, line, contentWidth)
 		if i == cursorRow {
-			line = markCursorRow(m.th.measure, line, m.th.selection)
+			line = markPanelCursorRow(m.th.measure, line, cursorStop, m.th.selection)
 		}
 		column[i] = separator + line
 	}
@@ -720,19 +721,17 @@ func (m Model) panelPinX() int {
 // cell is claimed whether or not it targets anything, so no click on the column falls through to
 // the panes or the transcript under it; the hover shape asks the same question (pointershape.go),
 // so the pointer promises a click exactly where one acts. A row resolves through the column's stops
-// ([Model.panelStops]): a body row to its stop's target, a header row to its pin toggle on the lead
-// pin glyph's cell ([Model.panelPinX]) and to its fold toggle on every other cell, and a row no
-// stop spans to nothing.
+// ([Model.panelStops]): a body row to its stop's target, and a header row — two stops on one row —
+// to the stop x falls in: its pin stop's toggle on the lead pin glyph's cell ([Model.panelPinX]),
+// its title stop's fold toggle on every other cell. A row no stop spans resolves to nothing.
 func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
 	if !m.panelCell(x, y) {
 		return panelTarget{}, false
 	}
+	isPinCell := x == m.panelPinX()
 	for _, stop := range m.panelStops(m.frameSpans().slotBottom) {
-		if !stop.spans(y) {
+		if !stop.spans(y) || (stop.id.isHeader && stop.id.isPin != isPinCell) {
 			continue
-		}
-		if stop.id.isHeader && x != m.panelPinX() {
-			return panelTarget{kind: panelTargetFold, section: stop.id.section}, true
 		}
 		return stop.target, true
 	}
