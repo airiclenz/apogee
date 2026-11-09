@@ -258,7 +258,8 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   dial owner in `cmd/apogee/wire_mcp.go` posts a `domain.MCPServerEvent` (`mcp_server` in the Event
   journal) as each server's dial starts (`dialling`) and finishes (`connected` with its tool count,
   or `failed` with the de-labelled cause and `kept` when a live session still serves), and when a
-  live session is closed on purpose (`disconnected`, reason `removed` or `denied`); a reconnect goes
+  live session is closed on purpose (`disconnected`, reason `removed` or `denied`) or ends on its own
+  (`disconnected`, reason `lost`, with the redacted cause); a reconnect goes
   `dialling` → `connected | failed` with no `disconnected` between. The posts land in an ordered
   outbox drained off the TUI's Update goroutine and never under the holder's lock, and leave through
   the engine's own serialised sink (`apogee.SerializeEvents`), so the engine stays MCP-blind. The
@@ -268,6 +269,20 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   into one per-server state (`internal/sidepanel`'s `MCPServers`), which the read-only `/mcp` report
   pane and the side panel's `mcp` section read, and a watch folds the watched process's journal
   lines instead. The transcript notes stay; they are no longer the only place an outcome is seen.
+- **A session that ends on its own is lost (ADR 0111, amendment 2026-11-09).** `Client` parks one
+  watcher per session on the SDK's `ClientSession.Wait()` and reports, once, a session that ends
+  while the Client is neither retired nor closed: `Lost()` closes and `LostCause()` holds the
+  redacted cause (a stdio server's clean exit reads `exit status 0`, any other error-less end
+  `connection closed`). A deliberate `Retire` or `Close` never reports. There is no keep-alive ping
+  and no deadline (the SDK's `ClientOptions.KeepAlive` kills on a first miss under a tight timeout).
+  The holder in `cmd/apogee/wire_mcp.go` watches each installed session and, on a loss, retires the
+  server at once (its calls answer "not connected"), withdraws its tools at the next idle-point
+  rebuild, posts `disconnected` with reason `lost`, and marks the server failed so the `/settings`
+  retry re-dials it — never automatically. The TUI adds one transcript line,
+  `mcp server <name> disconnected (lost): <cause>`; the model is not told. Any connection the SDK
+  ends on its own — a crash or exit, a dropped stream, an oversize message, a failed POST — reads
+  `lost`; a streamable-http server without a standalone stream (it refuses the GET) holds no
+  connection between calls, so its death is noticed only on its next call.
 - **Close** joins every session's teardown error and clears the sessions; it is safe on a dormant or
   already-closed Client. The composition root `defer`s it so no process or connection survives exit.
 

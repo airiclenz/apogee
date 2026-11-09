@@ -908,7 +908,14 @@ its own: `mcp docs reconnected` (or `mcp docs connected` for a new server), `mcp
 docs: … — previous connection kept`, or `mcp connect failed: docs: …`. Those notes are not the only
 place to look: [`/mcp`](commands.md) reports every server's transport, source, state, tool count and
 the cause of its last failure, and the side panel's [`mcp` section](#the-side-panel) shows itself
-while a server is dialling, failed or disconnected. A server that will not come
+while a server is dialling, failed or disconnected. A server that dies mid-session — its process
+exits or crashes, or its connection drops or breaks — is noticed at once, without waiting for a
+tool call: its tools are withdrawn at the next idle moment (a call before then answers that it is
+not connected), `/mcp` reads it `disconnected (lost)` with the cause, and the transcript gains one
+line, `mcp server docs disconnected (lost): …`. The model is not told, and apogee never reconnects
+it on its own: it counts as failed, so the `/settings` round trip below re-dials it. A
+`streamable-http` server that keeps no standalone stream open (it refuses the GET for one) holds
+no connection between calls, so its death is noticed only on its next call. A server that will not come
 back keeps its old connection serving; a new one whose first dial fails stays absent. A removed
 server's tools are refused at once. Nothing retries a failed server on its own: a save that changes
 it does, and so does the `/settings` round trip, even one that changes nothing, which re-dials

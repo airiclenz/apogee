@@ -136,13 +136,13 @@ edge, so the facts of every row line up.
 
 **MCP rows.** The section reads the process's MCP server state — the fold of every
 `MCPServerEvent` (ADR 0111 decision 8): emitted by the composition root as each server's dial starts
-and ends and as a live session is closed on purpose, and seeded at startup — not the viewed run's,
+and ends and as a live session is closed on purpose or lost on its own, and seeded at startup — not the viewed run's,
 since no run owns a server. A row is written flush left as `name · state · N tools` (`1 tool`), the
 name clipped first so the state and the count stay in view; the state is faint, `failed` in the
 error tone. The count is left off while no connection serves, and kept while a dial is under way
 with the previous connection's tools in hand or a failed reconnect's previous connection still
-serves. A server removed from the configuration has no row; one a `url-safety` edit closed reads
-`disconnected`. Server names are untrusted text, escape-stripped at the fold and again at paint.
+serves. A server removed from the configuration has no row; one a `url-safety` edit closed, or whose
+session ended on its own (reason `lost`), reads `disconnected`, with no count. Server names are untrusted text, escape-stripped at the fold and again at paint.
 
 **Task rows.** A finished task is the done mark, dim; the current task (the first unfinished one) is
 `▸` in the current-task style; any other open task is `○`. The task list stores only done / not

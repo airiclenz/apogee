@@ -46,12 +46,20 @@ loop, and the finished dials join the registry at the next idle point; a failed 
 server's old session, and each outcome is a transcript note of its own. Every server's lifecycle is
 also an **Event**: the composition root emits an `MCPServerEvent` (`mcp_server` in the journal) as
 each dial starts (`dialling`) and ends (`connected` with its tool count, or `failed` with its cause
-and whether the previous connection is kept) and as a live session is closed on purpose
-(`disconnected`, `removed` or `denied`), through the engine's serialised sink — the engine itself
+and whether the previous connection is kept) and as a live session ends — closed on purpose
+(`disconnected`, `removed` or `denied`) or **lost** on its own (`disconnected`, `lost`, with its
+cause: the server exited or crashed, or the SDK ended the connection — a dropped stream, an
+oversize message, a failed POST), through the engine's serialised sink — the engine itself
 stays MCP-blind — and the startup state is seeded into the TUI and into each Event journal at its
 birth (ADR 0111 decision 8). Every Driver view folds those Events into one per-server state, read by
 `/mcp` (a read-only report pane) and by the **Side panel**'s `mcp` section, and **Watch mode** shows
-the watched process's (ADR 0111 decisions 9 and 10). Startup connect stays
+the watched process's (ADR 0111 decisions 9 and 10). A lost server is noticed by a watcher on
+each session's `Wait`, with no ping and no deadline: it is retired at once, its tools leave the menu
+at the next idle point, the transcript gains one line (`mcp server <name> disconnected (lost): …`),
+the model is not told, and it is **never re-dialled on its own** — it is marked failed, so the
+`/settings` retry re-dials it. A streamable-http server without a standalone stream holds no
+connection between calls, so its death is noticed only on its next call (ADR 0111, amendment
+2026-11-09). Startup connect stays
 all-or-nothing and fatal. Mid-session nothing prompts: a reconnect
 that needs a login fails naming `apogee mcp login <name>` (ADR
 0095). **Resume reconnects

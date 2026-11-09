@@ -229,7 +229,10 @@ go-sdk@v1.6.1 mcp/streamable.go — calculateReconnectDelay; internal/testtime/t
 **Closes:** mcp-session-death-undetected
 **Commit:** `test(apogee): a killed MCP server reads disconnected (lost) in /mcp`
 
-## 7. Docs: the lost reason in ADR 0111, the glossary and the manual
+## 7. Docs: the lost reason in ADR 0111, the glossary and the manual — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): `adr-0111-consequences.md` is left as written: its "still not detected" line is the text the amendment names as superseded and answers, as the Acceptance sweep allows; the amendment is named on ADR 0111's Status line and appended to its reading order.
+NOTES (2026-11-09): beyond the one-line sweep fix, `docs/design/mcp-client.md` gains a bullet describing the watcher (`Client.Lost`/`LostCause`, the holder's drop-and-mark-failed, no KeepAlive) and `docs/manual/configuration.md` a paragraph on a mid-session death; no CHANGELOG entry, since items 4 and 5 carry the user-facing ones.
 
 **What:** **Goal:** every doc that says an MCP `disconnected` is only "closed on purpose" or that death goes
 unnoticed names the `lost` reason and its limits. Depends on item 6.
