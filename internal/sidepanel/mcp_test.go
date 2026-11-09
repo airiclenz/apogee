@@ -26,6 +26,12 @@ func TestMCPServersFold(t *testing.T) {
 	removed.Reason = domain.MCPDisconnectRemoved
 	denied := mcpEvent("files", domain.MCPServerDisconnected)
 	denied.Reason = domain.MCPDisconnectDenied
+	lost := mcpEvent("files", domain.MCPServerDisconnected)
+	lost.Reason, lost.Cause = domain.MCPDisconnectLost, "server exited: exit status 1"
+	lostEscaped := mcpEvent("files", domain.MCPServerDisconnected)
+	lostEscaped.Reason, lostEscaped.Cause = domain.MCPDisconnectLost, "ex\x1b[31mited"
+	deniedWithCause := denied
+	deniedWithCause.Cause = "ignored"
 	project := mcpEvent("web", domain.MCPServerDialling)
 	project.Transport, project.Project = "sse", true
 	escaped := mcpEvent("ev\x1b[31mil", domain.MCPServerFailed)
@@ -101,6 +107,40 @@ func TestMCPServersFold(t *testing.T) {
 				Reason: domain.MCPDisconnectDenied,
 			}},
 			wantLive: true,
+		},
+		{
+			name:   "a lost server keeps a disconnected row with no tools and the ending's cause",
+			events: []domain.MCPServerEvent{connected, lost},
+			wantRows: []MCPServerRow{{
+				Server: "files", Transport: "stdio", Phase: domain.MCPServerDisconnected,
+				Reason: domain.MCPDisconnectLost, Cause: "server exited: exit status 1",
+			}},
+			wantLive: true,
+		},
+		{
+			name:   "a lost server's cause is escape-stripped",
+			events: []domain.MCPServerEvent{connected, lostEscaped},
+			wantRows: []MCPServerRow{{
+				Server: "files", Transport: "stdio", Phase: domain.MCPServerDisconnected,
+				Reason: domain.MCPDisconnectLost, Cause: "exited",
+			}},
+			wantLive: true,
+		},
+		{
+			name:   "a disconnect closed on purpose carries no cause",
+			events: []domain.MCPServerEvent{connected, deniedWithCause},
+			wantRows: []MCPServerRow{{
+				Server: "files", Transport: "stdio", Phase: domain.MCPServerDisconnected,
+				Reason: domain.MCPDisconnectDenied,
+			}},
+			wantLive: true,
+		},
+		{
+			name:   "a connect after a loss clears the cause",
+			events: []domain.MCPServerEvent{connected, lost, connected},
+			wantRows: []MCPServerRow{{
+				Server: "files", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 7,
+			}},
 		},
 		{
 			name:   "servers keep the order they were first reported in",

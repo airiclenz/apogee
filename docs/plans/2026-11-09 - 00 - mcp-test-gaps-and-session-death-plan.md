@@ -170,7 +170,12 @@ commit → not restored, and posts `disconnected(lost)`; a startup session lost 
 - `go vet ./internal/domain/ ./cmd/apogee/`
 **Commit:** `feat(apogee): notice an MCP server that dies mid-session`
 
-## 5. Show a lost server in `/mcp`, the panel and the transcript
+## 5. Show a lost server in `/mcp`, the panel and the transcript — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the transcript note is written live-only, in `model.go`'s eventMsg `MCPServerEvent` branch through a new `Model.noteMCPLost` (in `fold.go`), as an ephemeral note like every other MCP note (`commitMCP`); a startup seed and a watched journal's Event write none. Wording reuses the `/mcp` state: `mcp server <name> disconnected (lost)[: <cause>]`, name and cause folded to one line (`sanitize.StripEscapesToLine`, whitespace collapsed).
+NOTES (2026-11-09): the new TUI tests (`TestMCPLostShowsInThePaneThePanelAndTheTranscript`, `TestMCPLostStripsEscapes`, `TestMCPLostNoteOnlyForALiveLoss`) live in `internal/tui/fold_test.go` beside the MCP fold's other tests rather than in `mcppane_test.go`, since each pins the pane, the panel and the note together; `mcppane_test.go` is untouched. `mcpPanelServes`/`panelMCPRow` needed no change: a lost row has 0 tools, so the panel prints `files · disconnected` with no count.
+NOTES (2026-11-09): consequential edit — internal/tui/doc.go: made necessary by the /mcp pane now wording a lost server's cause (the package doc said "a failed server's cause").
+NOTES (2026-11-09): consequential edit — layout.md: made necessary by the /mcp pane showing `disconnected (lost)` with its cause and the new transcript note (the `/mcp` popup section said only a failed server's cause follows and that a session is only closed on purpose).
 
 **What:** **Goal:** a `disconnected (lost)` Event renders in `/mcp` as `disconnected (lost)` with its cause, keeps
 the server's row in the `mcp` panel section with zero tools, and writes one transcript note naming the server

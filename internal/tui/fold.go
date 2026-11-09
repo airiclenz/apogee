@@ -2,9 +2,11 @@ package tui
 
 import (
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // ----------------------------------------------------------------------------
@@ -48,8 +50,10 @@ func (m Model) foldEvent(e domain.Event) Model {
 // run's (foldWatchedEvent), which a watch never writes into m.opts.
 func (m Model) foldEventAgainst(e domain.Event, window int, model string) Model {
 	// An MCP server's lifecycle is the composition root's news, not the conversation's (ADR 0111
-	// decision 8): it moves the MCP fold and nothing else — no stats, board, panel section,
-	// transcript entry or activity phrase.
+	// decision 8): it moves the MCP fold and nothing else — no stats, board, panel section or
+	// activity phrase. Nor a transcript entry here: the one MCP phase the transcript notes, a
+	// session lost on its own, is noted by the live eventMsg case alone ([Model.noteMCPLost]), so a
+	// watch's journal replay writes none.
 	if server, ok := e.(domain.MCPServerEvent); ok {
 		m.mcpServers.Fold(server)
 		return m
@@ -116,6 +120,38 @@ func (m *Model) seedMCP(events []domain.MCPServerEvent) {
 	for _, event := range events {
 		m.mcpServers.Fold(event)
 	}
+}
+
+// noteMCPLost writes the transcript's one line for an MCP session that ended on its own (a
+// disconnected Event with reason lost): the server and the ending's cause, on one line. A loss is
+// the one MCP change no dial or commit of the human's announces, so it is the one the transcript
+// notes; every other phase moves the MCP fold alone. The note is ephemeral, as every MCP note is
+// (commitMCP): it describes the process's servers, not the conversation, so the record never keeps
+// it. Server and cause are untrusted text, folded to one line here and escape-stripped again at
+// the note seam.
+func (m *Model) noteMCPLost(server domain.MCPServerEvent) {
+	if server.Phase != domain.MCPServerDisconnected || server.Reason != domain.MCPDisconnectLost {
+		return
+	}
+	m.transcript.addEphemeralNote(mcpLostNote(server))
+}
+
+// mcpLostNote words a lost session's note: `mcp server <name> disconnected (lost)`, the /mcp
+// state's own words, then `: <cause>` when the Event carries one. Name and cause are each folded to
+// one line with their runs of whitespace collapsed, so a multi-line cause cannot forge a second
+// transcript line.
+func mcpLostNote(server domain.MCPServerEvent) string {
+	note := "mcp server " + mcpNoteText(server.Server) + " disconnected (" + string(domain.MCPDisconnectLost) + ")"
+	if cause := mcpNoteText(server.Cause); cause != "" {
+		note += ": " + cause
+	}
+	return note
+}
+
+// mcpNoteText is untrusted text folded to one line for a note: escape-stripped, every line break
+// and run of whitespace collapsed to one space.
+func mcpNoteText(s string) string {
+	return strings.Join(strings.Fields(sanitize.StripEscapesToLine(s)), " ")
 }
 
 // fallbackNote words one Server fallback (ADR 0105): which seat moved, the server and model it was

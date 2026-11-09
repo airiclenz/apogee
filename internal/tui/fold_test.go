@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -1147,5 +1148,151 @@ func TestMCPFoldSeedsFromASnapshot(t *testing.T) {
 
 	if m.mcpServers.IsLive() {
 		t.Errorf("after web connected the fold is still live: %+v", m.mcpServers.Rows())
+	}
+}
+
+// mcpLost is files' session ending on its own, carrying cause.
+func mcpLost(cause string) domain.MCPServerEvent {
+	return domain.MCPServerEvent{
+		Server: "files", Transport: "stdio", Phase: domain.MCPServerDisconnected,
+		Reason: domain.MCPDisconnectLost, Cause: cause,
+	}
+}
+
+// mcpNotesSince is the text of every note committed after the first `before` transcript entries,
+// failing the test on one the record would keep: every MCP note is ephemeral.
+func mcpNotesSince(t *testing.T, m Model, before int) []string {
+	t.Helper()
+	var notes []string
+	for _, e := range m.transcript.entries[before:] {
+		if e.kind != entryNote {
+			continue
+		}
+		notes = append(notes, e.text)
+		if !e.ephemeral {
+			t.Errorf("note %q is not ephemeral", e.text)
+		}
+	}
+	return notes
+}
+
+// TestMCPLostShowsInThePaneThePanelAndTheTranscript pins a lost session's three surfaces: the
+// live `disconnected (lost)` Event reads `disconnected (lost)` in /mcp with its cause wrapped beneath,
+// keeps the server's panel row with no tool count, and writes ONE ephemeral transcript note naming
+// the server and the cause — mid-Turn, without moving the stall clock.
+func TestMCPLostShowsInThePaneThePanelAndTheTranscript(t *testing.T) {
+	t.Parallel()
+	m := runningModel(t)
+	m = step(t, m, eventMsg{Event: mcpConnected("files", 7)})
+	heard := time.Now().Add(-time.Minute)
+	m.lastEvent = heard
+	before := len(m.transcript.entries)
+
+	m, cmd := stepCmd(t, m, eventMsg{Event: mcpLost("server exited: exit status 1")})
+
+	if want := []string{"mcp server files disconnected (lost): server exited: exit status 1"}; !slices.Equal(
+		mcpNotesSince(t, m, before), want) {
+		t.Errorf("the loss wrote notes %q, want %q", mcpNotesSince(t, m, before), want)
+	}
+	if !m.lastEvent.Equal(heard) || m.state != stateRunning || cmd != nil {
+		t.Errorf("the loss moved the run: lastEvent %v (want %v), state %v, cmd %v", m.lastEvent, heard, m.state, cmd)
+	}
+
+	rows := m.mcpServers.Rows()
+	if len(rows) != 1 || rows[0].Tools != 0 || rows[0].Cause != "server exited: exit status 1" {
+		t.Fatalf("MCP fold holds %+v, want files disconnected with 0 tools and its cause", rows)
+	}
+	panel := panelModel(t, "[mcp: pinned]", 30, mcpConnected("files", 7), mcpLost("server exited: exit status 1"))
+	section, live := panel.panelSection(domain.SidePanelMCP)
+	if got := stripPanelRows(section.body); !live || !slices.Equal(got, []string{"files · disconnected"}) {
+		t.Errorf("panel mcp section live=%v rows %q; want one live row `files · disconnected`, no tool count", live, got)
+	}
+
+	want := []string{
+		strings.TrimRight(fmt.Sprintf("%-6s  %-9s  %-6s  %-19s  %s",
+			"server", "transport", "source", "state", "tools"), " "),
+		fmt.Sprintf("%-6s  %-9s  %-6s  %-19s  %s", "files", "stdio", "global", "disconnected (lost)", "0 tools"),
+		"  cause: server exited: exit status 1",
+	}
+	if got := mcpRowTexts(m); !slices.Equal(got, want) {
+		t.Errorf("/mcp rows =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestMCPLostStripsEscapes pins that a lost session's untrusted server name and cause reach the
+// pane, the panel and the transcript note escape-stripped, the note on one line.
+func TestMCPLostStripsEscapes(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	before := len(m.transcript.entries)
+	lost := mcpLost("bad\x1b[2Jthing\x07\nexit\x1b]0;title\x07 status 1")
+	lost.Server = "fi\x1b[31mles"
+
+	m = step(t, m, eventMsg{Event: lost})
+
+	notes := mcpNotesSince(t, m, before)
+	if want := []string{"mcp server files disconnected (lost): badthing exit status 1"}; !slices.Equal(notes, want) {
+		t.Errorf("the loss wrote notes %q, want %q", notes, want)
+	}
+	panel := panelModel(t, "[mcp: pinned]", 30, lost)
+	section, _ := panel.panelSection(domain.SidePanelMCP)
+	if got := stripPanelRows(section.body); !slices.Equal(got, []string{"files · disconnected"}) {
+		t.Errorf("panel mcp rows = %q, want the stripped name `files · disconnected`", got)
+	}
+	for _, row := range mcpRowTexts(m) {
+		if strings.ContainsAny(row, "\x1b\x07") {
+			t.Errorf("row %q carries an escape or control byte", row)
+		}
+	}
+	if joined := strings.Join(mcpRowTexts(m), "\n"); !strings.Contains(joined, "  cause: badthing") {
+		t.Errorf("/mcp rows lack the stripped cause:\n%s", joined)
+	}
+}
+
+// stripPanelRows is a panel section's painted rows as plain text, trailing padding trimmed.
+func stripPanelRows(body []string) []string {
+	rows := make([]string, 0, len(body))
+	for _, row := range body {
+		rows = append(rows, strings.TrimRight(strip(row), " "))
+	}
+	return rows
+}
+
+// TestMCPLostNoteOnlyForALiveLoss pins where the lost note is written: every other phase and
+// disconnect reason, a startup seed and a watched journal's Event move the MCP fold alone.
+func TestMCPLostNoteOnlyForALiveLoss(t *testing.T) {
+	t.Parallel()
+	denied := domain.MCPServerEvent{
+		Server: "files", Transport: "stdio", Phase: domain.MCPServerDisconnected, Reason: domain.MCPDisconnectDenied,
+	}
+	removed := denied
+	removed.Reason = domain.MCPDisconnectRemoved
+	failed := domain.MCPServerEvent{Server: "files", Transport: "stdio", Phase: domain.MCPServerFailed, Cause: "refused"}
+	tests := []struct {
+		name  string
+		drive func(t *testing.T, m Model) Model
+	}{
+		{"a live denied disconnect", func(t *testing.T, m Model) Model { return step(t, m, eventMsg{Event: denied}) }},
+		{"a live removed disconnect", func(t *testing.T, m Model) Model { return step(t, m, eventMsg{Event: removed}) }},
+		{"a live failed dial", func(t *testing.T, m Model) Model { return step(t, m, eventMsg{Event: failed}) }},
+		{"a seeded loss", func(_ *testing.T, m Model) Model {
+			m.seedMCP([]domain.MCPServerEvent{mcpLost("gone")})
+			return m
+		}},
+		{"a watched journal's loss", func(_ *testing.T, m Model) Model { return m.foldWatchedEvent(mcpLost("gone")) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModel(t)
+			m = step(t, m, eventMsg{Event: mcpConnected("files", 7)})
+			before := len(m.transcript.entries)
+
+			m = tc.drive(t, m)
+
+			if got := len(m.transcript.entries); got != before {
+				t.Errorf("transcript entries %d → %d, want none added", before, got)
+			}
+		})
 	}
 }

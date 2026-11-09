@@ -574,8 +574,8 @@
 //
 // mcppane.go is the /mcp report (ADR 0111 decision 9): every MCP server in the MCP fold
 // ([sessionView.mcpServers] — the watched process's own under a watch) as one row of a table —
-// server, transport, source (`global` or `project`), state and tool count — with a failed server's
-// cause wrapped beneath its row, and `failed (previous connection kept)` where a failed reconnect
+// server, transport, source (`global` or `project`), state and tool count — with a failed or lost
+// server's cause wrapped beneath its row, and `failed (previous connection kept)` where a failed reconnect
 // left the earlier session serving. Read-only and derived at render, so it updates while open;
 // reconnecting stays on the /settings `mcp-servers` row (mcpreconnect.go).
 //

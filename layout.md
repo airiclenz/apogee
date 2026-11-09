@@ -2657,15 +2657,18 @@ tools` heading, in the order the servers were first reported. `source` is `globa
 reported — `dialling`, `connected`, `failed` or `disconnected` — qualified where the bare phase
 would mislead: a reconnect that failed while the previous connection still serves reads `failed
 (previous connection kept)` and keeps that connection's tool count, and a server closed on purpose
-reads `disconnected (denied)` when a `url-safety` edit closed its endpoint. A removed server has no
-row. Under a failed server's row its cause follows as wrapped prose, `  cause: …`, rather than as a
-cell, so a long cause never widens a column of the table. With no server configured the pane is one
+reads `disconnected (denied)` when a `url-safety` edit closed its endpoint; a server whose session
+ended on its own — the process exited, the connection dropped — reads `disconnected (lost)` with no
+tools. A removed server has no row. Under a failed or lost server's row its cause follows as wrapped
+prose, `  cause: …`, rather than as a cell, so a long cause never widens a column of the table. A
+lost session is also the one MCP change the transcript notes, in one line: `mcp server <name>
+disconnected (lost): <cause>`. With no server configured the pane is one
 row, `no MCP servers configured`. Server names, transports and causes are untrusted text, shown with
 terminal escapes stripped.
 
 **It reads the MCP fold, never the transcript.** The rows come from the MCP server state every
 Driver view folds from `MCPServerEvent`s (ADR 0111 decisions 8 and 9): the composition root emits
-one as each server's dial starts and ends and as a live session is closed on purpose, and the
+one as each server's dial starts and ends and as a live session is closed on purpose or lost, and the
 startup state is seeded into the TUI at launch and into each Event journal at its birth. A server
 changing state while the pane is up repaints on the next frame. The state belongs to the process,
 not the conversation, so `/clear` and a resume leave it alone; while **watching** a session the

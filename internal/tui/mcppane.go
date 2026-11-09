@@ -24,7 +24,7 @@ import (
 //
 // The rows are a table — one heading row, then one row per server in the order the servers were
 // first reported — laid out here into single-cell rows rather than handed to the popup module as
-// cells, because a failed server's cause follows its row as wrapped prose, and a cause seated as a
+// cells, because a failed or lost server's cause follows its row as wrapped prose, and a cause seated as a
 // cell would widen a column of the table to its own length. The table's columns are measured by
 // the popup module's own column arithmetic (popupColumnWidths, layoutPopupRow), so the layout is
 // the one every celled pane has. Server, transport and cause are untrusted text: the fold strips
@@ -41,7 +41,7 @@ const (
 // shape adviceEmptyRow uses, so an empty pane scrolls, budgets and paints as every other report does.
 const mcpEmptyRow = "no MCP servers configured"
 
-// mcpCauseLead opens the first row of a failed server's cause; the rows it wraps onto carry the
+// mcpCauseLead opens the first row of a failed or lost server's cause; the rows it wraps onto carry the
 // readable wrap's own two-space indent (wrapReadable).
 const mcpCauseLead = "  cause: "
 
@@ -58,7 +58,7 @@ func mcpSource(row sidepanel.MCPServerRow) string {
 
 // mcpStateWord is the state column's words for one server: the phase the fold last saw, qualified
 // where the phase alone would mislead — a failed reconnect whose previous connection still serves,
-// and a session a `url-safety:` change closed.
+// and a session that a `url-safety:` change closed or that ended on its own (`disconnected (lost)`).
 func mcpStateWord(row sidepanel.MCPServerRow) string {
 	switch {
 	case row.Phase == domain.MCPServerFailed && row.Kept:
@@ -81,7 +81,7 @@ func mcpServerCells(row sidepanel.MCPServerRow) popupRow {
 }
 
 // mcpRows composes the report at the given wrap column: the heading row, then per server its table
-// row and, for a failed one with a cause, the cause wrapped beneath it. An empty fold is ONE row.
+// row and, for a failed or lost one with a cause, the cause wrapped beneath it. An empty fold is ONE row.
 func (m Model) mcpRows(column int) ([]popupRow, []popupRowKind) {
 	servers := m.mcpServers.Rows()
 	if len(servers) == 0 {
@@ -100,7 +100,7 @@ func (m Model) mcpRows(column int) ([]popupRow, []popupRowKind) {
 		rows = append(rows, popupRow{layoutPopupRow(m.th, table[i+1], widths)})
 		kinds = append(kinds, popupRowPlain)
 		cause := strings.TrimRight(stripEscapes(server.Cause), "\n")
-		if server.Phase != domain.MCPServerFailed || cause == "" {
+		if !hasMCPCause(server) || cause == "" {
 			continue
 		}
 		for _, line := range wrapReadable(mcpCauseLead, cause, column) {
@@ -109,6 +109,13 @@ func (m Model) mcpRows(column int) ([]popupRow, []popupRowKind) {
 		}
 	}
 	return rows, kinds
+}
+
+// hasMCPCause reports whether row's phase carries a cause the pane words beneath it: a failed dial,
+// or a session lost on its own — the one disconnect that was not closed on purpose.
+func hasMCPCause(row sidepanel.MCPServerRow) bool {
+	return row.Phase == domain.MCPServerFailed ||
+		row.Phase == domain.MCPServerDisconnected && row.Reason == domain.MCPDisconnectLost
 }
 
 // mcpContent is what the pane tells the shared report module about itself for one frame

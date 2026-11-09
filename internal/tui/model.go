@@ -1321,9 +1321,14 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// An MCP server's lifecycle is the composition root's, not the engine's (ADR 0111 decision 8):
 		// a dial finishing mid-Turn says nothing about whether the engine is alive, so it folds into
-		// the MCP state and touches neither the stall clock nor the run, turn or progress state.
-		if _, isMCP := msg.Event.(domain.MCPServerEvent); isMCP {
-			return m.foldEvent(msg.Event), nil
+		// the MCP state and touches neither the stall clock nor the run, turn or progress state. A
+		// session that ended on its own is the one phase the human is also told in the transcript
+		// (noteMCPLost): no dial or commit of theirs announces it. Here and not in the fold, so a
+		// watch's journal replay and a startup seed write no note.
+		if server, isMCP := msg.Event.(domain.MCPServerEvent); isMCP {
+			m = m.foldEvent(msg.Event)
+			m.noteMCPLost(server)
+			return m, nil
 		}
 		// Any other Event, any depth, any variant: the engine is not silent. Stamped before the fold and
 		// unconditionally, so an Event the folds deliberately ignore — usage accounting, an audit

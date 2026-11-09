@@ -14,7 +14,8 @@ import (
 // Phase is the last lifecycle phase reported. Project says the server comes from the Project config
 // rather than the global one. Tools is the tool count of the connection that serves: set by a
 // connected phase, kept through a dialling one and a failed one whose previous connection was Kept,
-// and 0 once no connection serves. Cause is the failure's text on a failed phase, "" otherwise.
+// and 0 once no connection serves. Cause is the failure's text on a failed phase and the ending's
+// text on a disconnected phase whose session was lost (domain.MCPDisconnectLost), "" otherwise.
 // Reason says why a disconnected phase closed the session; a removed server has no row at all.
 type MCPServerRow struct {
 	Server    string
@@ -90,6 +91,9 @@ func foldMCPRow(previous MCPServerRow, event domain.MCPServerEvent) MCPServerRow
 		}
 	case domain.MCPServerDisconnected:
 		row.Tools = 0
+		if event.Reason == domain.MCPDisconnectLost {
+			row.Cause = sanitize.StripEscapes(event.Cause)
+		}
 	}
 	return row
 }
