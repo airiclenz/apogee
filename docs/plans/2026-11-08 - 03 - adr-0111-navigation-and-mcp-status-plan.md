@@ -272,7 +272,10 @@ followed; pins item 1's gate);
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestNavMode|TestSidePanelClick' ./internal/tui/`
 **Commit:** `feat(tui): enter on a side-panel stop acts as its click`
 
-## 8. `^x` on a panel sub-agent row stops that run
+## 8. `^x` on a panel sub-agent row stops that run — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): runViewKey's `ctrl+x` step-aside now asks `m.reseatPanelCursor().cursorRunHead()` (the same re-judging its `esc` case and blockCursorKey already do), so the view steps aside for exactly the row blockCursorKey then stops. cursorRunHead's entry lookup is factored into `runHeadAt`, which both the transcript and panel branches share.
+NOTES (2026-11-09): the watch-mode test drives a real watch (enterWatchOn + journal emit + pollWatch) with the panel shown, rather than flipping `m.watch.isActive`. A third subtest pins that `^x` on a sub-agents header stops nothing.
 
 **What:** ADR 0111 D3's `^x`. Depends on item 7.
 **Regression guard.** The test fixture is item 6's shared panel-shown builder (as `panelModel`: auto, 140 cols,

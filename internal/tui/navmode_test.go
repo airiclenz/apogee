@@ -698,3 +698,108 @@ func TestNavModePanelCursorAnchorsToRow(t *testing.T) {
 		}
 	})
 }
+
+// panelSubAgentStop is the identity of run id's row in the side panel's sub-agents section.
+func panelSubAgentStop(id string) panelStopID {
+	return panelStopID{section: domain.SidePanelSubAgents, run: sidepanel.RunOf(delegationBase(id))}
+}
+
+// TestNavModeCtrlXStopsPanelSubAgent pins `^x` on a side-panel sub-agent row (ADR 0111 D3): it stops
+// that row's run alone, as `^x` on its transcript row does, and leaves the mode standing on the row —
+// at the top level, and inside a sibling's Run view, where the view's own `^x` steps aside for the
+// row the cursor points at. On any other panel stop the key is not the cursor's.
+func TestNavModeCtrlXStopsPanelSubAgent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("top level", func(t *testing.T) {
+		t.Parallel()
+		m, eng := navModel(t, onlySections(domain.SidePanelSubAgents),
+			panelDelegationCall(t, "r1", "scout"),
+			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		)
+		m = cursorOnPanelStop(t, m, panelSubAgentStop("r1"))
+
+		m = step(t, m, keyCtrlX())
+
+		if got := eng.stoppedChildren(); !slices.Equal(got, []string{"r1"}) {
+			t.Errorf("StopChild calls = %v; want only the row's run, r1", got)
+		}
+		if got := panelCursorStop(t, m).id; got != panelSubAgentStop("r1") {
+			t.Errorf("after ^x the cursor stands on %+v; want it kept on the row it stopped", got)
+		}
+		if m.inRunView() {
+			t.Error("^x opened a run view; it stops the row, it does not open it")
+		}
+	})
+
+	t.Run("inside a sibling's run view", func(t *testing.T) {
+		t.Parallel()
+		m, eng := navModel(t, onlySections(domain.SidePanelSubAgents),
+			panelDelegationCall(t, "r1", "scout"),
+			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+			panelDelegationCall(t, "r2", "mapper"),
+			delegationPhase("r2", domain.SubAgentStarted, time.Minute),
+		)
+		m = step(t, cursorOnPanelStop(t, m, panelSubAgentStop("r2")), keyEnter())
+		if !m.inRunView() || m.viewedRun().id != "r2" {
+			t.Fatalf("setup: ⏎ on r2's row left the view on %+v", m.viewedRun())
+		}
+		m = cursorOnPanelStop(t, m, panelSubAgentStop("r1"))
+
+		m = step(t, m, keyCtrlX())
+
+		if got := eng.stoppedChildren(); !slices.Equal(got, []string{"r1"}) {
+			t.Errorf("StopChild calls = %v; want only the row's run, r1 — not the viewed r2", got)
+		}
+		if !m.inRunView() || m.viewedRun().id != "r2" {
+			t.Errorf("the view is on %+v; want it still open on r2", m.viewedRun())
+		}
+		if !m.cursor.inPanel() {
+			t.Error("^x ended the walk; the row is still there to read")
+		}
+	})
+
+	t.Run("a header keeps the prompt's ^x", func(t *testing.T) {
+		t.Parallel()
+		m, eng := navModel(t, onlySections(domain.SidePanelSubAgents),
+			panelDelegationCall(t, "r1", "scout"),
+			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		)
+		m = cursorOnPanelStop(t, m, panelStopID{section: domain.SidePanelSubAgents, isHeader: true})
+		if _, ok := m.cursorRunHead(); ok {
+			t.Fatal("the section header heads a run")
+		}
+
+		step(t, m, keyCtrlX())
+
+		if got := eng.stoppedChildren(); len(got) != 0 {
+			t.Errorf("StopChild calls = %v; want none — a header is no run's row", got)
+		}
+	})
+}
+
+// TestNavModeCtrlXInWatchModeRefused pins `^x` on a watched session's side-panel sub-agent row: the
+// watch is read-only, so the key stops nothing and flashes the refusal, as on the transcript's row.
+func TestNavModeCtrlXInWatchModeRefused(t *testing.T) {
+	t.Parallel()
+	eng := watchEngine()
+	f := newWatchFixture(t, "watched", nil, 0)
+	m := enterWatchOn(t, eng, f)
+	m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	m.opts.UI.SidePanelSections = onlySections(domain.SidePanelSubAgents)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+	m.panel = sidepanel.New(func() time.Time { return panelNow })
+	f.prompt("survey the repo", false)
+	f.emit(panelDelegationCall(t, "r1", "scout"), delegationPhase("r1", domain.SubAgentStarted, time.Minute))
+	m = pollWatch(t, m)
+	m = cursorOnPanelStop(t, m, panelSubAgentStop("r1"))
+
+	m = step(t, m, keyCtrlX())
+
+	if got := eng.stoppedChildren(); len(got) != 0 {
+		t.Errorf("StopChild calls = %v; want none", got)
+	}
+	if m.flash != watchRefusedFlash {
+		t.Errorf("flash = %q; want the refusal", m.flash)
+	}
+}

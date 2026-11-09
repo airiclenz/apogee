@@ -457,8 +457,10 @@ func (m Model) backHint() string {
 // `^x` needs no confirmation: what it discards is only the rest of one delegation's work, and the
 // engine folds what that run had done into the result its parent reads. On a run that is over, or
 // one that never learned a run id, it does nothing. The one place `^x` steps aside is a cursor
-// standing on a delegation's row inside the view: there the human is pointing at THAT run, so the
-// key is left to [Model.blockCursorKey], which stops the row rather than the view.
+// standing on a delegation's row — a grandchild's row in the view's transcript, or a side-panel
+// sub-agent row (ADR 0111 D3): there the human is pointing at THAT run, so the key is left to
+// [Model.blockCursorKey], which stops the row rather than the view. The panel cursor is re-judged
+// first, as [Model.blockCursorKey] will, so the row stepped aside for is the row it stops.
 func (m Model) runViewKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -467,7 +469,7 @@ func (m Model) runViewKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		}
 		return true, m.upRun(), nil
 	case "ctrl+x":
-		if _, onRow := m.cursorRunHead(); onRow {
+		if _, onRow := m.reseatPanelCursor().cursorRunHead(); onRow {
 			return false, m, nil
 		}
 		if m.watch.isActive {

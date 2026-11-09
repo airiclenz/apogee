@@ -334,10 +334,11 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		next, cmd := m.toggleAtBlockCursor()
 		return next, cmd, true
 	case "ctrl+x":
-		// `^x` on a delegation's row stops that run alone — a member of a ✦ Sub-Agent umbrella, or a
-		// grandchild's row inside a view (ADR 0086 D5) — and leaves the mode standing: the row is
-		// still there, and says how the run ended once it has. Anywhere else the key is not the
-		// cursor's, and inside a view it goes on to stop nothing (the view's claimant declined it).
+		// `^x` on a delegation's row stops that run alone — a member of a ✦ Sub-Agent umbrella, a
+		// grandchild's row inside a view (ADR 0086 D5), or a side-panel sub-agent row (ADR 0111 D3) —
+		// and leaves the mode standing: the row is still there, and says how the run ended once it
+		// has. Anywhere else the key is not the cursor's, and inside a view it goes on to stop
+		// nothing (the view's claimant declined it).
 		head, ok := m.cursorRunHead()
 		if !ok {
 			return m, nil, false
@@ -415,18 +416,42 @@ func (m Model) enterTranscriptRegion() Model {
 
 // cursorRunHead is the delegation the highlight stands on, when it stands on one: a cursor standing
 // in the transcript whose line the paint marked as a header ([targetHeader]) of an entry that heads a run — a
-// delegation's collapsed row at any depth, a ✦ Sub-Agent umbrella's member rows included. It reads
-// the paint's own accounting (m.lineTargets), as [Model.toggleBlockAt] does, so the row `^x` stops is
-// the row the human sees highlighted.
+// delegation's collapsed row at any depth, a ✦ Sub-Agent umbrella's member rows included — or a
+// cursor standing on a side-panel sub-agent row, whose stop opens that run (ADR 0111 D3). It reads
+// the paint's own accounting (m.lineTargets, the column's stops), as [Model.toggleBlockAt] and
+// [Model.activatePanelCursor] do, so the row `^x` stops is the row the human sees highlighted.
 func (m Model) cursorRunHead() (entry, bool) {
+	if m.cursor.inPanel() {
+		return m.panelCursorRunHead()
+	}
 	if !m.cursor.inTranscript() || m.cursor.line < 0 || m.cursor.line >= len(m.lineTargets) {
 		return entry{}, false
 	}
 	target := m.lineTargets[m.cursor.line]
-	if target.kind != targetHeader || target.entry < 0 || target.entry >= len(m.transcript.entries) {
+	if target.kind != targetHeader {
 		return entry{}, false
 	}
-	head := m.transcript.entries[target.entry]
+	return m.runHeadAt(target.entry)
+}
+
+// panelCursorRunHead is the delegation a panel-standing cursor's stop opens: the stop the cursor
+// resolves to ([blockCursor.panelStopIndex]) when it is a sub-agent row. Any other stop — a header,
+// a task card, a changed file, the usage report — heads no run.
+func (m Model) panelCursorRunHead() (entry, bool) {
+	stops := m.navPanelStops()
+	at, ok := m.cursor.panelStopIndex(stops)
+	if !ok || stops[at].target.kind != panelTargetRun {
+		return entry{}, false
+	}
+	return m.runHeadAt(stops[at].target.entry)
+}
+
+// runHeadAt is entries[index] when it heads a run.
+func (m Model) runHeadAt(index int) (entry, bool) {
+	if index < 0 || index >= len(m.transcript.entries) {
+		return entry{}, false
+	}
+	head := m.transcript.entries[index]
 	if !head.headsRun() {
 		return entry{}, false
 	}
