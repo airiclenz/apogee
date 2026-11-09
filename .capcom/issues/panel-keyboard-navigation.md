@@ -1,9 +1,11 @@
 ---
 title: Navigation mode spans the transcript and the side panel (←/→ switch region)
-status: open
+status: done
 type: feature
 priority: 2
 created: 2026-11-08T21:33:39Z
+closed: 2026-11-09T09:25:18Z
+reason: "Resolved by plan '2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan' items 5-11 (archived at 82491d30): navigation mode spans transcript and panel, with ⏎, ^x, identity anchoring, legend and docs."
 ---
 
 The side panel is mouse-only (ADR 0110 decision 3, now superseded). ADR 0111 decisions 1–5

@@ -1,10 +1,12 @@
 ---
 title: No view of each MCP server's live connection state
-status: open
+status: done
 type: task
 priority: 3
 deps: [mcp-lifecycle-event]
 created: 2026-11-07T09:22:21Z
+closed: 2026-11-09T09:25:18Z
+reason: "Resolved by plan '2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan' items 18-21 (archived at 82491d30): /mcp report pane and mcp side-panel section show live per-server state; report-order test gap tracked in mcp-report-order-untested."
 ---
 
 Nothing in the TUI shows each MCP server's live connection state: connecting, connected, failed (and

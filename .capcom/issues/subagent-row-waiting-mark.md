@@ -1,9 +1,11 @@
 ---
 title: A sub-agent row gives no sign its run waits on an approval
-status: open
+status: done
 type: feature
 priority: 3
 created: 2026-11-08T21:33:39Z
+closed: 2026-11-09T09:25:18Z
+reason: "Resolved by plan '2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan' items 3-4 (archived at 82491d30): gated sub-agent rows read waiting, cleared per gate, also in watch mode."
 ---
 
 Every gate opens the shared approval pane, but gates queued behind the one showing have no

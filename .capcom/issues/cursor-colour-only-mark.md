@@ -1,9 +1,11 @@
 ---
 title: Block cursor highlight relies on colour alone
-status: open
+status: done
 type: bug
 priority: 3
 created: 2026-11-08T21:33:39Z
+closed: 2026-11-09T09:25:18Z
+reason: "Resolved by plan '2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan' item 9 (archived at 82491d30): transcript and panel cursors carry a fixed ▌ mark beside the tone."
 ---
 
 The transcript block cursor marks its row with the selection tone only

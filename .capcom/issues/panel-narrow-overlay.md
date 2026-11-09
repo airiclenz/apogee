@@ -1,10 +1,12 @@
 ---
 title: Side panel opens as an overlay on a window too narrow to dock it
-status: open
+status: done
 type: feature
 priority: 2
 deps: [panel-keyboard-navigation]
 created: 2026-11-08T21:33:39Z
+closed: 2026-11-09T09:25:18Z
+reason: "Resolved by plan '2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan' items 12-13 (archived at 82491d30): narrow-window overlay via → or bare /panel, with its close paths."
 ---
 
 Below its gate (137 columns in `auto`, 117 in `on`) the panel is not drawn and bare `/panel`

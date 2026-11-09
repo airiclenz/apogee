@@ -1,9 +1,11 @@
 ---
 title: A side-panel click may act while an approval or /settings is open
-status: open
+status: done
 type: bug
 priority: 2
 created: 2026-11-08T21:33:39Z
+closed: 2026-11-09T09:25:18Z
+reason: "Resolved by plan '2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan' item 1 (archived at 82491d30): panel clicks under modal panes are claimed and inert; a watched pin click flashes the watch refusal."
 ---
 
 The panel click is resolved before every pane (`internal/tui/mouse.go`) and

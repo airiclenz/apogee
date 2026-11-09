@@ -1,9 +1,11 @@
 ---
 title: MCP server lifecycle has no engine Event
-status: open
+status: done
 type: feature
 priority: 2
 created: 2026-11-08T21:33:39Z
+closed: 2026-11-09T09:25:18Z
+reason: "Resolved by plan '2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan' items 14-17 (archived at 82491d30): journaled MCPServerEvent emitted at dial start/finish and seeded at each journal's birth; resumed-seed e2e gap tracked in mcp-seed-resume-untested."
 ---
 
 The engine emits no Event about MCP servers. Per-server state lives only in `cmd/apogee`'s
