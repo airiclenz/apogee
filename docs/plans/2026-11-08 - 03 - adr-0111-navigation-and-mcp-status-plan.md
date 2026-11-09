@@ -202,7 +202,13 @@ header stops at x = m.width-1, body stops at `panelBodyX` — every section kind
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestPanelStops|TestSidePanelClick|TestDocMap' ./internal/tui/`
 **Commit:** `refactor(tui): derive side-panel stops with identities in paint order`
 
-## 6. Navigation mode spans the transcript and the side panel
+## 6. Navigation mode spans the transcript and the side panel — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): `refreshViewport` now seats the cursor through a new `Model.seatBlockCursor` (blockcursor.go) instead of calling `blockCursor.clamp` directly, so a transcript-standing cursor whose transcript loses every stop is handed to the panel there; the panel region is re-judged at key time by `reseatPanelCursor` (also called from `runViewKey`'s esc so a stale panel cursor is not stepped aside for).
+NOTES (2026-11-09): the shared panel-shown builder is `navModel(t, sections, events...) (Model, *fakeEngine)` in navmode_test.go, with `onlySections`, `panelCursorStop` and `transcriptCursorLine` helpers for items 7, 8, 9 and 20.
+NOTES (2026-11-09): `⏎` in the panel region is left unclaimed per the plan, so until item 7 it falls through to the prompt (an empty draft sends nothing); `^x` in the panel region inside a Run view therefore reaches the view's own stop until item 8.
+NOTES (2026-11-09): consequential edit — internal/tui/panes.go: made necessary by renaming the `block cursor` key-claim rung to `navigation mode` (keyClaimRungs comment names the rung).
+NOTES (2026-11-09): consequential edit — internal/tui/sessionview.go: made necessary by the blockCursor gaining a region and a remembered panel stop (the `cursor` field comment said "two plain fields").
 
 **What:** ADR 0111 D1–3 (region moves); `⏎` and anchoring are item 7, `^x` item 8. Depends on item 5.
 **Regression guard.** the existing cursor fixtures (modelWithRunningFanOut, modelWithToolBlock, newTestModel) run with the panel hidden, so navmode_test.go gains one shared builder with the side panel shown (panelModel-style, wide enough to dock, with an engine handle) that items 6, 7, 8, 9 and 20 reuse.

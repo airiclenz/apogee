@@ -1813,7 +1813,7 @@ func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, te
 // keyClaimOrder is the overlay precedence [Model.handleKey] walks, top rung first — after the frame
 // chords, which no rung is ever asked for ([Model.frameChord]): the modal overlays that own the
 // keyboard while they are up, then the report panes that claim only their
-// own keys, then the transcript's block cursor — and only then the frame's own verbs, the state-gated
+// own keys, then navigation mode's cursor — and only then the frame's own verbs, the state-gated
 // switches in handleKey itself.
 //
 // The order is load-bearing, which is why it is data: every rung states what its surface claims and
@@ -1822,7 +1822,7 @@ func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, te
 // carries its rung ([paneRank], panes.go) beside its gate and its claim, and init() lists the panes in
 // rank order ([keyClaimRungs]), each read off its row ([paneClaimant]) — so what a pane DOES with a
 // key and WHEN it is asked are both stated once, on its row, together with why it sits where it does.
-// The two rungs that are not panes — the run view and the block cursor — follow them, carried with
+// The two rungs that are not panes — the run view and navigation mode — follow them, carried with
 // their reasons on [transcriptClaimants]. Adding a pane's keys is its row and its rank; adding any
 // other surface is one entry there plus its key contract in its own file — never another `if` in
 // handleKey.
@@ -1837,7 +1837,7 @@ func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, te
 var keyClaimOrder []keyClaimant
 
 // transcriptClaimants are the rungs of [keyClaimOrder] that are not panes, in the order they close it:
-// they sit under every pane's rung, the run view first and the block cursor last of all.
+// they sit under every pane's rung, the run view first and navigation mode last of all.
 var transcriptClaimants = []keyClaimant{
 	{
 		// An open run view claims two keys — esc, which goes one level up (runview.go, ADR 0063), and
@@ -1848,9 +1848,11 @@ var transcriptClaimants = []keyClaimant{
 		//
 		// It sits BELOW every pane's rung because each of them answers its own esc first: a report a
 		// keystroke opened is dismissed by the esc the human means for it, and the view is still there
-		// behind it. It sits ABOVE the block cursor because esc is the way OUT of the view, and a
-		// highlight standing inside one is left by the same key ([Model.upRun] drops it) — one press,
-		// one level, rather than a press spent leaving a mode the human did not think they were in.
+		// behind it. It sits ABOVE navigation mode because esc is the way OUT of the view, and a
+		// highlight standing on the view's transcript is left by the same key ([Model.upRun] drops
+		// it) — one press, one level, rather than a press spent leaving a mode the human did not think
+		// they were in. A cursor standing in the side panel is the exception (ADR 0111): the panel is
+		// not the view, so esc there leaves only the mode and the view's claimant steps aside for it.
 		//
 		// The gate keeps it shut while a pane is waiting for an answer, where esc already means cancel
 		// (ask.go, approval.go): that is also what keeps the double-tap stop reachable from those two
@@ -1860,13 +1862,14 @@ var transcriptClaimants = []keyClaimant{
 		claim: paneClaim(Model.runViewKey),
 	},
 	{
-		// The transcript's modal block cursor claims its keys last of the claimants and ahead of the
-		// switches in handleKey, because two of them — ⏎ and esc — are the frame's own verbs and the mode
-		// exists to borrow them (blockcursor.go, design call 7). It is entered by ⌥↑/⌥↓ and left by esc
-		// or by typing, and the typing case is why its Model is taken whether or not the key was claimed:
-		// the printable key that ends the walk goes on to the prompt box with the mode already off. It is
-		// the one claimant whose unclaimed Model is kept, which is what [keyClaimant.claim] documents.
-		name:  "block cursor",
+		// Navigation mode — the modal cursor over the transcript and the side panel — claims its keys
+		// last of the claimants and ahead of the switches in handleKey, because several of them — ⏎,
+		// esc, ←/→ — are the frame's own verbs and the mode exists to borrow them (blockcursor.go,
+		// design call 7, ADR 0111). It is entered by ⌥↑/⌥↓ and left by esc or by typing, and the typing
+		// case is why its Model is taken whether or not the key was claimed: the printable key that ends
+		// the walk goes on to the prompt box with the mode already off. It is the one claimant whose
+		// unclaimed Model is kept, which is what [keyClaimant.claim] documents.
+		name:  "navigation mode",
 		claim: Model.blockCursorKey,
 	},
 }
@@ -3250,8 +3253,10 @@ func (m *Model) refreshViewport() {
 	m.padSeps = rendered.padSeps
 	// The keyboard cursor stands on that same map, so it is re-seated against the paint that just
 	// landed: this is the ONE place the map is restashed, and a highlight left on a line whose
-	// meaning moved would be a ⏎ opening some other block (blockCursor.clamp, blockcursor.go).
-	m.cursor = m.cursor.clamp(m.lineTargets, m.pads)
+	// meaning moved would be a ⏎ opening some other block (blockCursor.clamp, blockcursor.go). A
+	// cursor standing in a transcript that has no stop left is handed to the side panel's
+	// (seatBlockCursor).
+	m.cursor = m.seatBlockCursor()
 	if m.detached {
 		m.viewport.SetContentLines(rendered.lines)
 		m.floorShortScreenOffset()

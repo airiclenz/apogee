@@ -180,7 +180,9 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 // authority's measure: the separator, the gutter, and the content squared to the rest. With no
 // section to show it paints `nothing live` on its top row and leaves the rest blank — the column
 // stays on the frame either way, because nothing it shows may move it ([Model.panelShown]). The
-// separator is faint, and accent-bold while a drag holds it ([panelDrag]).
+// separator is faint, and accent-bold while a drag holds it ([panelDrag]). The row navigation mode's
+// cursor stands on, while it stands in the column, wears the selection tone across the content
+// ([Model.panelCursorRow]) — the same field the transcript's bar spends.
 func (m Model) sidePanelColumn(rows int) []string {
 	ruleStyle := m.th.statusFaint
 	if m.panelDrag.active {
@@ -189,13 +191,18 @@ func (m Model) sidePanelColumn(rows int) []string {
 	rule := ruleStyle.Render(sidePanelSeparator) + sidePanelGutter
 	content := m.sidePanelContent(rows)
 	contentWidth := m.panelContentWidth()
+	cursorRow := m.panelCursorRow(rows)
 	column := make([]string, rows)
 	for i := range column {
 		line := ""
 		if i < len(content) {
 			line = content[i]
 		}
-		column[i] = rule + squareLine(m.th.measure, line, contentWidth)
+		line = squareLine(m.th.measure, line, contentWidth)
+		if i == cursorRow {
+			line = shadeCells(m.th.measure, line, 0, contentWidth, m.th.selection)
+		}
+		column[i] = rule + line
 	}
 	return column
 }

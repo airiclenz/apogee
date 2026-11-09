@@ -157,9 +157,10 @@ type sessionView struct {
 	// Model's flashGen numbers it).
 	flash string
 
-	// cursor is the transcript's modal KEYBOARD pointer over the paint's click targets (the Model's
-	// lineTargets, blockcursor.go): whether the walk is on, and which content line its highlight is
-	// standing on. Two plain fields by ADR 0011, and a content line rather than a screen row so the
+	// cursor is navigation mode's KEYBOARD pointer over the paint's click targets (the Model's
+	// lineTargets, blockcursor.go) and the side panel's stops: whether the walk is on, which region it
+	// stands in, the content line its transcript place is on and the panel stop it remembers. Plain
+	// fields by ADR 0011, and a content line rather than a screen row so the
 	// highlight travels with the text it names through a scroll or a stream — refreshViewport keeps
 	// it standing on a real click surface (blockCursor.clamp) exactly as it keeps that map honest.
 	cursor blockCursor

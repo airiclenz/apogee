@@ -24,7 +24,7 @@ func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 		"thinking pane",
 		"advice pane",
 		"run view",
-		"block cursor",
+		"navigation mode",
 	}
 	if len(keyClaimOrder) != len(want) {
 		t.Fatalf("keyClaimOrder has %d claimants; want %d (%v)", len(keyClaimOrder), len(want), want)

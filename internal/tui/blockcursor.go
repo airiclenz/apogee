@@ -24,14 +24,84 @@ import (
 // rule of its own here, because the painter already marked each line for its deepest owner and a
 // level that is folded away paints no lines at all.
 //
-// The state is two plain fields on the value-copied Model (ADR 0011): whether the mode is on, and
+// The state is plain fields on the value-copied Model (ADR 0011): whether the mode is on, and
 // which CONTENT line the highlight is on. A content line rather than a screen row because the
 // scrollback is the stable coordinate — the same choice the mouse's press anchor makes — so a
 // scroll, a stream of new output or a repaint moves the highlight with the text it is pointing at
 // instead of leaving it on a row that now shows something else.
+//
+// Navigation mode (ADR 0111 D1–3) spans two regions — the transcript and the side panel's column —
+// and the cursor stands in one of them at a time while REMEMBERING its place in the other, so → and
+// ← move between the two and come back to where the reader left each. The panel's place is a stop
+// IDENTITY ([panelStopID]) rather than a row, because the column re-lays out under every Event; the
+// row it was last seen on is kept beside it as the hint a vanished identity falls back to.
 type blockCursor struct {
-	active bool // the mode is on: ↑/↓/⏎/esc are the transcript's until a printable key hands them back
-	line   int  // the index into Model.lines / Model.lineTargets the highlight is standing on
+	active bool      // the mode is on: ↑/↓/←/→/esc are the mode's until a printable key hands them back
+	region navRegion // which region the cursor stands in; the other one's place is only remembered
+	line   int       // the index into Model.lines / Model.lineTargets the transcript place is on
+
+	panel    panelStopID // the panel stop the panel place is on, while hasPanel
+	panelY   int         // the row that stop was last laid out on: the fallback when its identity is gone
+	hasPanel bool        // the panel has a place: the region was entered at least once this mode
+}
+
+// navRegion is which of navigation mode's two regions the cursor stands in.
+type navRegion int
+
+const (
+	regionTranscript navRegion = iota // the transcript's click surfaces (the zero value: the mode began there)
+	regionPanel                       // the side panel's stops ([Model.panelStops])
+)
+
+// inTranscript reports whether the cursor is on and standing in the transcript — the gate every
+// reader of the transcript place answers to, so a place only remembered while the cursor stands in
+// the panel is never painted, toggled, stopped or scrolled to.
+func (c blockCursor) inTranscript() bool {
+	return c.active && c.region == regionTranscript
+}
+
+// inPanel reports whether the cursor is on and standing in the side panel.
+func (c blockCursor) inPanel() bool {
+	return c.active && c.region == regionPanel
+}
+
+// standOnPanel is c with its panel place moved to stop.
+func (c blockCursor) standOnPanel(stop panelStop) blockCursor {
+	c.panel, c.panelY, c.hasPanel = stop.id, stop.y, true
+	return c
+}
+
+// panelStopIndex is the index in stops of the cursor's panel place: the stop with its identity, or —
+// the identity gone from the column — the stop nearest the row it was last on. It is false when the
+// cursor has no panel place or the column has no stops.
+func (c blockCursor) panelStopIndex(stops []panelStop) (int, bool) {
+	if !c.hasPanel || len(stops) == 0 {
+		return 0, false
+	}
+	if at := slices.IndexFunc(stops, func(s panelStop) bool { return s.id == c.panel }); at >= 0 {
+		return at, true
+	}
+	return nearestPanelStop(stops, c.panelY), true
+}
+
+// nearestPanelStop is the index of the stop in stops whose first row is closest to row, the upper
+// one on a tie. stops is never empty.
+func nearestPanelStop(stops []panelStop, row int) int {
+	best := 0
+	for i, stop := range stops {
+		if abs(stop.y-row) < abs(stops[best].y-row) {
+			best = i
+		}
+	}
+	return best
+}
+
+// abs is n's magnitude.
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // cursorStops is the ordered list of content lines the cursor may stand on: the FIRST line of every
@@ -101,13 +171,21 @@ func surfaceStop(targets []lineTarget, pads []bool, first int) int {
 // A line that is no longer a stop falls back to the stop BEFORE it, which is where the reader was
 // looking: opening a member of a group moves every stop below it down the body that appeared, and
 // the stop before is the surface the human was standing on when they pressed ⏎.
+//
+// The transcript place is kept honest while the cursor stands in the panel too, so ← returns to a
+// real stop; a transcript with no stops at all leaves a panel-standing cursor alone. A cursor
+// standing in a transcript that lost every stop comes back inactive here, and
+// [Model.seatBlockCursor] hands it to the panel or lets the mode end.
 func (c blockCursor) clamp(targets []lineTarget, pads []bool) blockCursor {
 	if !c.active {
 		return blockCursor{}
 	}
 	stops := cursorStops(targets, pads)
 	if len(stops) == 0 {
-		return blockCursor{} // nothing on the screen can be opened: the mode has nothing to be
+		if c.region == regionPanel {
+			return c
+		}
+		return blockCursor{} // nothing in the transcript can be opened: this region has nothing to be
 	}
 	i, exact := slices.BinarySearch(stops, c.line)
 	if exact {
@@ -115,6 +193,65 @@ func (c blockCursor) clamp(targets []lineTarget, pads []bool) blockCursor {
 	}
 	c.line = stops[max(i-1, 0)]
 	return c
+}
+
+// seatBlockCursor is the cursor re-seated against the paint that just landed ([Model.refreshViewport]):
+// the transcript place clamped onto a stop ([blockCursor.clamp]), and — when the region the cursor
+// stands in was the transcript and it lost every stop — the cursor handed to the panel's remembered
+// or first stop, the mode ending only where the panel has none either. The panel region needs no
+// seating here: the column is re-judged at the next key ([Model.reseatPanelCursor]) and at paint.
+func (m Model) seatBlockCursor() blockCursor {
+	c := m.cursor.clamp(m.lineTargets, m.pads)
+	if c.active || !m.cursor.inTranscript() {
+		return c
+	}
+	stops := m.navPanelStops()
+	if len(stops) == 0 {
+		return c
+	}
+	handed := m.cursor
+	handed.region = regionPanel
+	at, ok := handed.panelStopIndex(stops)
+	if !ok {
+		at = 0
+	}
+	return handed.standOnPanel(stops[at])
+}
+
+// navPanelStops is the side panel's stops as navigation mode may walk them: the column's stops
+// over the rows the frame gives it ([Model.panelStops]), none while the column does not show.
+func (m Model) navPanelStops() []panelStop {
+	if !m.panelShown() {
+		return nil
+	}
+	return m.panelStops(m.frameSpans().slotBottom)
+}
+
+// reseatPanelCursor re-judges a panel-standing cursor against the column as it stands now, before a
+// key is claimed: the column re-lays out under every Event and a deadline (the sub-agents linger)
+// can empty it with no key pressed, so its stop is found again by identity — or by the nearest row —
+// and a column with no stops left hands the cursor back to the transcript's place, or ends the mode
+// where the transcript has no stop either.
+func (m Model) reseatPanelCursor() Model {
+	if !m.cursor.inPanel() {
+		return m
+	}
+	stops := m.navPanelStops()
+	if at, ok := m.cursor.panelStopIndex(stops); ok {
+		m.cursor = m.cursor.standOnPanel(stops[at])
+		return m
+	}
+	if len(stops) > 0 {
+		m.cursor = m.cursor.standOnPanel(stops[0])
+		return m
+	}
+	if len(cursorStops(m.lineTargets, m.pads)) == 0 {
+		m.cursor = blockCursor{}
+		return m
+	}
+	m.cursor.region = regionTranscript
+	m.followBlockCursor()
+	return m
 }
 
 // blockCursorOwnsKeys reports whether the transcript's cursor may hold the frame's keys this frame.
@@ -134,15 +271,23 @@ func (m Model) blockCursorOwnsKeys() bool {
 // left to fall through to the prompt, so what the human typed lands in the box rather than being
 // swallowed by the walk they were in (design call 7).
 //
-// ⌥↑ / ⌥↓ both enter and move, so the mode costs no separate gesture to open. Inside it plain ↑/↓
-// move, ⏎ opens or closes the surface under the highlight, `^x` stops the delegation whose row it
-// stands on, and esc leaves without typing anything.
+// ⌥↑ / ⌥↓ both enter and move, so the mode costs no separate gesture to open; they enter in the
+// transcript, or in the side panel when the transcript has no stop. Inside the mode plain ↑/↓ move
+// within the region the cursor stands in, → and ← move it between the transcript and the panel
+// (ADR 0111 D1–3) — and are claimed even where there is nowhere to go, so the prompt's caret never
+// moves under a reader who is navigating — and esc leaves the mode from either region. In the
+// transcript ⏎ opens or closes the surface under the highlight and `^x` stops the delegation whose
+// row it stands on; in the panel neither is the mode's, and both go on to the frame.
 // Every other key — ⌃c, PgUp, ⇧⇥ — is left alone and leaves the mode standing: they are the frame's
 // own verbs, and none of them is a reason to lose your place in the scrollback.
+//
+// A panel-standing cursor is re-judged against the column first ([Model.reseatPanelCursor]), so a
+// key never acts on a stop the column no longer has.
 func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.blockCursorOwnsKeys() {
 		return m, nil, false
 	}
+	m = m.reseatPanelCursor()
 	switch msg.String() {
 	case "alt+up":
 		return m.moveBlockCursor(-1), nil, true
@@ -157,12 +302,19 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m.moveBlockCursor(-1), nil, true
 	case "down":
 		return m.moveBlockCursor(1), nil, true
-	case "enter":
-		next, cmd := m.toggleAtBlockCursor()
-		return next, cmd, true
+	case "right":
+		return m.enterPanelRegion(), nil, true
+	case "left":
+		return m.enterTranscriptRegion(), nil, true
 	case "esc":
 		m.cursor = blockCursor{}
 		return m, nil, true
+	case "enter":
+		if !m.cursor.inTranscript() {
+			return m, nil, false
+		}
+		next, cmd := m.toggleAtBlockCursor()
+		return next, cmd, true
 	case "ctrl+x":
 		// `^x` on a delegation's row stops that run alone — a member of a ✦ Sub-Agent umbrella, or a
 		// grandchild's row inside a view (ADR 0086 D5) — and leaves the mode standing: the row is
@@ -190,13 +342,44 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-// cursorRunHead is the delegation the highlight stands on, when it stands on one: an active cursor
-// whose line the paint marked as a header ([targetHeader]) of an entry that heads a run — a
+// enterPanelRegion is → : the cursor moves into the side panel, onto the stop it remembers there or,
+// on the first visit this mode, the stop nearest the transcript row it leaves. A panel with no stop
+// to stand on — or a column that does not show — leaves the cursor where it is.
+func (m Model) enterPanelRegion() Model {
+	if !m.cursor.inTranscript() {
+		return m
+	}
+	stops := m.navPanelStops()
+	if len(stops) == 0 {
+		return m
+	}
+	at, ok := m.cursor.panelStopIndex(stops)
+	if !ok {
+		at = nearestPanelStop(stops, m.blockCursorRow())
+	}
+	m.cursor.region = regionPanel
+	m.cursor = m.cursor.standOnPanel(stops[at])
+	return m
+}
+
+// enterTranscriptRegion is ← : the cursor moves back to the transcript row it remembers, scrolled
+// into view as any move there is. A transcript with no stop leaves the cursor in the panel.
+func (m Model) enterTranscriptRegion() Model {
+	if !m.cursor.inPanel() || len(cursorStops(m.lineTargets, m.pads)) == 0 {
+		return m
+	}
+	m.cursor.region = regionTranscript
+	m.followBlockCursor()
+	return m
+}
+
+// cursorRunHead is the delegation the highlight stands on, when it stands on one: a cursor standing
+// in the transcript whose line the paint marked as a header ([targetHeader]) of an entry that heads a run — a
 // delegation's collapsed row at any depth, a ✦ Sub-Agent umbrella's member rows included. It reads
 // the paint's own accounting (m.lineTargets), as [Model.toggleBlockAt] does, so the row `^x` stops is
 // the row the human sees highlighted.
 func (m Model) cursorRunHead() (entry, bool) {
-	if !m.cursor.active || m.cursor.line < 0 || m.cursor.line >= len(m.lineTargets) {
+	if !m.cursor.inTranscript() || m.cursor.line < 0 || m.cursor.line >= len(m.lineTargets) {
 		return entry{}, false
 	}
 	target := m.lineTargets[m.cursor.line]
@@ -219,38 +402,85 @@ func (m Model) cursorRunHead() (entry, bool) {
 // the top and reappeared at the bottom would lose the reader's place in a scrollback that is often
 // screens long, and the ask_user choice list already takes the same non-wrapping shape.
 //
+// Standing in the panel, the move walks the column's stops instead ([Model.movePanelCursor]), by the
+// same clamped rule.
+//
 // A live drag-selection is dropped on the way in. The transcript has one highlight and one meaning
 // for it — this is the thing you are pointing at — and the two would otherwise paint at once, which
 // is the same region arbitration the prompt's own selection is cleared for on every keypress
 // (handleKey).
 func (m Model) moveBlockCursor(dir int) Model {
+	if !m.cursor.active {
+		return m.enterNavigationMode(dir)
+	}
+	if m.cursor.region == regionPanel {
+		return m.movePanelCursor(dir)
+	}
 	stops := cursorStops(m.lineTargets, m.pads)
 	if len(stops) == 0 {
 		m.cursor = blockCursor{}
 		return m
 	}
-	if !m.cursor.active {
+	at, _ := slices.BinarySearch(stops, m.cursor.line)
+	m.cursor.line = stops[stepIndex(at, dir, len(stops))]
+	m.followBlockCursor()
+	return m
+}
+
+// enterNavigationMode turns the mode on from the prompt, at the end of the transcript's stops that
+// dir points away from — or, where the transcript has no stop, at that end of the side panel's
+// (ADR 0111 D3). With no stop in either region the mode stays off.
+func (m Model) enterNavigationMode(dir int) Model {
+	if stops := cursorStops(m.lineTargets, m.pads); len(stops) > 0 {
 		m.transcriptSel = transcriptSel{}
-		m.cursor = blockCursor{active: true, line: stops[len(stops)-1]}
-		if dir > 0 {
-			m.cursor.line = stops[0]
-		}
+		m.cursor = blockCursor{active: true, line: stops[entryIndex(dir, len(stops))]}
 		m.followBlockCursor()
 		return m
 	}
-	at, _ := slices.BinarySearch(stops, m.cursor.line)
-	m.cursor.line = stops[min(max(at+dir, 0), len(stops)-1)]
-	m.followBlockCursor()
+	stops := m.navPanelStops()
+	if len(stops) == 0 {
+		m.cursor = blockCursor{}
+		return m
+	}
+	m.transcriptSel = transcriptSel{}
+	m.cursor = blockCursor{active: true, region: regionPanel}.standOnPanel(stops[entryIndex(dir, len(stops))])
 	return m
+}
+
+// movePanelCursor moves a panel-standing cursor one stop in dir down the column, clamped at either
+// end; a column with no stops leaves it where it is (the next key re-judges it).
+func (m Model) movePanelCursor(dir int) Model {
+	stops := m.navPanelStops()
+	at, ok := m.cursor.panelStopIndex(stops)
+	if !ok {
+		return m
+	}
+	m.cursor = m.cursor.standOnPanel(stops[stepIndex(at, dir, len(stops))])
+	return m
+}
+
+// entryIndex is the stop a region is entered at from the prompt below it: the last for dir < 0 (⌥↑),
+// the first otherwise (⌥↓).
+func entryIndex(dir, count int) int {
+	if dir > 0 {
+		return 0
+	}
+	return count - 1
+}
+
+// stepIndex is at moved dir stops, clamped to a list of count — never wrapping.
+func stepIndex(at, dir, count int) int {
+	return min(max(at+dir, 0), count-1)
 }
 
 // blockCursorRow is the screen row the cursor's line is DRAWN on, or −1 when the transcript is not
 // showing it. It reads [Model.drawnLineAt] — the mapping the mouse and the selection highlight both
 // go through — rather than subtracting the scroll offset itself, so the sticky header's frozen rows
 // are answered for correctly: those rows draw the owning prompt's lines and not the offset's, and a
-// cursor "at" one of them is a cursor the human cannot see.
+// cursor "at" one of them is a cursor the human cannot see. A cursor standing in the side panel is
+// drawn on no transcript row: its transcript place is only remembered.
 func (m Model) blockCursorRow() int {
-	if !m.cursor.active {
+	if !m.cursor.inTranscript() {
 		return -1
 	}
 	for row := range m.transcriptRows() {
@@ -276,7 +506,7 @@ func (m Model) blockCursorRow() int {
 // the park — the span is a function of the offset that park just set — moves it to the first row the
 // header does not cover.
 func (m *Model) followBlockCursor() {
-	if !m.cursor.active || m.blockCursorRow() >= 0 {
+	if !m.cursor.inTranscript() || m.blockCursorRow() >= 0 {
 		return
 	}
 	rows := m.transcriptRows()
@@ -309,7 +539,8 @@ func (m *Model) followBlockCursor() {
 //
 // The anchor row is where the cursor is DRAWN, so ⏎ holds the highlighted row exactly where the eye
 // already is. A cursor the view is not showing cannot be toggled — followBlockCursor keeps that
-// unreachable after any move, and refusing beats guessing a row for a line nobody can see.
+// unreachable after any move, and refusing beats guessing a row for a line nobody can see — as is a
+// place the cursor only remembers while it stands in the side panel ([Model.blockCursorRow]).
 func (m Model) toggleAtBlockCursor() (Model, tea.Cmd) {
 	row := m.blockCursorRow()
 	if row < 0 {
@@ -325,9 +556,11 @@ func (m Model) toggleAtBlockCursor() (Model, tea.Cmd) {
 // The bar is the theme's SELECTION field — the one tone the frame already spends on "this is the
 // thing you are pointing at" (design call 7). It can never be confused with a drag-selection,
 // because the two never coexist: entering the mode drops the selection, and a mouse press ends the
-// paint of this one by moving the reader's attention back to the pointer.
+// paint of this one by moving the reader's attention back to the pointer. Only the region the cursor
+// stands in is painted: while it is in the side panel the transcript's remembered row is not
+// ([Model.panelCursorRow] paints that one).
 func (m Model) highlightBlockCursor(view string) string {
-	if !m.cursor.active || !m.blockCursorOwnsKeys() {
+	if !m.cursor.inTranscript() || !m.blockCursorOwnsKeys() {
 		return view
 	}
 	row := m.blockCursorRow()
@@ -340,4 +573,20 @@ func (m Model) highlightBlockCursor(view string) string {
 	}
 	lines[row] = shadeCells(m.th.measure, lines[row], 0, m.th.measure.Width(lines[row]), m.th.selection)
 	return strings.Join(lines, "\n")
+}
+
+// panelCursorRow is the column row the panel-standing cursor is painted on — its stop's first row
+// among the stops laid out over rows rows — or −1 where nothing is: the cursor stands in the
+// transcript, a decision holds the keys ([Model.blockCursorOwnsKeys], which takes the highlight with
+// them), or the column has no stop.
+func (m Model) panelCursorRow(rows int) int {
+	if !m.cursor.inPanel() || !m.blockCursorOwnsKeys() {
+		return -1
+	}
+	stops := m.panelStops(rows)
+	at, ok := m.cursor.panelStopIndex(stops)
+	if !ok {
+		return -1
+	}
+	return stops[at].y
 }

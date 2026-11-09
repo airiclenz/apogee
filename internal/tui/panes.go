@@ -313,7 +313,7 @@ func panesRankedBy(by func(paneRank) int) []framePane {
 
 // keyClaimRungs is [keyClaimOrder] derived: the panes that have a key rung, in rank order, each read
 // off its row ([paneClaimant]), followed by the surfaces that are not panes ([transcriptClaimants]) —
-// the run view, then the block cursor.
+// the run view, then navigation mode.
 func keyClaimRungs() []keyClaimant {
 	panes := panesRankedBy(func(r paneRank) int { return r.key })
 	order := make([]keyClaimant, 0, len(panes)+len(transcriptClaimants))
