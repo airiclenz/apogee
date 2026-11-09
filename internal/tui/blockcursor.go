@@ -666,7 +666,7 @@ func (m Model) highlightBlockCursor(view string) string {
 // markCursorRow paints line as the row navigation mode's cursor stands on: glyphCursorMark over its
 // first cell and the rest of it re-rendered under style, so the row reads as the cursor's by shape
 // as well as by tone. It is the one paint both regions' cursors wear — a transcript row from its
-// marker column ([Model.highlightBlockCursor]), a side-panel row from its gutter cell
+// marker column ([Model.highlightBlockCursor]), a side-panel row from its gutter's first cell
 // ([Model.sidePanelColumn]). The mark replaces a cell rather than adding one, so the row keeps the
 // width it was painted to. Like [shadeCells] it slices through the width authority, the measure the
 // row was painted in.
@@ -675,18 +675,18 @@ func markCursorRow(measure widthAuthority, line string, style lipgloss.Style) st
 	return style.Render(glyphCursorMark + ansi.Strip(rest))
 }
 
-// markPanelCursorRow paints line — a column row past its separator: the gutter cell, then the
-// content — as the panel cursor standing on the stop id wears it. A body stop's row is marked whole
-// ([markCursorRow]). A header row carries two stops (adr-0111-amend-1109b), so the mark tells them
-// apart by where the selection tone falls: the pin stop shades the lead pin cell alone, the title
-// stop the rest of the row past it, the pin cell left as painted — the ▌ over the gutter cell either
-// way, so a terminal painting no colour still shows the row.
-func markPanelCursorRow(measure widthAuthority, line string, id panelStopID, style lipgloss.Style) string {
+// markPanelCursorRow paints line — a column row past its separator: the gutter cells, then
+// the content — as the panel cursor standing on the stop id wears it. A body stop's row is marked
+// whole ([markCursorRow]). A header row carries two stops (adr-0111-amend-1109b), so the mark tells
+// them apart by where the selection tone falls: the pin stop shades the lead pin cell alone, the
+// title stop the rest of the row past it, the pin cell left as painted — the ▌ over the gutter's
+// first cell either way, so a terminal painting no colour still shows the row.
+func markPanelCursorRow(measure widthAuthority, line string, gutter int, id panelStopID, style lipgloss.Style) string {
 	if !id.isHeader {
 		return markCursorRow(measure, line, style)
 	}
 	width := measure.Width(line)
-	pin := measure.Width(sidePanelGutter) // the pin glyph's cell: the content's first
+	pin := gutter // the pin glyph's cell: the content's first
 	c0, c1 := pin, pin+1
 	if !id.isPin {
 		c0, c1 = pin+1, width

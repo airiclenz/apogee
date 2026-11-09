@@ -13,7 +13,7 @@ and `auto` (`ui.side-panel.sections`), and a click anywhere else on the header f
 that header or opens it again (`ui.side-panel.folded`). The keyboard reaches the same targets as the
 second region of **Navigation mode** (ADR 0111), whose `⏎` on a stop is that click — a header being
 two stops, its pin and its title (`adr-0111-amend-1109b`). The column itself appears or vanishes only when the window crosses
-a width threshold or `ui.side-panel.show` changes. It is 36 columns wide by default, and its width
+a width threshold or `ui.side-panel.show` changes. It is 44 columns wide by default, and its width
 changes only when the user drags its separator (at least 24 columns, and never so wide that the
 transcript drops under its floor), double-clicks the separator to reset it, or sets
 `ui.side-panel.width` (`/panel width <n>|reset`, `/settings`), so live content never re-wraps the

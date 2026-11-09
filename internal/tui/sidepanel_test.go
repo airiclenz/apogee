@@ -39,7 +39,8 @@ func sidePanelModel(t *testing.T, show domain.SidePanelShow, scrollbar bool, wid
 // TestSidePanelGate pins when the column shows: `auto` from a 137-column window, `on` from a
 // 117-column one, `off` and the zero UIPrefs' empty mode never — and the scroll bar's column counts
 // either way, so switching the bar off moves no threshold. While the column shows the transcript
-// slot is the window less its 36 columns, and the viewport is that slot less the bar.
+// slot is the window less the default width clamped to that room — the gate's 36 columns at the
+// threshold itself — and the viewport is that slot less the bar.
 func TestSidePanelGate(t *testing.T) {
 	t.Parallel()
 
@@ -64,7 +65,9 @@ func TestSidePanelGate(t *testing.T) {
 					}
 					slot := width
 					if want {
-						slot -= sidePanelWidth
+						// The default width, clamped to the room the show mode's floor leaves: the
+						// gate's own width at the threshold itself.
+						slot -= min(domain.DefaultSidePanelWidth, width-from+sidePanelGateWidth)
 					}
 					if got := m.slotWidth(); got != slot {
 						t.Errorf("width %d: slotWidth() = %d, want %d", width, got, slot)
@@ -89,7 +92,7 @@ func TestSidePanelSectionChangeMovesNothing(t *testing.T) {
 	t.Parallel()
 
 	m := sidePanelModel(t, domain.SidePanelShowAuto, true, 140)
-	key, wrap := m.frameKey(), m.transcriptWidth()
+	key, wrap, width := m.frameKey(), m.transcriptWidth(), m.panelWidth()
 
 	sections, _, _, _, err := m.settingsApplyLocal(domain.UIKeySidePanelSections, "[usage: pinned, tasks: hidden]")
 	if err != nil {
@@ -111,7 +114,7 @@ func TestSidePanelSectionChangeMovesNothing(t *testing.T) {
 	if off.frameKey() == key {
 		t.Errorf("switching the panel off left the frame key where it was")
 	}
-	if got, want := off.transcriptWidth(), wrap+sidePanelWidth; got != want {
+	if got, want := off.transcriptWidth(), wrap+width; got != want {
 		t.Errorf("switching the panel off wraps the transcript at %d columns, want %d", got, want)
 	}
 
@@ -126,7 +129,7 @@ func TestSidePanelSectionChangeMovesNothing(t *testing.T) {
 	if narrow.painted != narrow.frameKey() {
 		t.Errorf("narrowing the panel left the frame unsettled: painted %+v, key %+v", narrow.painted, narrow.frameKey())
 	}
-	if got, want := narrow.transcriptWidth(), wrap+sidePanelWidth-domain.MinSidePanelWidth; got != want {
+	if got, want := narrow.transcriptWidth(), wrap+width-domain.MinSidePanelWidth; got != want {
 		t.Errorf("narrowing the panel wraps the transcript at %d columns, want %d", got, want)
 	}
 }
@@ -134,7 +137,7 @@ func TestSidePanelSectionChangeMovesNothing(t *testing.T) {
 // TestSidePanelPaintedWidth pins the clamp the configured width paints through: an unset width
 // paints the default, a stated one paints as set while the window leaves the show mode's
 // transcript floor and the scroll-bar column beside it, and is held to that room — never below the
-// minimum — otherwise; the show gate counts the default width whatever is configured. The slot is
+// minimum — otherwise; the show gate counts its own width (sidePanelGateWidth) whatever is configured. The slot is
 // the window less the painted width, and the setting is never rewritten by the clamp.
 func TestSidePanelPaintedWidth(t *testing.T) {
 	t.Parallel()
@@ -146,7 +149,8 @@ func TestSidePanelPaintedWidth(t *testing.T) {
 		window int
 		want   int
 	}{
-		{name: "unset paints the default", show: domain.SidePanelShowAuto, stored: 0, window: 140, want: 36},
+		{name: "unset paints the default", show: domain.SidePanelShowAuto, stored: 0, window: 200, want: domain.DefaultSidePanelWidth},
+		{name: "unset docks clamped at the gate", show: domain.SidePanelShowAuto, stored: 0, window: 137, want: sidePanelGateWidth},
 		{name: "stated fits", show: domain.SidePanelShowAuto, stored: 60, window: 200, want: 60},
 		{name: "minimum fits", show: domain.SidePanelShowOn, stored: 24, window: 117, want: 24},
 		{name: "auto floor caps", show: domain.SidePanelShowAuto, stored: 60, window: 140, want: 39},
@@ -315,6 +319,102 @@ func TestSubAgentRowAlignsPastAnHour(t *testing.T) {
 	}
 }
 
+// TestSubAgentRowFactsPaintWholeAtTheMinimumWidth pins the narrow-width yield chain
+// (docs/layout/side-panel-layout.md, "Columns"): at the minimum width, under every spinner style, a
+// running sub-agent row's facts paint whole — the right margin and the gutter's extra cell yield
+// before any fact is cut, the name going first.
+func TestSubAgentRowFactsPaintWholeAtTheMinimumWidth(t *testing.T) {
+	t.Parallel()
+
+	for _, style := range domain.SpinnerStyleNames() {
+		t.Run(string(style), func(t *testing.T) {
+			t.Parallel()
+			m := panelModel(t, domain.DefaultSidePanelSections, 30)
+			m.opts.UI.Spinner = style
+			m.opts.UI.SidePanelWidth = domain.MinSidePanelWidth
+			m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+			row := sidepanel.SubAgentRow{Name: "alpha", Phase: sidepanel.PhaseRunning, Elapsed: 38 * time.Second,
+				Fill: sidepanel.Fill{Used: 62, Window: 100}}
+			facts := fmt.Sprintf(subAgentFactsFormat, "running", "38s", "62%")
+
+			painted := m.panelSubAgentRow(row, false)
+
+			if got, room := m.th.measure.Width(painted), m.panelContentWidth(); got > room {
+				t.Errorf("the row paints %d columns into %d: %q", got, room, ansi.Strip(painted))
+			}
+			if got := ansi.Strip(painted); !strings.HasSuffix(got, facts) {
+				t.Errorf("the row reads %q, want its facts %q whole", got, facts)
+			}
+		})
+	}
+}
+
+// TestSidePanelRightEdgeMeetsStatusLine pins the column's right margin
+// (docs/layout/side-panel-layout.md, "Columns"): on a wide window a header's fold indicator and a
+// row's right-aligned facts sit in the status line's last painted cell's column, bodyIndent short of
+// the window's edge.
+func TestSidePanelRightEdgeMeetsStatusLine(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, "[tasks: auto, changed-files: auto, usage: hidden]", 30, taskList(0, "one"),
+		// A full window, so the gauge's bar — the status line's last cells — paints solid blocks.
+		landedEdit(domain.EventBase{}, "a.go", 3, 1), panelUsageReading(testOpts.ContextWindow))
+	m = step(t, m, tea.WindowSizeMsg{Width: 170, Height: 30})
+	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
+	rule := slices.IndexFunc(frame, func(line string) bool { return strings.HasPrefix(line, "▔") })
+	if rule < 0 {
+		t.Fatal("no ▔ rule on the frame")
+	}
+	statusEdge := ansi.StringWidth(strings.TrimRight(frame[rule+1], " ")) - 1
+	if statusEdge < 0 {
+		t.Fatal("setup: the status line paints nothing on its right")
+	}
+
+	header := frame[panelRowY(t, m, "Tasks")]
+	file := frame[panelRowY(t, m, "a.go")]
+
+	if got := ansi.StringWidth(header[:strings.Index(header, glyphExpanded)]); got != statusEdge {
+		t.Errorf("the Tasks header's %s sits at column %d, the status line's last cell at %d", glyphExpanded, got, statusEdge)
+	}
+	if got := ansi.StringWidth(strings.TrimRight(file, " ")) - 1; got != statusEdge {
+		t.Errorf("the a.go row's facts end at column %d, the status line's last cell at %d", got, statusEdge)
+	}
+}
+
+// TestSidePanelPinCellIsNoGrip pins the grip to the separator and the one cell right of it
+// (adr-0110-amend-1108 (b)) whatever the gutter yields: at every width down to the minimum, under
+// every spinner style, a press on a header's lead pin cell toggles the pin and never arms a drag.
+func TestSidePanelPinCellIsNoGrip(t *testing.T) {
+	t.Parallel()
+
+	for _, style := range domain.SpinnerStyleNames() {
+		for _, width := range []int{domain.MinSidePanelWidth, 25, 26, 30, domain.DefaultSidePanelWidth} {
+			t.Run(fmt.Sprintf("%s/%d", style, width), func(t *testing.T) {
+				t.Parallel()
+				m := panelModel(t, "[tasks: auto]", 30, taskList(0, "one"))
+				m.opts.UI.Spinner = style
+				m.opts.UI.SidePanelWidth = width
+				m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30}).withFrameSpans()
+				pin, y := m.panelPinX(), panelRowY(t, m, "Tasks")
+
+				_, isGrip := m.panelGripAt(pin)
+				target, _ := m.panelTargetAt(pin, y)
+
+				if isGrip {
+					t.Errorf("the lead pin cell %d is a grip", pin)
+				}
+				if target.kind != panelTargetPin {
+					t.Errorf("a click on the lead pin cell %d follows %+v, want the pin toggle", pin, target)
+				}
+				for x := m.slotWidth(); x < m.slotWidth()+sidePanelGripWidth; x++ {
+					if _, isGrip := m.panelGripAt(x); !isGrip {
+						t.Errorf("column %d, the separator's or the cell right of it, is no grip", x)
+					}
+				}
+			})
+		}
+	}
+}
+
 // factColumns finds the painted sub-agent row whose elapsed field reads elapsed and returns the
 // column its phase word starts at and the column its elapsed field ends at.
 func factColumns(t *testing.T, column []string, elapsed string) [2]int {
@@ -423,7 +523,7 @@ func panelText(t *testing.T, m Model) []string {
 			}
 			return column
 		}
-		column = append(column, stripHeaderTail(strings.TrimRight(ansi.Cut(ln, slot+2, m.width), " ")))
+		column = append(column, stripHeaderTail(strings.TrimRight(ansi.Cut(ln, slot+m.panelLeftChrome(), m.width), " ")))
 	}
 	t.Fatal("no ▔ rule below the slot's rows")
 	return nil
@@ -434,7 +534,7 @@ func panelText(t *testing.T, m Model) []string {
 func columnText(m Model, rows int) []string {
 	column := m.sidePanelColumn(rows)
 	for i, row := range column {
-		column[i] = stripHeaderTail(strings.TrimRight(ansi.Cut(ansi.Strip(row), sidePanelChromeWidth, m.panelWidth()), " "))
+		column[i] = stripHeaderTail(strings.TrimRight(ansi.Cut(ansi.Strip(row), m.panelLeftChrome(), m.panelPaintWidth()), " "))
 	}
 	return column
 }
@@ -1540,8 +1640,8 @@ func panelRowY(t *testing.T, m Model, text string) int {
 }
 
 // panelBodyX is a column a click on a panel body row lands on: inside the content, clear of the
-// separator and the gutter.
-func panelBodyX(m Model) int { return m.slotWidth() + 4 }
+// left chrome ([Model.panelLeftChrome]) and of a header's pin cell.
+func panelBodyX(m Model) int { return m.slotWidth() + m.panelLeftChrome() + 2 }
 
 // entryAt is the transcript index of the call id by run, failing the test where none is.
 func entryAt(t *testing.T, m Model, run runRef, callID string) int {
@@ -2098,14 +2198,14 @@ func TestSidePanelHeaderLeadsWithPin(t *testing.T) {
 	} {
 		y := panelRowY(t, m, tc.title)
 		row := strings.TrimRight(ansi.Cut(frame[y], m.panelPinX(), m.width), " ")
-		dots := m.width - m.panelPinX() - len([]rune(tc.words)) - len(" ") - len(" ") - len([]rune(glyphExpanded))
+		dots := panelEdgeX(m) + 1 - m.panelPinX() - len([]rune(tc.words)) - len(" ") - len(" ") - len([]rune(glyphExpanded))
 		if want := tc.words + " " + strings.Repeat(dot, dots) + " " + glyphExpanded; row != want {
 			t.Errorf("the %s header paints %q, want %q", tc.title, row, want)
 		}
 		if got := ansi.Cut(frame[y], m.panelPinX(), m.panelPinX()+1); got != tc.pin {
 			t.Errorf("the %s header's pin cell holds %q, want %q", tc.title, got, tc.pin)
 		}
-		if got := ansi.Cut(frame[y], m.width-1, m.width); got != glyphExpanded {
+		if got := ansi.Cut(frame[y], panelEdgeX(m), panelEdgeX(m)+1); got != glyphExpanded {
 			t.Errorf("the %s header's right edge holds %q, want %q", tc.title, got, glyphExpanded)
 		}
 		if !strings.Contains(painted[y], m.th.toolIndicator.Render(glyphExpanded)) {
@@ -2140,8 +2240,12 @@ func foldedPanelModel(t *testing.T, folded domain.SidePanelFolded, glyphs domain
 func panelHeaderGlyph(t *testing.T, m Model, title string) string {
 	t.Helper()
 	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
-	return ansi.Cut(frame[panelRowY(t, m, title)], m.width-1, m.width)
+	return ansi.Cut(frame[panelRowY(t, m, title)], panelEdgeX(m), panelEdgeX(m)+1)
 }
+
+// panelEdgeX is the window column of the panel content's last cell — a header's fold indicator, a
+// row's right-aligned facts: the right margin ([Model.panelChrome]) short of the window's edge.
+func panelEdgeX(m Model) int { return m.width - 1 - m.panelChrome().margin }
 
 // TestSidePanelFoldTogglesAndWritesBack drives the fold (docs/layout/side-panel-layout.md,
 // "Pointer"): a click on a header anywhere but its pin glyph folds the section to its header row,
@@ -2177,7 +2281,7 @@ func TestSidePanelFoldTogglesAndWritesBack(t *testing.T) {
 			t.Errorf("the fold added %d transcript entries; a landed write says nothing", len(m.transcript.entries)-notes)
 		}
 
-		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+		m = clickCell(t, m, panelEdgeX(m), panelRowY(t, m, "Tasks"))
 
 		if got := panelHeaderGlyph(t, m, "Tasks"); got != glyphExpanded {
 			t.Errorf("the reopened header's edge holds %q, want %q", got, glyphExpanded)
@@ -2337,8 +2441,11 @@ func separatorDragModel(t *testing.T, failure error) (Model, *settingsSpy, int) 
 // separatorRow is the screen row the separator drags press on: one above the slot's bottom.
 const separatorRow = 2
 
+// draggedPanelWidth is the default-width panel after its separator is dragged 14 columns left.
+const draggedPanelWidth = domain.DefaultSidePanelWidth + 14
+
 // TestSidePanelSeparatorDrag pins the resize drag (adr-0110-amend-1108 (b), (c)): a press on the
-// separator or the gutter right of it grabs it, each held-button motion re-wraps the frame live at
+// separator or the cell right of it grabs it, each held-button motion re-wraps the frame live at
 // the clamped width, and the release writes `ui.side-panel.width` once — only when the painted width
 // moved off the press's, so a drag that comes back where it began writes nothing and leaves a stored
 // width the window clamps as it stood.
@@ -2358,10 +2465,10 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		if live != sep-4-scrollbarWidth {
 			t.Errorf("mid-drag viewport width %d, want %d — the transcript did not re-wrap live", live, sep-4-scrollbarWidth)
 		}
-		if m.panelWidth() != 50 || m.slotWidth() != sep-14 {
-			t.Errorf("panel %d, slot %d; want 50 and %d", m.panelWidth(), m.slotWidth(), sep-14)
+		if m.panelWidth() != draggedPanelWidth || m.slotWidth() != sep-14 {
+			t.Errorf("panel %d, slot %d; want %d and %d", m.panelWidth(), m.slotWidth(), draggedPanelWidth, sep-14)
 		}
-		if want := []string{domain.UIKeySidePanelWidth + "=50"}; !slices.Equal(spy.writes, want) {
+		if want := []string{domain.UIKeySidePanelWidth + "=" + strconv.Itoa(draggedPanelWidth)}; !slices.Equal(spy.writes, want) {
 			t.Errorf("writes %v, want %v", spy.writes, want)
 		}
 		if len(m.settingEdits) != 1 || m.settingEdits[0].path != domain.UIKeySidePanelWidth {
@@ -2369,7 +2476,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		}
 	})
 
-	t.Run("the gutter grabs it at its offset", func(t *testing.T) {
+	t.Run("the cell right of it grabs it at its offset", func(t *testing.T) {
 		t.Parallel()
 		m, spy, sep := separatorDragModel(t, nil)
 
@@ -2380,7 +2487,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		if m.slotWidth() != sep-10 {
 			t.Errorf("slot %d, want %d: the separator keeps one column left of the pointer", m.slotWidth(), sep-10)
 		}
-		if want := []string{domain.UIKeySidePanelWidth + "=46"}; !slices.Equal(spy.writes, want) {
+		if want := []string{domain.UIKeySidePanelWidth + "=" + strconv.Itoa(draggedPanelWidth-4)}; !slices.Equal(spy.writes, want) {
 			t.Errorf("writes %v, want %v", spy.writes, want)
 		}
 	})
@@ -2468,8 +2575,8 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		if got := strings.Count(plain(m.View()), note); got != 1 {
 			t.Errorf("the failed write is reported %d times, want once: %q", got, note)
 		}
-		if m.panelWidth() != 50 || len(m.settingEdits) != 0 {
-			t.Errorf("panel %d, journal %+v; want the dragged 50 standing and nothing journalled", m.panelWidth(), m.settingEdits)
+		if m.panelWidth() != draggedPanelWidth || len(m.settingEdits) != 0 {
+			t.Errorf("panel %d, journal %+v; want the dragged %d standing and nothing journalled", m.panelWidth(), m.settingEdits, draggedPanelWidth)
 		}
 	})
 
@@ -2485,7 +2592,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m = step(t, m, leftRelease(10, separatorRow))
 		m = step(t, m, tea.WindowSizeMsg{Width: 200, Height: 30})
 
-		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored || m.panelWidth() != sidePanelWidth {
+		if len(spy.writes) != 0 || m.opts.UI.SidePanelWidth != stored || m.panelWidth() != domain.DefaultSidePanelWidth {
 			t.Errorf("writes %v, stored %d, panel %d; want none, the press-time %d, and the default width back",
 				spy.writes, m.opts.UI.SidePanelWidth, m.panelWidth(), stored)
 		}
@@ -2500,10 +2607,10 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		m = step(t, m, tea.MouseMotionMsg{X: sep - 14, Y: separatorRow, Button: tea.MouseNone})
 		m = step(t, m, leftDrag(sep-20, separatorRow))
 
-		if m.panelDrag.active || m.mousePressed || m.panelWidth() != 50 {
-			t.Errorf("drag %+v, pressed %v, panel %d; want the SGR-35 release to end it at 50", m.panelDrag, m.mousePressed, m.panelWidth())
+		if m.panelDrag.active || m.mousePressed || m.panelWidth() != draggedPanelWidth {
+			t.Errorf("drag %+v, pressed %v, panel %d; want the SGR-35 release to end it at %d", m.panelDrag, m.mousePressed, m.panelWidth(), draggedPanelWidth)
 		}
-		if want := []string{domain.UIKeySidePanelWidth + "=50"}; !slices.Equal(spy.writes, want) {
+		if want := []string{domain.UIKeySidePanelWidth + "=" + strconv.Itoa(draggedPanelWidth)}; !slices.Equal(spy.writes, want) {
 			t.Errorf("writes %v, want %v", spy.writes, want)
 		}
 	})

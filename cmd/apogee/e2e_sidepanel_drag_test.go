@@ -29,7 +29,7 @@ const (
 
 	// sidePanelDefaultWidth is `ui.side-panel.width`'s default, separator included
 	// (domain.DefaultSidePanelWidth): where the separator stands before the drag.
-	sidePanelDefaultWidth = 36
+	sidePanelDefaultWidth = 44
 
 	// sidePanelDragColumns is how far left the drag moves the separator — well inside the limits a
 	// 160-column `auto` window allows (24 to 160 − 100 − 1 = 59 columns).

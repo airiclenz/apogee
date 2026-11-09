@@ -23,10 +23,13 @@ import (
 // Event fold keeps ([Model.foldSidePanel]).
 
 const (
-	// sidePanelWidth is the column's default width, its separator included — the width the show
-	// gate counts whatever `ui.side-panel.width` says ([sidePanelLeastWindow]), so a wider or
-	// narrower panel never moves the window it shows from. The painted width is [Model.panelWidth].
-	sidePanelWidth = domain.DefaultSidePanelWidth
+	// sidePanelGateWidth is the column width the show gate counts whatever `ui.side-panel.width`
+	// says ([sidePanelLeastWindow]), so a wider or narrower panel never moves the window it shows
+	// from. It is its own value, not [domain.DefaultSidePanelWidth]: the gate keeps its 137 / 117
+	// columns while the default width grew to 44 (owner call 2026-11-09), and a window between
+	// those docks the column clamped narrower ([Model.clampPanelWidth]). The painted width is
+	// [Model.panelWidth].
+	sidePanelGateWidth = 36
 	// sidePanelAutoFloor is the transcript width `ui.side-panel.show: auto` keeps beside the column,
 	// counting the scroll-bar column painted or not: the column shows from a 137-column window.
 	sidePanelAutoFloor = 100
@@ -35,8 +38,24 @@ const (
 	sidePanelOnFloor = 80
 	// sidePanelSeparator is the rule on the column's left edge, one cell in either width measure.
 	sidePanelSeparator = "│"
-	// sidePanelGutter is the blank cell between the separator and the column's content.
-	sidePanelGutter = " "
+	// sidePanelSeparatorWidth is the separator's cells.
+	sidePanelSeparatorWidth = 1
+	// sidePanelGutterWidth is the gutter's full width — the blank cells between the separator and
+	// the content — bodyIndent wide, as transcript text starts right of its marker column. A column
+	// too narrow for a full sub-agent row yields it to sidePanelGutterLeast ([Model.panelChrome]).
+	sidePanelGutterWidth = len(bodyIndent)
+	// sidePanelGutterLeast is the gutter the column never yields: the cell the cursor's ▌ stands in.
+	sidePanelGutterLeast = 1
+	// sidePanelMarginWidth is the blank cells right of the content at full width: the status line's
+	// right pad (bodyIndent), so the column's right-edge cells sit in the status line's last cell's
+	// column. A column too narrow for a full sub-agent row yields it first ([Model.panelChrome]).
+	sidePanelMarginWidth = len(bodyIndent)
+	// sidePanelGripWidth is the grip's cells: the separator and the one cell right of it
+	// ([Model.panelGripAt]) — fixed, so the lead pin cell is never a grip whatever the gutter yields.
+	sidePanelGripWidth = 2
+	// sidePanelOverlayGap is the blank column the overlay leaves between the transcript's text and
+	// its separator ([Model.panelOverlayGapHung]).
+	sidePanelOverlayGap = " "
 	// sidePanelEmpty is the one dim line an empty column paints at its top.
 	sidePanelEmpty = "nothing live"
 	// sidePanelMore is the bottom row's word when not every shown section's header fits: `+N more`.
@@ -64,9 +83,64 @@ const (
 	sidePanelFoldedSource = "side-panel.folded"
 )
 
-// sidePanelChromeWidth is the columns the column spends before its content: the separator and the
-// gutter beside it.
-const sidePanelChromeWidth = len(sidePanelGutter) + 1
+// subAgentFactsWidth is the cells subAgentFactsFormat's facts take, whatever they say.
+var subAgentFactsWidth = len(fmt.Sprintf(subAgentFactsFormat, "", "", ""))
+
+// panelChrome is the painted column's horizontal chrome around its content ([Model.panelChrome]).
+type panelChrome struct {
+	// inset is 1 where the overlay's blank column comes out of the column's own width — the
+	// overlay is as wide as the window, so there is no column left of it to hang the blank in
+	// ([Model.panelOverlayGapHung]) — and 0 otherwise. It is no column cell ([Model.panelCell]).
+	inset int
+	// gutter is the blank cells between the separator and the content.
+	gutter int
+	// margin is the blank cells right of the content.
+	margin int
+}
+
+// left is the columns the chrome spends left of the content: the inset blank, the separator and
+// the gutter.
+func (c panelChrome) left() int {
+	return c.inset + sidePanelSeparatorWidth + c.gutter
+}
+
+// panelChrome is the painted column's chrome this frame. Where the content holds a full sub-agent
+// row ([Model.panelFullSubAgentRowWidth]) the gutter and the margin are bodyIndent wide; narrower,
+// they yield a cell at a time before any fact is cut: the right margin first, then the gutter's
+// extra cell, down to the one cell the cursor's ▌ stands in.
+func (m Model) panelChrome() panelChrome {
+	width := m.panelPaintWidth()
+	chrome := panelChrome{gutter: sidePanelGutterWidth, margin: sidePanelMarginWidth}
+	if m.panelOverlaid() && !m.panelOverlayGapHung() {
+		chrome.inset = 1
+	}
+	short := m.panelFullSubAgentRowWidth() - (width - chrome.left() - chrome.margin)
+	marginYield := min(max(0, short), sidePanelMarginWidth)
+	chrome.margin -= marginYield
+	chrome.gutter -= min(max(0, short-marginYield), sidePanelGutterWidth-sidePanelGutterLeast)
+	return chrome
+}
+
+// panelLeftChrome is the columns the painted column spends before its content
+// ([Model.panelChrome]): the content's first cell is that far right of the column's left edge.
+func (m Model) panelLeftChrome() int {
+	return m.panelChrome().left()
+}
+
+// panelFullSubAgentRowWidth is the content width a sub-agent row needs to paint its facts whole
+// beside a name clipped to nothing: the lead cell and its space ([Model.panelSubAgentLeadWidth]),
+// the one-cell gap before the facts, and the facts.
+func (m Model) panelFullSubAgentRowWidth() int {
+	return m.panelSubAgentLeadWidth() + 1 + 1 + subAgentFactsWidth
+}
+
+// panelOverlayGapHung reports whether the overlay's blank column hangs left of the painted column
+// — the window has a column to spare beside it — rather than coming out of the column's own width
+// ([panelChrome.inset]). The docked column hangs none: the transcript's right gutter and the
+// scroll-bar column already stand between its text and the separator.
+func (m Model) panelOverlayGapHung() bool {
+	return m.panelOverlaid() && m.width-m.panelPaintWidth() >= 1
+}
 
 // configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the zero UIPrefs'
 // unset width (a test harness's, a block assembled field by field) resolves to
@@ -131,9 +205,11 @@ func (m Model) panelPaintWidth() int {
 }
 
 // panelContentWidth is the columns the panel's content has: the painted column
-// ([Model.panelPaintWidth]) less its separator and the gutter beside it, 0 while it is not painted.
+// ([Model.panelPaintWidth]) less its chrome ([Model.panelChrome]) — the left chrome and the right
+// margin — 0 while it is not painted.
 func (m Model) panelContentWidth() int {
-	return max(0, m.panelPaintWidth()-sidePanelChromeWidth)
+	chrome := m.panelChrome()
+	return max(0, m.panelPaintWidth()-chrome.left()-chrome.margin)
 }
 
 // panelSection is one section the column shows: which it is, what its header says and its body
@@ -211,13 +287,15 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 	return m.armPanelLinger()
 }
 
-// sidePanelColumn paints the column's rows rows, each exactly [Model.panelWidth] columns in the width
-// authority's measure: the separator, the gutter, and the content squared to the rest. With no
+// sidePanelColumn paints the column's rows rows, each exactly [Model.panelPaintWidth] columns in the
+// width authority's measure: the separator, the gutter, the content squared to its width
+// ([Model.panelContentWidth]) and the right margin ([Model.panelChrome]) — led by the overlay's blank
+// column where that comes out of the column's own width. With no
 // section to show it paints `nothing live` on its top row and leaves the rest blank — the column
 // stays on the frame either way, because nothing it shows may move it ([Model.panelShown]). The
 // separator is faint, and accent-bold while a drag holds it ([panelDrag]). The row navigation mode's
 // cursor stands on, while it stands in the column, wears the transcript's bar ([markPanelCursorRow],
-// [Model.panelCursorRow]): the ▌ in its gutter cell right of the separator and the selection tone
+// [Model.panelCursorRow]): the ▌ in the gutter's first cell, right of the separator, and the selection tone
 // across the content — on a header, across the part its stop is: the pin cell or the title. The
 // separator itself is untouched, so the grip stays where the pointer finds it.
 func (m Model) sidePanelColumn(rows int) []string {
@@ -227,7 +305,9 @@ func (m Model) sidePanelColumn(rows int) []string {
 	}
 	separator := ruleStyle.Render(sidePanelSeparator)
 	content := m.sidePanelContent(rows)
-	contentWidth := m.panelContentWidth()
+	chrome, contentWidth := m.panelChrome(), m.panelContentWidth()
+	inset, gutter := strings.Repeat(sidePanelOverlayGap, chrome.inset), strings.Repeat(" ", chrome.gutter)
+	margin := strings.Repeat(" ", chrome.margin)
 	cursorRow, cursorStop := m.panelCursorRow(rows)
 	column := make([]string, rows)
 	for i := range column {
@@ -235,11 +315,11 @@ func (m Model) sidePanelColumn(rows int) []string {
 		if i < len(content) {
 			line = content[i]
 		}
-		line = sidePanelGutter + squareLine(m.th.measure, line, contentWidth)
+		line = gutter + squareLine(m.th.measure, line, contentWidth)
 		if i == cursorRow {
-			line = markPanelCursorRow(m.th.measure, line, cursorStop, m.th.selection)
+			line = markPanelCursorRow(m.th.measure, line, chrome.gutter, cursorStop, m.th.selection)
 		}
-		column[i] = separator + line
+		column[i] = inset + separator + line + margin
 	}
 	return column
 }
@@ -735,15 +815,16 @@ type panelTarget struct {
 // over the transcript's right edge while overlaid), on a row above the session-name rule.
 func (m Model) panelCell(x, y int) bool {
 	width := m.panelPaintWidth()
-	return width > 0 && x >= m.width-width && x < m.width && y >= 0 && y < m.frameSpans().slotBottom
+	left := m.width - width + m.panelChrome().inset
+	return width > 0 && x >= left && x < m.width && y >= 0 && y < m.frameSpans().slotBottom
 }
 
 // panelPinX is the window column of a header's pin glyph: the painted column's first content cell,
-// its left edge ([Model.panelPaintWidth]) past the separator and the gutter. It reads the painted
-// column, never the slot: under the overlay the slot is the whole window, and the pin sits over the
-// transcript's right edge.
+// its left edge ([Model.panelPaintWidth]) past the left chrome ([Model.panelLeftChrome]). It reads
+// the painted column, never the slot: under the overlay the slot is the whole window, and the pin
+// sits over the transcript's right edge.
 func (m Model) panelPinX() int {
-	return m.width - m.panelPaintWidth() + sidePanelChromeWidth
+	return m.width - m.panelPaintWidth() + m.panelLeftChrome()
 }
 
 // panelTargetAt answers what a click at (x, y) does on the column of the frame m composes (pre in
@@ -817,7 +898,7 @@ func (m Model) panelWriteAt(row sidepanel.FileRow) (int, bool) {
 // handleSidePanelClick answers a left-click on the column, asked before every other region of the
 // click chain: the column claims each of its cells, and a click there drops the prompt's and the
 // transcript's selections, so nothing under it — a pane's row, a block's header, a drag anchor —
-// is reached through it. A press on the grip — the separator or the gutter right of it — starts a
+// is reached through it. A press on the grip — the separator or the cell right of it — starts a
 // resize drag ([panelDrag]) and follows no target, unless it is the second press of a double-click
 // ([Model.panelDoubleClicked]), which resets the width instead and starts nothing; elsewhere a
 // target acts on the press (followPanelTarget), and a cell that targets nothing is claimed and does
@@ -849,7 +930,7 @@ type panelDrag struct {
 	// active is true from the press on the grip until the drag ends.
 	active bool
 	// grabOffset is the pointer's column less the separator's at the press: 0 on the separator, 1 on
-	// the gutter — kept, so the separator stays that far left of the pointer however it moves.
+	// the cell right of it — kept, so the separator stays that far left of the pointer however it moves.
 	grabOffset int
 	// startWidth is the painted width at the press ([Model.panelWidth]): the release writes only a
 	// width that differs from it.
@@ -880,13 +961,14 @@ func (m Model) panelDoubleClicked(at time.Time) bool {
 }
 
 // panelGripAt answers whether column x of a press already on the column ([Model.panelTargetAt]) is
-// its grip — the separator or the gutter right of it — and how far right of the separator it is.
+// its grip — the separator or the one cell right of it ([sidePanelGripWidth]), whatever the gutter
+// yields, so the lead pin cell is never one — and how far right of the separator it is.
 // While watching the grip is inert: the press is claimed as any column cell is, and starts nothing.
 // The overlay has no grip at all (ADR 0111 D7): the separator belongs to the docked column, and an
 // overlay the window cannot dock has no width a drag could set.
 func (m Model) panelGripAt(x int) (grab int, isGrip bool) {
 	grab = x - m.slotWidth()
-	if m.watch.isActive || m.panelOverlaid() || grab < 0 || grab >= sidePanelChromeWidth {
+	if m.watch.isActive || m.panelOverlaid() || grab < 0 || grab >= sidePanelGripWidth {
 		return 0, false
 	}
 	return grab, true
@@ -1186,7 +1268,7 @@ func withSectionMode(
 }
 
 // sidePanelLeastWindow is the narrowest window show draws the column in: the floor the transcript
-// keeps beside it ([sidePanelTranscriptFloor]) plus the column at its default width and the
+// keeps beside it ([sidePanelTranscriptFloor]) plus the column at the gate's width ([sidePanelGateWidth]) and the
 // scroll-bar column, counted painted or not ([Model.panelShown]). ok is false for a mode that never
 // draws it: `off`, and the zero UIPrefs' empty mode.
 func sidePanelLeastWindow(show domain.SidePanelShow) (least int, ok bool) {
@@ -1194,7 +1276,7 @@ func sidePanelLeastWindow(show domain.SidePanelShow) (least int, ok bool) {
 	if !ok {
 		return 0, false
 	}
-	return floor + sidePanelWidth + scrollbarWidth, true
+	return floor + sidePanelGateWidth + scrollbarWidth, true
 }
 
 // sidePanelTranscriptFloor is the transcript width show keeps beside the column, the scroll-bar

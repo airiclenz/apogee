@@ -3207,9 +3207,9 @@ frame asks for focus reports, and a terminal that sends none never reads as blur
 ## The side panel
 
 On a wide terminal a column on the right of the transcript slot keeps live session state in view
-(ADR 0110). It is 36 columns wide by default, and the user resizes it by dragging its separator,
+(ADR 0110). It is 44 columns wide by default, and the user resizes it by dragging its separator,
 between 24 columns and the window less the transcript floor (100 under `auto`, 80 under `on`) less
-the scroll-bar column; a double-click on the separator or `/panel width reset` puts back the 36, and
+the scroll-bar column; a double-click on the separator or `/panel width reset` puts back the 44, and
 `/panel width <n>` sets it outright (adr-0110-amend-1108). Its shape, sections, thresholds, pointer
 rules and keyboard are specced in [`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md).
 The keyboard reaches it through **navigation mode** (ADR 0111): the block cursor's walk spans two

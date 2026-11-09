@@ -1187,9 +1187,9 @@ update-check: true
 # while the transcript keeps at least 100 columns beside it, `on` while it keeps at least 80, and
 # `off` never. Default `auto`. Switch live from /settings.
 #
-# `side-panel.width` is the panel's width in columns: 24 or more, default 36. A window too narrow
+# `side-panel.width` is the panel's width in columns: 24 or more, default 44. A window too narrow
 # for it draws the panel narrower without changing the setting. Drag the panel's separator to
-# resize it (written here on release; a double-click puts back 36), or change it live from
+# resize it (written here on release; a double-click puts back 44), or change it live from
 # /settings or with `/panel width <n>|reset`.
 #
 # `side-panel.sections` lists the panel's sections in the order it shows them — `sub-agents`,
@@ -1218,7 +1218,7 @@ ui:
   git-fetch: true        # false = no background git fetch; the footer's ↓ counts only what is fetched
   side-panel:
     show: auto           # auto | on | off — the side panel right of the transcript, by window width
-    # width: 36          # columns, 24 or more
+    # width: 44          # columns, 24 or more
     # sections: [sub-agents: auto, tasks: auto, changed-files: auto, usage: auto, mcp: auto]  # pinned | auto | hidden
     # folded: []         # e.g. [usage, mcp] — sections folded under their headers
   # footer:

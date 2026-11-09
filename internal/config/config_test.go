@@ -32,12 +32,12 @@ func countptr(n int) *WholeCount { w := WholeCount(n); return &w }
 // guard waiting 120 seconds of engine silence out, the skill-suggestion band painting, the task-list cards open, and a Tools umbrella
 // folding past five type rows with large umbrellas starting folded, all drawn in the unicode glyph set, with the
 // terminal bell rung when apogee waits on the human, the footer's periodic git fetch on, the footer laid out on two rows, and the side panel
-// drawn 36 columns wide on a wide window with every section in auto. It is spelled out rather than taken from
+// drawn 44 columns wide on a wide window with every section in auto. It is spelled out rather than taken from
 // domain.DefaultUIPrefs, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
 	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-	FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault}
+	FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault}
 
 // wantFooterRowsDefault is the `ui.footer.rows` a config that names none resolves to — the upstream
 // row, the mode marker at its right edge, above the workspace row — spelled out for wantUIDefault's
@@ -303,7 +303,7 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) {
 				o.UI = domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
 					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-					FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault}
+					FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault}
 			},
 		},
 		{
@@ -5749,7 +5749,7 @@ func TestApplyConfigUI(t *testing.T) {
 
 	want := domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
 		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-		FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault}
+		FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
 	}
@@ -6258,21 +6258,21 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			yaml: "ui:\n  spinner: classic\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
@@ -6281,14 +6281,14 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			yaml: "ui:\n  show-scrollbar: true\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			// The band's key, the one whose default is TRUE: an explicit false takes the band away and
@@ -6297,7 +6297,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			yaml: "ui:\n  skill-suggestions: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			// The task-list fold key, the other default-TRUE bool: an explicit false starts the cards
@@ -6306,7 +6306,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			yaml: "ui:\n  task-list-open: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			// And the newest key is independent in both directions: turning the stall guard off says
@@ -6315,7 +6315,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			yaml: "ui:\n  stall-after: 0\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: true,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 		{
 			// The footer's fetch key, default TRUE: an explicit false stops the fetch and leaves the
@@ -6324,7 +6324,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			yaml: "ui:\n  git-fetch: false\n",
 			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5, Glyphs: domain.GlyphsUnicode, Notify: domain.NotifyBell, GitFetch: false,
-				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 36, SidePanelSections: wantSidePanelSectionsDefault},
+				FooterRows: wantFooterRowsDefault, SidePanelShow: domain.SidePanelShowAuto, SidePanelWidth: 44, SidePanelSections: wantSidePanelSectionsDefault},
 		},
 	}
 	for _, tt := range tests {
@@ -6575,7 +6575,7 @@ func TestApplyConfigUISidePanelLoadsFromTheGlobalFile(t *testing.T) {
 }
 
 // TestApplyConfigUISidePanelWidthLoadsFromTheGlobalFile: `ui.side-panel.width` lands the columns the
-// file states, and a file that states none — no block, a block without the key — resolves to 36,
+// file states, and a file that states none — no block, a block without the key — resolves to 44,
 // leaving every other key of the block alone.
 func TestApplyConfigUISidePanelWidthLoadsFromTheGlobalFile(t *testing.T) {
 	t.Parallel()
@@ -6585,8 +6585,8 @@ func TestApplyConfigUISidePanelWidthLoadsFromTheGlobalFile(t *testing.T) {
 	}{
 		{"a stated width", "ui:\n  side-panel:\n    width: 48\n", 48},
 		{"the floor", "ui:\n  side-panel:\n    width: 24\n", 24},
-		{"no width key", "ui:\n  side-panel:\n    show: auto\n", 36},
-		{"no side-panel block", "mode: auto\n", 36},
+		{"no width key", "ui:\n  side-panel:\n    show: auto\n", 44},
+		{"no side-panel block", "mode: auto\n", 44},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

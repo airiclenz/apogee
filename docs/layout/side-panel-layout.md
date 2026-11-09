@@ -6,7 +6,7 @@
 
 # The side panel
 
-The side panel is a column on the right of the transcript slot, 36 columns wide by default and
+The side panel is a column on the right of the transcript slot, 44 columns wide by default and
 resized by dragging its separator. It keeps live session state in
 view: sub-agents, the task list, files changed this session, usage, and the MCP servers. It is a
 glance. The detail views (Run view, the task-list card, `/usage`, `/mcp`) stay where they are, and a click on a section opens
@@ -39,11 +39,20 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 - **Rows:** every row above the session-name rule, the same rows the transcript slot spans. The
   session-name rule, status line, prompt box and footer keep the full window width.
 - **Columns:** `ui.side-panel.width` painted columns, the separator `│` included, measured by the
-  width authority (ADR 0030): 36 by default. The painted width is clamped to at least 24 and at most
+  width authority (ADR 0030): 44 by default. The painted width is clamped to at least 24 and at most
   the window less the transcript floor (100 under `auto`, 80 under `on`) less the scroll-bar column
   ([adr-0110-amend-1108](../../.capcom/knowledge/decisions/adr-0110/adr-0110-amend-1108.md) (a)).
   The clamp never rewrites the setting, so a window grown back paints the stored width again. The
-  transcript's scroll bar stays on the transcript's own right edge, left of the separator.
+  transcript's scroll bar stays on the transcript's own right edge, left of the separator. Inside
+  the column come the separator, then a blank left gutter as wide as the transcript's body
+  indent (two cells), so the content starts as far right of the separator as transcript text does
+  of its marker column; then the content; then a right margin of the same two cells, so a header's
+  fold indicator and a row's right-aligned facts sit in the column of the status line's last cell.
+  Where the content would be narrower than a full sub-agent row — its lead cell and the space after
+  it, the one-cell gap and its facts — the chrome yields a cell at a time before any fact is cut:
+  the right margin first, then the gutter's second cell; the gutter's first cell, where the cursor's
+  `▌` stands, never yields, and past that the sub-agent's name is clipped to make room. The minimum
+  width 24 paints a full sub-agent row's facts whole under every spinner style.
 - **The slot's panes** (`/settings`, approvals, report panes, Run view) paint in the narrowed slot
   while the panel shows. Popups keep their own placement rules.
 
@@ -57,8 +66,9 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 
 The thresholds always count the scroll-bar column, painted or not, so a bar appearing never moves
 the panel across a threshold (`layout.md`, "The scroll bar and the column it hangs in"). They are
-computed with the default width 36 whatever `ui.side-panel.width` says, so a wider or narrower panel
-never moves the window it shows from.
+computed with a fixed gate width of 36 whatever `ui.side-panel.width` says, so a wider or narrower
+panel never moves the window it shows from. The gate width is not the default width: between 137
+and 145 columns under `auto` the default-width panel docks clamped narrower than 44.
 
 - The column appears or vanishes **only** when the window crosses that row's threshold, or when the
   setting changes (`/panel on|off|auto`, or `/settings`).
@@ -79,6 +89,11 @@ above the session-name rule, with the cursor on one of its stops.
 - **Width:** `ui.side-panel.width` clamped to the window alone — the overlay keeps no transcript
   floor beside it. The overlay never writes the setting, and it has no grip: its separator and the
   gutter beside it are inert, so it cannot be resized or reset by a double-click.
+- **A blank column beside it.** One blank column stands between the transcript's text and the
+  overlay's separator, so the text never runs into the `│`. It hangs left of the overlay where the
+  window has a column to spare, and comes out of the overlay's own width where the overlay is as
+  wide as the window. It is not a column cell: a click there is a click outside, and closes the
+  overlay.
 - **The transcript is not re-wrapped.** The slot, the viewport and every wrapped line stay exactly
   what they were; the overlay only paints over the rows' right-hand cells.
 - **It lives exactly while navigation mode stands in the panel.** `←` closes it (the cursor goes back
@@ -217,15 +232,16 @@ When the shown sections need more rows than the slot has:
 - While watching a session, a click on a pin glyph writes nothing: it flashes the watch refusal, and
   the hover there shows the default arrow. A fold is the viewer's own: it toggles and writes while
   watching too.
-- A left-button press on the **grip** — the separator column or the gutter column right of it, on
-  any row above the session-name rule — starts a resize drag. The separator keeps its grab offset
+- A left-button press on the **grip** — the separator column or the one column right of it, on
+  any row above the session-name rule — starts a resize drag. The grip is those two columns however
+  the gutter yields, so a press on a header's pin glyph is never one. The separator keeps its grab offset
   from the pointer and moves with it, clamped to the limits under "Where it sits"; the panel and the
   transcript re-wrap on every column it moves, and the separator is drawn in the accent tone, bold,
   while the drag holds it. The release writes `ui.side-panel.width` to the global config once, and
   only when the width differs from the one at the press; a failed save keeps the width for the
   session and says `not saved`. A window narrowed until the column hides ends the drag with no write.
 - A **double-click** on the grip (two presses within 500 ms, the first moving nothing) resets the
-  width to the default 36 and starts no drag.
+  width to the default 44 and starts no drag.
 - The hover shape over the grip is the default arrow: there is no resize cursor (ADR 0106 admits
   only `default`, `text` and `pointer`). A drag starts nowhere else, and the grip is inert while
   watching a session.
@@ -271,7 +287,7 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
   the usage report, the mcp report — rather than by row. A stop that has gone falls back to the stop of the same
   section nearest the row it was on, then to the column's first stop; a column left with no stop
   hands the cursor to the transcript, or ends the mode where the transcript has none either.
-- **The mark.** The cursor's row wears a `▌` in the blank gutter cell right of the separator, plus the
+- **The mark.** The cursor's row wears a `▌` in the gutter's first cell, right of the separator, plus the
   selection tone across its content, so a terminal that paints no colour still shows it (ADR 0111
   D6, ADR 0052 D4); the separator is untouched, so the grip stays put. A stop of several rows is
   marked on its first. A header's two stops share its row, so the tone tells them apart: on the pin
@@ -294,7 +310,7 @@ conversation gives the panel back to the top level.
 - `/panel pin|unpin|hide <section>` sets one section's mode (`unpin` → `auto`).
 - `/panel width <n>` sets `ui.side-panel.width` to `<n>` columns (24 or more; a window too narrow
   for it paints the clamped width without changing the setting), and `/panel width reset` returns it
-  to the default 36.
+  to the default 44.
 - Bare `/panel` reports the mode and every section's mode
   (`side panel: auto — sub-agents auto · tasks pinned · …`), adding
   `(not docked: the window is narrower than N columns)` when the mode would draw the column but the

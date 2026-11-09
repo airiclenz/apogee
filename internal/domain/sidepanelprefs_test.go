@@ -161,14 +161,14 @@ func TestSidePanelShowZeroValidatesAndBadIsRefusedNamingTheKey(t *testing.T) {
 	}
 }
 
-// TestSidePanelWidthValidateAndSetJudgeTheStatedWidth: the default is 36 and `""` reads as it; a
+// TestSidePanelWidthValidateAndSetJudgeTheStatedWidth: the default is 44 and `""` reads as it; a
 // zero field is the unset width and validates, while Set — a stated value — refuses 0 as it refuses
 // any width below 24; 24 and up land as written; and the parser refuses text that is no number.
 func TestSidePanelWidthValidateAndSetJudgeTheStatedWidth(t *testing.T) {
 	t.Parallel()
 
-	if got := DefaultUIPrefs().SidePanelWidth; got != 36 {
-		t.Errorf("DefaultUIPrefs().SidePanelWidth = %d; want 36", got)
+	if got := DefaultUIPrefs().SidePanelWidth; got != 44 {
+		t.Errorf("DefaultUIPrefs().SidePanelWidth = %d; want 44", got)
 	}
 	if got, err := ParseSidePanelWidth("  "); err != nil || got != DefaultSidePanelWidth {
 		t.Errorf(`ParseSidePanelWidth("  ") = %d, %v; want the default`, got, err)

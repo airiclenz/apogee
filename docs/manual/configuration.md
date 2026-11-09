@@ -1316,7 +1316,7 @@ never. Any other word is a startup error that names the key. It lives in a neste
 block, and `/settings` edits it. What the panel shows, and what a click on it does, is under [The
 side panel](#the-side-panel) below.
 
-`ui.side-panel.width` is the panel's width in columns: a whole number of 24 or more, default 36.
+`ui.side-panel.width` is the panel's width in columns: a whole number of 24 or more, default 44.
 A window too narrow to keep the transcript's floor beside a panel that wide draws the panel
 narrower, without changing the setting. A width below 24 — `0` included — or one that
 is not a whole number is a startup error that names the key. It lives in the same `side-panel:`
@@ -1377,7 +1377,7 @@ skill, and `/skills` lists them back so you can see what a skill declared.
 
 ### The side panel
 
-On a wide terminal apogee draws a panel on the right of the transcript, 36 columns wide unless you
+On a wide terminal apogee draws a panel on the right of the transcript, 44 columns wide unless you
 drag it wider or narrower (`ui.side-panel.width`), that keeps the
 session's live state in view: the sub-agents at work, the task list, the files changed this session,
 the usage and the MCP servers. It is a glance, not a workspace: the views it summarises (a sub-agent's run view,
@@ -1432,12 +1432,12 @@ config. A click anywhere else on a header folds the section to its header, or op
 saves `ui.side-panel.folded` silently, so the fold survives a restart (opening a section that only
 lacked room saves nothing, as above); it works while watching a
 session too, and a save that fails says `side-panel.folded: not saved` and keeps the fold for the
-session. Dragging the panel's separator — the `│` on its left edge, or the blank column beside it —
+session. Dragging the panel's separator — the `│` on its left edge, or the one column right of it —
 resizes the panel: the panel and your conversation re-wrap as you drag, and the separator lights up
 in the accent colour while you hold it. The panel stays at least 24 columns wide, and leaves the
 transcript its 100 columns (80 under `on`) and its scroll bar. Letting go saves the new width as
 `ui.side-panel.width` to your global config; a double-click on the separator puts back the default
-36. A window too narrow for the width you chose draws the panel narrower without changing the
+44. A window too narrow for the width you chose draws the panel narrower without changing the
 setting, and a window grown back draws your width again. Blank cells and the mouse wheel do
 nothing there.
 
@@ -1450,7 +1450,7 @@ top level.
 **From the prompt.** `/panel on`, `/panel off` and `/panel auto` set `ui.side-panel.show`;
 `/panel pin <section>`, `/panel unpin <section>` and `/panel hide <section>` set one section's mode;
 `/panel width <n>` sets `ui.side-panel.width` to `<n>` columns, and `/panel width reset` returns it
-to the default 36. Bare `/panel` reports the settings in force and says when the window is too
+to the default 44. Bare `/panel` reports the settings in force and says when the window is too
 narrow to dock the panel — and then also opens it over the conversation, with the bar on its first
 row, when it has something to stand on. Every change is saved to your global config ([commands](commands.md)).
 The width has no key of its own: drag the separator or use `/panel width`.

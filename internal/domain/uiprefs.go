@@ -626,7 +626,7 @@ func UIKeys() []string {
 // umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
 // the unicode glyph set, the terminal bell when apogee waits on the human, the footer's
 // periodic git fetch on, the footer laid out on two rows, the upstream above the workspace, and the
-// side panel drawn 36 columns wide where the window has room for it, every section in auto and none
+// side panel drawn 44 columns wide where the window has room for it, every section in auto and none
 // folded.
 // Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {

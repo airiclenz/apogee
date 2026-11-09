@@ -52,7 +52,7 @@ func ParseSidePanelShow(s string) (SidePanelShow, error) {
 
 // DefaultSidePanelWidth is the side panel's width in columns for a config that names no
 // `ui.side-panel.width:`, and what a zero [UIPrefs.SidePanelWidth] resolves to.
-const DefaultSidePanelWidth = 36
+const DefaultSidePanelWidth = 44
 
 // MinSidePanelWidth is the narrowest `ui.side-panel.width` a config may state: below it a section's
 // header and its rows no longer fit beside their marks.

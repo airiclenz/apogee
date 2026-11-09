@@ -3725,9 +3725,18 @@ func (m Model) View() tea.View {
 	// the walk above: that walk is the one frameSpans shares, and the column moves no row of it.
 	// Overlaid on a narrow window (ADR 0111 D7) the same column is hung over the right edge of those
 	// rows instead: they were laid out at the whole window's width, which the overlay never changes,
-	// so it covers their last columns and re-wraps nothing.
+	// so it covers their last columns and re-wraps nothing — and one column further left, the blank
+	// column it leaves between their text and its separator, where the window has that column to
+	// spare (panelOverlayGapHung; otherwise the blank comes out of the overlay's own width).
 	if width := m.panelPaintWidth(); width > 0 {
-		rows = []string{joinColumn(m.th.measure, rows, m.width-width, m.sidePanelColumn(belowSlot))}
+		column, left := m.sidePanelColumn(belowSlot), m.width-width
+		if m.panelOverlayGapHung() {
+			for i := range column {
+				column[i] = sidePanelOverlayGap + column[i]
+			}
+			left -= len(sidePanelOverlayGap)
+		}
+		rows = []string{joinColumn(m.th.measure, rows, left, column)}
 	}
 	// Then the ▔ top-edge hairline capping the chrome, and the status line under it.
 	rows = append(rows, m.topRule(), m.statusLine())

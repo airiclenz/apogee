@@ -147,6 +147,46 @@ func TestOverlayLeavesTranscriptLinesByteIdentical(t *testing.T) {
 	}
 }
 
+// TestOverlayLeavesBlankColumnBesideTranscript pins the overlay's blank column
+// (docs/layout/side-panel-layout.md, "Overlay"): one blank cell stands between the transcript's
+// text and the overlay's separator on every row above the session-name rule — hung left of the
+// overlay where the window has the column to spare, out of the overlay's own width where the
+// overlay is as wide as the window — and that cell is the transcript's, never a column cell.
+func TestOverlayLeavesBlankColumnBesideTranscript(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name              string
+		width, panelWidth int
+		wantSeparator     int
+	}{
+		{"hung left of the overlay", 100, 0, 100 - domain.DefaultSidePanelWidth},
+		{"out of an overlay clamped to the window", 40, 60, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := overlayModel(t, domain.SidePanelShowAuto, tc.width, tc.panelWidth, panelStopEvents(t)...)
+			m = step(t, step(t, m, keyAltUp()), keyRight())
+			assertOverlayPainted(t, m)
+			pre := m.withFrameSpans()
+
+			frame := strings.Split(ansi.Strip(m.View().Content), "\n")
+
+			for y := range pre.frameSpans().slotBottom {
+				if got := ansi.Cut(frame[y], tc.wantSeparator, tc.wantSeparator+1); got != sidePanelSeparator {
+					t.Errorf("row %d: column %d holds %q, want the separator", y, tc.wantSeparator, got)
+				}
+				if got := ansi.Cut(frame[y], tc.wantSeparator-1, tc.wantSeparator); got != sidePanelOverlayGap {
+					t.Errorf("row %d: the cell left of the separator holds %q, want it blank", y, got)
+				}
+				if _, isPanel := pre.panelTargetAt(tc.wantSeparator-1, y); isPanel {
+					t.Errorf("row %d: the blank column is claimed as a column cell", y)
+				}
+			}
+		})
+	}
+}
+
 // TestOverlayHasNoGrip pins the overlay as unresizable (ADR 0111 D7): neither its separator nor the
 // gutter beside it is a grip, and a press there followed by a drag starts no drag, moves nothing and
 // writes no width.
@@ -155,7 +195,7 @@ func TestOverlayHasNoGrip(t *testing.T) {
 	m := overlaidModel(t)
 	width := m.panelPaintWidth()
 	separator := m.width - width
-	for x := separator; x < separator+sidePanelChromeWidth; x++ {
+	for x := separator; x < separator+m.panelLeftChrome(); x++ {
 		if _, isGrip := m.panelGripAt(x); isGrip {
 			t.Errorf("column %d of the overlay is a grip", x)
 		}
@@ -207,7 +247,7 @@ func TestOverlayStopsMatchClickTargets(t *testing.T) {
 	pre := overlaidModel(t).withFrameSpans()
 	rows := pre.frameSpans().slotBottom
 	left := pre.width - pre.panelPaintWidth()
-	bodyX := left + sidePanelChromeWidth + 2
+	bodyX := left + pre.panelLeftChrome() + 2
 
 	stops := pre.navPanelStops()
 
@@ -386,7 +426,7 @@ func TestOverlayInsideClickActsAsDocked(t *testing.T) {
 			t.Fatalf("setup: the overlay has no usage stop among %+v", stops)
 		}
 
-		m = clickCell(t, m, m.width-m.panelPaintWidth()+sidePanelChromeWidth+2, stops[at].y)
+		m = clickCell(t, m, m.width-m.panelPaintWidth()+m.panelLeftChrome()+2, stops[at].y)
 
 		if !m.usagePane.open {
 			t.Error("a click on the overlay's usage report did not open /usage")

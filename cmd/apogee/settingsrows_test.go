@@ -506,7 +506,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.git-fetch":                       "false", // off in the fixture, against its true default
 		"ui.pointer-shapes":                  "true",  // on in the fixture, against its false default
 		"ui.side-panel.show":                 "on",    // on in the fixture, against its auto default
-		"ui.side-panel.width":                "48",    // a count prints itself, and the fixture's 48 is not the default 36
+		"ui.side-panel.width":                "48",    // a count prints itself, and the fixture's 48 is not the default 44
 		// Reordered in the fixture, against every section auto in the default order: the row reads
 		// the canonical spelling, a text the key takes back rather than a summary.
 		"ui.side-panel.sections": "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]",
