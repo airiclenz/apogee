@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/testtime"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // mcpDialRecorder stands in for one server's dial: it records every server it is asked for, refuses
@@ -1242,7 +1244,8 @@ func recordMCPEvents(fixture *mcpFixture) *mcpEventRecorder {
 }
 
 // mcpEventLines spells each Event as one comparable line: `<server> <phase>`, then the tool count of
-// a connected one, ` kept` and the cause of a failed one, or the reason of a disconnected one.
+// a connected one, ` kept` and the cause of a failed one, or the reason of a disconnected one and its
+// cause when it carries one (a lost one does).
 func mcpEventLines(events []apogee.MCPServerEvent) []string {
 	lines := make([]string, 0, len(events))
 	for _, event := range events {
@@ -1257,6 +1260,9 @@ func mcpEventLines(events []apogee.MCPServerEvent) []string {
 			line += ": " + event.Cause
 		case apogee.MCPServerDisconnected:
 			line += " " + string(event.Reason)
+			if event.Cause != "" {
+				line += ": " + event.Cause
+			}
 		}
 		lines = append(lines, line)
 	}
@@ -1637,4 +1643,313 @@ func TestMCPSeedJournalHoldsTheDrain(t *testing.T) {
 	if got := recorder.take(); !slices.Equal(got, []string{"late dialling"}) {
 		t.Errorf("after the birth the stream holds %q; want the late post", got)
 	}
+}
+
+// awaitMCPDropped waits until the holder carries no live session for the server named name — what a
+// loss watcher does off the caller — then for the closes it queued, so the session's state reads
+// race-free after it.
+func awaitMCPDropped(t *testing.T, set *liveMCP, name string) {
+	t.Helper()
+	testtime.Eventually(t, mcpWaitBudget, func() bool { return set.session(name) == nil },
+		"the lost server "+name+" to be dropped")
+	set.closes.Wait()
+}
+
+// isMCPWatched reports whether a loss watcher is armed for session.
+func isMCPWatched(set *liveMCP, session mcpSession) bool {
+	set.mu.Lock()
+	defer set.mu.Unlock()
+	return set.watches[session] != nil
+}
+
+// mcpLossWatchers counts the goroutines parked in a loss watcher (liveMCP.watch), across the whole
+// process.
+func mcpLossWatchers() int {
+	buf := make([]byte, 1<<20)
+	stacks := string(buf[:runtime.Stack(buf, true)])
+	return strings.Count(stacks, "cmd/apogee.(*liveMCP).watch(")
+}
+
+// A live session that ends on its own — whatever ended it — is dropped and reported lost (ADR 0111
+// D9): one `disconnected (lost)` carrying the de-labelled cause, its tools refused at once and gone
+// from the holder, a rebuild wanted so the next commit withdraws them, and the server marked failed
+// so the retry gesture re-dials it. Every ending the SDK reports on its own counts, the transport's
+// message bound tripping included.
+func TestMCPLostServerIsDroppedAndReportedLost(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{"process exit", errors.New("signal: killed"), "signal: killed"},
+		{"oversize message", errors.New("apogee: mcp message exceeds the 4 MiB limit"), "apogee: mcp message exceeds the 4 MiB limit"},
+		{"streamable POST failure", errors.New("mcp: broken session: 404 Not Found"), "broken session: 404 Not Found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			entry, session := liveServer(stdioServer("docs", "docs-mcp"))
+			fixture := newMCPFixtureWith([]mcpEntry{entry}, "", newMCPDialRecorder().connect)
+			events := recordMCPEvents(fixture)
+
+			session.die(tc.cause)
+			awaitMCPDropped(t, fixture.set, "docs")
+
+			assertMCPEvents(t, "the loss", events.take(), "docs disconnected lost: "+tc.want)
+			if !session.isRetired() || !session.isClosed() {
+				t.Errorf("lost session retired %v, closed %v: want both", session.isRetired(), session.isClosed())
+			}
+			if tools := fixture.set.tools(); len(tools) != 0 {
+				t.Errorf("the holder still surfaces %q", toolNames(tools))
+			}
+			if !fixture.set.wantsRebuild() {
+				t.Error("no rebuild wanted: the lost server's tools would stay in the menu")
+			}
+			if !fixture.set.hasFailedDial() {
+				t.Error("the lost server is not marked failed: the retry gesture would not re-dial it")
+			}
+			_ = fixture.set.close()
+		})
+	}
+}
+
+// The retry gesture (RetryFailedMCP) re-dials a lost server, and its dial lands as a fresh connect.
+func TestMCPLostServerIsRedialledByTheRetryGesture(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+	session := &fakeMCPSession{}
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith(
+		[]mcpEntry{{config: resolvedMCPServer(t, path, "docs"), session: session}}, "", dials.connect)
+	events := recordMCPEvents(fixture)
+	w := mcpHostWiring(t, fixture, &lateEngine{}, filepath.Dir(path))
+	session.die(errors.New("signal: killed"))
+	awaitMCPDropped(t, fixture.set, "docs")
+
+	note, err := w.RetryFailedMCP()
+	outcomes, drainErr := drainMCP(t, fixture.set, fixture.tools, &applySettingSpy{})
+
+	if err != nil || note != tui.MCPReconnectingNote {
+		t.Fatalf("RetryFailedMCP = (%q, %v), want (%q, nil)", note, err, tui.MCPReconnectingNote)
+	}
+	if drainErr != nil {
+		t.Fatalf("drain: %v", drainErr)
+	}
+	if !slices.Equal(dials.dialled, []string{"docs"}) {
+		t.Errorf("dialled %v, want one dial, of the lost docs", dials.dialled)
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(outcomes), want) {
+		t.Errorf("notes = %q, want %q", outcomeNotes(outcomes), want)
+	}
+	assertMCPEvents(t, "loss then retry", events.take(),
+		"docs disconnected lost: signal: killed", "docs dialling", "docs connected 1")
+	_ = fixture.set.close()
+}
+
+// A session that ends once the holder has let it go is not lost: after close, or once a commit has
+// replaced it, its ending posts nothing and drops nothing.
+func TestMCPLostAfterReleaseReportsNothing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("after close", func(t *testing.T) {
+		t.Parallel()
+		entry, session := liveServer(stdioServer("docs", "docs-mcp"))
+		fixture := newMCPFixtureWith([]mcpEntry{entry}, "", newMCPDialRecorder().connect)
+		events := recordMCPEvents(fixture)
+
+		if err := fixture.set.close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		session.die(errors.New("signal: killed"))
+
+		assertMCPEvents(t, "a loss after close", events.take())
+	})
+
+	t.Run("after a supersede", func(t *testing.T) {
+		t.Parallel()
+		entry, old := liveServer(stdioServer("docs", "docs-mcp"))
+		dials := newMCPDialRecorder()
+		fixture := newMCPFixtureWith([]mcpEntry{entry}, "", dials.connect)
+		events := recordMCPEvents(fixture)
+		if _, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")},
+			fixture.tools, &applySettingSpy{}); err != nil {
+			t.Fatalf("reconnect: %v", err)
+		}
+		events.take()
+
+		old.die(errors.New("signal: killed"))
+		time.Sleep(mcpQuietWindow)
+
+		assertMCPEvents(t, "the replaced session's loss", events.take())
+		if got := fixture.set.session("docs"); got != mcpSession(dials.sessions["docs"]) {
+			t.Errorf("docs is on %p, want the dial that replaced the lost session", got)
+		}
+		if fixture.set.hasFailedDial() {
+			t.Error("the replaced session's loss marked docs failed")
+		}
+		_ = fixture.set.close()
+	})
+}
+
+// A loss watcher lives exactly as long as its session is installed: one per session, gone once a
+// commit replaces that session, and every one gone once close returns — a watcher parked on Lost
+// alone would leak one goroutine per reconnect, since a deliberate close never fires Lost. Not
+// parallel: it counts the process's watchers, which no other test may move while it runs.
+func TestMCPLostWatchersLeaveNoGoroutine(t *testing.T) {
+	before := mcpLossWatchers()
+	entry, _ := liveServer(stdioServer("docs", "docs-mcp"))
+	fixture := newMCPFixtureWith([]mcpEntry{entry}, "", newMCPDialRecorder().connect)
+	recordMCPEvents(fixture)
+	testtime.Eventually(t, mcpWaitBudget, func() bool { return mcpLossWatchers() == before+1 },
+		"the startup session's watcher to start")
+
+	if _, err := requestAndDrainMCP(t, fixture.set, []mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")},
+		fixture.tools, &applySettingSpy{}); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	testtime.Eventually(t, mcpWaitBudget, func() bool { return mcpLossWatchers() <= before+1 },
+		"the replaced session's watcher to exit")
+	if err := fixture.set.close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if got := mcpLossWatchers(); got > before {
+		t.Errorf("%d loss watchers remain after close, want none of this holder's", got-before)
+	}
+}
+
+// dyingSwapEngine is an engine whose SwapTools first runs onSwap — a session ending while a commit
+// has the previous entries out of the installed set — then answers as the spy does.
+type dyingSwapEngine struct {
+	*applySettingSpy
+	onSwap func()
+}
+
+func (e dyingSwapEngine) SwapTools(registry *apogee.ToolRegistry) error {
+	e.onSwap()
+	return e.applySettingSpy.SwapTools(registry)
+}
+
+// A session that ends while a commit the engine then refuses has it out of the installed set is not
+// put back serving: the refused commit drops it as lost, and the pending dial that would have
+// replaced it lands at the next commit as a fresh connect.
+func TestMCPLostDuringARefusedCommitIsNotRestored(t *testing.T) {
+	t.Parallel()
+	entry, old := liveServer(stdioServer("docs", "docs-mcp"))
+	dials := newMCPDialRecorder()
+	fixture := newMCPFixtureWith([]mcpEntry{entry}, "", dials.connect)
+	events := recordMCPEvents(fixture)
+	spy := &applySettingSpy{swapErr: errors.New("input pending")}
+	engine := dyingSwapEngine{applySettingSpy: spy, onSwap: func() { old.die(errors.New("signal: killed")) }}
+	if err := fixture.set.request([]mcp.ServerConfig{stdioServer("docs", "docs-mcp-v2")}, openGuard, false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	_, refusal := drainMCP(t, fixture.set, fixture.tools, engine)
+
+	if _, isPending := errors.AsType[mcpPendingError](refusal); !isPending {
+		t.Fatalf("commit error = %v, want the still-pending outcome", refusal)
+	}
+	if got := fixture.set.session("docs"); got != nil {
+		t.Fatalf("docs is on %p after the refused commit, want the lost session dropped", got)
+	}
+	assertMCPEvents(t, "a loss inside a refused commit", events.take(),
+		"docs dialling", "docs connected 1", "docs disconnected lost: signal: killed")
+
+	spy.swapErr = nil
+	landed, err := drainMCP(t, fixture.set, fixture.tools, spy)
+
+	if err != nil {
+		t.Fatalf("later commit: %v", err)
+	}
+	if want := []string{"mcp docs connected"}; !slices.Equal(outcomeNotes(landed), want) {
+		t.Errorf("later notes = %q, want %q", outcomeNotes(landed), want)
+	}
+	if !old.isClosed() {
+		t.Error("the lost session was never closed")
+	}
+	_ = fixture.set.close()
+}
+
+// A session the commit does not touch — another server's dial is what it takes in — that ends while
+// the commit rebuilds is taken in once the commit is over, whichever way the engine answers: refused,
+// restore drops it as lost exactly once rather than put it back serving; landed, it is dropped after
+// the swap and a rebuild stays wanted, so its tools leave the menu at the next commit.
+func TestMCPLostUnchangedServerDuringACommit(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		swapErr error
+	}{
+		{"refused", errors.New("input pending")},
+		{"landed", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			docsEntry, docs := liveServer(stdioServer("docs", "docs-mcp"))
+			otherEntry, _ := liveServer(stdioServer("other", "other-mcp"))
+			fixture := newMCPFixtureWith([]mcpEntry{docsEntry, otherEntry}, "", newMCPDialRecorder().connect)
+			events := recordMCPEvents(fixture)
+			spy := &applySettingSpy{swapErr: tc.swapErr}
+			// The swap returns only once docs's watcher has acted on the loss, whatever it did with it.
+			engine := dyingSwapEngine{applySettingSpy: spy, onSwap: func() {
+				docs.die(errors.New("signal: killed"))
+				testtime.Eventually(t, mcpWaitBudget, func() bool { return !isMCPWatched(fixture.set, docs) },
+					"docs's watcher to act on the loss")
+			}}
+			servers := []mcp.ServerConfig{stdioServer("docs", "docs-mcp"), stdioServer("other", "other-mcp-v2")}
+			if err := fixture.set.request(servers, openGuard, false); err != nil {
+				t.Fatalf("request: %v", err)
+			}
+
+			_, err := drainMCP(t, fixture.set, fixture.tools, engine)
+			awaitMCPDropped(t, fixture.set, "docs")
+
+			if _, isPending := errors.AsType[mcpPendingError](err); (tc.swapErr != nil) != isPending {
+				t.Fatalf("commit error = %v, want pending only when the engine refuses", err)
+			}
+			assertMCPEvents(t, "a loss inside the commit", events.take(),
+				"other dialling", "other connected 1", "docs disconnected lost: signal: killed")
+			if !fixture.set.wantsRebuild() {
+				t.Error("no rebuild wanted: the lost server's tools would stay in the menu")
+			}
+			if !fixture.set.hasFailedDial() {
+				t.Error("the lost server is not marked failed: the retry gesture would not re-dial it")
+			}
+
+			spy.swapErr = nil
+			if _, err := drainMCP(t, fixture.set, fixture.tools, spy); err != nil {
+				t.Fatalf("later commit: %v", err)
+			}
+			if len(spy.swaps) == 0 {
+				t.Fatal("the later commit swapped nothing in")
+			}
+			if _, isFound := spy.swaps[len(spy.swaps)-1].Lookup("docs__live"); isFound {
+				t.Error("the lost server's tool is still in the swapped registry")
+			}
+			assertMCPEvents(t, "after the later commit", events.take())
+			_ = fixture.set.close()
+		})
+	}
+}
+
+// A startup session that ends before the holder is wired to emit is not lost from view: it is
+// watched from emitThrough on, so it reads `disconnected (lost)` on top of the startup seed rather
+// than vanishing from it.
+func TestMCPLostBeforeEmitThroughIsSeenLost(t *testing.T) {
+	t.Parallel()
+	entry, session := liveServer(stdioServer("docs", "docs-mcp"))
+	fixture := newMCPFixtureWith([]mcpEntry{entry}, "", newMCPDialRecorder().connect)
+	session.die(errors.New("signal: killed"))
+
+	events := recordMCPEvents(fixture)
+	awaitMCPDropped(t, fixture.set, "docs")
+
+	assertMCPEvents(t, "the startup loss", events.take(), "docs disconnected lost: signal: killed")
+	assertMCPEvents(t, "the seed after it", mcpEventLines(fixture.set.stateEvents()),
+		"docs disconnected lost: signal: killed")
+	_ = fixture.set.close()
 }

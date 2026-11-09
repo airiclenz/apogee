@@ -126,7 +126,13 @@ factored tracking step (or an `httptest` SSE/streamable server the test shuts do
 - `go vet ./internal/mcp/`
 **Commit:** `feat(mcp): report a session that ends on its own`
 
-## 4. `liveMCP` drops a lost server and journals `disconnected (lost)`
+## 4. `liveMCP` drops a lost server and journals `disconnected (lost)` — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): watchers are kept per session in the holder (`liveMCP.watches`, a stop channel per installed session, closed in `closeOffLoopLocked` and `close`) rather than a stop field on `mcpEntry`, since an installed entry map is never written again and test fixtures build entries as literals; `close` stops every watcher and waits for them (`watching`).
+NOTES (2026-11-09): committed dials are watched from `settleLocked` on (never while pending); a refused rebuild's restore (`liveMCP.restore`) drops a put-back session whose `Lost()` has closed as lost and re-arms the rest. A loss marks the server failed only when nothing else is bringing it back — `canRedialDroppedLocked`'s guard-free half was factored out as `isUnservedLocked` and shared — so a pending successful dial or one in flight decides the server's state instead.
+NOTES (2026-11-09): the lost cause goes through `mcpSentence` (de-labelled, as a failed dial's cause); escape-stripping stays at render time, as for every other cause. The TUI, panel and docs wording ("closed on purpose" in layout.md, docs/layout/side-panel-layout.md, docs/design/mcp-client.md, the mcp-client glossary Note) are items 5 and 7.
+NOTES (2026-11-09): fix-retry — a commit is marked in flight under the lock (`liveMCP.isCommitting`, set in `commit`, cleared in `restore` and before `settleLocked`); a loss watcher that fires while it is stands down (unwatches) instead of acting on the provisional entry set. The commit's end takes the loss in through one shared `rewatchLocked` (restore and settleLocked): a session whose `Lost()` has closed is dropped as lost there and then, synchronously — not by an async re-watch, which raced a caller's `closes.Wait` — so a refused commit reports it once and a landed one leaves the rebuild wanted.
+NOTES (2026-11-09): `TestMCPLostUnchangedServerDuringACommit` (refused and landed) kills an unchanged server inside SwapTools while another server's dial lands, and holds the swap until the watcher has acted (`isMCPWatched`); without the stand-down it fails with two `lost` events (refused) and no rebuild wanted with the dead tool still swapped in (landed).
 
 **What:** **Goal:** when an installed MCP session is lost, the composition root posts one `MCPServerEvent`
 `{Phase: disconnected, Reason: lost, Cause: <redacted>}`, retires the server, withdraws its tools at the next

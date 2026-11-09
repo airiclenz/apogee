@@ -168,6 +168,45 @@ type fakeMCPSession struct {
 	mu      sync.Mutex
 	closed  bool
 	retired bool
+	// lost closes when die ends the session on its own, and lostCause is why; lost is made on first
+	// use, so a session written as a literal needs no constructor.
+	lost      chan struct{}
+	lostCause error
+}
+
+// Lost is closed once die has run.
+func (f *fakeMCPSession) Lost() <-chan struct{} { return f.lostChannel() }
+
+// LostCause is die's cause, nil before it.
+func (f *fakeMCPSession) LostCause() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lostCause
+}
+
+// die ends the session on its own with cause, as a server that exits or drops its connection does:
+// Lost closes and LostCause answers cause, which must not be nil. Unlike *mcp.Client it fires after a
+// Retire or Close too, so a test proves the holder ignores such a loss rather than relying on the
+// Client never reporting it. A second die is a no-op.
+func (f *fakeMCPSession) die(cause error) {
+	lost := f.lostChannel()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.lostCause != nil {
+		return
+	}
+	f.lostCause = cause
+	close(lost)
+}
+
+// lostChannel is the session's lost channel, made on first use.
+func (f *fakeMCPSession) lostChannel() chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.lost == nil {
+		f.lost = make(chan struct{})
+	}
+	return f.lost
 }
 
 func (f *fakeMCPSession) Tools() []apogee.Tool  { return f.tools }

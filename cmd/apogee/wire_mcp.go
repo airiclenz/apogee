@@ -9,7 +9,9 @@ package main
 // the next idle point folds every finished dial into one rebuild and one SwapTools, then closes the
 // sessions it replaced — so a server that cannot be reached keeps its old session, or stays absent,
 // and costs the healthy ones nothing. A `url-safety:` edit that newly denies a server marks it closed
-// on its own (retire), ahead of the host-list swap. The wiring itself is the TUI's tui.MCPHost over this holder: the TUI runs the jobs as Cmds and commits
+// on its own (retire), ahead of the host-list swap. A session that ends on its own — the server died or
+// dropped its connection — is dropped the same way and reported lost (watch); it is never re-dialled
+// but by the retry gesture. The wiring itself is the TUI's tui.MCPHost over this holder: the TUI runs the jobs as Cmds and commits
 // at its idle point.
 
 import (
@@ -102,7 +104,9 @@ type mcpDialJob struct {
 // at once and queues a dial job per server that moved; the jobs (takeWork) run anywhere; commit (on
 // the caller, at an idle point) takes the finished dials in with one rebuild. retire is request's
 // removal alone, for a `url-safety:` edit whose deny must land before its host lists move. close is
-// the run's teardown: it cancels every dial, waits for them, and closes everything still open.
+// the run's teardown: it cancels every dial, waits for them, and closes everything still open. Beside
+// the three calls, one watcher per installed session (watch) drops a session that ends on its own and
+// reports it `disconnected (lost)`, marking the server failed so the retry gesture re-dials it.
 //
 // The holder is what makes the tool registry's rebuild honest afterwards: the build recipe folds in
 // whatever this holder currently carries, so a rebuild driven by any reason at all — a search endpoint
@@ -134,9 +138,18 @@ type liveMCP struct {
 	lastGen uint64
 	// isStopped says close has begun: nothing is dialled, queued or installed after it.
 	isStopped bool
+	// isCommitting says a commit is in flight: its entries are installed only provisionally while it
+	// rebuilds off the lock, so a loss watcher stands down rather than act on them (watch), and the
+	// commit's own end — restore, or settleLocked — takes the loss in instead (rewatchLocked).
+	isCommitting bool
 	// dials counts the dial jobs running; closes counts the off-loop closes queued (closeOffLoop).
 	dials  sync.WaitGroup
 	closes sync.WaitGroup
+	// watches holds, by session, the channel that stops that session's loss watcher (watch): one per
+	// installed session, closed when the session is closed (closeOffLoopLocked, close).
+	watches map[mcpSession]chan struct{}
+	// watching counts the loss watchers running, so close can wait for them.
+	watching sync.WaitGroup
 
 	// connect dials one server, as startup dialled each — bar a repo server whose pin moved, which the
 	// session it returns reports as skipped (mcpSession.Skipped).
@@ -157,7 +170,9 @@ type liveMCP struct {
 // caller (mcpOutbox). It is called once, as the holder is wired and before any request. The outbox
 // starts out holding the state startup left — each connected server with its tool count, in config
 // order, then skipped, the failed state of each repo server the startup connect skipped — which is
-// what a view or a journal born before any Event is seeded with (stateEvents, seedJournal).
+// what a view or a journal born before any Event is seeded with (stateEvents, seedJournal). Startup's
+// sessions are watched from here on (watch), not before: one that ended before the outbox existed is
+// reported lost on top of that seed, rather than vanishing from it.
 func (m *liveMCP) emitThrough(sink apogee.EventSink, skipped []apogee.MCPServerEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -174,6 +189,9 @@ func (m *liveMCP) emitThrough(sink apogee.EventSink, skipped []apogee.MCPServerE
 	}
 	m.outbox = outbox
 	m.skipped = slices.Clone(skipped)
+	for _, name := range m.order {
+		m.watchLocked(name, m.entries[name].session)
+	}
 }
 
 // stateEvents is every server's current state as the Events emitted so far leave it, the startup
@@ -224,6 +242,27 @@ func (m *liveMCP) postLocked(event apogee.MCPServerEvent) {
 func (m *liveMCP) postDisconnectedLocked(state *mcpServerState, reason apogee.MCPDisconnectReason) {
 	event := mcpServerEvent(state.config, apogee.MCPServerDisconnected)
 	event.Reason = reason
+	m.postLocked(event)
+}
+
+// loseLocked drops the server named name, whose live session ended on its own with cause (the
+// session's LostCause, never nil): it is retired at once, dropped from the installed set and closed
+// off the loop (dropLiveLocked), and its disconnected phase is queued with reason lost and the
+// de-labelled cause (mcpSentence), untrusted server text a Driver strips before it renders. It is
+// never re-dialled on its own: the server is marked failed, so the retry gesture re-dials it, unless
+// something is already bringing it back (isUnservedLocked) — a dial queued or running, or a
+// successful one waiting for the commit. The caller holds the lock.
+func (m *liveMCP) loseLocked(name string, cause error) {
+	m.dropLiveLocked(name)
+	state := m.servers[name]
+	if state == nil {
+		return
+	}
+	if m.isUnservedLocked(state) {
+		state.hasFailed = true
+	}
+	event := mcpServerEvent(state.config, apogee.MCPServerDisconnected)
+	event.Reason, event.Cause = apogee.MCPDisconnectLost, mcpSentence(cause)
 	m.postLocked(event)
 }
 
@@ -573,13 +612,19 @@ func (m *liveMCP) requestServerLocked(server mcp.ServerConfig, guard security.UR
 // one dial to its configured endpoint (ADR 0109 decision 7, amended 2026-11-07). The closed session
 // was a kept connection — the server's dial to the endpoint it is configured on failed, so the old
 // session went on serving — and once it is gone nothing else would bring the server back. It holds
-// when state is known, its last request admitted its config (isAdmitted, under the lists then in
-// force), guard admits that config too, no dial for it is queued or running, and it holds no
-// successful result: a held failed one is superseded by the new dial (queueDialLocked), and its
-// "previous connection kept" note would be false once the kept session is closed. The caller holds
-// the lock, and queues the dial under guard; commit re-admits it under the live lists.
+// when nothing is bringing the server back (isUnservedLocked) and guard admits its config too. The
+// caller holds the lock, and queues the dial under guard; commit re-admits it under the live lists.
 func (m *liveMCP) canRedialDroppedLocked(state *mcpServerState, guard security.URLGuard) bool {
-	if state == nil || !state.isAdmitted || !mcpAdmits(state.config, guard) || state.cancel != nil {
+	return m.isUnservedLocked(state) && mcpAdmits(state.config, guard)
+}
+
+// isUnservedLocked reports whether nothing is bringing state's server back once its live session is
+// gone: state is known, its last request admitted its config (isAdmitted, under the lists then in
+// force), no dial for it is queued or running, and it holds no successful result — a held failed one
+// is superseded by any new dial (queueDialLocked), and its "previous connection kept" note would be
+// false once the kept session is gone. The caller holds the lock.
+func (m *liveMCP) isUnservedLocked(state *mcpServerState) bool {
+	if state == nil || !state.isAdmitted || state.cancel != nil {
 		return false
 	}
 	if state.result != nil && state.result.err == nil {
@@ -839,7 +884,7 @@ func mcpFinishedEvent(result mcpDialResult, entries map[string]mcpEntry) apogee.
 // The outcomes are one per result taken, in config order. With nothing finished, nothing marked
 // closed and nothing reordered it does nothing. The error is the engine refusing the swap
 // (mcpPendingError): every result stays pending for the next commit, nothing is closed and no
-// outcome is returned.
+// outcome is returned — bar a session put back that ended on its own meanwhile (restore).
 func (m *liveMCP) commit(set *liveTools, engine settingsEngine) ([]mcpOutcome, error) {
 	spec := set.built()
 	guard := mcpGuard(spec.allowHosts, spec.denyHosts)
@@ -849,6 +894,7 @@ func (m *liveMCP) commit(set *liveTools, engine settingsEngine) ([]mcpOutcome, e
 		return nil, nil
 	}
 	pending := m.foldLocked(guard)
+	m.isCommitting = true
 	if pending.needsSwap {
 		// The rebuild below folds the holder's tools, so the new entries are installed before it —
 		// and put back if the engine will not take the registry built from them.
@@ -858,14 +904,50 @@ func (m *liveMCP) commit(set *liveTools, engine settingsEngine) ([]mcpOutcome, e
 
 	if pending.needsSwap {
 		if err := set.rebuild(engine); err != nil {
-			m.install(pending.previous, pending.previousOrder)
+			m.restore(pending)
 			return nil, mcpPendingError{cause: err}
 		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.isCommitting = false
 	m.settleLocked(pending)
 	return pending.outcomes, nil
+}
+
+// restore puts back the entries a commit the engine refused had replaced, and ends the commit. A
+// session it puts back that ended on its own while the commit was in flight — its watcher stood down
+// (watch) — is dropped as lost, once, rather than reinstalled serving; every other one is watched
+// again (rewatchLocked).
+func (m *liveMCP) restore(fold mcpFold) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.isCommitting = false
+	m.installLocked(fold.previous, fold.previousOrder)
+	if m.isStopped {
+		return
+	}
+	m.rewatchLocked(fold.previous, fold.previousOrder)
+}
+
+// rewatchLocked takes in, at a commit's end, each installed session of entries, by order: one that
+// ended on its own while the commit was in flight — its watcher stood down (watch) — is dropped as
+// lost now (loseLocked), and every other one is watched (watchLocked), a no-op where its watcher
+// still runs. entries is an installed map, never written again, so a loss installing a fresh one
+// leaves it as it was. The caller holds the lock.
+func (m *liveMCP) rewatchLocked(entries map[string]mcpEntry, order []string) {
+	for _, name := range order {
+		session := entries[name].session
+		if session == nil {
+			continue
+		}
+		select {
+		case <-session.Lost():
+			m.loseLocked(name, session.LostCause())
+		default:
+			m.watchLocked(name, session)
+		}
+	}
 }
 
 // mcpFold is what one commit would put in force: the entry set before and after, the outcomes, the
@@ -934,7 +1016,11 @@ func (f *mcpFold) add(name string, result mcpDialResult, isAdmitted bool) {
 }
 
 // settleLocked records a commit that landed: the results it took are consumed, a denied server's
-// verdict is recorded, and the sessions it displaced close off the loop. The caller holds the lock.
+// verdict is recorded, the sessions it displaced close off the loop, and every installed session is
+// taken in (rewatchLocked): watched — a dial's from here on, never while it waited for the commit, so
+// a session the commit took back out was never watched — or, one that ended while the commit was in
+// flight, dropped as lost now, which wants the rebuild that withdraws its tools. The caller holds the
+// lock.
 func (m *liveMCP) settleLocked(fold mcpFold) {
 	for name, result := range fold.taken {
 		if state := m.servers[name]; state != nil && state.result == result {
@@ -953,11 +1039,14 @@ func (m *liveMCP) settleLocked(fold mcpFold) {
 	for _, entry := range fold.closes {
 		m.closeOffLoopLocked(entry)
 	}
+	m.rewatchLocked(m.entries, m.order)
 }
 
 // closeOffLoopLocked closes entry on a goroutine of its own, counted on the closes WaitGroup close
-// waits on. The caller holds the lock, and close has not begun (after it, nothing is queued here).
+// waits on, and stops its session's loss watcher first: a session being closed on purpose is not
+// lost. The caller holds the lock, and close has not begun (after it, nothing is queued here).
 func (m *liveMCP) closeOffLoopLocked(entry mcpEntry) {
+	m.unwatchLocked(entry.session)
 	m.closes.Add(1)
 	go func() {
 		defer m.closes.Done()
@@ -967,11 +1056,61 @@ func (m *liveMCP) closeOffLoopLocked(entry mcpEntry) {
 	}()
 }
 
+// watchLocked starts session's loss watcher (watch) for the server named name, unless one already
+// runs for it. The caller holds the lock.
+func (m *liveMCP) watchLocked(name string, session mcpSession) {
+	if session == nil || m.watches[session] != nil {
+		return
+	}
+	if m.watches == nil {
+		m.watches = map[mcpSession]chan struct{}{}
+	}
+	stop := make(chan struct{})
+	m.watches[session] = stop
+	m.watching.Add(1)
+	go m.watch(name, session, stop)
+}
+
+// unwatchLocked stops session's loss watcher, if one runs. The caller holds the lock.
+func (m *liveMCP) unwatchLocked(session mcpSession) {
+	if stop, isWatched := m.watches[session]; isWatched {
+		close(stop)
+		delete(m.watches, session)
+	}
+}
+
+// watch waits for session to end on its own (mcpSession.Lost) or for stop, closed once the session
+// is closed on purpose — a Retire or Close never fires Lost, so stop is what ends a watcher on a
+// session dropped, replaced or torn down, and close waits for it. A loss is acted on only when it
+// still matters, under the lock: close has not begun, no commit is in flight, and session is still
+// the one installed for name. Then the server is dropped and reported lost (loseLocked). Otherwise
+// the watcher stands down: a session no longer installed is being closed, and while a commit is in
+// flight the installed set is provisional — the commit's end acts on the loss instead
+// (rewatchLocked, from restore or settleLocked).
+func (m *liveMCP) watch(name string, session mcpSession, stop <-chan struct{}) {
+	defer m.watching.Done()
+	select {
+	case <-stop:
+		return
+	case <-session.Lost():
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.isStopped {
+		return
+	}
+	if live, isLive := m.entries[name]; m.isCommitting || !isLive || live.session != session {
+		m.unwatchLocked(session)
+		return
+	}
+	m.loseLocked(name, session.LostCause())
+}
+
 // close tears down every server the session ended on — the run's own defer, which is why it reads the
 // holder rather than closing the sessions the process started with (ADR 0109 decision 10). It cancels
 // every dial in flight and waits for them, then closes every live entry and every finished result in
-// parallel, and waits for those and for every close already queued. Nothing is dialled or installed
-// after it begins.
+// parallel, and waits for those, for every close already queued and for every loss watcher, which it
+// stops first. Nothing is dialled, installed or reported lost after it begins.
 func (m *liveMCP) close() error {
 	m.cancelDials()
 	m.dials.Wait()
@@ -988,10 +1127,15 @@ func (m *liveMCP) close() error {
 		}
 	}
 	m.installLocked(map[string]mcpEntry{}, nil)
+	for _, stop := range m.watches {
+		close(stop)
+	}
+	m.watches = nil
 	m.mu.Unlock()
 
 	errs := closeInParallel(open)
 	m.closes.Wait()
+	m.watching.Wait()
 	// No Event is posted once close has begun; the ones posted before it are emitted first.
 	m.mu.Lock()
 	outbox := m.outbox

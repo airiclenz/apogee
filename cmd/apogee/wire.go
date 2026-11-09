@@ -437,14 +437,17 @@ type settingsSkills interface {
 // whether the connect skipped it for a moved pin (reported as the server's failed dial), the switch
 // that refuses every one of its tools at once while the session stays open (Retire — a removal or a
 // deny takes effect on the keystroke, ADR 0109 decision 5), and the teardown that ends the connection,
-// run off the Update loop. *mcp.Client over one server is the only implementation that ships — it is
-// an interface for settingsEngine's reason, so the lifecycle's ORDER (dial, swap, close) is
-// exercisable against a fake without a server process behind it.
+// run off the Update loop, and the signal that the connection ended on its own (Lost, closed once and
+// never by Retire or Close, with LostCause never nil once it has). *mcp.Client over one server is the
+// only implementation that ships — it is an interface for settingsEngine's reason, so the lifecycle's
+// ORDER (dial, swap, close, loss) is exercisable against a fake without a server process behind it.
 type mcpSession interface {
 	Tools() []apogee.Tool
 	Skipped() []mcp.Denied
 	Retire()
 	Close() error
+	Lost() <-chan struct{}
+	LostCause() error
 }
 
 // contextFileNote is the boundary sentence the `context-files:` keys carry back to the row: the name

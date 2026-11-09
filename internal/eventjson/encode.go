@@ -726,9 +726,9 @@ type upstreamSwitchedData struct {
 
 // mcpServerData is the mcp_server line: one MCP server's connection lifecycle (ADR 0111 decision 8).
 // phase is dialling, connected, failed or disconnected; tools is the tool count on connected, cause
-// the failure's text on failed, kept whether a failed reconnect left the previous connection
-// serving, and reason — removed or denied — why a disconnected closed the session, "" on every
-// other phase. The composition root emits it, never the engine, so its envelope identity is
+// the failure's text on failed and why the session ended on a lost disconnected, kept whether a
+// failed reconnect left the previous connection serving, and reason — removed, denied or lost — why
+// a disconnected ended the session, "" on every other phase. The composition root emits it, never the engine, so its envelope identity is
 // always zero.
 type mcpServerData struct {
 	Server    string `json:"server"`

@@ -516,13 +516,14 @@ const (
 	MCPServerDisconnected = domain.MCPServerDisconnected
 )
 
-// MCPDisconnectReason is why an MCPServerEvent's disconnected phase closed a live session.
+// MCPDisconnectReason is why an MCPServerEvent's disconnected phase ended a live session.
 type MCPDisconnectReason = domain.MCPDisconnectReason
 
-// The reasons a live MCP session is closed on purpose.
+// The reasons a live MCP session ends: closed on purpose (removed, denied), or lost on its own.
 const (
 	MCPDisconnectRemoved = domain.MCPDisconnectRemoved
 	MCPDisconnectDenied  = domain.MCPDisconnectDenied
+	MCPDisconnectLost    = domain.MCPDisconnectLost
 )
 
 // SubAgentPhase is the phase a SubAgentPhaseEvent reports.

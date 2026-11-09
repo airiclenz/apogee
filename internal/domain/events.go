@@ -893,11 +893,12 @@ const (
 	// MCPServerFailed reports that a dial finished without a session; Cause is the failure's text,
 	// and Kept says whether an earlier connection still serves.
 	MCPServerFailed MCPServerPhase = "failed"
-	// MCPServerDisconnected reports that a live session was closed on purpose; Reason says why.
+	// MCPServerDisconnected reports that a live session ended — closed on purpose, or lost when the
+	// server died or dropped its connection on its own; Reason says which.
 	MCPServerDisconnected MCPServerPhase = "disconnected"
 )
 
-// MCPDisconnectReason says why an MCPServerEvent's disconnected phase closed a live session.
+// MCPDisconnectReason says why an MCPServerEvent's disconnected phase ended a live session.
 type MCPDisconnectReason string
 
 const (
@@ -906,11 +907,15 @@ const (
 	// MCPDisconnectDenied: a `url-safety:` change now denies the endpoint the server is connected
 	// on, so its session was closed.
 	MCPDisconnectDenied MCPDisconnectReason = "denied"
+	// MCPDisconnectLost: the session ended on its own — the server exited, dropped its connection
+	// or broke the transport (an oversize message, a failed stream) — while apogee still held it.
+	// Its tools are withdrawn and it is never re-dialled on its own: the `/settings` retry does that.
+	MCPDisconnectLost MCPDisconnectReason = "lost"
 )
 
 // MCPServerEvent reports one MCP server's connection lifecycle (ADR 0111 decision 8): a dial
 // starting (dialling), a dial finishing (connected or failed), or a live session closed
-// (disconnected). A reconnect is dialling then connected or failed, with no disconnected between.
+// (disconnected), on purpose or lost. A reconnect is dialling then connected or failed, with no disconnected between.
 // It is emitted when a dial starts and when it finishes, not at the idle-point commit that brings a
 // server's tools into the menu (ADR 0109), so every Driver, watch mode and a resumed session read
 // the same per-server state from the Event stream and the journal.
@@ -922,7 +927,8 @@ const (
 //
 // Server is the configured server's name and Transport its transport ("stdio", "sse", ...);
 // Project says the server comes from the Project config rather than the global one. Tools is the
-// tool count on connected, 0 otherwise. Cause is the failure's text on failed, "" otherwise.
+// tool count on connected, 0 otherwise. Cause is the failure's text on failed, and why the
+// session ended on a disconnected one whose Reason is lost; "" otherwise.
 // Kept is true on a failed reconnect while the previous connection still serves (its tools stay
 // in the menu); it is false on every other phase. Reason is set on disconnected only. Server,
 // Transport and Cause are untrusted text: a Driver strips terminal escapes before it renders them.
