@@ -378,7 +378,7 @@ func TestBlockCursorReachesTheLastBlockUnderAPane(t *testing.T) {
 	}
 }
 
-// modelWithRunningFanOut is a model mid-Exchange whose scrollback holds a ✦ Sub-Agent umbrella over
+// modelWithRunningFanOut is a model mid-Exchange whose scrollback holds a ✦ Sub-agents umbrella over
 // two delegations the engine stamped as it does live — scout-a (run-a) and scout-b (run-b), both
 // started — so each member row names a run a stop can reach.
 func modelWithRunningFanOut(t *testing.T, eng *fakeEngine) Model {
@@ -391,8 +391,8 @@ func modelWithRunningFanOut(t *testing.T, eng *fakeEngine) Model {
 	stampedPhase(&m.transcript, first, domain.SubAgentStarted, "")
 	stampedPhase(&m.transcript, second, domain.SubAgentStarted, "")
 	m.refreshViewport()
-	if painted := strip(strings.Join(m.lines, "\n")); !strings.Contains(painted, "Sub-Agent (2)") {
-		t.Fatalf("setup: the two delegations are not under one ✦ Sub-Agent umbrella:\n%s", painted)
+	if painted := strip(strings.Join(m.lines, "\n")); !strings.Contains(painted, "Sub-agents (2)") {
+		t.Fatalf("setup: the two delegations are not under one ✦ Sub-agents umbrella:\n%s", painted)
 	}
 	return m
 }
@@ -411,7 +411,7 @@ func cursorOnRun(t *testing.T, m Model, runID string) Model {
 	return m
 }
 
-// TestBlockCursorCtrlXStopsTheMemberRowItStandsOn pins `^x` on a ✦ Sub-Agent umbrella's member row:
+// TestBlockCursorCtrlXStopsTheMemberRowItStandsOn pins `^x` on a ✦ Sub-agents umbrella's member row:
 // it stops that row's run and no other, leaves the walk standing, and does nothing on a member that
 // is already over.
 func TestBlockCursorCtrlXStopsTheMemberRowItStandsOn(t *testing.T) {

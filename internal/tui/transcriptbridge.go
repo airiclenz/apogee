@@ -595,7 +595,7 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// (presentToolCall); a name with no row — a dynamic tool's — reads the zero row, which is
 	// solo=false, the same answer the live path gives it. A sub-agent head is a block in its own
 	// right by rule, not by circumstance — without this, two span-less heads (two delegations
-	// refused at the depth bound) replay as one "✦ Sub-Agent (2)".
+	// refused at the depth bound) replay as one "✦ Sub-agents (2)".
 	//
 	// An ANSWERED user question is the other, and it is the one no row settles: the record
 	// materialises with the answer (askUserAnswerRecord, reached from the RESULT hook), so a question
@@ -633,6 +633,16 @@ func fromWireToolView(w *session.ToolView, done bool) toolView {
 	// changes. Reading the same entry field the live producer reads (presentToolCall) is what keeps
 	// the two paints one.
 	tv.collapsesToHeader = toolRegistry[tv.name].collapsesToHeader
+	// The LABEL is the registry's word too, for a tool the registry knows: a display name and not
+	// a fact about the call, so a record written before a relabelling (the Title Case labels
+	// sub_agent and task_list once wore) replays under the label the live presenter gives the same
+	// tool today rather than the one it gave then. A name with no row — a dynamic tool's — keeps the
+	// record's own label, which is the raw name the live path gave it. A background sub_agent's
+	// card wears the delegation's label as well (backgroundSubAgentPresenter), so reading the
+	// sub_agent row serves both.
+	if p, known := toolRegistry[tv.name]; known && p.label != "" {
+		tv.Label = p.label
+	}
 	if len(w.Details) > 0 {
 		lines := make([]detailLine, 0, len(w.Details))
 		for _, d := range w.Details {

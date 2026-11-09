@@ -702,7 +702,7 @@ type toolView struct {
 // no registry row, because the registry is keyed by the tool's name and this is one sub_agent call
 // shape, not a tool.
 var backgroundSubAgentPresenter = toolPresenter{
-	label:  "Sub-Agent",
+	label:  "Sub-agent",
 	verb:   "delegating in the background",
 	target: subAgentTarget,
 	detail: firstLineDetail,
@@ -722,7 +722,7 @@ func (tv toolView) presenter() (p toolPresenter, known bool) {
 
 // headsRun reports whether this card is a delegation's — the sub_agent call whose block heads a run
 // ([entry.headsRun] is the same question asked of the entry that carries the card). It matches the
-// RETAINED tool name rather than the "Sub-Agent" label for [subAgentSpan]'s reason: a relabelling
+// RETAINED tool name rather than the "Sub-agent" label for [subAgentSpan]'s reason: a relabelling
 // must not switch the rule off, and a third-party tool that happens to share the label must not
 // switch it on. That the answer is knowable from the name alone is what lets a decoded record
 // re-derive its own solo mark rather than trust one the wire may predate (fromWireToolView).
@@ -867,7 +867,7 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	// what hangs beneath it is a whole delegation (renderSubAgentRun). The painter's own rule for
 	// that shape keys on the run's span, which is not the same question — a delegation refused at
 	// the depth bound (executeRefuse, internal/agent) leaves a head with no span at all, and the
-	// shape rule alone would read two refusals in a row as one "Sub-Agent (2)". So the fact is
+	// shape rule alone would read two refusals in a row as one "Sub-agents (2)". So the fact is
 	// stated on the registry row (toolPresenter.solo) and copied here, where the call is
 	// recognised. A skill fetch is the second row that says it, for the other half of the same
 	// reason: it groups with its OWN kind (loadSkillToolName), and a mixed umbrella would bury the

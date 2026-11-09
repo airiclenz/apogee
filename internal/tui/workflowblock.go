@@ -34,7 +34,7 @@ import (
 // (entry.seatsItemHead), and the item child's entries land behind it (entry.headsRunFor, by the
 // run id the phase names). That head is a delegation's in every way the view asks — it paints as a
 // delegation row eliding its run, opens as the run's view, and answers ^x, a message and the gauge —
-// but it never groups into a "✦ Sub-Agent (N)" list. The item's receipt folds onto it as its report.
+// but it never groups into a "✦ Sub-agents (N)" list. The item's receipt folds onto it as its report.
 // A retried item keeps ONE row: each attempt has its own head, and the ones a later attempt
 // superseded are stepped over by the paint (retiredAttempts). Under a workflow block that draws its
 // stage rows — a live one, or one replayed with its structure — the item heads are not painted at

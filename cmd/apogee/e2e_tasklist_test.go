@@ -42,15 +42,15 @@ const (
 	taskListDoneRow = "[✔] wire the parser seam"
 	// taskListCardLabel is the presenter's own label for a task_list call (internal/tui's
 	// toolRegistry), so a frame carrying it is a call that was PRESENTED rather than merely made.
-	taskListCardLabel = "Task List"
+	taskListCardLabel = "Tasks"
 	// taskListStandingPrompt pins this run's own system prompt, for reportStandingPrompt's reason:
 	// the block rides along on standing content that already exists, so a run whose prompt is the
 	// embedded default would be asserting against wording the default is free to change.
 	taskListStandingPrompt = "system-prompt-text: |\n  You are apogee, a terminal coding agent.\n"
 	// The card's two headers, as the frame spells them: the count is the fixture's one done task of
 	// three, and the glyph is the fold — ▼ open on its rows, ▶ folded to the header alone.
-	taskListCardOpen   = "✦ Task List (1/3) ▼"
-	taskListCardFolded = "✦ Task List (1/3) ▶"
+	taskListCardOpen   = "✦ Tasks (1/3) ▼"
+	taskListCardFolded = "✦ Tasks (1/3) ▶"
 	// taskListFoldedConfig is the config line that starts every task-list card folded.
 	taskListFoldedConfig = "ui:\n  task-list-open: false\n"
 )
@@ -155,7 +155,7 @@ func taskListRequestCarrying(t *testing.T, reqs []stubllm.Request, prompt string
 
 // TestE2ETaskListFoldFollowsTheConfigKey drives the card's fold from the FILE (item 4 of plan
 // "2026-09-14 - 00"): with `ui.task-list-open: false` in the home's config.yaml the card's first
-// paint is its counted header alone, `✦ Task List (1/3) ▶`, with no task row beneath it; with the
+// paint is its counted header alone, `✦ Tasks (1/3) ▶`, with no task row beneath it; with the
 // default it opens on its rows under a ▼. The row is asserted through the driven frame rather than
 // the renderer's own test because the key crosses three seams to get there — the config resolve,
 // the composition root's inversion onto tui.Options, and the transcript's seed — and only the

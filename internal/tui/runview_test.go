@@ -167,7 +167,7 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 
 		m := modelWithSubAgentGroup(t)
 		header := memberRows(t, m, 1)[0] - 1 // the umbrella sits directly above the first member row
-		if got := strip(m.lines[header]); !strings.Contains(got, "Sub-Agent (3)") {
+		if got := strip(m.lines[header]); !strings.Contains(got, "Sub-agents (3)") {
 			t.Fatalf("setup: line %d is %q, not the umbrella header", header, got)
 		}
 
@@ -790,7 +790,7 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 	}{
 		{name: "running", phase: childRunning, want: "Message repo-scout…  ⏎ send · ↑ recall · esc back"},
 		{name: "finished", phase: childOver, want: "repo-scout has finished · esc back"},
-		{name: "scheduled", phase: childScheduled, want: "repo-scout has not started · esc back"},
+		{name: "queued", phase: childScheduled, want: "repo-scout has not started · esc back"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

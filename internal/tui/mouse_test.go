@@ -4308,7 +4308,7 @@ func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 }
 
 // modelWithSubAgentGroup builds a ready idle model whose scrollback holds a fan-out of three
-// delegations, each with one nested read behind it — the shape the folded "✦ Sub-Agent (3)" list is
+// delegations, each with one nested read behind it — the shape the folded "✦ Sub-agents (3)" list is
 // derived from (subAgentGroup). The delegations stand at entries 1, 3 and 5, the prompt at 0.
 func modelWithSubAgentGroup(t *testing.T) Model {
 	t.Helper()
@@ -4395,7 +4395,7 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 		t.Parallel()
 		m := modelWithSubAgentGroup(t)
 		line := memberRows(t, m, first)[0] - 1 // the header sits directly above the first row
-		if got := strip(m.lines[line]); !strings.Contains(got, "Sub-Agent (3)") {
+		if got := strip(m.lines[line]); !strings.Contains(got, "Sub-agents (3)") {
 			t.Fatalf("setup: the line above the first member is %q, not the group header", got)
 		}
 		if kind := m.lineTargets[line].kind; kind != targetNone {

@@ -69,7 +69,7 @@ const (
 	// child running behind it yet (internal/tui's scheduledSummary, subagentblock.go). It is restated
 	// here because cmd/apogee cannot import it, which is the point: it is what the screen promises a
 	// human, so a rename over there has to fail here.
-	scheduledWord = "scheduled"
+	scheduledWord = "queued"
 )
 
 // parallelSize is the terminal these runs read at. A hundred and forty columns for the same reason

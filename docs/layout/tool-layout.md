@@ -8,9 +8,10 @@ quoting — and its tool sections point here.
 **As implemented**, four things read differently from the ratified sketch. Each was
 settled at implementation time and argued in that plan's item notes, and the
 per-tool table below states the shipped form (corrected 2026-10-02): labels are
-Title Case (`Diff Preview`, `Find Files`, `Git Status`, `Ask User`, `Sub-Agent`,
-`Task List`)
-rather than sentence case; no stat carries a duration, because no result exposes
+Title Case (`Diff Preview`, `Find Files`, `Git Status`, `Ask User`) rather than
+sentence case — except the two the side panel also names, which take the panel's
+words (2026-11-09): a delegation is `Sub-agent`, a folded list of them
+`Sub-agents (N)`, and the task list `Tasks`; no stat carries a duration, because no result exposes
 one and design call 14 rules out growing the engine for presentation;
 `ask_user`'s right slot keeps the human's own answer rather than
 `answered`/`pending`; and `git_diff_range`'s target keeps git's three-dot
@@ -45,7 +46,7 @@ closer is drawn today.
 - grouped tool calls should display the group-count
 - expanded tools should be printed with a brighter gray than collapsed
   (scheme roles `muted` / `muted-bright`)
-- Sub-agent calls group with **each other** (`✦ Sub-Agent (N)`, one row per
+- Sub-agent calls group with **each other** (`✦ Sub-agents (N)`, one row per
   agent: name left, stat right; opening a member opens its run view) but never
   join a super-group — a sub-agent block or group breaks the run.
 - Skill fetches group with **each other** the same way (`✦ Skill (N)`, one row
@@ -158,7 +159,7 @@ closer is drawn today.
   opens a different *surface* rather than a third fold stage of the row
   ([ADR 0063](../../.capcom/knowledge/decisions/adr-0063.md)).
   `task_list` is the first of two blocks whose collapsed state is its
-  **header alone**: it folds to `✦ Task List (done/total)` — no task row
+  **header alone**: it folds to `✦ Tasks (done/total)` — no task row
   beneath, no `+N more lines`, because the header's own count already says
   what the fold holds — and opens to every row uncapped with no `see less…`
   footer, the header's `▼` being the fold. The `▶`/`▼` sits on the header; a
@@ -328,16 +329,16 @@ differs.
 
 ## Grouped Sub-agents
 
-- opening a sub-agent — from a click on its row or `enter` on the block cursor — opens its **run view** (`layout.md`, "Run view"), which takes the whole transcript slot under a `← main › <name>` breadcrumb and is left with `esc`. A member row of an `✦ Sub-Agent (N)` list opens the same way; the umbrella itself still opens **inline** to those rows.
-- `^x` stops ONE running sub-agent (ADR 0086 D5; `layout.md`, "Run view"): inside its run view it stops the run on screen — the view's header and the status line then read `esc back · ^x stop` while that run can still be stopped — and on the block cursor it stops the delegation whose row the cursor stands on, a member row of an `✦ Sub-Agent (N)` list included — or, with the cursor in the side panel, the sub-agent row it stands on there — leaving the cursor where it was. It needs no confirmation and the parent's Turn goes on: the engine folds what the run had done into the partial result the parent reads, and the row settles on `· stopped by you` once the run reports. On a finished run it does nothing. The whole Turn is cancelled by `esc×2` at the top level, never by `^x`.
+- opening a sub-agent — from a click on its row or `enter` on the block cursor — opens its **run view** (`layout.md`, "Run view"), which takes the whole transcript slot under a `← main › <name>` breadcrumb and is left with `esc`. A member row of an `✦ Sub-agents (N)` list opens the same way; the umbrella itself still opens **inline** to those rows.
+- `^x` stops ONE running sub-agent (ADR 0086 D5; `layout.md`, "Run view"): inside its run view it stops the run on screen — the view's header and the status line then read `esc back · ^x stop` while that run can still be stopped — and on the block cursor it stops the delegation whose row the cursor stands on, a member row of an `✦ Sub-agents (N)` list included — or, with the cursor in the side panel, the sub-agent row it stands on there — leaving the cursor where it was. It needs no confirmation and the parent's Turn goes on: the engine folds what the run had done into the partial result the parent reads, and the row settles on `· stopped by you` once the run reports. On a finished run it does nothing. The whole Turn is cancelled by `esc×2` at the top level, never by `^x`.
 - the inline expanded shape that used to open a delegation's span in place — no `⤷ sub-agent` label on the open row, a colored vertical line down its left — was REMOVED on 2026-08-30 with the run view (ADR 0063), and its sketch went with it.
 - `┊` was only displayed if another grouped sub-agent followed after the expanded sub-agent, and the last sub-agent in the group (if expanded) did not show it. No DELEGATION draws it any more — a member opens its run view rather than a span in place, so every grouped sub-agent is followed by the ordinary separator — but the rule is the group's, not the delegation's, and **Grouped Skills** below is where it fires: a member that opens INLINE is closed by `┊` wherever another member of its list resumes after it, and the list's last member shows none however it ends.
 - a RUNNING sub-agent's `<tool-top-level-details>` reads `N tool calls · <used>/<window> · 80 steps` and names no ongoing action. The call in flight is deliberately not spelled there: it changed several times a second while the two cells beside it held still, and each of those calls already has a block of its own inside the run, one click away. The one live word the slot adds is `· delegating`, and only while the most recent call open inside the run is itself a sub-agent — work the child has handed on, which its own blocks cannot show since the nested run is collapsed too. The trailing cell is the STEP CAP the child runs under, as its started phase carried it (`domain.SubAgentPhaseEvent`): `· 80 steps` for the configured delegate cap or the call's own lower `max_steps`, `· 80 steps (120 asked)` where the call asked for more than the configured cap and was clamped to it, and no cell at all for an unbounded child (`delegate-max-steps: 0`). The row wears it from the child's FIRST TOOL CALL — a started child with nothing behind it has no summary line to carry it — and only while the run works: a finished row ends on its gist, the bound being history once the child has reported. A finished sub-agent's slot is its report's first line, or `· done` where the report became a body — unless the engine wrapped that report in an outcome envelope, which takes the slot instead: `· capped at its step cap` where the step cap cut the run off mid-task (`· capped at its token budget` / `· capped at its time limit` for its sibling bounds — "capped", because on screen "stopped" is the human's word alone, whatever wording the engine's result head carries for the parent model), `· stopped by you` where the human stopped the run with `^x` (ADR 0086 D4) — a queued pooled run stopped before it started, or one a turn cancel caught queued, included — `· not started · your message` where a queued message pre-empted the run before it started (ADR 0025), both of which wear no ✓ and reads in the marker tone, since the run did not finish and nothing failed, `· ended without a report` where the child reached its own boundary but handed back narration of a next step, a paste or the `[delegate returned no report]` marker rather than a report (the row's reading alone — the parent model gets the result exactly as the engine wrote it), and `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its cause. Where the width leaves the row too little of its target to be worth reading, the promote-guard drops the GIST and nothing else: the row reads the same line with the engine's verdict in the gist's place — `1 tool call · done`, `2 tool calls · 12k/32k · capped at its step cap` — so the count and the fill survive every width, and nothing lands in a body, a run's row growing none in place (ADR 0063) and its report being one click away in the run's own view. A run routed to the Sub-agent server (ADR 0045) closes the slot with the model it ran on — `2 tool calls · 12k/32k · Found 4 gaps · qwen3-4b` — and only when that is not the session's own model; a same-model delegation shows no such cell. `<window>` is the CHILD's own window, so a routed run's fill is spelled against the Sub-agent server's window (`7k/8k`) rather than the session's (`7k/128k`); a run reporting no window of its own is spelled against the session's, which is what an unrouted child inherited. This holds for a lone sub-agent exactly as for a grouped member.
-- opening a sub-agent takes nothing back either: the row the reader leaves behind keeps the very `<tool-top-level-details>` it wore — the count, the fill, and the gist or the verdict (`· done`, `· ended without a report`, …) — and the task, the report and the child's own blocks are what the run view shows. This holds for a lone sub-agent exactly as for a grouped member, running and finished alike; a view of a finished or scheduled run opens read-only.
-- a sub-agent the engine has not started yet is SCHEDULED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `scheduled` — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and opens like any other. A lone sub-agent starts immediately and never shows this.
+- opening a sub-agent takes nothing back either: the row the reader leaves behind keeps the very `<tool-top-level-details>` it wore — the count, the fill, and the gist or the verdict (`· done`, `· ended without a report`, …) — and the task, the report and the child's own blocks are what the run view shows. This holds for a lone sub-agent exactly as for a grouped member, running and finished alike; a view of a finished or queued run opens read-only.
+- a sub-agent the engine has not started yet is QUEUED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `queued` (the side panel's word for the same phase) — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and opens like any other. A lone sub-agent starts immediately and never shows this.
 
 ```text
-✦ Sub-Agent (<group-count>)
+✦ Sub-agents (<group-count>)
   ┝ first-sub-agent-collapsed ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
   ┝ sub-agent-whose-row-opens-its-run-view ⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ another-collapsed-sub-agent ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
@@ -349,17 +350,17 @@ Example for how finished sub agents should be displayed. The first sub-agent is 
 Each member is marked PER MEMBER, the moment that sub-agent finishes — not when the group as a whole is done. A grouped run reports its results in one burst once every member has joined, so the display follows each delegation's own start/finish instead: the first to report wears its `✓` and its `done` while its siblings are still running, and opening its run view shows the report it returned right then. A member that finished with a FAILURE wears no `✓` — its red `<tool-top-level-details>` is the whole of the marking — and neither does one that `ended without a report` or one `stopped by you`, whose verdicts read in the marker tone. Each row is matched to its own child by the delegation's run id, never by its call id, which a model or server may repeat across one fan-out: a sibling that finishes first ticks its own row and no other.
 
 ```text
-✦ Sub-Agent (<group-count>)
+✦ Sub-agents (<group-count>)
   ┝ <tool-type-header> ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┕ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
 ```
 
-Example for a fan-out wider than the `parallel-agents` cap: the first sub-agent holds a slot and is working, the second is queued behind it. The queued row states `scheduled` and nothing else, and it wears no `▶` — clicking it does nothing until it starts.
+Example for a fan-out wider than the `parallel-agents` cap: the first sub-agent holds a slot and is working, the second is queued behind it. The queued row states `queued` and nothing else, and it wears no `▶` — clicking it does nothing until it starts.
 
 ```text
-✦ Sub-Agent (<group-count>)
+✦ Sub-agents (<group-count>)
   ┝ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-  ┕ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ scheduled
+  ┕ <tool-type-header> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ queued
 ```
 
 
@@ -428,10 +429,10 @@ its body whole while collapsed, and it appears only when the two differ.
 | web_search | Search | the query | `N results` | result titles + URLs |
 | present_document | Present | document title (path fallback) | — | path + title |
 | ask_user | Ask User | the question | the human's own answer | question + choices + the answer |
-| sub_agent | Sub-Agent | its name (task head fallback) | `scheduled` before it starts; while it works `N tool calls · <used>/<window> · 80 steps` (`· delegating` before the cap while its newest open call is a sub-agent); once it reports `N tool calls · <used>/<window> · <gist>`, the gist being the report's first line or the verdict (`done` / `capped at its step cap` / `stopped by you` / `ended without a report` / …), and a routed run's model last — see **Grouped Sub-agents** above | task text + result summary |
+| sub_agent | Sub-agent | its name (task head fallback) | `queued` before it starts; while it works `N tool calls · <used>/<window> · 80 steps` (`· delegating` before the cap while its newest open call is a sub-agent); once it reports `N tool calls · <used>/<window> · <gist>`, the gist being the report's first line or the verdict (`done` / `capped at its step cap` / `stopped by you` / `ended without a report` / …), and a routed run's model last — see **Grouped Sub-agents** above | task text + result summary |
 | fan_out | Fan-Out | the brief's first line (`task`) | the result's first line | the card's item rows, one delegation-shaped row per item run, each opening its run view |
 | workflow | Workflow | the action (`status` / `stop` / `message`) | the result's first line | — |
-| task_list | Task List (done/total) | — | — | the list, one row per task; collapsed = header only |
+| task_list | Tasks (done/total) | — | — | the list, one row per task; collapsed = header only |
 | load_skill | Skill | the loaded skill (the query until one is) | — | the skill body |
 
 Notes:
@@ -457,11 +458,11 @@ Notes:
   off the body they were taken from, so no Console card states a fact twice.
 - **2026-09-03** — the `task_list` row above arrived with the tool itself
   (ADR 0072). It carries no target because its one argument IS the list, and
-  its count rides the header rather than the outcome slot: `✦ Task List
+  its count rides the header rather than the outcome slot: `✦ Tasks
   (done/total)` — done rows over all rows of the list the tool echoed back,
   painted in the same faint count tone as the umbrella's breakdown — while
   the slot stays blank. A result with no rows at all — a cleared list, or a
-  refusal — drops the count and reads plain `✦ Task List`.
+  refusal — drops the count and reads plain `✦ Tasks`.
   **2026-09-14** — the block folds to that counted header (the `Fold states`
   exception above; the state is shared by every task-list card and remembered
   in `ui.task-list-open`), and the header sentence the tool writes for the
@@ -487,7 +488,7 @@ Notes:
   inside its run view (task + result). Its `N steps` stat is wired only if the
   engine already exposes a step count; otherwise the slot shows `done`/`failed`
   alone. A delegation queued behind the `parallel-agents` cap shows
-  `scheduled` and opens nothing at all (see Grouped Sub-agents).
+  `queued` and opens nothing at all (see Grouped Sub-agents).
 - Expansion state lives on the transcript entry, so it survives scrolling and
   new messages arriving. New blocks start collapsed. A run view is not an
   expansion state and lives on no entry: it is the Driver's own stack of open

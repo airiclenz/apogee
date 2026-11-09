@@ -244,7 +244,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-agent"},
 				{line: 1, kind: targetHeader, entry: 0, text: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call")},
 			},
 		},
@@ -264,7 +264,7 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 				}
 			},
 			want: []blockMark{
-				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"},
+				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-agent"},
 				{line: 1, kind: targetHeader, entry: 0,
 					text: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · survey complete")},
 			},
@@ -342,7 +342,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				subAgentReport(tr, "s1", "survey complete", 0)
 				return tr
 			},
-			wantHeader:    "✦ Sub-Agent",
+			wantHeader:    "✦ Sub-agent",
 			wantCollapsed: defaultGlyphs.collapsed, wantExpanded: defaultGlyphs.collapsed,
 			refusesToggle: true,
 		},
@@ -723,7 +723,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 			},
-			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
+			settled: "✦ Sub-agent", flipped: "  Sub-agent",
 		},
 		{
 			// The mirror case, and the reason the rule asks the span as well as the head: the report
@@ -735,7 +735,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				openRead(tr, "c1", "a.go", 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent", flipped: "  Sub-Agent",
+			settled: "✦ Sub-agent", flipped: "  Sub-agent",
 		},
 		{
 			name: "a finished run settles",
@@ -744,7 +744,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
 			},
-			settled: "✦ Sub-Agent", flipped: "✦ Sub-Agent",
+			settled: "✦ Sub-agent", flipped: "✦ Sub-agent",
 		},
 		{
 			// The umbrella's star answers for every call under it, the group's rule one level up: the
@@ -785,7 +785,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 
 // TestTaskListBlockCollapsesToHeader pins the header-folding block's half of the target rule (the
 // ratified call of plan "2026-09-14 - 00", item 2): a task_list block with rows folds to its header
-// alone — one row, `✦ Task List (1/3) ▶`, no task row and no `+N more lines`, the header's own
+// alone — one row, `✦ Tasks (1/3) ▶`, no task row and no `+N more lines`, the header's own
 // count saying what the fold holds — and opens onto every row uncapped under a `▼` header with NO
 // see-less footer, the header's glyph and a click anywhere on the block being its fold. It holds at
 // EVERY width, which is the part the width arm of blockHidesWhenCollapsed would otherwise muddle:
@@ -819,7 +819,7 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: tc.rendered}})
 
 			collapsed := strings.Split(renderPlain(tr, tc.width), "\n")
-			if want := []string{"✦ Task List (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(collapsed, want) {
+			if want := []string{"✦ Tasks (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(collapsed, want) {
 				t.Errorf("the collapsed block paints:\n%s\nwant exactly its header:\n%s",
 					strings.Join(collapsed, "\n"), strings.Join(want, "\n"))
 			}
@@ -831,7 +831,7 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 				t.Fatal("toggleExpanded(0) = false; want the task_list block to open")
 			}
 			open := strings.Split(renderPlain(tr, tc.width), "\n")
-			if want := "✦ Task List (1/3) " + glyphExpanded; open[0] != want {
+			if want := "✦ Tasks (1/3) " + glyphExpanded; open[0] != want {
 				t.Errorf("open header = %q, want %q", open[0], want)
 			}
 			rows := 0
@@ -879,7 +879,7 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 		}
 
 		m = step(t, m, keyAltUp())
-		if !strings.Contains(strip(m.lines[m.blockCursorRow()]), "✦ Task List") {
+		if !strings.Contains(strip(m.lines[m.blockCursorRow()]), "✦ Tasks") {
 			t.Fatalf("the block cursor entered on %q, not the task list's header", strip(m.lines[m.blockCursorRow()]))
 		}
 		m = step(t, m, keyEnter())
@@ -939,13 +939,13 @@ func headerLineOf(t *testing.T, m Model, entry int) int {
 	return -1
 }
 
-// taskListHeaders is every `✦ Task List` header on the frame m last painted, glyph included, so a
+// taskListHeaders is every `✦ Tasks` header on the frame m last painted, glyph included, so a
 // test can say which state EVERY card is painted in from the frame alone — the cached paint path
 // (paintcache.go), which is what a click has to move.
 func taskListHeaders(m Model) []string {
 	var headers []string
 	for _, ln := range m.lines {
-		if plain := strings.TrimSpace(strip(ln)); strings.HasPrefix(plain, "✦ Task List") {
+		if plain := strings.TrimSpace(strip(ln)); strings.HasPrefix(plain, "✦ Tasks") {
 			headers = append(headers, plain)
 		}
 	}
@@ -981,7 +981,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 				t.Fatalf("setup: the card at entry %d starts folded; the default preference seeds it open", at)
 			}
 		}
-		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphExpanded, "✦ Task List (1/3) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+		if got, want := taskListHeaders(m), []string{"✦ Tasks (1/3) " + glyphExpanded, "✦ Tasks (1/3) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("setup: headers = %q, want both open %q", got, want)
 		}
 		entries := len(m.transcript.entries)
@@ -994,7 +994,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 				t.Errorf("after the click on the second card, the card at entry %d is still open; the fold is shared", at)
 			}
 		}
-		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + defaultGlyphs.collapsed, "✦ Task List (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := taskListHeaders(m), []string{"✦ Tasks (1/3) " + defaultGlyphs.collapsed, "✦ Tasks (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Errorf("the next frame paints headers %q, want both folded %q — the cached paint did not move", got, want)
 		}
 		if m.opts.UI.TaskListOpen {
@@ -1008,7 +1008,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 		}
 
 		m = step(t, m, keyAltUp())
-		for !strings.Contains(strip(m.lines[m.blockCursorRow()]), "✦ Task List") ||
+		for !strings.Contains(strip(m.lines[m.blockCursorRow()]), "✦ Tasks") ||
 			m.lineTargets[m.cursor.line].entry != cards[0] {
 			if m.cursor.line == 0 {
 				t.Fatal("the block cursor never reached the first task-list card")
@@ -1022,7 +1022,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 				t.Errorf("after ⏎ on the first card, the card at entry %d is still folded; the fold is shared", at)
 			}
 		}
-		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphExpanded, "✦ Task List (1/3) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+		if got, want := taskListHeaders(m), []string{"✦ Tasks (1/3) " + glyphExpanded, "✦ Tasks (1/3) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
 			t.Errorf("the next frame paints headers %q, want both open %q", got, want)
 		}
 		if want := []settingEdit{{path: "ui.task-list-open", value: "false"}, {path: "ui.task-list-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
@@ -1072,7 +1072,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 		if len(cards) != 1 || m.transcript.entries[cards[0]].expanded {
 			t.Fatalf("under ui.task-list-open: false the live card starts open (cards %v)", cards)
 		}
-		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
+		if got, want := taskListHeaders(m), []string{"✦ Tasks (1/3) " + defaultGlyphs.collapsed}; !reflect.DeepEqual(got, want) {
 			t.Errorf("first paint headers = %q, want %q", got, want)
 		}
 
@@ -1168,7 +1168,7 @@ func TestRowlessTaskListCardKeepsTheOrdinaryShape(t *testing.T) {
 			t.Errorf("the collapsed errored card stands %d rows tall, want at most the budget's %d:\n%s",
 				len(collapsed), 1+collapsedBodyCap, strings.Join(collapsed, "\n"))
 		}
-		if collapsed[0] != "✦ Task List" {
+		if collapsed[0] != "✦ Tasks" {
 			t.Errorf("header = %q, want the bare label — no count over an error, and nothing folded behind it", collapsed[0])
 		}
 		painted := strings.Join(collapsed, "\n")
@@ -1187,7 +1187,7 @@ func TestRowlessTaskListCardKeepsTheOrdinaryShape(t *testing.T) {
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 			CallID: "1", Content: fmt.Sprintf(tasklist.HeaderFormat, 0, 0)}})
 
-		if got := renderPlain(tr, 80); got != "✦ Task List" {
+		if got := renderPlain(tr, 80); got != "✦ Tasks" {
 			t.Errorf("the fence-only card paints %q, want the bare header and nothing beneath", got)
 		}
 		if got := blockMarks(t, tr, 80); got != nil {

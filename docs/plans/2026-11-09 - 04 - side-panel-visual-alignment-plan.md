@@ -268,7 +268,28 @@ internal/tui/theme.go — panelHeader, toolLabel, toolIndicator; docs/layout/sid
 - `go test -race -count=1 -run 'Panel|Theme' ./internal/tui/`
 **Commit:** `feat(tui): paint side-panel headers in the transcript's heading tones`
 
-## 11. Use one vocabulary for section names and run phases
+## 11. Use one vocabulary for section names and run phases — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — cmd/apogee/e2e_delegation_test.go: made necessary by the `Sub-agent` registry label (its WaitText pinned `Sub-Agent`)
+NOTES (2026-11-09): consequential edit — cmd/apogee/e2e_parallel_test.go: made necessary by the queued phase word (`scheduledWord` pinned `scheduled`)
+NOTES (2026-11-09): consequential edit — cmd/apogee/e2e_toolsfold_subagent_test.go: made necessary by the `Sub-agents (N)` heading (comment named the old list)
+NOTES (2026-11-09): consequential edit — cmd/apogee/testdata/frames/t04-step-cap-block.txt: made necessary by the `Sub-agent` registry label (golden frame)
+NOTES (2026-11-09): consequential edit — cmd/apogee/testdata/frames/t15-cancelled-delegation.txt: made necessary by the `Sub-agent` registry label (golden frame)
+NOTES (2026-11-09): consequential edit — cmd/apogee/testdata/frames/workflow-stage-view.txt: made necessary by the `Sub-agent` registry label (golden frame)
+NOTES (2026-11-09): consequential edit — docs/manual/sessions.md: made necessary by the `Sub-agents (N)` heading
+NOTES (2026-11-09): consequential edit — docs/manual/workflows.md: made necessary by the `Sub-agent` label
+NOTES (2026-11-09): consequential edit — internal/scheme/schemes/dark.yaml: made necessary by the `Sub-agent` label (tool-header role comment)
+NOTES (2026-11-09): consequential edit — internal/scheme/schemes/light.yaml: made necessary by the `Sub-agent` label (tool-header role comment)
+NOTES (2026-11-09): consequential edit — internal/tui/activity.go: made necessary by the constant `Sub-agents` heading (comment)
+NOTES (2026-11-09): consequential edit — internal/tui/blockcursor.go: made necessary by the `Sub-agents (N)` heading (comment)
+NOTES (2026-11-09): consequential edit — internal/tui/doc.go: made necessary by the `Sub-agents (N)` heading (comment)
+NOTES (2026-11-09): consequential edit — internal/tui/render.go: made necessary by the `Sub-agents (N)` heading (comment)
+NOTES (2026-11-09): consequential edit — internal/tui/runview.go: made necessary by the `Sub-agents (N)` heading (comment)
+NOTES (2026-11-09): consequential edit — internal/tui/transcript.go: made necessary by the `Sub-agents (N)` heading (comment)
+NOTES (2026-11-09): consequential edit — internal/tui/workflowblock.go: made necessary by the `Sub-agents (N)` heading (comment)
+NOTES (2026-11-09): groupLabelOf keeps reading a skill-fetch group's own member label (resolveGroup lays both out through renderSubAgentGroup); only a delegation group takes the constant `Sub-agents` heading.
+NOTES (2026-11-09): the decode re-derives Label from the registry for every known tool name (not just sub_agent/task_list); dynamic tools keep the record's label. Identifiers (scheduledSummary, scheduledSubAgentView, subAgentScheduled, scheduledWord, preemptScheduledWord) kept their names per the no-rename rule; only their values/prose moved to `queued`.
+NOTES (2026-11-09): the prose grep was applied case-sensitively for `Sub-Agent|Task List` (with -i it matches every correct lowercase "sub-agent"); `scheduled` was moved to `queued` only where it named the not-started delegation phase — Schedule/Firing, tick-scheduling and generic uses stay. cmd/sessionexpect's own fixture and tests (an old recorded session, `tool=Sub-Agent`) and graphics/demo/history NOTES were left as historical records.
 
 **What:** Recast at the regression check (2026-11-09). Vocabulary half of `panel-header-style`; closes it with item 10. Depends on item 10.
 **Regression guard.** Non-live cmd/apogee e2e tests pin the old words: switch `drv.WaitText("Sub-Agent")` (`e2e_naming_test.go`) and `"Task List"` (`e2e_tasklist_test.go`) to the new labels, and retarget `e2e_subagent_preempt_test.go`'s absent-word check to `queued` on the `beta` row. Owner calls 2026-11-09. A lone or background sub-agent block's header reads `Sub-agent` (singular). The folded group heading is the constant `Sub-agents (N)`, not the member label. The task-list block reads `Tasks (d/n)`. `backgroundSubAgentPresenter` matches. A resumed record re-derives its Label from the registry on decode for a known tool name, so old sessions show the new words; pin it with a test. This supersedes `docs/layout/tool-layout.md`'s Title Case label note (`Sub-Agent`, `Task List`); correct it. The prose rule widens to `grep -rniE 'Sub-Agent|Task List|\bscheduled\b'` over layout.md docs/layout docs/manual .capcom/knowledge/glossary graphics internal/config/defaults internal/scheme/schemes and internal/tui's comments.

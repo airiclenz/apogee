@@ -4,7 +4,7 @@ title: "Delegation name: what one Sub-agent run is called wherever it is shown"
 
 **Delegation name**:
 What one **Sub-agent** run is called wherever it is shown — the collapsed call block, the
-`✦ Sub-Agent (N)` umbrella's rows, a **Run view**'s breadcrumb, `apogee headless`'s
+`✦ Sub-agents (N)` umbrella's rows, a **Run view**'s breadcrumb, `apogee headless`'s
 `sub-agent:` line and the **Session record** it is saved into. Three-deep, in order: the `name`
 the `sub_agent` call carried (normalised to a trimmed first line), else a **generated** one, else
 the delegated task's first line. The generated one comes from a single out-of-band completion on

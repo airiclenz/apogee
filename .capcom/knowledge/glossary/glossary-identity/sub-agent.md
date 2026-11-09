@@ -89,7 +89,7 @@ included, and lands once every member has finished (ADR 0025, amended 2026-10-05
 delegation commits, in call order, the tool result `sub-agent not started: the user sent a
 message while this group was running; delegate again if the task is still needed` with a
 finished phase and no started one, so the model is told and may delegate again; the TUI paints that
-row with the neutral `not started · your message` verdict in the marker tone, no ✓ (never `scheduled`,
+row with the neutral `not started · your message` verdict in the marker tone, no ✓ (never `queued`,
 never the red `error`: the skip is the human's act, not a failure), and opens it onto the skip's own
 words, like a refusal at the depth bound. A delegation a turn cancel caught queued reads `stopped by
 you` the same way. The children already running finish untouched — a message never

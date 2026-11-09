@@ -234,7 +234,7 @@ func (m Model) legendFor(top string) string {
 // delegation announces itself a beat before it says anything, and a reader who clicked it then must
 // not get an inline rail that the view would replace a moment later. A delegation that is over and
 // left nothing behind it (refused at the depth bound, faulted before its first event, skipped for a
-// queued message) is not a run: it keeps the ordinary block's inline toggle, as does the ✦ Sub-Agent
+// queued message) is not a run: it keeps the ordinary block's inline toggle, as does the ✦ Sub-agent
 // umbrella, whose click is its own kind (targetUmbrella). "Over" is read through the finished phase
 // as well as done, because in a fan-out a skipped member's phase lands long before its group's
 // results burst and pair it — a head asked by done alone would open an empty view in that gap.

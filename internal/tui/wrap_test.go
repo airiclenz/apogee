@@ -748,7 +748,7 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s2"}, Text: "second child"})
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent (2)", // the two adjacent delegations are rows of one list (subAgentGroup)
+		"✦ Sub-agents (2)", // the two adjacent delegations are rows of one list (subAgentGroup)
 		groupMemberLine("  ┝ first ⋯ 0 tool calls"),
 		groupMemberLine("  ┕ second ⋯ 0 tool calls"),
 	}, "\n")

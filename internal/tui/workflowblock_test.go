@@ -1397,7 +1397,7 @@ func TestWorkflowBlockSeatsARunHeadPerItem(t *testing.T) {
 
 // A fan_out call's item runs each get a run head of their own inside its card's span the same way.
 // The card stays the call it is — its own closed top-level call with nothing folded in — and its
-// item rows never fold into a "✦ Sub-Agent (N)" list: they are the card's own body.
+// item rows never fold into a "✦ Sub-agents (N)" list: they are the card's own body.
 func TestFanOutCardSeatsARunHeadPerItem(t *testing.T) {
 	t.Parallel()
 	const call = "f1"

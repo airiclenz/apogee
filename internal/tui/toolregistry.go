@@ -533,7 +533,7 @@ var toolRegistry = map[string]toolPresenter{
 		stat:   searchHitsStat,
 	},
 	"sub_agent": {
-		label:        "Sub-Agent",
+		label:        "Sub-agent",
 		verb:         "delegating",
 		target:       subAgentTarget,         // the delegation's name when it was given one, else the task's first line
 		resultDetail: delegationResultDetail, // the report's gist; the nested run already rendered railed
@@ -567,7 +567,7 @@ var toolRegistry = map[string]toolPresenter{
 	// it. No wireDropped either: the tasks array is the call's whole point, and repeating it
 	// above the result it produced would say the same thing twice; the session record keeps it.
 	"task_list": {
-		label:             "Task List",
+		label:             "Tasks",
 		verb:              "updating the task list",
 		detail:            taskListDetail, // the rows the model reads, its header sentence stripped
 		stat:              blankStat,      // the header's (done/total) already says how the list stands

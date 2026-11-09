@@ -748,8 +748,8 @@ func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 	rendered, call := taskListRendered, taskListCall
 
 	tv := presentToolCall(call, "", workspaceRoot{})
-	if tv.Label != "Task List" {
-		t.Errorf("label = %q, want %q — the raw name is the fallback a dynamic tool takes", tv.Label, "Task List")
+	if tv.Label != "Tasks" {
+		t.Errorf("label = %q, want %q — the raw name is the fallback a dynamic tool takes", tv.Label, "Tasks")
 	}
 	if want := "updating the task list"; tv.Verb != want {
 		t.Errorf("verb = %q, want %q", tv.Verb, want)
@@ -799,7 +799,7 @@ func TestToolRegistryPresentsTheTaskListCall(t *testing.T) {
 func assertTaskListPaint(t *testing.T, tr *transcript) {
 	t.Helper()
 	collapsed := renderPlain(tr, 80)
-	if want := "✦ Task List (1/3) " + defaultGlyphs.collapsed; collapsed != want {
+	if want := "✦ Tasks (1/3) " + defaultGlyphs.collapsed; collapsed != want {
 		t.Errorf("task_list paints collapsed:\n%s\nwant its counted header alone:\n%s", collapsed, want)
 	}
 	if !tr.toggleExpanded(0) {
@@ -807,7 +807,7 @@ func assertTaskListPaint(t *testing.T, tr *transcript) {
 	}
 	painted := renderPlain(tr, 80)
 	want := []string{
-		"✦ Task List (1/3) " + glyphExpanded,
+		"✦ Tasks (1/3) " + glyphExpanded,
 		"  ┝ [✔] read the plan",
 		"  ┝ [ ] write the code",
 		"  ┕ [ ] run the tests",
@@ -877,7 +877,7 @@ func TestToolRegistryTaskListReplaysAnOldOpenCountRecord(t *testing.T) {
 		CallID: "1",
 		Done:   true,
 		Tool: &session.ToolView{
-			Label: "Task List",
+			Label: "Task List", // the label the record was written under, before the relabelling
 			Verb:  "updating the task list",
 			Name:  "task_list",
 			Summary: session.BranchSummary{
@@ -924,12 +924,12 @@ func TestToolRegistryTaskListReplayKeepsAVerdictAndAPromotedLine(t *testing.T) {
 			name:    "a failed call keeps its verdict",
 			summary: session.BranchSummary{DetailLine: session.DetailLine{Text: "error"}},
 			details: []session.DetailLine{{Text: "the task list holds at most 40 tasks"}},
-			want:    []string{"✦ Task List", "  ┝ the task list holds at most 40 tasks", "  ┕ error"},
+			want:    []string{"✦ Tasks", "  ┝ the task list holds at most 40 tasks", "  ┕ error"},
 		},
 		{
 			name:    "a promoted refusal keeps its line",
 			summary: session.BranchSummary{DetailLine: session.DetailLine{Text: "task list cleared"}, Quoted: true},
-			want:    []string{"✦ Task List", "  ┕ task list cleared"},
+			want:    []string{"✦ Tasks", "  ┕ task list cleared"},
 		},
 	}
 	for _, tc := range cases {
@@ -938,7 +938,7 @@ func TestToolRegistryTaskListReplayKeepsAVerdictAndAPromotedLine(t *testing.T) {
 
 			blob, err := session.EncodeTranscript([]session.Entry{{
 				Kind: session.EntryKindToolCall, CallID: "1", Done: true,
-				Tool: &session.ToolView{Label: "Task List", Name: "task_list", Summary: tc.summary, Details: tc.details},
+				Tool: &session.ToolView{Label: "Tasks", Name: "task_list", Summary: tc.summary, Details: tc.details},
 			}})
 			if err != nil {
 				t.Fatalf("EncodeTranscript: %v", err)
@@ -963,7 +963,7 @@ func TestToolRegistryTaskListReplayKeepsAVerdictAndAPromotedLine(t *testing.T) {
 // list the tool echoed back: done rows over every row. It counts only rows wearing a marker, so a
 // task whose own text opens with a bracket is never miscounted, and it DECLINES where there is no
 // list to count — a cleared list, a fence-only result, a refusal, an error result — which leaves
-// the header the bare `✦ Task List` rather than a `0/0` that would read as a finished job.
+// the header the bare `✦ Tasks` rather than a `0/0` that would read as a finished job.
 func TestToolRegistryTaskListCountsDoneOverTotal(t *testing.T) {
 	t.Parallel()
 
@@ -1037,7 +1037,7 @@ func TestToolRegistryTaskListCountsDoneOverTotal(t *testing.T) {
 				tr.apply(domain.ToolResultEvent{Result: tc.result})
 				header := strings.Split(renderPlain(tr, 80), "\n")[0]
 				if strings.Contains(header, "(") {
-					t.Errorf("header = %q, want the plain `✦ Task List` — nothing to count", header)
+					t.Errorf("header = %q, want the plain `✦ Tasks` — nothing to count", header)
 				}
 			}
 		})

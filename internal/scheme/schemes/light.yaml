@@ -26,7 +26,7 @@ error: "#cf222e"       # recovered-fault notices
 success: "#115e59"     # the ✓ on a finished sub-agent and any other "this came off" marker — error's counterpart, a dark teal in `diff-add-bg`'s family so it carries against a light background
 warning: "#9a6700"     # a condition worth noticing that is not a fault (the status line's quiet qualifier before the activity clock) — a dark amber pitched between `muted` and `error`, deep enough to carry against a light background
 code: "#bc4c00"        # inline `code` + fenced code blocks (orange)
-tool-header: "#1f6feb" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — blue, so the blocks apogee ran read apart from the code it prints
+tool-header: "#1f6feb" # a tool-call block's header label (Run, List Dir, Sub-agent, …) and the sub-agent rail that hangs off it — blue, so the blocks apogee ran read apart from the code it prints
 
 # --- autonomy modes ----------------------------------------------------------------
 # The footer's mode markers, warming up the privilege ladder (least → most autonomous).

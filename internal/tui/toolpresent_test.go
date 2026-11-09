@@ -360,7 +360,7 @@ func TestPresentToolCall(t *testing.T) {
 			name:       "sub_agent → task first line as target, the whole report as the body",
 			call:       domain.ToolCall{ID: "33", Tool: "sub_agent", Arguments: []byte(`{"task":"Survey the tests.\nReport gaps."}`)},
 			result:     domain.ToolResult{CallID: "33", Content: "The suite covers A and B.\nGap: C is untested."},
-			wantLabel:  "Sub-Agent",
+			wantLabel:  "Sub-agent",
 			wantVerb:   "delegating",
 			wantTarget: "Survey the tests.", wantDetail: "Gap: C is untested.",
 		},
@@ -484,7 +484,7 @@ func TestPresentSubAgentNameLeadsTheHeader(t *testing.T) {
 			if tv.agentName != tc.wantAgent {
 				t.Errorf("agentName = %q, want %q", tv.agentName, tc.wantAgent)
 			}
-			if tv.Label != "Sub-Agent" || tv.Verb != "delegating" {
+			if tv.Label != "Sub-agent" || tv.Verb != "delegating" {
 				t.Errorf("label/verb = %q/%q; the name changes neither", tv.Label, tv.Verb)
 			}
 		})

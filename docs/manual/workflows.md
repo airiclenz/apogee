@@ -477,7 +477,7 @@ faulted or stopped one is kept whatever its name (see
 without `background`.
 
 In the transcript the call paints as a background-workflow call — the delegation's name over the
-call's answer — never as a `✦ Sub-Agent` row with a run view to open, and its finish line names the
+call's answer — never as a `✦ Sub-agent` row with a run view to open, and its finish line names the
 delegation. Where apogee cannot keep a background workflow — a `headless` run, a `daemon` firing,
 a sub-agent's own call — no `background` switch is shown, and a call that carries one anyway runs as
 a plain blocking `sub_agent`.

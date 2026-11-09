@@ -686,7 +686,7 @@ func bgSubAgentAnswer(id string) domain.ToolResultEvent {
 
 // A background sub_agent's call paints as a background-workflow call — its name as the target,
 // the immediate answer's first line in the slot — and never as a delegation block: it heads no
-// run, wears no `done`, two of them never fold into one "Sub-Agent (2)" group, and its call fires
+// run, wears no `done`, two of them never fold into one "Sub-agents (2)" group, and its call fires
 // no delegation progress save.
 func TestBackgroundSubAgent_CallPaintsAsABackgroundWorkflowCall(t *testing.T) {
 	t.Parallel()
@@ -707,10 +707,14 @@ func TestBackgroundSubAgent_CallPaintsAsABackgroundWorkflowCall(t *testing.T) {
 	if !strings.Contains(painted, "scout "+defaultGlyphs.leaderDot+" "+bgSubAgentStarted) {
 		t.Errorf("no row reads the delegation's name over its immediate answer:\n%s", painted)
 	}
-	for _, refused := range []string{"done", "Sub-Agent (2)"} {
+	for _, refused := range []string{"done", "Sub-agents (2)"} {
 		if strings.Contains(painted, refused) {
 			t.Errorf("a background sub_agent's call reads %q:\n%s", refused, painted)
 		}
+	}
+	// Its header is the delegation's own label, the side panel's word for one sub-agent.
+	if !strings.Contains(painted, "✦ Sub-agent") {
+		t.Errorf("no background sub_agent's call is headed `Sub-agent`:\n%s", painted)
 	}
 	if progressSaveTrigger(bgSubAgentCall("s3", "")) {
 		t.Error("a background sub_agent's call fired the delegation progress save")

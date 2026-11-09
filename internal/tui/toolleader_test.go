@@ -280,7 +280,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		// what a delegation's block hides is the prompt it carried, whichever reading the slot got
 		// (subAgentHidesPrompt).
 		name: "a never-ran delegation's refusal is held to the same floor",
-		view: toolView{Label: "Sub-Agent", Target: "survey the tests", name: subAgentToolName,
+		view: toolView{Label: "Sub-agent", Target: "survey the tests", name: subAgentToolName,
 			task:    "survey the tests\nand report back",
 			stat:    plainStat("done"),
 			Summary: quotedSummary(detailLine{Text: refusedResult + " — no further delegation is possible"})},

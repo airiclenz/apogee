@@ -84,7 +84,7 @@ still remembers.
   spawned without giving it a name gets a short one from the same kind of call off to
   the side — asked of the server that child itself runs on, while it works — and the
   generated name then stands wherever that run is shown: its collapsed block, the
-  `✦ Sub-Agent` rows, the breadcrumb when you open the run, and the saved record, so a
+  `✦ Sub-agents (N)` rows, the breadcrumb when you open the run, and the saved record, so a
   resumed session shows it too. A name the model supplied is never overwritten, a name
   that arrives after the run has already finished is dropped, and anything that goes
   wrong is silent — the run keeps reading as the first line of its task, which is what

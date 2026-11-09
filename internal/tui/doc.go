@@ -357,7 +357,7 @@
 // paint reads ([Model.legend], with [Model.legendFor] as its view-aware half). Two gestures end
 // work and they reach different things (ADR 0086 D5). `^x` stops ONE sub-agent's run: inside a view
 // the run on screen, and on the block cursor the delegation whose row it stands on — a member row
-// of a ✦ Sub-Agent umbrella, a nested row inside a view, or a side-panel sub-agent row, which takes
+// of a ✦ Sub-agents umbrella, a nested row inside a view, or a side-panel sub-agent row, which takes
 // the key over the view's own run ([Model.runViewKey] steps aside for [Model.blockCursorKey]); both reach the engine through
 // [Model.stopRun], which does nothing for a run that is not [stoppable] (over, or without a run
 // id), and the row says `stopped by you` once the run reports. esc×2 CANCELS the whole Turn, and

@@ -34,7 +34,7 @@ const (
 	toolsFoldChild        = "surveyor"
 	toolsFoldRunViewCrumb = "← main › " + toolsFoldChild
 	// toolsFoldDelegationRow is the head of the delegation's collapsed row — the ┕ of the one-member
-	// Sub-Agent list and the child's name — the row a click opens as a run view. It is matched by
+	// Sub-agents list and the child's name — the row a click opens as a run view. It is matched by
 	// its head rather than by the name alone because the approval pane names the child too
 	// (`Sub-agent: surveyor — …`), and a click aimed at that row would land on the pane.
 	toolsFoldDelegationRow = "┕ " + toolsFoldChild

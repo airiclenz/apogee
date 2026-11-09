@@ -482,7 +482,7 @@ func TestFaultedSiblingResidueCommitsAtItsFinishedPhase(t *testing.T) {
 
 // A host note landing between two announcements of one fan-out does not split the group. The
 // delegations are grouped by ADJACENCY of blocks (subAgentGroup), so a note parked between them
-// would be a permanent divider: two "✦ Sub-Agent (1)" headers where the reader was promised one.
+// would be a permanent divider: two "✦ Sub-agents (1)" headers where the reader was promised one.
 // The sibling announced after the note therefore lands in FRONT of it and the note slides to the
 // tail, where it stands after the whole group.
 func TestNoteBetweenSiblingDelegationsKeepsOneGroup(t *testing.T) {

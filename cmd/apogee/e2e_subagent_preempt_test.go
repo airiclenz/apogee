@@ -49,9 +49,10 @@ const (
 	// screen — which is what puts the ⏎ strictly before the engine decides on the second delegation.
 	preemptChildGate = "staged"
 	// The verdict the skipped row's outcome slot reads (internal/tui's neutral pre-emption verdict), and the
-	// word it must not: the row is over, not waiting.
+	// word it must not: the row is over, not waiting. The word is the queued phase's (internal/tui's
+	// scheduledSummary), which the status line's own readout also says, so it is checked on the row.
 	preemptErrorWord     = "not started · your message"
-	preemptScheduledWord = "scheduled"
+	preemptScheduledWord = "queued"
 	// preemptQueuedReadout is the status line's count of staged messages while one waits.
 	preemptQueuedReadout = "1 queued"
 
@@ -63,7 +64,7 @@ const (
 	waveReport  = "The beta half is the test suite."
 	// waveReadout is the queued readout while a ⏎ message waits out a wave's queued member: the
 	// count, when it lands, and the key that would send it now instead (internal/tui's
-	// queuedWaveHint). A pooled wave shows its queued member as a `scheduled` row; a serial wave draws
+	// queuedWaveHint). A pooled wave shows its queued member as a `queued` row; a serial wave draws
 	// no row for a member it has not started, and the readout counts that member off the size the
 	// engine announced for the group — so both journeys show it.
 	waveReadout = "1 queued · after the wave · ctrl+g sends now"
@@ -135,14 +136,14 @@ func TestE2EQueuedMessagePreemptsTheScheduledSubAgents(t *testing.T) {
 		}
 	}
 
-	// The screen: the skipped row says the verdict, not `scheduled`, and the group is collapsed.
+	// The screen: the skipped row says the verdict, not `queued`, and the group is collapsed.
 	frame := drv.Frame()
 	row := rowContaining(t, frame, "beta")
 	if !strings.Contains(row, preemptErrorWord) {
 		t.Errorf("the skipped delegation's row does not read %q: %q", preemptErrorWord, row)
 	}
-	if strings.Contains(flatten(frame.String()), preemptScheduledWord) {
-		t.Errorf("a delegation still reads %q after the run settled:\n%s", preemptScheduledWord, frame)
+	if strings.Contains(row, preemptScheduledWord) {
+		t.Errorf("the skipped delegation still reads %q after the run settled: %q", preemptScheduledWord, row)
 	}
 
 	if err := sess.Quit(); err != nil {
@@ -201,7 +202,7 @@ func TestE2EQueuedMessageWaitsForTheWholeWave(t *testing.T) {
 }
 
 // TestE2EQueuedMessageWaitsForAPooledWaveAndSaysSo is the wave rule at `parallel-agents: 2`, where
-// the queued member stands on screen as `scheduled` before it starts: a message sent with ⏎ while
+// the queued member stands on screen as `queued` before it starts: a message sent with ⏎ while
 // the first two run makes the queued readout say the message waits for the wave and name the key
 // that would not, and the third delegation still runs once a slot frees.
 func TestE2EQueuedMessageWaitsForAPooledWaveAndSaysSo(t *testing.T) {

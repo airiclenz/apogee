@@ -1177,7 +1177,7 @@ live, like `ui.skill-suggestions` above it: commit the row in `/settings` and th
 itself in the session you are already in.
 
 `ui.task-list-open` — on by default — is whether the task-list cards in the transcript start open,
-every task row painted, or folded to their counted `✦ Task List (done/total)` header. It is one
+every task row painted, or folded to their counted `✦ Tasks (done/total)` header. It is one
 choice for every task-list card in the session, and it is a `ui:` key apogee writes as well as
 reads — as it does `ui.tools-open` below and the `ui.color-scheme` a `/color-scheme <name>` switch
 saves: clicking a card folds — or opens — them all and records the flip in `config.yaml`
@@ -3644,8 +3644,8 @@ or not — so ticking a task off is resending the list with that task done, and 
 sending an empty one. There are no task ids to get wrong. There are two limits: a list holds at
 most **40** tasks, and one task's text runs to at most **200** characters; a call over either
 comes back as an error naming the limit, and the list apogee holds is unchanged. The current list is what you see in the
-transcript's `Task List` card, rendered `[✔]` for a finished row and `[ ]` for a row still open. The
-card's header counts them, `✦ Task List (done/total)`, and the card folds to that header alone:
+transcript's `Tasks` card, rendered `[✔]` for a finished row and `[ ]` for a row still open. The
+card's header counts them, `✦ Tasks (done/total)`, and the card folds to that header alone:
 click it, or press `enter` with the block cursor on it, and every task-list card in the session
 folds — or opens — together, a choice apogee remembers in
 [`ui.task-list-open`](#the-terminal-ui--ui).

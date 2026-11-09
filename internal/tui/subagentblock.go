@@ -11,7 +11,7 @@ import (
 
 // subAgentToolName is the raw tool id whose call block heads a sub-agent run. The span rule matches
 // on the view's retained name (toolView.name, which the codec round-trips) rather than on the
-// "Sub-Agent" label, so a relabelling cannot silently switch the rule off and a third-party tool
+// "Sub-agent" label, so a relabelling cannot silently switch the rule off and a third-party tool
 // that happens to share the label cannot switch it on.
 const subAgentToolName = "sub_agent"
 
@@ -538,12 +538,13 @@ type subAgentMember struct {
 }
 
 // subAgentGroupLabel is the header a folded group of delegations wears, ahead of its count
-// (docs/layout/tool-layout.md, Rules: "✦ Sub-Agent (N)"). It is read off the members' own registry
-// label rather than restated, so the group and a lone delegation cannot come to name the tool
-// differently; this constant is only the fallback for a group whose views carry no label at all.
-const subAgentGroupLabel = "Sub-Agent"
+// (docs/layout/tool-layout.md, Rules: "✦ Sub-agents (N)"). It is the side panel's own section title
+// ([Model.panelSection]), so the list of delegations reads alike on both surfaces, and it is a
+// constant rather than the members' label: the label names ONE delegation (`Sub-agent`), the
+// heading names the list of them.
+const subAgentGroupLabel = "Sub-agents"
 
-// renderSubAgentGroup paints a folded group of adjacent delegations — "✦ Sub-Agent (3)" over one
+// renderSubAgentGroup paints a folded group of adjacent delegations — "✦ Sub-agents (3)" over one
 // row per agent, the agent's name on the left and its verdict in the outcome slot
 // (docs/layout/tool-layout.md, Rules). It is the same list the umbrella is
 // (renderSuperGroup), and the member rows go through the very painter that block's do, so a
@@ -672,8 +673,10 @@ func subAgentReported(head paintInput) bool {
 	return head.done || head.phase == domain.SubAgentFinished
 }
 
-// scheduledSummary is the whole of what a queued delegation's <tool-top-level-details> says.
-const scheduledSummary = "scheduled"
+// scheduledSummary is the whole of what a queued delegation's <tool-top-level-details> says: the
+// side panel's own phase word for a run not yet started ([Model.panelSubAgentRow]), so the two surfaces
+// name the phase alike.
+const scheduledSummary = "queued"
 
 // subAgentScheduled reports whether a delegation is QUEUED: the model asked for it, and no child is
 // running behind it yet. A fan-out wider than the Parallel agents cap emits every ToolCallEvent up
@@ -685,7 +688,7 @@ const scheduledSummary = "scheduled"
 // is the engine's (domain.SubAgentPhaseEvent), emitted the instant a worker dequeues the job — the
 // signal this state exists to wait for. Its being OVER is the second: a delegation refused at the
 // depth bound or failed by a reaction never runs and so is never started, yet its result still
-// arrives (dispatch.go), and a row left "scheduled" over a delegation that already answered would
+// arrives (dispatch.go), and a row left "queued" over a delegation that already answered would
 // say so forever. A delegation a queued user message PRE-EMPTED is the same shape one producer
 // over — its finished phase arrives without a started one, carrying the error-shaped skip result
 // (skipDelegation, ADR 0025) — so the row reads that result's neutral verdict, `not started · your
@@ -694,9 +697,9 @@ const scheduledSummary = "scheduled"
 // reader having opened it. That one is the answer for a producer that emits no phases at all: a
 // hand-built test transcript, a record replayed from a session written before the phase existed. A
 // delegation with entries behind it has manifestly started whatever it announced, and one that is
-// OPEN was expandable when the click landed, which a scheduled row never is. Reading all three is
+// OPEN was expandable when the click landed, which a queued row never is. Reading all three is
 // what lets one rule serve every producer — the discipline subAgentReported follows for the other
-// end of the same life — and being framed and being scheduled are mutually exclusive by
+// end of the same life — and being framed and being queued are mutually exclusive by
 // construction, which is what keeps the queued row out of the reading that would draw it a frame
 // (renderSubAgentGroup).
 func subAgentScheduled(head paintInput, span int) bool {
@@ -730,14 +733,16 @@ func scheduledSubAgentView(head paintInput) toolView {
 	return view
 }
 
-// groupLabelOf is the label a folded group of delegations names itself with: the members' own, off
-// the first of them, falling back to the constant for a view built before the registry knew the
-// tool (a replayed record, a hand-built test transcript).
+// groupLabelOf is the label a folded group names itself with. A group of delegations wears the
+// constant list heading (subAgentGroupLabel), whatever its members' own label says; any other
+// group this painter lays out (a run of skill fetches, resolveGroup) is named by its members' own
+// label, off the first of them, falling back to the constant for a view that carries none (a
+// hand-built test transcript).
 func groupLabelOf(members []subAgentMember) string {
-	if len(members) > 0 && members[0].head.tool.Label != "" {
-		return members[0].head.tool.Label
+	if len(members) == 0 || members[0].head.tool.headsRun() || members[0].head.tool.Label == "" {
+		return subAgentGroupLabel
 	}
-	return subAgentGroupLabel
+	return members[0].head.tool.Label
 }
 
 // renderSubAgentMemberRows paints one member of a folded sub-agent group and reports whether the

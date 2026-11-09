@@ -13,8 +13,8 @@ line's right slot states the **viewed run's** context gauge once that run has re
 the top-level agent's — and reads `esc back` until it has (`esc back · ^x stop` while the viewed run
 is running). `^x` stops the viewed run alone (**Stop (a delegation)**); `esc×2` at the top level
 still cancels the whole Turn. Inside a view of a **running** child the prompt box addresses that child (see
-**Interjection**); a view of a finished or scheduled one opens **read-only**. A run therefore has
-exactly two shapes — the collapsed row and the run view — while the `✦ Sub-Agent (N)` umbrella
+**Interjection**); a view of a finished or queued one opens **read-only**. A run therefore has
+exactly two shapes — the collapsed row and the run view — while the `✦ Sub-agents (N)` umbrella
 still opens inline to its member rows. It is **Driver state**: a stack of open runs in the TUI's
 `Model`, never encoded in the transcript, never written to a **Session record** and never restored,
 so a resumed session opens at the top level. Ratified 2026-08-30

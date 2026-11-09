@@ -187,7 +187,8 @@ func (a runActivities) oldestChild() (runRef, bool) {
 // It is the status line's own word and no longer a label the transcript also draws: the rail and
 // its ┌─┶ header are the whole of what the transcript says about a descent now, so nothing here is
 // held to another surface's spelling. The transcript's own word for the tool is the registry's
-// "Sub-Agent" label, which titles its blocks (subAgentGroupLabel).
+// "Sub-agent" label, which titles its blocks (the sub_agent registry row), and "Sub-agents" heads a
+// folded list of them (subAgentGroupLabel).
 const subAgentActivityName = "sub-agent"
 
 // text renders the activity as the status line's unstyled phrase. Idle says nothing at all —

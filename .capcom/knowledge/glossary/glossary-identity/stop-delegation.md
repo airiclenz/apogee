@@ -7,7 +7,7 @@ The human ending **one** running **Sub-agent** — and everything under it — w
 goes on: nothing rolls back, and the parent receives a partial result with the engine's summary of
 the work so far. The engine call is `Agent.StopChild(runID)`, addressed by the run id as an
 **Interjection** to a child is; the TUI binds it to `^x`, on the viewed run of a **Run view** or on
-the cursor's member row of the `✦ Sub-Agent (N)` umbrella, with no confirmation since nothing rolls
+the cursor's member row of the `✦ Sub-agents (N)` umbrella, with no confirmation since nothing rolls
 back. The engine folds the child at the stop — no wrap-up Turn — and the non-error result opens
 `[stopped by the user — engine summary follows]`; a pooled child stopped before it started runs
 and folds nothing, and returns `sub-agent not started: the user stopped it before it started;

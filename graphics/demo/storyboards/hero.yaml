@@ -81,18 +81,18 @@ beats:
     title: the sub-agent fan-out
     why: delegation is visible — a child run with its own tool calls, summarized in the parent
     do:
-      - wait: {screen: "Sub-Agent", timeout: 90s}
+      - wait: {screen: "Sub-agent", timeout: 90s}
       - wait: {screen: "tool calls", timeout: 90s}
     duration: 7.2s
     expect:
       - run: >-
-          "$PHOTON_WORK/bin/sessionexpect" --entry 'kind=toolCall,tool=Sub-Agent' --contains Sub-Agent
+          "$PHOTON_WORK/bin/sessionexpect" --entry 'kind=toolCall,tool=Sub-agent' --contains Sub-agent
     notes: |
-      The wait is on the card label `Sub-Agent`, never on its `✦` lead: the lead blinks while the
+      The wait is on the card label `Sub-agent`, never on its `✦` lead: the lead blinks while the
       child runs, so a screen can miss it. `tool calls` is the member row's summary
       (subAgentSummaryLine, internal/tui/subagentblock.go), painted once the child has made at
       least two calls. The expect selects the card by its label — `tool:` prefix-matches the
-      card's label, and the label is `Sub-Agent`, not the tool name `sub_agent`. About 24 s of
+      card's label, and the label is `Sub-agent`, not the tool name `sub_agent`. About 24 s of
       take play in 10 s (2.4×), close to beat 7's pace so the clip's speed stays even: at 5× the
       child's rows streamed past too fast to read.
 
@@ -128,14 +128,14 @@ beats:
     why: every child run is inspectable — one click in, one click out
     do:
       - pause: {for: 1s}
-      - click: {target: {text: "Sub-Agent", nth: last, area: transcript}}
+      - click: {target: {text: "Sub-agent", nth: last, area: transcript}}
       - wait: {screen: "← main ›", timeout: 5s}
       - pause: {for: 3s}
       - click: {target: {text: "← main ›"}}
       - wait: {screen: "← main ›", gone: true, timeout: 5s}
     duration: 7s
     notes: |
-      A lone delegation's `Sub-Agent` title row opens its run view, exactly as its `┕ … tool
+      A lone delegation's `Sub-agent` title row opens its run view, exactly as its `┕ … tool
       calls` member row does — a transcript click acts on the whole line, never the column
       (toggleBlockAt, internal/tui/mouse.go) — so the click aims at the title, where a reader
       would, rather than at the middle of the member row's dotted leader. The view's header band

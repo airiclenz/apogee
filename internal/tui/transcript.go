@@ -2313,7 +2313,7 @@ type groupBlock struct {
 // third-party tool that happens to share the label must not switch it on.
 //
 // A background sub_agent's call (toolView.background) is no delegation's head, so it never joins a
-// "✦ Sub-Agent (N)" group either.
+// "✦ Sub-agents (N)" group either.
 func ownHeads(entries []entry, i int, name string) bool {
 	return i >= 0 && i < len(entries) && entries[i].kind == entryToolCall && entries[i].tool.name == name &&
 		!entries[i].tool.background
@@ -2492,7 +2492,7 @@ func subAgentGroup(entries []entry, i int) []groupBlock {
 
 // ownGroupAt is the group entries[i] BELONGS to and its position in it — what the painter asks
 // at a block head, where [ownGroup] alone would answer about the members from i onward and so
-// would grow a second "✦ Sub-Agent (N)" header at every member of one group.
+// would grow a second "✦ Sub-agents (N)" header at every member of one group.
 //
 // It walks back to the group's first member before walking forward, and the backward step is exact
 // for the same reason the forward one is: a member's span is contiguous and ends where the next

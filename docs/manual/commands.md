@@ -204,7 +204,7 @@ click on the row would — on a header's pin glyph it toggles the section's pin,
 folds or opens the section, and the bar stays, while
 opening a sub-agent's run view, the task-list card, a changed file's tool block, `/usage` or `/mcp`
 ends the mode, the keys going back to the prompt. `^x` on a
-delegation's row — a member of a `✦ Sub-Agent (N)` group, a nested delegation inside a run
+delegation's row — a member of a `✦ Sub-agents (N)` group, a nested delegation inside a run
 view, or a sub-agent row in the side panel — stops that one run, and leaves the bar where it was so the row can say how it ended. `⏎` on a
 **sub-agent** does something else: it opens that delegation's **run view**, which gives the
 whole transcript area over to that one run — its task at the top, its own tool calls and

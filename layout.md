@@ -58,7 +58,7 @@
     2 + another new code line
                                                                             see less…
 
-✦ Sub-Agent
+✦ Sub-agent
   ┕ survey the tests ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 tool calls · 12k/32k · Found 4 gaps ▶
 
 ✦ This is the last message from the LLM. There must always be one empty line between
@@ -912,7 +912,7 @@ a list. The RULE behind that flag is one rule: a call whose presenter marks it s
 record in its own right, or it **groups with its own kind** — a list of one tool's calls under its
 own umbrella — and a call that has its own list never joins the mixed one. Three calls say it, and
 the second and third are the own-kind half: the answered `Ask User` block, which is the permanent
-record of an exchange and reads as a card; the `Sub-Agent` call, which heads a whole delegation and,
+record of an exchange and reads as a card; the `Sub-agent` call, which heads a whole delegation and,
 per the canon spec, groups with other sub-agent calls alone rather than joining a super-group; and
 the `Skill` fetch, which groups with other fetches under `✦ Skill (N)` for the same reason and no
 other (*Grouped Skills*, `docs/layout/tool-layout.md`). That flag is the one deliberate
@@ -966,7 +966,7 @@ delegation's second shape is its **run view** (below), which paints that run's o
 transcript's own depth rather than nesting them under a frame, and every run left standing in the
 conversation is a collapsed row. The `│` rail an open delegation used to draw unbroken from a
 `┌─┶` header row down to its last line, and the `┊` that closed such a span where an
-`✦ Sub-Agent (N)` list resumed after it, went with the inline shape (ADR 0063) — the one `│` still
+`✦ Sub-agents (N)` list resumed after it, went with the inline shape (ADR 0063) — the one `│` still
 on screen is an open group member's continuation gutter (above), which is that block's own chrome
 and never a run's frame.
 
@@ -991,7 +991,7 @@ facts**: the entry keeps every line, and the cap applies at paint, not at build.
 So a collapsed block stands no taller than three screen rows, whatever tool filled it and however
 long its target is — which is the point, because a scrollback of tool calls should read as a list
 and not as a wall. The one block that spends none of the two rows is `task_list`, the model's own
-checklist (2026-09-14): collapsed, it is its counted header alone — `✦ Task List (done/total)`,
+checklist (2026-09-14): collapsed, it is its counted header alone — `✦ Tasks (done/total)`,
 `▶` on the header, no task row and no `+N more lines`, because the count already says what the
 fold holds — and open it is every row uncapped, the header's `▼` its only fold, since a two-row
 preview of a checklist would fold away exactly the rows the reader keeps glancing at. Its fold
@@ -1119,7 +1119,7 @@ without a report`, which reached its boundary with nothing to hand back. Where b
 promoted and quoted ones included, takes the marker tone. The sketch at the
 top of this file shows both states side by side: a collapsed `Terminal` row over its remainder
 marker, and a `Diff Preview` deliberately drawn open so the shape of a full body appears too — a
-body being the one thing a collapsed row shows nothing of. The `Sub-Agent` there
+body being the one thing a collapsed row shows nothing of. The `Sub-agent` there
 is drawn shut, which is the only shape a run wears in the conversation: opening one leaves the
 transcript for its run view (below).
 
@@ -1198,7 +1198,7 @@ puts the row under the `❯` marker itself, so it never leaves an empty block. I
 width, cut with the house ellipsis where it runs long, and it stands outside the three-row cap: a
 collapsed prompt still ends with it. A text-only send paints no such row.
 
-**A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
+**A sub-agent run collapses to its call block.** The `Sub-agent` call block is the run's header
 block, and in the conversation it is the whole of the run: it stands alone and the whole span
 beneath it — every inner block — is elided, to be read in the run's own view (below). **Its target — the text leading its row — is the
 delegation's name** when the call gave one, and the delegated task's first line when it did not, so
@@ -1291,7 +1291,7 @@ of its own: the cascade is this one rule applied at every depth, not a special c
 **Concurrent delegates get one run each.** When a reply asks for several delegations at once
 they run concurrently (ADR 0039), and the scrollback shows **one run per child, in the order
 the calls were made** — the first `sub_agent` call is the first of them — each holding only its own
-child's work; adjacent ones fold into the canon spec's `✦ Sub-Agent (N)` list, one row per child,
+child's work; adjacent ones fold into the canon spec's `✦ Sub-agents (N)` list, one row per child,
 and opening a row opens that child's run view. Nothing about a single run's shape changes: each is the
 same collapsed call block
 described above, in the same two tempi, under the same cap. What changes is that the grouping can
@@ -1380,7 +1380,7 @@ here. The block has no fold of its own and always paints this way.
 **A stage row opens its stage's work.** Each item of a Workflow is a child run with a **run head
 of its own**, seated under the block and inside its span when the item's run starts: it opens as
 that run's view, `^x` stops it, a message typed in its view reaches its child, and the gauge states
-its fill, exactly as for a delegation — but it never groups into a `✦ Sub-Agent (N)` list, and its
+its fill, exactly as for a delegation — but it never groups into a `✦ Sub-agents (N)` list, and its
 receipt folds onto it as the run's report. The head, the not-ok item lines, the stage view's rows,
 the breadcrumb and the status line call an item by its **short name** — its path relative to the
 workflow's folder, the folder itself read as the stage name, a path outside it as its basename —
@@ -1413,7 +1413,7 @@ with a note and left in the box.
 
 ## Run view
 
-**Expanding a delegation opens it, and opening it takes the transcript.** A framed `Sub-Agent`
+**Expanding a delegation opens it, and opening it takes the transcript.** A framed `Sub-agent`
 row — reached by a motionless click anywhere on it, or by `⏎` on the block cursor — opens that run
 as its **run view**: the transcript slot paints that one run and nothing else, rooted at the run's
 own task, opened on its latest line and following it as it grows. Everything around the slot stays
@@ -1421,7 +1421,7 @@ exactly where it was — the top rule, the status line, the staged band, the pro
 footer — so this is a pane inside apogee's own frame and never an alternate screen (ADR 0035), and
 the conversation the reader left is one `esc` away rather than out of reach. A run has these two
 shapes and no third: the collapsed row it wears in the conversation, and this. The
-`✦ Sub-Agent (N)` umbrella is unchanged and still opens **inline** to its member rows — each of
+`✦ Sub-agents (N)` umbrella is unchanged and still opens **inline** to its member rows — each of
 those rows is a collapsed run, and opening one opens its view.
 
 ```text
@@ -1522,7 +1522,7 @@ with the item's name as the crumb.
 **`esc` means back, `^x` stops one run, and `esc×2` cancels the Turn.** Two gestures end work and
 they reach different things. `^x` **stops one sub-agent's run** and nothing else (ADR 0086 D5):
 inside a view it stops the run on screen, and on the block cursor it stops the delegation whose row
-the cursor stands on — a member row of a `✦ Sub-Agent (N)` umbrella, a nested delegation's row
+the cursor stands on — a member row of a `✦ Sub-agents (N)` umbrella, a nested delegation's row
 inside a view, or a sub-agent row in the side panel, each of which takes the key over the view's own
 run because that is the run the human is pointing at. It asks for no confirmation, since all it discards is the rest of one delegation's
 work: the engine folds what the run had done into the partial result its parent reads, the
@@ -1970,7 +1970,7 @@ a dismissed one included, through the same route — at idle only; mid-turn it n
 A background `sub_agent` (ADR 0094) is such a workflow of one item. Its call paints as a
 background-workflow call, the way a background `fan_out`'s does, and never as a delegation block:
 the delegation's name sits over the call's immediate answer, and the row has no run to open and
-never joins a `✦ Sub-Agent (N)` group. Its finish line names it as a sub_agent over the
+never joins a `✦ Sub-agents (N)` group. Its finish line names it as a sub_agent over the
 delegation's name — `background sub_agent <name> finished — items 1 · ok 1 · …` (or `stopped`),
 and `background sub_agent <name> failed — <reason>` for a run that could not proceed — where a
 `fan_out`'s or a recipe's reads `background workflow <name> …`. In `/workflows` its row ends on

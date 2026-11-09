@@ -49,7 +49,7 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 	}
 }
 
-// A fan-out reads as ONE list: adjacent delegations fold under "✦ Sub-Agent (3)", one row per agent
+// A fan-out reads as ONE list: adjacent delegations fold under "✦ Sub-agents (3)", one row per agent
 // in the shape every folded member takes (docs/layout/tool-layout.md, Rules). What a row SAYS is
 // the lone block's own collapsed reading (collapsedSubAgentView) — the work behind it and the gist
 // its delegate reported — because folding changes the frame around a delegation, not the record.
@@ -79,7 +79,7 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		}
 		return tr
 	}
-	header := "✦ Sub-Agent (3)"
+	header := "✦ Sub-agents (3)"
 	rows := []string{
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
 		groupMemberLine("  ┝ build ✓ ⋯ 1 tool call · all clear"),
@@ -130,7 +130,7 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 			CallID: "s2", Content: "it fell over", IsError: true}})
 
 		want := strings.Join([]string{
-			"✦ Sub-Agent (2)",
+			"✦ Sub-agents (2)",
 			groupMemberLine("  ┝ working ⋯ 1 tool call"),
 			groupMemberLine("  ┕ broken ⋯ 1 tool call · error"),
 		}, "\n")
@@ -252,7 +252,7 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 		return tr
 	}
 	collapsed := strings.Join([]string{
-		"✦ Sub-Agent (2)",
+		"✦ Sub-agents (2)",
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · done"),
 		groupMemberLine("  ┕ build ⋯ 1 tool call"), // still working: no ✓, and no gist of its own
 	}, "\n")
@@ -286,7 +286,7 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 // TestSubAgentGroupRunningRowsWearTheCap pins the step-cap cell across a folded group's three
 // readings at once (renderSubAgentGroup): a RUNNING member with a call behind it trails the cap its
 // started phase carried (`· 80 steps (120 asked)`), a FINISHED member ends on its gist with no cap
-// however it was bounded, and a SCHEDULED member says the one word — no cap, because no child is
+// however it was bounded, and a QUEUED member says the one word — no cap, because no child is
 // running under one yet. A started member with nothing behind it stands as the bare head view and
 // wears no cell either: the row takes the cap from the child's first tool call, which is what gives
 // it a summary line to carry it.
@@ -305,11 +305,11 @@ func TestSubAgentGroupRunningRowsWearTheCap(t *testing.T) {
 	subAgentCall(tr, "s4", "check", 0)
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent (4)",
+		"✦ Sub-agents (4)",
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · done surveying"),
 		groupMemberLine("  ┝ build ⋯ 1 tool call · 80 steps (120 asked)"),
 		groupMemberLine("  ┝ lint ⋯"),
-		groupMemberLine("  ┕ check ⋯ scheduled"),
+		groupMemberLine("  ┕ check ⋯ queued"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
 		t.Errorf("group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -318,7 +318,7 @@ func TestSubAgentGroupRunningRowsWearTheCap(t *testing.T) {
 
 // A fan-out wider than the Parallel agents cap emits every delegation's call up front and starts
 // only as many children as it has slots (ADR 0039), so the rows past the cap stand for work that has
-// not begun. This is what such a row says and what it does: the one word "scheduled" in the outcome
+// not begun. This is what such a row says and what it does: the one word "queued" in the outcome
 // slot — no count of tool calls, no context fill, no gist, none of which exist yet — no indicator,
 // and no click target at all, since there is nothing behind it to open. Its own started phase is
 // what ends that (domain.SubAgentPhaseEvent), and the row is an ordinary live delegation from there.
@@ -338,7 +338,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 		subAgentCall(tr, "s3", "check", 0)
 		return tr
 	}
-	header := "✦ Sub-Agent (3)"
+	header := "✦ Sub-agents (3)"
 	running := []string{
 		groupMemberLine("  ┝ survey ⋯ 1 tool call"),
 		groupMemberLine("  ┝ build ⋯ 1 tool call"),
@@ -349,13 +349,13 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	// one — it names the delegation and says it has not started, which is exactly what a lone queued
 	// delegation opens onto today (TestRunViewPlaceholderNamesTheChild). An affordance that arrived
 	// the instant a worker freed a slot would be one no reader could learn.
-	t.Run("queued member says scheduled and still wears its indicator", func(t *testing.T) {
+	t.Run("queued member says queued and still wears its indicator", func(t *testing.T) {
 		t.Parallel()
 
 		want := strings.Join(append(append([]string{header}, running...),
-			groupMemberLine("  ┕ check ⋯ scheduled")), "\n")
+			groupMemberLine("  ┕ check ⋯ queued")), "\n")
 		if got := renderPlain(build(t), 80); got != want {
-			t.Errorf("scheduled member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			t.Errorf("queued member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
 
@@ -364,7 +364,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 
 		lines, targets := targetedRender(build(t), 80)
 		if got := targets[rowWith(t, lines, "check")].kind; got != targetHeader {
-			t.Errorf("scheduled row is target kind %v, want targetHeader", got)
+			t.Errorf("queued row is target kind %v, want targetHeader", got)
 		}
 		// The comparison, off the same paint: a member with a run behind it opens the same way, so
 		// the fold offers one gesture down the whole list.
@@ -373,7 +373,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 		}
 	})
 
-	t.Run("its start ends the scheduled row", func(t *testing.T) {
+	t.Run("its start ends the queued row", func(t *testing.T) {
 		t.Parallel()
 
 		tr := build(t)
@@ -411,7 +411,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	// queued word held, and the reading behind the row moves from the child's view to the prompt
 	// the delegation carried (renderSubAgentMemberRows), which is a swap the reader never has to
 	// notice — the row was openable throughout.
-	t.Run("a refused delegation is not scheduled", func(t *testing.T) {
+	t.Run("a refused delegation is not queued", func(t *testing.T) {
 		t.Parallel()
 
 		tr := build(t)
@@ -492,7 +492,7 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 		loneDelegation(grouped, "s2", "build", "b.go", "all clear")
 		loneDelegation(grouped, "s1", "survey", "a.go", "all clear")
 
-		// Line 0 is the block header ("✦ Sub-Agent", "✦ Sub-Agent (2)"), then one row per member.
+		// Line 0 is the block header ("✦ Sub-agent", "✦ Sub-agents (2)"), then one row per member.
 		row := strings.Split(renderPlain(lone, 80), "\n")[1]
 		if member := strings.Split(renderPlain(grouped, 80), "\n")[2]; row != member {
 			t.Errorf("lone run's row = %q; want the grouped member's %q", row, member)
@@ -513,7 +513,7 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 			t.Fatal("setExpanded(0, true) = true; a run opens as a view, never as a rail")
 		}
 		want := strings.Join([]string{
-			"✦ Sub-Agent",
+			"✦ Sub-agent",
 			groupMemberLine("  ┕ survey ✓ ⋯ 1 tool call · all clear"),
 			"",
 			"✦ back to parent",
@@ -555,7 +555,7 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 				tr := &transcript{}
 				tc.build(tr)
 
-				want := strings.Join([]string{"✦ Sub-Agent", groupMemberLine(tc.row)}, "\n")
+				want := strings.Join([]string{"✦ Sub-agent", groupMemberLine(tc.row)}, "\n")
 				if got := renderPlain(tr, 80); got != want {
 					t.Errorf("row mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 				}
@@ -590,7 +590,7 @@ func TestFramedSubAgentRowKeepsItsTopLevelDetails(t *testing.T) {
 		return tr
 	}
 	const (
-		header  = "✦ Sub-Agent (2)"
+		header  = "✦ Sub-agents (2)"
 		working = "survey ⋯ 1 tool call · 12k/32k"    // count and fill, and no action phrase
 		done    = "build ✓ ⋯ 1 tool call · all clear" // the same line, closed by the report's gist
 	)
@@ -652,7 +652,7 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 		// full width before the target was given any budget, so design call 4's order played out
 		// to its end and both rows went out with no target at all, showing which delegation was
 		// refused nowhere on screen.
-		"✦ Sub-Agent (2)",
+		"✦ Sub-agents (2)",
 		groupMemberLine("  ┝ first ⋯ error"),
 		groupMemberLine("  ┕ second ⋯ error"),
 	}, "\n")
@@ -976,7 +976,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 		}
 
 		want := strings.Join([]string{
-			"✦ Sub-Agent",
+			"✦ Sub-agent",
 			// The promoted refusal leaves the slot for the body so the prompt can stand above it,
 			// and the presenter's typed phrase takes its place (toolView.demoted).
 			leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
@@ -1001,7 +1001,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 
 		// The row wears the ▶ that says the prompt above is behind it: the block hides the
 		// delegation's whole task, which no reading of its own lines can see (subAgentHidesPrompt).
-		want := "✦ Sub-Agent\n" +
+		want := "✦ Sub-agent\n" +
 			leaderEdgeRow("  ┕ survey the tests ⋯ "+refusedResult, defaultGlyphs.collapsed)
 		if got := renderPlain(tr, width); got != want {
 			t.Errorf("collapsed lone refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -1020,7 +1020,7 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 
 		sibling := leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusedResult, defaultGlyphs.collapsed)
 		want := strings.Join([]string{
-			"✦ Sub-Agent (2)",
+			"✦ Sub-agents (2)",
 			leaderEdgeRow("  ┝ survey the tests ✓ ⋯ done", glyphExpanded),
 			"  │ " + prompt[0],
 			"  │ " + prompt[1],
@@ -1202,7 +1202,7 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 		subAgentReport(tr, "s2", refusal, 0)
 
 		want := strings.Join([]string{
-			"✦ Sub-Agent (2)",
+			"✦ Sub-agents (2)",
 			leaderEdgeRow("  ┝ "+target+" ✓ ⋯ "+refusal, defaultGlyphs.collapsed),
 			leaderEdgeRow("  ┕ build it ✓ ⋯ "+refusal, defaultGlyphs.collapsed),
 		}, "\n")
@@ -1243,7 +1243,7 @@ func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
 		started(tr)
 
 		want := strings.Join([]string{
-			"✦ Sub-Agent (2)",
+			"✦ Sub-agents (2)",
 			groupMemberLine("  ┝ survey the tests ⋯"),
 			groupMemberLine("  ┕ build it ⋯"),
 		}, "\n")
@@ -1362,7 +1362,7 @@ func TestUnframedSubAgentNeverFoldsIntoASuperGroup(t *testing.T) {
 
 	// Its own header, its own leader row, and the prompt beneath them — the lone-block reading.
 	want := strings.Join([]string{
-		"✦ Sub-Agent",
+		"✦ Sub-agent",
 		leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
 		"    " + unframedSubAgentPromptLead + "survey the tests",
 		"    and report back",
@@ -2264,7 +2264,7 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		rename(tr, "s1", name)
 
 		want := strings.Join([]string{
-			"✦ Sub-Agent (2)",
+			"✦ Sub-agents (2)",
 			groupMemberLine("  ┝ " + name + " ⋯ 1 tool call"),
 			groupMemberLine("  ┕ build the docs ⋯ 1 tool call"),
 		}, "\n")
@@ -2502,7 +2502,7 @@ func skippedDelegation(tr *transcript, id, task string, burst bool) {
 // because the child never ran — so it is `subAgentReported` without being started, which is the
 // shape of the engine's REAL depth-bound refusal on the wire (errorToolResult) and paints through
 // the same `absorbFailure` path: collapsed, the outcome slot reads the neutral `not started · your
-// message` verdict — never `scheduled`, and never the red `error` a refusal reads — whether or not the trailing result burst has landed; expanded, the skip's own words
+// message` verdict — never `queued`, and never the red `error` a refusal reads — whether or not the trailing result burst has landed; expanded, the skip's own words
 // are the body under the task the delegation carried, exactly as a refusal's are
 // (TestUnframedSubAgentShowsThePromptWhenExpanded).
 func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
@@ -2511,7 +2511,7 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 	const width = 80
 	// The word the row must NOT say: a delegation whose finished phase arrived is over, and a rule
 	// that read only the missing started phase would leave it queued for the rest of the session.
-	const scheduledWord = "scheduled"
+	const scheduledWord = "queued"
 
 	// fill is the serial shape the e2e drives: the first delegation ran and reported, the second
 	// was skipped once the message was queued. The skipped head is entry 2 — the first run's read
@@ -2537,7 +2537,7 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 		return tr
 	}
 	collapsed := strings.Join([]string{
-		"✦ Sub-Agent (2)",
+		"✦ Sub-agents (2)",
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
 		groupMemberLine("  ┕ check ⋯ not started · your message"),
 	}, "\n")
@@ -2573,7 +2573,7 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 			t.Fatalf("setExpanded(2, true) = false; want the skipped member open")
 		}
 		want := strings.Join([]string{
-			"✦ Sub-Agent (2)",
+			"✦ Sub-agents (2)",
 			groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
 			leaderEdgeRow("  ┕ check ⋯ not started · your message", glyphExpanded),
 			"  │ " + unframedSubAgentPromptLead + "check",

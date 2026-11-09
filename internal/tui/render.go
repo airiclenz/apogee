@@ -901,7 +901,7 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 	// delegation has the collapsed row it wears in this list and its run view, and no third shape
 	// (docs/layout/tool-layout.md, "Grouped Sub-agents").
 	//
-	// Adjacent delegations fold into ONE "✦ Sub-Agent (N)" list (subAgentGroupAt), asked first
+	// Adjacent delegations fold into ONE "✦ Sub-agents (N)" list (subAgentGroupAt), asked first
 	// because every member of one is also a run head and would otherwise resolve as a block of its
 	// own below. The question is asked at every member and not only at the first: a member carrying
 	// the open flag ENDS this block, so the list resumes in a second block of the same shape after

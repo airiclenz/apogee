@@ -69,7 +69,7 @@ func TestE2ENamingPaintsAGeneratedName(t *testing.T) {
 	sess := launchTUI(t, drv, stub)
 
 	submit(drv, namingPrompt)
-	drv.WaitText("Sub-Agent")
+	drv.WaitText("Sub-agent")
 
 	// The name arriving is the assertion, and it is waited for while the child is still running:
 	// the fixture holds the child's answer on the `named` gate, so the delegation cannot finish
@@ -153,7 +153,7 @@ func TestE2ENamingIsSilentWithAutoTitleOff(t *testing.T) {
 	sess := launchTUIConfigured(t, drv, stub, "auto-title: false\n")
 
 	submit(drv, namingPrompt)
-	drv.WaitText("Sub-Agent")
+	drv.WaitText("Sub-agent")
 	// Waiting for the parent's wrap-up is waiting for the whole delegation to be over: the naming
 	// call would have been made at spawn, so by here a request that was going to arrive has.
 	drv.WaitText(namingWrapUp)

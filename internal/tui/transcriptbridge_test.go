@@ -424,13 +424,13 @@ func TestTranscriptCodecDecodesALegacyBlobUnchanged(t *testing.T) {
 //
 // What the two DO fold into is the sub-agent group's own list (subAgentGroup, item 7): grouping
 // with each OTHER is a different rule from grouping with everyone, and it is derived off the tool
-// name rather than off this flag, so a replayed pair reads as one "✦ Sub-Agent (2)".
+// name rather than off this flag, so a replayed pair reads as one "✦ Sub-agents (2)".
 func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"version":1,"entries":[` +
-		`{"kind":"toolCall","callID":"s1","done":true,"tool":{"label":"Sub-Agent","verb":"delegating",` +
+		`{"kind":"toolCall","callID":"s1","done":true,"tool":{"label":"Sub-agent","verb":"delegating",` +
 		`"target":"survey the tests","name":"sub_agent","summary":{"text":"refused"}}},` +
-		`{"kind":"toolCall","callID":"s2","done":true,"tool":{"label":"Sub-Agent","verb":"delegating",` +
+		`{"kind":"toolCall","callID":"s2","done":true,"tool":{"label":"Sub-agent","verb":"delegating",` +
 		`"target":"survey the docs","name":"sub_agent","summary":{"text":"refused"}}}` +
 		`]}`)
 	got, err := decodeTranscript(data)
@@ -453,12 +453,46 @@ func TestTranscriptCodecReDerivesSubAgentSolo(t *testing.T) {
 	// (failedSummary), so each row carries the done ✓ — the mark is read off the record's own state
 	// and its own wording, which is exactly what a replay has to reproduce.
 	want := strings.Join([]string{
-		"✦ Sub-Agent (2)",
+		"✦ Sub-agents (2)",
 		"  ┝ survey the tests ✓ ⋯ refused",
 		"  ┕ survey the docs ✓ ⋯ refused",
 	}, "\n")
 	if out := renderPlain(&transcript{entries: got}, 80); out != want {
 		t.Errorf("replayed delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+	}
+}
+
+// TestTranscriptCodecReDerivesARelabelledToolsLabel proves a resumed record names a tool the
+// registry knows by the label the live presenter gives it TODAY: a session written before the
+// panel's vocabulary reached the transcript stored `Sub-Agent` and `Task List`, and replays as
+// `Sub-agent` — the background card included — and `Tasks`. A dynamic tool has no registry row,
+// so its record keeps the label it was written with. Hand-written bytes, because the case IS an
+// old file.
+func TestTranscriptCodecReDerivesARelabelledToolsLabel(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"version":1,"entries":[` +
+		`{"kind":"toolCall","callID":"s1","done":true,"spawnRunID":"r1","tool":{"label":"Sub-Agent",` +
+		`"target":"survey the tests","name":"sub_agent","summary":{"text":"done"}}},` +
+		`{"kind":"toolCall","callID":"b1","done":true,"tool":{"label":"Sub-Agent","target":"scout",` +
+		`"name":"sub_agent","args":{"task":"scan","name":"scout","background":true},"summary":{"text":"started"}}},` +
+		`{"kind":"toolCall","callID":"t1","done":true,"tool":{"label":"Task List","name":"task_list"}},` +
+		`{"kind":"toolCall","callID":"m1","done":true,"tool":{"label":"mcp__docs__lookup","name":"mcp__docs__lookup"}}` +
+		`]}`)
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	want := []string{"Sub-agent", "Sub-agent", "Tasks", "mcp__docs__lookup"}
+	if len(got) != len(want) {
+		t.Fatalf("decoded %d entries; want %d", len(got), len(want))
+	}
+	if !got[1].tool.background {
+		t.Fatal("setup: the second record did not decode as a background sub_agent's card")
+	}
+	for i, e := range got {
+		if e.tool.Label != want[i] {
+			t.Errorf("entry %d (%s) decoded label %q; want %q", i, e.tool.name, e.tool.Label, want[i])
+		}
 	}
 }
 
@@ -1349,7 +1383,7 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 		t.Parallel()
 
 		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
-			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+			`"tool":{"label":"Sub-agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
 		got, err := decodeTranscript(legacy)
 		if err != nil {
 			t.Fatalf("decodeTranscript(legacy): %v", err)
@@ -1529,7 +1563,7 @@ func TestTranscriptCodecRoundTripsTheDelegatedPrompt(t *testing.T) {
 	t.Run("a blob written before the member decodes to no prompt", func(t *testing.T) {
 		t.Parallel()
 		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
-			`"tool":{"label":"Sub-Agent","verb":"delegating","target":"test-surveyor","name":"sub_agent",` +
+			`"tool":{"label":"Sub-agent","verb":"delegating","target":"test-surveyor","name":"sub_agent",` +
 			`"solo":true,"summary":{"text":"done"}}}]}`)
 
 		got, err := decodeTranscript(legacy)
@@ -1952,7 +1986,7 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		// so its zero has to come from the decode rather than from an empty accounting.
 		older := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
 			`"usageCalls":2,"usagePromptTokens":11000,"usageCompletionTokens":1000,"usageTotalTokens":12000,` +
-			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+			`"tool":{"label":"Sub-agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
 		got, err := decodeTranscript(older)
 		if err != nil {
 			t.Fatalf("decodeTranscript(older): %v", err)
@@ -1971,7 +2005,7 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		t.Parallel()
 		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
 			`"ctxUsed":12000,"ctxLimit":32768,` +
-			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+			`"tool":{"label":"Sub-agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
 		got, err := decodeTranscript(legacy)
 		if err != nil {
 			t.Fatalf("decodeTranscript(legacy): %v", err)
@@ -2042,7 +2076,7 @@ func TestTranscriptCodecRoundTripsARoutedSubAgentsModel(t *testing.T) {
 		t.Parallel()
 		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
 			`"ctxUsed":12000,"ctxLimit":32768,` +
-			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+			`"tool":{"label":"Sub-agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
 		got, err := decodeTranscript(legacy)
 		if err != nil {
 			t.Fatalf("decodeTranscript(legacy): %v", err)

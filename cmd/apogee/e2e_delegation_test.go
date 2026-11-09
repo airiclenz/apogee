@@ -104,7 +104,7 @@ func TestE2EDelegationRecordSurvivesAKill(t *testing.T) {
 
 		// Step 2 — the delegation opens.
 		submit(drv, delegatePrompt)
-		drv.WaitText("Sub-Agent")
+		drv.WaitText("Sub-agent")
 
 		// Step 3 — a record is on disk WHILE the child is still working. Waiting for the hanging
 		// request is what makes "still working" true rather than likely: the fixture's fourth
@@ -191,7 +191,7 @@ func TestE2EDelegationRecordSurvivesSIGKILL(t *testing.T) {
 	drv := sess.drv
 
 	submit(drv, delegatePrompt)
-	drv.WaitText("Sub-Agent")
+	drv.WaitText("Sub-agent")
 	drv.WaitFor(func() bool { return len(stub.Requests()) >= 4 },
 		tuitest.Awaiting("the child's second request, which the script never answers"))
 	drv.WaitFor(func() bool { return len(sessionRecordsIn(t, sess.Home())) > 0 },

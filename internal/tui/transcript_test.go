@@ -1464,7 +1464,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	subAgentReport(tr, "s1", "Found 4 gaps\nin the suite\nhere they are", 0)
 
 	collapsed := strings.Join([]string{
-		"✦ Sub-Agent",
+		"✦ Sub-agent",
 		groupMemberLine("  ┕ survey the tests ✓ ⋯ 2 tool calls · 12k/32k · done"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != collapsed {
@@ -1983,7 +1983,7 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 	// beneath it (subAgentHidesPrompt), and the elision rule is about the delegate's WORDS, not
 	// about whether the head can be opened at all.
 	want := strings.Join([]string{
-		"✦ Sub-Agent",
+		"✦ Sub-agent",
 		leaderEdgeRow("  ┕ survey the tests ⋯", defaultGlyphs.collapsed),
 	}, "\n")
 	got := renderPlain(tr, 80)
@@ -2044,7 +2044,7 @@ func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
 	want := strings.Join([]string{
-		"✦ Sub-Agent (2)",
+		"✦ Sub-agents (2)",
 		groupMemberLine("  ┝ survey the tests ⋯"),
 		groupMemberLine("  ┕ survey the docs ⋯"),
 	}, "\n")
@@ -3040,7 +3040,7 @@ func TestTranscriptSubAgentGroupFormation(t *testing.T) {
 
 // subAgentGroupAt answers about the group an entry BELONGS to, at every member of it and not only
 // at the first — the question the painter asks at each block head, which is what keeps a group from
-// growing a second "✦ Sub-Agent (N)" header at every row. Everything in no group at all — a nested
+// growing a second "✦ Sub-agents (N)" header at every row. Everything in no group at all — a nested
 // entry, an ordinary call, a lone delegation — answers false.
 func TestTranscriptSubAgentGroupAtEveryMember(t *testing.T) {
 	t.Parallel()
@@ -3071,7 +3071,7 @@ func TestTranscriptSubAgentGroupAtEveryMember(t *testing.T) {
 }
 
 // Delegations group with EACH OTHER and never with anything else (design call 12): the same two
-// entries that fold into one "✦ Sub-Agent (2)" head no umbrella and join none, so a batch of mixed
+// entries that fold into one "✦ Sub-agents (2)" head no umbrella and join none, so a batch of mixed
 // tool calls standing beside them is split rather than swept in.
 func TestTranscriptSubAgentGroupNeverJoinsAnUmbrella(t *testing.T) {
 	t.Parallel()
@@ -3504,7 +3504,7 @@ func TestRunHeadPredicates(t *testing.T) {
 	// A run head as every site meets one: a committed sub_agent call, still open, carrying the id
 	// its run is named by. Each case says only what it changes about that.
 	head := func(mutate func(*entry)) entry {
-		e := entry{kind: entryToolCall, callID: "s1", tool: toolView{Label: "Sub-Agent", name: subAgentToolName}}
+		e := entry{kind: entryToolCall, callID: "s1", tool: toolView{Label: "Sub-agent", name: subAgentToolName}}
 		if mutate != nil {
 			mutate(&e)
 		}
@@ -3636,7 +3636,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		// RUNNING delegation from here — the run has a span now, which is the same reading it takes
 		// on its delegate's first committed entry (subAgentScheduled).
 		want := strings.Join([]string{
-			"✦ Sub-Agent",
+			"✦ Sub-agent",
 			leaderEdgeRow("  ┕ survey the tests ⋯ 0 tool calls", defaultGlyphs.collapsed),
 		}, "\n")
 		if got := renderPlain(tr, 80); got != want {
