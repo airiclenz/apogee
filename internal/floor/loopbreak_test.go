@@ -260,6 +260,31 @@ func TestToolLoopBreakOnAnAlternatingRepeat(t *testing.T) {
 	}
 }
 
+// A pre-request advise lands on the request's tool-result tail alone (Request.AdviseTail), never on
+// the committed copy of the result two Turns earlier, so it must not part two byte-identical
+// results: the alternation still closes, keyed on the content ahead of the request-tail fence.
+func TestToolLoopBreakOnAnAlternatingRepeatUnderTailAdvice(t *testing.T) {
+	t.Parallel()
+
+	taskList := domaintest.Call("t", "task_list", map[string]string{})
+	noop := domaintest.Call("s", "sub_agent", map[string]string{"task": "noop"})
+	history := alternationHistory(taskList, noop, [2]string{"1. [ ] finish", "1. [ ] finish"})
+	req := domain.NewRequest("m", history, nil, domain.Budget{}, 0)
+	span := domain.AdviceSpan{Reaction: "house-rules", Origin: domain.OriginUser, Moment: domain.MomentPreRequest, Turn: 4}
+	if !req.AdviseTail(span, "keep diffs small") {
+		t.Fatal("AdviseTail = false on the alternation's tool-result tail")
+	}
+
+	directive, ok := ToolLoopBreak(domain.NewResponse("", "", []domain.ToolCall{noop}, domain.FinishToolCalls, req.View()))
+
+	if !ok {
+		t.Fatal("ToolLoopBreak returned ok = false on an exact A-B-A-B alternation whose tail carries request advice")
+	}
+	if !strings.Contains(directive, "sub_agent") {
+		t.Errorf("directive = %q, want the loop-breaking wording naming sub_agent", directive)
+	}
+}
+
 // The alternation rule needs the repeated pair's results to be byte-identical: a poll whose output
 // moves — console_read or read_file between other calls while a build runs (ADR 0059) — is
 // progress, not a loop, however identical its keys are.

@@ -52,7 +52,11 @@
   - 4: guard folded (decision: `docs/manual/reactions.md` `on:` row changes here; stale reorder sentences dropped;
     delegate case from item 2).
 
-## 1. `Request.AdviseTail`: place a fenced advice block on the request tail
+## 1. `Request.AdviseTail`: place a fenced advice block on the request tail — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): per DECISION, loop-break's resultKey keys on Message.ContentBeforeRequestAdvice (new exported domain method in request.go): Content up to the first standing trailing advice row at pre-request/post-response, so a request-tail fence no longer parts the A-B-A-B results; post-tool-result trailers still key as before. Pinned by TestToolLoopBreakOnAnAlternatingRepeatUnderTailAdvice in internal/floor/loopbreak_test.go (fails with the old m.Content key).
+NOTES (2026-11-09): consequential edit — internal/domain/advice.go: made necessary by AdviseTail's mid-ledger insert ahead of an engine note — AdviceSpan doc said "a ledger is append-ordered"; now "kept in offset order", and names the request-tail fence among trailing/leading spans.
+NOTES (2026-11-09): an assistant tail's advice-only user message carries a leading-span fence (Content = fence + blank line), so the ledger's fenceStands holds; a system-only or empty request is refused (returns false).
 
 **What:** **Goal:** `internal/domain` offers one request-copy mutator that places a rendered advice fence on the
 request's last message by the tail's role (tool → trailing, user → leading, assistant → a new user message),

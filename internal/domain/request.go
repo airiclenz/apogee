@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -169,6 +170,114 @@ func (r *Request) NoteOnTail(topic, text string) bool {
 	r.messages[n-1] = r.messages[n-1].WithEngineNote(topic, text)
 	r.revision++
 	return true
+}
+
+// AdviseTail fences text as advice (RenderAdvice) on the request's last message, placed
+// role-safely by the tail's role — the request-tail advise slot for the pre-request and
+// post-response Moments (ADR 0076 D6):
+//
+//   - a tool-result tail takes a trailing fence inside that tool message, ahead of any engine
+//     note already on it, so a wrap-up directive stays last;
+//   - a user tail takes a leading fence inside that user message, after any leading fences
+//     already there (as session-started advice does);
+//   - an assistant tail gets one new user message holding only the fence. committedLen is
+//     frozen at the length before that append (as AppendSupersededAssistant freezes it), so
+//     View() never shows the advice-only message and the post-response scanners keep the
+//     Exchange and LastUser they read without it.
+//
+// The fence is never folded into the system message. The advice lives on the request copy
+// alone: NewRequest copied the messages, and every placement copies the tail's ledger, so the
+// conversation the request was built from is never touched and the next request built from it
+// carries no fence. The span's Reaction, Origin, Moment and Turn name the fence; its Offset,
+// End, Leading and Topic are the placement's to set. text is fenced verbatim, so a caller that
+// wants it capped passes it through CapAdvice first.
+//
+// It reports whether the advice landed: an empty request, or a tail of any other role, is
+// refused and leaves the request — and its revision — as it was. A landing bumps the revision
+// like every other mutation.
+func (r *Request) AdviseTail(span AdviceSpan, text string) bool {
+	n := len(r.messages)
+	if n == 0 {
+		return false
+	}
+	span.Topic = ""
+	switch tail := r.messages[n-1]; tail.Role {
+	case RoleTool:
+		span.Leading = false
+		r.messages[n-1] = tail.withAdviceBeforeEngineNotes(span, text)
+	case RoleUser:
+		span.Leading = true
+		r.messages[n-1] = tail.WithAdvice(span, text)
+	case RoleAssistant:
+		if r.committedLen < 0 {
+			r.committedLen = n
+		}
+		span.Leading = true
+		r.messages = append(r.messages, Message{Role: RoleUser}.WithAdvice(span, text))
+	default:
+		return false
+	}
+	r.revision++
+	return true
+}
+
+// withAdviceBeforeEngineNotes is WithAdvice for a trailing span that must sit ahead of m's engine
+// notes: the fence goes in where the first engine note's fence opens, and every row at or past
+// that point moves with the bytes it fences. The span's row is inserted into the ledger ahead of
+// that note's row, so the ledger stays in offset order and its first trailing row is still the
+// earliest cut (ContentWithoutAdvice). A message with no engine note — or whose first engine
+// note's fence no longer stands — takes a plain trailer (WithAdvice). The ledger is copied, as
+// WithAdvice copies it.
+func (m Message) withAdviceBeforeEngineNotes(span AdviceSpan, text string) Message {
+	note := slices.IndexFunc(m.Advice, func(row AdviceSpan) bool { return row.Topic != "" })
+	if note < 0 || !m.fenceStands(m.Advice[note]) {
+		return m.WithAdvice(span, text)
+	}
+	at := m.Advice[note].Offset
+	fence := RenderAdvice(span, text)
+	span.Offset, span.End = at, 0
+
+	ledger := make([]AdviceSpan, 0, len(m.Advice)+1)
+	for i, row := range m.Advice {
+		if i == note {
+			ledger = append(ledger, span)
+		}
+		if row.Offset >= at {
+			row.Offset += len(fence)
+			if row.Leading {
+				row.End += len(fence)
+			}
+		}
+		ledger = append(ledger, row)
+	}
+	m.Content = m.Content[:at] + fence + m.Content[at:]
+	m.Advice = ledger
+	return m
+}
+
+// ContentBeforeRequestAdvice is m's Content up to the request-tail advice fence Request.AdviseTail
+// placed on it — the first trailing advice row at the pre-request or post-response Moment whose
+// fence still stands — or the whole Content when no such fence stands. Everything else the
+// content carries ahead of that fence (a post-tool-result trailer committed with the result) is
+// kept. It is what a reader comparing a tool result across Turns keys on (internal/floor,
+// computeToolResultKey): the fence rides only the request's tail, never the committed copy of
+// the same result, so keying on it would make one result read as two.
+func (m Message) ContentBeforeRequestAdvice() string {
+	for _, row := range m.Advice {
+		if row.Leading || row.Topic != "" || !requestTailMoment(row.Moment) {
+			continue
+		}
+		if m.fenceStands(row) {
+			return m.Content[:row.Offset]
+		}
+	}
+	return m.Content
+}
+
+// requestTailMoment reports whether advice at moment rides the request tail (Request.AdviseTail)
+// rather than a committed message.
+func requestTailMoment(moment Moment) bool {
+	return moment == MomentPreRequest || moment == MomentPostResponse
 }
 
 // InjectContext inserts a user message at the role-safe position: appended to the

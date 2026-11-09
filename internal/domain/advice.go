@@ -36,12 +36,14 @@ import (
 // origin and Moment it produced it under, the Turn it landed in, and where its fence begins.
 //
 // Offset is the byte index in the advised Message's Content at which the rendered fence
-// starts. A TRAILING span (Leading false, every tool-shaped injection and every engine note)
-// fences after the text, so the first trailing span's Offset is the cut the session-record strip
-// makes: everything from it on is advice. A ledger is append-ordered, so the first trailing row
-// is the earliest trailer, hence the earliest cut.
+// starts. A TRAILING span (Leading false, every tool-shaped injection, every engine note and the
+// request-tail fence on a tool-result tail, Request.AdviseTail) fences after the text, so the first
+// trailing span's Offset is the cut the session-record strip makes: everything from it on is
+// advice. A ledger is kept in offset order — rows are appended, or inserted ahead of an engine note
+// by Request.AdviseTail — so the first trailing row is the earliest trailer, hence the earliest cut.
 //
-// A LEADING span (Leading true, the session-start slot on a user message) fences ahead of the
+// A LEADING span (Leading true, the session-start slot on a user message, and the request-tail
+// fence on a user tail or in the advice-only message after an assistant tail) fences ahead of the
 // text instead, and End is the byte index just past its fence and the blank line that parts it
 // from the text: Content[Offset:End] is the range the strip removes. Leading spans tile the front
 // of the content in ledger order — the first at 0, each next one at the previous one's End — so

@@ -175,6 +175,11 @@ func exchangeToolTurns(ex domain.ExchangeView) []toolTurn {
 // result is filed under the name and arguments of the call it answers and sorted with them, so two
 // Turns of the same calls compare equal exactly when every call drew byte-identical content. A
 // result answering no call of the Turn is skipped.
+//
+// A result's content is read up to the request-tail advice fence (Message.ContentBeforeRequestAdvice):
+// a pre-request or post-response advise lands on the request's tool-result tail alone, never on the
+// committed copy of that result, so keying on the fence would part the newest Turn's result from the
+// same bytes two Turns earlier and silence the alternation rule whenever such an advise is armed.
 func computeToolResultKey(calls []domain.ToolCall, results []domain.Message) string {
 	callsByID := make(map[string]domain.ToolCall, len(calls))
 	for _, tc := range calls {
@@ -187,7 +192,7 @@ func computeToolResultKey(calls []domain.ToolCall, results []domain.Message) str
 		if !ok {
 			continue
 		}
-		entries = append(entries, entry{name: tc.Tool, args: callArgumentsKey(tc), content: m.Content})
+		entries = append(entries, entry{name: tc.Tool, args: callArgumentsKey(tc), content: m.ContentBeforeRequestAdvice()})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].name != entries[j].name {
