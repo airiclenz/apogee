@@ -434,7 +434,10 @@ func (m Model) panelHeaderRow(section panelSection) string {
 }
 
 // panelSubAgentRow is one delegation: its phase glyph — the status line's spinner frame while it
-// runs — its name, and its phase, elapsed time and context fill. A run waiting on an approval,
+// runs, in the status line's colour loop — its name, and its phase, elapsed time and context fill.
+// The glyph sits in a lead cell as wide as the widest glyph a row can wear
+// ([Model.panelSubAgentLeadWidth]), padded on the right, so every row's name starts in one column
+// whatever the spinner style. A run waiting on an approval,
 // showing or queued, reads `waiting` under the glyph set's waiting mark in the warning tone, in
 // place of its queued or running glyph (ADR 0111 decision 11); the fold only ever sets Waiting on
 // an active row, so a done or failed row keeps its own mark. The run Run view shows (isViewed) is
@@ -447,7 +450,7 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	case row.Phase == sidepanel.PhaseQueued:
 		glyph, phase = m.th.statusFaint.Render(glyphPanelOpen), "queued"
 	case row.Phase == sidepanel.PhaseRunning:
-		glyph, phase = m.spin.drawn(m.th, m.opts.UI.Spinner), "running"
+		glyph, phase = m.spin.tinted(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor), "running"
 	case row.Phase == sidepanel.PhaseDone:
 		glyph, phase = m.th.successMark.Render(m.th.glyphs.done), "done"
 	default:
@@ -462,11 +465,24 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 		fill = strconv.Itoa(percent) + "%"
 	}
 	facts := m.th.statusFaint.Render(fmt.Sprintf(subAgentFactsFormat, phase, elapsed, fill))
-	lead, style := glyph+" ", lipgloss.NewStyle()
+	pad := max(0, m.panelSubAgentLeadWidth()-m.th.measure.Width(glyph))
+	lead, style := glyph+strings.Repeat(" ", pad)+" ", lipgloss.NewStyle()
 	if isViewed {
 		lead, style = lead+m.th.panelCurrent.Render(glyphPanelCurrent)+" ", m.th.panelCurrent
 	}
 	return m.panelRow(lead, row.Name, style, facts)
+}
+
+// panelSubAgentLeadWidth is the width of a sub-agent row's lead cell: the widest of the active
+// spinner style's frame as the glyph set draws it and the one-cell phase marks (queued, waiting,
+// done, failed), so a two-cell spinner widens every row's lead rather than shoving its own name
+// one column right of the rest.
+func (m Model) panelSubAgentLeadWidth() int {
+	width := m.spin.width(m.th, m.opts.UI.Spinner)
+	for _, mark := range []string{glyphPanelOpen, m.th.glyphs.waiting, m.th.glyphs.done, m.th.glyphs.failure} {
+		width = max(width, m.th.measure.Width(mark))
+	}
+	return width
 }
 
 // panelMCPRow is one MCP server: `name · state · N tools`, the count left off while no connection

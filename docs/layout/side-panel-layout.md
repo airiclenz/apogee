@@ -119,7 +119,8 @@ The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune;
 0110's.
 
 **Sub-agent rows.** The phase glyph is the status line's spinner frame while the run is running
-(`ui.spinner`, so it turns with the status line), `○` while it is queued, the glyph set's done mark
+(`ui.spinner`, so it turns with the status line, in the same `ui.spinner-color` loop as a
+foreground on no background), `○` while it is queued, the glyph set's done mark
 (`✓`, `√` under `ui.glyphs: safe`) once it has finished, and its failure mark (`✗`, `x` under `safe`) when it failed.
 While a queued or running run has an approval requested and not yet decided — the one the approval
 pane shows or one queued behind it — its row reads `waiting` under the waiting mark `◷` (`?` under
@@ -131,8 +132,10 @@ The phase word is `queued`, `running`, `waiting`, `done` or `failed`. Elapsed ti
 form (`38s`, `01:12s`) below an hour, then hours and minutes (`1h02m` to `23h59m`), then days and
 hours (`1d02h`), clamped at `99d23h` — never wider than six columns, where the status line's own
 `01:02:03s` would push the row's facts out of line — and blank while queued; the fill is the run's latest reading against its own
-window, blank before it has one. Phase, elapsed and fill sit in fixed-width columns at the right
-edge, so the facts of every row line up.
+window, blank before it has one. The glyph sits in a lead cell as wide as the active spinner
+style's frame (two cells under `snake` and `glitter`, one under `classic` and `ui.glyphs: safe`),
+the narrower marks padded on the right, so every row's name starts in one column. Phase, elapsed
+and fill sit in fixed-width columns at the right edge, so the facts of every row line up.
 
 **MCP rows.** The section reads the process's MCP server state — the fold of every
 `MCPServerEvent` (ADR 0111 decision 8): emitted by the composition root as each server's dial starts

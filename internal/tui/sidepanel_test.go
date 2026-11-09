@@ -624,6 +624,122 @@ func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {
 	}
 }
 
+// spinnerPanelModel is panelModel under the default sections with the spinner style and glyph set
+// named explicitly — testUIPrefs leaves the style unset, which resolves to classic.
+func spinnerPanelModel(t *testing.T, style SpinnerStyle, glyphs domain.GlyphSet, color bool, events ...domain.Event) Model {
+	t.Helper()
+
+	opts := testOpts
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	opts.UI.SidePanelSections = domain.DefaultSidePanelSections
+	opts.UI.Spinner = style
+	opts.UI.Glyphs = glyphs
+	opts.UI.SpinnerColor = color
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+	m.panel = sidepanel.New(func() time.Time { return panelNow })
+	for _, e := range events {
+		m = m.foldEvent(e)
+	}
+	return m
+}
+
+// TestSidePanelSubAgentNamesAlignUnderEverySpinner paints a run of every phase — running, queued,
+// done, failed and waiting — under each spinner style, in both glyph sets and across several
+// frames: every row's name starts in the same column, so a two-cell spinner frame widens every
+// lead instead of shoving the running row's name one column right of the rest.
+func TestSidePanelSubAgentNamesAlignUnderEverySpinner(t *testing.T) {
+	t.Parallel()
+
+	names := []string{"alpha", "bravo", "charlie", "delta", "echo"}
+	for _, glyphs := range []domain.GlyphSet{domain.GlyphsUnicode, domain.GlyphsSafe} {
+		for style := range spinnerSpecs {
+			t.Run(string(glyphs)+"/"+string(style), func(t *testing.T) {
+				t.Parallel()
+
+				m := spinnerPanelModel(t, style, glyphs, true,
+					panelDelegationCall(t, "r1", "alpha"),
+					delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+					panelDelegationCall(t, "r2", "bravo"),
+					panelDelegationCall(t, "r3", "charlie"),
+					delegationPhase("r3", domain.SubAgentStarted, time.Minute),
+					delegationPhase("r3", domain.SubAgentFinished, 22*time.Second),
+					panelDelegationCall(t, "r4", "delta"),
+					delegationPhase("r4", domain.SubAgentStarted, time.Minute),
+					domain.SubAgentPhaseEvent{EventBase: delegationBase("r4"), Phase: domain.SubAgentFinished,
+						Result: domain.ToolResult{IsError: true}, At: panelNow.Add(-10 * time.Second)},
+					panelDelegationCall(t, "r5", "echo"),
+					delegationPhase("r5", domain.SubAgentStarted, 30*time.Second),
+					panelGate("r5", domain.ApprovalRequested, ""),
+				)
+				for _, phase := range []string{" running ", " queued", " done ", " failed ", " waiting "} {
+					if !slices.ContainsFunc(panelText(t, m), func(row string) bool { return strings.Contains(row, phase) }) {
+						t.Fatalf("setup: no row reads %q:\n%s", phase, strings.Join(panelText(t, m), "\n"))
+					}
+				}
+				for frame := range 4 {
+					m.spin.frame = frame
+					column := panelText(t, m)
+					want := -1
+					for _, name := range names {
+						row := panelRowOf(t, m, name)
+						at := strings.Index(row, " "+name+" ")
+						if at < 0 {
+							t.Fatalf("frame %d: no row names %q:\n%s", frame, name, strings.Join(column, "\n"))
+						}
+						got := ansi.StringWidth(row[:at+1])
+						if want < 0 {
+							want = got
+						}
+						if got != want {
+							t.Errorf("frame %d: %q starts at column %d, %q at %d:\n%s",
+								frame, name, got, names[0], want, strings.Join(column, "\n"))
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestSidePanelSpinnerCarriesTheStatusLineColour pins the running row's lead under every style:
+// with `ui.spinner-color` on it is the status line's own frame in the colour loop's foreground for
+// the frame, on no background; with it off it is the bare glyph, as the status line's is.
+func TestSidePanelSpinnerCarriesTheStatusLineColour(t *testing.T) {
+	t.Parallel()
+
+	for style := range spinnerSpecs {
+		for _, color := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/color=%v", style, color), func(t *testing.T) {
+				t.Parallel()
+
+				m := spinnerPanelModel(t, style, domain.GlyphsUnicode, color)
+				m.spin.frame = 7
+				row := m.panelSubAgentRow(sidepanel.SubAgentRow{Name: "repo-scout", Phase: sidepanel.PhaseRunning}, false)
+				lead := row[:strings.Index(row, "repo-scout")]
+
+				glyph := m.spin.drawn(m.th, style)
+				want := glyph
+				if color {
+					want = lipgloss.NewStyle().Foreground(m.th.spinnerColor(m.spin.frame, m.spin.framesPerColorLoop(style))).Render(glyph)
+					if want == glyph {
+						t.Fatal("setup: the coloured glyph carries no escape")
+					}
+				}
+				if !strings.HasPrefix(lead, want) {
+					t.Errorf("running lead = %q, want it to open with %q", lead, want)
+				}
+				if strings.Contains(lead, "[48;") || strings.Contains(lead, ";48;") {
+					t.Errorf("running lead = %q carries a background", lead)
+				}
+				if !color && lead != ansi.Strip(lead) {
+					t.Errorf("uncoloured running lead = %q, want the bare glyph", lead)
+				}
+			})
+		}
+	}
+}
+
 // panelGate is run id's approval Event at phase: a requested gate, or a human's decision on one.
 func panelGate(id string, phase domain.ApprovalPhase, decision domain.ApprovalDecision) domain.ApprovalEvent {
 	return domain.ApprovalEvent{

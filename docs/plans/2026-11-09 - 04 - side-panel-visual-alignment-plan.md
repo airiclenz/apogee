@@ -83,7 +83,10 @@ internal/tui/sidepanel_test.go — TestSidePanelPaintsEachSection
 - `go test -race -count=1 -run 'SidePanel|Usage|Gauge' ./internal/tui/`
 **Commit:** `fix(tui): clamp the side panel's Usage percent like the gauge`
 
-## 2. Align running sub-agent rows under every spinner and colour their spinner
+## 2. Align running sub-agent rows under every spinner and colour their spinner — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — docs/layout/side-panel-layout.md: made necessary by the coloured panel spinner and the spinner-wide lead cell (§Sub-agent rows now states both).
+NOTES (2026-11-09): added `spinnerAnim.tinted` (foreground-only colour loop, bare glyph when `ui.spinner-color` is off) and `spinnerAnim.width` (declared style width, one cell under `ui.glyphs: safe`); the lead cell width is `Model.panelSubAgentLeadWidth`, the max of that and the measured queued/waiting/done/failure marks.
 
 **What:** Fixes bug `panel-subagent-lead-misalign`: the default `snake` spinner's frames are two cells wide, so a running row's name sits one column right of queued/done/failed/waiting rows; and the panel's spinner is the bare `drawn` frame, uncoloured.
 **Regression guard.** Do not call `spinnerAnim.view`: it renders on `th.spinnerBase` (`Background(surface)`), which would notch the panel's background-free rows and the cursor row's selection tone. Add a helper in `spinner.go` that layers `spinnerColor`'s foreground on a style with no background, and pass `m.opts.UI.SpinnerColor`, so `ui.spinner-color: false` leaves the panel spinner uncoloured as it leaves the status line.

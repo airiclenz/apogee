@@ -400,6 +400,32 @@ func (s spinnerAnim) view(th theme, style SpinnerStyle, color bool) string {
 	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop(style))).Render(s.drawn(th, style))
 }
 
+// tinted paints this frame's glyph as [spinnerAnim.view] does — the same glyph, the same colour loop
+// when color is set — but on no field of its own: a foreground alone, or the bare glyph uncoloured.
+// It is for a surface that is not the status bar's black, the side panel's sub-agent rows, where
+// spinnerBase's background would notch the panel's background-free rows and the cursor row's
+// selection tone.
+func (s spinnerAnim) tinted(th theme, style SpinnerStyle, color bool) string {
+	glyph := s.drawn(th, style)
+	if !color {
+		return glyph
+	}
+	return lipgloss.NewStyle().Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop(style))).Render(glyph)
+}
+
+// safeSpinnerWidth is how many terminal columns each of safeSpinnerFrames occupies: one ASCII cell.
+const safeSpinnerWidth = 1
+
+// width is how many terminal columns this style's frame occupies as th draws it
+// ([spinnerAnim.drawn]): the style's declared width, or the safe set's one cell. It is the same on
+// every frame (TestSpinnerFrameWidth), so a caller can reserve the column once.
+func (s spinnerAnim) width(th theme, style SpinnerStyle) int {
+	if th.glyphs.asciiSpinner {
+		return safeSpinnerWidth
+	}
+	return s.spec(style).width
+}
+
 // arm opens a fresh tick chain: a new generation, back at frame 0, with the first tick scheduled.
 // Every return to stateRunning calls it — a submit, an approval decision, an answered question, a
 // watched run resuming — and the new generation is what makes a tick still in flight from the
