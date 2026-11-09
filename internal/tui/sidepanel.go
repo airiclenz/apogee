@@ -386,16 +386,21 @@ func (m Model) panelHeaderRow(section panelSection) string {
 }
 
 // panelSubAgentRow is one delegation: its phase glyph — the status line's spinner frame while it
-// runs — its name, and its phase, elapsed time and context fill. The run Run view shows (isViewed)
-// is marked as the current task is: `▸` before its name, both in the current task's style.
+// runs — its name, and its phase, elapsed time and context fill. A run waiting on an approval,
+// showing or queued, reads `waiting` under the glyph set's waiting mark in the warning tone, in
+// place of its queued or running glyph (ADR 0111 decision 11); the fold only ever sets Waiting on
+// an active row, so a done or failed row keeps its own mark. The run Run view shows (isViewed) is
+// marked as the current task is: `▸` before its name, both in the current task's style.
 func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string {
 	var glyph, phase string
-	switch row.Phase {
-	case sidepanel.PhaseQueued:
+	switch {
+	case row.Waiting:
+		glyph, phase = m.th.panelWaiting.Render(m.th.glyphs.waiting), "waiting"
+	case row.Phase == sidepanel.PhaseQueued:
 		glyph, phase = m.th.statusFaint.Render(glyphPanelOpen), "queued"
-	case sidepanel.PhaseRunning:
+	case row.Phase == sidepanel.PhaseRunning:
 		glyph, phase = m.spin.drawn(m.th, m.opts.UI.Spinner), "running"
-	case sidepanel.PhaseDone:
+	case row.Phase == sidepanel.PhaseDone:
 		glyph, phase = m.th.successMark.Render(m.th.glyphs.done), "done"
 	default:
 		glyph, phase = m.th.errorText.Render(m.th.glyphs.failure), "failed"

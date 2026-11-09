@@ -94,7 +94,13 @@ The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune;
 **Sub-agent rows.** The phase glyph is the status line's spinner frame while the run is running
 (`ui.spinner`, so it turns with the status line), `○` while it is queued, the glyph set's done mark
 (`✓`, `√` under `ui.glyphs: safe`) once it has finished, and its failure mark (`✗`, `x` under `safe`) when it failed.
-The phase word is `queued`, `running`, `done` or `failed`. Elapsed time is the status line's clock
+While a queued or running run has an approval requested and not yet decided — the one the approval
+pane shows or one queued behind it — its row reads `waiting` under the waiting mark `◷` (`?` under
+`safe`) in the `warning` foreground with no background, in place of its spinner or `○`; the phase
+word stays faint like every other, and only the gated run's own row is marked (ADR 0111 decision
+11). The gate closes on that run's decision, on the Approver's failure on it, or when the run or
+the Turn finishes, so a done or failed row never reads `waiting`.
+The phase word is `queued`, `running`, `waiting`, `done` or `failed`. Elapsed time is the status line's clock
 form (`38s`, `01:12s`) below an hour, then hours and minutes (`1h02m` to `23h59m`), then days and
 hours (`1d02h`), clamped at `99d23h` — never wider than six columns, where the status line's own
 `01:02:03s` would push the row's facts out of line — and blank while queued; the fill is the run's latest reading against its own
@@ -112,7 +118,8 @@ the ones that name the file they write, a deletion included — and a failed wri
 file changed through the `terminal` tool is not shown (ADR 0110 decision 13).
 
 **Header row:** `◆ <Title>` with a summary wherever the section has one — `Sub-agents 1 running`
-(`2 running · 1 queued`, `3 queued`, or `3 done` once all have ended), `Tasks 2/5`,
+(`2 running · 1 queued`, `3 queued`, or `3 done` once all have ended; a waiting run counts as the
+running or queued run it is, so a section folded to its header shows no wait), `Tasks 2/5`,
 `Changed files 4` (the file count), `Usage 62%` — and the pin glyph `⊙` (auto) or `●` (pinned) at
 the right edge.
 

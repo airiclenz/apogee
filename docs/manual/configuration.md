@@ -1143,10 +1143,11 @@ draws boxes or blanks in their place (VS Code's integrated terminal with GPU acc
 off is a common case). `safe` swaps every mark apogee draws for one nearly every font carries, each
 the same width as the one it replaces, so nothing on screen moves: `♦` for the `✦` star, `›` for
 the `❯` prompt, a `·` leader for `⋯`, `►` for the `▶` fold indicator, `√` for `✓`, `»` for the `⧖`
-interjection, `≡` for the `▤` presented document, `@` and `+` for the `⟳` and `⑂` `/sessions`
-tags, `x` for `✗`, the footer's rungs as `□ plan`, `○ ask before`, `√ allow edits` and `►► auto`,
-`[x]` for a ticked option in an open `ask_user` pane, and the status-line spinner — every style —
-as a one-column `| / - \` turn instead of braille. Four things keep their shape: the key hints
+interjection, `?` for the `◷` of a side-panel sub-agent waiting on an approval, `≡` for the `▤`
+presented document, `@` and `+` for the `⟳` and `⑂` `/sessions` tags, `x` for `✗`, the footer's
+rungs as `□ plan`, `○ ask before`, `√ allow edits` and `►► auto`, `[x]` for a ticked option in an
+open `ask_user` pane, and the status-line spinner — every style — as a one-column `| / - \` turn
+instead of braille. Four things keep their shape: the key hints
 (`⇥ ⇧ ⌃ ⌥ ⌫ ⏎ ␣`); the `Δ ↓ ↑` marks of the footer's git counts; the `[✔]` of the task-list cards
 and of a recorded `ask_user` exchange, which the model reads back and the session record keeps;
 and the `⋯⋯⋯⋯⋯⋯⋯⋯` rule between the regions of an edit's stacked diff, which is drawn into the
@@ -1369,13 +1370,13 @@ with its summary and a pin glyph — `⊙` for `auto`, `●` for `pinned`:
 
 | Section | Shown in `auto` while | Each row |
 |---|---|---|
-| `sub-agents` | a delegation is queued or running, and for 30 s after the last one ends | the status line's spinner while it runs, `○` queued, `✓` done, `✗` failed; its name, phase, elapsed time and context fill |
+| `sub-agents` | a delegation is queued or running, and for 30 s after the last one ends | the status line's spinner while it runs, `○` queued, `◷` `waiting` while an approval it asked for is showing or queued, `✓` done, `✗` failed; its name, phase, elapsed time and context fill |
 | `tasks` | the task list has an unfinished task | `✓` done, `▸` the current task (the first unfinished one), `○` still open |
 | `changed-files` | the session has written a file, at any depth | the path, trimmed from the left to fit; `↳` when a sub-agent wrote it; `+N −M` lines where the edit reports them |
 | `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
 
 Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
-shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√` and the failed one `x`.
+shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x` and the waiting one `?`.
 
 When the sections need more rows than the panel has, pinned sections get their rows first, then
 the `auto` ones in list order. A section that does not get its full height folds to its header

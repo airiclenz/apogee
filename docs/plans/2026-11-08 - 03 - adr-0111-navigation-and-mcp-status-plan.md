@@ -151,7 +151,7 @@ request clears nothing; top-level gate adds no row).
 **Acceptance:** `go build ./internal/sidepanel/ ./internal/agent/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestReads_|TestSubAgentWaiting' ./internal/sidepanel/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestDispatch_ApproverErrorRefuses' ./internal/agent/`
 **Commit:** `feat(sidepanel): fold outstanding approval gates per sub-agent run`
 
-## 4. Paint `waiting` on sub-agent rows
+## 4. Paint `waiting` on sub-agent rows — ✅ DONE (2026-11-09)
 
 **What:** the paint half of ADR 0111 D11. Depends on item 3.
 **Goal:** a sub-agent row whose `Waiting` is set reads phase word `waiting` with glyph `◷` (safe `?`) in the

@@ -1063,6 +1063,41 @@ func subAgentRowOf(m Model, name string) string {
 	return ""
 }
 
+// TestWatchShowsWaitingMarks pins ADR 0111 decision 11 under a watch: a journal replaying two
+// gated sub-agents paints both rows `waiting` under the waiting mark in the watcher's own panel, and
+// the journal's decision on one gate clears that row alone, as a live session's fold does.
+func TestWatchShowsWaitingMarks(t *testing.T) {
+	t.Parallel()
+	opts := testOpts
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	f := newWatchFixture(t, "watched", nil, 0)
+	m, cmd := newTestModelEng(t, watchEngine(), opts).enterWatch(f.src)
+	if !m.watch.isActive || cmd == nil {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	m = step(t, step(t, m, cmd()), tea.WindowSizeMsg{Width: 140, Height: 30})
+	one := runRef{depth: 1, spawn: "s1", id: "run-s1"}
+	two := runRef{depth: 1, spawn: "s2", id: "run-s2"}
+	gate := func(run runRef, phase domain.ApprovalPhase, decision domain.ApprovalDecision) domain.ApprovalEvent {
+		return domain.ApprovalEvent{EventBase: stampedBase(run), Phase: phase, Decision: decision,
+			Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"}}
+	}
+
+	f.emit(delegationEvents(one, "scout-one")...)
+	f.emit(delegationEvents(two, "scout-two")...)
+	f.emit(gate(one, domain.ApprovalRequested, ""), gate(two, domain.ApprovalRequested, ""))
+	m = pollWatch(t, m)
+
+	assertWaiting(t, m, "scout-one", true)
+	assertWaiting(t, m, "scout-two", true)
+
+	f.emit(gate(two, domain.ApprovalDecided, domain.ApprovalAllow))
+	m = pollWatch(t, m)
+
+	assertWaiting(t, m, "scout-one", true)
+	assertWaiting(t, m, "scout-two", false)
+}
+
 // TestWatchMeasuresSubAgentsAgainstTheWatchedRun pins a watch's sub-agent rows to the watched run's
 // binding: a child is measured against the model and window the watched run is bound to — its
 // depth-0 usage line's, else the record's model — never against the watcher's own, while an owner

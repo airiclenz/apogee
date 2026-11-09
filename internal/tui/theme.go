@@ -117,6 +117,7 @@ type glyphSet struct {
 	assistant string // the assistant and tool-header star. A tool block still holding an open call BLINKS it — half a second showing, half a second a bare cell that holds the column (layout.md, "The live star"; blockState.star); also the footer's segment separator
 	leaderDot string // one cell of the dotted leader a tool row runs from its target to its outcome slot (toolleader.go, leaderRowIn), painted in the `tool-leader` role. Deliberately one glyph per cell, so the run's length IS its cell count
 	user      string // leads the user prompt, and the selected row of a menu-style popup
+	waiting   string // a side-panel sub-agent row whose run waits on an approval, showing or queued (ADR 0111 decision 11), in place of its phase glyph and in the `warning` role (panelWaiting)
 	done      string // a FINISHED delegation's mark, after its name on the row and before the leaders, in the scheme's `success` green (theme.successMark, design call 6). A failed run wears no glyph at all: its red outcome slot is the whole of the failure marking (summaryStyle)
 	skill     string // marks a skill: the "/" menu's skill rows (the sent block marks its own by colouring the token, not by badging it)
 	presented string // leads a presented document — deliberately NOT the assistant star: a deliverable is not a tool call
@@ -161,6 +162,7 @@ var defaultGlyphs = glyphSet{
 	assistant:      "✦",
 	leaderDot:      "⋯", // U+22EF MIDLINE HORIZONTAL ELLIPSIS
 	user:           "❯",
+	waiting:        "◷", // U+25F7 WHITE CIRCLE WITH UPPER RIGHT QUADRANT
 	done:           "✓", // U+2713 CHECK MARK
 	skill:          "✦",
 	presented:      "▤",
@@ -186,6 +188,7 @@ var safeGlyphs = glyphSet{
 	assistant:      "♦",
 	leaderDot:      "·", // U+00B7 MIDDLE DOT
 	user:           "›",
+	waiting:        "?",
 	done:           "√",
 	skill:          "♦",
 	presented:      "≡",
@@ -411,6 +414,7 @@ type themeStyles struct {
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 	panelHeader   lipgloss.Style // a side-panel section's header row: ◆, title and summary in bold prompt-white, so the sections read as headings over their rows (sidepanel.go)
 	panelCurrent  lipgloss.Style // the side panel's current task (its ▸ and text) in the `code` role, the one row of the task list the eye is sent to
+	panelWaiting  lipgloss.Style // a waiting sub-agent row's glyph (glyphSet.waiting): the `warning` role on the panel's own field — no background, which statusWarning and footerWarning carry for their bars
 	panelDragRule lipgloss.Style // the side panel's separator while a drag resizes it: bold in the `code` role, the accent tone, against the faint rule it is otherwise (sidepanel.go)
 
 	// Context-fill gauge (statusLine). The bar is a solid two-tone strip in the
@@ -633,6 +637,7 @@ func newTheme(s scheme.Scheme) theme {
 			scrollTrack:   lipgloss.NewStyle().Foreground(chrome),
 			panelHeader:   lipgloss.NewStyle().Bold(true).Foreground(userText),
 			panelCurrent:  lipgloss.NewStyle().Foreground(code),
+			panelWaiting:  lipgloss.NewStyle().Foreground(warningFg),
 			panelDragRule: lipgloss.NewStyle().Bold(true).Foreground(code),
 			gaugeFill:     lipgloss.NewStyle().Foreground(gauge).Background(surface),
 			gaugeTrack:    lipgloss.NewStyle().Background(chrome),

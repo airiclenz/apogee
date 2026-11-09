@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -583,6 +584,136 @@ func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {
 	want := ansi.Strip(m.spin.drawn(m.th, m.opts.UI.Spinner)) + " repo-scout   running 01:12s"
 	if len(got) != 2 || got[0] != "◆ Sub-agents 1 running           ⊙" || got[1] != want {
 		t.Errorf("the column paints\n%s\nwant the running header over %q", strings.Join(got, "\n"), want)
+	}
+}
+
+// panelGate is run id's approval Event at phase: a requested gate, or a human's decision on one.
+func panelGate(id string, phase domain.ApprovalPhase, decision domain.ApprovalDecision) domain.ApprovalEvent {
+	return domain.ApprovalEvent{
+		EventBase: delegationBase(id),
+		Phase:     phase,
+		Request:   domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"},
+		Decision:  decision,
+	}
+}
+
+// panelRowOf is the painted panel row that names name, or "" when none does.
+func panelRowOf(t *testing.T, m Model, name string) string {
+	t.Helper()
+	for _, row := range panelText(t, m) {
+		if strings.Contains(row, " "+name+" ") {
+			return row
+		}
+	}
+	return ""
+}
+
+// assertWaiting checks the row naming name reads waiting — the glyph set's waiting mark in place of
+// its phase glyph, and the phase word `waiting` — or, when isWaiting is false, neither.
+func assertWaiting(t *testing.T, m Model, name string, isWaiting bool) {
+	t.Helper()
+	row := panelRowOf(t, m, name)
+	if row == "" {
+		t.Fatalf("no panel row names %q", name)
+	}
+	marked := strings.HasPrefix(row, m.th.glyphs.waiting+" "+name) && strings.Contains(row, " waiting ")
+	if marked != isWaiting || strings.Contains(row, " waiting ") != isWaiting {
+		t.Errorf("row %q: waiting = %v, want %v", row, marked, isWaiting)
+	}
+}
+
+// TestSidePanelTwoGatedSubAgentsReadWaiting pins ADR 0111 decision 11's paint: with two sub-agents
+// gated at once — one approval showing, the other queued behind it — both rows read `waiting` under
+// the waiting mark, in the warning tone and on no background of its own; each row clears to
+// `running` on its own run's decision alone, the queued one first here.
+func TestSidePanelTwoGatedSubAgentsReadWaiting(t *testing.T) {
+	t.Parallel()
+
+	m := panelModel(t, domain.DefaultSidePanelSections, 30,
+		panelDelegationCall(t, "r1", "planner"), delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		panelDelegationCall(t, "r2", "repo-scout"), delegationPhase("r2", domain.SubAgentStarted, 30*time.Second),
+		panelGate("r1", domain.ApprovalRequested, ""), panelGate("r2", domain.ApprovalRequested, ""))
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
+		Reply:   make(chan domain.ApprovalDecision, 1),
+	})
+	if m.state != stateAwaitingApproval {
+		t.Fatalf("setup: state = %v, want r1's approval showing", m.state)
+	}
+
+	assertWaiting(t, m, "planner", true)
+	assertWaiting(t, m, "repo-scout", true)
+	mark := m.th.panelWaiting.Render(m.th.glyphs.waiting)
+	if column := strings.Join(m.sidePanelColumn(m.viewport.Height()), "\n"); !strings.Contains(column, mark) {
+		t.Errorf("the column paints no waiting mark in the panelWaiting style %q", mark)
+	}
+	if _, isNone := m.th.panelWaiting.GetBackground().(lipgloss.NoColor); !isNone {
+		t.Error("panelWaiting carries a background; the mark takes the panel's own field")
+	}
+	if got, want := m.th.panelWaiting.GetForeground(), m.th.statusWarning.GetForeground(); got != want {
+		t.Errorf("panelWaiting foreground = %v, want the warning role's %v", got, want)
+	}
+
+	m = m.foldEvent(panelGate("r2", domain.ApprovalDecided, domain.ApprovalAllow))
+	assertWaiting(t, m, "planner", true)
+	assertWaiting(t, m, "repo-scout", false)
+	if row := panelRowOf(t, m, "repo-scout"); !strings.Contains(row, " running ") {
+		t.Errorf("the decided row reads %q, want it back to running", row)
+	}
+
+	m = m.foldEvent(panelGate("r1", domain.ApprovalDecided, domain.ApprovalDeny))
+	assertWaiting(t, m, "planner", false)
+	assertWaiting(t, m, "repo-scout", false)
+}
+
+// TestSidePanelWaitingClearsOnCancel pins the ways a gate ends without a decision: the Approver's
+// failure on it (a cancelled pane), the run finishing — a stopped delegation finishes failed, and
+// its row then reads failed, never waiting — and the top-level Turn ending under a cancel. The
+// other gated run keeps its mark until its own gate closes.
+func TestSidePanelWaitingClearsOnCancel(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		end       domain.Event
+		wantWord  string
+		wantOther bool
+	}{
+		{
+			name: "the approver's failure on the gate",
+			end: domain.ErrorEvent{EventBase: delegationBase("r1"), Source: "loop",
+				Err: domain.ApproverErrorPrefix + "prompt cancelled"},
+			wantWord: " running ", wantOther: true,
+		},
+		{
+			name: "the stopped run finishing",
+			end: domain.SubAgentPhaseEvent{EventBase: delegationBase("r1"), Phase: domain.SubAgentFinished,
+				Result: domain.ToolResult{IsError: true}, At: panelNow},
+			wantWord: " failed ", wantOther: true,
+		},
+		{
+			name: "the cancelled top-level Turn ending", end: domain.TurnEvent{},
+			wantWord: " running ", wantOther: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := panelModel(t, domain.DefaultSidePanelSections, 30,
+				panelDelegationCall(t, "r1", "planner"), delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+				panelDelegationCall(t, "r2", "repo-scout"), delegationPhase("r2", domain.SubAgentStarted, time.Minute),
+				panelGate("r1", domain.ApprovalRequested, ""), panelGate("r2", domain.ApprovalRequested, ""))
+			assertWaiting(t, m, "planner", true)
+
+			m = m.foldEvent(tc.end)
+
+			assertWaiting(t, m, "planner", false)
+			if row := panelRowOf(t, m, "planner"); !strings.Contains(row, tc.wantWord) {
+				t.Errorf("the ended gate's row reads %q, want %q", row, strings.TrimSpace(tc.wantWord))
+			}
+			assertWaiting(t, m, "repo-scout", tc.wantOther)
+		})
 	}
 }
 
