@@ -15,26 +15,36 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 ## Where it sits
 
 ```
- ❯ refactor the parser                                    │ ○ Sub-agents (1)
-                                                          │ ⠋ repo-scout   running 01:12s  41%
- I'll start by mapping the call sites…                    │ ✓ planner      done       38s  27%
-                                                          │ ○ Tasks (1/3)
- ⏺ Read internal/parse/lexer.go                           │ ✓ map call sites
- ⏺ Edit internal/parse/parser.go  +12 −4                  │ ▸ split the tokenizer
-                                                          │ ○ port the tests
-                                                          │ ○ Changed files (2)
-                                                          │ …/parse/parser.go           +12 −4
-                                                          │ …/parse/lexer_test.go     ↳ +30 −0
-                                                         ▐│ ○ Usage (62%)
- ── session name ────────────────────────────────────────────────────────────────────────────────
- ⠋ thinking…                                                                     ctx 62% ▕████▍▏
- ╭─ prompt ─────────────────────────────────────────────────────────────────────────────────────╮
- │                                                                                              │
- ╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-  footer
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ││  ○ Sub-agents (1) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+❯ refactor the parser                                ││    ⣾ repo-scout      running 01:12s  41%
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ││    ✓ planner         done       38s  27%
+✦ I'll start by mapping the call sites…              ││
+                                                     ││  ○ Tasks (1/3) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+✦ Tools (1 Read, 1 Edit) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼ ┃│    ✓ map call sites
+  ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ line one ▶ ┃│    ▸ split the tokenizer
+  ┕ Edit ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +12 −4 ▶ ┃│    ○ port the tests
+                                                     ┃│
+✦ Sub-agents (2)                                     ┃│  ○ Changed files (2) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  ┝ repo-scout ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 0 tool calls · 13k/31k ▶ ┃│      internal/parse/parser.go     +12 −4
+  ┕ planner ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ done ▶ ┃│    ↳ internal/parse/lexer_test.go +30 −0
+                                                     ┃│
+✦ The scout maps the tests while                     ┃│  ○ Usage (62%) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  I split the tokenizer into its                     ┃│      20k/32k 62% ██████▎
+  own file.                                          ┃│      prompt 4k · completion 300
+                                                      │      cached 25%
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ refactor the parser ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  ⣾ responding · 0s [total 0s]                                            20k/32k 62% ██████▎
+╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ queue a message…  ⏎ queue · ↑ recall · esc×2 cancel                                            │
+╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+  test-host ✦ test-model                                                            ◐ ask before
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
 ```
 
-*(The sketch is narrowed to fit; on screen the transcript keeps at least 100 columns.)*
+*(Drawn from a frame rendered at 150 columns while a Turn runs, the column at its default 44. The
+column's 44 cells are copied as painted; the transcript and the full-width rows below the rule are
+narrowed to fit, and on screen the transcript keeps at least 100 columns. Left of the separator
+stand the transcript's scroll-bar track `│` and thumb `┃`.)*
 
 - **Rows:** every row above the session-name rule, the same rows the transcript slot spans. The
   session-name rule, status line, prompt box and footer keep the full window width.

@@ -381,7 +381,10 @@ internal/tui/sidepanel_test.go — panelModel
 **Acceptance:** `go test -race -count=1 -run 'Glyph|Panel' ./internal/tui/`
 **Commit:** `fix(tui): draw side-panel glyphs from the safe set under ui.glyphs safe`
 
-## 16. Redraw the side-panel spec's sketch from a rendered frame
+## 16. Redraw the side-panel spec's sketch from a rendered frame — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the frame was rendered in-process with a throwaway test (deleted, not committed): window 150×24, state running, auto sections, a running and a done sub-agent with child fills, a 1/3 task list, a top-level Edit and a delegated write, a 62% usage reading. The panel's 44 cells are copied as painted; the transcript side and the full-width rows below the rule are narrowed to a 98-column sketch, and the note under the sketch says so. The transcript's `line one` / `0 tool calls` facts are the fixture's, kept as rendered.
+NOTES (2026-11-09): dark and light frames are cell-identical once escape-stripped; the `ui.glyphs: safe` frame swaps `⋯`→`·`, `✓`→`√`, `▸`→`>`, `↳`→`»`, the spinner to ASCII, and keeps `○`, `▼` and `│`, as the spec's Glyphs paragraph states — the epic's rendered-frame acceptance holds.
 
 **What:** Closes `panel-spec-sketch-drift`; checks the epic's rendered-frame acceptance. Depends on items 1–15.
 **Regression guard.** The acceptance also proves the old panel shapes are gone: no `ctx 62%`, `⊙` or `◆` remains in `docs/layout/side-panel-layout.md` (items 4 and 10 retire them file-wide), and the sketch draws `▼`.
