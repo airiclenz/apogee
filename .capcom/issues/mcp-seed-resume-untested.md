@@ -1,11 +1,13 @@
 ---
 title: No e2e test seeds MCP state into a resumed session's journal
-status: open
+status: done
 type: task
 priority: 3
 labels: [test-gap]
 plan: 2026-11-09 - 00 - mcp-test-gaps-and-session-death-plan
 created: 2026-11-09T09:10:39Z
+closed: 2026-11-09T12:25:04Z
+reason: "Resolved by plan '2026-11-09 - 00 - mcp-test-gaps-and-session-death-plan' item 2 (archived at 556778e7): TestE2EMCPResumeSeedsTheJournal pins one mcp_server seed line per server after run_started on a resumed session's journal."
 ---
 
 Item 17 of `2026-11-08 - 03 - adr-0111-navigation-and-mcp-status-plan` (commit `f5a2b50a`) seeds each live Event journal with one `mcp_server` line per configured server right after `run_started`. The seed runs at every journal birth through `sessionHost.mcpSeed` (`cmd/apogee/wire_session.go:129`, called at `cmd/apogee/wire_session.go:403` from `openEventJournalLocked`). A resumed record's journal is born in `attachEventJournal` (`cmd/apogee/wire_session.go:325`). The e2e tests cover only a fresh start and the journal born again after `/clear`; no test drives a resumed session and checks that its journal opens on the seed.
