@@ -1,10 +1,12 @@
 ---
 title: Prompt box shows no scrollbar when its content outgrows the box
-status: open
+status: done
 type: task
 priority: 2
 plan: 2026-11-09 - 03 - prompt-box-scrollbar-plan.md
 created: 2026-11-09T14:31:59Z
+closed: 2026-11-09T17:42:48Z
+reason: "Resolved by plan '2026-11-09 - 03 - prompt-box-scrollbar-plan' (archived at 60ccb441): overflow-only scrollbar column, wheel scrolls the overflowing draft, layout.md states the rule."
 ---
 
 The prompt box stops growing at `maxInputRows` and the textarea then scrolls internally, but the only sign of the hidden rows is the `+N` elision marker in the box's top border (`Model.inputElisionEdge`). Other TUI surfaces — the transcript, the boxed pop-ups (`popupRowScrollbar`) — show a scrollbar column when their content overflows; the prompt box alone leaves the human without a visual scroll affordance, so it is not obvious the box can be scrolled or how much is hidden beyond the count.
