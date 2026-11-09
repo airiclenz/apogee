@@ -64,7 +64,9 @@
 - 11 (round 2): recast — owner call: `Sub-agent` / `Sub-agents (N)` / `Tasks (d/n)`; resumed records re-derive labels; replaces the "choose/state" guard.
 - 8 (round 3): guard folded — owner call: the show/dock gate keeps its own 36-column constant (137 `auto` / 117 `on`), decoupled from the 44 default width; a test docks the default-width config at 137 under `auto`.
 
-## 1. Clamp the panel's Usage percent through one shared helper
+## 1. Clamp the panel's Usage percent through one shared helper — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): added TestUsage_WithFillClampsAnOverfullSummary in internal/sidepanel beside the planned helper table test, pinning the bug at UsageView.WithFill itself; percentCap stays (the cache-hit row still uses it) with its comment trimmed to drop the fill-clamp role it no longer has.
 
 **What:** Fixes bug `panel-usage-unclamped-percent`: `UsageView.WithFill` builds its header summary from the unclamped `Fill.Percent`, so a fill over the window reads `Usage 137%` while the gauge reads 100%.
 **Regression guard.** `panelUsageRows` paints `<bar> used/window` with no percent (`internal/tui/sidepanel.go`), so the clamp test asserts `100%` in the panel header, in a sub-agent row's fill (a `SubAgentRow` whose `Fill` is over its window), in `usageFillCell` and in the status-line gauge — never in a panel usage row.

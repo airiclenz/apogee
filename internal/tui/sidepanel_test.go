@@ -572,6 +572,43 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 	}
 }
 
+// TestSidePanelUsageHeaderClampsOverfullFill pins one clamp across every surface that spells a fill
+// as a percentage: a top-level fill and a sub-agent's fill past their windows read 100% in the
+// panel's Usage header, in the sub-agent row, in /usage's fill cell and in the status-line gauge —
+// never the unclamped figure past a hundred (bug panel-usage-unclamped-percent). The panel's usage row carries no
+// percent, so it is not asserted here.
+func TestSidePanelUsageHeaderClampsOverfullFill(t *testing.T) {
+	t.Parallel()
+
+	over := testOpts.ContextWindow * 137 / 100
+	m := panelModel(t, domain.DefaultSidePanelSections, 30,
+		panelDelegationCall(t, "r1", "repo-scout"),
+		delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		domain.UsageEvent{EventBase: delegationBase("r1"), TotalTokens: 12000, ContextWindow: 8000},
+		panelUsageReading(over),
+	)
+
+	header := ""
+	for _, row := range panelText(t, m) {
+		if strings.Contains(row, "Usage") {
+			header = row
+			break
+		}
+	}
+	if !strings.Contains(header, "Usage 100%") {
+		t.Errorf("usage header = %q, want it to read Usage 100%%", header)
+	}
+	if row := panelRowOf(t, m, "repo-scout"); !strings.Contains(row, " 100%") {
+		t.Errorf("sub-agent row = %q, want its overfull fill clamped to 100%%", row)
+	}
+	if got := usageFillCell(over, testOpts.ContextWindow); got != "100%" {
+		t.Errorf("usageFillCell = %q, want 100%%", got)
+	}
+	if gauge := ansi.Strip(m.contextGauge()); !strings.Contains(gauge, " 100% ") {
+		t.Errorf("status-line gauge = %q, want its percentage clamped to 100%%", gauge)
+	}
+}
+
 // TestSidePanelRunningDelegationSpinsWithTheStatusLine pins a running row: the status line's own
 // spinner frame leads it, and its elapsed time counts to now.
 func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {

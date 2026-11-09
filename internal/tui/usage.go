@@ -10,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/sidepanel"
 )
 
 // ----------------------------------------------------------------------------
@@ -428,5 +429,5 @@ func usageFillCell(used, limit int) string {
 	if used <= 0 || limit <= 0 {
 		return ""
 	}
-	return strconv.Itoa(min(used*100/limit, 100)) + "%"
+	return strconv.Itoa(sidepanel.ClampedPercent(used, limit)) + "%"
 }

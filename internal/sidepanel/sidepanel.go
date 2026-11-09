@@ -73,12 +73,22 @@ type Fill struct {
 	IsEstimate bool
 }
 
-// Percent is the fill as a whole percentage of the window, 0 when either side is unknown.
+// Percent is the fill as a whole percentage of the window, clamped to 100 and 0 when either side is
+// unknown (ClampedPercent).
 func (f Fill) Percent() int {
-	if f.Used <= 0 || f.Window <= 0 {
+	return ClampedPercent(f.Used, f.Window)
+}
+
+// ClampedPercent is used as a whole percentage of limit, clamped to [0, 100]: 0 when either side is
+// not positive, 100 when used overfills limit. A conversation carried into a smaller window overfills
+// it, and a percentage past a hundred beside a full bar is a rendering bug rather than a reading, so
+// every surface that spells a fill as a percentage — the side panel's usage header and sub-agent
+// rows, the status-line gauge, /usage's fill cell — spells it through this one clamp.
+func ClampedPercent(used, limit int) int {
+	if used <= 0 || limit <= 0 {
 		return 0
 	}
-	return f.Used * percentScale / f.Window
+	return min(used*percentScale/limit, percentScale)
 }
 
 // View is one section's answer: its rows in display order, the summary its header carries

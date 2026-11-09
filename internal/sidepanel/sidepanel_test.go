@@ -550,6 +550,44 @@ func TestUsage_WithFillRemeasures(t *testing.T) {
 	}
 }
 
+// TestClampedPercent pins the one clamp every fill percentage goes through: a whole percentage of
+// the limit, never past 100 and 0 when either side is not positive.
+func TestClampedPercent(t *testing.T) {
+	cases := []struct {
+		name        string
+		used, limit int
+		want        int
+	}{
+		{name: "under the limit", used: 6000, limit: 10000, want: 60},
+		{name: "at the limit", used: 10000, limit: 10000, want: 100},
+		{name: "over the limit", used: 45000, limit: 32768, want: 100},
+		{name: "nothing used", used: 0, limit: 10000, want: 0},
+		{name: "negative used", used: -5, limit: 10000, want: 0},
+		{name: "zero limit", used: 6000, limit: 0, want: 0},
+		{name: "negative limit", used: 6000, limit: -1, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sidepanel.ClampedPercent(tc.used, tc.limit); got != tc.want {
+				t.Errorf("ClampedPercent(%d, %d) = %d, want %d", tc.used, tc.limit, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestUsage_WithFillClampsAnOverfullSummary pins the bug the clamp fixes: a fill past its window
+// summarises as 100%, the figure the status-line gauge states beside its full bar.
+func TestUsage_WithFillClampsAnOverfullSummary(t *testing.T) {
+	view := sidepanel.UsageView{}.WithFill(sidepanel.Fill{Used: 45000, Window: 32768})
+
+	if view.Summary != "100%" || !view.IsLive {
+		t.Errorf("summary %q live %v, want 100%% and live", view.Summary, view.IsLive)
+	}
+	if got := view.Fill.Percent(); got != 100 {
+		t.Errorf("Fill.Percent() = %d, want 100", got)
+	}
+}
+
 func TestUsage_Totals(t *testing.T) {
 	state, _ := newState(t)
 	state.SetUsage(sidepanel.RunKey{}, domain.Usage{Calls: 2, PromptTokens: 100}, 0)

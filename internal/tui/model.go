@@ -19,6 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/notice"
+	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -5249,7 +5250,7 @@ func (c contextUsage) view(th theme) string {
 	if c.Used <= 0 || c.Limit <= 0 {
 		return ""
 	}
-	pct := min(c.Used*100/c.Limit, 100)
+	pct := sidepanel.ClampedPercent(c.Used, c.Limit)
 	approx := ""
 	if c.Estimated {
 		approx = "~"

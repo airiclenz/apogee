@@ -53,8 +53,8 @@ const (
 	// panelElapsedMaxDays is the most days a sub-agent row's clock reads: `99d23h` is the widest
 	// form subAgentFactsFormat's elapsed field holds, so a longer run reads that and no more.
 	panelElapsedMaxDays = 99
-	// percentCap is a whole percentage: the scale a share is spelled in, and the most a fill
-	// reads — a conversation carried into a smaller window overfills it (usageFillCell's clamp).
+	// percentCap is a whole percentage: the scale a share is spelled in. A fill's percentage is
+	// clamped by sidepanel.ClampedPercent, not here.
 	percentCap = 100
 	// sidePanelSectionsSource is the label a failed pin write-back's transcript error carries — the
 	// key's own name, taskListOpenSource's posture.
@@ -459,7 +459,7 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	}
 	fill := ""
 	if percent := row.Fill.Percent(); percent > 0 {
-		fill = strconv.Itoa(min(percent, percentCap)) + "%"
+		fill = strconv.Itoa(percent) + "%"
 	}
 	facts := m.th.statusFaint.Render(fmt.Sprintf(subAgentFactsFormat, phase, elapsed, fill))
 	lead, style := glyph+" ", lipgloss.NewStyle()
