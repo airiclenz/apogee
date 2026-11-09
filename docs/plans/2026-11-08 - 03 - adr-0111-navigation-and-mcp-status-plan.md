@@ -374,7 +374,10 @@ add the Note with `capcom know add --parent glossary-identity`; run `capcom chec
 **Closes:** panel-keyboard-navigation
 **Commit:** `docs(layout): specify navigation mode and the cursor mark`
 
-## 12. Narrow-window overlay: geometry, paint and `→`
+## 12. Narrow-window overlay: geometry, paint and `→` — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): internal/tui/navmode_test.go (not on the item's Files line) — two cases from item 6 asserted a hidden panel's old behaviour that this item's Goal reverses: `TestNavModeRightIntoEmptyPanelDoesNothing`'s "a column the window cannot show" (60 cols, `auto`: → now opens the overlay) became "a column `off` hides", and `TestNavModeRegionLosingStops`'s "the panel empties and the transcript has no stop" now empties the panel by switching `ui.side-panel.show` to `off` instead of shrinking the window to 60 columns (which now keeps the panel as the overlay).
+NOTES (2026-11-09): with no overlay flag (overlay ⇔ cursor in the panel region ∧ hidden panel ∧ show not `off` ∧ the cursor owns the keys), a cursor standing in the docked panel when the window shrinks under the gate keeps the panel, now painted as the overlay; a pending decision hides it as it hides the cursor. Docs for the overlay are left to item 13, whose Files line owns them.
 
 **What:** ADR 0111 D7, opening by `→`. Depends on item 6.
 **Regression guard.** panelStops and panelTargetAt resolve against the paint geometry (docked or overlay), so item 12 moves panelCell's panelShown()/slotWidth() gate onto that geometry and adds a test that every stop's target equals the click at its row while the overlay is shown — item 12 depends on item 5.

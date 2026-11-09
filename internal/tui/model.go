@@ -3650,8 +3650,11 @@ func (m Model) View() tea.View {
 	// While the side panel shows, its column is hung off the right edge of every row above the ▔
 	// rule — the body, the gap row and the slot's blocks — once they are stacked, and not inside
 	// the walk above: that walk is the one frameSpans shares, and the column moves no row of it.
-	if m.panelShown() {
-		rows = []string{joinColumn(m.th.measure, rows, m.slotWidth(), m.sidePanelColumn(belowSlot))}
+	// Overlaid on a narrow window (ADR 0111 D7) the same column is hung over the right edge of those
+	// rows instead: they were laid out at the whole window's width, which the overlay never changes,
+	// so it covers their last columns and re-wraps nothing.
+	if width := m.panelPaintWidth(); width > 0 {
+		rows = []string{joinColumn(m.th.measure, rows, m.width-width, m.sidePanelColumn(belowSlot))}
 	}
 	// Then the ▔ top-edge hairline capping the chrome, and the status line under it.
 	rows = append(rows, m.topRule(), m.statusLine())

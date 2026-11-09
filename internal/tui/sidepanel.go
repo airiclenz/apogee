@@ -97,10 +97,40 @@ func (m Model) clampPanelWidth(width int) int {
 	return min(max(width, domain.MinSidePanelWidth), m.width-floor-scrollbarWidth)
 }
 
-// panelContentWidth is the columns the panel's content has: the painted column less its separator
-// and the gutter beside it, 0 while the column does not show.
+// panelOverlayable reports whether the column can open as the narrow-window overlay (ADR 0111 D7):
+// the window is under the show mode's gate ([Model.panelShown] is false), and the mode is one that
+// draws the column at all — `off`, and the zero UIPrefs' empty mode, never overlay it.
+func (m Model) panelOverlayable() bool {
+	least, ok := sidePanelLeastWindow(m.opts.UI.SidePanelShow)
+	return ok && m.width < least
+}
+
+// panelOverlaid reports whether the column is painted as the overlay this frame: it is overlayable
+// and navigation mode stands in the panel region with the keys its own ([Model.blockCursorOwnsKeys]).
+// There is no flag of its own — the overlay lives exactly while the cursor stands in the panel
+// region, so whatever moves the cursor out of it, or ends the mode, closes it.
+func (m Model) panelOverlaid() bool {
+	return m.panelOverlayable() && m.cursor.inPanel() && m.blockCursorOwnsKeys()
+}
+
+// panelPaintWidth is the columns the column is painted across, its separator included: the docked
+// column's ([Model.panelWidth]) while it shows; while it is overlaid ([Model.panelOverlaid]) the
+// configured width clamped to the window alone — the overlay leaves no transcript floor beside it,
+// so [Model.clampPanelWidth] stays the docked column's and the drag's; 0 otherwise. It is the paint
+// geometry: the content's width, the cells a click or a notch lands on and where View hangs the
+// column read it. [Model.panelWidth] stays 0 under the overlay, so the slot, the layout and the
+// frame key never move and the transcript is not re-wrapped (ADR 0110 D6).
+func (m Model) panelPaintWidth() int {
+	if m.panelOverlaid() {
+		return min(m.configuredPanelWidth(), m.width)
+	}
+	return m.panelWidth()
+}
+
+// panelContentWidth is the columns the panel's content has: the painted column
+// ([Model.panelPaintWidth]) less its separator and the gutter beside it, 0 while it is not painted.
 func (m Model) panelContentWidth() int {
-	return max(0, m.panelWidth()-sidePanelChromeWidth)
+	return max(0, m.panelPaintWidth()-sidePanelChromeWidth)
 }
 
 // panelSection is one section the column shows: which it is, what its header says and its body
@@ -575,10 +605,12 @@ type panelTarget struct {
 	run      runRef
 }
 
-// panelCell reports whether (x, y) is one of the column's cells: right of the transcript slot, on
-// a row above the session-name rule, while the column shows.
+// panelCell reports whether (x, y) is one of the column's cells: within the painted column's width
+// of the window's right edge ([Model.panelPaintWidth] — right of the transcript slot while docked,
+// over the transcript's right edge while overlaid), on a row above the session-name rule.
 func (m Model) panelCell(x, y int) bool {
-	return m.panelShown() && x >= m.slotWidth() && x < m.width && y >= 0 && y < m.frameSpans().slotBottom
+	width := m.panelPaintWidth()
+	return width > 0 && x >= m.width-width && x < m.width && y >= 0 && y < m.frameSpans().slotBottom
 }
 
 // panelTargetAt answers what a click at (x, y) does on the column of the frame m composes (pre in
@@ -718,9 +750,11 @@ func (m Model) panelDoubleClicked(at time.Time) bool {
 // panelGripAt answers whether column x of a press already on the column ([Model.panelTargetAt]) is
 // its grip — the separator or the gutter right of it — and how far right of the separator it is.
 // While watching the grip is inert: the press is claimed as any column cell is, and starts nothing.
+// The overlay has no grip at all (ADR 0111 D7): the separator belongs to the docked column, and an
+// overlay the window cannot dock has no width a drag could set.
 func (m Model) panelGripAt(x int) (grab int, isGrip bool) {
 	grab = x - m.slotWidth()
-	if m.watch.isActive || grab < 0 || grab >= sidePanelChromeWidth {
+	if m.watch.isActive || m.panelOverlaid() || grab < 0 || grab >= sidePanelChromeWidth {
 		return 0, false
 	}
 	return grab, true

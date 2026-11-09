@@ -250,8 +250,9 @@ func TestNavModeEscLeavesFromEitherRegion(t *testing.T) {
 }
 
 // TestNavModeRightIntoEmptyPanelDoesNothing pins → where the panel has no stop — a column showing
-// `nothing live`, or one the window is too narrow to show: the cursor stays on the transcript row it
-// stands on, and the key is still the mode's.
+// `nothing live`, or one `off` hides (a window too narrow to dock it overlays it instead,
+// sidepaneloverlay_test.go): the cursor stays on the transcript row it stands on, and the key is
+// still the mode's.
 func TestNavModeRightIntoEmptyPanelDoesNothing(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -265,11 +266,11 @@ func TestNavModeRightIntoEmptyPanelDoesNothing(t *testing.T) {
 			}
 			return m
 		}},
-		{"a column the window cannot show", func(t *testing.T) Model {
+		{"a column `off` hides", func(t *testing.T) Model {
 			m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
-			m = step(t, m, tea.WindowSizeMsg{Width: 60, Height: 30})
-			if m.panelShown() {
-				t.Fatal("setup: the column still shows at 60 columns")
+			m = m.setPanelShow(domain.SidePanelShowOff)
+			if m.panelShown() || m.panelOverlayable() {
+				t.Fatal("setup: the column still shows, or could overlay, under `off`")
 			}
 			return m
 		}},
@@ -330,7 +331,7 @@ func TestNavModeRegionLosingStops(t *testing.T) {
 		m, _ := navModel(t, domain.DefaultSidePanelSections, panelUsageReading(panelUsed))
 		m = step(t, m, keyAltUp())
 		panelCursorStop(t, m)
-		m = step(t, m, tea.WindowSizeMsg{Width: 60, Height: 30})
+		m = m.setPanelShow(domain.SidePanelShowOff)
 
 		m = step(t, m, keyDown())
 
