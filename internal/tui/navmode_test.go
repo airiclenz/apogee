@@ -455,12 +455,13 @@ func cursorOnPanelStop(t *testing.T, m Model, id panelStopID) Model {
 }
 
 // panelOutcome is what following a panel target can change: the view on screen and where it is
-// scrolled to, the /usage report, the section list a pin writes, and every block's fold.
+// scrolled to, the /usage and /mcp reports, the section list a pin writes, and every block's fold.
 type panelOutcome struct {
 	viewed    runRef
 	isInView  bool
 	yOffset   int
 	isUsage   bool
+	isMCP     bool
 	sections  domain.SidePanelSections
 	expansion string
 }
@@ -469,18 +470,20 @@ type panelOutcome struct {
 func panelOutcomeOf(m Model) panelOutcome {
 	return panelOutcome{
 		viewed: m.viewedRun(), isInView: m.inRunView(), yOffset: m.viewport.YOffset(), isUsage: m.usagePane.open,
-		sections: m.opts.UI.SidePanelSections, expansion: fmt.Sprint(expandedFlags(m)),
+		isMCP: m.mcpPane.open, sections: m.opts.UI.SidePanelSections, expansion: fmt.Sprint(expandedFlags(m)),
 	}
 }
 
 // TestNavModeEnterMatchesClickPerKind pins ⏎ on a panel stop as the click on its row (ADR 0111 D4):
 // for every kind of stop the two leave the same outcome, and it is not the untouched one. A stop that
-// opens a detail ends the mode; a header's pin toggle keeps it, on the header it toggled.
+// opens a detail ends the mode; a header's pin toggle keeps it, on the header it toggled. events
+// adds to panelStopEvents what a case's section needs to be live.
 func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string
 		id         func(m Model) panelStopID
+		events     []domain.Event
 		isModeKept bool
 	}{
 		{
@@ -504,6 +507,13 @@ func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 			id:   func(Model) panelStopID { return panelStopID{section: domain.SidePanelUsage} },
 		},
 		{
+			name: "mcp",
+			id:   func(Model) panelStopID { return panelStopID{section: domain.SidePanelMCP} },
+			events: []domain.Event{
+				domain.MCPServerEvent{Server: "files", Transport: "stdio", Phase: domain.MCPServerFailed, Cause: "exit 1"},
+			},
+		},
+		{
 			name:       "header pin",
 			id:         func(Model) panelStopID { return panelStopID{section: domain.SidePanelTasks, isHeader: true} },
 			isModeKept: true,
@@ -512,7 +522,7 @@ func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			base, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+			base, _ := navModel(t, domain.DefaultSidePanelSections, append(panelStopEvents(t), tc.events...)...)
 			base = streamOneScreen(t, base) // the blocks scroll off, so a reveal shows in the outcome
 			id := tc.id(base)
 			stops := base.navPanelStops()
@@ -543,6 +553,25 @@ func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 				t.Errorf("after the pin toggle the cursor stands on %+v, want the header %+v", panelCursorStop(t, keyed).id, id)
 			}
 		})
+	}
+}
+
+// TestNavModeEnterOnMCPOpensReport pins ⏎ on the mcp section's stop (ADR 0111 D10): it opens /mcp
+// and, as every stop that opens a detail does, ends navigation mode.
+func TestNavModeEnterOnMCPOpensReport(t *testing.T) {
+	t.Parallel()
+	m, _ := navModel(t, domain.DefaultSidePanelSections, domain.MCPServerEvent{
+		Server: "files", Transport: "stdio", Phase: domain.MCPServerDialling,
+	})
+	m = cursorOnPanelStop(t, m, panelStopID{section: domain.SidePanelMCP})
+
+	m = step(t, m, keyEnter())
+
+	if !m.mcpPane.open {
+		t.Error("⏎ on the mcp stop left the /mcp report closed")
+	}
+	if m.cursor.active {
+		t.Error("navigation mode is still on after ⏎ opened /mcp")
 	}
 }
 

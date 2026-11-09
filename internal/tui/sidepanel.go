@@ -337,10 +337,11 @@ func (m Model) panelSections() []panelSection {
 }
 
 // panelSection paints one section from the folded state, and reports whether its live rule holds.
-// Every section but sub-agents reads the run the human is looking at ([Model.viewedRun]) — the
-// top-level run outside Run view — and the usage section measures that run's fill as the
+// Every section but sub-agents and mcp reads the run the human is looking at ([Model.viewedRun]) —
+// the top-level run outside Run view — and the usage section measures that run's fill as the
 // status-line gauge states it ([Model.viewedFill]). Sub-agents lists every run and marks the viewed
-// one (ADR 0110 decision 12).
+// one (ADR 0110 decision 12); mcp reads the process's MCP fold ([sessionView.mcpServers]), which no
+// run owns, and is live while any server is not connected (ADR 0111 decision 10).
 func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool) {
 	scope := panelRunKey(m.viewedRun())
 	switch section {
@@ -365,9 +366,9 @@ func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool
 		view := m.panel.Usage(scope).WithFill(m.panelFill())
 		return panelSection{title: "Usage", summary: view.Summary, body: m.panelUsageRows(view)}, view.IsLive
 	case domain.SidePanelMCP:
-		// Named and configurable, but not yet folded: an empty section that is never live, so auto
-		// keeps it hidden and only pinned paints its header.
-		return panelSection{title: "MCP"}, false
+		servers := m.mcpServers.Rows()
+		return panelSection{title: "MCP", summary: mcpPanelSummary(servers), body: paintPanelRows(servers, m.panelMCPRow)},
+			m.mcpServers.IsLive()
 	default:
 		return panelSection{}, false
 	}
@@ -466,6 +467,53 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 		lead, style = lead+m.th.panelCurrent.Render(glyphPanelCurrent)+" ", m.th.panelCurrent
 	}
 	return m.panelRow(lead, row.Name, style, facts)
+}
+
+// panelMCPRow is one MCP server: `name · state · N tools`, the count left off while no connection
+// serves ([mcpPanelServes]). The name is clipped first so the state and count stay in view; on a
+// column too narrow even for them the row runs long, for sidePanelColumn's squareLine to cut. The
+// name is untrusted text: the fold strips it and this strips it again, which is idempotent.
+func (m Model) panelMCPRow(row sidepanel.MCPServerRow) string {
+	state := m.th.statusFaint.Render(string(row.Phase))
+	if row.Phase == domain.MCPServerFailed {
+		state = m.th.errorText.Render(string(row.Phase))
+	}
+	facts := m.th.statusFaint.Render(sidePanelPartSeparator) + state
+	if mcpPanelServes(row) {
+		facts += m.th.statusFaint.Render(sidePanelPartSeparator + plural(row.Tools, "tool"))
+	}
+	name := truncateToWidth(m.th, firstLine(stripEscapes(row.Server)), m.panelContentWidth()-m.th.measure.Width(facts))
+	return name + facts
+}
+
+// mcpPanelServes reports whether a connection serves row's server, so its tool count means
+// something: a connected one, a failed reconnect whose previous connection was kept, or a reconnect
+// still dialling with the previous connection's tools in hand ([sidepanel.MCPServerRow.Tools]).
+func mcpPanelServes(row sidepanel.MCPServerRow) bool {
+	return row.Phase == domain.MCPServerConnected || (row.Phase == domain.MCPServerFailed && row.Kept) || row.Tools > 0
+}
+
+// mcpPanelPhases is the order mcpPanelSummary counts the phases that are not connected in.
+var mcpPanelPhases = []domain.MCPServerPhase{
+	domain.MCPServerDialling, domain.MCPServerFailed, domain.MCPServerDisconnected,
+}
+
+// mcpPanelSummary is the mcp header's summary: how many servers are not connected, by phase
+// (`1 failed`, `2 dialling · 1 failed`), and nothing while every server is connected.
+func mcpPanelSummary(servers []sidepanel.MCPServerRow) string {
+	parts := make([]string, 0, len(mcpPanelPhases))
+	for _, phase := range mcpPanelPhases {
+		n := 0
+		for _, server := range servers {
+			if server.Phase == phase {
+				n++
+			}
+		}
+		if n > 0 {
+			parts = append(parts, strconv.Itoa(n)+" "+string(phase))
+		}
+	}
+	return strings.Join(parts, sidePanelPartSeparator)
 }
 
 // panelElapsed is a sub-agent row's elapsed time in at most six columns, the width of
@@ -596,6 +644,7 @@ const (
 	panelTargetRun                          // a sub-agent row: open that run's Run view
 	panelTargetBlock                        // a task or changed-file row: unfold its block and scroll to it
 	panelTargetUsage                        // a usage row: open /usage
+	panelTargetMCP                          // an mcp row: open /mcp
 )
 
 // panelTarget is one column cell's click: what it does, and what it does it to — the section a pin
@@ -865,9 +914,9 @@ func (m Model) resetPanelWidth() Model {
 // followPanelTarget does what a click on target means: a pin toggles its section between pinned
 // and auto, a sub-agent row opens its Run view, a task or changed-file row unfolds that one block
 // — never the shared task-list fold, whose toggle writes `ui.task-list-open` — and scrolls it into
-// view (opening the run that holds it first), and a usage row opens /usage. ⏎ on the row's stop in
-// navigation mode is the same call ([Model.activatePanelCursor]), so the click and the key cannot
-// come to mean different things.
+// view (opening the run that holds it first), a usage row opens /usage and an mcp row opens /mcp.
+// ⏎ on the row's stop in navigation mode is the same call ([Model.activatePanelCursor]), so the
+// click and the key cannot come to mean different things.
 //
 // Under a modal pane ([Model.modalPaneOpen]) no target acts: the pane owns the keyboard, and a
 // detail view or a settings write under it would change what the human is answering. And while
@@ -900,6 +949,8 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 		return m, nil
 	case panelTargetUsage:
 		return m.runUsageCommand()
+	case panelTargetMCP:
+		return m.runMCPCommand()
 	default:
 		return m, nil
 	}

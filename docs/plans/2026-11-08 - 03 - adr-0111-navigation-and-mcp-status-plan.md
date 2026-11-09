@@ -623,7 +623,12 @@ name and pin the known list "…, usage, mcp"; `TestSidePanelCommandBareReports`
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/domain/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'SidePanel|Sections' ./internal/config/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestWireOptions' ./cmd/apogee/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSidePanel' ./internal/tui/`
 **Commit:** `feat(config): add mcp to the side-panel section names`
 
-## 20. The `mcp` side-panel section
+## 20. The `mcp` side-panel section — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the row is written flush-left as `name · state · N tools` (the name clipped first so state and count stay in view), not through `panelRow`'s right-aligned facts, to read as ADR 0111 D10 spells it; the header summary counts not-connected servers per phase in the order dialling, failed, disconnected, and is empty while all are connected.
+NOTES (2026-11-09): item 19's `TestSidePanelMCPSectionIsNamedButNeverLive` asserted the placeholder this item replaces (the section never live); its parse half is kept as `TestSidePanelMCPSectionIsNamed`, its never-live half is superseded by `TestSidePanelMCPSectionAuto`.
+NOTES (2026-11-09): `blockcursor.go`'s end-mode rule needed no code change — any live non-pin target already ends the mode — only its comments now name `/mcp`.
+NOTES (2026-11-09): consequential edit — internal/tui/doc.go: made necessary by the new `mcp` stop identity (panelstops.go's identity list in the file map).
 
 **What:** ADR 0111 D10's TUI half. Depends on items 5, 15, 18, 19.
 **Regression guard.** `panelStop` gains an `mcp` identity, and `⏎` on the `mcp` stop ends navigation mode as `/usage` does

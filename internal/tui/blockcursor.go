@@ -395,8 +395,9 @@ func (m Model) enterPanelRegion() Model {
 // that stop's row, through the click's own [Model.followPanelTarget], so the two ways in are one
 // gesture — under a modal pane or on a watched pin it acts as the click does there. A pin toggle
 // keeps the mode, the cursor still on the header it toggled; a stop that opens a detail — a Run view,
-// a tool block, /usage — ends it, as ⏎ on a delegation's transcript row does: the reader's attention
-// has moved to what opened. The stop is the one [Model.reseatPanelCursor] resolved for this key.
+// a tool block, /usage, /mcp — ends it, as ⏎ on a delegation's transcript row does: the reader's
+// attention has moved to what opened. The stop is the one [Model.reseatPanelCursor] resolved for
+// this key.
 func (m Model) activatePanelCursor() (Model, tea.Cmd) {
 	stops := m.navPanelStops()
 	at, ok := m.cursor.panelStopIndex(stops)
@@ -454,7 +455,7 @@ func (m Model) cursorRunHead() (entry, bool) {
 
 // panelCursorRunHead is the delegation a panel-standing cursor's stop opens: the stop the cursor
 // resolves to ([blockCursor.panelStopIndex]) when it is a sub-agent row. Any other stop — a header,
-// a task card, a changed file, the usage report — heads no run.
+// a task card, a changed file, the usage or the mcp report — heads no run.
 func (m Model) panelCursorRunHead() (entry, bool) {
 	stops := m.navPanelStops()
 	at, ok := m.cursor.panelStopIndex(stops)

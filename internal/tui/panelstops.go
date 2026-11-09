@@ -12,9 +12,9 @@ import (
 // stop it stands on ([Model.activatePanelCursor]) — the click by another way in.
 
 // panelStopID is what a stop is, independent of the row it is laid out on: a section's header, a
-// sub-agent row by its run, a changed-file row by its path, the tasks section's one task card or
-// the usage section's one report. It is comparable, so a cursor holding one finds its stop again
-// after the column re-lays out.
+// sub-agent row by its run, a changed-file row by its path, the tasks section's one task card, the
+// usage section's one report or the mcp section's one report. It is comparable, so a cursor
+// holding one finds its stop again after the column re-lays out.
 type panelStopID struct {
 	section  domain.SidePanelSection
 	isHeader bool
@@ -39,8 +39,8 @@ func (s panelStop) spans(y int) bool {
 // panelStops is the column's stops in paint order, laid out over rows rows by the same layout the
 // paint reads ([panelLayout] over [Model.panelSections]). Every header is a stop, its target the
 // pin glyph's toggle; a body row is one where it has a target, and adjacent rows that share one
-// target are one stop (the tasks body, the usage rows). The `+N more` row and a body row with
-// nothing to open are none.
+// target are one stop (the tasks body, the usage rows, the mcp rows). The `+N more` row and a body
+// row with nothing to open are none.
 func (m Model) panelStops(rows int) []panelStop {
 	sections := m.panelSections()
 	if len(sections) == 0 {
@@ -103,6 +103,8 @@ func (m Model) panelBodyStop(section panelSection, row int) (panelTarget, panelS
 		}
 	case domain.SidePanelUsage:
 		return panelTarget{kind: panelTargetUsage}, id
+	case domain.SidePanelMCP:
+		return panelTarget{kind: panelTargetMCP}, id
 	}
 	return panelTarget{}, id
 }

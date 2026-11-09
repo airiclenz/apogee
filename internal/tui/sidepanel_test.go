@@ -2375,10 +2375,9 @@ func TestSidePanelCommandRefusesAnUnknownSection(t *testing.T) {
 	}
 }
 
-// TestSidePanelMCPSectionIsNamedButNeverLive pins the `mcp` section's config half (ADR 0111 D10):
-// `/panel pin|unpin|hide mcp` parses to that section, and until its state is folded the section is
-// never live — auto leaves it out of the column, pinned paints its header over an empty body.
-func TestSidePanelMCPSectionIsNamedButNeverLive(t *testing.T) {
+// TestSidePanelMCPSectionIsNamed pins the `mcp` section's config half (ADR 0111 D10): `/panel
+// pin|unpin|hide mcp` parses to that section.
+func TestSidePanelMCPSectionIsNamed(t *testing.T) {
 	t.Parallel()
 	for verb, mode := range map[string]domain.SidePanelMode{
 		"pin": domain.SidePanelModePinned, "unpin": domain.SidePanelModeAuto, "hide": domain.SidePanelModeHidden,
@@ -2389,17 +2388,112 @@ func TestSidePanelMCPSectionIsNamedButNeverLive(t *testing.T) {
 			t.Errorf("parsePanel(%s mcp) = %+v, %v; want %+v", verb, got, err, want)
 		}
 	}
+}
 
-	if section, isLive := panelModel(t, "[mcp: pinned]", 30).panelSection(domain.SidePanelMCP); isLive || len(section.body) != 0 {
-		t.Errorf("panelSection(mcp) = %+v, live %v; want an empty section that is never live", section, isLive)
+// panelMCPEvents is the mcp section's fixture: a server in each state the rows word — connected with
+// one tool, failed with no connection left, a failed reconnect whose previous connection is kept,
+// dialling, and disconnected — the first named with an escape sequence to be stripped.
+func panelMCPEvents() []domain.Event {
+	return []domain.Event{
+		domain.MCPServerEvent{Server: "\x1b]0;pwned\x07alpha", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 1},
+		domain.MCPServerEvent{Server: "beta", Transport: "sse", Phase: domain.MCPServerFailed, Cause: "connection refused"},
+		domain.MCPServerEvent{Server: "gamma", Transport: "http", Phase: domain.MCPServerConnected, Tools: 2},
+		domain.MCPServerEvent{Server: "gamma", Transport: "http", Phase: domain.MCPServerFailed, Cause: "timeout", Kept: true},
+		domain.MCPServerEvent{Server: "delta", Transport: "stdio", Phase: domain.MCPServerDialling},
+		domain.MCPServerEvent{Server: "omega", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 4},
+		domain.MCPServerEvent{Server: "omega", Transport: "stdio", Phase: domain.MCPServerDisconnected},
 	}
-	for sections, wantShown := range map[domain.SidePanelSections]bool{
-		domain.DefaultSidePanelSections: false, "[mcp: pinned]": true, "[mcp: hidden]": false,
-	} {
-		m := panelModel(t, sections, 30)
-		shown := slices.ContainsFunc(m.panelSections(), func(s panelSection) bool { return s.kind == domain.SidePanelMCP })
-		if shown != wantShown {
-			t.Errorf("sections %q: mcp shown = %v, want %v", sections, shown, wantShown)
+}
+
+// TestSidePanelMCPSectionRows pins the mcp section's rows (ADR 0111 D10): `name · state · N tools`
+// per server in the order they were first reported, `1 tool` in the singular, the count left off
+// while no connection serves and kept while a failed reconnect's previous connection still does,
+// the header summarising the servers not connected by phase, and a name's escapes stripped.
+func TestSidePanelMCPSectionRows(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, "[mcp: pinned]", 30, panelMCPEvents()...)
+
+	section, isLive := m.panelSection(domain.SidePanelMCP)
+	if !isLive {
+		t.Error("the mcp section is not live with servers not connected")
+	}
+	want := []string{
+		"alpha · connected · 1 tool",
+		"beta · failed",
+		"gamma · failed · 2 tools",
+		"delta · dialling",
+		"omega · disconnected",
+	}
+	got := make([]string, 0, len(section.body))
+	for _, row := range section.body {
+		if strings.Contains(row, "\x1b]") || strings.Contains(row, "pwned") {
+			t.Errorf("row %q carries the server name's escape sequence", row)
+		}
+		got = append(got, strings.TrimRight(ansi.Strip(row), " "))
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("mcp rows = %q, want %q", got, want)
+	}
+	if wantSummary := "1 dialling · 2 failed · 1 disconnected"; section.summary != wantSummary {
+		t.Errorf("mcp summary = %q, want %q", section.summary, wantSummary)
+	}
+	column := strings.Join(panelText(t, m), "\n")
+	for _, text := range append([]string{"MCP 1 dialling · 2 failed"}, want...) { // the header clips its tail
+		if !strings.Contains(column, text) {
+			t.Errorf("the column paints no %q:\n%s", text, column)
+		}
+	}
+}
+
+// TestSidePanelMCPSectionAuto pins the mcp section's live rule (ADR 0111 D10): in auto it shows
+// while any server is dialling, failed or disconnected — summarising the count, `1 failed` — and
+// is hidden with no server or every server connected; pinned it shows regardless, hidden never.
+func TestSidePanelMCPSectionAuto(t *testing.T) {
+	t.Parallel()
+	connected := []domain.Event{
+		domain.MCPServerEvent{Server: "alpha", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 3},
+		domain.MCPServerEvent{Server: "beta", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 1},
+	}
+	failed := append(slices.Clone(connected),
+		domain.MCPServerEvent{Server: "beta", Transport: "stdio", Phase: domain.MCPServerFailed, Cause: "exit 1"})
+	cases := []struct {
+		name      string
+		sections  domain.SidePanelSections
+		events    []domain.Event
+		wantShown bool
+	}{
+		{name: "auto, no server", sections: domain.DefaultSidePanelSections, wantShown: false},
+		{name: "auto, all connected", sections: domain.DefaultSidePanelSections, events: connected, wantShown: false},
+		{name: "auto, one failed", sections: domain.DefaultSidePanelSections, events: failed, wantShown: true},
+		{name: "pinned, all connected", sections: "[mcp: pinned]", events: connected, wantShown: true},
+		{name: "hidden, one failed", sections: "[mcp: hidden]", events: failed, wantShown: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := panelModel(t, tc.sections, 30, tc.events...)
+			at := slices.IndexFunc(m.panelSections(), func(s panelSection) bool { return s.kind == domain.SidePanelMCP })
+			if shown := at >= 0; shown != tc.wantShown {
+				t.Fatalf("mcp shown = %v, want %v", shown, tc.wantShown)
+			}
+			if tc.name == "auto, one failed" && m.panelSections()[at].summary != "1 failed" {
+				t.Errorf("mcp summary = %q, want %q", m.panelSections()[at].summary, "1 failed")
+			}
+		})
+	}
+}
+
+// TestSidePanelMCPClickOpensReport pins the mcp section's click (ADR 0111 D10): a click on any of
+// its rows opens /mcp.
+func TestSidePanelMCPClickOpensReport(t *testing.T) {
+	t.Parallel()
+	for _, row := range []string{"alpha · connected", "omega · disconnected"} {
+		m := panelModel(t, domain.DefaultSidePanelSections, 30, panelMCPEvents()...)
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, row))
+
+		if !m.mcpPane.open {
+			t.Errorf("a click on %q left the /mcp report closed", row)
 		}
 	}
 }

@@ -1030,7 +1030,7 @@
 // that navigation mode's panel region opens — by → or bare /panel — and every way out of that
 // region closes; panelstops.go the column's stops ([Model.panelStops]) —
 // the rows a click acts on, in paint order, each with its row span, its target and an identity
-// (header, run, path, task card, usage) — through which the pointer resolves a body row and which
+// (header, run, path, task card, usage, mcp) — through which the pointer resolves a body row and which
 // navigation mode's cursor walks in the panel region (blockcursor.go);
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
