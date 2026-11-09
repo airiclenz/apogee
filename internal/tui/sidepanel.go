@@ -616,9 +616,9 @@ func (m Model) panelHeaderRow(section panelSection, isOpen bool) string {
 	if section.summary != "" {
 		text += " (" + section.summary + ")"
 	}
-	pin := glyphPanelOpen
+	pin := m.th.glyphs.panelOpen
 	if section.isPinned {
-		pin = glyphPanelPinned
+		pin = m.th.glyphs.panelPinned
 	}
 	width := m.panelContentWidth()
 	row := leaderRowIn(m.th, text, panelTitlePaint(m.th, section.title), branchSummary{}, pin+" ", paintPanelPin,
@@ -663,7 +663,7 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	case row.Waiting:
 		glyph, phase = m.th.panelWaiting.Render(m.th.glyphs.waiting), "waiting"
 	case row.Phase == sidepanel.PhaseQueued:
-		glyph, phase = m.th.statusFaint.Render(glyphPanelOpen), "queued"
+		glyph, phase = m.th.statusFaint.Render(m.th.glyphs.panelOpen), "queued"
 	case row.Phase == sidepanel.PhaseRunning:
 		glyph, phase = m.spin.tinted(m.th, m.opts.UI.Spinner, m.opts.UI.SpinnerColor), "running"
 	case row.Phase == sidepanel.PhaseDone:
@@ -685,7 +685,7 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	facts := tone.Render(phase) + m.th.statusFaint.Render(laidOut[len(phase):])
 	marker, style := "", lipgloss.NewStyle()
 	if isViewed {
-		marker, style = m.th.panelCurrent.Render(glyphPanelCurrent), m.th.panelCurrent
+		marker, style = m.th.panelCurrent.Render(m.th.glyphs.panelCurrent), m.th.panelCurrent
 	}
 	return m.panelRow(m.panelBodyLead(marker, glyph), row.Name, style, facts)
 }
@@ -697,8 +697,9 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 // and every section's text starts in one column.
 func (m Model) panelLeadWidth() int {
 	width := m.spin.width(m.th, m.opts.UI.Spinner)
+	glyphs := m.th.glyphs
 	marks := []string{
-		glyphPanelOpen, m.th.glyphs.waiting, m.th.glyphs.done, m.th.glyphs.failure, glyphPanelCurrent, glyphPanelDelegated,
+		glyphs.panelOpen, glyphs.waiting, glyphs.done, glyphs.failure, glyphs.panelCurrent, glyphs.panelDelegated,
 	}
 	for _, mark := range marks {
 		width = max(width, m.th.measure.Width(mark))
@@ -781,9 +782,9 @@ func (m Model) panelTaskRow(row sidepanel.TaskRow) string {
 	case row.IsDone:
 		return m.panelRow(m.panelBodyLead("", m.th.successMark.Render(m.th.glyphs.done)), text, m.th.statusFaint, "")
 	case row.IsCurrent:
-		return m.panelRow(m.panelBodyLead("", m.th.panelCurrent.Render(glyphPanelCurrent)), text, m.th.panelCurrent, "")
+		return m.panelRow(m.panelBodyLead("", m.th.panelCurrent.Render(m.th.glyphs.panelCurrent)), text, m.th.panelCurrent, "")
 	default:
-		return m.panelRow(m.panelBodyLead("", m.th.statusFaint.Render(glyphPanelOpen)), text, lipgloss.NewStyle(), "")
+		return m.panelRow(m.panelBodyLead("", m.th.statusFaint.Render(m.th.glyphs.panelOpen)), text, lipgloss.NewStyle(), "")
 	}
 }
 
@@ -794,7 +795,7 @@ func (m Model) panelTaskRow(row sidepanel.TaskRow) string {
 func (m Model) panelFileRow(row sidepanel.FileRow) string {
 	glyph := ""
 	if row.IsDelegated {
-		glyph = m.th.statusFaint.Render(glyphPanelDelegated)
+		glyph = m.th.statusFaint.Render(m.th.glyphs.panelDelegated)
 	}
 	lead, right := m.panelBodyLead("", glyph), ""
 	if row.HasStat {

@@ -1158,15 +1158,19 @@ draws boxes or blanks in their place (VS Code's integrated terminal with GPU acc
 off is a common case). `safe` swaps every mark apogee draws for one nearly every font carries, each
 the same width as the one it replaces, so nothing on screen moves: `♦` for the `✦` star, `›` for
 the `❯` prompt, a `·` leader for `⋯`, `►` for the `▶` fold indicator, `√` for `✓`, `»` for the `⧖`
-interjection, `?` for the `◷` of a side-panel sub-agent waiting on an approval, `≡` for the `▤`
+interjection, `?` for the `◷` of a side-panel sub-agent waiting on an approval, the side panel's `●` pin of a
+pinned section as `•`, its `▸` current task and viewed run as `>` and its `↳` sub-agent write as
+`»` (its `○` is the same in both sets), `≡` for the `▤`
 presented document, `@` and `+` for the `⟳` and `⑂` `/sessions` tags, `x` for `✗`, the footer's
 rungs as `□ plan`, `○ ask before`, `√ allow edits` and `►► auto`, `[x]` for a ticked option in an
 open `ask_user` pane, and the status-line spinner — every style — as a one-column `| / - \` turn
-instead of braille. Four things keep their shape: the key hints
+instead of braille. These keep their shape: the key hints
 (`⇥ ⇧ ⌃ ⌥ ⌫ ⏎ ␣`); the `Δ ↓ ↑` marks of the footer's git counts; the `[✔]` of the task-list cards
 and of a recorded `ask_user` exchange, which the model reads back and the session record keeps;
-and the `⋯⋯⋯⋯⋯⋯⋯⋯` rule between the regions of an edit's stacked diff, which is drawn into the
-edit's saved result. A value other than those two is a startup
+the `⋯⋯⋯⋯⋯⋯⋯⋯` rule between the regions of an edit's stacked diff, which is drawn into the
+edit's saved result; the `▼` of an open block or side-panel section; and the line and block
+drawing — the side panel's `│` separator, the scroll bar, the sub-agent rails and table rules,
+navigation mode's `▌` cursor and the `█` cells of the context gauges. A value other than those two is a startup
 error. The switch is live: commit the row in `/settings` and the whole transcript repaints in the
 other set.
 
@@ -1423,7 +1427,8 @@ tool block's counts wear, a finished sub-agent's `done` green, and every failure
 The `mcp` section's header counts the servers that are not connected, by state (`○ MCP (1 failed)`,
 `2 dialling · 1 failed`), and the section hides again once every server is connected. Its server
 names are shown with terminal escapes stripped. Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
-shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x` and the waiting one `?`.
+shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x`, the waiting one `?`, a pinned
+section's `●` is `•`, the current task's `▸` is `>` and a sub-agent write's `↳` is `»`; `○` stays.
 
 A blank row parts each section from the one above it, and every section's rows are indented under
 its header, their marks in one column and their text in the next, so the text of every section

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -1513,7 +1515,7 @@ func everySectionEvents(t *testing.T) []domain.Event {
 // isPanelHeaderText reports whether row, as panelText reads it, is a section header: led by its pin
 // glyph on the content's first cell, where a body row leads with its indent.
 func isPanelHeaderText(row string) bool {
-	return strings.HasPrefix(row, glyphPanelOpen+" ") || strings.HasPrefix(row, glyphPanelPinned+" ")
+	return strings.HasPrefix(row, defaultGlyphs.panelOpen+" ") || strings.HasPrefix(row, defaultGlyphs.panelPinned+" ")
 }
 
 // TestSidePanelSpacesSectionsApart pins the spacing (docs/layout/side-panel-layout.md, "Rows and
@@ -1638,7 +1640,7 @@ func TestSidePanelRowsNearTheRoomLimitKeepTheirFacts(t *testing.T) {
 
 	files, _ := m.panelSection(domain.SidePanelChangedFiles)
 	file := ansi.Strip(files.body[0])
-	if !strings.HasPrefix(file, bodyIndent+glyphPanelDelegated) || !strings.Contains(file, sidePanelPathElision) ||
+	if !strings.HasPrefix(file, bodyIndent+defaultGlyphs.panelDelegated) || !strings.Contains(file, sidePanelPathElision) ||
 		!strings.HasSuffix(file, " +12 −4") || ansi.StringWidth(file) != m.panelContentWidth() {
 		t.Errorf("changed-file row %q: want ↳ …/path, `+12 −4` at the edge, %d cells", file, m.panelContentWidth())
 	}
@@ -1749,8 +1751,8 @@ func TestSidePanelViewedRunMarkMovesNoColumn(t *testing.T) {
 
 	m = openViewOf(t, m, delegationBase("r1"))
 
-	if row := panelRowOf(t, m, "alpha"); !strings.HasPrefix(row, glyphPanelCurrent+" ") {
-		t.Errorf("the viewed row %q does not lead with %s in its body indent", row, glyphPanelCurrent)
+	if row := panelRowOf(t, m, "alpha"); !strings.HasPrefix(row, defaultGlyphs.panelCurrent+" ") {
+		t.Errorf("the viewed row %q does not lead with %s in its body indent", row, defaultGlyphs.panelCurrent)
 	}
 	if got, other := nameColumn(m, "alpha"), nameColumn(m, "bravo"); got != before || other != before {
 		t.Errorf("viewed name at column %d, other at %d; want both at %d, where it stood unviewed", got, other, before)
@@ -1987,7 +1989,7 @@ func TestSidePanelRunViewScopesALegacyRunByDepthAndSpawn(t *testing.T) {
 		t.Errorf("the legacy run's view paints its sibling's task:\n%s", strings.Join(got, "\n"))
 	}
 	// A legacy call names no run, so the rows are unnamed: the second row is the second run's.
-	if len(got) < 3 || strings.Contains(got[1], glyphPanelCurrent) || !strings.Contains(got[2], glyphPanelCurrent) {
+	if len(got) < 3 || strings.Contains(got[1], defaultGlyphs.panelCurrent) || !strings.Contains(got[2], defaultGlyphs.panelCurrent) {
 		t.Errorf("sub-agents does not mark the viewed legacy run alone:\n%s", strings.Join(got, "\n"))
 	}
 }
@@ -2573,6 +2575,74 @@ func TestSidePanelClickBesideABlockHeaderLeavesIt(t *testing.T) {
 	}
 }
 
+// TestSafePanelFrameDrawsOnlySafeGlyphs pins the panel to the glyph set (panel-glyphs-skip-safe):
+// under `ui.glyphs: safe` a populated column — a pinned and three auto sections, a running and a
+// queued sub-agent, a done, a current and an open task, a delegated write, and a usage reading with
+// its bar — paints `•` pinned, `○` auto and queued, `>` for the current task and `»` for the
+// delegated write, and every other rune it paints is ASCII, a safe-set glyph, or one of the shapes
+// the manual's `ui.glyphs` list names as keeping their form: the open fold's ▼, the │ separator, the
+// navigation cursor's ▌ and the gauge's block cells. The `−` of a diff count and the `…` of a cut
+// are punctuation the transcript shares, not marks.
+func TestSafePanelFrameDrawsOnlySafeGlyphs(t *testing.T) {
+	t.Parallel()
+	opts := testOpts
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	opts.UI.SidePanelSections = "[sub-agents: auto, tasks: auto, changed-files: auto, usage: pinned]"
+	opts.UI.Glyphs = domain.GlyphsSafe
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+	m.panel = sidepanel.New(func() time.Time { return panelNow })
+	for _, e := range panelEvents(
+		[]domain.Event{
+			panelDelegationCall(t, "r1", "alpha"),
+			delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+			panelDelegationCall(t, "r2", "bravo"),
+			taskList(1, "draft", "test", "ship"),
+			landedEdit(domain.EventBase{}, "top.go", 3, 1),
+			panelUsageReading(panelUsed),
+		},
+		panelWrite(delegationBase("r1"), "w1", "child.go"),
+	) {
+		m = m.foldEvent(e)
+	}
+
+	slot := m.slotWidth()
+	var column []string
+	for _, ln := range strings.Split(ansi.Strip(m.View().Content), "\n") {
+		if strings.HasPrefix(ln, "▔") {
+			break
+		}
+		column = append(column, ansi.Cut(ln, slot, m.width))
+	}
+	painted := strings.Join(column, "\n")
+
+	allowed := map[rune]bool{'−': true, '…': true, '█': true}
+	safe := reflect.ValueOf(safeGlyphs)
+	for i := range safe.NumField() {
+		if safe.Field(i).Kind() == reflect.String {
+			for _, r := range safe.Field(i).String() {
+				allowed[r] = true
+			}
+		}
+	}
+	for _, exception := range []string{glyphExpanded, sidePanelSeparator, glyphCursorMark, string(gaugeEighths)} {
+		for _, r := range exception {
+			allowed[r] = true
+		}
+	}
+	for _, r := range painted {
+		if r > unicode.MaxASCII && !allowed[r] {
+			t.Errorf("the safe panel paints %q (U+%04X), neither a safe glyph nor a named exception:\n%s", r, r, painted)
+		}
+	}
+	text := panelText(t, m)
+	for _, want := range []string{"• Usage", "○ Sub-agents (1 · 1 queued)", "○ bravo", "> test", "○ ship", "» "} {
+		if !slices.ContainsFunc(text, func(row string) bool { return strings.Contains(row, want) }) {
+			t.Errorf("the safe panel carries no %q:\n%s", want, strings.Join(text, "\n"))
+		}
+	}
+}
+
 // TestSidePanelHeaderLeadsWithPin pins the header's shape: its pin glyph leads it — ● pinned, ○
 // auto — on the cell a pin click lands on ([Model.panelPinX]), its summary sits in parentheses, and
 // a `tool-leader` dotted leader runs from it to the fold's ▼ at the column's right edge, painted in
@@ -2585,8 +2655,8 @@ func TestSidePanelHeaderLeadsWithPin(t *testing.T) {
 	dot := m.th.glyphs.leaderDot
 
 	for _, tc := range []struct{ title, pin, words string }{
-		{"Tasks", glyphPanelOpen, "○ Tasks (0/1)"},
-		{"Usage", glyphPanelPinned, "● Usage"},
+		{"Tasks", defaultGlyphs.panelOpen, "○ Tasks (0/1)"},
+		{"Usage", defaultGlyphs.panelPinned, "● Usage"},
 	} {
 		y := panelRowY(t, m, tc.title)
 		row := strings.TrimRight(ansi.Cut(frame[y], m.panelPinX(), m.width), " ")
@@ -2873,8 +2943,8 @@ func TestSidePanelPinTogglesAndWritesBack(t *testing.T) {
 
 		m = clickCell(t, m, m.panelPinX(), panelRowY(t, m, "Tasks"))
 
-		if !strings.Contains(panelText(t, m)[panelRowY(t, m, "Tasks")], glyphPanelPinned) {
-			t.Errorf("the header does not wear %s after the pin:\n%s", glyphPanelPinned, strings.Join(panelText(t, m), "\n"))
+		if !strings.Contains(panelText(t, m)[panelRowY(t, m, "Tasks")], defaultGlyphs.panelPinned) {
+			t.Errorf("the header does not wear %s after the pin:\n%s", defaultGlyphs.panelPinned, strings.Join(panelText(t, m), "\n"))
 		}
 		if !strings.Contains(plain(m.View()), sidePanelSectionsSource+": "+taskListNotSavedNote+"disk full") {
 			t.Error("the failed write is not reported in the transcript")

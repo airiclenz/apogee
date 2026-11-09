@@ -692,7 +692,7 @@ func TestNavModePanelHeaderHasFoldAndPinStops(t *testing.T) {
 		}
 		shadesPin := func(row string) bool { // the pin glyph painted in the selection tone
 			bar := styleSGR(m.th.selection)
-			return strings.Contains(row, bar+glyphPanelOpen) || strings.Contains(row, bar+glyphPanelPinned)
+			return strings.Contains(row, bar+defaultGlyphs.panelOpen) || strings.Contains(row, bar+defaultGlyphs.panelPinned)
 		}
 		if !shadesPin(pinRow) {
 			t.Errorf("the pin stop leaves its pin cell unshaded: %q", pinRow)

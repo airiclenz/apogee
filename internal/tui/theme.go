@@ -81,20 +81,6 @@ const (
 	glyphScrollTrack = "│" // U+2502 LIGHT VERTICAL — the groove behind it
 )
 
-// The side panel's marks (sidepanel.go, docs/layout/side-panel-layout.md). A section's header row
-// leads with its pin glyph: the open circle while the section is `auto`, the filled one while it
-// is `pinned`. A task row leads with the
-// pointer when it is the current task and the open circle while it is merely unfinished, and a
-// changed-file row carries the hook arrow when a sub-agent wrote the file. A finished row reuses
-// the glyph set's own marks (glyphSet.done, glyphSet.failure), and a running delegation the
-// status line's spinner frame, so the panel speaks the frame's one vocabulary for those.
-const (
-	glyphPanelPinned    = "●" // U+25CF BLACK CIRCLE — a pinned section's header
-	glyphPanelCurrent   = "▸" // U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE
-	glyphPanelOpen      = "○" // U+25CB WHITE CIRCLE — an auto section's header, an unfinished task, or a delegation still queued
-	glyphPanelDelegated = "↳" // U+21B3 DOWNWARDS ARROW WITH TIP RIGHTWARDS
-)
-
 // glyphSet is the drawn marker glyphs a theme carries (theme.glyphs): the marks whose shape a
 // terminal font may not hold, read by every renderer off the theme it was handed rather than off a
 // package constant, so one place decides which spelling the frame paints. newTheme seats
@@ -108,7 +94,9 @@ const (
 // cells as its default counterpart, so switching sets moves no column.
 //
 // What stays OUT of the set is as deliberate as what is in it: the tree branches, rails, table
-// rules and half blocks are fixed constants above, a glyph composed into another constant
+// rules, half blocks and the expanded ▼ are fixed constants above — as are the side panel's │
+// separator (sidePanelSeparator) and the gauges' block cells (paintGaugeBar), the shapes
+// `ui.glyphs` documents as keeping their form in both sets — a glyph composed into another constant
 // (memberGutter, subAgentOpenMarker, tableDivider) stays with that constant, and the task-list and
 // recorded-exchange checkboxes (askCheckedMarker/askUncheckedMarker) are model-facing and persisted,
 // so they never follow the display set.
@@ -122,6 +110,19 @@ type glyphSet struct {
 	presented string // leads a presented document — deliberately NOT the assistant star: a deliverable is not a tool call
 	interject string // leads an interjection — waiting as a staged row, then delivered as a transcript block (ADR 0025)
 	collapsed string // the state indicator of a COLLAPSED block: a click opens it (stateIndicator; glyphExpanded is its fixed twin)
+
+	// The side panel's own marks (sidepanel.go, docs/layout/side-panel-layout.md). A section's
+	// header row leads with its pin glyph: panelOpen while the section is `auto`, panelPinned while
+	// it is `pinned`. A task row leads with panelCurrent when it is the current task and panelOpen
+	// while it is merely unfinished; a sub-agent row leads with panelOpen while it is queued and
+	// wears panelCurrent in its body indent while Run view shows it; and a changed-file row carries
+	// panelDelegated when a sub-agent wrote the file. A finished row reuses done and failure, and a
+	// running delegation the status line's spinner frame, so the panel speaks the frame's one
+	// vocabulary for those.
+	panelPinned    string // a pinned section's header pin
+	panelOpen      string // an auto section's header pin, an unfinished task, or a delegation still queued
+	panelCurrent   string // the current task, and the sub-agent row Run view shows
+	panelDelegated string // a changed file a sub-agent wrote
 
 	// The autonomy-mode glyphs, one per rung of the ladder (modeSymbol). They lead the footer's mode
 	// marker in the mode's OWN colour — the glyph and the word are one styled run, not a coloured
@@ -167,6 +168,10 @@ var defaultGlyphs = glyphSet{
 	presented:      "▤",
 	interject:      "⧖",
 	collapsed:      "▶", // U+25B6 BLACK RIGHT-POINTING TRIANGLE
+	panelPinned:    "●", // U+25CF BLACK CIRCLE
+	panelOpen:      "○", // U+25CB WHITE CIRCLE
+	panelCurrent:   "▸", // U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE
+	panelDelegated: "↳", // U+21B3 DOWNWARDS ARROW WITH TIP RIGHTWARDS
 	modePlan:       "⊞",
 	modeAskBefore:  "◐",
 	modeAllowEdits: "✔",
@@ -193,6 +198,10 @@ var safeGlyphs = glyphSet{
 	presented:      "≡",
 	interject:      "»",
 	collapsed:      "►", // U+25BA BLACK RIGHT-POINTING POINTER
+	panelPinned:    "•", // U+2022 BULLET
+	panelOpen:      "○", // the safe ask-before rung's circle, which every font carries
+	panelCurrent:   ">",
+	panelDelegated: "»",
 	modePlan:       "□",
 	modeAskBefore:  "○",
 	modeAllowEdits: "√",

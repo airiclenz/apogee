@@ -362,7 +362,12 @@ internal/tui/sidepanel_test.go — TestSidePanelSeparatorDrag, separatorDragMode
 **Acceptance:** `go test -race -count=1 -run 'Panel|Separator|Drag' ./internal/tui/`
 **Commit:** `feat(tui): paint the side-panel separator like the scroll track`
 
-## 15. Draw the panel's glyphs from the glyph set
+## 15. Draw the panel's glyphs from the glyph set — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the four `glyphPanel*` constants are gone; they are `glyphSet` fields `panelPinned`, `panelOpen`, `panelCurrent`, `panelDelegated` (safe `•`, `○`, `>`, `»`). `▼` stays a fixed constant with no safe twin and is named in the manual's keep-their-shape list, as the item's regression guard allows.
+NOTES (2026-11-09): internal/tui/theme_test.go is untouched — `TestSafeGlyphsMeasureAsTheDefaults` sweeps the struct by reflection, so it already measures the four new fields; the new safe frame test `TestSafePanelFrameDrawsOnlySafeGlyphs` lives in sidepanel_test.go on a `panelModel`-style setup.
+NOTES (2026-11-09): consequential edit — internal/tui/navmode_test.go: made necessary by removing the `glyphPanelOpen`/`glyphPanelPinned` constants (now `defaultGlyphs.panelOpen`/`.panelPinned`).
+NOTES (2026-11-09): the new test allows `−` (diff counts) and `…` (clip ellipsis) as punctuation the transcript shares, not glyph-set marks; the manual's exception list was widened from "Four things" to also name the line and block drawing the transcript already kept fixed (scroll bar, rails, table rules), so the list matches the code.
 
 **What:** Closes `panel-glyphs-skip-safe`: under `ui.glyphs: safe` the panel's own glyphs never fall back, contradicting the manual. Depends on items 4–13.
 **Regression guard.** "Every glyph from `glyphSet`" holds with named exceptions, as the issue's Acceptance allows: `▼` (`glyphExpanded`, fixed, no safe twin — or give it a safe field, transcript-wide, and say so), the `│` separator, the `▌` cursor and the gauge's block cells; the manual's keep-their-shape list names them. The safe panel frame test builds on `panelModel`-style setup, since `glyphFrameModel`'s `testOpts` paint no panel. Rule: every sentence stating a panel glyph's safe form — ``grep -n "ui.glyphs: safe\|under `safe`" docs/manual/configuration.md docs/layout/side-panel-layout.md``.

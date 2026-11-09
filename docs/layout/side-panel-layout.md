@@ -127,7 +127,7 @@ section out gets it appended in `auto`, so a list saved before `mcp` existed sho
 |---|---|---|
 | `sub-agents` | any run is queued or running, and for 30 s after the last one ends | phase glyph, Delegation name, phase word, elapsed, context fill |
 | `tasks` | the list has an unfinished task | status glyph and task text; the first unfinished task marked `▸` |
-| `changed-files` | the session (any depth) has written a file | `↳` in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present, right-aligned in the `tool-marker` role |
+| `changed-files` | the session (any depth) has written a file | `↳` (`»` under `ui.glyphs: safe`) in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present, right-aligned in the `tool-marker` role |
 | `usage` | context fill ≥ 50% | the fill as the status-line gauge reads it, `used/window N% bar` (`~` before an estimate, the percent clamped at 100), the bar in the gauge colour on no background — a column too narrow for the whole bar keeps the figures alone; `sys · tools · hist` split (history = estimate − standing rows); `prompt · completion` tokens; `cached N%` (the cached share of the prompt); `cost`. The words are `/usage`'s, and as there a zero count is left out rather than printed as `0`, a row with every count zero not drawn |
 | `mcp` | any MCP server is `dialling`, `failed` or `disconnected` | the name, then `state · N tools` right-aligned, one row per server in first-reported order |
 
@@ -179,8 +179,14 @@ with the previous connection's tools in hand or a failed reconnect's previous co
 serves. A server removed from the configuration has no row; one a `url-safety` edit closed, or whose
 session ended on its own (reason `lost`), reads `disconnected`, with no count. Server names are untrusted text, escape-stripped at the fold and again at paint.
 
+**Glyphs.** Every mark the panel paints comes from the theme's glyph set, so `ui.glyphs: safe`
+swaps them as it swaps the transcript's: `●` → `•`, `▸` → `>`, `↳` → `»`, `▶` → `►`, `✓` → `√`,
+`✗` → `x`, `◷` → `?`, the `⋯` leader → `·`, and the running spinner turns ASCII; `○` is the same in
+both sets. Only the shapes the manual's `ui.glyphs` list names keep their form here: the open
+fold's `▼`, the `│` separator, navigation mode's `▌` cursor and the usage gauge's block cells.
+
 **Task rows.** A finished task is the done mark, dim; the current task (the first unfinished one) is
-`▸` in the current-task style; any other open task is `○`. The task list stores only done / not
+`▸` (`>` under `ui.glyphs: safe`) in the current-task style; any other open task is `○`. The task list stores only done / not
 done, so there is no separate in-progress state.
 
 **Changed-file rows.** One row per path, in first-write order; several writes to one path merge
@@ -190,7 +196,7 @@ the ones that name the file they write, a deletion included — and a failed wri
 file changed through the `terminal` tool is not shown (ADR 0110 decision 13).
 
 **Header row:** `<pin> <Title> (<summary>) ⋯ ▼`. The pin glyph leads it, on the content's first
-cell — `○` while the section is `auto`, `●` while it is `pinned` — and a dotted leader in the
+cell — `○` while the section is `auto`, `●` (`•` under `ui.glyphs: safe`) while it is `pinned` — and a dotted leader in the
 transcript's `tool-leader` role runs from the title to the fold indicator at the content's right
 edge, in the `tool-indicator` role: `▶` (`►` under `ui.glyphs: safe`) while the section has body
 rows the column is not showing — the human folded it, or the overflow squeezed it — and `▼`
