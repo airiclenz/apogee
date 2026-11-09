@@ -12,10 +12,19 @@ and every section folds from engine Events.**
    nothing else.
 2. **v1 sections:** sub-agents, the task list, files changed this session, and usage. MCP live state
    (`mcp-live-status-view`) and advice are later sections, each needing its Event first (decision 4).
+
+   > **Amended 2026-11-08 (ADR 0111).** The MCP section is designed: a fifth section `mcp`, last
+   > and `auto`, folded from a new journaled MCP lifecycle Event (ADR 0111 decisions 8–10).
+
 3. **Read-only in v1.** A click on a section's body opens its detail view: Run view for a sub-agent
    row, the task-list card, `/usage`. A pin glyph in each section's header toggles that section's
    pin. The panel takes no keyboard focus. Focus and ←/→ navigation belong to the key-navigation
    work, which this panel unblocks but does not do.
+
+   > **Amended 2026-11-08 (ADR 0111).** Superseded: the panel is the second region of navigation
+   > mode (`alt+↑`/`alt+↓` enter, `→`/`←` switch region, `⏎` acts through the click's path,
+   > ADR 0111 decisions 1–5).
+
 4. **Events only.** Every section renders from engine Events, folded by a Driver-neutral fold that
    any Driver can reuse. A fact the engine does not yet emit gets an additive Event (or an additive
    field) before its section ships. For v1 that is a typed task-list Event, a per-session
@@ -40,6 +49,11 @@ and every section folds from engine Events.**
 8. **Visibility setting.** `ui.side-panel.show` is `auto | on | off`, default `auto`. The `/panel`
    command sets it (`/panel on|off|auto`) and edits sections (`/panel pin|unpin|hide <section>`). A
    key binding waits for the key-navigation work, after an audit of free keys.
+
+   > **Amended 2026-11-08 (ADR 0111).** Superseded: the audit found no key needed. The panel is
+   > reached through navigation mode, and on a window under the gate `→` or bare `/panel` opens
+   > it as an overlay (ADR 0111 decisions 1 and 7).
+
 9. **Section modes.** Each section is `pinned` (always shown), `auto` (shown while live) or `hidden`
    (never shown), in the ordered list `ui.side-panel.sections`, shaped like `ui.footer.rows`; the order is the display order.
    A pin or hide made from the panel or `/panel` is written back to the setting, the way
