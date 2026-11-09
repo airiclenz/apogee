@@ -1399,8 +1399,8 @@ it does not re-wrap your conversation underneath. It stays open while the bar is
 a click outside it (which then does what it would have done anyway) or opening one of its rows
 closes it. Clicks inside it work as on the docked panel; it has no separator to drag.
 
-**Its sections**, in the order `ui.side-panel.sections` lists them, each under a `◆ <Title>` header
-with its summary and a pin glyph — `⊙` for `auto`, `●` for `pinned`:
+**Its sections**, in the order `ui.side-panel.sections` lists them, each under a `<pin> <Title> (<summary>)`
+header led by its pin glyph — `○` for `auto`, `●` for `pinned`:
 
 | Section | Shown in `auto` while | Each row |
 |---|---|---|
@@ -1410,20 +1410,20 @@ with its summary and a pin glyph — `⊙` for `auto`, `●` for `pinned`:
 | `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
 | `mcp` | an MCP server is dialling, failed or disconnected | the server's name, its state and its tool count (`docs · connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
 
-The `mcp` section's header counts the servers that are not connected, by state (`◆ MCP 1 failed`,
+The `mcp` section's header counts the servers that are not connected, by state (`○ MCP (1 failed)`,
 `2 dialling · 1 failed`), and the section hides again once every server is connected. Its server
 names are shown with terminal escapes stripped. Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
 shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x` and the waiting one `?`.
 
 When the sections need more rows than the panel has, pinned sections get their rows first, then
 the `auto` ones in list order. A section that does not get its full height folds to its header
-(`◆ Tasks 2/5`); when not even every header fits, the last ones are left out and the bottom row
+(`○ Tasks (2/5)`); when not even every header fits, the last ones are left out and the bottom row
 reads `+N more`. The panel never scrolls.
 
 **The mouse.** A click on a sub-agent row opens its run view; on a task row it unfolds the
 task-list card and scrolls to it; on a changed-file row it unfolds that write's tool block (opening
-the run that wrote it); on the usage section it opens `/usage`; on the mcp section it opens `/mcp`. A click on a header's pin glyph
-toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
+the run that wrote it); on the usage section it opens `/usage`; on the mcp section it opens `/mcp`. A click on a header's pin glyph —
+its first cell — toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
 config. Dragging the panel's separator — the `│` on its left edge, or the blank column beside it —
 resizes the panel: the panel and your conversation re-wrap as you drag, and the separator lights up
 in the accent colour while you hold it. The panel stays at least 24 columns wide, and leaves the

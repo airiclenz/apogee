@@ -532,7 +532,7 @@ func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
 			}
 			x := panelBodyX(base)
 			if id.isHeader {
-				x = base.width - 1
+				x = base.panelPinX()
 			}
 			walked := cursorOnPanelStop(t, base, id) // both ways in start from the one walked frame
 			clicked := clickCell(t, walked, x, stops[at].y)

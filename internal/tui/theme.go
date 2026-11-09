@@ -82,18 +82,16 @@ const (
 )
 
 // The side panel's marks (sidepanel.go, docs/layout/side-panel-layout.md). A section's header row
-// opens with the diamond and closes, at the column's right edge, on its pin glyph: the open circle
-// while the section is `auto`, the filled one while it is `pinned`. A task row leads with the
+// leads with its pin glyph: the open circle while the section is `auto`, the filled one while it
+// is `pinned`. A task row leads with the
 // pointer when it is the current task and the open circle while it is merely unfinished, and a
 // changed-file row carries the hook arrow when a sub-agent wrote the file. A finished row reuses
 // the glyph set's own marks (glyphSet.done, glyphSet.failure), and a running delegation the
 // status line's spinner frame, so the panel speaks the frame's one vocabulary for those.
 const (
-	glyphPanelHeader    = "◆" // U+25C6 BLACK DIAMOND
-	glyphPanelUnpinned  = "⊙" // U+2299 CIRCLED DOT OPERATOR
-	glyphPanelPinned    = "●" // U+25CF BLACK CIRCLE
+	glyphPanelPinned    = "●" // U+25CF BLACK CIRCLE — a pinned section's header
 	glyphPanelCurrent   = "▸" // U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE
-	glyphPanelOpen      = "○" // U+25CB WHITE CIRCLE — an unfinished task, or a delegation still queued
+	glyphPanelOpen      = "○" // U+25CB WHITE CIRCLE — an auto section's header, an unfinished task, or a delegation still queued
 	glyphPanelDelegated = "↳" // U+21B3 DOWNWARDS ARROW WITH TIP RIGHTWARDS
 )
 
@@ -413,7 +411,7 @@ type themeStyles struct {
 	footerAccent  lipgloss.Style // the footer's model name (Model.footerToned) unless `ui.footer.colors` names it: the `footer-accent` role on the footer's black
 	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
-	panelHeader   lipgloss.Style // a side-panel section's header row: ◆, title and summary in bold prompt-white, so the sections read as headings over their rows (sidepanel.go)
+	panelHeader   lipgloss.Style // a side-panel section's header row: title and summary in bold prompt-white, so the sections read as headings over their rows (sidepanel.go)
 	panelCurrent  lipgloss.Style // the side panel's current task (its ▸ and text) in the `code` role, the one row of the task list the eye is sent to
 	panelWaiting  lipgloss.Style // a waiting sub-agent row's glyph (glyphSet.waiting): the `warning` role on the panel's own field — no background, which statusWarning and footerWarning carry for their bars
 	panelDragRule lipgloss.Style // the side panel's separator while a drag resizes it: bold in the `code` role, the accent tone, against the faint rule it is otherwise (sidepanel.go)

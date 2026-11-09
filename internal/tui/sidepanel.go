@@ -419,18 +419,19 @@ func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) s
 	return row + strings.Repeat(" ", max(0, room-m.th.measure.Width(text)+1)) + right
 }
 
-// panelHeaderRow is a section's header: `◆ <Title>` with its summary, and the pin glyph — ⊙ while
-// the section is auto, ● while it is pinned — at the column's right edge.
+// panelHeaderRow is a section's header: `<pin> <Title> (<summary>)`, led by its pin glyph — ●
+// while the section is pinned, ○ while it is auto — on the column's first content cell
+// ([Model.panelPinX]), with nothing at the right edge.
 func (m Model) panelHeaderRow(section panelSection) string {
 	text := section.title
 	if section.summary != "" {
-		text += " " + section.summary
+		text += " (" + section.summary + ")"
 	}
-	pin := glyphPanelUnpinned
+	pin := glyphPanelOpen
 	if section.isPinned {
 		pin = glyphPanelPinned
 	}
-	return m.panelRow(m.th.panelHeader.Render(glyphPanelHeader+" "), text, m.th.panelHeader, m.th.statusFaint.Render(pin))
+	return m.panelRow(m.th.statusFaint.Render(pin)+" ", text, m.th.panelHeader, "")
 }
 
 // panelSubAgentRow is one delegation: its phase glyph — the status line's spinner frame while it
@@ -682,13 +683,21 @@ func (m Model) panelCell(x, y int) bool {
 	return width > 0 && x >= m.width-width && x < m.width && y >= 0 && y < m.frameSpans().slotBottom
 }
 
+// panelPinX is the window column of a header's pin glyph: the painted column's first content cell,
+// its left edge ([Model.panelPaintWidth]) past the separator and the gutter. It reads the painted
+// column, never the slot: under the overlay the slot is the whole window, and the pin sits over the
+// transcript's right edge.
+func (m Model) panelPinX() int {
+	return m.width - m.panelPaintWidth() + sidePanelChromeWidth
+}
+
 // panelTargetAt answers what a click at (x, y) does on the column of the frame m composes (pre in
 // the click chain, which carries that frame's spans), and whether (x, y) is a column cell at all. A
 // cell is claimed whether or not it targets anything, so no click on the column falls through to
 // the panes or the transcript under it; the hover shape asks the same question (pointershape.go),
 // so the pointer promises a click exactly where one acts. A row resolves through the column's stops
-// ([Model.panelStops]): a body row to its stop's target, a header row to its pin toggle on the pin
-// glyph's cell alone, and a row no stop spans to nothing.
+// ([Model.panelStops]): a body row to its stop's target, a header row to its pin toggle on the lead
+// pin glyph's cell alone ([Model.panelPinX]), and a row no stop spans to nothing.
 func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
 	if !m.panelCell(x, y) {
 		return panelTarget{}, false
@@ -697,7 +706,7 @@ func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
 		if !stop.spans(y) {
 			continue
 		}
-		if stop.id.isHeader && x != m.width-1 {
+		if stop.id.isHeader && x != m.panelPinX() {
 			return panelTarget{}, true
 		}
 		return stop.target, true

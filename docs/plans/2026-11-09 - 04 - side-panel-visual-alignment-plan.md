@@ -124,7 +124,11 @@ cmd/apogee/wire_options.go — settingsHost.Write; cmd/apogee/settingsrows_test.
 - `go vet ./internal/tui/` (compiles the tui test package against the widened `SettingsHost`)
 **Commit:** `feat(config): add the ui.side-panel.folded setting`
 
-## 4. Move the pin to the header's lead glyph
+## 4. Move the pin to the header's lead glyph — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the shared pin-cell helper is the production method `Model.panelPinX` (`m.width - m.panelPaintWidth() + sidePanelChromeWidth`), which `panelTargetAt` and every rewritten docked, overlay and nav-parity test read; no test-only twin.
+NOTES (2026-11-09): pointershape.go needed no change — `pointerShapeAt` asks `panelTargetAt`, so the hover follows the moved pin cell; it is not in FILES.
+NOTES (2026-11-09): the pin glyph keeps its old `statusFaint` tone as the header lead; header tones are item 10's. Tests reading the old summary form (`Usage 100%`, `Changed files 1`, `MCP 1 dialling`) now read the parenthesised form.
 
 **What:** Second step of `panel-section-user-fold`: the header takes the transcript's lead shape; the right-edge pin glyph retires.
 **Regression guard.** Take the lead pin cell from the painted column's own left edge, `m.width - m.panelPaintWidth() + sidePanelChromeWidth` (`panelCell`'s geometry), never from `slotWidth()`: under the narrow-window overlay `panelWidth()` is 0, so `slotWidth()` is the whole window and an overlay pin click would miss. The rewritten docked, overlay and nav-parity tests share one helper for that cell.

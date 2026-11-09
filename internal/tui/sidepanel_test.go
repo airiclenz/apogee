@@ -493,8 +493,8 @@ func standingCost(system, tools int) domain.ContextCostEvent {
 }
 
 // TestSidePanelPaintsEachSection paints every section, one at a time, from the Events that make it
-// live, as docs/layout/side-panel-layout.md sketches it: the header row with its summary and the
-// unpinned ⊙ at the right edge, then the section's rows.
+// live, as docs/layout/side-panel-layout.md sketches it: the header row led by the auto section's
+// ○ with its summary in parentheses, then the section's rows.
 func TestSidePanelPaintsEachSection(t *testing.T) {
 	t.Parallel()
 
@@ -514,7 +514,7 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 				}
 			},
 			want: []string{
-				"◆ Sub-agents 1 queued            ⊙",
+				"○ Sub-agents (1 queued)",
 				"✓ planner      done       38s",
 				"○ repo-scout   queued",
 			},
@@ -525,7 +525,7 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 				return []domain.Event{taskList(1, "map call sites", "split the tokenizer", "port the tests")}
 			},
 			want: []string{
-				"◆ Tasks 1/3                      ⊙",
+				"○ Tasks (1/3)",
 				"✓ map call sites",
 				"▸ split the tokenizer",
 				"○ port the tests",
@@ -540,7 +540,7 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 				}
 			},
 			want: []string{
-				"◆ Changed files 2                ⊙",
+				"○ Changed files (2)",
 				"internal/parse/parser.go    +12 −4",
 				"…/lexer_test.go                  ↳",
 			},
@@ -551,7 +551,7 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 				return []domain.Event{panelUsageReading(panelUsed), standingCost(200, 100)}
 			},
 			want: []string{
-				"◆ Usage 62%                      ⊙",
+				"○ Usage (62%)",
 				"██████▎    20k/32k",
 				"sys 200 · tools 100 · hist 20k",
 				"in 4k · out 300",
@@ -595,8 +595,8 @@ func TestSidePanelUsageHeaderClampsOverfullFill(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(header, "Usage 100%") {
-		t.Errorf("usage header = %q, want it to read Usage 100%%", header)
+	if !strings.Contains(header, "Usage (100%)") {
+		t.Errorf("usage header = %q, want it to read Usage (100%%)", header)
 	}
 	if row := panelRowOf(t, m, "repo-scout"); !strings.Contains(row, " 100%") {
 		t.Errorf("sub-agent row = %q, want its overfull fill clamped to 100%%", row)
@@ -619,7 +619,7 @@ func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {
 
 	got := panelText(t, m)
 	want := ansi.Strip(m.spin.drawn(m.th, m.opts.UI.Spinner)) + " repo-scout   running 01:12s"
-	if len(got) != 2 || got[0] != "◆ Sub-agents 1 running           ⊙" || got[1] != want {
+	if len(got) != 2 || got[0] != "○ Sub-agents (1 running)" || got[1] != want {
 		t.Errorf("the column paints\n%s\nwant the running header over %q", strings.Join(got, "\n"), want)
 	}
 }
@@ -983,7 +983,7 @@ func TestSidePanelSectionModes(t *testing.T) {
 		{
 			name:     "pinned with nothing live",
 			sections: "[usage: pinned]",
-			want:     []string{"◆ Usage                          ●"},
+			want:     []string{"● Usage"},
 		},
 		{
 			name:     "hidden while live",
@@ -1001,7 +1001,7 @@ func TestSidePanelSectionModes(t *testing.T) {
 			name:     "list order, not pin order",
 			sections: "[tasks: auto, usage: pinned]",
 			events:   []domain.Event{taskList(0, "one")},
-			want:     []string{"◆ Tasks 0/1                      ⊙", "▸ one", "◆ Usage                          ●"},
+			want:     []string{"○ Tasks (0/1)", "▸ one", "● Usage"},
 		},
 	}
 	for _, tc := range cases {
@@ -1042,10 +1042,10 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 			sections: "[sub-agents: auto, tasks: auto, changed-files: pinned, usage: hidden]",
 			rows:     6,
 			want: []string{
-				"◆ Sub-agents 1 queued            ⊙",
+				"○ Sub-agents (1 queued)",
 				"○ scout        queued",
-				"◆ Tasks 0/3                      ⊙",
-				"◆ Changed files 1                ●",
+				"○ Tasks (0/3)",
+				"● Changed files (1)",
 				"a.go",
 				"",
 			},
@@ -1055,8 +1055,8 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 			sections: "[tasks: auto, sub-agents: auto, changed-files: hidden, usage: hidden]",
 			rows:     4,
 			want: []string{
-				"◆ Tasks 0/3                      ⊙",
-				"◆ Sub-agents 1 queued            ⊙",
+				"○ Tasks (0/3)",
+				"○ Sub-agents (1 queued)",
 				"○ scout        queued",
 				"",
 			},
@@ -1066,10 +1066,10 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 			sections: domain.DefaultSidePanelSections,
 			rows:     4,
 			want: []string{
-				"◆ Sub-agents 1 queued            ⊙",
-				"◆ Tasks 0/3                      ⊙",
-				"◆ Changed files 1                ⊙",
-				"◆ Usage 62%                      ⊙",
+				"○ Sub-agents (1 queued)",
+				"○ Tasks (0/3)",
+				"○ Changed files (1)",
+				"○ Usage (62%)",
 			},
 		},
 		{
@@ -1077,8 +1077,8 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 			sections: domain.DefaultSidePanelSections,
 			rows:     3,
 			want: []string{
-				"◆ Sub-agents 1 queued            ⊙",
-				"◆ Tasks 0/3                      ⊙",
+				"○ Sub-agents (1 queued)",
+				"○ Tasks (0/3)",
 				"+2 more",
 			},
 		},
@@ -1219,7 +1219,7 @@ func TestSidePanelRunViewFollowsTheViewedRun(t *testing.T) {
 
 	got := panelText(t, m)
 	figures := format.Tokens(6000) + "/" + format.Tokens(8192)
-	for _, want := range []string{"▸ scout the parser", "child.go", "Changed files 1", "Usage 73%", figures} {
+	for _, want := range []string{"▸ scout the parser", "child.go", "Changed files (1)", "Usage (73%)", figures} {
 		if !slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, want) }) {
 			t.Errorf("r1's view paints no %q:\n%s", want, strings.Join(got, "\n"))
 		}
@@ -1547,7 +1547,7 @@ func TestPanelStopsMatchClickTargets(t *testing.T) {
 	for _, stop := range stops {
 		x := panelBodyX(pre)
 		if stop.id.isHeader {
-			x = pre.width - 1
+			x = pre.panelPinX()
 		}
 		for y := stop.y; y < stop.y+stop.height; y++ {
 			isSpanned[y] = true
@@ -1701,7 +1701,7 @@ func TestSidePanelClickHoverShapeMatches(t *testing.T) {
 		want pointerShape
 	}{
 		{"body row", panelBodyX(m), panelRowY(t, m, "read the plan"), shapePointer},
-		{"pin glyph", m.width - 1, header, shapePointer},
+		{"pin glyph", m.panelPinX(), header, shapePointer},
 		{"header title", panelBodyX(m), header, shapeDefault},
 		{"blank cell", panelBodyX(m), m.transcriptRows() - 1, shapeDefault},
 	}
@@ -1802,7 +1802,7 @@ func TestSidePanelClickRefusedUnderModalPanes(t *testing.T) {
 			}{
 				{"sub-agent row", panelBodyX(m), panelRowY(t, m, "scout")},
 				{"usage row", panelBodyX(m), panelRowY(t, m, "cache hit")},
-				{"pin glyph", m.width - 1, panelRowY(t, m, "Tasks")},
+				{"pin glyph", m.panelPinX(), panelRowY(t, m, "Tasks")},
 			}
 			for _, cell := range targets {
 				if got := m.pointerShapeAt(pre, cell.x, cell.y); got != shapeDefault {
@@ -1846,7 +1846,7 @@ func TestSidePanelPinClickRefusedInWatchMode(t *testing.T) {
 	spy := &settingsSpy{}
 	m.opts.Settings = spy.host(nil)
 	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
-	x, y := m.width-1, panelRowY(t, m, "Tasks")
+	x, y := m.panelPinX(), panelRowY(t, m, "Tasks")
 	if got := m.pointerShapeAt(m.withFrameSpans(), x, y); got != shapeDefault {
 		t.Errorf("hover over the watched pin: shape %q, want the default arrow", got.name())
 	}
@@ -1888,7 +1888,40 @@ func TestSidePanelClickBesideABlockHeaderLeavesIt(t *testing.T) {
 	}
 }
 
-// TestSidePanelPinTogglesAndWritesBack drives the pin glyph: a click on an auto section's ⊙ pins
+// TestSidePanelHeaderLeadsWithPin pins the header's shape: its pin glyph leads it — ● pinned, ○
+// auto — on the cell a pin click lands on ([Model.panelPinX]), its summary sits in parentheses, and
+// the column's right edge stays blank, so a click there toggles nothing.
+func TestSidePanelHeaderLeadsWithPin(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, "[tasks: auto, usage: pinned]", 30, taskList(0, "one"))
+	spy := &settingsSpy{}
+	m.opts.Settings = spy.host(nil)
+	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
+
+	for _, tc := range []struct{ title, pin, header string }{
+		{"Tasks", glyphPanelOpen, "○ Tasks (0/1)"},
+		{"Usage", glyphPanelPinned, "● Usage"},
+	} {
+		y := panelRowY(t, m, tc.title)
+		if got := panelText(t, m)[y]; got != tc.header {
+			t.Errorf("the %s header paints %q, want %q", tc.title, got, tc.header)
+		}
+		if got := ansi.Cut(frame[y], m.panelPinX(), m.panelPinX()+1); got != tc.pin {
+			t.Errorf("the %s header's pin cell holds %q, want %q", tc.title, got, tc.pin)
+		}
+		if got := ansi.Cut(frame[y], m.width-1, m.width); got != " " {
+			t.Errorf("the %s header's right edge holds %q, want a blank cell", tc.title, got)
+		}
+	}
+
+	m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+
+	if len(spy.sections) != 0 || m.opts.UI.SidePanelSections != "[tasks: auto, usage: pinned]" {
+		t.Errorf("a click on the right edge wrote %v, sections %q; want nothing toggled", spy.sections, m.opts.UI.SidePanelSections)
+	}
+}
+
+// TestSidePanelPinTogglesAndWritesBack drives the pin glyph: a click on an auto section's ○ pins
 // it, through the settings host, and lands the list the host answers; a second click unpins it. A
 // failed write leaves the section pinned on screen and says so in the transcript.
 func TestSidePanelPinTogglesAndWritesBack(t *testing.T) {
@@ -1900,9 +1933,9 @@ func TestSidePanelPinTogglesAndWritesBack(t *testing.T) {
 		spy := &settingsSpy{}
 		m.opts.Settings = spy.host(nil)
 
-		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+		m = clickCell(t, m, m.panelPinX(), panelRowY(t, m, "Tasks"))
 		pinned := m.opts.UI.SidePanelSections
-		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+		m = clickCell(t, m, m.panelPinX(), panelRowY(t, m, "Tasks"))
 
 		want := []domain.SidePanelEntry{
 			{Section: domain.SidePanelTasks, Mode: domain.SidePanelModePinned},
@@ -1924,7 +1957,7 @@ func TestSidePanelPinTogglesAndWritesBack(t *testing.T) {
 		m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
 		m.opts.Settings = (&settingsSpy{}).host(fmt.Errorf("disk full"))
 
-		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+		m = clickCell(t, m, m.panelPinX(), panelRowY(t, m, "Tasks"))
 
 		if !strings.Contains(panelText(t, m)[panelRowY(t, m, "Tasks")], glyphPanelPinned) {
 			t.Errorf("the header does not wear %s after the pin:\n%s", glyphPanelPinned, strings.Join(panelText(t, m), "\n"))
@@ -2591,7 +2624,7 @@ func TestSidePanelMCPSectionRows(t *testing.T) {
 		t.Errorf("mcp summary = %q, want %q", section.summary, wantSummary)
 	}
 	column := strings.Join(panelText(t, m), "\n")
-	for _, text := range append([]string{"MCP 1 dialling · 2 failed"}, want...) { // the header clips its tail
+	for _, text := range append([]string{"MCP (1 dialling · 2 failed"}, want...) { // the header clips its tail
 		if !strings.Contains(column, text) {
 			t.Errorf("the column paints no %q:\n%s", text, column)
 		}

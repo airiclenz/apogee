@@ -217,7 +217,7 @@ func TestOverlayStopsMatchClickTargets(t *testing.T) {
 	for _, stop := range stops {
 		x := bodyX
 		if stop.id.isHeader {
-			x = pre.width - 1
+			x = pre.panelPinX()
 		}
 		for y := stop.y; y < stop.y+stop.height; y++ {
 			isSpanned[y] = true
@@ -368,7 +368,7 @@ func TestOverlayInsideClickActsAsDocked(t *testing.T) {
 		}
 		section := stops[at].id.section
 
-		m = clickCell(t, m, m.width-1, stops[at].y)
+		m = clickCell(t, m, m.panelPinX(), stops[at].y)
 
 		if want := string(section) + ": pinned"; !strings.Contains(string(m.opts.UI.SidePanelSections), want) {
 			t.Errorf("sections %q after the click; want %q", m.opts.UI.SidePanelSections, want)
