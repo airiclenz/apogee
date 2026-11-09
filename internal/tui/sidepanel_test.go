@@ -3102,7 +3102,7 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		t.Parallel()
 		m, _, sep := separatorDragModel(t, nil)
 		lit := m.th.panelDragRule.Render(sidePanelSeparator)
-		if lit == m.th.statusFaint.Render(sidePanelSeparator) {
+		if lit == m.th.scrollTrack.Render(sidePanelSeparator) {
 			t.Skip("no colour profile in this environment — the two separator styles are not observable")
 		}
 
@@ -3114,6 +3114,24 @@ func TestSidePanelSeparatorDrag(t *testing.T) {
 		}
 		if strings.HasPrefix(released.sidePanelColumn(1)[0], lit) {
 			t.Error("the separator stays lit after the release")
+		}
+	})
+
+	// panel-separator-double-stroke: at rest the separator is the scroll track's stroke in the
+	// track's role, so the bar beside it never reads as a second rule in another tone.
+	t.Run("at rest the separator wears the scroll track's role", func(t *testing.T) {
+		t.Parallel()
+		m, _, _ := separatorDragModel(t, nil)
+		track := scrollbarCells(m.th, 0, 1, 2, 2)[1]
+		if track != m.th.scrollTrack.Render(glyphScrollTrack) {
+			t.Fatalf("the bar's track cell is %q, want the scrollTrack stroke", track)
+		}
+		if glyphScrollTrack != sidePanelSeparator {
+			t.Fatalf("the separator %q and the track %q are different shapes", sidePanelSeparator, glyphScrollTrack)
+		}
+
+		if opening := m.sidePanelColumn(1)[0]; !strings.HasPrefix(opening, track) {
+			t.Errorf("at rest the column opens %q, want the scroll track's stroke %q", opening, track)
 		}
 	})
 }

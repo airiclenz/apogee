@@ -347,7 +347,9 @@ internal/tui/background_test.go — TestBottomChromePaintsOneBackground; layout.
 **Acceptance:** `go test -race -count=1 -run 'Panel|Gauge|Usage|BottomChrome' ./internal/tui/`
 **Commit:** `feat(tui): show panel usage like the gauge and /usage`
 
-## 14. Paint the panel separator in the scroll track's role
+## 14. Paint the panel separator in the scroll track's role — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — internal/tui/theme.go: made necessary by the separator's rest style moving from statusFaint to scrollTrack (panelDragRule's comment named "the faint rule it is otherwise")
 
 **What:** Closes `panel-separator-double-stroke`.
 **Goal:** The panel separator renders in the `chrome` role the transcript's scroll track uses; while dragging it still renders `panelDragRule`.

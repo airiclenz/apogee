@@ -413,7 +413,7 @@ type themeStyles struct {
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
 	panelCurrent  lipgloss.Style // the side panel's current task (its ▸ and text) in the `code` role, the one row of the task list the eye is sent to
 	panelWaiting  lipgloss.Style // a waiting sub-agent row's glyph (glyphSet.waiting): the `warning` role on the panel's own field — no background, which statusWarning and footerWarning carry for their bars
-	panelDragRule lipgloss.Style // the side panel's separator while a drag resizes it: bold in the `code` role, the accent tone, against the faint rule it is otherwise (sidepanel.go)
+	panelDragRule lipgloss.Style // the side panel's separator while a drag resizes it: bold in the `code` role, the accent tone, against the scroll track's `chrome` rule it is otherwise (sidepanel.go)
 
 	// Context-fill gauge (statusLine). The bar is a solid two-tone strip in the
 	// llama-launcher style: gaugeFill paints the filled portion (full blocks + an eighth-block

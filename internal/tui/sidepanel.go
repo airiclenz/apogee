@@ -305,13 +305,15 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 // column where that comes out of the column's own width. With no
 // section to show it paints `nothing live` on its top row and leaves the rest blank — the column
 // stays on the frame either way, because nothing it shows may move it ([Model.panelShown]). The
-// separator is faint, and accent-bold while a drag holds it ([panelDrag]). The row navigation mode's
+// separator wears the transcript scroll track's `chrome` role ([theme.scrollTrack]), so the two
+// strokes read as one recessive edge where the bar stands beside it, and it is accent-bold while a
+// drag holds it ([panelDrag]). The row navigation mode's
 // cursor stands on, while it stands in the column, wears the transcript's bar ([markPanelCursorRow],
 // [Model.panelCursorRow]): the ▌ in the gutter's first cell, right of the separator, and the selection tone
 // across the content — on a header, across the part its stop is: the pin cell or the title. The
 // separator itself is untouched, so the grip stays where the pointer finds it.
 func (m Model) sidePanelColumn(rows int) []string {
-	ruleStyle := m.th.statusFaint
+	ruleStyle := m.th.scrollTrack
 	if m.panelDrag.active {
 		ruleStyle = m.th.panelDragRule // the separator the pointer holds is lit (adr-0110-amend-1108 (b))
 	}
