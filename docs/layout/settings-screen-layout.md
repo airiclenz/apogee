@@ -89,7 +89,12 @@ collapses away only on rows a provider reported without a source. An override is
 launch; which file supplies a key is read off the files as they stand now, so the mark — and whether
 the row can be written here — follows every save and reset this pane makes and every outside save
 the config watcher reloads. The note column collapses away on
-a configuration with nothing read-only and nothing edited yet. A commit on a key a project may set
+a configuration with nothing read-only and nothing edited yet. The **value column gives way** to the
+cells after it: a value wider than the key, the mark and the note leave it loses its tail to an `…`
+(an edit's ` *` or ` ~` stays on), so a long default — `ui.side-panel.sections:` — never pushes a
+pointer such as `· ⏎ opens $EDITOR` past the pane's edge. It gives way no narrower than 24 cells; a
+terminal too narrow for the row at that width cuts the row from the right, the mark and the note
+first. The row being edited keeps its value whole. A commit on a key a project may set
 (a project-param or tighten-only key, ADR 0096 §6) asks which file it lands in before anything is
 written — the legend becomes `Save to: [global] / this project · ←/→ choose · ⏎ save · esc back`
 (`Reset in:` for a reset), the bracket on the file that supplies the key now, and the row's value

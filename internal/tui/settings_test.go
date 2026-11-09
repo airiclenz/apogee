@@ -1641,6 +1641,44 @@ func TestSettingsAutoNoteIsMeasuredAgainstTheMarkedValueColumn(t *testing.T) {
 	}
 }
 
+// A value as long as a config file makes it — the `ui.side-panel.sections:` default grew past the
+// room a 140-column pane left — must not widen the value column past the cells after it: the pointer
+// names where a row is edited, and `⏎ op…` names nothing. The value column gives way instead, its
+// long cells losing their tails to the ellipsis, and an edited row keeps the ` *` that says this
+// session wrote it.
+func TestSettingsLongValueGivesWayToThePointers(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("section: auto, ", 8) + "tail-end"
+	rows := []SettingRow{
+		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
+			EditPointer: "⏎ opens $EDITOR", ExternalEdit: true, Desc: "The named server list."},
+		{Path: "unconfined-hosts", Section: "Confinement", Kind: SettingStructured, Value: "2 hosts",
+			EditPointer: "use /confine", Desc: "Machines acknowledged as disposable."},
+		{Path: "ui.side-panel.sections", Section: "Interface", Kind: SettingString, Value: long,
+			Editable: true, Desc: "The side panel's sections."},
+		{Path: "present.command", Section: "Interface", Kind: SettingString, Value: "glow",
+			Editable: true, Desc: "The present command."},
+	}
+	opts := Options{Workspace: "/ws/a", Settings: fakeSettingsHost{rows: func() []SettingRow { return rows }}}
+	m := modelWithOverlayRoomAt(t, 100, 40, opts)
+	m.settings = settingsPane{open: true}
+	m.layout()
+	m = m.recordSettingEdit(settingEdit{path: "present.command", value: long})
+
+	rendered := strip(m.renderSettings())
+	for _, pointer := range []string{"· ⏎ opens $EDITOR", "· use /confine"} {
+		if !strings.Contains(rendered, pointer) {
+			t.Errorf("the key list does not paint %q whole:\n%s", pointer, rendered)
+		}
+	}
+	if strings.Contains(rendered, "tail-end") {
+		t.Errorf("a value wider than the row leaves it was painted whole:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "…"+settingsEditMarker) {
+		t.Errorf("the clipped edited value lost its %q marker:\n%s", settingsEditMarker, rendered)
+	}
+}
+
 // settingsLiveBoolRow is one editable bool row that applies through the dispatcher — `bypass:` as the
 // registry describes it, minus the restart gate no key keeps once its edit takes effect.
 func settingsLiveBoolRow() SettingRow {

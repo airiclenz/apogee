@@ -1925,16 +1925,22 @@ func (m Model) settingsNoteWidth(rows []SettingRow, pending settingEdit) int {
 		cells = append(cells, m.settingRowCellsPending(row, pending))
 	}
 	widths := popupColumnWidths(m.th, cells)
-	width := popupInnerWidth(m.th, m.slotWidth()) - popupRowIndent - settingsNoteMarkerCells
+	row := popupInnerWidth(m.th, m.slotWidth()) - popupRowIndent
+	spec, _, seated := m.settingsKeyListSpec(rows)
+	if seated {
+		row = m.settingsRowWidth(spec)
+	}
+	// The value column is measured as the painter lays it out: no wider than the other cells leave it
+	// (settingsFitValueColumn), however long the widest value is.
+	if len(widths) > settingsValueColumn {
+		widths[settingsValueColumn] = min(widths[settingsValueColumn], settingsValueLimit(m.th, widths, row))
+	}
+	width := row - settingsNoteMarkerCells
 	for i := 0; i+1 < len(widths); i++ {
 		if widths[i] == 0 {
 			continue
 		}
 		width -= widths[i] + m.th.measure.Width(popupGutter)
-	}
-	spec, _, seated := m.settingsKeyListSpec(rows)
-	if seated && popupScrollbarShown(m.th, spec, popupInnerWidth(m.th, m.slotWidth())) {
-		width -= popupScrollbarGutter
 	}
 	return width
 }
@@ -2098,7 +2104,7 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 	// this list — the value buffer, the armed reset, the save target — takes the keys instead. The
 	// two steps that paint for themselves (the enum sub-list, the text editor) replace the list it
 	// narrows and carry no tail.
-	return popupSpec{
+	spec := popupSpec{
 		title:       settingsTitle,
 		titleTail:   overlayFilterTail(m.settings.filter, m.settings.kind == settingsKeyList),
 		body:        body,
@@ -2111,7 +2117,96 @@ func (m Model) settingsKeyListSpec(rows []SettingRow) (popupSpec, settingsDispla
 		hint:        hint,
 		maxRows:     maxRows,
 		scrollbar:   m.popupScrollbarOn(),
-	}, display, true
+	}
+	m.settingsFitValueColumn(rows, display, m.settingsRowWidth(spec))
+	return spec, display, true
+}
+
+// settingsValueFloorCells is the narrowest the value column gives way to (settingsValueLimit): room
+// for every word a vocabulary row holds (`allow-edits`, `ask-before`) and a summary such as
+// `auto (session server)` whole, so a terminal too narrow for the row's every cell still reads the
+// values before it reads the marks after them.
+const settingsValueFloorCells = 24
+
+// settingsRowWidth is how many cells a key-list row may compose to before the painter elides it: the
+// pane's inner width, less the marker column every row is led by (popupRowIndent), and less the
+// overflow bar and the blank column before it (popupScrollbarGutter) while the list overflows with
+// the bar on (popupScrollbarShown). The rows never wrap, so whether the bar is up does not depend on
+// what their cells say, and the spec can be asked before its value cells are fitted.
+func (m Model) settingsRowWidth(spec popupSpec) int {
+	inner := popupInnerWidth(m.th, m.slotWidth())
+	width := inner - popupRowIndent
+	if popupScrollbarShown(m.th, spec, inner) {
+		width -= popupScrollbarGutter
+	}
+	return width
+}
+
+// settingsValueLimit is how wide the value column may be laid out in a row of the given width: what
+// the other columns, measured whole (popupColumnWidths), and the gutters between the drawn columns
+// leave it — never less than settingsValueFloorCells. The value column is the ELASTIC one because
+// the cells after it are short and fixed — the source mark, and the note or pointer, which names
+// where a row is edited (`⏎ opens $EDITOR`, `use /confine`) and is no use with its tail cut off —
+// while a value can be as long as a config file makes it: a default such as
+// `ui.side-panel.sections:` grew past the room a 140-column pane left, and the value column it
+// widened took the pointers' tails with it.
+func settingsValueLimit(th theme, widths []int, width int) int {
+	used, drawn := 0, 0
+	for i, w := range widths {
+		if i == settingsValueColumn || w == 0 {
+			continue // the value column is what is being sized; an empty tier collapses (layoutPopupRow)
+		}
+		used += w
+		drawn++
+	}
+	// The value column and `drawn` others make drawn+1 columns, joined by `drawn` gutters.
+	return max(width-used-drawn*th.measure.Width(popupGutter), settingsValueFloorCells)
+}
+
+// settingsFitValueColumn clips, in place, every value cell of the display rows wider than the value
+// column may be (settingsValueLimit), so the source mark and the note after it are painted whole on
+// every row a row of this width can hold them on. A clipped value loses its TAIL to an ellipsis in
+// the painter's own measure (settingsClipValue) — the value is recognised from its start, and the
+// row's own edit field and the description header show it whole.
+//
+// The row being edited is left as it stands: its value cell is the edit field (settingBufferCells)
+// or the value a save is asking about, and the human typing into it or answering about it must see
+// what they are writing, caret and all.
+func (m *Model) settingsFitValueColumn(rows []SettingRow, display settingsDisplay, width int) {
+	widths := popupColumnWidths(m.th, display.rows)
+	if len(widths) <= settingsValueColumn {
+		return
+	}
+	limit := settingsValueLimit(m.th, widths, width)
+	if widths[settingsValueColumn] <= limit {
+		return
+	}
+	for i, cells := range display.rows {
+		key, ok := display.settingKeyAt(i)
+		if !ok || len(cells) <= settingsValueColumn || display.kinds[i] == popupRowEditing {
+			continue
+		}
+		cells[settingsValueColumn] = m.settingsClipValue(rows[key], cells[settingsValueColumn], limit)
+	}
+}
+
+// settingsClipValue is a value cell cut to the given width, its tail going to the ellipsis
+// (truncateToWidth). The ` *` or ` ~` an edit appended (settingsEditedValueCell) is not tail: it is
+// the row's answer to "did this session change it", so it is kept, and the value before it gives up
+// its cells instead.
+func (m *Model) settingsClipValue(row SettingRow, cell string, width int) string {
+	if m.th.measure.Width(cell) <= width {
+		return cell
+	}
+	marker := ""
+	if edit, ok := m.settingEditOf(row.Path); ok {
+		marker = settingsEditMarker
+		if edit.watched {
+			marker = settingsWatchMarker
+		}
+	}
+	value := strings.TrimSuffix(cell, marker)
+	return truncateToWidth(m.th, value, width-m.th.measure.Width(marker)) + marker
 }
 
 // renderSettingsText paints the multi-line field a text key's prose is written in — the pane's third
