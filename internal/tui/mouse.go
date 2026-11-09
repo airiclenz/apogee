@@ -2196,8 +2196,9 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 // transcript. Acting in the box ends recall, as a click in it does, so the next ↑ moves the caret
 // rather than walking the recorded prompts. A shift-notch is the viewport's horizontal scroll, which
 // the box has none of, so it is left to the chain's floor as before. The upkeep is the ↑/↓
-// keypress's tail in handleKey: the overlay re-derived from the moved caret where it is live, then a
-// re-flow.
+// keypress's: the overlay re-derived from the moved caret where it is live. The re-flow is Update's
+// tail's (doc.go, "an arm mutates"): the moved window is painted per frame (inputView), and a height
+// the overlay moved is caught by [Model.settle].
 func (m Model) draftWheel(msg tea.MouseWheelMsg) (Model, tea.Cmd, bool) {
 	if !m.inputEditable() || m.hiddenDraftRows() == 0 || msg.Mod.Contains(tea.ModShift) {
 		return m, nil, false
@@ -2221,6 +2222,5 @@ func (m Model) draftWheel(msg tea.MouseWheelMsg) (Model, tea.Cmd, bool) {
 	if m.state.live() {
 		m, cmd = m.recomputeAutocomplete() // the caret moved: re-derive the overlay, as an ↑/↓ keypress does
 	}
-	m.layout()
 	return m, cmd, true
 }

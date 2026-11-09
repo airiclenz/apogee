@@ -88,6 +88,8 @@ NOTES (2026-11-09): wheelRows re-clamps the widget's window onto the caret (a no
 
 NOTES (2026-11-09): pre-existing debt the work exposed — after ↑ recalls an overflowing entry, layout's reseat repositions against the widget viewport's stale content, so the box shows the entry's first rows with the caret off-window (and item 1's thumb at the top) until the next widget Update; TestWheelOverARecalledPromptBoxEndsRecall paints once (inputView) between recall and notch, as the program's frame does
 
+NOTES (2026-11-09): Model.draftWheel's bare m.layout() was dropped, not annotated: the arm reads no geometry after it. The moved window and the overflow bar's thumb are painted per frame (inputView, joinInputScrollbar), and a height the re-derived overlay moves is caught by Update's tail (settle / freshenTranscriptClamp). The doc comment now says the re-flow is the tail's (doc.go, "an arm mutates").
+
 **What:**
 Recast at the regression check (2026-11-09).
 **Goal:** While the prompt box overflows, a wheel notch whose pointer is inside the box's rectangle (border rows included) first seats the caret on the window's edge row in the notch's direction (top visible row for up, bottom for down), then moves it up/down by the transcript's notch row count, so every notch moves the box's window and its thumb until the draft's end is reached, the transcript offset unchanged; while the draft fits, the same notch scrolls the transcript exactly as before. ↑/↓ from the draft's last row reach its first row (`ScrollYOffset()` 0) and back without `prompt-recall` taking the key.
