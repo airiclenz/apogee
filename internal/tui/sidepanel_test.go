@@ -669,10 +669,10 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 			},
 			want: []string{
 				"○ Usage (62%)",
-				"    ██████▎    20k/32k",
+				"    20k/32k 62% ██████▎",
 				"    sys 200 · tools 100 · hist 20k",
-				"    in 4k · out 300",
-				"    cache hit 25%",
+				"    prompt 4k · completion 300",
+				"    cached 25%",
 			},
 		},
 	}
@@ -691,9 +691,9 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 
 // TestSidePanelUsageHeaderClampsOverfullFill pins one clamp across every surface that spells a fill
 // as a percentage: a top-level fill and a sub-agent's fill past their windows read 100% in the
-// panel's Usage header, in the sub-agent row, in /usage's fill cell and in the status-line gauge —
-// never the unclamped figure past a hundred (bug panel-usage-unclamped-percent). The panel's usage row carries no
-// percent, so it is not asserted here.
+// panel's Usage header, in its usage fill row, in the sub-agent row, in /usage's fill cell and in
+// the status-line gauge — never the unclamped figure past a hundred (bug
+// panel-usage-unclamped-percent).
 func TestSidePanelUsageHeaderClampsOverfullFill(t *testing.T) {
 	t.Parallel()
 
@@ -715,6 +715,10 @@ func TestSidePanelUsageHeaderClampsOverfullFill(t *testing.T) {
 	if !strings.Contains(header, "Usage (100%)") {
 		t.Errorf("usage header = %q, want it to read Usage (100%%)", header)
 	}
+	over137 := format.Tokens(over) + "/" + format.Tokens(testOpts.ContextWindow)
+	if row := panelRowOf(t, m, over137); !strings.Contains(row, " "+over137+" 100% █") {
+		t.Errorf("usage fill row = %q, want it to read %s 100%% then a full bar", row, over137)
+	}
 	if row := panelRowOf(t, m, "repo-scout"); !strings.Contains(row, " 100%") {
 		t.Errorf("sub-agent row = %q, want its overfull fill clamped to 100%%", row)
 	}
@@ -723,6 +727,104 @@ func TestSidePanelUsageHeaderClampsOverfullFill(t *testing.T) {
 	}
 	if gauge := ansi.Strip(m.contextGauge()); !strings.Contains(gauge, " 100% ") {
 		t.Errorf("status-line gauge = %q, want its percentage clamped to 100%%", gauge)
+	}
+}
+
+// TestSidePanelUsageRowsSpeakUsageWords pins the usage rows' words and zero rule to /usage's
+// (layout.md, "The /usage popup"): `prompt` and `completion`, never `in` and `out`, and a zero
+// count left out of its row rather than printed as `0` — a row whose every count is zero is no
+// row at all, and no cached share is no `cached` row.
+func TestSidePanelUsageRowsSpeakUsageWords(t *testing.T) {
+	t.Parallel()
+
+	reading := panelUsageReading(panelUsed)
+	reading.Cumulative = domain.Usage{Calls: 1, PromptTokens: 4000, TotalTokens: 4000}
+	m := panelModel(t, domain.DefaultSidePanelSections, 30, reading, standingCost(0, 100))
+
+	want := []string{
+		"○ Usage (62%)",
+		"    20k/32k 62% ██████▎",
+		"    tools 100 · hist 20k",
+		"    prompt 4k",
+	}
+	if got := panelText(t, m); !slices.Equal(got, want) {
+		t.Errorf("the column paints\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestSidePanelUsageBarPaintsNoBackground pins the usage fill row's bar to ink alone: in the dark
+// and the light scheme every one of its gaugeWidth cells — the full blocks, the partial cell and
+// the blank track — leaves the terminal's own background, and its filled cells wear the gauge
+// colour. The status line's gauge keeps its groove (TestBottomChromePaintsOneBackground).
+func TestSidePanelUsageBarPaintsNoBackground(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		s    func(*testing.T) scheme.Scheme
+	}{
+		{"dark", func(*testing.T) scheme.Scheme { return scheme.Default() }},
+		{"light", lightScheme},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := testOpts
+			opts.ColorScheme = tc.s(t)
+			opts.UI.SidePanelShow = domain.SidePanelShowAuto
+			opts.UI.SidePanelSections = domain.DefaultSidePanelSections
+			m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+			m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+			m.panel = sidepanel.New(func() time.Time { return panelNow })
+			m = m.foldEvent(panelUsageReading(panelUsed))
+
+			y := panelRowY(t, m, "20k/32k 62% ")
+			buf := paintedFrame(t, m)
+			start := -1
+			for x := m.slotWidth(); x < m.width; x++ {
+				if c := buf.CellAt(x, y); c != nil && c.Content == "█" {
+					start = x
+					break
+				}
+			}
+			if start < 0 {
+				t.Fatalf("row %d (%q) paints no bar", y, buf.Lines[y].String())
+			}
+			ink := 0
+			for x := start; x < start+gaugeWidth; x++ {
+				c := buf.CellAt(x, y)
+				if c == nil {
+					t.Fatalf("row %d: no cell at column %d", y, x)
+				}
+				if c.Style.Bg != nil {
+					t.Errorf("bar cell %d (%q): background %v, want the terminal's own", x-start, c.Content, c.Style.Bg)
+				}
+				if c.Content != " " {
+					ink++
+					if !sameColor(c.Style.Fg, m.th.gaugeFill.GetForeground()) {
+						t.Errorf("bar cell %d (%q): ink %v, want the gauge colour", x-start, c.Content, c.Style.Fg)
+					}
+				}
+			}
+			if ink != 7 { // 62% of a ten-cell bar: six full blocks and the partial cell
+				t.Errorf("the bar inks %d cells, want 7", ink)
+			}
+		})
+	}
+}
+
+// TestSidePanelUsageFillRowKeepsFiguresOnANarrowColumn pins the narrow fill row: a column too
+// narrow for the figures and the whole bar keeps the figures — the reading — and paints no bar,
+// never a bar cut short.
+func TestSidePanelUsageFillRowKeepsFiguresOnANarrowColumn(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelUsageReading(panelUsed))
+	m.opts.UI.SidePanelWidth = domain.MinSidePanelWidth
+	if room := m.panelTextRoom(m.panelBodyLead("", ""), ""); room >= len("20k/32k 62% ")+gaugeWidth {
+		t.Fatalf("setup: the narrowest column leaves %d cells, room for the whole bar", room)
+	}
+
+	row := panelRowOf(t, m, "20k/32k")
+	if !strings.HasSuffix(row, " 20k/32k 62%") {
+		t.Errorf("usage fill row = %q, want the figures alone", row)
 	}
 }
 
@@ -1500,7 +1602,7 @@ func TestPanelAllocationDropsSpacersBeforeFolding(t *testing.T) {
 func TestSidePanelBodyTextColumnsAlign(t *testing.T) {
 	t.Parallel()
 
-	texts := []string{"alpha", "read the plan", "write the code", "a.go", "b.go", "sys ", "in ", "beta"}
+	texts := []string{"alpha", "read the plan", "write the code", "a.go", "b.go", "sys ", "prompt ", "beta"}
 	for _, glyphs := range []domain.GlyphSet{domain.GlyphsUnicode, domain.GlyphsSafe} {
 		for style := range spinnerSpecs {
 			t.Run(string(glyphs)+"/"+string(style), func(t *testing.T) {
@@ -1851,7 +1953,7 @@ func TestSidePanelRunViewUsageMatchesTheGauge(t *testing.T) {
 				t.Fatalf("setup: the gauge states %q; want %q", gauge, tc.want)
 			}
 			got := panelText(t, m)
-			if len(got) < 2 || !strings.HasSuffix(got[1], tc.want) {
+			if len(got) < 2 || !strings.HasPrefix(strings.TrimLeft(got[1], " "), tc.want+" ") {
 				t.Errorf("the usage fill reads\n%s\nwant the gauge's %q", strings.Join(got, "\n"), tc.want)
 			}
 		})
@@ -2065,7 +2167,7 @@ func TestSidePanelClickOpensTheRowsDetail(t *testing.T) {
 		},
 		{
 			name: "usage row opens /usage",
-			row:  "cache hit",
+			row:  "cached ",
 			check: func(t *testing.T, m Model) {
 				if !m.usagePane.open {
 					t.Error("the /usage report is not open")
@@ -2166,7 +2268,7 @@ func TestPanelStopsMatchClickTargets(t *testing.T) {
 		t.Errorf("the task card's stop spans rows %d+%d, want the three task rows from %d",
 			tasks.y, tasks.height, panelRowY(t, pre, "read the plan"))
 	}
-	if usage := stops[12]; usage.height < 2 || !usage.spans(panelRowY(t, pre, "cache hit")) {
+	if usage := stops[12]; usage.height < 2 || !usage.spans(panelRowY(t, pre, "cached ")) {
 		t.Errorf("the usage stop spans rows %d+%d: want several, the cache-hit row among them", usage.y, usage.height)
 	}
 }
@@ -2383,7 +2485,7 @@ func TestSidePanelClickRefusedUnderModalPanes(t *testing.T) {
 				x, y int
 			}{
 				{"sub-agent row", panelBodyX(m), panelRowY(t, m, "scout")},
-				{"usage row", panelBodyX(m), panelRowY(t, m, "cache hit")},
+				{"usage row", panelBodyX(m), panelRowY(t, m, "cached ")},
 				{"pin glyph", m.panelPinX(), panelRowY(t, m, "Tasks")},
 				{"header title", panelBodyX(m), panelRowY(t, m, "Tasks")},
 			}
@@ -3698,8 +3800,8 @@ func TestSidePanelResumeRebuildsThroughBothDoors(t *testing.T) {
 	opts := testOpts
 	opts.Workspace = panelResumeWorkspace
 	opts.UI.SidePanelShow = domain.SidePanelShowAuto
-	inOut := "in " + panelTokens(panelResumeUsage.PromptTokens) + sidePanelPartSeparator +
-		"out " + panelTokens(panelResumeUsage.CompletionTokens)
+	inOut := "prompt " + format.Tokens(panelResumeUsage.PromptTokens) + sidePanelPartSeparator +
+		"completion " + format.Tokens(panelResumeUsage.CompletionTokens)
 
 	t.Run("start-up resume", func(t *testing.T) {
 		t.Parallel()

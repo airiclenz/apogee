@@ -128,7 +128,7 @@ section out gets it appended in `auto`, so a list saved before `mcp` existed sho
 | `sub-agents` | any run is queued or running, and for 30 s after the last one ends | phase glyph, Delegation name, phase word, elapsed, context fill |
 | `tasks` | the list has an unfinished task | status glyph and task text; the first unfinished task marked `▸` |
 | `changed-files` | the session (any depth) has written a file | `↳` in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present, right-aligned in the `tool-marker` role |
-| `usage` | context fill ≥ 50% | fill bar with `used/window`; `sys · tools · hist` split (history = estimate − standing rows); `in · out` tokens; cache hit %; spend |
+| `usage` | context fill ≥ 50% | the fill as the status-line gauge reads it, `used/window N% bar` (`~` before an estimate, the percent clamped at 100), the bar in the gauge colour on no background — a column too narrow for the whole bar keeps the figures alone; `sys · tools · hist` split (history = estimate − standing rows); `prompt · completion` tokens; `cached N%` (the cached share of the prompt); `cost`. The words are `/usage`'s, and as there a zero count is left out rather than printed as `0`, a row with every count zero not drawn |
 | `mcp` | any MCP server is `dialling`, `failed` or `disconnected` | the name, then `state · N tools` right-aligned, one row per server in first-reported order |
 
 The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune; the rules are ADR

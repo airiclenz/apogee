@@ -5280,6 +5280,23 @@ func (c contextUsage) view(th theme) string {
 // fraction shows at least a one-eighth sliver; an over-limit Used clamps to a full bar.
 // (Ported from llama-launcher internal/launcher/memformat.go writeBar.)
 func renderGaugeBar(th theme, used, limit int) string {
+	// The eighth glyph's ink is the fill colour, its paper the track colour.
+	return paintGaugeBar(used, limit, th.gaugeFill, th.gaugeFill.Background(th.chrome), th.gaugeTrack)
+}
+
+// renderGaugeInk paints the same strip as renderGaugeBar with no background on any cell — the
+// fill and the partial cell in the gauge colour's ink alone, the empty remainder blank — for a
+// surface that keeps the terminal's own background (the side panel's usage row,
+// docs/layout/side-panel-layout.md). The status line keeps renderGaugeBar: it sits on `surface`,
+// where the groove reads as part of the band.
+func renderGaugeInk(th theme, used, limit int) string {
+	ink := th.gaugeFill.UnsetBackground()
+	return paintGaugeBar(used, limit, ink, ink, lipgloss.NewStyle())
+}
+
+// paintGaugeBar lays used/limit out over gaugeWidth cells — full blocks, one eighth-block partial
+// cell, blank track — painting each run in its own style (renderGaugeBar, renderGaugeInk).
+func paintGaugeBar(used, limit int, fill, partial, track lipgloss.Style) string {
 	eighths := (used*gaugeWidth*8 + limit/2) / limit // round to the nearest eighth
 	if max := gaugeWidth * 8; eighths > max {
 		eighths = max
@@ -5296,14 +5313,13 @@ func renderGaugeBar(th theme, used, limit int) string {
 
 	var b strings.Builder
 	if full > 0 {
-		b.WriteString(th.gaugeFill.Render(strings.Repeat("█", full)))
+		b.WriteString(fill.Render(strings.Repeat("█", full)))
 	}
 	if rem > 0 {
-		// The eighth glyph's ink is the fill colour, its paper the track colour.
-		b.WriteString(th.gaugeFill.Background(th.chrome).Render(string(gaugeEighths[rem-1])))
+		b.WriteString(partial.Render(string(gaugeEighths[rem-1])))
 	}
 	if empty > 0 {
-		b.WriteString(th.gaugeTrack.Render(strings.Repeat(" ", empty)))
+		b.WriteString(track.Render(strings.Repeat(" ", empty)))
 	}
 	return b.String()
 }

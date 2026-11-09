@@ -67,7 +67,7 @@ const (
 	sidePanelMore = " more"
 	// sidePanelPathElision leads a changed file's path trimmed from the left (`…/parse/parser.go`).
 	sidePanelPathElision = "…/"
-	// sidePanelPartSeparator parts the facts of one usage row (`in 12k · out 4k`).
+	// sidePanelPartSeparator parts the facts of one usage row (`prompt 12k · completion 4k`).
 	sidePanelPartSeparator = " · "
 	// subAgentFactsFormat lays out a sub-agent row's right-hand facts — phase, elapsed, fill — at
 	// fixed widths, so the facts of every row line up down the column.
@@ -821,47 +821,74 @@ func trimPathLeft(th theme, path string, room int) string {
 	}
 }
 
-// panelUsageRows is the usage section's body: the fill bar with the tokens it stands for, the
-// system / tools / history split, the tokens in and out, the cache hit rate and the spend — each
-// row only where the reading has it, behind a blank body lead ([Model.panelBodyLead]).
+// panelUsageRows is the usage section's body: the fill with the bar it stands for, the
+// system / tools / history split, the prompt and completion tokens, the cached share of the prompt
+// and the cost — each row only where the reading has it, behind a blank body lead
+// ([Model.panelBodyLead]). The fill row reads as the status-line gauge does, figures then bar
+// ([contextUsage.view]), its percentage clamped by the same helper, and its bar carries no
+// background ([renderGaugeInk]); the other rows take /usage's words and leave a zero figure out
+// (layout.md, "The /usage popup").
 func (m Model) panelUsageRows(view sidepanel.UsageView) []string {
 	plain, lead := lipgloss.NewStyle(), m.panelBodyLead("", "")
 	rows := make([]string, 0, 5)
 	if fill := view.Fill; fill.Window > 0 && fill.Used > 0 {
-		approx := ""
-		if fill.IsEstimate {
-			approx = "~"
-		}
-		bar := renderGaugeBar(m.th, fill.Used, fill.Window) + " "
-		rows = append(rows, m.panelRow(lead+bar, approx+format.Tokens(fill.Used)+"/"+format.Tokens(fill.Window), m.th.statusFaint, ""))
+		rows = append(rows, m.panelFillRow(lead, fill))
 	}
 	if view.HasSplit {
-		split := "sys " + panelTokens(view.System) + sidePanelPartSeparator + "tools " + panelTokens(view.Tools) +
-			sidePanelPartSeparator + "hist " + panelTokens(view.History)
-		rows = append(rows, m.panelRow(lead, split, plain, ""))
+		if split := panelParts(panelFigure{"sys", view.System}, panelFigure{"tools", view.Tools}, panelFigure{"hist", view.History}); split != "" {
+			rows = append(rows, m.panelRow(lead, split, plain, ""))
+		}
 	}
 	totals := view.Totals
 	if totals.Calls > 0 {
-		inOut := "in " + panelTokens(totals.PromptTokens) + sidePanelPartSeparator + "out " + panelTokens(totals.CompletionTokens)
-		rows = append(rows, m.panelRow(lead, inOut, plain, ""))
+		if spent := panelParts(panelFigure{"prompt", totals.PromptTokens}, panelFigure{"completion", totals.CompletionTokens}); spent != "" {
+			rows = append(rows, m.panelRow(lead, spent, plain, ""))
+		}
 	}
 	if totals.PromptTokens > 0 && totals.CachedPromptTokens > 0 {
-		hit := totals.CachedPromptTokens * percentCap / totals.PromptTokens
-		rows = append(rows, m.panelRow(lead, "cache hit "+strconv.Itoa(hit)+"%", plain, ""))
+		cached := totals.CachedPromptTokens * percentCap / totals.PromptTokens
+		rows = append(rows, m.panelRow(lead, "cached "+strconv.Itoa(cached)+"%", plain, ""))
 	}
 	if spend := spendText(totals, m.currency()); spend != "" {
-		rows = append(rows, m.panelRow(lead, "spend "+spend, plain, ""))
+		rows = append(rows, m.panelRow(lead, "cost "+spend, plain, ""))
 	}
 	return rows
 }
 
-// panelTokens spells a count in the gauge's coarse form, and a zero as `0` rather than as the
-// empty cell format.Tokens leaves for it: a usage row states a split, where none is a value.
-func panelTokens(n int) string {
-	if n <= 0 {
-		return "0"
+// panelFillRow is the usage section's fill row: `<used>/<window> <pct>% <bar>` — `~` before an
+// estimate — the status-line gauge's own reading with its bar in ink alone. A column too narrow for
+// the figures and the bar keeps the figures, the reading, and gives up the bar that draws it.
+func (m Model) panelFillRow(lead string, fill sidepanel.Fill) string {
+	approx := ""
+	if fill.IsEstimate {
+		approx = "~"
 	}
-	return format.Tokens(n)
+	figures := fmt.Sprintf("%s%s/%s %d%%", approx, format.Tokens(fill.Used), format.Tokens(fill.Window),
+		sidepanel.ClampedPercent(fill.Used, fill.Window))
+	if m.panelTextRoom(lead, "") < m.th.measure.Width(figures)+1+gaugeWidth {
+		return m.panelRow(lead, figures, m.th.statusFaint, "")
+	}
+	return lead + m.th.statusFaint.Render(figures) + " " + renderGaugeInk(m.th, fill.Used, fill.Window)
+}
+
+// panelFigure is one labelled count of a usage row (`prompt 4k`).
+type panelFigure struct {
+	label string
+	count int
+}
+
+// panelParts spells figures as one usage row's facts parted by sidePanelPartSeparator
+// (`prompt 4k · completion 300`), each count in the gauge's coarse form. A zero count leaves its
+// figure out, as a zero leaves its /usage cell empty: a row states what was spent, and a `0` is a
+// figure the reader has to scan past. Every count zero is no row at all ("").
+func panelParts(figures ...panelFigure) string {
+	parts := make([]string, 0, len(figures))
+	for _, f := range figures {
+		if text := format.Tokens(f.count); text != "" {
+			parts = append(parts, f.label+" "+text)
+		}
+	}
+	return strings.Join(parts, sidePanelPartSeparator)
 }
 
 // panelTargetKind is what a click on one cell of the column does (docs/layout/side-panel-layout.md,

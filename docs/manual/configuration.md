@@ -1409,7 +1409,7 @@ fold indicator at the right edge, as a tool block's header does: `▼` open, `�
 | `sub-agents` | a delegation is queued or running, and for 30 s after the last one ends | the status line's spinner while it runs, `○` queued, `◷` `waiting` while an approval it asked for is showing or queued, `✓` done, `✗` failed; its name, phase, elapsed time and context fill |
 | `tasks` | the task list has an unfinished task | `✓` done, `▸` the current task (the first unfinished one), `○` still open |
 | `changed-files` | the session has written a file, at any depth | `↳` before the path when a sub-agent wrote it; the path, trimmed from the left to fit; `+N −M` lines where the edit reports them |
-| `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
+| `usage` | the context is at least 50% full | the fill as the status line's gauge shows it (`20k/32k 62%` then the bar), the system / tools / history split, the `prompt` and `completion` tokens, the `cached` share of the prompt and the `cost` — in `/usage`'s words, a zero left out rather than shown as `0` |
 | `mcp` | an MCP server is dialling, failed or disconnected | the server's name, then its state and its tool count at the right edge (`docs` … `connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
 
 A header's title is bold in the tone a tool block's label wears, its summary muted beside it. The

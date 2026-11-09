@@ -328,7 +328,12 @@ internal/tui/mcppane_test.go — TestMCPPaneStripsEscapes; internal/tui/fold_tes
 - `capcom check`
 **Commit:** `feat(tui): colour side-panel facts like the transcript's outcomes`
 
-## 13. Match the panel's usage rows to the gauge and `/usage`
+## 13. Match the panel's usage rows to the gauge and `/usage` — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): renderGaugeBar's layout moved into a shared paintGaugeBar(used, limit, fill, partial, track); renderGaugeBar passes its three styles unchanged (status line identical), and the new renderGaugeInk passes the gauge ink with every background unset and a plain blank track.
+NOTES (2026-11-09): panelTokens removed rather than reworded — reversing its zero-as-`0` rule left it identical to format.Tokens. Zero-blank in a row is read as leaving the zero figure (label and count) out of the row; a row with every count zero is not drawn.
+NOTES (2026-11-09): word choices beyond prompt/completion follow /usage's column names: `cache hit N%` → `cached N%` (still the share of the prompt), `spend` → `cost`; the `sys · tools · hist` split has no /usage counterpart and keeps its words.
+NOTES (2026-11-09): a column too narrow for the figures and the whole bar keeps the figures and drops the bar (TestSidePanelUsageFillRowKeepsFiguresOnANarrowColumn); the previous layout kept the bar and clipped the figures.
 
 **What:** Closes `panel-usage-row-style`. Depends on items 1 and 9.
 **Regression guard.** The panel's usage fill row reads `used/limit N% bar` like the status-line gauge. Its percent comes from item 1's clamped helper. The no-background variant drops all three backgrounds — `gaugeFill`'s surface, the partial cell's chrome paper and `gaugeTrack`'s chrome; `renderGaugeBar` stays as is for the status line (`TestBottomChromePaintsOneBackground`). This reverses `panelTokens`' recorded rule that a zero reads `0` ("a usage row states a split, where none is a value"); rewrite its comment. If the new words drop `cache hit`, update the tests' row locators that find a row by it.
