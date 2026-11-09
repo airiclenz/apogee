@@ -1238,6 +1238,131 @@ func TestSidePanelClickTakesNoApprovalDecision(t *testing.T) {
 	}
 }
 
+// TestSidePanelClickRefusedUnderModalPanes pins the panel's targets inert under a modal pane (ADR
+// 0111): with an approval, an ask or the /settings pane up, a click on a sub-agent row, a usage row
+// and a pin glyph is claimed and changes nothing — no Run view, no report, no section write, the
+// pane still up — the hover over each reads the default arrow, and a press on the grip still starts
+// a resize drag.
+func TestSidePanelClickRefusedUnderModalPanes(t *testing.T) {
+	t.Parallel()
+
+	events := panelEvents(panelTaskCard(), []domain.Event{
+		panelUsageReading(panelUsed),
+		panelDelegationCall(t, "r1", "scout"),
+		delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+	})
+	cases := []struct {
+		name string
+		open func(t *testing.T, m Model) Model
+	}{
+		{
+			name: "approval",
+			open: func(t *testing.T, m Model) Model {
+				m = step(t, streamOneScreen(t, m), approvalReqMsg{
+					Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
+					Reply:   make(chan domain.ApprovalDecision, 1),
+				})
+				return armApproval(t, m)
+			},
+		},
+		{
+			name: "ask",
+			open: func(t *testing.T, m Model) Model {
+				m = step(t, streamOneScreen(t, m), askReqMsg{
+					Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}},
+					Reply:   make(chan domain.AskAnswer, 1),
+				})
+				return armApproval(t, m)
+			},
+		},
+		{
+			name: "settings",
+			open: func(t *testing.T, m Model) Model {
+				return openSettingsPane(t, m)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := panelModel(t, domain.DefaultSidePanelSections, 30, events...)
+			spy := &settingsSpy{}
+			host := spy.host(nil)
+			rows := settingsTestRows(6)
+			host.rows = func() []SettingRow { return rows }
+			m.opts.Settings = host
+			m = tc.open(t, m)
+			if !m.modalPaneOpen() {
+				t.Fatal("setup: no modal pane is open")
+			}
+			pre := m.withFrameSpans()
+			targets := []struct {
+				name string
+				x, y int
+			}{
+				{"sub-agent row", panelBodyX(m), panelRowY(t, m, "scout")},
+				{"usage row", panelBodyX(m), panelRowY(t, m, "cache hit")},
+				{"pin glyph", m.width - 1, panelRowY(t, m, "Tasks")},
+			}
+			for _, cell := range targets {
+				if got := m.pointerShapeAt(pre, cell.x, cell.y); got != shapeDefault {
+					t.Errorf("hover over the %s: shape %q, want the default arrow", cell.name, got.name())
+				}
+			}
+			sections := m.opts.UI.SidePanelSections
+
+			for _, cell := range targets {
+				m = clickCell(t, m, cell.x, cell.y)
+			}
+
+			if m.inRunView() || m.usagePane.open || m.opts.UI.SidePanelSections != sections {
+				t.Errorf("in view %v, /usage open %v, sections %q→%q; want all unchanged",
+					m.inRunView(), m.usagePane.open, sections, m.opts.UI.SidePanelSections)
+			}
+			if len(spy.writes) != 0 || len(spy.sections) != 0 || len(m.settingEdits) != 0 {
+				t.Errorf("clicks wrote %v / %v (journal %v); want nothing", spy.writes, spy.sections, m.settingEdits)
+			}
+			if !m.modalPaneOpen() {
+				t.Error("a click on the column closed the modal pane")
+			}
+
+			m = step(t, m, leftClick(m.slotWidth(), separatorRow))
+
+			if !m.panelDrag.active {
+				t.Error("a press on the grip started no resize drag under the modal pane")
+			}
+		})
+	}
+}
+
+// TestSidePanelPinClickRefusedInWatchMode pins the pin glyph read-only while watching (ADR 0111):
+// a click there flashes the watch refusal and toggles and writes nothing, and the hover over it
+// reads the default arrow.
+func TestSidePanelPinClickRefusedInWatchMode(t *testing.T) {
+	t.Parallel()
+	m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
+	m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	m.opts.UI.SidePanelSections = "[tasks: pinned]"
+	spy := &settingsSpy{}
+	m.opts.Settings = spy.host(nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+	x, y := m.width-1, panelRowY(t, m, "Tasks")
+	if got := m.pointerShapeAt(m.withFrameSpans(), x, y); got != shapeDefault {
+		t.Errorf("hover over the watched pin: shape %q, want the default arrow", got.name())
+	}
+	before := m.opts.UI
+
+	m = clickCell(t, m, x, y)
+
+	if m.flash != watchRefusedFlash {
+		t.Errorf("flash %q, want the watch refusal", m.flash)
+	}
+	if m.opts.UI != before || len(spy.sections) != 0 || len(spy.writes) != 0 || len(m.settingEdits) != 0 {
+		t.Errorf("settings %+v, writes %v / %v (journal %v); want %+v kept and nothing written",
+			m.opts.UI, spy.sections, spy.writes, m.settingEdits, before)
+	}
+}
+
 // TestSidePanelClickBesideABlockHeaderLeavesIt pins the column's claim on every cell: a click on a
 // blank panel cell on the row of a tool block's header does not reach the block.
 func TestSidePanelClickBesideABlockHeaderLeavesIt(t *testing.T) {

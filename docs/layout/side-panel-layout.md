@@ -134,6 +134,11 @@ When the shown sections need more rows than the slot has:
   - usage → `/usage`.
 - A click on the **pin glyph** toggles `pinned` ↔ `auto` and writes the list back to the setting.
 - A click on the header title does nothing. The panel never takes keyboard focus in v1.
+- While a modal pane is open — an approval, an ask, `/settings`, the sessions browser, a picker or
+  the workflows view — a click on a body row or a pin glyph is claimed and does nothing, and the
+  hover there shows the default arrow. The grip stays live under them.
+- While watching a session, a click on a pin glyph writes nothing: it flashes the watch refusal, and
+  the hover there shows the default arrow.
 - A left-button press on the **grip** — the separator column or the gutter column right of it, on
   any row above the session-name rule — starts a resize drag. The separator keeps its grab offset
   from the pointer and moves with it, clamped to the limits under "Where it sits"; the panel and the

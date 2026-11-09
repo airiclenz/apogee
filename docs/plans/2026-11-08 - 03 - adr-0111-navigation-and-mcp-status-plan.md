@@ -66,7 +66,10 @@
   - 20: guard folded — `mcp` stop identity; `⏎` ends the mode.
   - 21: guard folded — watch/report verb lists in either order and "four reports"; `sessions.md` and `interjection` listed; grep scoped off historical docs.
 
-## 1. Refuse side-panel clicks under modal panes and the watched pin
+## 1. Refuse side-panel clicks under modal panes and the watched pin — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the click and the hover share one predicate, `panelTargetLive` (sidepanel.go), which `followPanelTarget` and `pointerShapeAt` both ask; the item's later `⏎` on a panel stop goes through `followPanelTarget` and inherits the gate.
+NOTES (2026-11-09): the pointer-shape cases (default arrow over each target under each modal pane, and over the watched pin) live inside `TestSidePanelClickRefusedUnderModalPanes` and `TestSidePanelPinClickRefusedInWatchMode` in sidepanel_test.go rather than in pointershape_test.go, which is left untouched; the Acceptance pattern runs both.
 
 **What:** fix the defect `panel-click-ignores-modal`: a panel click acts under an approval, ask, `/settings`,
 sessions browser, picker or workflows view, and the pin click writes config in watch mode.

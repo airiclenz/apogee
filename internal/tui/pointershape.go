@@ -47,9 +47,10 @@ func (s pointerShape) name() string {
 //
 // It has no side effects: the Model is a value (ADR 0011) and nothing here writes to it.
 func (m Model) pointerShapeAt(pre Model, x, y int) pointerShape {
-	// The side panel's column first, as the click chain asks it (handleSidePanelClick).
+	// The side panel's column first, as the click chain asks it (handleSidePanelClick): the hand
+	// only where a click acts — never under a modal pane, nor on the pin while watching.
 	if target, isPanel := pre.panelTargetAt(x, y); isPanel {
-		if target.kind == panelTargetNone {
+		if !m.panelTargetLive(target) {
 			return shapeDefault
 		}
 		return shapePointer

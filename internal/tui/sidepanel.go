@@ -819,7 +819,19 @@ func (m Model) resetPanelWidth() Model {
 // and auto, a sub-agent row opens its Run view, a task or changed-file row unfolds that one block
 // — never the shared task-list fold, whose toggle writes `ui.task-list-open` — and scrolls it into
 // view (opening the run that holds it first), and a usage row opens /usage.
+//
+// Under a modal pane ([Model.modalPaneOpen]) no target acts: the pane owns the keyboard, and a
+// detail view or a settings write under it would change what the human is answering. And while
+// watching, a pin is refused with the watch flash: the watch is read-only, so the column it shows
+// writes nothing back (ADR 0111).
 func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
+	if !m.panelTargetLive(target) {
+		if target.kind != panelTargetPin || !m.watch.isActive || m.modalPaneOpen() {
+			return m, nil
+		}
+		cmd := m.showFlash(watchRefusedFlash)
+		return m, cmd
+	}
 	switch target.kind {
 	case panelTargetPin:
 		mode := domain.SidePanelModePinned
@@ -841,6 +853,21 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 		return m.runUsageCommand()
 	default:
 		return m, nil
+	}
+}
+
+// panelTargetLive reports whether target acts at all on the model as it stands: it targets
+// something, no modal pane is open, and it is not a pin while watching. The click
+// ([Model.followPanelTarget]) and the hover shape ([Model.pointerShapeAt]) ask it alike, so the
+// pointer promises a click exactly where one acts.
+func (m Model) panelTargetLive(target panelTarget) bool {
+	switch {
+	case target.kind == panelTargetNone, m.modalPaneOpen():
+		return false
+	case target.kind == panelTargetPin:
+		return !m.watch.isActive
+	default:
+		return true
 	}
 }
 
