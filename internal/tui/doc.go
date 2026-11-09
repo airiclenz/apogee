@@ -319,18 +319,26 @@
 // clicks, drags and the wheel dead for the rest of the session — the model re-asserts the
 // sequence itself after every tool result and on every resize.
 //
-// blockcursor.go is that same reach from the KEYBOARD: a modal block cursor over the transcript
-// (docs/layout/tool-layout.md, design call 7). ⌥↑/⌥↓ enter the walk and move it, plain ↑/↓ move
-// inside it, ⏎ opens or closes what the highlight stands on, and esc — or typing, which ends the
-// mode and still lands in the prompt — hands the keys back. It walks the PAINT'S OWN click map
-// ([lineTarget], blocktarget.go), collapsed to one stop per surface, so the levels a pointer can
-// open are exactly the stops a cursor has and "deepest visible" needs no second rule; ⏎ goes
-// through the mouse's own [Model.toggleBlockAt], so both ways in flip and anchor identically. The
-// state is two plain fields on the value-copied Model — on/off and the CONTENT line under the
-// highlight — re-seated against every fresh paint in [Model.refreshViewport] ([blockCursor.clamp]),
-// suspended (keys and highlight together) while an approval or ask prompt owns ↑/↓/⏎, and painted
-// as the theme's one selection field, which the drag-selection it replaces on entry can therefore
-// never be confused with.
+// blockcursor.go is that same reach from the KEYBOARD: NAVIGATION MODE (ADR 0111), a modal cursor
+// over two regions — the transcript (docs/layout/tool-layout.md, design call 7) and the side panel's
+// column (docs/layout/side-panel-layout.md, "Keyboard"). ⌥↑/⌥↓ enter the walk and move it — in the
+// transcript, or in the panel when the transcript has no stop — plain ↑/↓ move inside the region the
+// cursor stands in, → and ← move it between the two, ⏎ acts on what it stands on, and esc — or
+// typing, which ends the mode and still lands in the prompt — hands the keys back. In the transcript
+// it walks the PAINT'S OWN click map ([lineTarget], blocktarget.go), collapsed to one stop per
+// surface, so the levels a pointer can open are exactly the stops a cursor has and "deepest
+// visible" needs no second rule; ⏎ goes through the mouse's own [Model.toggleBlockAt], so both ways
+// in flip and anchor identically. In the panel it walks the column's own stops ([Model.panelStops],
+// panelstops.go) and ⏎ is the click on one ([Model.activatePanelCursor] through
+// [Model.followPanelTarget]). The state is plain fields on the value-copied Model — on/off, the
+// region, the CONTENT line of the transcript place and the stop IDENTITY of the panel place, each
+// region's place remembered while the cursor stands in the other — re-seated against every fresh
+// paint in [Model.refreshViewport] ([blockCursor.clamp]) and, for the panel, before every key
+// ([Model.reseatPanelCursor]); suspended (keys and mark together) while an approval or ask prompt
+// owns ↑/↓/⏎; and painted only in the region it stands in, as [markCursorRow]: a ▌
+// (glyphCursorMark) over the row's first cell, so a terminal painting no colour still shows it, and
+// the theme's one selection field across the rest, which the drag-selection it replaces on entry
+// can therefore never be confused with.
 //
 // runview.go is where those two reaches ARRIVE when what they open is a delegation. A run has two
 // shapes and no third (ADR 0063): the collapsed row it wears in the conversation, and its run VIEW —
@@ -348,8 +356,8 @@
 // paint reads ([Model.legend], with [Model.legendFor] as its view-aware half). Two gestures end
 // work and they reach different things (ADR 0086 D5). `^x` stops ONE sub-agent's run: inside a view
 // the run on screen, and on the block cursor the delegation whose row it stands on — a member row
-// of a ✦ Sub-Agent umbrella, or a nested row inside a view, which takes the key over the view's
-// own run ([Model.runViewKey] steps aside for [Model.blockCursorKey]); both reach the engine through
+// of a ✦ Sub-Agent umbrella, a nested row inside a view, or a side-panel sub-agent row, which takes
+// the key over the view's own run ([Model.runViewKey] steps aside for [Model.blockCursorKey]); both reach the engine through
 // [Model.stopRun], which does nothing for a run that is not [stoppable] (over, or without a run
 // id), and the row says `stopped by you` once the run reports. esc×2 CANCELS the whole Turn, and
 // because the claimant swallows esc that cancel is unreachable from inside a view — the status line
@@ -1012,7 +1020,8 @@
 // — its width, the floors its gate keeps ([Model.panelShown]) and the rows it paints, hung off the
 // rows above the session-name rule by View; panelstops.go the column's stops ([Model.panelStops]) —
 // the rows a click acts on, in paint order, each with its row span, its target and an identity
-// (header, run, path, task card, usage) — through which the pointer resolves a body row;
+// (header, run, path, task card, usage) — through which the pointer resolves a body row and which
+// navigation mode's cursor walks in the panel region (blockcursor.go);
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace

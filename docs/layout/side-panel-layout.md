@@ -1,6 +1,7 @@
 > **Status:** shipped (2026-11-08, `docs/plans/archived/2026-11-08 - 00 - tui-side-panel-plan.md`), from the
 > 2026-11-07 grill ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md), issue `tui-side-panel`).
-> This file describes the panel as built. `layout.md` §"The side panel" holds the rule that binds the
+> Keyboard navigation joined it 2026-11-09 ([ADR 0111](../../.capcom/knowledge/decisions/adr-0111.md),
+> which supersedes ADR 0110 decisions 3 and 8). This file describes the panel as built. `layout.md` §"The side panel" holds the rule that binds the
 > rest of the frame; the user-facing account is `docs/manual/configuration.md` (the `ui:` section).
 
 # The side panel
@@ -9,7 +10,7 @@ The side panel is a column on the right of the transcript slot, 36 columns wide 
 resized by dragging its separator. It keeps live session state in
 view: sub-agents, the task list, files changed this session, and usage. It is a glance. The detail
 views (Run view, the task-list card, `/usage`) stay where they are, and a click on a section opens
-its detail.
+its detail — as does `⏎` on it in navigation mode, the keyboard's way into the column.
 
 ## Where it sits
 
@@ -142,7 +143,8 @@ When the shown sections need more rows than the slot has:
   - a changed-file row → that write's tool block, unfolded and scrolled to;
   - usage → `/usage`.
 - A click on the **pin glyph** toggles `pinned` ↔ `auto` and writes the list back to the setting.
-- A click on the header title does nothing. The panel never takes keyboard focus in v1.
+- A click on the header title does nothing. The keyboard reaches the same targets through navigation
+  mode (Keyboard, below).
 - While a modal pane is open — an approval, an ask, `/settings`, the sessions browser, a picker or
   the workflows view — a click on a body row or a pin glyph is claimed and does nothing, and the
   hover there shows the default arrow. The grip stays live under them.
@@ -162,6 +164,47 @@ When the shown sections need more rows than the slot has:
   watching a session.
 - A drag-select that starts in the transcript stops at the separator; one that starts in the panel
   away from the grip selects nothing in v1.
+
+## Keyboard
+
+The panel is the second region of **navigation mode** (ADR 0111), the modal cursor that also walks
+the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same in both regions.
+
+- **Stops** are the click targets of "Pointer", in paint order: every section header, each sub-agent
+  row and each changed-file row; adjacent rows that share one target are one stop, so the tasks body
+  is one stop (the task-list card) and the usage rows are one (`/usage`). The `+N more` row and a body
+  row with nothing to open are none.
+- **Entering.** `⌥↑`/`⌥↓` start the mode in the transcript, or in the panel when the transcript has
+  no stop — `⌥↑` at the last stop, `⌥↓` at the first. Inside the mode `→` moves the cursor from the
+  transcript into the panel, onto the stop it stood on there before or, on the first visit, the stop
+  nearest the transcript row it leaves; `←` takes it back to the transcript row it left. `→` into a
+  column that does not show or has no stop, and `←` towards a transcript with no stop, do nothing,
+  and both keys are claimed even then, so the prompt's caret never moves under a reader who is
+  navigating.
+- **Moving.** `↑`/`↓` walk the column's stops, clamped at either end, never wrapping.
+- **`⏎` is the click** on the stop the cursor stands on, through the click's own path, so the rules
+  under "Pointer" hold for it unchanged: under a modal pane it does nothing, and on a pin while
+  watching a session it flashes the watch refusal. On a header it toggles the section's pin and the
+  cursor stays on that header; a stop that opens a detail — a run's Run view, the task-list card, a
+  changed file's tool block, `/usage` — ends the mode, the keys going back to the prompt.
+- **`^x`** on a sub-agent row stops that run (ADR 0086 D5), with no confirmation, and leaves the
+  cursor where it was so the row can say how the run ended; while watching it flashes the watch
+  refusal. On any other stop `^x` is not the mode's.
+- **Leaving.** `esc` leaves the mode from either region, and so does a printable key, which still
+  lands in the prompt. Inside a Run view, `esc` with the cursor in the panel leaves the mode and
+  keeps the view open; with the cursor on the view's transcript it goes one level up, as before.
+- **Identity.** The column re-lays out under every Event, so the cursor holds its stop by identity —
+  a header by its section, a sub-agent row by its run, a changed-file row by its path, the task card,
+  the usage report — rather than by row. A stop that has gone falls back to the stop of the same
+  section nearest the row it was on, then to the column's first stop; a column left with no stop
+  hands the cursor to the transcript, or ends the mode where the transcript has none either.
+- **The mark.** The cursor's row wears a `▌` in the blank gutter cell right of the separator, plus the
+  selection tone across its content, so a terminal that paints no colour still shows it (ADR 0111
+  D6, ADR 0052 D4); the separator is untouched, so the grip stays put. A stop of several rows is
+  marked on its first. Only the region the cursor stands in is painted: the transcript's remembered
+  row is not while the cursor is in the panel, and the panel's is not while it is in the transcript.
+- **Decisions come first.** While an approval or an `ask_user` question owns `↑`/`↓`/`⏎`, the mode is
+  suspended, mark and keys together, and comes back on the same stop once the decision is taken.
 
 ## Run view
 
@@ -184,7 +227,9 @@ conversation gives the panel back to the top level.
 - Each write is saved to the global config as a pin-glyph click or a separator drag is; a failed save keeps the change
   for the session and says `not saved`. The report answers mid-run, the writing forms wait for idle,
   and the command is refused while watching a session.
-- No key binding in v1 (ADR 0110 decision 8), for the panel or for its width.
+- No key shows or hides the panel or sets its width: the keyboard reaches the panel's stops through
+  navigation mode ("Keyboard"; ADR 0111 supersedes ADR 0110 decision 8), and the width changes by a
+  drag or `/panel width`.
 
 ## Replay
 

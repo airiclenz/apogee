@@ -350,7 +350,7 @@ docs/manual/commands.md — /help row, ⌥↑/⌥↓ paragraph; docs/manual/conf
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestHelp' ./internal/tui/ && ! grep -n 'keyboard focus\|no key binding' docs/manual/commands.md docs/manual/configuration.md`
 **Commit:** `docs(manual): describe navigation mode across the transcript and side panel`
 
-## 11. Layout specs and glossary describe navigation mode
+## 11. Layout specs and glossary describe navigation mode — ✅ DONE (2026-11-09)
 
 **What:** spec and glossary for items 6–9. Depends on item 10.
 **Regression guard.** The rewrite rule is every sentence describing the block cursor's paint or keys, or the panel as

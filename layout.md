@@ -1472,7 +1472,9 @@ pane and no longer walks up, so the header drops the hint exactly where the stat
 drops it — the two rows advertise one key, and neither may name a press the other does not have. The
 trail itself stays, because where the reader is is still true. A motionless click
 anywhere on the band — any of its three rows — goes **one** level up, and `esc` does the same: the trail is a sign rather than
-a set of jump targets, so leaving a run two deep is two presses.
+a set of jump targets, so leaving a run two deep is two presses. Nor does `esc` walk up while
+navigation mode's cursor stands in the side panel: the panel is not the view, so
+that press leaves the mode and the view stays open.
 
 **A workflow stage is a level of its own.** A workflow block's stage row (above) opens a **stage
 view** when the stage has more than one item, has run more than one round, or has retried its item:
@@ -1496,9 +1498,9 @@ with the item's name as the crumb.
 **`esc` means back, `^x` stops one run, and `esc×2` cancels the Turn.** Two gestures end work and
 they reach different things. `^x` **stops one sub-agent's run** and nothing else (ADR 0086 D5):
 inside a view it stops the run on screen, and on the block cursor it stops the delegation whose row
-the cursor stands on — a member row of a `✦ Sub-Agent (N)` umbrella, or a nested delegation's row
-inside a view, which takes the key over the view's own run because that is the run the human is
-pointing at. It asks for no confirmation, since all it discards is the rest of one delegation's
+the cursor stands on — a member row of a `✦ Sub-Agent (N)` umbrella, a nested delegation's row
+inside a view, or a sub-agent row in the side panel, each of which takes the key over the view's own
+run because that is the run the human is pointing at. It asks for no confirmation, since all it discards is the rest of one delegation's
 work: the engine folds what the run had done into the partial result its parent reads, the
 parent's Turn goes on, and the row reports `stopped by you` once the run has. On a run that is over,
 or one that never learned a run id, `^x` does nothing, and a standing ask or approval pane owns its
@@ -3139,8 +3141,14 @@ On a wide terminal a column on the right of the transcript slot keeps live sessi
 (ADR 0110). It is 36 columns wide by default, and the user resizes it by dragging its separator,
 between 24 columns and the window less the transcript floor (100 under `auto`, 80 under `on`) less
 the scroll-bar column; a double-click on the separator or `/panel width reset` puts back the 36, and
-`/panel width <n>` sets it outright (adr-0110-amend-1108). Its shape, sections, thresholds and pointer
-rules are specced in [`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md). The
+`/panel width <n>` sets it outright (adr-0110-amend-1108). Its shape, sections, thresholds, pointer
+rules and keyboard are specced in [`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md).
+The keyboard reaches it through **navigation mode** (ADR 0111): the block cursor's walk spans two
+regions, the transcript and the panel, `→` and `←` move between them, and `↑`/`↓`, `⏎`, `esc` and
+`^x` mean the same in both — the panel's stops are its click targets, and `⏎` on one is that click.
+The cursor's row wears a `▌` as well as the selection tone, over the transcript row's marker cell or
+in the panel's gutter cell right of the separator, and only the region the cursor stands in is
+painted. The
 rule that binds the rest of the frame is stated here: **the panel's column appears or vanishes only
 when the window crosses a threshold or the user changes `ui.side-panel.show`, and changes width
 only on a deliberate act of the user's — a separator drag, a double-click, `/panel width` or a
