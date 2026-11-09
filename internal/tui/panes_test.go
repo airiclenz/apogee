@@ -72,20 +72,21 @@ func TestEveryFramePaneHasASpec(t *testing.T) {
 	}
 }
 
-// TestTheFourReportsPaintInTheFramePaneOrder is the paint the goldens do not cover: every report up at
+// TestTheFiveReportsPaintInTheFramePaneOrder is the paint the goldens do not cover: every report up at
 // once, on a window tall enough to seat them all. Each is on the composed frame, each opens on the
 // row the one above it closes on — the framePane order, walked once (stackTranscriptSlot) — and the
 // frame the human sees carries their titles in that same order.
-func TestTheFourReportsPaintInTheFramePaneOrder(t *testing.T) {
+func TestTheFiveReportsPaintInTheFramePaneOrder(t *testing.T) {
 	t.Parallel()
 
-	m := bothPanesModel(t, 4)
+	m := foldMCPEvents(t, bothPanesModel(t, 4), mcpConnected("alpha", 1))
 	m.thinkingPane = reportPane{open: true}
 	m.advicePane = reportPane{open: true}
+	m.mcpPane = reportPane{open: true}
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 60})
 
-	reports := []reportKind{usageReport, inspectReport, thinkingReport, adviceReport}
-	titles := []string{usageTitle, inspectorTitle, thinkingTitle, adviceTitle}
+	reports := []reportKind{usageReport, inspectReport, thinkingReport, adviceReport, mcpReport}
+	titles := []string{usageTitle, inspectorTitle, thinkingTitle, adviceTitle, mcpTitle}
 	below := -1
 	for i, r := range reports {
 		if !m.openPanes().has(r.pane()) {
@@ -209,6 +210,10 @@ func paneFixtures() []paneFixture {
 			t.Helper()
 			return advicePaneModel(t, 0)
 		}},
+		{"mcp pane", paneMCP, func(t *testing.T) Model {
+			t.Helper()
+			return mcpPaneModel(t, 40)
+		}},
 		{"autocomplete dropdown", paneDropdown, func(t *testing.T) Model {
 			t.Helper()
 			return dropdownPaneModel(t, testOpts, "/")
@@ -240,7 +245,7 @@ var overlayHeightQueryGroupPanes = [overlayHeightGroupKinds][]framePane{
 	overlayHeightBrowserAndPicker: {paneBrowser, panePicker},
 	overlayHeightWorkflows:        {paneWorkflows},
 	overlayHeightSettings:         {paneSettings},
-	overlayHeightReports:          {paneUsage, paneInspector, paneThinking, paneAdvice},
+	overlayHeightReports:          {paneUsage, paneInspector, paneThinking, paneAdvice, paneMCP},
 	overlayHeightDropdown:         {paneDropdown},
 }
 

@@ -11,7 +11,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The shared report pane — /usage, /inspect, /thinking and /advice through one body (reportpane.go)
+// The shared report pane — /usage, /inspect, /thinking, /advice and /mcp through one body (reportpane.go)
 // ----------------------------------------------------------------------------
 //
 // The assertions below drive the reports through the SHARED functions with the kind filled in — the
@@ -36,6 +36,7 @@ func reportCases(t *testing.T) []reportCase {
 		{name: "/inspect", kind: inspectReport, model: inspectorPaneModel(t, 40)},
 		{name: "/thinking", kind: thinkingReport, model: thinkingPaneModel(t, 40)},
 		{name: "/advice", kind: adviceReport, model: advicePaneModel(t, 40)},
+		{name: "/mcp", kind: mcpReport, model: mcpPaneModel(t, 40)},
 	}
 }
 

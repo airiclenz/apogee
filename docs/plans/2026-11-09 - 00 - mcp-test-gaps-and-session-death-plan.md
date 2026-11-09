@@ -41,7 +41,10 @@
 - 6: guard folded (writer's decision on the wait budget; reviewer guard: a prompt births the journal before the kill).
 - 7: guard folded (writer's decision on what the docs state; reviewer guards: wider sweep, three more files, the sweep as Acceptance).
 
-## 1. Cover `/mcp` in the shared report-pane and frame-order tests
+## 1. Cover `/mcp` in the shared report-pane and frame-order tests — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the window height of the renamed frame-order test stays at 60 — the five panes seat at 80x60; the reportpane_test.go section header now names /mcp among the reports through one body.
+NOTES (2026-11-09): shipped-code comments still say "the four reports" (internal/tui/mouse.go:338, internal/tui/model.go:3662, internal/tui/reportpane.go:106) and pointershape_test.go's fourReportsModel rows omit /mcp — pre-existing, outside this test-only item.
 
 **What:** test-only. `reportCases` (`internal/tui/reportpane_test.go`) gains a `{"/mcp", mcpReport, mcpPaneModel(t, 40)}`
 case; `mcpPaneModel(t, n)` folds `n` `mcpConnected(fmt.Sprintf("s%02d", i), 1)` Events through `foldMCPEvents`,

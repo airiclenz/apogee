@@ -39,6 +39,19 @@ func foldMCPEvents(t *testing.T, m Model, events ...domain.MCPServerEvent) Model
 	return m
 }
 
+// mcpPaneModel folds `servers` connected servers and opens the /mcp pane at the top — more rows
+// than it can seat, the state the shared scroll and hit-test drivers need a full window under.
+func mcpPaneModel(t *testing.T, servers int) Model {
+	t.Helper()
+	m := newTestModel(t)
+	for i := range servers {
+		m = foldMCPEvents(t, m, mcpConnected(fmt.Sprintf("s%02d", i), 1))
+	}
+	m.mcpPane = reportPane{open: true}
+	m.layout()
+	return m
+}
+
 // mcpRowTexts is the pane's rows for this frame as plain text, one string per row.
 func mcpRowTexts(m Model) []string {
 	rows, _ := m.mcpRows(m.thinkingWrapColumn())
