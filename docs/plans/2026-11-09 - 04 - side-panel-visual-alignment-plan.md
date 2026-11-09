@@ -142,7 +142,12 @@ internal/tui/navmode_test.go — TestNavModeEnterMatchesClickPerKind
 **Acceptance:** `go test -race -count=1 -run 'Panel|Overlay|NavMode|CursorMark|PointerShape' ./internal/tui/`
 **Commit:** `feat(tui): lead each side-panel header with its pin glyph`
 
-## 5. Fold side-panel sections by click and persist the fold
+## 5. Fold side-panel sections by click and persist the fold — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): model.go and settingsapply.go needed no change, so they are not in FILES — the panel reads `ui.side-panel.folded` off `m.opts.UI` on every frame (`panelSections`), and item 3 already routed the key through `settingsApplyLocal`'s side-panel arm, so there is no seed to re-read; `TestSettingsApplyLocalFoldsTheSidePanel` (settingsapply_test.go) pins the hand-edit re-read folding and opening the panel live.
+NOTES (2026-11-09): the toggle `toggleSidePanelFold` (and its canonical-list helper `withSectionFolded`) sits in sidepanel.go beside `setPanelSectionMode` rather than in settingsapply.go; it mirrors `toggleTaskListFold`'s contract through item 3's `WriteSidePanelFolded` seam. The header reuses the transcript's `leaderRowIn`/`indicatorRow`/`toolRowCells`/`stateIndicator`.
+NOTES (2026-11-09): `TestSidePanelClickHeaderTitleBlankAndWheelDoNothing` keeps its name (no renames outside the item's text); its doc comment and body no longer claim the header title, which `TestSidePanelFoldTogglesAndWritesBack` now pins. The shared test readers `panelText`/`columnText` cut a header's leader and indicator (`stripHeaderTail`) so content tests read the header's words; `TestSidePanelHeaderLeadsWithPin` asserts the full raw header, the `▼` cell and both roles.
+NOTES (2026-11-09): a section squeezed to its header by the overflow (not folded by the human) still wears `▼` — the overflow `▶` and the "opened" tier are item 7's.
 
 **What:** Third step of `panel-section-user-fold`. Depends on items 3 and 4.
 **Regression guard.** The fold state is held as the canonical domain string on m.opts.UI, as SidePanelSections is. It is never a map or other no-copy state seeded into the value-copied Model (ADR 0011); writes go through item 3's `WriteSidePanelFolded` seam. A title click now folds: flip `TestSidePanelClickHoverShapeMatches`' header-title case to `shapePointer`, drop the header-title cell from `TestSidePanelClickHeaderTitleBlankAndWheelDoNothing` and pin it in the new fold test; update the `panelTargetNone` comment (`sidepanel.go`) and the spec's Pointer section to match.

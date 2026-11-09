@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -327,5 +328,35 @@ func TestColorSchemeSwitchKeepsTheGlyphSet(t *testing.T) {
 	}
 	if applied.th.glyphs != safeGlyphs {
 		t.Errorf("a scheme switch under ui.glyphs: safe left the theme drawing %+v; want the safe set", applied.th.glyphs)
+	}
+}
+
+// TestSettingsApplyLocalFoldsTheSidePanel: `ui.side-panel.folded` is structured — edited in the
+// file, never on a row — so it reaches the session as a re-read of a hand-edited file, and the
+// renderer lands it itself: the next frame paints the named section folded to its header, and a
+// re-read that drops it opens the section again. A list naming no section lands nothing.
+func TestSettingsApplyLocalFoldsTheSidePanel(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
+	panelRowY(t, m, "read the plan")
+
+	folded, _, _, handled, err := m.settingsApplyLocal(domain.UIKeySidePanelFolded, "[tasks]")
+
+	if err != nil || !handled {
+		t.Fatalf("settingsApplyLocal(%q) = handled %v, err %v", domain.UIKeySidePanelFolded, handled, err)
+	}
+	if rows := panelText(t, folded); slices.ContainsFunc(rows, func(r string) bool { return strings.Contains(r, "read the plan") }) {
+		t.Errorf("the re-read fold left the tasks body painted:\n%s", strings.Join(rows, "\n"))
+	}
+
+	opened, _, _, _, err := folded.settingsApplyLocal(domain.UIKeySidePanelFolded, "[]")
+
+	if err != nil || opened.opts.UI.SidePanelFolded != "" {
+		t.Fatalf("re-read of [] = folded %q, err %v; want none folded", opened.opts.UI.SidePanelFolded, err)
+	}
+	panelRowY(t, opened, "read the plan")
+
+	if _, _, _, _, err := m.settingsApplyLocal(domain.UIKeySidePanelFolded, "[nope]"); err == nil {
+		t.Error("a fold list naming no section was applied")
 	}
 }

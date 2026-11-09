@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -395,8 +396,21 @@ func panelModel(t *testing.T, sections domain.SidePanelSections, height int, eve
 	return m
 }
 
+// panelHeaderTail is a header row's dotted leader and its fold indicator at the right edge, in
+// either glyph set: what [stripHeaderTail] cuts off so a row reads as its pin, title and summary.
+var panelHeaderTail = regexp.MustCompile(` [⋯·]+ [▼▶►]$`)
+
+// stripHeaderTail is row with a header's leader and fold indicator cut off; any other row is
+// returned as it is. The header's own shape is pinned by TestSidePanelHeaderLeadsWithPin and
+// TestSidePanelFoldTogglesAndWritesBack, so the tests reading a section's content read the
+// header's words alone.
+func stripHeaderTail(row string) string {
+	return panelHeaderTail.ReplaceAllString(row, "")
+}
+
 // panelText is the column's content as the frame paints it: one escape-stripped, right-trimmed
-// string per row above the session-name rule, the trailing blank rows dropped.
+// string per row above the session-name rule, the trailing blank rows dropped, each header's
+// leader and fold indicator cut off ([stripHeaderTail]).
 func panelText(t *testing.T, m Model) []string {
 	t.Helper()
 
@@ -409,17 +423,18 @@ func panelText(t *testing.T, m Model) []string {
 			}
 			return column
 		}
-		column = append(column, strings.TrimRight(ansi.Cut(ln, slot+2, m.width), " "))
+		column = append(column, stripHeaderTail(strings.TrimRight(ansi.Cut(ln, slot+2, m.width), " ")))
 	}
 	t.Fatal("no ▔ rule below the slot's rows")
 	return nil
 }
 
-// columnText is sidePanelColumn's rows rows, escape-stripped and right-trimmed.
+// columnText is sidePanelColumn's rows rows, escape-stripped and right-trimmed, each header's
+// leader and fold indicator cut off ([stripHeaderTail]).
 func columnText(m Model, rows int) []string {
 	column := m.sidePanelColumn(rows)
 	for i, row := range column {
-		column[i] = strings.TrimRight(ansi.Cut(ansi.Strip(row), sidePanelChromeWidth, m.panelWidth()), " ")
+		column[i] = stripHeaderTail(strings.TrimRight(ansi.Cut(ansi.Strip(row), sidePanelChromeWidth, m.panelWidth()), " "))
 	}
 	return column
 }
@@ -1395,15 +1410,17 @@ func entryOnScreen(m Model, at int) bool {
 	return line >= m.viewport.YOffset() && line < m.viewport.YOffset()+m.transcriptRows()
 }
 
-// settingsSpy is a settings host that records every write it is handed: the section writes it
-// answers with the list a fresh file would resolve to, any other write, and every reset.
+// settingsSpy is a settings host that records every write it is handed: the section and fold
+// writes it answers with the list a fresh file would resolve to, any other write, and every reset.
 type settingsSpy struct {
 	sections []domain.SidePanelEntry
+	folds    []string // one `<section>=<folded>` per fold write
 	writes   []string
 	resets   []string
 }
 
-// host is the spy as a SettingsHost, its section write failing with failure where one is given.
+// host is the spy as a SettingsHost, its section and fold writes failing with failure where one is
+// given.
 func (s *settingsSpy) host(failure error) fakeSettingsHost {
 	return fakeSettingsHost{
 		write: func(path, value string) error {
@@ -1420,6 +1437,16 @@ func (s *settingsSpy) host(failure error) fakeSettingsHost {
 				return "", failure
 			}
 			return withSectionMode(domain.DefaultSidePanelSections, section, mode), nil
+		},
+		writeFolded: func(section domain.SidePanelSection, folded bool) (domain.SidePanelFolded, error) {
+			s.folds = append(s.folds, string(section)+"="+strconv.FormatBool(folded))
+			if failure != nil {
+				return "", failure
+			}
+			if !folded {
+				return "", nil
+			}
+			return domain.SpellSidePanelFolded([]domain.SidePanelSection{section}), nil
 		},
 	}
 }
@@ -1663,9 +1690,10 @@ func TestSidePanelClickTaskRowWritesNoSetting(t *testing.T) {
 	}
 }
 
-// TestSidePanelClickHeaderTitleBlankAndWheelDoNothing pins the cells that target nothing: the
-// header title, a blank cell below the sections and a wheel notch over the column leave the model
-// as it was — no view opened, no section toggled, the transcript not scrolled.
+// TestSidePanelClickHeaderTitleBlankAndWheelDoNothing pins the cells that target nothing: a blank
+// cell below the sections and a wheel notch over the column — a header row's included — leave the
+// model as it was — no view opened, no section toggled, the transcript not scrolled. A click on the
+// header title folds the section (TestSidePanelFoldTogglesAndWritesBack).
 func TestSidePanelClickHeaderTitleBlankAndWheelDoNothing(t *testing.T) {
 	t.Parallel()
 	m := streamOneScreen(t, panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...))
@@ -1673,14 +1701,13 @@ func TestSidePanelClickHeaderTitleBlankAndWheelDoNothing(t *testing.T) {
 	offset, sections := m.viewport.YOffset(), m.opts.UI.SidePanelSections
 	header := panelRowY(t, m, "Tasks")
 
-	for _, cell := range [][2]int{{panelBodyX(m), header}, {panelBodyX(m), m.transcriptRows() - 1}} {
-		m = clickCell(t, m, cell[0], cell[1])
-	}
+	m = clickCell(t, m, panelBodyX(m), m.transcriptRows()-1)
 	m = step(t, m, tea.MouseWheelMsg{X: panelBodyX(m), Y: header, Button: tea.MouseWheelUp})
 
-	if m.viewport.YOffset() != offset || m.opts.UI.SidePanelSections != sections || m.inRunView() {
-		t.Errorf("offset %d→%d, sections %q→%q, in view %v; want all unchanged",
-			offset, m.viewport.YOffset(), sections, m.opts.UI.SidePanelSections, m.inRunView())
+	if m.viewport.YOffset() != offset || m.opts.UI.SidePanelSections != sections || m.inRunView() ||
+		m.opts.UI.SidePanelFolded != "" {
+		t.Errorf("offset %d→%d, sections %q→%q, folded %q, in view %v; want all unchanged",
+			offset, m.viewport.YOffset(), sections, m.opts.UI.SidePanelSections, m.opts.UI.SidePanelFolded, m.inRunView())
 	}
 	if m.transcriptSel.active || m.sel.active {
 		t.Error("a click on the column armed a selection")
@@ -1688,7 +1715,8 @@ func TestSidePanelClickHeaderTitleBlankAndWheelDoNothing(t *testing.T) {
 }
 
 // TestSidePanelClickHoverShapeMatches pins the pointer shape over the column to what a click there
-// does: the hand over a body row and the pin glyph, the arrow over a header title and a blank cell.
+// does: the hand over a body row, the pin glyph and a header title (which folds), the arrow over a
+// blank cell.
 func TestSidePanelClickHoverShapeMatches(t *testing.T) {
 	t.Parallel()
 	m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
@@ -1702,7 +1730,7 @@ func TestSidePanelClickHoverShapeMatches(t *testing.T) {
 	}{
 		{"body row", panelBodyX(m), panelRowY(t, m, "read the plan"), shapePointer},
 		{"pin glyph", m.panelPinX(), header, shapePointer},
-		{"header title", panelBodyX(m), header, shapeDefault},
+		{"header title", panelBodyX(m), header, shapePointer},
 		{"blank cell", panelBodyX(m), m.transcriptRows() - 1, shapeDefault},
 	}
 	for _, tc := range cases {
@@ -1803,6 +1831,7 @@ func TestSidePanelClickRefusedUnderModalPanes(t *testing.T) {
 				{"sub-agent row", panelBodyX(m), panelRowY(t, m, "scout")},
 				{"usage row", panelBodyX(m), panelRowY(t, m, "cache hit")},
 				{"pin glyph", m.panelPinX(), panelRowY(t, m, "Tasks")},
+				{"header title", panelBodyX(m), panelRowY(t, m, "Tasks")},
 			}
 			for _, cell := range targets {
 				if got := m.pointerShapeAt(pre, cell.x, cell.y); got != shapeDefault {
@@ -1815,12 +1844,12 @@ func TestSidePanelClickRefusedUnderModalPanes(t *testing.T) {
 				m = clickCell(t, m, cell.x, cell.y)
 			}
 
-			if m.inRunView() || m.usagePane.open || m.opts.UI.SidePanelSections != sections {
-				t.Errorf("in view %v, /usage open %v, sections %q→%q; want all unchanged",
-					m.inRunView(), m.usagePane.open, sections, m.opts.UI.SidePanelSections)
+			if m.inRunView() || m.usagePane.open || m.opts.UI.SidePanelSections != sections || m.opts.UI.SidePanelFolded != "" {
+				t.Errorf("in view %v, /usage open %v, sections %q→%q, folded %q; want all unchanged",
+					m.inRunView(), m.usagePane.open, sections, m.opts.UI.SidePanelSections, m.opts.UI.SidePanelFolded)
 			}
-			if len(spy.writes) != 0 || len(spy.sections) != 0 || len(m.settingEdits) != 0 {
-				t.Errorf("clicks wrote %v / %v (journal %v); want nothing", spy.writes, spy.sections, m.settingEdits)
+			if len(spy.writes) != 0 || len(spy.sections) != 0 || len(spy.folds) != 0 || len(m.settingEdits) != 0 {
+				t.Errorf("clicks wrote %v / %v / %v (journal %v); want nothing", spy.writes, spy.sections, spy.folds, m.settingEdits)
 			}
 			if !m.modalPaneOpen() {
 				t.Error("a click on the column closed the modal pane")
@@ -1890,35 +1919,169 @@ func TestSidePanelClickBesideABlockHeaderLeavesIt(t *testing.T) {
 
 // TestSidePanelHeaderLeadsWithPin pins the header's shape: its pin glyph leads it — ● pinned, ○
 // auto — on the cell a pin click lands on ([Model.panelPinX]), its summary sits in parentheses, and
-// the column's right edge stays blank, so a click there toggles nothing.
+// a `tool-leader` dotted leader runs from it to the fold's ▼ at the column's right edge, painted in
+// the `tool-indicator` role, as a transcript header's does.
 func TestSidePanelHeaderLeadsWithPin(t *testing.T) {
 	t.Parallel()
 	m := panelModel(t, "[tasks: auto, usage: pinned]", 30, taskList(0, "one"))
-	spy := &settingsSpy{}
-	m.opts.Settings = spy.host(nil)
 	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
+	painted := strings.Split(m.View().Content, "\n")
+	dot := m.th.glyphs.leaderDot
 
-	for _, tc := range []struct{ title, pin, header string }{
+	for _, tc := range []struct{ title, pin, words string }{
 		{"Tasks", glyphPanelOpen, "○ Tasks (0/1)"},
 		{"Usage", glyphPanelPinned, "● Usage"},
 	} {
 		y := panelRowY(t, m, tc.title)
-		if got := panelText(t, m)[y]; got != tc.header {
-			t.Errorf("the %s header paints %q, want %q", tc.title, got, tc.header)
+		row := strings.TrimRight(ansi.Cut(frame[y], m.panelPinX(), m.width), " ")
+		dots := m.width - m.panelPinX() - len([]rune(tc.words)) - len(" ") - len(" ") - len([]rune(glyphExpanded))
+		if want := tc.words + " " + strings.Repeat(dot, dots) + " " + glyphExpanded; row != want {
+			t.Errorf("the %s header paints %q, want %q", tc.title, row, want)
 		}
 		if got := ansi.Cut(frame[y], m.panelPinX(), m.panelPinX()+1); got != tc.pin {
 			t.Errorf("the %s header's pin cell holds %q, want %q", tc.title, got, tc.pin)
 		}
-		if got := ansi.Cut(frame[y], m.width-1, m.width); got != " " {
-			t.Errorf("the %s header's right edge holds %q, want a blank cell", tc.title, got)
+		if got := ansi.Cut(frame[y], m.width-1, m.width); got != glyphExpanded {
+			t.Errorf("the %s header's right edge holds %q, want %q", tc.title, got, glyphExpanded)
+		}
+		if !strings.Contains(painted[y], m.th.toolIndicator.Render(glyphExpanded)) {
+			t.Errorf("the %s header's %s is not painted in the tool-indicator role: %q", tc.title, glyphExpanded, painted[y])
+		}
+		if !strings.Contains(painted[y], m.th.toolLeader.Render(strings.Repeat(dot, dots))) {
+			t.Errorf("the %s header's leader is not painted in the tool-leader role: %q", tc.title, painted[y])
 		}
 	}
+}
 
-	m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+// foldedPanelModel is panelModel built from Options whose `ui.side-panel.folded` is folded and whose
+// glyph set is glyphs, so a model starts folded the way a session started from that config does.
+func foldedPanelModel(t *testing.T, folded domain.SidePanelFolded, glyphs domain.GlyphSet, events ...domain.Event) Model {
+	t.Helper()
 
-	if len(spy.sections) != 0 || m.opts.UI.SidePanelSections != "[tasks: auto, usage: pinned]" {
-		t.Errorf("a click on the right edge wrote %v, sections %q; want nothing toggled", spy.sections, m.opts.UI.SidePanelSections)
+	opts := testOpts
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	opts.UI.SidePanelSections = domain.DefaultSidePanelSections
+	opts.UI.SidePanelFolded = folded
+	opts.UI.Glyphs = glyphs
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+	m.panel = sidepanel.New(func() time.Time { return panelNow })
+	for _, e := range events {
+		m = m.foldEvent(e)
 	}
+	return m
+}
+
+// panelHeaderGlyph is the fold indicator at the right edge of the header row titled title.
+func panelHeaderGlyph(t *testing.T, m Model, title string) string {
+	t.Helper()
+	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
+	return ansi.Cut(frame[panelRowY(t, m, title)], m.width-1, m.width)
+}
+
+// TestSidePanelFoldTogglesAndWritesBack drives the fold (docs/layout/side-panel-layout.md,
+// "Pointer"): a click on a header anywhere but its pin glyph folds the section to its header row,
+// ▶ at its edge, and writes `ui.side-panel.folded` silently through the settings host; a second
+// click opens it again. A failed write keeps the fold and says `not saved`; a model built from a
+// folded list starts folded, and spare rows never open it; the safe glyph set folds to ►; and a
+// fold while watching toggles and writes, as a task-list card's does.
+func TestSidePanelFoldTogglesAndWritesBack(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fold then open", func(t *testing.T) {
+		t.Parallel()
+		m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
+		spy := &settingsSpy{}
+		m.opts.Settings = spy.host(nil)
+		notes := len(m.transcript.entries)
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
+
+		if got := panelHeaderGlyph(t, m, "Tasks"); got != m.th.glyphs.collapsed {
+			t.Errorf("the folded header's edge holds %q, want %q", got, m.th.glyphs.collapsed)
+		}
+		if rows := panelText(t, m); slices.ContainsFunc(rows, func(r string) bool { return strings.Contains(r, "read the plan") }) {
+			t.Errorf("the folded section still paints its body:\n%s", strings.Join(rows, "\n"))
+		}
+		if m.opts.UI.SidePanelFolded != "[tasks]" {
+			t.Errorf("folded %q, want [tasks]", m.opts.UI.SidePanelFolded)
+		}
+		if len(m.settingEdits) != 1 || m.settingEdits[0] != (settingEdit{path: domain.UIKeySidePanelFolded, value: "[tasks]"}) {
+			t.Errorf("journal %+v, want one %s=[tasks] entry", m.settingEdits, domain.UIKeySidePanelFolded)
+		}
+		if len(m.transcript.entries) != notes {
+			t.Errorf("the fold added %d transcript entries; a landed write says nothing", len(m.transcript.entries)-notes)
+		}
+
+		m = clickCell(t, m, m.width-1, panelRowY(t, m, "Tasks"))
+
+		if got := panelHeaderGlyph(t, m, "Tasks"); got != glyphExpanded {
+			t.Errorf("the reopened header's edge holds %q, want %q", got, glyphExpanded)
+		}
+		panelRowY(t, m, "read the plan")
+		if want := []string{"tasks=true", "tasks=false"}; !slices.Equal(spy.folds, want) {
+			t.Errorf("fold writes %v, want %v", spy.folds, want)
+		}
+		if m.opts.UI.SidePanelFolded != "" || len(spy.sections) != 0 {
+			t.Errorf("folded %q, section writes %v; want none folded and no pin moved", m.opts.UI.SidePanelFolded, spy.sections)
+		}
+	})
+
+	t.Run("a failed write keeps the fold and says so", func(t *testing.T) {
+		t.Parallel()
+		m := panelModel(t, domain.DefaultSidePanelSections, 30, panelTaskCard()...)
+		m.opts.Settings = (&settingsSpy{}).host(fmt.Errorf("disk full"))
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
+
+		if got := panelHeaderGlyph(t, m, "Tasks"); got != m.th.glyphs.collapsed || m.opts.UI.SidePanelFolded != "[tasks]" {
+			t.Errorf("edge %q, folded %q after a failed write; want the fold to stand", got, m.opts.UI.SidePanelFolded)
+		}
+		if !strings.Contains(plain(m.View()), sidePanelFoldedSource+": "+taskListNotSavedNote+"disk full") {
+			t.Error("the failed write is not reported in the transcript")
+		}
+	})
+
+	t.Run("a folded list starts folded and spare rows never open it", func(t *testing.T) {
+		t.Parallel()
+		m := foldedPanelModel(t, "[usage]", domain.GlyphsUnicode, panelUsageReading(panelUsed), standingCost(200, 100))
+
+		if got := panelText(t, m); !slices.Equal(got, []string{"○ Usage (62%)"}) {
+			t.Errorf("a column of 30 rows paints\n%s\nwant the usage header alone", strings.Join(got, "\n"))
+		}
+		if got := panelHeaderGlyph(t, m, "Usage"); got != "▶" {
+			t.Errorf("the folded header's edge holds %q, want ▶", got)
+		}
+	})
+
+	t.Run("the safe glyph set folds to its pointer", func(t *testing.T) {
+		t.Parallel()
+		m := foldedPanelModel(t, "[usage]", domain.GlyphsSafe, panelUsageReading(panelUsed))
+
+		if got := panelHeaderGlyph(t, m, "Usage"); got != "►" {
+			t.Errorf("the folded header's edge holds %q under the safe set, want ►", got)
+		}
+	})
+
+	t.Run("a fold while watching toggles and writes", func(t *testing.T) {
+		t.Parallel()
+		m := enterWatchOn(t, watchEngine(), newWatchFixture(t, "watched", nil, 0))
+		m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+		m.opts.UI.SidePanelSections = "[tasks: pinned]"
+		spy := &settingsSpy{}
+		m.opts.Settings = spy.host(nil)
+		m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+		x, y := panelBodyX(m), panelRowY(t, m, "Tasks")
+		if got := m.pointerShapeAt(m.withFrameSpans(), x, y); got != shapePointer {
+			t.Errorf("hover over the watched header title: shape %q, want the pointer", got.name())
+		}
+
+		m = clickCell(t, m, x, y)
+
+		if m.flash == watchRefusedFlash || m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks=true"}) {
+			t.Errorf("flash %q, folded %q, writes %v; want the fold toggled and written", m.flash, m.opts.UI.SidePanelFolded, spy.folds)
+		}
+	})
 }
 
 // TestSidePanelPinTogglesAndWritesBack drives the pin glyph: a click on an auto section's ○ pins

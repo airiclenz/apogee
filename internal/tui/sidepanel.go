@@ -59,6 +59,9 @@ const (
 	// sidePanelSectionsSource is the label a failed pin write-back's transcript error carries — the
 	// key's own name, taskListOpenSource's posture.
 	sidePanelSectionsSource = "side-panel.sections"
+	// sidePanelFoldedSource is the label a failed fold write-back's transcript error carries —
+	// `side-panel.folded: not saved: …`, sidePanelSectionsSource's posture.
+	sidePanelFoldedSource = "side-panel.folded"
 )
 
 // sidePanelChromeWidth is the columns the column spends before its content: the separator and the
@@ -141,6 +144,7 @@ type panelSection struct {
 	title     string
 	summary   string
 	isPinned  bool
+	isFolded  bool // listed in `ui.side-panel.folded`: drawn as its header row alone, whatever room is left
 	body      []string
 	subAgents []sidepanel.SubAgentRow
 	files     []sidepanel.FileRow
@@ -293,7 +297,8 @@ func panelLayout(sections []panelSection, rows int) []panelLine {
 // panelAllocation settles the overflow (docs/layout/side-panel-layout.md, "Overflow"): every shown
 // section keeps its header row, and the rows left over go to whole bodies — pinned sections first,
 // then auto ones, each pass in list order — so a section whose body does not fit folds to its
-// header alone. When not even every header fits, the last ones in list order are left out and the
+// header alone. A section the human folded costs its header row and nothing more: it takes no body
+// rows, and no spare room unfolds it. When not even every header fits, the last ones in list order are left out and the
 // bottom row is kept for `+N more`. kept is how many sections, from the front, are drawn.
 func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []bool) {
 	isExpanded = make([]bool, len(sections))
@@ -303,7 +308,8 @@ func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []
 	spare := rows - len(sections)
 	for _, isPinnedPass := range []bool{true, false} {
 		for i, section := range sections {
-			if section.isPinned != isPinnedPass || len(section.body) == 0 || len(section.body) > spare {
+			if section.isPinned != isPinnedPass || section.isFolded || len(section.body) == 0 ||
+				len(section.body) > spare {
 				continue
 			}
 			isExpanded[i], spare = true, spare-len(section.body)
@@ -313,7 +319,9 @@ func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []
 }
 
 // panelSections is the sections the column shows, in list order: every entry of
-// `ui.side-panel.sections` that is pinned, or auto while its live rule holds.
+// `ui.side-panel.sections` that is pinned, or auto while its live rule holds, each folded where
+// `ui.side-panel.folded` lists it. Both are read off the Options on every frame, so a fold landed
+// by a click, a `/settings` apply or a re-read of the file paints on the next one.
 func (m Model) panelSections() []panelSection {
 	entries, err := domain.ParseSidePanelSections(string(m.opts.UI.SidePanelSections))
 	if err != nil {
@@ -321,6 +329,7 @@ func (m Model) panelSections() []panelSection {
 		// this parse refuses, so a bad one never reaches the Options. The default list still paints.
 		entries, _ = domain.ParseSidePanelSections("")
 	}
+	folded := m.panelFoldedSections()
 	shown := make([]panelSection, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Mode == domain.SidePanelModeHidden {
@@ -331,6 +340,7 @@ func (m Model) panelSections() []panelSection {
 			continue
 		}
 		section.kind, section.isPinned = entry.Section, entry.Mode == domain.SidePanelModePinned
+		section.isFolded = slices.Contains(folded, entry.Section)
 		shown = append(shown, section)
 	}
 	return shown
@@ -419,9 +429,12 @@ func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) s
 	return row + strings.Repeat(" ", max(0, room-m.th.measure.Width(text)+1)) + right
 }
 
-// panelHeaderRow is a section's header: `<pin> <Title> (<summary>)`, led by its pin glyph — ●
+// panelHeaderRow is a section's header: `<pin> <Title> (<summary>) ⋯ ▼`, led by its pin glyph — ●
 // while the section is pinned, ○ while it is auto — on the column's first content cell
-// ([Model.panelPinX]), with nothing at the right edge.
+// ([Model.panelPinX]), its dotted leader running to the fold's state indicator at the column's
+// right edge: ▼ open, the glyph set's ▶ folded. It is the transcript's header row (umbrellaHeader):
+// the same leader arithmetic ([leaderRowIn]) in the same `tool-leader` dots, and the indicator in
+// the same field ([indicatorRow], [toolRowCells]), so a panel header folds like a tool block.
 func (m Model) panelHeaderRow(section panelSection) string {
 	text := section.title
 	if section.summary != "" {
@@ -431,7 +444,17 @@ func (m Model) panelHeaderRow(section panelSection) string {
 	if section.isPinned {
 		pin = glyphPanelPinned
 	}
-	return m.panelRow(m.th.statusFaint.Render(pin)+" ", text, m.th.panelHeader, "")
+	isOpen, width := !section.isFolded, m.panelContentWidth()
+	paintTitle := func(clipped string) string { return m.th.panelHeader.Render(clipped) }
+	row := leaderRowIn(m.th, text, paintTitle, branchSummary{}, pin+" ", paintPanelPin, toolRowCells(m.th, width),
+		isOpen, noRemainder)
+	return indicatorRow(m.th, row, width, stateIndicator(m.th, isOpen))
+}
+
+// paintPanelPin paints a header's pin glyph — the marker [leaderRowIn] leads the header row with —
+// in the faint tone, open or folded alike.
+func paintPanelPin(th theme, marker string, _ bool) string {
+	return th.statusFaint.Render(marker)
 }
 
 // panelSubAgentRow is one delegation: its phase glyph — the status line's spinner frame while it
@@ -656,8 +679,9 @@ func panelTokens(n int) string {
 type panelTargetKind int
 
 const (
-	panelTargetNone  panelTargetKind = iota // a header title, the `+N more` row, a blank cell: nothing
+	panelTargetNone  panelTargetKind = iota // the `+N more` row, a blank cell: nothing
 	panelTargetPin                          // a header's pin glyph: toggle pinned ↔ auto, written back
+	panelTargetFold                         // a header anywhere but its pin glyph: fold ↔ open, written back
 	panelTargetRun                          // a sub-agent row: open that run's Run view
 	panelTargetBlock                        // a task or changed-file row: unfold its block and scroll to it
 	panelTargetUsage                        // a usage row: open /usage
@@ -665,7 +689,7 @@ const (
 )
 
 // panelTarget is one column cell's click: what it does, and what it does it to — the section a pin
-// toggles, or the transcript entry a run row opens or a block row unfolds, with the run whose view
+// or a fold toggles, or the transcript entry a run row opens or a block row unfolds, with the run whose view
 // shows that block.
 type panelTarget struct {
 	kind     panelTargetKind
@@ -697,7 +721,8 @@ func (m Model) panelPinX() int {
 // the panes or the transcript under it; the hover shape asks the same question (pointershape.go),
 // so the pointer promises a click exactly where one acts. A row resolves through the column's stops
 // ([Model.panelStops]): a body row to its stop's target, a header row to its pin toggle on the lead
-// pin glyph's cell alone ([Model.panelPinX]), and a row no stop spans to nothing.
+// pin glyph's cell ([Model.panelPinX]) and to its fold toggle on every other cell, and a row no
+// stop spans to nothing.
 func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
 	if !m.panelCell(x, y) {
 		return panelTarget{}, false
@@ -707,7 +732,7 @@ func (m Model) panelTargetAt(x, y int) (panelTarget, bool) {
 			continue
 		}
 		if stop.id.isHeader && x != m.panelPinX() {
-			return panelTarget{}, true
+			return panelTarget{kind: panelTargetFold, section: stop.id.section}, true
 		}
 		return stop.target, true
 	}
@@ -946,7 +971,8 @@ func (m Model) resetPanelWidth() Model {
 // Under a modal pane ([Model.modalPaneOpen]) no target acts: the pane owns the keyboard, and a
 // detail view or a settings write under it would change what the human is answering. And while
 // watching, a pin is refused with the watch flash: the watch is read-only, so the column it shows
-// writes nothing back (ADR 0111).
+// writes nothing back (ADR 0111). A fold is not: like a task-list card's, it is the viewer's own
+// preference, so it toggles and writes while watching too.
 func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 	if !m.panelTargetLive(target) {
 		if target.kind != panelTargetPin || !m.watch.isActive || m.modalPaneOpen() {
@@ -962,6 +988,8 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 			mode = domain.SidePanelModeAuto
 		}
 		return m.setPanelSectionMode(target.section, mode), nil
+	case panelTargetFold:
+		return m.toggleSidePanelFold(target.section), nil
 	case panelTargetRun:
 		next, _ := m.openRunAt(target.entry)
 		return next, nil
@@ -1033,6 +1061,52 @@ func (m Model) setPanelSectionMode(section domain.SidePanelSection, mode domain.
 	}
 	m.opts.UI.SidePanelSections = sections
 	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelSections, value: string(sections)})
+}
+
+// panelFoldedSections is `ui.side-panel.folded` read into the sections it folds.
+func (m Model) panelFoldedSections() []domain.SidePanelSection {
+	folded, err := domain.ParseSidePanelFolded(string(m.opts.UI.SidePanelFolded))
+	if err != nil {
+		// Unreachable from a running session, for panelSections' reason: nothing folds.
+		return nil
+	}
+	return folded
+}
+
+// toggleSidePanelFold folds an open section, or opens a folded one — what a click on a header
+// anywhere but its pin glyph means — and writes the fold back through
+// [SettingsHost.WriteSidePanelFolded] as `ui.side-panel.folded`: toggleTaskListFold's contract. The
+// column moves first; a landed write puts the list the files resolve to in force and journals it
+// (recordSettingEdit), silently, the header's indicator being the whole report; a failed one speaks
+// as one transcript error naming the key, and the flip stands for the session. A nil seam flips the
+// session alone, the Driver degrade (ADR 0031). The fold is held as the canonical string on the
+// Options, never as state of its own, so it rides the value-copied Model (ADR 0011).
+func (m Model) toggleSidePanelFold(section domain.SidePanelSection) Model {
+	isFolded := !slices.Contains(m.panelFoldedSections(), section)
+	m.opts.UI.SidePanelFolded = m.withSectionFolded(section, isFolded)
+	if m.opts.Settings == nil {
+		return m
+	}
+	list, err := m.opts.Settings.WriteSidePanelFolded(section, isFolded)
+	if err != nil {
+		m.transcript.addError(sidePanelFoldedSource, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	m.opts.UI.SidePanelFolded = list
+	return m.recordSettingEdit(settingEdit{path: domain.UIKeySidePanelFolded, value: string(list)})
+}
+
+// withSectionFolded is `ui.side-panel.folded` with section folded or not, every other section kept
+// as it is, in the canonical spelling — the panel's default section order, each named once.
+func (m Model) withSectionFolded(section domain.SidePanelSection, isFolded bool) domain.SidePanelFolded {
+	folded := m.panelFoldedSections()
+	var next []domain.SidePanelSection
+	for _, name := range domain.SidePanelSectionNames() {
+		if (name == section && isFolded) || (name != section && slices.Contains(folded, name)) {
+			next = append(next, name)
+		}
+	}
+	return domain.SpellSidePanelFolded(next)
 }
 
 // withSectionMode is list with section's entry set to mode, every other entry kept with its mode

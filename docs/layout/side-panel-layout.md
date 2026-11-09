@@ -157,8 +157,12 @@ trimmed from the left a whole component at a time behind `…/`. Only apogee's f
 the ones that name the file they write, a deletion included — and a failed write is not counted. A
 file changed through the `terminal` tool is not shown (ADR 0110 decision 13).
 
-**Header row:** `<pin> <Title> (<summary>)`. The pin glyph leads it, on the content's first cell —
-`○` while the section is `auto`, `●` while it is `pinned` — and nothing sits at the right edge. The
+**Header row:** `<pin> <Title> (<summary>) ⋯ ▼`. The pin glyph leads it, on the content's first
+cell — `○` while the section is `auto`, `●` while it is `pinned` — and a dotted leader in the
+transcript's `tool-leader` role runs from the title to the fold indicator at the content's right
+edge, in the `tool-indicator` role: `▼` while the section is open, `▶` while the human has folded
+it (`►` under `ui.glyphs: safe`). It is the transcript's header shape (`tool-layout.md`, "Fold
+states and interaction"). The folded sections are `ui.side-panel.folded`, read on every frame. The
 summary, in parentheses, appears wherever the section has one — `Sub-agents (1 running)`
 (`2 running · 1 queued`, `3 queued`, or `3 done` once all have ended; a waiting run counts as the
 running or queued run it is, so a section folded to its header shows no wait), `Tasks (2/5)`,
@@ -170,7 +174,9 @@ while every one is connected).
 
 When the shown sections need more rows than the slot has:
 
-1. Pinned sections take rows first, then auto sections, both in list order.
+1. Pinned sections take rows first, then auto sections, both in list order. A section the human
+   folded costs its header row alone and takes no body rows, however many are spare: the overflow
+   never opens it.
 2. A section that does not get its full height folds to its header row alone, which carries the
    summary (`○ Tasks (2/5)`, `○ Sub-agents (2 running)`).
 3. A section that would get no row at all is still drawn as its header row; when not even every
@@ -187,13 +193,18 @@ When the shown sections need more rows than the slot has:
   - an mcp row → `/mcp`.
 - A click on the **pin glyph** — the header's lead cell — toggles `pinned` ↔ `auto` and writes the
   list back to the setting.
-- A click on the header title does nothing. The keyboard reaches the same targets through navigation
-  mode (Keyboard, below).
+- A click anywhere else on a **header** — its title, summary, leader or fold indicator — folds the
+  section to its header row, or opens a folded one, and writes `ui.side-panel.folded` back to the
+  global config silently, as a task-list card's fold writes `ui.task-list-open`. A failed write says
+  `side-panel.folded: not saved: …` in the transcript and the fold stands for the session. The hover
+  there is the pointer hand. The keyboard reaches the body and pin targets through navigation mode
+  (Keyboard, below).
 - While a modal pane is open — an approval, an ask, `/settings`, the sessions browser, a picker or
-  the workflows view — a click on a body row or a pin glyph is claimed and does nothing, and the
-  hover there shows the default arrow. The grip stays live under them.
+  the workflows view — a click on a body row, a pin glyph or a header is claimed and does nothing,
+  and the hover there shows the default arrow. The grip stays live under them.
 - While watching a session, a click on a pin glyph writes nothing: it flashes the watch refusal, and
-  the hover there shows the default arrow.
+  the hover there shows the default arrow. A fold is the viewer's own: it toggles and writes while
+  watching too.
 - A left-button press on the **grip** — the separator column or the gutter column right of it, on
   any row above the session-name rule — starts a resize drag. The separator keeps its grab offset
   from the pointer and moves with it, clamped to the limits under "Where it sits"; the panel and the

@@ -1399,8 +1399,10 @@ it does not re-wrap your conversation underneath. It stays open while the bar is
 a click outside it (which then does what it would have done anyway) or opening one of its rows
 closes it. Clicks inside it work as on the docked panel; it has no separator to drag.
 
-**Its sections**, in the order `ui.side-panel.sections` lists them, each under a `<pin> <Title> (<summary>)`
-header led by its pin glyph — `○` for `auto`, `●` for `pinned`:
+**Its sections**, in the order `ui.side-panel.sections` lists them, each under a `<pin> <Title> (<summary>) ⋯ ▼`
+header led by its pin glyph — `○` for `auto`, `●` for `pinned` — whose dotted leader runs to the
+fold indicator at the right edge, as a tool block's header does: `▼` open, `▶` folded (`►` under
+`ui.glyphs: safe`):
 
 | Section | Shown in `auto` while | Each row |
 |---|---|---|
@@ -1416,7 +1418,7 @@ names are shown with terminal escapes stripped. Only apogee's own file tools cou
 shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x` and the waiting one `?`.
 
 When the sections need more rows than the panel has, pinned sections get their rows first, then
-the `auto` ones in list order. A section that does not get its full height folds to its header
+the `auto` ones in list order; a section you folded keeps to its header however much room is left. A section that does not get its full height folds to its header
 (`○ Tasks (2/5)`); when not even every header fits, the last ones are left out and the bottom row
 reads `+N more`. The panel never scrolls.
 
@@ -1424,14 +1426,17 @@ reads `+N more`. The panel never scrolls.
 task-list card and scrolls to it; on a changed-file row it unfolds that write's tool block (opening
 the run that wrote it); on the usage section it opens `/usage`; on the mcp section it opens `/mcp`. A click on a header's pin glyph —
 its first cell — toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
-config. Dragging the panel's separator — the `│` on its left edge, or the blank column beside it —
+config. A click anywhere else on a header folds the section to its header, or opens it again, and
+saves `ui.side-panel.folded` silently, so the fold survives a restart; it works while watching a
+session too, and a save that fails says `side-panel.folded: not saved` and keeps the fold for the
+session. Dragging the panel's separator — the `│` on its left edge, or the blank column beside it —
 resizes the panel: the panel and your conversation re-wrap as you drag, and the separator lights up
 in the accent colour while you hold it. The panel stays at least 24 columns wide, and leaves the
 transcript its 100 columns (80 under `on`) and its scroll bar. Letting go saves the new width as
 `ui.side-panel.width` to your global config; a double-click on the separator puts back the default
 36. A window too narrow for the width you chose draws the panel narrower without changing the
-setting, and a window grown back draws your width again. Header titles, other blank cells and the
-mouse wheel do nothing there.
+setting, and a window grown back draws your width again. Blank cells and the mouse wheel do
+nothing there.
 
 **Run view.** While a sub-agent's run view is open, the tasks, changed files and usage are that
 run's, and the usage fill matches the status-line gauge; the sub-agents section still lists every
