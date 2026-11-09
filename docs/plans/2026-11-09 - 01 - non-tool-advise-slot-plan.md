@@ -234,7 +234,10 @@ as-configured Turn-1 request tail carries the pre-request fence and the Bypass r
 - `go vet ./cmd/apogee/`
 **Commit:** `feat(probe): count pre-request advise in the Turn-1 context cost`
 
-## 6. E2E: a user pre-request advise reaches the wire on both wires
+## 6. E2E: a user pre-request advise reaches the wire on both wires — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the journey talks to an inline Go stub script (preRequestAdviseScript, the rebriefScript pattern) rather than testdata/stubllm/reactions.yaml, whose `^What files` matcher is anchored and cannot match an opening the pre-request fence leads; the run goes through headlessEventLines (always `--format json`) over wireHome plus an appended adviseConfig block, since headlessHooksIn writes its own server entry with no `wire:` key.
+NOTES (2026-11-09): the user/user adjacency check over the raw body's `messages[].role` runs on both wires' requests, not only the Messages wire; the test also asserts one advise firing per request (two in all).
 
 **What:** test-only. An e2e test in `cmd/apogee` configures a `reactions:` entry with `on: pre-request` and an
 `advise:` argv script, sends a prompt against the stub upstream on the OpenAI-compatible wire and on
