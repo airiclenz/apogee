@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // MCPReconnectingNote is the word the busy indicator shows while an MCP server's dial is in flight
@@ -33,6 +35,11 @@ type MCPHost interface {
 	// answers [MCPReconnectingNote]; when none did it requests nothing and answers "". The error is
 	// a refused request, with nothing requested.
 	RetryFailedMCP() (note string, err error)
+	// MCPServerStates is every configured server's current state as the snapshot the Model is seeded
+	// with at construction ([Model.seedMCP], ADR 0111 decision 8): the servers startup dialled before
+	// the view could hear their Events — a repo server startup skipped included, as failed — and
+	// whatever has moved since, in the order the servers were first reported. It never blocks.
+	MCPServerStates() []domain.MCPServerEvent
 }
 
 // MCPDial is one server's dial. It blocks until the server answers, fails or ctx is cancelled, and

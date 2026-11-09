@@ -26,6 +26,8 @@ type fakeMCPHost struct {
 	// retryNote is what every RetryFailedMCP answers, and retries counts the calls.
 	retryNote string
 	retries   int
+	// states is the snapshot every MCPServerStates answers.
+	states []domain.MCPServerEvent
 }
 
 func (f *fakeMCPHost) TakeMCPWork() ([]MCPDial, bool) {
@@ -56,6 +58,13 @@ func (f *fakeMCPHost) RetryFailedMCP() (string, error) {
 	defer f.mu.Unlock()
 	f.retries++
 	return f.retryNote, nil
+}
+
+// MCPServerStates answers the seeded snapshot, as a fresh slice.
+func (f *fakeMCPHost) MCPServerStates() []domain.MCPServerEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.states)
 }
 
 func (f *fakeMCPHost) retryCount() int {
@@ -534,4 +543,44 @@ func TestMCPRowUnchangedRoundTrip(t *testing.T) {
 			t.Errorf("row note = %q (armed %t), want %q untouched", got, m.mcp.row.isArmed, before)
 		}
 	})
+}
+
+// TestMCPSeedReachesTheTUIFold: the host's snapshot is folded into the MCP fold at construction, in
+// order — a connected server with its tool count, and a repo server startup skipped seeded failed
+// with its cause — and a live Event then moves the seeded row as it would any other.
+func TestMCPSeedReachesTheTUIFold(t *testing.T) {
+	t.Parallel()
+	host := &fakeMCPHost{states: []domain.MCPServerEvent{
+		mcpConnected("files", 3),
+		{Server: "repo", Transport: "stdio", Project: true, Phase: domain.MCPServerFailed,
+			Cause: `server "repo" skipped: its pinned file moved`},
+	}}
+	m := mcpModel(t, host)
+
+	rows := m.mcpServers.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("seeded fold holds %+v, want files then repo", rows)
+	}
+	if rows[0].Server != "files" || rows[0].Phase != domain.MCPServerConnected || rows[0].Tools != 3 {
+		t.Errorf("first row = %+v, want files connected with 3 tools", rows[0])
+	}
+	if rows[1].Server != "repo" || rows[1].Phase != domain.MCPServerFailed || !rows[1].Project ||
+		rows[1].Cause != `server "repo" skipped: its pinned file moved` {
+		t.Errorf("second row = %+v, want the skipped repo server failed with its cause", rows[1])
+	}
+
+	m = step(t, m, eventMsg{Event: mcpConnected("repo", 2)})
+
+	if rows := m.mcpServers.Rows(); len(rows) != 2 || rows[1].Phase != domain.MCPServerConnected || rows[1].Tools != 2 {
+		t.Errorf("after repo connected the fold holds %+v, want repo connected with 2 tools", rows)
+	}
+}
+
+// TestMCPSeedNoHostSeedsNothing: with no MCP seam wired the fold starts empty.
+func TestMCPSeedNoHostSeedsNothing(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	if rows := m.mcpServers.Rows(); len(rows) != 0 {
+		t.Errorf("unwired fold holds %+v, want none", rows)
+	}
 }

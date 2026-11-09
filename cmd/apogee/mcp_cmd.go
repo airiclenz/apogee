@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -479,8 +480,10 @@ func findMCPServer(servers []mcp.ServerConfig, name string) (mcp.ServerConfig, b
 // asks on stderr while it is still a safe place to write: declined, or with stdin not a terminal, the
 // launch aborts with the error naming `apogee mcp login <name>`. A repo server the connect skipped
 // for a moved pin does not abort the launch and holds no entry: it is announced and the entry asked
-// about again (announceSkippedMCP), and the session starts on the rest of the set.
-func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, error) {
+// about again (announceSkippedMCP), and the session starts on the rest of the set. Its failed state,
+// the skip's cause in it, is returned in the seed-only list, in config order, for the MCP holder to
+// seed the views and journals with (liveMCP.emitThrough, ADR 0111 decision 8).
+func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, []apogee.MCPServerEvent, error) {
 	deps := w.mcpLogin.withDefaults()
 	host := deps.mcpHost(w.roots.config)
 	guard := mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts)
@@ -490,19 +493,20 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, error) 
 	}
 
 	if err := mcp.ValidateServers(w.opts.MCPServers); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, server := range w.opts.MCPServers {
 		if server.Auth != mcp.AuthOAuth {
 			continue
 		}
 		if err := login.offerUnsaved(ctx, host.OAuthStore, server); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
 	entries := make([]mcpEntry, 0, len(w.opts.MCPServers))
 	var skipped []mcp.Denied
+	var seed []apogee.MCPServerEvent
 	for _, server := range w.opts.MCPServers {
 		client, err := connectStartupServer(ctx, host, server, guard, w.roots.workspace, login)
 		if err != nil {
@@ -511,16 +515,19 @@ func (w *rootWiring) connectMCPServers(ctx context.Context) ([]mcpEntry, error) 
 				// describes a connection nobody is going to use either way.
 				_ = closeSession(entry.session)
 			}
-			return nil, err
+			return nil, nil, err
 		}
 		if s := client.Skipped(); len(s) > 0 {
 			skipped = append(skipped, s...)
+			failed := mcpServerEvent(server, apogee.MCPServerFailed)
+			failed.Cause = mcpSentence(s[0].Err)
+			seed = append(seed, failed)
 			continue
 		}
 		entries = append(entries, mcpEntry{config: server, session: client})
 	}
 	w.announceSkippedMCP(skipped)
-	return entries, nil
+	return entries, seed, nil
 }
 
 // connectStartupServer dials one server at startup, offering an `auth: oauth` server a login and

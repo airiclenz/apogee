@@ -8,6 +8,10 @@ package main
 // note says how it went and the new server's tool answers a model turn. A server that fails its
 // dial is noted and stays absent, while the one saved beside it connects and works.
 //
+// The live Event journal follows the same lifecycle (ADR 0111 decision 8): each journal opens on the
+// servers' current state right after run_started — at the first prompt and again after `/clear` —
+// and a save's dials are journaled as they start and finish.
+//
 // Driven in-process rather than through the pty for the reason e2e_mcpmidturn_test.go gives: the
 // claim includes the dial's hand-off back to the Update goroutine, which only a process the race
 // detector is watching can see.
@@ -16,6 +20,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +29,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -101,6 +109,206 @@ func answerPingAndAwaitPong(drv *tuitest.Driver, stub *stubllm.Server) {
 			})
 		})
 	}, tuitest.Awaiting("the new server's tool to answer pong"))
+}
+
+// liveJournal is the path and the decoded lines of the run's one live Event journal
+// (`<home>/sessions/<id>.events.jsonl`, ADR 0103), read while the session runs — the owner removes
+// it at quit. It is empty while no journal, or more than one, is open; a last line still being
+// written ends the read, so a poll sees it on its next pass.
+func liveJournal(t *testing.T, home string) (string, []eventjson.Line) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(home, "sessions", "*.events.jsonl"))
+	if err != nil || len(paths) != 1 {
+		return "", nil
+	}
+	body, err := os.ReadFile(paths[0])
+	if err != nil {
+		return "", nil
+	}
+	var lines []eventjson.Line
+	for _, raw := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		line, err := eventjson.Decode([]byte(raw))
+		if err != nil {
+			break
+		}
+		lines = append(lines, line)
+	}
+	return paths[0], lines
+}
+
+// journalMCPEvents is every mcp_server line among lines, in order.
+func journalMCPEvents(lines []eventjson.Line) []domain.MCPServerEvent {
+	var events []domain.MCPServerEvent
+	for _, line := range lines {
+		if event, isMCP := line.Event.(domain.MCPServerEvent); isMCP {
+			events = append(events, event)
+		}
+	}
+	return events
+}
+
+// journalSeed is the mcp_server lines between a journal's run_started and its first prompt line —
+// the seed its birth wrote — and whether the journal opened on run_started and holds that prompt.
+func journalSeed(lines []eventjson.Line) ([]domain.MCPServerEvent, bool) {
+	if len(lines) == 0 || lines[0].Started == nil {
+		return nil, false
+	}
+	at := slices.IndexFunc(lines, func(line eventjson.Line) bool { return line.Prompt != nil })
+	if at < 0 {
+		return nil, false
+	}
+	seed := journalMCPEvents(lines[1:at])
+	if len(seed) != at-1 {
+		return nil, false
+	}
+	return seed, true
+}
+
+// isConnectedWith reports whether event says server connected with tools tools.
+func isConnectedWith(event domain.MCPServerEvent, server string, tools int) bool {
+	return event.Server == server && event.Phase == domain.MCPServerConnected && event.Tools == tools
+}
+
+// mcpSeedScript is the model script the seed tests run: the session title, then a reply per prompt.
+func mcpSeedScript() stubllm.Script {
+	return stubllm.Script{Model: "seed-model", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: copyTitleRequest}, Repeat: true, Text: "MCP seed"},
+		{Text: "First reply."},
+		{Text: "Second reply."},
+	}}
+}
+
+// A server startup connected dialled before anything listened, so the journal born at the first
+// prompt opens on its state: right after run_started, before the prompt line, the server is
+// connected with its one tool (ADR 0111 decision 8).
+func TestE2EMCPStartupStateSeedsTheJournal(t *testing.T) {
+	t.Parallel()
+
+	docs := newPingMCPServer(t, "docs")
+	stub := stubllm.New(t, mcpSeedScript())
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, mcpMidTurnServers(docs.Endpoint))
+
+	submit(drv, "Say something.")
+	drv.WaitText("First reply.")
+	waitIdle(drv)
+
+	var seed []domain.MCPServerEvent
+	drv.WaitFor(func() bool {
+		_, lines := liveJournal(t, sess.Home())
+		var isSeeded bool
+		seed, isSeeded = journalSeed(lines)
+		return isSeeded
+	}, tuitest.Awaiting("the live journal's opening frame, seed and prompt"))
+	if len(seed) != 1 || !isConnectedWith(seed[0], "docs", 1) {
+		t.Errorf("the journal's seed is %+v; want docs connected with 1 tool", seed)
+	}
+	if err := sess.Quit(); err != nil {
+		t.Errorf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// `/clear` ends the session's journal and the next prompt bears a new one: that one is seeded with
+// the servers' state too, since the server stayed connected across the boundary.
+func TestE2EMCPClearReseedsTheJournal(t *testing.T) {
+	t.Parallel()
+
+	docs := newPingMCPServer(t, "docs")
+	stub := stubllm.New(t, mcpSeedScript())
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, mcpMidTurnServers(docs.Endpoint))
+
+	submit(drv, "Say something.")
+	drv.WaitText("First reply.")
+	waitIdle(drv)
+	var first string
+	drv.WaitFor(func() bool {
+		var lines []eventjson.Line
+		first, lines = liveJournal(t, sess.Home())
+		_, isSeeded := journalSeed(lines)
+		return isSeeded
+	}, tuitest.Awaiting("the first session's seeded journal"))
+
+	submit(drv, "/clear")
+	drv.WaitGone("First reply.")
+	drv.WaitText(idlePromptHead)
+	submit(drv, "Say more.")
+	drv.WaitText("Second reply.")
+	waitIdle(drv)
+
+	var seed []domain.MCPServerEvent
+	drv.WaitFor(func() bool {
+		path, lines := liveJournal(t, sess.Home())
+		var isSeeded bool
+		seed, isSeeded = journalSeed(lines)
+		return path != "" && path != first && isSeeded
+	}, tuitest.Awaiting("the cleared session's own seeded journal"))
+	if len(seed) != 1 || !isConnectedWith(seed[0], "docs", 1) {
+		t.Errorf("the rotated journal's seed is %+v; want docs connected with 1 tool", seed)
+	}
+	if err := sess.Quit(); err != nil {
+		t.Errorf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// A settings save that adds a healthy and a broken server is journaled as it happens: each is
+// dialling first, then the healthy one connected with its tool count and the broken one failed with
+// the dial's cause. The journal born before the save had nothing to seed.
+func TestE2EMCPReconnectAndFailureReachTheJournal(t *testing.T) {
+	t.Parallel()
+
+	broken := newBrokenMCPServer(t)
+	healthy := newPingMCPServer(t, "healthy")
+	stub := stubllm.New(t, mcpSeedScript())
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUI(t, drv, stub)
+
+	submit(drv, "Say something.")
+	drv.WaitText("First reply.")
+	waitIdle(drv)
+	drv.WaitFor(func() bool {
+		_, lines := liveJournal(t, sess.Home())
+		seed, isSeeded := journalSeed(lines)
+		return isSeeded && len(seed) == 0
+	}, tuitest.Awaiting("the journal born with no server to seed"))
+
+	appendHomeConfig(t, sess.Home(), "mcp-servers:\n"+
+		mcpServerEntry("broken", broken)+
+		mcpServerEntry("healthy", healthy.Endpoint))
+	drv.WaitText("mcp connect failed: broken: ")
+	drv.WaitText("mcp healthy connected")
+
+	var events []domain.MCPServerEvent
+	drv.WaitFor(func() bool {
+		_, lines := liveJournal(t, sess.Home())
+		events = journalMCPEvents(lines)
+		return len(events) >= 4
+	}, tuitest.Awaiting("both servers' dial and finish in the journal"))
+	for _, server := range []string{"healthy", "broken"} {
+		var phases []domain.MCPServerEvent
+		for _, event := range events {
+			if event.Server == server {
+				phases = append(phases, event)
+			}
+		}
+		if len(phases) != 2 || phases[0].Phase != domain.MCPServerDialling {
+			t.Errorf("%s journaled %+v; want dialling then its finish", server, phases)
+			continue
+		}
+		switch server {
+		case "healthy":
+			if !isConnectedWith(phases[1], "healthy", 1) {
+				t.Errorf("healthy finished %+v; want connected with 1 tool", phases[1])
+			}
+		case "broken":
+			if phases[1].Phase != domain.MCPServerFailed || phases[1].Cause == "" || phases[1].Kept {
+				t.Errorf("broken finished %+v; want failed with its cause, nothing kept", phases[1])
+			}
+		}
+	}
+	if err := sess.Quit(); err != nil {
+		t.Errorf("the run returned %v; want a clean quit", err)
+	}
 }
 
 // A server whose dial is held keeps the TUI live: the status line says `reconnecting MCP…` and the

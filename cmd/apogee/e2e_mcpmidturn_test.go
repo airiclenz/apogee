@@ -26,6 +26,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
@@ -109,6 +110,54 @@ func TestE2EWatchedMCPSaveMidTurnSwapsOnlyAtIdle(t *testing.T) {
 
 // mcpMidTurnReconnected is the note the repointed server's commit writes once the swap has landed.
 const mcpMidTurnReconnected = "mcp docs reconnected"
+
+// A dial that finishes while a Turn is running is journaled when it finishes, not at the idle-point
+// commit (ADR 0111 decision 8): with the reply held, the journal already says the repointed server
+// is dialling and then connected, after the startup seed, while the reconnected note — the commit's
+// — has yet to appear; it does once the Turn ends.
+func TestE2EMCPMidTurnFinishJournalsBeforeTheCommit(t *testing.T) {
+	t.Parallel()
+
+	first := newPingMCPServer(t, "first")
+	second := newPingMCPServer(t, "second")
+	stub := stubllm.New(t, stubllm.Script{Model: "midturn-model", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: copyTitleRequest}, Repeat: true, Text: "Mid-turn journal"},
+		{Await: mcpMidTurnGate, Text: "Done."},
+	}})
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, mcpMidTurnServers(first.Endpoint))
+	// A failure below must not leave the held reply holding the run open past the test.
+	t.Cleanup(func() { stub.Release(mcpMidTurnGate) })
+
+	submit(drv, mcpMidTurnPrompt)
+	drv.WaitText(busyPlaceholder)
+	drv.WaitFor(func() bool {
+		return slices.ContainsFunc(stub.Requests(), func(r stubllm.Request) bool { return r.TurnIndex == 1 })
+	}, tuitest.Awaiting("the prompt's request to reach the held turn"))
+
+	renameHomeConfig(t, sess.Home(), first.Endpoint, second.Endpoint)
+	drv.WaitText("config changed on disk — applied: mcp-servers")
+	var events []domain.MCPServerEvent
+	drv.WaitFor(func() bool {
+		_, lines := liveJournal(t, sess.Home())
+		events = journalMCPEvents(lines)
+		return len(events) >= 3
+	}, tuitest.Awaiting("the repointed dial's lines in the journal mid-Turn"))
+	if strings.Contains(drv.Frame().String(), mcpMidTurnReconnected) {
+		t.Error("the commit landed mid-Turn; want the journaled finish ahead of the idle-point commit")
+	}
+	if len(events) != 3 || !isConnectedWith(events[0], "docs", 1) ||
+		events[1].Phase != domain.MCPServerDialling || !isConnectedWith(events[2], "docs", 1) {
+		t.Errorf("the journal's mcp_server lines are %+v; want the seed, then dialling, then connected", events)
+	}
+
+	stub.Release(mcpMidTurnGate)
+	waitIdle(drv)
+	drv.WaitText(mcpMidTurnReconnected)
+	if err := sess.Quit(); err != nil {
+		t.Errorf("the run returned %v; want a clean quit", err)
+	}
+}
 
 // The url-safety gate the prompt's tool call is held at.
 const urlSafetyMidTurnGate = "deny-mid-turn"

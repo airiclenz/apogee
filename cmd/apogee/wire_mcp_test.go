@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
 
@@ -1235,7 +1237,7 @@ func (r *mcpEventRecorder) take() []string {
 // recordMCPEvents points the fixture's holder at a fresh recorder.
 func recordMCPEvents(fixture *mcpFixture) *mcpEventRecorder {
 	recorder := &mcpEventRecorder{set: fixture.set}
-	fixture.set.emitThrough(recorder)
+	fixture.set.emitThrough(recorder, nil)
 	return recorder
 }
 
@@ -1499,7 +1501,7 @@ func TestLiveMCPNeverEmitsUnderLock(t *testing.T) {
 	old, _ := liveServer(stdioServer("old", "old-mcp"))
 	fixture := newMCPFixtureWith([]mcpEntry{old}, "", newMCPDialRecorder().connect)
 	events := &mcpEventRecorder{set: fixture.set, gate: make(chan struct{})}
-	fixture.set.emitThrough(events)
+	fixture.set.emitThrough(events, nil)
 
 	requested := make(chan struct{})
 	go func() {
@@ -1516,5 +1518,123 @@ func TestLiveMCPNeverEmitsUnderLock(t *testing.T) {
 		"old disconnected removed", "new dialling", "new connected 1")
 	if events.lockHeld != 0 {
 		t.Errorf("%d Event(s) were emitted while the holder's lock was held", events.lockHeld)
+	}
+}
+
+// TestMCPSeedStatesReplayTheFold: the outbox's state restates the stream it has emitted as Events a
+// fold replays to the same rows the whole stream folds to — a dialling or kept-failed server keeps
+// the serving connection's tool count through a connected line ahead of its last phase, a server
+// removed from the configuration drops out, and the servers keep the order they were first reported.
+func TestMCPSeedStatesReplayTheFold(t *testing.T) {
+	t.Parallel()
+	connected := func(server string, tools int) apogee.MCPServerEvent {
+		return apogee.MCPServerEvent{Server: server, Transport: "stdio", Phase: apogee.MCPServerConnected, Tools: tools}
+	}
+	phase := func(server string, phase apogee.MCPServerPhase) apogee.MCPServerEvent {
+		return apogee.MCPServerEvent{Server: server, Transport: "stdio", Phase: phase}
+	}
+	kept := phase("kept", apogee.MCPServerFailed)
+	kept.Cause, kept.Kept = "refused", true
+	lost := phase("lost", apogee.MCPServerFailed)
+	lost.Cause = "refused"
+	removed := phase("gone", apogee.MCPServerDisconnected)
+	removed.Reason = apogee.MCPDisconnectRemoved
+	denied := phase("closed", apogee.MCPServerDisconnected)
+	denied.Reason = apogee.MCPDisconnectDenied
+	stream := []apogee.MCPServerEvent{
+		connected("dialling", 5), connected("kept", 3), connected("lost", 2), connected("gone", 1),
+		connected("closed", 4), phase("dialling", apogee.MCPServerDialling), kept, lost, removed, denied,
+	}
+
+	var states mcpServerStates
+	var whole sidepanel.MCPServers
+	for _, event := range stream {
+		states = states.fold(event)
+		whole.Fold(event)
+	}
+	seed := states.events()
+	var seeded sidepanel.MCPServers
+	for _, event := range seed {
+		seeded.Fold(event)
+	}
+
+	if got, want := seeded.Rows(), whole.Rows(); !slices.Equal(got, want) {
+		t.Errorf("the seed folds to %+v; want the whole stream's %+v", got, want)
+	}
+	want := []string{
+		"dialling connected 5", "dialling dialling", "kept connected 3", "kept failed kept: refused",
+		"lost failed: refused", "closed disconnected denied",
+	}
+	if got := mcpEventLines(seed); !slices.Equal(got, want) {
+		t.Errorf("the seed is %q; want %q", got, want)
+	}
+}
+
+// TestMCPSeedCarriesTheStartupState: the holder's state starts out on what startup left — the
+// connected server with its tool count, and a repo server skipped for a moved pin as failed with the
+// skip's cause — and the first request that no longer configures the skipped server says it removed,
+// while that server was never one the holder's request diff knew.
+func TestMCPSeedCarriesTheStartupState(t *testing.T) {
+	t.Parallel()
+	global := newPingMCPServer(t, "remote")
+	w := startupWiring(t, testMCPLoginDeps(t, &scriptedInput{}, &bytes.Buffer{}, false), global)
+	w.opts.MCPServers = append(w.opts.MCPServers, adoptedRepoWikiServer(t, w))
+	writeRepoWikiScript(t, w.roots.project, "echo edited")
+
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+
+	states := w.mcpSet.stateEvents()
+	if len(states) != 2 || states[0].Server != "remote" || states[0].Phase != apogee.MCPServerConnected ||
+		states[0].Tools != 1 {
+		t.Fatalf("startup state = %+v; want remote connected with 1 tool, then wiki", states)
+	}
+	wiki := states[1]
+	if wiki.Server != "wiki" || wiki.Phase != apogee.MCPServerFailed || !wiki.Project || wiki.Kept ||
+		!strings.Contains(wiki.Cause, "bin/wiki.sh changed since you adopted it") {
+		t.Errorf("skipped repo server's state = %+v; want wiki failed with the moved pin's cause", wiki)
+	}
+	if _, isKnown := w.mcpSet.servers["wiki"]; isKnown {
+		t.Error("the skipped server joined the request diff's servers; want it on the seed-only list")
+	}
+
+	if err := w.mcpSet.request([]mcp.ServerConfig{global}, mcpGuard(nil, nil), false); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	w.mcpSet.outbox.wait()
+	if got := mcpEventLines(w.mcpSet.stateEvents()); !slices.Equal(got, []string{"remote connected 1"}) {
+		t.Errorf("after the request the state is %q; want the skipped server removed", got)
+	}
+}
+
+// TestMCPSeedJournalHoldsTheDrain: a journal birth is handed the state under the emit-order lock, so
+// an Event posted while it writes is not emitted until it returns — the seed always lands before the
+// first live line — and is emitted once it does.
+func TestMCPSeedJournalHoldsTheDrain(t *testing.T) {
+	t.Parallel()
+	docs, _ := liveServer(stdioServer("docs", "docs-mcp"))
+	fixture := newMCPFixtureWith([]mcpEntry{docs}, "", newMCPDialRecorder().connect)
+	recorder := recordMCPEvents(fixture)
+	set := fixture.set
+
+	var seeded []string
+	set.seedJournal(func(states []apogee.MCPServerEvent) {
+		seeded = mcpEventLines(states)
+		set.outbox.post(apogee.MCPServerEvent{Server: "late", Phase: apogee.MCPServerDialling})
+		// The drainer the post started waits on the lock this birth holds.
+		time.Sleep(testtime.Fixed(20 * time.Millisecond))
+		recorder.mu.Lock()
+		defer recorder.mu.Unlock()
+		if len(recorder.events) != 0 {
+			t.Errorf("emitted %q while the birth held the emit-order lock; want nothing yet", mcpEventLines(recorder.events))
+		}
+	})
+
+	if want := []string{"docs connected 1"}; !slices.Equal(seeded, want) {
+		t.Errorf("the birth was seeded %q; want %q, the state before the late post", seeded, want)
+	}
+	if got := recorder.take(); !slices.Equal(got, []string{"late dialling"}) {
+		t.Errorf("after the birth the stream holds %q; want the late post", got)
 	}
 }

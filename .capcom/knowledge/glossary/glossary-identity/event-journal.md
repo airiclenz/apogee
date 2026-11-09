@@ -10,7 +10,11 @@ pair, with token and reasoning deltas merged over a window of about 30 ms withou
 `run_started` adds `title`, `entries` (the record's transcript entry count when the journal was
 born), `model` and `context_window` (the run's binding at that birth; `""` and `0` mean
 unknown). It also carries a Driver-written `prompt` line for each top-level prompt and
-Interjection, because prompts are not Events. It is born when the record is held and the session
+Interjection, because prompts are not Events. In the TUI, the lines right after `run_started` are
+the MCP seed: one `mcp_server` line per configured server restating its current state (two where a
+dialling or kept-failed server's tool count needs a `connected` line ahead of it), written before
+any live `mcp_server` line, at every birth — fresh, resumed, or after `/clear` — because the
+servers outlive each journal (ADR 0111 decision 8). It is born when the record is held and the session
 has a prompt, never under `--no-save`, and it is removed after the final save, before the hold is
 released. The startup sweep removes an orphan whose lock is free. **Watch mode** follows it. The
 engine never sees it: the Driver composes it as a sink. See ADR 0103.

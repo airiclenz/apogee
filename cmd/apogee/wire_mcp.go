@@ -145,15 +145,70 @@ type liveMCP struct {
 	// outbox carries the lifecycle Events the holder decides on to the Event stream (mcpOutbox); nil
 	// until emitThrough points it at a sink, and then a holder that emits nothing.
 	outbox *mcpOutbox
+	// skipped is the seed-only list: the failed state of each repo server the startup connect skipped
+	// for a moved pin (connectMCPServers). It is kept outside servers, so a later request that
+	// configures one of them still dials it; the first request says removed of each one it no longer
+	// configures, and empties the list.
+	skipped []apogee.MCPServerEvent
 }
 
 // emitThrough points the holder's MCP server lifecycle Events (ADR 0111 decision 8) at sink — the
 // engine's own serialised sink (apogee.SerializeEvents) — through an ordered outbox drained off the
-// caller (mcpOutbox). It is called once, as the holder is wired and before any request.
-func (m *liveMCP) emitThrough(sink apogee.EventSink) {
+// caller (mcpOutbox). It is called once, as the holder is wired and before any request. The outbox
+// starts out holding the state startup left — each connected server with its tool count, in config
+// order, then skipped, the failed state of each repo server the startup connect skipped — which is
+// what a view or a journal born before any Event is seeded with (stateEvents, seedJournal).
+func (m *liveMCP) emitThrough(sink apogee.EventSink, skipped []apogee.MCPServerEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.outbox = &mcpOutbox{sink: sink}
+	outbox := &mcpOutbox{sink: sink}
+	for _, name := range m.requested {
+		if entry, isLive := m.entries[name]; isLive {
+			event := mcpServerEvent(entry.config, apogee.MCPServerConnected)
+			event.Tools = len(entry.session.Tools())
+			outbox.states = outbox.states.fold(event)
+		}
+	}
+	for _, event := range skipped {
+		outbox.states = outbox.states.fold(event)
+	}
+	m.outbox = outbox
+	m.skipped = slices.Clone(skipped)
+}
+
+// stateEvents is every server's current state as the Events emitted so far leave it, the startup
+// state included, as the snapshot a view born late is seeded with (ADR 0111 decision 8): one Event
+// per server — two where the connection that serves has tools the last phase does not carry
+// (mcpServerStates.events) — in the order the servers were first reported. Nil before emitThrough.
+// It never waits on the drainer, so it may be read on any goroutine.
+func (m *liveMCP) stateEvents() []apogee.MCPServerEvent {
+	outbox := m.currentOutbox()
+	if outbox == nil {
+		return nil
+	}
+	return outbox.stateEvents()
+}
+
+// seedJournal hands birth the servers' current state (stateEvents) under the outbox's emit-order
+// lock, so nothing drains past it until birth returns: a journal birth writes those Events and only
+// then starts recording the stream, so its seed comes before any live mcp_server line and no line is
+// lost between the two. Before emitThrough, birth is handed nothing. The caller must not be the TUI's
+// Update goroutine, which the drainer may be waiting on while it holds that lock (mcpOutbox).
+func (m *liveMCP) seedJournal(birth func(states []apogee.MCPServerEvent)) {
+	outbox := m.currentOutbox()
+	if outbox == nil {
+		birth(nil)
+		return
+	}
+	outbox.seed(birth)
+}
+
+// currentOutbox reads the outbox under the lock, and releases it: a reader of the outbox's own state
+// never holds the holder's lock while it takes an outbox lock (mcpOutbox's lock order).
+func (m *liveMCP) currentOutbox() *mcpOutbox {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.outbox
 }
 
 // postLocked queues event for emission, in the order the holder's state moved. The caller holds
@@ -218,6 +273,11 @@ func mcpServerEvent(server mcp.ServerConfig, phase apogee.MCPServerPhase) apogee
 //     state as it opens — holds it too, so nothing drains past that write. post never takes it.
 //   - Emit is never called under liveMCP.mu and never on the caller: the drainer is a goroutine of
 //     its own, started by the post that finds none draining.
+//   - states is what the Events emitted so far leave each server in: the drainer folds each Event in
+//     under mu once it is emitted, so under emitMu it is exactly the state the drained stream has
+//     reached, and a journal seeded from it then records the still-pending Events after the seed.
+//     Emit to the TUI blocks until its Update goroutine takes the Event, so nothing on that
+//     goroutine may wait for emitMu: a seed taken there would deadlock on the drainer.
 //
 // Lock order: liveMCP.mu before mu, and emitMu before mu; nothing takes liveMCP.mu while holding
 // emitMu or mu.
@@ -229,6 +289,7 @@ type mcpOutbox struct {
 	mu         sync.Mutex
 	pending    []apogee.MCPServerEvent
 	isDraining bool
+	states     mcpServerStates
 	// drains counts the drainer running, so teardown can wait for the Events already posted.
 	drains sync.WaitGroup
 }
@@ -263,8 +324,87 @@ func (o *mcpOutbox) drain() {
 		o.mu.Unlock()
 		for _, event := range batch {
 			o.sink.Emit(event)
+			o.mu.Lock()
+			o.states = o.states.fold(event)
+			o.mu.Unlock()
 		}
 	}
+}
+
+// stateEvents is the servers' state as the Events emitted so far leave it (mcpServerStates.events).
+func (o *mcpOutbox) stateEvents() []apogee.MCPServerEvent {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.states.events()
+}
+
+// seed hands birth the servers' state under the emit-order lock, so no Event is emitted until birth
+// returns.
+func (o *mcpOutbox) seed(birth func(states []apogee.MCPServerEvent)) {
+	o.emitMu.Lock()
+	defer o.emitMu.Unlock()
+	birth(o.stateEvents())
+}
+
+// mcpServerStates is each server's state as a stream of MCPServerEvents leaves it, in the order the
+// servers were first reported: the last Event and the tool count of the connection that serves,
+// which a dialling phase or a failed one whose previous connection was kept carries forward rather
+// than restating (sidepanel.MCPServers folds it the same way). It is the outbox's record of what it
+// has emitted, and the seed a view or journal born late starts from.
+type mcpServerStates []mcpServerStateEntry
+
+// mcpServerStateEntry is one server's last Event and the tool count of the connection serving it.
+type mcpServerStateEntry struct {
+	last  apogee.MCPServerEvent
+	tools int
+}
+
+// fold moves the states by event into a fresh slice: a server removed from the configuration drops
+// out, and any other phase sets the server's last Event, its tool count following the connection
+// that serves.
+func (s mcpServerStates) fold(event apogee.MCPServerEvent) mcpServerStates {
+	at := slices.IndexFunc(s, func(entry mcpServerStateEntry) bool { return entry.last.Server == event.Server })
+	if event.Phase == apogee.MCPServerDisconnected && event.Reason == apogee.MCPDisconnectRemoved {
+		if at < 0 {
+			return s
+		}
+		return slices.Delete(slices.Clone(s), at, at+1)
+	}
+	entry := mcpServerStateEntry{last: event}
+	if at >= 0 {
+		entry.tools = s[at].tools
+	}
+	switch {
+	case event.Phase == apogee.MCPServerConnected:
+		entry.tools = event.Tools
+	case event.Phase == apogee.MCPServerDisconnected, event.Phase == apogee.MCPServerFailed && !event.Kept:
+		entry.tools = 0
+	}
+	next := slices.Clone(s)
+	if at >= 0 {
+		next[at] = entry
+		return next
+	}
+	return append(next, entry)
+}
+
+// events restates the states as Events a fold replays to the same rows: each server's last Event,
+// preceded by a connected one carrying the serving connection's tool count when that last Event is
+// a dialling or kept-failed phase that does not carry the count itself.
+func (s mcpServerStates) events() []apogee.MCPServerEvent {
+	out := make([]apogee.MCPServerEvent, 0, len(s))
+	for _, entry := range s {
+		last := entry.last
+		carriesForward := last.Phase == apogee.MCPServerDialling || last.Phase == apogee.MCPServerFailed && last.Kept
+		if carriesForward && entry.tools > 0 {
+			serving := last
+			serving.Phase, serving.Tools = apogee.MCPServerConnected, entry.tools
+			serving.Cause, serving.Kept, serving.Reason = "", false, ""
+			out = append(out, serving)
+		}
+		out = append(out, last)
+	}
+	return out
 }
 
 // wait blocks until every Event posted so far has been emitted. A nil outbox has none.
@@ -339,6 +479,14 @@ func (m *liveMCP) request(servers []mcp.ServerConfig, guard security.URLGuard, r
 	for _, server := range servers {
 		configured[server.Name] = true
 	}
+	for _, skipped := range m.skipped {
+		if !configured[skipped.Server] {
+			removed := skipped
+			removed.Phase, removed.Cause, removed.Reason = apogee.MCPServerDisconnected, "", apogee.MCPDisconnectRemoved
+			m.postLocked(removed)
+		}
+	}
+	m.skipped = nil
 	for _, name := range m.requested {
 		if state := m.servers[name]; state != nil && !configured[name] {
 			m.disconnectLocked(name)
@@ -1104,6 +1252,10 @@ func (w *rootWiring) CommitMCP() ([]tui.MCPOutcome, bool) {
 func mcpRefusedCommit(refusal error) []tui.MCPOutcome {
 	return []tui.MCPOutcome{{RowFailure: mcpReconnectFailed(refusal).Error()}}
 }
+
+// MCPServerStates is the servers' current state the TUI is seeded with at construction — startup's
+// connects and skips, and every Event emitted since (liveMCP.stateEvents).
+func (w *rootWiring) MCPServerStates() []apogee.MCPServerEvent { return w.mcpSet.stateEvents() }
 
 // CancelMCPDials cancels every dial in flight and drops the queued ones; the run's teardown closes
 // the servers after the program returns (liveMCP.close).

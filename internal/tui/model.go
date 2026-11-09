@@ -898,6 +898,11 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		m.queueAdoption(opts.ProposedRules)
 	}
 	m.openAdoption()
+	// The MCP servers startup dialled before this view could hear their Events are seeded from the
+	// host's snapshot (ADR 0111 decision 8), ahead of the watch below, which parks the owner's fold.
+	if opts.MCP != nil {
+		m.seedMCP(opts.MCP.MCPServerStates())
+	}
 	// A --resume of a session another instance is running opens watching it (enterStartupWatch,
 	// watch.go). It goes last, over the fresh session built above — the one esc goes back to — and
 	// after the asks, which stay open over the watch exactly as they would over that session.

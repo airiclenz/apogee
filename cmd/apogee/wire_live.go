@@ -141,7 +141,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// An `auth: oauth` server with no usable token is offered a login on stderr first, before the
 	// alternate screen opens (connectMCPServers, mcp_cmd.go); declined, or with no terminal to ask
 	// on, the launch aborts naming `apogee mcp login <name>`.
-	mcpEntries, err := w.connectMCPServers(ctx)
+	mcpEntries, mcpSkipped, err := w.connectMCPServers(ctx)
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
@@ -185,8 +185,11 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// (ADR 0111 decision 8), emitted through the engine's own serialised sink — the handle
 	// resolveConfig put on Config.Events — so it shares the engine's mutex, reaches the journal and
 	// every observer in one linear stream, and leaves the holder's outbox in the order its state moved,
-	// never under its lock and never on the Update goroutine (mcpOutbox).
-	w.mcpSet.emitThrough(w.cfg.Events)
+	// never under its lock and never on the Update goroutine (mcpOutbox). Startup dialled before any
+	// of them listened, so the outbox starts out on the state startup left — the skipped repo servers'
+	// failed state with it — which the TUI is seeded with at construction (MCPHost.MCPServerStates)
+	// and every live Event journal at its birth (sessionHost.mcpSeed, attached below).
+	w.mcpSet.emitThrough(w.cfg.Events, mcpSkipped)
 	// The resolver a user reaction's mcp: handler calls through (adr-0076-amend-1029), over the live
 	// set rather than this startup snapshot, so a reconnect's servers are what the next firing
 	// resolves against without a restart. It reads w.mcpSet through a closure, never a method value:
@@ -384,6 +387,9 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// host points the chain's journal sink at the active record's `<id>.events.jsonl`, opened by the
 	// same store-backed opener a Firing's journal is (firingJournal), and the engine holder tells it
 	// of every accepted prompt — the moment a fresh session's hold is taken, and a `prompt` line.
+	// Each journal opens on the MCP servers' current state, written right after its run_started under
+	// the holder's emit-order lock, so no live mcp_server line lands ahead of it (liveMCP.seedJournal).
+	w.host.mcpSeed = w.mcpSet.seedJournal
 	w.host.attachEventJournal(w.events, firingJournal(w.store, w.bridge.NotifyHook))
 	w.engine.onPrompt(w.host.Prompt)
 	w.cfg.ScratchDir = w.host.SessionScratchDir()

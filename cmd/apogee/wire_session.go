@@ -120,6 +120,13 @@ type sessionHost struct {
 	// built without one — keeps no journal at all.
 	events     *liveJournalSink
 	openEvents run.JournalOpener
+	// mcpSeed hands a journal's birth the MCP servers' current state under the MCP holder's
+	// emit-order lock (liveMCP.seedJournal), so each journal carries it right after its run_started
+	// and before any live mcp_server line (ADR 0111 decision 8). The composition root sets it before
+	// attachEventJournal; nil — tests, and any host built without one — seeds nothing. It is called
+	// under evMu, never on the TUI's Update goroutine: every path that births a journal runs on the
+	// worker, a record-write Cmd or the root.
+	mcpSeed func(birth func(states []domain.MCPServerEvent))
 
 	// evMu guards the open journal and serializes every step of its life — a Prompt on the worker
 	// goroutine, a Save or a Rotate/Activate on the record-write Cmd, Close at teardown — so no
@@ -358,8 +365,10 @@ func (h *sessionHost) Prompt(text string, interjection bool) {
 // openEventJournalLocked opens the live Event journal of ident's record — held by the caller's
 // Claim, Begin or Activate — unless one is open already, the host keeps none, or that record's
 // journal already failed to open. Entries is the record's transcript length at this birth, and Model
-// and ContextWindow the binding the session holds at it (SetModel's pair). Callers hold evMu, and
-// take mu inside it only here: no path takes evMu while holding mu.
+// and ContextWindow the binding the session holds at it (SetModel's pair). The journal opens on the
+// MCP servers' current state (mcpSeed), written before it records the stream, so a live mcp_server
+// line never lands ahead of the seed. Callers hold evMu, and take mu inside it only here: no path
+// takes evMu while holding mu.
 func (h *sessionHost) openEventJournalLocked(ident session.Identity) {
 	if h.events == nil || h.openEvents == nil || h.journal != nil || ident.ID == h.failedID {
 		return
@@ -380,7 +389,18 @@ func (h *sessionHost) openEventJournalLocked(ident session.Identity) {
 		return
 	}
 	h.journal, h.journalID = journal, ident.ID
-	h.events.swap(journal.Wrap(nil))
+	sink := journal.Wrap(nil)
+	birth := func(states []domain.MCPServerEvent) {
+		for _, state := range states {
+			sink.Emit(state)
+		}
+		h.events.swap(sink)
+	}
+	if h.mcpSeed == nil {
+		birth(nil)
+		return
+	}
+	h.mcpSeed(birth)
 }
 
 // endEventJournalLocked takes the open live Event journal down — no Event is recorded into it from
