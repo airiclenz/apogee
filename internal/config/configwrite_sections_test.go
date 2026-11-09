@@ -374,7 +374,7 @@ func TestSidePanelSectionsBlockResetNoOpAndRefusals(t *testing.T) {
 	if err := ResetSidePanelSetting(path, domain.UIKeySidePanelShow); err != nil {
 		t.Fatalf("ResetSidePanelSetting of an unset key: %v", err)
 	}
-	for _, key := range []string{domain.UIKeySidePanelSections, "ui.spinner"} {
+	for _, key := range []string{domain.UIKeySidePanelSections, domain.UIKeySidePanelFolded, "ui.spinner"} {
 		if err := ResetSidePanelSetting(path, key); err == nil {
 			t.Errorf("ResetSidePanelSetting(%q) succeeded; want a refusal", key)
 		}
@@ -437,5 +437,98 @@ func TestSidePanelSectionsBlockWritesAndResetsWidth(t *testing.T) {
 	}
 	if opts.UI.SidePanelWidth != domain.DefaultSidePanelWidth {
 		t.Errorf("width reads back %d after reset, want the default %d", opts.UI.SidePanelWidth, domain.DefaultSidePanelWidth)
+	}
+}
+
+// A section's fold toggle adds or drops its one name in `ui.side-panel.folded`: the line lands in
+// its canonical spelling beside the block's other keys, comments and other keys carried over, the
+// answer is the list the file now holds, and a reload reads that list back. Opening the last folded
+// section leaves `[]`, which reloads as the zero value.
+func TestSidePanelFoldedWriteRoundTripsThroughTheFile(t *testing.T) {
+	t.Parallel()
+	path := writeSectionsConfig(t, "# my config\n"+
+		"ui:\n"+
+		"  side-panel:\n"+
+		"    show: on   # wide screen\n"+
+		"    sections: [tasks: pinned]\n"+
+		"  notify: bell\n")
+
+	if _, err := SaveSidePanelFold(path, domain.SidePanelMCP, true); err != nil {
+		t.Fatalf("SaveSidePanelFold(mcp, true): %v", err)
+	}
+	folded, err := SaveSidePanelFold(path, domain.SidePanelUsage, true)
+
+	if err != nil {
+		t.Fatalf("SaveSidePanelFold(usage, true): %v", err)
+	}
+	if want := domain.SidePanelFolded("[usage, mcp]"); folded != want {
+		t.Errorf("folded = %q, want %q", folded, want)
+	}
+	want := "# my config\n" +
+		"ui:\n" +
+		"  side-panel:\n" +
+		"    show: on   # wide screen\n" +
+		"    sections: [tasks: pinned]\n" +
+		"    folded: [usage, mcp]\n" +
+		"  notify: bell\n"
+	if got := readSectionsConfig(t, path); got != want {
+		t.Errorf("config =\n%s\nwant\n%s", got, want)
+	}
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if opts.UI.SidePanelFolded != folded {
+		t.Errorf("folded reads back %q, want the written %q", opts.UI.SidePanelFolded, folded)
+	}
+
+	for _, section := range []domain.SidePanelSection{domain.SidePanelMCP, domain.SidePanelUsage} {
+		if folded, err = SaveSidePanelFold(path, section, false); err != nil {
+			t.Fatalf("SaveSidePanelFold(%s, false): %v", section, err)
+		}
+	}
+
+	if folded != "" {
+		t.Errorf("folded = %q after opening every section, want the zero value", folded)
+	}
+	if got := readSectionsConfig(t, path); !strings.Contains(got, "    folded: []\n") {
+		t.Errorf("config does not carry the empty list:\n%s", got)
+	}
+	if opts, err = LoadFileConfig(path, os.ReadFile, noNotify); err != nil || opts.UI.SidePanelFolded != "" {
+		t.Errorf("reload = %q, %v; want the zero value", opts.UI.SidePanelFolded, err)
+	}
+}
+
+// The whole-list write of `ui.side-panel.folded` lands its canonical spelling — the default display
+// order, a repeated name collapsed — and a list naming no section, or a file list that no longer
+// parses, is refused with the file left as it was.
+func TestSidePanelFoldedWholeListWriteAndRefusals(t *testing.T) {
+	t.Parallel()
+	path := writeSectionsConfig(t, "ui:\n  side-panel:\n    show: auto\n")
+
+	if err := SaveSidePanelSetting(path, domain.UIKeySidePanelFolded, "[mcp, tasks, mcp]"); err != nil {
+		t.Fatalf("SaveSidePanelSetting: %v", err)
+	}
+
+	const want = "ui:\n  side-panel:\n    show: auto\n    folded: [tasks, mcp]\n"
+	if got := readSectionsConfig(t, path); got != want {
+		t.Errorf("config =\n%s\nwant\n%s", got, want)
+	}
+	if err := SaveSidePanelSetting(path, domain.UIKeySidePanelFolded, "[lsp]"); err == nil {
+		t.Error("an unknown section was written; want a refusal")
+	}
+	if _, err := SaveSidePanelFold(path, "lsp", true); err == nil {
+		t.Error("SaveSidePanelFold of an unknown section succeeded; want a refusal")
+	}
+	if got := readSectionsConfig(t, path); got != want {
+		t.Errorf("a refused write changed the file:\n%s", got)
+	}
+	const broken = "ui:\n  side-panel:\n    folded: [lsp]\n"
+	brokenPath := writeSectionsConfig(t, broken)
+	if _, err := SaveSidePanelFold(brokenPath, domain.SidePanelUsage, true); err == nil {
+		t.Error("a fold over a file list that no longer parses succeeded; want a refusal")
+	}
+	if got := readSectionsConfig(t, brokenPath); got != broken {
+		t.Errorf("a refused fold changed the file:\n%s", got)
 	}
 }

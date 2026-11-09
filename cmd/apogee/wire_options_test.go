@@ -77,6 +77,46 @@ func TestSettingsHostSidePanelSectionsWriteRefreshesTheBaseline(t *testing.T) {
 	}
 }
 
+// A section's fold persisted through the host lands in the file, answers the list the file now
+// holds, reloads as that list, and re-takes the external-edit baseline (ADR 0041 decision 8): the
+// watcher reports nothing for apogee's own write, so the session does not apply it a second time.
+func TestSettingsHostSidePanelFoldedWriteRoundTrips(t *testing.T) {
+	t.Parallel()
+	c := newWatchedConfig(t, "ui:\n  side-panel:\n    show: auto\n")
+	h := settingsHost{configPath: c.path, edits: c.edits}
+
+	folded, err := h.WriteSidePanelFolded(domain.SidePanelUsage, true)
+
+	if err != nil {
+		t.Fatalf("WriteSidePanelFolded: %v", err)
+	}
+	const want = "[usage]"
+	if folded != want {
+		t.Errorf("folded = %q, want %q", folded, want)
+	}
+	data, err := os.ReadFile(c.path)
+	if err != nil {
+		t.Fatalf("read the config back: %v", err)
+	}
+	if !strings.Contains(string(data), "folded: "+want) {
+		t.Errorf("the config does not carry the list:\n%s", data)
+	}
+	opts, err := config.LoadFileConfig(c.path, os.ReadFile, func(string) {})
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if opts.UI.SidePanelFolded != want {
+		t.Errorf("folded reads back %q, want %q", opts.UI.SidePanelFolded, want)
+	}
+	applied, err := c.reload(t, "apogee's own fold write")
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(applied) != 0 {
+		t.Errorf("the watcher reported %+v for apogee's own write; it would apply twice", applied)
+	}
+}
+
 // The `/settings` Reset of `ui.side-panel.show` goes to the block's writer too — the scalar reset
 // refuses a path three segments deep, so the pane announced a key it then could not reset — and
 // re-takes the baseline as every landed write does. The file reads back at the default.

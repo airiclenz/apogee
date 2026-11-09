@@ -666,7 +666,9 @@ type fakeSettingsHost struct {
 	resetIn func(target SettingTarget, path string) (SettingOutcome, error)
 	// writeSection answers WriteSidePanelSection; nil refuses it as the other unwired writes are.
 	writeSection func(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error)
-	apply        func(path, value string) (string, error)
+	// writeFolded answers WriteSidePanelFolded; nil refuses it as the other unwired writes are.
+	writeFolded func(section domain.SidePanelSection, folded bool) (domain.SidePanelFolded, error)
+	apply       func(path, value string) (string, error)
 	// applyWatched, when set, answers Apply in apply's place and is told whether a watched save asked.
 	applyWatched func(path, value string, watched bool) (string, error)
 }
@@ -712,6 +714,14 @@ func (h fakeSettingsHost) WriteSidePanelSection(section domain.SidePanelSection,
 		return "", errors.New(noSettingsWriterNote)
 	}
 	return h.writeSection(section, mode)
+}
+
+func (h fakeSettingsHost) WriteSidePanelFolded(section domain.SidePanelSection,
+	folded bool) (domain.SidePanelFolded, error) {
+	if h.writeFolded == nil {
+		return "", errors.New(noSettingsWriterNote)
+	}
+	return h.writeFolded(section, folded)
 }
 
 func (h fakeSettingsHost) Apply(path, value string, watched bool) (string, error) {

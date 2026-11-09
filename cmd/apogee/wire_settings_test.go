@@ -979,6 +979,7 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.side-panel.show",
 	"ui.side-panel.width",
 	"ui.side-panel.sections",
+	"ui.side-panel.folded",
 	"ui.footer.rows",
 	"ui.footer.colors",
 	"cursor-shape",

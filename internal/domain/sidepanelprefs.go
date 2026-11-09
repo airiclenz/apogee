@@ -260,3 +260,82 @@ func joinNames[S ~string](names []S) string {
 	}
 	return strings.Join(spelled, ", ")
 }
+
+// SidePanelFolded is `ui.side-panel.folded` in its one canonical spelling: the folded sections in
+// brackets, joined by `, `, in the default display order and each named once — the text
+// [SpellSidePanelFolded] writes over [ParseSidePanelFolded]'s answer, and a YAML flow list the
+// config file takes as written. The zero value `""` folds nothing, and it is the one spelling of
+// that: an empty list spells `""`, never `[]`, so two blocks that fold nothing compare equal. A
+// string rather than a slice so [UIPrefs] stays comparable with `==`.
+type SidePanelFolded string
+
+// sidePanelFoldedShape is the refusal for text that is not a list of section names at all.
+const sidePanelFoldedShape = "want a list of section names, like [usage, mcp]"
+
+// SpellSidePanelFolded writes sections in the canonical bracketed spelling, in the order given,
+// judging nothing: a config file's list is spelled through it as written so [ParseSidePanelFolded]
+// can quote it in its refusal. No sections spell `""`.
+func SpellSidePanelFolded(sections []SidePanelSection) SidePanelFolded {
+	if len(sections) == 0 {
+		return ""
+	}
+	return SidePanelFolded("[" + joinNames(sections) + "]")
+}
+
+// ParseSidePanelFolded reads a `ui.side-panel.folded` value into the sections it folds, in the
+// default display order, each once — a section named twice is collapsed rather than refused, since
+// folding a section twice still folds it. "" and `[]` (trimmed) fold nothing. It refuses, in a
+// sentence naming the key and quoting the text, text that is not a bracketed list of names and a
+// name that is not a section.
+func ParseSidePanelFolded(text string) ([]SidePanelSection, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, nil
+	}
+	refuse := func(reason string) error {
+		return fmt.Errorf("apogee: invalid ui.side-panel.folded %q: %s", text, reason)
+	}
+	names, ok := splitSidePanelFolded(text)
+	if !ok {
+		return nil, refuse(sidePanelFoldedShape)
+	}
+	for _, name := range names {
+		if !slices.Contains(sidePanelSectionNames, SidePanelSection(name)) {
+			return nil, refuse(fmt.Sprintf("unknown section %q (known sections: %s)", name,
+				joinNames(sidePanelSectionNames)))
+		}
+	}
+	var folded []SidePanelSection
+	for _, section := range sidePanelSectionNames {
+		if slices.Contains(names, string(section)) {
+			folded = append(folded, section)
+		}
+	}
+	return folded, nil
+}
+
+// splitSidePanelFolded cuts bracketed text into its trimmed names, answering false for text that is
+// not `[` names `]`, a name holding a colon or a nested bracket, or an empty name between commas.
+func splitSidePanelFolded(text string) ([]string, bool) {
+	inner, ok := strings.CutPrefix(text, "[")
+	if !ok {
+		return nil, false
+	}
+	inner, ok = strings.CutSuffix(inner, "]")
+	if !ok || strings.ContainsAny(inner, "[]{}:") {
+		return nil, false
+	}
+	if strings.TrimSpace(inner) == "" {
+		return nil, true
+	}
+	items := strings.Split(inner, ",")
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item)
+		if name == "" {
+			return nil, false
+		}
+		names = append(names, name)
+	}
+	return names, true
+}

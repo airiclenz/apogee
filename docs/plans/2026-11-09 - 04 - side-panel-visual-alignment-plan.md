@@ -101,7 +101,12 @@ internal/tui/model_test.go — testUIPrefs (Spinner unset resolves to classic, s
 **Acceptance:** `go test -race -count=1 -run 'SidePanel|Spinner|Snake' ./internal/tui/`
 **Commit:** `fix(tui): line up running sub-agent rows and colour the panel spinner`
 
-## 3. Add the `ui.side-panel.folded` setting
+## 3. Add the `ui.side-panel.folded` setting — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the seam is `SettingsHost.WriteSidePanelFolded(section, folded bool) (domain.SidePanelFolded, error)` — one section's fold per call, edited inside the write transaction (config.SaveSidePanelFold), answering the canonical list for item 5 to land on `m.opts.UI`; the file line is written in canonical spelling, `[]` when nothing is folded (the zero value `""` is the one in-memory spelling of "none").
+NOTES (2026-11-09): consequential edit — internal/tui/settingsapply.go: made necessary by registering the key — `domain.UIKeySidePanelFolded` joins the side-panel case label of `settingsApplyLocal`, the renderer arm `cmd/apogee/wire_settings_test.go`'s `settingKeysAppliedByTheRenderer` list mirrors, so a hand-edited fold list re-read by the watcher lands live instead of being refused at the binary's dispatcher.
+NOTES (2026-11-09): `ResetSidePanelSetting` refuses the folded key as it refuses `ui.side-panel.sections` (structured, never reset from a settings surface); `SaveSidePanelSetting` takes the whole list too, for the hand-edit/`Write` path.
+NOTES (2026-11-09): the manual and template prose already say that folding or opening a section in the panel writes the list back — the TUI behaviour item 5 delivers through this seam.
 
 **What:** First half of `panel-section-user-fold`: the persisted fold list, with no TUI behaviour yet.
 **Regression guard.** The registry row is KindStructured, like ui.side-panel.sections. Writes go through a dedicated SettingsHost.WriteSidePanelFolded seam that mirrors WriteSidePanelSection (internal/tui/tui.go, cmd/apogee/wire_options.go) and its test spy. cmd/apogee/wire_settings_test.go treats the key exactly as it treats ui.side-panel.sections. Item 5 uses this seam. The row is not Editable and the key stays out of `domain.uiKeys`, as `UIKeySidePanelSections` is. The seam method lands on `fakeSettingsHost` (`internal/tui/settings_test.go`) in this item, or the tui test package stops compiling. The registry row sits right after the `ui.side-panel.sections` row, and `internal/config/defaults/config.yaml` gains a commented `# folded: []` after the `# sections:` line with a prose paragraph. The zero value `""` means no folds (its Read spells it `[]`), so no resolved-`UIPrefs` literal in `internal/config/config_test.go` moves.

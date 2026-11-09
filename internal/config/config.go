@@ -2922,6 +2922,10 @@ type uiSidePanelConfig struct {
 	// Sections is `ui.side-panel.sections`: the sections with their modes, kept as written. Nil for
 	// an absent (or null) key, which keeps the default. The judgement is fileSidePanelSections'.
 	Sections sidePanelSectionsConfig `yaml:"sections"`
+	// Folded is `ui.side-panel.folded`: the folded sections' names, kept as written. Nil for an
+	// absent (or null) key, which folds nothing, as does an empty list. The judgement is
+	// fileSidePanelFolded's.
+	Folded sidePanelFoldedConfig `yaml:"folded"`
 }
 
 // uiFooterConfig is the on-disk `ui.footer:` block.
@@ -3111,6 +3115,52 @@ func fileSidePanelSections(o *Options, fc fileConfig) error {
 		return err
 	}
 	o.UI.SidePanelSections = domain.SpellSidePanelSections(entries)
+	return nil
+}
+
+// sidePanelFoldedConfig is the on-disk `ui.side-panel.folded:` list, its section names kept in the
+// order written, a repeated name included, so the refusal can quote what the file says.
+type sidePanelFoldedConfig []domain.SidePanelSection
+
+// UnmarshalYAML reads the list as written. It refuses only a shape no name can be made of — a
+// scalar or a map where the list belongs, or an entry that is not one name — in a sentence naming
+// the key, and judges nothing else: the names are domain.ParseSidePanelFolded's.
+func (f *sidePanelFoldedConfig) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	shape := func(at *yaml.Node) error {
+		return fmt.Errorf("apogee: invalid ui.side-panel.folded at line %d: want a list of "+
+			"section names, like [usage, mcp]", at.Line)
+	}
+	if node.Kind != yaml.SequenceNode {
+		return shape(node)
+	}
+	names := make(sidePanelFoldedConfig, 0, len(node.Content))
+	for _, nameNode := range node.Content {
+		nameNode = resolveAlias(nameNode)
+		if nameNode.Kind != yaml.ScalarNode {
+			return shape(nameNode)
+		}
+		names = append(names, domain.SidePanelSection(nameNode.Value))
+	}
+	*f = names
+	return nil
+}
+
+// fileSidePanelFolded projects `ui.side-panel.folded:` onto its one field of the block, writing it
+// on every pass so a re-read over a file that no longer names the key folds nothing again. The
+// names are spelled as written and read through domain.ParseSidePanelFolded, which refuses —
+// naming the key and quoting the list — a name that is not a section; a list it accepts is carried
+// in its canonical spelling, a repeated name collapsed.
+func fileSidePanelFolded(o *Options, fc fileConfig) error {
+	o.UI.SidePanelFolded = ""
+	if fc.UI == nil || fc.UI.SidePanel == nil {
+		return nil
+	}
+	folded, err := domain.ParseSidePanelFolded(string(domain.SpellSidePanelFolded(fc.UI.SidePanel.Folded)))
+	if err != nil {
+		return err
+	}
+	o.UI.SidePanelFolded = domain.SpellSidePanelFolded(folded)
 	return nil
 }
 

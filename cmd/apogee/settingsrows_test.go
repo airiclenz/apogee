@@ -93,7 +93,8 @@ func fabricatedSettings() config.Options {
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3, Notify: domain.NotifyBoth, GitFetch: false,
 			PointerShapes: true, FooterRows: "[[host, model, effort, mode], [workdir, git, spend]]",
 			FooterColors: fixtureFooterColors(), SidePanelShow: domain.SidePanelShowOn, SidePanelWidth: 48,
-			SidePanelSections: "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]"},
+			SidePanelSections: "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]",
+			SidePanelFolded:   "[usage, mcp]"},
 		// The retention keys stay unset; the two watch keys are set, so their rows report a value.
 		Sessions: config.SessionSettings{
 			WatchHomes: []config.WatchHome{{Label: "bob", Path: "/home/bob/.apogee"},
@@ -509,6 +510,9 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		// Reordered in the fixture, against every section auto in the default order: the row reads
 		// the canonical spelling, a text the key takes back rather than a summary.
 		"ui.side-panel.sections": "[usage: pinned, tasks: hidden, sub-agents: auto, changed-files: auto]",
+		// Two sections folded in the fixture, against none by default: the row reads the canonical
+		// spelling, a text the key takes back rather than a summary.
+		"ui.side-panel.folded": "[usage, mcp]",
 		// Two rows in the fixture, against the one-row default: the row reads the canonical spelling,
 		// a text the key takes back rather than a summary.
 		"ui.footer.rows": "[[host, model, effort, mode], [workdir, git, spend]]",

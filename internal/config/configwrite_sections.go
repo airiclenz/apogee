@@ -14,8 +14,8 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The `ui.side-panel:` block (ADR 0110) sits one level deeper than the scalar writer reaches
-// (scalarPathDepth): its keys are three segments long, `ui.side-panel.show`, `ui.side-panel.width`
-// and `ui.side-panel.sections`. So this writer owns the whole block. It finds `ui:` and `side-panel:`
+// (scalarPathDepth): its keys are three segments long, `ui.side-panel.show`, `ui.side-panel.width`,
+// `ui.side-panel.sections` and `ui.side-panel.folded`. So this writer owns the whole block. It finds `ui:` and `side-panel:`
 // in the parsed document, creates whichever of the two is absent, and splices the one line its key
 // sits on, under the contract every config writer keeps (configedit.go): comments, key order and the
 // other keys stay exactly as found, the result is re-parsed and compared before anything is written,
@@ -28,6 +28,11 @@ import (
 // display order on screen is the order the file now spells. A list written one entry per line is
 // refused rather than rewritten: turning the user's lines into one is a rewrite they did not ask for
 // (valueFitsOneLine's rule for a name list).
+//
+// `folded` is a list of section names, carried as one flow line too. A section's fold toggle adds or
+// drops ONE name (SaveSidePanelFold), and the line is written in its canonical spelling — the
+// default display order, each name once, `[]` for nothing folded — since the order of a set says
+// nothing a reader would miss.
 
 // sidePanelBlockKey is the `side-panel:` block's key inside `ui:`, and uiBlockKey that block's own.
 const (
@@ -40,6 +45,8 @@ const (
 	sidePanelShowLeaf     = "show"
 	sidePanelWidthLeaf    = "width"
 	sidePanelSectionsLeaf = "sections"
+	// sidePanelFoldedLeaf is the block's list of folded sections as the file spells it.
+	sidePanelFoldedLeaf = "folded"
 )
 
 // sidePanelScalarLeaves maps each scalar key of the `ui.side-panel:` block — the ones a settings row
@@ -54,13 +61,15 @@ var sidePanelScalarLeaves = map[string]string{
 // [ResetConfigSetting]: the scalar writer refuses a path three segments deep.
 func IsSidePanelKey(key string) bool {
 	_, scalar := sidePanelScalarLeaves[key]
-	return scalar || key == domain.UIKeySidePanelSections
+	return scalar || key == domain.UIKeySidePanelSections || key == domain.UIKeySidePanelFolded
 }
 
 // SaveSidePanelSetting writes one key of the `ui.side-panel:` block, value spelled as the file and the
 // registry row spell it: `auto`, `on` or `off` for `ui.side-panel.show`, a number of columns for
-// `ui.side-panel.width`, and the whole bracketed list
-// for `ui.side-panel.sections`, which lands in its canonical spelling with every section named. A
+// `ui.side-panel.width`, the whole bracketed list
+// for `ui.side-panel.sections`, which lands in its canonical spelling with every section named, and
+// the whole bracketed list of names for `ui.side-panel.folded`, which lands in its canonical
+// spelling. A
 // value the key cannot hold is refused before the file is opened. The write is [SaveConfigSetting]'s
 // in every other respect: an absent config is seeded from the template, a re-set of what the file
 // already says writes nothing, and the replace is atomic and mode-preserving.
@@ -78,6 +87,15 @@ func SaveSidePanelSetting(path, key, value string) error {
 			return entries, nil
 		})
 		return err
+	case domain.UIKeySidePanelFolded:
+		folded, err := domain.ParseSidePanelFolded(value)
+		if err != nil {
+			return err
+		}
+		_, err = saveSidePanelFolded(path, func([]domain.SidePanelSection) []domain.SidePanelSection {
+			return folded
+		})
+		return err
 	}
 	return fmt.Errorf("apogee: %q is not a key of the %s block", key, sidePanelBlockPath)
 }
@@ -89,8 +107,9 @@ func SaveSidePanelSetting(path, key, value string) error {
 // found. A key the file does not set is already at its default: a no-op, and nothing is written.
 //
 // Only the block's scalars, `ui.side-panel.show` and `ui.side-panel.width`, are reset here.
-// `ui.side-panel.sections` is a structured list edited in the file, which no settings surface
-// resets — refused as [ResetConfigSetting] refuses such a key.
+// `ui.side-panel.sections` is a structured list edited in the file, and `ui.side-panel.folded` one
+// the panel's fold toggle writes; no settings surface resets either — refused as
+// [ResetConfigSetting] refuses such a key.
 func ResetSidePanelSetting(path, key string) error {
 	if leaf, scalar := sidePanelScalarLeaves[key]; scalar {
 		k, ok := LookupKey(key)
@@ -106,7 +125,7 @@ func ResetSidePanelSetting(path, key string) error {
 		return edit(path, splice, verify)
 	}
 	switch key {
-	case domain.UIKeySidePanelSections:
+	case domain.UIKeySidePanelSections, domain.UIKeySidePanelFolded:
 		return fmt.Errorf("apogee: %s is not a simple value; edit it in config.yaml", key)
 	}
 	return fmt.Errorf("apogee: %q is not a key of the %s block", key, sidePanelBlockPath)
@@ -149,6 +168,84 @@ func withSectionMode(written []domain.SidePanelEntry, section domain.SidePanelSe
 	}
 	next[slices.IndexFunc(next, named)].Mode = mode
 	return next, nil
+}
+
+// SaveSidePanelFold folds or unfolds one section in `ui.side-panel.folded` — what a section's fold
+// toggle persists — and answers the list the file now holds, in its canonical spelling, for the
+// caller to land in the session as the next start would read it. The file's other folded sections
+// stay folded; the line is written in the canonical spelling, and a file with no list gains one. A
+// section this build does not know is refused before the file is opened, and so is a list in the
+// file that no longer parses.
+func SaveSidePanelFold(path string, section domain.SidePanelSection, folded bool) (domain.SidePanelFolded, error) {
+	asked := []domain.SidePanelSection{section}
+	if _, err := domain.ParseSidePanelFolded(string(domain.SpellSidePanelFolded(asked))); err != nil {
+		return "", err
+	}
+	return saveSidePanelFolded(path, func(written []domain.SidePanelSection) []domain.SidePanelSection {
+		kept := slices.DeleteFunc(slices.Clone(written), func(s domain.SidePanelSection) bool { return s == section })
+		if folded {
+			kept = append(kept, section)
+		}
+		return kept
+	})
+}
+
+// saveSidePanelFolded writes the list next makes of the file's written names, inside the one
+// transaction, so the names it starts from are the ones the file holds under the lock. The line is
+// the canonical spelling of that list, `[]` when it folds nothing, and the answer is that list —
+// also when the file already said it, and nothing was written.
+func saveSidePanelFolded(path string,
+	next func(written []domain.SidePanelSection) []domain.SidePanelSection) (domain.SidePanelFolded, error) {
+	var resolved domain.SidePanelFolded
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		parsed, err := domain.ParseSidePanelFolded(string(domain.SpellSidePanelFolded(next(writtenSidePanelFolded(before)))))
+		if err != nil {
+			return nil, err
+		}
+		resolved = domain.SpellSidePanelFolded(parsed)
+		return spliceSidePanelLine(data, sidePanelFoldedLeaf, KindStringList, sidePanelFoldedText(resolved))
+	}
+	verify := func(before, after fileConfig, _ []byte) error {
+		return verifySidePanelFolded(before, after, resolved)
+	}
+	if err := edit(path, splice, verify); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+// sidePanelFoldedText is the `ui.side-panel.folded` line's value for a list in its canonical
+// spelling: the list itself, or `[]` for the zero value, which folds nothing — a text the key
+// reads back as the zero value, and the one the registry row reads.
+func sidePanelFoldedText(folded domain.SidePanelFolded) string {
+	if folded == "" {
+		return "[]"
+	}
+	return string(folded)
+}
+
+// writtenSidePanelFolded is the `ui.side-panel.folded` names a parsed config writes, as written, or
+// nil when it names no list.
+func writtenSidePanelFolded(fc fileConfig) []domain.SidePanelSection {
+	if fc.UI == nil || fc.UI.SidePanel == nil {
+		return nil
+	}
+	return fc.UI.SidePanel.Folded
+}
+
+// verifySidePanelFolded is the folded write's gate: the edited config must read back the list
+// exactly as spelled, and agree with the config it started from on every other setting.
+func verifySidePanelFolded(before, after fileConfig, want domain.SidePanelFolded) error {
+	written := writtenSidePanelFolded(after)
+	switch {
+	case written == nil || domain.SpellSidePanelFolded(written) != want:
+		return fmt.Errorf("the edit did not put %s where a reader would look for it; edit the file by hand",
+			domain.UIKeySidePanelFolded)
+	case !sameApartFrom(before, after, domain.UIKeySidePanelFolded):
+		return fmt.Errorf("the edit would have changed more than %s; edit the file by hand",
+			domain.UIKeySidePanelFolded)
+	}
+	return nil
 }
 
 // saveSidePanelScalar writes one scalar key of the block onto its leaf, judged by the key's own

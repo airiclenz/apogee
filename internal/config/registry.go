@@ -1264,6 +1264,20 @@ var KeyRegistry = bindRows([]Key{
 		fromFile:  fileSidePanelSections,
 	},
 	{
+		// A list of section names, so structured — ui.side-panel.sections' posture, global-only by the
+		// same zero class — and written by the panel's own fold toggle (SaveSidePanelFold) rather than
+		// a row. Its Read is the canonical spelling, a text domain.ParseSidePanelFolded reads back
+		// (UIPrefs.Set lands it); the zero value folds nothing and reads `[]`, a list row's empty
+		// spelling. No Default: nothing folded is domain.UIPrefs' zero value and the starter
+		// template's commented line. Judged by fileSidePanelFolded at the load.
+		Path: "ui.side-panel.folded", Kind: KindStructured,
+		Desc: "The side panel's folded sections, their bodies hidden under the header; " +
+			"a section's fold toggle writes it.",
+		Read:      func(o Options) string { return sidePanelFoldedText(o.UI.SidePanelFolded) },
+		Structure: func(o Options) any { return o.UI.SidePanelFolded },
+		fromFile:  fileSidePanelFolded,
+	},
+	{
 		// A list of lists, so structured — sessions.watch-homes' shape: no one-line row holds it,
 		// and it is edited in the file. Global-only by the zero class, like every `ui:` key. Its
 		// Read is the canonical spelling rather than a summary, a text domain.ParseFooterRows reads

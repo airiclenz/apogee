@@ -307,6 +307,17 @@ type SettingsHost interface {
 	// does not report the write back as somebody's edit.
 	WriteSidePanelSection(section domain.SidePanelSection, mode domain.SidePanelMode) (domain.SidePanelSections, error)
 
+	// WriteSidePanelFolded persists one side-panel section's fold — folded true folds it, false
+	// opens it — into `ui.side-panel.folded` in the global config, the file's other folded sections
+	// kept folded. It answers the list the file now holds, in the canonical spelling
+	// [domain.UIPrefs.Set] lands for that key, so the caller lands it in the session. The write is
+	// silent, as a task-list card's fold writes `ui.task-list-open`: nothing is journalled.
+	//
+	// The [SettingsHost.Write] contract otherwise: synchronous on the keypress, errors reported and
+	// never swallowed, and the external-edit baseline re-taken after a landed write so the watcher
+	// does not report the write back as somebody's edit.
+	WriteSidePanelFolded(section domain.SidePanelSection, folded bool) (domain.SidePanelFolded, error)
+
 	// Apply makes one persisted key take effect in the RUNNING session — the apply half of every
 	// `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path and
 	// value are Write's, so the pane hands the apply exactly what it handed the write and no second

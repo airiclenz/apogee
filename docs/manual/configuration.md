@@ -1135,10 +1135,11 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../../.capcom/knowledge/decisions/adr-0061.md)).
 
-Eighteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
-says; the other nine, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch`, the footer's
+Nineteen more keys live under `ui:`. Nine of them change how the screen looks rather than what it
+says; the other ten, `ui.notify`, `ui.inspector`, `ui.stall-after`, `ui.git-fetch`, the footer's
 layout and colours, `ui.footer.rows` and `ui.footer.colors`, and the side panel's,
-`ui.side-panel.show`, `ui.side-panel.width` and `ui.side-panel.sections`, come further down.
+`ui.side-panel.show`, `ui.side-panel.width`, `ui.side-panel.sections` and `ui.side-panel.folded`,
+come further down.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. The same animation is the busy indicator outside a turn: while
 an idle session waits on something slow — a `/model` profile load, a footer git action, a
@@ -1330,6 +1331,15 @@ a section named twice are startup errors that name the key and the value. Like `
 is edited in the file, and the saved list reaches the running session at once; like every `ui:` key
 both are global-only.
 
+`ui.side-panel.folded` lists the sections whose bodies are folded under their headers, by the
+same names — `[usage, mcp]` keeps those two folded. The default folds none. The order is not
+significant and a name given twice counts once; apogee writes the list back in the panel's
+default section order. A name that is not a section is a startup error that names the key and the
+value. Folding or opening a section in the panel writes the list to your global config, silently,
+as a task-list card's fold writes `ui.task-list-open`; it is not a mode, so it leaves
+`ui.side-panel.sections` alone. Like that list it is global-only and edited in the file, not in
+`/settings`.
+
 ```yaml
 # ~/.apogee/config.yaml
 ui:
@@ -1337,6 +1347,7 @@ ui:
     show: on
     width: 44
     sections: [usage: pinned, tasks: auto, changed-files: auto, sub-agents: hidden]
+    folded: [usage, mcp]
 ```
 
 `triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter

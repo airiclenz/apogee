@@ -206,3 +206,83 @@ func TestSidePanelWidthValidateAndSetJudgeTheStatedWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestSidePanelFoldedRoundTripsThroughItsCanonicalSpelling: the zero block folds nothing; a list
+// lands in its canonical spelling — the default display order, each section once — through Set,
+// and that spelling parses back to the same sections; an empty list lands the zero value, the one
+// spelling of "nothing folded".
+func TestSidePanelFoldedRoundTripsThroughItsCanonicalSpelling(t *testing.T) {
+	t.Parallel()
+
+	if got := DefaultUIPrefs().SidePanelFolded; got != "" {
+		t.Errorf("DefaultUIPrefs().SidePanelFolded = %q; want the zero value, nothing folded", got)
+	}
+	tests := []struct {
+		name, written string
+		want          SidePanelFolded
+		sections      []SidePanelSection
+	}{
+		{"empty", "", "", nil},
+		{"empty list", "[ ]", "", nil},
+		{"one", "[usage]", "[usage]", []SidePanelSection{SidePanelUsage}},
+		{"display order", "[mcp, tasks, usage]", "[tasks, usage, mcp]",
+			[]SidePanelSection{SidePanelTasks, SidePanelUsage, SidePanelMCP}},
+		{"duplicates collapse", "[usage, mcp, usage]", "[usage, mcp]",
+			[]SidePanelSection{SidePanelUsage, SidePanelMCP}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			u := DefaultUIPrefs()
+
+			if err := u.Set(UIKeySidePanelFolded, tt.written); err != nil {
+				t.Fatalf("Set(ui.side-panel.folded, %q): %v", tt.written, err)
+			}
+
+			if u.SidePanelFolded != tt.want {
+				t.Errorf("Set(%q) landed %q; want %q", tt.written, u.SidePanelFolded, tt.want)
+			}
+			got, err := ParseSidePanelFolded(string(u.SidePanelFolded))
+			if err != nil || !slices.Equal(got, tt.sections) {
+				t.Errorf("ParseSidePanelFolded(%q) = %v, %v; want %v", u.SidePanelFolded, got, err, tt.sections)
+			}
+			if again := SpellSidePanelFolded(got); again != tt.want {
+				t.Errorf("SpellSidePanelFolded(%v) = %q; want the landed %q back", got, again, tt.want)
+			}
+		})
+	}
+}
+
+// TestSidePanelFoldedRefusesEveryBadList: a name that is not a section, and text that is not a
+// bracketed list of names, are refused by Validate and by Set naming the key and quoting the text,
+// and a refused Set leaves the block untouched.
+func TestSidePanelFoldedRefusesEveryBadList(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, folded, reason string
+	}{
+		{"unknown section", "[usage, lsp]", `unknown section "lsp" (known sections: sub-agents, tasks, changed-files, usage, mcp)`},
+		{"no brackets", "usage", "want a list of section names"},
+		{"a mode", "[usage: pinned]", "want a list of section names"},
+		{"nested", "[[usage]]", "want a list of section names"},
+		{"empty name", "[usage, , mcp]", "want a list of section names"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			u := DefaultUIPrefs()
+			u.SidePanelFolded = SidePanelFolded(tt.folded)
+
+			err := u.Validate()
+
+			wantPrefix := "apogee: invalid ui.side-panel.folded " + `"` + tt.folded + `": `
+			if err == nil || !strings.HasPrefix(err.Error(), wantPrefix) || !strings.Contains(err.Error(), tt.reason) {
+				t.Errorf("Validate() with SidePanelFolded %q = %v; want %q naming %q", tt.folded, err, wantPrefix, tt.reason)
+			}
+			held := DefaultUIPrefs()
+			if err := held.Set(UIKeySidePanelFolded, tt.folded); err == nil || held != DefaultUIPrefs() {
+				t.Errorf("Set(ui.side-panel.folded, %q) = %v, leaving %+v; want refused and untouched", tt.folded, err, held)
+			}
+		})
+	}
+}

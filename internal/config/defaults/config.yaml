@@ -1197,6 +1197,10 @@ update-check: true
 # something live) or `hidden` (never shown). A section the list leaves out follows the ones it
 # names, in `auto`. Default every section `auto`, in that order. Edit it here, in the file.
 #
+# `side-panel.folded` lists the sections whose bodies are folded under their headers, by the same
+# names: `[usage, mcp]` keeps those two folded. A name that is no section is refused at startup.
+# Default none folded. Folding or opening a section in the panel writes this back.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -1216,6 +1220,7 @@ ui:
     show: auto           # auto | on | off — the side panel right of the transcript, by window width
     # width: 36          # columns, 24 or more
     # sections: [sub-agents: auto, tasks: auto, changed-files: auto, usage: auto, mcp: auto]  # pinned | auto | hidden
+    # folded: []         # e.g. [usage, mcp] — sections folded under their headers
   # footer:
   #   rows: [[host, model, effort, mode], [workdir, git, spend]]
   #   colors: {}             # e.g. {model: success, branch: warning}

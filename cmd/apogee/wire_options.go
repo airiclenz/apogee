@@ -609,6 +609,20 @@ func (h settingsHost) WriteSidePanelSection(section domain.SidePanelSection,
 	return sections, nil
 }
 
+// WriteSidePanelFolded persists one side-panel section's fold through the `ui.side-panel:` block's
+// writer (config.SaveSidePanelFold), and answers the list the file now holds. A landed write
+// re-takes the external-edit baseline for Write's reason (ADR 0041 decision 8); a refused one
+// changed no file and refreshes nothing.
+func (h settingsHost) WriteSidePanelFolded(section domain.SidePanelSection,
+	folded bool) (domain.SidePanelFolded, error) {
+	written, err := config.SaveSidePanelFold(h.configPath, section, folded)
+	if err != nil {
+		return "", err
+	}
+	h.edits.refresh()
+	return written, nil
+}
+
 // Reset is the same write in reverse: the key's active line is REMOVED, so the value goes back to
 // the binary's default rather than being pinned to today's spelling of it. It refreshes the same
 // baseline for the same reason — a removed line is a change to the file like any other. A key of the
