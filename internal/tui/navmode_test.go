@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -355,15 +356,20 @@ func TestNavModeRegionLosingStops(t *testing.T) {
 }
 
 // TestNavModePanelKeysLeaveTheTranscriptRow pins the remembered transcript place as only remembered
-// while the cursor stands in the panel: ⏎ there opens no block on that row, and `^x` stops no run
-// whose row it is.
+// while the cursor stands in the panel: ⏎ there — on a header, whose own ⏎ opens nothing — opens no
+// block on that row, and `^x` stops no run whose row it is.
 func TestNavModePanelKeysLeaveTheTranscriptRow(t *testing.T) {
 	t.Parallel()
 	m, eng := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
 	m = cursorOnRun(t, m, "r1")
 	flags := expandedFlags(m)
 	m = step(t, m, keyRight())
-	panelCursorStop(t, m)
+	for range m.navPanelStops() {
+		m = step(t, m, keyUp()) // onto the column's first stop, a header: its ⏎ toggles a pin and opens nothing
+	}
+	if !panelCursorStop(t, m).id.isHeader {
+		t.Fatal("setup: the panel cursor does not stand on a header")
+	}
 
 	m = step(t, m, keyEnter())
 	m = step(t, m, keyCtrlX())
@@ -410,4 +416,285 @@ func TestNavModePanelHighlightYieldsToADecision(t *testing.T) {
 	if _, _, claimed := m.blockCursorKey(keyDown()); claimed {
 		t.Error("navigation mode claimed ↓ while an approval decision was pending")
 	}
+}
+
+// cursorOnPanelStop enters navigation mode, moves it into the side panel and walks the column to the
+// stop whose identity is id.
+func cursorOnPanelStop(t *testing.T, m Model, id panelStopID) Model {
+	t.Helper()
+	m = step(t, m, keyAltUp())
+	if m.cursor.inTranscript() {
+		m = step(t, m, keyRight())
+	}
+	stops := m.navPanelStops()
+	for range stops {
+		m = step(t, m, keyUp())
+	}
+	for range stops {
+		if panelCursorStop(t, m).id == id {
+			return m
+		}
+		m = step(t, m, keyDown())
+	}
+	t.Fatalf("setup: the panel cursor never stood on %+v; the stops are %+v", id, stops)
+	return m
+}
+
+// panelOutcome is what following a panel target can change: the view on screen and where it is
+// scrolled to, the /usage report, the section list a pin writes, and every block's fold.
+type panelOutcome struct {
+	viewed    runRef
+	isInView  bool
+	yOffset   int
+	isUsage   bool
+	sections  domain.SidePanelSections
+	expansion string
+}
+
+// panelOutcomeOf reads m's panelOutcome.
+func panelOutcomeOf(m Model) panelOutcome {
+	return panelOutcome{
+		viewed: m.viewedRun(), isInView: m.inRunView(), yOffset: m.viewport.YOffset(), isUsage: m.usagePane.open,
+		sections: m.opts.UI.SidePanelSections, expansion: fmt.Sprint(expandedFlags(m)),
+	}
+}
+
+// TestNavModeEnterMatchesClickPerKind pins ⏎ on a panel stop as the click on its row (ADR 0111 D4):
+// for every kind of stop the two leave the same outcome, and it is not the untouched one. A stop that
+// opens a detail ends the mode; a header's pin toggle keeps it, on the header it toggled.
+func TestNavModeEnterMatchesClickPerKind(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		id         func(m Model) panelStopID
+		isModeKept bool
+	}{
+		{
+			name: "sub-agent row",
+			id: func(Model) panelStopID {
+				return panelStopID{section: domain.SidePanelSubAgents, run: sidepanel.RunOf(delegationBase("r1"))}
+			},
+		},
+		{
+			name: "changed file row",
+			id: func(m Model) panelStopID {
+				return panelStopID{section: domain.SidePanelChangedFiles, path: m.panelWriteKey("/w/child.go")}
+			},
+		},
+		{
+			name: "tasks",
+			id:   func(Model) panelStopID { return panelStopID{section: domain.SidePanelTasks} },
+		},
+		{
+			name: "usage",
+			id:   func(Model) panelStopID { return panelStopID{section: domain.SidePanelUsage} },
+		},
+		{
+			name:       "header pin",
+			id:         func(Model) panelStopID { return panelStopID{section: domain.SidePanelTasks, isHeader: true} },
+			isModeKept: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+			base = streamOneScreen(t, base) // the blocks scroll off, so a reveal shows in the outcome
+			id := tc.id(base)
+			stops := base.navPanelStops()
+			at := slices.IndexFunc(stops, func(s panelStop) bool { return s.id == id })
+			if at < 0 {
+				t.Fatalf("setup: no stop %+v among %+v", id, stops)
+			}
+			x := panelBodyX(base)
+			if id.isHeader {
+				x = base.width - 1
+			}
+			walked := cursorOnPanelStop(t, base, id) // both ways in start from the one walked frame
+			clicked := clickCell(t, walked, x, stops[at].y)
+
+			keyed := step(t, walked, keyEnter())
+
+			want, got := panelOutcomeOf(clicked), panelOutcomeOf(keyed)
+			if want == panelOutcomeOf(walked) {
+				t.Fatalf("setup: the click on %+v changed nothing", id)
+			}
+			if got != want {
+				t.Errorf("⏎ on %+v left %+v; the click on its row left %+v", id, got, want)
+			}
+			if keyed.cursor.active != tc.isModeKept {
+				t.Errorf("after ⏎ the mode is on = %v, want %v", keyed.cursor.active, tc.isModeKept)
+			}
+			if tc.isModeKept && panelCursorStop(t, keyed).id != id {
+				t.Errorf("after the pin toggle the cursor stands on %+v, want the header %+v", panelCursorStop(t, keyed).id, id)
+			}
+		})
+	}
+}
+
+// TestNavModeEnterRefusedUnderModal pins the click's modal gate (ADR 0111's modal click, which
+// followPanelTarget carries) for the keyboard's way in: with a modal pane open over a panel-standing
+// cursor, ⏎ follows no panel target — it opens no Run view and no /usage report and writes no
+// section mode. Under approval and ask the pane answers the key; under /settings its own rung takes it.
+func TestNavModeEnterRefusedUnderModal(t *testing.T) {
+	t.Parallel()
+	modals := []struct {
+		name string
+		open func(t *testing.T, m Model) Model
+	}{
+		{
+			name: "approval",
+			open: func(t *testing.T, m Model) Model {
+				m = step(t, streamOneScreen(t, m), approvalReqMsg{
+					Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
+					Reply:   make(chan domain.ApprovalDecision, 1),
+				})
+				return armApproval(t, m)
+			},
+		},
+		{
+			name: "ask",
+			open: func(t *testing.T, m Model) Model {
+				m = step(t, streamOneScreen(t, m), askReqMsg{
+					Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}},
+					Reply:   make(chan domain.AskAnswer, 1),
+				})
+				return armApproval(t, m)
+			},
+		},
+		{
+			name: "settings",
+			open: func(t *testing.T, m Model) Model {
+				// /settings is submitted with ⏎, which the mode would take: the cursor is set aside across it.
+				cursor := m.cursor
+				m.cursor = blockCursor{}
+				m = openSettingsPane(t, m)
+				m.cursor = cursor
+				return m
+			},
+		},
+	}
+	stops := []panelStopID{
+		{section: domain.SidePanelSubAgents, run: sidepanel.RunOf(delegationBase("r1"))},
+		{section: domain.SidePanelUsage},
+		{section: domain.SidePanelTasks, isHeader: true},
+	}
+	for _, modal := range modals {
+		for _, id := range stops {
+			t.Run(fmt.Sprintf("%s/%+v", modal.name, id), func(t *testing.T) {
+				t.Parallel()
+				m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+				spy := &settingsSpy{}
+				host := spy.host(nil)
+				rows := settingsTestRows(6)
+				host.rows = func() []SettingRow { return rows }
+				m.opts.Settings = host
+				m = cursorOnPanelStop(t, m, id)
+				m = modal.open(t, m)
+				if !m.modalPaneOpen() {
+					t.Fatal("setup: no modal pane is open")
+				}
+				sections := m.opts.UI.SidePanelSections
+
+				m = step(t, m, keyEnter())
+
+				if m.inRunView() || m.usagePane.open || m.opts.UI.SidePanelSections != sections || len(spy.sections) != 0 {
+					t.Errorf("in view %v, /usage open %v, sections %q→%q, section writes %v; want no panel target followed",
+						m.inRunView(), m.usagePane.open, sections, m.opts.UI.SidePanelSections, spy.sections)
+				}
+			})
+		}
+	}
+}
+
+// TestNavModePanelCursorAnchorsToRow pins the panel cursor to its row's identity (ADR 0111 D5): rows
+// appearing above it leave it on its row, its own row vanishing lands it on the nearest stop of the
+// same section — even where another section's stop is nearer — and its whole section vanishing lands
+// it on the column's first stop.
+func TestNavModePanelCursorAnchorsToRow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a row added above", func(t *testing.T) {
+		t.Parallel()
+		m, _ := navModel(t, onlySections(domain.SidePanelSubAgents, domain.SidePanelChangedFiles),
+			panelWrite(domain.EventBase{}, "w1", "/w/top.go")...)
+		id := panelStopID{section: domain.SidePanelChangedFiles, path: m.panelWriteKey("/w/top.go")}
+		m = cursorOnPanelStop(t, m, id)
+		before := panelCursorStop(t, m).y
+
+		for _, e := range []domain.Event{panelDelegationCall(t, "r1", "scout"), delegationPhase("r1", domain.SubAgentStarted, time.Minute)} {
+			m = step(t, m, eventMsg{Event: e})
+		}
+
+		stop := panelCursorStop(t, m)
+		if stop.id != id || stop.y <= before {
+			t.Errorf("the cursor stands on %+v at row %d, want %+v moved down from row %d", stop.id, stop.y, id, before)
+		}
+		if got := m.panelCursorRow(m.frameSpans().slotBottom); got != stop.y {
+			t.Errorf("the cursor is painted on row %d, want its row %d", got, stop.y)
+		}
+	})
+	t.Run("its own row removed: the same section's nearest stop", func(t *testing.T) {
+		t.Parallel()
+		events := panelWrite(domain.EventBase{}, "w1", "/w/top.go")
+		for _, run := range []string{"r1", "r2", "r3"} {
+			events = append(events, panelDelegationCall(t, run, "scout-"+run), delegationPhase(run, domain.SubAgentStarted, time.Minute))
+		}
+		m, _ := navModel(t, onlySections(domain.SidePanelSubAgents, domain.SidePanelChangedFiles), events...)
+		row := func(run string) panelStopID {
+			return panelStopID{section: domain.SidePanelSubAgents, run: sidepanel.RunOf(delegationBase(run))}
+		}
+		m = cursorOnPanelStop(t, m, row("r3"))
+		left := panelCursorStop(t, m).y
+
+		m.transcript.entries = slices.DeleteFunc(m.transcript.entries, func(e entry) bool {
+			return e.headsRun() && (e.spawnRunID == "r2" || e.spawnRunID == "r3")
+		})
+		m.refreshViewport()
+
+		stops := m.navPanelStops()
+		if at, _ := nearestPanelStop(stops, left, anyPanelStop); stops[at].id.section == domain.SidePanelSubAgents {
+			t.Fatalf("setup: the stop nearest row %d is %+v, in the cursor's own section", left, stops[at].id)
+		}
+		stop := panelCursorStop(t, m)
+		if stop.id != row("r1") {
+			t.Errorf("the cursor stands on %+v, want r1's row, the nearest stop left in its section", stop.id)
+		}
+		m = step(t, m, keyDown())
+		m = step(t, m, keyUp())
+		if got := panelCursorStop(t, m).id; got != row("r1") {
+			t.Errorf("after ↓↑ the cursor stands on %+v, want r1's row", got)
+		}
+	})
+	t.Run("its whole section gone: the column's first stop", func(t *testing.T) {
+		t.Parallel()
+		m, _ := navModel(t, "[usage: auto, sub-agents: auto, changed-files: auto, tasks: hidden]")
+		clock := panelNow
+		m.panel = sidepanel.New(func() time.Time { return clock })
+		finished := domain.SubAgentPhaseEvent{
+			EventBase: delegationBase("r1"), Phase: domain.SubAgentFinished, At: panelNow.Add(-testtime.Fixed(10 * time.Second)),
+		}
+		events := panelEvents(
+			[]domain.Event{panelUsageReading(panelUsed), panelDelegationCall(t, "r1", "scout"), delegationPhase("r1", domain.SubAgentStarted, time.Minute), finished},
+			panelWrite(domain.EventBase{}, "w1", "/w/top.go"),
+		)
+		for _, e := range events {
+			m = step(t, m, eventMsg{Event: e})
+		}
+		header := panelStopID{section: domain.SidePanelSubAgents, isHeader: true}
+		m = cursorOnPanelStop(t, m, header)
+		left := panelCursorStop(t, m).y
+
+		clock = panelNow.Add(testtime.Fixed(time.Hour))
+		m = step(t, m, keyDown())
+		m = step(t, m, keyUp())
+
+		stops := m.navPanelStops()
+		if at, _ := nearestPanelStop(stops, left, anyPanelStop); at == 0 {
+			t.Fatalf("setup: the stop nearest row %d is the column's first; the case would not tell the rules apart", left)
+		}
+		if got := panelCursorStop(t, m).id; got != stops[0].id {
+			t.Errorf("the cursor stands on %+v, want the column's first stop %+v", got, stops[0].id)
+		}
+	})
 }

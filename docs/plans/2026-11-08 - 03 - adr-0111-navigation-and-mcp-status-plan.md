@@ -244,7 +244,10 @@ one level up, panel esc leaves only the mode), `TestNavModeRightIntoEmptyPanelDo
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestNavMode|TestKeyClaimOrder|TestBlockCursor|TestRunViewEsc' ./internal/tui/`
 **Commit:** `feat(tui): navigation mode moves between the transcript and the side panel`
 
-## 7. `⏎` on panel stops acts as the click; the panel cursor anchors to identity
+## 7. `⏎` on panel stops acts as the click; the panel cursor anchors to identity — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the paint path already passed `belowSlot` into `sidePanelColumn` → `panelCursorRow(rows)` → `panelStops(rows)` (item 6), so no paint change was needed; ⏎ follows through the new `Model.activatePanelCursor` (blockcursor.go), which calls `followPanelTarget` and ends the mode only for a live, non-pin target. The vanished-row fallback keeps item 6's `panelY` hint, now restricted to the cursor's own section (`nearestPanelStop` gained a candidate filter), then the column's first stop.
+NOTES (2026-11-09): `TestNavModePanelKeysLeaveTheTranscriptRow` (item 6) now walks the panel cursor onto a header before ⏎, since ⏎ on a body stop now legitimately opens that stop's detail; its assertion (no remembered transcript row acted on) is unchanged.
 
 **What:** ADR 0111 D4–5. Depends on item 6 (and item 1's gate, which `followPanelTarget` now carries).
 **Regression guard.** The paint path passes the rows `View` already has (`belowSlot`, into `sidePanelColumn`) to

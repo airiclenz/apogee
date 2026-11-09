@@ -826,7 +826,9 @@ func (m Model) resetPanelWidth() Model {
 // followPanelTarget does what a click on target means: a pin toggles its section between pinned
 // and auto, a sub-agent row opens its Run view, a task or changed-file row unfolds that one block
 // — never the shared task-list fold, whose toggle writes `ui.task-list-open` — and scrolls it into
-// view (opening the run that holds it first), and a usage row opens /usage.
+// view (opening the run that holds it first), and a usage row opens /usage. ⏎ on the row's stop in
+// navigation mode is the same call ([Model.activatePanelCursor]), so the click and the key cannot
+// come to mean different things.
 //
 // Under a modal pane ([Model.modalPaneOpen]) no target acts: the pane owns the keyboard, and a
 // detail view or a settings write under it would change what the human is answering. And while

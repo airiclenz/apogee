@@ -33,8 +33,9 @@ import (
 // Navigation mode (ADR 0111 D1–3) spans two regions — the transcript and the side panel's column —
 // and the cursor stands in one of them at a time while REMEMBERING its place in the other, so → and
 // ← move between the two and come back to where the reader left each. The panel's place is a stop
-// IDENTITY ([panelStopID]) rather than a row, because the column re-lays out under every Event; the
-// row it was last seen on is kept beside it as the hint a vanished identity falls back to.
+// IDENTITY ([panelStopID]) rather than a row, because the column re-lays out under every Event: a
+// row appearing or vanishing above it leaves the cursor on its own row. The row it was last seen on
+// is kept beside it as the hint a vanished identity falls back to ([blockCursor.panelStopIndex]).
 type blockCursor struct {
 	active bool      // the mode is on: ↑/↓/←/→/esc are the mode's until a printable key hands them back
 	region navRegion // which region the cursor stands in; the other one's place is only remembered
@@ -71,9 +72,11 @@ func (c blockCursor) standOnPanel(stop panelStop) blockCursor {
 	return c
 }
 
-// panelStopIndex is the index in stops of the cursor's panel place: the stop with its identity, or —
-// the identity gone from the column — the stop nearest the row it was last on. It is false when the
-// cursor has no panel place or the column has no stops.
+// panelStopIndex is the index in stops of the cursor's panel place (ADR 0111 D5): the stop with its
+// identity; or — that row gone from the column — the stop of the same section nearest the row it was
+// last on, since a reader whose sub-agent row ended is still reading that section; or, the whole
+// section gone, the column's first stop. It is false when the cursor has no panel place or the
+// column has no stops.
 func (c blockCursor) panelStopIndex(stops []panelStop) (int, bool) {
 	if !c.hasPanel || len(stops) == 0 {
 		return 0, false
@@ -81,20 +84,30 @@ func (c blockCursor) panelStopIndex(stops []panelStop) (int, bool) {
 	if at := slices.IndexFunc(stops, func(s panelStop) bool { return s.id == c.panel }); at >= 0 {
 		return at, true
 	}
-	return nearestPanelStop(stops, c.panelY), true
+	inSection := func(s panelStop) bool { return s.id.section == c.panel.section }
+	if at, ok := nearestPanelStop(stops, c.panelY, inSection); ok {
+		return at, true
+	}
+	return 0, true
 }
 
-// nearestPanelStop is the index of the stop in stops whose first row is closest to row, the upper
-// one on a tie. stops is never empty.
-func nearestPanelStop(stops []panelStop, row int) int {
-	best := 0
+// nearestPanelStop is the index of the stop in stops, among those isCandidate keeps, whose first row
+// is closest to row, the upper one on a tie. It is false when isCandidate keeps none.
+func nearestPanelStop(stops []panelStop, row int, isCandidate func(panelStop) bool) (int, bool) {
+	best := -1
 	for i, stop := range stops {
-		if abs(stop.y-row) < abs(stops[best].y-row) {
+		if !isCandidate(stop) {
+			continue
+		}
+		if best < 0 || abs(stop.y-row) < abs(stops[best].y-row) {
 			best = i
 		}
 	}
-	return best
+	return best, best >= 0
 }
+
+// anyPanelStop keeps every stop: [nearestPanelStop] over the whole column.
+func anyPanelStop(panelStop) bool { return true }
 
 // abs is n's magnitude.
 func abs(n int) int {
@@ -277,7 +290,8 @@ func (m Model) blockCursorOwnsKeys() bool {
 // (ADR 0111 D1–3) — and are claimed even where there is nowhere to go, so the prompt's caret never
 // moves under a reader who is navigating — and esc leaves the mode from either region. In the
 // transcript ⏎ opens or closes the surface under the highlight and `^x` stops the delegation whose
-// row it stands on; in the panel neither is the mode's, and both go on to the frame.
+// row it stands on; in the panel ⏎ is the click on the stop it stands on ([Model.activatePanelCursor],
+// ADR 0111 D4), and `^x` is not the mode's and goes on to the frame.
 // Every other key — ⌃c, PgUp, ⇧⇥ — is left alone and leaves the mode standing: they are the frame's
 // own verbs, and none of them is a reason to lose your place in the scrollback.
 //
@@ -310,6 +324,10 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		m.cursor = blockCursor{}
 		return m, nil, true
 	case "enter":
+		if m.cursor.inPanel() {
+			next, cmd := m.activatePanelCursor()
+			return next, cmd, true
+		}
 		if !m.cursor.inTranscript() {
 			return m, nil, false
 		}
@@ -355,11 +373,33 @@ func (m Model) enterPanelRegion() Model {
 	}
 	at, ok := m.cursor.panelStopIndex(stops)
 	if !ok {
-		at = nearestPanelStop(stops, m.blockCursorRow())
+		at, _ = nearestPanelStop(stops, m.blockCursorRow(), anyPanelStop)
 	}
 	m.cursor.region = regionPanel
 	m.cursor = m.cursor.standOnPanel(stops[at])
 	return m
+}
+
+// activatePanelCursor is ⏎ on the panel stop the cursor stands on (ADR 0111 D4): exactly the click on
+// that stop's row, through the click's own [Model.followPanelTarget], so the two ways in are one
+// gesture — under a modal pane or on a watched pin it acts as the click does there. A pin toggle
+// keeps the mode, the cursor still on the header it toggled; a stop that opens a detail — a Run view,
+// a tool block, /usage — ends it, as ⏎ on a delegation's transcript row does: the reader's attention
+// has moved to what opened. The stop is the one [Model.reseatPanelCursor] resolved for this key.
+func (m Model) activatePanelCursor() (Model, tea.Cmd) {
+	stops := m.navPanelStops()
+	at, ok := m.cursor.panelStopIndex(stops)
+	if !ok {
+		return m, nil
+	}
+	target := stops[at].target
+	isOpening := target.kind != panelTargetPin && m.panelTargetLive(target)
+	next, cmd := m.followPanelTarget(target)
+	m = next.(Model)
+	if isOpening {
+		m.cursor = blockCursor{}
+	}
+	return m, cmd
 }
 
 // enterTranscriptRegion is ← : the cursor moves back to the transcript row it remembers, scrolled

@@ -8,7 +8,8 @@ import (
 // The side panel's stops (ADR 0111 decisions 4–5): the rows of the column a click acts on, each
 // with the target that click follows and an identity that outlives the row it sits on. The pointer
 // resolves a body row through them ([Model.panelTargetAt]), so a stop's target is the click at
-// every row of its span; navigation mode walks the same list.
+// every row of its span; navigation mode walks the same list, and its ⏎ follows the target of the
+// stop it stands on ([Model.activatePanelCursor]) — the click by another way in.
 
 // panelStopID is what a stop is, independent of the row it is laid out on: a section's header, a
 // sub-agent row by its run, a changed-file row by its path, the tasks section's one task card or
