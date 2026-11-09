@@ -267,7 +267,7 @@ rather than flattened beside it:
 
 | Member | What it carries |
 |---|---|
-| `event` | the line kind: one of the twenty-eight names below |
+| `event` | the line kind: one of the twenty-nine names below |
 | `v` | the contract version — `2` today, on **every** line |
 | `seq` | 1-based, counting every line the run wrote, the two frames included |
 | `time` | RFC3339Nano, stamped as the line is written |
@@ -285,9 +285,11 @@ sub-agent from another, and the parent's `tool_call` and `tool_result` for a del
 same id as `data.spawn_run_id` (`""` on any other call), which is how a delegated run is paired with
 the call that spawned it.
 
-### The twenty-eight line kinds
+### The twenty-nine line kinds
 
-Twenty-six of them are engine events, and the two frames are not. The names are snake_case on
+Twenty-seven of them are events, and the two frames are not. All but `mcp_server` come from the
+engine; that one comes from the interactive session's MCP wiring, so `--format json` never carries
+it. The names are snake_case on
 purpose — a [Reaction notice](reactions.md)'s kebab-case name for a neighbouring moment is a *different*
 moment, and the case difference is the signal.
 
@@ -319,6 +321,7 @@ moment, and the case difference is the signal.
 | `upstream_switched` | a server failed and its seat moved to a fallback server named in that `servers:` entry's `fallback:` list, after the entry's `fallback-after:` grace window went by without the server recovering: `data.from_server` and `data.from_model` name the entry and model the seat was on, `data.to_server` and `data.to_model` the fallback it continues on, `data.fault` the fault that triggered the switch, `data.waited_ms` how long the grace window ran first, in whole milliseconds, and `data.seat` which seat moved — `session` (the session's own server, whether the top-level agent or a sub-agent sharing it hit the fault) or `sub-agents` (the server the `sub-agents-server:` setting routes delegations to). A seat switches once and never moves back by itself |
 | `task_list` | the emitting agent's task list as a successful `task_list` tool call left it, written after that call's `context_estimate` line at the same depth: `data.items` is the whole list in the model's order — each row's `text` and whether it is `done` — and `[]` for a list the call cleared. Each call replaces the whole list, so a reader replaces its copy rather than merging. Every agent keeps its own list, so a sub-agent's line carries its own `depth` and `run_id` and its own list, never its parent's. Clearing the conversation and resuming a session write no `task_list` line |
 | `context_cost` | the emitting agent's standing context cost at the end of each Turn, written right after that Turn's `turn` line at the same depth: `data` is the shape `run_finished.context_cost` carries — `rows` (one `{name, bytes, tokens}` per piece of the standing system content and the tool menu, in wire order, `[]` for an agent that seeds nothing), the total `bytes`, the token estimate `tokens` over that total, and `calibrated`. It is an estimate, never a reading, and adds nothing to the cumulative totals: subtracting its `tokens` from the latest context fill at the same depth leaves what the conversation history holds. Every agent reports its own, so a sub-agent's line carries its own `depth` and `run_id` |
+| `mcp_server` | one MCP server's connection changed: `data.server` names it, `data.transport` is its transport (`stdio`, `sse`, …) and `data.project` says whether it came from the project config. `data.phase` is `dialling` when a connection attempt starts, `connected` when it succeeds (`data.tools` is the server's tool count), `failed` when it does not (`data.cause` is the error text, and `data.kept` is `true` when an earlier connection still serves and its tools stay available), and `disconnected` when apogee closed a live connection (`data.reason` is `removed` for a server taken out of the config, `denied` for one whose endpoint a `url-safety:` change now refuses). A reconnect is `dialling` then `connected` or `failed`, with no `disconnected` between. The envelope's `turn`, `depth`, `call_id` and `run_id` are always zero or `""`: a server belongs to the session, not to an agent. Only the interactive session's [Event journal](#the-event-journal--what-a-watcher-reads) writes this kind; the server name, transport and cause are untrusted text |
 | `run_started` | the opening frame — not an event |
 | `run_finished` | the closing frame — not an event |
 
@@ -454,7 +457,7 @@ Whether or not `--format json` is given, a run that keeps a record also writes i
 file beside that record while it runs: `~/.apogee/sessions/<id>.events.jsonl`, the **Event journal**
 that [watch mode](sessions.md#watching-a-live-session) follows from another terminal
 ([ADR 0103](../../.capcom/knowledge/decisions/adr-0103.md)). It is the same `v:2` envelope and the
-same line kinds as stdout, with three differences that make it a coalesced variant of them:
+same line kinds as stdout, with four differences that make it a coalesced variant of them:
 
 - **Deltas are merged.** The `token` and `reasoning` deltas that arrive within one window of about
   30 ms are written as one line whose text is exactly their concatenation, so a fast stream costs a
@@ -472,6 +475,9 @@ same line kinds as stdout, with three differences that make it a coalesced varia
   what was submitted and `data.interjection` says which it was — because a prompt is not an Event
   and a watcher would otherwise see answers with no question. This kind is the journal's own and
   never reaches stdout.
+- **`mcp_server` lines** are written only by an interactive session's journal, since only the
+  interactive session reports its MCP servers' connections as events. A watcher reads them to show
+  the same per-server state the watched session shows.
 
 A journal holds exactly one `run_started` and one `run_finished`. Its **lifetime is the run's hold
 on the record**: it is born once the run holds its record and has its prompt, and it is removed

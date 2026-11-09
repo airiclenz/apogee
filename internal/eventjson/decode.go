@@ -206,6 +206,22 @@ var eventDecoders = map[string]eventDecoder{
 	kindUpstreamSwitched: decodeWith(upstreamSwitchedEventFrom),
 	kindTaskList:         decodeWith(taskListEventFrom),
 	kindContextCost:      decodeWith(contextCostEventFrom),
+	kindMCPServer:        decodeWith(mcpServerEventFrom),
+}
+
+// mcpServerEventFrom rebuilds a domain.MCPServerEvent.
+func mcpServerEventFrom(base domain.EventBase, d mcpServerData) (domain.Event, error) {
+	return domain.MCPServerEvent{
+		EventBase: base,
+		Server:    d.Server,
+		Transport: d.Transport,
+		Project:   d.Project,
+		Phase:     domain.MCPServerPhase(d.Phase),
+		Tools:     d.Tools,
+		Cause:     d.Cause,
+		Kept:      d.Kept,
+		Reason:    domain.MCPDisconnectReason(d.Reason),
+	}, nil
 }
 
 // contextCostEventFrom rebuilds a domain.ContextCostEvent; an empty rows list comes back nil.

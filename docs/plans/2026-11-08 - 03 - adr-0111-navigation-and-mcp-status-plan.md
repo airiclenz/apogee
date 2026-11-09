@@ -435,7 +435,10 @@ asserting the exact report text the command emits; `off` and nothing-live subtes
 **Closes:** panel-narrow-overlay
 **Commit:** `feat(tui): close the side-panel overlay and open it from bare /panel`
 
-## 14. `MCPServerEvent` joins the Event vocabulary and the journal
+## 14. `MCPServerEvent` joins the Event vocabulary and the journal — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): left `internal/eventjson/doc.go`'s "across twenty-three variants" as is — a design-rationale figure that was already stale before this item (twenty-six), not a live count of the vocabulary; likewise `adr-0075-decision.md`'s inline amendment history stops at 2026-11-01 by precedent (later counts live in the amend Notes).
+NOTES (2026-11-09): `docs/manual/headless.md`'s Event journal section now lists four differences from stdout, not three — the new `mcp_server` bullet says only the interactive session's journal writes the kind.
 
 **What:** ADR 0111 D8's type; nothing emits it yet.
 **Regression guard.** The amend-by-rule covers every count of line kinds, default-stream variants or Event variants, found

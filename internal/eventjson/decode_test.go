@@ -167,6 +167,12 @@ func roundTripEvents() []domain.Event {
 			EventBase: delegatedBase, FromServer: "helpers", FromModel: "small", ToServer: "spare", ToModel: "tiny",
 			Fault: "transport", Seat: domain.UpstreamSeatSubAgents,
 		},
+		domain.MCPServerEvent{Server: "files", Transport: "stdio", Project: true, Phase: domain.MCPServerDialling},
+		domain.MCPServerEvent{Server: "files", Transport: "stdio", Project: true, Phase: domain.MCPServerConnected, Tools: 7},
+		domain.MCPServerEvent{
+			Server: "search", Transport: "sse", Phase: domain.MCPServerFailed, Cause: "dial tcp: connection refused", Kept: true,
+		},
+		domain.MCPServerEvent{Server: "search", Transport: "sse", Phase: domain.MCPServerDisconnected, Reason: domain.MCPDisconnectRemoved},
 	}
 }
 

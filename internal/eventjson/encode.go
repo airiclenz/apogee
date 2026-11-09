@@ -7,9 +7,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-eight line kinds of ADR 0075 §4 — twenty-six Event variants, workflow_phase (ADR 0087),
+// The twenty-nine line kinds of ADR 0075 §4 — twenty-seven Event variants, workflow_phase (ADR 0087),
 // malformed_chunks, sub_agent_group (ADR 0103 decision 13), context_estimate, upstream_switched
-// (adr-0075-amend-1102), task_list and context_cost (adr-0075-amend-1108) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// (adr-0075-amend-1102), task_list, context_cost (adr-0075-amend-1108) and mcp_server
+// (adr-0075-amend-1109) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -40,6 +41,7 @@ const (
 	kindUpstreamSwitched  = "upstream_switched"
 	kindTaskList          = "task_list"
 	kindContextCost       = "context_cost"
+	kindMCPServer         = "mcp_server"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -88,6 +90,7 @@ func Kinds() []string {
 		kindUpstreamSwitched,
 		kindTaskList,
 		kindContextCost,
+		kindMCPServer,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -242,6 +245,17 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 			Fault:      e.Fault,
 			WaitedMs:   e.Waited.Milliseconds(),
 			Seat:       string(e.Seat),
+		}, true
+	case domain.MCPServerEvent:
+		return kindMCPServer, e.EventBase, mcpServerData{
+			Server:    e.Server,
+			Transport: e.Transport,
+			Project:   e.Project,
+			Phase:     string(e.Phase),
+			Tools:     e.Tools,
+			Cause:     e.Cause,
+			Kept:      e.Kept,
+			Reason:    string(e.Reason),
 		}, true
 	default:
 		return "", domain.EventBase{}, nil, false
@@ -708,6 +722,23 @@ type upstreamSwitchedData struct {
 	Fault      string `json:"fault"`
 	WaitedMs   int64  `json:"waited_ms"`
 	Seat       string `json:"seat"`
+}
+
+// mcpServerData is the mcp_server line: one MCP server's connection lifecycle (ADR 0111 decision 8).
+// phase is dialling, connected, failed or disconnected; tools is the tool count on connected, cause
+// the failure's text on failed, kept whether a failed reconnect left the previous connection
+// serving, and reason — removed or denied — why a disconnected closed the session, "" on every
+// other phase. The composition root emits it, never the engine, so its envelope identity is
+// always zero.
+type mcpServerData struct {
+	Server    string `json:"server"`
+	Transport string `json:"transport"`
+	Project   bool   `json:"project"`
+	Phase     string `json:"phase"`
+	Tools     int    `json:"tools"`
+	Cause     string `json:"cause"`
+	Kept      bool   `json:"kept"`
+	Reason    string `json:"reason"`
 }
 
 // The nested mirrors. A domain struct that rides inside a variant gets its own tagged shape here

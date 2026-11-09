@@ -878,6 +878,66 @@ func (e UpstreamSwitchedEvent) Notice() string {
 		e.FromServer, e.Fault, e.ToServer, e.ToModel, e.Waited.Round(time.Second))
 }
 
+// MCPServerPhase names the point in one MCP server's connection life that an MCPServerEvent
+// reports (ADR 0111 decision 8).
+type MCPServerPhase string
+
+const (
+	// MCPServerDialling reports that a dial of the server has begun: at startup, on a reconnect, or
+	// when a server is added mid-session.
+	MCPServerDialling MCPServerPhase = "dialling"
+	// MCPServerConnected reports that a dial finished with a live session; Tools is the number of
+	// tools the server offers. Those tools join the menu at the next idle point (ADR 0109), not
+	// when this is emitted.
+	MCPServerConnected MCPServerPhase = "connected"
+	// MCPServerFailed reports that a dial finished without a session; Cause is the failure's text,
+	// and Kept says whether an earlier connection still serves.
+	MCPServerFailed MCPServerPhase = "failed"
+	// MCPServerDisconnected reports that a live session was closed on purpose; Reason says why.
+	MCPServerDisconnected MCPServerPhase = "disconnected"
+)
+
+// MCPDisconnectReason says why an MCPServerEvent's disconnected phase closed a live session.
+type MCPDisconnectReason string
+
+const (
+	// MCPDisconnectRemoved: the server was removed from the configuration mid-session.
+	MCPDisconnectRemoved MCPDisconnectReason = "removed"
+	// MCPDisconnectDenied: a `url-safety:` change now denies the endpoint the server is connected
+	// on, so its session was closed.
+	MCPDisconnectDenied MCPDisconnectReason = "denied"
+)
+
+// MCPServerEvent reports one MCP server's connection lifecycle (ADR 0111 decision 8): a dial
+// starting (dialling), a dial finishing (connected or failed), or a live session closed
+// (disconnected). A reconnect is dialling then connected or failed, with no disconnected between.
+// It is emitted when a dial starts and when it finishes, not at the idle-point commit that brings a
+// server's tools into the menu (ADR 0109), so every Driver, watch mode and a resumed session read
+// the same per-server state from the Event stream and the journal.
+//
+// Unlike every other variant, the engine never emits it — the engine stays MCP-blind. The
+// composition root that owns the dials emits it through the engine's serialised sink. Its
+// EventBase is therefore always zero: a server belongs to the session, not to any agent, Turn or
+// delegation.
+//
+// Server is the configured server's name and Transport its transport ("stdio", "sse", ...);
+// Project says the server comes from the Project config rather than the global one. Tools is the
+// tool count on connected, 0 otherwise. Cause is the failure's text on failed, "" otherwise.
+// Kept is true on a failed reconnect while the previous connection still serves (its tools stay
+// in the menu); it is false on every other phase. Reason is set on disconnected only. Server,
+// Transport and Cause are untrusted text: a Driver strips terminal escapes before it renders them.
+type MCPServerEvent struct {
+	EventBase
+	Server    string
+	Transport string
+	Project   bool
+	Phase     MCPServerPhase
+	Tools     int
+	Cause     string
+	Kept      bool
+	Reason    MCPDisconnectReason
+}
+
 // WorkflowPhase names the point in a Workflow's life that a WorkflowPhaseEvent reports.
 type WorkflowPhase string
 

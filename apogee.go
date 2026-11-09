@@ -482,6 +482,7 @@ type (
 	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent
 	WorkflowPhaseEvent     = domain.WorkflowPhaseEvent
 	UpstreamSwitchedEvent  = domain.UpstreamSwitchedEvent
+	MCPServerEvent         = domain.MCPServerEvent
 )
 
 // TaskItem is one row of a TaskListEvent's list.
@@ -494,6 +495,27 @@ type UpstreamSeat = domain.UpstreamSeat
 const (
 	UpstreamSeatSession   = domain.UpstreamSeatSession
 	UpstreamSeatSubAgents = domain.UpstreamSeatSubAgents
+)
+
+// MCPServerPhase is the phase an MCPServerEvent reports. The engine never emits that Event: the
+// composition root that owns the MCP dials does, through the engine's serialised sink.
+type MCPServerPhase = domain.MCPServerPhase
+
+// The four phases of an MCP server's connection life.
+const (
+	MCPServerDialling     = domain.MCPServerDialling
+	MCPServerConnected    = domain.MCPServerConnected
+	MCPServerFailed       = domain.MCPServerFailed
+	MCPServerDisconnected = domain.MCPServerDisconnected
+)
+
+// MCPDisconnectReason is why an MCPServerEvent's disconnected phase closed a live session.
+type MCPDisconnectReason = domain.MCPDisconnectReason
+
+// The reasons a live MCP session is closed on purpose.
+const (
+	MCPDisconnectRemoved = domain.MCPDisconnectRemoved
+	MCPDisconnectDenied  = domain.MCPDisconnectDenied
 )
 
 // SubAgentPhase is the phase a SubAgentPhaseEvent reports.

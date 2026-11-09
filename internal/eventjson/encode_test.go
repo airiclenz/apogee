@@ -565,6 +565,39 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"fault":"status 503","waited_ms":120001,"seat":"session"}`,
 		},
 		{
+			// The composition root emits it, never the engine, so the envelope identity is zero.
+			name: "mcp_server connected",
+			event: domain.MCPServerEvent{
+				Server: "files", Transport: "stdio", Project: true, Phase: domain.MCPServerConnected, Tools: 7,
+			},
+			wantKind: "mcp_server",
+			wantBase: domain.EventBase{},
+			wantData: `{"server":"files","transport":"stdio","project":true,"phase":"connected","tools":7,` +
+				`"cause":"","kept":false,"reason":""}`,
+		},
+		{
+			// A failed reconnect while the previous connection still serves: kept is true.
+			name: "mcp_server failed with the previous connection kept",
+			event: domain.MCPServerEvent{
+				Server: "search", Transport: "sse", Phase: domain.MCPServerFailed,
+				Cause: "dial tcp: connection refused", Kept: true,
+			},
+			wantKind: "mcp_server",
+			wantBase: domain.EventBase{},
+			wantData: `{"server":"search","transport":"sse","project":false,"phase":"failed","tools":0,` +
+				`"cause":"dial tcp: connection refused","kept":true,"reason":""}`,
+		},
+		{
+			name: "mcp_server disconnected",
+			event: domain.MCPServerEvent{
+				Server: "search", Transport: "sse", Phase: domain.MCPServerDisconnected, Reason: domain.MCPDisconnectDenied,
+			},
+			wantKind: "mcp_server",
+			wantBase: domain.EventBase{},
+			wantData: `{"server":"search","transport":"sse","project":false,"phase":"disconnected","tools":0,` +
+				`"cause":"","kept":false,"reason":"denied"}`,
+		},
+		{
 			name: "usage",
 			event: domain.UsageEvent{
 				EventBase:          domain.EventBase{Turn: 2},
@@ -1151,6 +1184,7 @@ func TestEncodeMapsEveryEventVariant(t *testing.T) {
 		"UpstreamAttemptEvent":   domain.UpstreamAttemptEvent{},
 		"WorkflowPhaseEvent":     domain.WorkflowPhaseEvent{},
 		"UpstreamSwitchedEvent":  domain.UpstreamSwitchedEvent{},
+		"MCPServerEvent":         domain.MCPServerEvent{},
 	}
 	declared := declaredEventVariants(t)
 	known := make(map[string]bool, len(Kinds()))
@@ -1244,16 +1278,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentyEight pins the vocabulary itself — the twenty-six serialized variants, the
+// TestKindsAreTwentyNine pins the vocabulary itself — the twenty-seven serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentyEight(t *testing.T) {
+func TestKindsAreTwentyNine(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 28 {
-		t.Fatalf("len(Kinds()) = %d, want 28: %v", len(kinds), kinds)
+	if len(kinds) != 29 {
+		t.Fatalf("len(Kinds()) = %d, want 29: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

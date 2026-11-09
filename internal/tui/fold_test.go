@@ -356,6 +356,14 @@ func foldCases() []foldCase {
 			}},
 		},
 		{
+			name: "MCPServerEvent is inert in the TUI for now",
+			// One MCP server's connection lifecycle, emitted by the composition root rather than the
+			// engine. The TUI does not fold it yet: no entry, no gauge, no phrase, no progress save.
+			// The MCP server state the /mcp pane and the side panel's mcp section read is a later
+			// change to this row.
+			event: domain.MCPServerEvent{Server: "files", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 7},
+		},
+		{
 			name: "AuditEvent is inert in the TUI",
 			// Nothing at all: the audit trail is observable through the EventSink for other
 			// hosts (a log shipper), and the transcript deliberately renders none of it.
