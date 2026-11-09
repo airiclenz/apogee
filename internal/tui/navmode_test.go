@@ -22,9 +22,21 @@ import (
 // column hidden; this is the one that shows it.
 func navModel(t *testing.T, sections domain.SidePanelSections, events ...domain.Event) (Model, *fakeEngine) {
 	t.Helper()
+	return navModelWithGlyphs(t, domain.DefaultGlyphSet, sections, events...)
+}
+
+// navModelWithGlyphs is navModel drawn with the `ui.glyphs` set glyphs.
+func navModelWithGlyphs(
+	t *testing.T,
+	glyphs domain.GlyphSet,
+	sections domain.SidePanelSections,
+	events ...domain.Event,
+) (Model, *fakeEngine) {
+	t.Helper()
 
 	eng := &fakeEngine{}
 	opts := testOpts
+	opts.UI.Glyphs = glyphs
 	opts.UI.SidePanelShow = domain.SidePanelShowAuto
 	opts.UI.SidePanelSections = sections
 	m := newModel(context.Background(), eng, opts, nil)
@@ -801,5 +813,49 @@ func TestNavModeCtrlXInWatchModeRefused(t *testing.T) {
 	}
 	if m.flash != watchRefusedFlash {
 		t.Errorf("flash = %q; want the refusal", m.flash)
+	}
+}
+
+// TestCursorMarkUnderSafeGlyphs pins the ▌ as a fixed glyph (ADR 0111 D6): the font-safe set swaps
+// the theme's own marks, but a half block is not one of them, so the cursor row in either region
+// leads with the same ▌ under `ui.glyphs: safe`.
+func TestCursorMarkUnderSafeGlyphs(t *testing.T) {
+	t.Parallel()
+	m, _ := navModelWithGlyphs(t, domain.GlyphsSafe, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+	if m.th.glyphs != safeGlyphs {
+		t.Fatal("setup: the model does not draw with the safe glyph set")
+	}
+
+	m = step(t, m, keyAltUp())
+	assertTranscriptCursorMark(t, m)
+	m = step(t, m, keyRight())
+	assertPanelCursorMark(t, m)
+}
+
+// assertTranscriptCursorMark fails unless the transcript row the cursor stands on — and no other
+// row — leads with the ▌ mark once the styling is stripped.
+func assertTranscriptCursorMark(t *testing.T, m Model) {
+	t.Helper()
+	row := m.blockCursorRow()
+	if row < 0 {
+		t.Fatal("the cursor's line is not drawn on any transcript row")
+	}
+	for i, line := range strings.Split(m.View().Content, "\n") {
+		if got := strings.HasPrefix(strip(line), glyphCursorMark); got != (i == row) {
+			t.Errorf("row %d leads with the ▌ mark %v, want it on the cursor's row %d alone: %q", i, got, row, strip(line))
+		}
+	}
+}
+
+// assertPanelCursorMark fails unless the panel row the cursor stands on — and no other row — carries
+// the ▌ mark in its gutter cell, right of the column's separator, once the styling is stripped.
+func assertPanelCursorMark(t *testing.T, m Model) {
+	t.Helper()
+	stop := panelCursorStop(t, m)
+	for i, line := range strings.Split(m.View().Content, "\n") {
+		column := strip(m.th.measure.Cut(line, m.slotWidth(), m.width))
+		if got := strings.HasPrefix(column, sidePanelSeparator+glyphCursorMark); got != (i == stop.y) {
+			t.Errorf("row %d's panel gutter carries the ▌ mark %v, want it on the panel cursor's row %d alone: %q", i, got, stop.y, column)
+		}
 	}
 }

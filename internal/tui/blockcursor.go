@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ----------------------------------------------------------------------------
@@ -291,7 +293,8 @@ func (m Model) blockCursorOwnsKeys() bool {
 // moves under a reader who is navigating — and esc leaves the mode from either region. In the
 // transcript ⏎ opens or closes the surface under the highlight and `^x` stops the delegation whose
 // row it stands on; in the panel ⏎ is the click on the stop it stands on ([Model.activatePanelCursor],
-// ADR 0111 D4), and `^x` is not the mode's and goes on to the frame.
+// ADR 0111 D4), and `^x` on a sub-agent row stops that run (ADR 0111 D3) — off one it is not the
+// mode's and goes on to the frame.
 // Every other key — ⌃c, PgUp, ⇧⇥ — is left alone and leaves the mode standing: they are the frame's
 // own verbs, and none of them is a reason to lose your place in the scrollback.
 //
@@ -618,8 +621,10 @@ func (m Model) toggleAtBlockCursor() (Model, tea.Cmd) {
 // highlightTranscript (mouse.go): it is handed the transcript's own rows, so it maps its content
 // line through the same [Model.drawnLineAt] and paints the row that is actually showing it.
 //
-// The bar is the theme's SELECTION field — the one tone the frame already spends on "this is the
-// thing you are pointing at" (design call 7). It can never be confused with a drag-selection,
+// The bar is two marks ([markCursorRow]): a glyphCursorMark ▌ over column 0 — the marker cell — and
+// the theme's SELECTION field across the row, the one tone the frame already spends on "this is the
+// thing you are pointing at" (design call 7). The ▌ is what a terminal painting no colour still
+// shows (ADR 0111 D6); the row keeps its width, so nothing re-wraps. It can never be confused with a drag-selection,
 // because the two never coexist: entering the mode drops the selection, and a mouse press ends the
 // paint of this one by moving the reader's attention back to the pointer. Only the region the cursor
 // stands in is painted: while it is in the side panel the transcript's remembered row is not
@@ -636,8 +641,20 @@ func (m Model) highlightBlockCursor(view string) string {
 	if row >= len(lines) {
 		return view
 	}
-	lines[row] = shadeCells(m.th.measure, lines[row], 0, m.th.measure.Width(lines[row]), m.th.selection)
+	lines[row] = markCursorRow(m.th.measure, lines[row], m.th.selection)
 	return strings.Join(lines, "\n")
+}
+
+// markCursorRow paints line as the row navigation mode's cursor stands on: glyphCursorMark over its
+// first cell and the rest of it re-rendered under style, so the row reads as the cursor's by shape
+// as well as by tone. It is the one paint both regions' cursors wear — a transcript row from its
+// marker column ([Model.highlightBlockCursor]), a side-panel row from its gutter cell
+// ([Model.sidePanelColumn]). The mark replaces a cell rather than adding one, so the row keeps the
+// width it was painted to. Like [shadeCells] it slices through the width authority, the measure the
+// row was painted in.
+func markCursorRow(measure widthAuthority, line string, style lipgloss.Style) string {
+	rest := measure.Cut(line, 1, measure.Width(line))
+	return style.Render(glyphCursorMark + ansi.Strip(rest))
 }
 
 // panelCursorRow is the column row the panel-standing cursor is painted on — its stop's first row

@@ -297,7 +297,12 @@ builder with `panelDelegationCall` + `delegationPhase`, `keyCtrlX`, asserting `e
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestNavModeCtrlX|TestRunView' ./internal/tui/`
 **Commit:** `feat(tui): ctrl+x on a side-panel sub-agent row stops that run`
 
-## 9. Mark both cursors with a non-colour `▌`
+## 9. Mark both cursors with a non-colour `▌` — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): both regions paint through one new helper, `markCursorRow` (blockcursor.go) — `▌` over the row's first cell and the selection tone across the rest; the panel hands it its gutter cell plus content, so the separator (and the grip hit test) is untouched. The mark is rendered in the selection tone with the row.
+NOTES (2026-11-09): `blockCursorKey`'s doc comment no longer says `^x` in the panel "is not the mode's and goes on to the frame" (false since item 8); it now says `^x` on a panel sub-agent row stops that run.
+NOTES (2026-11-09): navmode_test.go's `navModel` now delegates to a new `navModelWithGlyphs` fixture (same construction plus `opts.UI.Glyphs`), used by `TestCursorMarkUnderSafeGlyphs`; the shared assertions `assertTranscriptCursorMark` / `assertPanelCursorMark` live beside it. Bite-checked: both new tests fail with the mark replaced by a blank.
+NOTES (2026-11-09): no other View-reading cursor-row test needed a change — the eight tests in blocktarget/mouse/runview/subagentblock_test.go that enter the mode were run and pass; `TestNavModePanelHighlightYieldsToADecision` passes unchanged (the mark is painted in the same selection render).
 
 **What:** fix the defect `cursor-colour-only-mark` (ADR 0052 D4), ADR 0111 D6. Depends on item 6.
 **Regression guard.** Every test reading the painted `View` row the cursor stands on is updated for the column-0 `▌`

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -178,5 +179,42 @@ func TestPaintCacheSeparatesPadStates(t *testing.T) {
 		return blockKey(shapeEntry, []paintInput{{kind: entryUser}}, th, 80, false, false, paintRoot{}, umbrellaFold{})
 	}; key(padded) == key(unpadded) {
 		t.Error("blockKey names the same key for both pad states")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Navigation mode's cursor mark under the terminal's colour profile
+// ----------------------------------------------------------------------------
+
+// TestCursorMarkSurvivesAsciiProfile is the defect a colour-only mark had (ADR 0052 D4, ADR 0111
+// D6): a terminal that paints no colour drops the selection tone, so the cursor row must say where
+// the cursor stands by shape — the ▌ over the transcript row's marker cell, and in the panel's
+// gutter cell right of its │ — and the mark replaces a cell rather than adding one, so the row
+// keeps its width.
+func TestCursorMarkSurvivesAsciiProfile(t *testing.T) {
+	t.Parallel()
+	m, _ := navModel(t, domain.DefaultSidePanelSections, panelStopEvents(t)...)
+	m = step(t, m, tea.ColorProfileMsg{Profile: colorprofile.Ascii})
+	before := strings.Split(m.View().Content, "\n")
+
+	m = step(t, m, keyAltUp())
+	assertTranscriptCursorMark(t, m)
+	assertRowKeepsItsWidth(t, m, before, m.blockCursorRow())
+
+	m = step(t, m, keyRight())
+	assertPanelCursorMark(t, m)
+	assertRowKeepsItsWidth(t, m, before, panelCursorStop(t, m).y)
+}
+
+// assertRowKeepsItsWidth fails when frame row row of m's view measures other than it did in before,
+// the frame painted without the cursor.
+func assertRowKeepsItsWidth(t *testing.T, m Model, before []string, row int) {
+	t.Helper()
+	after := strings.Split(m.View().Content, "\n")
+	if row < 0 || row >= len(before) || row >= len(after) {
+		t.Fatalf("row %d is outside the frame (%d rows before, %d after)", row, len(before), len(after))
+	}
+	if got, want := m.th.measure.Width(after[row]), m.th.measure.Width(before[row]); got != want {
+		t.Errorf("the cursor's row %d measures %d cells, want the %d it had without the mark: %q", row, got, want, strip(after[row]))
 	}
 }

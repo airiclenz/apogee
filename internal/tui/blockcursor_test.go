@@ -261,7 +261,8 @@ func TestBlockCursorKeysReturnToThePrompt(t *testing.T) {
 
 // TestBlockCursorHighlightsTheRowItStandsOn pins the paint: the cursor's row — and only it — carries
 // the theme's selection field, the one tone the frame spends on "this is the thing you are pointing
-// at" (design call 7), and the text under the bar is unchanged.
+// at" (design call 7), with the ▌ mark over its marker cell (ADR 0111 D6), and the text under the bar
+// is otherwise unchanged.
 func TestBlockCursorHighlightsTheRowItStandsOn(t *testing.T) {
 	t.Parallel()
 
@@ -275,8 +276,8 @@ func TestBlockCursorHighlightsTheRowItStandsOn(t *testing.T) {
 
 	view := m.View()
 	lines := strings.Split(view.Content, "\n")
-	if !strings.Contains(strip(lines[row]), "✦ Terminal") {
-		t.Fatalf("row %d reads %q, not the block header the cursor stands on", row, strip(lines[row]))
+	if !strings.HasPrefix(strip(lines[row]), glyphCursorMark+" Terminal") {
+		t.Fatalf("row %d reads %q, not the block header the cursor stands on under the ▌ mark", row, strip(lines[row]))
 	}
 	if !colorActive(m.th) {
 		return // the styling is the rest of the claim, and this profile emits none
@@ -452,7 +453,7 @@ func TestBlockCursorCtrlXStopsTheMemberRowItStandsOn(t *testing.T) {
 
 // TestBlockCursorHighlightsPaddedPromptRow is the padded prompt's stop: its ▄ half row opens the
 // click surface but carries none of its words, so the cursor landing on a collapsible prompt stands
-// on — and shades — the ❯ row beneath it.
+// on — and shades — the ❯ row beneath it, its ▌ mark over the ❯.
 func TestBlockCursorHighlightsPaddedPromptRow(t *testing.T) {
 	t.Parallel()
 
@@ -468,7 +469,7 @@ func TestBlockCursorHighlightsPaddedPromptRow(t *testing.T) {
 	if row < 0 {
 		t.Fatal("the cursor's line is not on screen")
 	}
-	if got := strings.Split(plain(m.View()), "\n")[row]; !strings.Contains(got, defaultGlyphs.user+" alpha") {
-		t.Errorf("the highlighted row reads %q; want the prompt's ❯ row", got)
+	if got := strings.Split(plain(m.View()), "\n")[row]; !strings.HasPrefix(got, glyphCursorMark+" alpha") {
+		t.Errorf("the highlighted row reads %q; want the prompt's ❯ row as ▌ alpha", got)
 	}
 }
