@@ -111,7 +111,13 @@ internal/tui/model.go — hiddenDraftRows; internal/tui/inputaccent.go — input
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestWheel|TestArrowKeysReach|TestInputBox|TestHiddenScrollbarYieldsTheColumn' ./internal/tui/`
 **Commit:** `feat(tui): scroll an overflowing prompt box with the mouse wheel`
 
-## 3. layout.md states the prompt box scrollbar rule
+## 3. layout.md states the prompt box scrollbar rule — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — internal/config/defaults/config.yaml: made necessary by the show-scrollbar prose sweep (the seeded template's `show-scrollbar` paragraph and its inline `ui:` comment named only the transcript and the popups; the sweep's `internal/config` grep reaches it, but the plan's Files did not list it)
+
+NOTES (2026-11-09): config.go's `UI *uiConfig` comment ("whether the transcript is painted with a scroll bar") was swept with the ShowScrollbar field comment, now "whether the scroll bars are painted"
+
+NOTES (2026-11-09): CLOSES names prompt-box-scrollbar because this item lands its last Acceptance bullet (layout.md states the rule); items 1 and 2 carried no CLOSES
 
 **What:**
 **Goal:** `layout.md` states, in the "A capped box is a window onto the draft" paragraph and in "## The scroll bar and the column it hangs in", that an overflowing prompt box carries the same bar (text, blank, bar, pad, border; overflow only; `ui.show-scrollbar` gates it; the `+N` count stays) and that a wheel notch over it scrolls the draft only while it overflows; `docs/layout/prompt-box-layout.md` points to that rule; every user doc that says what `ui.show-scrollbar` governs names the prompt box.

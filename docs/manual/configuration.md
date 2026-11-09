@@ -1169,8 +1169,9 @@ edit's saved result. A value other than those two is a startup
 error. The switch is live: commit the row in `/settings` and the whole transcript repaints in the
 other set.
 
-`ui.show-scrollbar` — on by default — paints the scroll bar on the transcript and on any popup that
-overflows, and reserves the column it hangs in; off, that column goes back to the text. The flip is
+`ui.show-scrollbar` — on by default — paints the scroll bar on the transcript, on any popup that
+overflows and on the prompt box while your draft overflows it, and reserves the column it hangs in;
+off, that column goes back to the text. The flip is
 live, like `ui.skill-suggestions` above it: commit the row in `/settings` and the screen re-lays
 itself in the session you are already in.
 

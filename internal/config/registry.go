@@ -1087,7 +1087,7 @@ var KeyRegistry = bindRows([]Key{
 	{
 		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
 		Editable: true,
-		Desc:     "Paint the scroll bar on the transcript and on any overflowing popup, and reserve its column.",
+		Desc:     "Paint the scroll bar on the transcript, on any overflowing popup and on an overflowing prompt box, and reserve its column.",
 		field: uiBool(domain.UIKeyShowScrollbar, func(u *domain.UIPrefs) *bool { return &u.ShowScrollbar },
 			func(u *uiConfig) *bool { return u.ShowScrollbar }),
 	},

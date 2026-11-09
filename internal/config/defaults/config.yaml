@@ -1077,9 +1077,9 @@ update-check: true
 #
 # `show-scrollbar` decides whether a scroll bar is painted down the right-hand edge of the
 # transcript AND of every popup pane — `/settings` and its sub-lists, `/usage`, the `/sessions`
-# browser, the `/model` and `/server` pickers, the `/` dropdown, the approval and ask prompts. The
-# bar appears only where there is more content than window, so a pane whose rows all fit shows
-# none. Turning the key off takes the bar AND the column it hangs in away together, everywhere at
+# browser, the `/model` and `/server` pickers, the `/` dropdown, the approval and ask prompts — AND
+# of the prompt box while your draft outgrows it. The bar appears only where there is more content
+# than window, so a pane whose rows all fit shows none. Turning the key off takes the bar AND the column it hangs in away together, everywhere at
 # once, so the text takes that width instead — a hidden bar does not leave an empty stripe behind.
 # Default on.
 #
@@ -1201,7 +1201,7 @@ ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
   glyphs: unicode        # unicode | safe — safe swaps the symbols a terminal font may lack
-  show-scrollbar: true   # false = no bar in the transcript or any popup; they take back the column
+  show-scrollbar: true   # false = no bar in the transcript, any popup or the prompt box; they take back the column
   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
   stall-after: 120s      # engine silence before "· quiet" qualifies the status line; 0 = off
   inspector: false       # true = capture the raw wire traffic /inspect shows; takes effect next start

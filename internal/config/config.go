@@ -1419,7 +1419,7 @@ type fileConfig struct {
 	// seam (the `ui.spinner` posture).
 	CursorShape string `yaml:"cursor-shape"`
 	// UI configures how the terminal UI presents itself — today the status-line spinner's animation,
-	// its colour loop, and whether the transcript is painted with a scroll bar. File-only (no
+	// its colour loop, and whether the scroll bars are painted. File-only (no
 	// flag/env), like the blocks above. Absent ⇒ the renderer's default style with the colour loop on
 	// and the scroll bar shown. A pointer so an absent block falls through to those defaults rather
 	// than being an explicit zero setting, which would read as `spinner-color: false`.
@@ -2845,8 +2845,8 @@ type uiConfig struct {
 	// Glyphs names the symbol set the screen is drawn with — unicode | safe. Empty ⇒ the default.
 	// A raw string for Spinner's reason: UIPrefs.Validate parses it once, at startup.
 	Glyphs string `yaml:"glyphs"`
-	// ShowScrollbar gates the scroll bar — in the transcript and in every popup pane alike — and the
-	// column it hangs in. A pointer so an explicit `show-scrollbar: false` is distinguishable from an
+	// ShowScrollbar gates the scroll bar — in the transcript, in every popup pane and in an
+	// overflowing prompt box alike — and the column it hangs in. A pointer so an explicit `show-scrollbar: false` is distinguishable from an
 	// absent key (which keeps the default true).
 	ShowScrollbar *bool `yaml:"show-scrollbar"`
 	// ColorScheme names the palette the screen is drawn in — a built-in or a file in

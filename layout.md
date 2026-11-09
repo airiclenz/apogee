@@ -159,7 +159,9 @@ on a pane's border or on a session row selects nothing in the transcript, becaus
 transcript there. **And the wheel follows the pointer:** a notch over any open pane scrolls THAT
 pane — its rows are not the transcript's — and the transcript is what a notch reaches everywhere
 else, the approval and ask prompts included, since those two leave the transcript scrollable under
-them and claim only the notches inside their own box.
+them and claim only the notches inside their own box. The input box claims its own notches the
+same way, but only while its draft overflows: then a notch over it scrolls the draft instead (see
+"A capped box is a window onto the draft").
 
 **And the click follows the notch.** Every boxed pane the wheel routes to answers a click off the
 same rectangle and the same rows. On the five that ask a question — the approval prompt, the ask
@@ -328,7 +330,17 @@ carries nothing else — the box's title row in every way that counts — so the
 no row. It differs from a pane's title row in one place only, at the bottom of the width ladder: a
 pane sheds its NAME to keep its number, and this row has no name to shed, so under the width even
 `… +3` needs, it stays a plain border rather than drawing a clipped count. `… +1` of `… +19` is not
-a quieter statement of the fact; it is a false one.
+a quieter statement of the fact; it is a false one. While rows are out of sight the prompt box
+also carries the scroll bar every overflowing pane does ("The scroll bar and the column it hangs
+in"): each content row is the text, one blank column, the bar, the box's right pad and its border,
+and the text gives up those two columns only while the draft overflows — a draft that fits draws
+exactly the box it always did. `ui.show-scrollbar` gates this bar as it gates the others, and the
+`+N` count stays on the top border, bar or no bar. **And the wheel scrolls the draft while it
+overflows:** a notch with the pointer over the box, its borders included, moves the caret up or
+down by the transcript's notch rows and the window follows it, so every notch moves the window and
+its thumb until the draft's end is reached, the transcript left where it was. Over a box whose
+draft fits — or one that is not taking input — the notch scrolls the transcript, as it does
+everywhere else.
 
 **The frame's own floor is nine rows, and below it the frame is its floor and nothing more.** With
 the session area gone the frame is one blank gap row, the `▔` hairline, the status line, the input
@@ -755,14 +767,24 @@ nothing to scroll. The thumb
 is sized and placed from the **rows** — the seated window over the whole list — and drawn in the
 **lines** the row block was painted in, which is what keeps it flush at the top on the first row
 and flush at the bottom on the last even where a row wraps to several lines. `ui.show-scrollbar`
-governs both bars: switching the transcript's off takes the popups' with it, each pane giving the
-column back to its rows exactly as the transcript gives it back to its body.
+governs every bar: switching the transcript's off takes the popups' and the prompt box's with it,
+each pane giving the column back to its rows exactly as the transcript gives it back to its body.
+
+**The prompt box carries the same bar while its draft overflows.** Once the draft's wrapped rows
+outgrow the box, each content row is laid out text, one blank column, the bar, the box's right pad,
+its border — the popups' rule, the gap and the bar reserved only while the draft overflows, so a
+draft that fits keeps the box's full text width and draws exactly as it would with no bar at all.
+The thumb is placed from the box's first visible row and sized from its height over the draft's rows
+at the narrowed width. The `+N` count on the top border stays, bar or no bar, and a wheel notch over
+the box scrolls the draft only while it overflows ("A capped box is a window onto the draft").
 
 **It re-wraps once, and only on a deliberate change.** The key is read from `config.yaml` at
 start-up like the rest of the `ui:` block, and `/settings` applies an edit to the *running* session
 (ADR 0037): the bar's column is transcript width, so flipping the key lays the frame out again and
 the visible transcript re-wraps there and then. What the rule rules out is a re-wrap nobody asked
-for — the width never moves because a bar appeared or vanished on its own.
+for — the transcript's width never moves because a bar appeared or vanished on its own. The popups
+and the prompt box are the overflow-only exception: each narrows its own text by the gap and the bar
+while, and only while, what it holds overflows, which is the bar's own statement that there is more.
 
 **The terminal's own scroll bar is a different bar, and apogee puts it out.** Every frame apogee
 draws lives on the alternate screen, so nothing it renders ever reaches the terminal's scrollback —
