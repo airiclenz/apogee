@@ -70,7 +70,9 @@ internal/tui/paintcache_test.go — TestOverlayPanesRenderOncePerUpdateAndView; 
 **Closes:** mcp-report-order-untested
 **Commit:** `test(tui): cover /mcp in the shared report-pane and frame-order tests`
 
-## 2. E2E: a resumed session's journal opens on the MCP seed
+## 2. E2E: a resumed session's journal opens on the MCP seed — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): mutation check run — moving `w.host.mcpSeed = w.mcpSet.seedJournal` below `attachEventJournal` in `wireSession` (cmd/apogee/wire_live.go) fails the new test ("the resumed journal opens on []"); reverted, wire_live.go untouched.
 
 **What:** test-only; the code already seeds at `openEventJournalLocked` (`cmd/apogee/wire_session.go`) on the
 resume path through `attachEventJournal`. A new e2e test `TestE2EMCPResumeSeedsTheJournal` in

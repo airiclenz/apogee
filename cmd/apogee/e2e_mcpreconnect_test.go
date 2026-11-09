@@ -9,8 +9,8 @@ package main
 // dial is noted and stays absent, while the one saved beside it connects and works.
 //
 // The live Event journal follows the same lifecycle (ADR 0111 decision 8): each journal opens on the
-// servers' current state right after run_started — at the first prompt and again after `/clear` —
-// and a save's dials are journaled as they start and finish.
+// servers' current state right after run_started — at the first prompt, again after `/clear`, and at
+// the boot of a resumed session — and a save's dials are journaled as they start and finish.
 //
 // Driven in-process rather than through the pty for the reason e2e_mcpmidturn_test.go gives: the
 // claim includes the dial's hand-off back to the Update goroutine, which only a process the race
@@ -164,6 +164,24 @@ func journalSeed(lines []eventjson.Line) ([]domain.MCPServerEvent, bool) {
 	return seed, true
 }
 
+// journalOpening is the run of mcp_server lines immediately after a journal's run_started — the seed
+// its birth wrote, read without journalSeed's prompt line, since a resumed session's journal is born
+// at boot before any prompt — and whether the journal opened on run_started.
+func journalOpening(lines []eventjson.Line) ([]domain.MCPServerEvent, bool) {
+	if len(lines) == 0 || lines[0].Started == nil {
+		return nil, false
+	}
+	var seed []domain.MCPServerEvent
+	for _, line := range lines[1:] {
+		event, isMCP := line.Event.(domain.MCPServerEvent)
+		if !isMCP {
+			break
+		}
+		seed = append(seed, event)
+	}
+	return seed, true
+}
+
 // isConnectedWith reports whether event says server connected with tools tools.
 func isConnectedWith(event domain.MCPServerEvent, server string, tools int) bool {
 	return event.Server == server && event.Phase == domain.MCPServerConnected && event.Tools == tools
@@ -248,6 +266,58 @@ func TestE2EMCPClearReseedsTheJournal(t *testing.T) {
 	}
 	if err := sess.Quit(); err != nil {
 		t.Errorf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// A session resumed with --continue holds its record from construction, so its journal is born at
+// boot, before any prompt — and opens on the servers' current state there too: right after
+// run_started, one mcp_server line per configured server, each connected with its one tool, ahead of
+// any other mcp_server line (ADR 0111 decision 8).
+func TestE2EMCPResumeSeedsTheJournal(t *testing.T) {
+	t.Parallel()
+
+	docs := newPingMCPServer(t, "docs")
+	wiki := newPingMCPServer(t, "wiki")
+	stub := stubllm.New(t, mcpSeedScript())
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, "mcp-servers:\n"+
+		mcpServerEntry("docs", docs.Endpoint)+
+		mcpServerEntry("wiki", wiki.Endpoint))
+
+	submit(drv, "Say something.")
+	drv.WaitText("First reply.")
+	waitIdle(drv)
+	// The relaunch resumes the saved record, and a painted reply is no proof it has been written —
+	// the idle save is a Cmd queued behind the reply's last frame.
+	drv.WaitFor(func() bool {
+		return len(sess.sessionRecords()) > 0 && strings.Contains(sessionRecordText(t, sess.Home()), "First reply.")
+	}, tuitest.Awaiting("the reply to reach the session record"))
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+
+	// The wiring births the resumed journal, seed and all, before the launch paints anything, so
+	// the restored reply on screen means the opening run is on disk in full.
+	next := sess.RelaunchWith("--continue")
+	next.WaitText("First reply.")
+	var seed []domain.MCPServerEvent
+	next.WaitFor(func() bool {
+		_, lines := liveJournal(t, sess.Home())
+		var isOpened bool
+		seed, isOpened = journalOpening(lines)
+		return isOpened
+	}, tuitest.Awaiting("the resumed session's journal, born at boot"))
+	if len(seed) != 2 {
+		t.Errorf("the resumed journal opens on %+v; want one mcp_server line per configured server", seed)
+	}
+	for _, server := range []string{"docs", "wiki"} {
+		at := slices.IndexFunc(seed, func(event domain.MCPServerEvent) bool { return event.Server == server })
+		if at < 0 || !isConnectedWith(seed[at], server, 1) {
+			t.Errorf("the resumed journal's seed is %+v; want %s connected with 1 tool", seed, server)
+		}
+	}
+	if err := sess.Quit(); err != nil {
+		t.Errorf("the relaunched run returned %v; want a clean quit", err)
 	}
 }
 
