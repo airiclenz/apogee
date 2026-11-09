@@ -91,6 +91,7 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 		inspectReport:  inspectorTitle,
 		thinkingReport: thinkingTitle,
 		adviceReport:   adviceTitle,
+		mcpReport:      mcpTitle,
 	} {
 		if got := m.reportContent(want).title; got != name {
 			t.Errorf("report %d is titled %q, want %q — the kind resolves to another pane's content", want, got, name)
@@ -102,6 +103,7 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 		inspectReport:  true,
 		thinkingReport: true,
 		adviceReport:   true,
+		mcpReport:      false,
 	} {
 		if got := follows[kind]; got != want {
 			t.Errorf("report %d follows %t, want %t — a report's follow scope flipped in silence", kind, got, want)

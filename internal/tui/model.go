@@ -205,6 +205,13 @@ type Model struct {
 	// state, because the verb is whileRunning and the pane reads Model state only.
 	advicePane reportPane
 
+	// mcpPane is the /mcp pane's state (mcppane.go): whether the report of MCP servers is up and how
+	// far its row list is scrolled. The same plain values under the same posture as its four siblings
+	// (ADR 0011) — the rows are derived from the MCP fold at render time, so there is nothing here to
+	// keep in step with them — and driven in every state, watching included, because the verb is
+	// whileRunning and a watch verb, and the pane reads view state only.
+	mcpPane reportPane
+
 	// wire is the Inspector's bounded ring: the most recent maxWireRecords halves of an Upstream
 	// round-trip, as the fold recorded them (foldWire). Each half carries the wire stream it came
 	// from — the run (depth, callID and run id) of the agent that made the call — because the one ring
@@ -5268,6 +5275,11 @@ const transcriptReserve = 3
 // onto a retained board (advicepane.go) that keeps every firing whether or not the pane is drawn,
 // and a record of what the model was TOLD rather than of what it is thinking now — the reading a
 // reader comes back to last.
+//
+// The /mcp report sits under THAT, above only the dropdown: a reading of the MCP fold, which keeps
+// every server's state whether or not the pane is drawn, so a lost row costs nothing a reopen on a
+// taller window does not give back — and a status a reader asks after rather than a stream they sit
+// and watch.
 type framePane int
 
 const (
@@ -5280,6 +5292,7 @@ const (
 	paneInspector                  // the /inspect raw-protocol pane
 	paneThinking                   // the /thinking plain-reasoning pane
 	paneAdvice                     // the /advice pane of advise firings
+	paneMCP                        // the /mcp report of MCP server state
 	paneDropdown                   // the command / @file / skill autocomplete
 	paneKinds                      // not a pane: the count, so a plan can hold one grant per kind
 )

@@ -5,13 +5,14 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The read-only report panes — one module behind /usage, /inspect, /thinking and /advice
+// The read-only report panes — one module behind /usage, /inspect, /thinking, /advice and /mcp
 // ----------------------------------------------------------------------------
 //
 // A REPORT is the frame's lightest kind of overlay: a scrolled list of rows that answers a question
-// the human asked and decides nothing. Four of them exist — the /usage token accounting (usage.go),
+// the human asked and decides nothing. Five of them exist — the /usage token accounting (usage.go),
 // the /inspect raw-protocol view (inspector.go), the /thinking plain-reasoning pane
-// (thinkingpane.go) and the /advice pane of advise firings (advicepane.go) — and everything about
+// (thinkingpane.go), the /advice pane of advise firings (advicepane.go) and the /mcp pane of MCP
+// server state (mcppane.go) — and everything about
 // them except their ROWS is the same pane, so it is written once here and each kind is one row of
 // [reportRows]: the pane's own file contributes its content and nothing else.
 //
@@ -31,7 +32,7 @@ import (
 //   - Its scroll is clamped to the last FULL window rather than to the last row, so a report scrolled
 //     to its end shows a full pane of rows.
 //   - It FOLLOWS the tail while it is left at the end — /inspect, /thinking and /advice do ([reportKind.follows]),
-//     /usage keeps the clamp alone — so rows arriving under an open pane are shown rather than
+//     /usage and /mcp keep the clamp alone — so rows arriving under an open pane are shown rather than
 //     landing below a frozen window, and scrolling up off the end is what stops it. It is the
 //     transcript's own behaviour ([Model.detached], model.go) under a report's smaller contract.
 //   - Closing it takes the scroll with it, and /inspect's choice of rendering with it too: a
@@ -80,6 +81,7 @@ const (
 	inspectReport                    // /inspect — the raw wire traffic (inspector.go)
 	thinkingReport                   // /thinking — the model's plain reasoning (thinkingpane.go)
 	adviceReport                     // /advice — every advise firing the model was handed (advicepane.go)
+	mcpReport                        // /mcp — the process's MCP servers, as the MCP fold last saw them (mcppane.go)
 	reportKinds                      // not a kind: the count, so a walk over the reports needs no hand-written list
 )
 
@@ -126,6 +128,12 @@ var reportRows = [reportKinds]reportRow{
 		follows: true,
 		state:   func(m *Model) *reportPane { return &m.advicePane },
 		content: Model.adviceContent,
+	},
+	mcpReport: {
+		pane:    paneMCP,
+		follows: false,
+		state:   func(m *Model) *reportPane { return &m.mcpPane },
+		content: Model.mcpContent,
 	},
 }
 

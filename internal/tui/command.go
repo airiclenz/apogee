@@ -278,6 +278,11 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // the `ui.inspector` config key and offered whether or not that key is on: a verb withheld until a
 // key is set is a verb nobody finds the key for, and the pane's own first row names it.
 //
+// /mcp opens the report of the process's MCP servers (mcppane.go, ADR 0111 decision 9): each one's
+// transport, source, state, tool count and a failed one's cause, read off the MCP fold. It carries
+// /usage's two flags for /usage's two reasons, and it is a watch verb (watchVerbs): it reads only
+// what the view already holds, which under a watch is the watched process's own fold.
+//
 // /help prints the registry itself as a transcript note (help.go): one line per row of this table
 // with its summary, then the key legend in the prompt box's own vocabulary. It reads only this
 // table and the editor's key-disambiguation flag, so it carries /usage's two flags for /usage's two
@@ -322,6 +327,7 @@ func init() {
 		{name: "git", summary: "git actions on the workspace — fetch, pull, push, sync, switch, rebase", whileRunning: true, run: bareVerb(Model.runGitCommand)},
 		{name: "help", summary: "list the commands and keys", whileRunning: true, noRecall: true, run: bareVerb(Model.runHelp)},
 		{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true, run: bareVerb(Model.runInspectCommand)},
+		{name: "mcp", summary: "the MCP servers — transport, source, state and tools", whileRunning: true, noRecall: true, run: bareVerb(Model.runMCPCommand)},
 		{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true, run: tokenVerb(Model.runModelCommand)},
 		{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true, run: bareVerb(Model.startNewSession)},
 		{name: "panel", summary: "set the side panel — on|off|auto, pin|unpin|hide <section>, or width <n>|reset (bare = report)", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parsePanel), run: typedVerb(Model.runPanelCommand)},

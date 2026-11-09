@@ -90,6 +90,7 @@ var watchVerbs = map[string]bool{
 	"help":     true,
 	"usage":    true,
 	"inspect":  true,
+	"mcp":      true,
 	"version":  true,
 }
 

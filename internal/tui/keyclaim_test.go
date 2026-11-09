@@ -23,6 +23,7 @@ func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 		"inspector pane",
 		"thinking pane",
 		"advice pane",
+		"mcp pane",
 		"run view",
 		"navigation mode",
 	}

@@ -40,7 +40,7 @@ const (
 // excepted: ctrl+c and ctrl+l are answered ahead of every pane, [Model.frameChord]) — the /sessions
 // browser, the picker and the /settings pane through their modalClaim key, the approval or ask
 // prompt through the state-gated switches in handleKey — as opposed to a pane that says something rather than
-// asking (the four reports, the dropdown), behind which the box stays live.
+// asking (the five reports, the dropdown), behind which the box stays live.
 //
 // key is the pane's rung of the overlay precedence in the claimant currency [keyClaimant.claim]
 // speaks — the row applies [modalClaim] or [paneClaim] to the pane's own handler itself, so the
@@ -136,7 +136,7 @@ func init() {
 			hover:  promptHover,
 			// No key rung, for the reason above; its place in the pointer chain is the one pointerPanes
 			// states.
-			rank: paneRank{pointer: 9},
+			rank: paneRank{pointer: 10},
 		},
 		paneBrowser: {
 			// The /sessions browser takes the prompt's position in the slot because they never
@@ -156,7 +156,7 @@ func init() {
 			// every keypress but the frame chords — selection, resume, delete-confirm, rename edit, and
 			// esc to close (sessions.go) — before the normal input routing, exactly as the autocomplete
 			// dropdown claims its keys first.
-			rank: paneRank{key: 1, pointer: 6},
+			rank: paneRank{key: 1, pointer: 7},
 		},
 		panePicker: {
 			// The /model | /server picker shares that position on the same terms as the browser.
@@ -179,7 +179,7 @@ func init() {
 			// The browser's simpler sibling, and it claims keys the same way: while it is open the
 			// selection, the accept and esc are all its own (picker.go) — in BOTH live states, for the
 			// reason keyOpen states. Its rung sits under the /settings pane's.
-			rank: paneRank{key: 3, pointer: 7},
+			rank: paneRank{key: 3, pointer: 8},
 		},
 		paneWorkflows: {
 			// The /workflows view shares that position on the picker's terms: modal, and asked in
@@ -202,7 +202,7 @@ func init() {
 			// states, for the reason keyOpen states (workflows.go). The two are never open together —
 			// each owns ⏎ for as long as it is up, so neither verb can be accepted over the other — so
 			// the order between them decides nothing.
-			rank: paneRank{key: 4, pointer: 8},
+			rank: paneRank{key: 4, pointer: 9},
 		},
 		paneSettings: {
 			// The /settings pane is the frame's one FULL-HEIGHT pane (frameRowPlan): it is granted the
@@ -227,12 +227,12 @@ func init() {
 			// asked FIRST of the pointer chain, for the reason pointerPanes states.
 			rank: paneRank{key: 2, pointer: 1},
 		},
-		// The four reports close the transcript-side slot, nearest the chrome, because they are the
+		// The five reports close the transcript-side slot, nearest the chrome, because they are the
 		// panes that CAN be up beside another: their verbs are whileRunning, so a report opens over an
 		// approval or ask prompt the run is blocked on — and stacking it under the prompt keeps the
 		// surface the human is answering in the position it has when no report is up.
 		//
-		// In the key precedence the four sit under the dropdown and above the run view.
+		// In the key precedence the five sit under the dropdown and above the run view.
 		//
 		// The /usage report claims esc and the four keys that scroll it, and nothing else (usage.go). It
 		// is not modal — it says something rather than asking, so the box behind it stays live and every
@@ -266,6 +266,11 @@ func init() {
 		// them for the same reason: a pane that owns the keyboard answers its own esc first, and the
 		// esc that closes a report opened inside a run view is the esc the human means for it.
 		paneAdvice: reportPaneRow("advice pane", adviceReport, paneRank{key: 9, pointer: 5}),
+		// The /mcp report claims the report's five keys and no sixth — one rendering, no ctrl+r
+		// (mcppane.go) — on the same non-modal terms as the four panes above it, and sits beside them
+		// for the same reason: a pane that owns the keyboard answers its own esc first, and the esc
+		// that closes a report opened inside a run view is the esc the human means for it.
+		paneMCP: reportPaneRow("mcp pane", mcpReport, paneRank{key: 10, pointer: 6}),
 		paneDropdown: {
 			// The command / @file / skill autocomplete is the input slot's own tenant, drawn flush over
 			// the box rather than over the transcript, and the one list that is not modal at all: any
@@ -289,7 +294,7 @@ func init() {
 			// them — under the four modal overlays' rungs and before the normal routing; any other key
 			// falls through to edit the input. It closes the pointer chain, for the reason pointerPanes
 			// states.
-			rank: paneRank{key: 5, pointer: 10},
+			rank: paneRank{key: 5, pointer: 11},
 		},
 	}
 	keyClaimOrder = keyClaimRungs()

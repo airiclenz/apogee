@@ -565,7 +565,11 @@ failed dial carries cause; mid-Turn finish emits before commit; `/clear` rotatio
 **Closes:** mcp-lifecycle-event
 **Commit:** `feat(apogee): seed MCP server state into the TUI and each journal`
 
-## 18. `/mcp`, a read-only report pane
+## 18. `/mcp`, a read-only report pane — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): consequential edit — internal/tui/reportpane_test.go: made necessary by the new mcpReport kind; TestReportKindsResolveDistinctly's pinned title and follow maps gain mcpReport (title `mcp servers`, follows false — a reading like /usage, not a stream).
+NOTES (2026-11-09): the pane lays its table out itself (popupColumnWidths + layoutPopupRow into single-cell rows) rather than handing cells to the popup module, so a failed server's cause can sit beneath its row as wrapped prose (`  cause: …`) without widening a column; a `disconnected` row with a reason reads `disconnected (denied)`. Added TestMCPPaneSaysSoWithNoServers (empty pane, and /mcp while a Turn runs) beyond the plan's four named tests.
+NOTES (2026-11-09): comments naming "four reports" were updated in the files this item touched (reportpane.go, panes.go, doc.go, mouse_test.go); TestTheFourReportsPaintInTheFramePaneOrder (panes_test.go) and reportCases (reportpane_test.go) still walk the original four and do not include /mcp.
 
 **What:** ADR 0111 D9. Depends on item 15.
 **Regression guard.** `"mcp"` joins `wantParsed` (`TestCommandTableDrivesParserAndMenu`) and
