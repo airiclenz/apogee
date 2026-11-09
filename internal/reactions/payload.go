@@ -76,11 +76,10 @@ func projectSeamValue(seam domain.Moment, value any) any {
 	switch seam {
 	case domain.MomentPreRequest:
 		request, ok := value.(*domain.Request)
-		if !ok || request == nil {
+		if !ok {
 			return nil
 		}
-		state := request.State()
-		return requestValue{Messages: projectMessages(state.Messages), Tools: projectToolNames(state.Tools)}
+		return ProjectRequest(request)
 	case domain.MomentPostResponse:
 		moment, ok := value.(domain.PostResponseMoment)
 		if !ok || moment.Resp == nil {
@@ -115,6 +114,20 @@ func projectSeamValue(seam domain.Moment, value any) any {
 		return conversationValue{Messages: projectMessages(conversation.Messages())}
 	}
 	return nil
+}
+
+// ProjectRequest is the pre-request seam's projection on its own: the request reduced to the
+// documented `value` shape — its messages and the names of the tools it offers — copied, so the
+// document survives the request it was cut from. It is what a pre-request-finished notice carries
+// under "value" (projectSeamValue), and what the sync lane hands a pre-request advise entry under
+// the same key (internal/agent's seamPayload), so a script reads one shape whichever lane fired it.
+// A nil request projects to nothing, which leaves "value" absent rather than empty.
+func ProjectRequest(request *domain.Request) any {
+	if request == nil {
+		return nil
+	}
+	state := request.State()
+	return requestValue{Messages: projectMessages(state.Messages), Tools: projectToolNames(state.Tools)}
 }
 
 // projectMessages projects a message list, preserving its order.

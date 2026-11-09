@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -76,12 +77,13 @@ type armedReaction struct {
 	action string
 }
 
-// advice is one advise Reaction's contribution at the tool-result Moment: the ledger row the
+// advice is one advise Reaction's contribution at a Moment with an advise slot: the ledger row the
 // injection is attributed through and the capped text that lands inside its fence. The two travel
 // together because neither is readable alone — a span with no text names nothing, and text with no
 // span cannot be fenced, since every word of the fence header is derived from the span
-// (domain.RenderAdvice). The dispatcher collects them in ladder order; the seam that commits the
-// tool result renders them onto it (appendToolResult, dispatch.go).
+// (domain.RenderAdvice). The dispatcher collects them in ladder order; at post-tool-result the seam
+// that commits the tool result renders them onto it (appendToolResult, dispatch.go), and at
+// pre-request the cascade itself lands them on the outgoing request's tail (adviseRequest).
 type advice struct {
 	span domain.AdviceSpan
 	text string
@@ -90,8 +92,8 @@ type advice struct {
 // bookedDetail is the Detail an advise firing is booked under, given the one its handler set: the
 // handler's own when it set one, else the CAPPED text the model reads — never the fence header —
 // so what apogee-sim hashes to attribute an effect is the string the fence carries. Every advise
-// slot books through it (fireLeg at the tool-result seam, attachSessionAdvice at the session-start
-// join), so the same handler's answer books byte-equal wherever it lands.
+// slot books through it (fireLeg at the tool-result and pre-request seams, attachSessionAdvice at
+// the session-start join), so the same handler's answer books byte-equal wherever it lands.
 func (adv advice) bookedDetail(detail string) string {
 	if detail != "" {
 		return detail
@@ -149,7 +151,9 @@ type seamPayload struct {
 // The second return is the ADVISE SLOT (ADR 0076 D6): the spans the cascade's advise reactions
 // contributed, in ladder order, for the seam to render onto the closing tool result. It is empty
 // at every Moment but post-tool-result, and empty there too under Bypass, which switches advise
-// off before a handler is ever called.
+// off before a handler is ever called. The pre-request seam's slot never leaves the cascade: its
+// advice lands on the outgoing request's tail here, after both legs and before the seam closes
+// (adviseRequest), so it comes back empty too.
 func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, []advice, error) {
 	turn := a.turns.index
 
@@ -196,12 +200,41 @@ func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (
 	if _, err := a.fireLeg(ctx, turn, m, seam, a.armedLadder(), false, &result, &fired, &collected); err != nil {
 		return domain.Outcome{}, nil, err
 	}
+	if m == domain.MomentPreRequest {
+		adviseRequest(payload, collected)
+		return result, nil, nil
+	}
 	return result, collected, nil
 }
 
-// fire runs the cascade for a seam that carries no advise slot and reports the Outcome alone.
-// Four of the five Moments are such seams: only the closing tool result has somewhere to put a
-// trailer, so only firePostToolResult calls fireCascade directly.
+// adviseRequest lands the pre-request cascade's advice on the outgoing request (ADR 0076 D6): each
+// span, in ladder order, is fenced on the request's tail by its role (domain.Request.AdviseTail).
+// It runs inside the cascade, after every handler of both legs and before the deferred
+// SeamClosedEvent, for three reasons: the fence follows every edit a pre-request handler made and
+// every engine note stampRequestTail placed, so it is the last thing the request gains before it
+// is sent; a pre-request-finished subscriber sees the request exactly as it goes out; and every
+// pre-request fire — the first build, the rebuild after a fold, the re-arm after a rehome —
+// lands it at once, so a rebuilt request carries exactly the advice of the cascade that re-ran
+// over it.
+//
+// The fence lives on the request copy alone and is gone from the next request: the conversation,
+// the snapshot and the record never see it. A request with no tail AdviseTail can fence (empty, or
+// system-only) is unreachable from the loop — every request carries the Turn's user message or a
+// later turn — and leaves the request as it was.
+func adviseRequest(payload any, advised []advice) {
+	req, ok := payload.(*domain.Request)
+	if !ok {
+		return
+	}
+	for _, adv := range advised {
+		req.AdviseTail(adv.span, adv.text)
+	}
+}
+
+// fire runs the cascade for a seam whose caller holds no advise slot and reports the Outcome alone.
+// Four of the five Moments are such seams: only the closing tool result hands its trailer back for
+// the caller to commit, so only firePostToolResult calls fireCascade directly. pre-request has an
+// advise slot too, but the cascade lands it on the request itself (adviseRequest).
 func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, error) {
 	out, _, err := a.fireCascade(ctx, m, payload)
 	return out, err
@@ -449,8 +482,9 @@ func (a *Agent) bookFiring(
 // covering both a handler that said so and a revision the bracket saw move. Everything else is
 // an inspect-and-do-nothing invocation, which is not a firing.
 //
-// "Carried a correction" is what makes an advise reaction a firing at the tool-result seam: its
-// Inject is the trailer text and no Retry accompanies it there, so the Inject term alone books it.
+// "Carried a correction" is what makes an advise reaction a firing at the tool-result and
+// pre-request seams: its Inject is the advice text and no Retry accompanies it there, so the Inject
+// term alone books it.
 //
 // "Gave a verdict" is the gate cell's term, and the gate STAGE is its only reader (gate.go's
 // callGateFunc): an Outcome whose Gate.Verdict is the only thing set carries no correction, no
@@ -463,23 +497,25 @@ func acted(out domain.Outcome) bool {
 // isAdvice reports whether this ACTED Outcome is an advise injection — the one firing that both
 // books under actionAdvise and contributes a span to an advise slot. All three terms are
 // necessary: the class says the reaction is allowed to speak to the model, the Moment says there
-// is somewhere to speak — a tool result at post-tool-result, the session's next user message at
-// session-started, or the user-role message after a fold at compaction-finished (the session
-// advise lanes, sessionadvise.go) — and a non-empty Inject is the text
-// itself. Of the builtins only the context-fill notice satisfies it — the one engine reaction of
-// class advise (ADR 0077); the seven Floor guards are shape-view and contribute no advice.
+// is somewhere to speak — a tool result at post-tool-result, the outgoing request's tail at
+// pre-request (adviseRequest), the session's next user message at session-started, or the
+// user-role message after a fold at compaction-finished (the session advise lanes,
+// sessionadvise.go) — and a non-empty Inject is the text itself. Of the builtins only the
+// context-fill notice satisfies it — the one engine reaction of class advise (ADR 0077); the seven
+// Floor guards are shape-view and contribute no advice.
 func isAdvice(m domain.Moment, r domain.Reaction, out domain.Outcome) bool {
-	return (m == domain.MomentPostToolResult || m == domain.MomentSessionStarted ||
-		m == domain.MomentCompactionFinished) && r.Class == domain.ClassAdvise && out.Inject != ""
+	return (m == domain.MomentPostToolResult || m == domain.MomentPreRequest ||
+		m == domain.MomentSessionStarted || m == domain.MomentCompactionFinished) &&
+		r.Class == domain.ClassAdvise && out.Inject != ""
 }
 
-// adviceOf turns one advise firing into the slot entry the tool-result seam renders, and reports
+// adviceOf turns one advise firing into the slot entry its seam renders, and reports
 // whether the firing was one at all. Every field of the ledger row comes from the REACTION and the
 // cascade — id, origin, Moment, Turn — and none from the handler, which is what makes the fence
 // header unforgeable: a handler printing its own "[advice — reaction …]" line lands inside the
 // fence rather than beside it. The text is capped here (domain.CapAdvice), once, so the cap cannot
 // be bypassed by a route that renders a span itself. Offset is left zero: the message stamps it
-// when the fence is appended (domain.Message.WithAdvice).
+// when the fence is placed (domain.Message.WithAdvice, domain.Request.AdviseTail).
 func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) (advice, bool) {
 	if !isAdvice(m, r, out) {
 		return advice{}, false
@@ -497,9 +533,10 @@ func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) 
 
 // adviseUser is the USER half of the advise slot: one `advise:` entry's command runs out of
 // process, its webhook is POSTed to, or its MCP tool is called, while the loop waits, and what it
-// answered becomes the trailer the model reads (ADR 0076 D2, D6, adr-0076-amend-1029). It is called
-// from the post-tool-result seam alone — the only Moment with a closing tool result to fence a
-// trailer onto — and dispatches on the handler's KIND: a command's standard output, a webhook's
+// answered becomes the advice the model reads (ADR 0076 D2, D6, adr-0076-amend-1029). It is called
+// from the two in-loop seams with an advise slot — post-tool-result, whose closing tool result
+// takes the trailer, and pre-request, whose outgoing request's tail takes the fence
+// (adviseRequest) — and dispatches on the handler's KIND: a command's standard output, a webhook's
 // reply body and an MCP tool's text answer are the same text to everything below.
 //
 // It is FAIL-OPEN in both directions it decides (D7), and each of them costs the Turn nothing: a
@@ -538,7 +575,7 @@ func (a *Agent) adviseUser(
 	case domain.MCPHandler:
 		answer, err = a.runSyncMCP(ctx, turn, r, doc)
 	default:
-		return domain.Outcome{}, wrongHandler(domain.MomentPostToolResult, r.Handler)
+		return domain.Outcome{}, wrongHandler(doc.Event, r.Handler)
 	}
 	if err != nil {
 		a.reportSyncFailure(turn, r, doc.Event, err)
@@ -622,9 +659,8 @@ func (a *Agent) writtenPath(call domain.ToolCall) (string, bool) {
 
 // reactionAction is the label an ARMED reaction's firing is booked under. Post-response is the
 // one Moment with an action vocabulary of its own, in the precedence the header ratifies; an
-// advise injection — at the tool-result seam, or a session advise lane's at session-started or
-// compaction-finished — is
-// the other named action; the rest have none, so a
+// advise injection — at the tool-result or pre-request seam, or a session advise lane's at
+// session-started or compaction-finished — is the other named action; the rest have none, so a
 // firing there is simply "fired". A builtin never reaches here — it carries its own label.
 func reactionAction(m domain.Moment, r domain.Reaction, out domain.Outcome) string {
 	if isAdvice(m, r, out) {
@@ -677,6 +713,21 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 		return seamPayload{
 			work: req,
 			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
+				// The user's advise cell leaves the process here as it does at post-tool-result:
+				// its handler is a command, a webhook or an MCP tool, never a PreRequestFunc, so
+				// all three kinds are routed before the Go handler assertion rather than failing
+				// it — which would abandon the Turn, since a pre-request error does. The document
+				// carries the request as the cascade has shaped it so far, in the shape a
+				// pre-request-finished notice's "value" has (reactions.ProjectRequest).
+				if r.Class == domain.ClassAdvise {
+					switch r.Handler.(type) {
+					case domain.ArgvHandler, domain.WebhookHandler, domain.MCPHandler:
+						return a.adviseUser(ctx, turn, r, domain.SeamPayload{
+							Event: domain.MomentPreRequest,
+							Value: reactions.ProjectRequest(req),
+						})
+					}
+				}
 				fn, ok := r.Handler.(domain.PreRequestFunc)
 				if !ok {
 					return domain.Outcome{}, wrongHandler(m, r.Handler)

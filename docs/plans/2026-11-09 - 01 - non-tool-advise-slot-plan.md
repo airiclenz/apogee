@@ -85,7 +85,13 @@ unchanged (deep compare); a second request built from the same conversation has 
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestAdviseTail' ./internal/domain/`
 **Commit:** `feat(domain): place a fenced advice block on the request tail by role`
 
-## 2. Fire pre-request advice into the outgoing request
+## 2. Fire pre-request advice into the outgoing request — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the advice lands in fireCascade (new adviseRequest helper) after the armed leg and before the deferred SeamClosedEvent, so build, refold and rehome are covered with no change to internal/agent/loop.go, which leaves FILES; fireCascade returns an empty advise slot at pre-request because the slot is already on the request.
+NOTES (2026-11-09): the exported request projection is reactions.ProjectRequest (returns any, nil for a nil request), now also what projectSeamValue's pre-request case calls; the sync-lane document carries it under SeamPayload.Value, so seampayload.go's Value doc names that firing beside the five seam-closing notices.
+NOTES (2026-11-09): consequential edit — internal/agent/syncexec.go: made necessary by routing pre-request advise through adviseUser — the file-top comment named the advise slot at post-tool-result as runSyncArgv's only advise caller.
+NOTES (2026-11-09): adviseUser's default-case wrongHandler now names doc.Event instead of a hard-coded post-tool-result, since the route serves two Moments.
+NOTES (2026-11-09): the plan's tests live as six TestPreRequestAdvice* functions in internal/agent/reactions_test.go (tail-only across a tool-call Exchange incl. conv/snapshot/booking, the pre-request-finished observer via an Emit-time snapshotting sink, the stdin document, refold, Bypass, timeout); the entries are appended straight onto a.armed because Reaction.Validate still refuses a user pre-request advise until item 4.
 
 **What:** Recast at the regression check (2026-11-09). **Goal:** each request whose pre-request cascade yields
 user advice carries it through `Request.AdviseTail`, fenced and capped, after every pre-request Go handler and

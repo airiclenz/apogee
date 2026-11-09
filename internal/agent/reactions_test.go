@@ -7,7 +7,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +18,8 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/domain/domaintest"
+	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // ---------------------------------------------------------------------------
@@ -1282,4 +1287,329 @@ func TestSessionWindow_ASeededConstructionFiresThroughItsAnnouncement(t *testing
 // armedCallEqual compares two narrowed firings by start and ids.
 func armedCallEqual(a, b armedCall) bool {
 	return a.start == b.start && slices.Equal(a.ids, b.ids)
+}
+
+// ---------------------------------------------------------------------------
+// Pre-request advice (ADR 0076 D6: the request-tail advise slot)
+// ---------------------------------------------------------------------------
+
+// preRequestAdviceText is what every pre-request advise entry below prints: the advice the model
+// reads inside the fence.
+const preRequestAdviceText = "keep the reply short"
+
+// preRequestCoach is one user advise entry on pre-request whose command prints text. It is armed
+// straight onto the ladder (preRequestAdviceAgent), never through Reaction.Validate, which does not
+// admit the Moment for a user advise yet.
+func preRequestCoach(argv ...string) domain.Reaction {
+	return userAdvise("coach", []domain.Moment{domain.MomentPreRequest}, argv...)
+}
+
+// printsAdvice is a command that prints text with no trailing newline, so the fence carries it
+// byte-exact.
+func printsAdvice(text string) []string {
+	return []string{"/bin/sh", "-c", "printf '%s' '" + text + "'"}
+}
+
+// preRequestAdviceAgent builds an Agent over up from cfg with entries appended to its ARMED leg as
+// they stand, a list_dir tool to ask for, and a Report sink so a failure's operator line can be
+// read back. Confinement is off: the argv entries run unfenced, as these tests mean.
+func preRequestAdviceAgent(
+	t *testing.T,
+	cfg domain.Config,
+	up *scriptedUpstream,
+	reported *[]string,
+	entries ...domain.Reaction,
+) *Agent {
+	t.Helper()
+
+	reg := domain.NewToolRegistry()
+	if err := reg.Register(fakeTool{name: "list_dir", readOnly: true, result: "main.go"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	cfg.Tools = reg
+	cfg.WorkspaceDir = t.TempDir()
+	cfg.Unconfined = true
+	cfg.Report = func(msg string) { *reported = append(*reported, msg) }
+
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	for _, entry := range entries {
+		a.armed = append(a.armed, armedReaction{spec: entry})
+	}
+	return a
+}
+
+// preRequestFence is the fence the coach entry's advice renders to at turn, leading on a user tail
+// and trailing on a tool tail.
+func preRequestFence(turn int, leading bool) string {
+	return domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: "coach",
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentPreRequest,
+		Turn:     turn,
+		Leading:  leading,
+	}, preRequestAdviceText)
+}
+
+// tailOf is the last message a captured request carried.
+func tailOf(t *testing.T, req stubllm.Request) stubllm.Message {
+	t.Helper()
+	if len(req.Messages) == 0 {
+		t.Fatal("the captured request carried no messages")
+	}
+	return req.Messages[len(req.Messages)-1]
+}
+
+// fenceCount is how many advice fences a captured request carried, over every message.
+func fenceCount(req stubllm.Request) int {
+	count := 0
+	for _, m := range req.Messages {
+		count += strings.Count(m.Content, domain.AdviceFencePrefix)
+	}
+	return count
+}
+
+// adviseFirings is every booked firing of the coach entry.
+func adviseFirings(sink *recordingSink) []domain.ReactionFiredEvent {
+	var out []domain.ReactionFiredEvent
+	for _, fe := range firings(sink.events) {
+		if fe.Reaction == "coach" {
+			out = append(out, fe)
+		}
+	}
+	return out
+}
+
+// The slot's whole contract across one Exchange of two requests: each request carries the advice
+// its own pre-request cascade produced, fenced by the tail's role — leading inside the user message
+// that opens the Exchange, trailing on the tool result that closes the Turn before — and nothing of
+// the request before it; the conversation and the snapshot never carry it; and each landing is
+// booked as an advise firing whose Detail is the text the fence carries.
+func TestPreRequestAdviceLandsOnTheRequestTailOnly(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	up := scriptedResponder(t, toolCallTurn("c1", "list_dir", `{}`), contentTurn("done"))
+	a := preRequestAdviceAgent(t, baseConfig(sink), up, &reported, preRequestCoach(printsAdvice(preRequestAdviceText)...))
+
+	runExchange(t, a, "hi")
+
+	requests := up.requests()
+	if len(requests) != 2 {
+		t.Fatalf("upstream saw %d requests, want 2", len(requests))
+	}
+	first := tailOf(t, requests[0])
+	if first.Role != string(domain.RoleUser) || first.Content != preRequestFence(0, true)+"hi" {
+		t.Errorf("request 1 tail = {%s %q}, want the user message led by the Turn-0 fence", first.Role, first.Content)
+	}
+	committed := a.conv.At(a.conv.Len() - 2) // the tool result, before the final reply
+	tail := tailOf(t, requests[1])
+	if tail.Role != string(domain.RoleTool) || tail.Content != committed.Content+preRequestFence(1, false) {
+		t.Errorf("request 2 tail = {%s %q}, want the tool result %q trailed by the Turn-1 fence",
+			tail.Role, tail.Content, committed.Content)
+	}
+	if got := fenceCount(requests[1]); got != 1 {
+		t.Errorf("request 2 carried %d fences, want 1 — the Turn-0 advice is request-only", got)
+	}
+
+	for i := 0; i < a.conv.Len(); i++ {
+		if m := a.conv.At(i); len(m.Advice) != 0 || strings.Contains(m.Content, preRequestAdviceText) {
+			t.Errorf("conversation message %d carries the advice: %+v", i, m)
+		}
+	}
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if strings.Contains(string(snap.State), preRequestAdviceText) {
+		t.Error("the snapshot carries the advice; it lives on the request copy alone")
+	}
+
+	fired := adviseFirings(sink)
+	if len(fired) != 2 {
+		t.Fatalf("coach booked %d firings, want 2 (one per request): %+v", len(fired), fired)
+	}
+	for _, fe := range fired {
+		if fe.Action != actionAdvise || fe.Moment != domain.MomentPreRequest || fe.Detail != preRequestAdviceText {
+			t.Errorf("firing = {Action:%q Moment:%q Detail:%q}, want {advise pre-request %q}",
+				fe.Action, fe.Moment, fe.Detail, preRequestAdviceText)
+		}
+	}
+	if len(reported) != 0 {
+		t.Errorf("reporter said %q, want nothing", reported)
+	}
+}
+
+// requestTailSink snapshots the request's last message INSIDE Emit at every pre-request
+// SeamClosedEvent — the only moment the reference the event carries is valid — so a fence added
+// after the emit would be missing from it, where recordingSink's kept pointer would show it.
+type requestTailSink struct {
+	recordingSink
+	tails []domain.Message
+}
+
+func (s *requestTailSink) Emit(e domain.Event) {
+	s.recordingSink.Emit(e)
+	closed, ok := e.(domain.SeamClosedEvent)
+	if !ok || closed.Seam != domain.MomentPreRequest {
+		return
+	}
+	req, ok := closed.Value.(*domain.Request)
+	if !ok {
+		return
+	}
+	messages := req.State().Messages
+	s.tails = append(s.tails, messages[len(messages)-1])
+}
+
+// A pre-request-finished subscriber is promised the request "as the loop will send it", so the
+// fence has to be on the request before the seam closes, not stamped after it.
+func TestPreRequestAdviceIsOnTheRequestThePreRequestSeamClosesOver(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &requestTailSink{}
+	var reported []string
+	a := preRequestAdviceAgent(t, baseConfig(sink), echoResponder(t, "done"), &reported,
+		preRequestCoach(printsAdvice(preRequestAdviceText)...))
+
+	stepOnce(t, a, "hi")
+
+	if len(sink.tails) != 1 {
+		t.Fatalf("saw %d pre-request closings, want 1", len(sink.tails))
+	}
+	if got, want := sink.tails[0].Content, preRequestFence(0, true)+"hi"; got != want {
+		t.Errorf("the closing seam's request tail = %q, want %q", got, want)
+	}
+}
+
+// The command reads the documented pre-request document: the event, and under "value" the request
+// as the cascade has shaped it so far, in the shape a pre-request-finished notice carries.
+func TestPreRequestAdviceHandsTheCommandTheRequest(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	stdin := filepath.Join(t.TempDir(), "stdin.json")
+	a := preRequestAdviceAgent(t, baseConfig(sink), echoResponder(t, "done"), &reported,
+		preRequestCoach("/bin/sh", "-c", `cat > "$0"; printf '%s' '`+preRequestAdviceText+`'`, stdin))
+
+	stepOnce(t, a, "hi")
+
+	raw, err := os.ReadFile(stdin)
+	if err != nil {
+		t.Fatalf("the command left no document: %v", err)
+	}
+	var doc struct {
+		Event string `json:"event"`
+		Value struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Tools []string `json:"tools"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("document is not JSON: %v\n%s", err, raw)
+	}
+	if doc.Event != string(domain.MomentPreRequest) {
+		t.Errorf("event = %q, want %q", doc.Event, domain.MomentPreRequest)
+	}
+	messages := doc.Value.Messages
+	if len(messages) == 0 || messages[len(messages)-1].Role != "user" || messages[len(messages)-1].Content != "hi" {
+		t.Errorf("value.messages = %+v, want it to end on the unfenced user message", messages)
+	}
+	if !slices.Contains(doc.Value.Tools, "list_dir") {
+		t.Errorf("value.tools = %v, want the offered list_dir", doc.Value.Tools)
+	}
+}
+
+// pre-request runs per REQUEST, so a request rebuilt after an overflow fold runs it again: the
+// retried request carries the fresh cascade's fence and only that one, and both firings are booked.
+func TestPreRequestAdviceRerunsOnARefold(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+
+	sink := &recordingSink{}
+	var reported []string
+	up := recoveryResponder(t, "recovered reply", "EMERGENCY-SUMMARY", true)
+	a := preRequestAdviceAgent(t, autoCompactConfig(sink), up, &reported,
+		preRequestCoach(printsAdvice(preRequestAdviceText)...))
+	seedToolCallConv(a)
+
+	runExchange(t, a, "keep going")
+
+	mains := up.mains()
+	if len(mains) != 2 {
+		t.Fatalf("main requests = %d, want 2 (the overflowed one and the retry)", len(mains))
+	}
+	fired := adviseFirings(sink)
+	if len(fired) != 2 {
+		t.Fatalf("coach booked %d firings, want 2 (the first request and the rebuilt one): %+v", len(fired), fired)
+	}
+	retry := mains[1]
+	if got := fenceCount(retry); got != 1 {
+		t.Errorf("the retried request carried %d fences, want exactly 1", got)
+	}
+	if tail := tailOf(t, retry); tail.Content != preRequestFence(fired[1].Turn, true)+overflowBridge {
+		t.Errorf("retry tail = %q, want the user bridge led by the fence", tail.Content)
+	}
+}
+
+// Bypass switches advise off before its handler is reached: no fence, no firing.
+func TestPreRequestAdviceIsSkippedUnderBypass(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	cfg := baseConfig(sink)
+	cfg.Bypass = true
+	up := echoResponder(t, "done")
+	a := preRequestAdviceAgent(t, cfg, up, &reported, preRequestCoach(printsAdvice(preRequestAdviceText)...))
+
+	stepOnce(t, a, "hi")
+
+	if tail := tailOf(t, up.last()); tail.Content != "hi" {
+		t.Errorf("request tail = %q under Bypass, want the bare user message", tail.Content)
+	}
+	if fired := adviseFirings(sink); len(fired) != 0 {
+		t.Errorf("coach booked %+v under Bypass, want nothing", fired)
+	}
+}
+
+// A command that outlives its deadline costs the request nothing (D7): it goes out unfenced, the
+// Turn completes, and the failure is said once to the operator and once as a "failed" firing.
+func TestPreRequestAdviceFailsOpenOnATimeout(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	entry := preRequestCoach("/bin/sh", "-c", "sleep 5")
+	entry.Timeout = testtime.Fixed(150 * time.Millisecond)
+	up := echoResponder(t, "done")
+	a := preRequestAdviceAgent(t, baseConfig(sink), up, &reported, entry)
+
+	res := stepOnce(t, a, "hi")
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("status = %q, want %q — a failed advise never abandons the Turn",
+			res.Status, domain.StatusExchangeComplete)
+	}
+	if tail := tailOf(t, up.last()); tail.Content != "hi" {
+		t.Errorf("request tail = %q, want the bare user message", tail.Content)
+	}
+	fired := adviseFirings(sink)
+	if len(fired) != 1 || fired[0].Action != "failed" || !strings.Contains(fired[0].Detail, "timed out") {
+		t.Errorf("firings = %+v, want exactly one booked failed naming the timeout", fired)
+	}
+	if len(reported) != 1 || !strings.HasPrefix(reported[0], "reaction coach (pre-request): ") {
+		t.Errorf("reporter said %q, want one observe-lane sentence", reported)
+	}
 }
