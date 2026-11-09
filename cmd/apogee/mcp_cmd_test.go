@@ -780,6 +780,14 @@ func adoptedRepoWikiServer(t *testing.T, w *rootWiring) mcp.ServerConfig {
 // when the test ends, and returns its config under name: the global server a pin skip must spare.
 func newPingMCPServer(t *testing.T, name string) mcp.ServerConfig {
 	t.Helper()
+	cfg, _ := newPingMCPHTTPServer(t, name)
+	return cfg
+}
+
+// newPingMCPHTTPServer is newPingMCPServer that also hands back the HTTP server itself, for a test
+// that kills the server mid-session. Closing it early is safe: the cleanup's second Close is a no-op.
+func newPingMCPHTTPServer(t *testing.T, name string) (mcp.ServerConfig, *httptest.Server) {
+	t.Helper()
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: name, Version: "v0.0.1"}, nil)
 	server.AddTool(&mcpsdk.Tool{Name: "ping", InputSchema: map[string]any{"type": "object"}},
 		func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -790,7 +798,7 @@ func newPingMCPServer(t *testing.T, name string) mcp.ServerConfig {
 		srv.CloseClientConnections()
 		srv.Close()
 	})
-	return mcp.ServerConfig{Name: name, Transport: mcp.TransportStreamableHTTP, Endpoint: srv.URL + "/mcp"}
+	return mcp.ServerConfig{Name: name, Transport: mcp.TransportStreamableHTTP, Endpoint: srv.URL + "/mcp"}, srv
 }
 
 // awaitPinWake reports whether w's config wait returns true within the test deadline — the re-read

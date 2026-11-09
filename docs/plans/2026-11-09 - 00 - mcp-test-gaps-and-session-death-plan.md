@@ -204,7 +204,10 @@ with 0 tools and its `Cause`, one transcript note; a cause carrying an ANSI esca
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestMCP' ./internal/sidepanel/`
 **Commit:** `feat(tui): show a lost MCP server in /mcp, the panel and the transcript`
 
-## 6. E2E: a killed MCP server reads `disconnected (lost)` in `/mcp`
+## 6. E2E: a killed MCP server reads `disconnected (lost)` in `/mcp` — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the waits use the driver's `drv.WaitFor` with `tuitest.Within(testtime.Budget(2 * time.Minute))` rather than a bare `testtime.Eventually`: same poll-until-budget semantics, and a timeout also prints the last frame, as every other wait in this file does.
+NOTES (2026-11-09): the `/mcp` assertion matches a frame row naming `docs`, `streamable-http` and `disconnected (lost)`, because the transcript's lost note words the same state and only the pane renders the transport.
 
 **What:** test-only. `TestE2EMCPServerDeathReachesMCPPane` in `cmd/apogee/e2e_mcpreconnect_test.go` launches with a
 streamable-http MCP server (a `newPingMCPServer` variant returning the `*httptest.Server`), waits for

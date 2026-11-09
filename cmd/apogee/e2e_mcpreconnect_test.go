@@ -10,7 +10,9 @@ package main
 //
 // The live Event journal follows the same lifecycle (ADR 0111 decision 8): each journal opens on the
 // servers' current state right after run_started — at the first prompt, again after `/clear`, and at
-// the boot of a resumed session — and a save's dials are journaled as they start and finish.
+// the boot of a resumed session — and a save's dials are journaled as they start and finish. A
+// server that dies mid-session is noticed with no tool call (ADR 0111 decision 9): the journal
+// records it disconnected with reason lost and `/mcp` reads `disconnected (lost)`.
 //
 // Driven in-process rather than through the pty for the reason e2e_mcpmidturn_test.go gives: the
 // claim includes the dial's hand-off back to the Update goroutine, which only a process the race
@@ -26,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -33,6 +36,7 @@ import (
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/testtime"
 	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
@@ -443,6 +447,88 @@ func TestE2EMCPBrokenServerSparesTheHealthyOne(t *testing.T) {
 	submit(drv, "Ping the healthy server.")
 	answerPingAndAwaitPong(drv, stub)
 	waitIdle(drv)
+	if err := sess.Quit(); err != nil {
+		t.Errorf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// mcpLostBudget is how long a killed streamable-http server may take to be reported lost. The SDK
+// retries the session's standalone stream five times, 1 s × 1.5^n apart plus up to as much jitter —
+// about 13 s, at worst about 26 s — before it ends the session, so the budget sits well past that.
+var mcpLostBudget = testtime.Budget(2 * time.Minute)
+
+// mcpPaneTitle is the `/mcp` pane's title as it paints.
+const mcpPaneTitle = "mcp servers"
+
+// isLostServer reports whether event says server's session ended on its own.
+func isLostServer(event domain.MCPServerEvent, server string) bool {
+	return event.Server == server && event.Phase == domain.MCPServerDisconnected &&
+		event.Reason == domain.MCPDisconnectLost
+}
+
+// journalLostAt is the index in lines of the first mcp_server line reporting server lost, or -1.
+func journalLostAt(lines []eventjson.Line, server string) int {
+	return slices.IndexFunc(lines, func(line eventjson.Line) bool {
+		event, isMCP := line.Event.(domain.MCPServerEvent)
+		return isMCP && isLostServer(event, server)
+	})
+}
+
+// hasMCPPaneRow reports whether frame holds an `/mcp` table row for server reading state. The row's
+// transport column is what tells it from the transcript's note, which words the same state.
+func hasMCPPaneRow(frame tuitest.Frame, server, state string) bool {
+	return slices.ContainsFunc(frame.Rows(), func(row string) bool {
+		return strings.Contains(row, server) && strings.Contains(row, string(mcp.TransportStreamableHTTP)) &&
+			strings.Contains(row, state)
+	})
+}
+
+// A streamable-http server killed mid-session is noticed with no tool call: once the SDK gives up
+// re-opening the session's standalone stream, the journal records the server disconnected with
+// reason lost, after the seed its birth wrote, and `/mcp` reads `disconnected (lost)` (ADR 0111
+// decision 9). A fresh session's journal is born at its first prompt, so one prompt and its seed
+// come before the kill.
+func TestE2EMCPServerDeathReachesMCPPane(t *testing.T) {
+	t.Parallel()
+
+	docs, srv := newPingMCPHTTPServer(t, "docs")
+	stub := stubllm.New(t, mcpSeedScript())
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIConfigured(t, drv, stub, mcpMidTurnServers(docs.Endpoint))
+
+	submit(drv, "Say something.")
+	drv.WaitText("First reply.")
+	waitIdle(drv)
+	drv.WaitFor(func() bool {
+		_, lines := liveJournal(t, sess.Home())
+		seed, isSeeded := journalSeed(lines)
+		return isSeeded && len(seed) == 1 && isConnectedWith(seed[0], "docs", 1)
+	}, tuitest.Awaiting("the live journal's seed, docs connected with 1 tool"))
+
+	srv.CloseClientConnections()
+	srv.Close()
+
+	var lines []eventjson.Line
+	drv.WaitFor(func() bool {
+		_, lines = liveJournal(t, sess.Home())
+		return journalLostAt(lines, "docs") >= 0
+	}, tuitest.Within(mcpLostBudget), tuitest.Awaiting("the journal to report docs disconnected (lost)"))
+	if _, isSeeded := journalSeed(lines); !isSeeded {
+		t.Errorf("the journal no longer opens on its seed and prompt: %+v", lines)
+	}
+	prompt := slices.IndexFunc(lines, func(line eventjson.Line) bool { return line.Prompt != nil })
+	if lost := journalLostAt(lines, "docs"); lost < prompt {
+		t.Errorf("the lost line sits at %d, ahead of the prompt at %d; want it after the seed", lost, prompt)
+	}
+
+	submit(drv, "/mcp")
+	drv.WaitText(mcpPaneTitle)
+	drv.WaitFor(func() bool {
+		return hasMCPPaneRow(drv.Frame(), "docs", "disconnected (lost)")
+	}, tuitest.Awaiting("/mcp to read docs disconnected (lost)"))
+	drv.Press(tuitest.Esc)
+	drv.WaitGone(mcpPaneTitle)
+
 	if err := sess.Quit(); err != nil {
 		t.Errorf("the run returned %v; want a clean quit", err)
 	}
