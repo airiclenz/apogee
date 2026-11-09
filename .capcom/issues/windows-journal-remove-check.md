@@ -3,6 +3,7 @@ title: Check on Windows that RemoveJournal tolerates a watcher's open journal
 status: open
 type: task
 priority: 3
+plan: 2026-11-09 - 02 - windows-journal-remove-check-plan
 created: 2026-10-18T05:31:31Z
 ---
 

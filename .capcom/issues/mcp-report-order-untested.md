@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [test-gap]
+plan: 2026-11-09 - 00 - mcp-test-gaps-and-session-death-plan
 created: 2026-11-09T09:10:45Z
 ---
 

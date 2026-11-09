@@ -3,6 +3,7 @@ title: An MCP server that dies mid-session is not noticed
 status: open
 type: task
 priority: 4
+plan: 2026-11-09 - 00 - mcp-test-gaps-and-session-death-plan
 created: 2026-11-08T21:33:39Z
 ---
 

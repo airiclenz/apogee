@@ -3,6 +3,7 @@ title: "Advise slot for non-tool Moments: the fenced tail user-role message (ADR
 status: open
 type: feature
 priority: 3
+plan: 2026-11-09 - 01 - non-tool-advise-slot-plan
 aliases: [apogee-4h5]
 created: 2026-09-09T07:19:56Z
 ---
