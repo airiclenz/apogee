@@ -209,7 +209,11 @@ carries the parent's pre-request fence (not under `TopLevelOnly`); the manual's 
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestLoadFileConfig(RefusesMalformedReactions|Admits)' ./internal/config/`
 **Commit:** `feat(domain): admit advise reactions at pre-request and post-response`
 
-## 5. Count pre-request advise in the context probe
+## 5. Count pre-request advise in the context probe — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): no production change was needed — measureTurn1 already seeds the sync lane and the Agent's pre-request cascade (item 2) lands the fence on the Turn-1 tail; the item's code change is the newProbeAgent/measureTurn1 comment rewording plus the new test, and the fence's span carries Turn 0 (the engine's first Turn, as session-started's span does), not 1.
+NOTES (2026-11-09): consequential edit — cmd/apogee/probecontext_test.go (comments on TestProbeContextLiveSendsTwiceWhenReactionsArmed and TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1): made necessary by pre-request advice now also riding Turn 1 ("the one advise Reaction that rides the Turn-1 request" became false).
+NOTES (2026-11-09): docs/manual/probe.md still says only a session-started advise entry answers before Turn 1; left for item 7, whose Files list owns probe.md.
 
 **What:** **Goal:** the context-cost probe counts a configured pre-request advise entry in the Turn-1 request
 weight, as it counts session-started advice. Depends on items 2 and 4.

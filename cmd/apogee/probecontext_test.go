@@ -311,7 +311,8 @@ func TestProbeContextLiveCarriesTheCachedShare(t *testing.T) {
 // which comes after Turn 1, so the wire cannot show the lane armed — the count and the columns are
 // the claim. That the lane IS armed, and on the first Agent only, is read off the Agents themselves
 // in TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly; a session-started entry, which does
-// ride Turn 1, is TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1's.
+// ride Turn 1, is TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1's, and a pre-request one
+// TestProbeContextLiveMeasuresPreRequestAdvice's.
 func TestProbeContextLiveSendsTwiceWhenReactionsArmed(t *testing.T) {
 	t.Parallel()
 	workspace := probeContextWorkspace(t)
@@ -415,8 +416,8 @@ func TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly(t *testing.T) {
 }
 
 // TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1 — a user's advise entry on
-// session-started is the one advise Reaction that rides the Turn-1 request, so --live measures it
-// there: the as-configured request's opening starts with the entry's leading fence, and the
+// session-started is one of the two advise Reactions that ride the Turn-1 request (pre-request is
+// the other, TestProbeContextLiveMeasuresPreRequestAdvice), so --live measures it there: the as-configured request's opening starts with the entry's leading fence, and the
 // Bypass request carries no fence at all. It holds only because measureTurn1 seeds the lanes into
 // the Agent's construction, which arms them before it announces the session-started boundary, as
 // run.Once does.
@@ -446,6 +447,49 @@ func TestProbeContextLiveMeasuresSessionStartAdviceAtTurn1(t *testing.T) {
 	configured := reqs[0].Messages
 	if got := configured[len(configured)-1].Content; !strings.HasPrefix(got, want) {
 		t.Errorf("the as-configured Turn-1 opening is\n%q\nwant it to start with the leading fence\n%q", got, want)
+	}
+	for i, m := range reqs[1].Messages {
+		if strings.Contains(m.Content, domain.AdviceFencePrefix) {
+			t.Errorf("message %d (%s) of the Bypass request carries an advice fence:\n%s", i, m.Role, m.Content)
+		}
+	}
+}
+
+// TestProbeContextLiveMeasuresPreRequestAdvice — a user's advise entry on pre-request fires as the
+// Turn-1 request is built and lands on its tail, so --live counts it in the as-configured weight
+// as it counts session-started advice: the as-configured request's tail — the fixed prompt, a
+// user message — opens with the entry's leading fence, and the Bypass request, where the
+// model-shaping classes are off, carries no fence at all.
+func TestProbeContextLiveMeasuresPreRequestAdvice(t *testing.T) {
+	t.Parallel()
+	workspace := probeContextWorkspace(t)
+	stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 800, Completion: 1})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	appendHomeConfig(t, home,
+		"confine-to-workspace: false\n"+
+			"reactions:\n"+
+			"  - id: steer\n    on: [pre-request]\n    advise: [sh, -c, 'echo steered']\n")
+
+	runProbeContext(t, home, workspace, stub.URL, "--live")
+
+	reqs := stub.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("the stub saw %d request(s); an advise config sends twice, as configured and under Bypass", len(reqs))
+	}
+	want := domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: "steer",
+		Origin:   domain.OriginUser,
+		Moment:   domain.MomentPreRequest,
+		Turn:     0,
+		Leading:  true,
+	}, "steered\n")
+	configured := reqs[0].Messages
+	tail := configured[len(configured)-1]
+	if !strings.HasPrefix(tail.Content, want) {
+		t.Errorf("the as-configured Turn-1 tail is\n%q\nwant it to start with the leading pre-request fence\n%q", tail.Content, want)
+	}
+	if !strings.Contains(tail.Content, probeContextLivePrompt) {
+		t.Errorf("the as-configured Turn-1 tail lost the fixed prompt:\n%q", tail.Content)
 	}
 	for i, m := range reqs[1].Messages {
 		if strings.Contains(m.Content, domain.AdviceFencePrefix) {

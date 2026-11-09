@@ -34,9 +34,9 @@ var errProbeContextNeedsEndpoint = errors.New(
 
 // newProbeAgent constructs the Agent an estimate or a live reading is taken off. A seam because
 // most of the lane measureTurn1 arms is not on the wire — a user's advise Reaction at
-// post-tool-result or file-changed fires after Turn 1, and only one on session-started rides the
-// Turn-1 request — so a test proves the arming by reading the Generation off the Agents built,
-// and the Agent is closed before the command returns.
+// post-tool-result or file-changed fires after Turn 1, and only one on session-started or
+// pre-request rides the Turn-1 request — so a test proves the arming by reading the Generation off
+// the Agents built, and the Agent is closed before the command returns.
 // Package-level, swapped only by a serial test (seams_guard_test.go). It wraps the variadic facade
 // in a closure so the seam keeps the one-argument type its test overrides assign.
 var newProbeAgent = func(cfg apogee.Config) (*apogee.Agent, error) { return apogee.New(cfg) }
@@ -282,7 +282,8 @@ func (r turn1Reading) column(label string) probe.ContextCostMeasured {
 // construction seed (Config.Observe, Config.Sync) — only those two, so the Floor enable set and
 // Bypass the caller composed stay as composed; two empty lanes leave the Config's own lanes
 // standing. agent.New arms the seed before it announces the session-started boundary, so a user's
-// session-started advise answer rides the Turn-1 request and is measured there. The observe lane
+// session-started advise answer rides the Turn-1 request and is measured there; a pre-request
+// advise answer fires as the request is built and lands on its tail. The observe lane
 // reaches no Runner here — the probe builds none — so only the sync lane moves what the request
 // carries. Under bypass the lanes stay unseeded and Bypass is OR-ed on in the seed — never copied
 // from a zero value — so the second reading is the first with the model-shaping classes off
