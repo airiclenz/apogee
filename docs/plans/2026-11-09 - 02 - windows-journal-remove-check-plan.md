@@ -85,7 +85,12 @@ journal tests (`TestStoreJournalLifecycle`, `TestStoreSweepJournals`, `TestStore
 - `grep -n 'Amended 2026-11-09' .capcom/knowledge/decisions/adr-0103/adr-0103-amend-1017.md`
 **Commit:** `fix(session): accept only a sharing violation as a watcher-held journal`
 
-## 2. Record the CI evidence and close the issue (owner-gated)
+## 2. Record the CI evidence and close the issue (owner-gated) — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): verified as the PRE-PUSH half only (owner decision, 2026-11-09): the CI evidence and the issue close are pending the owner's push of `main`; windows-journal-remove-check stays open until a green test-windows run whose headSha contains d6a88372 logs errno 32 (or the errno-5 path runs).
+NOTES (2026-11-09): pre-push branch taken — item 1's commit d6a88372 is not on origin/main (origin/main = 1eaef158); the newest ci.yml run on main (42594827717, success) is at 1eaef158, which does not contain d6a88372, so no 'RemoveJournal watcher case' log line exists yet. Logged one "Evidence awaits the CI run" line on windows-journal-remove-check and left it open; the green-errno-32 close (or the errno-5 fix path) runs after the owner pushes main.
+NOTES (2026-11-09): the item's own text directs this capcom log on the issue, so the ticket was edited despite the implementer rule against ticket edits; no close was made and there is no CLOSES entry (the issue closes by hand with the CI evidence).
+NOTES (2026-11-09): commit message adjusted from the plan's `chore(issues): record the Windows RemoveJournal CI evidence` because no evidence is recorded yet, only its pending state.
 
 **What:** Recast at the regression check (2026-11-09). manual — needs a push, which only the owner asks for. Depends on
 item 1. After the owner pushes `main`, take the newest `ci.yml` run on `main` whose `headSha` contains item 1's commit

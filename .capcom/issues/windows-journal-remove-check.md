@@ -20,3 +20,7 @@ Two open questions:
 - On a real Windows host, with one apogee session owning a live session and a second one watching it: the owner ends, exits without an error, and the next startup's sweep removes the leftover journal.
 - The errors observed are recorded in this issue. If ERROR_ACCESS_DENIED never appears in the watcher case, `isRemoveSharingError` stops accepting it. If it does appear, the case is told apart from a real permission failure, or the residual risk is written down in the code comment.
 - Either way, a test or a recorded manual run covers the case.
+
+## Log
+
+- 2026-11-09 Airic Lenz: Evidence awaits the CI run: item 1 (commit d6a88372, TestWindowsRemoveJournalUnderAWatcher logging 'RemoveJournal watcher case') is not yet pushed; newest ci.yml run on main (42594827717) is at 1eaef158, which does not contain it. Close once a green test-windows run on a main headSha containing d6a88372 logs errno 32.
