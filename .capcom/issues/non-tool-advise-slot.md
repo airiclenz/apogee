@@ -1,11 +1,13 @@
 ---
 title: "Advise slot for non-tool Moments: the fenced tail user-role message (ADR 0076 D6 second form)"
-status: open
+status: done
 type: feature
 priority: 3
 plan: 2026-11-09 - 01 - non-tool-advise-slot-plan
 aliases: [apogee-4h5]
 created: 2026-09-09T07:19:56Z
+closed: 2026-11-09T13:47:49Z
+reason: "Resolved by plan '2026-11-09 - 01 - non-tool-advise-slot-plan' (archived a0f78c2f): advise: admitted at pre-request and post-response as a fenced, capped, request-only tail block, off under Bypass; history-rewrite advise stays refused by owner decision (plan's ratified design calls)."
 ---
 
 Stage 3 ships user advise: on post-tool-result and file-changed only, both landing as the trailer on the closing tool result. ADR 0076 D6's second slot — a fenced user-role message appended at the request tail for pre-request / post-response / history-rewrite advise — is unbuilt and unproven by the admission arm (which measures the trailer slot). Build it behind its own arm; the existing Outcome.Defer / Request.InjectContext path is NOT the slot (it folds into the system message after a tool result, the forgery adjacency D6 closes).
