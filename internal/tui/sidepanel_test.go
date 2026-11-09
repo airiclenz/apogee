@@ -1111,6 +1111,160 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 	}
 }
 
+// squeezedPanelModel is a height-20 frame (13 column rows) whose sections, pinned changed-files
+// first, need one row more than the column has: changed-files (2 files) is pinned, then
+// sub-agents (2 runs), usage (3 rows) and tasks (3 tasks) are auto in that order, so the overflow
+// squeezes tasks, the last auto section, to its header.
+func squeezedPanelModel(t *testing.T) Model {
+	t.Helper()
+	return panelModel(t, "[changed-files: pinned, sub-agents: auto, usage: auto, tasks: auto, mcp: hidden]", 20,
+		squeezedPanelEvents(t)...)
+}
+
+// squeezedPanelEvents is the Event stream [squeezedPanelModel] folds.
+func squeezedPanelEvents(t *testing.T) []domain.Event {
+	t.Helper()
+	return panelEvents(panelTaskCard(), []domain.Event{
+		panelDelegationCall(t, "r1", "scout"),
+		panelDelegationCall(t, "r2", "miner"),
+		landedEdit(domain.EventBase{}, "a.go", 1, 0),
+		landedEdit(domain.EventBase{}, "b.go", 1, 0),
+		panelUsageReading(panelUsed),
+	})
+}
+
+// assertPanelGlyphs fails the test unless each titled header's fold indicator is the one want maps
+// it to.
+func assertPanelGlyphs(t *testing.T, m Model, want map[string]string) {
+	t.Helper()
+	for title, glyph := range want {
+		if got := panelHeaderGlyph(t, m, title); got != glyph {
+			t.Errorf("the %s header's edge holds %q, want %q:\n%s", title, got, glyph, strings.Join(panelText(t, m), "\n"))
+		}
+	}
+}
+
+// TestSidePanelOverflowMarksAndOpens drives the overflow's fold marks and the opened tier
+// (docs/layout/side-panel-layout.md, "Overflow"): every header the overflow folded wears ▶ and
+// every open one ▼; a click on a squeezed header opens it into the session's opened tier, which
+// takes rows after the pinned sections and before the auto ones, squeezing the last auto section
+// instead and writing nothing; a click on it again folds it, writes the fold and drops it from the
+// tier; a section the human folded opens into the tier as it unfolds, so one click always shows a
+// change; a new model forgets the tier; and a section with no body rows never reads ▶.
+func TestSidePanelOverflowMarksAndOpens(t *testing.T) {
+	t.Parallel()
+
+	const collapsed = "▶" // the unicode glyph set's folded indicator
+
+	t.Run("every squeezed header wears the folded mark", func(t *testing.T) {
+		t.Parallel()
+		events := func(t *testing.T) []domain.Event {
+			return panelEvents(panelTaskCard(), []domain.Event{
+				panelDelegationCall(t, "r1", "scout"),
+				panelDelegationCall(t, "r2", "miner"),
+				panelDelegationCall(t, "r3", "sifter"),
+				landedEdit(domain.EventBase{}, "a.go", 1, 0),
+				landedEdit(domain.EventBase{}, "b.go", 1, 0),
+				landedEdit(domain.EventBase{}, "c.go", 1, 0),
+				landedEdit(domain.EventBase{}, "d.go", 1, 0),
+				panelUsageReading(panelUsed),
+			})
+		}
+		m := panelModel(t, "[changed-files: pinned, tasks: auto, usage: auto, sub-agents: auto, mcp: hidden]", 20, events(t)...)
+
+		assertPanelGlyphs(t, m, map[string]string{
+			"Changed files": glyphExpanded, "Tasks": glyphExpanded, "Usage": collapsed, "Sub-agents": collapsed,
+		})
+	})
+
+	t.Run("a squeezed section opens into the tier and folds out of it", func(t *testing.T) {
+		t.Parallel()
+		m := squeezedPanelModel(t)
+		spy := &settingsSpy{}
+		m.opts.Settings = spy.host(nil)
+		assertPanelGlyphs(t, m, map[string]string{
+			"Changed files": glyphExpanded, "Sub-agents": glyphExpanded, "Usage": glyphExpanded, "Tasks": collapsed,
+		})
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
+
+		assertPanelGlyphs(t, m, map[string]string{
+			"Changed files": glyphExpanded, "Sub-agents": glyphExpanded, "Usage": collapsed, "Tasks": glyphExpanded,
+		})
+		panelRowY(t, m, "a.go")
+		panelRowY(t, m, "read the plan")
+		if len(spy.folds) != 0 || m.opts.UI.SidePanelFolded != "" || len(m.settingEdits) != 0 {
+			t.Errorf("opening a squeezed section wrote folds %v, folded %q, journal %+v; want nothing written",
+				spy.folds, m.opts.UI.SidePanelFolded, m.settingEdits)
+		}
+
+		restarted := newModel(context.Background(), &fakeEngine{}, m.opts, nil)
+		restarted = step(t, restarted, tea.WindowSizeMsg{Width: 140, Height: 20})
+		restarted.panel = sidepanel.New(func() time.Time { return panelNow })
+		for _, e := range squeezedPanelEvents(t) {
+			restarted = restarted.foldEvent(e)
+		}
+		if got := panelHeaderGlyph(t, restarted, "Tasks"); got != collapsed {
+			t.Errorf("a new model's Tasks header holds %q, want the tier forgotten and %q:\n%s", got, collapsed, strings.Join(panelText(t, restarted), "\n"))
+		}
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
+
+		assertPanelGlyphs(t, m, map[string]string{"Usage": glyphExpanded, "Tasks": collapsed})
+		if m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks=true"}) {
+			t.Errorf("folded %q, writes %v; want the fold written", m.opts.UI.SidePanelFolded, spy.folds)
+		}
+	})
+
+	t.Run("a folded squeezed section opens with one click", func(t *testing.T) {
+		t.Parallel()
+		m := squeezedPanelModel(t)
+		m.opts.UI.SidePanelFolded = "[tasks]"
+		spy := &settingsSpy{}
+		m.opts.Settings = spy.host(nil)
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
+
+		assertPanelGlyphs(t, m, map[string]string{"Usage": collapsed, "Tasks": glyphExpanded})
+		panelRowY(t, m, "read the plan")
+		if m.opts.UI.SidePanelFolded != "" || !slices.Equal(spy.folds, []string{"tasks=false"}) {
+			t.Errorf("folded %q, writes %v; want the unfold written", m.opts.UI.SidePanelFolded, spy.folds)
+		}
+
+		m = clickCell(t, m, panelBodyX(m), panelRowY(t, m, "Tasks"))
+
+		assertPanelGlyphs(t, m, map[string]string{"Usage": glyphExpanded, "Tasks": collapsed})
+		if m.opts.UI.SidePanelFolded != "[tasks]" || !slices.Equal(spy.folds, []string{"tasks=false", "tasks=true"}) {
+			t.Errorf("folded %q, writes %v; want the fold written again", m.opts.UI.SidePanelFolded, spy.folds)
+		}
+	})
+
+	t.Run("+N more paints in the tool-marker role", func(t *testing.T) {
+		t.Parallel()
+		m := squeezedPanelModel(t)
+
+		content := m.sidePanelContent(3)
+
+		if want := m.th.toolMarker.Render("+2" + sidePanelMore); content[2] != want {
+			t.Errorf("the 3-row column's last row is %q, want %q", content[2], want)
+		}
+	})
+
+	t.Run("an empty body never reads folded", func(t *testing.T) {
+		t.Parallel()
+		m := panelModel(t, domain.DefaultSidePanelSections, 20, panelTaskCard()...)
+		m, _ = sendPrompt(t, m, "/panel pin changed-files")
+
+		if got := panelHeaderGlyph(t, m, "Changed files"); got != glyphExpanded {
+			t.Errorf("the empty pinned section's edge holds %q, want %q", got, glyphExpanded)
+		}
+		m.opts.UI.SidePanelFolded = "[changed-files]"
+		if got := panelHeaderGlyph(t, m, "Changed files"); got == collapsed {
+			t.Errorf("the empty folded section's edge holds %q; a section with no body rows never reads it", got)
+		}
+	})
+}
+
 // TestSidePanelClearEmptiesThePanel pins the /clear boundary: the panel the closed session folded
 // falls with it, and the column reads `nothing live` again.
 func TestSidePanelClearEmptiesThePanel(t *testing.T) {

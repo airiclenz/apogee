@@ -180,7 +180,13 @@ internal/tui/sidepanel_test.go — TestPanelStopsMatchClickTargets
 - `capcom check`
 **Commit:** `feat(tui): give side-panel pins their own navigation stop`
 
-## 7. Mark overflow folds with `▶` and keep an opened section open
+## 7. Mark overflow folds with `▶` and keep an opened section open — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): re-derived from panelHeaderStops living in sidepanel.go — the header's fold stop (which now carries whether the header reads open, so the click knows to fold or open) moved to internal/tui/panelstops.go with item 6.
+NOTES (2026-11-09): re-derived from "the model's opened set" existing — the session-only tier is a new Model field `panelOpened` declared in internal/tui/model.go beside `panelDrag`, replaced copy-on-write (ADR 0011).
+NOTES (2026-11-09): consequential edit — .capcom/knowledge/decisions/adr-0110/adr-0110-decision.md: made necessary by the D11 amendment (dated blockquote under decision 11 naming `adr-0110-amend-1109`).
+NOTES (2026-11-09): the opened tier keeps the existing greedy list-order fill inside each tier, so the auto rows the opened section takes come out of the auto sections after it; the tier survives `/clear` (a viewer preference, like the fold) and ends when apogee exits. A tier member that still cannot fit stays `▶` and a second click on it does nothing.
+NOTES (2026-11-09): the new tests live in internal/tui/sidepanel_test.go (TestSidePanelOverflowMarksAndOpens); internal/tui/sidepaneloverlay_test.go needed no change — its Overlay tests pass unchanged.
 
 **What:** Closes `panel-overflow-fold-marks`. Depends on item 5.
 **Regression guard.** Unfolding a user-folded section also puts it in the opened tier, and folding a tier member writes the fold and leaves the tier, so one click always shows a change. `▶` derives from "has body rows and not expanded", not from "not expanded" alone (`panelAllocation` skips an empty body): a shown section with an empty body reads `▼` (or no indicator).

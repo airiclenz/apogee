@@ -59,7 +59,7 @@ func (m Model) panelStops(rows int) []panelStop {
 		}
 		section := sections[line.section]
 		if line.body < 0 {
-			stops = append(stops, panelHeaderStops(section, y)...)
+			stops = append(stops, panelHeaderStops(section, y, line.isOpen)...)
 			continue
 		}
 		stop := panelStop{y: y, height: 1}
@@ -78,8 +78,9 @@ func (m Model) panelStops(rows int) []panelStop {
 
 // panelHeaderStops is section's header, laid out on row y, as its two stops: the lead pin cell's,
 // which toggles pinned ↔ auto, then the title's, which folds ↔ opens — the two clicks the header row
-// answers ([Model.panelTargetAt]).
-func panelHeaderStops(section panelSection, y int) []panelStop {
+// answers ([Model.panelTargetAt]). isOpen is whether the header reads open ([panelLine]), which
+// decides whether the title's click folds the section or opens it.
+func panelHeaderStops(section panelSection, y int, isOpen bool) []panelStop {
 	return []panelStop{
 		{
 			y: y, height: 1,
@@ -88,7 +89,7 @@ func panelHeaderStops(section panelSection, y int) []panelStop {
 		},
 		{
 			y: y, height: 1,
-			target: panelTarget{kind: panelTargetFold, section: section.kind},
+			target: panelTarget{kind: panelTargetFold, section: section.kind, isOpen: isOpen},
 			id:     panelStopID{section: section.kind, isHeader: true},
 		},
 	}

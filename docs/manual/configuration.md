@@ -1401,8 +1401,8 @@ closes it. Clicks inside it work as on the docked panel; it has no separator to 
 
 **Its sections**, in the order `ui.side-panel.sections` lists them, each under a `<pin> <Title> (<summary>) ⋯ ▼`
 header led by its pin glyph — `○` for `auto`, `●` for `pinned` — whose dotted leader runs to the
-fold indicator at the right edge, as a tool block's header does: `▼` open, `▶` folded (`►` under
-`ui.glyphs: safe`):
+fold indicator at the right edge, as a tool block's header does: `▼` open, `▶` (`►` under
+`ui.glyphs: safe`) while the section has rows it is not showing, folded by you or for want of room:
 
 | Section | Shown in `auto` while | Each row |
 |---|---|---|
@@ -1419,15 +1419,18 @@ shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done ma
 
 When the sections need more rows than the panel has, pinned sections get their rows first, then
 the `auto` ones in list order; a section you folded keeps to its header however much room is left. A section that does not get its full height folds to its header
-(`○ Tasks (2/5)`); when not even every header fits, the last ones are left out and the bottom row
-reads `+N more`. The panel never scrolls.
+(`○ Tasks (2/5)`) and wears `▶`. Click such a header to open it: it takes its rows ahead of the
+`auto` sections for the rest of the session — the last `auto` section folds instead — without
+writing anything to your config; clicking it again folds it and saves the fold. When not even every
+header fits, the last ones are left out and the bottom row reads `+N more`. The panel never scrolls.
 
 **The mouse.** A click on a sub-agent row opens its run view; on a task row it unfolds the
 task-list card and scrolls to it; on a changed-file row it unfolds that write's tool block (opening
 the run that wrote it); on the usage section it opens `/usage`; on the mcp section it opens `/mcp`. A click on a header's pin glyph —
 its first cell — toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
 config. A click anywhere else on a header folds the section to its header, or opens it again, and
-saves `ui.side-panel.folded` silently, so the fold survives a restart; it works while watching a
+saves `ui.side-panel.folded` silently, so the fold survives a restart (opening a section that only
+lacked room saves nothing, as above); it works while watching a
 session too, and a save that fails says `side-panel.folded: not saved` and keeps the fold for the
 session. Dragging the panel's separator — the `│` on its left edge, or the blank column beside it —
 resizes the panel: the panel and your conversation re-wrap as you drag, and the separator lights up

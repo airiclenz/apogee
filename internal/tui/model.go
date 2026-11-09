@@ -489,6 +489,11 @@ type Model struct {
 	// panelDrag is a resize drag of the side panel's separator (sidepanel.go): armed by a press on
 	// its grip, ended by the release or by a resize that hides the column. Plain values (ADR 0011).
 	panelDrag panelDrag
+	// panelOpened is the side panel's opened tier (sidepanel.go): the sections the human opened out
+	// of the overflow's squeeze, or unfolded, this session. They take rows after the pinned sections
+	// and before the auto ones; folding one drops it. Session-only — never written to config — and
+	// replaced, never written in place ([withPanelOpened]), so it rides the value-copied Model (ADR 0011).
+	panelOpened []domain.SidePanelSection
 	// now is the Model's clock: what time a press on the side panel's grip landed, so two of them
 	// close together read as a double-click ([panelDoubleClick], sidepanel.go). Seeded time.Now by
 	// newModel; a test overwrites it to stub the gap between two presses. A func value, so it rides

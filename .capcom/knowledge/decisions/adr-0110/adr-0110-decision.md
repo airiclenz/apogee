@@ -68,6 +68,10 @@ and every section folds from engine Events.**
 11. **Overflow folds, never scrolls.** When the shown sections need more rows than the slot has,
     pinned sections get rows first, then auto sections in list order. A squeezed section folds to a
     one-line summary (`Tasks 3/7`). The panel does not scroll in v1.
+
+    > **Amended 2026-11-09 (`adr-0110-amend-1109`).** A squeezed header wears `▶`, and opening one
+    > puts it in a session-only opened tier that takes rows after pinned sections and before auto ones.
+
 12. **Run view scoping.** While Run view shows a run, the panel follows it: that run's task list,
     usage and writes, matching the status-line gauge, which already retargets. The sub-agents section
     still lists every run.

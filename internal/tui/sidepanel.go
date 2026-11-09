@@ -145,6 +145,7 @@ type panelSection struct {
 	summary   string
 	isPinned  bool
 	isFolded  bool // listed in `ui.side-panel.folded`: drawn as its header row alone, whatever room is left
+	isOpened  bool // in the session's opened tier ([Model.panelOpened]): takes rows after pinned sections, before auto ones
 	body      []string
 	subAgents []sidepanel.SubAgentRow
 	files     []sidepanel.FileRow
@@ -255,9 +256,9 @@ func (m Model) sidePanelContent(rows int) []string {
 	for _, line := range layout {
 		switch {
 		case line.more > 0:
-			lines = append(lines, m.th.statusFaint.Render("+"+strconv.Itoa(line.more)+sidePanelMore))
+			lines = append(lines, m.th.toolMarker.Render("+"+strconv.Itoa(line.more)+sidePanelMore))
 		case line.body < 0:
-			lines = append(lines, m.panelHeaderRow(sections[line.section]))
+			lines = append(lines, m.panelHeaderRow(sections[line.section], line.isOpen))
 		default:
 			lines = append(lines, sections[line.section].body[line.body])
 		}
@@ -266,11 +267,14 @@ func (m Model) sidePanelContent(rows int) []string {
 }
 
 // panelLine is what one content row of the column is: a section's header (body −1) or one of its
-// body rows, or — section −1, more the count — the `+N more` row.
+// body rows, or — section −1, more the count — the `+N more` row. A header's isOpen is whether its
+// fold indicator reads open: its body is drawn below it, or it has no body rows to draw — so `▶`
+// marks exactly a section with rows the column is not showing, folded by the human or by the overflow.
 type panelLine struct {
 	section int
 	body    int
 	more    int
+	isOpen  bool
 }
 
 // panelLayout lays the shown sections out over rows rows by the overflow rule ([panelAllocation]):
@@ -281,7 +285,7 @@ func panelLayout(sections []panelSection, rows int) []panelLine {
 	kept, isExpanded := panelAllocation(sections, rows)
 	lines := make([]panelLine, 0, rows)
 	for i := range sections[:kept] {
-		lines = append(lines, panelLine{section: i, body: -1})
+		lines = append(lines, panelLine{section: i, body: -1, isOpen: isExpanded[i] || len(sections[i].body) == 0})
 		if !isExpanded[i] {
 			continue
 		}
@@ -296,10 +300,12 @@ func panelLayout(sections []panelSection, rows int) []panelLine {
 }
 
 // panelAllocation settles the overflow (docs/layout/side-panel-layout.md, "Overflow"): every shown
-// section keeps its header row, and the rows left over go to whole bodies — pinned sections first,
-// then auto ones, each pass in list order — so a section whose body does not fit folds to its
-// header alone. A section the human folded costs its header row and nothing more: it takes no body
-// rows, and no spare room unfolds it. When not even every header fits, the last ones in list order are left out and the
+// section keeps its header row, and the rows left over go to whole bodies tier by tier
+// ([panelTier]) — pinned sections first, then the opened tier, then auto ones, each pass in list
+// order — so a section whose body does not fit folds to its header alone, and a section the human
+// opened takes its rows ahead of the auto ones it would otherwise have lost them to. A section the
+// human folded costs its header row and nothing more: it takes no body rows, and no spare room
+// unfolds it. When not even every header fits, the last ones in list order are left out and the
 // bottom row is kept for `+N more`. kept is how many sections, from the front, are drawn.
 func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []bool) {
 	isExpanded = make([]bool, len(sections))
@@ -307,9 +313,9 @@ func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []
 		return max(rows-1, 0), isExpanded
 	}
 	spare := rows - len(sections)
-	for _, isPinnedPass := range []bool{true, false} {
+	for _, tier := range []int{panelTierPinned, panelTierOpened, panelTierAuto} {
 		for i, section := range sections {
-			if section.isPinned != isPinnedPass || section.isFolded || len(section.body) == 0 ||
+			if panelTier(section) != tier || section.isFolded || len(section.body) == 0 ||
 				len(section.body) > spare {
 				continue
 			}
@@ -317,6 +323,26 @@ func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []
 		}
 	}
 	return len(sections), isExpanded
+}
+
+// The overflow's tiers, in the order they take rows ([panelAllocation]).
+const (
+	panelTierPinned = iota // a pinned section
+	panelTierOpened        // an auto section in the session's opened tier ([Model.panelOpened])
+	panelTierAuto          // every other auto section
+)
+
+// panelTier is the overflow tier section takes rows in: a pinned section's own whether or not the
+// human opened it, since pinned sections already go first.
+func panelTier(section panelSection) int {
+	switch {
+	case section.isPinned:
+		return panelTierPinned
+	case section.isOpened:
+		return panelTierOpened
+	default:
+		return panelTierAuto
+	}
 }
 
 // panelSections is the sections the column shows, in list order: every entry of
@@ -342,6 +368,7 @@ func (m Model) panelSections() []panelSection {
 		}
 		section.kind, section.isPinned = entry.Section, entry.Mode == domain.SidePanelModePinned
 		section.isFolded = slices.Contains(folded, entry.Section)
+		section.isOpened = slices.Contains(m.panelOpened, entry.Section)
 		shown = append(shown, section)
 	}
 	return shown
@@ -433,10 +460,12 @@ func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) s
 // panelHeaderRow is a section's header: `<pin> <Title> (<summary>) ⋯ ▼`, led by its pin glyph — ●
 // while the section is pinned, ○ while it is auto — on the column's first content cell
 // ([Model.panelPinX]), its dotted leader running to the fold's state indicator at the column's
-// right edge: ▼ open, the glyph set's ▶ folded. It is the transcript's header row (umbrellaHeader):
+// right edge: ▼ while isOpen, the glyph set's ▶ while the section has body rows the column is not
+// showing, whether the human folded it or the overflow squeezed it ([panelLine]). It is the
+// transcript's header row (umbrellaHeader):
 // the same leader arithmetic ([leaderRowIn]) in the same `tool-leader` dots, and the indicator in
 // the same field ([indicatorRow], [toolRowCells]), so a panel header folds like a tool block.
-func (m Model) panelHeaderRow(section panelSection) string {
+func (m Model) panelHeaderRow(section panelSection, isOpen bool) string {
 	text := section.title
 	if section.summary != "" {
 		text += " (" + section.summary + ")"
@@ -445,7 +474,7 @@ func (m Model) panelHeaderRow(section panelSection) string {
 	if section.isPinned {
 		pin = glyphPanelPinned
 	}
-	isOpen, width := !section.isFolded, m.panelContentWidth()
+	width := m.panelContentWidth()
 	paintTitle := func(clipped string) string { return m.th.panelHeader.Render(clipped) }
 	row := leaderRowIn(m.th, text, paintTitle, branchSummary{}, pin+" ", paintPanelPin, toolRowCells(m.th, width),
 		isOpen, noRemainder)
@@ -696,6 +725,7 @@ type panelTarget struct {
 	kind     panelTargetKind
 	section  domain.SidePanelSection
 	isPinned bool
+	isOpen   bool // a fold's section reads open at its header ([panelLine]): the click folds it
 	entry    int
 	run      runRef
 }
@@ -988,7 +1018,7 @@ func (m Model) followPanelTarget(target panelTarget) (tea.Model, tea.Cmd) {
 		}
 		return m.setPanelSectionMode(target.section, mode), nil
 	case panelTargetFold:
-		return m.toggleSidePanelFold(target.section), nil
+		return m.toggleSidePanelFold(target.section, target.isOpen), nil
 	case panelTargetRun:
 		next, _ := m.openRunAt(target.entry)
 		return next, nil
@@ -1073,15 +1103,26 @@ func (m Model) panelFoldedSections() []domain.SidePanelSection {
 }
 
 // toggleSidePanelFold folds an open section, or opens a folded one — what a click on a header
-// anywhere but its pin glyph means — and writes the fold back through
-// [SettingsHost.WriteSidePanelFolded] as `ui.side-panel.folded`: toggleTaskListFold's contract. The
-// column moves first; a landed write puts the list the files resolve to in force and journals it
-// (recordSettingEdit), silently, the header's indicator being the whole report; a failed one speaks
-// as one transcript error naming the key, and the flip stands for the session. A nil seam flips the
-// session alone, the Driver degrade (ADR 0031). The fold is held as the canonical string on the
-// Options, never as state of its own, so it rides the value-copied Model (ADR 0011).
-func (m Model) toggleSidePanelFold(section domain.SidePanelSection) Model {
-	isFolded := !slices.Contains(m.panelFoldedSections(), section)
+// anywhere but its pin glyph means — isOpen being whether its header reads open ([panelLine]). A
+// section the overflow squeezed, not the human, opens into the session's opened tier
+// ([Model.panelOpened]) and writes nothing. Every other toggle writes the fold back through
+// [SettingsHost.WriteSidePanelFolded] as `ui.side-panel.folded`: toggleTaskListFold's contract — and
+// moves the tier with it, so one click always shows a change: unfolding a section the human folded
+// also opens it into the tier, so the overflow cannot squeeze it straight back, and folding a
+// section leaves the tier. The column moves first; a landed write puts the list the files resolve to
+// in force and journals it (recordSettingEdit), silently, the header's indicator being the whole
+// report; a failed one speaks as one transcript error naming the key, and the flip stands for the
+// session. A nil seam flips the session alone, the Driver degrade (ADR 0031). The fold is held as
+// the canonical string on the Options, never as state of its own, so it rides the value-copied
+// Model (ADR 0011).
+func (m Model) toggleSidePanelFold(section domain.SidePanelSection, isOpen bool) Model {
+	wasFolded := slices.Contains(m.panelFoldedSections(), section)
+	if !wasFolded && !isOpen {
+		m.panelOpened = withPanelOpened(m.panelOpened, section, true)
+		return m
+	}
+	isFolded := !wasFolded
+	m.panelOpened = withPanelOpened(m.panelOpened, section, !isFolded)
 	m.opts.UI.SidePanelFolded = m.withSectionFolded(section, isFolded)
 	if m.opts.Settings == nil {
 		return m
@@ -1106,6 +1147,24 @@ func (m Model) withSectionFolded(section domain.SidePanelSection, isFolded bool)
 		}
 	}
 	return domain.SpellSidePanelFolded(next)
+}
+
+// withPanelOpened is the opened tier opened with section in it or not, every other member kept: a
+// new slice, never opened written in place, so a tier another Model copy holds is never changed
+// (ADR 0011).
+func withPanelOpened(
+	opened []domain.SidePanelSection, section domain.SidePanelSection, isOpened bool,
+) []domain.SidePanelSection {
+	next := make([]domain.SidePanelSection, 0, len(opened)+1)
+	for _, name := range opened {
+		if name != section {
+			next = append(next, name)
+		}
+	}
+	if isOpened {
+		next = append(next, section)
+	}
+	return next
 }
 
 // withSectionMode is list with section's entry set to mode, every other entry kept with its mode

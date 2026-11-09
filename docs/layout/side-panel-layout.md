@@ -160,8 +160,10 @@ file changed through the `terminal` tool is not shown (ADR 0110 decision 13).
 **Header row:** `<pin> <Title> (<summary>) ⋯ ▼`. The pin glyph leads it, on the content's first
 cell — `○` while the section is `auto`, `●` while it is `pinned` — and a dotted leader in the
 transcript's `tool-leader` role runs from the title to the fold indicator at the content's right
-edge, in the `tool-indicator` role: `▼` while the section is open, `▶` while the human has folded
-it (`►` under `ui.glyphs: safe`). It is the transcript's header shape (`tool-layout.md`, "Fold
+edge, in the `tool-indicator` role: `▶` (`►` under `ui.glyphs: safe`) while the section has body
+rows the column is not showing — the human folded it, or the overflow squeezed it — and `▼`
+otherwise, so a section with no body rows never reads `▶`. A folded header carries no hidden-row
+count. It is the transcript's header shape (`tool-layout.md`, "Fold
 states and interaction"). The folded sections are `ui.side-panel.folded`, read on every frame. The
 summary, in parentheses, appears wherever the section has one — `Sub-agents (1 running)`
 (`2 running · 1 queued`, `3 queued`, or `3 done` once all have ended; a waiting run counts as the
@@ -174,14 +176,22 @@ while every one is connected).
 
 When the shown sections need more rows than the slot has:
 
-1. Pinned sections take rows first, then auto sections, both in list order. A section the human
-   folded costs its header row alone and takes no body rows, however many are spare: the overflow
-   never opens it.
+1. Pinned sections take rows first, then the **opened tier**, then auto sections, each in list
+   order. A section the human folded costs its header row alone and takes no body rows, however
+   many are spare: the overflow never opens it.
 2. A section that does not get its full height folds to its header row alone, which carries the
-   summary (`○ Tasks (2/5)`, `○ Sub-agents (2 running)`).
-3. A section that would get no row at all is still drawn as its header row; when not even every
-   header fits, the last ones in list order are left out, and the bottom row reads `+N more`.
-4. Nothing scrolls inside the panel in v1. The mouse wheel over the panel does nothing.
+   summary (`○ Tasks (2/5)`, `○ Sub-agents (2 running)`) and the `▶` fold indicator.
+3. A click on a squeezed section's header (or `⏎` on its title stop) opens it into the opened
+   tier: it takes its rows ahead of the auto sections, which share what is left in list order, so
+   the last auto section in list order is squeezed instead. Nothing is written to config for it. A
+   click on an opened section folds it, writes `ui.side-panel.folded` and drops it from the tier;
+   unfolding a section the human folded also puts it in the tier, so the overflow cannot squeeze it
+   straight back and one click always shows a change. The tier lasts until apogee exits: a
+   restarted session starts without it (ADR 0110 decision 11, `adr-0110-amend-1109`).
+4. A section that would get no row at all is still drawn as its header row; when not even every
+   header fits, the last ones in list order are left out, and the bottom row reads `+N more`, in
+   the transcript's `tool-marker` role.
+5. Nothing scrolls inside the panel in v1. The mouse wheel over the panel does nothing.
 
 ## Pointer
 
@@ -195,8 +205,10 @@ When the shown sections need more rows than the slot has:
   list back to the setting.
 - A click anywhere else on a **header** — its title, summary, leader or fold indicator — folds the
   section to its header row, or opens a folded one, and writes `ui.side-panel.folded` back to the
-  global config silently, as a task-list card's fold writes `ui.task-list-open`. A failed write says
-  `side-panel.folded: not saved: …` in the transcript and the fold stands for the session. The hover
+  global config silently, as a task-list card's fold writes `ui.task-list-open`. A section only the
+  overflow squeezed opens into the opened tier instead and writes nothing ("Overflow", rule 3). A
+  failed write says `side-panel.folded: not saved: …` in the transcript and the fold stands for the
+  session. The hover
   there is the pointer hand. The keyboard reaches every one of these targets — body, pin and fold —
   through navigation mode (Keyboard, below).
 - While a modal pane is open — an approval, an ask, `/settings`, the sessions browser, a picker or
