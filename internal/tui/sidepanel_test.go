@@ -242,6 +242,94 @@ func TestSidePanelNarrowestColumnPaintsLongRows(t *testing.T) {
 	}
 }
 
+// TestPanelElapsedForms pins a sub-agent row's clock: the status line's form below an hour, then
+// hours and minutes, then days and hours, clamped at 99d23h — never wider than the six columns of
+// subAgentFactsFormat's elapsed field.
+func TestPanelElapsedForms(t *testing.T) {
+	t.Parallel()
+
+	const day = 24 * time.Hour
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{d: 38 * time.Second, want: "38s"},
+		{d: 59*time.Minute + 59*time.Second, want: "59:59s"},
+		{d: time.Hour, want: "1h00m"},
+		{d: time.Hour + 2*time.Minute + 3*time.Second, want: "1h02m"},
+		{d: 23*time.Hour + 59*time.Minute + 59*time.Second, want: "23h59m"},
+		{d: day, want: "1d00h"},
+		{d: day + 2*time.Hour + 59*time.Minute, want: "1d02h"},
+		{d: 99*day + 23*time.Hour + 59*time.Minute, want: "99d23h"},
+		{d: 120 * day, want: "99d23h"}, // clamped: the field holds no third day digit
+	}
+	for _, tc := range tests {
+		t.Run(tc.d.String(), func(t *testing.T) {
+			t.Parallel()
+
+			got := panelElapsed(tc.d)
+
+			if got != tc.want {
+				t.Errorf("panelElapsed(%v) = %q, want %q", tc.d, got, tc.want)
+			}
+			if width := ansi.StringWidth(got); width > 6 {
+				t.Errorf("panelElapsed(%v) = %q is %d columns, want at most 6", tc.d, got, width)
+			}
+		})
+	}
+}
+
+// TestSubAgentRowAlignsPastAnHour paints two running sub-agents, one an hour and more old and one
+// under a minute, at the default-ish and the narrowest column width: the phase word and the end of
+// the elapsed field sit at the same column on both rows, and no row outruns the column.
+func TestSubAgentRowAlignsPastAnHour(t *testing.T) {
+	t.Parallel()
+
+	for _, width := range []int{36, domain.MinSidePanelWidth} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			t.Parallel()
+
+			m := panelModel(t, domain.DefaultSidePanelSections, 30,
+				panelDelegationCall(t, "r1", "alpha"),
+				delegationPhase("r1", domain.SubAgentStarted, time.Hour+2*time.Minute+3*time.Second),
+				panelDelegationCall(t, "r2", "beta"),
+				delegationPhase("r2", domain.SubAgentStarted, 38*time.Second),
+			)
+			m.opts.UI.SidePanelWidth = width
+			m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+
+			long := factColumns(t, panelText(t, m), "1h02m")
+			short := factColumns(t, panelText(t, m), "38s")
+
+			if long != short {
+				t.Errorf("width %d: the 1h02m row's facts sit at %v, the 38s row's at %v — want equal", width, long, short)
+			}
+			for i, row := range m.sidePanelColumn(30) {
+				if got := m.th.measure.Width(row); got != width {
+					t.Errorf("width %d: row %d paints %d columns: %q", width, i, got, ansi.Strip(row))
+				}
+			}
+		})
+	}
+}
+
+// factColumns finds the painted sub-agent row whose elapsed field reads elapsed and returns the
+// column its phase word starts at and the column its elapsed field ends at.
+func factColumns(t *testing.T, column []string, elapsed string) [2]int {
+	t.Helper()
+
+	for _, row := range column {
+		end := strings.Index(row, " "+elapsed)
+		phase := strings.Index(row, "running")
+		if end < 0 || phase < 0 {
+			continue
+		}
+		return [2]int{ansi.StringWidth(row[:phase]), ansi.StringWidth(row[:end+1]) + ansi.StringWidth(elapsed)}
+	}
+	t.Fatalf("no running row reads %q:\n%s", elapsed, strings.Join(column, "\n"))
+	return [2]int{}
+}
+
 // TestSidePanelColumnFillsTheSlotRows paints a shown, empty panel: every row above the
 // session-name rule carries the separator at the slot's edge and the column's top row reads
 // `nothing live`, while every row from the rule down keeps the whole window — the rule and the

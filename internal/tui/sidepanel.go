@@ -48,6 +48,11 @@ const (
 	// subAgentFactsFormat lays out a sub-agent row's right-hand facts — phase, elapsed, fill — at
 	// fixed widths, so the facts of every row line up down the column.
 	subAgentFactsFormat = "%-7s %6s %4s"
+	// secondsPerDay is the panel clock's last rollover, from hours to days (panelElapsed).
+	secondsPerDay = 24 * secondsPerHour
+	// panelElapsedMaxDays is the most days a sub-agent row's clock reads: `99d23h` is the widest
+	// form subAgentFactsFormat's elapsed field holds, so a longer run reads that and no more.
+	panelElapsedMaxDays = 99
 	// percentCap is a whole percentage: the scale a share is spelled in, and the most a fill
 	// reads — a conversation carried into a smaller window overfills it (usageFillCell's clamp).
 	percentCap = 100
@@ -397,7 +402,7 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 	}
 	elapsed := ""
 	if row.Elapsed > 0 {
-		elapsed = formatElapsed(row.Elapsed)
+		elapsed = panelElapsed(row.Elapsed)
 	}
 	fill := ""
 	if percent := row.Fill.Percent(); percent > 0 {
@@ -409,6 +414,25 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 		lead, style = lead+m.th.panelCurrent.Render(glyphPanelCurrent)+" ", m.th.panelCurrent
 	}
 	return m.panelRow(lead, row.Name, style, facts)
+}
+
+// panelElapsed is a sub-agent row's elapsed time in at most six columns, the width of
+// subAgentFactsFormat's elapsed field: the status line's clock form (formatElapsed: `38s`,
+// `59:59s`) below an hour, then hours and minutes (`1h02m` to `23h59m`), then days and hours
+// (`1d02h`), clamped at `99d23h`. The status line keeps formatElapsed's `01:02:03s` — it has the
+// room; the column does not, and an overflowing field would push the row's facts out of line.
+func panelElapsed(d time.Duration) string {
+	secs := int(d / time.Second)
+	switch {
+	case secs < secondsPerHour:
+		return formatElapsed(d)
+	case secs < secondsPerDay:
+		return fmt.Sprintf("%dh%02dm", secs/secondsPerHour, secs%secondsPerHour/secondsPerMinute)
+	case secs/secondsPerDay > panelElapsedMaxDays:
+		return fmt.Sprintf("%dd%02dh", panelElapsedMaxDays, secondsPerDay/secondsPerHour-1)
+	default:
+		return fmt.Sprintf("%dd%02dh", secs/secondsPerDay, secs%secondsPerDay/secondsPerHour)
+	}
 }
 
 // panelTaskRow is one task: done, the current one (the first unfinished, marked ▸), or still open.

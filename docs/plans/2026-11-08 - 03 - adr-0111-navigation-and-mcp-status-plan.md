@@ -101,7 +101,7 @@ pointer-shape case for each, the watched pin reading default.
 **Closes:** panel-click-ignores-modal
 **Commit:** `fix(tui): refuse side-panel clicks under modal panes and the watched pin`
 
-## 2. Keep sub-agent row columns aligned past an hour of elapsed time
+## 2. Keep sub-agent row columns aligned past an hour of elapsed time — ✅ DONE (2026-11-09)
 
 **What:** fix the defect `subagent-row-elapsed-overflow`: `formatElapsed` renders `01:02:03s` (9 columns)
 into the row's 6-column field of `subAgentFactsFormat`.

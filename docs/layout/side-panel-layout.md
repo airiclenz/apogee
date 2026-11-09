@@ -95,7 +95,9 @@ The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune;
 (`ui.spinner`, so it turns with the status line), `○` while it is queued, the glyph set's done mark
 (`✓`, `√` under `ui.glyphs: safe`) once it has finished, and its failure mark (`✗`, `x` under `safe`) when it failed.
 The phase word is `queued`, `running`, `done` or `failed`. Elapsed time is the status line's clock
-form (`38s`, `01:12s`), blank while queued; the fill is the run's latest reading against its own
+form (`38s`, `01:12s`) below an hour, then hours and minutes (`1h02m` to `23h59m`), then days and
+hours (`1d02h`), clamped at `99d23h` — never wider than six columns, where the status line's own
+`01:02:03s` would push the row's facts out of line — and blank while queued; the fill is the run's latest reading against its own
 window, blank before it has one. Phase, elapsed and fill sit in fixed-width columns at the right
 edge, so the facts of every row line up.
 
