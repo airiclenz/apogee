@@ -533,13 +533,16 @@ func (r *runState) elapsed(now time.Time) time.Duration {
 	return max(end.Sub(r.startedAt), 0)
 }
 
-// subAgentSummary is the sub-agents header's summary: what runs, else how many ran.
+// subAgentSummary is the sub-agents header's summary: what runs, else how many ran. The running
+// count stands bare, as the panel's headline fact; another phase is named only while it is
+// non-zero — `2`, `2 · 1 queued`, `1 queued`, else `3 done` once nothing is active. A failed run
+// is counted among the done and never named, since its own row carries the failure mark.
 func subAgentSummary(running, queued, total int) string {
 	switch {
 	case running > 0 && queued > 0:
-		return strconv.Itoa(running) + " running · " + strconv.Itoa(queued) + " queued"
+		return strconv.Itoa(running) + " · " + strconv.Itoa(queued) + " queued"
 	case running > 0:
-		return strconv.Itoa(running) + " running"
+		return strconv.Itoa(running)
 	case queued > 0:
 		return strconv.Itoa(queued) + " queued"
 	case total > 0:

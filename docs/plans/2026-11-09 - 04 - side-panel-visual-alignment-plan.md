@@ -249,7 +249,11 @@ internal/tui/spinner.go — spinnerSpecs; internal/tui/fold_test.go — stripPan
 **Acceptance:** `go test -race -count=1 -run 'Panel|Overlay|NavMode|MCPLost' ./internal/tui/`
 **Commit:** `feat(tui): space side-panel sections and indent their bodies`
 
-## 10. Paint panel headers in the transcript's heading tones
+## 10. Paint panel headers in the transcript's heading tones — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): `panelHeader` retired from theme.go; the title paints in `toolLabel` and the summary in `toolIndicator` (the tone `typeRowPaint` gives its count) through a new `panelTitlePaint` helper — no new theme style.
+NOTES (2026-11-09): the side-panel spec's sketch header (`○ Sub-agents (1 running)` → `(1)`) and its overflow example were updated in place so they do not contradict the new summary; item 16 still redraws the sketch from a rendered frame.
+NOTES (2026-11-09): `TestSubAgents_SummaryAndEmpty` split into the table `TestSubAgents_Summary` (one case per binding form) and `TestSubAgents_EmptyStateIsBlank`.
 
 **What:** Recast at the regression check (2026-11-09). Tone and summary half of `panel-header-style`. Depends on item 9.
 **Regression guard.** Binding summary forms, extending today's `subAgentSummary` under the ratified rule. Running only: `(2)`. Running and queued: `(2 · 1 queued)`. Queued only: `(1 queued)`. Nothing active but runs exist: `(3 done)`; failed runs are not named in the summary, since their rows carry `✗`. No runs: no parentheses. Waiting runs count as running, as today. State these forms in the Goal and in the spec's Header row list (`docs/layout/side-panel-layout.md`).

@@ -15,10 +15,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/sidepanel"
 	"github.com/airiclenz/apogee/internal/tasklist"
@@ -734,7 +736,7 @@ func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {
 
 	got := panelText(t, m)
 	want := bodyIndent + ansi.Strip(m.spin.drawn(m.th, m.opts.UI.Spinner)) + " repo-scout running 01:12s"
-	if len(got) != 2 || got[0] != "○ Sub-agents (1 running)" || got[1] != want {
+	if len(got) != 2 || got[0] != "○ Sub-agents (1)" || got[1] != want {
 		t.Errorf("the column paints\n%s\nwant the running header over %q", strings.Join(got, "\n"), want)
 	}
 }
@@ -2449,6 +2451,97 @@ func TestSidePanelHeaderLeadsWithPin(t *testing.T) {
 		if !strings.Contains(painted[y], m.th.toolLeader.Render(strings.Repeat(dot, dots))) {
 			t.Errorf("the %s header's leader is not painted in the tool-leader role: %q", tc.title, painted[y])
 		}
+	}
+}
+
+// subAgentsHeaderModel is a panel model of width cells in colour scheme s, its Sub-agents section
+// holding two running delegations and one still queued — the header `○ Sub-agents (2 · 1 queued)`.
+func subAgentsHeaderModel(t *testing.T, s scheme.Scheme, width int) Model {
+	t.Helper()
+
+	opts := testOpts
+	opts.ColorScheme = s
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	opts.UI.SidePanelSections = domain.DefaultSidePanelSections
+	opts.UI.SidePanelWidth = width
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+	m.panel = sidepanel.New(func() time.Time { return panelNow })
+	for _, e := range []domain.Event{
+		panelDelegationCall(t, "r1", "planner"), panelDelegationCall(t, "r2", "scout"),
+		panelDelegationCall(t, "r3", "tester"),
+		delegationPhase("r1", domain.SubAgentStarted, time.Second),
+		delegationPhase("r2", domain.SubAgentStarted, time.Second),
+	} {
+		m = m.foldEvent(e)
+	}
+	return m
+}
+
+// TestSidePanelHeaderPaintsTheTranscriptHeadingTones pins a header's tones under both built-in
+// schemes (docs/layout/side-panel-layout.md, "Header row"): the title bold in the transcript's
+// label tone (toolLabel), the parenthesised summary in the muted count tone a type row's count
+// wears (toolIndicator) and not bold, and the lead pin glyph not bold.
+func TestSidePanelHeaderPaintsTheTranscriptHeadingTones(t *testing.T) {
+	t.Parallel()
+	const title, summary = "Sub-agents", "(2 · 1 queued)"
+	for _, tc := range []struct {
+		name string
+		s    scheme.Scheme
+	}{{"dark", scheme.Default()}, {"light", lightScheme(t)}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := subAgentsHeaderModel(t, tc.s, domain.DefaultSidePanelWidth)
+			buf := uv.NewScreenBuffer(m.width, m.height)
+			buf.Clear()
+			uv.NewStyledString(m.View().Content).Draw(buf, buf.Bounds())
+			y := panelRowY(t, m, title)
+			labelFg, countFg := m.th.toolLabel.GetForeground(), m.th.toolIndicator.GetForeground()
+			if sameColor(labelFg, countFg) {
+				t.Fatalf("the label and count tones are one colour %v; the test cannot tell them apart", labelFg)
+			}
+			cellAt := func(x int) *uv.Cell {
+				c := buf.CellAt(x, y)
+				if c == nil {
+					t.Fatalf("header row %d: no cell at column %d", y, x)
+				}
+				return c
+			}
+			if pin := cellAt(m.panelPinX()); pin.Style.Attrs&uv.AttrBold != 0 {
+				t.Errorf("the pin glyph %q is bold, want it in its faint tone alone", pin.Content)
+			}
+			titleX := m.panelPinX() + 2
+			for x := titleX; x < titleX+len(title); x++ {
+				if c := cellAt(x); c.Style.Attrs&uv.AttrBold == 0 || !sameColor(c.Style.Fg, labelFg) {
+					t.Errorf("title cell %d %q: bold %v, fg %v; want bold in toolLabel's %v",
+						x, c.Content, c.Style.Attrs&uv.AttrBold != 0, c.Style.Fg, labelFg)
+				}
+			}
+			summaryX := titleX + len(title) + 1
+			for x := summaryX; x < summaryX+len([]rune(summary)); x++ {
+				if c := cellAt(x); c.Style.Attrs&uv.AttrBold != 0 || !sameColor(c.Style.Fg, countFg) {
+					t.Errorf("summary cell %d %q: bold %v, fg %v; want not bold in the muted count tone %v",
+						x, c.Content, c.Style.Attrs&uv.AttrBold != 0, c.Style.Fg, countFg)
+				}
+			}
+		})
+	}
+}
+
+// TestSidePanelSubAgentsHeaderFitsAtWidth36 pins the summary's short form against the narrowest
+// customary column: at panel width 36 the default Sub-agents header with two running and one
+// queued run paints whole, its leader and fold indicator still after it.
+func TestSidePanelSubAgentsHeaderFitsAtWidth36(t *testing.T) {
+	t.Parallel()
+	m := subAgentsHeaderModel(t, scheme.Default(), 36)
+	if got := m.panelWidth(); got != 36 {
+		t.Fatalf("the panel paints %d columns wide, want 36", got)
+	}
+	frame := strings.Split(ansi.Strip(m.View().Content), "\n")
+	y := panelRowY(t, m, "Sub-agents")
+	row := strings.TrimRight(ansi.Cut(frame[y], m.panelPinX(), m.width), " ")
+	if !strings.HasPrefix(row, "○ Sub-agents (2 · 1 queued) ") || !panelHeaderTail.MatchString(row) {
+		t.Errorf("the header paints %q, want `○ Sub-agents (2 · 1 queued)` whole before its leader and ▼", row)
 	}
 }
 

@@ -411,7 +411,6 @@ type themeStyles struct {
 	footerAccent  lipgloss.Style // the footer's model name (Model.footerToned) unless `ui.footer.colors` names it: the `footer-accent` role on the footer's black
 	scrollThumb   lipgloss.Style // the transcript scroll-bar thumb (the position marker)
 	scrollTrack   lipgloss.Style // the transcript scroll-bar track (the dim groove behind it)
-	panelHeader   lipgloss.Style // a side-panel section's header row: title and summary in bold prompt-white, so the sections read as headings over their rows (sidepanel.go)
 	panelCurrent  lipgloss.Style // the side panel's current task (its ▸ and text) in the `code` role, the one row of the task list the eye is sent to
 	panelWaiting  lipgloss.Style // a waiting sub-agent row's glyph (glyphSet.waiting): the `warning` role on the panel's own field — no background, which statusWarning and footerWarning carry for their bars
 	panelDragRule lipgloss.Style // the side panel's separator while a drag resizes it: bold in the `code` role, the accent tone, against the faint rule it is otherwise (sidepanel.go)
@@ -634,7 +633,6 @@ func newTheme(s scheme.Scheme) theme {
 			footerAccent:  lipgloss.NewStyle().Foreground(footerAccentFg).Background(surface),
 			scrollThumb:   lipgloss.NewStyle().Foreground(muted),
 			scrollTrack:   lipgloss.NewStyle().Foreground(chrome),
-			panelHeader:   lipgloss.NewStyle().Bold(true).Foreground(userText),
 			panelCurrent:  lipgloss.NewStyle().Foreground(code),
 			panelWaiting:  lipgloss.NewStyle().Foreground(warningFg),
 			panelDragRule: lipgloss.NewStyle().Bold(true).Foreground(code),

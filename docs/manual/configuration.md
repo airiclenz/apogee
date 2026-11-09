@@ -1412,6 +1412,11 @@ fold indicator at the right edge, as a tool block's header does: `▼` open, `�
 | `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
 | `mcp` | an MCP server is dialling, failed or disconnected | the server's name, its state and its tool count (`docs · connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
 
+A header's title is bold in the tone a tool block's label wears, its summary muted beside it. The
+`sub-agents` header counts the running runs bare and names the others only while there are some —
+`○ Sub-agents (2)`, `(2 · 1 queued)`, `(1 queued)`, then `(3 done)` once none is active (a failed
+run is counted there; its row carries the `✗`) — and carries no count before the first run.
+
 The `mcp` section's header counts the servers that are not connected, by state (`○ MCP (1 failed)`,
 `2 dialling · 1 failed`), and the section hides again once every server is connected. Its server
 names are shown with terminal escapes stripped. Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not

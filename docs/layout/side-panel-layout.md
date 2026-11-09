@@ -15,7 +15,7 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 ## Where it sits
 
 ```
- ❯ refactor the parser                                    │ ○ Sub-agents (1 running)
+ ❯ refactor the parser                                    │ ○ Sub-agents (1)
                                                           │ ⠋ repo-scout   running 01:12s  41%
  I'll start by mapping the call sites…                    │ ✓ planner      done       38s  27%
                                                           │ ○ Tasks (1/3)
@@ -193,12 +193,16 @@ rows the column is not showing — the human folded it, or the overflow squeezed
 otherwise, so a section with no body rows never reads `▶`. A folded header carries no hidden-row
 count. It is the transcript's header shape (`tool-layout.md`, "Fold
 states and interaction"). The folded sections are `ui.side-panel.folded`, read on every frame. The
-summary, in parentheses, appears wherever the section has one — `Sub-agents (1 running)`
-(`2 running · 1 queued`, `3 queued`, or `3 done` once all have ended; a waiting run counts as the
-running or queued run it is, so a section folded to its header shows no wait), `Tasks (2/5)`,
-`Changed files (4)` (the file count), `Usage (62%)`, `MCP (1 failed)` (the servers not connected,
-by state in the order dialling, failed, disconnected — `2 dialling · 1 failed` — and no summary
-while every one is connected).
+title is painted as the transcript paints a block's label, bold in the `tool-header` role; the
+summary after it is in the `tool-indicator` role's muted tone, not bold; the pin glyph keeps its
+faint tone and is never bold. The summary, in parentheses, appears wherever the section has one:
+- `Sub-agents (2)` — the running count stands bare; `(2 · 1 queued)` while some are queued too;
+  `(1 queued)` while only queued runs exist; `(3 done)` once nothing is active, a failed run
+  counted there and never named, since its row carries `✗`; no parentheses with no runs. A waiting
+  run counts as the running or queued run it is, so a section folded to its header shows no wait.
+- `Tasks (2/5)`, `Changed files (4)` (the file count), `Usage (62%)`, `MCP (1 failed)` (the servers not connected,
+  by state in the order dialling, failed, disconnected — `2 dialling · 1 failed` — and no summary
+  while every one is connected).
 
 ## Overflow
 
@@ -213,7 +217,7 @@ When the shown sections need more rows than the slot has:
    order. A section the human folded costs its header row alone and takes no body rows, however
    many are spare: the overflow never opens it.
 2. A section that does not get its full height folds to its header row alone, which carries the
-   summary (`○ Tasks (2/5)`, `○ Sub-agents (2 running)`) and the `▶` fold indicator.
+   summary (`○ Tasks (2/5)`, `○ Sub-agents (2)`) and the `▶` fold indicator.
 3. A click on a squeezed section's header (or `⏎` on its title stop) opens it into the opened
    tier: it takes its rows ahead of the auto sections, which share what is left in list order, so
    the last auto section in list order is squeezed instead. Nothing is written to config for it. A

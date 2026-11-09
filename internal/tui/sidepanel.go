@@ -619,10 +619,22 @@ func (m Model) panelHeaderRow(section panelSection, isOpen bool) string {
 		pin = glyphPanelPinned
 	}
 	width := m.panelContentWidth()
-	paintTitle := func(clipped string) string { return m.th.panelHeader.Render(clipped) }
-	row := leaderRowIn(m.th, text, paintTitle, branchSummary{}, pin+" ", paintPanelPin, toolRowCells(m.th, width),
-		isOpen, noRemainder)
+	row := leaderRowIn(m.th, text, panelTitlePaint(m.th, section.title), branchSummary{}, pin+" ", paintPanelPin,
+		toolRowCells(m.th, width), isOpen, noRemainder)
 	return indicatorRow(m.th, row, width, stateIndicator(m.th, isOpen))
+}
+
+// panelTitlePaint paints a header's title and summary as the transcript paints a type row's label
+// and count ([typeRowPaint]): the title bold in `toolLabel`, and whatever the clip left after it —
+// the parenthesised summary, whole or cut — in `toolIndicator`'s muted tone, not bold. A clip that
+// cut into the title itself leaves no summary, so the whole of it is the label.
+func panelTitlePaint(th theme, title string) func(string) string {
+	return func(clipped string) string {
+		if rest, ok := strings.CutPrefix(clipped, title); ok && rest != "" {
+			return th.toolLabel.Render(title) + th.toolIndicator.Render(rest)
+		}
+		return th.toolLabel.Render(clipped)
+	}
 }
 
 // paintPanelPin paints a header's pin glyph — the marker [leaderRowIn] leads the header row with —

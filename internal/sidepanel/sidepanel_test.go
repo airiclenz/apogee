@@ -254,19 +254,88 @@ func TestSubAgentLinger_NilAndEmpty(t *testing.T) {
 	}
 }
 
-func TestSubAgents_SummaryAndEmpty(t *testing.T) {
-	state, clock := newState(t)
+// TestSubAgents_Summary pins the sub-agents header's summary forms: the running count bare,
+// another phase named only while non-zero, `N done` once nothing is active — a failed run counted
+// there and never named, since its row carries the failure mark — and nothing with no runs. A run
+// waiting on an approval counts as the running run it is.
+func TestSubAgents_Summary(t *testing.T) {
+	started := func(id string, at time.Time) domain.Event { return phase(id, domain.SubAgentStarted, at, false) }
+	ended := func(id string, at time.Time, isError bool) domain.Event {
+		return phase(id, domain.SubAgentFinished, at, isError)
+	}
+	cases := []struct {
+		name   string
+		runs   []string
+		events func(at time.Time) []domain.Event
+		want   string
+	}{
+		{
+			name: "no runs carry no summary",
+			want: "",
+		},
+		{
+			name: "running only is the bare count",
+			runs: []string{"r.1", "r.2"},
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{started("r.1", at), started("r.2", at)}
+			},
+			want: "2",
+		},
+		{
+			name: "running and queued names the queued",
+			runs: []string{"r.1", "r.2", "r.3"},
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{started("r.1", at), started("r.2", at)}
+			},
+			want: "2 · 1 queued",
+		},
+		{
+			name: "queued only names the queued",
+			runs: []string{"r.1"},
+			want: "1 queued",
+		},
+		{
+			name: "nothing active counts the done with a failed run unnamed",
+			runs: []string{"r.1", "r.2", "r.3"},
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{
+					started("r.1", at), started("r.2", at), started("r.3", at),
+					ended("r.1", at, false), ended("r.2", at, false), ended("r.3", at, true),
+				}
+			},
+			want: "3 done",
+		},
+		{
+			name: "a waiting run counts as running",
+			runs: []string{"r.1"},
+			events: func(at time.Time) []domain.Event {
+				return []domain.Event{started("r.1", at), gate(child("r.1"), domain.ApprovalRequested, "")}
+			},
+			want: "1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, clock := newState(t)
+			for _, id := range tc.runs {
+				state.Fold(spawn(t, id, map[string]any{"name": id}))
+			}
+			if tc.events != nil {
+				for _, event := range tc.events(clock.at) {
+					state.Fold(event)
+				}
+			}
+			if got := state.SubAgents().Summary; got != tc.want {
+				t.Errorf("summary = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSubAgents_EmptyStateIsBlank(t *testing.T) {
+	state, _ := newState(t)
 	if view := state.SubAgents(); view.IsLive || view.Summary != "" || len(view.Rows) != 0 {
 		t.Fatalf("empty state answered %+v", view)
-	}
-	for _, id := range []string{"r.1", "r.2", "r.3"} {
-		state.Fold(spawn(t, id, map[string]any{"name": id}))
-	}
-	state.Fold(phase("r.1", domain.SubAgentStarted, clock.at, false))
-	state.Fold(phase("r.2", domain.SubAgentStarted, clock.at, false))
-
-	if got := state.SubAgents().Summary; got != "2 running · 1 queued" {
-		t.Errorf("summary = %q, want %q", got, "2 running · 1 queued")
 	}
 }
 
