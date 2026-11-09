@@ -82,8 +82,10 @@ type armedReaction struct {
 // together because neither is readable alone — a span with no text names nothing, and text with no
 // span cannot be fenced, since every word of the fence header is derived from the span
 // (domain.RenderAdvice). The dispatcher collects them in ladder order; at post-tool-result the seam
-// that commits the tool result renders them onto it (appendToolResult, dispatch.go), and at
-// pre-request the cascade itself lands them on the outgoing request's tail (adviseRequest).
+// that commits the tool result renders them onto it (appendToolResult, dispatch.go), at
+// post-response the cascade holds them for the Exchange's next request (turnLifecycle.holdAdvice),
+// and at pre-request the cascade itself lands them on the outgoing request's tail, after the
+// held ones (adviseRequest).
 type advice struct {
 	span domain.AdviceSpan
 	text string
@@ -92,7 +94,7 @@ type advice struct {
 // bookedDetail is the Detail an advise firing is booked under, given the one its handler set: the
 // handler's own when it set one, else the CAPPED text the model reads — never the fence header —
 // so what apogee-sim hashes to attribute an effect is the string the fence carries. Every advise
-// slot books through it (fireLeg at the tool-result and pre-request seams, attachSessionAdvice at
+// slot books through it (fireLeg at the in-loop seams, attachSessionAdvice at
 // the session-start join), so the same handler's answer books byte-equal wherever it lands.
 func (adv advice) bookedDetail(detail string) string {
 	if detail != "" {
@@ -129,9 +131,10 @@ type seamPayload struct {
 
 // fireCascade runs the Reaction cascade for Moment m against payload and reports what the cascade
 // did — one Outcome for the seam to act on, plus the advise slot below. It is the engine's ONLY
-// SEAM dispatcher: every seam reaches it, through fire or firePostToolResult, and nothing else fires
-// a reaction at a seam. The one firing outside it is the session-start advise lane's
-// (sessionadvise.go), which a Session boundary starts in the background, where no seam is passing.
+// SEAM dispatcher: every seam reaches it, through fire, firePreRequest or firePostToolResult, and
+// nothing else fires a reaction at a seam. The one firing outside it is the session-start advise
+// lane's (sessionadvise.go), which a Session boundary starts in the background, where no seam is
+// passing.
 //
 // Two legs run in turn — the builtins, then the armed Reactions. A post-response Retry the loop
 // WILL act on ends the cascade where it fires: the Turn is about to re-stream, so the leg below
@@ -151,10 +154,17 @@ type seamPayload struct {
 // The second return is the ADVISE SLOT (ADR 0076 D6): the spans the cascade's advise reactions
 // contributed, in ladder order, for the seam to render onto the closing tool result. It is empty
 // at every Moment but post-tool-result, and empty there too under Bypass, which switches advise
-// off before a handler is ever called. The pre-request seam's slot never leaves the cascade: its
-// advice lands on the outgoing request's tail here, after both legs and before the seam closes
-// (adviseRequest), so it comes back empty too.
-func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, []advice, error) {
+// off before a handler is ever called. The two request-tail slots never leave the cascade
+// (routeAdvice): post-response's advice is held for the Exchange's next request, and pre-request
+// lands carried — that held advice, which the request took when it was armed — and then its own
+// on the outgoing request's tail, after both legs and before the seam closes, so both come back
+// empty too. carried is read at pre-request alone; every other Moment is passed nil.
+func (a *Agent) fireCascade(
+	ctx context.Context,
+	m domain.Moment,
+	payload any,
+	carried []advice,
+) (domain.Outcome, []advice, error) {
 	turn := a.turns.index
 
 	seam, err := a.seamPayload(turn, m, payload)
@@ -191,24 +201,46 @@ func (a *Agent) fireCascade(ctx context.Context, m domain.Moment, payload any) (
 	if err != nil {
 		return domain.Outcome{}, nil, err
 	}
-	if retried && seam.retryable {
-		// The loop will re-stream this Turn with the builtin's correction, so the leg below
-		// never sees this response at all — it will see the retried one.
-		return result, collected, nil
+	// A builtin retry the loop will act on re-streams this Turn with the builtin's correction, so
+	// the leg below never sees this response at all — it will see the retried one.
+	if !retried || !seam.retryable {
+		if _, err := a.fireLeg(ctx, turn, m, seam, a.armedLadder(), false, &result, &fired, &collected); err != nil {
+			return domain.Outcome{}, nil, err
+		}
 	}
-
-	if _, err := a.fireLeg(ctx, turn, m, seam, a.armedLadder(), false, &result, &fired, &collected); err != nil {
-		return domain.Outcome{}, nil, err
-	}
-	if m == domain.MomentPreRequest {
-		adviseRequest(payload, collected)
-		return result, nil, nil
-	}
-	return result, collected, nil
+	return result, a.routeAdvice(m, payload, carried, collected), nil
 }
 
-// adviseRequest lands the pre-request cascade's advice on the outgoing request (ADR 0076 D6): each
-// span, in ladder order, is fenced on the request's tail by its role (domain.Request.AdviseTail).
+// routeAdvice settles a finished cascade's advice by its Moment's slot and returns what is left for
+// the caller to place: post-tool-result's trailer, which the seam commits onto the tool result.
+// The two request-tail slots are settled here, inside the cascade and so before the seam closes:
+//
+//   - post-response holds its advice for the Exchange's next request (turnLifecycle.holdAdvice):
+//     the response it read is answered by that request, and nothing of it reaches the
+//     conversation, the snapshot or the deferred queue. A retried pass holds too, as its
+//     deferrals queue: the Turn's rollback drops both (turnLifecycle.end's endCancelled row).
+//   - pre-request fences carried — the advice post-response held, which this request took when
+//     it was armed — and then its own on the request's tail (adviseRequest), so the response
+//     being answered speaks before the request's own advice does. Under Bypass, which a live
+//     SetReactions can switch on between the two, carried is dropped with the rest of advise.
+func (a *Agent) routeAdvice(m domain.Moment, payload any, carried, collected []advice) []advice {
+	switch m {
+	case domain.MomentPostResponse:
+		a.turns.holdAdvice(collected)
+		return nil
+	case domain.MomentPreRequest:
+		if a.bypassEnabled() {
+			carried = nil
+		}
+		adviseRequest(payload, slices.Concat(carried, collected))
+		return nil
+	}
+	return collected
+}
+
+// adviseRequest lands the request-tail advice on the outgoing request (ADR 0076 D6): the advice a
+// post-response cascade held for it and then the pre-request cascade's own, each span in the order
+// given, fenced on the request's tail by its role (domain.Request.AdviseTail).
 // It runs inside the cascade, after every handler of both legs and before the deferred
 // SeamClosedEvent, for three reasons: the fence follows every edit a pre-request handler made and
 // every engine note stampRequestTail placed, so it is the last thing the request gains before it
@@ -233,11 +265,23 @@ func adviseRequest(payload any, advised []advice) {
 
 // fire runs the cascade for a seam whose caller holds no advise slot and reports the Outcome alone.
 // Four of the five Moments are such seams: only the closing tool result hands its trailer back for
-// the caller to commit, so only firePostToolResult calls fireCascade directly. pre-request has an
-// advise slot too, but the cascade lands it on the request itself (adviseRequest).
+// the caller to commit, so only firePostToolResult takes the slot from fireCascade. post-response
+// and pre-request have advise slots too, but the cascade settles both itself (routeAdvice); the
+// loop fires pre-request through firePreRequest, which hands the cascade the advice the request
+// carries.
 func (a *Agent) fire(ctx context.Context, m domain.Moment, payload any) (domain.Outcome, error) {
-	out, _, err := a.fireCascade(ctx, m, payload)
+	out, _, err := a.fireCascade(ctx, m, payload, nil)
 	return out, err
+}
+
+// firePreRequest fires the pre-request Moment over the Turn's armed request, handing the cascade
+// the post-response advice the request took when it was armed (armRequest), so the held advice
+// lands on the tail ahead of the request's own. Every pre-request fire goes through it — the first
+// build, the rebuild after a fold, the re-arm after a rehome — so a rebuilt request carries the
+// held advice exactly once. Only the error is returned: the loop acts on nothing else of it.
+func (a *Agent) firePreRequest(ctx context.Context, t *turnRun) error {
+	_, _, err := a.fireCascade(ctx, domain.MomentPreRequest, t.req, t.advice)
+	return err
 }
 
 // armedLadder snapshots the ARMED leg for one cascade or one gate fold: the construction-time
@@ -305,7 +349,7 @@ func (a *Agent) firePostToolResult(ctx context.Context, call domain.ToolCall, re
 	_, advised, _ := a.fireCascade(ctx, domain.MomentPostToolResult, domain.ToolResultMoment{
 		Call: call,
 		Edit: domain.NewToolResultEdit(result),
-	})
+	}, nil)
 	return advised
 }
 
@@ -482,9 +526,8 @@ func (a *Agent) bookFiring(
 // covering both a handler that said so and a revision the bracket saw move. Everything else is
 // an inspect-and-do-nothing invocation, which is not a firing.
 //
-// "Carried a correction" is what makes an advise reaction a firing at the tool-result and
-// pre-request seams: its Inject is the advice text and no Retry accompanies it there, so the Inject
-// term alone books it.
+// "Carried a correction" is what makes an advise reaction a firing at its in-loop seams: its Inject
+// is the advice text and no Retry accompanies it there, so the Inject term alone books it.
 //
 // "Gave a verdict" is the gate cell's term, and the gate STAGE is its only reader (gate.go's
 // callGateFunc): an Outcome whose Gate.Verdict is the only thing set carries no correction, no
@@ -498,15 +541,28 @@ func acted(out domain.Outcome) bool {
 // books under actionAdvise and contributes a span to an advise slot. All three terms are
 // necessary: the class says the reaction is allowed to speak to the model, the Moment says there
 // is somewhere to speak — a tool result at post-tool-result, the outgoing request's tail at
-// pre-request (adviseRequest), the session's next user message at session-started, or the
-// user-role message after a fold at compaction-finished (the session advise lanes,
-// sessionadvise.go) — and a non-empty Inject is the text itself. Of the builtins only the
-// context-fill notice satisfies it — the one engine reaction of class advise (ADR 0077); the seven
-// Floor guards are shape-view and contribute no advice.
+// pre-request (adviseRequest) and at post-response (the next request's, routeAdvice), the
+// session's next user message at session-started, or the user-role message after a fold at
+// compaction-finished (the session advise lanes, sessionadvise.go) — and a non-empty Inject is the
+// text itself. Of the builtins only the context-fill notice satisfies it — the one engine reaction
+// of class advise (ADR 0077); the seven Floor guards are shape-view and contribute no advice.
+//
+// At post-response a Retry takes the Inject: there it is the correction the re-stream carries
+// (applyRetry), so an advise-class Outcome asking for both is a retry — booked under its retry
+// label and injected once, onto the retried request — and never held as advice as well.
 func isAdvice(m domain.Moment, r domain.Reaction, out domain.Outcome) bool {
-	return (m == domain.MomentPostToolResult || m == domain.MomentPreRequest ||
-		m == domain.MomentSessionStarted || m == domain.MomentCompactionFinished) &&
-		r.Class == domain.ClassAdvise && out.Inject != ""
+	if r.Class != domain.ClassAdvise || out.Inject == "" {
+		return false
+	}
+	switch m {
+	case domain.MomentPostToolResult, domain.MomentPreRequest,
+		domain.MomentSessionStarted, domain.MomentCompactionFinished:
+		return true
+	case domain.MomentPostResponse:
+		return !out.Retry
+	default:
+		return false
+	}
 }
 
 // adviceOf turns one advise firing into the slot entry its seam renders, and reports
@@ -534,9 +590,10 @@ func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) 
 // adviseUser is the USER half of the advise slot: one `advise:` entry's command runs out of
 // process, its webhook is POSTed to, or its MCP tool is called, while the loop waits, and what it
 // answered becomes the advice the model reads (ADR 0076 D2, D6, adr-0076-amend-1029). It is called
-// from the two in-loop seams with an advise slot — post-tool-result, whose closing tool result
-// takes the trailer, and pre-request, whose outgoing request's tail takes the fence
-// (adviseRequest) — and dispatches on the handler's KIND: a command's standard output, a webhook's
+// from the three in-loop seams with an advise slot — post-tool-result, whose closing tool result
+// takes the trailer; pre-request, whose outgoing request's tail takes the fence (adviseRequest);
+// and post-response, whose advice the next request's tail takes (routeAdvice) — and dispatches
+// on the handler's KIND: a command's standard output, a webhook's
 // reply body and an MCP tool's text answer are the same text to everything below.
 //
 // It is FAIL-OPEN in both directions it decides (D7), and each of them costs the Turn nothing: a
@@ -659,9 +716,10 @@ func (a *Agent) writtenPath(call domain.ToolCall) (string, bool) {
 
 // reactionAction is the label an ARMED reaction's firing is booked under. Post-response is the
 // one Moment with an action vocabulary of its own, in the precedence the header ratifies; an
-// advise injection — at the tool-result or pre-request seam, or a session advise lane's at
-// session-started or compaction-finished — is the other named action; the rest have none, so a
-// firing there is simply "fired". A builtin never reaches here — it carries its own label.
+// advise injection — at the tool-result, pre-request or post-response seam, or a session advise
+// lane's at session-started or compaction-finished — is the other named action; the rest have
+// none, so a firing there is simply "fired". A builtin never reaches here — it carries its own
+// label.
 func reactionAction(m domain.Moment, r domain.Reaction, out domain.Outcome) string {
 	if isAdvice(m, r, out) {
 		return actionAdvise
@@ -745,6 +803,21 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 			work:      p,
 			retryable: p.Retryable,
 			invoke: func(ctx context.Context, r domain.Reaction) (domain.Outcome, error) {
+				// The user's advise cell leaves the process here as it does at pre-request, and
+				// for the same reason: a command, a webhook or an MCP tool is no
+				// PostResponseFunc, so all three kinds are routed before the assertion. The
+				// document carries the response under review in the shape a
+				// post-response-finished notice's "value" has (reactions.ProjectResponse); what
+				// the handler answers is held for the next request (routeAdvice).
+				if r.Class == domain.ClassAdvise {
+					switch r.Handler.(type) {
+					case domain.ArgvHandler, domain.WebhookHandler, domain.MCPHandler:
+						return a.adviseUser(ctx, turn, r, domain.SeamPayload{
+							Event: domain.MomentPostResponse,
+							Value: reactions.ProjectResponse(p),
+						})
+					}
+				}
 				fn, ok := r.Handler.(domain.PostResponseFunc)
 				if !ok {
 					return domain.Outcome{}, wrongHandler(m, r.Handler)

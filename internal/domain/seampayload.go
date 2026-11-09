@@ -149,8 +149,9 @@ type SeamPayload struct {
 	// copy: nothing here points back into the loop's own state. The projection itself is
 	// internal/reactions' (its payload.go) — this package holds the document, not the engine
 	// state it is cut from. The five seam-closing notices, and a sync-lane advise firing at
-	// pre-request, which reads the request as the cascade has shaped it so far in the same
-	// shape the pre-request-finished notice carries.
+	// pre-request or post-response, which reads the request as the cascade has shaped it so far,
+	// or the response under review, in the same shape the pre-request-finished or
+	// post-response-finished notice carries.
 	Value any `json:"value,omitempty"`
 
 	// Arguments is the raw JSON object the model produced for the call, copied rather than

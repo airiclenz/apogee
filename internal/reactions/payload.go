@@ -82,14 +82,10 @@ func projectSeamValue(seam domain.Moment, value any) any {
 		return ProjectRequest(request)
 	case domain.MomentPostResponse:
 		moment, ok := value.(domain.PostResponseMoment)
-		if !ok || moment.Resp == nil {
+		if !ok {
 			return nil
 		}
-		return responseValue{
-			Text:      moment.Resp.Text(),
-			ToolCalls: projectToolCalls(moment.Resp.ToolCalls()),
-			Retryable: moment.Retryable,
-		}
+		return ProjectResponse(moment)
 	case domain.MomentPreToolExec:
 		edit, ok := value.(*domain.ToolCallEdit)
 		if !ok || edit == nil {
@@ -128,6 +124,24 @@ func ProjectRequest(request *domain.Request) any {
 	}
 	state := request.State()
 	return requestValue{Messages: projectMessages(state.Messages), Tools: projectToolNames(state.Tools)}
+}
+
+// ProjectResponse is the post-response seam's projection on its own: the response reduced to the
+// documented `value` shape — its text, the calls it issued and whether the loop could still
+// re-stream the Turn — copied, so the document survives the response it was cut from. It is what a
+// post-response-finished notice carries under "value" (projectSeamValue), and what the sync lane
+// hands a post-response advise entry under the same key (internal/agent's seamPayload), so a script
+// reads one shape whichever lane fired it. A moment with no response projects to nothing, which
+// leaves "value" absent rather than empty.
+func ProjectResponse(moment domain.PostResponseMoment) any {
+	if moment.Resp == nil {
+		return nil
+	}
+	return responseValue{
+		Text:      moment.Resp.Text(),
+		ToolCalls: projectToolCalls(moment.Resp.ToolCalls()),
+		Retryable: moment.Retryable,
+	}
 }
 
 // projectMessages projects a message list, preserving its order.

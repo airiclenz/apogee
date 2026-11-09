@@ -210,7 +210,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		}
 	}
 
-	if _, err := a.fire(ctx, domain.MomentPreRequest, t.req); err != nil {
+	if err := a.firePreRequest(ctx, t); err != nil {
 		// The request was never sent, so degrade the Turn with no assistant message. The drained
 		// corrections need no re-queue here: the abandoned Exchange clears the whole deferred queue
 		// regardless (end → closeExchange → F6), so re-queuing them would be dead motion.
@@ -282,7 +282,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 			// The pre-request Moment runs per REQUEST, so it runs again over the rebuilt
 			// one and keeps its pre-request failure semantics: no assistant message, Turn degraded (the
 			// abandoned Exchange clears the deferred queue — F6).
-			if _, err := a.fire(ctx, domain.MomentPreRequest, t.req); err != nil {
+			if err := a.firePreRequest(ctx, t); err != nil {
 				return a.turns.end(t, endAbandoned), nil
 			}
 		}
@@ -375,6 +375,11 @@ func (a *Agent) armRequest(t *turnRun) {
 	// never roll back into a pre-fold index).
 	t.rollback = a.conv.Len()
 	t.req, t.deferred = a.buildRequest(t.turn)
+	// The advice a post-response cascade held for this request is taken the way the deferred
+	// corrections are drained: the request owns it now, and every path that discards the request
+	// unsent holds it again (refold, rearmAfterRehome, the cancel exit). The pre-request pass
+	// fences it on the tail (firePreRequest).
+	t.advice = a.turns.takeAdvice()
 	// deferredFloor is the deferred queue's length after this Turn's request drained it and BEFORE
 	// any post-response hook re-defers — the boundary the cancel exit truncates back to, so a
 	// cancelled Turn's own deferrals die with the Turn and only the drained injections are
@@ -392,6 +397,7 @@ func (a *Agent) armRequest(t *turnRun) {
 // false when the request is ready to resend.
 func (a *Agent) rearmAfterRehome(ctx context.Context, t *turnRun) (turnEnd, bool) {
 	a.turns.restoreDeferred(t.deferred)
+	a.turns.restoreAdvice(t.advice)
 	a.followUpstream()
 	t.restreamsSpent = 0
 	a.armRequest(t)
@@ -404,7 +410,7 @@ func (a *Agent) rearmAfterRehome(ctx context.Context, t *turnRun) (turnEnd, bool
 		case foldDeclined:
 		}
 	}
-	if _, err := a.fire(ctx, domain.MomentPreRequest, t.req); err != nil {
+	if err := a.firePreRequest(ctx, t); err != nil {
 		return endAbandoned, true
 	}
 	return 0, false
@@ -434,8 +440,10 @@ const (
 // and the cancel exit's truncate-then-restore leaves the corrections re-queued here exactly once.
 func (a *Agent) refold(ctx context.Context, t *turnRun) foldOutcome {
 	// Re-queue the drained corrections FIRST so the rebuilt request carries them (armRequest's
-	// buildRequest drains the queue again below).
+	// buildRequest drains the queue again below), and hold the taken advice again for the same
+	// reason (armRequest takes it again below).
 	a.turns.restoreDeferred(t.deferred)
+	a.turns.restoreAdvice(t.advice)
 	r := a.foldFor(ctx, t.turn, foldOverflow)
 	if r.end == foldEndCancelled {
 		return foldCancelled // leave t untouched; the caller routes the cancel

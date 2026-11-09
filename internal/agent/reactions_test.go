@@ -219,10 +219,13 @@ func TestFireStopsTheCascadeOnAReturnedError(t *testing.T) {
 func TestFireBooksTheActionTheOutcomeNames(t *testing.T) {
 	cases := []struct {
 		name       string
+		class      domain.Class // the subject's class; zero reads as observe
 		act        func(*domain.Response) (domain.Outcome, error)
 		wantFired  bool
 		wantAction string
 		wantDetail string
+		wantInject string // the correction the cascade hands the re-stream
+		wantHeld   int    // advice spans held for the next request
 	}{
 		{
 			name:      "inspecting and doing nothing is not a firing",
@@ -234,6 +237,26 @@ func TestFireBooksTheActionTheOutcomeNames(t *testing.T) {
 			act:        acts(domain.Outcome{Retry: true, Inject: "try again"}),
 			wantFired:  true,
 			wantAction: "retry",
+			wantInject: "try again",
+		},
+		{
+			// The Retry takes the Inject at post-response: it is the re-stream's correction,
+			// injected once onto the retried request, never held as advice too.
+			name:       "an advise-class retry with a correction",
+			class:      domain.ClassAdvise,
+			act:        acts(domain.Outcome{Retry: true, Inject: "try again"}),
+			wantFired:  true,
+			wantAction: "retry",
+			wantInject: "try again",
+		},
+		{
+			name:       "an advise-class injection",
+			class:      domain.ClassAdvise,
+			act:        acts(domain.Outcome{Inject: "mind the tests"}),
+			wantFired:  true,
+			wantAction: "advise",
+			wantDetail: "mind the tests",
+			wantHeld:   1,
 		},
 		{
 			name:       "a deferral",
@@ -261,15 +284,26 @@ func TestFireBooksTheActionTheOutcomeNames(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			class := tc.class
+			if class == "" {
+				class = domain.ClassObserve
+			}
 			log := &ladderLog{}
 			a, sink := ladderAgent(t, nil, []domain.Reaction{
-				probe(log, "subject", domain.ClassObserve, tc.act),
+				probe(log, "subject", class, tc.act),
 			})
 
-			if _, err := a.fire(context.Background(), domain.MomentPostResponse, postResponse(true)); err != nil {
+			out, err := a.fire(context.Background(), domain.MomentPostResponse, postResponse(true))
+			if err != nil {
 				t.Fatalf("fire: %v", err)
 			}
 
+			if out.Inject != tc.wantInject {
+				t.Errorf("cascade Inject = %q, want %q", out.Inject, tc.wantInject)
+			}
+			if held := len(a.turns.heldAdvice); held != tc.wantHeld {
+				t.Errorf("held %d advice spans, want %d", held, tc.wantHeld)
+			}
 			fired := firings(sink.events)
 			if !tc.wantFired {
 				if len(fired) != 0 {
@@ -1611,5 +1645,278 @@ func TestPreRequestAdviceFailsOpenOnATimeout(t *testing.T) {
 	}
 	if len(reported) != 1 || !strings.HasPrefix(reported[0], "reaction coach (pre-request): ") {
 		t.Errorf("reporter said %q, want one observe-lane sentence", reported)
+	}
+}
+
+// postResponseAdviceText is what every post-response advise entry below prints.
+const postResponseAdviceText = "check the listing before writing"
+
+// postResponseCoach is one user advise entry on post-response whose command prints text. Like
+// preRequestCoach it is armed straight onto the ladder, never through Reaction.Validate.
+func postResponseCoach(argv ...string) domain.Reaction {
+	return userAdvise("coach", []domain.Moment{domain.MomentPostResponse}, argv...)
+}
+
+// adviceFence is the fence a user entry's advice renders to on a request tail.
+func adviceFence(id string, m domain.Moment, turn int, leading bool, text string) string {
+	return domain.RenderAdvice(domain.AdviceSpan{
+		Reaction: id,
+		Origin:   domain.OriginUser,
+		Moment:   m,
+		Turn:     turn,
+		Leading:  leading,
+	}, text)
+}
+
+// postResponseFence is the coach entry's post-response fence for the response of turn.
+func postResponseFence(turn int, leading bool) string {
+	return adviceFence("coach", domain.MomentPostResponse, turn, leading, postResponseAdviceText)
+}
+
+// stepAgain advances an open Exchange one Turn under ctx.
+func stepAgain(ctx context.Context, t *testing.T, a *Agent) domain.StepResult {
+	t.Helper()
+	res, err := a.Step(ctx)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	return res
+}
+
+// Advice about Turn N's response rides Turn N+1's request alone, trailing its tool tail: the
+// request that drew the response carries none, the snapshot between the two carries none, and the
+// Exchange that ends on a response takes that response's advice with it — the next Exchange's
+// first request is bare.
+func TestPostResponseAdviceLandsOnTheNextRequestOnly(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	up := scriptedResponder(t, toolCallTurn("c1", "list_dir", `{}`), stubllm.Turn{Text: "done", Repeat: true})
+	a := preRequestAdviceAgent(t, baseConfig(sink), up, &reported,
+		postResponseCoach(printsAdvice(postResponseAdviceText)...))
+
+	stepOnce(t, a, "hi")
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if res := stepAgain(context.Background(), t, a); res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("Turn 1 status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+	}
+	runExchange(t, a, "again")
+
+	if strings.Contains(string(snap.State), postResponseAdviceText) {
+		t.Error("the snapshot after Turn 0 carries the held advice; it lives on a request alone")
+	}
+	requests := up.requests()
+	if len(requests) != 3 {
+		t.Fatalf("upstream saw %d requests, want 3", len(requests))
+	}
+	if got := fenceCount(requests[0]); got != 0 {
+		t.Errorf("request 1 carried %d fences, want none — no response has been reviewed yet", got)
+	}
+	committed := a.conv.At(2) // Turn 0's tool result
+	if tail := tailOf(t, requests[1]); tail.Role != string(domain.RoleTool) ||
+		tail.Content != committed.Content+postResponseFence(0, false) {
+		t.Errorf("request 2 tail = {%s %q}, want the tool result %q trailed by the Turn-0 fence",
+			tail.Role, tail.Content, committed.Content)
+	}
+	if got := fenceCount(requests[1]); got != 1 {
+		t.Errorf("request 2 carried %d fences, want 1", got)
+	}
+	if got := fenceCount(requests[2]); got != 0 {
+		t.Errorf("the next Exchange's first request carried %d fences, want none", got)
+	}
+	for i := 0; i < a.conv.Len(); i++ {
+		if m := a.conv.At(i); len(m.Advice) != 0 || strings.Contains(m.Content, postResponseAdviceText) {
+			t.Errorf("conversation message %d carries the advice: %+v", i, m)
+		}
+	}
+	for _, fe := range adviseFirings(sink) {
+		if fe.Action != actionAdvise || fe.Moment != domain.MomentPostResponse || fe.Detail != postResponseAdviceText {
+			t.Errorf("firing = {Action:%q Moment:%q Detail:%q}, want {advise post-response %q}",
+				fe.Action, fe.Moment, fe.Detail, postResponseAdviceText)
+		}
+	}
+	if len(reported) != 0 {
+		t.Errorf("reporter said %q, want nothing", reported)
+	}
+}
+
+// The command reads the documented post-response document: the event, and under "value" the
+// response under review, in the shape a post-response-finished notice carries.
+func TestPostResponseAdviceHandsTheCommandTheResponse(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	stdin := filepath.Join(t.TempDir(), "stdin.json")
+	up := scriptedResponder(t, toolCallTurn("c1", "list_dir", `{}`), stubllm.Turn{Text: "done", Repeat: true})
+	a := preRequestAdviceAgent(t, baseConfig(sink), up, &reported,
+		postResponseCoach("/bin/sh", "-c", `cat > "$0"; printf '%s' '`+postResponseAdviceText+`'`, stdin))
+
+	stepOnce(t, a, "hi")
+
+	raw, err := os.ReadFile(stdin)
+	if err != nil {
+		t.Fatalf("the command left no document: %v", err)
+	}
+	var doc struct {
+		Event string `json:"event"`
+		Value struct {
+			ToolCalls []struct {
+				Name string `json:"name"`
+			} `json:"tool_calls"`
+			Retryable bool `json:"retryable"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("document is not JSON: %v\n%s", err, raw)
+	}
+	if doc.Event != string(domain.MomentPostResponse) {
+		t.Errorf("event = %q, want %q", doc.Event, domain.MomentPostResponse)
+	}
+	if len(doc.Value.ToolCalls) != 1 || doc.Value.ToolCalls[0].Name != "list_dir" || !doc.Value.Retryable {
+		t.Errorf("value = %+v, want the one list_dir call, retryable", doc.Value)
+	}
+}
+
+// A request rebuilt after an overflow fold takes the held advice again: the retried request
+// carries the Turn-0 fence exactly once, on the fold's user bridge.
+func TestPostResponseAdviceIsReappliedOnARefold(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+
+	sink := &recordingSink{}
+	var reported []string
+	recovered := contentTurn("recovered reply")
+	recovered.Repeat = true
+	up := scriptResponder(t, stubllm.Script{Turns: []stubllm.Turn{
+		summaryTurn("EMERGENCY-SUMMARY"),
+		toolCallTurn("c1", "list_dir", `{}`),
+		overflowTurn(),
+		recovered,
+	}})
+	a := preRequestAdviceAgent(t, autoCompactConfig(sink), up, &reported,
+		postResponseCoach(printsAdvice(postResponseAdviceText)...))
+	seedToolCallConv(a)
+
+	runExchange(t, a, "keep going")
+
+	mains := up.mains()
+	if len(mains) != 3 {
+		t.Fatalf("main requests = %d, want 3 (Turn 0, the overflowed Turn 1 and its retry)", len(mains))
+	}
+	if got := fenceCount(mains[1]); got != 1 {
+		t.Errorf("the overflowed request carried %d fences, want 1", got)
+	}
+	retry := mains[2]
+	if got := fenceCount(retry); got != 1 {
+		t.Errorf("the retried request carried %d fences, want exactly 1", got)
+	}
+	if tail := tailOf(t, retry); tail.Content != postResponseFence(0, true)+overflowBridge {
+		t.Errorf("retry tail = %q, want the user bridge led by the Turn-0 fence", tail.Content)
+	}
+}
+
+// A cancel during the re-stream a retry asked for rolls the Turn back, and the advice its own
+// post-response held goes with the response it was about; the advice the Turn's request took is
+// held again, so the re-attempt carries exactly the Turn-0 fence.
+func TestPostResponseAdviceOfACancelledRetryIsDropped(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The retrier lets Turn 0's response stand and retries Turn 1's once, cancelling the Step as it
+	// asks, so the re-stream is cancelled before it is answered.
+	calls := 0
+	retrier := domain.Reaction{
+		ID:     "retrier",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassObserve,
+		On:     []domain.Moment{domain.MomentPostResponse},
+		Handler: domain.PostResponseFunc(func(context.Context, *domain.Response) (domain.Outcome, error) {
+			calls++
+			if calls != 2 {
+				return domain.Outcome{}, nil
+			}
+			cancel()
+			return domain.Outcome{Retry: true, Inject: "say it again"}, nil
+		}),
+	}
+	up := scriptedResponder(t, toolCallTurn("c1", "list_dir", `{}`), stubllm.Turn{Text: "done", Repeat: true})
+	a := preRequestAdviceAgent(t, baseConfig(sink), up, &reported,
+		postResponseCoach(printsAdvice(postResponseAdviceText)...), retrier)
+
+	stepOnce(t, a, "hi")
+	if res := stepAgain(ctx, t, a); res.Status != domain.StatusCancelled {
+		t.Fatalf("Turn 1 status = %q, want %q", res.Status, domain.StatusCancelled)
+	}
+	stepAgain(context.Background(), t, a)
+
+	reattempt := up.last()
+	if got := fenceCount(reattempt); got != 1 {
+		t.Errorf("the re-attempted request carried %d fences, want 1 — the cancelled Turn's own advice is dropped", got)
+	}
+	committed := a.conv.At(2) // Turn 0's tool result
+	if tail := tailOf(t, reattempt); tail.Content != committed.Content+postResponseFence(0, false) {
+		t.Errorf("re-attempt tail = %q, want the tool result trailed by the Turn-0 fence", tail.Content)
+	}
+}
+
+// With a post-response and a pre-request entry both armed, Turn 1's tail carries the advice about
+// the response it answers first and its own request's advice after it, and nothing of either ever
+// reaches the deferred queue.
+func TestPostResponseAdviceLandsAheadOfPreRequestAdvice(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	const preText = "keep the reply short"
+	sink := &recordingSink{}
+	var reported []string
+	up := scriptedResponder(t, toolCallTurn("c1", "list_dir", `{}`), stubllm.Turn{Text: "done", Repeat: true})
+	a := preRequestAdviceAgent(t, baseConfig(sink), up, &reported,
+		postResponseCoach(printsAdvice(postResponseAdviceText)...),
+		userAdvise("pre-coach", []domain.Moment{domain.MomentPreRequest}, printsAdvice(preText)...))
+
+	stepOnce(t, a, "hi")
+	if got := a.conv.DeferredLen(); got != 0 {
+		t.Errorf("deferred queue holds %d entries after Turn 0, want 0", got)
+	}
+	stepAgain(context.Background(), t, a)
+
+	committed := a.conv.At(2) // Turn 0's tool result
+	want := committed.Content + postResponseFence(0, false) +
+		adviceFence("pre-coach", domain.MomentPreRequest, 1, false, preText)
+	if tail := tailOf(t, up.requests()[1]); tail.Content != want {
+		t.Errorf("request 2 tail = %q, want %q", tail.Content, want)
+	}
+}
+
+// Bypass switches post-response advise off before its handler is reached: no fence on the next
+// request, no firing.
+func TestPostResponseAdviceIsSkippedUnderBypass(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var reported []string
+	cfg := baseConfig(sink)
+	cfg.Bypass = true
+	up := scriptedResponder(t, toolCallTurn("c1", "list_dir", `{}`), stubllm.Turn{Text: "done", Repeat: true})
+	a := preRequestAdviceAgent(t, cfg, up, &reported, postResponseCoach(printsAdvice(postResponseAdviceText)...))
+
+	runExchange(t, a, "hi")
+
+	if got := fenceCount(up.requests()[1]); got != 0 {
+		t.Errorf("request 2 carried %d fences under Bypass, want none", got)
+	}
+	if fired := adviseFirings(sink); len(fired) != 0 {
+		t.Errorf("coach booked %+v under Bypass, want nothing", fired)
 	}
 }

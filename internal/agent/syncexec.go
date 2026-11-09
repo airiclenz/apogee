@@ -24,8 +24,8 @@ import (
 // It is deliberately ONE deep module. Everything a sync reaction's command needs settling —
 // which permit it spawns under, whether a confinement box has to be built first, what deadline
 // it dies at, how its document reaches it, and what a failure is reported as — is settled here,
-// and the seams that call it (the advise slot at post-tool-result and pre-request, the gate stage
-// at pre-tool-exec) see nothing but `(stdout, err)`. No seam should have to know that a permit
+// and the seams that call it (the advise slot at post-tool-result, pre-request and post-response,
+// the gate stage at pre-tool-exec) see nothing but `(stdout, err)`. No seam should have to know that a permit
 // exists, and none should be able to spawn a command any other way. The webhook door beside it
 // (runSyncWebhook) sends the SAME document as the POST body and hands the seam the reply body on
 // the same terms; it takes no permit, because nothing is spawned — the request leaves the process

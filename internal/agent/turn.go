@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -101,6 +102,18 @@ type turnLifecycle struct {
 	// Written on the Agent's own loop goroutine, read by the parent only after Run has returned.
 	lastFault string
 
+	// heldAdvice is the post-response advice waiting for the Exchange's next request (ADR 0076 D6):
+	// the spans a post-response cascade's advise reactions contributed (holdAdvice), in firing
+	// order, until armRequest takes them for the request it builds (takeAdvice), where the
+	// pre-request pass fences them on its tail ahead of that request's own advice. It is the
+	// deferred correction queue's pattern for a request-only value: a request that is rebuilt
+	// (refold, a rehome) holds them again first, a rolled-back Turn drops what its own response
+	// held and holds the taken copy again (end's endCancelled row), and the Exchange's end clears
+	// them (closeExchange), so advice about one Exchange's response never reaches another's
+	// request. Transient like wrapUp: never serialized, never in the conversation, and empty
+	// whenever no Exchange is open.
+	heldAdvice []advice
+
 	// recipeOpening marks an open Exchange whose opening user message carries a recipe launch's
 	// result lines (carryRecipeResult, set by launchRecipe once the workflow ran). It is what lets
 	// settle keep a cancelled launch that committed no tool result: the opening holds the user's
@@ -159,6 +172,7 @@ type turnRun struct {
 	req           *domain.Request // the request under attempt this Turn
 	deferred      []string        // corrections buildRequest drained; a cancel re-queues them
 	deferredFloor int             // queue length after the drain — the cancel truncation floor (F6)
+	advice        []advice        // held advice armRequest took; refold, a rehome or a cancel holds it again
 
 	// foldSpent is the one-fold-per-Turn latch: it flips once this Turn has folded its history and
 	// re-sent a request the model's context window rejected, and the predictive and reactive
@@ -264,6 +278,12 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		l.conv.DropRange(t.rollback, l.conv.Len())
 		l.conv.TruncateDeferred(t.deferredFloor)
 		l.restoreDeferred(t.deferred)
+		// Held advice follows the same rule: what this Turn's own post-response held was about the
+		// response the rollback just dropped (a cancel during a re-stream after a retry), so it
+		// dies with the Turn, and the advice the request took is held again for the re-attempt.
+		// A Turn cancelled before it armed its request took nothing and held nothing: it is an
+		// Exchange's opening, and nothing is held while no Exchange is open.
+		l.heldAdvice = slices.Clone(t.advice)
 		// The dropped tool results may include the one a context-fill notice rode on: let the
 		// Agent end the ladder's climb (observer.turnRolledBack → rearmFillNotice), as abort does.
 		if l.observer != nil {
@@ -337,6 +357,7 @@ func (l *turnLifecycle) closeExchange() {
 	l.inExchange = false
 	l.recipeOpening = false
 	l.conv.ClearDeferred()
+	l.heldAdvice = nil // advice about this Exchange's response never rides into another's request
 	// And the one thing an Exchange's END means outside this type: the undo journal's closing
 	// capture (ADR 0074 decision 3). It runs AFTER the state flips so an observer reached from it
 	// sees a closed Exchange, and it is the last word here for the same reason — whatever it does,
@@ -353,6 +374,27 @@ func (l *turnLifecycle) restoreDeferred(deferred []string) {
 	for _, inject := range deferred {
 		l.conv.Defer(inject)
 	}
+}
+
+// holdAdvice holds a post-response cascade's advice for the Exchange's next request, after any
+// advice already held, so the fences keep firing order.
+func (l *turnLifecycle) holdAdvice(advised []advice) {
+	l.heldAdvice = append(l.heldAdvice, advised...)
+}
+
+// takeAdvice hands the held advice to the request being armed and holds none, so a request is
+// the only place it lives until that request is rebuilt or its Turn rolled back.
+func (l *turnLifecycle) takeAdvice() []advice {
+	taken := l.heldAdvice
+	l.heldAdvice = nil
+	return taken
+}
+
+// restoreAdvice holds advice a request took again, ahead of anything held since — it is older —
+// when that request is about to be rebuilt (refold, rearmAfterRehome), so the rebuilt request
+// takes it back. It is restoreDeferred's counterpart for the held advice.
+func (l *turnLifecycle) restoreAdvice(taken []advice) {
+	l.heldAdvice = slices.Concat(taken, l.heldAdvice)
 }
 
 // openExchange marks the boundary a new Exchange opens at — the conversation length BEFORE its
@@ -613,6 +655,7 @@ func (l *turnLifecycle) restore(s turnSnapshot) {
 	l.inExchange = s.inExchange
 	l.exchangeStart = s.exchangeStart
 	l.pendingInput = s.pendingInput
+	l.heldAdvice = nil // it was about the conversation the snapshot replaces
 	l.compactSat = false
 	l.compactSatTokens = 0
 	l.compactFailed = false

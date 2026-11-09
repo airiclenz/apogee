@@ -129,7 +129,14 @@ and a second firing is booked; Bypass → no fence, no booking; handler timeout 
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestPreRequestAdvice' ./internal/agent/`
 **Commit:** `feat(agent): land pre-request advise on the outgoing request`
 
-## 3. Hold post-response advice for the next request
+## 3. Hold post-response advice for the next request — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): re-derived from "hold collected advice on an Agent field cleared at Exchange end (Agent.exchangeClosed, construct.go)": the held advice lives on turnLifecycle (turn.go, heldAdvice with holdAdvice/takeAdvice/restoreAdvice) beside the deferred queue it mirrors, because that type owns both exits the plan names — closeExchange clears it on every Exchange end (abort and settle included) and end()'s endCancelled row drops the Turn's own advice and holds the taken copy again — which an Agent field could only reach through the argument-less observer; agent.go and construct.go are unchanged and leave FILES. turnLifecycle.restore also clears it (a restored snapshot replaces the conversation it was about).
+NOTES (2026-11-09): the advice the request took reaches the pre-request cascade through a new carried parameter on fireCascade, passed by a new firePreRequest(ctx, t) that all three loop.go pre-request fire sites (build, refold, rehome) now call; routeAdvice settles both request-tail slots inside the cascade (post-response holds, pre-request fences carried then its own via slices.Concat), and drops carried under a live Bypass.
+NOTES (2026-11-09): the exported response projection is reactions.ProjectResponse(domain.PostResponseMoment), now also what projectSeamValue's post-response case calls; the sync-lane document carries it under SeamPayload.Value.
+NOTES (2026-11-09): consequential edit — internal/agent/syncexec.go: made necessary by routing post-response advise through adviseUser — the file-top comment listed the advise slot's Moments as post-tool-result and pre-request.
+NOTES (2026-11-09): consequential edit — internal/domain/seampayload.go: made necessary by the post-response projection riding SeamPayload.Value — the Value doc named only the pre-request sync-lane advise firing beside the five notices.
+NOTES (2026-11-09): tests are six TestPostResponseAdvice* functions in internal/agent/reactions_test.go (next-request-only across a tool-call Exchange incl. snapshot, conv and the next Exchange; the stdin document; refold re-application; a cancelled retry's own advice dropped while the taken Turn-0 advice is held again; ordering ahead of pre-request advice with DeferredLen 0; Bypass), plus two TestFireBooksTheActionTheOutcomeNames cases (advise-class Retry+Inject books retry, injects once, holds nothing; advise-class Inject books advise and holds one span); entries are appended onto a.armed since Reaction.Validate refuses a user post-response advise until item 4.
 
 **What:** Recast at the regression check (2026-11-09). **Goal:** user advice from a `post-response` Reaction
 lands, through `Request.AdviseTail`, on the next request of the same Exchange only, ahead of that request's own
