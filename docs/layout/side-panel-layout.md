@@ -69,6 +69,30 @@ never moves the window it shows from.
 - Crossing a threshold re-wraps the transcript once, like any deliberate width change. A separator
   drag re-wraps the panel and the transcript live, on every column the separator moves.
 
+### Below the threshold: the overlay
+
+On a window under its row's threshold, with `ui.side-panel.show` not `off`, the column is not
+docked, but it can still be opened as an **overlay** (ADR 0111 D7): `→` in navigation mode
+("Keyboard"), or bare `/panel` ("Commands"), paints it over the transcript's right edge, on every row
+above the session-name rule, with the cursor on one of its stops.
+
+- **Width:** `ui.side-panel.width` clamped to the window alone — the overlay keeps no transcript
+  floor beside it. The overlay never writes the setting, and it has no grip: its separator and the
+  gutter beside it are inert, so it cannot be resized or reset by a double-click.
+- **The transcript is not re-wrapped.** The slot, the viewport and every wrapped line stay exactly
+  what they were; the overlay only paints over the rows' right-hand cells.
+- **It lives exactly while navigation mode stands in the panel.** `←` closes it (the cursor goes back
+  to the transcript row it left, or the mode ends where the transcript has no stop), and so do `esc`,
+  a `⏎` that opens a detail, and anything else that ends the mode. A click outside it closes it too:
+  the mode ends and the click goes on to whatever it landed on — the transcript, the prompt, a pane.
+- **Inside, it is the docked column.** A click acts as it does on the docked panel ("Pointer"): a pin
+  glyph pins or unpins its section and the overlay stays, a body row opens its detail. The keys are
+  navigation mode's, as in "Keyboard".
+- While an approval or an `ask_user` question owns the keys the mode is suspended, so the overlay is
+  not painted; it comes back on the same stop once the decision is taken.
+- Under `off`, or with nothing in the column to stand on, there is no overlay: `→` does nothing and
+  bare `/panel` only reports.
+
 ## Sections
 
 Each section is one entry in the ordered `ui.side-panel.sections` list (shaped like
@@ -177,10 +201,11 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
 - **Entering.** `⌥↑`/`⌥↓` start the mode in the transcript, or in the panel when the transcript has
   no stop — `⌥↑` at the last stop, `⌥↓` at the first. Inside the mode `→` moves the cursor from the
   transcript into the panel, onto the stop it stood on there before or, on the first visit, the stop
-  nearest the transcript row it leaves; `←` takes it back to the transcript row it left. `→` into a
-  column that does not show or has no stop, and `←` towards a transcript with no stop, do nothing,
-  and both keys are claimed even then, so the prompt's caret never moves under a reader who is
-  navigating.
+  nearest the transcript row it leaves; `←` takes it back to the transcript row it left. On a window
+  too narrow to dock the column, `→` opens it as the overlay ("Below the threshold: the overlay"),
+  and `←` closes it. `→` into a column `off` hides or with no stop, and `←` from the docked column
+  towards a transcript with no stop, do nothing, and both keys are claimed even then, so the
+  prompt's caret never moves under a reader who is navigating. `⌥↑`/`⌥↓` never open the overlay.
 - **Moving.** `↑`/`↓` walk the column's stops, clamped at either end, never wrapping.
 - **`⏎` is the click** on the stop the cursor stands on, through the click's own path, so the rules
   under "Pointer" hold for it unchanged: under a modal pane it does nothing, and on a pin while
@@ -222,8 +247,10 @@ conversation gives the panel back to the top level.
   to the default 36.
 - Bare `/panel` reports the mode and every section's mode
   (`side panel: auto — sub-agents auto · tasks pinned · …`), adding
-  `(not drawn: the window is narrower than N columns)` when the mode would draw the column but the
-  window is too narrow. Every form ends with that report.
+  `(not docked: the window is narrower than N columns)` when the mode would draw the column but the
+  window is too narrow to dock it. Every form ends with that report. On such a window bare `/panel`
+  also opens the column as the overlay, in navigation mode with the cursor on its first stop
+  ("Below the threshold: the overlay") — unless the column has no stop, when it only reports.
 - Each write is saved to the global config as a pin-glyph click or a separator drag is; a failed save keeps the change
   for the session and says `not saved`. The report answers mid-run, the writing forms wait for idle,
   and the command is refused while watching a session.

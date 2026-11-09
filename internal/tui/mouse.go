@@ -455,6 +455,12 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if next, cmd, claimed := m.handleSidePanelClick(pre, msg); claimed {
 		return next, cmd
 	}
+	// A click outside the narrow-window overlay closes it (ADR 0111 D7): the overlay lives only while
+	// navigation mode stands in the panel region ([Model.panelOverlaid]), so the mode ends, and the
+	// click is not spent on closing it — it goes on to whatever it landed on, as a report pane's does.
+	if pre.panelOverlaid() {
+		m.cursor = blockCursor{}
+	}
 	// The panes, in the one order both gestures ask them in (pointerPanes), each answering with its
 	// row's click (paneSpecs). A pane that does not claim the click hands the model on — dismissed
 	// where its currency says so — and the next pane's rect is still read off pre, never off the model

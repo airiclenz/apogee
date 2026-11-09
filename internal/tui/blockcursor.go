@@ -414,9 +414,17 @@ func (m Model) activatePanelCursor() (Model, tea.Cmd) {
 }
 
 // enterTranscriptRegion is ← : the cursor moves back to the transcript row it remembers, scrolled
-// into view as any move there is. A transcript with no stop leaves the cursor in the panel.
+// into view as any move there is. A transcript with no stop leaves the cursor in the docked panel;
+// in the narrow-window overlay ← closes it whatever the transcript holds (ADR 0111 D7), so there it
+// ends the mode instead.
 func (m Model) enterTranscriptRegion() Model {
-	if !m.cursor.inPanel() || len(cursorStops(m.lineTargets, m.pads)) == 0 {
+	if !m.cursor.inPanel() {
+		return m
+	}
+	if len(cursorStops(m.lineTargets, m.pads)) == 0 {
+		if m.panelOverlaid() {
+			m.cursor = blockCursor{}
+		}
 		return m
 	}
 	m.cursor.region = regionTranscript

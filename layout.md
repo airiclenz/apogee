@@ -3148,7 +3148,12 @@ regions, the transcript and the panel, `→` and `←` move between them, and `�
 `^x` mean the same in both — the panel's stops are its click targets, and `⏎` on one is that click.
 The cursor's row wears a `▌` as well as the selection tone, over the transcript row's marker cell or
 in the panel's gutter cell right of the separator, and only the region the cursor stands in is
-painted. The
+painted. On a window under the panel's threshold (`show` not `off`), `→` or bare `/panel` opens the
+column as an **overlay** over the transcript slot's right edge, at its width clamped to the window
+(ADR 0111 D7): it lives exactly while the cursor stands in the panel — `←`, `esc`, a `⏎` that opens a
+detail or a click outside it (which passes through) closes it — clicks inside act as on the docked
+column, it has no grip, and it paints over the transcript's rows without re-wrapping them, so the
+slot and every wrapped line stay the window's. The
 rule that binds the rest of the frame is stated here: **the panel's column appears or vanishes only
 when the window crosses a threshold or the user changes `ui.side-panel.show`, and changes width
 only on a deliberate act of the user's — a separator drag, a double-click, `/panel width` or a

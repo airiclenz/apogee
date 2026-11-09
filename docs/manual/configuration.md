@@ -1366,6 +1366,13 @@ only when you resize it — nothing inside it moves the transcript's edge, so li
 re-wraps your conversation. It takes the rows above the session-name rule; the status line, prompt box and
 footer keep the full width. With nothing to show it reads `nothing live`.
 
+**On a narrower window** (and `show` not `off`) the panel is not docked, but you can still open it
+over the right edge of your conversation: press `→` in navigation mode, or type bare `/panel`. It
+opens at its usual width — narrowed to the window if need be — with the bar on one of its rows, and
+it does not re-wrap your conversation underneath. It stays open while the bar is in it: `←`, `esc`,
+a click outside it (which then does what it would have done anyway) or opening one of its rows
+closes it. Clicks inside it work as on the docked panel; it has no separator to drag.
+
 **Its sections**, in the order `ui.side-panel.sections` lists them, each under a `◆ <Title>` header
 with its summary and a pin glyph — `⊙` for `auto`, `●` for `pinned`:
 
@@ -1406,7 +1413,8 @@ top level.
 `/panel pin <section>`, `/panel unpin <section>` and `/panel hide <section>` set one section's mode;
 `/panel width <n>` sets `ui.side-panel.width` to `<n>` columns, and `/panel width reset` returns it
 to the default 36. Bare `/panel` reports the settings in force and says when the window is too
-narrow to draw the panel. Every change is saved to your global config ([commands](commands.md)).
+narrow to dock the panel — and then also opens it over the conversation, with the bar on its first
+row, when it has something to stand on. Every change is saved to your global config ([commands](commands.md)).
 The width has no key of its own: drag the separator or use `/panel width`.
 
 **The keyboard.** `⌥↑`/`⌥↓` start navigation mode on the transcript, and `→` moves its bar into

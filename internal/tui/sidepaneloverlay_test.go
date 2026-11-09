@@ -261,3 +261,134 @@ func TestOverlayNotOpenedByAltArrows(t *testing.T) {
 		}
 	}
 }
+
+// assertOverlayClosed fails the test unless m paints no overlay and navigation mode has left the
+// panel region — ended, or (wantTranscript) standing on a transcript row.
+func assertOverlayClosed(t *testing.T, m Model, wantTranscript bool) {
+	t.Helper()
+	if m.panelOverlaid() || m.panelPaintWidth() != 0 || frameColumnOf(m, overlayHeader) >= 0 {
+		t.Fatalf("the overlay is still painted (overlaid %v, width %d)", m.panelOverlaid(), m.panelPaintWidth())
+	}
+	if m.cursor.inTranscript() != wantTranscript || (!wantTranscript && m.cursor.active) {
+		t.Errorf("the cursor is active %v in region %v; want it in the transcript %v",
+			m.cursor.active, m.cursor.region, wantTranscript)
+	}
+}
+
+// TestOverlayClosesOnLeftEscAndOutsideClick pins the overlay's ways out (ADR 0111 D7): ← returns the
+// cursor to the transcript row it left, or ends the mode where the transcript has no stop to return
+// to; esc ends the mode; and a click outside the overlay ends it and goes on to what it landed on —
+// here the transcript, whose selection it seats.
+func TestOverlayClosesOnLeftEscAndOutsideClick(t *testing.T) {
+	t.Parallel()
+
+	t.Run("←", func(t *testing.T) {
+		t.Parallel()
+		m := overlayModel(t, domain.SidePanelShowAuto, 100, 0, panelStopEvents(t)...)
+		m = step(t, m, keyAltUp())
+		line := transcriptCursorLine(t, m)
+		m = step(t, m, keyRight())
+		assertOverlayPainted(t, m)
+
+		m = step(t, m, keyLeft())
+
+		assertOverlayClosed(t, m, true)
+		if got := transcriptCursorLine(t, m); got != line {
+			t.Errorf("← returned to line %d, want %d", got, line)
+		}
+	})
+	t.Run("← with no transcript stop", func(t *testing.T) {
+		t.Parallel()
+		m := overlayModel(t, domain.SidePanelShowAuto, 100, 0, taskList(0, "one", "two"), panelUsageReading(panelUsed))
+		if stops := cursorStops(m.lineTargets, m.pads); len(stops) != 0 {
+			t.Fatalf("setup: the transcript offers stops %v; want none", stops)
+		}
+		m = sendLine(t, m, "/panel")
+		panelCursorStop(t, m)
+		if !m.panelOverlaid() {
+			t.Fatal("setup: bare /panel did not open the overlay")
+		}
+
+		m = step(t, m, keyLeft())
+
+		if m.cursor.active || m.panelOverlaid() {
+			t.Errorf("← left the overlay open (active %v, overlaid %v)", m.cursor.active, m.panelOverlaid())
+		}
+	})
+	t.Run("esc", func(t *testing.T) {
+		t.Parallel()
+		m := overlaidModel(t)
+
+		m = step(t, m, keyEsc())
+
+		assertOverlayClosed(t, m, false)
+	})
+	t.Run("a click outside", func(t *testing.T) {
+		t.Parallel()
+		m := overlaidModel(t)
+		x := m.width - m.panelPaintWidth() - 1
+		y := transcriptRowY(t, m)
+
+		m = step(t, m, leftClick(x, y))
+
+		assertOverlayClosed(t, m, false)
+		if !m.transcriptSel.active {
+			t.Error("the click outside was spent on closing the overlay; want it to seat the transcript's selection")
+		}
+	})
+}
+
+// transcriptRowY is the first screen row m's frame draws a transcript line on — the row a click
+// outside the overlay lands on the transcript at.
+func transcriptRowY(t *testing.T, m Model) int {
+	t.Helper()
+	pre := m.withFrameSpans()
+	for y := range pre.frameSpans().slotBottom {
+		if _, _, ok := pre.pointTranscriptRow(0, y); ok {
+			return y
+		}
+	}
+	t.Fatal("no screen row draws a transcript line")
+	return -1
+}
+
+// TestOverlayInsideClickActsAsDocked pins a click inside the overlay to the docked column's (ADR 0111
+// D7): a header's pin glyph pins its section and the overlay stays, the cursor in it; a body stop
+// follows its target — the usage report opens /usage.
+func TestOverlayInsideClickActsAsDocked(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a pin glyph", func(t *testing.T) {
+		t.Parallel()
+		m := overlaidModel(t)
+		stops := m.navPanelStops()
+		at := slices.IndexFunc(stops, func(s panelStop) bool { return s.id.isHeader && !s.target.isPinned })
+		if at < 0 {
+			t.Fatalf("setup: the overlay has no unpinned header among %+v", stops)
+		}
+		section := stops[at].id.section
+
+		m = clickCell(t, m, m.width-1, stops[at].y)
+
+		if want := string(section) + ": pinned"; !strings.Contains(string(m.opts.UI.SidePanelSections), want) {
+			t.Errorf("sections %q after the click; want %q", m.opts.UI.SidePanelSections, want)
+		}
+		assertOverlayPainted(t, m)
+		panelCursorStop(t, m)
+	})
+	t.Run("the usage report", func(t *testing.T) {
+		t.Parallel()
+		m := overlaidModel(t)
+		stops := m.navPanelStops()
+		at := slices.IndexFunc(stops, func(s panelStop) bool { return s.target.kind == panelTargetUsage })
+		if at < 0 {
+			t.Fatalf("setup: the overlay has no usage stop among %+v", stops)
+		}
+
+		m = clickCell(t, m, m.width-m.panelPaintWidth()+sidePanelChromeWidth+2, stops[at].y)
+
+		if !m.usagePane.open {
+			t.Error("a click on the overlay's usage report did not open /usage")
+		}
+	})
+}

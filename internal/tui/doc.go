@@ -1018,7 +1018,10 @@
 // [Model.topRule] gets both the name (the landed one, else the first prompt's heuristic, else none)
 // and the cell arithmetic that centers and clips it; sidepanel.go the side panel's column (ADR 0110)
 // — its width, the floors its gate keeps ([Model.panelShown]) and the rows it paints, hung off the
-// rows above the session-name rule by View; panelstops.go the column's stops ([Model.panelStops]) —
+// rows above the session-name rule by View: docked beside the transcript slot, or, on a window under
+// the gate, painted over the slot's right edge as the overlay ([Model.panelOverlaid], ADR 0111 D7)
+// that navigation mode's panel region opens — by → or bare /panel — and every way out of that
+// region closes; panelstops.go the column's stops ([Model.panelStops]) —
 // the rows a click acts on, in paint order, each with its row span, its target and an identity
 // (header, run, path, task card, usage) — through which the pointer resolves a body row and which
 // navigation mode's cursor walks in the panel region (blockcursor.go);

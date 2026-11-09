@@ -2376,8 +2376,11 @@ func TestSidePanelCommandRefusesAnUnknownSection(t *testing.T) {
 }
 
 // TestSidePanelCommandBareReports pins the bare form: it reports the show mode and every section's
-// mode in display order, writes nothing, says when the window is too narrow to draw the column,
-// and answers mid-run where the writing forms wait for idle.
+// mode in display order, writes nothing, says when the window is too narrow to dock the column,
+// and answers mid-run where the writing forms wait for idle. On such a window it also opens the
+// column as the overlay in navigation mode on its first stop (ADR 0111 D7) — but only where the
+// column could be drawn and has a stop: under `off`, the zero UIPrefs' empty mode or with nothing
+// live it parks no cursor.
 func TestSidePanelCommandBareReports(t *testing.T) {
 	t.Parallel()
 	m := sidePanelModel(t, domain.SidePanelShowAuto, true, 100)
@@ -2388,9 +2391,15 @@ func TestSidePanelCommandBareReports(t *testing.T) {
 	m = sendLine(t, m, "/panel")
 
 	want := "side panel: auto — usage pinned · tasks hidden · sub-agents auto · changed-files auto" +
-		" (not drawn: the window is narrower than 137 columns)"
+		" (not docked: the window is narrower than 137 columns)"
 	if !noteHolding(m, want) {
 		t.Errorf("no report %q:\n%s", want, plain(m.View()))
+	}
+	if stops := m.navPanelStops(); len(stops) == 0 || panelCursorStop(t, m) != stops[0] {
+		t.Errorf("the cursor is not on the overlay's first stop %+v", stops)
+	}
+	if !m.panelOverlaid() || frameColumnOf(m, "Usage") < m.width-m.panelPaintWidth() {
+		t.Errorf("the overlay is not painted (overlaid %v):\n%s", m.panelOverlaid(), plain(m.View()))
 	}
 	if len(spy.sections) != 0 || len(spy.writes) != 0 {
 		t.Errorf("the report wrote %v / %v", spy.sections, spy.writes)
@@ -2402,6 +2411,41 @@ func TestSidePanelCommandBareReports(t *testing.T) {
 		if got := parseInput(line, nil).safeWhileRunning(); got != wantSafe {
 			t.Errorf("%q safe while running = %v, want %v", line, got, wantSafe)
 		}
+	}
+
+	cases := []struct {
+		name     string
+		show     domain.SidePanelShow
+		sections domain.SidePanelSections
+		width    int
+		want     string
+	}{
+		{"off", domain.SidePanelShowOff, "[usage: pinned]", 100,
+			"side panel: off — usage pinned · sub-agents auto · tasks auto · changed-files auto"},
+		{"the zero UIPrefs' empty mode", "", "[usage: pinned]", 100,
+			"side panel: off — usage pinned · sub-agents auto · tasks auto · changed-files auto"},
+		{"nothing live", domain.SidePanelShowAuto, domain.DefaultSidePanelSections, 100,
+			"side panel: auto — sub-agents auto · tasks auto · changed-files auto · usage auto" +
+				" (not docked: the window is narrower than 137 columns)"},
+		{"docked", domain.SidePanelShowAuto, "[usage: pinned]", 140,
+			"side panel: auto — usage pinned · sub-agents auto · tasks auto · changed-files auto"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := sidePanelModel(t, tc.show, true, tc.width)
+			m.opts.UI.SidePanelSections = tc.sections
+
+			m = sendLine(t, m, "/panel")
+
+			if !noteHolding(m, tc.want) {
+				t.Errorf("no report %q:\n%s", tc.want, plain(m.View()))
+			}
+			if m.cursor.active || m.panelOverlaid() {
+				t.Errorf("bare /panel parked a cursor (active %v, region %v, overlaid %v)",
+					m.cursor.active, m.cursor.region, m.panelOverlaid())
+			}
+		})
 	}
 }
 

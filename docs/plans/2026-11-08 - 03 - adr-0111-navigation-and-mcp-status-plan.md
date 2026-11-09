@@ -404,7 +404,12 @@ the overlay shows), `TestOverlayNotOpenedByAltArrows` (80 cols, no transcript st
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestOverlay|TestSidePanel' ./internal/tui/`
 **Commit:** `feat(tui): open the side panel as an overlay on a narrow window`
 
-## 13. Overlay close paths and bare `/panel`
+## 13. Overlay close paths and bare `/panel` — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): re-derived from "close follows from item 12's derived predicate" — it does for `esc`, a detail-opening `⏎` and `←` toward a transcript with stops, but `←` toward a transcript with no stop left the cursor (and so the overlay) in the panel; `enterTranscriptRegion` in internal/tui/blockcursor.go now ends the mode there while the panel is overlaid (the docked column keeps its claimed no-op).
+NOTES (2026-11-09): `panelReportNote` reworded from `(not drawn: …)` to `(not docked: the window is narrower than N columns)`, as the item's Approach allows when it "promises otherwise": with bare `/panel` now painting the overlay right under it, "not drawn" was false. Docs and the test assert the new text.
+NOTES (2026-11-09): bare `/panel` seats the remembered transcript place on the transcript's last stop (where `⌥↑` enters), so a later `←` lands somewhere real; the overlay's own conditions (overlayable, no pending decision) plus a non-empty stop list gate it, so `off`, the zero UIPrefs, a docked column and a panel with nothing live park no cursor (subtests for each).
+NOTES (2026-11-09): consequential edit — internal/tui/doc.go: made necessary by the overlay this item documents (item 12's verifier noted the sidepanel.go blurb still said only "hung off the rows" by View).
 
 **What:** ADR 0111 D7's close and command paths, plus docs. Depends on item 12.
 **Regression guard.** Bare `/panel` enters navigation mode only when `sidePanelLeastWindow(show)` is ok ∧ `!panelShown()` ∧

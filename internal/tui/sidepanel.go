@@ -1111,7 +1111,8 @@ func parsePanelWidth(args []string) (panelArgs, error) {
 
 // runPanelCommand routes a parsed /panel line: set the show mode, one section's mode or the width,
 // or reset the width, and every way — the bare report included — answer with the settings now in force (panelReportNote), so
-// the human sees what the panel does even where this window is too narrow to draw it.
+// the human sees what the panel does even where this window is too narrow to dock it. The bare
+// report on such a window also opens the column as the overlay ([Model.openPanelOverlay]).
 //
 // No upstream call and no worker: a write is one config key through the seams the settings pane and
 // the pin glyph use, synchronous like theirs.
@@ -1125,9 +1126,36 @@ func (m Model) runPanelCommand(args panelArgs) (tea.Model, tea.Cmd) {
 		m = m.setPanelWidth(args.width)
 	case panelResetWidth:
 		m = m.resetPanelWidth()
+	case panelReport:
+		m = m.openPanelOverlay()
 	}
 	m.transcript.addNote(m.panelReportNote())
 	return m, nil
+}
+
+// openPanelOverlay is bare /panel's way into the narrow-window overlay (ADR 0111 D7): on a window
+// under the column's gate it starts navigation mode in the panel region on the column's first stop,
+// which is what paints the column as the overlay ([Model.panelOverlaid]). The transcript place it
+// remembers for ← is the transcript's last stop, where ⌥↑ would have entered. Where the column docks,
+// where `off` or the zero UIPrefs' empty mode never draws it, while a decision owns the keys, or
+// while the column has no stop, it parks no cursor: one standing in a panel nobody can see would
+// swallow the arrows for nothing.
+func (m Model) openPanelOverlay() Model {
+	entered := m
+	entered.cursor = blockCursor{active: true, region: regionPanel}
+	if stops := cursorStops(m.lineTargets, m.pads); len(stops) > 0 {
+		entered.cursor.line = stops[len(stops)-1]
+	}
+	if !entered.panelOverlaid() {
+		return m
+	}
+	stops := entered.navPanelStops()
+	if len(stops) == 0 {
+		return m
+	}
+	entered.transcriptSel = transcriptSel{}
+	entered.cursor = entered.cursor.standOnPanel(stops[0])
+	return entered
 }
 
 // setPanelShow sets `ui.side-panel.show` and writes it back through [SettingsHost.Write], with
@@ -1148,7 +1176,8 @@ func (m Model) setPanelShow(show domain.SidePanelShow) Model {
 
 // panelReportNote words the side panel's settings in force: the show mode, then every section with
 // its mode in display order — `side panel: auto — sub-agents auto · tasks pinned · …` — and, where
-// the mode would draw the column but this window is too narrow for it, the width it needs.
+// the mode would dock the column but this window is too narrow for it, the width it needs: the
+// column is then not docked, though it may be painted as the overlay ([Model.panelOverlaid]).
 func (m Model) panelReportNote() string {
 	show := m.opts.UI.SidePanelShow
 	if show == "" {
@@ -1165,7 +1194,7 @@ func (m Model) panelReportNote() string {
 	}
 	note := "side panel: " + string(show) + " — " + strings.Join(modes, sidePanelPartSeparator)
 	if least, ok := sidePanelLeastWindow(show); ok && !m.panelShown() {
-		note += " (not drawn: the window is narrower than " + strconv.Itoa(least) + " columns)"
+		note += " (not docked: the window is narrower than " + strconv.Itoa(least) + " columns)"
 	}
 	return note
 }
