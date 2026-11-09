@@ -34,7 +34,9 @@
   - 2: rejected — add CHANGELOG.md to Files; plan-lint refuses a Files line naming CHANGELOG.md (the entry travels in
     the item's sidecar).
 
-## 1. Pin RemoveJournal under a watcher on Windows, narrow the classifier
+## 1. Pin RemoveJournal under a watcher on Windows, narrow the classifier — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the watcher test asserts only that SweepJournals returns a non-nil error and 0 removed while the watcher is open, not which errno; the errno is pinned once, on the raw os.Remove.
 
 **What:** fix(session) — the ERROR_ACCESS_DENIED acceptance copied from the rename predicate hides a real
 permission failure on every run.

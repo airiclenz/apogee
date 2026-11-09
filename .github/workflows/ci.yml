@@ -217,7 +217,8 @@ jobs:
         with:
           go-version-file: go.mod
       - name: go test (race, ConPTY packages)
-        # These five trees rather than `./...`: the rest of the suite is Linux-shaped (the
+        # These five trees, plus the Windows-tagged tests of `internal/session` in the third
+        # step, rather than `./...`: the rest of the suite is Linux-shaped (the
         # landlock battery, the PTY drivers), while the Windows half of the product is the
         # confinement backend — `internal/platform` carries `winlabel`'s walk — whose tests
         # label the runner's own disk, throwaway by construction, and the ConPTY Console in
@@ -242,7 +243,8 @@ jobs:
         # link here, drop -race from this one job and say so in this comment — the C-20
         # race test then rests on its own iteration count alone.
         #
-        # The five trees run as two steps. `internal/platform` and `internal/console` are the
+        # The five trees run as two steps, and a third runs `internal/session`'s Windows
+        # tests. `internal/platform` and `internal/console` are the
         # ConPTY-heavy packages: each runs 50-iteration cmd.exe/conhost loops, and run side by
         # side they share the runner's 4 vCPU and starve each other's pseudoconsoles. This
         # step runs them one at a time (`-p 1`), with `-timeout 30m` for the serial wall time.
@@ -254,3 +256,13 @@ jobs:
         # each is here. `!cancelled()` runs this step even when the ConPTY step failed.
         if: ${{ !cancelled() }}
         run: go test -race -count=1 ./internal/probe/... ./internal/auditsplit/... ./cmd/release/...
+      - name: go test (race, session Windows tests)
+        # `internal/session`'s `//go:build windows` tests: the record save retrying through a
+        # reader's sharing violation, and the Event journal an owner removes while a watcher
+        # holds it open (ADR 0103's Windows amendment). Only those run — `TestWindows` and
+        # `TestAtomicWriteRetries` — because the rest of `internal/session` has never been
+        # proven on Windows; running all of it here is a follow-up of its own. `-v` keeps the
+        # watcher test's logged `os.Remove` errno in the log on a green run too. `!cancelled()`
+        # runs this step even when an earlier step failed.
+        if: ${{ !cancelled() }}
+        run: go test -race -count=1 -v -run 'TestWindows|TestAtomicWriteRetries' ./internal/session/

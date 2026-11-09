@@ -808,12 +808,14 @@ func (s *Store) OpenJournal(id string) (*os.File, error) {
 
 // RemoveJournal removes session id's Event journal — the owner's step when it releases the
 // session. A journal that is not there is not an error, and neither is one a watcher holds open on
-// Windows, where Go's open shares no delete and the removal fails until the watcher lets go
-// (isRemoveSharingError): the owner removes before it releases its hold (ADR 0103 decision 4),
-// while the watcher closes only once it reads the hold free, so a retry here would wait on the
-// watcher waiting on it. The journal left behind has a free lock, so Live never lists it and the
-// next startup sweep collects it (SweepJournals). An id that is not a safe filename component is
-// refused with ErrInvalidID.
+// Windows, where Go's open shares no delete and the removal fails with a sharing violation until
+// the watcher lets go (isRemoveSharingError): the owner removes before it releases its hold (ADR
+// 0103 decision 4), while the watcher closes only once it reads the hold free, so a retry here
+// would wait on the watcher waiting on it. The journal left behind has a free lock, so Live never
+// lists it and the next startup sweep collects it (SweepJournals). Only that sharing violation is
+// tolerated: a removal an ACL refuses is returned like any other failure, so the owner reports it,
+// rather than leaving behind unremarked a journal no sweep can remove. An id that is not a safe
+// filename component is refused with ErrInvalidID.
 func (s *Store) RemoveJournal(id string) error {
 	if err := validateID(id); err != nil {
 		return err

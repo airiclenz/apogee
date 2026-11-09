@@ -32,7 +32,11 @@ func isRenameSharingError(err error) bool {
 
 // isRemoveSharingError reports whether err is a Windows removal refused because another handle —
 // a watcher following the journal — has the file open without FILE_SHARE_DELETE. DeleteFile
-// answers that case with the same two errors a rename does (isRenameSharingError).
+// answers that case with ERROR_SHARING_VIOLATION alone, so that is the one error accepted here,
+// unlike isRenameSharingError, which also takes the ERROR_ACCESS_DENIED MoveFileEx reports. An
+// ERROR_ACCESS_DENIED from a removal is a real refusal — an ACL that denies delete; a read-only
+// attribute never reaches here, since os.Remove clears it and retries — and is reported, not
+// hidden: the journal stays and the next startup sweep tries it again.
 func isRemoveSharingError(err error) bool {
-	return isRenameSharingError(err)
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION)
 }
