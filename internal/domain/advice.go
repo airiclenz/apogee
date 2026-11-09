@@ -16,7 +16,9 @@ import (
 // server's prefix cache survives the Turn. For session-started (ADR 0076, 2026-10-19 amendment)
 // it lands as a LEADING fence inside the user message that opens the session's next Exchange,
 // ahead of the user's own text — still one user message, never an added one
-// (Conversation.AdviseUserMessage). The engine rides the same seam for its own
+// (Conversation.AdviseUserMessage). For pre-request and post-response (ADR 0076, 2026-11-09
+// amendment) it lands on the outgoing request's tail alone, placed by the tail's role
+// (Request.AdviseTail). The engine rides the same seam for its own
 // structural text — an ENGINE NOTE (RenderEngineNote, Message.WithEngineNote), fenced under its
 // own header on the closing tool result of a request that needs it (a capped delegate's wrap-up
 // directive, Request.NoteOnTail) and recorded on the same ledger, so one strip and one staleness

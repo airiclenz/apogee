@@ -20,8 +20,9 @@ import (
 //
 // What the pane is FOR: reading what the model was TOLD beside its own reply. An advise reaction
 // speaks to the model in a fence on a message it reads — a user `advise:` entry's text under its
-// `[advice — …]` header, trailing the tool result a post-tool-result entry fired on or leading the
-// session's first prompt for a session-started one, and the context-fill notice's rung (ADR 0076
+// `[advice — …]` header, trailing the tool result a post-tool-result entry fired on, leading the
+// session's first prompt for a session-started one, or on the outgoing request's tail — that request
+// alone — for a pre-request or post-response one, and the context-fill notice's rung (ADR 0076
 // D7, ADR 0077) — and the transcript never shows that text: it is the model's reading, not the
 // human's conversation. The
 // engine books each of those as a domain.ReactionFiredEvent whose Action is "advise" (an armed

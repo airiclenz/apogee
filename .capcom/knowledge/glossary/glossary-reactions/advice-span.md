@@ -16,6 +16,12 @@ closes with mid-Exchange — never the summary, never the system prompt; and a s
 retires the same reaction's earlier leading fences from the protected prefix's first user message
 (`Conversation.StripReactionAdvice`), leaving every other reaction's spans standing, so a re-brief
 replaces the briefing the fold kept rather than stacking beside it (ADR 0076, 2026-10-21
+amendment). On `pre-request` and `post-response` the span rides the outgoing **request**'s tail
+alone (`Request.AdviseTail`), placed by the tail's role: a trailer inside a tool-result tail, a
+leading fence inside a user tail, or — after an assistant tail — one new user message holding only
+the fence; ahead of any engine note on that tail, never in the system prompt, and request-only — in
+no conversation, snapshot, record or Defer queue, gone from the next request. post-response advice
+is held for the Exchange's next request and dropped when the Exchange ends (ADR 0076, 2026-11-09
 amendment). The
 fence the model reads (`[advice — reaction <id> (<origin> origin) at <moment>, turn <n>]`
 … `[end advice — <id>]`) is rendered from the span, never from the handler's output, so nothing
@@ -41,9 +47,11 @@ guard cover both kinds (ADR 0076, 2026-09-19 addendum).
 
 **In a test** (2026-10-21, docs/plans/archived/2026-10-21 - 00 - user-session-advice-plan.md): build
 the expected fence with `domain.RenderAdvice` and the span's real shape — `Leading: true` for
-session-started and compaction-finished advice on a user-role message. Without it `RenderAdvice`
+session-started and compaction-finished advice on a user-role message, and for request-tail advice
+on a user tail or an assistant tail's added message. Without it `RenderAdvice`
 renders the trailing tool-result form, its blank line on the other side of the fence, and the
 comparison fails.
 _Avoid_: "injection" (the system-prompt fold the trailer replaced), "advice message" (a fence
-inside a tool result or a user message, not a message of its own), "advice history" (nothing
+inside a tool result or a user message, not a message of its own — save the request-only one an
+assistant tail gains), "advice history" (nothing
 persists).

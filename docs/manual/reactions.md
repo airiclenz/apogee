@@ -5,8 +5,8 @@ in a session — what other tools call a hook. Each entry names the moments it f
 action it takes: `run:` — an argv list run directly, a URL the moment is POSTed to as JSON, or a
 tool on one of your MCP servers — after the moment; `advise:` — a command whose standard output, a
 webhook whose reply, or an MCP tool whose answer the model reads inside a fence apogee writes: as a
-trailer on a tool result, or ahead of your next message when a session starts or after a compaction
-fold; or `gate:` — a command, webhook or MCP tool asked whether a tool call may run — before it.
+trailer on a tool result, ahead of your next message when a session starts or after a compaction
+fold, or on the tail of the request about to be sent, before a request or after a reply; or `gate:` — a command, webhook or MCP tool asked whether a tool call may run — before it.
 Every key takes the same three shapes, an argv list, a webhook mapping or an MCP mapping; the key
 decides what the answer is worth. The list is empty by default, so a fresh install runs
 nothing and reports nothing.
@@ -19,15 +19,17 @@ other two keys are the same origin at the two classes the loop **waits** on. An 
 (class **advise**) runs after a tool call finished, and what it prints — or, as a webhook or an MCP tool, answers —
 is appended to that call's result inside a fence apogee writes, so the model reads it as advice from you and not as the
 tool's own output; on `session-started` or `compaction-finished` it runs in the background instead,
-and its answer is fenced ahead of the text of the next user message the model reads. A `gate:` entry (class **gate**) is asked, before a tool call runs, whether the
+and its answer is fenced ahead of the text of the next user message the model reads; on `pre-request` or
+`post-response` it runs while the loop waits, and its answer is fenced on the tail of the request about to be
+sent, and on that request alone. A `gate:` entry (class **gate**) is asked, before a tool call runs, whether the
 call may — and it can say `deny`, or `ask` to put the call to you, but never approve a call on
 your behalf. A Floor guard is the engine's own `shape (view)` Reaction — it fires on a Moment
 inside the loop and rewrites what the model sees — and the engine's own `advise` Reaction is the
 [context-fill notice](configuration.md#context-fill-notice), which appends its line to a tool
 result the way an `advise:` entry does; yours fires on your own machine, as your
 configuration rather than a model action. Of the five in-loop seams, a `gate:` entry reacts at
-`pre-tool-exec` and an `advise:` entry at `post-tool-result` (or its `file-changed` narrowing);
-the other three take no user entry. Beyond the seams, an `advise:` entry takes two notices as well —
+`pre-tool-exec` and an `advise:` entry at `post-tool-result` (or its `file-changed` narrowing),
+`pre-request` and `post-response`; `history-rewrite` takes no user entry. Beyond the seams, an `advise:` entry takes two notices as well —
 `session-started`, to brief a session, and `compaction-finished`, to brief it again after its
 history was folded. Every notice below reports a thing that is over.
 ([ADR 0076](../../.capcom/knowledge/decisions/adr-0076.md) is the
@@ -79,7 +81,7 @@ reactions:
     gate: ["check-tool-call"]           # answers allow, deny or ask on its first stdout line
     timeout: 2s                         # optional; a gate's default is 5s
   - id: unformatted
-    on: [file-changed]                  # an advise: also takes post-tool-result, session-started, compaction-finished
+    on: [file-changed]                  # an advise: also takes post-tool-result, session-started, compaction-finished, pre-request, post-response
     advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]  # its stdout reaches the model
     timeout: 5s                         # optional; an advise's default is 10s
   - id: policy-server
@@ -99,7 +101,7 @@ reactions:
 | `timeout:` | Optional Go duration (`10s`, `2m`). Default `30s` for `run:`, `10s` for `advise:`, `5s` for `gate:`. Bounds the command run and the POST alike, and one `timeout:` binds every Reaction its entry arms. |
 | `enabled:` | Optional. `enabled: false` **parks** an entry — it stays in the file and is dropped when the file is read, so nothing arms it and the `/settings` summary does not count it. |
 | `gate:` | The entry's gate action, in the three `run:` shapes: an argv list, run directly like a `run:` list, a webhook mapping `{url:, headers:, headers-env:}` POSTed to like a `run:` webhook, or an MCP mapping called like a `run:` one — each is asked before a tool call runs, and its `on:` is `[pre-tool-exec]`. The call reaches a command as JSON on **stdin** and a webhook as the **POST body** (`event`, `reaction`, `tool`, `arguments` and the shared fields below), and it answers on **stdout**, in the **reply body** or in the **tool's text**: the first line is `allow`, `deny` or `ask`, and any later lines are the reason, kept to its first 240 runes. It runs as an approval stage ahead of you — under `bypass:` too — with a default `timeout:` of `5s`. The first `deny` ends the call: the model reads `tool call denied by reaction <id>` and never the reason. The first `ask` forces the approval prompt, which reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the [daemon](daemon.md) nobody is there to answer, so the call is denied as `tool call denied by approver`. A gate that printed nothing, printed something else, exited non-zero, timed out or crashed — or a webhook that answered with anything but a 2xx, or an MCP call that failed — counts as `ask`, never as `allow`, and an `allow` changes nothing about what the mode already decided. On a `sub_agent` call an `ask` is deferred: the child inherits the gate and is asked on the calls that actually do something. |
-| `advise:` | The entry's third action, in the three `run:` shapes: an argv list run directly like the others, a webhook mapping `{url:, headers:, headers-env:}` or an MCP mapping — each fires **after** a tool call finished (`post-tool-result`, `file-changed`), at a session's start (`session-started`) or after a compaction fold (`compaction-finished`), and its `on:` is any of those four. The firing reaches a command as JSON on **stdin**, a webhook as the **POST body** and an MCP tool under its `payload-arg:` (`event`, `reaction`, the shared fields below, and `tool`, `arguments` and `result` after a tool call, `start` at a session's start, `fold` after a fold), and the command's **stdout**, the webhook's **reply body** or the MCP tool's **text** — redacted, capped at 8 KiB — is fenced where the model reads it and the saved session never carries it: appended to that call's result after a tool call, set ahead of the next user message's text at a session's start or after a fold. A bare string is refused: `reaction <id>: advise: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`. Default `timeout:` `10s`; switched off under `bypass:`. See [Advising the model](#advising-the-model). |
+| `advise:` | The entry's third action, in the three `run:` shapes: an argv list run directly like the others, a webhook mapping `{url:, headers:, headers-env:}` or an MCP mapping — each fires **after** a tool call finished (`post-tool-result`, `file-changed`), at a session's start (`session-started`), after a compaction fold (`compaction-finished`), before a request is sent (`pre-request`) or after the model replied (`post-response`), and its `on:` is any of those six. The firing reaches a command as JSON on **stdin**, a webhook as the **POST body** and an MCP tool under its `payload-arg:` (`event`, `reaction`, the shared fields below, and `tool`, `arguments` and `result` after a tool call, `start` at a session's start, `fold` after a fold, `value` — the request or the reply — at the two request seams), and the command's **stdout**, the webhook's **reply body** or the MCP tool's **text** — redacted, capped at 8 KiB — is fenced where the model reads it and the saved session never carries it: appended to that call's result after a tool call, set ahead of the next user message's text at a session's start or after a fold, placed on the tail of the outgoing request — that request alone — before a request or after a reply. A bare string is refused: `reaction <id>: advise: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp mapping {mcp: {server:, tool:, args:, payload-arg:}}`. Default `timeout:` `10s`; switched off under `bypass:`. See [Advising the model](#advising-the-model). |
 
 An entry may spell more than one action key. Each arms a Reaction of its own under the entry's one
 `id:`, and the whole `on:` list has to suit each of them: `run:` beside `advise:` on
@@ -136,7 +138,7 @@ passing.
 | `error` | A localised, recovered engine fault. A Reaction's own failure never becomes one of these, because an entry subscribed to `error` would then fire on itself and loop. | Any, sub-agents included |
 | `session-started` | A session started, once per start: a fresh session, a `--resume`, every [`apogee headless`](headless.md), [daemon](daemon.md) or `/schedule` run, `/clear`, `/new`, a `/sessions` resume and `/fork`. The payload's `start` says which — `new`, `resume`, `clear` or `fork`. A sub-agent is not a session start and never fires it. An `advise:` entry on it briefs the session (see [Advising the model](#advising-the-model)). | Top-level only |
 | `compaction-finished` | A [compaction](configuration.md#keeping-the-window-from-overflowing--compaction-and-pruning) fold ran and replaced the conversation, once per fold — whether the context estimate, an emergency (a request that would not fit the window) or `/compact` started it. The payload's `fold` says which — `auto`, `emergency` or `manual`. A fold that failed, was cancelled or replaced nothing fires none, and a sub-agent's fold never fires it. An `advise:` entry on it briefs the model again after the fold. | Top-level only |
-| `pre-request-finished` | The `pre-request` seam's pass finished: the outgoing request is as the loop will send it. Full working value; only serialized when you subscribe. | Top-level only |
+| `pre-request-finished` | The `pre-request` seam's pass finished: the outgoing request is as the loop will send it, an `advise:` entry's fence included. Full working value; only serialized when you subscribe. | Top-level only |
 | `post-response-finished` | The `post-response` seam's pass finished, on the model's answer. Full working value; only serialized when you subscribe. | Top-level only |
 | `pre-tool-exec-finished` | The `pre-tool-exec` seam's pass finished, on a call about to run. Full working value; only serialized when you subscribe. | Top-level only |
 | `post-tool-result-finished` | The `post-tool-result` seam's pass finished, on a result before the model sees it. Full working value; only serialized when you subscribe. | Top-level only |
@@ -246,7 +248,8 @@ working on.
 An `advise:` or `gate:` command reads — and a webhook under either key is POSTed, and an MCP tool
 under either is sent under its `payload-arg:` — the **same**
 document cut to the call itself rather than to a notice about it — or, for an `advise:` entry on
-`session-started` or `compaction-finished`, where there is no call, cut to the boundary or the fold.
+`session-started` or `compaction-finished`, where there is no call, cut to the boundary or the fold, and
+on `pre-request` or `post-response` to the request or the reply.
 It opens with the shared block above — `event`, `reaction`,
 `time`, `workspace`, `depth`, `turn` and `call_id`, spelled the same — and then carries:
 
@@ -258,6 +261,7 @@ It opens with the shared block above — `event`, `reaction`,
 | `path` | `file-changed` | The absolute, symlink-resolved path the write landed on. |
 | `start` | `session-started` | How the session started: `new`, `resume`, `clear` or `fork`. |
 | `fold` | `compaction-finished` | What started the fold: `auto`, `emergency` or `manual`. |
+| `value` | `pre-request`, `post-response` | The request about to be sent, as the handlers before this entry left it, or the reply under review — in the shape the seam-closing notice's `value` has ([The payload](#the-payload)). |
 
 ```json
 {"event":"file-changed","reaction":"unformatted","time":"2026-09-12T09:41:00Z",
@@ -276,8 +280,12 @@ nothing has been called — and `depth` is always `0`, since neither fires below
  "workspace":"/work/repo","depth":0,"turn":0,"start":"new"}
 ```
 
-There is no `value`, no `seam` and no `schedule` — the call, the boundary or the fold is the
-document. The same headline
+A `pre-request` or `post-response` document carries no `tool`, `arguments` or `result` either; its
+`value` is the request or the reply, and its `depth` is the agent's own, since a sub-agent fires
+those two too.
+
+There is no `seam` and no `schedule`, and no `value` but at the two request seams — the call, the
+boundary, the fold, the request or the reply is the document. The same headline
 facts are in the command's environment as `APOGEE_REACTION_EVENT`, `APOGEE_REACTION_NAME`,
 `APOGEE_REACTION_WORKSPACE` and, on `file-changed`, `APOGEE_REACTION_PATH`, on `session-started`,
 `APOGEE_REACTION_START`, and on `compaction-finished`, `APOGEE_REACTION_FOLD`; the two schedule
@@ -455,7 +463,7 @@ fires before the session has connected its servers fails as `MCP servers are not
 
 ## Advising the model
 
-An `advise:` entry is the one kind of Reaction whose output the model reads. It reacts at four
+An `advise:` entry is the one kind of Reaction whose output the model reads. It reacts at six
 Moments, and `on:` takes any of them. Two follow a tool call: there the entry runs **while the loop
 waits** — after the call has finished and before the model sees the result — and what it prints on
 stdout is appended to that result:
@@ -466,7 +474,7 @@ stdout is appended to that result:
   the `write_file` that landed and not on the `list_dir` after it, and `path` names the file. An
   entry listing `file-changed` alone is silent on every other call.
 
-The other two have no tool result to append to. There the entry runs **in the background**, and
+Two have no tool result to append to. There the entry runs **in the background**, and
 its answer is fenced **ahead of the text of the next user message** the model reads — inside that
 message, never a message of its own, and never in the system prompt:
 
@@ -514,6 +522,26 @@ it suits a session started inside the repository — or a repository's own
 [Project config](configuration.md#a-projects-own-config--apogeeconfigyaml), whose adopted entries
 run in the Project root.
 
+The last two are the loop's own request seams. There the entry runs **while the loop waits**, as
+it does after a tool call, and its answer is fenced on the **tail of the request** — the last
+message of the request apogee is about to send — and on that request alone:
+
+- `pre-request` — every request, once it is built and before it is sent; the answer lands on that
+  same request. A request built again — after an emergency fold, or when a
+  [`fallback:`](configuration.md#moving-to-another-server-when-one-fails--fallback) moves the turn
+  to another server — runs the entry again, and carries the answer of that run.
+- `post-response` — every reply, once it is in; the answer is held and lands on the exchange's next
+  request, the one that carries the reply's tool results. A final reply ends the exchange, so an
+  answer to it reaches no request.
+
+Where the fence stands follows the tail's role, so a request never gains a message a strict chat
+template refuses: after a tool result it trails that result, as a `post-tool-result` fence does; on
+your prompt it leads it, as a session's briefing does; after a reply of the model's it is a user
+message of its own, holding only the fence. It never enters the system prompt, and it stands ahead
+of any note apogee itself puts on that tail; advice held from a `post-response` run lands ahead of
+the request's own `pre-request` advice. The fence is the request's alone: the conversation, the
+saved session and the next request never carry it.
+
 The command is run like a `run:` list — directly, no shell — with the
 [seam document](#the-seam-document) on **stdin** and the `APOGEE_REACTION_*` facts in its
 environment. A webhook mapping under `advise:` is POSTed like a `run:` webhook, the same document
@@ -546,7 +574,8 @@ through three steps before the model sees it:
    advice was fenced at, which is `post-tool-result` for a `file-changed` entry too; the stdin
    document's `event` is what names the entry's own Moment (`file-changed`). At a session's start
    or after a fold the same fence, naming `session-started` or `compaction-finished`, stands at
-   the front of the user message, a blank line before your own text.
+   the front of the user message, a blank line before your own text. On a request's tail it names
+   `pre-request` or `post-response` and stands where the tail's role puts it.
 
 The fence is what the model reads, and only the model: the **session record is written from the
 result, or the message, as it stood before the fence**, so a resumed session carries no advice, a
@@ -579,7 +608,8 @@ Write a script that **returns facts, not imperatives**: the files `gofmt` would 
 failing test's name, the line a linter flagged. The fence tells the model who spoke; it does not
 make the model obey, and a smaller model handed an order inside a tool result will often follow
 it at the cost of the task it was on. Advice is also text the model must read, and pay tokens
-for, on every call the entry fires on — print nothing when there is nothing to say. A briefing
+for, on every call the entry fires on — print nothing when there is nothing to say. A `pre-request`
+entry fires on every request of every exchange, and each one waits for it, so keep it quick. A briefing
 costs one fenced block per entry at each session boundary and each fold, up to 8 KiB, and it stays
 in the context window — every later request carries it — until a fold takes it or replaces it, so
 a short briefing is a cheap one.
@@ -655,7 +685,7 @@ never reaches the Approver (see [Calling an MCP tool](#calling-an-mcp-tool)).
 
 Both keys are inherited by every sub-agent, unconditionally, because a Reaction the parent runs
 with is part of the posture a delegation inherits: an `advise:` fence lands on the child's tool
-results and a `gate:` is asked on the child's calls, each with the child's `depth` and `call_id`
+results and requests and a `gate:` is asked on the child's calls, each with the child's `depth` and `call_id`
 stamped on the document. An `advise:` entry on `session-started` or `compaction-finished` is the
 exception the notices make: a delegation starts no session and its folds are its own, so such an
 entry briefs the top-level model alone.

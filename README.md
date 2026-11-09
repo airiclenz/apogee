@@ -313,8 +313,9 @@ The full tour is in [the manual](docs/manual/README.md).
 - **Reactions** — run a command, POST a webhook or call an MCP tool when an exchange
   ends, a file changes or an approval is waiting; a `gate:` entry can deny a tool call, or hand it to you,
   before it runs; an `advise:` entry hands the model a fact about a call that just
-  finished, or briefs it when a session starts and again after a compaction fold —
-  fenced, capped, never saved with the session. See
+  finished, briefs it when a session starts and again after a compaction fold, or
+  rides the next request apogee sends it — fenced, capped, never saved with the
+  session. See
   [Reactions](docs/manual/reactions.md).
 - **[`apogee probe`](docs/manual/probe.md)** reports what this host, model and terminal
   can do, what `config.yaml` resolves to, and how many tokens apogee itself puts in front
@@ -348,7 +349,7 @@ The [manual](docs/manual/README.md) carries the full reference:
 | [Sessions](docs/manual/sessions.md) | Saving, resuming, forking, browsing, renaming conversations; watching a live one |
 | [Configuration](docs/manual/configuration.md) | `~/.apogee/config.yaml` and a project's `.apogee/config.yaml` end to end: servers and wires, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
 | [Workflows](docs/manual/workflows.md) | One brief over many items: `fan_out`, recipes, `/bg` background workflows, background `sub_agent`, `/workflows` |
-| [Reactions](docs/manual/reactions.md) | Commands, webhooks and MCP tools fired on what a session did (`run:`), that advise the model on a tool result, at a session's start or after a compaction fold (`advise:`) or that gate a tool call (`gate:`), migrating from `hooks:` |
+| [Reactions](docs/manual/reactions.md) | Commands, webhooks and MCP tools fired on what a session did (`run:`), that advise the model on a tool result, at a session's start, after a compaction fold or on the outgoing request (`advise:`) or that gate a tool call (`gate:`), migrating from `hooks:` |
 | [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model and terminal can do, what the config file says, and what the model is sent at turn 1 |
 | [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts; the JSON event lines |
 | [`apogee daemon`](docs/manual/daemon.md) | Standing schedules that outlive the session |

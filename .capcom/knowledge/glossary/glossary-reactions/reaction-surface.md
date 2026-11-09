@@ -18,8 +18,8 @@ reaction takes exactly **one cell**:
   path, never waited on.
 - **advise** — returns text the model sees: fenced, capped, **fail-open** (no advice is just no
   advice), landed as a trailer on the closing tool result, ahead of a user message's text
-  (`session-started`, `compaction-finished`) or at the request's tail, never in the
-  system prompt, **ephemeral** on resume, every span on the **provenance ledger**.
+  (`session-started`, `compaction-finished`) or on the outgoing request's tail by its role,
+  request-only (`pre-request`, `post-response`), never in the system prompt, **ephemeral** on resume, every span on the **provenance ledger**.
 - **gate** — returns allow / deny / ask at `pre-tool-exec` as a stage of the **Approver**, never
   as a seam edit; deny text stays engine-authored. A script saying No is the same act as a human
   saying No. A gate that fails or times out **escalates to ask**.

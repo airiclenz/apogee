@@ -59,8 +59,10 @@ its pinned project files re-checked before every spawn — ADR 0104) —
 `{id, on: [moments], run: <argv | {url, headers, headers-env} | {mcp: {server, tool, args, payload-arg}}>, advise: <argv | {url, …} | {mcp: …}>, gate: <argv | {url, …} | {mcp: …}>, workspace?, timeout?, enabled?}` —
 resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**
 class, fired by the async lane (`internal/reactions`' own runner) on notices; `advise:` at
-**advise** class, fired at four Moments — by the agent's sync lane at `post-tool-result` or
-`file-changed` (the latter narrowing it to a successful write-tool call), and in the background
+**advise** class, fired at six Moments — by the agent's sync lane at `post-tool-result` or
+`file-changed` (the latter narrowing it to a successful write-tool call) and at `pre-request` or
+`post-response` (fenced on the outgoing request's tail, or the Exchange's next one, request-only),
+and in the background
 from a **Session boundary** at `session-started` or from a **Compaction** fold at
 `compaction-finished` — its stdout — or its webhook's reply body, or its MCP tool's text — secret-redacted
 (`tools.RedactSecrets`), capped and fenced as the trailer on the call's result, or ahead of the next
@@ -72,7 +74,7 @@ three shapes — an argv list, a webhook mapping or an MCP mapping — through o
 key beside any other or one outside `{server, tool, args, payload-arg}` is refused with a sentence
 naming the key (`advise: is an argv list, a webhook mapping {url:, headers:, headers-env:} or an mcp
 mapping {mcp: {server:, tool:, args:, payload-arg:}}`), as is an `on:` a
-key's class cannot take (a seam under `run:`, a notice under `gate:`, any Moment but the four under
+key's class cannot take (a seam under `run:`, a notice under `gate:`, any Moment but the six under
 `advise:`); a **Project config**'s entry whose `mcp:` names a server that Project config does not
 itself declare (or declares under a name a global server shadows) is dropped with a notice when the
 file is read, so an adopted entry reaches only its own Project config's servers; and

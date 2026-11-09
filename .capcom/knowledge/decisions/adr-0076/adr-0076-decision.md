@@ -105,6 +105,12 @@ attributes effect by reaction id; `/settings` can show what the model saw this T
 > decision-5-style admission arm. *(Superseded 2026-10-21 by `adr-0076-amend-1021`: the slot
 > meets the structural bar, so the user advise cell on `session-started` is admitted without an arm.)*
 
+> *Amendment (2026-11-09, `adr-0076-amend-1109`):* for `pre-request` and `post-response` the
+> "any other Moment" slot is fixed per tail role on the outgoing request — a trailing fence inside a
+> tool-result tail, a leading fence inside a user tail, one new fence-only user message after an
+> assistant tail — request-only, never in the conversation or the record; post-response advice
+> rides the Exchange's next request.
+
 **7. Deadlines, cap and failure.** `advise` defaults to **10s** and is **fail-open** — no advice is
 just no advice. `gate` defaults to **5s** (it runs on every tool call) and on timeout or crash
 **escalates to ask**: a broken guard becomes a human question, never a silent allow and never a hard

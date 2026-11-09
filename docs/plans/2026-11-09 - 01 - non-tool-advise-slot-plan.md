@@ -259,7 +259,15 @@ Request.Body; internal/domain/advice.go — RenderAdvice, withLeadingAdvice
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestE2EPreRequestAdvise' ./cmd/apogee/`
 **Commit:** `test(apogee): pre-request advise reaches both wires request-only`
 
-## 7. Docs: the second advise slot
+## 7. Docs: the second advise slot — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): ADR amendment filed with `capcom know add --id adr-0076-amend-1109 --parent adr-0076`; named on ADR 0076's Status line and reading-order list, plus a dated pointer blockquote under D6 in adr-0076-decision.md (the adr-0076-amend-1019 precedent); the Rejected row is unchanged — the amendment states it holds.
+NOTES (2026-11-09): reactions.md covers the intro, the class paragraph and seam list, the example `on:` comment, the `advise:` row, the pre-request-finished row (fence included), the seam document (`value` row and prose), "Advising the model" (six Moments, a request-seams block with per-tail placement, refold/fallback re-run, post-response held to the next request and dropped on a final reply, fence header), the cost note and the delegate-inheritance paragraph.
+NOTES (2026-11-09): consequential edit — docs/manual/README.md: made necessary by the Reactions row listing where advise fires (the regression guard's sweep names it).
+NOTES (2026-11-09): consequential edit — .capcom/knowledge/glossary/glossary-reactions/reaction.md: made necessary by its "fired at four Moments" / "any Moment but the four under advise:" sentences, false since item 4.
+NOTES (2026-11-09): consequential edit — .capcom/knowledge/decisions/adr-0076/adr-0076-decision.md: made necessary by the amendment fixing D6's non-tool slot (pointer blockquote under D6).
+NOTES (2026-11-09): consequential edit — internal/tui/doc.go: made necessary by the /advice board now also folding request-tail advice (the advicepane.go summary line).
+NOTES (2026-11-09): consequential edit — internal/domain/advice.go: made necessary by the advise-slot section header listing only the tool-result and session-started placements.
 
 **What:** **Goal:** the manual, glossary and ADR 0076 describe advise at `pre-request` and `post-response`, the
 per-tail placement and its request-only lifetime. Depends on item 6.
