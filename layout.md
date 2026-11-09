@@ -150,7 +150,7 @@ leader for `⋯`, an ASCII spinner) — the full list is in `docs/manual/configu
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
 prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the
-`/usage` report, the `/inspect` wire-traffic pane, the `/thinking` pane, the `/advice` pane, the `/` and
+`/usage` report, the `/inspect` wire-traffic pane, the `/thinking` pane, the `/advice` pane, the `/mcp` pane, the `/` and
 `@` dropdown, the staged-interjection band and the skill-suggestion row all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
@@ -187,7 +187,7 @@ and whether the click is spent on closing it:
 
 | Pane | A click outside it |
 | --- | --- |
-| `/usage`, `/inspect`, `/thinking`, `/advice` | dismisses the pane, and the click still lands where it was aimed |
+| `/usage`, `/inspect`, `/thinking`, `/advice`, `/mcp` | dismisses the pane, and the click still lands where it was aimed |
 | `/sessions` browser, `/model` \| `/server` picker | dismisses the pane, and the click is spent on that — these two are modal |
 | `/workflows` view | dismisses the pane, and the click is spent on that — it is modal; while a recipe is being named (the `^s` name row is up) every click, inside the box or out, is claimed and ignored, and the pane and the name typed so far stay |
 | `/` \| `@` dropdown | dismisses the menu, and the click still lands where it was aimed — the menu decides nothing, and the next keystroke re-derives it |
@@ -268,6 +268,8 @@ doing.** The **session area** goes first and goes to nothing; then the **skill-s
 which is advice about a message that has not been sent yet; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
 **`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
+**`/mcp` pane**, a reading of the MCP fold, which keeps every server's state whether or not the pane
+is drawn, and a status a reader asks after rather than a stream they sit and watch; then the
 **`/advice` pane**, a window onto a board that keeps every advise firing whether or not the pane is
 drawn, and a record of what the model was told rather than of what it is thinking now; then the
 **`/thinking` pane**, a window onto a board that keeps every turn's reasoning whether or not the
@@ -742,7 +744,7 @@ column stay a single column.
 
 **Every overflowing popup carries the same bar.** A bordered pane whose list is longer than the
 window it was granted paints those same two weights down the last column *inside* its border —
-the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, `/thinking`, `/advice`, the dropdown,
+the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, `/thinking`, `/advice`, `/mcp`, the dropdown,
 the approval and ask prompts alike, because a windowed list that gives no sign of what it is holding
 back is the same omission wherever it is drawn. The rows stop **one blank column short of the bar**,
 the transcript's rule: a row's last glyph, and the selected row's highlight, end before that gap, so
@@ -2437,7 +2439,7 @@ would scroll what is hidden.
 four: it is a question already answered rather than a decision surface, so the input box behind it
 stays live and every other key — a printable one included — goes where it always went. Its verb is safe while the agent works — the pane reads
 what the frame already holds and calls nothing — which is exactly when the question gets asked, so
-it is one of the four reports — with `/inspect`, `/thinking` and `/advice` — that can be up beside an
+it is one of the five reports — with `/inspect`, `/thinking`, `/advice` and `/mcp` — that can be up beside an
 approval or ask prompt, seated below it, nearest the chrome. In the give-way order it sits between the `/settings` pane and the `/inspect` pane: it
 yields to every surface the human is acting **in**, and the panes below it — the wire-traffic view,
 and the dropdown the next keystroke re-derives among them — yield before it.
@@ -2559,7 +2561,7 @@ streams while the pane is up is shown rather than landing below a frozen window,
 end is what stops that, and scrolling back down onto the last full window is what resumes it. Its
 keyboard is the `/usage` report's exactly: `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and nothing else. There is no
 `ctrl+r` — one rendering is the point of the pane, and raw bytes are `/inspect`'s job. It is
-non-modal on the same terms as the other three reports: the box behind it stays live and every other
+non-modal on the same terms as the other four reports: the box behind it stays live and every other
 key, a printable one included, goes where it always went. The hint under the rows reads `↑/↓ scroll
 · esc close`. Its verb is safe while the agent works, which is when the thinking worth reading is
 being made.
@@ -2571,17 +2573,17 @@ reasoning into one arrival-ordered stream, and a reader who has not opened a chi
 the agent they are talking to. There is no key for the scope and no manual filter: opening a run is
 what narrows it, and closing the view is what widens it back.
 
-**In the give-way order it sits below the `/inspect` pane**, above the `/advice` pane and the dropdown. It is a window
+**In the give-way order it sits below the `/inspect` pane**, above the `/advice` and `/mcp` panes and the dropdown. It is a window
 onto a board that keeps its records whether or not the pane is drawn — reopened on a taller window it
 says exactly what it would have said — and of the windows onto retained state, prose a reader
 returns to yields before the evidence of a call that has just gone wrong.
 
-**The pointer works on it exactly as it does on the other three reports.** A click **outside** the box
+**The pointer works on it exactly as it does on the other four reports.** A click **outside** the box
 dismisses the pane and still lands where it was aimed, a click **inside** does nothing and is
 swallowed rather than dragging a selection across the transcript drawn under it, and the **wheel**
 scrolls the rows one per notch, clamped at the first row and the last full window — the two ends the
-keys stop at — and it detaches and re-attaches the follow at those ends exactly as they do. It is asked THIRD of the four reports, in the slot's own draw order, so a click aimed
-here dismisses the panes above it first; the `/advice` pane is asked after this one.
+keys stop at — and it detaches and re-attaches the follow at those ends exactly as they do. It is asked THIRD of the five reports, in the slot's own draw order, so a click aimed
+here dismisses the panes above it first; the `/advice` and `/mcp` panes are asked after this one.
 
 ---
 
@@ -2630,19 +2632,61 @@ does: a firing that lands while the pane is up is shown rather than landing belo
 scrolling up off the end is what stops that, and scrolling back down onto the last full window is
 what resumes it. Its keyboard is the `/thinking` pane's exactly: `esc`, `↑`/`↓` by a row,
 `PgUp`/`PgDn` by a window, and nothing else — no `ctrl+r`, one rendering. It is non-modal on the same
-terms as the other three reports: the box behind it stays live and every other key, a printable one
+terms as the other four reports: the box behind it stays live and every other key, a printable one
 included, goes where it always went. The hint under the rows reads `↑/↓ scroll · esc close`.
 
-**In the give-way order it sits below the `/thinking` pane**, above only the dropdown: a window onto a
+**In the give-way order it sits below the `/thinking` pane**, above the `/mcp` pane and the dropdown: a window onto a
 board that keeps its firings whether or not the pane is drawn, and of the windows onto retained state
 the one a reader returns to last.
 
-**The pointer works on it exactly as it does on the other three reports.** A click **outside** the
+**The pointer works on it exactly as it does on the other four reports.** A click **outside** the
 box dismisses the pane and still lands where it was aimed, a click **inside** does nothing and is
 swallowed, and the **wheel** scrolls the rows one per notch, clamped at the first row and the last
-full window, detaching and re-attaching the follow at those ends as the keys do. It is asked LAST of
-the four reports, in the slot's own draw order, so a click aimed here dismisses the panes above it
-first.
+full window, detaching and re-attaching the follow at those ends as the keys do. It is asked FOURTH of
+the five reports, in the slot's own draw order, so a click aimed here dismisses the panes above it
+first; the `/mcp` pane is asked after this one.
+
+---
+
+## The `/mcp` popup
+
+**What it shows.** `/mcp` opens a bordered pane in the same transcript-side slot, titled `mcp
+servers`, holding one row per configured MCP server under a `server · transport · source · state ·
+tools` heading, in the order the servers were first reported. `source` is `global` or `project`
+(a server from an adopted Project config); `state` is the phase the server's last lifecycle Event
+reported — `dialling`, `connected`, `failed` or `disconnected` — qualified where the bare phase
+would mislead: a reconnect that failed while the previous connection still serves reads `failed
+(previous connection kept)` and keeps that connection's tool count, and a server closed on purpose
+reads `disconnected (denied)` when a `url-safety` edit closed its endpoint. A removed server has no
+row. Under a failed server's row its cause follows as wrapped prose, `  cause: …`, rather than as a
+cell, so a long cause never widens a column of the table. With no server configured the pane is one
+row, `no MCP servers configured`. Server names, transports and causes are untrusted text, shown with
+terminal escapes stripped.
+
+**It reads the MCP fold, never the transcript.** The rows come from the MCP server state every
+Driver view folds from `MCPServerEvent`s (ADR 0111 decisions 8 and 9): the composition root emits
+one as each server's dial starts and ends and as a live session is closed on purpose, and the
+startup state is seeded into the TUI at launch and into each Event journal at its birth. A server
+changing state while the pane is up repaints on the next frame. The state belongs to the process,
+not the conversation, so `/clear` and a resume leave it alone; while **watching** a session the
+fold is the watched process's own, built from its journal's `mcp_server` lines, which is why `/mcp`
+is one of the verbs a watch still runs. The pane only reports: reconnecting a failed server stays on
+the `/settings` `mcp-servers` row.
+
+**Its keys and pointer are the report's.** `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and
+nothing else — no `ctrl+r`, one rendering; the hint reads `↑/↓ scroll · esc close`. It is non-modal
+on the same terms as the other four reports, its verb runs while the agent works, and it keeps the
+clamp alone rather than following a tail, as `/usage` does: it is a reading, not a stream. A second
+`/mcp` on an open pane re-opens it at the top. A click **outside** the box dismisses the pane and
+still lands where it was aimed, a click **inside** does nothing and is swallowed, and the **wheel**
+scrolls the rows one per notch. It is asked LAST of the five reports, in the slot's own draw order,
+so a click aimed here dismisses the panes above it first. **In the give-way order it sits below the
+`/advice` pane**, above only the dropdown.
+
+**The side panel's `mcp` section is its glance.** The section lists each server as `name · state ·
+N tools`, shows itself under `auto` while a server is dialling, failed or disconnected, and a click
+on it — or `⏎` on it in navigation mode — opens this pane
+([`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md)).
 
 ---
 
@@ -3056,13 +3100,13 @@ idle, and the rest of the draft stays exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
 verbs that only report (`/version`, `/help`, `/skills`, `/usage`, `/inspect`, `/thinking`, `/advice`,
-`/workflows`, `/confine` with no arguments) run there and then, and so do `/schedule` and
+`/mcp`, `/workflows`, `/confine` with no arguments) run there and then, and so do `/schedule` and
 `/schedule-stop`, which touch no engine at all: a schedule fires as a run of its own, so creating or
 stopping one needs no quiet moment in this session. So do `/sub-agents-server`, which moves only
 where the next delegation is spawned, and `/effort`, whose level is read when the next request is
 built. **That is the one rule for which panes open mid-run:** a pane opens while the model works
-exactly when its verb runs there and then — the four reports (`/usage`, `/inspect`, `/thinking`,
-`/advice`), the `/workflows` view, and the picker as `/effort`, `/schedule`, `/schedule-stop` and
+exactly when its verb runs there and then — the five reports (`/usage`, `/inspect`, `/thinking`,
+`/advice`, `/mcp`), the `/workflows` view, and the picker as `/effort`, `/schedule`, `/schedule-stop` and
 `/sub-agents-server` open it — and every other pane-opening verb (`/model`, `/server`, `/sessions`,
 `/settings`, …) wears the tag and opens at the next idle. The one pane no verb opens, a background
 workflow's waiting prompt, waits for idle too. `/git` runs there and then as well, but its picker

@@ -215,7 +215,8 @@ that anyone is watching, and nothing flows back to it. The design is
 - **While you watch**, the prompt box reads `watching <title> · read-only · esc back`. Typing to
   the session, sending, a command that would act on it, `shift+tab` and every picker are refused
   with a flash: `read-only — you are watching this session; esc goes back`. The view-only
-  commands still work — `/thinking`, `/help`, `/usage`, `/inspect` and `/version`. The context
+  commands still work — `/thinking`, `/help`, `/usage`, `/inspect`, `/mcp` and `/version`; `/mcp`
+  shows the watched session's MCP servers, as its journal reports them. The context
   gauge shows the watched session's fill against the window that session is bound to, as its
   journal's opening frame names it, from the moment you open it; a journal from an older apogee, or
   a frame naming no window (e.g. after a `/server` move), uses your own window until the session's

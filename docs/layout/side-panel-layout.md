@@ -1,15 +1,15 @@
 > **Status:** shipped (2026-11-08, `docs/plans/archived/2026-11-08 - 00 - tui-side-panel-plan.md`), from the
 > 2026-11-07 grill ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md), issue `tui-side-panel`).
 > Keyboard navigation joined it 2026-11-09 ([ADR 0111](../../.capcom/knowledge/decisions/adr-0111.md),
-> which supersedes ADR 0110 decisions 3 and 8). This file describes the panel as built. `layout.md` §"The side panel" holds the rule that binds the
+> which supersedes ADR 0110 decisions 3 and 8), and the `mcp` section with it (ADR 0111 decision 10). This file describes the panel as built. `layout.md` §"The side panel" holds the rule that binds the
 > rest of the frame; the user-facing account is `docs/manual/configuration.md` (the `ui:` section).
 
 # The side panel
 
 The side panel is a column on the right of the transcript slot, 36 columns wide by default and
 resized by dragging its separator. It keeps live session state in
-view: sub-agents, the task list, files changed this session, and usage. It is a glance. The detail
-views (Run view, the task-list card, `/usage`) stay where they are, and a click on a section opens
+view: sub-agents, the task list, files changed this session, usage, and the MCP servers. It is a
+glance. The detail views (Run view, the task-list card, `/usage`, `/mcp`) stay where they are, and a click on a section opens
 its detail — as does `⏎` on it in navigation mode, the keyboard's way into the column.
 
 ## Where it sits
@@ -104,7 +104,8 @@ Each section is one entry in the ordered `ui.side-panel.sections` list (shaped l
 | `auto` | while its live rule holds |
 | `hidden` | never |
 
-Default list, all `auto`: `sub-agents`, `tasks`, `changed-files`, `usage`.
+Default list, all `auto`: `sub-agents`, `tasks`, `changed-files`, `usage`, `mcp`. A list that leaves a
+section out gets it appended in `auto`, so a list saved before `mcp` existed shows it last.
 
 | Section | Live while (auto) | Row content |
 |---|---|---|
@@ -112,6 +113,7 @@ Default list, all `auto`: `sub-agents`, `tasks`, `changed-files`, `usage`.
 | `tasks` | the list has an unfinished task | status glyph and task text; the first unfinished task marked `▸` |
 | `changed-files` | the session (any depth) has written a file | path trimmed from the left, `↳` when a sub-agent wrote it, `+N −M` from Edit regions where present |
 | `usage` | context fill ≥ 50% | fill bar with `used/window`; `sys · tools · hist` split (history = estimate − standing rows); `in · out` tokens; cache hit %; spend |
+| `mcp` | any MCP server is `dialling`, `failed` or `disconnected` | `name · state · N tools`, one row per server in first-reported order |
 
 The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune; the rules are ADR
 0110's.
@@ -132,6 +134,16 @@ hours (`1d02h`), clamped at `99d23h` — never wider than six columns, where the
 window, blank before it has one. Phase, elapsed and fill sit in fixed-width columns at the right
 edge, so the facts of every row line up.
 
+**MCP rows.** The section reads the process's MCP server state — the fold of every
+`MCPServerEvent` (ADR 0111 decision 8): emitted by the composition root as each server's dial starts
+and ends and as a live session is closed on purpose, and seeded at startup — not the viewed run's,
+since no run owns a server. A row is written flush left as `name · state · N tools` (`1 tool`), the
+name clipped first so the state and the count stay in view; the state is faint, `failed` in the
+error tone. The count is left off while no connection serves, and kept while a dial is under way
+with the previous connection's tools in hand or a failed reconnect's previous connection still
+serves. A server removed from the configuration has no row; one a `url-safety` edit closed reads
+`disconnected`. Server names are untrusted text, escape-stripped at the fold and again at paint.
+
 **Task rows.** A finished task is the done mark, dim; the current task (the first unfinished one) is
 `▸` in the current-task style; any other open task is `○`. The task list stores only done / not
 done, so there is no separate in-progress state.
@@ -145,7 +157,9 @@ file changed through the `terminal` tool is not shown (ADR 0110 decision 13).
 **Header row:** `◆ <Title>` with a summary wherever the section has one — `Sub-agents 1 running`
 (`2 running · 1 queued`, `3 queued`, or `3 done` once all have ended; a waiting run counts as the
 running or queued run it is, so a section folded to its header shows no wait), `Tasks 2/5`,
-`Changed files 4` (the file count), `Usage 62%` — and the pin glyph `⊙` (auto) or `●` (pinned) at
+`Changed files 4` (the file count), `Usage 62%`, `MCP 1 failed` (the servers not connected, by
+state in the order dialling, failed, disconnected — `2 dialling · 1 failed` — and no summary while
+every one is connected) — and the pin glyph `⊙` (auto) or `●` (pinned) at
 the right edge.
 
 ## Overflow
@@ -165,7 +179,8 @@ When the shown sections need more rows than the slot has:
   - a sub-agent row → that run's Run view;
   - a task row → the task-list card, unfolded and scrolled to;
   - a changed-file row → that write's tool block, unfolded and scrolled to;
-  - usage → `/usage`.
+  - usage → `/usage`;
+  - an mcp row → `/mcp`.
 - A click on the **pin glyph** toggles `pinned` ↔ `auto` and writes the list back to the setting.
 - A click on the header title does nothing. The keyboard reaches the same targets through navigation
   mode (Keyboard, below).
@@ -196,7 +211,8 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
 
 - **Stops** are the click targets of "Pointer", in paint order: every section header, each sub-agent
   row and each changed-file row; adjacent rows that share one target are one stop, so the tasks body
-  is one stop (the task-list card) and the usage rows are one (`/usage`). The `+N more` row and a body
+  is one stop (the task-list card), the usage rows are one (`/usage`) and the mcp rows are one
+(`/mcp`). The `+N more` row and a body
   row with nothing to open are none.
 - **Entering.** `⌥↑`/`⌥↓` start the mode in the transcript, or in the panel when the transcript has
   no stop — `⌥↑` at the last stop, `⌥↓` at the first. Inside the mode `→` moves the cursor from the
@@ -211,7 +227,7 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
   under "Pointer" hold for it unchanged: under a modal pane it does nothing, and on a pin while
   watching a session it flashes the watch refusal. On a header it toggles the section's pin and the
   cursor stays on that header; a stop that opens a detail — a run's Run view, the task-list card, a
-  changed file's tool block, `/usage` — ends the mode, the keys going back to the prompt.
+  changed file's tool block, `/usage`, `/mcp` — ends the mode, the keys going back to the prompt.
 - **`^x`** on a sub-agent row stops that run (ADR 0086 D5), with no confirmation, and leaves the
   cursor where it was so the row can say how the run ended; while watching it flashes the watch
   refusal. On any other stop `^x` is not the mode's.
@@ -220,7 +236,7 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
   keeps the view open; with the cursor on the view's transcript it goes one level up, as before.
 - **Identity.** The column re-lays out under every Event, so the cursor holds its stop by identity —
   a header by its section, a sub-agent row by its run, a changed-file row by its path, the task card,
-  the usage report — rather than by row. A stop that has gone falls back to the stop of the same
+  the usage report, the mcp report — rather than by row. A stop that has gone falls back to the stop of the same
   section nearest the row it was on, then to the column's first stop; a column left with no stop
   hands the cursor to the transcript, or ends the mode where the transcript has none either.
 - **The mark.** The cursor's row wears a `▌` in the blank gutter cell right of the separator, plus the
@@ -235,7 +251,8 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
 
 While Run view shows a run, `tasks`, `changed-files` and `usage` show that run's state, and the
 usage fill reads exactly what the status-line gauge reads. `sub-agents` keeps listing every run, and
-the viewed one is marked with `▸` before its name, both in the current-task style. `esc` back to the
+the viewed one is marked with `▸` before its name, both in the current-task style; `mcp` keeps
+showing every server, which belongs to the process rather than to a run. `esc` back to the
 conversation gives the panel back to the top level.
 
 ## Commands
@@ -260,8 +277,10 @@ conversation gives the panel back to the top level.
 
 ## Replay
 
-Watch mode folds the Event journal, so it paints the live session's panel. `/clear` empties the
-panel. A resumed session has
+Watch mode folds the Event journal, so it paints the live session's panel — its `mcp` section from
+the journal's `mcp_server` lines, which open with the watched process's state at the journal's birth.
+`/clear` empties the panel but for `mcp`: the servers stay connected across it, so their rows stay.
+A resumed session has
 no journal and folds its stored record instead: the task list, changed files and usage come back,
-and the sub-agents section starts empty. The visibility rule is the viewer's own window and
+the sub-agents section starts empty, and `mcp` keeps this process's own servers. The visibility rule is the viewer's own window and
 setting.

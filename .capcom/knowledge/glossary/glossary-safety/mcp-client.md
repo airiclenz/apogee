@@ -43,7 +43,15 @@ endpoint's floor exemption never extends to it. `auth:` on stdio or sse, or besi
 `Authorization` header, is a refusal rather than a note. A live `mcp-servers:` edit **reconnects
 server by server** (ADR 0109): only the servers it adds or changes are dialled, off the TUI's Update
 loop, and the finished dials join the registry at the next idle point; a failed re-dial keeps that
-server's old session, and each outcome is a transcript note of its own. Startup connect stays
+server's old session, and each outcome is a transcript note of its own. Every server's lifecycle is
+also an **Event**: the composition root emits an `MCPServerEvent` (`mcp_server` in the journal) as
+each dial starts (`dialling`) and ends (`connected` with its tool count, or `failed` with its cause
+and whether the previous connection is kept) and as a live session is closed on purpose
+(`disconnected`, `removed` or `denied`), through the engine's serialised sink — the engine itself
+stays MCP-blind — and the startup state is seeded into the TUI and into each Event journal at its
+birth (ADR 0111 decision 8). Every Driver view folds those Events into one per-server state, read by
+`/mcp` (a read-only report pane) and by the **Side panel**'s `mcp` section, and **Watch mode** shows
+the watched process's (ADR 0111 decisions 9 and 10). Startup connect stays
 all-or-nothing and fatal. Mid-session nothing prompts: a reconnect
 that needs a login fails naming `apogee mcp login <name>` (ADR
 0095). **Resume reconnects

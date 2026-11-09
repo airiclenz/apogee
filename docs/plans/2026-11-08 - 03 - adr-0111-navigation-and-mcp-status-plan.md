@@ -649,7 +649,11 @@ internal/tui/usage.go — runUsageCommand; internal/tui/sidepanel_test.go — Te
 **Acceptance:** `go build ./internal/tui/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestSidePanelMCP|TestNavModeEnter|TestPanelStops' ./internal/tui/`
 **Commit:** `feat(tui): show MCP server state in the side panel`
 
-## 21. Document `/mcp` and the `mcp` section
+## 21. Document `/mcp` and the `mcp` section — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): layout.md gained a whole `## The /mcp popup` section (after the `/advice` popup) rather than only list amendments, since every other report has one; "the other three reports" became "the other four reports" in the `/thinking` and `/advice` sections, and `/advice` is now asked FOURTH of the five reports by the pointer, with `/mcp` LAST (panes.go pointer ranks 2–6), and the give-way order places `/mcp` between the dropdown and `/advice` (framePane order).
+NOTES (2026-11-09): layout.md has no separate key-precedence prose beyond the give-way order and the mid-run pane rule, so those (and the report lists) are the sites amended there.
+NOTES (2026-11-09): left as written — `docs/design/side-panel-findings.md`'s four-section list (a dated findings record, not in Files) and README.md, which names no side-panel section and lists reports only as feature highlights.
 
 **What:** docs for items 14–20. Depends on item 20.
 **Regression guard.** The rule also covers every list of watch or report verbs in either order and every "four reports"

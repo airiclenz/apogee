@@ -254,6 +254,20 @@ ConnectWith(ctx, Host, []ServerConfig, URLGuard, workspaceRoot)   // the same ov
   again when the lists, at its last request and now, admit it and no dial for it is pending. Each outcome is one transcript note per server (`mcp <server> reconnected`,
   `mcp reconnect failed: <server>: … — previous connection kept`, …). Startup's `Connect` stays
   all-or-nothing and fatal.
+- **Lifecycle is an Event too (ADR 0111 decisions 8–10).** `internal/mcp` knows nothing of it: the
+  dial owner in `cmd/apogee/wire_mcp.go` posts a `domain.MCPServerEvent` (`mcp_server` in the Event
+  journal) as each server's dial starts (`dialling`) and finishes (`connected` with its tool count,
+  or `failed` with the de-labelled cause and `kept` when a live session still serves), and when a
+  live session is closed on purpose (`disconnected`, reason `removed` or `denied`); a reconnect goes
+  `dialling` → `connected | failed` with no `disconnected` between. The posts land in an ordered
+  outbox drained off the TUI's Update goroutine and never under the holder's lock, and leave through
+  the engine's own serialised sink (`apogee.SerializeEvents`), so the engine stays MCP-blind. The
+  startup state — each connected server and its tool count, and a repo server skipped for a moved
+  pin as `failed` — seeds the TUI's state at launch and opens every live Event journal (fresh,
+  resumed, or reborn after `/clear`) right after `run_started`. Every Driver view folds those Events
+  into one per-server state (`internal/sidepanel`'s `MCPServers`), which the read-only `/mcp` report
+  pane and the side panel's `mcp` section read, and a watch folds the watched process's journal
+  lines instead. The transcript notes stay; they are no longer the only place an outcome is seen.
 - **Close** joins every session's teardown error and clears the sessions; it is safe on a dormant or
   already-closed Client. The composition root `defer`s it so no process or connection survives exit.
 

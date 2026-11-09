@@ -905,7 +905,10 @@ status line shows `reconnecting MCP…` while a dial runs between turns, a slow 
 the others, and quitting cancels the dials rather than waiting on them. Each server's tools join
 at the next idle moment, mid-turn dials included, and each outcome arrives as a transcript note of
 its own: `mcp docs reconnected` (or `mcp docs connected` for a new server), `mcp reconnect failed:
-docs: … — previous connection kept`, or `mcp connect failed: docs: …`. A server that will not come
+docs: … — previous connection kept`, or `mcp connect failed: docs: …`. Those notes are not the only
+place to look: [`/mcp`](commands.md) reports every server's transport, source, state, tool count and
+the cause of its last failure, and the side panel's [`mcp` section](#the-side-panel) shows itself
+while a server is dialling, failed or disconnected. A server that will not come
 back keeps its old connection serving; a new one whose first dial fails stays absent. A removed
 server's tools are refused at once. Nothing retries a failed server on its own: a save that changes
 it does, and so does the `/settings` round trip, even one that changes nothing, which re-dials
@@ -1293,8 +1296,8 @@ ui:
 ```
 
 `ui.side-panel.show` is when the side panel is drawn: a column right of the transcript
-that shows the sub-agents at work, the task list, the files changed this session and the usage
-([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md)). `auto` — the default — draws it while
+that shows the sub-agents at work, the task list, the files changed this session, the usage and
+the MCP servers ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md)). `auto` — the default — draws it while
 the transcript keeps at least 100 columns beside it, `on` while it keeps at least 80, and `off`
 never. Any other word is a startup error that names the key. It lives in a nested `side-panel:`
 block, and `/settings` edits it. What the panel shows, and what a click on it does, is under [The
@@ -1307,7 +1310,7 @@ is not a whole number is a startup error that names the key. It lives in the sam
 block, and `/settings` edits it, live.
 
 `ui.side-panel.sections` lists the panel's sections in the order it shows them — `sub-agents`,
-`tasks`, `changed-files` and `usage` — each in a mode: `pinned` (always shown), `auto` (shown while
+`tasks`, `changed-files`, `usage` and `mcp` — each in a mode: `pinned` (always shown), `auto` (shown while
 it has something live) or `hidden` (never shown). The default is every section `auto`, in that
 order. A section the list leaves out follows the ones it names, in `auto`, so a list written before a
 section existed still loads. A name that is not a section, a mode that is not one of the three, and
@@ -1353,9 +1356,9 @@ skill, and `/skills` lists them back so you can see what a skill declared.
 
 On a wide terminal apogee draws a panel on the right of the transcript, 36 columns wide unless you
 drag it wider or narrower (`ui.side-panel.width`), that keeps the
-session's live state in view: the sub-agents at work, the task list, the files changed this session
-and the usage. It is a glance, not a workspace: the views it summarises (a sub-agent's run view,
-the task-list card, `/usage`) stay where they were, and the keyboard reaches it through
+session's live state in view: the sub-agents at work, the task list, the files changed this session,
+the usage and the MCP servers. It is a glance, not a workspace: the views it summarises (a sub-agent's run view,
+the task-list card, `/usage`, `/mcp`) stay where they were, and the keyboard reaches it through
 [navigation mode](commands.md), the same bar `⌥↑`/`⌥↓` light on the transcript.
 
 **When it shows.** Under `ui.side-panel.show: auto` (the default) the panel appears once the window
@@ -1382,8 +1385,11 @@ with its summary and a pin glyph — `⊙` for `auto`, `●` for `pinned`:
 | `tasks` | the task list has an unfinished task | `✓` done, `▸` the current task (the first unfinished one), `○` still open |
 | `changed-files` | the session has written a file, at any depth | the path, trimmed from the left to fit; `↳` when a sub-agent wrote it; `+N −M` lines where the edit reports them |
 | `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
+| `mcp` | an MCP server is dialling, failed or disconnected | the server's name, its state and its tool count (`docs · connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
 
-Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
+The `mcp` section's header counts the servers that are not connected, by state (`◆ MCP 1 failed`,
+`2 dialling · 1 failed`), and the section hides again once every server is connected. Its server
+names are shown with terminal escapes stripped. Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
 shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x` and the waiting one `?`.
 
 When the sections need more rows than the panel has, pinned sections get their rows first, then
@@ -1393,7 +1399,7 @@ reads `+N more`. The panel never scrolls.
 
 **The mouse.** A click on a sub-agent row opens its run view; on a task row it unfolds the
 task-list card and scrolls to it; on a changed-file row it unfolds that write's tool block (opening
-the run that wrote it); on the usage section it opens `/usage`. A click on a header's pin glyph
+the run that wrote it); on the usage section it opens `/usage`; on the mcp section it opens `/mcp`. A click on a header's pin glyph
 toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
 config. Dragging the panel's separator — the `│` on its left edge, or the blank column beside it —
 resizes the panel: the panel and your conversation re-wrap as you drag, and the separator lights up
@@ -1406,7 +1412,8 @@ mouse wheel do nothing there.
 
 **Run view.** While a sub-agent's run view is open, the tasks, changed files and usage are that
 run's, and the usage fill matches the status-line gauge; the sub-agents section still lists every
-run and marks the viewed one with `▸`. `esc` back to the conversation gives the panel back to the
+run and marks the viewed one with `▸`, and the mcp section still shows every server, since the
+servers belong to apogee rather than to any one run. `esc` back to the conversation gives the panel back to the
 top level.
 
 **From the prompt.** `/panel on`, `/panel off` and `/panel auto` set `ui.side-panel.show`;
@@ -1420,7 +1427,7 @@ The width has no key of its own: drag the separator or use `/panel width`.
 **The keyboard.** `⌥↑`/`⌥↓` start navigation mode on the transcript, and `→` moves its bar into
 the panel — `⌥↑`/`⌥↓` start it in the panel when the transcript has nothing to stand on. There
 `↑`/`↓` walk the stops: every section header, each sub-agent row and changed-file row, and the
-tasks body and the usage rows as one stop each. The bar's row is marked with a `▌` in the blank
+tasks body, the usage rows and the mcp rows as one stop each. The bar's row is marked with a `▌` in the blank
 column right of the separator as well as in colour. `⏎` is the click on that stop, under the same
 rules as the mouse: on a header it toggles the pin and the bar stays; anything it opens ends the
 mode. `^x` on a sub-agent row stops that run, and `←` takes the bar back to the transcript row it
@@ -1431,7 +1438,9 @@ left; `esc`, or typing your next message, leaves the mode
 session's panel, drawn by your own window and setting; `/panel` is not available while you watch,
 and the separator does not drag. A
 resumed session's panel shows its stored task list, changed files and usage; its sub-agents section
-starts empty. `/clear` empties the panel.
+starts empty. `/clear` empties the panel, except the mcp section: the servers stay connected across
+`/clear` and a resume, so their rows stay. While watching, the mcp section shows the watched
+session's servers.
 
 ## Keeping the window from overflowing — compaction and pruning
 

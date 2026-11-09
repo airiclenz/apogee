@@ -35,7 +35,7 @@ Mid-run delivery is 1:1 (one row, one marked message); a flush at idle joins the
 a **File reference** named in a staged message is message content and rides the Interjection with
 it; a `/command` is not message content, and which ones may run mid-run is a **per-command**
 policy rather than a blanket "at idle" rule — the reporting verbs (`/version`, `/help`, `/skills`,
-`/usage`, `/inspect`, `/advice`, `/thinking`, `/workflows`, `/confine` status), `/effort`, the
+`/usage`, `/inspect`, `/advice`, `/thinking`, `/mcp`, `/workflows`, `/confine` status), `/effort`, the
 Schedule pair (`/schedule`, `/schedule-stop`, which touch only the scheduler library and never this
 session's engine — ADR 0033) and `/sub-agents-server` (it moves only where the next delegation
 spawns, ADR 0045) — the verbs `whileRunning` marks in internal/tui/command.go — run immediately,
