@@ -1494,3 +1494,160 @@ func serverNames(servers []ServerConfig) []string {
 	}
 	return names
 }
+
+// ----------------------------------------------------------------------------
+// Lost — a session that ends on its own
+// ----------------------------------------------------------------------------
+
+// waitLost fails the test unless c.Lost closes within a generous budget.
+func waitLost(t *testing.T, c *Client) {
+	t.Helper()
+	testtime.Eventually(t, testtime.Budget(10*time.Second), func() bool { return lostFired(c) },
+		"Client.Lost to close")
+}
+
+// lostFired reports whether c.Lost has closed, without blocking.
+func lostFired(c *Client) bool {
+	select {
+	case <-c.Lost():
+		return true
+	default:
+		return false
+	}
+}
+
+// waitSessionEnded waits for the session's own Wait to return — the moment its watcher wakes — so
+// a test can order what it does next after the ending rather than racing it.
+func waitSessionEnded(t *testing.T, s *mcpsdk.ClientSession) {
+	t.Helper()
+	ended := make(chan struct{})
+	go func() {
+		_ = s.Wait()
+		close(ended)
+	}()
+	testtime.Eventually(t, testtime.Budget(10*time.Second), func() bool {
+		select {
+		case <-ended:
+			return true
+		default:
+			return false
+		}
+	}, "the session to end")
+}
+
+// A stdio server that dies under the Client is reported: Lost closes and the cause is the process's
+// own ending, never nil.
+func TestClientLost_KilledStdioServerFires(t *testing.T) {
+	c := connectFixture(t)
+	if lostFired(c) {
+		t.Fatal("Lost closed before any session ended")
+	}
+	if err := c.sessions[0].cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill the fixture: %v", err)
+	}
+	waitLost(t, c)
+	if c.LostCause() == nil {
+		t.Fatal("LostCause() = nil after Lost closed, want the process's ending")
+	}
+}
+
+// A session that ends cleanly from the server's side, with no process behind it, reads "connection
+// closed" — the in-memory transport stands in for an HTTP server that hung up, tracked through the
+// same step connectOne records a session with.
+func TestClientLost_CleanServerCloseReadsConnectionClosed(t *testing.T) {
+	ctx := context.Background()
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "gone", Version: "v0.0.1"}, nil)
+	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: clientName, Version: clientVersion}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	c := &Client{}
+	c.track(liveSession{session: session}, nil)
+	t.Cleanup(func() { _ = c.Close() })
+
+	if err := serverSession.Close(); err != nil {
+		t.Fatalf("serverSession.Close: %v", err)
+	}
+	waitLost(t, c)
+	if got := c.LostCause(); got == nil || got.Error() != "connection closed" {
+		t.Fatalf("LostCause() = %v, want \"connection closed\"", got)
+	}
+}
+
+// Two sessions of one Client ending each wake a watcher, and the second report must not close the
+// channel again (a double close panics the test binary).
+func TestClientLost_TwoSessionsEndingFireOnce(t *testing.T) {
+	second := stdioServerConfig(t)
+	second.Name = "second"
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
+	t.Cleanup(cancel)
+	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t), second}, security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	for _, s := range c.sessions {
+		if err := s.cmd.Process.Kill(); err != nil {
+			t.Fatalf("kill a fixture: %v", err)
+		}
+	}
+	for _, s := range c.sessions {
+		waitSessionEnded(t, s.session)
+	}
+	waitLost(t, c)
+	// Close joins both watchers, so both have reported by the time it returns.
+	_ = c.Close()
+	if c.LostCause() == nil {
+		t.Fatal("LostCause() = nil after two sessions ended")
+	}
+}
+
+// A retired Client has been let go: a session that ends after Retire is not reported, nor is the
+// Close that follows.
+func TestClientLost_RetireThenCloseNeverFires(t *testing.T) {
+	c := connectFixture(t)
+	c.Retire()
+	session := c.sessions[0].session
+	if err := c.sessions[0].cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill the fixture: %v", err)
+	}
+	waitSessionEnded(t, session)
+	_ = c.Close()
+	if lostFired(c) {
+		t.Fatalf("Lost closed after Retire; cause %v", c.LostCause())
+	}
+	if c.LostCause() != nil {
+		t.Fatalf("LostCause() = %v after Retire, want nil", c.LostCause())
+	}
+}
+
+// A deliberate Close is not a loss, and it leaves no watcher behind.
+func TestClientLost_CloseNeverFiresAndLeavesNoWatcher(t *testing.T) {
+	// Not parallel: assertNoGoroutineIn scans every goroutine in the test binary.
+	ctx, cancel := context.WithTimeout(context.Background(), testtime.Budget(20*time.Second))
+	t.Cleanup(cancel)
+	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if lostFired(c) {
+		t.Fatalf("Lost closed on a deliberate Close; cause %v", c.LostCause())
+	}
+	assertNoGoroutineIn(t, "internal/mcp.(*Client).watch", testtime.Budget(2*time.Second))
+}
+
+// A nil Client is dormant: Lost is a channel that never fires and LostCause is nil.
+func TestClientLost_NilClientIsDormant(t *testing.T) {
+	var c *Client
+	if c.Lost() != nil || c.LostCause() != nil {
+		t.Fatal("a nil Client reported a lost session")
+	}
+}

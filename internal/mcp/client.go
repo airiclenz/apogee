@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -41,13 +42,60 @@ const (
 // configured pays nothing. It is not safe for concurrent use; drive it from the goroutine
 // that owns the Agent (the SDK sessions themselves are concurrency-safe, but the Client's own
 // connection bookkeeping is not). The one exception is Retire, which any goroutine may call while
-// the Client's tools are running.
+// the Client's tools are running; Lost and LostCause are likewise safe from any goroutine.
 type Client struct {
-	sessions []liveSession // one per connected server, in config order
-	tools    []domain.Tool // surfaced server tools, in (server, tool) order
-	skipped  []Denied      // Project servers left undialled for a moved pin, in config order
-	retired  atomic.Bool   // set by Retire (and Close); every surfaced tool reads it before a call
+	sessions []liveSession  // one per connected server, in config order
+	tools    []domain.Tool  // surfaced server tools, in (server, tool) order
+	skipped  []Denied       // Project servers left undialled for a moved pin, in config order
+	retired  atomic.Bool    // set by Retire (and Close); every surfaced tool reads it before a call
+	watchers sync.WaitGroup // one watch goroutine per tracked session; Close waits for them all
+	lost     lostSignal     // fires the first time a session ends while the Client is neither retired nor closed
 }
+
+// lostSignal is the Client's "a session ended on its own" report: a channel closed at most once,
+// under fire, and the cause recorded just before it closes. A Client holds several sessions, each
+// with its own watcher, so two endings race to report and only the first is kept. Its zero value
+// is ready: the channel is made on first use, so a hand-built or dormant Client needs no
+// constructor.
+type lostSignal struct {
+	init  sync.Once
+	fire  sync.Once
+	ch    chan struct{}
+	mu    sync.Mutex
+	cause error
+}
+
+// done returns the channel, making it on first use.
+func (l *lostSignal) done() chan struct{} {
+	l.init.Do(func() { l.ch = make(chan struct{}) })
+	return l.ch
+}
+
+// report records cause and closes the channel; every call after the first is a no-op.
+func (l *lostSignal) report(cause error) {
+	l.fire.Do(func() {
+		l.mu.Lock()
+		l.cause = cause
+		l.mu.Unlock()
+		close(l.done())
+	})
+}
+
+// recorded returns the cause report kept, or nil before any report.
+func (l *lostSignal) recorded() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.cause
+}
+
+// errConnectionClosed is a lost session's cause when the connection ended without an error of its
+// own and there is no process exit to name (an HTTP transport's clean end).
+var errConnectionClosed = errors.New("connection closed")
+
+// errExitStatusZero is a lost stdio session's cause when the server process exited cleanly: the
+// shutdown ladder (stdinLadder.Close) hands the connection cmd.Wait's own error, which is nil only
+// for a zero exit, so a nil Wait over a launched process means exactly that.
+var errExitStatusZero = errors.New("exit status 0")
 
 // liveSession is one connected server: the SDK session, plus — for a stdio server — the process
 // this client launched, the teardown holding that process's whole tree, and the cancel ending the
@@ -265,7 +313,7 @@ func (c *Client) connectOne(ctx context.Context, host Host, cfg ServerConfig, gu
 		reapProcess(cmd, td)
 		return fmt.Errorf("mcp: connect to server %q: %w", cfg.Name, redactor.RedactErr(err))
 	}
-	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td, cancel: cancel})
+	c.track(liveSession{session: session, cmd: cmd, td: td, cancel: cancel}, redactor)
 
 	tools, err := listServerTools(ctx, cfg.Name, cfg.Project, &c.retired, session, redactor)
 	if err != nil {
@@ -273,6 +321,62 @@ func (c *Client) connectOne(ctx context.Context, host Host, cfg ServerConfig, gu
 	}
 	c.tools = append(c.tools, tools...)
 	return nil
+}
+
+// track records a connected session on the Client and starts its watcher (watch). It is the one
+// step every session takes into the Client, so Close can tear down and wait for whatever track
+// recorded. redactor cuts the server's endpoint from the cause watch records (nil for stdio).
+func (c *Client) track(s liveSession, redactor *security.OriginRedactor) {
+	c.sessions = append(c.sessions, s)
+	c.watchers.Add(1)
+	go c.watch(s, redactor)
+}
+
+// watch parks on the session's Wait, which returns once the connection has ended — for any reason:
+// the server exited or dropped the connection, or Close closed the session. An ending that finds
+// the Client retired is deliberate (Close retires before it closes anything, and a host that
+// retired the Client has already let it go) and is not reported; any other is reported once through
+// lost, with Wait's error redacted the way a surfaced call's transport error is (serverTool.call).
+// A nil Wait error is a clean end; its cause is then a stdio server's zero exit, else
+// errConnectionClosed, so a reported cause is never nil. The exit status is read only from Wait's
+// error — the stdio ladder's own cmd.Wait result — never from cmd.ProcessState, which that
+// ladder's goroutine may still be writing.
+func (c *Client) watch(s liveSession, redactor *security.OriginRedactor) {
+	defer c.watchers.Done()
+	err := s.session.Wait()
+	if c.retired.Load() {
+		return
+	}
+	switch {
+	case err != nil:
+		err = redactor.RedactErr(err)
+	case s.cmd != nil:
+		err = errExitStatusZero
+	default:
+		err = errConnectionClosed
+	}
+	c.lost.report(err)
+}
+
+// Lost returns a channel closed the first time one of the Client's sessions ends while the Client
+// is neither retired nor closed — a server that died, exited or dropped its connection on its own.
+// A deliberate Retire or Close never closes it. It is safe to call from any goroutine; on a nil
+// Client it returns nil, a channel that never fires.
+func (c *Client) Lost() <-chan struct{} {
+	if c == nil {
+		return nil
+	}
+	return c.lost.done()
+}
+
+// LostCause returns why the session Lost reported ended: never nil once Lost has closed, nil before.
+// The text is redacted of the server's endpoint but is otherwise the transport's own, so a host
+// that shows it treats it as untrusted server text.
+func (c *Client) LostCause() error {
+	if c == nil {
+		return nil
+	}
+	return c.lost.recorded()
 }
 
 // The three bounds on one server's tool list — the post-decode half of the 2026-09-20 audit's
@@ -401,7 +505,9 @@ func (c *Client) Retire() {
 // only thing that reaches those descendants, and Release drops the handle the teardown has owned
 // since before the process existed. Reaping first would turn every clean shutdown into a kill.
 //
-// Close retires the Client first (see Retire), so no surfaced tool reaches a session being closed.
+// Close retires the Client first (see Retire), so no surfaced tool reaches a session being closed
+// and no session it closes is reported through Lost. It returns only once every session's watcher
+// has exited, so a closed Client leaves no goroutine behind.
 func (c *Client) Close() error {
 	if c == nil {
 		return nil
@@ -417,6 +523,7 @@ func (c *Client) Close() error {
 		}
 		reapProcess(s.cmd, s.td)
 	}
+	c.watchers.Wait()
 	c.sessions = nil
 	c.tools = nil
 	if len(errs) > 0 {

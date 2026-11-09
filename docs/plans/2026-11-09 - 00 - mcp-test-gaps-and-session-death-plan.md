@@ -94,7 +94,9 @@ cmd/apogee/e2e_support_test.go — e2eSession.RelaunchWith
 **Closes:** mcp-seed-resume-untested
 **Commit:** `test(apogee): pin the MCP seed on a resumed session's journal`
 
-## 3. `mcp.Client` reports a session that ends on its own
+## 3. `mcp.Client` reports a session that ends on its own — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the in-memory case uses the factored tracking step `Client.track(liveSession, redactor)` (connectOne now records every session through it) rather than an httptest server; a nil `Wait` error over a stdio session reads "exit status 0" (the ladder hands back `cmd.Wait`'s own error, nil only on a zero exit), over any other transport "connection closed". No CHANGELOG entry: the signal has no user-visible effect until items 4–5 consume it.
 
 **What:** **Goal:** an `mcp.Client` exposes a signal that fires exactly when one of its sessions ends while the
 Client is neither retired nor closed, carrying the ending's cause; a deliberate `Retire` or `Close` never
