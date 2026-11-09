@@ -1354,8 +1354,9 @@ skill, and `/skills` lists them back so you can see what a skill declared.
 On a wide terminal apogee draws a panel on the right of the transcript, 36 columns wide unless you
 drag it wider or narrower (`ui.side-panel.width`), that keeps the
 session's live state in view: the sub-agents at work, the task list, the files changed this session
-and the usage. It is a glance, not a workspace — it never takes keyboard focus, and the views it
-summarises (a sub-agent's run view, the task-list card, `/usage`) stay where they were.
+and the usage. It is a glance, not a workspace: the views it summarises (a sub-agent's run view,
+the task-list card, `/usage`) stay where they were, and the keyboard reaches it through
+[navigation mode](commands.md), the same bar `⌥↑`/`⌥↓` light on the transcript.
 
 **When it shows.** Under `ui.side-panel.show: auto` (the default) the panel appears once the window
 is at least 137 columns wide, which leaves the transcript 100; under `on`, from 117 columns, leaving
@@ -1406,7 +1407,17 @@ top level.
 `/panel width <n>` sets `ui.side-panel.width` to `<n>` columns, and `/panel width reset` returns it
 to the default 36. Bare `/panel` reports the settings in force and says when the window is too
 narrow to draw the panel. Every change is saved to your global config ([commands](commands.md)).
-There is no key binding for the panel or its width.
+The width has no key of its own: drag the separator or use `/panel width`.
+
+**The keyboard.** `⌥↑`/`⌥↓` start navigation mode on the transcript, and `→` moves its bar into
+the panel — `⌥↑`/`⌥↓` start it in the panel when the transcript has nothing to stand on. There
+`↑`/`↓` walk the stops: every section header, each sub-agent row and changed-file row, and the
+tasks body and the usage rows as one stop each. The bar's row is marked with a `▌` in the blank
+column right of the separator as well as in colour. `⏎` is the click on that stop, under the same
+rules as the mouse: on a header it toggles the pin and the bar stays; anything it opens ends the
+mode. `^x` on a sub-agent row stops that run, and `←` takes the bar back to the transcript row it
+left; `esc`, or typing your next message, leaves the mode
+([commands](commands.md)).
 
 **Watching and resuming.** [Watching](sessions.md#watching-a-live-session) a session paints that
 session's panel, drawn by your own window and setting; `/panel` is not available while you watch,

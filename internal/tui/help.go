@@ -9,10 +9,15 @@ import "strings"
 // a run view's header does (breadcrumbStopHint, which is built from it) — and
 // TestHelpNoteListsEveryVerb pins each to the legend constant it copies, so a rewording of the box
 // cannot leave /help teaching a spelling the box no longer shows. The rest name gestures the box
-// has no room for: the now send, the down half of recall, the autonomy-mode cycle and transcript
-// scrolling (docs/manual/commands.md's keys paragraph). The now send's key is spelled as the queued
-// readout and the armed-esc hint spell it (queuedWaveHint, escStopHintSkipsFormat), which
-// TestHelpNoteListsEveryVerb pins too.
+// has no room for: the now send, the down half of recall, the autonomy-mode cycle, transcript
+// scrolling and navigation mode (docs/manual/commands.md's keys paragraph). The now send's key is
+// spelled as the queued readout and the armed-esc hint spell it (queuedWaveHint,
+// escStopHintSkipsFormat), which TestHelpNoteListsEveryVerb pins too.
+//
+// The navigation cell names the whole of navigation mode in one cell — the chord that enters it and,
+// inside the parentheses, the keys it claims once on (blockCursorKey) — because those keys mean
+// something else outside the mode and a cell of their own would read as a global binding. Its stop
+// reuses the one-run stop cell: `^x` on a delegation's row is the same verb in both places.
 const (
 	helpKeySend         = "⏎ send"
 	helpKeySendNow      = "ctrl+g send now"
@@ -24,6 +29,7 @@ const (
 	helpKeyQuit         = "⌃c quit"
 	helpKeyMode         = "⇧⇥ mode"
 	helpKeyScroll       = "PgUp/PgDn scroll"
+	helpKeyNavigate     = "⌥↑/⌥↓ navigate (←/→ region, ⏎ act, " + helpKeyStopRun + ", esc leave)"
 )
 
 // helpLegendPrefix opens the key line so it reads as a legend under the verb list, not as one more
@@ -69,6 +75,7 @@ func helpKeyLegend(keyDisambiguation bool) string {
 		helpKeyQuit,
 		helpKeyMode,
 		helpKeyScroll,
+		helpKeyNavigate,
 	}
 	return helpLegendPrefix + strings.Join(cells, helpCellSeparator)
 }

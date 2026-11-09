@@ -12,7 +12,9 @@ import (
 // stop as a run view's header does, and the now send's key as the queued readout and the armed-esc
 // hint do. Each copied
 // cell is asserted against the prompteditor.go constant it copies, so /help can never teach a
-// spelling the box has stopped showing.
+// spelling the box has stopped showing. The legend closes on the navigation cell, which names
+// navigation mode's every key — the entering chord, the region switch, the act, the one-run stop
+// and the way out (blockCursorKey).
 func TestHelpNoteListsEveryVerb(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -46,7 +48,7 @@ func TestHelpNoteListsEveryVerb(t *testing.T) {
 			// The legend trailer names the fixed cells, with the newline chord this terminal delivers.
 			legend := lines[len(lines)-1]
 			if want := helpLegendPrefix + strings.Join([]string{
-				helpKeySend, helpKeySendNow, c.wantNewline, helpKeyRecall, helpKeyStop, helpKeyStopRun, helpKeyQuit, helpKeyMode, helpKeyScroll,
+				helpKeySend, helpKeySendNow, c.wantNewline, helpKeyRecall, helpKeyStop, helpKeyStopRun, helpKeyQuit, helpKeyMode, helpKeyScroll, helpKeyNavigate,
 			}, helpCellSeparator); legend != want {
 				t.Errorf("legend = %q, want %q", legend, want)
 			}
@@ -61,6 +63,14 @@ func TestHelpNoteListsEveryVerb(t *testing.T) {
 			}
 			if !strings.HasSuffix(breadcrumbStopHint, helpCellSeparator+helpKeyStopRun) {
 				t.Errorf("one-run stop cell %q is not spelled by the run view's hint %q", helpKeyStopRun, breadcrumbStopHint)
+			}
+			if !strings.HasSuffix(legend, helpCellSeparator+helpKeyNavigate) {
+				t.Errorf("legend %q does not close on the navigation cell %q", legend, helpKeyNavigate)
+			}
+			for _, key := range []string{"⌥↑/⌥↓ navigate", "←/→ region", "⏎ act", helpKeyStopRun, "esc leave"} {
+				if !strings.Contains(helpKeyNavigate, key) {
+					t.Errorf("navigation cell %q does not name %q", helpKeyNavigate, key)
+				}
 			}
 			nowKey := strings.Fields(helpKeySendNow)[0]
 			for _, spelled := range []string{queuedWaveHint, escStopHintSkipsFormat} {

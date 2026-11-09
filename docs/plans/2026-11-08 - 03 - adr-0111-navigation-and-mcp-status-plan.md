@@ -328,7 +328,9 @@ for the column-0 mark, with every other View-reading cursor-row test;
 **Closes:** cursor-colour-only-mark
 **Commit:** `fix(tui): mark the cursor row with a glyph as well as colour`
 
-## 10. Key legend and manual name navigation mode
+## 10. Key legend and manual name navigation mode — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the navigation keys are one legend cell (`helpKeyNavigate`, built from `helpKeyStopRun`), appended after `PgUp/PgDn scroll`, because the in-mode keys mean something else outside the mode; configuration.md §The side panel gains a **The keyboard.** paragraph after **From the prompt.**, and its "no key binding" sentence now reads that the width has no key of its own.
 
 **What:** user-facing docs for items 6–9. Depends on items 6–9.
 **Regression guard.** Every manual sentence that lists the `/help` legend gains the navigation cell
