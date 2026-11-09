@@ -1,11 +1,13 @@
 ---
 title: The panel's usage rows differ from the status-line gauge and /usage
-status: open
+status: done
 type: task
 priority: 3
 labels: [tui]
 plan: 2026-11-09 - 04 - side-panel-visual-alignment-plan.md
 created: 2026-11-09T18:56:44Z
+closed: 2026-11-09T22:59:20Z
+reason: resolved by plan '2026-11-09 - 04 - side-panel-visual-alignment-plan' (archived at 21eb9fbf), item(s) 13
 ---
 
 **Gauge background**

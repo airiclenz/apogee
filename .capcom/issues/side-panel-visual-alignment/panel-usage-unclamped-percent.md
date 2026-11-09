@@ -1,11 +1,13 @@
 ---
 title: The panel's Usage header can read over 100% while the gauge clamps
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tui]
 plan: 2026-11-09 - 04 - side-panel-visual-alignment-plan.md
 created: 2026-11-09T18:56:44Z
+closed: 2026-11-09T22:59:19Z
+reason: resolved by plan '2026-11-09 - 04 - side-panel-visual-alignment-plan' (archived at 21eb9fbf), item(s) 1
 ---
 
 - `UsageView.WithFill` builds the header summary from `fill.Percent()`, which has no clamp

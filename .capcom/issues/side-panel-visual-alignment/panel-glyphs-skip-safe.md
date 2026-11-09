@@ -1,11 +1,13 @@
 ---
 title: The side panel's own glyphs ignore ui.glyphs safe
-status: open
+status: done
 type: bug
 priority: 3
 labels: [tui]
 plan: 2026-11-09 - 04 - side-panel-visual-alignment-plan.md
 created: 2026-11-09T18:56:44Z
+closed: 2026-11-09T22:59:20Z
+reason: resolved by plan '2026-11-09 - 04 - side-panel-visual-alignment-plan' (archived at 21eb9fbf), item(s) 15
 ---
 
 - The panel's glyphs `◆ ⊙ ● ▸ ○ ↳` are fixed constants outside `glyphSet`

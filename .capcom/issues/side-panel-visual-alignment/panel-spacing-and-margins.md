@@ -1,11 +1,13 @@
 ---
 title: Side panel rows have no section spacing, body indent or right margin
-status: open
+status: done
 type: task
 priority: 2
 labels: [tui]
 plan: 2026-11-09 - 04 - side-panel-visual-alignment-plan.md
 created: 2026-11-09T18:56:44Z
+closed: 2026-11-09T22:59:20Z
+reason: resolved by plan '2026-11-09 - 04 - side-panel-visual-alignment-plan' (archived at 21eb9fbf), item(s) 8-9
 ---
 
 Rendered at 170x45 (frame `01-wide`), compared with the transcript and the chrome below.

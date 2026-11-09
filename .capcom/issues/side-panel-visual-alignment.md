@@ -1,11 +1,13 @@
 ---
 title: "[epic] Align the side panel's look with the rest of the TUI"
-status: open
+status: done
 type: epic
 priority: 2
 labels: [tui]
 plan: 2026-11-09 - 04 - side-panel-visual-alignment-plan.md
 created: 2026-11-09T18:56:44Z
+closed: 2026-11-09T22:59:20Z
+reason: resolved by plan '2026-11-09 - 04 - side-panel-visual-alignment-plan' (archived at 21eb9fbf); all children closed and item 16's rendered dark/light/safe frames show the transcript vocabulary
 ---
 
 The side panel (`docs/layout/side-panel-layout.md`, glossary `Side panel`) was built with its own

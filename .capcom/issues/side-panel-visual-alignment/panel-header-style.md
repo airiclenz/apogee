@@ -1,12 +1,14 @@
 ---
 title: Panel section headers do not match transcript headings in tone or wording
-status: open
+status: done
 type: task
 priority: 2
 labels: [tui]
 deps: [panel-section-user-fold]
 plan: 2026-11-09 - 04 - side-panel-visual-alignment-plan.md
 created: 2026-11-09T18:56:44Z
+closed: 2026-11-09T22:59:20Z
+reason: resolved by plan '2026-11-09 - 04 - side-panel-visual-alignment-plan' (archived at 21eb9fbf), item(s) 10-11
 ---
 
 **Today**
