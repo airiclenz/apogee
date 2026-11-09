@@ -459,6 +459,61 @@ reactions:
 	}
 }
 
+// `pre-request` and `post-response` are Moments `advise:` reacts at (ADR 0076 D6's second form): the
+// advice lands on a request's tail. An argv entry on pre-request and a webhook entry on
+// post-response load as advise Reactions on the sync lane, each on the one Moment it spells.
+func TestLoadFileConfigAdmitsRequestTailAdvice(t *testing.T) {
+	t.Parallel()
+
+	path := writeReactionsConfig(t, `
+reactions:
+  - id: coach
+    on: [pre-request]
+    advise: ["./scripts/coach.sh"]
+  - id: reviewer
+    on: [post-response]
+    advise:
+      url: https://hooks.example.com/review
+`)
+
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if len(opts.Reactions) != 2 {
+		t.Fatalf("resolved %d reactions; want the 2 the two entries arm: %+v",
+			len(opts.Reactions), opts.Reactions)
+	}
+
+	for i, want := range []struct {
+		id string
+		on domain.Moment
+	}{
+		{id: "coach", on: domain.MomentPreRequest},
+		{id: "reviewer", on: domain.MomentPostResponse},
+	} {
+		reaction := opts.Reactions[i]
+		if reaction.ID != want.id || reaction.Class != domain.ClassAdvise {
+			t.Errorf("entry %d is %q/%s, want %q/%s", i, reaction.ID, reaction.Class, want.id, domain.ClassAdvise)
+		}
+		if !slices.Equal(reaction.On, []domain.Moment{want.on}) {
+			t.Errorf("%q fires on %v, want [%s]", reaction.ID, reaction.On, want.on)
+		}
+	}
+	if _, ok := opts.Reactions[1].Handler.(domain.WebhookHandler); !ok {
+		t.Errorf("second handler = %T; want a domain.WebhookHandler for an `advise:` mapping",
+			opts.Reactions[1].Handler)
+	}
+
+	observe, sync := domain.SplitLanes(opts.Reactions)
+	if got := laneIDs(observe); got != "" {
+		t.Errorf("observe lane = %q, want it empty — no entry spells `run:`", got)
+	}
+	if got := laneIDs(sync); got != "coach reviewer" {
+		t.Errorf("sync lane = %q, want %q — every `advise:` in file order", got, "coach reviewer")
+	}
+}
+
 // An empty or absent block resolves to no Reactions and no error: the lane is dormant by default,
 // exactly as `mcp-servers:` is. A block whose every entry is parked resolves the same way, so a
 // file that keeps its definitions without arming them is indistinguishable from one that has none.
@@ -529,7 +584,12 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 		{
 			name: "advise: reacts at a Moment it cannot take",
 			body: "reactions:\n  - id: coach\n    on: [turn-finished]\n    advise: [\"say-something\"]\n",
-			want: `invalid reaction "coach": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "turn-finished" is none of them`,
+			want: `invalid reaction "coach": advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "turn-finished" is none of them`,
+		},
+		{
+			name: "advise: reacts at history-rewrite",
+			body: "reactions:\n  - id: coach\n    on: [history-rewrite]\n    advise: [\"say-something\"]\n",
+			want: `invalid reaction "coach": advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "history-rewrite" is none of them — advise at pre-request to reach the request after a rewrite`,
 		},
 		{
 			name: "gate: reacts at session-started",

@@ -171,7 +171,13 @@ post-response and a pre-request advise armed, Turn N+1's tail carries the post-r
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestPostResponseAdvice|TestFireBooksTheActionTheOutcomeNames' ./internal/agent/`
 **Commit:** `feat(agent): carry post-response advise to the next request`
 
-## 4. Admit `advise:` at pre-request and post-response
+## 4. Admit `advise:` at pre-request and post-response — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): the refusal sentence is now `advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "<m>" is none of them`, with ` — advise at pre-request to reach the request after a rewrite` appended for history-rewrite only; the advise Moment set moved into an `adviseMoments` list with `takesAdvise`/`adviseMomentRefusal` helpers in reaction.go.
+NOTES (2026-11-09): docs/manual/reactions.md — the `on:` row's two other clauses listing advise's Moments (the "reacts at" list and "a notice other than … under `advise:`") were updated alongside its quoted refusal sentence, so the one row does not contradict itself; the rest of the manual sweep stays item 7's.
+NOTES (2026-11-09): added beyond the named cases — an argv pre-tool-exec advise refusal case, a webhook pre-request/post-response validating case, and a TopLevelOnly subtest in TestPreRequestAdviceReachesADelegate (the child's request carries no fence).
+NOTES (2026-11-09): consequential edit — internal/agent/reactions_test.go: the preRequestCoach/postResponseCoach comments said Reaction.Validate does not admit the Moment yet; made false by the widened Validate.
+NOTES (2026-11-09): pre-existing — the TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler comment still says "a webhook stays observe-only", which predates this item and is not true (webhooks serve advise and gate); left as is.
 
 **What:** Recast at the regression check (2026-11-09). **Goal:** a user Reaction with `advise:` on `pre-request`
 or `post-response` validates and loads; `history-rewrite` and every other non-advise Moment still refuse it with

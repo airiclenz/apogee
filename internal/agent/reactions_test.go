@@ -1331,9 +1331,9 @@ func armedCallEqual(a, b armedCall) bool {
 // reads inside the fence.
 const preRequestAdviceText = "keep the reply short"
 
-// preRequestCoach is one user advise entry on pre-request whose command prints text. It is armed
-// straight onto the ladder (preRequestAdviceAgent), never through Reaction.Validate, which does not
-// admit the Moment for a user advise yet.
+// preRequestCoach is one user advise entry on pre-request whose command prints text. The tests
+// below arm it straight onto the ladder (preRequestAdviceAgent); TestPreRequestAdviceReachesADelegate
+// arms it through the sync lane, where Reaction.Validate admits it.
 func preRequestCoach(argv ...string) domain.Reaction {
 	return userAdvise("coach", []domain.Moment{domain.MomentPreRequest}, argv...)
 }
@@ -1475,6 +1475,67 @@ func TestPreRequestAdviceLandsOnTheRequestTailOnly(t *testing.T) {
 	}
 	if len(reported) != 0 {
 		t.Errorf("reporter said %q, want nothing", reported)
+	}
+}
+
+// A user pre-request advise armed through the sync lane — so Reaction.Validate admits it — is
+// inherited by a delegate like any other reaction: the child's opening request carries the fence
+// ahead of its task, exactly as the parent's does. TopLevelOnly is the one opt-out: the child's
+// requests then go out bare while the parent's stay advised.
+func TestPreRequestAdviceReachesADelegate(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name         string
+		topLevelOnly bool
+		wantChild    int
+	}{
+		{name: "inherited", wantChild: 1},
+		{name: "top-level only", topLevelOnly: true, wantChild: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			coach := preRequestCoach(printsAdvice(preRequestAdviceText)...)
+			coach.TopLevelOnly = tt.topLevelOnly
+			cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore)
+			cfg.WorkspaceDir = t.TempDir()
+			cfg.Unconfined = true
+			cfg.Sync = []domain.Reaction{coach}
+			responder := scriptedResponder(t,
+				subAgentCallTurn("c1", "summarise the repo"),
+				contentTurn("the repo is a Go TUI agent"), // the delegate's only Turn
+				contentTurn("done — delegated and summarised"),
+			)
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			runExchange(t, a, "please research")
+
+			requests := responder.requests()
+			if len(requests) != 3 {
+				t.Fatalf("upstream saw %d requests, want 3", len(requests))
+			}
+			parent := tailOf(t, requests[0])
+			if !strings.HasPrefix(parent.Content, preRequestFence(0, true)) {
+				t.Errorf("parent's opening = %q, want it led by the Turn-0 fence", parent.Content)
+			}
+			child := requests[1]
+			if got := fenceCount(child); got != tt.wantChild {
+				t.Errorf("delegate's request carried %d fences, want %d", got, tt.wantChild)
+			}
+			if tt.wantChild == 0 {
+				return
+			}
+			if tail := tailOf(t, child); tail.Role != string(domain.RoleUser) ||
+				!strings.HasPrefix(tail.Content, preRequestFence(0, true)) {
+				t.Errorf("delegate's request tail = {%s %q}, want its task led by the Turn-0 fence",
+					tail.Role, tail.Content)
+			}
+		})
 	}
 }
 
@@ -1652,7 +1713,7 @@ func TestPreRequestAdviceFailsOpenOnATimeout(t *testing.T) {
 const postResponseAdviceText = "check the listing before writing"
 
 // postResponseCoach is one user advise entry on post-response whose command prints text. Like
-// preRequestCoach it is armed straight onto the ladder, never through Reaction.Validate.
+// preRequestCoach it is armed straight onto the ladder.
 func postResponseCoach(argv ...string) domain.Reaction {
 	return userAdvise("coach", []domain.Moment{domain.MomentPostResponse}, argv...)
 }

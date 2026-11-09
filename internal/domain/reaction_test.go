@@ -472,9 +472,9 @@ func TestReactionValidateAdmitsASessionStartedHandlerUnderAdviseOnly(t *testing.
 
 // TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler walks the rules the argv and
 // webhook handlers brought in. They key on the handler KIND, not the class alone: an argv handler
-// serves observe on notices, advise at post-tool-result, file-changed, session-started or
-// compaction-finished and gate at pre-tool-exec, while a webhook stays observe-only and a Go handler keeps the per-seam rule for
-// every class — which is why the bench's class-observe Go reactions still validate. The refusals
+// serves observe on notices, advise at post-tool-result, file-changed, session-started,
+// compaction-finished, pre-request or post-response and gate at pre-tool-exec, while a webhook
+// stays observe-only and a Go handler keeps the per-seam rule for every class — which is why the bench's class-observe Go reactions still validate. The refusals
 // are pinned by their exact text: they are what a user reads when their `run:` entry names the
 // wrong Moment.
 func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
@@ -672,18 +672,49 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentTurnFinished},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "turn-finished" is none of them`,
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "turn-finished" is none of them`,
 		},
 		{
-			name: "an argv handler advising on another seam is refused",
+			name: "an argv handler advising at pre-request and post-response validates",
 			reaction: Reaction{
 				ID:      "notify",
 				Origin:  OriginUser,
 				Class:   ClassAdvise,
-				On:      []Moment{MomentPostToolResult, MomentPreRequest},
+				On:      []Moment{MomentPostToolResult, MomentPreRequest, MomentPostResponse},
 				Handler: argv,
 			},
-			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "pre-request" is none of them`,
+		},
+		{
+			name: "a webhook handler advising at pre-request and post-response validates",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentPreRequest, MomentPostResponse},
+				Handler: webhook,
+			},
+		},
+		{
+			name: "an argv handler advising at history-rewrite is refused and pointed to pre-request",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentPreRequest, MomentHistoryRewrite},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "history-rewrite" is none of them — advise at pre-request to reach the request after a rewrite`,
+		},
+		{
+			name: "an argv handler advising at pre-tool-exec is refused",
+			reaction: Reaction{
+				ID:      "notify",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentPreToolExec},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "notify": advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "pre-tool-exec" is none of them`,
 		},
 		{
 			name: "an argv handler gating anywhere else is refused",
@@ -791,15 +822,25 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 			},
 		},
 		{
-			name: "an mcp handler advising at pre-request is refused",
+			name: "an mcp handler advising at pre-request and post-response validates",
 			reaction: Reaction{
 				ID:      "primer",
 				Origin:  OriginUser,
 				Class:   ClassAdvise,
-				On:      []Moment{MomentPreRequest},
+				On:      []Moment{MomentPreRequest, MomentPostResponse},
 				Handler: mcp,
 			},
-			wantErr: `apogee: invalid reaction "primer": advise: reacts at post-tool-result, file-changed, session-started or compaction-finished; "pre-request" is none of them`,
+		},
+		{
+			name: "an mcp handler advising at history-rewrite is refused and pointed to pre-request",
+			reaction: Reaction{
+				ID:      "primer",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentHistoryRewrite},
+				Handler: mcp,
+			},
+			wantErr: `apogee: invalid reaction "primer": advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, pre-request or post-response; "history-rewrite" is none of them — advise at pre-request to reach the request after a rewrite`,
 		},
 		{
 			name: "an mcp handler on a seam is refused",

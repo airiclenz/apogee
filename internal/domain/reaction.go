@@ -324,9 +324,10 @@ func (SessionStartedFunc) seam() Moment { return MomentSessionStarted }
 // shell, so no quoting or expansion happens on the way. The Moment's payload reaches the command
 // through its environment. It serves three of the user's classes, and the class decides both where
 // it may fire and what its output is worth: observe fires on notices and its output is ignored;
-// advise fires at post-tool-result, file-changed, session-started or compaction-finished and its
-// stdout becomes the fenced trailer — or, at session-started, the session-start advice, and at
-// compaction-finished, the briefing after a fold; gate fires at pre-tool-exec and its first stdout
+// advise fires at post-tool-result, file-changed, session-started, compaction-finished, pre-request
+// or post-response and its stdout becomes the fenced trailer — or, at session-started, the
+// session-start advice, at compaction-finished, the briefing after a fold, and at pre-request or
+// post-response, the advice on a request's tail; gate fires at pre-tool-exec and its first stdout
 // line is the verdict.
 type ArgvHandler struct {
 	// Argv is the command and its arguments. Validate refuses a list whose first element is empty
@@ -340,10 +341,11 @@ type ArgvHandler struct {
 // mapping arms (ADR 0076 D2). It is the out-of-process twin of an ArgvHandler and serves the same
 // three of the user's classes, with the class deciding where it fires and what its reply is worth:
 // observe fires on notices and the reply is discarded — nothing an observe reaction returns reaches
-// the model; advise fires at post-tool-result, file-changed, session-started or compaction-finished
-// and the reply body becomes the fenced trailer — or, at session-started, the session-start advice,
-// and at compaction-finished, the briefing after a fold; gate fires at pre-tool-exec and the reply's
-// first line is the verdict.
+// the model; advise fires at post-tool-result, file-changed, session-started, compaction-finished,
+// pre-request or post-response and the reply body becomes the fenced trailer — or, at
+// session-started, the session-start advice, at compaction-finished, the briefing after a fold, and
+// at pre-request or post-response, the advice on a request's tail; gate fires at pre-tool-exec and
+// the reply's first line is the verdict.
 type WebhookHandler struct {
 	// URL is the endpoint the payload is POSTed to.
 	URL string
@@ -366,10 +368,11 @@ func (WebhookHandler) seam() Moment { return "" }
 // `{mcp: {server:, tool:, args:, payload-arg:}}` mapping arms (adr-0076-amend-1029). It is the
 // third out-of-process kind beside ArgvHandler and WebhookHandler and serves the same three of the
 // user's classes under the same Moment rules: observe fires on notices and the answer is discarded;
-// advise fires at post-tool-result, file-changed, session-started or compaction-finished and the
-// tool's text answer becomes the fenced trailer — or, at session-started, the session-start advice,
-// and at compaction-finished, the briefing after a fold; gate fires at pre-tool-exec and the
-// answer's first line is the verdict. The user authored the call, so it never reaches the Approver.
+// advise fires at post-tool-result, file-changed, session-started, compaction-finished, pre-request
+// or post-response and the tool's text answer becomes the fenced trailer — or, at session-started,
+// the session-start advice, at compaction-finished, the briefing after a fold, and at pre-request or
+// post-response, the advice on a request's tail; gate fires at pre-tool-exec and the answer's first
+// line is the verdict. The user authored the call, so it never reaches the Approver.
 //
 // It is pure data: the engine never dials a server. The Driver injects a Config.MCP resolver that
 // turns Server and Tool into a call; a Driver that injects none leaves the handler inert.
@@ -414,6 +417,38 @@ func servesClass(h Handler, class Class) bool {
 		return false
 	}
 	return class == ClassObserve || class == ClassAdvise || class == ClassGate
+}
+
+// adviseMoments is where an out-of-process advise handler may fire: the tool-result trailer's two
+// (post-tool-result, file-changed), the background briefings' two (session-started,
+// compaction-finished) and the request-tail slot's two (pre-request, post-response — ADR 0076 D6's
+// second form). history-rewrite is not among them: the conversation it rewrites is not a request,
+// and pre-request advises the request the rewrite feeds.
+var adviseMoments = []Moment{
+	MomentPostToolResult,
+	MomentFileChanged,
+	MomentSessionStarted,
+	MomentCompactionFinished,
+	MomentPreRequest,
+	MomentPostResponse,
+}
+
+// takesAdvise reports whether an out-of-process advise handler may fire at m.
+func takesAdvise(m Moment) bool {
+	return slices.Contains(adviseMoments, m)
+}
+
+// adviseMomentRefusal is the sentence that refuses an `advise:` entry on m: it lists the Moments the
+// key takes and, for history-rewrite, names pre-request as the Moment to advise at instead.
+func adviseMomentRefusal(m Moment) string {
+	refusal := fmt.Sprintf(
+		"advise: reacts at post-tool-result, file-changed, session-started, compaction-finished, "+
+			"pre-request or post-response; %q is none of them", m,
+	)
+	if m == MomentHistoryRewrite {
+		refusal += " — advise at pre-request to reach the request after a rewrite"
+	}
+	return refusal
 }
 
 // ToolResultMoment is the post-tool-result seam's payload: the pair a PostToolResultFunc needs,
@@ -637,14 +672,8 @@ func (r Reaction) Validate() error {
 		if async {
 			switch r.Class {
 			case ClassAdvise:
-				if m != MomentPostToolResult && m != MomentFileChanged && m != MomentSessionStarted &&
-					m != MomentCompactionFinished {
-					return fmt.Errorf(
-						"%w %q: advise: reacts at post-tool-result, file-changed, session-started or "+
-							"compaction-finished; "+
-							"%q is none of them",
-						ErrInvalidReaction, r.ID, m,
-					)
+				if !takesAdvise(m) {
+					return fmt.Errorf("%w %q: %s", ErrInvalidReaction, r.ID, adviseMomentRefusal(m))
 				}
 			case ClassGate:
 				if m != MomentPreToolExec {
