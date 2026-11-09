@@ -356,11 +356,11 @@ func foldCases() []foldCase {
 			}},
 		},
 		{
-			name: "MCPServerEvent is inert in the TUI for now",
+			name: "MCPServerEvent folds into the MCP state alone",
 			// One MCP server's connection lifecycle, emitted by the composition root rather than the
-			// engine. The TUI does not fold it yet: no entry, no gauge, no phrase, no progress save.
-			// The MCP server state the /mcp pane and the side panel's mcp section read is a later
-			// change to this row.
+			// engine. It moves the MCP fold the /mcp pane and the side panel's mcp section read
+			// (TestMCPFold*) and nothing this table measures: no entry, no gauge, no phrase, no
+			// progress save.
 			event: domain.MCPServerEvent{Server: "files", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 7},
 		},
 		{
@@ -1037,5 +1037,115 @@ func TestCompactCommandLeavesExactlyOneTrace(t *testing.T) {
 	}
 	if got := plain(m.View()); !strings.Contains(got, "context compacted") {
 		t.Errorf("the trace is not painted as the note it reads as:\n%s", got)
+	}
+}
+
+// mcpConnected is one MCP server's connected Event, offering tools.
+func mcpConnected(server string, tools int) domain.MCPServerEvent {
+	return domain.MCPServerEvent{Server: server, Transport: "stdio", Phase: domain.MCPServerConnected, Tools: tools}
+}
+
+// mcpServerNames lists the servers the Model's MCP fold holds, in its order.
+func mcpServerNames(m Model) []string {
+	var names []string
+	for _, row := range m.mcpServers.Rows() {
+		names = append(names, row.Server)
+	}
+	return names
+}
+
+// TestMCPFoldSurvivesClearAndResume pins that the MCP fold is the process's, not the
+// conversation's: a server dialled before /clear or an in-TUI restore is still connected after it,
+// so neither session boundary drops its row.
+func TestMCPFoldSurvivesClearAndResume(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		drive func(t *testing.T, m Model) Model
+	}{
+		{"/clear", clearSession},
+		{"a /sessions restore", restoreSession},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModelEng(t, &fakeEngine{}, testOpts)
+			m = step(t, m, eventMsg{Event: mcpConnected("files", 7)})
+
+			m = tc.drive(t, m)
+
+			rows := m.mcpServers.Rows()
+			if len(rows) != 1 || rows[0].Server != "files" || rows[0].Tools != 7 ||
+				rows[0].Phase != domain.MCPServerConnected {
+				t.Errorf("after %s the MCP fold holds %+v, want files connected with 7 tools", tc.name, rows)
+			}
+		})
+	}
+}
+
+// TestMCPFoldEventIsNotEngineActivity pins the regression guard of the MCP fold: an MCPServerEvent
+// reaching the live eventMsg path mid-Turn is the composition root's news, so it moves the MCP fold
+// and leaves the stall clock, the run state, the activity phrase and the transcript as they were,
+// and schedules no progress save.
+func TestMCPFoldEventIsNotEngineActivity(t *testing.T) {
+	t.Parallel()
+	m := runningModel(t)
+	heard := time.Now().Add(-time.Minute)
+	m.lastEvent = heard
+	phrase := shownAct(m).text("")
+	entries := len(m.transcript.entries)
+
+	m, cmd := stepCmd(t, m, eventMsg{Event: domain.MCPServerEvent{
+		Server: "files", Transport: "stdio", Phase: domain.MCPServerDialling,
+	}})
+
+	if !m.lastEvent.Equal(heard) {
+		t.Errorf("the stall clock moved to %v, want it left at %v", m.lastEvent, heard)
+	}
+	if m.state != stateRunning {
+		t.Errorf("state = %v, want running", m.state)
+	}
+	if got := shownAct(m).text(""); got != phrase {
+		t.Errorf("activity phrase = %q, want %q", got, phrase)
+	}
+	if got := len(m.transcript.entries); got != entries {
+		t.Errorf("transcript entries %d → %d, want none added", entries, got)
+	}
+	if cmd != nil {
+		t.Error("the MCP Event scheduled a Cmd; want none (no progress save, no re-assert)")
+	}
+	if got := mcpServerNames(m); !slices.Equal(got, []string{"files"}) {
+		t.Errorf("MCP fold holds %v, want [files]", got)
+	}
+}
+
+// TestMCPFoldSeedsFromASnapshot pins the seed entry point: a startup snapshot folds through the
+// same fold a live Event takes, in order, and a later live Event moves the seeded row.
+func TestMCPFoldSeedsFromASnapshot(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	entries := len(m.transcript.entries)
+
+	m.seedMCP([]domain.MCPServerEvent{
+		mcpConnected("files", 7),
+		{Server: "web", Transport: "sse", Project: true, Phase: domain.MCPServerFailed, Cause: "refused"},
+	})
+
+	rows := m.mcpServers.Rows()
+	if len(rows) != 2 || rows[0].Server != "files" || rows[0].Tools != 7 ||
+		rows[1].Server != "web" || !rows[1].Project || rows[1].Cause != "refused" {
+		t.Fatalf("seeded fold holds %+v, want files connected (7 tools) then web failed", rows)
+	}
+	if !m.mcpServers.IsLive() {
+		t.Error("a seeded failed server leaves the fold not live")
+	}
+	if got := len(m.transcript.entries); got != entries {
+		t.Errorf("the seed added %d transcript entries, want none", got-entries)
+	}
+
+	m = step(t, m, eventMsg{Event: mcpConnected("web", 2)})
+
+	if m.mcpServers.IsLive() {
+		t.Errorf("after web connected the fold is still live: %+v", m.mcpServers.Rows())
 	}
 }

@@ -47,6 +47,13 @@ func (m Model) foldEvent(e domain.Event) Model {
 // own Events are its own run's (foldEvent); a read-only watch's journal Events are the watched
 // run's (foldWatchedEvent), which a watch never writes into m.opts.
 func (m Model) foldEventAgainst(e domain.Event, window int, model string) Model {
+	// An MCP server's lifecycle is the composition root's news, not the conversation's (ADR 0111
+	// decision 8): it moves the MCP fold and nothing else — no stats, board, panel section,
+	// transcript entry or activity phrase.
+	if server, ok := e.(domain.MCPServerEvent); ok {
+		m.mcpServers.Fold(server)
+		return m
+	}
 	e = m.countedUsage(e) // a resumed session under its own label counts later calls unpriced
 	m = m.foldStats(e)
 	// Order-free, and placed here rather than woven into the dependency below because it has none:
@@ -100,6 +107,15 @@ func (m Model) foldEventAgainst(e domain.Event, window int, model string) Model 
 	// rule asks whether a call is still open (a parallel batch holds the tool phrase), and only
 	// the call/result pairing apply performs can answer that.
 	return m.foldActivity(e, m.transcript.hasOpenToolCall())
+}
+
+// seedMCP folds a snapshot of the MCP servers' state into the MCP fold, in order, through the fold
+// a live MCPServerEvent takes: the servers the process dialled before the view could hear their
+// Events (ADR 0111, "startup state is seeded by a snapshot"). It moves nothing else.
+func (m *Model) seedMCP(events []domain.MCPServerEvent) {
+	for _, event := range events {
+		m.mcpServers.Fold(event)
+	}
 }
 
 // fallbackNote words one Server fallback (ADR 0105): which seat moved, the server and model it was

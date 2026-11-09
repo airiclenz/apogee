@@ -120,6 +120,16 @@ type sessionView struct {
 	panelLingerUntil time.Time
 	panelLingerGen   int
 
+	// mcpServers is the process's MCP server state (ADR 0111 decisions 9 and 10; sidepanel.MCPServers),
+	// folded from every domain.MCPServerEvent the view hears — live, from a watched journal, and from
+	// the startup seed ([Model.seedMCP]) — by foldEventAgainst. It belongs to the PROCESS, not the conversation: a
+	// server stays connected across /clear and an in-TUI restore, so neither boundary
+	// (resetSessionView, resumeLoaded) writes it. It lives here rather than on the Model because a
+	// watch swaps it with the rest of the view: the watched process's own fold, built from its
+	// journal's mcp_server lines, is painted in its place and the owner's is parked untouched. A
+	// plain value whose fold replaces its slice whole, so ADR 0011's copy rule holds.
+	mcpServers sidepanel.MCPServers
+
 	// acts is the live activity board the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go) — one slot per RUN
 	// rather than one for the session, keyed by the run identity (runActivities). It is derived

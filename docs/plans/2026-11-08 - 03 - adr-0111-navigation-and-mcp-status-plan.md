@@ -465,7 +465,12 @@ internal/tui/fold_test.go — foldCases
 **Acceptance:** `go build ./... && GOMEMLIMIT=2GiB go test -race -count=1 ./internal/eventjson/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestEveryDomainEventVariantIsAliased' . && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestHeadlessFormatJSON|TestManualListsEveryEventLineKind' ./cmd/apogee/ && GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestFoldEventCoversEveryEventVariant' ./internal/tui/ && capcom check`
 **Commit:** `feat(domain): add the MCP server lifecycle Event`
 
-## 15. Fold MCP server state for every Driver view
+## 15. Fold MCP server state for every Driver view — ✅ DONE (2026-11-09)
+
+NOTES (2026-11-09): re-derived from "name `mcp.go` in `internal/sidepanel/doc.go`" — the package had no doc.go; it was created by moving the package comment out of internal/sidepanel/sidepanel.go (the only change there) and adding a file map naming sidepanel.go, mcp.go and doc.go.
+NOTES (2026-11-09): the sessionView field is `mcpServers`, not `mcp`: the Model already has an `mcp mcpState` field (mcpreconnect.go) that would shadow a promoted `mcp`.
+NOTES (2026-11-09): the fold escape-strips Server/Transport (to one line) and Cause as it folds, as the package does for sub-agent names; render-time stripping (items 18 and 20) stays required and is idempotent. A disconnected/denied row keeps its Reason; Tools follows the serving connection (kept through dialling and a Kept failure). The seed entry point is `Model.seedMCP([]domain.MCPServerEvent)` in internal/tui/fold.go.
+NOTES (2026-11-09): the live eventMsg case short-circuits an MCPServerEvent to foldEvent before noteEngineHeard and returns no Cmd; foldEventAgainst folds it into the MCP state and returns before every other fold, so the watched path (foldWatchedEvent) folds it too.
 
 **What:** the Driver-neutral fold ADR 0111 D9–10 read. Depends on item 14.
 **Regression guard.** an MCPServerEvent reaching the TUI's eventMsg path is folded into the MCP fold but never counts as engine activity (noteEngineHeard and any busy/progress or turn state stay untouched), with a test.

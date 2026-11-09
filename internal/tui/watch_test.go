@@ -2465,3 +2465,31 @@ func TestWatchInterjectionKeepsTheTotalOrigin(t *testing.T) {
 		t.Errorf("total = %v; want at least 5m — the Interjection must not restart it", total)
 	}
 }
+
+// TestWatchFoldsMCPServerLines pins that a watch paints the WATCHED process's MCP state: a journal
+// mcp_server line reaches the watched fold, and the owner's own fold is parked untouched.
+func TestWatchFoldsMCPServerLines(t *testing.T) {
+	t.Parallel()
+	f := newWatchFixture(t, "fix the parser", nil, 0)
+	m := newTestModelEng(t, watchEngine(), testOpts)
+	m = m.foldEvent(mcpConnected("owner-server", 3))
+	m, cmd := m.enterWatch(f.src)
+	if !m.watch.isActive || cmd == nil {
+		t.Fatal("setup: enterWatch did not enter watch mode")
+	}
+	m = step(t, m, cmd())
+	if got := mcpServerNames(m); len(got) != 0 {
+		t.Fatalf("the watch opened on MCP servers %v, want the watched process's own empty fold", got)
+	}
+
+	f.emit(mcpConnected("watched-server", 5))
+	m = pollWatch(t, m)
+
+	rows := m.mcpServers.Rows()
+	if len(rows) != 1 || rows[0].Server != "watched-server" || rows[0].Tools != 5 {
+		t.Errorf("the watched fold holds %+v, want the journal's watched-server with 5 tools", rows)
+	}
+	if got := m.watch.parked.mcpServers.Rows(); len(got) != 1 || got[0].Server != "owner-server" {
+		t.Errorf("the owner's parked fold holds %+v, want its own owner-server alone", got)
+	}
+}
