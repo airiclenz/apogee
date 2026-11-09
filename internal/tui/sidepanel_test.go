@@ -630,8 +630,8 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 			},
 			want: []string{
 				"○ Sub-agents (1 queued)",
-				"✓ planner      done       38s",
-				"○ repo-scout   queued",
+				"  ✓ planner    done       38s",
+				"  ○ repo-scout queued",
 			},
 		},
 		{
@@ -641,9 +641,9 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 			},
 			want: []string{
 				"○ Tasks (1/3)",
-				"✓ map call sites",
-				"▸ split the tokenizer",
-				"○ port the tests",
+				"  ✓ map call sites",
+				"  ▸ split the tokenizer",
+				"  ○ port the tests",
 			},
 		},
 		{
@@ -656,8 +656,8 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 			},
 			want: []string{
 				"○ Changed files (2)",
-				"internal/parse/parser.go    +12 −4",
-				"…/lexer_test.go                  ↳",
+				"    …/parse/parser.go       +12 −4",
+				"  ↳ …/lexer_test.go",
 			},
 		},
 		{
@@ -667,10 +667,10 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 			},
 			want: []string{
 				"○ Usage (62%)",
-				"██████▎    20k/32k",
-				"sys 200 · tools 100 · hist 20k",
-				"in 4k · out 300",
-				"cache hit 25%",
+				"    ██████▎    20k/32k",
+				"    sys 200 · tools 100 · hist 20k",
+				"    in 4k · out 300",
+				"    cache hit 25%",
 			},
 		},
 	}
@@ -733,7 +733,7 @@ func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {
 		panelDelegationCall(t, "r1", "repo-scout"), delegationPhase("r1", domain.SubAgentStarted, 72*time.Second))
 
 	got := panelText(t, m)
-	want := ansi.Strip(m.spin.drawn(m.th, m.opts.UI.Spinner)) + " repo-scout   running 01:12s"
+	want := bodyIndent + ansi.Strip(m.spin.drawn(m.th, m.opts.UI.Spinner)) + " repo-scout running 01:12s"
 	if len(got) != 2 || got[0] != "○ Sub-agents (1 running)" || got[1] != want {
 		t.Errorf("the column paints\n%s\nwant the running header over %q", strings.Join(got, "\n"), want)
 	}
@@ -830,8 +830,8 @@ func TestSidePanelSpinnerCarriesTheStatusLineColour(t *testing.T) {
 
 				m := spinnerPanelModel(t, style, domain.GlyphsUnicode, color)
 				m.spin.frame = 7
-				row := m.panelSubAgentRow(sidepanel.SubAgentRow{Name: "repo-scout", Phase: sidepanel.PhaseRunning}, false)
-				lead := row[:strings.Index(row, "repo-scout")]
+				row := m.panelSubAgentRow(sidepanel.SubAgentRow{Name: "scout", Phase: sidepanel.PhaseRunning}, false)
+				lead := strings.TrimPrefix(row[:strings.Index(row, "scout")], bodyIndent)
 
 				glyph := m.spin.drawn(m.th, style)
 				want := glyph
@@ -884,7 +884,7 @@ func assertWaiting(t *testing.T, m Model, name string, isWaiting bool) {
 	if row == "" {
 		t.Fatalf("no panel row names %q", name)
 	}
-	marked := strings.HasPrefix(row, m.th.glyphs.waiting+" "+name) && strings.Contains(row, " waiting ")
+	marked := strings.HasPrefix(strings.TrimLeft(row, " "), m.th.glyphs.waiting+" "+name) && strings.Contains(row, " waiting ")
 	if marked != isWaiting || strings.Contains(row, " waiting ") != isWaiting {
 		t.Errorf("row %q: waiting = %v, want %v", row, marked, isWaiting)
 	}
@@ -1116,7 +1116,7 @@ func TestSidePanelSectionModes(t *testing.T) {
 			name:     "list order, not pin order",
 			sections: "[tasks: auto, usage: pinned]",
 			events:   []domain.Event{taskList(0, "one")},
-			want:     []string{"○ Tasks (0/1)", "▸ one", "● Usage"},
+			want:     []string{"○ Tasks (0/1)", "  ▸ one", "", "● Usage"},
 		},
 	}
 	for _, tc := range cases {
@@ -1158,10 +1158,10 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 			rows:     6,
 			want: []string{
 				"○ Sub-agents (1 queued)",
-				"○ scout        queued",
+				"  ○ scout      queued",
 				"○ Tasks (0/3)",
 				"● Changed files (1)",
-				"a.go",
+				"    a.go",
 				"",
 			},
 		},
@@ -1172,7 +1172,7 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 			want: []string{
 				"○ Tasks (0/3)",
 				"○ Sub-agents (1 queued)",
-				"○ scout        queued",
+				"  ○ scout      queued",
 				"",
 			},
 		},
@@ -1363,6 +1363,241 @@ func TestSidePanelOverflowMarksAndOpens(t *testing.T) {
 			t.Errorf("the empty folded section's edge holds %q; a section with no body rows never reads it", got)
 		}
 	})
+}
+
+// alignedPanelModel builds a ready model whose column shows under the default sections, in a
+// width × height window, with the spinner style and glyph set named explicitly, its panel on a
+// clock fixed at panelNow and events folded through the view's own Event fold.
+func alignedPanelModel(
+	t *testing.T,
+	style SpinnerStyle,
+	glyphs domain.GlyphSet,
+	width, height int,
+	events ...domain.Event,
+) Model {
+	t.Helper()
+
+	opts := testOpts
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	opts.UI.SidePanelSections = domain.DefaultSidePanelSections
+	opts.UI.Spinner = style
+	opts.UI.Glyphs = glyphs
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: height})
+	m.panel = sidepanel.New(func() time.Time { return panelNow })
+	for _, e := range events {
+		m = m.foldEvent(e)
+	}
+	return m
+}
+
+// everySectionEvents makes every section of the default list live with body rows: a running
+// sub-agent, a task card, a changed file of the top level and one of the sub-agent's, a usage
+// reading with its split, and the MCP servers of [panelMCPEvents].
+func everySectionEvents(t *testing.T) []domain.Event {
+	t.Helper()
+	return panelEvents(panelTaskCard(), []domain.Event{
+		panelDelegationCall(t, "r1", "alpha"),
+		delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		landedEdit(domain.EventBase{}, "a.go", 1, 0),
+		landedEdit(delegationBase("r1"), "b.go", 2, 1),
+		panelUsageReading(panelUsed),
+		standingCost(200, 100),
+	}, panelMCPEvents())
+}
+
+// isPanelHeaderText reports whether row, as panelText reads it, is a section header: led by its pin
+// glyph on the content's first cell, where a body row leads with its indent.
+func isPanelHeaderText(row string) bool {
+	return strings.HasPrefix(row, glyphPanelOpen+" ") || strings.HasPrefix(row, glyphPanelPinned+" ")
+}
+
+// TestSidePanelSpacesSectionsApart pins the spacing (docs/layout/side-panel-layout.md, "Rows and
+// spacing"): on a column with room, one blank row precedes every section header but the first,
+// none precedes the first, and a click on a spacer is claimed and does nothing.
+func TestSidePanelSpacesSectionsApart(t *testing.T) {
+	t.Parallel()
+	m := alignedPanelModel(t, SpinnerClassic, domain.GlyphsUnicode, 140, 40, everySectionEvents(t)...)
+
+	column := panelText(t, m)
+	if len(column) == 0 || !isPanelHeaderText(column[0]) {
+		t.Fatalf("the column's first row is no header:\n%s", strings.Join(column, "\n"))
+	}
+	headers, spacers := 0, 0
+	for i, row := range column {
+		switch {
+		case isPanelHeaderText(row):
+			headers++
+			if i > 0 && column[i-1] != "" {
+				t.Errorf("header %q at row %d follows %q, want one blank row", row, i, column[i-1])
+			}
+			if i > 1 && column[i-2] == "" {
+				t.Errorf("header %q at row %d follows two blank rows", row, i)
+			}
+		case row == "":
+			spacers++
+			if target, isPanel := m.panelTargetAt(panelBodyX(m), i); !isPanel || target.kind != panelTargetNone {
+				t.Errorf("a click on the spacer at row %d follows %+v (column cell %v), want nothing", i, target, isPanel)
+			}
+		}
+	}
+	if headers != 5 || spacers != headers-1 {
+		t.Errorf("the column paints %d headers and %d spacers, want 5 and 4:\n%s", headers, spacers, strings.Join(column, "\n"))
+	}
+}
+
+// TestPanelAllocationDropsSpacersBeforeFolding pins the overflow's spacer budget: the spacers
+// between sections take rows only after every body the column can show has them, so a column a row
+// short of its spacers drops them all and folds nothing, and a column that squeezes a section paints
+// no spacer though it has rows to spare — the human's own fold squeezes nothing.
+func TestPanelAllocationDropsSpacersBeforeFolding(t *testing.T) {
+	t.Parallel()
+
+	body := func(n int) []string { return slices.Repeat([]string{"row"}, n) }
+	sections := []panelSection{{body: body(2)}, {body: body(1)}, {body: body(3)}} // 3 headers, 6 body rows, 2 spacers
+	cases := []struct {
+		rows       int
+		hasSpacers bool
+		isExpanded []bool
+	}{
+		{rows: 11, hasSpacers: true, isExpanded: []bool{true, true, true}},
+		{rows: 10, hasSpacers: false, isExpanded: []bool{true, true, true}},
+		{rows: 9, hasSpacers: false, isExpanded: []bool{true, true, true}},
+		{rows: 8, hasSpacers: false, isExpanded: []bool{true, true, false}},
+	}
+	folded := slices.Clone(sections)
+	folded[2].isFolded = true
+	if _, isExpanded, hasSpacers := panelAllocation(folded, 8); !hasSpacers || !slices.Equal(isExpanded, []bool{true, true, false}) {
+		t.Errorf("8 rows, the last section folded by the human: expanded %v, spacers %v; want [true true false], true",
+			isExpanded, hasSpacers)
+	}
+	for _, tc := range cases {
+		kept, isExpanded, hasSpacers := panelAllocation(sections, tc.rows)
+		if kept != len(sections) || hasSpacers != tc.hasSpacers || !slices.Equal(isExpanded, tc.isExpanded) {
+			t.Errorf("%d rows: kept %d, expanded %v, spacers %v; want %d, %v, %v",
+				tc.rows, kept, isExpanded, hasSpacers, len(sections), tc.isExpanded, tc.hasSpacers)
+		}
+		if lines := panelLayout(sections, tc.rows); len(lines) > tc.rows {
+			t.Errorf("%d rows: the layout lays out %d lines", tc.rows, len(lines))
+		}
+	}
+
+	m := squeezedPanelModel(t)
+	if got := panelHeaderGlyph(t, m, "Tasks"); got != "▶" {
+		t.Fatalf("setup: the squeezed Tasks header holds %q, want ▶", got)
+	}
+	if column := panelText(t, m); slices.Contains(column, "") {
+		t.Errorf("a column with a squeezed section paints a spacer:\n%s", strings.Join(column, "\n"))
+	}
+}
+
+// TestSidePanelBodyTextColumnsAlign pins the panel-wide lead (docs/layout/side-panel-layout.md,
+// "Rows and spacing"): under every spinner style and both glyph sets, the text of a body row of
+// every section — a sub-agent's name, a task, a changed file, a usage row, an MCP server — starts in
+// one column, the body indent and the lead cell and its blank right of the header's pin.
+func TestSidePanelBodyTextColumnsAlign(t *testing.T) {
+	t.Parallel()
+
+	texts := []string{"alpha", "read the plan", "write the code", "a.go", "b.go", "sys ", "in ", "beta"}
+	for _, glyphs := range []domain.GlyphSet{domain.GlyphsUnicode, domain.GlyphsSafe} {
+		for style := range spinnerSpecs {
+			t.Run(string(glyphs)+"/"+string(style), func(t *testing.T) {
+				t.Parallel()
+				m := alignedPanelModel(t, style, glyphs, 140, 40, everySectionEvents(t)...)
+
+				want := len(bodyIndent) + m.panelLeadWidth() + 1
+				column := panelText(t, m)
+				for _, text := range texts {
+					row := column[panelRowY(t, m, text)]
+					if got := ansi.StringWidth(row[:strings.Index(row, text)]); got != want {
+						t.Errorf("%q starts at column %d, want %d:\n%s", text, got, want, strings.Join(column, "\n"))
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestSidePanelRowsNearTheRoomLimitKeepTheirFacts pins the body lead's cost to a row's room: at the
+// default width a changed file's path too long for its row is trimmed from the left behind its ↳
+// lead and its `+N −M` stays whole at the edge, and an MCP server's name too long for its row is
+// clipped so its state stays whole — neither row runs past the content.
+func TestSidePanelRowsNearTheRoomLimitKeepTheirFacts(t *testing.T) {
+	t.Parallel()
+	m := alignedPanelModel(t, SpinnerSnake, domain.GlyphsUnicode, 170, 40,
+		landedEdit(delegationBase("r1"), "internal/a/rather/deep/path/to/the/changed/file_name.go", 12, 4),
+		domain.MCPServerEvent{Server: "a-server-whose-name-runs-well-past-the-room", Transport: "stdio", Phase: domain.MCPServerFailed},
+	)
+	if got := m.panelPaintWidth(); got != domain.DefaultSidePanelWidth {
+		t.Fatalf("setup: the column paints %d wide, want the default %d", got, domain.DefaultSidePanelWidth)
+	}
+
+	files, _ := m.panelSection(domain.SidePanelChangedFiles)
+	file := ansi.Strip(files.body[0])
+	if !strings.HasPrefix(file, bodyIndent+glyphPanelDelegated) || !strings.Contains(file, sidePanelPathElision) ||
+		!strings.HasSuffix(file, " +12 −4") || ansi.StringWidth(file) != m.panelContentWidth() {
+		t.Errorf("changed-file row %q: want ↳ …/path, `+12 −4` at the edge, %d cells", file, m.panelContentWidth())
+	}
+	servers, _ := m.panelSection(domain.SidePanelMCP)
+	server := ansi.Strip(servers.body[0])
+	if !strings.HasSuffix(server, "… · failed") || ansi.StringWidth(server) > m.panelContentWidth() {
+		t.Errorf("mcp row %q: want the name clipped and ` · failed` whole within %d cells", server, m.panelContentWidth())
+	}
+}
+
+// TestSidePanelDefaultWidthPaintsWholeRows pins the room the default width leaves past the body
+// indent and lead: under every spinner style a 12-character sub-agent name and the usage split row
+// `sys 12k · tools 13k · hist 40k` paint whole.
+func TestSidePanelDefaultWidthPaintsWholeRows(t *testing.T) {
+	t.Parallel()
+
+	for style := range spinnerSpecs {
+		t.Run(string(style), func(t *testing.T) {
+			t.Parallel()
+			m := alignedPanelModel(t, style, domain.GlyphsUnicode, 170, 40,
+				panelDelegationCall(t, "r1", "twelve-chars"),
+				delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+				panelUsageReading((12+13+40)*1024), // the split's coarse form counts in steps of 1024
+				standingCost(12*1024, 13*1024),
+			)
+			if got := m.panelPaintWidth(); got != domain.DefaultSidePanelWidth {
+				t.Fatalf("setup: the column paints %d wide, want the default %d", got, domain.DefaultSidePanelWidth)
+			}
+
+			column := strings.Join(panelText(t, m), "\n")
+			for _, text := range []string{" twelve-chars ", "sys 12k · tools 13k · hist 40k"} {
+				if !strings.Contains(column, text) {
+					t.Errorf("the column paints no whole %q:\n%s", text, column)
+				}
+			}
+		})
+	}
+}
+
+// TestSidePanelViewedRunMarkMovesNoColumn pins the viewed run's mark (docs/layout/side-panel-layout.md,
+// "Run view"): Run view's `▸` stands in the first cell of its row's body indent, so the viewed
+// run's name starts in the column every other row's does, before and after the view opens.
+func TestSidePanelViewedRunMarkMovesNoColumn(t *testing.T) {
+	t.Parallel()
+	m := panelModel(t, domain.DefaultSidePanelSections, 30,
+		panelDelegationCall(t, "r1", "alpha"),
+		delegationPhase("r1", domain.SubAgentStarted, time.Minute),
+		panelDelegationCall(t, "r2", "bravo"),
+	)
+	nameColumn := func(m Model, name string) int {
+		row := panelRowOf(t, m, name)
+		return ansi.StringWidth(row[:strings.Index(row, " "+name+" ")+1])
+	}
+	before := nameColumn(m, "alpha")
+
+	m = openViewOf(t, m, delegationBase("r1"))
+
+	if row := panelRowOf(t, m, "alpha"); !strings.HasPrefix(row, glyphPanelCurrent+" ") {
+		t.Errorf("the viewed row %q does not lead with %s in its body indent", row, glyphPanelCurrent)
+	}
+	if got, other := nameColumn(m, "alpha"), nameColumn(m, "bravo"); got != before || other != before {
+		t.Errorf("viewed name at column %d, other at %d; want both at %d, where it stood unviewed", got, other, before)
+	}
 }
 
 // TestSidePanelClearEmptiesThePanel pins the /clear boundary: the panel the closed session folded
@@ -3037,12 +3272,12 @@ func TestSidePanelMCPSectionRows(t *testing.T) {
 	if !isLive {
 		t.Error("the mcp section is not live with servers not connected")
 	}
-	want := []string{
-		"alpha · connected · 1 tool",
-		"beta · failed",
-		"gamma · failed · 2 tools",
-		"delta · dialling",
-		"omega · disconnected",
+	want := []string{ // behind the body indent and the classic spinner's blank one-cell lead
+		"    alpha · connected · 1 tool",
+		"    beta · failed",
+		"    gamma · failed · 2 tools",
+		"    delta · dialling",
+		"    omega · disconnected",
 	}
 	got := make([]string, 0, len(section.body))
 	for _, row := range section.body {

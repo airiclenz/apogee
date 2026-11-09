@@ -829,18 +829,18 @@ func TestNavModePanelCursorAnchorsToRow(t *testing.T) {
 	t.Run("its own row removed: the same section's nearest stop", func(t *testing.T) {
 		t.Parallel()
 		events := panelWrite(domain.EventBase{}, "w1", "/w/top.go")
-		for _, run := range []string{"r1", "r2", "r3"} {
+		for _, run := range []string{"r1", "r2", "r3", "r4"} {
 			events = append(events, panelDelegationCall(t, run, "scout-"+run), delegationPhase(run, domain.SubAgentStarted, time.Minute))
 		}
 		m, _ := navModel(t, onlySections(domain.SidePanelSubAgents, domain.SidePanelChangedFiles), events...)
 		row := func(run string) panelStopID {
 			return panelStopID{section: domain.SidePanelSubAgents, run: sidepanel.RunOf(delegationBase(run))}
 		}
-		m = cursorOnPanelStop(t, m, row("r3"))
+		m = cursorOnPanelStop(t, m, row("r4"))
 		left := panelCursorStop(t, m).y
 
 		m.transcript.entries = slices.DeleteFunc(m.transcript.entries, func(e entry) bool {
-			return e.headsRun() && (e.spawnRunID == "r2" || e.spawnRunID == "r3")
+			return e.headsRun() && slices.Contains([]string{"r2", "r3", "r4"}, e.spawnRunID)
 		})
 		m.refreshViewport()
 

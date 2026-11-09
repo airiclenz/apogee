@@ -1408,7 +1408,7 @@ fold indicator at the right edge, as a tool block's header does: `▼` open, `�
 |---|---|---|
 | `sub-agents` | a delegation is queued or running, and for 30 s after the last one ends | the status line's spinner while it runs, `○` queued, `◷` `waiting` while an approval it asked for is showing or queued, `✓` done, `✗` failed; its name, phase, elapsed time and context fill |
 | `tasks` | the task list has an unfinished task | `✓` done, `▸` the current task (the first unfinished one), `○` still open |
-| `changed-files` | the session has written a file, at any depth | the path, trimmed from the left to fit; `↳` when a sub-agent wrote it; `+N −M` lines where the edit reports them |
+| `changed-files` | the session has written a file, at any depth | `↳` before the path when a sub-agent wrote it; the path, trimmed from the left to fit; `+N −M` lines where the edit reports them |
 | `usage` | the context is at least 50% full | the fill bar, the system / tools / history split, tokens in and out, the cache hit rate and the spend |
 | `mcp` | an MCP server is dialling, failed or disconnected | the server's name, its state and its tool count (`docs · connected · 12 tools`); the count is left off while no connection serves, and kept while a failed reconnect's previous connection still does |
 
@@ -1417,7 +1417,12 @@ The `mcp` section's header counts the servers that are not connected, by state (
 names are shown with terminal escapes stripped. Only apogee's own file tools count as changes: **a file changed through the `terminal` tool is not
 shown**, and neither is a write that failed. Under `ui.glyphs: safe` the done mark is `√`, the failed one `x` and the waiting one `?`.
 
-When the sections need more rows than the panel has, pinned sections get their rows first, then
+A blank row parts each section from the one above it, and every section's rows are indented under
+its header, their marks in one column and their text in the next, so the text of every section
+starts in the same column.
+
+When the sections need more rows than the panel has, the blank rows between them are dropped
+before any section folds; pinned sections get their rows first, then
 the `auto` ones in list order; a section you folded keeps to its header however much room is left. A section that does not get its full height folds to its header
 (`○ Tasks (2/5)`) and wears `▶`. Click such a header to open it: it takes its rows ahead of the
 `auto` sections for the rest of the session — the last `auto` section folds instead — without

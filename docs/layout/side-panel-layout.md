@@ -48,11 +48,12 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
   indent (two cells), so the content starts as far right of the separator as transcript text does
   of its marker column; then the content; then a right margin of the same two cells, so a header's
   fold indicator and a row's right-aligned facts sit in the column of the status line's last cell.
-  Where the content would be narrower than a full sub-agent row — its lead cell and the space after
-  it, the one-cell gap and its facts — the chrome yields a cell at a time before any fact is cut:
-  the right margin first, then the gutter's second cell; the gutter's first cell, where the cursor's
-  `▌` stands, never yields, and past that the sub-agent's name is clipped to make room. The minimum
-  width 24 paints a full sub-agent row's facts whole under every spinner style.
+  Where the content would be narrower than a full sub-agent row — its body indent, its lead cell
+  and the space after it, the one-cell gap and its facts ("Rows and spacing") — the chrome yields a
+  cell at a time before any fact is cut: the right margin first, then the gutter's second cell, then
+  the body indent, down to nothing; the gutter's first cell, where the cursor's `▌` stands, never
+  yields, and past that the sub-agent's name is clipped to make room. The minimum width 24 paints a
+  full sub-agent row's facts whole under every spinner style.
 - **The slot's panes** (`/settings`, approvals, report panes, Run view) paint in the narrowed slot
   while the panel shows. Popups keep their own placement rules.
 
@@ -126,12 +127,25 @@ section out gets it appended in `auto`, so a list saved before `mcp` existed sho
 |---|---|---|
 | `sub-agents` | any run is queued or running, and for 30 s after the last one ends | phase glyph, Delegation name, phase word, elapsed, context fill |
 | `tasks` | the list has an unfinished task | status glyph and task text; the first unfinished task marked `▸` |
-| `changed-files` | the session (any depth) has written a file | path trimmed from the left, `↳` when a sub-agent wrote it, `+N −M` from Edit regions where present |
+| `changed-files` | the session (any depth) has written a file | `↳` in the lead when a sub-agent wrote it (blank otherwise), path trimmed from the left, `+N −M` from Edit regions where present |
 | `usage` | context fill ≥ 50% | fill bar with `used/window`; `sys · tools · hist` split (history = estimate − standing rows); `in · out` tokens; cache hit %; spend |
 | `mcp` | any MCP server is `dialling`, `failed` or `disconnected` | `name · state · N tools`, one row per server in first-reported order |
 
 The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune; the rules are ADR
 0110's.
+
+**Rows and spacing.** One blank spacer row precedes every section header but the first, as one
+blank line parts the transcript's blocks; the overflow drops the spacers first ("Overflow"). A
+header's pin glyph stands on the content's first cell. Every body row of every section starts
+`bodyIndent` (two cells) right of it, then a **lead cell** as wide as the panel-wide lead width —
+the widest of the active spinner style's frames and the one-cell marks a lead can hold (`○`, `◷`,
+`✓`, `✗`, `▸`, `↳`): two cells under `snake` and `glitter`, one under `classic` and
+`ui.glyphs: safe` — holding the row's status glyph, `↳`, or nothing, padded on the right, then one
+blank cell, then the row's text. So the text of a sub-agent, a task, a changed file, a usage row and
+an MCP server starts in one column across the column. There are no `┝`/`┕` branches. The indent
+and lead come out of a row's room before its text is clipped or its path trimmed, never out of its
+facts. On a column too narrow for a full sub-agent row the body indent yields ("Where it sits",
+Columns); with no indent cell left, Run view's `▸` stands after the lead instead ("Run view").
 
 **Sub-agent rows.** The phase glyph is the status line's spinner frame while the run is running
 (`ui.spinner`, so it turns with the status line, in the same `ui.spinner-color` loop as a
@@ -147,15 +161,14 @@ The phase word is `queued`, `running`, `waiting`, `done` or `failed`. Elapsed ti
 form (`38s`, `01:12s`) below an hour, then hours and minutes (`1h02m` to `23h59m`), then days and
 hours (`1d02h`), clamped at `99d23h` — never wider than six columns, where the status line's own
 `01:02:03s` would push the row's facts out of line — and blank while queued; the fill is the run's latest reading against its own
-window, blank before it has one. The glyph sits in a lead cell as wide as the active spinner
-style's frame (two cells under `snake` and `glitter`, one under `classic` and `ui.glyphs: safe`),
+window, blank before it has one. The glyph sits in the panel-wide lead cell ("Rows and spacing"),
 the narrower marks padded on the right, so every row's name starts in one column. Phase, elapsed
 and fill sit in fixed-width columns at the right edge, so the facts of every row line up.
 
 **MCP rows.** The section reads the process's MCP server state — the fold of every
 `MCPServerEvent` (ADR 0111 decision 8): emitted by the composition root as each server's dial starts
 and ends and as a live session is closed on purpose or lost on its own, and seeded at startup — not the viewed run's,
-since no run owns a server. A row is written flush left as `name · state · N tools` (`1 tool`), the
+since no run owns a server. A row is written behind a blank lead as `name · state · N tools` (`1 tool`), the
 name clipped first so the state and the count stay in view; the state is faint, `failed` in the
 error tone. The count is left off while no connection serves, and kept while a dial is under way
 with the previous connection's tools in hand or a failed reconnect's previous connection still
@@ -188,6 +201,11 @@ by state in the order dialling, failed, disconnected — `2 dialling · 1 failed
 while every one is connected).
 
 ## Overflow
+
+The spacers between sections ("Rows and spacing") go first, all together: they are painted only
+while the overflow below squeezes no section and every one of them fits in the rows the bodies leave
+over, so a spacer never costs a section its body. A section the human folded is not squeezed, so it
+leaves the spacers standing.
 
 When the shown sections need more rows than the slot has:
 
@@ -258,7 +276,7 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
   ([adr-0111-amend-1109b](../../.capcom/knowledge/decisions/adr-0111/adr-0111-amend-1109b.md)); adjacent
   rows that share one target are one stop, so the tasks body
   is one stop (the task-list card), the usage rows are one (`/usage`) and the mcp rows are one
-(`/mcp`). The `+N more` row and a body
+(`/mcp`). The `+N more` row, a spacer and a body
   row with nothing to open are none.
 - **Entering.** `⌥↑`/`⌥↓` start the mode in the transcript, or in the panel when the transcript has
   no stop — `⌥↑` at the last stop, `⌥↓` at the first. Inside the mode `→` moves the cursor from the
@@ -300,7 +318,9 @@ the transcript (`docs/layout/tool-layout.md`, "Keyboard"). Its keys are the same
 
 While Run view shows a run, `tasks`, `changed-files` and `usage` show that run's state, and the
 usage fill reads exactly what the status-line gauge reads. `sub-agents` keeps listing every run, and
-the viewed one is marked with `▸` before its name, both in the current-task style; `mcp` keeps
+the viewed one is marked with `▸` in the first cell of its row's body indent, so the mark costs no
+width and moves no column (on a column so narrow the indent has yielded, it stands after the lead),
+and its name, both in the current-task style; `mcp` keeps
 showing every server, which belongs to the process rather than to a run. `esc` back to the
 conversation gives the panel back to the top level.
 

@@ -1249,11 +1249,12 @@ func TestMCPLostStripsEscapes(t *testing.T) {
 	}
 }
 
-// stripPanelRows is a panel section's painted rows as plain text, trailing padding trimmed.
+// stripPanelRows is a panel section's painted rows as plain text, the blank body indent and lead
+// ([Model.panelBodyLead]) and the trailing padding trimmed.
 func stripPanelRows(body []string) []string {
 	rows := make([]string, 0, len(body))
 	for _, row := range body {
-		rows = append(rows, strings.TrimRight(strip(row), " "))
+		rows = append(rows, strings.Trim(strip(row), " "))
 	}
 	return rows
 }

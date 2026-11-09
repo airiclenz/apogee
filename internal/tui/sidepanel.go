@@ -50,6 +50,11 @@ const (
 	// right pad (bodyIndent), so the column's right-edge cells sit in the status line's last cell's
 	// column. A column too narrow for a full sub-agent row yields it first ([Model.panelChrome]).
 	sidePanelMarginWidth = len(bodyIndent)
+	// sidePanelBodyIndentWidth is the body indent at full width: a section's body rows start this
+	// far right of its header's lead pin cell, as a transcript block's body hangs bodyIndent in
+	// under its header. A column too narrow for a full sub-agent row yields it after the gutter's
+	// extra cell ([Model.panelChrome]).
+	sidePanelBodyIndentWidth = len(bodyIndent)
 	// sidePanelGripWidth is the grip's cells: the separator and the one cell right of it
 	// ([Model.panelGripAt]) — fixed, so the lead pin cell is never a grip whatever the gutter yields.
 	sidePanelGripWidth = 2
@@ -96,6 +101,10 @@ type panelChrome struct {
 	gutter int
 	// margin is the blank cells right of the content.
 	margin int
+	// indent is the body indent: the cells inside the content a body row starts right of its
+	// header's lead pin cell ([Model.panelBodyLead]). It is content, not chrome left of it, so
+	// [panelChrome.left] leaves it out.
+	indent int
 }
 
 // left is the columns the chrome spends left of the content: the inset blank, the separator and
@@ -105,19 +114,22 @@ func (c panelChrome) left() int {
 }
 
 // panelChrome is the painted column's chrome this frame. Where the content holds a full sub-agent
-// row ([Model.panelFullSubAgentRowWidth]) the gutter and the margin are bodyIndent wide; narrower,
-// they yield a cell at a time before any fact is cut: the right margin first, then the gutter's
-// extra cell, down to the one cell the cursor's ▌ stands in.
+// row ([Model.panelFullSubAgentRowWidth]) the gutter, the margin and the body indent are bodyIndent
+// wide; narrower, they yield a cell at a time before any fact is cut: the right margin first, then
+// the gutter's extra cell, down to the one cell the cursor's ▌ stands in, then the body indent,
+// down to nothing.
 func (m Model) panelChrome() panelChrome {
 	width := m.panelPaintWidth()
-	chrome := panelChrome{gutter: sidePanelGutterWidth, margin: sidePanelMarginWidth}
+	chrome := panelChrome{gutter: sidePanelGutterWidth, margin: sidePanelMarginWidth, indent: sidePanelBodyIndentWidth}
 	if m.panelOverlaid() && !m.panelOverlayGapHung() {
 		chrome.inset = 1
 	}
 	short := m.panelFullSubAgentRowWidth() - (width - chrome.left() - chrome.margin)
 	marginYield := min(max(0, short), sidePanelMarginWidth)
 	chrome.margin -= marginYield
-	chrome.gutter -= min(max(0, short-marginYield), sidePanelGutterWidth-sidePanelGutterLeast)
+	gutterYield := min(max(0, short-marginYield), sidePanelGutterWidth-sidePanelGutterLeast)
+	chrome.gutter -= gutterYield
+	chrome.indent -= min(max(0, short-marginYield-gutterYield), sidePanelBodyIndentWidth)
 	return chrome
 }
 
@@ -128,10 +140,10 @@ func (m Model) panelLeftChrome() int {
 }
 
 // panelFullSubAgentRowWidth is the content width a sub-agent row needs to paint its facts whole
-// beside a name clipped to nothing: the lead cell and its space ([Model.panelSubAgentLeadWidth]),
-// the one-cell gap before the facts, and the facts.
+// beside a name clipped to nothing: the full body indent, the lead cell and its space
+// ([Model.panelLeadWidth]), the one-cell gap before the facts, and the facts.
 func (m Model) panelFullSubAgentRowWidth() int {
-	return m.panelSubAgentLeadWidth() + 1 + 1 + subAgentFactsWidth
+	return sidePanelBodyIndentWidth + m.panelLeadWidth() + 1 + 1 + subAgentFactsWidth
 }
 
 // panelOverlayGapHung reports whether the overlay's blank column hangs left of the painted column
@@ -335,6 +347,8 @@ func (m Model) sidePanelContent(rows int) []string {
 	lines := make([]string, 0, len(layout))
 	for _, line := range layout {
 		switch {
+		case line.isSpacer:
+			lines = append(lines, "")
 		case line.more > 0:
 			lines = append(lines, m.th.toolMarker.Render("+"+strconv.Itoa(line.more)+sidePanelMore))
 		case line.body < 0:
@@ -347,24 +361,30 @@ func (m Model) sidePanelContent(rows int) []string {
 }
 
 // panelLine is what one content row of the column is: a section's header (body −1) or one of its
-// body rows, or — section −1, more the count — the `+N more` row. A header's isOpen is whether its
-// fold indicator reads open: its body is drawn below it, or it has no body rows to draw — so `▶`
-// marks exactly a section with rows the column is not showing, folded by the human or by the overflow.
+// body rows, or — section −1 — the blank spacer row before a header (isSpacer) or, more the count,
+// the `+N more` row. A header's isOpen is whether its fold indicator reads open: its body is drawn
+// below it, or it has no body rows to draw — so `▶` marks exactly a section with rows the column is
+// not showing, folded by the human or by the overflow.
 type panelLine struct {
-	section int
-	body    int
-	more    int
-	isOpen  bool
+	section  int
+	body     int
+	more     int
+	isOpen   bool
+	isSpacer bool
 }
 
 // panelLayout lays the shown sections out over rows rows by the overflow rule ([panelAllocation]):
-// one panelLine per content row, from the top. It is the one layout the paint
+// one panelLine per content row, from the top, a blank spacer before every header but the first
+// where the allocation has room for them. It is the one layout the paint
 // ([Model.sidePanelContent]) and the stops ([Model.panelStops]) — so the pointer — both read, so a
 // click names the row it lands on.
 func panelLayout(sections []panelSection, rows int) []panelLine {
-	kept, isExpanded := panelAllocation(sections, rows)
+	kept, isExpanded, hasSpacers := panelAllocation(sections, rows)
 	lines := make([]panelLine, 0, rows)
 	for i := range sections[:kept] {
+		if hasSpacers && i > 0 {
+			lines = append(lines, panelLine{section: -1, body: -1, isSpacer: true})
+		}
 		lines = append(lines, panelLine{section: i, body: -1, isOpen: isExpanded[i] || len(sections[i].body) == 0})
 		if !isExpanded[i] {
 			continue
@@ -387,10 +407,13 @@ func panelLayout(sections []panelSection, rows int) []panelLine {
 // human folded costs its header row and nothing more: it takes no body rows, and no spare room
 // unfolds it. When not even every header fits, the last ones in list order are left out and the
 // bottom row is kept for `+N more`. kept is how many sections, from the front, are drawn.
-func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []bool) {
+// The spacers between sections are budgeted last: hasSpacers holds only where the overflow squeezed
+// no section and every spacer fits in the rows the bodies left over, so the spacers all go before
+// any section folds for want of rows, and never cost one its body.
+func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []bool, hasSpacers bool) {
 	isExpanded = make([]bool, len(sections))
 	if len(sections) > rows {
-		return max(rows-1, 0), isExpanded
+		return max(rows-1, 0), isExpanded, false
 	}
 	spare := rows - len(sections)
 	for _, tier := range []int{panelTierPinned, panelTierOpened, panelTierAuto} {
@@ -402,7 +425,18 @@ func panelAllocation(sections []panelSection, rows int) (kept int, isExpanded []
 			isExpanded[i], spare = true, spare-len(section.body)
 		}
 	}
-	return len(sections), isExpanded
+	return len(sections), isExpanded, !panelSqueezed(sections, isExpanded) && spare >= len(sections)-1
+}
+
+// panelSqueezed reports whether the overflow squeezed any of sections: one with body rows that the
+// human did not fold and that isExpanded leaves folded.
+func panelSqueezed(sections []panelSection, isExpanded []bool) bool {
+	for i, section := range sections {
+		if !section.isFolded && len(section.body) > 0 && !isExpanded[i] {
+			return true
+		}
+	}
+	return false
 }
 
 // The overflow's tiers, in the order they take rows ([panelAllocation]).
@@ -519,22 +553,52 @@ func paintPanelRows[R any](rows []R, paint func(R) string) []string {
 	return painted
 }
 
-// panelRow lays one content row out: lead (painted, measured as it stands), then text — clipped
-// with an ellipsis to the room left — painted in style, then right (painted) flush against the
-// column's right edge, one blank cell at least from the text. On a narrow column the lead and the
-// right-hand facts alone can outrun the room: the pad then floors at nothing and the row runs long,
-// for sidePanelColumn's squareLine to cut.
+// panelRow lays one body row out: lead (painted, measured as it stands — [Model.panelBodyLead], or
+// that with a bar after it), then text — clipped with an ellipsis to the room left
+// ([Model.panelTextRoom]) — painted in style, then right (painted) flush against the column's right
+// edge, one blank cell at least from the text. On a narrow column the lead and the right-hand facts
+// alone can outrun the room: the pad then floors at nothing and the row runs long, for
+// sidePanelColumn's squareLine to cut.
 func (m Model) panelRow(lead, text string, style lipgloss.Style, right string) string {
-	room := m.panelContentWidth() - m.th.measure.Width(lead)
-	if right != "" {
-		room -= m.th.measure.Width(right) + 1
-	}
+	room := m.panelTextRoom(lead, right)
 	text = truncateToWidth(m.th, text, room)
 	row := lead + style.Render(text)
 	if right == "" {
 		return row
 	}
 	return row + strings.Repeat(" ", max(0, room-m.th.measure.Width(text)+1)) + right
+}
+
+// panelTextRoom is the cells a body row's text has between lead and right (both painted, right
+// empty for none): the content width less the lead, and less the right-hand facts and the blank
+// cell before them. It goes negative on a column too narrow for the lead and facts alone.
+func (m Model) panelTextRoom(lead, right string) int {
+	room := m.panelContentWidth() - m.th.measure.Width(lead)
+	if right != "" {
+		room -= m.th.measure.Width(right) + 1
+	}
+	return room
+}
+
+// panelBodyLead is a body row's lead: the body indent ([panelChrome.indent]) — its first cell
+// holding marker (painted, or empty for none) — then glyph (painted, or empty for a blank lead) in
+// a lead cell the panel-wide lead width wide ([Model.panelLeadWidth]), padded on the right, then
+// one blank cell. Every section's body rows are led by it, so their text starts in one column
+// across the column, and a marker in the indent costs no width and moves no column. On a column so
+// narrow the indent has yielded too few cells for the marker ([Model.panelChrome]) the marker and a
+// blank cell follow the lead instead, so the row still wears it.
+func (m Model) panelBodyLead(marker, glyph string) string {
+	indent, markerWidth := m.panelChrome().indent, m.th.measure.Width(marker)
+	pad := max(0, m.panelLeadWidth()-m.th.measure.Width(glyph))
+	lead := glyph + strings.Repeat(" ", pad) + " "
+	switch {
+	case marker == "":
+		return strings.Repeat(" ", indent) + lead
+	case markerWidth > indent:
+		return strings.Repeat(" ", indent) + lead + marker + " "
+	default:
+		return marker + strings.Repeat(" ", indent-markerWidth) + lead
+	}
 }
 
 // panelHeaderRow is a section's header: `<pin> <Title> (<summary>) ⋯ ▼`, led by its pin glyph — ●
@@ -569,13 +633,13 @@ func paintPanelPin(th theme, marker string, _ bool) string {
 
 // panelSubAgentRow is one delegation: its phase glyph — the status line's spinner frame while it
 // runs, in the status line's colour loop — its name, and its phase, elapsed time and context fill.
-// The glyph sits in a lead cell as wide as the widest glyph a row can wear
-// ([Model.panelSubAgentLeadWidth]), padded on the right, so every row's name starts in one column
-// whatever the spinner style. A run waiting on an approval,
+// The glyph sits in the panel-wide lead cell ([Model.panelBodyLead]), so every row's name starts in
+// one column whatever the spinner style. A run waiting on an approval,
 // showing or queued, reads `waiting` under the glyph set's waiting mark in the warning tone, in
 // place of its queued or running glyph (ADR 0111 decision 11); the fold only ever sets Waiting on
 // an active row, so a done or failed row keeps its own mark. The run Run view shows (isViewed) is
-// marked as the current task is: `▸` before its name, both in the current task's style.
+// marked as the current task is: `▸` in the first cell of its body indent, and its name, both in
+// the current task's style.
 func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string {
 	var glyph, phase string
 	switch {
@@ -599,28 +663,32 @@ func (m Model) panelSubAgentRow(row sidepanel.SubAgentRow, isViewed bool) string
 		fill = strconv.Itoa(percent) + "%"
 	}
 	facts := m.th.statusFaint.Render(fmt.Sprintf(subAgentFactsFormat, phase, elapsed, fill))
-	pad := max(0, m.panelSubAgentLeadWidth()-m.th.measure.Width(glyph))
-	lead, style := glyph+strings.Repeat(" ", pad)+" ", lipgloss.NewStyle()
+	marker, style := "", lipgloss.NewStyle()
 	if isViewed {
-		lead, style = lead+m.th.panelCurrent.Render(glyphPanelCurrent)+" ", m.th.panelCurrent
+		marker, style = m.th.panelCurrent.Render(glyphPanelCurrent), m.th.panelCurrent
 	}
-	return m.panelRow(lead, row.Name, style, facts)
+	return m.panelRow(m.panelBodyLead(marker, glyph), row.Name, style, facts)
 }
 
-// panelSubAgentLeadWidth is the width of a sub-agent row's lead cell: the widest of the active
-// spinner style's frame as the glyph set draws it and the one-cell phase marks (queued, waiting,
-// done, failed), so a two-cell spinner widens every row's lead rather than shoving its own name
-// one column right of the rest.
-func (m Model) panelSubAgentLeadWidth() int {
+// panelLeadWidth is the width of every body row's lead cell, in every section: the widest of the
+// active spinner style's frame as the glyph set draws it and the one-cell marks a lead can hold
+// (queued, waiting, done, failed, the current task's ▸, a delegated write's ↳), so a two-cell
+// spinner widens every row's lead rather than shoving its own name one column right of the rest,
+// and every section's text starts in one column.
+func (m Model) panelLeadWidth() int {
 	width := m.spin.width(m.th, m.opts.UI.Spinner)
-	for _, mark := range []string{glyphPanelOpen, m.th.glyphs.waiting, m.th.glyphs.done, m.th.glyphs.failure} {
+	marks := []string{
+		glyphPanelOpen, m.th.glyphs.waiting, m.th.glyphs.done, m.th.glyphs.failure, glyphPanelCurrent, glyphPanelDelegated,
+	}
+	for _, mark := range marks {
 		width = max(width, m.th.measure.Width(mark))
 	}
 	return width
 }
 
 // panelMCPRow is one MCP server: `name · state · N tools`, the count left off while no connection
-// serves ([mcpPanelServes]). The name is clipped first so the state and count stay in view; on a
+// serves ([mcpPanelServes]), behind a blank body lead ([Model.panelBodyLead]). The name is clipped
+// first so the state and count stay in view; on a
 // column too narrow even for them the row runs long, for sidePanelColumn's squareLine to cut. The
 // name is untrusted text: the fold strips it and this strips it again, which is idempotent.
 func (m Model) panelMCPRow(row sidepanel.MCPServerRow) string {
@@ -632,8 +700,9 @@ func (m Model) panelMCPRow(row sidepanel.MCPServerRow) string {
 	if mcpPanelServes(row) {
 		facts += m.th.statusFaint.Render(sidePanelPartSeparator + plural(row.Tools, "tool"))
 	}
-	name := truncateToWidth(m.th, firstLine(stripEscapes(row.Server)), m.panelContentWidth()-m.th.measure.Width(facts))
-	return name + facts
+	lead := m.panelBodyLead("", "")
+	name := truncateToWidth(m.th, firstLine(stripEscapes(row.Server)), m.panelTextRoom(lead, "")-m.th.measure.Width(facts))
+	return lead + name + facts
 }
 
 // mcpPanelServes reports whether a connection serves row's server, so its tool count means
@@ -691,35 +760,28 @@ func (m Model) panelTaskRow(row sidepanel.TaskRow) string {
 	text := firstLine(stripEscapes(row.Text))
 	switch {
 	case row.IsDone:
-		return m.panelRow(m.th.successMark.Render(m.th.glyphs.done)+" ", text, m.th.statusFaint, "")
+		return m.panelRow(m.panelBodyLead("", m.th.successMark.Render(m.th.glyphs.done)), text, m.th.statusFaint, "")
 	case row.IsCurrent:
-		return m.panelRow(m.th.panelCurrent.Render(glyphPanelCurrent)+" ", text, m.th.panelCurrent, "")
+		return m.panelRow(m.panelBodyLead("", m.th.panelCurrent.Render(glyphPanelCurrent)), text, m.th.panelCurrent, "")
 	default:
-		return m.panelRow(m.th.statusFaint.Render(glyphPanelOpen)+" ", text, lipgloss.NewStyle(), "")
+		return m.panelRow(m.panelBodyLead("", m.th.statusFaint.Render(glyphPanelOpen)), text, lipgloss.NewStyle(), "")
 	}
 }
 
-// panelFileRow is one changed file: its path, relative to the workspace where it lies inside it and
-// trimmed from the left to the room the row has, then ↳ when a sub-agent wrote it and the `+N −M`
-// its Edit regions add up to.
+// panelFileRow is one changed file: ↳ in its lead when a sub-agent wrote it (blank otherwise), its
+// path, relative to the workspace where it lies inside it and trimmed from the left to the room
+// the row has, then the `+N −M` its Edit regions add up to.
 func (m Model) panelFileRow(row sidepanel.FileRow) string {
-	facts := make([]string, 0, 2)
+	glyph := ""
 	if row.IsDelegated {
-		facts = append(facts, glyphPanelDelegated)
+		glyph = m.th.statusFaint.Render(glyphPanelDelegated)
 	}
+	lead, right := m.panelBodyLead("", glyph), ""
 	if row.HasStat {
-		facts = append(facts, diffCounts(row.Stat.Added, row.Stat.Removed))
-	}
-	right := ""
-	if len(facts) > 0 {
-		right = m.th.statusFaint.Render(strings.Join(facts, " "))
-	}
-	room := m.panelContentWidth()
-	if right != "" {
-		room -= m.th.measure.Width(right) + 1
+		right = m.th.statusFaint.Render(diffCounts(row.Stat.Added, row.Stat.Removed))
 	}
 	path := m.transcript.ws.shorten(firstLine(stripEscapes(row.Path)))
-	return m.panelRow("", trimPathLeft(m.th, path, room), lipgloss.NewStyle(), right)
+	return m.panelRow(lead, trimPathLeft(m.th, path, m.panelTextRoom(lead, right)), lipgloss.NewStyle(), right)
 }
 
 // trimPathLeft cuts path from the left, a whole component at a time, behind `…/` until it fits
@@ -743,9 +805,9 @@ func trimPathLeft(th theme, path string, room int) string {
 
 // panelUsageRows is the usage section's body: the fill bar with the tokens it stands for, the
 // system / tools / history split, the tokens in and out, the cache hit rate and the spend — each
-// row only where the reading has it.
+// row only where the reading has it, behind a blank body lead ([Model.panelBodyLead]).
 func (m Model) panelUsageRows(view sidepanel.UsageView) []string {
-	plain := lipgloss.NewStyle()
+	plain, lead := lipgloss.NewStyle(), m.panelBodyLead("", "")
 	rows := make([]string, 0, 5)
 	if fill := view.Fill; fill.Window > 0 && fill.Used > 0 {
 		approx := ""
@@ -753,24 +815,24 @@ func (m Model) panelUsageRows(view sidepanel.UsageView) []string {
 			approx = "~"
 		}
 		bar := renderGaugeBar(m.th, fill.Used, fill.Window) + " "
-		rows = append(rows, m.panelRow(bar, approx+format.Tokens(fill.Used)+"/"+format.Tokens(fill.Window), m.th.statusFaint, ""))
+		rows = append(rows, m.panelRow(lead+bar, approx+format.Tokens(fill.Used)+"/"+format.Tokens(fill.Window), m.th.statusFaint, ""))
 	}
 	if view.HasSplit {
 		split := "sys " + panelTokens(view.System) + sidePanelPartSeparator + "tools " + panelTokens(view.Tools) +
 			sidePanelPartSeparator + "hist " + panelTokens(view.History)
-		rows = append(rows, m.panelRow("", split, plain, ""))
+		rows = append(rows, m.panelRow(lead, split, plain, ""))
 	}
 	totals := view.Totals
 	if totals.Calls > 0 {
 		inOut := "in " + panelTokens(totals.PromptTokens) + sidePanelPartSeparator + "out " + panelTokens(totals.CompletionTokens)
-		rows = append(rows, m.panelRow("", inOut, plain, ""))
+		rows = append(rows, m.panelRow(lead, inOut, plain, ""))
 	}
 	if totals.PromptTokens > 0 && totals.CachedPromptTokens > 0 {
 		hit := totals.CachedPromptTokens * percentCap / totals.PromptTokens
-		rows = append(rows, m.panelRow("", "cache hit "+strconv.Itoa(hit)+"%", plain, ""))
+		rows = append(rows, m.panelRow(lead, "cache hit "+strconv.Itoa(hit)+"%", plain, ""))
 	}
 	if spend := spendText(totals, m.currency()); spend != "" {
-		rows = append(rows, m.panelRow("", "spend "+spend, plain, ""))
+		rows = append(rows, m.panelRow(lead, "spend "+spend, plain, ""))
 	}
 	return rows
 }

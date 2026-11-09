@@ -44,8 +44,8 @@ func (s panelStop) spans(y int) bool {
 // paint reads ([panelLayout] over [Model.panelSections]). Every header is two stops on its row, the
 // pin cell's first — its target the pin toggle — and then the title's, its target the fold toggle;
 // a body row is one where it has a target, and adjacent rows that share one
-// target are one stop (the tasks body, the usage rows, the mcp rows). The `+N more` row and a body
-// row with nothing to open are none.
+// target are one stop (the tasks body, the usage rows, the mcp rows). The `+N more` row, a spacer
+// between sections and a body row with nothing to open are none.
 func (m Model) panelStops(rows int) []panelStop {
 	sections := m.panelSections()
 	if len(sections) == 0 {
