@@ -1567,3 +1567,182 @@ func TestExtractPDF_ReadsEncryptSpelledInsideAStreamAsContent(t *testing.T) {
 		t.Errorf("text = %q, pages = %d, want the single page carrying %q", text, pages, spelled)
 	}
 }
+
+// plainFont is the one font every nesting fixture's page uses, unless a case gives it a
+// /ToUnicode CMap of its own.
+const plainFont = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+
+// nestingPDF builds a one-page document from the page's font object and content-stream object,
+// with extras appended as objects 6 onward.
+func nestingPDF(t *testing.T, font, content string, extras ...string) []byte {
+	t.Helper()
+
+	return hostilePDF(t, append([]string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+		font,
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]" +
+			" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+		content,
+	}, extras...)...)
+}
+
+// plainStream wraps body as a stream object body with its exact /Length and any further
+// dictionary entries, the body itself written as given.
+func plainStream(body string, entries ...string) string {
+	dictionary := strings.Join(append([]string{fmt.Sprintf("/Length %d", len(body))}, entries...), " ")
+	return fmt.Sprintf("<< %s >>\nstream\n%s\nendstream", dictionary, body)
+}
+
+// pngUpRows encodes data as the PNG Up predictor does, row by row of columns bytes: each row
+// is the Up filter-type byte and the bytewise difference from the row above it.
+func pngUpRows(data []byte, columns int) []byte {
+	encoded := make([]byte, 0, len(data)+len(data)/columns+1)
+	above := make([]byte, columns)
+	for start := 0; start < len(data); start += columns {
+		encoded = append(encoded, pdfPNGUpTag)
+		for column := range columns {
+			encoded = append(encoded, data[start+column]-above[column])
+			above[column] = data[start+column]
+		}
+	}
+	return encoded
+}
+
+// TestExtractPDF_RefusesDeepNestingBeforeTheParserRecurses pins the nesting bound on every kind
+// of syntax the parser recurses into: the object bytes it reads the trailer and every object
+// from, a page's content stream however it is filtered, an object stream, and a font's
+// /ToUnicode CMap wherever it is named. The parser's recursion has no bound of its own and a
+// stack overflow kills the process, so a case whose refusal broke would not fail — it would
+// take the test binary down with it.
+func TestExtractPDF_RefusesDeepNestingBeforeTheParserRecurses(t *testing.T) {
+	t.Parallel()
+
+	deepArrays := strings.Repeat("[", 1<<20)
+	cases := []struct {
+		name string
+		data func(t *testing.T) []byte
+	}{
+		{name: "a trailer of five mebibytes of arrays", data: func(t *testing.T) []byte {
+			data := nestingPDF(t, plainFont, contentStream("Shallow page"))
+			deepTrailer := "trailer\n<< /Deep " + strings.Repeat("[", 5<<20) + " "
+			return bytes.Replace(data, []byte("trailer\n<<"), []byte(deepTrailer), 1)
+		}},
+		{name: "an object of dictionaries whose >> is a value", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, contentStream("Shallow page"),
+				strings.Repeat("<< /A >> /B ", 1<<10)+"null")
+		}},
+		{name: "a deflated page stream of arrays", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, deflatedStream(t, deepArrays))
+		}},
+		{name: "a deflated page stream of dictionaries", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, deflatedStream(t, strings.Repeat("<< /A ", 1<<18)))
+		}},
+		{name: "an unfiltered page stream of arrays", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, plainStream(deepArrays))
+		}},
+		{name: "a page stream one level past the bound", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, plainStream(strings.Repeat("[", pdfMaxNesting+1)))
+		}},
+		{name: "an object stream of arrays", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, contentStream("Shallow page"),
+				deflatedStream(t, "9 0 "+deepArrays, "/Type /ObjStm /N 1 /First 4"))
+		}},
+		{name: "a ToUnicode CMap of arrays", data: func(t *testing.T) []byte {
+			return nestingPDF(t, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
+				contentStream("Shallow page"), deflatedStream(t, deepArrays))
+		}},
+		{name: "a ToUnicode CMap named only inside an object stream", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, contentStream("Shallow page"),
+				deflatedStream(t, "9 0 << /ToUnicode 7 0 R >>", "/Type /ObjStm /N 1 /First 4"),
+				deflatedStream(t, deepArrays))
+		}},
+		{name: "a ToUnicode CMap whose filter is a reference to null", data: func(t *testing.T) []byte {
+			return nestingPDF(t, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
+				contentStream("Shallow page"), plainStream(deepArrays, "/Filter 7 0 R"), "null")
+		}},
+		{name: "a ToUnicode CMap whose filter array holds a reference", data: func(t *testing.T) []byte {
+			return nestingPDF(t, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
+				contentStream("Shallow page"),
+				plainStream(ascii85Body([]byte(deepArrays)), "/Filter [7 0 R]"), "/ASCII85Decode")
+		}},
+		{name: "an object stream whose filter is a reference to null", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, contentStream("Shallow page"),
+				plainStream("9 0 "+deepArrays, "/Type /ObjStm /N 1 /First 4 /Filter 7 0 R"), "null")
+		}},
+		{name: "a ToUnicode CMap behind a PNG Up predictor", data: func(t *testing.T) []byte {
+			// Balanced, so a broken guard fails this case instead of hanging the parser: an array
+			// left open at the end of an interpreted stream loops the parser at end-of-file.
+			rows := pngUpRows([]byte(strings.Repeat("[", 1<<12)+strings.Repeat("]", 1<<12)), 4)
+			return nestingPDF(t, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
+				contentStream("Shallow page"),
+				deflatedStream(t, string(rows), "/DecodeParms << /Predictor 12 /Columns 4 >>"))
+		}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			data := testCase.data(t)
+
+			text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+			if want := fmt.Sprintf(pdfNestingCause, pdfMaxNesting); !strings.Contains(failMessage, want) {
+				t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+			}
+			if text != "" || pages != 0 {
+				t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+			}
+		})
+	}
+}
+
+// TestExtractPDF_ReadsBracketsThatAreNotDeepSyntax pins the other side of the nesting bound: it
+// counts only what the parser reads as nested syntax. Nesting up to the bound itself reads, and
+// so do brackets the parser never recurses into — a string's text, and a stream that is not
+// syntax at all, such as an embedded font, whatever bytes it carries and whether or not it is
+// deflated.
+func TestExtractPDF_ReadsBracketsThatAreNotDeepSyntax(t *testing.T) {
+	t.Parallel()
+
+	const pageText = "Brackets elsewhere"
+	binaryBrackets := strings.Repeat("[", 1<<20)
+	cases := []struct {
+		name string
+		data func(t *testing.T) []byte
+	}{
+		{name: "a page stream nested exactly to the bound", data: func(t *testing.T) []byte {
+			nested := strings.Repeat("[", pdfMaxNesting) + strings.Repeat("]", pdfMaxNesting) + " pop\n"
+			return nestingPDF(t, plainFont, plainStream(nested+contentBody(pageText)))
+		}},
+		{name: "a string full of brackets", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, contentStream(pageText),
+				"<< /Title ("+strings.Repeat("[", 1<<10)+") >>")
+		}},
+		{name: "an unfiltered untyped stream full of brackets", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, contentStream(pageText), plainStream(binaryBrackets))
+		}},
+		{name: "a deflated untyped font file full of brackets", data: func(t *testing.T) []byte {
+			return nestingPDF(t, plainFont, contentStream(pageText),
+				deflatedStream(t, binaryBrackets, fmt.Sprintf("/Length1 %d", len(binaryBrackets))))
+		}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			data := testCase.data(t)
+
+			text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+			if failMessage != "" {
+				t.Fatalf("ExtractPDF failed: %s", failMessage)
+			}
+			if pages != 1 || !strings.Contains(text, pageText) {
+				t.Errorf("text = %q, pages = %d, want the page's own text", text, pages)
+			}
+		})
+	}
+}

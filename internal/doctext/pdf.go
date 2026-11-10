@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -99,6 +100,11 @@ const (
 	// password, or a decrypted copy, and the model holds neither.
 	pdfEncryptedCause = "the document is encrypted, and encrypted PDFs are not read"
 
+	// pdfNestingCause words the refusal of a document whose syntax nests arrays or dictionaries
+	// deeper than pdfMaxNesting (see refuseDeepNesting). It quotes the bound, not the depth found:
+	// the scan stops counting at the bound.
+	pdfNestingCause = "nests arrays or dictionaries more than %d levels deep"
+
 	// pdfPagesOmittedFormat is the last block of a walk that stopped before the document's final
 	// page: the range that was not extracted and why. It is a BLOCK rather than a failure because
 	// the pages above it are real text the model can use — the marker exists so the model reads
@@ -149,6 +155,11 @@ const (
 	// Sixty-four thousand columns is wider than any image a document carries.
 	pdfMaxPredictorColumns = 1 << 16
 
+	// pdfPNGUpPredictor is the /Predictor number of the PNG Up predictor, the one the parser
+	// decodes, and pdfPNGUpTag the filter-type byte that opens each of its rows.
+	pdfPNGUpPredictor = 12
+	pdfPNGUpTag       = 2
+
 	// pdfMaxXrefFieldWidth and pdfMaxXrefRowWidth bound a cross-reference stream's /W array: the
 	// parser allocates one row of the summed widths, and decodeInt reads each field as a
 	// big-endian integer, which is never wider than eight bytes.
@@ -176,7 +187,14 @@ func IsPDF(data []byte) bool {
 // written FOR THE MODEL — it is returned to the caller to hand straight to errorResult, not
 // wrapped or re-worded.
 //
-// A panic out of the parser is a failure like any other; nothing escapes this function. A page
+// A panic out of the parser is a failure like any other. A Go stack overflow is not a panic —
+// the runtime kills the process, and no recover sees it — and the parser recurses once per `[`
+// or `<<` with no limit of its own (lex.go readObject), so nesting is bounded BEFORE the parser
+// recurses: a document is refused, never parsed, when the syntax the parser reads nests deeper
+// than pdfMaxNesting (see refuseDeepNesting and pageContentNesting). What is guaranteed is that
+// bound as the preflight's lexer reads that syntax from the start of each span it scans; a
+// parser started mid-way through a string or comment by a forged offset reads a different
+// tokenisation, and is bounded by that span's own depth only. A page
 // that fails on its own does NOT fail the document: its text becomes a
 // "[Page N: text extraction failed]" placeholder and the walk continues. A document that yields
 // no characters on any page it kept is the scanned-image case and fails with pdfNoTextMessage —
@@ -193,7 +211,8 @@ func IsPDF(data []byte) bool {
 // Three bounds the caller does not set apply always: pdfMaxPages caps the walk, pdfPhantomRun
 // abandons a document whose page tree has run out of real pages, and pdfMaxReads bounds the
 // object graph the parser may walk. A document declaring more objects than its own byte length
-// could hold is refused before the parser allocates for them.
+// could hold is refused before the parser allocates for them, and one whose syntax nests deeper
+// than pdfMaxNesting before the parser recurses into it.
 //
 // When any of those stopped the walk before the document's last page, the text ends with one
 // "[Pages N+1–M not extracted: <reason>]" block and pages is N — the last page actually
@@ -243,7 +262,11 @@ func walkPages(reader *pdf.Reader, source *budgetedReaderAt, declared, maxTextBy
 		if failure := source.failure(); failure != "" {
 			return "", 0, failure
 		}
-		pageText, pageErr := reader.Page(number).GetPlainText(nil)
+		page := reader.Page(number)
+		if cause := pageContentNesting(source.ctx, page); cause != "" {
+			return "", 0, fmt.Sprintf(pdfUnreadableFormat, cause)
+		}
+		pageText, pageErr := page.GetPlainText(nil)
 		acc.record(number, pageText, pageErr)
 		switch {
 		case acc.phantom >= pdfPhantomRun:
@@ -529,7 +552,9 @@ func refuseAbsurdObjectCount(data []byte) string {
 //
 // An encrypted document is refused before any of that (see pdfEncrypted): its stream bodies are
 // ciphertext in the raw bytes, which the budget cannot measure, and the parser decrypts them
-// anyway whenever the user password is empty.
+// anyway whenever the user password is empty. Once the budget holds, the syntax the parser
+// reads is measured for depth (see refuseDeepNesting) — last, because that measurement decodes
+// streams, which only a document within the budget may have done to it.
 func preflightPDF(ctx context.Context, data []byte) string {
 	if pdfEncrypted(data) {
 		return pdfEncryptedCause
@@ -540,7 +565,8 @@ func preflightPDF(ctx context.Context, data []byte) string {
 		}
 	}
 
-	decoded, err := decodedReferences(ctx, data, indexPDFObjects(data))
+	objects := indexPDFObjects(data)
+	decoded, err := decodedReferences(ctx, data, objects)
 	if err != nil {
 		return pdfCancelledCause
 	}
@@ -564,7 +590,7 @@ func preflightPDF(ctx context.Context, data []byte) string {
 		}
 		remaining -= inflated
 	}
-	return ""
+	return refuseDeepNesting(ctx, data, objects)
 }
 
 // pdfEncrypted reports whether the parser would treat data as an encrypted document: whether the
@@ -681,9 +707,12 @@ const (
 	// from making the scan quadratic.
 	pdfMaxOwnerCandidates = 8
 
-	// pdfMaxNesting bounds how deeply the dictionary reader descends into nested dictionaries
-	// and arrays, so a document cannot size the preflight's stack. No real stream dictionary
-	// nests more than a handful of levels.
+	// pdfMaxNesting is the deepest the syntax the parser reads may nest arrays and dictionaries:
+	// a document nesting deeper is refused before the parser recurses into it (see
+	// refuseDeepNesting), because the parser's recursion has no bound of its own and a Go stack
+	// overflow cannot be recovered. The preflight's own dictionary reader gives up at the same
+	// depth, so a document cannot size the preflight's stack either. No real document nests more
+	// than a handful of levels.
 	pdfMaxNesting = 64
 )
 
@@ -693,21 +722,41 @@ const (
 // producers write, and the worst of them is what the stream is charged.
 var pdfUnreadChains = [][]string{{pdfFlateDecode}, {pdfASCII85Decode, pdfFlateDecode}}
 
+// pdfUnreadSyntaxChains are the decode chains a stream the parser reads as syntax is scanned
+// through when its /Filter could not be read: pdfUnreadChains, and the plain chains they leave
+// out because those inflate nothing — no filter at all (a reference the parser resolves to null)
+// and ASCII85Decode on its own.
+var pdfUnreadSyntaxChains = append([][]string{nil, {pdfASCII85Decode}}, pdfUnreadChains...)
+
 // pdfStream is one `stream` keyword the locator found. keyword is the keyword's index; skipEnd
 // is where the span the dictionary scans skip ends (== keyword when nothing is skipped). A stream
 // is owned when an `N G obj` header before it introduces it: only then does it carry the owner's
 // number, the dictionary bytes between `obj` and the keyword, the body the parser may decode, and
 // the candidate decode chains (none when the parser inflates nothing). An unowned stream is
 // unreachable — the cross-reference table addresses objects by their headers — and is never
-// charged.
+// charged. An owned stream also carries what the depth scan reads of it (see
+// refuseNestedStream): bodyStart, every chain the parser could decode it through as syntax
+// (syntaxChains — the inflating ones and the plain ones alike) and the predictor its FlateDecode
+// layer applies.
 type pdfStream struct {
-	keyword    int
-	skipEnd    int
-	owned      bool
-	number     int64
-	dictionary []byte
-	body       []byte
-	chains     [][]string
+	keyword      int
+	skipEnd      int
+	bodyStart    int
+	owned        bool
+	number       int64
+	dictionary   []byte
+	body         []byte
+	chains       [][]string
+	syntaxChains [][]string
+	predictor    pdfPredictor
+}
+
+// pdfPredictor is the PNG Up predictor the parser applies after a stream's FlateDecode layer
+// (read.go applyFilter, pngUpReader): whether it applies one, and its row width. It is the only
+// predictor the parser decodes; any other one panics before a byte is read.
+type pdfPredictor struct {
+	pngUp   bool
+	columns int64
 }
 
 // pdfStreamSite is one `stream` keyword: the keyword's index and the index its body starts at.
@@ -767,7 +816,7 @@ func locatePDFStreams(data []byte) []pdfStream {
 // charged for pdfUnreadChains through the end of the file. It also returns where a direct
 // /Length ends the body, or -1 when the length is not a direct integer.
 func describePDFStream(data []byte, windowStart int, site pdfStreamSite) (pdfStream, int) {
-	stream := pdfStream{keyword: site.keyword}
+	stream := pdfStream{keyword: site.keyword, bodyStart: site.bodyStart}
 	headers := pdfObjectHeaders(data[windowStart:site.keyword])
 	if len(headers) == 0 {
 		return stream, -1
@@ -785,6 +834,12 @@ func describePDFStream(data []byte, windowStart int, site pdfStreamSite) (pdfStr
 		stream.dictionary = data[windowStart+header.end : site.keyword]
 		filter, hasFilter := dictionary["Filter"]
 		stream.chains = pdfDecodeChains(filter, hasFilter)
+		stream.syntaxChains = pdfSyntaxChains(filter, hasFilter)
+		predictor, readable := readPDFPredictor(dictionary)
+		if !readable {
+			stream.syntaxChains = nil
+		}
+		stream.predictor = predictor
 		bodyEnd := len(data)
 		declaredEnd := -1
 		if length, ok := directPDFLength(dictionary); ok {
@@ -799,6 +854,7 @@ func describePDFStream(data []byte, windowStart int, site pdfStreamSite) (pdfStr
 	stream.owned, stream.number = true, nearest.number
 	stream.dictionary = data[windowStart+nearest.end : site.keyword]
 	stream.chains = pdfUnreadChains
+	stream.syntaxChains = pdfUnreadSyntaxChains
 	stream.body = data[site.bodyStart:]
 	return stream, -1
 }
@@ -848,6 +904,99 @@ func pdfDecodeChains(filter pdfValue, present bool) [][]string {
 		return inflatingChain(names)
 	}
 	return nil
+}
+
+// pdfSyntaxChains returns the decode chains the parser could apply to a stream it reads as
+// syntax: every chain pdfDecodeChains names, and the plain ones it leaves out because they
+// inflate nothing — no filter at all (one empty chain), or ASCII85Decode on its own. A /Filter
+// that is a reference, or an array with a reference among its names, could resolve to either
+// plain chain as well as to an inflating one, so it is scanned through pdfUnreadSyntaxChains.
+// It returns nil only where the parser refuses the chain before reading a byte.
+func pdfSyntaxChains(filter pdfValue, present bool) [][]string {
+	if present && pdfFilterReferenced(filter) {
+		return pdfUnreadSyntaxChains
+	}
+	if chains := pdfDecodeChains(filter, present); chains != nil {
+		return chains
+	}
+	if !present {
+		return [][]string{nil}
+	}
+	names := []string{filter.text}
+	if filter.kind == pdfValueArray {
+		names = make([]string, 0, len(filter.members))
+		for _, member := range filter.members {
+			names = append(names, member.text)
+		}
+	} else if filter.kind != pdfValueName {
+		return nil
+	}
+	for _, name := range names {
+		if name != pdfASCII85Decode {
+			return nil
+		}
+	}
+	return [][]string{names}
+}
+
+// pdfFilterReferenced reports whether a /Filter value names a filter the raw bytes cannot read:
+// the value is a reference, or an array whose members are all names or references and at least
+// one is a reference. An array with any other member is refused by the parser whatever the
+// references resolve to.
+func pdfFilterReferenced(filter pdfValue) bool {
+	switch filter.kind {
+	case pdfValueReference:
+		return true
+	case pdfValueArray:
+		referenced := false
+		for _, member := range filter.members {
+			switch member.kind {
+			case pdfValueReference:
+				referenced = true
+			case pdfValueName:
+			default:
+				return false
+			}
+		}
+		return referenced
+	}
+	return false
+}
+
+// readPDFPredictor reads the predictor a stream dictionary's /DecodeParms names for its
+// FlateDecode layer, as the parser pairs them (read.go Value.Reader): a single /Filter takes the
+// whole /DecodeParms, a /Filter array takes the /DecodeParms member at the same index. It reports
+// false — nothing to scan — for a /Columns outside 0…pdfMaxPredictorColumns: the parser cannot
+// allocate a negative row, and a wider one is refused (see preflightPDF). A /Predictor or
+// /DecodeParms given by reference is not followed, and a predictor other than PNG Up — which the
+// parser panics on — is not modelled: either way the stream reads as unpredicted.
+func readPDFPredictor(dictionary map[string]pdfValue) (pdfPredictor, bool) {
+	parameters := dictionary["DecodeParms"]
+	if filter := dictionary["Filter"]; filter.kind == pdfValueArray {
+		parameters = pdfValue{}
+		for index, member := range filter.members {
+			if member.text == pdfFlateDecode && index < len(dictionary["DecodeParms"].members) {
+				parameters = dictionary["DecodeParms"].members[index]
+				break
+			}
+		}
+	}
+	predictor := parameters.entries["Predictor"]
+	if predictor.kind != pdfValueInteger {
+		return pdfPredictor{}, true
+	}
+	if number, err := strconv.ParseInt(predictor.text, 10, 64); err != nil || number != pdfPNGUpPredictor {
+		return pdfPredictor{}, true
+	}
+	columns := parameters.entries["Columns"]
+	if columns.kind != pdfValueInteger {
+		return pdfPredictor{pngUp: true}, true
+	}
+	width, err := strconv.ParseInt(columns.text, 10, 64)
+	if err != nil || width < 0 || width > pdfMaxPredictorColumns {
+		return pdfPredictor{}, false
+	}
+	return pdfPredictor{pngUp: true, columns: width}, true
 }
 
 // inflatingChain returns names as the stream's single candidate chain when the parser decodes
@@ -937,8 +1086,8 @@ func (c pdfASCII85Cleaner) Read(p []byte) (int, error) {
 }
 
 // pdfValueKind classifies the values readPDFStreamDictionary distinguishes; every kind the
-// preflight never inspects — a string, a number other than an integer, a boolean, null, a nested
-// dictionary — reads as pdfValueOther.
+// preflight never inspects — a string, a number other than an integer, a boolean, null — reads
+// as pdfValueOther.
 type pdfValueKind int
 
 const (
@@ -947,14 +1096,16 @@ const (
 	pdfValueInteger
 	pdfValueReference
 	pdfValueArray
+	pdfValueDictionary
 )
 
 // pdfValue is one value of a stream dictionary: its kind, a name's decoded text or an integer's
-// digits, and an array's members.
+// digits, an array's members, and a nested dictionary's entries.
 type pdfValue struct {
 	kind    pdfValueKind
 	text    string
 	members []pdfValue
+	entries map[string]pdfValue
 }
 
 // pdfTokenKind classifies the lexer's tokens. pdfTokenInvalid covers both the end of the span and
@@ -1065,8 +1216,8 @@ func (l *pdfLexer) readValue() (pdfValue, bool) {
 	case pdfTokenDelimiter:
 		switch token.text {
 		case "<<":
-			_, ok := l.readDictionary()
-			return pdfValue{}, ok
+			entries, ok := l.readDictionary()
+			return pdfValue{kind: pdfValueDictionary, entries: entries}, ok
 		case "[":
 			return l.readArray()
 		case ">>":
@@ -1293,9 +1444,15 @@ func pdfObjectHeaders(span []byte) []pdfObjectHeader {
 // its error is returned with a nil set when it is done: a hostile document's sites run into the
 // hundreds of thousands, and a cancelled Turn must not wait for them.
 func decodedReferences(ctx context.Context, data []byte, objects []pdfObject) (map[int64]bool, error) {
+	return namedReferences(ctx, data, objects, "Contents", "ToUnicode")
+}
+
+// namedReferences is decodedReferences for any set of keys: the numbers of every object one of
+// keys names outside the document's stream bodies, read and bounded the same way.
+func namedReferences(ctx context.Context, data []byte, objects []pdfObject, keys ...string) (map[int64]bool, error) {
 	references := newPDFReferenceSet(objects)
 	for _, span := range withoutStreamBodies(data) {
-		for _, key := range []string{"Contents", "ToUnicode"} {
+		for _, key := range keys {
 			for _, site := range pdfNameSites(span, key) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
@@ -1405,17 +1562,9 @@ func refuseAbsurdXrefWidths(dictionary []byte) string {
 // the error, and what inflated before it is still charged. Cancellation is read between chunks
 // and reported through the context, which the caller consults.
 func inflatedSize(ctx context.Context, body []byte, chain []string, limit int64) int64 {
-	var reader io.Reader = bytes.NewReader(body)
-	for _, filter := range chain {
-		if filter == pdfASCII85Decode {
-			reader = ascii85.NewDecoder(pdfASCII85Cleaner{source: reader})
-			continue
-		}
-		inflater, err := zlib.NewReader(reader)
-		if err != nil {
-			return 0
-		}
-		reader = inflater
+	reader := pdfChainReader(body, chain, pdfPredictor{})
+	if reader == nil {
+		return 0
 	}
 
 	var total int64
@@ -1427,6 +1576,289 @@ func inflatedSize(ctx context.Context, body []byte, chain []string, limit int64)
 		}
 	}
 	return total
+}
+
+// pdfChainReader returns a reader that decodes body through chain as the parser does (read.go
+// Value.Reader, applyFilter): ASCII85Decode through the parser's own cleaner, FlateDecode, and
+// the PNG Up predictor after the first FlateDecode layer when one applies. It returns nil when a
+// FlateDecode layer's zlib header does not read: the parser panics on that before it decodes a
+// byte.
+func pdfChainReader(body []byte, chain []string, predictor pdfPredictor) io.Reader {
+	var reader io.Reader = bytes.NewReader(body)
+	predicted := false
+	for _, filter := range chain {
+		if filter == pdfASCII85Decode {
+			reader = ascii85.NewDecoder(pdfASCII85Cleaner{source: reader})
+			continue
+		}
+		inflater, err := zlib.NewReader(reader)
+		if err != nil {
+			return nil
+		}
+		reader = inflater
+		if predictor.pngUp && !predicted {
+			predicted = true
+			reader = &pdfPNGUpReader{
+				source:  reader,
+				row:     make([]byte, 1+predictor.columns),
+				encoded: make([]byte, 1+predictor.columns),
+			}
+		}
+	}
+	return reader
+}
+
+// errPNGUpRow is what a PNG Up row whose filter-type byte is not Up reads as; the parser stops
+// the stream there with an error of its own.
+var errPNGUpRow = errors.New("malformed PNG-Up encoding")
+
+// pdfPNGUpReader is the parser's pngUpReader (read.go) reproduced: each encoded row is its
+// filter-type byte and one byte per column, added bytewise — the type byte included — to the
+// row before it, and every column of the sum is output.
+type pdfPNGUpReader struct {
+	source  io.Reader
+	row     []byte
+	encoded []byte
+	pending []byte
+}
+
+// Read decodes rows until p is full or the source ends.
+func (r *pdfPNGUpReader) Read(p []byte) (int, error) {
+	written := 0
+	for len(p) > 0 {
+		if len(r.pending) > 0 {
+			copied := copy(p, r.pending)
+			written += copied
+			p = p[copied:]
+			r.pending = r.pending[copied:]
+			continue
+		}
+		if _, err := io.ReadFull(r.source, r.encoded); err != nil {
+			return written, err
+		}
+		if r.encoded[0] != pdfPNGUpTag {
+			return written, errPNGUpRow
+		}
+		for index, value := range r.encoded {
+			r.row[index] += value
+		}
+		r.pending = r.row[1:]
+	}
+	return written, nil
+}
+
+// pdfNestingMode says how the parser reaches the syntax a depth scan reads, which decides what
+// the scan does at a byte the lexer refuses.
+type pdfNestingMode int
+
+const (
+	// pdfNestingObjects is object syntax — the bytes outside stream bodies, and an object
+	// stream's decoded body — which the parser starts reading at whatever offset a
+	// cross-reference entry names. A byte the lexer refuses ends nothing there, since a read can
+	// start just past it: the scan steps over it and carries on.
+	pdfNestingObjects pdfNestingMode = iota
+	// pdfNestingProgram is a content stream or CMap, which the parser interprets from its first
+	// byte (ps.go Interpret) and abandons at the first byte its lexer panics on, so the scan stops
+	// there too: an inline image's binary after it is never read as syntax.
+	pdfNestingProgram
+)
+
+// pdfNestingFrame is one open array or dictionary of a depth scan. A dictionary also tracks
+// whether its next token is a value: there a `>>` is the null value the parser's readObject
+// reads it as, not the dictionary's end.
+type pdfNestingFrame struct {
+	isArray    bool
+	wantsValue bool
+}
+
+// exceedsPDFNesting reports whether span, read as the parser reads it (lex.go readObject,
+// readArray, readDict), opens more than pdfMaxNesting arrays and dictionaries inside one another.
+// The scan is iterative and keeps at most pdfMaxNesting frames, so the document cannot size its
+// stack either. It never under-counts the parser: every `[` and `<<` opens a frame, and a frame
+// closes only where the parser closes one — a `]` in an array, a `>>` where a dictionary expects
+// a key. A closer anywhere else is where the parser panics, and leaves the depth as it was.
+func exceedsPDFNesting(span []byte, mode pdfNestingMode) bool {
+	lexer := pdfLexer{span: span}
+	frames := make([]pdfNestingFrame, 0, pdfMaxNesting)
+	for {
+		token := lexer.next()
+		if token.kind == pdfTokenInvalid {
+			if token.start >= len(span) || mode == pdfNestingProgram {
+				return false
+			}
+			lexer.at = token.start + 1
+			continue
+		}
+
+		top := len(frames) - 1
+		inDictionary := top >= 0 && !frames[top].isArray
+		switch {
+		case token.kind == pdfTokenDelimiter && (token.text == "[" || token.text == "<<"):
+			if inDictionary {
+				frames[top].wantsValue = false
+			}
+			if len(frames) == pdfMaxNesting {
+				return true
+			}
+			frames = append(frames, pdfNestingFrame{isArray: token.text == "["})
+		case token.kind == pdfTokenDelimiter && token.text == "]":
+			if top >= 0 && frames[top].isArray {
+				frames = frames[:top]
+			}
+		case token.kind == pdfTokenDelimiter && token.text == ">>" && inDictionary && !frames[top].wantsValue:
+			frames = frames[:top]
+		case token.kind == pdfTokenName && inDictionary:
+			frames[top].wantsValue = !frames[top].wantsValue
+		case inDictionary:
+			frames[top].wantsValue = false
+		}
+	}
+}
+
+// refuseDeepNesting returns pdfNestingCause, worded for the model, when the syntax the parser
+// reads before the page walk nests deeper than pdfMaxNesting, or "" when it does not. Three kinds
+// of syntax are read here: the bytes outside every stream body, where the parser reads the
+// trailer and every uncompressed object; each object stream's decoded body, where it reads every
+// compressed one; and each CMap or /ToUnicode stream, which it interprets for a font. A page's
+// content stream is read at the walk instead (see pageContentNesting), through the parser's own
+// reader. Any other stream — an image, an embedded font, a cross-reference stream — is binary
+// the parser never reads as syntax, so a `[` in it is no nesting at all.
+//
+// Object streams go first: a font dictionary compressed into one names its /ToUnicode stream
+// only in the decoded body, so that is where those references are collected from.
+func refuseDeepNesting(ctx context.Context, data []byte, objects []pdfObject) string {
+	for _, span := range withoutStreamBodies(data) {
+		if exceedsPDFNesting(span, pdfNestingObjects) {
+			return fmt.Sprintf(pdfNestingCause, pdfMaxNesting)
+		}
+	}
+
+	toUnicode, err := namedReferences(ctx, data, objects, "ToUnicode")
+	if err != nil {
+		return pdfCancelledCause
+	}
+	streams := locatePDFStreams(data)
+	for _, stream := range streams {
+		if stream.owned && pdfNameValue(stream.dictionary, "Type") == "ObjStm" {
+			if cause := refuseNestedStream(ctx, stream, pdfNestingObjects, toUnicode); cause != "" {
+				return cause
+			}
+		}
+	}
+	for _, stream := range streams {
+		if !stream.owned {
+			continue
+		}
+		switch streamType := pdfNameValue(stream.dictionary, "Type"); {
+		case streamType == "ObjStm":
+		case streamType == "CMap" || toUnicode[stream.number]:
+			if cause := refuseNestedStream(ctx, stream, pdfNestingProgram, nil); cause != "" {
+				return cause
+			}
+		}
+	}
+	return ""
+}
+
+// refuseNestedStream decodes one stream through every chain in its syntaxChains and returns the
+// refusal cause when any decoding nests deeper than pdfMaxNesting, decodes past the inflate
+// budget, or was cancelled. An inflating chain decodes the body the parser reads; a plain one
+// reads the body only up to skipEnd, since past it the bytes are the scan's object syntax. Read
+// as object syntax, a decoding also names into toUnicode every /ToUnicode reference it carries.
+func refuseNestedStream(
+	ctx context.Context,
+	stream pdfStream,
+	mode pdfNestingMode,
+	toUnicode map[int64]bool,
+) string {
+	for _, chain := range stream.syntaxChains {
+		body := stream.body
+		if !slices.Contains(chain, pdfFlateDecode) {
+			body = body[:min(len(body), max(0, stream.skipEnd-stream.bodyStart))]
+		}
+		reader := pdfChainReader(body, chain, stream.predictor)
+		if reader == nil {
+			continue
+		}
+		decoded, cause := readPDFSyntax(ctx, reader)
+		if cause != "" {
+			return cause
+		}
+		if exceedsPDFNesting(decoded, mode) {
+			return fmt.Sprintf(pdfNestingCause, pdfMaxNesting)
+		}
+		if mode == pdfNestingObjects {
+			for _, site := range pdfNameSites(decoded, "ToUnicode") {
+				for _, number := range pdfReferencesAt(decoded, site) {
+					toUnicode[number] = true
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// readPDFSyntax reads a decoded stream for a depth scan, a chunk at a time with the context
+// checked between chunks, and returns its bytes — or the refusal cause when it decodes past the
+// inflate budget or the context is done. A decode error ends the bytes where the parser's own
+// read of the stream ends, so what came before it is exactly what the parser reads as syntax, and
+// the error is the parser's to report.
+func readPDFSyntax(ctx context.Context, reader io.Reader) ([]byte, string) {
+	var decoded bytes.Buffer
+	for {
+		if ctx.Err() != nil {
+			return nil, pdfCancelledCause
+		}
+		_, err := io.CopyN(&decoded, reader, pdfInflateChunk)
+		if decoded.Len() > pdfMaxInflatedBytes {
+			return nil, fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20)
+		}
+		if err != nil {
+			return decoded.Bytes(), ""
+		}
+	}
+}
+
+// pageContentNesting returns the refusal cause when a page's content streams, read through the
+// parser's own stream reader, nest deeper than pdfMaxNesting or decode past the inflate budget,
+// or "" when the page may be interpreted. It runs before the page is interpreted, and through the
+// parser rather than over the raw bytes because only the parser knows every content stream a page
+// has: a page dictionary compressed into an object stream names its /Contents nowhere the raw
+// bytes show, and the parser resolves an indirect /Length, /Filter or /DecodeParms the raw scan
+// cannot. Each stream of a /Contents array is scanned on its own, as Interpret starts each anew.
+//
+// The parser panics on a page it cannot resolve or decode. Such a panic is recovered here and
+// the page let through: interpreting it meets the same panic, which fails that page alone.
+func pageContentNesting(ctx context.Context, page pdf.Page) (cause string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			cause = ""
+		}
+	}()
+
+	contents := page.V.Key("Contents")
+	streams := []pdf.Value{contents}
+	if contents.Kind() == pdf.Array {
+		streams = make([]pdf.Value, 0, contents.Len())
+		for index := range contents.Len() {
+			streams = append(streams, contents.Index(index))
+		}
+	}
+	for _, stream := range streams {
+		if stream.Kind() != pdf.Stream {
+			continue
+		}
+		// The reader holds nothing to release: the parser hands back a no-op closer over the
+		// document's own reader, and never closes one itself.
+		decoded, refusal := readPDFSyntax(ctx, stream.Reader())
+		if refusal != "" {
+			return refusal
+		}
+		if exceedsPDFNesting(decoded, pdfNestingProgram) {
+			return fmt.Sprintf(pdfNestingCause, pdfMaxNesting)
+		}
+	}
+	return ""
 }
 
 // declaredIntegers returns, as digit strings, the value written after every `/key` outside the

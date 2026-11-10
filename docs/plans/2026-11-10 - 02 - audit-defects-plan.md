@@ -53,7 +53,16 @@
 - The parked architecture-review issues (2026-11-10 #1–#10).
 - Any version bump.
 
-## 1. Refuse deeply nested PDFs before the parser recurses
+## 1. Refuse deeply nested PDFs before the parser recurses — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): page content streams are depth-scanned at the walk through the parser's own `Value.Reader` (`pageContentNesting`, the plan's stated alternative), not in the preflight. This also covers a page dictionary compressed into an object stream, an indirect /Length, /Filter or /DecodeParms, and a /Contents array object, none of which the raw scan sees. The preflight (`refuseDeepNesting`) scans the object bytes, every /ObjStm, every /CMap, and every stream a /ToUnicode names, including names found inside a decoded object stream.
+NOTES (2026-11-10): the depth scan is iterative, but it keeps a bounded stack of at most 64 typed frames rather than a bare counter. A counter in which every closer decrements can be bypassed with `[ >> [ >> …` and `<< /A >> /B << /A >> …`, because the parser reads a `>>` in an array, or in a dictionary's value position, as null. The scan models those positions, and a frame closes only where the parser closes one.
+NOTES (2026-11-10): the item went beyond its literal approach in two places. The decode for the depth scan models the parser's PNG Up predictor (/Predictor 12), because without it a predicted stream hides its `[` bytes from the scan. In the program mode (content/CMap) the scan also stops at the first byte the lexer refuses, as Interpret does, so an inline image's binary is never counted.
+NOTES (2026-11-10): "the package comment" in the Goal is read as ExtractPDF's doc comment, which carried the "nothing escapes this function" claim. That comment now states the guarantee, and doc.go is untouched.
+NOTES (2026-11-10): known limits of the guarantee, stated in ExtractPDF's doc. A /Predictor or /DecodeParms given by reference reads as unpredicted. Each decoded stream is held in memory for its scan, up to the 64 MiB inflate budget.
+NOTES (2026-11-10): pre-existing debt the work exposed: `/Columns +99999999` (with a sign) gets past the pdfMaxPredictorColumns guard, because declaredIntegers reads digits only, and the parser's pngUpReader then allocates rows of that width.
+NOTES (2026-11-10): retry fix: a syntax stream (an /ObjStm, a /CMap or a /ToUnicode target) whose /Filter is a reference, or an array holding a reference among its names, is now depth-scanned through the plain chains too (no filter and ASCII85Decode alone, up to skipEnd) as well as the inflating unread chains (`pdfUnreadSyntaxChains`, `pdfFilterReferenced`). A stream with an unreadable dictionary gains the ASCII85Decode-alone chain the same way. Pinned by three new cases: a /ToUnicode CMap whose /Filter 7 0 R is null, one whose /Filter [7 0 R] is /ASCII85Decode, and an /ObjStm whose /Filter 7 0 R is null. A throwaway probe confirmed each one passes the preflight without the fix. readPDFPredictor's 161-character doc line is rewrapped.
+NOTES (2026-11-10): known limit: a referenced /Filter that resolves to a chain of several plain filters (ASCII85Decode twice) is not modelled.
 
 **What:**
 **Goal:** `doctext.ExtractPDF` returns a model-facing unreadable-PDF failure, and the process survives, for a PDF whose object bytes or any decoded content stream nest `[` / `<<` deeper than 64; the package comment states what is guaranteed.
