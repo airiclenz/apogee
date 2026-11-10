@@ -60,7 +60,12 @@ internal/tui/prompteditor.go — rowCountMemo.rows; internal/tui/listsurface_tes
 
 **Commit:** `fix(tui): build a Model per parallel subtest so pointer-held memos are not shared`
 
-## 2. TestE2ESubAgentView scenes wait on the rows they assert
+## 2. TestE2ESubAgentView scenes wait on the rows they assert — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): re-derived from the assumption that the t18 flake was a frame captured before its last row painted. A 20x one-core -race run with only the scene 4/5 waits failed 1 in 20: the frame showed `scout ✓ … 1 tool call · done · steered by 1 message`. The human's message had reached the child's second request itself, because it was typed after the first read's receipt painted but before the child asked again. The child then answered without the second read. That one race explains both of the issue's failures (the collapsed-row check at ~L193 and the t18 golden's `Read (2)` / `4 lines`). Scene 3 now waits on the stub's request log (new `childSentToolResult`) for the child's tool-result request before `submit(drv, childMessage)`; the stub logs a request when it matches it, before the 3 s reply streams.
+NOTES (2026-11-10): the non-failing row predicate is `firstRow(f, want) string` ("" when absent). It sits beside `holds` and `frameWhen` in e2e_subagent_view_test.go, not beside `rowContaining` in e2e_support_test.go, which is outside the item's Files. It mirrors rowContaining's first-row semantics, so each wait condition reads exactly the row its assertion reads.
+NOTES (2026-11-10): scene 4 drops its WaitQuiet, since no golden or whole-frame read follows. Scene 5 waits on the condition, then runs WaitQuiet(settled), then takes the goldened frame through frameWhen with the same condition, so the golden is a frame that condition accepted.
+NOTES (2026-11-10): the Acceptance command as written cannot finish on the Pi 5. One iteration takes ~36 s (unchanged from base 2cfebcaf), so 20 iterations exceed go test's default 10 m `-timeout` and panic. It was run with `-timeout 30m` added.
 
 **What:** Fixes bug `subagent-view-t18-flake`: scene 4 (esc back to the parent, then the collapsed-row checks) and scene 5 (`openLastRun`, then the `t18-run-view-finished` golden) wait on `WaitText` + `WaitQuiet(settled)`, and those content waits do not cover the rows the assertions read, so under load the frame can be captured before the last row paints.
 

@@ -85,6 +85,11 @@ const (
 	// three-second window this run acts inside has already closed.
 	secondRead = "Read (2)"
 
+	// The receipt that header ends with once both reads are in (t18-run-view-finished.txt:10). Like
+	// [readReceipt] it is the row's last paint, so a frame that shows the header without it is one
+	// tick too early for the finished view's golden.
+	secondReadReceipt = "4 lines"
+
 	// The notice a steered child's result ends with, and the wrap-up that echoes it back onto the
 	// screen (the fixture captures it out of the tool result it answers).
 	parentNotice = "(the user sent 1 message to this sub-agent while it ran)"
@@ -150,6 +155,15 @@ func TestE2ESubAgentView(t *testing.T) {
 
 	// Scene 3 — the box addresses the child. The message stages under the label that says where it
 	// is going, lands as a row INSIDE the run, and reaches the child's own conversation.
+	//
+	// It is typed only once the child has ASKED for its second read. From that request until the
+	// read lands three seconds later the child is mid-Step, so the message queues for the boundary
+	// behind it, which is the window the fixture opens. The first read's receipt is on the screen a
+	// beat before the child asks again, and a loaded machine stretches that beat: a message typed
+	// inside it rides the second request itself, the child answers it without reading again, and
+	// both the collapsed row's count and the finished view's golden come out one read short.
+	drv.WaitFor(func() bool { return childSentToolResult(stub, longTask) },
+		tuitest.Awaiting(longDelegate+" to ask for its second read"))
 	submit(drv, childMessage)
 	drv.WaitText(queuedForChild)
 	drv.WaitGone(queuedForChild)
@@ -182,13 +196,20 @@ func TestE2ESubAgentView(t *testing.T) {
 	drv.WaitGone(runViewCrumb)
 	drv.WaitText(parentEcho)
 	waitIdle(drv)
-	drv.WaitQuiet(settled)
 
 	// Both delegates wear one collapsed row, and the trade item 3 accepted shows in the pair: the
 	// steered child's report is no longer one line — the notice is under it — so its row falls back
 	// to the count, the outcome and the steering cell that outcome composes, while the sibling
 	// nobody spoke to still promotes the sentence it answered with.
-	top := drv.Frame()
+	//
+	// The frame is the one the wait accepted, and the wait names every row the claims below read: the
+	// echo and the idle prompt can be on the screen while a collapsed row is still one paint short,
+	// and a settle over a loaded machine ends there as readily as after it.
+	top := frameWhen(t, drv, "both delegations collapsed under the parent's echo", func(f tuitest.Frame) bool {
+		return strings.Contains(firstRow(f, longDelegate), steeredOutcome) &&
+			strings.Contains(firstRow(f, shortDelegate), siblingAnswer) &&
+			strings.Contains(firstRow(f, parentNotice), parentEcho) && !holds(f, childAnswer)
+	})
 	if row := rowContaining(t, top, longDelegate); !strings.Contains(row, steeredOutcome) {
 		t.Errorf("the steered delegation's collapsed row does not read %q: %q", steeredOutcome, row)
 	}
@@ -204,10 +225,22 @@ func TestE2ESubAgentView(t *testing.T) {
 
 	// Scene 5's golden — the same view reopened over a finished run, at rest, which is the one
 	// frame of this feature a human can sit and look at.
+	//
+	// The breadcrumb is the view's TOP row, so it is on the screen before the rows under it are: the
+	// wait names the facts those rows carry down to the box's legend, the settle after it lets the
+	// paint finish, and the frame compared is taken by the same condition once more, so it is a frame
+	// that condition accepted rather than whatever the screen held after the quiet.
 	openLastRun(drv)
-	drv.WaitText(runViewCrumb)
+	finishedView := func(f tuitest.Frame) bool {
+		crumb := strings.TrimRight(firstRow(f, runViewCrumb), " ")
+		return strings.HasSuffix(crumb, runViewHint) && !strings.HasSuffix(crumb, runViewStopHint) &&
+			strings.Contains(firstRow(f, secondRead), secondReadReceipt) &&
+			holds(f, childMessage) && holds(f, childAnswer) && holds(f, childFinishedBox)
+	}
+	const finishedAwaiting = "the finished run's view painted down to the box's legend"
+	frameWhen(t, drv, finishedAwaiting, finishedView)
 	drv.WaitQuiet(settled)
-	finished := drv.Frame()
+	finished := frameWhen(t, drv, finishedAwaiting, finishedView)
 	if crumb := strings.TrimRight(rowContaining(t, finished, runViewCrumb), " "); !strings.HasSuffix(crumb, runViewHint) ||
 		strings.HasSuffix(crumb, runViewStopHint) {
 		t.Errorf("the breadcrumb of a finished run should offer the way back alone: %q", crumb)
@@ -318,6 +351,17 @@ func frameWhen(t *testing.T, drv *tuitest.Driver, what string, want func(tuitest
 func holds(f tuitest.Frame, text string) bool {
 	_, _, ok := f.Find(text)
 	return ok
+}
+
+// firstRow is the frame's first row holding want, or "" when no row does: [rowContaining] without
+// the failure, so a claim about one row can sit inside a wait's condition.
+func firstRow(f tuitest.Frame, want string) string {
+	for _, row := range f.Rows() {
+		if strings.Contains(row, want) {
+			return row
+		}
+	}
+	return ""
 }
 
 // statusRow is the frame's status line: the row directly above the prompt box's top border. It is
@@ -453,6 +497,24 @@ func assertBelow(t *testing.T, f tuitest.Frame, earlier, later string) {
 		t.Errorf("%q is on row %d and %q on row %d; want the second under the first:\n%s",
 			earlier, top, later, bottom, f)
 	}
+}
+
+// childSentToolResult reports whether the child handed task has sent a request carrying a tool
+// result: the request after its first Step, which the fixture answers with the slow second read.
+// The stub logs a request when it matches it, before the reply streams, so a true answer means the
+// child is waiting on that read now.
+func childSentToolResult(stub *stubllm.Server, task string) bool {
+	for _, req := range stub.Requests() {
+		if !carriesTask(req, task) {
+			continue
+		}
+		for _, msg := range req.Messages {
+			if msg.Role == "tool" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // childCarries reports whether any request in the conversation of the child handed task carries
