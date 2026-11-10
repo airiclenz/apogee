@@ -11,6 +11,8 @@ or Moment is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-11-10
+
 - **Fixed:** a `ui.side-panel.sections` list no longer draws an "unknown key" notice for every section it names, in flow or block style; a misspelled key beside the list (`ui.side-panel.widht`) is still announced at its line. The config walk now leaves alone the entries of any list or map whose entries are data rather than schema keys.
 - **Fixed:** a `sub_agent` call's `tools` argument now accepts the two shapes small models send on their first try. `["read-only"]` (the keyword wrapped in an array) runs the delegation with the read-only set, and an array of tool names sent as a JSON string (`"[\"read_file\",\"list_dir\"]"`) runs it with those tools. Before, both were refused and cost a whole parent Turn. `"read-only"` beside tool names, an unknown keyword, and a string that is not an array of tool names are still refused, and each refusal names both accepted shapes. An unknown tool name's refusal now also points at `"read-only"` as the whole value. The tool schema is unchanged.
 - **fan_out takes sub_agent's `tools` shapes.** A fan_out call's `tools` (and a workflow file's stage `tools:`) now reads as sub_agent's does: `["read-only"]` or the bare `"read-only"` runs each helper with the read-only set, and a JSON array sent as a string runs it with those names. A roster that names an unknown tool, or mixes `read-only` with tool names, is refused as `fan_out was not run: …` before any helper runs or any workflow folder exists, instead of failing the whole call as invalid JSON or faulting every item. The fan_out schema is unchanged.
