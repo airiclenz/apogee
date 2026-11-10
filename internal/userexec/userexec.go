@@ -68,7 +68,9 @@ const (
 	// WaitGrace bounds the wait AFTER the deadline fired. Killing the process group ends the
 	// command and everything it spawned, but a descendant that detached with setsid is outside
 	// the group's reach and can still hold the stderr pipe it inherited, and Wait would then block
-	// on the copy forever; this is the drain bound that ends it. It replaces
+	// on the copy forever; this is the drain bound that ends it. It ends the same wait behind a
+	// command that exited 0 on its own while a process it started still held a pipe, which Run
+	// reads as that command's status (Result.DrainWedged) rather than a failure to run. It replaces
 	// platform.ProcessWaitDelay for these runs because a failure line here is read by a person
 	// waiting on the deadline.
 	WaitGrace = 2 * time.Second
@@ -117,7 +119,12 @@ type Options struct {
 // unfolded and cut at MaxStderr BYTES, for a caller that has to edit it before quoting it (a cut
 // that may land mid-word, or mid-secret); StderrCapped says the child said more than that, the one
 // condition under which Stderr's end may be such a cut. Stdout is what it printed when the caller
-// wanted it, capped; StdoutTruncated says there was more.
+// wanted it, capped; StdoutTruncated says there was more. DrainWedged says the command exited 0
+// but something it started was still holding its stdout or stderr pipe when WaitGrace ran out, so
+// the copy behind that pipe was cut there: ExitCode is still the command's own 0 and what was
+// captured is kept, but its end may be missing whatever the left-behind process would have written.
+// A non-zero exit never sets it — exec reports the status in that case and says nothing of the
+// drain.
 type Result struct {
 	ExitCode        int
 	TimedOut        bool
@@ -126,6 +133,7 @@ type Result struct {
 	StderrCapped    bool
 	Stdout          string
 	StdoutTruncated bool
+	DrainWedged     bool
 }
 
 // Run executes argv under the package's posture and reports what the command did.
@@ -136,7 +144,9 @@ type Result struct {
 // (`could not run %s: …`, wrapping the underlying error). The Result then carries whatever stderr was
 // captured before that, and nothing else. A command that ran — exited, any status, or was killed by
 // the deadline — returns a nil error and the facts in Result; the caller reads ExitCode and
-// TimedOut to decide what that meant.
+// TimedOut to decide what that meant. That includes a command that exited 0 while a process it
+// started (`helper &`, a setsid daemon) still held its pipe past WaitGrace: it ran to its status,
+// so the error stays nil and the captured output is kept, with DrainWedged noting its end may be cut.
 func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
 		return Result{}, errors.New("no command to run")
@@ -185,6 +195,14 @@ func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 		return result, nil
 	case errors.As(runErr, &exitErr):
 		result.ExitCode = exitErr.ExitCode()
+		return result, nil
+	case errors.Is(runErr, exec.ErrWaitDelay):
+		// exec hands this back only in place of a nil error: the command exited 0, and the wait
+		// ended on WaitGrace because something it left running still held a pipe. It ran to
+		// its status — the left-behind process is reaped with the group behind us — so this is
+		// that status and the output captured up to the cut, never "could not run".
+		result.ExitCode = cmd.ProcessState.ExitCode()
+		result.DrainWedged = true
 		return result, nil
 	case result.TimedOut:
 		// The deadline killed the process group and the wait ended on WaitGrace instead of a

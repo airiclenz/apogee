@@ -168,6 +168,54 @@ func TestRunReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	}
 }
 
+// TestRunReadsAnExitBehindAHeldPipeAsTheCommandsStatus is the held-pipe case: a command that
+// backgrounds a helper inheriting its pipes and then exits has RUN — its status and what it printed
+// are the answer, never "could not run" — whether that status is 0 (where exec reports the cut
+// drain in place of success) or not (where exec reports the status and the drain goes unsaid). The
+// wait ends on WaitGrace, so the run must finish soon after it and never wait the helper's sleep out.
+func TestRunReadsAnExitBehindAHeldPipeAsTheCommandsStatus(t *testing.T) {
+	requireShell(t)
+	t.Parallel()
+
+	// margin is what a loaded box under -race is allowed on top of WaitGrace: the shell's cold
+	// start and the teardown behind the cut drain. The helper sleeps 30 so the bound stays well
+	// under it.
+	const margin = 5 * time.Second
+	for _, tc := range []struct {
+		name            string
+		status          int
+		wantDrainWedged bool
+	}{
+		{name: "exit 0", status: 0, wantDrainWedged: true},
+		{name: "exit 3", status: 3, wantDrainWedged: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			script := fmt.Sprintf(`sleep 30 & echo "sk-key"; echo "warming" >&2; exit %d`, tc.status)
+
+			started := time.Now()
+			result, err := Run(context.Background(), shell(script), Options{WantStdout: true, StdoutCap: 64})
+			elapsed := time.Since(started)
+
+			if err != nil {
+				t.Fatalf("Run on a command that exited %d behind a held pipe returned an error: %v", tc.status, err)
+			}
+			if result.ExitCode != tc.status || result.TimedOut {
+				t.Errorf("result = %+v, want exit %d and no timeout", result, tc.status)
+			}
+			if result.Stdout != "sk-key\n" || result.StderrTail != "warming" {
+				t.Errorf("Stdout = %q, StderrTail = %q; want what the command printed before it exited", result.Stdout, result.StderrTail)
+			}
+			if result.DrainWedged != tc.wantDrainWedged {
+				t.Errorf("DrainWedged = %v, want %v", result.DrainWedged, tc.wantDrainWedged)
+			}
+			if elapsed > WaitGrace+margin {
+				t.Errorf("Run took %s behind a held pipe; the bound here is %s", elapsed, WaitGrace+margin)
+			}
+		})
+	}
+}
+
 // TestRunCapsStderrWithoutKillingTheCommand is the SIGPIPE guard: a command printing far past
 // MaxStderr still exits with ITS status, and what survives is the folded tail, not a signal.
 func TestRunCapsStderrWithoutKillingTheCommand(t *testing.T) {

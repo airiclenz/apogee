@@ -142,7 +142,7 @@ NOTES (2026-11-10): consequential edit — docs/manual/configuration.md: made ne
 **Acceptance:** `go test -race -count=1 -run 'Allow' ./internal/config/`
 **Commit:** `fix(config): refuse control characters in Allow rule text`
 
-## 6. A command that exited 0 with a held pipe ran
+## 6. A command that exited 0 with a held pipe ran — ✅ DONE (2026-11-10)
 
 **What:**
 **Goal:** `userexec.Run` returns nil error and the command's exit code, with captured stdout/stderr kept, when the command exited but a child it spawned still holds a pipe after `WaitGrace`; non-zero exits and the deadline case are unchanged.
