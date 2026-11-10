@@ -65,7 +65,10 @@ Plus one `parseConfigFile` case that the notify text for `ui.side-panel.bogus` i
 
 **Commit:** `fix(config): stop the unknown-key walk flagging data-keyed list entries`
 
-## 2. sub_agent tools: decode the two shapes models send
+## 2. sub_agent tools: decode the two shapes models send — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): deviation from the Approach's string-branch decode: a string is tried as a JSON array only when it starts with `[` (after trimming), so `"null"` stays an unknown keyword rather than decoding to no roster; a `[`-string that is not an array of strings gets its own refusal (`tools: "[1,2]" is not an array of tool names — use "read-only" or an array of tool names`) instead of the unknown-keyword text.
+NOTES (2026-11-10): the agent-level wrapped-keyword test compares the `["read-only"]` child's menu to a `"read-only"` child's menu in the same run (default registry), rather than recomputing the set TestSubAgent_ReadOnlyRosterIsThePlanFloorMinusTheHumanSeat derives.
 
 **What:** fix: `"tools": ["read-only"]` and a JSON array sent as a string are refused (6 of 6 first calls from glm-5.3-flash in November).
 **Goal:** `SubAgentRoster` decodes `["read-only"]` as the read-only set and a string holding a JSON array of strings as that array. An array that mixes `"read-only"` with tool names, an unknown keyword, or a string that is not an array of strings is refused with a message naming both accepted shapes. The tool schema text is byte-identical to the base.

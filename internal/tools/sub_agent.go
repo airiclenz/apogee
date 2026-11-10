@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -238,11 +240,36 @@ func (r SubAgentRoster) MarshalJSON() ([]byte, error) {
 	}
 }
 
-// UnmarshalJSON accepts the two wire shapes the schema publishes and refuses everything else with a
-// message that names them, so the refusal the recursion point returns tells the model what the
-// argument takes. A keyword other than SubAgentToolsReadOnly is refused too: the alternative —
-// treating "readonly" or "ro" as a list of one unknown tool — would answer with the wrong
-// correction.
+// RosterFromNames reads a list of tool names as the roster it asks for. A list whose only element
+// is SubAgentToolsReadOnly asks for the read-only set: no tool carries that name, so the keyword
+// wrapped in an array has one meaning. The keyword beside tool names is refused, because the call
+// asks for two rosters at once and no answer would be the one the model meant. Every other list is
+// the names as given (an empty one is the zero value, "no narrowing").
+func RosterFromNames(names []string) (SubAgentRoster, error) {
+	if len(names) == 1 && names[0] == SubAgentToolsReadOnly {
+		return SubAgentRoster{ReadOnly: true}, nil
+	}
+	if slices.Contains(names, SubAgentToolsReadOnly) {
+		return SubAgentRoster{}, fmt.Errorf(
+			"tools: pass %q alone as the whole value, not inside a list of tool names",
+			SubAgentToolsReadOnly,
+		)
+	}
+	if len(names) == 0 {
+		return SubAgentRoster{}, nil
+	}
+	return SubAgentRoster{Names: names}, nil
+}
+
+// UnmarshalJSON accepts the two wire shapes the schema publishes, plus two misspellings of them
+// that have one meaning each: the keyword wrapped in an array (`["read-only"]`, see
+// RosterFromNames) and an array encoded as a JSON string (`"[\"read_file\"]"`). It is lenient for
+// the reason consoleID is: small models send both on their first call, and refusing them spends a
+// whole parent Turn teaching the union's shape rather than delegating the work. Everything else is
+// refused with a message that names the two shapes, so the refusal the recursion point returns
+// tells the model what the argument takes. A keyword other than SubAgentToolsReadOnly is refused
+// too: the alternative — treating "readonly" or "ro" as a list of one unknown tool — would answer
+// with the wrong correction.
 func (r *SubAgentRoster) UnmarshalJSON(b []byte) error {
 	if string(b) == "null" {
 		*r = SubAgentRoster{}
@@ -250,21 +277,47 @@ func (r *SubAgentRoster) UnmarshalJSON(b []byte) error {
 	}
 	var keyword string
 	if err := json.Unmarshal(b, &keyword); err == nil {
-		switch keyword {
-		case "":
-			*r = SubAgentRoster{}
-		case SubAgentToolsReadOnly:
-			*r = SubAgentRoster{ReadOnly: true}
-		default:
-			return fmt.Errorf("tools: unknown keyword %q — use %q or an array of tool names", keyword, SubAgentToolsReadOnly)
-		}
-		return nil
+		return r.decodeKeyword(keyword)
 	}
 	var names []string
 	if err := json.Unmarshal(b, &names); err != nil {
 		return fmt.Errorf("tools: must be the string %q or an array of tool names", SubAgentToolsReadOnly)
 	}
-	*r = SubAgentRoster{Names: names}
+	return r.assignNames(names)
+}
+
+// decodeKeyword reads the string branch of the union: "" (no roster), the read-only keyword, or a
+// string holding a JSON array of tool names. Any other string is refused naming both shapes.
+func (r *SubAgentRoster) decodeKeyword(keyword string) error {
+	switch keyword {
+	case "":
+		*r = SubAgentRoster{}
+		return nil
+	case SubAgentToolsReadOnly:
+		*r = SubAgentRoster{ReadOnly: true}
+		return nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(keyword), "[") {
+		return fmt.Errorf("tools: unknown keyword %q — use %q or an array of tool names", keyword, SubAgentToolsReadOnly)
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(keyword), &names); err != nil {
+		return fmt.Errorf(
+			"tools: %q is not an array of tool names — use %q or an array of tool names",
+			keyword,
+			SubAgentToolsReadOnly,
+		)
+	}
+	return r.assignNames(names)
+}
+
+// assignNames stores the roster RosterFromNames reads from names, or returns its refusal.
+func (r *SubAgentRoster) assignNames(names []string) error {
+	roster, err := RosterFromNames(names)
+	if err != nil {
+		return err
+	}
+	*r = roster
 	return nil
 }
 

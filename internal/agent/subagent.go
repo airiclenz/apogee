@@ -2058,8 +2058,8 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 // defaultSubAgentTools built. Both spellings are answered against the set the child would
 // otherwise INHERIT, so neither can widen it (ADR 0005):
 //
-//   - the read-only keyword yields every inherited tool Plan mode admits on every target
-//     (planAdmits — the class, never the bare ReadOnly() self-declaration, so a self-declared
+//   - the read-only keyword (also when sent wrapped in an array — tools.RosterFromNames) yields
+//     every inherited tool Plan mode admits on every target (planAdmits — the class, never the bare ReadOnly() self-declaration, so a self-declared
 //     read-only tool that launches a subprocess is left out exactly as Plan leaves it out) plus
 //     sub_agent where the depth bound still offers it, because a read-only child may still
 //     delegate read-only work exactly as a Plan-mode parent may (toolMenu keeps it for the same
@@ -2067,7 +2067,8 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 //   - a list of names is checked against the PARENT's registry and refused whole when any name is
 //     unknown — the refusal names every unknown one, in the order given, so the model reads the
 //     spellings it got wrong rather than finding the tool silently gone (the check runs BEFORE
-//     Subset, which would drop the name without a word). A name the parent holds but no child gets
+//     Subset, which would drop the name without a word), and it points at the keyword too, for a
+//     model that meant the read-only set and spelled it as a tool. A name the parent holds but no child gets
 //     (childWithheldTools, topLevelOnlyTools, sub_agent at the bound) passes the check and is
 //     dropped by the intersection: it is not a tool the model misspelled, it is one a child never
 //     has.
@@ -2098,8 +2099,11 @@ func (a *Agent) requestedChildTools(asked tools.SubAgentRoster) ([]string, error
 		}
 	}
 	if len(unknown) > 0 {
-		return nil, fmt.Errorf("sub_agent tools: unknown tool %s — name tools from your own menu",
-			strings.Join(unknown, ", "))
+		return nil, fmt.Errorf(
+			"sub_agent tools: unknown tool %s — name tools from your own menu, or pass %q as the whole value",
+			strings.Join(unknown, ", "),
+			tools.SubAgentToolsReadOnly,
+		)
 	}
 	return asked.Names, nil
 }

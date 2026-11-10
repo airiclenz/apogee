@@ -361,7 +361,9 @@ const wantPlainSubAgentSchema = `{
 // TestSubAgentArgsParsesTheOptionalTools proves the `tools` argument's two wire shapes reach the
 // orchestrator as one value — the read-only keyword and a list of names — and that every way of
 // naming NO roster (absent, null, "", []) decodes to the zero value the orchestrator reads as "keep
-// the inherited set". A keyword that is not the published one, and a value of any other shape, are
+// the inherited set". The two misspellings with one meaning each — the keyword wrapped in an array
+// and an array encoded as a string — decode as what they mean; the keyword beside tool names is
+// refused. A keyword that is not the published one, and a value of any other shape, are
 // refused with a message naming what the argument takes: the recursion point returns that message
 // to the model verbatim, so it has to be the correction rather than a decoder's complaint.
 func TestSubAgentArgsParsesTheOptionalTools(t *testing.T) {
@@ -379,8 +381,15 @@ func TestSubAgentArgsParsesTheOptionalTools(t *testing.T) {
 		{"null", `{"task":"survey the repo","tools":null}`, SubAgentRoster{}, ""},
 		{"empty string", `{"task":"survey the repo","tools":""}`, SubAgentRoster{}, ""},
 		{"empty list", `{"task":"survey the repo","tools":[]}`, SubAgentRoster{}, ""},
-		{"an unknown keyword", `{"task":"survey the repo","tools":"readonly"}`, SubAgentRoster{}, `unknown keyword "readonly"`},
+		{"an unknown keyword", `{"task":"survey the repo","tools":"readonly"}`, SubAgentRoster{}, `tools: unknown keyword "readonly" — use "read-only" or an array of tool names`},
 		{"the wrong shape", `{"task":"survey the repo","tools":{"read_file":true}}`, SubAgentRoster{}, `must be the string "read-only" or an array`},
+		{"the keyword wrapped in an array", `{"task":"survey the repo","tools":["read-only"]}`, SubAgentRoster{ReadOnly: true}, ""},
+		{"an array encoded as a string", `{"task":"survey the repo","tools":"[\"read_file\",\"list_dir\"]"}`, SubAgentRoster{Names: []string{"read_file", "list_dir"}}, ""},
+		{"the wrapped keyword encoded as a string", `{"task":"survey the repo","tools":"[\"read-only\"]"}`, SubAgentRoster{ReadOnly: true}, ""},
+		{"the keyword beside tool names", `{"task":"survey the repo","tools":["read-only","read_file"]}`, SubAgentRoster{}, `pass "read-only" alone as the whole value, not inside a list of tool names`},
+		{"the keyword beside tool names in a string", `{"task":"survey the repo","tools":"[\"read-only\",\"read_file\"]"}`, SubAgentRoster{}, `pass "read-only" alone as the whole value`},
+		{"a string holding an array of numbers", `{"task":"survey the repo","tools":"[1,2]"}`, SubAgentRoster{}, `"[1,2]" is not an array of tool names — use "read-only" or an array of tool names`},
+		{"a string holding null", `{"task":"survey the repo","tools":"null"}`, SubAgentRoster{}, `unknown keyword "null" — use "read-only" or an array of tool names`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

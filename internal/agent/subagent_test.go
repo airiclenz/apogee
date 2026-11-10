@@ -996,6 +996,81 @@ func TestSubAgent_ToolsListDropsTheWorkflowTool(t *testing.T) {
 	}
 }
 
+// TestSubAgent_WrappedReadOnlyKeywordRunsTheReadOnlySet drives the misspelling small models send
+// first — the keyword wrapped in an array, `["read-only"]` — against the real default registry: the
+// child it spawns is offered exactly the menu the published `"read-only"` spelling yields (the set
+// TestSubAgent_ReadOnlyRosterIsThePlanFloorMinusTheHumanSeat defines), not a refusal naming
+// "read-only" as an unknown tool.
+func TestSubAgent_WrappedReadOnlyKeywordRunsTheReadOnlySet(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Tools = tools.NewDefaultRegistryWithHost(t.TempDir(), tools.HostTools{
+		Asker:     &askProbeAsker{answer: func(domain.AskRequest) string { return "" }},
+		Presenter: &recordingPresenter{},
+	})
+
+	const parentInput = "delegate two read-only surveys"
+	const keywordTask, wrappedTask = "survey with the keyword spelling", "survey with the wrapped spelling"
+	up := newMenuRecorder(newRoutedResponder().
+		route(parentInput, nil, toolCallScript("c1", tools.SubAgentToolName,
+			`{"task":"`+keywordTask+`","tools":"read-only"}`)).
+		route(keywordTask, nil, contentScript("keyword child done")).
+		route(parentInput, nil, toolCallScript("c2", tools.SubAgentToolName,
+			`{"task":"`+wrappedTask+`","tools":["read-only"]}`)).
+		route(wrappedTask, nil, contentScript("wrapped child done")).
+		route(parentInput, nil, contentScript("parent done")))
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: parentInput})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want := up.firstMenu(keywordTask)
+	if len(want) < 3 || slices.Contains(want, "write_file") {
+		t.Fatalf("the keyword child's menu %v is not a credible read-only set", want)
+	}
+	if got := up.firstMenu(wrappedTask); !slices.Equal(got, want) {
+		t.Errorf("the wrapped-keyword child's menu = %v, want the read-only set %v", got, want)
+	}
+}
+
+// TestSubAgent_StringEncodedToolsArrayNarrowsToThoseTools drives the other first-call misspelling:
+// the array of names sent as a JSON string. The child runs with exactly the named tools, in the
+// order named, as the array spelling would give it.
+func TestSubAgent_StringEncodedToolsArrayNarrowsToThoseTools(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Tools = humanSeatRegistry(
+		fakeTool{name: "read_thing", readOnly: true, result: "read"},
+		fakeTool{name: "grep_thing", readOnly: true, result: "found"},
+		fakeTool{name: "write_thing", result: "wrote"},
+	)
+
+	const parentInput, childTask = "delegate a string-encoded roster", "read and grep from a string-encoded list"
+	up := newMenuRecorder(newRoutedResponder().
+		route(parentInput, nil, toolCallScript("c1", tools.SubAgentToolName,
+			`{"task":"`+childTask+`","tools":"[\"grep_thing\",\"read_thing\"]"}`)).
+		route(childTask, nil, contentScript("child done")).
+		route(parentInput, nil, contentScript("parent done")))
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: parentInput})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if got := up.firstMenu(childTask); !slices.Equal(got, []string{"grep_thing", "read_thing"}) {
+		t.Errorf("the narrowed child's menu = %v, want exactly [grep_thing read_thing]", got)
+	}
+	if res, ok := lastSubAgentResult(sink.events); !ok || res.IsError {
+		t.Errorf("the delegation's result = %+v, want the child's own completion", res)
+	}
+}
+
 // TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns pins the refusal: a list naming a tool
 // the parent does not hold is answered with an error result naming every unknown name — before
 // ToolRegistry.Subset could drop it silently and before a child is built — so the parent spends
@@ -1017,8 +1092,9 @@ func TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns(t *testing.T) {
 	if outcome != dispatchDone {
 		t.Fatalf("outcome = %v, want dispatchDone", outcome)
 	}
-	if !res.IsError || !strings.Contains(res.Content, "unknown tool frobnicate, zap") {
-		t.Errorf("result = %+v, want an error naming the unknown tools in order", res)
+	const wantRefusal = `sub_agent tools: unknown tool frobnicate, zap — name tools from your own menu, or pass "read-only" as the whole value`
+	if !res.IsError || !strings.Contains(res.Content, wantRefusal) {
+		t.Errorf("result = %+v, want an error containing %q", res, wantRefusal)
 	}
 	if len(sink.events) != 0 {
 		t.Errorf("%d events reached the sink; a refused roster must build no child", len(sink.events))
@@ -4904,7 +4980,7 @@ func TestSubAgent_ARefusedContinueKeepsTheRetainedDelegate(t *testing.T) {
 			name:    "unknown tool",
 			config:  func(sink domain.EventSink) domain.Config { return subAgentConfig(sink, domain.ModeAskBefore, reader) },
 			refused: refusedContinueArgs(retainedSurveyName, continueInstructions, "", tools.SubAgentRoster{Names: []string{"no_such_tool"}}),
-			want:    "sub_agent tools: unknown tool no_such_tool — name tools from your own menu",
+			want:    `sub_agent tools: unknown tool no_such_tool — name tools from your own menu, or pass "read-only" as the whole value`,
 		},
 	}
 	for _, tc := range cases {
