@@ -249,7 +249,9 @@ func (m Model) applyReloaded(rows []SettingRow, applied []AppliedSetting, watche
 		if !ok {
 			continue // a key the pane does not list has no row to journal it on
 		}
-		next, cmd := m.settingsApplied(row, settingEdit{path: a.Path, value: a.Value, watched: watched, reread: true})
+		next, cmd := m.settingsApplied(row, settingEdit{
+			path: a.Path, value: a.Value, watched: watched, reread: true, unstated: a.Reset,
+		})
 		m = next
 		if cmd != nil {
 			cmds = append(cmds, cmd)

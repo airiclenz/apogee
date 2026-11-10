@@ -3253,8 +3253,8 @@ func pressSeparator(t *testing.T, m Model, x int) Model {
 }
 
 // TestSidePanelSeparatorDoubleClick pins adr-0110-amend-1108 (b)'s reset: two presses on the grip
-// within 500 ms return `ui.side-panel.width` to 36 through the settings host's Reset and start no
-// drag; presses further apart, or a press right after a drag that moved the separator, are drags.
+// within 500 ms return `ui.side-panel.width` to its unset width (0, painted at the default 44)
+// through the settings host's Reset and start no drag; presses further apart, or a press right after a drag that moved the separator, are drags.
 func TestSidePanelSeparatorDoubleClick(t *testing.T) {
 	t.Parallel()
 
@@ -3278,6 +3278,9 @@ func TestSidePanelSeparatorDoubleClick(t *testing.T) {
 		if m.panelWidth() != domain.DefaultSidePanelWidth || m.slotWidth() != sep+50-domain.DefaultSidePanelWidth {
 			t.Errorf("panel %d, slot %d; want %d and %d", m.panelWidth(), m.slotWidth(),
 				domain.DefaultSidePanelWidth, sep+50-domain.DefaultSidePanelWidth)
+		}
+		if m.opts.UI.SidePanelWidth != 0 {
+			t.Errorf("the reset stored ui.side-panel.width %d, want 0, the unset width", m.opts.UI.SidePanelWidth)
 		}
 		if m.viewport.Width() != m.slotWidth()-scrollbarWidth {
 			t.Errorf("viewport width %d, want %d — the transcript did not re-wrap at the reset width",
@@ -3458,6 +3461,9 @@ func TestSidePanelCommandDrivesTheSettings(t *testing.T) {
 			wantEdit := settingEdit{path: domain.UIKeySidePanelWidth, value: strconv.Itoa(want.width), reset: want.resets != nil}
 			if len(m.settingEdits) != 1 || m.settingEdits[0] != wantEdit {
 				t.Errorf("journal %+v, want %+v", m.settingEdits, wantEdit)
+			}
+			if want.resets != nil && m.opts.UI.SidePanelWidth != 0 {
+				t.Errorf("the reset stored ui.side-panel.width %d, want 0, the unset width", m.opts.UI.SidePanelWidth)
 			}
 			if !noteHolding(m, "side panel: on — ") {
 				t.Errorf("no report of the settings in force:\n%s", plain(m.View()))

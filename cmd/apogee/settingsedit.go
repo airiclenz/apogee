@@ -254,6 +254,10 @@ func (e *externalEdit) spec(key string) (tui.EditorCommand, error) {
 // /confine (ADR 0012 — binding G), `server:` (settingKeyServer), and `sub-agents-server:`
 // (settingKeySubAgentsServer) — both of them recorded choices a picker makes deliberately.
 //
+// A changed key the re-read finds stated in no file is reported as the reset it amounts to
+// (tui.AppliedSetting.Reset): the human deleted its line, and the session goes back to the default a
+// fresh start would resolve — for `ui.side-panel.width`, the unset width rather than its number.
+//
 // The loader's notices ride back beside the keys, diffed the same way: only a notice the baseline
 // did not carry is reported (newNotices). The baseline moves on every write apogee itself makes
 // (refresh), so an unknown key the file has carried since start-up — already announced there — is
@@ -280,7 +284,9 @@ func (e *externalEdit) changed() (tui.ConfigReload, error) {
 		if !settingChanged(k, before, after, i) {
 			continue
 		}
-		applied = append(applied, tui.AppliedSetting{Path: k.Path, Value: appliedValue(after.rows[i])})
+		applied = append(applied, tui.AppliedSetting{
+			Path: k.Path, Value: appliedValue(after.rows[i]), Reset: after.opts.SourceOf(k.Path) == config.SourceDefault,
+		})
 	}
 	return tui.ConfigReload{Applied: applied, Notices: newNotices(before.notices, after.notices)}, nil
 }

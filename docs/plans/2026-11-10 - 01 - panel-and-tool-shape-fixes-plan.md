@@ -113,7 +113,13 @@ NOTES (2026-11-10): docs updated — docs/manual/workflows.md fan_out argument t
 
 **Commit:** `fix(agent): give fan_out and workflow stages sub_agent's tools decoding`
 
-## 4. Side panel width: carry an unset width end to end
+## 4. Side panel width: carry an unset width end to end — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): re-derived from the assumption that `externalEdit.changed` (cmd/apogee/settingsedit.go) and `settingsapply.go` alone carry the reload's reset — the fact has to cross the host/TUI seam, so `tui.AppliedSetting` gains `Reset` (internal/tui/tui.go), `applyReloaded` passes it on (internal/tui/settingswatcher.go) and `settingEdit` gains `unstated` (internal/tui/settings.go).
+NOTES (2026-11-10): the reload reports `Reset` for every changed key it finds stated in no file, but only `ui.side-panel.width`'s apply changes (`settingsApplyValue` lands `""` for a width reset or unstated re-read); the journal still records a re-read as a re-read, so no other key's row, marker or dispatch moves (`TestSettingsPaneEmptyValueFromTheEditorIsNotApplied` keeps holding).
+NOTES (2026-11-10): consequential edit — internal/config/config.go: made necessary by uiSidePanelWidth's zeroWhenUnstated (the `Width` field comment said an absent key keeps the default, and named 36).
+NOTES (2026-11-10): consequential edit — internal/config/configwrite_sections_test.go: made necessary by the absent-key width resolving 0 (`TestSidePanelSectionsBlockWritesAndResetsWidth` read back the default after a reset; the plan's Tests bullet on absent-key expectations covers it).
+NOTES (2026-11-10): the settings row's spelling of 0 as 44 lives in a new `sidePanelWidthText` format in keyfield.go; `ParseSidePanelWidth("")` still returns 44, and `UIPrefs.land` lands the block default (0) for `""` before the parser.
 
 **What:** Recast at the regression check (2026-11-10). refactor: an unset `ui.side-panel.width` never reaches the renderer — an absent key, `Set("")` and the width reset all land 44 — so item 5's unset/set split would collapse to "set" for every real user.
 **Regression guard.** Ratified call (owner, 2026-11-10), **Unset width carried end to end:** an unset `ui.side-panel.width` is a real state from config to renderer. No user-visible change.

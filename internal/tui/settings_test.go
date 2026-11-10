@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -3107,6 +3108,75 @@ func TestSettingsPaneEmptyValueFromTheEditorIsNotApplied(t *testing.T) {
 	if got, want := m.settingsValueCell(rows[1]), settingsUnsetValue+settingsEditMarker; got != want {
 		t.Errorf("value cell = %q, want %q — the re-read is still journaled on the row", got, want)
 	}
+}
+
+// A `ui.side-panel.width` returned to its default — a /settings reset, straight or through the
+// save-target question, or a re-read that found its line gone — lands the unset width (0), which the
+// layout paints at the default, never the default's number, a width somebody chose; the row still
+// shows the default it went back to.
+func TestSettingsPaneResetOfTheSidePanelWidthLandsTheUnsetWidth(t *testing.T) {
+	t.Parallel()
+	widthRow := func(projectCapable bool) SettingRow {
+		return SettingRow{
+			Path: domain.UIKeySidePanelWidth, Section: "Interface", Kind: SettingInt, Value: "48",
+			Default: strconv.Itoa(domain.DefaultSidePanelWidth), Source: SettingFromGlobal, Editable: true,
+			ProjectCapable: projectCapable, Desc: "The side panel's width in columns.",
+		}
+	}
+	wantCell := strconv.Itoa(domain.DefaultSidePanelWidth) + settingsEditMarker
+	for _, tc := range []struct {
+		name           string
+		projectCapable bool
+		keys           []tea.KeyPressMsg
+	}{
+		{"a straight reset", false, []tea.KeyPressMsg{keyBackspace(), keyEnter()}},
+		{"a reset through the save-target question", true, []tea.KeyPressMsg{keyBackspace(), keyEnter(), keyLeft(), keyEnter()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := widthRow(tc.projectCapable)
+			log := &settingsWriteLog{layered: func(settingEdit) SettingOutcome {
+				return SettingOutcome{Value: row.Default, Source: SettingFromDefault}
+			}}
+			m, _ := settingsEditModel(t, []SettingRow{row}, log)
+			m.opts.UI.SidePanelWidth = 48
+
+			for _, key := range tc.keys {
+				m = step(t, m, key)
+			}
+
+			if len(log.resets)+len(log.targeted) != 1 {
+				t.Fatalf("resets %+v, targeted %+v; want the one reset", log.resets, log.targeted)
+			}
+			if m.opts.UI.SidePanelWidth != 0 || m.configuredPanelWidth() != domain.DefaultSidePanelWidth {
+				t.Errorf("stored %d, resolved %d; want 0, the unset width, resolved to %d",
+					m.opts.UI.SidePanelWidth, m.configuredPanelWidth(), domain.DefaultSidePanelWidth)
+			}
+			if got := m.settingsValueCell(row); got != wantCell {
+				t.Errorf("value cell = %q, want %q", got, wantCell)
+			}
+		})
+	}
+
+	t.Run("a re-read that found the line gone", func(t *testing.T) {
+		t.Parallel()
+		row := widthRow(false)
+		rows := []SettingRow{settingsStructuredRow(), row}
+		edit := &externalEditLog{applied: []AppliedSetting{{
+			Path: domain.UIKeySidePanelWidth, Value: row.Default, Reset: true,
+		}}}
+		m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+		m.opts.UI.SidePanelWidth = 48
+
+		m = step(t, m, settingsEditedMsg{path: "servers"})
+
+		if m.opts.UI.SidePanelWidth != 0 {
+			t.Errorf("stored %d, want 0, the unset width", m.opts.UI.SidePanelWidth)
+		}
+		if got := m.settingsValueCell(row); got != wantCell {
+			t.Errorf("value cell = %q, want %q", got, wantCell)
+		}
+	})
 }
 
 // The two new steps are views of the SELECTED row and the rows are re-derived under them, so a key that

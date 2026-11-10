@@ -11,10 +11,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -282,6 +284,37 @@ func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {
 	}
 	if want := "first line\nsecond line\n"; applied[0].Value != want {
 		t.Errorf("value = %q, want the prose %q", applied[0].Value, want)
+	}
+}
+
+// A key deleted from the file is reported as the reset it amounts to, carrying the default its row
+// reads — and for `ui.side-panel.width` the re-read resolves the unset width (0), not the default's
+// number, so the pane lands the width nobody chose. A key the file still states is no reset.
+func TestExternalEditReloadReportsADeletedSidePanelWidthAsAReset(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "mode: ask-before\nui:\n  side-panel:\n    width: 48\n")
+	e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, "", func(string) string { return "" })
+	writeSettingsFixture(t, path, "mode: auto\n")
+
+	reload, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	got := map[string]tui.AppliedSetting{}
+	for _, a := range reload.Applied {
+		got[a.Path] = a
+	}
+	want := tui.AppliedSetting{Path: domain.UIKeySidePanelWidth, Value: strconv.Itoa(domain.DefaultSidePanelWidth), Reset: true}
+	if got[domain.UIKeySidePanelWidth] != want {
+		t.Errorf("reload reported %+v for the deleted width, want %+v", got[domain.UIKeySidePanelWidth], want)
+	}
+	if a := got["mode"]; a.Value != "auto" || a.Reset {
+		t.Errorf("reload reported %+v for mode, want auto and no reset: the file still states it", a)
+	}
+	if width := e.baseline.opts.UI.SidePanelWidth; width != 0 {
+		t.Errorf("the re-read resolved ui.side-panel.width %d, want 0, the unset width", width)
 	}
 }
 

@@ -1243,7 +1243,8 @@ var KeyRegistry = bindRows([]Key{
 		// as ui.side-panel.show is, and written through the same block writer. The floor is the whole
 		// contract — ui.tools-fold-over's shape with a floor of 24 — and the window's own limit is the
 		// layout's clamp, never a rewrite of the value. A pointer on disk: a stated `0` is refused at
-		// the load by domain.ParseSidePanelWidth rather than read as an absent key.
+		// the load by domain.ParseSidePanelWidth rather than read as an absent key. An absent key
+		// resolves to 0, the unset width (uiSidePanelWidth); Default is the width that reads as.
 		Path: "ui.side-panel.width", Kind: KindInt, Default: strconv.Itoa(domain.DefaultSidePanelWidth),
 		Editable: true,
 		Validate: validateSidePanelWidth,

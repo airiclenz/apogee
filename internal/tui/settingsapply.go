@@ -397,7 +397,7 @@ func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd
 // its new palette needs. The seam's own keys are unchanged — [SettingsHost.Apply] returns a note
 // and never a Cmd, because what it moves is on the far side of the renderer.
 func (m Model) settingsApplyLive(edit settingEdit) (Model, string, tea.Cmd, error) {
-	path, value := edit.path, edit.value
+	path, value := edit.path, settingsApplyValue(edit)
 	if applied, note, cmd, ok, err := m.settingsApplyLocal(path, value); ok {
 		return applied, note, cmd, err
 	}
@@ -419,6 +419,18 @@ func (m Model) settingsApplyLive(edit settingEdit) (Model, string, tea.Cmd, erro
 		}
 	}
 	return m, note, nil, nil
+}
+
+// settingsApplyValue is the text an edit lands: its value — except a `ui.side-panel.width` that went
+// back to its default, by a reset or by a re-read that found its line gone (unstated), which lands
+// `""`, the unset width (domain.UIPrefs.SidePanelWidth 0) the layout resolves to the default. The
+// default's own number would land a width somebody chose; the journal keeps it, since it is what the
+// row shows.
+func settingsApplyValue(edit settingEdit) string {
+	if edit.path == domain.UIKeySidePanelWidth && (edit.reset || edit.unstated) {
+		return ""
+	}
+	return edit.value
 }
 
 // autoBlastRadiusNote is that sentence as the ROW can carry it: whole where the note column has the

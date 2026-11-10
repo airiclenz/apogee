@@ -207,20 +207,25 @@ type settingsPendingSave struct {
 // or the editor's return trip — whose value is therefore the LAYERED one the next start resolves,
 // never a value written beneath a file that outranks it (settingsOutranksNote).
 //
+// unstated marks a re-read that found the key stated in no file ([AppliedSetting.Reset]): the value
+// is the default it went back to, journaled as the re-read it is, and applied as the reset it amounts
+// to (settingsApplyValue).
+//
 // target and source are a targeted save's (a [SettingRow.ProjectCapable] key, [SettingsHost.SaveTo]):
 // the file the human chose, and the file that supplies the key once the save landed. The row's own
 // [SettingRow.Source] agrees from the next paint, because the provider marks every row off the files
 // as they stand now; source is the journal's copy of the same answer. Both are empty for every other
 // edit.
 type settingEdit struct {
-	path    string
-	value   string
-	note    string
-	reset   bool
-	watched bool
-	reread  bool
-	target  SettingTarget
-	source  SettingSource
+	path     string
+	value    string
+	note     string
+	reset    bool
+	watched  bool
+	reread   bool
+	unstated bool
+	target   SettingTarget
+	source   SettingSource
 }
 
 // settingFailure is the last write this pane was REFUSED, and by what — a read-only config home, a

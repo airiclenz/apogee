@@ -435,8 +435,8 @@ func TestSidePanelSectionsBlockWritesAndResetsWidth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
-	if opts.UI.SidePanelWidth != domain.DefaultSidePanelWidth {
-		t.Errorf("width reads back %d after reset, want the default %d", opts.UI.SidePanelWidth, domain.DefaultSidePanelWidth)
+	if opts.UI.SidePanelWidth != 0 {
+		t.Errorf("width reads back %d after reset, want 0, the unset width", opts.UI.SidePanelWidth)
 	}
 }
 

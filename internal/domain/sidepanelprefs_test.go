@@ -161,14 +161,24 @@ func TestSidePanelShowZeroValidatesAndBadIsRefusedNamingTheKey(t *testing.T) {
 	}
 }
 
-// TestSidePanelWidthValidateAndSetJudgeTheStatedWidth: the default is 44 and `""` reads as it; a
-// zero field is the unset width and validates, while Set — a stated value — refuses 0 as it refuses
-// any width below 24; 24 and up land as written; and the parser refuses text that is no number.
+// TestSidePanelWidthValidateAndSetJudgeTheStatedWidth: the default block carries the unset width
+// (0), and Set's `""` lands it — never the default's number, which would read as a width somebody
+// chose — while the parser still reads `""` as the default 44; a zero field validates, while Set — a
+// stated value — refuses 0 as it refuses any width below 24; 24 and up land as written; and the
+// parser refuses text that is no number.
 func TestSidePanelWidthValidateAndSetJudgeTheStatedWidth(t *testing.T) {
 	t.Parallel()
 
-	if got := DefaultUIPrefs().SidePanelWidth; got != 44 {
-		t.Errorf("DefaultUIPrefs().SidePanelWidth = %d; want 44", got)
+	if got := DefaultUIPrefs().SidePanelWidth; got != 0 {
+		t.Errorf("DefaultUIPrefs().SidePanelWidth = %d; want 0, the unset width", got)
+	}
+	stated := DefaultUIPrefs()
+	stated.SidePanelWidth = 48
+	for _, text := range []string{"", "  "} {
+		unset := stated
+		if err := unset.Set(UIKeySidePanelWidth, text); err != nil || unset.SidePanelWidth != 0 {
+			t.Errorf(`Set(ui.side-panel.width, %q) = %v, landing %d; want 0, the unset width`, text, err, unset.SidePanelWidth)
+		}
 	}
 	if got, err := ParseSidePanelWidth("  "); err != nil || got != DefaultSidePanelWidth {
 		t.Errorf(`ParseSidePanelWidth("  ") = %d, %v; want the default`, got, err)

@@ -2915,7 +2915,7 @@ type uiSidePanelConfig struct {
 	// string for uiConfig.Spinner's reason: UIPrefs.Validate parses it once, at startup.
 	Show string `yaml:"show"`
 	// Width is `ui.side-panel.width`: the panel's width in columns. A pointer for ToolsFoldOver's
-	// reason — an absent key keeps the default of 36, and a stated `0` is a width the load refuses
+	// reason — an absent key resolves to the unset width (0), and a stated `0` is a width the load refuses
 	// rather than an absent one — and a WholeCount for the same reason as that key. The judgement
 	// (a whole number of 24 or more) is domain.ParseSidePanelWidth's, at the file pass.
 	Width *WholeCount `yaml:"width"`

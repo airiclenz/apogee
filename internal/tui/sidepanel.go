@@ -154,9 +154,9 @@ func (m Model) panelOverlayGapHung() bool {
 	return m.panelOverlaid() && m.width-m.panelPaintWidth() >= 1
 }
 
-// configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the zero UIPrefs'
-// unset width (a test harness's, a block assembled field by field) resolves to
-// [domain.DefaultSidePanelWidth] here and nowhere else.
+// configuredPanelWidth is `ui.side-panel.width` as every reader of it takes it: the unset width (0 —
+// a config with no key, a reset, a zero UIPrefs) resolves to [domain.DefaultSidePanelWidth] here and
+// nowhere else.
 func (m Model) configuredPanelWidth() int {
 	if m.opts.UI.SidePanelWidth == 0 {
 		return domain.DefaultSidePanelWidth
@@ -1168,9 +1168,11 @@ func (m Model) setPanelWidth(width int) Model {
 // the key's line rather than writing the default into it (ADR 0035), with setPanelWidth's contract
 // otherwise: the column moves first, a landed reset is journalled as the reset it is, a failed one
 // speaks as one transcript error naming the key and the default stands for the session, and a nil
-// seam changes the session alone (ADR 0031).
+// seam changes the session alone (ADR 0031). The session lands the unset width (0), which
+// [Model.configuredPanelWidth] resolves to the default, never the default's number: a reset width is
+// one nobody chose.
 func (m Model) resetPanelWidth() Model {
-	m.opts.UI.SidePanelWidth = domain.DefaultSidePanelWidth
+	m.opts.UI.SidePanelWidth = 0
 	if m.opts.Settings == nil {
 		return m
 	}

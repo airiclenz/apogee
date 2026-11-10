@@ -2211,9 +2211,15 @@ type EditorCommand struct {
 //
 // It carries no note and no error: nothing is in force yet when the reload returns it, so what a
 // key had to say about landing is what the apply says, on the row, a moment later.
+//
+// Reset reports that the re-read found the key stated in no file: it went back to its default, the
+// state a reset leaves, and Value is that default as the row reads it. The pane journals and applies
+// such a key as before; the one key the difference reaches is `ui.side-panel.width`, whose unset
+// width is a state of its own (settingsApplyValue).
 type AppliedSetting struct {
 	Path  string // the key's registry path, as [SettingRow.Path] spells it
 	Value string // its new value, in the spelling the pane journals and applies
+	Reset bool   // the file no longer states the key: it is back at its default
 }
 
 // ConfigReload is one answer from [ConfigHost.ReloadConfig]: the keys a re-read of the config file found

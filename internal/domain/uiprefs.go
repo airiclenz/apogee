@@ -133,8 +133,9 @@ type UIPrefs struct {
 	// the model.
 	SidePanelShow SidePanelShow
 	// SidePanelWidth is `ui.side-panel.width`: the side panel's width in columns while it is drawn
-	// (ADR 0110, amended 2026-11-08). Default [DefaultSidePanelWidth], and 0 reads as unset and
-	// resolves to it — Glyphs' posture, so a block assembled field by field still validates. A
+	// (ADR 0110, amended 2026-11-08). 0 is the unset width — no key, a `""`, a reset — carried as
+	// itself from config to renderer, so the layout can tell a width nobody chose from one somebody
+	// did; every reader that paints, clamps or shows it resolves 0 to [DefaultSidePanelWidth]. A
 	// stated width below [MinSidePanelWidth] is refused by [UIPrefs.Validate] naming the key; how
 	// wide the window lets the panel be is the layout's clamp, never a rewrite of this value.
 	SidePanelWidth int
@@ -626,8 +627,8 @@ func UIKeys() []string {
 // umbrella folding past five type rows with large umbrellas starting folded, pointer shapes off,
 // the unicode glyph set, the terminal bell when apogee waits on the human, the footer's
 // periodic git fetch on, the footer laid out on two rows, the upstream above the workspace, and the
-// side panel drawn 44 columns wide where the window has room for it, every section in auto and none
-// folded.
+// side panel drawn at its unset width (0, which every reader resolves to 44 columns) where the window
+// has room for it, every section in auto and none folded.
 // Every `""` handed to [UIPrefs.Set] lands the field this value carries for that key.
 func DefaultUIPrefs() UIPrefs {
 	return UIPrefs{
@@ -644,7 +645,6 @@ func DefaultUIPrefs() UIPrefs {
 		GitFetch:          true,
 		FooterRows:        DefaultFooterRows,
 		SidePanelShow:     DefaultSidePanelShow,
-		SidePanelWidth:    DefaultSidePanelWidth,
 		SidePanelSections: DefaultSidePanelSections,
 	}
 }
@@ -835,6 +835,10 @@ func (u *UIPrefs) land(key, value string) error {
 		}
 		u.SidePanelShow = show
 	case UIKeySidePanelWidth:
+		if value == "" {
+			u.SidePanelWidth = defaults.SidePanelWidth // the unset width, never the default's number
+			return nil
+		}
 		width, err := ParseSidePanelWidth(value)
 		if err != nil {
 			return err
