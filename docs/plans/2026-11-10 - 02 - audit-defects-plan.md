@@ -329,7 +329,10 @@ NOTES (2026-11-10): internal/agent/rebind.go needed no change — its tap.bind s
 **Acceptance:** `go test -race -count=1 -run 'WireTap' ./internal/agent/`
 **Commit:** `fix(agent): stop the wire tap racing background workflow children`
 
-## 16. Harmony stripping recognises `<|constrain|>` tool-call headers
+## 16. Harmony stripping recognises `<|constrain|>` tool-call headers — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the header pattern is one shared `harmonyHeader` constant used by both `harmonyMessage` and `harmonyOpen`, so the terminated and streaming matchers cannot disagree on a header.
+NOTES (2026-11-10): the optional fault wording naming an unparsed Harmony tool call was not taken; the empty-reply text stays verbatim and the agent-level test `TestEmptyReply_UnparsedHarmonyToolCallFaults` pins it (recovery retry fires, provider called maxPostResponseRetries+1 times, then the fault) — verified to fail against the pre-fix harmony.go.
 
 **What:**
 **Goal:** `StripHarmony` on an analysis plus `commentary to=functions.x <|constrain|>json<|message|>{…}<|call|>` response leaves no control tokens or call JSON in Visible; `IsHarmonyThinking` is true while that message is unterminated; existing vectors pass.

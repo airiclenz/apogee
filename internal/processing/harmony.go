@@ -27,14 +27,25 @@ const (
 //
 // Terminators: `<|end|>` (message complete), `<|call|>` (a tool call follows), `<|return|>`
 // (the assistant turn is done) — the harmony control tokens that close a message.
+//
+// The header between the channel name and `<|message|>` is plain text with one control token
+// allowed in it: gpt-oss writes a tool call as `<|channel|>commentary to=functions.x
+// <|constrain|>json<|message|>{…}<|call|>`, and a header that stopped at the first `<` would leave
+// that whole message — control tokens and call JSON — in visible content.
 var harmonyMessage = regexp.MustCompile(
-	`(?s)(?:<\|start\|>[^<]*)?<\|channel\|>\s*([a-zA-Z_][a-zA-Z0-9_]*)[^<]*<\|message\|>(.*?)(<\|end\|>|<\|call\|>|<\|return\|>)`,
+	`(?s)(?:<\|start\|>[^<]*)?<\|channel\|>\s*([a-zA-Z_][a-zA-Z0-9_]*)` + harmonyHeader +
+		`<\|message\|>(.*?)(<\|end\|>|<\|call\|>|<\|return\|>)`,
 )
+
+// harmonyHeader is the rest of a message header after the channel name: header text such as a
+// `to=functions.x` recipient, and the `<|constrain|>` token that names a tool call's argument
+// format. It is shared by harmonyMessage and harmonyOpen so the two never disagree on a header.
+const harmonyHeader = `(?:[^<]|<\|constrain\|>)*`
 
 // harmonyOpen matches an unterminated trailing harmony message — a channel opened with content
 // but no closing control token yet (the streaming tail). The body runs to end of input.
 var harmonyOpen = regexp.MustCompile(
-	`(?s)(?:<\|start\|>[^<]*)?<\|channel\|>\s*([a-zA-Z_][a-zA-Z0-9_]*)[^<]*<\|message\|>(.*)$`,
+	`(?s)(?:<\|start\|>[^<]*)?<\|channel\|>\s*([a-zA-Z_][a-zA-Z0-9_]*)` + harmonyHeader + `<\|message\|>(.*)$`,
 )
 
 // HarmonyStripped separates a harmony-formatted response into its three streams.

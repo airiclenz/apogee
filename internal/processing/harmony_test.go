@@ -84,6 +84,24 @@ func TestStripHarmony_FullChannelSet(t *testing.T) {
 			wantReasoning: "first\n\nsecond",
 			wantReasoned:  true,
 		},
+		{
+			name: "constrained tool-call header after analysis leaks nothing",
+			raw: "<|start|>assistant<|channel|>analysis<|message|>I should read the file.<|end|>" +
+				`<|start|>assistant<|channel|>commentary to=functions.read_file <|constrain|>json<|message|>{"path":"main.go"}<|call|>`,
+			wantVisible:    "",
+			wantReasoning:  "I should read the file.",
+			wantCommentary: `{"path":"main.go"}`,
+			wantReasoned:   true,
+		},
+		{
+			name: "unterminated constrained tool-call header (streaming) leaks nothing",
+			raw: "<|channel|>analysis<|message|>I should read the file.<|end|>" +
+				`<|channel|>commentary to=functions.read_file <|constrain|>json<|message|>{"path":"ma`,
+			wantVisible:    "",
+			wantReasoning:  "I should read the file.",
+			wantCommentary: `{"path":"ma`,
+			wantReasoned:   true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -139,6 +157,8 @@ func TestIsHarmonyThinking(t *testing.T) {
 		{"closed analysis is not thinking", "<|channel|>analysis<|message|>done<|end|>", false},
 		{"no channel is not thinking", "plain text", false},
 		{"closed analysis then open final is not thinking", "<|channel|>analysis<|message|>x<|end|><|channel|>final<|message|>y", false},
+		{"open constrained tool call is thinking", "<|channel|>analysis<|message|>x<|end|><|channel|>commentary to=functions.read_file <|constrain|>json<|message|>{\"path\":", true},
+		{"closed constrained tool call is not thinking", "<|channel|>commentary to=functions.read_file <|constrain|>json<|message|>{}<|call|>", false},
 	}
 
 	for _, tc := range cases {

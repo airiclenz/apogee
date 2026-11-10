@@ -102,6 +102,54 @@ func TestEmptyReplyFailsTheTurn(t *testing.T) {
 	}
 }
 
+// TestEmptyReply_UnparsedHarmonyToolCallFaults pins what a gpt-oss tool call costs when the
+// Upstream leaves Harmony unparsed (harmony-constrain-header-unparsed): the harmony stripper now
+// recognises the `to=functions.x <|constrain|>json` header, so the call message routes to the
+// commentary channel instead of leaking its control tokens and JSON into the answer. apogee has no
+// text parser for a Harmony tool call, so such a reply holds no visible text and no tool call: the
+// empty-response recovery guard re-sends it with the completion-check nudge, and once the model has
+// answered the same way to the loop's retry cap the empty-reply guard faults the Turn naming an
+// empty reply, where before the fix it completed with the raw call markup committed as the
+// assistant's answer.
+func TestEmptyReply_UnparsedHarmonyToolCallFaults(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
+	cfg.Profile = domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingHarmony}}
+	content := "<|channel|>analysis<|message|>I should read the file.<|end|>" +
+		`<|start|>assistant<|channel|>commentary to=functions.read_file <|constrain|>json<|message|>{"path":"main.go"}<|call|>`
+	responder := echoResponder(t, content)
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	res := runExchange(t, a, "read main.go")
+
+	if res.Status != domain.StatusExchangeComplete || !res.Faulted {
+		t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:true}",
+			res.Status, res.Faulted, domain.StatusExchangeComplete)
+	}
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 {
+		t.Fatalf("ErrorEvents = %d (%v), want exactly 1", len(errs), errs)
+	}
+	if want := "upstream returned an empty reply (finish: stop)"; errs[0].Source != "loop" || errs[0].Err != want {
+		t.Errorf("ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:%q}", errs[0].Source, errs[0].Err, "loop", want)
+	}
+	if hasEvent[domain.MessageEvent](sink.events) {
+		t.Error("a MessageEvent was emitted for a reply whose only content was an unparsed tool call")
+	}
+	if got := a.conv.Len(); got != 1 {
+		t.Errorf("conv.Len() = %d, want 1 — no assistant message carries the raw call markup", got)
+	}
+	if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
+		t.Error("no ReactionFiredEvent for the empty-response recovery — the stripped reply was not seen as empty")
+	}
+	if got, want := responder.calls(), maxPostResponseRetries+1; got != want {
+		t.Errorf("provider was called %d times, want %d (the recovery retries up to the cap, then the guard faults)", got, want)
+	}
+}
+
 // TestEmptyReplyGuardYieldsToRecoveredRetry pins the guard's placement, which is the whole reason
 // it sits after the Floor guards and the post-response hook loop: whoever answered the empty reply
 // with a retry — the empty-response recovery guard, or a hook — gets its second attempt, and content
