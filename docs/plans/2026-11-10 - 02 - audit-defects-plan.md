@@ -245,7 +245,10 @@ Depends on item 9.
 **Acceptance:** `go test -race -count=1 ./internal/undo/` then, when dispatch.go changes, `go test -race -count=1 -run 'Capture' ./internal/agent/`
 **Commit:** `fix(undo): do not retry a failed pre-image capture on every write call`
 
-## 11. `apogee update` bounds a stall, not a slow download
+## 11. `apogee update` bounds a stall, not a slow download — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the stall bound is a `download` parameter (`stallTimeout`), not a package knob, so the trickle/stall tests stay `t.Parallel`; `Stage` passes `downloadStallTimeout` (60 s), which also bounds the dial, TLS handshake and response headers in `newDownloadClient`. `ForceAttemptHTTP2: true` keeps HTTP/2 on, since a custom `DialContext` would otherwise disable it.
+NOTES (2026-11-10): added `TestDownload_CallerCancelsMidBody_IsNotReportedAsStall` beyond the listed tests, so a cancelled `apogee update` is not mislabelled as a stall.
 
 **What:**
 **Goal:** a release archive download that keeps moving completes however long it takes; one that stops sending for 60 s fails with an error naming the stall; size ceilings and the SHA256SUMS check are unchanged.

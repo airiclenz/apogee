@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,9 +25,14 @@ import (
 // release's SHA256SUMS lists for it: the bytes are not the published ones, so nothing is staged.
 var ErrChecksumMismatch = errors.New("update: archive does not match its SHA256SUMS entry")
 
-// downloadTimeout bounds one download end to end. A release archive is tens of megabytes, so this
-// is far looser than the lookup's, yet it still ends a stalled transfer.
-const downloadTimeout = 2 * time.Minute
+// downloadStallTimeout bounds every wait a download can stall on: a dial, a TLS handshake, the
+// response headers, and each gap between body bytes. It bounds no transfer's total length — a
+// release archive is tens of megabytes and a slow link may take many minutes to move it — so a
+// download that keeps moving always completes, and only one that stops sending fails.
+const downloadStallTimeout = 60 * time.Second
+
+// errDownloadStalled reports a download whose body stopped arriving for the stall bound.
+var errDownloadStalled = errors.New("stalled")
 
 // releaseDownloadDirectory is the path a release's assets live under:
 // `<repo>/releases/download/<tag>/<asset>`.
@@ -81,13 +87,14 @@ var targetPattern = regexp.MustCompile(`^[a-z0-9]+$`)
 // without its `v`) and the binary is its `apogee_<bare>_<goos>_<goarch>/apogee[.exe]` entry —
 // the `make dist` layout. Both it and SHA256SUMS are fetched from `<base>/releases/download/<tag>/`
 // over a client that follows redirects (assets are served from a CDN), honours
-// HTTP_PROXY/HTTPS_PROXY/NO_PROXY and gives up after two minutes per download.
+// HTTP_PROXY/HTTPS_PROXY/NO_PROXY and gives up only on a stall: no connection, no response
+// headers, or no body bytes for a minute. A slow transfer that keeps moving is never cut off.
 //
 // Only that exact entry is read, and its name never reaches the file system, so an entry such as
 // `../apogee` cannot write outside dir. Stage fails, leaving no file behind in dir, on: a malformed
 // tag or target, a client not built with [NewClient], a failed or non-200 download, an archive
 // SHA256SUMS does not list, a checksum mismatch ([ErrChecksumMismatch]), an archive without the
-// expected entry as a regular file, an oversized download or binary, or a write error. Cancelling
+// expected entry as a regular file, an oversized download or binary, a stalled download, or a write error. Cancelling
 // ctx aborts the downloads.
 func Stage(ctx context.Context, client Client, tag, goos, goarch, dir string) (string, error) {
 	if client.httpClient == nil {
@@ -104,7 +111,7 @@ func Stage(ctx context.Context, client Client, tag, goos, goarch, dir string) (s
 	downloader := newDownloadClient()
 	assetDirectoryURL := client.baseURL + releaseDownloadDirectory + tag + "/"
 
-	checksums, err := download(ctx, downloader, assetDirectoryURL+checksumsAssetName, maxChecksumsBytes)
+	checksums, err := download(ctx, downloader, assetDirectoryURL+checksumsAssetName, maxChecksumsBytes, downloadStallTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -112,7 +119,7 @@ func Stage(ctx context.Context, client Client, tag, goos, goarch, dir string) (s
 	if err != nil {
 		return "", err
 	}
-	archive, err := download(ctx, downloader, assetDirectoryURL+asset.archiveName, maxArchiveBytes)
+	archive, err := download(ctx, downloader, assetDirectoryURL+asset.archiveName, maxArchiveBytes, downloadStallTimeout)
 	if err != nil {
 		return "", err
 	}
@@ -143,17 +150,31 @@ func newReleaseAsset(tag, goos, goarch string) releaseAsset {
 }
 
 // newDownloadClient returns the asset client: unlike the lookup's, it follows redirects, because
-// GitHub answers an asset URL with a redirect to its CDN.
+// GitHub answers an asset URL with a redirect to its CDN. It has no total timeout — a client
+// Timeout also bounds reading the body, so it cannot tell a slow transfer from a stalled one —
+// and bounds instead each step that can stall before the body starts; [download] bounds the gaps
+// within the body.
 func newDownloadClient() *http.Client {
+	dialer := &net.Dialer{Timeout: downloadStallTimeout}
 	return &http.Client{
-		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
-		Timeout:   downloadTimeout,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dialer.DialContext,
+			TLSHandshakeTimeout:   downloadStallTimeout,
+			ResponseHeaderTimeout: downloadStallTimeout,
+			// A custom DialContext turns HTTP/2 off unless asked for; keep it as before.
+			ForceAttemptHTTP2: true,
+		},
 	}
 }
 
-// download GETs url and returns its body, failing on a non-200 answer or a body over limit bytes.
-func download(ctx context.Context, client *http.Client, url string, limit int64) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// download GETs url and returns its body, failing on a non-200 answer, a body over limit bytes,
+// or a body that sends nothing for stallTimeout ([errDownloadStalled]). The body may take any
+// time in total as long as no gap between its bytes reaches stallTimeout.
+func download(ctx context.Context, client *http.Client, url string, limit int64, stallTimeout time.Duration) ([]byte, error) {
+	downloadCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	request, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("update: build download request: %w", err)
 	}
@@ -166,14 +187,37 @@ func download(ctx context.Context, client *http.Client, url string, limit int64)
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("update: download %s: %s", url, response.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+	stallTimer := time.AfterFunc(stallTimeout, func() { cancel(errDownloadStalled) })
+	defer stallTimer.Stop()
+	source := &stallResetReader{source: response.Body, stallTimer: stallTimer, stallTimeout: stallTimeout}
+	body, err := io.ReadAll(io.LimitReader(source, limit+1))
 	if err != nil {
+		if errors.Is(context.Cause(downloadCtx), errDownloadStalled) {
+			return nil, fmt.Errorf("update: download %s: %w: no data received for %s", url, errDownloadStalled, stallTimeout)
+		}
 		return nil, fmt.Errorf("update: download %s: %w", url, err)
 	}
 	if int64(len(body)) > limit {
 		return nil, fmt.Errorf("update: download %s: larger than %d bytes", url, limit)
 	}
 	return body, nil
+}
+
+// stallResetReader pushes stallTimer back by stallTimeout each time a read from source yields
+// bytes, so the timer fires only after a full stallTimeout without any.
+type stallResetReader struct {
+	source       io.Reader
+	stallTimer   *time.Timer
+	stallTimeout time.Duration
+}
+
+// Read reads from source and, when bytes arrived, restarts the stall countdown.
+func (r *stallResetReader) Read(buffer []byte) (int, error) {
+	count, err := r.source.Read(buffer)
+	if count > 0 {
+		r.stallTimer.Reset(r.stallTimeout)
+	}
+	return count, err
 }
 
 // checksumFor returns the SHA-256 SHA256SUMS lists for archiveName. Lines are

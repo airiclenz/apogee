@@ -16,6 +16,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // stageTestTag is the release every Stage case downloads.
@@ -374,5 +377,132 @@ func TestStage_InvalidArguments_ReturnsErrorWithoutRequest(t *testing.T) {
 			}
 			assertDirEmpty(t, dir)
 		})
+	}
+}
+
+// trickleChunkCount is how many separately flushed chunks the trickling server sends: enough that
+// the whole body takes several stall bounds while no single gap comes near one.
+const trickleChunkCount = 16
+
+// trickleGapsPerStallBound is how many inter-chunk gaps fit in one stall bound.
+const trickleGapsPerStallBound = 5
+
+func TestNewDownloadClient_BoundsStallsNotTotalTime(t *testing.T) {
+	t.Parallel()
+
+	client := newDownloadClient()
+
+	if client.Timeout != 0 {
+		t.Errorf("download client Timeout = %s, want 0: a total timeout cuts off a slow but moving download", client.Timeout)
+	}
+	transport, isTransport := client.Transport.(*http.Transport)
+	if !isTransport {
+		t.Fatalf("download client Transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.ResponseHeaderTimeout <= 0 {
+		t.Errorf("ResponseHeaderTimeout = %s, want a bound on a server that never answers", transport.ResponseHeaderTimeout)
+	}
+	if transport.TLSHandshakeTimeout <= 0 {
+		t.Errorf("TLSHandshakeTimeout = %s, want a bound on a stalled handshake", transport.TLSHandshakeTimeout)
+	}
+	if transport.Proxy == nil {
+		t.Error("download client Transport has no Proxy, want the environment's")
+	}
+}
+
+func TestDownload_BodyTrickledOverSeveralStallBounds_Completes(t *testing.T) {
+	t.Parallel()
+	stallBound := testtime.Budget(400 * time.Millisecond)
+	gap := stallBound / trickleGapsPerStallBound
+	var want bytes.Buffer
+	for chunk := range trickleChunkCount {
+		want.WriteString("chunk-" + strings.Repeat("x", chunk) + "\n")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		flusher := writer.(http.Flusher)
+		for _, line := range strings.SplitAfter(want.String(), "\n") {
+			if line == "" {
+				continue
+			}
+			_, _ = writer.Write([]byte(line))
+			flusher.Flush()
+			time.Sleep(gap)
+		}
+	}))
+	t.Cleanup(server.Close)
+	start := time.Now()
+
+	body, err := download(context.Background(), newDownloadClient(), server.URL, maxChecksumsBytes, stallBound)
+
+	if err != nil {
+		t.Fatalf("download: unexpected error %v", err)
+	}
+	if !bytes.Equal(body, want.Bytes()) {
+		t.Errorf("download body = %q, want %q", body, want.Bytes())
+	}
+	if elapsed, floor := time.Since(start), 3*stallBound; elapsed < floor {
+		t.Errorf("trickle took %s, want at least %s so it spans several stall bounds", elapsed, floor)
+	}
+}
+
+func TestDownload_BodyStopsMidway_FailsNamingTheStall(t *testing.T) {
+	t.Parallel()
+	stallBound := testtime.Fixed(200 * time.Millisecond)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte("the first part of the archive"))
+		writer.(http.Flusher).Flush()
+		select {
+		case <-request.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	backstop, cancel := context.WithTimeout(context.Background(), testtime.Budget(30*time.Second))
+	t.Cleanup(cancel)
+
+	_, err := download(backstop, newDownloadClient(), server.URL, maxChecksumsBytes, stallBound)
+
+	if !errors.Is(err, errDownloadStalled) {
+		t.Fatalf("download error = %v, want %v", err, errDownloadStalled)
+	}
+	if !strings.Contains(err.Error(), "stalled") || !strings.Contains(err.Error(), stallBound.String()) {
+		t.Errorf("download error = %q, want it to name the stall and its %s bound", err, stallBound)
+	}
+	if backstop.Err() != nil {
+		t.Errorf("the test's backstop ended the download (%v), want the stall bound to", backstop.Err())
+	}
+}
+
+func TestDownload_CallerCancelsMidBody_IsNotReportedAsStall(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	isBodyStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte("the first part of the archive"))
+		writer.(http.Flusher).Flush()
+		close(isBodyStarted)
+		select {
+		case <-request.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		<-isBodyStarted
+		cancel()
+	}()
+
+	_, err := download(ctx, newDownloadClient(), server.URL, maxChecksumsBytes, downloadStallTimeout)
+
+	if err == nil {
+		t.Fatal("download: want an error after the caller cancelled, got nil")
+	}
+	if errors.Is(err, errDownloadStalled) {
+		t.Errorf("download error = %v, want a cancellation, not a stall", err)
 	}
 }
