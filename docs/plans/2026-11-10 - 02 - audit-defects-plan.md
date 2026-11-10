@@ -208,7 +208,11 @@ Depends on item 7.
 **Acceptance:** `go test -race -count=1 -run 'Loading|RoundTrip|EveryEventVariant|RoundTripsEveryKind' ./internal/eventjson/` then `go test -race -count=1 -run 'Loading|RoundTrip' ./internal/agent/` then `go test -race -count=1 -run 'Loading|EveryEventVariant' ./internal/tui/` then `go test -race -count=1 -run 'TestManualListsEveryEventLineKind' ./cmd/apogee/`
 **Commit:** `feat(agent): tell the user when a server is still loading its model`
 
-## 9. Snapshot git bounds a wedge, not the work
+## 9. Snapshot git bounds a wedge, not the work — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the "add failed on its deadline" test is `errors.Is(addErr, gitexec.ErrIncomplete) || ctx.Err() != nil`, so a wedged output drain, an unfinished command-config probe and a cancelled ctx also fail the capture without a fresh-index rebuild. Such an add skips its write-tree too, and stageAndWrite returns it as err rather than addErr, so captureFresh's own add stops the same way.
+NOTES (2026-11-10): the two bounds are Store fields (readBound, workBound) set from readTimeout and workTreeBackstop in Open, so a test can scale the backstop down. `git init` in Open keeps the 60 s read bound.
+NOTES (2026-11-10): already broken before this item — gitexec's timeout message names args[0], so the store's add times out as "git -c: timed out after …" because the add's args start with `-c core.excludesFile=`.
 
 **What:**
 **Goal:** a snapshot capture whose `add -A` takes longer than 60 s completes; a wedged git still ends at a backstop; a deadline failure does not chain into a second full `captureFresh`; a capture killed mid-add leaves the next capture working (no stale `index.lock`).

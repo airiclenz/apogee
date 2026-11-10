@@ -16,13 +16,19 @@ import (
 	"github.com/airiclenz/apogee/internal/subprocess"
 )
 
-// snapshotTimeout bounds every git invocation the store makes. It is deliberately generous
-// where the tracked-file mutation floor's is not (internal/agent/treesnapshot.go uses two
+// readTimeout bounds every git run whose cost does not grow with the workspace: initialising the
+// store and reading back what it holds (`ls-tree`, `cat-file`, `diff-tree`). It is deliberately
+// generous where the tracked-file mutation floor's is not (internal/agent/treesnapshot.go uses two
 // seconds): the floor is bookkeeping on a tool call's success path and may be skipped, while a
-// capture that gives up early loses the only way back from an Exchange. A whole-tree `add -A`
-// over a large workspace is the slow case, and the ceiling exists to stop a wedged git rather
-// than to keep the call snappy.
-const snapshotTimeout = 60 * time.Second
+// store that gives up early loses the only way back from an Exchange.
+const readTimeout = 60 * time.Second
+
+// workTreeBackstop bounds every git run that walks or hashes the work-tree — the capture's
+// `add -A` and `write-tree`, and the `ls-files` and `rm --cached` passes that settle a capture.
+// Their cost grows with the workspace, and a large one on a slow disk can take minutes for a
+// healthy git, so this ceiling exists only to end a wedged git, never to keep a capture snappy:
+// a slow machine makes a capture slower, not failed.
+const workTreeBackstop = 30 * time.Minute
 
 // storeDirPerm keeps the store readable by its owner alone: it holds whole-tree images of the
 // workspace, so its contents are exactly as confidential as the workspace itself.
@@ -96,15 +102,25 @@ func (t Tree) validate() error {
 }
 
 // Store is one session's object database: a bare repository directory, the workspace it takes
-// images of, the private index the captures stage into, and the gitexec.Host every git run it
-// makes goes through — the one it was opened with. It holds no mutable state of its own, so a
-// Store is safe to share between goroutines — git's own index lock serialises concurrent
-// captures, and the per-tree record of paths a capture could not read is only ever appended to.
+// images of, the private index the captures stage into, the gitexec.Host every git run it
+// makes goes through — the one it was opened with — and the two bounds those runs take. It holds
+// no mutable state of its own, so its reads are safe to share between goroutines, and the per-tree
+// record of paths a capture could not read is only ever appended to.
+//
+// Captures are NOT serialised here: they rely on their caller running one at a time. The one
+// capturing caller is the undo journal (journalSource, through internal/undo's Snapshotter),
+// whose Journal.mu every MarkPre and MarkPost holds across its Capture, and a session's journal
+// is open in one process at a time — the session hold, which cmd/apogee/undo.go's runUndoVerb
+// takes, and is refused while a live session keeps it, before it opens a session's journal. That
+// is what makes [Store.Capture] free to clear a stale index.lock a killed capture left behind: no
+// other capture can be holding it.
 type Store struct {
-	dir       string       // the bare GIT_DIR the session owns, outside the workspace
-	workspace string       // the work-tree a capture stages, never written to
-	index     string       // the private index file, inside dir
-	git       gitexec.Host // the host every git run resolves and spawns through
+	dir       string        // the bare GIT_DIR the session owns, outside the workspace
+	workspace string        // the work-tree a capture stages, never written to
+	index     string        // the private index file, inside dir
+	git       gitexec.Host  // the host every git run resolves and spawns through
+	readBound time.Duration // the bound on a read whose cost does not grow with the workspace
+	workBound time.Duration // the backstop on a run that walks or hashes the work-tree
 }
 
 // Available reports whether git resolves through host — whether a store opened with it could run
@@ -161,6 +177,8 @@ func Open(ctx context.Context, host gitexec.Host, dir, workspace string) (*Store
 		workspace: workTree,
 		index:     filepath.Join(storeDir, indexFileName),
 		git:       host,
+		readBound: readTimeout,
+		workBound: workTreeBackstop,
 	}
 	if _, err := os.Stat(filepath.Join(storeDir, headFileName)); err == nil {
 		return store, nil
@@ -168,7 +186,7 @@ func Open(ctx context.Context, host gitexec.Host, dir, workspace string) (*Store
 	// The init call carries GIT_DIR alone: git refuses a GIT_WORK_TREE without a repository to
 	// attach it to, and the repository is what this call is creating.
 	initEnv := []string{"GIT_DIR=" + storeDir}
-	if _, err := host.Run(ctx, workTree, initEnv, snapshotTimeout, "init", "--bare", "--object-format=sha1", "-q"); err != nil {
+	if _, err := host.Run(ctx, workTree, initEnv, readTimeout, "init", "--bare", "--object-format=sha1", "-q"); err != nil {
 		return nil, fmt.Errorf("apogee: snapshot: initialise store: %w", err)
 	}
 	return store, nil
@@ -217,6 +235,13 @@ func Remove(dir string) error {
 // capture could not stage are recorded beside the objects, keyed by the tree, and [Store.Diff]
 // leaves them out of every diff that tree takes part in. A capture that cannot write that record
 // fails rather than return an image whose absences read as deletions.
+//
+// An add that gave no complete answer — it ran into its backstop, wedged, or its ctx ended — is
+// not the failed add above: the capture fails with it and stages nothing again, because a second
+// whole-tree add into a fresh index would only meet the same wedge. A killed add leaves git's
+// index.lock behind in the store, which every later add into the persistent index would refuse
+// on; the next capture clears it first, which is safe only because captures never overlap (see
+// [Store]).
 func (s *Store) Capture(ctx context.Context) (Tree, error) {
 	out, warnings, addErr, err := s.stageAndWrite(ctx, s.index)
 	var unread []string
@@ -271,7 +296,7 @@ func (s *Store) captureFresh(ctx context.Context) (out string, unread []string, 
 		}
 		return out, dirs, nil, nil
 	}
-	listing, err := s.streamWith(ctx, s.envWithIndex(index),
+	listing, err := s.streamWith(ctx, s.envWithIndex(index), s.workBound,
 		"-c", "core.excludesFile=", "ls-files", "-z", "--others", "--exclude-standard")
 	if err != nil {
 		return "", nil, addErr, fmt.Errorf("list the paths the fresh index left out: %w", err)
@@ -294,7 +319,7 @@ func (s *Store) captureFresh(ctx context.Context) (out string, unread []string, 
 // stale, and both kinds are recorded. Any other warning — a line-ending conversion, an embedded
 // repository — costs one stat pass over the index and records nothing.
 func (s *Store) settleWarnings(ctx context.Context, out, warnings string) (string, []string, error) {
-	listing, err := s.stream(ctx, "ls-files", "-z", "--deleted")
+	listing, err := s.streamWith(ctx, s.env(), s.workBound, "ls-files", "-z", "--deleted")
 	if err != nil {
 		return "", nil, fmt.Errorf("list the index entries git could not stat: %w", err)
 	}
@@ -303,7 +328,7 @@ func (s *Store) settleWarnings(ctx context.Context, out, warnings string) (strin
 		if err := s.dropFromIndex(ctx, stale); err != nil {
 			return "", nil, fmt.Errorf("drop the index entries git could not stat: %w", err)
 		}
-		if out, err = s.git.Run(ctx, s.workspace, s.env(), snapshotTimeout, "write-tree"); err != nil {
+		if out, err = s.git.Run(ctx, s.workspace, s.env(), s.workBound, "write-tree"); err != nil {
 			return "", nil, err
 		}
 	}
@@ -329,7 +354,7 @@ func (s *Store) dropFromIndex(ctx context.Context, paths []string) error {
 	if err := errors.Join(writeErr, file.Close()); err != nil {
 		return err
 	}
-	_, err = s.git.Run(ctx, s.workspace, s.env(), snapshotTimeout, "--literal-pathspecs",
+	_, err = s.git.Run(ctx, s.workspace, s.env(), s.workBound, "--literal-pathspecs",
 		"rm", "--cached", "--force", "--quiet", "--ignore-unmatch",
 		"--pathspec-from-file="+file.Name(), "--pathspec-file-nul")
 	return err
@@ -474,13 +499,34 @@ func coveredBy(path string, records []string) bool {
 // returning write-tree's output and what the add printed on standard error. The add's error is
 // returned beside that output rather than instead of it: see [Store.Capture] for why it is not
 // fatal on its own. The add runs in the C locale so its warnings read the same on every host.
+//
+// An add that gave no complete answer is the exception: it is returned as err, with no addErr and
+// no write-tree, so no caller mistakes a wedge for a path git could not read and stages the whole
+// tree again. Before the add, a lock file a killed add left on index is removed (see [Store]).
 func (s *Store) stageAndWrite(ctx context.Context, index string) (out, warnings string, addErr, err error) {
+	if err := removeStaleLock(index); err != nil {
+		return "", "", nil, err
+	}
 	env := s.envWithIndex(index)
-	_, warnings, addErr = s.git.RunDiagnosed(ctx, s.workspace, append(env, cLocale), snapshotTimeout,
+	_, warnings, addErr = s.git.RunDiagnosed(ctx, s.workspace, append(env, cLocale), s.workBound,
 		"-c", "core.excludesFile=", "add", "-A", "--ignore-errors")
+	if addErr != nil && (errors.Is(addErr, gitexec.ErrIncomplete) || ctx.Err() != nil) {
+		return "", warnings, nil, fmt.Errorf("stage the work-tree: %w", addErr)
+	}
 
-	out, err = s.git.Run(ctx, s.workspace, env, snapshotTimeout, "write-tree")
+	out, err = s.git.Run(ctx, s.workspace, env, s.workBound, "write-tree")
 	return out, warnings, addErr, err
+}
+
+// removeStaleLock deletes the lock file git keeps beside index while it rewrites it. git removes
+// it on every exit it controls; one left behind is the mark of a git killed mid-add — by its
+// backstop, or with apogee itself — and would make every later add into that index refuse to
+// start. Clearing it is safe only while captures never overlap (see [Store]).
+func removeStaleLock(index string) error {
+	if err := os.Remove(index + ".lock"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove a stale index lock: %w", err)
+	}
+	return nil
 }
 
 // Diff returns the workspace-relative paths that differ between two captures — added, removed
@@ -545,7 +591,7 @@ func (s *Store) ListBlobs(ctx context.Context, tree Tree) (map[string]string, er
 // store could not be asked, and is never mistakable for absence.
 //
 // It takes no context because its callers are internal/undo's ctx-free Preview and Revert (ADR
-// 0051 decision 7's protocol predates this store); the bounded snapshotTimeout above applies
+// 0051 decision 7's protocol predates this store); the readTimeout above applies
 // internally instead, so a wedged git still cannot hang an undo.
 func (s *Store) Content(tree Tree, path string) (data []byte, exists bool, err error) {
 	if err := tree.validate(); err != nil {
@@ -556,7 +602,7 @@ func (s *Store) Content(tree Tree, path string) (data []byte, exists bool, err e
 	}
 	target := filepath.ToSlash(path)
 
-	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), s.readBound)
 	defer cancel()
 
 	// Existence is asked with a LISTING rather than by reading the blob and calling a failure
@@ -602,17 +648,19 @@ func (s *Store) envWithIndex(index string) []string {
 	}
 }
 
-// stream runs one read-side git command and returns its standard output UNCAPPED. The capped
-// path (the Store's Host.Run) would silently truncate at 256 KiB, which for a blob being restored or a
+// stream runs one read-side git command over the store alone — one whose cost does not grow with
+// the workspace — and returns its standard output UNCAPPED under the read bound. The capped path
+// (the Store's Host.Run) would silently truncate at 256 KiB, which for a blob being restored or a
 // wide Exchange's path list is a corrupt answer rather than a short one.
 func (s *Store) stream(ctx context.Context, args ...string) ([]byte, error) {
-	return s.streamWith(ctx, s.env(), args...)
+	return s.streamWith(ctx, s.env(), s.readBound, args...)
 }
 
-// streamWith is stream with env in place of the persistent private index's redirection.
-func (s *Store) streamWith(ctx context.Context, env []string, args ...string) ([]byte, error) {
+// streamWith is stream with env in place of the persistent private index's redirection and bound
+// in place of the read bound: a listing that walks the work-tree takes the work-tree backstop.
+func (s *Store) streamWith(ctx context.Context, env []string, bound time.Duration, args ...string) ([]byte, error) {
 	var out bytes.Buffer
-	if err := s.git.RunTo(ctx, s.workspace, env, snapshotTimeout, &out, args...); err != nil {
+	if err := s.git.RunTo(ctx, s.workspace, env, bound, &out, args...); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

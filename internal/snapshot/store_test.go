@@ -12,18 +12,23 @@ package snapshot
 import (
 	"context"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/gitexec"
 	"github.com/airiclenz/apogee/internal/subprocess"
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 // requireGit skips the test when no git binary is on PATH — the store degrades to
@@ -680,5 +685,315 @@ func TestUnopenedDirsTrustsOnlyAWholeAccount(t *testing.T) {
 				t.Errorf("unopenedDirs = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// gitRun is one git child a scripted Host was asked to spawn: its subcommand, the index it was
+// pointed at, and the bound it was given.
+type gitRun struct {
+	sub     string
+	index   string
+	timeout time.Duration
+}
+
+// gitLog records every git child a scripted Host spawned, in order.
+type gitLog struct {
+	mu   sync.Mutex
+	runs []gitRun
+}
+
+func (l *gitLog) add(run gitRun) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.runs = append(l.runs, run)
+}
+
+// count returns how many runs of sub the log holds.
+func (l *gitLog) count(sub string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, run := range l.runs {
+		if run.sub == sub {
+			n++
+		}
+	}
+	return n
+}
+
+// all returns a copy of the runs recorded so far.
+func (l *gitLog) all() []gitRun {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]gitRun(nil), l.runs...)
+}
+
+// subcommandOf returns the git subcommand an argv runs — the first word after the program that
+// is neither an option nor a `-c` value.
+func subcommandOf(argv []string) string {
+	for i := 1; i < len(argv); i++ {
+		switch {
+		case argv[i] == "-c":
+			i++
+		case strings.HasPrefix(argv[i], "-"):
+		default:
+			return argv[i]
+		}
+	}
+	return ""
+}
+
+// indexOf returns the GIT_INDEX_FILE an environment points git at, or "".
+func indexOf(env []string) string {
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, "GIT_INDEX_FILE="); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+// play decides one scripted run: handled is false to spawn it for real (spec may be rewritten),
+// true to answer it with result instead.
+type play func(run gitRun, spec *subprocess.SubprocessSpec) (result subprocess.SubprocessResult, handled bool)
+
+// scriptedGit is the real git with some of its runs answered by p, and every run logged.
+func scriptedGit(log *gitLog, p play) gitexec.Host {
+	decide := func(spec *subprocess.SubprocessSpec) (subprocess.SubprocessResult, bool) {
+		run := gitRun{sub: subcommandOf(spec.Argv), index: indexOf(spec.Env), timeout: spec.Timeout}
+		log.add(run)
+		if p == nil {
+			return subprocess.SubprocessResult{}, false
+		}
+		return p(run, spec)
+	}
+	return gitexec.Host{
+		Spawn: func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+			if result, handled := decide(&spec); handled {
+				return result, nil
+			}
+			return subprocess.RunSubprocess(ctx, spec)
+		},
+		SpawnTo: func(ctx context.Context, spec subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
+			if result, handled := decide(&spec); handled {
+				return result, nil
+			}
+			return subprocess.RunSubprocessTo(ctx, spec, stdout)
+		},
+	}
+}
+
+// taking plays each named subcommand as running for its duration: a run whose bound is shorter
+// times out — what subprocess reports for a git killed at its bound — and any other runs for real.
+func taking(durations map[string]time.Duration) play {
+	return func(run gitRun, _ *subprocess.SubprocessSpec) (subprocess.SubprocessResult, bool) {
+		if took, ok := durations[run.sub]; ok && took > run.timeout {
+			return subprocess.SubprocessResult{TimedOut: true, ExitCode: -1}, true
+		}
+		return subprocess.SubprocessResult{}, false
+	}
+}
+
+// newScriptedStore opens a store for a fresh workspace through scriptedGit, holding one file.
+func newScriptedStore(t *testing.T, p play) (*Store, string, *gitLog) {
+	t.Helper()
+	log := &gitLog{}
+	workspace := t.TempDir()
+	writeFile(t, workspace, "main.go", "package main\n")
+	store, err := Open(context.Background(), scriptedGit(log, p), t.TempDir(), workspace)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	return store, workspace, log
+}
+
+// A slow machine makes a capture slower, never failed: every git run that walks or hashes the
+// work-tree takes the wedge backstop, so one that outlasts the read bound — the whole-tree add of
+// a large workspace on a slow disk — still completes, whichever of the capture's passes it is.
+func TestWorkTreeRunsOutlastTheReadBound(t *testing.T) {
+	requireGit(t)
+	t.Parallel()
+	slow := testtime.Fixed(5 * time.Minute) // past readTimeout, short of workTreeBackstop
+	cases := []struct {
+		name string
+		sub  string
+		run  func(ctx context.Context, store *Store) error
+	}{
+		{"add", "add", func(ctx context.Context, store *Store) error {
+			_, err := store.Capture(ctx)
+			return err
+		}},
+		{"write-tree", "write-tree", func(ctx context.Context, store *Store) error {
+			_, err := store.Capture(ctx)
+			return err
+		}},
+		{"ls-files --deleted", "ls-files", func(ctx context.Context, store *Store) error {
+			out, err := store.git.Run(ctx, store.workspace, store.env(), readTimeout, "write-tree")
+			if err != nil {
+				return err
+			}
+			_, _, err = store.settleWarnings(ctx, out, "warning: something to settle\n")
+			return err
+		}},
+		{"rm --cached", "rm", func(ctx context.Context, store *Store) error {
+			return store.dropFromIndex(ctx, []string{"main.go"})
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store, _, log := newScriptedStore(t, taking(map[string]time.Duration{tc.sub: slow}))
+			if err := tc.run(context.Background(), store); err != nil {
+				t.Fatalf("a %s past the read bound failed: %v", tc.sub, err)
+			}
+			if log.count(tc.sub) == 0 {
+				t.Fatalf("no %s ran", tc.sub)
+			}
+		})
+	}
+
+	// The fresh-index walk runs only when the rebuild's own add fails, so it is driven directly.
+	t.Run("ls-files --others", func(t *testing.T) {
+		t.Parallel()
+		walk := taking(map[string]time.Duration{"ls-files": slow})
+		store, _, _ := newScriptedStore(t, func(run gitRun, spec *subprocess.SubprocessSpec) (subprocess.SubprocessResult, bool) {
+			if run.sub == "add" {
+				return subprocess.SubprocessResult{ExitCode: 1, CombinedOutput: "error: could not add\n"}, true
+			}
+			return walk(run, spec)
+		})
+		_, unread, _, err := store.captureFresh(context.Background())
+		if err != nil {
+			t.Fatalf("a fresh-index walk past the read bound failed: %v", err)
+		}
+		if !slices.Contains(unread, "main.go") {
+			t.Fatalf("unread = %v, want the path the failed add left out", unread)
+		}
+	})
+}
+
+// The bound is picked by the work: a run over the work-tree takes the backstop, a read of what
+// the store already holds keeps the short bound.
+func TestStoreBoundsEachRunByItsWork(t *testing.T) {
+	requireGit(t)
+	t.Parallel()
+	store, _, log := newScriptedStore(t, nil)
+	ctx := context.Background()
+	tree := mustCapture(t, store)
+	if _, err := store.Diff(ctx, tree, tree); err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if _, _, err := store.Content(tree, "main.go"); err != nil {
+		t.Fatalf("Content: %v", err)
+	}
+
+	want := map[string]time.Duration{
+		"add": workTreeBackstop, "write-tree": workTreeBackstop,
+		"diff-tree": readTimeout, "ls-tree": readTimeout, "cat-file": readTimeout,
+	}
+	seen := map[string]bool{}
+	for _, run := range log.all() {
+		bound, ok := want[run.sub]
+		if !ok {
+			continue
+		}
+		seen[run.sub] = true
+		if run.timeout != bound {
+			t.Errorf("git %s ran under %s, want %s", run.sub, run.timeout, bound)
+		}
+	}
+	for sub := range want {
+		if !seen[sub] {
+			t.Errorf("no git %s ran", sub)
+		}
+	}
+}
+
+// An add that hit its backstop is not a path git could not read: the capture fails with the
+// incomplete answer and never stages the whole tree a second time into a fresh index, which would
+// only meet the same wedge.
+func TestCaptureDoesNotRebuildAfterTheAddRanOutItsBound(t *testing.T) {
+	requireGit(t)
+	t.Parallel()
+	store, _, log := newScriptedStore(t, taking(map[string]time.Duration{"add": 2 * workTreeBackstop}))
+
+	_, err := store.Capture(context.Background())
+
+	if !errors.Is(err, gitexec.ErrIncomplete) {
+		t.Fatalf("Capture err = %v, want one matching gitexec.ErrIncomplete", err)
+	}
+	if n := log.count("add"); n != 1 {
+		t.Errorf("%d adds ran, want 1: a deadline must not chain into a fresh-index rebuild", n)
+	}
+	if n := log.count("write-tree"); n != 0 {
+		t.Errorf("%d write-trees ran after an add that gave no answer, want 0", n)
+	}
+}
+
+// A git that never exits is still ended — by the backstop, which a test scales down — and the
+// capture fails once, without a rebuild.
+func TestCaptureEndsAWedgedAddAtTheBackstop(t *testing.T) {
+	requireGit(t)
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("no sleep binary to stand in for a wedged git")
+	}
+	t.Parallel()
+	store, _, log := newScriptedStore(t, func(run gitRun, spec *subprocess.SubprocessSpec) (subprocess.SubprocessResult, bool) {
+		if run.sub == "add" {
+			spec.Argv = []string{sleep, "3600"}
+		}
+		return subprocess.SubprocessResult{}, false
+	})
+	store.workBound = testtime.Fixed(300 * time.Millisecond)
+
+	start := time.Now()
+	_, err = store.Capture(context.Background())
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, gitexec.ErrIncomplete) {
+		t.Fatalf("Capture err = %v, want the backstop's incomplete answer", err)
+	}
+	if limit := testtime.Budget(30 * time.Second); elapsed > limit {
+		t.Errorf("Capture took %s, want it ended by the backstop well within %s", elapsed, limit)
+	}
+	if n := log.count("add"); n != 1 {
+		t.Errorf("%d adds ran, want 1", n)
+	}
+}
+
+// A capture killed mid-add leaves git's index.lock in the store; the next capture clears it and
+// stages into the persistent index as usual, rather than failing its add and rebuilding the
+// whole tree into a fresh index on every capture after.
+func TestCaptureClearsAStaleIndexLock(t *testing.T) {
+	requireGit(t)
+	t.Parallel()
+	store, workspace, log := newScriptedStore(t, nil)
+	mustCapture(t, store)
+	lock := store.index + ".lock"
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, workspace, "new.txt", "new\n")
+	before := log.count("add")
+
+	blobs, err := store.ListBlobs(context.Background(), mustCapture(t, store))
+
+	if err != nil {
+		t.Fatalf("ListBlobs: %v", err)
+	}
+	if _, ok := blobs["new.txt"]; !ok {
+		t.Errorf("ListBlobs = %v, want new.txt captured", blobs)
+	}
+	if n := log.count("add") - before; n != 1 {
+		t.Errorf("%d adds ran, want 1: the stale lock sent the capture to a fresh-index rebuild", n)
+	}
+	for _, run := range log.all() {
+		if run.sub == "add" && run.index != store.index {
+			t.Errorf("an add ran into %s, want only the persistent index %s", run.index, store.index)
+		}
+	}
+	if _, err := os.Stat(lock); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("index.lock still present after the capture (stat err %v)", err)
 	}
 }
