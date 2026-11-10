@@ -1312,20 +1312,20 @@ ui:
     colors: {model: success, branch: warning}
 ```
 
-`ui.side-panel.show` is when the side panel is drawn: a column right of the transcript
-that shows the sub-agents at work, the task list, the files changed this session, the usage and
-the MCP servers ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md)). `auto` — the default — draws it on a
-window of at least 137 columns, `on` on one of at least 117, and `off`
-never. Any other word is a startup error that names the key. It lives in a nested `side-panel:`
-block, and `/settings` edits it. What the panel shows, and what a click on it does, is under [The
-side panel](#the-side-panel) below.
+`ui.side-panel.show` is when the side panel is drawn: a column right of the transcript that shows
+the sub-agents at work, the task list, the files changed this session, the usage and the MCP
+servers ([ADR 0110](../../.capcom/knowledge/decisions/adr-0110.md)). `auto` — the default — draws
+it on a window of at least 137 columns, `on` on one of at least 117, and `off` never. Any other
+word is a startup error that names the key. It lives in a nested `side-panel:` block, and
+`/settings` edits it. What the panel shows, and what a click on it does, is under [The side
+panel](#the-side-panel) below.
 
-`ui.side-panel.width` is the panel's width in columns: a whole number of 24 or more, default 44.
-A window too narrow to leave the transcript 60 columns beside a panel that wide draws the panel
+`ui.side-panel.width` is the panel's width in columns: a whole number of 24 or more, default 44. A
+window too narrow to leave the transcript 60 columns beside a panel that wide draws the panel
 narrower, without changing the setting. With the width unset, the default 44 narrows sooner: where
-it would leave the transcript fewer than 100 columns (80 in `on`). A width below 24 — `0`
-included — or one that is not a whole number is a startup error that names the key. It lives in the same `side-panel:`
-block, and `/settings` edits it, live.
+it would leave the transcript fewer than 100 columns (80 in `on`). A width below 24 — `0` included
+— or one that is not a whole number is a startup error that names the key. It lives in the same
+`side-panel:` block, and `/settings` edits it, live.
 
 `ui.side-panel.sections` lists the panel's sections in the order it shows them — `sub-agents`,
 `tasks`, `changed-files`, `usage` and `mcp` — each in a mode: `pinned` (always shown), `auto` (shown while
@@ -1445,20 +1445,20 @@ header fits, the last ones are left out and the bottom row reads `+N more`. The 
 
 **The mouse.** A click on a sub-agent row opens its run view; on a task row it unfolds the
 task-list card and scrolls to it; on a changed-file row it unfolds that write's tool block (opening
-the run that wrote it); on the usage section it opens `/usage`; on the mcp section it opens `/mcp`. A click on a header's pin glyph —
-its first cell — toggles the section between `pinned` and `auto` and saves `ui.side-panel.sections` to your global
-config. A click anywhere else on a header folds the section to its header, or opens it again, and
-saves `ui.side-panel.folded` silently, so the fold survives a restart (opening a section that only
-lacked room saves nothing, as above); it works while watching a
-session too, and a save that fails says `side-panel.folded: not saved` and keeps the fold for the
-session. Dragging the panel's separator — the `│` on its left edge, or the one column right of it —
-resizes the panel: the panel and your conversation re-wrap as you drag, and the separator lights up
-in the accent colour while you hold it. The panel stays at least 24 columns wide, and leaves the
-transcript 60 columns and its scroll bar, under `auto` and `on` alike. Letting go saves the new width as
-`ui.side-panel.width` to your global config; a double-click on the separator puts back the default
-44. A window too narrow for the width you chose draws the panel narrower without changing the
-setting, and a window grown back draws your width again. Blank cells and the mouse wheel do
-nothing there.
+the run that wrote it); on the usage section it opens `/usage`; on the mcp section it opens `/mcp`.
+A click on a header's pin glyph — its first cell — toggles the section between `pinned` and `auto`
+and saves `ui.side-panel.sections` to your global config. A click anywhere else on a header folds
+the section to its header, or opens it again, and saves `ui.side-panel.folded` silently, so the
+fold survives a restart (opening a section that only lacked room saves nothing, as above); it works
+while watching a session too, and a save that fails says `side-panel.folded: not saved` and keeps
+the fold for the session. Dragging the panel's separator — the `│` on its left edge, or the one
+column right of it — resizes the panel: the panel and your conversation re-wrap as you drag, and
+the separator lights up in the accent colour while you hold it. The panel stays at least 24 columns
+wide, and leaves the transcript 60 columns and its scroll bar, under `auto` and `on` alike. Letting
+go saves the new width as `ui.side-panel.width` to your global config; a double-click on the
+separator puts back the default 44. A window too narrow for the width you chose draws the panel
+narrower without changing the setting, and a window grown back draws your width again. Blank cells
+and the mouse wheel do nothing there.
 
 **Run view.** While a sub-agent's run view is open, the tasks, changed files and usage are that
 run's, and the usage fill matches the status-line gauge; the sub-agents section still lists every

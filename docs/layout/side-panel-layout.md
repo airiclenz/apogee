@@ -121,9 +121,9 @@ above the session-name rule, with the cursor on one of its stops.
   to the transcript row it left, or the mode ends where the transcript has no stop), and so do `esc`,
   a `⏎` that opens a detail, and anything else that ends the mode. A click outside it closes it too:
   the mode ends and the click goes on to whatever it landed on — the transcript, the prompt, a pane.
-- **Inside, it is the docked column**, blank top row included ("Rows and spacing"). A click acts as it does on the docked panel ("Pointer"): a pin
-  glyph pins or unpins its section and the overlay stays, a body row opens its detail. The keys are
-  navigation mode's, as in "Keyboard".
+- **Inside, it is the docked column**, blank top row included ("Rows and spacing"). A click acts as it
+  does on the docked panel ("Pointer"): a pin glyph pins or unpins its section and the overlay stays, a
+  body row opens its detail. The keys are navigation mode's, as in "Keyboard".
 - While an approval or an `ask_user` question owns the keys the mode is suspended, so the overlay is
   not painted; it comes back on the same stop once the decision is taken.
 - Under `off`, or with nothing in the column to stand on, there is no overlay: `→` does nothing and

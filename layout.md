@@ -3214,10 +3214,11 @@ On a wide terminal a column on the right of the transcript slot keeps live sessi
 between 24 columns and the window less a 60-column transcript minimum less the scroll-bar column; a
 double-click on the separator or `/panel width reset` puts back the 44, and `/panel width <n>` sets
 it outright (adr-0110-amend-1108). Its content starts one row below the slot's top edge: the
-column's top row is blank, in the docked column, the overlay and Run view alike. The 60 columns hold for any width the user set, under `auto` and
-`on` alike; an unset width keeps the show mode's gate floor (100 columns in `auto`, 80 in `on`),
-and the column still docks only from a 137-column window, 117 in `on` (adr-0110-amend-1110). Its
-shape, sections, thresholds, pointer rules and keyboard are specced in [`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md).
+column's top row is blank, in the docked column, the overlay and Run view alike. The 60 columns
+hold for any width the user set, under `auto` and `on` alike; an unset width keeps the show mode's
+gate floor (100 columns in `auto`, 80 in `on`), and the column still docks only from a 137-column
+window, 117 in `on` (adr-0110-amend-1110). Its shape, sections, thresholds, pointer rules and
+keyboard are specced in [`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md).
 The keyboard reaches it through **navigation mode** (ADR 0111): the block cursor's walk spans two
 regions, the transcript and the panel, `→` and `←` move between them, and `↑`/`↓`, `⏎`, `esc` and
 `^x` mean the same in both — the panel's stops are its click targets, and `⏎` on one is that click.

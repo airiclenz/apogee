@@ -2059,19 +2059,19 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 // otherwise INHERIT, so neither can widen it (ADR 0005):
 //
 //   - the read-only keyword (also when sent wrapped in an array — tools.RosterFromNames) yields
-//     every inherited tool Plan mode admits on every target (planAdmits — the class, never the bare ReadOnly() self-declaration, so a self-declared
-//     read-only tool that launches a subprocess is left out exactly as Plan leaves it out) plus
-//     sub_agent where the depth bound still offers it, because a read-only child may still
-//     delegate read-only work exactly as a Plan-mode parent may (toolMenu keeps it for the same
-//     reason);
+//     every inherited tool Plan mode admits on every target (planAdmits — the class, never the bare
+//     ReadOnly() self-declaration, so a self-declared read-only tool that launches a subprocess is
+//     left out exactly as Plan leaves it out) plus sub_agent where the depth bound still offers it,
+//     because a read-only child may still delegate read-only work exactly as a Plan-mode parent may
+//     (toolMenu keeps it for the same reason);
 //   - a list of names is checked against the PARENT's registry and refused whole when any name is
 //     unknown — the refusal names every unknown one, in the order given, so the model reads the
 //     spellings it got wrong rather than finding the tool silently gone (the check runs BEFORE
 //     Subset, which would drop the name without a word), and it points at the keyword too, for a
-//     model that meant the read-only set and spelled it as a tool. A name the parent holds but no child gets
-//     (childWithheldTools, topLevelOnlyTools, sub_agent at the bound) passes the check and is
-//     dropped by the intersection: it is not a tool the model misspelled, it is one a child never
-//     has.
+//     model that meant the read-only set and spelled it as a tool. A name the parent holds but no
+//     child gets (childWithheldTools, topLevelOnlyTools, sub_agent at the bound) passes the check
+//     and is dropped by the intersection: it is not a tool the model misspelled, it is one a child
+//     never has.
 //
 // An empty list is the zero value — "no narrowing" — rather than a tool-less child, because a model
 // that emits `"tools": []` out of habit should not lose its delegate's whole menu to the habit.
