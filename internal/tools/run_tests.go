@@ -36,9 +36,10 @@ import (
 // Detection starts at `path` (its parent directory when `path` names a file) and walks up to the
 // workspace root, never below `path`: the first directory holding any marker wins, and inside
 // that one directory call 6's precedence decides (2026-11-05). The runner then runs FROM that
-// marker directory, handed `path` relative to it — so a project in a subdirectory (a clone under
-// checkouts/, a nested Go module) is tested as itself, with its own module or config, rather
-// than refused or driven from an outer root that cannot build it.
+// marker directory, handed `path` relative to it (go test, which takes packages, is handed a
+// file's package directory instead) — so a project in a subdirectory (a clone under checkouts/,
+// a nested Go module) is tested as itself, with its own module or config, rather than refused or
+// driven from an outer root that cannot build it.
 //
 // It is a SubprocessTool with terminal's disposition (not read-only: a test suite runs the
 // project's own code, which writes): the dispatch disposition confines it in Auto and gates
@@ -133,15 +134,27 @@ type testRunner struct {
 	// detect reports whether this runner's marker is present in dir — a workspace-relative slash
 	// path, "" for the root — read through the fence of the workspace at root.
 	detect func(root, dir string) bool
-	// args builds the argv AFTER the program for an optional workspace-relative subtree and an
-	// optional test-name filter, each in this runner's native spelling.
-	args func(subtree, filter string) []string
+	// args builds the argv AFTER the program for an optional target — the call's path, rebased
+	// onto the marker directory — and an optional test-name filter, each in this runner's native
+	// spelling.
+	args func(target testTarget, filter string) []string
 	// failureHead reports whether a line announces a failing test — the anchor a condensed
 	// failure block starts at.
 	failureHead func(line string) bool
 	// summary returns the runner's OWN tally line when it prints one, else "". A runner that
 	// reports no counts (go test) leaves this nil and the condenser derives one.
 	summary func(out string) string
+}
+
+// testTarget is the part of the project a run is pointed at, as the runner started in the
+// marker directory spells it. The zero value is the whole project.
+type testTarget struct {
+	// path is the target relative to the marker directory, slash-separated: "" for the marker
+	// directory itself (or no path at all), else a directory or a file below it.
+	path string
+	// isFile reports that path names a file rather than a directory. pytest and jest take a file
+	// natively; go test does not, so its runner narrows a file to the file's own package.
+	isFile bool
 }
 
 // testRunners is the detection order (ratified call 6): the first marker that matches wins, so
@@ -155,12 +168,12 @@ var goTestRunner = testRunner{
 	program: "go",
 	marker:  "go.mod (go test)",
 	detect:  func(root, dir string) bool { return markerFileExists(markerPath(dir, "go.mod"), root) },
-	args: func(subtree, filter string) []string {
+	args: func(target testTarget, filter string) []string {
 		argv := []string{"test"}
 		if filter != "" {
 			argv = append(argv, "-run", filter)
 		}
-		return append(argv, goPackagePattern(subtree))
+		return append(argv, goPackagePattern(target))
 	},
 	// go test heads every failing test with "--- FAIL: <name>", indented for a subtest.
 	failureHead: func(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), "--- FAIL:") },
@@ -172,13 +185,13 @@ var pytestRunner = testRunner{
 	program: "pytest",
 	marker:  "pytest.ini, or a pyproject.toml carrying a [tool.pytest…] section (pytest)",
 	detect:  detectPytest,
-	args: func(subtree, filter string) []string {
+	args: func(target testTarget, filter string) []string {
 		var argv []string
 		if filter != "" {
 			argv = append(argv, "-k", filter)
 		}
-		if subtree != "" {
-			argv = append(argv, subtree)
+		if target.path != "" {
+			argv = append(argv, target.path)
 		}
 		return argv
 	},
@@ -192,9 +205,9 @@ var npmTestRunner = testRunner{
 	program: "npm",
 	marker:  `package.json with a "test" script (npm test)`,
 	detect:  detectNPMTest,
-	args: func(subtree, filter string) []string {
+	args: func(target testTarget, filter string) []string {
 		argv := []string{"test"}
-		if filter == "" && subtree == "" {
+		if filter == "" && target.path == "" {
 			return argv
 		}
 		// npm forwards nothing to the script behind `npm test` unless the arguments follow a
@@ -206,8 +219,8 @@ var npmTestRunner = testRunner{
 		if filter != "" {
 			argv = append(argv, "-t", filter)
 		}
-		if subtree != "" {
-			argv = append(argv, subtree)
+		if target.path != "" {
+			argv = append(argv, target.path)
 		}
 		return argv
 	},
@@ -304,7 +317,9 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 
 	// The program is still judged against the workspace root above — the fence is the
 	// workspace's, wherever inside it the runner starts.
-	runnerArgs := runner.args(relativeToMarker(subtree, markerDir), filter)
+	// subtree's start is its parent exactly when the path names a file (t.subtree).
+	target := testTarget{path: relativeToMarker(subtree, markerDir), isFile: subtree != start}
+	runnerArgs := runner.args(target, filter)
 	// The environment is the caller's MINUS the credential variables (plain subprocessEnv, with
 	// PATH left unscoped — unlike terminal and python_exec, which take subprocessEnvScopedPath,
 	// because a workspace-resident runner such as node_modules/.bin/jest IS the test command
@@ -387,15 +402,24 @@ func relativeToMarker(subtree, markerDir string) string {
 	}
 }
 
-// goPackagePattern renders a workspace-relative subtree as the package pattern `go test` takes:
-// the whole module when none was named, and the subtree WITH its own subpackages otherwise —
-// "test this part of the project" is what a model means by a directory, and go's plain
-// directory form would silently test only the one package.
-func goPackagePattern(subtree string) string {
-	if subtree == "" {
+// goPackagePattern renders a target as the package argument `go test` takes: the whole module
+// when none was named, a directory WITH its own subpackages — "test this part of the project" is
+// what a model means by a directory, and go's plain directory form would silently test only the
+// one package — and a file as its own package directory alone ("." for a file in the marker
+// directory itself), because go test reads a file argument as a lone-file package and a
+// "<file>/..." pattern as a directory that is not there.
+func goPackagePattern(target testTarget) string {
+	if target.isFile {
+		dir := parentDir(target.path)
+		if dir == "" {
+			return "."
+		}
+		return "./" + dir
+	}
+	if target.path == "" {
 		return "./..."
 	}
-	return "./" + strings.Trim(subtree, "/") + "/..."
+	return "./" + strings.Trim(target.path, "/") + "/..."
 }
 
 // detectTestRunner walks from start — a workspace-relative slash directory, "" for the root — up

@@ -507,7 +507,8 @@ cut back to it beyond that, and a timed-out run names the budget it actually had
 file `path` starts the search at the file's directory. The runner runs from the directory holding
 the marker and is handed `path` relative to it, so `path=checkouts/tool` with its own `go.mod`
 runs `go test ./...` inside `checkouts/tool`, and a nested Go module is tested as itself rather than
-from an outer root that cannot build it. A run off the root ends its condensed result with
+from an outer root that cannot build it. A Go file `path` runs that file's package, so
+`path=internal/foo/foo_test.go` runs `go test ./internal/foo`. A run off the root ends its condensed result with
 ``run `<command>` with terminal (workdir <dir>) for the full log``, and when no directory on the
 way up holds a marker the refusal names each one it searched, nearest first.
 

@@ -282,6 +282,34 @@ func TestRunTestsRunsFromTheMarkerDirectory(t *testing.T) {
 			wantDir:  "",
 			wantArgv: []string{"test", "./internal/x/..."},
 		},
+		{
+			name:     "a go file path runs that file's package alone",
+			files:    map[string]string{"go.mod": goMod, "internal/foo/foo_test.go": "package foo\n"},
+			path:     "internal/foo/foo_test.go",
+			wantDir:  "",
+			wantArgv: []string{"test", "./internal/foo"},
+		},
+		{
+			name:     "a go file at the module root runs the root package, not the module",
+			files:    map[string]string{"go.mod": goMod, "foo_test.go": "package x\n"},
+			path:     "foo_test.go",
+			wantDir:  "",
+			wantArgv: []string{"test", "."},
+		},
+		{
+			name:     "a go file beside a nested go.mod runs that module's root package",
+			files:    map[string]string{"sub/proj/go.mod": goMod, "sub/proj/foo_test.go": "package x\n"},
+			path:     "sub/proj/foo_test.go",
+			wantDir:  "sub/proj",
+			wantArgv: []string{"test", "."},
+		},
+		{
+			name:     "a jest file path stays the file",
+			files:    map[string]string{"web/package.json": `{"name":"x","scripts":{"test":"jest"}}`, "web/src/x.test.js": ""},
+			path:     "web/src/x.test.js",
+			wantDir:  "web",
+			wantArgv: []string{"test", "--", "src/x.test.js"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -428,16 +456,25 @@ func TestRunTestsCommandConstructionPerRunner(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name    string
-		runner  testRunner
-		subtree string
-		filter  string
-		want    []string
+		name   string
+		runner testRunner
+		target testTarget
+		filter string
+		want   []string
 	}{
 		{name: "go: whole module", runner: goTestRunner, want: []string{"test", "./..."}},
 		{
 			name: "go: subtree carries its own subpackages", runner: goTestRunner,
-			subtree: "internal/tools", want: []string{"test", "./internal/tools/..."},
+			target: testTarget{path: "internal/tools"}, want: []string{"test", "./internal/tools/..."},
+		},
+		{
+			name: "go: a file is its own package directory alone", runner: goTestRunner,
+			target: testTarget{path: "internal/foo/foo_test.go", isFile: true},
+			want:   []string{"test", "./internal/foo"},
+		},
+		{
+			name: "go: a file in the marker directory is the package there", runner: goTestRunner,
+			target: testTarget{path: "foo_test.go", isFile: true}, want: []string{"test", "."},
 		},
 		{
 			name: "go: filter maps to -run", runner: goTestRunner,
@@ -446,20 +483,28 @@ func TestRunTestsCommandConstructionPerRunner(t *testing.T) {
 		{name: "pytest: no arguments", runner: pytestRunner, want: nil},
 		{
 			name: "pytest: filter maps to -k, subtree is positional", runner: pytestRunner,
-			subtree: "tests", filter: "adds", want: []string{"-k", "adds", "tests"},
+			target: testTarget{path: "tests"}, filter: "adds", want: []string{"-k", "adds", "tests"},
+		},
+		{
+			name: "pytest: a file target stays the file", runner: pytestRunner,
+			target: testTarget{path: "tests/test_x.py", isFile: true}, want: []string{"tests/test_x.py"},
 		},
 		{name: "npm: bare script", runner: npmTestRunner, want: []string{"test"}},
 		{
 			name: "npm: arguments follow the -- separator", runner: npmTestRunner,
-			subtree: "src", filter: "adds", want: []string{"test", "--", "-t", "adds", "src"},
+			target: testTarget{path: "src"}, filter: "adds", want: []string{"test", "--", "-t", "adds", "src"},
+		},
+		{
+			name: "npm: a file target stays the file", runner: npmTestRunner,
+			target: testTarget{path: "src/x.test.js", isFile: true}, want: []string{"test", "--", "src/x.test.js"},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := tc.runner.args(tc.subtree, tc.filter); !slices.Equal(got, tc.want) {
-				t.Errorf("args(%q, %q) = %v, want %v", tc.subtree, tc.filter, got, tc.want)
+			if got := tc.runner.args(tc.target, tc.filter); !slices.Equal(got, tc.want) {
+				t.Errorf("args(%+v, %q) = %v, want %v", tc.target, tc.filter, got, tc.want)
 			}
 		})
 	}
@@ -931,7 +976,7 @@ func TestRunTestsCapHoldsAgainstAnOversizedFilter(t *testing.T) {
 	t.Parallel()
 
 	filter := strings.Repeat("T", 20000)
-	display := displayCommand(goTestRunner, goTestRunner.args("", filter))
+	display := displayCommand(goTestRunner, goTestRunner.args(testTarget{}, filter))
 	got := condenseTestOutput(goTestRunner, display, "", subprocess.SubprocessResult{CombinedOutput: "ok\n", ExitCode: 0}, runTestsTimeout)
 
 	assertUnderCap(t, got)

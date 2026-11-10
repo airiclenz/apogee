@@ -278,7 +278,9 @@ NOTES (2026-11-10): the "does not contain package" refusal is classified only by
 **Acceptance:** `go test -race -count=1 -run 'Diagnostics|GoVet' ./internal/tools/`
 **Commit:** `fix(tools): run go vet in the file's own module`
 
-## 13. `run_tests` maps a Go file path to its package
+## 13. `run_tests` maps a Go file path to its package — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the file/dir distinction reaches the runners as a new `testTarget{path, isFile}` argument to `testRunner.args` (all three runners and `TestRunTestsCommandConstructionPerRunner` updated); `isFile` is derived in Execute from `subtree != start`, which `RunTests.subtree` makes true exactly for a file. `goTestRunner.detect` is unchanged.
 
 **What:**
 **Goal:** `run_tests` with `path` naming a Go file runs `go test` on that file's package directory, never a `<file>/...` pattern.
