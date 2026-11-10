@@ -189,8 +189,8 @@ var prewarmLabelWalk = platform.PrewarmLabelWalk
 
 // narrationSink is the headless Driver's own EventSink: the live view of an unattended run under
 // `--format text`. It prints one stderr line per [domain.PruneEvent], per
-// [domain.MalformedChunksEvent], per [domain.RefClippedEvent] and per
-// [domain.UpstreamSwitchedEvent], one per tool call and tool
+// [domain.MalformedChunksEvent], per [domain.RefClippedEvent], per
+// [domain.UpstreamSwitchedEvent] and per [domain.UpstreamLoadingEvent], one per tool call and tool
 // result at Depth 0, and one per sub-agent lifecycle boundary — and forwards every Event, its own
 // included, to whatever sink it wraps (nil ⇒ nothing to forward to). A zero-value inner is the
 // normal case — a bare headless run composes no sink of its own — and the wrap still matters,
@@ -287,6 +287,8 @@ func (s *narrationSink) narrate(e domain.Event) {
 	case domain.RefClippedEvent:
 		_, _ = fmt.Fprintln(s.out, sanitize.StripEscapesToLine(ev.Notice()))
 	case domain.UpstreamSwitchedEvent:
+		_, _ = fmt.Fprintln(s.out, sanitize.StripEscapesToLine(ev.Notice()))
+	case domain.UpstreamLoadingEvent:
 		_, _ = fmt.Fprintln(s.out, sanitize.StripEscapesToLine(ev.Notice()))
 	case domain.ToolCallEvent:
 		if ev.Depth != 0 {

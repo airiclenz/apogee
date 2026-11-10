@@ -1230,6 +1230,8 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 			}
 		case provider.DeltaAttempt:
 			a.emitAttempt(turn, delta)
+		case provider.DeltaLoadingWait:
+			a.emitLoadingWait(turn, delta)
 		}
 	}
 	return a.collectCompletion(ctx, a.toProviderRequest(req), observe)
@@ -1276,6 +1278,22 @@ func (a *Agent) emitAttempt(turn int, delta provider.Delta) {
 		Duration:     at.Duration,
 		OutputTokens: at.OutputTokens,
 		Outcome:      at.Outcome,
+	})
+}
+
+// emitLoadingWait reports the start of a model call's wait on a server still loading its model (a
+// DeltaLoadingWait, yielded once per call) as an UpstreamLoadingEvent stamped with this Agent's
+// identity at turn, naming the server and model the Agent is bound to now — observation only, like
+// emitAttempt, and shared by the same two observers (streamResponse, compactCompleter.Complete). A
+// delta that is not a DeltaLoadingWait emits nothing.
+func (a *Agent) emitLoadingWait(turn int, delta provider.Delta) {
+	if delta.Kind != provider.DeltaLoadingWait {
+		return
+	}
+	a.cfg.Events.Emit(domain.UpstreamLoadingEvent{
+		EventBase: a.base(turn),
+		Server:    a.cfg.ServerName,
+		Model:     a.cfg.Model,
 	})
 }
 

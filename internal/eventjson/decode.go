@@ -207,6 +207,9 @@ var eventDecoders = map[string]eventDecoder{
 	kindTaskList:         decodeWith(taskListEventFrom),
 	kindContextCost:      decodeWith(contextCostEventFrom),
 	kindMCPServer:        decodeWith(mcpServerEventFrom),
+	kindUpstreamLoading: decodeWith(func(base domain.EventBase, d upstreamLoadingData) (domain.Event, error) {
+		return domain.UpstreamLoadingEvent{EventBase: base, Server: d.Server, Model: d.Model}, nil
+	}),
 }
 
 // mcpServerEventFrom rebuilds a domain.MCPServerEvent.

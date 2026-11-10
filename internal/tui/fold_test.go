@@ -321,6 +321,14 @@ func foldCases() []foldCase {
 			wantEntries: 1,
 		},
 		{
+			name: "UpstreamLoadingEvent appends the loading note and moves nothing else",
+			// A model call is waiting out a server still loading its model: one host note in the
+			// scrollback, at the run that emitted it (transcript.addUpstreamLoading), worded by the
+			// event itself. No gauge, no phrase, no progress save, as a malformed-chunks note.
+			event:       domain.UpstreamLoadingEvent{Server: "box", Model: "qwen"},
+			wantEntries: 1,
+		},
+		{
 			name: "UsageEvent at depth 0 moves the gauge and appends no entry",
 			// The top-level reading is the status line's: it lights the gauge and nothing in the
 			// scrollback. A sub-agent's reading (Depth > 0) appends no entry either — it lands ON
@@ -424,6 +432,33 @@ func foldCases() []foldCase {
 			// sees of a seam is the ReactionFiredEvent of whatever acted there, not the pass itself.
 			event: domain.SeamClosedEvent{Seam: domain.MomentPostResponse, Fired: []string{"tool-call-repair"}},
 		},
+	}
+}
+
+// TestUpstreamLoadingNoteIsOnScreen pins what a model call waiting out a server still loading its
+// model looks like in a live frame: the event's own sentence, naming the server, as one host line —
+// and "this server" where the host names none.
+func TestUpstreamLoadingNoteIsOnScreen(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		server string
+		want   string
+	}{
+		{name: "a named server", server: "box", want: "box is still loading its model (HTTP 503) — waiting up to 10m"},
+		{name: "an unnamed server", want: "this server is still loading its model (HTTP 503) — waiting up to 10m"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := newTestModel(t)
+
+			m = step(t, m, eventMsg{Event: domain.UpstreamLoadingEvent{Server: tc.server, Model: "qwen"}})
+
+			if frame := plain(m.View()); !strings.Contains(frame, tc.want) {
+				t.Errorf("the frame does not show %q:\n%s", tc.want, frame)
+			}
+		})
 	}
 }
 

@@ -2670,7 +2670,9 @@ reloading its model.
 **A server still loading its model.** While llama-server loads a model it answers every
 request with a 503 `Loading model` reply. On an entry with no `fallback:`, apogee waits the
 load out instead of failing the Turn: it sends the request again after 1 s, then 2 s, 4 s
-and every 8 s after that, for up to 10 minutes; Esc stops it. On an entry that names a
+and every 8 s after that, for up to 10 minutes; Esc stops it. Each model call that starts such a
+wait says so once — `<server> is still loading its model (HTTP 503) — waiting up to 10m` — as a
+note in the TUI, a line on a headless run's stderr and in the daemon's log. On an entry that names a
 `fallback:` list it does not wait: the 503 is retried twice like any other 5xx and then
 starts the move described below, so `fallback-after:` decides how long the server gets.
 

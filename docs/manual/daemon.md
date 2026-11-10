@@ -215,6 +215,11 @@ sub-agents server's seat is marked `nightly-audit (sub-agents)`. The saved recor
 the run finished on — the fallback's after a session switch, never after a sub-agents one — and
 resuming it starts on the entry's configured server again, not on the fallback.
 
+A firing whose server is still loading its model waits the load out (see
+[configuration](configuration.md#moving-to-another-server-when-one-fails--fallback)), and the log
+says so as each model call starts waiting: `loading   nightly-audit — workstation is still loading
+its model (HTTP 503) — waiting up to 10m`.
+
 ## The unit that runs it — `apogee daemon install`
 
 `apogee daemon install` writes the unit that makes this host run `apogee daemon` for

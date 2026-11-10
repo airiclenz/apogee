@@ -1343,6 +1343,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addRefClipped(e, runOf(e.EventBase))
 	case domain.MalformedChunksEvent:
 		t.addMalformedChunks(e, runOf(e.EventBase))
+	case domain.UpstreamLoadingEvent:
+		t.addUpstreamLoading(e, runOf(e.EventBase))
 	case domain.WorkflowPhaseEvent:
 		t.addWorkflowPhase(e)
 	case domain.SubAgentGroupEvent:
@@ -2842,6 +2844,20 @@ func (t *transcript) addMalformedChunks(e domain.MalformedChunksEvent, run runRe
 	t.place(inRun(entry{
 		kind: entryNote,
 		text: e.Notice(),
+	}, run))
+}
+
+// addUpstreamLoading appends the host note for one model call that found its server still loading
+// its model and is waiting the load out (domain.UpstreamLoadingEvent): without it the screen sits
+// quiet for as long as the load takes, with nothing to say the run is alive. The sentence is the
+// event's own (Notice), escape-stripped because it names the server, so every Driver words the
+// wait one way.
+//
+// Placed at the run that emitted it, as addMalformedChunks is: the waiting call is that run's.
+func (t *transcript) addUpstreamLoading(e domain.UpstreamLoadingEvent, run runRef) {
+	t.place(inRun(entry{
+		kind: entryNote,
+		text: stripEscapes(e.Notice()),
 	}, run))
 }
 

@@ -116,6 +116,11 @@ func (f *transcriptFold) fold(e domain.Event) {
 		// told where and why — the event's own sentence, every Driver's wording. Escape-stripped to
 		// one line because the model it names is the fallback server's to report.
 		f.appendText(session.EntryKindNote, sanitize.StripEscapesToLine(ev.Notice()), ev.EventBase)
+	case domain.UpstreamLoadingEvent:
+		// A note as well: the call waited out a server still loading its model, which is why the
+		// run took as long as it did — the event's own sentence, every Driver's wording, escape-
+		// stripped to one line because it names the server.
+		f.appendText(session.EntryKindNote, sanitize.StripEscapesToLine(ev.Notice()), ev.EventBase)
 	}
 }
 

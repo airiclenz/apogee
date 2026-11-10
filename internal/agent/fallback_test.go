@@ -1837,3 +1837,92 @@ func TestLoadingReplyIsWaitedOutByATurn(t *testing.T) {
 		}
 	})
 }
+
+// loadingEvents is every UpstreamLoadingEvent a recording sink saw, in order.
+func loadingEvents(sink *recordingSink) []domain.UpstreamLoadingEvent {
+	var out []domain.UpstreamLoadingEvent
+	for _, e := range sink.events {
+		if ev, ok := e.(domain.UpstreamLoadingEvent); ok {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// TestLoadingWaitEmitsOneNoticePerCall pins the engine's half of the loading notice: a model call
+// that waits out a server still loading its model emits exactly one UpstreamLoadingEvent (the
+// provider yields its wait Delta once per call, pinned in its own tests), naming the bound server
+// and model — and a host that names no server is worded "this server".
+func TestLoadingWaitEmitsOneNoticePerCall(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a named server, over a real Client", func(t *testing.T) {
+		t.Parallel()
+		loading := &stubllm.HTTPReply{
+			Status: http.StatusServiceUnavailable,
+			Body:   `{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}`,
+		}
+		srv := stubllm.New(t, stubllm.Script{Model: testModel, Turns: []stubllm.Turn{{HTTP: loading}, {Text: "loaded"}}})
+		sink := &recordingSink{}
+		cfg := baseConfig(sink)
+		cfg.ServerName = "box"
+		a, err := newAgent(cfg, provider.NewClient(srv.URL, testModel))
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+
+		resp, outcome, _ := respondOnce(t, a)
+		if outcome != turnOK || resp == nil || resp.Text() != "loaded" {
+			t.Fatalf("outcome %v, resp %+v; want the reply the loaded server gave", outcome, resp)
+		}
+		got := loadingEvents(sink)
+		if len(got) != 1 {
+			t.Fatalf("UpstreamLoadingEvents = %d, want exactly one: %+v", len(got), got)
+		}
+		if got[0].Server != "box" || got[0].Model != testModel || got[0].Depth != 0 {
+			t.Errorf("event = %+v, want server box, model %s, depth 0", got[0], testModel)
+		}
+		const want = "box is still loading its model (HTTP 503) — waiting up to 10m"
+		if notice := got[0].Notice(); notice != want {
+			t.Errorf("Notice = %q, want %q", notice, want)
+		}
+	})
+
+	t.Run("an unnamed server", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		a, err := newAgent(baseConfig(sink), &loadingWaitResponder{})
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+
+		if _, outcome, _ := respondOnce(t, a); outcome != turnOK {
+			t.Fatalf("outcome %v, want the loaded reply", outcome)
+		}
+		got := loadingEvents(sink)
+		if len(got) != 1 {
+			t.Fatalf("UpstreamLoadingEvents = %d, want exactly one: %+v", len(got), got)
+		}
+		const want = "this server is still loading its model (HTTP 503) — waiting up to 10m"
+		if notice := got[0].Notice(); notice != want {
+			t.Errorf("Notice = %q, want %q", notice, want)
+		}
+	})
+
+	t.Run("a compaction summary call", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		a, err := newAgent(baseConfig(sink), &loadingWaitResponder{})
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		seedToolCallConv(a)
+
+		if skipped, err := a.Compact(context.Background()); err != nil || skipped {
+			t.Fatalf("Compact = skipped %v, err %v; want a fold", skipped, err)
+		}
+		if got := loadingEvents(sink); len(got) != 1 {
+			t.Fatalf("UpstreamLoadingEvents = %d, want exactly one for the summary call: %+v", len(got), got)
+		}
+	})
+}

@@ -495,6 +495,7 @@ type (
 	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent
 	WorkflowPhaseEvent     = domain.WorkflowPhaseEvent
 	UpstreamSwitchedEvent  = domain.UpstreamSwitchedEvent
+	UpstreamLoadingEvent   = domain.UpstreamLoadingEvent
 	MCPServerEvent         = domain.MCPServerEvent
 )
 

@@ -3208,6 +3208,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 				domain.TaskListEvent{Items: []domain.TaskItem{{Text: "read the spec", Done: true}}},
 				domain.ContextCostEvent{Cost: domain.ContextCost{Rows: []domain.ContextCostRow{{Name: "prompt", Bytes: 40, Tokens: 10}}, Bytes: 40, Tokens: 10}},
 				domain.MCPServerEvent{Server: "files", Transport: "stdio", Phase: domain.MCPServerConnected, Tools: 7},
+				domain.UpstreamLoadingEvent{Server: "stub", Model: "stub-model"},
 			} {
 				sink.Emit(e)
 			}
@@ -3218,7 +3219,7 @@ func TestHeadlessFormatJSONStreamsEveryEvent(t *testing.T) {
 		t.Fatalf("a completed run returned an error: %v", err)
 	}
 
-	// The two frames bracket the twenty-six default-stream variants, in the contract's own order —
+	// The two frames bracket the twenty-seven default-stream variants, in the contract's own order —
 	// seam_closed is the one kind the default stream holds back.
 	kinds := eventjson.Kinds()
 	want := []string{"run_started"}
@@ -4141,6 +4142,29 @@ func TestHeadlessPrintsTheMalformedChunksNotice(t *testing.T) {
 		t.Errorf("stderr carries no malformed-chunk notice reading %q:\n%s", want, errOut)
 	}
 	if strings.Contains(out, "malformed") {
+		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
+	}
+}
+
+// TestHeadlessPrintsTheUpstreamLoadingNotice pins the `--format text` line for a model call that
+// found its server still loading its model and is waiting the load out: the event's own Notice
+// sentence on STDERR, worded as the TUI and the session record word it, and never on stdout. Without
+// it an unattended run sitting out a model load would look wedged.
+func TestHeadlessPrintsTheUpstreamLoadingNotice(t *testing.T) {
+	stub := &stubRunner{emit: func(sink domain.EventSink) {
+		sink.Emit(domain.UpstreamLoadingEvent{Server: "box", Model: "qwen"})
+	}}
+
+	out, errOut, err := headlessRun(t, stub, "explain this repo")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	const want = "box is still loading its model (HTTP 503) — waiting up to 10m"
+	if !slices.Contains(strings.Split(errOut, "\n"), want) {
+		t.Errorf("stderr carries no loading notice reading %q:\n%s", want, errOut)
+	}
+	if strings.Contains(out, "loading") {
 		t.Errorf("the notice reached stdout, where a pipeline reads the answer: %q", out)
 	}
 }

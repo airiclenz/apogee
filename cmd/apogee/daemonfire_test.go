@@ -1557,3 +1557,28 @@ func TestDaemonFallbackLineNamesTheSeat(t *testing.T) {
 		})
 	}
 }
+
+// TestDaemonLoadingLineSaysTheWait pins the daemon log line for a Firing's model call waiting out a
+// server still loading its model: the `loading` verb, the schedule and the event's own sentence,
+// escape-stripped to one line — and the sink still forwards the event to the one it wraps.
+func TestDaemonLoadingLineSaysTheWait(t *testing.T) {
+	stamp := time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC)
+	logged := &bytes.Buffer{}
+	var forwarded []domain.Event
+	sink := daemonSwitchSink{
+		inner:    sinkFunc(func(e domain.Event) { forwarded = append(forwarded, e) }),
+		schedule: "nightly",
+		log:      &daemonLog{out: logged, now: func() time.Time { return stamp }},
+	}
+
+	sink.Emit(domain.UpstreamLoadingEvent{Server: "box\x1b[2J\nlocal", Model: "qwen"})
+
+	want := stamp.Format(daemonTimeFormat) +
+		" loading   nightly — box local is still loading its model (HTTP 503) — waiting up to 10m\n"
+	if got := logged.String(); got != want {
+		t.Errorf("the daemon log reads %q, want %q", got, want)
+	}
+	if len(forwarded) != 1 {
+		t.Errorf("the sink forwarded %d events, want the wait", len(forwarded))
+	}
+}

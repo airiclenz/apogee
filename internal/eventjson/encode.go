@@ -7,10 +7,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty-nine line kinds of ADR 0075 §4 — twenty-seven Event variants, workflow_phase (ADR 0087),
+// The thirty line kinds of ADR 0075 §4 — twenty-eight Event variants, workflow_phase (ADR 0087),
 // malformed_chunks, sub_agent_group (ADR 0103 decision 13), context_estimate, upstream_switched
-// (adr-0075-amend-1102), task_list, context_cost (adr-0075-amend-1108) and mcp_server
-// (adr-0075-amend-1109) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
+// (adr-0075-amend-1102), task_list, context_cost (adr-0075-amend-1108), mcp_server
+// (adr-0075-amend-1109) and upstream_loading (adr-0075-amend-1110) the newest, plus the two frames that bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
 // here is total, the gating is the Writer's.
@@ -42,6 +42,7 @@ const (
 	kindTaskList          = "task_list"
 	kindContextCost       = "context_cost"
 	kindMCPServer         = "mcp_server"
+	kindUpstreamLoading   = "upstream_loading"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -91,6 +92,7 @@ func Kinds() []string {
 		kindTaskList,
 		kindContextCost,
 		kindMCPServer,
+		kindUpstreamLoading,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -246,6 +248,8 @@ func encode(ev domain.Event, currency string) (kind string, base domain.EventBas
 			WaitedMs:   e.Waited.Milliseconds(),
 			Seat:       string(e.Seat),
 		}, true
+	case domain.UpstreamLoadingEvent:
+		return kindUpstreamLoading, e.EventBase, upstreamLoadingData{Server: e.Server, Model: e.Model}, true
 	case domain.MCPServerEvent:
 		return kindMCPServer, e.EventBase, mcpServerData{
 			Server:    e.Server,
@@ -722,6 +726,14 @@ type upstreamSwitchedData struct {
 	Fault      string `json:"fault"`
 	WaitedMs   int64  `json:"waited_ms"`
 	Seat       string `json:"seat"`
+}
+
+// upstreamLoadingData is the upstream_loading line: a model call found its server still loading its
+// model (an HTTP 503) and is waiting the load out. server is the bound entry's name, "" when the
+// host names none; model is the model the call asked for.
+type upstreamLoadingData struct {
+	Server string `json:"server"`
+	Model  string `json:"model"`
 }
 
 // mcpServerData is the mcp_server line: one MCP server's connection lifecycle (ADR 0111 decision 8).

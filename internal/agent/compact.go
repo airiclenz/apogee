@@ -673,9 +673,14 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	// always did.
 	// The summary stays silent in the transcript, but not in the measurement: its observer passes
 	// on each HTTP attempt's DeltaAttempt as an UpstreamAttemptEvent and ignores every other kind,
-	// so a fold's calls reach the per-server stats like a Turn's do (ADR 0085).
+	// so a fold's calls reach the per-server stats like a Turn's do (ADR 0085). A wait on a server
+	// still loading its model (DeltaLoadingWait) is passed on too, as an UpstreamLoadingEvent: a fold
+	// that sits out a load is as quiet on screen as a Turn that does, and owed the same notice.
 	turn := c.a.turns.index
-	observeAttempt := func(delta provider.Delta) { c.a.emitAttempt(turn, delta) }
+	observeAttempt := func(delta provider.Delta) {
+		c.a.emitAttempt(turn, delta)
+		c.a.emitLoadingWait(turn, delta)
+	}
 	var summary completion
 	for restreamed := 0; ; {
 		summary = c.a.collectCompletion(ctx, preq, observeAttempt)

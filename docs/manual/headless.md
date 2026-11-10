@@ -126,7 +126,10 @@ read_file ranges for the rest`) in the same stream. A server that fails mid-run 
 run to one of its entry's
 [fallback servers](configuration.md#moving-to-another-server-when-one-fails--fallback) prints
 `apogee: <server> failed (<fault>); continuing on <fallback> (<model>) after waiting <time>`
-once, however many agents shared that server.
+once, however many agents shared that server. A model call that finds its server still loading
+its model, and waits the load out, prints
+`<server> is still loading its model (HTTP 503) — waiting up to 10m` (`this server …` where no
+`servers:` entry names it) once, as the wait starts, at every depth.
 None of this is the run's outcome: the block described next is still composed after
 the run, from what it reported, in the wording and order it has always had.
 
@@ -267,7 +270,7 @@ rather than flattened beside it:
 
 | Member | What it carries |
 |---|---|
-| `event` | the line kind: one of the twenty-nine names below |
+| `event` | the line kind: one of the thirty names below |
 | `v` | the contract version — `2` today, on **every** line |
 | `seq` | 1-based, counting every line the run wrote, the two frames included |
 | `time` | RFC3339Nano, stamped as the line is written |
@@ -285,9 +288,9 @@ sub-agent from another, and the parent's `tool_call` and `tool_result` for a del
 same id as `data.spawn_run_id` (`""` on any other call), which is how a delegated run is paired with
 the call that spawned it.
 
-### The twenty-nine line kinds
+### The thirty line kinds
 
-Twenty-seven of them are events, and the two frames are not. All but `mcp_server` come from the
+Twenty-eight of them are events, and the two frames are not. All but `mcp_server` come from the
 engine; that one comes from the interactive session's MCP wiring, so `--format json` never carries
 it. The names are snake_case on
 purpose — a [Reaction notice](reactions.md)'s kebab-case name for a neighbouring moment is a *different*
@@ -322,6 +325,7 @@ moment, and the case difference is the signal.
 | `task_list` | the emitting agent's task list as a successful `task_list` tool call left it, written after that call's `context_estimate` line at the same depth: `data.items` is the whole list in the model's order — each row's `text` and whether it is `done` — and `[]` for a list the call cleared. Each call replaces the whole list, so a reader replaces its copy rather than merging. Every agent keeps its own list, so a sub-agent's line carries its own `depth` and `run_id` and its own list, never its parent's. Clearing the conversation and resuming a session write no `task_list` line |
 | `context_cost` | the emitting agent's standing context cost at the end of each Turn, written right after that Turn's `turn` line at the same depth: `data` is the shape `run_finished.context_cost` carries — `rows` (one `{name, bytes, tokens}` per piece of the standing system content and the tool menu, in wire order, `[]` for an agent that seeds nothing), the total `bytes`, the token estimate `tokens` over that total, and `calibrated`. It is an estimate, never a reading, and adds nothing to the cumulative totals: subtracting its `tokens` from the latest context fill at the same depth leaves what the conversation history holds. Every agent reports its own, so a sub-agent's line carries its own `depth` and `run_id` |
 | `mcp_server` | one MCP server's connection changed: `data.server` names it, `data.transport` is its transport (`stdio`, `sse`, …) and `data.project` says whether it came from the project config. `data.phase` is `dialling` when a connection attempt starts, `connected` when it succeeds (`data.tools` is the server's tool count), `failed` when it does not (`data.cause` is the error text, and `data.kept` is `true` when an earlier connection still serves and its tools stay available), and `disconnected` when a live connection ended (`data.reason` is `removed` for a server taken out of the config, `denied` for one whose endpoint a `url-safety:` change now refuses, `lost` for one whose connection ended on its own — the server exited or crashed, or the connection dropped or broke — with `data.cause` saying why; a lost server is never reconnected on its own, and a `streamable-http` server without a standalone stream is noticed lost only on its next call). A reconnect is `dialling` then `connected` or `failed`, with no `disconnected` between. The envelope's `turn`, `depth`, `call_id` and `run_id` are always zero or `""`: a server belongs to the session, not to an agent. Only the interactive session's [Event journal](#the-event-journal--what-a-watcher-reads) writes this kind; the server name, transport and cause are untrusted text |
+| `upstream_loading` | a model call found its server still loading its model — the HTTP 503 `Loading model` reply llama-server sends while it loads — and is waiting the load out rather than failing (see [configuration](configuration.md#moving-to-another-server-when-one-fails--fallback)): `data.server` names the `servers:` entry, `""` when none names it, and `data.model` the model the call asked for. One line per model call, written as its wait starts, at every depth and for a compaction summary's call as well as a Turn's. A call on an entry that names a `fallback:` list never waits, so it writes none |
 | `run_started` | the opening frame — not an event |
 | `run_finished` | the closing frame — not an event |
 

@@ -878,6 +878,38 @@ func (e UpstreamSwitchedEvent) Notice() string {
 		e.FromServer, e.Fault, e.ToServer, e.ToModel, e.Waited.Round(time.Second))
 }
 
+// UpstreamLoadingEvent reports that a model call found its server still loading its model — the
+// HTTP 503 llama-server answers with while it loads — and is waiting the load out rather than
+// giving up. It is emitted once per model call, as that call's wait starts, at every depth and for
+// compaction's summary call as well as a Turn's, so a user staring at a quiet screen learns why.
+//
+// It is OBSERVATION ONLY: nothing in it reaches history, the transcript the model reads, the
+// token accounting or the model, and a Driver that ignores it loses nothing but the explanation.
+// A call that yields the wait to a fallback server (an entry naming `fallback:`, whose
+// `fallback-after:` grace governs instead) never waits, so it emits none.
+//
+// Server is the bound `servers:` entry's name, "" when the host names none; Model is the model the
+// call asked for. Notice renders the one sentence every Driver shows.
+type UpstreamLoadingEvent struct {
+	EventBase
+	Server string
+	Model  string
+}
+
+// upstreamLoadingBound is how long a call waits on a loading server before it gives up, as the
+// Notice words it: the provider's loading-wait backstop (provider.loadingBackstop, 10 minutes).
+const upstreamLoadingBound = "10m"
+
+// Notice is the human-facing sentence for one wait: which server is loading and how long the call
+// will wait for it. A server with no name is "this server".
+func (e UpstreamLoadingEvent) Notice() string {
+	server := e.Server
+	if server == "" {
+		server = "this server"
+	}
+	return fmt.Sprintf("%s is still loading its model (HTTP 503) — waiting up to %s", server, upstreamLoadingBound)
+}
+
 // MCPServerPhase names the point in one MCP server's connection life that an MCPServerEvent
 // reports (ADR 0111 decision 8).
 type MCPServerPhase string

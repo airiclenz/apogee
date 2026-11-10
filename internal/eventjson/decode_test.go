@@ -167,6 +167,8 @@ func roundTripEvents() []domain.Event {
 			EventBase: delegatedBase, FromServer: "helpers", FromModel: "small", ToServer: "spare", ToModel: "tiny",
 			Fault: "transport", Seat: domain.UpstreamSeatSubAgents,
 		},
+		domain.UpstreamLoadingEvent{EventBase: topLevelBase, Server: "box", Model: "qwen"},
+		domain.UpstreamLoadingEvent{EventBase: delegatedBase, Model: "small"},
 		domain.MCPServerEvent{Server: "files", Transport: "stdio", Project: true, Phase: domain.MCPServerDialling},
 		domain.MCPServerEvent{Server: "files", Transport: "stdio", Project: true, Phase: domain.MCPServerConnected, Tools: 7},
 		domain.MCPServerEvent{

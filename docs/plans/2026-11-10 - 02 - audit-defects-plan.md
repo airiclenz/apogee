@@ -180,7 +180,19 @@ NOTES (2026-11-10): the pre-header idle window is re-armed on each loading reply
 **Acceptance:** `go test -race -count=1 -run 'Retry|503|StatusError' ./internal/provider/` then `go test -race -count=1 -run 'Loading' ./internal/agent/` then `go test -race -count=1 -run 'Loading|TestTitleGeneratorDoesNotRetry|TestTUIFallbackOnAnEntryWithoutFallbackIsAbandoned' ./cmd/apogee/`
 **Commit:** `fix(provider): wait out a local server that is still loading its model`
 
-## 8. Every Driver shows a "server still loading" status
+## 8. Every Driver shows a "server still loading" status — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the new event is `domain.UpstreamLoadingEvent` (Server, Model, Notice()), written as the `upstream_loading` line kind, placed after `mcp_server` and before the frames in `Kinds()`. The Notice's "10m" is a domain constant (`upstreamLoadingBound`) that names the provider's unexported `loadingBackstop`; nothing pins the two together.
+NOTES (2026-11-10): deviation — the TUI note goes through `transcript.apply` (new `addUpstreamLoading`, internal/tui/transcript.go) and is placed at the emitting run, as the malformed-chunks note is, not through fold.go's top-level `fallbackNote` site. A sub-agent's wait lands inside that sub-agent's run.
+NOTES (2026-11-10): deviation — internal/agent/construct.go is unchanged. The wait Delta needs no server identity (every Client yields it, stamped or not), so the dial options need nothing new.
+NOTES (2026-11-10): tests live in fallback_test.go (agent, beside item 7's loading tests), fold_test.go (TUI frame plus the foldCases row), headless_test.go, daemonfire_test.go and run/transcript_test.go. The plan's Files list named no agent, cmd or run test file.
+NOTES (2026-11-10): consequential edit — apogee.go: made necessary by the new domain Event variant, which TestEveryDomainEventVariantIsAliased requires to have a facade alias.
+NOTES (2026-11-10): consequential edit — cmd/apogee/headless_test.go: made necessary by the new line kind, which TestHeadlessFormatJSONStreamsEveryEvent's event list and its "twenty-six default-stream variants" count enumerate.
+NOTES (2026-11-10): consequential edit — docs/manual/daemon.md: made necessary by the new `loading` line in the daemon log.
+NOTES (2026-11-10): consequential edit — docs/manual/configuration.md: made necessary by the new notice. Item 7's loading-server paragraph now says where each Driver shows it.
+NOTES (2026-11-10): consequential edit — .capcom/knowledge/decisions/adr-0075.md: made necessary by the new amendment, which the record's Status line and reading-order list now name.
+NOTES (2026-11-10): the compaction summarizer's observer (compact.go) emits the event too; TestLoadingWaitEmitsOneNoticePerCall's "a compaction summary call" subtest (fallback_test.go) drives a fold through a loading wait and fails with the emission removed.
+NOTES (2026-11-10): consequential edit — internal/eventjson/encode_test.go: made necessary by the 30th line kind; TestKindsAreTwentyNine renamed TestKindsAreThirty, wants 30, comment says twenty-eight serialized variants (verifier retry). No other count pin moved: docs_eventlines_test.go holds the manual table to Kinds() and passes; headless.md already says thirty.
 
 Depends on item 7.
 

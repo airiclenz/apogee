@@ -634,11 +634,13 @@ func (w *daemonWiring) serverFor(entry daemon.Entry) (config.ServerEntry, error)
 }
 
 // daemonSwitchSink is the daemon's one live narration of a Firing's Event stream: it logs one line
-// per [domain.UpstreamSwitchedEvent] (daemonSwitchLine) and forwards every Event, the switch
-// included, to the sink it wraps (nil ⇒ nothing to forward to). Everything else a Firing has to say
-// reaches the log after it lands, off its Result; a switch is said as it happens because the run
-// goes on, on another server, and a supervisor reading the journal mid-run must not find the
-// primary's name standing for a run that left it.
+// per [domain.UpstreamSwitchedEvent] (daemonSwitchLine) and one per [domain.UpstreamLoadingEvent]
+// (daemonLoadingLine), and forwards every Event, those included, to the sink it wraps (nil ⇒
+// nothing to forward to). Everything else a Firing has to say reaches the log after it lands, off
+// its Result; a switch is said as it happens because the run goes on, on another server, and a
+// supervisor reading the journal mid-run must not find the primary's name standing for a run that
+// left it. A wait on a loading server is said as it happens for the same supervisor: a Firing that
+// sits out a model load for minutes would otherwise read as a wedged one.
 type daemonSwitchSink struct {
 	inner    domain.EventSink
 	schedule string
@@ -647,10 +649,13 @@ type daemonSwitchSink struct {
 
 var _ domain.EventSink = daemonSwitchSink{}
 
-// Emit logs a switch and forwards the event.
+// Emit logs a switch or a loading wait and forwards the event.
 func (s daemonSwitchSink) Emit(e domain.Event) {
-	if ev, ok := e.(domain.UpstreamSwitchedEvent); ok {
+	switch ev := e.(type) {
+	case domain.UpstreamSwitchedEvent:
 		s.log.line("%s", daemonSwitchLine(s.schedule, ev))
+	case domain.UpstreamLoadingEvent:
+		s.log.line("%s", daemonLoadingLine(s.schedule, ev))
 	}
 	if s.inner != nil {
 		s.inner.Emit(e)
@@ -669,6 +674,14 @@ func daemonSwitchLine(schedule string, ev domain.UpstreamSwitchedEvent) string {
 		where += " (sub-agents)"
 	}
 	return fmt.Sprintf("%-9s %s — %s", "switched", where, sanitize.StripEscapesToLine(ev.Notice()))
+}
+
+// daemonLoadingLine is the log line for one model call's wait on a server still loading its model:
+// the `loading` verb in the lifecycle lines' column, the schedule it happened in, and the event's
+// own sentence (UpstreamLoadingEvent.Notice), escape-stripped to one line because it names the
+// server.
+func daemonLoadingLine(schedule string, ev domain.UpstreamLoadingEvent) string {
+	return fmt.Sprintf("%-9s %s — %s", "loading", schedule, sanitize.StripEscapesToLine(ev.Notice()))
 }
 
 // daemonLogWriter is the daemon log seen as an [io.Writer], for the one caller that narrates

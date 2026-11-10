@@ -76,6 +76,28 @@ func TestTranscriptFoldRecordsAMalformedChunkNote(t *testing.T) {
 	}
 }
 
+// TestTranscriptFoldRecordsAnUpstreamLoadingNote pins the entry a model call waiting out a server
+// still loading its model leaves in a record: a NOTE — the run went on once the model loaded —
+// worded by the event itself (UpstreamLoadingEvent.Notice), so the TUI, the headless stderr and the
+// record spell one wait one way.
+func TestTranscriptFoldRecordsAnUpstreamLoadingNote(t *testing.T) {
+	t.Parallel()
+
+	f := newTranscriptFold("")
+
+	f.fold(domain.UpstreamLoadingEvent{Server: "box", Model: "qwen"})
+
+	entries := f.entries
+	if len(entries) != 1 {
+		t.Fatalf("the fold wrote %d entries, want the loading note alone: %+v", len(entries), entries)
+	}
+	const want = "box is still loading its model (HTTP 503) — waiting up to 10m"
+	if entries[0].Kind != session.EntryKindNote || entries[0].Text != want {
+		t.Errorf("loading entry = %s/%q, want %s reading %q",
+			entries[0].Kind, entries[0].Text, session.EntryKindNote, want)
+	}
+}
+
 // TestTranscriptFoldIgnoresAReactionFiring pins the other half of the prune contract: a Reaction
 // firing contributes NOTHING to a Firing's record. A reaction repairs the model's own failure or
 // shapes what it sees without steering it (ADR 0071, ADR 0076) — engine behaviour the reader of a

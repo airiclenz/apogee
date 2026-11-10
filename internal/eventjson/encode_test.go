@@ -565,6 +565,17 @@ func TestEncodeJSONGolden(t *testing.T) {
 				`"fault":"status 503","waited_ms":120001,"seat":"session"}`,
 		},
 		{
+			name: "upstream_loading",
+			event: domain.UpstreamLoadingEvent{
+				EventBase: domain.EventBase{Turn: 2, Depth: 1, CallID: "call-4", RunID: "run-d"},
+				Server:    "box",
+				Model:     "qwen",
+			},
+			wantKind: "upstream_loading",
+			wantBase: domain.EventBase{Turn: 2, Depth: 1, CallID: "call-4", RunID: "run-d"},
+			wantData: `{"server":"box","model":"qwen"}`,
+		},
+		{
 			// The composition root emits it, never the engine, so the envelope identity is zero.
 			name: "mcp_server connected",
 			event: domain.MCPServerEvent{
@@ -1185,6 +1196,7 @@ func TestEncodeMapsEveryEventVariant(t *testing.T) {
 		"WorkflowPhaseEvent":     domain.WorkflowPhaseEvent{},
 		"UpstreamSwitchedEvent":  domain.UpstreamSwitchedEvent{},
 		"MCPServerEvent":         domain.MCPServerEvent{},
+		"UpstreamLoadingEvent":   domain.UpstreamLoadingEvent{},
 	}
 	declared := declaredEventVariants(t)
 	known := make(map[string]bool, len(Kinds()))
@@ -1278,16 +1290,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwentyNine pins the vocabulary itself — the twenty-seven serialized variants, the
+// TestKindsAreThirty pins the vocabulary itself — the twenty-eight serialized variants, the
 // opt-in seam_closed among them, plus the two frames — so a kind added to the encoder without a
 // manual entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwentyNine(t *testing.T) {
+func TestKindsAreThirty(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 29 {
-		t.Fatalf("len(Kinds()) = %d, want 29: %v", len(kinds), kinds)
+	if len(kinds) != 30 {
+		t.Fatalf("len(Kinds()) = %d, want 30: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {
