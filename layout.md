@@ -3213,7 +3213,8 @@ On a wide terminal a column on the right of the transcript slot keeps live sessi
 (ADR 0110). It is 44 columns wide by default, and the user resizes it by dragging its separator,
 between 24 columns and the window less a 60-column transcript minimum less the scroll-bar column; a
 double-click on the separator or `/panel width reset` puts back the 44, and `/panel width <n>` sets
-it outright (adr-0110-amend-1108). The 60 columns hold for any width the user set, under `auto` and
+it outright (adr-0110-amend-1108). Its content starts one row below the slot's top edge: the
+column's top row is blank, in the docked column, the overlay and Run view alike. The 60 columns hold for any width the user set, under `auto` and
 `on` alike; an unset width keeps the show mode's gate floor (100 columns in `auto`, 80 in `on`),
 and the column still docks only from a 137-column window, 117 in `on` (adr-0110-amend-1110). Its
 shape, sections, thresholds, pointer rules and keyboard are specced in [`docs/layout/side-panel-layout.md`](docs/layout/side-panel-layout.md).

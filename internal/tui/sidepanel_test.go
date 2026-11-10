@@ -490,9 +490,10 @@ func factColumns(t *testing.T, column []string, elapsed string) [2]int {
 }
 
 // TestSidePanelColumnFillsTheSlotRows paints a shown, empty panel: every row above the
-// session-name rule carries the separator at the slot's edge and the column's top row reads
-// `nothing live`, while every row from the rule down keeps the whole window — the rule and the
-// closing hairline run edge to edge with no separator cut into them.
+// session-name rule carries the separator at the slot's edge, the column's top row is blank and its
+// second reads `nothing live`, and the column is exactly the slot's rows ([frameSpans.slotBottom]),
+// while every row from the rule down keeps the whole window — the rule and the closing hairline run
+// edge to edge with no separator cut into them.
 func TestSidePanelColumnFillsTheSlotRows(t *testing.T) {
 	t.Parallel()
 
@@ -516,8 +517,14 @@ func TestSidePanelColumnFillsTheSlotRows(t *testing.T) {
 			t.Errorf("row %d carries %q at the slot's edge (column %d), want the separator: %q", i, sep, slot, ln)
 		}
 	}
-	if top := strings.TrimSpace(ansi.Cut(lines[0], slot+1, width)); top != sidePanelEmpty {
-		t.Errorf("the empty column's top row reads %q, want %q", top, sidePanelEmpty)
+	if top := strings.TrimSpace(ansi.Cut(lines[0], slot+1, width)); top != "" {
+		t.Errorf("the empty column's top row reads %q, want it blank", top)
+	}
+	if second := strings.TrimSpace(ansi.Cut(lines[1], slot+1, width)); second != sidePanelEmpty {
+		t.Errorf("the empty column's second row reads %q, want %q", second, sidePanelEmpty)
+	}
+	if slotRows := m.frameSpans().slotBottom; rule != slotRows {
+		t.Errorf("the column paints %d rows, want the slot's %d", rule, slotRows)
 	}
 	for i, ln := range lines[rule:] {
 		if got := ansi.StringWidth(ln); got != width {
@@ -584,6 +591,12 @@ func panelText(t *testing.T, m Model) []string {
 	}
 	t.Fatal("no ▔ rule below the slot's rows")
 	return nil
+}
+
+// belowPanelTopRow is rows as panelText reads them under the column's blank top row ([panelLayout]):
+// the content the column paints from its second row down.
+func belowPanelTopRow(rows ...string) []string {
+	return append([]string{""}, rows...)
 }
 
 // columnText is sidePanelColumn's rows rows, escape-stripped and right-trimmed, each header's
@@ -737,8 +750,8 @@ func TestSidePanelPaintsEachSection(t *testing.T) {
 
 			m := panelModel(t, domain.DefaultSidePanelSections, 30, tc.events(t)...)
 
-			if got := panelText(t, m); !slices.Equal(got, tc.want) {
-				t.Errorf("the column paints\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+			if got, want := panelText(t, m), belowPanelTopRow(tc.want...); !slices.Equal(got, want) {
+				t.Errorf("the column paints\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 			}
 		})
 	}
@@ -796,12 +809,12 @@ func TestSidePanelUsageRowsSpeakUsageWords(t *testing.T) {
 	reading.Cumulative = domain.Usage{Calls: 1, PromptTokens: 4000, TotalTokens: 4000}
 	m := panelModel(t, domain.DefaultSidePanelSections, 30, reading, standingCost(0, 100))
 
-	want := []string{
+	want := belowPanelTopRow(
 		"○ Usage (62%)",
 		"    20k/32k 62% ██████▎",
 		"    tools 100 · hist 20k",
 		"    prompt 4k",
-	}
+	)
 	if got := panelText(t, m); !slices.Equal(got, want) {
 		t.Errorf("the column paints\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -893,7 +906,7 @@ func TestSidePanelRunningDelegationSpinsWithTheStatusLine(t *testing.T) {
 
 	got := panelText(t, m)
 	want := bodyIndent + ansi.Strip(m.spin.drawn(m.th, m.opts.UI.Spinner)) + " repo-scout running 01:12s"
-	if len(got) != 2 || got[0] != "○ Sub-agents (1)" || got[1] != want {
+	if len(got) != 3 || got[0] != "" || got[1] != "○ Sub-agents (1)" || got[2] != want {
 		t.Errorf("the column paints\n%s\nwant the running header over %q", strings.Join(got, "\n"), want)
 	}
 }
@@ -1284,8 +1297,8 @@ func TestSidePanelSectionModes(t *testing.T) {
 
 			m := panelModel(t, tc.sections, 30, tc.events...)
 
-			if got := panelText(t, m); !slices.Equal(got, tc.want) {
-				t.Errorf("the column paints\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+			if got, want := panelText(t, m), belowPanelTopRow(tc.want...); !slices.Equal(got, want) {
+				t.Errorf("the column paints\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 			}
 		})
 	}
@@ -1314,8 +1327,9 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 		{
 			name:     "a pinned section's body comes first",
 			sections: "[sub-agents: auto, tasks: auto, changed-files: pinned, usage: hidden]",
-			rows:     6,
+			rows:     7,
 			want: []string{
+				"",
 				"○ Sub-agents (1 queued)",
 				"  ○ scout      queued",
 				"○ Tasks (0/3)",
@@ -1327,8 +1341,9 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 		{
 			name:     "a later section that fits still expands",
 			sections: "[tasks: auto, sub-agents: auto, changed-files: hidden, usage: hidden]",
-			rows:     4,
+			rows:     5,
 			want: []string{
+				"",
 				"○ Tasks (0/3)",
 				"○ Sub-agents (1 queued)",
 				"  ○ scout      queued",
@@ -1338,8 +1353,9 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 		{
 			name:     "every header fits exactly",
 			sections: domain.DefaultSidePanelSections,
-			rows:     4,
+			rows:     5,
 			want: []string{
+				"",
 				"○ Sub-agents (1 queued)",
 				"○ Tasks (0/3)",
 				"○ Changed files (1)",
@@ -1349,8 +1365,9 @@ func TestSidePanelOverflowFoldsToHeaders(t *testing.T) {
 		{
 			name:     "headers that do not fit",
 			sections: domain.DefaultSidePanelSections,
-			rows:     3,
+			rows:     4,
 			want: []string{
+				"",
 				"○ Sub-agents (1 queued)",
 				"○ Tasks (0/3)",
 				"+2 more",
@@ -1502,10 +1519,10 @@ func TestSidePanelOverflowMarksAndOpens(t *testing.T) {
 		t.Parallel()
 		m := squeezedPanelModel(t)
 
-		content := m.sidePanelContent(3)
+		content := m.sidePanelContent(4)
 
-		if want := m.th.toolMarker.Render("+2" + sidePanelMore); content[2] != want {
-			t.Errorf("the 3-row column's last row is %q, want %q", content[2], want)
+		if want := m.th.toolMarker.Render("+2" + sidePanelMore); content[3] != want {
+			t.Errorf("the 4-row column's last row is %q, want %q", content[3], want)
 		}
 	})
 
@@ -1572,18 +1589,23 @@ func isPanelHeaderText(row string) bool {
 }
 
 // TestSidePanelSpacesSectionsApart pins the spacing (docs/layout/side-panel-layout.md, "Rows and
-// spacing"): on a column with room, one blank row precedes every section header but the first,
-// none precedes the first, and a click on a spacer is claimed and does nothing.
+// spacing"): on a column with room, the column's top row is blank, the first header paints on the
+// row below it, one blank row precedes every section header after the first, and a click on the top
+// row or a spacer is claimed and does nothing.
 func TestSidePanelSpacesSectionsApart(t *testing.T) {
 	t.Parallel()
 	m := alignedPanelModel(t, SpinnerClassic, domain.GlyphsUnicode, 140, 40, everySectionEvents(t)...)
 
 	column := panelText(t, m)
-	if len(column) == 0 || !isPanelHeaderText(column[0]) {
-		t.Fatalf("the column's first row is no header:\n%s", strings.Join(column, "\n"))
+	if len(column) < 2 || column[0] != "" || !isPanelHeaderText(column[1]) {
+		t.Fatalf("the column's top row is not blank above its first header:\n%s", strings.Join(column, "\n"))
+	}
+	if target, isPanel := m.panelTargetAt(panelBodyX(m), 0); !isPanel || target.kind != panelTargetNone {
+		t.Errorf("a click on the blank top row follows %+v (column cell %v), want nothing", target, isPanel)
 	}
 	headers, spacers := 0, 0
-	for i, row := range column {
+	for i := 1; i < len(column); i++ {
+		row := column[i]
 		switch {
 		case isPanelHeaderText(row):
 			headers++
@@ -1645,8 +1667,8 @@ func TestPanelAllocationDropsSpacersBeforeFolding(t *testing.T) {
 	if got := panelHeaderGlyph(t, m, "Tasks"); got != "▶" {
 		t.Fatalf("setup: the squeezed Tasks header holds %q, want ▶", got)
 	}
-	if column := panelText(t, m); slices.Contains(column, "") {
-		t.Errorf("a column with a squeezed section paints a spacer:\n%s", strings.Join(column, "\n"))
+	if column := panelText(t, m); len(column) == 0 || column[0] != "" || slices.Contains(column[1:], "") {
+		t.Errorf("a column with a squeezed section paints a spacer, or no blank top row:\n%s", strings.Join(column, "\n"))
 	}
 }
 
@@ -1824,7 +1846,7 @@ func TestSidePanelClearEmptiesThePanel(t *testing.T) {
 	if m.panel != nil {
 		t.Error("/clear kept the closed session's panel state")
 	}
-	if got := panelText(t, m); !slices.Equal(got, []string{sidePanelEmpty}) {
+	if got := panelText(t, m); !slices.Equal(got, belowPanelTopRow(sidePanelEmpty)) {
 		t.Errorf("after /clear the column paints %q, want only %q", got, sidePanelEmpty)
 	}
 }
@@ -2008,7 +2030,7 @@ func TestSidePanelRunViewUsageMatchesTheGauge(t *testing.T) {
 				t.Fatalf("setup: the gauge states %q; want %q", gauge, tc.want)
 			}
 			got := panelText(t, m)
-			if len(got) < 2 || !strings.HasPrefix(strings.TrimLeft(got[1], " "), tc.want+" ") {
+			if len(got) < 3 || !strings.HasPrefix(strings.TrimLeft(got[2], " "), tc.want+" ") {
 				t.Errorf("the usage fill reads\n%s\nwant the gauge's %q", strings.Join(got, "\n"), tc.want)
 			}
 		})
@@ -2041,8 +2063,8 @@ func TestSidePanelRunViewScopesALegacyRunByDepthAndSpawn(t *testing.T) {
 	if slices.ContainsFunc(got, func(row string) bool { return strings.Contains(row, "first's task") }) {
 		t.Errorf("the legacy run's view paints its sibling's task:\n%s", strings.Join(got, "\n"))
 	}
-	// A legacy call names no run, so the rows are unnamed: the second row is the second run's.
-	if len(got) < 3 || strings.Contains(got[1], defaultGlyphs.panelCurrent) || !strings.Contains(got[2], defaultGlyphs.panelCurrent) {
+	// A legacy call names no run, so the rows are unnamed: the second body row is the second run's.
+	if len(got) < 4 || strings.Contains(got[2], defaultGlyphs.panelCurrent) || !strings.Contains(got[3], defaultGlyphs.panelCurrent) {
 		t.Errorf("sub-agents does not mark the viewed legacy run alone:\n%s", strings.Join(got, "\n"))
 	}
 }
@@ -2263,7 +2285,7 @@ func panelStopEvents(t *testing.T) []domain.Event {
 // cell, its title stop's and a body stop's inside the content — a row no stop spans clicks nothing,
 // and the stops come in paint order with one identity per kind of section row, each header two (its
 // pin, then its title: adr-0111-amend-1109b), a task card and the usage report each one stop over
-// all their rows.
+// all their rows. The column's blank top row is no stop: the first header's stops sit on row 1.
 func TestPanelStopsMatchClickTargets(t *testing.T) {
 	t.Parallel()
 	m := streamOneScreen(t, panelModel(t, domain.DefaultSidePanelSections, 30, panelStopEvents(t)...))
@@ -2312,6 +2334,12 @@ func TestPanelStopsMatchClickTargets(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("stop identities\n%+v\nwant\n%+v", got, want)
 	}
+	if isSpanned[0] {
+		t.Errorf("a stop spans the column's blank top row: %+v", stops[0])
+	}
+	if stops[0].y != 1 || stops[1].y != 1 {
+		t.Errorf("the first header's stops sit on rows %d and %d, want row 1, below the blank top row", stops[0].y, stops[1].y)
+	}
 	firstRows := map[int]string{0: "Sub-agents", 3: "Tasks", 6: "Changed files", 10: "Usage"}
 	for at, text := range firstRows {
 		y := panelRowY(t, pre, text)
@@ -2328,8 +2356,9 @@ func TestPanelStopsMatchClickTargets(t *testing.T) {
 	}
 }
 
-// TestPanelStopsSkipTargetlessRows pins the rows that are no stop: the `+N more` row of an
-// overflowing column, and a changed-file row whose write names no tool call to open.
+// TestPanelStopsSkipTargetlessRows pins the rows that are no stop: the column's blank top row and the
+// `+N more` row of an overflowing column, and a changed-file row whose write names no tool call to
+// open.
 func TestPanelStopsSkipTargetlessRows(t *testing.T) {
 	t.Parallel()
 	events := func(t *testing.T) []domain.Event {
@@ -2345,19 +2374,19 @@ func TestPanelStopsSkipTargetlessRows(t *testing.T) {
 		t.Parallel()
 		m := panelModel(t, domain.DefaultSidePanelSections, 30, events(t)...)
 
-		stops := m.panelStops(3)
+		stops := m.panelStops(4)
 
-		if column := columnText(m, 3); column[2] != "+2 more" {
-			t.Fatalf("the 3-row column's last row reads %q, want the +2 more row", column[2])
+		if column := columnText(m, 4); column[3] != "+2 more" {
+			t.Fatalf("the 4-row column's last row reads %q, want the +2 more row", column[3])
 		}
 		want := []panelStop{
-			{y: 0, height: 1, target: panelTarget{kind: panelTargetPin, section: domain.SidePanelSubAgents},
+			{y: 1, height: 1, target: panelTarget{kind: panelTargetPin, section: domain.SidePanelSubAgents},
 				id: panelStopID{section: domain.SidePanelSubAgents, isHeader: true, isPin: true}},
-			{y: 0, height: 1, target: panelTarget{kind: panelTargetFold, section: domain.SidePanelSubAgents},
+			{y: 1, height: 1, target: panelTarget{kind: panelTargetFold, section: domain.SidePanelSubAgents},
 				id: panelStopID{section: domain.SidePanelSubAgents, isHeader: true}},
-			{y: 1, height: 1, target: panelTarget{kind: panelTargetPin, section: domain.SidePanelTasks},
+			{y: 2, height: 1, target: panelTarget{kind: panelTargetPin, section: domain.SidePanelTasks},
 				id: panelStopID{section: domain.SidePanelTasks, isHeader: true, isPin: true}},
-			{y: 1, height: 1, target: panelTarget{kind: panelTargetFold, section: domain.SidePanelTasks},
+			{y: 2, height: 1, target: panelTarget{kind: panelTargetFold, section: domain.SidePanelTasks},
 				id: panelStopID{section: domain.SidePanelTasks, isHeader: true}},
 		}
 		if !slices.Equal(stops, want) {
@@ -2920,7 +2949,7 @@ func TestSidePanelFoldTogglesAndWritesBack(t *testing.T) {
 		t.Parallel()
 		m := foldedPanelModel(t, "[usage]", domain.GlyphsUnicode, panelUsageReading(panelUsed), standingCost(200, 100))
 
-		if got := panelText(t, m); !slices.Equal(got, []string{"○ Usage (62%)"}) {
+		if got := panelText(t, m); !slices.Equal(got, belowPanelTopRow("○ Usage (62%)")) {
 			t.Errorf("a column of 30 rows paints\n%s\nwant the usage header alone", strings.Join(got, "\n"))
 		}
 		if got := panelHeaderGlyph(t, m, "Usage"); got != "▶" {

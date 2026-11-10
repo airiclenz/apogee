@@ -68,7 +68,7 @@ const (
 	// sidePanelOverlayGap is the blank column the overlay leaves between the transcript's text and
 	// its separator ([Model.panelOverlayGapHung]).
 	sidePanelOverlayGap = " "
-	// sidePanelEmpty is the one dim line an empty column paints at its top.
+	// sidePanelEmpty is the one dim line an empty column paints, below its blank top row.
 	sidePanelEmpty = "nothing live"
 	// sidePanelMore is the bottom row's word when not every shown section's header fits: `+N more`.
 	sidePanelMore = " more"
@@ -318,7 +318,8 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 // width authority's measure: the separator, the gutter, the content squared to its width
 // ([Model.panelContentWidth]) and the right margin ([Model.panelChrome]) — led by the overlay's blank
 // column where that comes out of the column's own width. With no
-// section to show it paints `nothing live` on its top row and leaves the rest blank — the column
+// section to show it paints `nothing live` on its second row, below the blank top row every column
+// leads with ([panelLayout]), and leaves the rest blank — the column
 // stays on the frame either way, because nothing it shows may move it ([Model.panelShown]). The
 // separator wears the transcript scroll track's `chrome` role ([theme.scrollTrack]), so the two
 // strokes read as one recessive edge where the bar stands beside it, and it is accent-bold while a
@@ -354,11 +355,12 @@ func (m Model) sidePanelColumn(rows int) []string {
 }
 
 // sidePanelContent is the column's content rows, at most rows of them: the shown sections laid out
-// by the overflow rule ([panelAllocation]), or the one `nothing live` line.
+// by the overflow rule ([panelAllocation]), or the one `nothing live` line — either led by the
+// column's blank top row ([panelLayout]).
 func (m Model) sidePanelContent(rows int) []string {
 	sections := m.panelSections()
 	if len(sections) == 0 {
-		return []string{m.th.statusFaint.Render(sidePanelEmpty)}
+		return []string{"", m.th.statusFaint.Render(sidePanelEmpty)}
 	}
 	layout := panelLayout(sections, rows)
 	lines := make([]string, 0, len(layout))
@@ -378,10 +380,10 @@ func (m Model) sidePanelContent(rows int) []string {
 }
 
 // panelLine is what one content row of the column is: a section's header (body −1) or one of its
-// body rows, or — section −1 — the blank spacer row before a header (isSpacer) or, more the count,
-// the `+N more` row. A header's isOpen is whether its fold indicator reads open: its body is drawn
-// below it, or it has no body rows to draw — so `▶` marks exactly a section with rows the column is
-// not showing, folded by the human or by the overflow.
+// body rows, or — section −1 — a blank row (isSpacer: the column's top row, or the spacer before a
+// header) or, more the count, the `+N more` row. A header's isOpen is whether its fold indicator
+// reads open: its body is drawn below it, or it has no body rows to draw — so `▶` marks exactly a
+// section with rows the column is not showing, folded by the human or by the overflow.
 type panelLine struct {
 	section  int
 	body     int
@@ -391,13 +393,15 @@ type panelLine struct {
 }
 
 // panelLayout lays the shown sections out over rows rows by the overflow rule ([panelAllocation]):
-// one panelLine per content row, from the top, a blank spacer before every header but the first
-// where the allocation has room for them. It is the one layout the paint
-// ([Model.sidePanelContent]) and the stops ([Model.panelStops]) — so the pointer — both read, so a
-// click names the row it lands on.
+// one panelLine per content row, led by one blank row that is no stop — so the first header paints
+// on the column's second row, clear of the window's top edge — then the sections over the rows
+// below it, a blank spacer before every header but the first where the allocation has room for
+// them. It is the one layout the paint ([Model.sidePanelContent]) and the stops
+// ([Model.panelStops]) — so the pointer — both read, so a click names the row it lands on.
 func panelLayout(sections []panelSection, rows int) []panelLine {
-	kept, isExpanded, hasSpacers := panelAllocation(sections, rows)
-	lines := make([]panelLine, 0, rows)
+	kept, isExpanded, hasSpacers := panelAllocation(sections, max(rows-1, 0))
+	lines := make([]panelLine, 0, max(rows, 1))
+	lines = append(lines, panelLine{section: -1, body: -1, isSpacer: true}) // the blank top row
 	for i := range sections[:kept] {
 		if hasSpacers && i > 0 {
 			lines = append(lines, panelLine{section: -1, body: -1, isSpacer: true})

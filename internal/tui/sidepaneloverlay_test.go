@@ -241,7 +241,8 @@ func TestOverlayOffDoesNothing(t *testing.T) {
 // inside acts as on the docked column): every stop's target is the click at every row of its span —
 // a header's pin stop's on the pin glyph's cell, its title stop's and a body stop's inside the
 // overlay's content (adr-0111-amend-1109b) — a row no stop spans clicks nothing, and the transcript
-// cell left of the overlay is no column cell.
+// cell left of the overlay is no column cell. The overlay is the docked column, blank top row
+// included: its content cells on row 0 are blank and its first stop sits on row 1.
 func TestOverlayStopsMatchClickTargets(t *testing.T) {
 	t.Parallel()
 	pre := overlaidModel(t).withFrameSpans()
@@ -253,6 +254,13 @@ func TestOverlayStopsMatchClickTargets(t *testing.T) {
 
 	if len(stops) == 0 {
 		t.Fatal("the overlay offers no stops")
+	}
+	if stops[0].y != 1 {
+		t.Errorf("the overlay's first stop sits on row %d, want row 1, below the blank top row", stops[0].y)
+	}
+	top := strings.SplitN(ansi.Strip(pre.View().Content), "\n", 2)[0]
+	if cells := ansi.Cut(top, left+pre.panelLeftChrome(), pre.width); strings.TrimSpace(cells) != "" {
+		t.Errorf("the overlay's top row paints %q in its content cells, want them blank", cells)
 	}
 	isSpanned := make([]bool, rows)
 	for _, stop := range stops {

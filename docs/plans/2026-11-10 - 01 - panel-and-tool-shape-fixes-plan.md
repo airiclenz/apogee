@@ -201,7 +201,10 @@ NOTES (2026-11-10): the unset-width gate floor is written "100 columns in `auto`
 
 **Commit:** `docs(adr): amend ADR 0110 with the 60-column transcript minimum`
 
-## 7. Side panel: blank top row
+## 7. Side panel: blank top row — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the `docs/layout/side-panel-layout.md` §Where it sits sketch gained one transcript row at its foot so its 17 content rows still fit, unsqueezed and spaced, under the new blank top row; the sketch's panel column was shifted down one row rather than re-rendered.
+NOTES (2026-11-10): the shifted exact-sequence tests read through a new test helper, `belowPanelTopRow` (internal/tui/sidepanel_test.go), instead of a leading `""` written into every table case; the overflow-table and `+N more` cases grew their row count by one so they keep exercising the same allocation they did at the base.
 
 **What:** the column's first section heading paints flush on the window's top row; the owner wants one blank row above it.
 **Regression guard.** Every test that reads `panelText` / `columnText` / `sidePanelContent` as an exact sequence or by index moves one row (`grep -n "panelText(t, \|columnText(\|sidePanelContent(" internal/tui/*_test.go`); keep `panelText` frame-aligned — do not strip row 0 in the helper, since `panelRowY` feeds click y's. Every sentence stating where the column's content starts, which header a blank row precedes, or the overflow's row budget moves with it, found by `grep -n "at its top\|top row\|but the first\|from the top\|rows than the slot" internal/tui/sidepanel.go docs/layout/side-panel-layout.md layout.md docs/manual/configuration.md`.

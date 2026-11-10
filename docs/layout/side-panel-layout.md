@@ -15,22 +15,23 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 ## Where it sits
 
 ```
-▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ││  ○ Sub-agents (1) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
-❯ refactor the parser                                ││    ⣾ repo-scout      running 01:12s  41%
-▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ││    ✓ planner         done       38s  27%
-✦ I'll start by mapping the call sites…              ││
-                                                     ││  ○ Tasks (1/3) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
-✦ Tools (1 Read, 1 Edit) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼ ┃│    ✓ map call sites
-  ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ line one ▶ ┃│    ▸ split the tokenizer
-  ┕ Edit ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +12 −4 ▶ ┃│    ○ port the tests
-                                                     ┃│
-✦ Sub-agents (2)                                     ┃│  ○ Changed files (2) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
-  ┝ repo-scout ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 0 tool calls · 13k/31k ▶ ┃│      internal/parse/parser.go     +12 −4
-  ┕ planner ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ done ▶ ┃│    ↳ internal/parse/lexer_test.go +30 −0
-                                                     ┃│
-✦ The scout maps the tests while                     ┃│  ○ Usage (62%) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
-  I split the tokenizer into its                     ┃│      20k/32k 62% ██████▎
-  own file.                                          ┃│      prompt 4k · completion 300
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ││
+❯ refactor the parser                                ││  ○ Sub-agents (1) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ││    ⣾ repo-scout      running 01:12s  41%
+✦ I'll start by mapping the call sites…              ││    ✓ planner         done       38s  27%
+                                                     ││
+✦ Tools (1 Read, 1 Edit) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼ ┃│  ○ Tasks (1/3) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ line one ▶ ┃│    ✓ map call sites
+  ┕ Edit ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ +12 −4 ▶ ┃│    ▸ split the tokenizer
+                                                     ┃│    ○ port the tests
+✦ Sub-agents (2)                                     ┃│
+  ┝ repo-scout ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 0 tool calls · 13k/31k ▶ ┃│  ○ Changed files (2) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  ┕ planner ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ done ▶ ┃│      internal/parse/parser.go     +12 −4
+                                                     ┃│    ↳ internal/parse/lexer_test.go +30 −0
+✦ The scout maps the tests while                     ┃│
+  I split the tokenizer into its                     ┃│  ○ Usage (62%) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▼
+  own file.                                          ┃│      20k/32k 62% ██████▎
+                                                      │      prompt 4k · completion 300
                                                       │      cached 25%
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ refactor the parser ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
   ⣾ responding · 0s [total 0s]                                            20k/32k 62% ██████▎
@@ -45,7 +46,7 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 column's 44 cells are copied as painted; the transcript and the full-width rows below the rule are
 narrowed to fit; on screen the window clears the 137-column gate, and the unset width leaves the
 transcript 105 columns. Left of the separator stand the transcript's scroll-bar track `│` and
-thumb `┃`.)*
+thumb `┃`. The column's top row is blank ("Rows and spacing").)*
 
 - **Rows:** every row above the session-name rule, the same rows the transcript slot spans. The
   session-name rule, status line, prompt box and footer keep the full window width.
@@ -94,7 +95,8 @@ the clamp: once the column has docked, a width the user set may narrow the trans
 - Its width changes **only** on a deliberate act of the user's — a separator drag, a double-click on
   the separator, `/panel width`, or a `/settings` edit of `ui.side-panel.width` — and, within the
   clamp, on a terminal resize. Nothing a section shows or hides moves the column.
-- With no section to show, the column stays and paints one dim line, `nothing live`, at its top.
+- With no section to show, the column stays and paints one dim line, `nothing live`, on its second
+  row, below the blank top row ("Rows and spacing").
 - Crossing a threshold re-wraps the transcript once, like any deliberate width change. A separator
   drag re-wraps the panel and the transcript live, on every column the separator moves.
 
@@ -119,7 +121,7 @@ above the session-name rule, with the cursor on one of its stops.
   to the transcript row it left, or the mode ends where the transcript has no stop), and so do `esc`,
   a `⏎` that opens a detail, and anything else that ends the mode. A click outside it closes it too:
   the mode ends and the click goes on to whatever it landed on — the transcript, the prompt, a pane.
-- **Inside, it is the docked column.** A click acts as it does on the docked panel ("Pointer"): a pin
+- **Inside, it is the docked column**, blank top row included ("Rows and spacing"). A click acts as it does on the docked panel ("Pointer"): a pin
   glyph pins or unpins its section and the overlay stays, a body row opens its detail. The keys are
   navigation mode's, as in "Keyboard".
 - While an approval or an `ask_user` question owns the keys the mode is suspended, so the overlay is
@@ -152,8 +154,11 @@ section out gets it appended in `auto`, so a list saved before `mcp` existed sho
 The linger (30 s) and the usage threshold (50%) are this spec's numbers to tune; the rules are ADR
 0110's.
 
-**Rows and spacing.** One blank spacer row precedes every section header but the first, as one
-blank line parts the transcript's blocks; the overflow drops the spacers first ("Overflow"). A
+**Rows and spacing.** The column's top row is blank and no stop, so the first section header
+paints on its second row, clear of the window's top edge — in the docked column, the overlay and
+Run view alike; the overflow never takes that row. One blank spacer row precedes every section
+header but the first, as one blank line parts the transcript's blocks; the overflow drops the
+spacers first ("Overflow"). A
 header's pin glyph stands on the content's first cell. Every body row of every section starts
 `bodyIndent` (two cells) right of it, then a **lead cell** as wide as the panel-wide lead width —
 the widest of the active spinner style's frames and the one-cell marks a lead can hold (`○`, `◷`,
@@ -239,7 +244,7 @@ while the overflow below squeezes no section and every one of them fits in the r
 over, so a spacer never costs a section its body. A section the human folded is not squeezed, so it
 leaves the spacers standing.
 
-When the shown sections need more rows than the slot has:
+When the shown sections need more rows than the slot has below the column's blank top row:
 
 1. Pinned sections take rows first, then the **opened tier**, then auto sections, each in list
    order. A section the human folded costs its header row alone and takes no body rows, however
