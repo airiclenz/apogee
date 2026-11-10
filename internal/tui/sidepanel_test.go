@@ -3964,31 +3964,29 @@ func TestPanelWriteKeyUnderSymlinkedRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve the outside directory: %v", err)
 	}
-	opts := testOpts
-	opts.Workspace = link
-	linked := newModel(context.Background(), &fakeEngine{}, opts, nil)
-	opts.Workspace = ""
-	unrooted := newModel(context.Background(), &fakeEngine{}, opts, nil)
 
 	cases := []struct {
-		name string
-		m    Model
-		path string
-		want string
+		name      string
+		workspace string
+		path      string
+		want      string
 	}{
-		{"relative", linked, "src/a.go", "src/a.go"},
-		{"through the symlinked root", linked, link + "/src/a.go", "src/a.go"},
-		{"through the real root", linked, realRoot + "/src/a.go", "src/a.go"},
-		{"uncleaned through the symlinked root", linked, link + "/src/../src/a.go", "src/a.go"},
-		{"outside the workspace", linked, outsideDir + "/x.go", outsideDir + "/x.go"},
-		{"no workspace, relative", unrooted, "src/./a.go", "src/a.go"},
-		{"no workspace, absolute", unrooted, "/elsewhere/../x.go", "/x.go"},
+		{"relative", link, "src/a.go", "src/a.go"},
+		{"through the symlinked root", link, link + "/src/a.go", "src/a.go"},
+		{"through the real root", link, realRoot + "/src/a.go", "src/a.go"},
+		{"uncleaned through the symlinked root", link, link + "/src/../src/a.go", "src/a.go"},
+		{"outside the workspace", link, outsideDir + "/x.go", outsideDir + "/x.go"},
+		{"no workspace, relative", "", "src/./a.go", "src/a.go"},
+		{"no workspace, absolute", "", "/elsewhere/../x.go", "/x.go"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			opts := testOpts
+			opts.Workspace = tc.workspace
+			m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 
-			got := tc.m.panelWriteKey(tc.path)
+			got := m.panelWriteKey(tc.path)
 
 			if got != tc.want {
 				t.Errorf("panelWriteKey(%q) = %q, want %q", tc.path, got, tc.want)

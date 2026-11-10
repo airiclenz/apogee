@@ -738,30 +738,19 @@ func TestWorkflowsViewPasteLandsInTheNameRow(t *testing.T) {
 // stays open and the name typed so far is kept.
 func TestWorkflowsViewClickIsSwallowedByTheNameRow(t *testing.T) {
 	t.Parallel()
-	base, _, _ := savePaneModel(t, saveFanOutPlan(), "")
-	base = step(t, base, keyCtrlS())
-	for _, r := range "sca" {
-		base = step(t, base, keyRune(r))
-	}
-	if !base.workflowsPane.naming {
-		t.Fatal("precondition: ^s did not open the name row")
-	}
-	paneTop, _, ok := base.frameSpans().pane(paneWorkflows)
-	if !ok {
-		t.Fatal("precondition: the /workflows pane is not on the frame")
-	}
-
 	for _, tc := range []struct {
 		name string
-		x, y int
+		at   func(paneTop int) (x, y int)
 	}{
-		{"outside the box", 0, 0},
-		{"over the pane", 2, paneTop + 1},
+		{"outside the box", func(int) (int, int) { return 0, 0 }},
+		{"over the pane", func(paneTop int) (int, int) { return 2, paneTop + 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			base, paneTop := namingRowModel(t)
+			x, y := tc.at(paneTop)
 
-			after, cmd := stepCmd(t, base, leftClick(tc.x, tc.y))
+			after, cmd := stepCmd(t, base, leftClick(x, y))
 
 			if cmd != nil {
 				t.Errorf("the swallowed click dispatched a Cmd")
@@ -783,6 +772,26 @@ func TestWorkflowsViewClickIsSwallowedByTheNameRow(t *testing.T) {
 			}
 		})
 	}
+}
+
+// namingRowModel is a /workflows detail view with the ^s name row open and "sca" typed into it,
+// plus the frame row the pane's top sits on. Each parallel subtest builds its own: the Model's
+// memos are pointer-held and written on render, so a Model shared across goroutines races (doc.go).
+func namingRowModel(t *testing.T) (Model, int) {
+	t.Helper()
+	m, _, _ := savePaneModel(t, saveFanOutPlan(), "")
+	m = step(t, m, keyCtrlS())
+	for _, r := range "sca" {
+		m = step(t, m, keyRune(r))
+	}
+	if !m.workflowsPane.naming {
+		t.Fatal("precondition: ^s did not open the name row")
+	}
+	paneTop, _, ok := m.frameSpans().pane(paneWorkflows)
+	if !ok {
+		t.Fatal("precondition: the /workflows pane is not on the frame")
+	}
+	return m, paneTop
 }
 
 // The name row's buffer sits behind a copyOnWriteField: a Model snapshot taken AFTER the first

@@ -34,7 +34,6 @@ func pressList(m Model, l *listSurface, msg tea.KeyPressMsg, rows []popupRow, wr
 // pair: a merge that dropped the flag would keep half of them passing.
 func TestListSurfaceArrowsAnswerTheEndsByTheWrapFlag(t *testing.T) {
 	t.Parallel()
-	m := newTestModel(t)
 	rows := listTestRows("first", "second", "third")
 
 	cases := []struct {
@@ -55,6 +54,7 @@ func TestListSurfaceArrowsAnswerTheEndsByTheWrapFlag(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			m := newTestModel(t)
 			l := listSurface{listCursor: listCursor{selected: tc.from}}
 			if got := pressList(m, &l, tc.key, rows, tc.wrap); got != listSwallowed {
 				t.Fatalf("verdict = %v, want the modal to keep an arrow", got)
@@ -72,7 +72,6 @@ func TestListSurfaceArrowsAnswerTheEndsByTheWrapFlag(t *testing.T) {
 // stepping onto a row the pane never painted.
 func TestListSurfaceArrowsAtTheBottomOfAFilteredList(t *testing.T) {
 	t.Parallel()
-	m := newTestModel(t)
 	// "alpha" prunes "beta" away and leaves rows 0 and 2 of the offering — so the filtered list's
 	// bottom is its index 1, and the offering's is 2.
 	rows := listTestRows("alpha", "beta", "alphabet")
@@ -88,6 +87,7 @@ func TestListSurfaceArrowsAtTheBottomOfAFilteredList(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			m := newTestModel(t)
 			l := listSurface{listCursor: listCursor{selected: 1}, filter: typedFilter(m, "alpha")}
 			if got := len(l.view(rows, matchLeadCell).rows); got != 2 {
 				t.Fatalf("precondition: the filter leaves %d rows, want 2", got)
@@ -108,7 +108,6 @@ func TestListSurfaceArrowsAtTheBottomOfAFilteredList(t *testing.T) {
 // by the modal above.
 func TestListSurfaceVerdictsNameWhatThePaneMustDo(t *testing.T) {
 	t.Parallel()
-	m := newTestModel(t)
 	rows := listTestRows("first", "second")
 
 	cases := []struct {
@@ -128,6 +127,7 @@ func TestListSurfaceVerdictsNameWhatThePaneMustDo(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			m := newTestModel(t)
 			l := listSurface{listCursor: listCursor{selected: tc.from}}
 			if got := pressList(m, &l, tc.key, rows, listWrapsAround); got != tc.want {
 				t.Errorf("verdict = %v, want %v", got, tc.want)

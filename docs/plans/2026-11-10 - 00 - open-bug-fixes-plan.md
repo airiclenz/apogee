@@ -30,7 +30,10 @@
 - 2: guard folded (writer's decision + reviewer guards: t18 receipt constant, Goal narrowed to scenes 4 and 5)
 - 3: guard folded (writer's decision + reviewer guards: indicator-glyph condition, esc tail kept, three call sites in two tests, Acceptance check for the Goal's no-WaitQuiet clause)
 
-## 1. Parallel tui subtests stop sharing a parent-built Model
+## 1. Parallel tui subtests stop sharing a parent-built Model — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): a go/types sweep of internal/tui (every t.Run FuncLit that calls t.Parallel, flagging any variable declared outside it whose type holds a tui.Model) found exactly the five plan-named sites before the fix and none after; the issue's other reported tests were collateral of the same race.
+NOTES (2026-11-10): the workflows case table now carries `at func(paneTop int) (x, y int)` and a new `namingRowModel` helper builds the Model and paneTop inside each subtest; TestPanelWriteKeyUnderSymlinkedRoot's cases carry the workspace string instead of a Model.
 
 **What:** Fixes bug `prompt-rowcount-memo-race` (exposed by `f65794ae`): `TestWorkflowsViewClickIsSwallowedByTheNameRow` builds `base` in the parent and two `t.Parallel()` subtests each run `stepCmd(t, base, …)`; the Model's pointer-held memos (`promptEditor.rowCount`, `transcript.paints`) are then written from two goroutines.
 

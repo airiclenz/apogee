@@ -1273,6 +1273,16 @@
 // strings.Builder case structurally — the behaviour is address-dependent and a behavioural
 // test cannot reliably reproduce the panic.
 //
+// Invariant — a parallel subtest never shares a parent-built Model. The flip side of that copy:
+// the Model's render memos (the prompt editor's rowCountMemo, the transcript's paint cache, …)
+// are held by pointer so every copy shares them, and they carry no locks because production
+// renders on the single Update goroutine. A test that builds a Model in the parent and hands it
+// to subtests that call t.Parallel() — stepping it, rendering it or reading it through a method —
+// writes those memos from several goroutines at once, and the race detector reports it. Each
+// parallel subtest builds its own Model (a helper called inside the subtest, not a value closed
+// over or carried in the case table); plain data a case only reads — paths, rows, strings — may
+// still come from the parent.
+//
 // Invariant — the theme's styles are shared and immutable. The same copy that makes a Builder
 // dangerous makes a large value expensive: every byte the Model holds by value is copied on every
 // Update. The [theme]'s lipgloss styles are most of what it would otherwise hold, so they live in
