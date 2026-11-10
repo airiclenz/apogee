@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/testtime"
 )
 
 const okJSON = `{"choices":[{"message":{"content":"recovered"},"finish_reason":"stop"}]}`
@@ -416,6 +418,29 @@ func TestStatusError_EmptyBodyNamesTheStatus(t *testing.T) {
 	})
 }
 
+// TestStatusError_Loading503WithRetriesOffPostsOnce pins WithMaxRetries(0) as one POST whatever
+// the reply: a loading server's 503 is not waited out with retries off — the naming call relies on
+// it — and surfaces at once, its body quoted, on both surfaces.
+func TestStatusError_Loading503WithRetriesOffPostsOnce(t *testing.T) {
+	t.Parallel()
+
+	srv, calls := scriptedServer(t, writeLoadingReply)
+	client := NewClient(srv.URL, "m", WithMaxRetries(0))
+
+	_, err := client.Respond(context.Background(), Request{})
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || statusErr.Code != http.StatusServiceUnavailable || !strings.Contains(statusErr.Body, "Loading model") {
+		t.Errorf("Respond error = %v, want a 503 StatusError quoting the Loading model body", err)
+	}
+	deltas := collectStream(client, Request{})
+	if len(deltas) != 1 || deltas[0].Kind != DeltaError || !strings.Contains(deltas[0].Err, "Loading model") {
+		t.Errorf("deltas = %+v, want exactly one DeltaError quoting the body", deltas)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("server calls = %d, want 2 — one POST per call", n)
+	}
+}
+
 func TestRespond_GenericBadRequestNotRetried(t *testing.T) {
 	t.Parallel()
 
@@ -473,5 +498,308 @@ func TestRespond_SendsAuthHeader(t *testing.T) {
 	}
 	if gotAuth != "Bearer tok" {
 		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer tok")
+	}
+}
+
+// loadingReplyBody is what llama-server answers a request made while its model is still loading,
+// with HTTP 503.
+const loadingReplyBody = `{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}`
+
+// loadedSSE is the streamed reply a server gives once its model is loaded.
+const loadedSSE = "data: {\"choices\":[{\"delta\":{\"content\":\"loaded\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+
+// writeLoadingReply answers w with llama-server's loading reply.
+func writeLoadingReply(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = io.WriteString(w, loadingReplyBody)
+}
+
+// writeLoadedSSE answers w with loadedSSE.
+func writeLoadedSSE(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = io.WriteString(w, loadedSSE)
+}
+
+// scriptedServer answers its n-th POST (1-based) with the n-th reply of script, and every POST
+// past the script with its last reply, counting them all.
+func scriptedServer(t *testing.T, script ...func(http.ResponseWriter)) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		n := int(calls.Add(1))
+		script[min(n, len(script))-1](w)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+// repeated is reply n times, for a scriptedServer script.
+func repeated(n int, reply func(http.ResponseWriter)) []func(http.ResponseWriter) {
+	out := make([]func(http.ResponseWriter), n)
+	for i := range out {
+		out[i] = reply
+	}
+	return out
+}
+
+// loadingPacing scales the wait on a loading server for a test: a hold-off of base doubling to
+// ceiling, given up once backstop has passed.
+func loadingPacing(base, ceiling, backstop time.Duration) Option {
+	return func(c *Client) {
+		c.loadingBase, c.loadingCap, c.loadingBackstop = base, ceiling, backstop
+	}
+}
+
+// TestRespond_Loading503IsWaitedOutPastTheRetryLadder pins the patient wait on a server still
+// loading its model: eight loading replies — past the 0.6 s the 200ms·2ⁿ ladder gives up on — and
+// then the answer, which Respond returns.
+func TestRespond_Loading503IsWaitedOutPastTheRetryLadder(t *testing.T) {
+	t.Parallel()
+
+	okReply := func(w http.ResponseWriter) { _, _ = io.WriteString(w, okJSON) }
+	srv, calls := scriptedServer(t, append(repeated(8, writeLoadingReply), okReply)...)
+	client := NewClient(srv.URL, "m",
+		loadingPacing(testtime.Fixed(20*time.Millisecond), testtime.Fixed(100*time.Millisecond), testtime.Budget(time.Minute)))
+
+	began := time.Now()
+	got, err := client.Respond(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Respond: %v — the loading server was given up on", err)
+	}
+	if got.Content != "recovered" {
+		t.Errorf("Content = %q, want recovered", got.Content)
+	}
+	if n := calls.Load(); n != 9 {
+		t.Errorf("server calls = %d, want 9 (eight loading replies, then the answer)", n)
+	}
+	if waited := time.Since(began); waited < testtime.Fixed(600*time.Millisecond) {
+		t.Errorf("the wait took %v, want past the 0.6 s the retry ladder spans", waited)
+	}
+}
+
+// TestStream_Loading503IsSaidOnceAndRecordedOncePerWait pins the stream's view of the wait: one
+// DeltaLoadingWait per call, ahead of every attempt, even when the server flaps out of loading
+// (a 500 the short ladder retries) and back into it; and one DeltaAttempt per wait, not per
+// re-send, with the re-send that ended each wait opening an attempt of its own.
+func TestStream_Loading503IsSaidOnceAndRecordedOncePerWait(t *testing.T) {
+	t.Parallel()
+
+	serverError := func(w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) }
+	script := append(repeated(3, writeLoadingReply), serverError)
+	script = append(script, repeated(2, writeLoadingReply)...)
+	script = append(script, writeLoadedSSE)
+	srv, calls := scriptedServer(t, script...)
+	client := identified(srv, WithRetryBaseDelay(time.Millisecond),
+		loadingPacing(testtime.Fixed(5*time.Millisecond), testtime.Fixed(10*time.Millisecond), testtime.Budget(time.Minute)))
+
+	deltas := collectStream(client, Request{})
+
+	if len(deltas) == 0 || deltas[0].Kind != DeltaLoadingWait {
+		t.Fatalf("deltas = %+v, want the DeltaLoadingWait first", deltas)
+	}
+	attempts, kinds := attemptsOf(deltas)
+	waits := 0
+	var content string
+	for _, d := range deltas {
+		if d.Kind == DeltaLoadingWait {
+			waits++
+		}
+		content += d.Content
+	}
+	if waits != 1 {
+		t.Errorf("DeltaLoadingWait yielded %d times, want once per call", waits)
+	}
+	if content != "loaded" || kinds[len(kinds)-1] != DeltaDone {
+		t.Errorf("content %q, kinds %v; want the loaded reply ending on Done", content, kinds)
+	}
+	var outcomes []string
+	for i, a := range attempts {
+		outcomes = append(outcomes, a.Outcome)
+		if a.Index != i {
+			t.Errorf("attempt %d carries Index %d", i, a.Index)
+		}
+	}
+	want := []string{"http_503", "http_500", "http_503", AttemptOK}
+	if strings.Join(outcomes, ",") != strings.Join(want, ",") {
+		t.Errorf("attempt outcomes = %v, want %v — one per wait, one per other reply", outcomes, want)
+	}
+	if n := calls.Load(); n != 7 {
+		t.Errorf("server calls = %d, want 7", n)
+	}
+}
+
+// TestStream_Loading503PastTheBackstopQuotesTheBody pins the backstop: a server that never
+// finishes loading is given up on once the backstop has passed, and the last loading reply is the
+// terminal fault, its "Loading model" body quoted as statusDelta quotes any status's — on Respond
+// too — and recorded as the one attempt the wait was.
+func TestStream_Loading503PastTheBackstopQuotesTheBody(t *testing.T) {
+	t.Parallel()
+
+	srv, calls := scriptedServer(t, writeLoadingReply)
+	pacing := loadingPacing(testtime.Fixed(10*time.Millisecond), testtime.Fixed(20*time.Millisecond), testtime.Fixed(150*time.Millisecond))
+
+	deltas := collectStream(identified(srv, pacing), Request{})
+	last := deltas[len(deltas)-1]
+	if last.Kind != DeltaError || !strings.Contains(last.Err, "Loading model") || !strings.Contains(last.Err, "503") {
+		t.Fatalf("terminal delta = %+v, want a DeltaError quoting the 503's Loading model body", last)
+	}
+	if last.Fault.Class != FaultStatus || last.Fault.Code != http.StatusServiceUnavailable {
+		t.Errorf("Fault = %+v, want the 503 status", last.Fault)
+	}
+	if attempts, _ := attemptsOf(deltas); len(attempts) != 1 || attempts[0].Outcome != "http_503" {
+		t.Errorf("attempts = %+v, want the one http_503 attempt the wait was", attempts)
+	}
+	if n := calls.Load(); n < 4 {
+		t.Errorf("server calls = %d, want the wait to have re-sent until the backstop", n)
+	}
+
+	_, err := NewClient(srv.URL, "m", pacing).Respond(context.Background(), Request{})
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || statusErr.Code != http.StatusServiceUnavailable || !strings.Contains(statusErr.Body, "Loading model") {
+		t.Errorf("Respond error = %v, want a 503 StatusError quoting the Loading model body", err)
+	}
+}
+
+// TestStream_Loading503CancelledMidWaitReturnsAtOnce pins that the wait is the caller's to end: a
+// cancel during a hold-off far longer than any test returns the call at once, as a fault.
+func TestStream_Loading503CancelledMidWaitReturnsAtOnce(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, calls := scriptedServer(t, func(w http.ResponseWriter) {
+		writeLoadingReply(w)
+		cancel()
+	})
+	client := identified(srv, loadingPacing(time.Hour, time.Hour, 24*time.Hour))
+
+	done := make(chan []Delta, 1)
+	go func() {
+		var deltas []Delta
+		for d := range client.Stream(ctx, Request{}) {
+			deltas = append(deltas, d)
+		}
+		done <- deltas
+	}()
+	select {
+	case deltas := <-done:
+		last := deltas[len(deltas)-1]
+		if last.Kind != DeltaError {
+			t.Errorf("terminal delta = %+v, want a DeltaError for the cancel", last)
+		}
+		if attempts, _ := attemptsOf(deltas); len(attempts) != 1 || attempts[0].Outcome != AttemptCancelled {
+			t.Errorf("attempts = %+v, want the one wait, cancelled", attempts)
+		}
+	case <-time.After(testtime.Budget(10 * time.Second)):
+		t.Fatal("the cancelled wait did not return")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("server calls = %d, want 1", n)
+	}
+}
+
+// TestStream_Loading503ConsumerBreakStopsTheCall pins that a consumer breaking on the wait's
+// Delta ends the call there: no further POST, nothing more yielded.
+func TestStream_Loading503ConsumerBreakStopsTheCall(t *testing.T) {
+	t.Parallel()
+
+	srv, calls := scriptedServer(t, writeLoadingReply)
+	client := identified(srv, loadingPacing(time.Millisecond, time.Millisecond, testtime.Budget(time.Minute)))
+
+	var seen []DeltaKind
+	for d := range client.Stream(context.Background(), Request{}) {
+		seen = append(seen, d.Kind)
+		break
+	}
+	if len(seen) != 1 || seen[0] != DeltaLoadingWait {
+		t.Errorf("deltas before the break = %v, want the DeltaLoadingWait", seen)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("server calls = %d, want 1 — the call stops where its consumer did", n)
+	}
+}
+
+// TestRespond_RetryLadderHoldsForEveryOther5xx pins that the wait fires on the loading reply
+// alone: a 500 carrying the same words and a 503 with any other body keep the short ladder —
+// three POSTs and the fault.
+func TestRespond_RetryLadderHoldsForEveryOther5xx(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "500 saying loading", status: http.StatusInternalServerError, body: loadingReplyBody},
+		{name: "503 overloaded", status: http.StatusServiceUnavailable, body: "server overloaded"},
+		{name: "503 empty", status: http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv, calls := scriptedServer(t, func(w http.ResponseWriter) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			})
+			client := NewClient(srv.URL, "m", WithRetryBaseDelay(time.Millisecond),
+				loadingPacing(time.Hour, time.Hour, 24*time.Hour))
+
+			if _, err := client.Respond(context.Background(), Request{}); err == nil {
+				t.Fatal("Respond succeeded against a failing server")
+			}
+			if n := calls.Load(); n != 3 {
+				t.Errorf("server calls = %d, want 3 — the ladder, not the wait", n)
+			}
+		})
+	}
+}
+
+// TestStream_Loading503YieldedToAFallbackKeepsTheLadder pins Request.SkipLoadingWait: a seat whose
+// bound entry names a fallback list gets the short ladder on the loading reply, so the fault
+// reaches its resolver and the `fallback-after:` grace governs.
+func TestStream_Loading503YieldedToAFallbackKeepsTheLadder(t *testing.T) {
+	t.Parallel()
+
+	srv, calls := scriptedServer(t, writeLoadingReply)
+	client := NewClient(srv.URL, "m", WithRetryBaseDelay(time.Millisecond),
+		loadingPacing(time.Hour, time.Hour, 24*time.Hour))
+
+	deltas := collectStream(client, Request{SkipLoadingWait: true})
+	for _, d := range deltas {
+		if d.Kind == DeltaLoadingWait {
+			t.Errorf("a call that yields the wait announced one: %+v", deltas)
+		}
+	}
+	if last := deltas[len(deltas)-1]; last.Kind != DeltaError || !strings.Contains(last.Err, "Loading model") {
+		t.Errorf("terminal delta = %+v, want the loading reply surfaced", last)
+	}
+	if n := calls.Load(); n != 3 {
+		t.Errorf("server calls = %d, want 3 — the ladder, not the wait", n)
+	}
+}
+
+// TestStream_Loading503ReArmsTheHeaderIdleWindow pins that a loading reply is not silence: a wait
+// that runs well past the pre-header idle window is not cut by it, because each loading reply
+// re-arms the window.
+func TestStream_Loading503ReArmsTheHeaderIdleWindow(t *testing.T) {
+	t.Parallel()
+
+	const polls = 12
+	srv, calls := scriptedServer(t, append(repeated(polls, writeLoadingReply), writeLoadedSSE)...)
+	window := testtime.Fixed(300 * time.Millisecond)
+	client := NewClient(srv.URL, "m", WithStreamIdleTimeout(window),
+		loadingPacing(testtime.Fixed(50*time.Millisecond), testtime.Fixed(50*time.Millisecond), testtime.Budget(time.Minute)))
+
+	began := time.Now()
+	deltas := collectStream(client, Request{})
+	if waited := time.Since(began); waited < window {
+		t.Fatalf("the wait took %v, want past the %v idle window for the pin to bite", waited, window)
+	}
+	if last := deltas[len(deltas)-1]; last.Kind != DeltaDone {
+		t.Errorf("terminal delta = %+v, want Done — the idle window cut the wait", last)
+	}
+	if n := calls.Load(); n != polls+1 {
+		t.Errorf("server calls = %d, want %d", n, polls+1)
 	}
 }

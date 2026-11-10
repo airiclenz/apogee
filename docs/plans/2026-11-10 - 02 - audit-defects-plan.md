@@ -156,7 +156,17 @@ NOTES (2026-11-10): consequential edit — docs/manual/configuration.md: made ne
 **Acceptance:** `go test -race -count=1 ./internal/userexec/`
 **Commit:** `fix(userexec): a command that exited is not "could not run" when a child holds its pipe`
 
-## 7. The provider waits out a loading server's 503s
+## 7. The provider waits out a loading server's 503s — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): re-derived from "the predicate is a Request field or ctx carried by loop.go": `provider.Request` lives in internal/provider/wire.go, so the new `SkipLoadingWait` field is there. loop.go answers it (`yieldsLoadingWait`), and the one request projection, `toProviderRequest` in internal/agent/wire.go, sets it, so the compaction summarizer's call carries it too. The engine asks a new optional `FallbackListNamer` interface, declared beside `FallbackLandingJoiner` in internal/agent/agent.go. A resolver without it is read as naming a fallback.
+NOTES (2026-11-10): consequential edit — apogee.go: made necessary by the new agent.FallbackListNamer, which gets a facade alias beside FallbackLandingJoiner's.
+NOTES (2026-11-10): consequential edit — docs/manual/configuration.md: made necessary by the loading wait, which changes how a loading server's 503 behaves for users. Added a paragraph to the `fallback:` section.
+NOTES (2026-11-10): deviation — the peeked loading-reply body is restored as `{MultiReader(peeked, rest), original Closer}`, not `io.NopCloser(...)` as the item text says. A NopCloser would never close the response body and would leak the connection.
+NOTES (2026-11-10): deviation — the recorder's `begin` now takes the send time and numbers attempts itself, because a wait is one attempt however many POSTs it makes. The re-send that ends a wait opens the next attempt, timed from its own send.
+NOTES (2026-11-10): deviation — the 10-minute backstop runs from the call's first wait, and DeltaLoadingWait is yielded only for that first wait. A server that flaps between the loading reply and another 5xx cannot restart either one.
+NOTES (2026-11-10): deviation — sessionFallback.NamesFallback also answers true while a resolver is current (built for an entry with `fallback:`). Its walk still governs after it moves the seat onto a fallback that names none.
+NOTES (2026-11-10): tests live in reliability_test.go (provider), fallback_test.go (agent) and fallback_test.go (cmd/apogee). The plan's Files list named client_test.go and no agent or cmd test file.
+NOTES (2026-11-10): the pre-header idle window is re-armed on each loading reply as specified. A user-set `stream-idle-timeout:` shorter than the 8 s hold-off cap can still cut the wait, between two loading replies.
 
 **What:** Recast at the regression check (2026-11-10).
 **Goal:** a 503 whose body is the llama-server loading reply is retried inside `send` with 1 s backoff doubling to an 8 s cap until it succeeds, ctx is cancelled, or 10 minutes pass; any other 503/5xx, maxRetries 0, or a seat whose bound entry names `fallback:`, retries as at base.

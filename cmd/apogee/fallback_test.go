@@ -1091,3 +1091,49 @@ func TestFallbackResolverLandsTheTargetForCancelledCallers(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadingWaitYieldsOnlyOnAnEntryNamingFallback pins the Driver's answer to the engine's
+// FallbackListNamer, which decides whether a server still loading its model is waited out: the TUI
+// installs a session resolver on every entry, yet only an entry naming a `fallback:` list yields
+// the wait — or a seat whose resolver is current, still walking that list after it moved — and a
+// Firing or Sub-agents seat's resolver exists only for such an entry.
+func TestLoadingWaitYieldsOnlyOnAnEntryNamingFallback(t *testing.T) {
+	t.Parallel()
+
+	primary := config.ServerEntry{Name: "primary", Endpoint: "http://127.0.0.1:1", Model: "primary-model",
+		Fallback: config.NewFallbackList("backup")}
+	backup := config.ServerEntry{Name: "backup", Endpoint: "http://127.0.0.1:2", Model: "backup-model"}
+	opts := config.Options{ContextWindow: 131072, WorkingWindow: 65536, ResponseReserve: 0.4,
+		Servers: []config.ServerEntry{primary, backup}}
+	live := newLiveSettings(opts, config.ProjectOffer{})
+	holder := newUpstreamHolder()
+	dial := bindingOfEntry(primary, "")
+	holder.Bind(dial, dial.Monitor())
+	session := newSessionFallback(live, holder, config.NewKeyResolver(""), stateRoots{config: t.TempDir(), probe: t.TempDir()})
+	var namer apogee.FallbackListNamer = session
+
+	live.followEntry(backup)
+	if namer.NamesFallback() {
+		t.Error("a session on an entry naming no fallback yields the wait — a resolver is installed regardless, and must not count")
+	}
+	live.followEntry(primary)
+	if !namer.NamesFallback() {
+		t.Error("a session on an entry naming a fallback waits, where the fallback-after grace should govern")
+	}
+	if session.resolver() == nil {
+		t.Fatal("no resolver was built for an entry naming a fallback")
+	}
+	live.followEntry(backup)
+	if !namer.NamesFallback() {
+		t.Error("a session the resolver moved onto backup waits, though that resolver still walks the primary's list")
+	}
+	session.rearm()
+	if namer.NamesFallback() {
+		t.Error("a session a human moved onto an entry naming no fallback still yields the wait")
+	}
+
+	seat := newSeatResolver(subAgentsSeat, seatSource{primary: primary})
+	if seat == nil || !seat.NamesFallback() {
+		t.Error("a seat resolver, built only for an entry naming a fallback, does not yield the wait")
+	}
+}

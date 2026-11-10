@@ -146,6 +146,12 @@ type FallbackResolver = agent.FallbackResolver
 // without it gets no post-cancel re-latch. See internal/agent for the contract.
 type FallbackLandingJoiner = agent.FallbackLandingJoiner
 
+// FallbackListNamer is the optional half of a FallbackResolver that says whether the seat's bound
+// server entry names a non-empty `fallback:` list: when it does, a server still loading its model
+// is not waited out, and the resolver's `fallback-after:` grace governs. A resolver without it is
+// read as naming one. See internal/agent for the contract.
+type FallbackListNamer = agent.FallbackListNamer
+
 // FallbackReport is what the engine tells a FallbackResolver about the fault it would abandon a
 // Turn for.
 type FallbackReport = agent.FallbackReport

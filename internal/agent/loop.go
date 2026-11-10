@@ -795,6 +795,19 @@ func (a *Agent) consultFallback(ctx context.Context, t *turnRun, reply completio
 	return fallbackResend
 }
 
+// yieldsLoadingWait reports whether this Agent's requests yield the provider's wait on a server
+// still loading its model to the seat's fallback resolver (provider.Request.SkipLoadingWait):
+// only when the seat's bound server entry names a non-empty `fallback:` list (FallbackListNamer),
+// never merely because a resolver is installed — the TUI installs one on every session. With no
+// resolver the request waits; a resolver that cannot say is read as naming one.
+func (a *Agent) yieldsLoadingWait() bool {
+	if a.seating.fallback == nil {
+		return false
+	}
+	namer, ok := a.seating.fallback.(FallbackListNamer)
+	return !ok || namer.NamesFallback()
+}
+
 // applyRetry prepares the Turn's next attempt for a retry the caller has already counted, and is
 // the ONE place a re-stream is set up: a Floor guard's retry and a post-response Reaction's Outcome{Retry}
 // take it identically, because the two differ only in who asked.

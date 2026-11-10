@@ -529,6 +529,12 @@ func (s *seatResolver) land(ctx context.Context, name string) (apogee.FallbackAn
 	return landing.answer, true
 }
 
+// NamesFallback answers the engine's FallbackListNamer: always true, since a seatResolver exists
+// only for a primary that names a `fallback:` list (newSeatResolver), and once it has landed it
+// walks the rest of that list. A server still loading its model is then not waited out — the
+// `fallback-after:` grace governs (ADR 0105).
+func (s *seatResolver) NamesFallback() bool { return true }
+
 // latestLanding is the last landing the seat's walk made, false until it has made one.
 func (s *seatResolver) latestLanding() (fallbackLanding, bool) {
 	s.latestMu.Lock()
@@ -664,6 +670,23 @@ func (f *sessionFallback) resolver() *seatResolver {
 		},
 	})
 	return f.current
+}
+
+// NamesFallback answers the engine's FallbackListNamer for the TUI session seat, whose resolver is
+// installed whatever entry the session is on: true while a resolver is current — built at a fault
+// on an entry that named a `fallback:` list, so its walk still governs after it moved the seat —
+// and otherwise whether the entry the session is bound to now names one. Only then does a server
+// still loading its model go unwaited, the `fallback-after:` grace governing (ADR 0105); a session
+// on an entry with no `fallback:` waits the load out.
+func (f *sessionFallback) NamesFallback() bool {
+	f.mu.Lock()
+	current := f.current
+	f.mu.Unlock()
+	if current != nil {
+		return true
+	}
+	entry, ok := f.bound()
+	return ok && len(entry.Fallback.Names()) > 0
 }
 
 // routedLander is the session seat's lander turned to the Sub-agents seat (delegationWiring's

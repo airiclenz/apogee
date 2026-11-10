@@ -100,6 +100,14 @@ type Request struct {
 	// one.
 	ThinkingEffort Effort
 
+	// SkipLoadingWait yields the wait on a server still loading its model to a fallback resolver:
+	// the 503 loading reply then retries on the short ladder like any other 5xx, and the fault that
+	// ladder ends on reaches the resolver, whose `fallback-after:` grace governs (ADR 0105). The
+	// loop sets it when the seat's bound server entry names a non-empty `fallback:` list; false —
+	// the zero value, every other caller's — lets the Client wait the load out (Client "Retry
+	// policy"). It never reaches the wire.
+	SkipLoadingWait bool
+
 	// EffortDialect selects which wire shape expresses ThinkingEffort on this server. It is the
 	// semantic per-server seam that keeps the intent above dialect-free: the loop says how hard
 	// to think, this says which endpoint is listening, and the Client owns the mapping between

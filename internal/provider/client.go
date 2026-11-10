@@ -73,6 +73,17 @@ const (
 	defaultMaxRetries     = 2
 	defaultRetryBaseDelay = 200 * time.Millisecond
 
+	// loadingRetryBase, loadingRetryCap and loadingBackstop pace the wait on a server still
+	// loading its model (llama-server's 503 loading reply, isLoadingReply): the request is re-sent
+	// after loadingRetryBase, the hold-off doubling to loadingRetryCap, until a reply that is not
+	// the loading reply arrives, the caller's ctx ends, or loadingBackstop has passed since the
+	// call's first wait began. A large model on a slow box takes minutes to load, which the
+	// 200ms·2ⁿ ladder above gives up on in 0.6 s (loading-server-503-giveup); ten minutes is the
+	// default stream idle window, so a wait never outlives the bound a silent server gets.
+	loadingRetryBase = 1 * time.Second
+	loadingRetryCap  = 8 * time.Second
+	loadingBackstop  = 10 * time.Minute
+
 	// defaultStreamIdleTimeout is how long Stream lets an upstream sit silent — before its
 	// headers or between two body reads — before cutting it as a retryable fault. Ten minutes
 	// clears every remote provider's keep-alive cadence and most local prefills; a local server
@@ -160,7 +171,11 @@ func upstreamStatusText(code int, body, location string) string {
 // that long, up to maxRetryAfter — a longer one is surfaced as an error at once rather than
 // blocking the turn on a long ban. Without the header the wait is exponential, base·2ⁿ, off
 // the Client's configured base for transport faults and 5xx and off the slower
-// retry429BaseDelay for a 429. Every wait is cancellable by the caller's context.
+// retry429BaseDelay for a 429. The one exception is a server still loading its model — the 503
+// whose body is llama-server's loading reply (isLoadingReply): that one is waited out
+// patiently, re-sent at loadingRetryBase doubling to loadingRetryCap for up to loadingBackstop,
+// unless retries are off (WithMaxRetries(0)) or the request yields the wait to a fallback
+// resolver (Request.SkipLoadingWait). Every wait is cancellable by the caller's context.
 //
 // One Client is safe for concurrent Respond/Stream calls
 // (it holds no per-request state) and for a concurrent SetModel; cancellation is via the
@@ -210,6 +225,13 @@ type Client struct {
 	// identity is the server entry WithServerIdentity stamped; nil ⇒ Stream measures no
 	// attempts and yields no DeltaAttempt.
 	identity *serverIdentity
+
+	// loadingBase, loadingCap and loadingBackstop pace the wait on a loading server (awaitLoaded):
+	// loadingRetryBase, loadingRetryCap and loadingBackstop, set by NewClient. They are fields
+	// rather than the constants read directly only so this package's tests can scale the wait.
+	loadingBase     time.Duration
+	loadingCap      time.Duration
+	loadingBackstop time.Duration
 }
 
 // wireCodec is the protocol-specific half of a Client: one implementation per Wire, selected
@@ -278,7 +300,9 @@ func WithWire(w Wire) Option { return func(c *Client) { c.wire = w } }
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClient = h } }
 
 // WithMaxRetries sets how many times a retryable attempt is re-tried (default 2 ⇒ up to
-// 3 attempts). Zero disables retries.
+// 3 attempts). Zero disables retries, the wait on a loading server's 503 included. The budget
+// does not bound that wait: a loading reply is re-sent until the server answers otherwise or
+// loadingBackstop passes, and the reply that ends the wait goes on to the remaining budget.
 func WithMaxRetries(n int) Option { return func(c *Client) { c.maxRetries = n } }
 
 // WithRetryBaseDelay sets the base backoff for transport faults and 5xx replies; attempt n
@@ -393,6 +417,9 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 		maxRetries:        defaultMaxRetries,
 		retryBaseDelay:    defaultRetryBaseDelay,
 		streamIdleTimeout: defaultStreamIdleTimeout,
+		loadingBase:       loadingRetryBase,
+		loadingCap:        loadingRetryCap,
+		loadingBackstop:   loadingBackstop,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -484,7 +511,7 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 		return RawResponse{}, fmt.Errorf("apogee: marshal request: %w", err)
 	}
 
-	resp, cancel, err := c.send(ctx, body, c.requestTimeout, nil)
+	resp, cancel, err := c.send(ctx, body, c.requestTimeout, nil, &loadingWait{skip: req.SkipLoadingWait})
 	if err != nil {
 		return RawResponse{}, err
 	}
@@ -540,11 +567,13 @@ func (c *Client) encode(req Request) (body []byte, sent sentRequest, err error) 
 // A retryable reply's Retry-After header sets the wait when it is at most maxRetryAfter,
 // and ends the retries outright when it is longer — the response is handed back so the
 // caller surfaces it as the final error instead of the turn hanging on a long ban.
+// A server still loading its model is waited out instead of retried (awaitLoaded), as wait
+// allows; the reply that ends that wait is then judged like any other attempt's.
 // attemptTimeout > 0 bounds each attempt so a stuck attempt becomes retryable without
 // touching the caller's context — but it must outlive the body read, so it rides the
 // returned cancel rather than a local defer. rec, when non-nil, is told where each attempt
 // begins and handed every attempt send abandons; the attempt it returns is the caller's to end.
-func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Duration, rec *attemptRecorder) (*http.Response, context.CancelFunc, error) {
+func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Duration, rec *attemptRecorder, wait *loadingWait) (*http.Response, context.CancelFunc, error) {
 	url := c.baseURL + c.codec.path()
 
 	// One request record per call, not per attempt: every retry posts these same bytes, and
@@ -552,17 +581,24 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 	c.observeWire(WireRequest, body)
 
 	var lastErr error
-	var wait time.Duration // how long to hold off before the next attempt, set by the failed one
+	var holdOff time.Duration // how long to hold off before the next attempt, set by the failed one
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
-			if err := sleepCtx(ctx, wait); err != nil {
+			if err := sleepCtx(ctx, holdOff); err != nil {
 				return nil, nil, err
 			}
 		}
 
-		rec.begin(attempt)
+		rec.begin(time.Now())
 		attemptCtx, cancel := c.attemptContext(ctx, attemptTimeout)
 		resp, err := c.do(attemptCtx, url, body)
+		if err == nil && c.waitsOnLoading(wait) && isLoadingReply(resp) {
+			var final bool
+			resp, cancel, final, err = c.awaitLoaded(ctx, url, body, attemptTimeout, rec, wait, resp, cancel)
+			if final {
+				return resp, cancel, err
+			}
+		}
 		if err != nil {
 			cancel()
 			if ctx.Err() != nil {
@@ -571,7 +607,7 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 			}
 			rec.abandon(0, err, false)
 			lastErr = err
-			wait = c.retryDelay(0, attempt+1)
+			holdOff = c.retryDelay(0, attempt+1)
 			continue // transport/timeout fault — retry if budget remains
 		}
 		if isRetryableStatus(resp.StatusCode) && attempt < c.maxRetries {
@@ -585,9 +621,9 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 			cancel()
 			rec.abandon(resp.StatusCode, nil, false)
 			if ok {
-				wait = after
+				holdOff = after
 			} else {
-				wait = c.retryDelay(resp.StatusCode, attempt+1)
+				holdOff = c.retryDelay(resp.StatusCode, attempt+1)
 			}
 			lastErr = fmt.Errorf("apogee: upstream HTTP %d", resp.StatusCode)
 			continue
@@ -595,6 +631,124 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 		return resp, cancel, nil
 	}
 	return nil, nil, fmt.Errorf("apogee: upstream unreachable after %d attempts: %w", c.maxRetries+1, lastErr)
+}
+
+// loadingWait is one call's part in waiting out a server still loading its model (awaitLoaded):
+// whether the call may wait at all, what the caller is told as the wait runs, and when the call's
+// first wait began. The backstop runs from that first start, so a server that flaps between its
+// loading reply and another fault cannot restart it, and the caller hears of the wait once.
+type loadingWait struct {
+	// skip is Request.SkipLoadingWait: the call yields the wait to a fallback resolver's grace.
+	skip bool
+	// started runs once per call, as its first wait begins; false stops the call — Stream's
+	// consumer broke on the wait's Delta. nil runs nothing and goes on.
+	started func() bool
+	// replied runs on every loading reply the wait receives — Stream re-arms its pre-header idle
+	// window, since a reply is not silence. nil runs nothing.
+	replied func()
+	// since is when the call's first wait began; zero until one has.
+	since time.Time
+}
+
+// errCallStopped ends a call whose consumer broke on the loading wait's Delta: nothing more may
+// be yielded, so Stream reads it as a stop and never renders it.
+var errCallStopped = errors.New("apogee: the stream's consumer stopped ranging")
+
+// waitsOnLoading reports whether a loading reply is waited out on this call: never with retries
+// off (WithMaxRetries(0) is one POST, whatever the reply), nor on a call that yields the wait to a
+// fallback resolver.
+func (c *Client) waitsOnLoading(wait *loadingWait) bool {
+	return c.maxRetries > 0 && wait != nil && !wait.skip
+}
+
+// awaitLoaded waits out a server still loading its model. resp is a loading reply, received on the
+// attempt rec has open, and cancel its attempt context. The request is re-sent after a hold-off of
+// loadingBase doubling to loadingCap until a reply that is not the loading reply comes back, ctx
+// ends, or loadingBackstop has passed since the call's first wait began.
+//
+// The whole wait is one attempt to rec, however many re-sends it makes. final reports that the
+// call ends here: with the last loading reply once the backstop has passed — its attempt still
+// open, for the caller to surface as it surfaces any final status — or with an error when ctx
+// ended during the wait or the consumer broke on the wait's Delta. Otherwise the wait ends as an
+// abandoned http_503 attempt, and the re-send that ended it — a response, or the transport error
+// its POST hit — is handed back as a fresh attempt, opened at its send, for send to judge.
+func (c *Client) awaitLoaded(
+	ctx context.Context,
+	url string,
+	body []byte,
+	attemptTimeout time.Duration,
+	rec *attemptRecorder,
+	wait *loadingWait,
+	resp *http.Response,
+	cancel context.CancelFunc,
+) (next *http.Response, nextCancel context.CancelFunc, final bool, err error) {
+	if wait.since.IsZero() {
+		wait.since = time.Now()
+		if wait.started != nil && !wait.started() {
+			drain(resp)
+			cancel()
+			return nil, nil, true, errCallStopped
+		}
+	}
+	holdOff := c.loadingBase
+	for {
+		if wait.replied != nil {
+			wait.replied()
+		}
+		remaining := c.loadingBackstop - time.Since(wait.since)
+		if remaining <= 0 {
+			return resp, cancel, true, nil
+		}
+		drain(resp) // free the connection for reuse before re-sending
+		cancel()
+		if err := sleepCtx(ctx, min(holdOff, remaining)); err != nil {
+			rec.abandon(0, err, true)
+			return nil, nil, true, err
+		}
+		holdOff = min(2*holdOff, c.loadingCap)
+
+		sent := time.Now()
+		pollCtx, pollCancel := c.attemptContext(ctx, attemptTimeout)
+		poll, err := c.do(pollCtx, url, body)
+		if err == nil && isLoadingReply(poll) {
+			resp, cancel = poll, pollCancel
+			continue
+		}
+		rec.abandon(http.StatusServiceUnavailable, nil, false)
+		rec.begin(sent)
+		return poll, pollCancel, false, err
+	}
+}
+
+// loadingReplyMarkers are what llama-server's reply to a request made while its model is still
+// loading carries — a 503 whose body is `{"error":{"code":503,"message":"Loading model",
+// "type":"unavailable_error"}}` — matched case-insensitively.
+var loadingReplyMarkers = []string{"loading model", "unavailable_error"}
+
+// isLoadingReply reports whether resp is a server's "still loading the model" reply: a 503 whose
+// body carries a loadingReplyMarkers member. It peeks at most maxErrorBodyBytes of the body and
+// puts the peeked bytes back in front of the rest, so whoever reads the body next — statusDelta,
+// statusError, drain — reads it whole, and closing it still closes the connection's body.
+func isLoadingReply(resp *http.Response) bool {
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		return false
+	}
+	peeked, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+	resp.Body = restoredBody{Reader: io.MultiReader(bytes.NewReader(peeked), resp.Body), Closer: resp.Body}
+	lower := strings.ToLower(string(peeked))
+	for _, marker := range loadingReplyMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// restoredBody is a response body whose first bytes were read and put back: reads come from the
+// peeked bytes then the rest, and Close closes the original body.
+type restoredBody struct {
+	io.Reader
+	io.Closer
 }
 
 // attemptContext derives the per-attempt context: a timeout child when attemptTimeout > 0,

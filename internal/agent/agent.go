@@ -844,6 +844,19 @@ type FallbackLandingJoiner interface {
 	JoinLanding(ctx context.Context, report FallbackReport) (FallbackAnswer, bool)
 }
 
+// FallbackListNamer is the optional half of a FallbackResolver that tells the engine whether the
+// seat's bound server entry names a non-empty `fallback:` list. A server still loading its model
+// answers 503 with its loading reply, which the provider waits out patiently (up to ten minutes)
+// unless the request yields that wait (provider.Request.SkipLoadingWait); the engine yields it
+// exactly when NamesFallback answers true, so the resolver's own `fallback-after:` grace governs
+// a seat that has somewhere to fall over to, and a seat that has nowhere waits the load out (ADR
+// 0105). It is asked on every request, so it must answer from what it holds, without blocking. A
+// resolver without it is read as naming one — an embedder that installed a resolver meant its
+// grace to govern — and a seat with no resolver never yields the wait.
+type FallbackListNamer interface {
+	NamesFallback() bool
+}
+
 // FallbackReport is what the engine tells a FallbackResolver about the fault it would abandon a
 // Turn for.
 type FallbackReport struct {

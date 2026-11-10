@@ -2667,6 +2667,13 @@ servers:
 a negative length is refused, because a wait of nothing would leave a server that is only
 reloading its model.
 
+**A server still loading its model.** While llama-server loads a model it answers every
+request with a 503 `Loading model` reply. On an entry with no `fallback:`, apogee waits the
+load out instead of failing the Turn: it sends the request again after 1 s, then 2 s, 4 s
+and every 8 s after that, for up to 10 minutes; Esc stops it. On an entry that names a
+`fallback:` list it does not wait: the 503 is retried twice like any other 5xx and then
+starts the move described below, so `fallback-after:` decides how long the server gets.
+
 **What starts a move.** Only a fault that would end the Turn today, and only once the
 [re-stream budget](#the-context-window-and-the-reply-stream) is spent: the server cannot be
 reached, the connection drops, the request times out or the stream goes silent past

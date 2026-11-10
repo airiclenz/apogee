@@ -17,8 +17,9 @@ import (
 // rule — replayedThinking, and a user message's images under the vision rule — projectedImages),
 // the tool menu, the sampling a pre-request hook shaped, and the resolved Thinking effort
 // (resolvedEffort — override ▸ profile ▸ nothing) in the wire dialect the bound SERVER reads it in
-// (a.effortDialect, committed by Rebind — ADR 0060); the provider wire has no carrier for
-// SetExtra fields yet (response_format is a Phase-4 concern).
+// (a.effortDialect, committed by Rebind — ADR 0060), and whether the call yields a loading
+// server's wait to the seat's fallback resolver (yieldsLoadingWait); the provider wire has no
+// carrier for SetExtra fields yet (response_format is a Phase-4 concern).
 func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	st := req.State()
 	msgs := st.Messages
@@ -66,6 +67,9 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 		Sampling:       toProviderSampling(st.Sampling),
 		ThinkingEffort: toProviderEffort(a.resolvedEffort()),
 		EffortDialect:  a.effortDialect,
+		// Per call, so a seat that moved onto an entry with or without a `fallback:` list answers
+		// for the entry it is on now (yieldsLoadingWait).
+		SkipLoadingWait: a.yieldsLoadingWait(),
 	}
 }
 

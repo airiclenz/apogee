@@ -29,7 +29,8 @@ type Attempt struct {
 	// that made them; it is random per call and carries nothing of the request.
 	RequestID string
 	// Index is the attempt's 0-based position within its call: 0 for the first POST, 1 for the
-	// first retry, and so on.
+	// first retry, and so on. A wait on a server still loading its model is one attempt however
+	// many times it re-sent, timed from its first POST to the reply that ended it.
 	Index int
 	// TTFB is send → the first body byte of any kind, an SSE keep-alive comment included; 0 when
 	// no byte was read through the stream (an attempt abandoned for retry, a transport fault).
@@ -140,6 +141,8 @@ type attemptRecorder struct {
 	yield     func(Delta) bool
 	broken    bool // the consumer's yield returned false: nothing may be yielded again
 
+	opened int // how many attempts begin has opened: the next one's index
+
 	// The attempt in flight.
 	index     int
 	start     time.Time
@@ -170,12 +173,15 @@ func (c *Client) newAttemptRecorder(ctx context.Context, req Request, yield func
 	}
 }
 
-// begin opens attempt index, starting its clock at the send.
-func (r *attemptRecorder) begin(index int) {
+// begin opens the call's next attempt — index 0 first, then one more each — starting its clock at
+// start, the moment its POST was sent. A loading server's wait (Client.awaitLoaded) is one attempt
+// however many re-sends it makes, so the index counts attempts as recorded, not POSTs.
+func (r *attemptRecorder) begin(start time.Time) {
 	if r == nil {
 		return
 	}
-	r.index, r.start = index, time.Now()
+	r.index, r.start = r.opened, start
+	r.opened++
 	r.body, r.idle = nil, nil
 	r.ttft, r.last, r.served, r.outTokens = 0, 0, "", 0
 }

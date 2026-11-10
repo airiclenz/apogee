@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/testtime"
 )
 
@@ -1729,4 +1731,109 @@ func TestFallbackRehomeKeepsANarrowedChildsSubset(t *testing.T) {
 	if len(*built) != 0 {
 		t.Errorf("builder rosters = %+v, want none — the child carries no builder", *built)
 	}
+}
+
+// namingResolver is a stubResolver that answers FallbackListNamer: names is whether the seat's
+// bound entry names a `fallback:` list.
+type namingResolver struct {
+	*stubResolver
+	names bool
+}
+
+func (r namingResolver) NamesFallback() bool { return r.names }
+
+// loadingWaitResponder records whether each request yields the loading wait and answers every one
+// with the stream a waited-out load gives: the wait's Delta, then the reply.
+type loadingWaitResponder struct {
+	mu    sync.Mutex
+	skips []bool
+}
+
+func (r *loadingWaitResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	r.mu.Lock()
+	r.skips = append(r.skips, req.SkipLoadingWait)
+	r.mu.Unlock()
+	return slices.Values([]provider.Delta{
+		{Kind: provider.DeltaLoadingWait},
+		{Kind: provider.DeltaContent, Content: "loaded"},
+		{Kind: provider.DeltaDone, FinishReason: "stop"},
+	})
+}
+
+// TestLoadingWaitYieldsOnlyToANamedFallback pins the per-call predicate the loop hands the provider
+// (provider.Request.SkipLoadingWait): a request yields a loading server's wait only when the seat's
+// bound entry names a `fallback:` list, never merely because a resolver is installed — and a
+// resolver that cannot say is read as naming one. The wait's Delta itself changes nothing the Turn
+// collects.
+func TestLoadingWaitYieldsOnlyToANamedFallback(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		resolver FallbackResolver
+		want     bool
+	}{
+		{name: "no resolver", resolver: nil, want: false},
+		{name: "a resolver on an entry naming no fallback", resolver: namingResolver{stubResolver: resolverAnswering(FallbackNone)}, want: false},
+		{name: "a resolver on an entry naming a fallback", resolver: namingResolver{stubResolver: resolverAnswering(FallbackNone), names: true}, want: true},
+		{name: "a resolver that cannot say", resolver: resolverAnswering(FallbackNone), want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			upstream := &loadingWaitResponder{}
+			a := newFallbackAgent(t, &recordingSink{}, upstream, tc.resolver)
+
+			resp, outcome, _ := respondOnce(t, a)
+			if outcome != turnOK || resp == nil || resp.Text() != "loaded" {
+				t.Fatalf("outcome %v, resp %+v; want the loaded reply", outcome, resp)
+			}
+			if len(upstream.skips) != 1 || upstream.skips[0] != tc.want {
+				t.Errorf("SkipLoadingWait = %v, want [%v]", upstream.skips, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoadingReplyIsWaitedOutByATurn drives a real provider Client: a server still loading its
+// model is waited out by a Turn on a seat naming no fallback, and is given up on — the fault
+// reaching the resolver — on a seat whose entry names one.
+func TestLoadingReplyIsWaitedOutByATurn(t *testing.T) {
+	t.Parallel()
+
+	loading := &stubllm.HTTPReply{
+		Status: http.StatusServiceUnavailable,
+		Body:   `{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}`,
+	}
+
+	t.Run("no fallback waits", func(t *testing.T) {
+		t.Parallel()
+		srv := stubllm.New(t, stubllm.Script{Model: testModel, Turns: []stubllm.Turn{{HTTP: loading}, {Text: "loaded"}}})
+		a := newFallbackAgent(t, &recordingSink{}, provider.NewClient(srv.URL, testModel),
+			namingResolver{stubResolver: resolverAnswering(FallbackNone)})
+
+		resp, outcome, _ := respondOnce(t, a)
+		if outcome != turnOK || resp == nil || resp.Text() != "loaded" {
+			t.Fatalf("outcome %v, resp %+v; want the reply the loaded server gave", outcome, resp)
+		}
+		if n := len(srv.Requests()); n != 2 {
+			t.Errorf("server requests = %d, want 2", n)
+		}
+	})
+
+	t.Run("a named fallback governs", func(t *testing.T) {
+		t.Parallel()
+		srv := stubllm.New(t, stubllm.Script{Model: testModel, Turns: []stubllm.Turn{{HTTP: loading, Repeat: true}}})
+		resolver := namingResolver{stubResolver: resolverAnswering(FallbackNone), names: true}
+		a := newFallbackAgent(t, &recordingSink{}, provider.NewClient(srv.URL, testModel), resolver)
+
+		if _, outcome, _ := respondOnce(t, a); outcome != turnFailed {
+			t.Fatalf("outcome %v, want the Turn failed once the resolver had nothing", outcome)
+		}
+		if n := len(srv.Requests()); n != 3 {
+			t.Errorf("server requests = %d, want 3 — the short ladder, not the wait", n)
+		}
+		if seen := resolver.seen(); len(seen) != 1 {
+			t.Errorf("the resolver was consulted %d times, want once", len(seen))
+		}
+	})
 }

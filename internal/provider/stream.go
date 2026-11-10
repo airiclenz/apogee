@@ -47,6 +47,15 @@ const (
 	// ContextOverflow it ends on. It is not terminal and changes no other kind's order. Only a
 	// Client stamped by WithServerIdentity yields it; an unstamped stream carries none.
 	DeltaAttempt DeltaKind = "attempt"
+	// DeltaLoadingWait reports that the server answered with its "still loading the model" reply
+	// (a 503 llama-server sends while it loads) and the call is now waiting the load out rather than
+	// giving up: re-sending at a 1 s hold-off doubling to 8 s, for up to 10 minutes, cancellable by
+	// the caller's ctx. It is yielded once per call, as the first such wait starts — before any
+	// DeltaAttempt that wait ends with — by every Client, stamped or not. It is not terminal and
+	// carries no payload; a consumer that does not tell its user about the wait ignores it. No call
+	// that yields the wait to a fallback resolver (Request.SkipLoadingWait), nor any call on a Client
+	// with retries off, ever waits, so none yields it.
+	DeltaLoadingWait DeltaKind = "loading_wait"
 	// DeltaThinkingBlock carries one finished reasoning block of the reply, opaque and verbatim
 	// (Delta.ThinkingBlock): the anthropic wire yields one as each `thinking` or
 	// `redacted_thinking` block closes, after the DeltaThinking fragments of its text, and one
@@ -121,7 +130,11 @@ type Delta struct {
 // stream that decoded nothing at all but skipped some is a fault naming that count rather than
 // an empty Done. A Client stamped by WithServerIdentity also yields one DeltaAttempt per HTTP
 // attempt — each retry send abandoned as it is abandoned, the final attempt immediately before
-// its terminal delta — and an unstamped one yields none.
+// its terminal delta, and a wait on a server still loading its model as one attempt however many
+// times it re-sent — and an unstamped one yields none. That wait (DeltaLoadingWait, yielded once
+// per call as it starts) re-arms the pre-header idle window on every loading reply, so its own
+// 10-minute backstop bounds it; past the backstop the last loading reply is the call's terminal
+// DeltaError, its body quoted as any status's is.
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
@@ -151,9 +164,28 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		if rec != nil {
 			rec.headers, rec.stop = headers, cancelHeaders
 		}
-		resp, cancel, err := c.send(headersCtx, body, 0, rec)
-		if rec != nil && rec.broken {
-			// The consumer broke on an abandoned attempt's delta; nothing more may be yielded.
+		// The wait on a server still loading its model: the consumer hears of it once, and every
+		// loading reply re-arms the pre-header window — a reply is not silence, so the wait's own
+		// backstop, not the idle window, is what bounds it.
+		stopped := false
+		wait := &loadingWait{
+			skip: req.SkipLoadingWait,
+			started: func() bool {
+				if yield(Delta{Kind: DeltaLoadingWait}) {
+					return true
+				}
+				stopped = true
+				if rec != nil {
+					rec.broken = true
+				}
+				return false
+			},
+			replied: func() { headers.reset(c.streamIdleTimeout) },
+		}
+		resp, cancel, err := c.send(headersCtx, body, 0, rec, wait)
+		if stopped || (rec != nil && rec.broken) {
+			// The consumer broke on an abandoned attempt's delta or on the loading wait's; nothing
+			// more may be yielded.
 			headers.stopOrFired()
 			if err == nil {
 				cancel()
