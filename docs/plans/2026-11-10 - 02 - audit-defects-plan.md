@@ -262,7 +262,9 @@ NOTES (2026-11-10): added `TestDownload_CallerCancelsMidBody_IsNotReportedAsStal
 **Acceptance:** `go test -race -count=1 ./internal/update/`
 **Commit:** `fix(update): end a stalled download, not a slow one`
 
-## 12. `diagnostics` vets a file in its own module
+## 12. `diagnostics` vets a file in its own module — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the "does not contain package" refusal is classified only by its "main module (" prefix, and "go.mod file not found" only as "go: go.mod file not found", so a dependency's "found, but does not contain package" reply stays a vet finding as the goVetPins doc requires (pinned by a test case).
 
 **What:**
 **Goal:** `diagnostics` on a clean `.go` file in a nested module (root has another module, or no `go.mod`) reports clean; a real vet finding in a nested module is still reported; a module-resolution failure is reported as `go vet skipped: <reason>`, never as findings.

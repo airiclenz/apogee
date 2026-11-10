@@ -297,7 +297,10 @@ type vetOutcome struct {
 // problems; a clean package exits zero with no output. A vet the ceiling killed, or one whose
 // drain wedged on a pipe something it started still held, checked nothing: it comes back as a
 // skipNote rather than as findings, because its exit code (-1 for a kill) says nothing about
-// the code.
+// the code. So does a vet the go command refused before loading the package because no module
+// it can load holds it (goModuleLoadFailure): that is a statement about where the file sits,
+// not about its code. A dependency the pinned environment cannot resolve is not that refusal —
+// it stays a finding, the trade goVetPins documents.
 //
 // It launches through h.run — the calling tool's execHost, the same host whose look resolved
 // goPath — so a host carrying a fake look never has its answer executed by the real launcher.
@@ -319,6 +322,9 @@ func runGoVet(ctx context.Context, h execHost, goPath, root, abs string) (vetOut
 	if res.ExitCode == 0 {
 		return vetOutcome{}, nil
 	}
+	if reason := goModuleLoadFailure(out); reason != "" {
+		return vetOutcome{skipNote: "go could not load the file's module: " + reason}, nil
+	}
 	if out == "" {
 		out = "go vet reported problems (exit code " + strconv.Itoa(res.ExitCode) + ")"
 	}
@@ -335,13 +341,65 @@ func runGoVet(ctx context.Context, h execHost, goPath, root, abs string) (vetOut
 // inside root (abs was already resolved through the fence). That widening is what
 // vettedPackageLine states on the result, so the sentence the operator approved and the
 // scope the subprocess read are the same sentence.
+//
+// The working directory is the file's own module (goModuleDir): go resolves the main module
+// from where it runs, and with GOWORK pinned off a package outside that module is refused
+// before vet reads a line of it.
 func goVetSpec(h execHost, goPath, root, abs string) subprocess.SubprocessSpec {
 	return subprocess.SubprocessSpec{
 		Argv:    []string{goPath, "vet", filepath.Dir(abs)},
-		Dir:     root,
+		Dir:     goModuleDir(root, abs),
 		Timeout: vetTimeout,
 		Env:     goVetEnv(h, root),
 	}
+}
+
+// goModuleDir returns the directory go vet runs from for the file at abs: the nearest
+// directory from the file's own up to the workspace root that holds a go.mod, each statted
+// THROUGH the fence the way run_tests finds its marker (markerFileExists), so a nested module
+// (sub/proj/go.mod under a root module, or checkouts/x/go.mod under a root with none) is vetted
+// as the module it is. With no go.mod between the file and the root it is the root itself, as
+// it always was: a workspace opened inside a module's subdirectory vets fine because go walks
+// up from there on its own.
+func goModuleDir(root, abs string) string {
+	dir := filepath.ToSlash(workspaceRelative(filepath.Dir(abs), root))
+	if dir == "." {
+		dir = ""
+	}
+	for dir != "" {
+		if markerFileExists(markerPath(dir, "go.mod"), root) {
+			return filepath.Join(root, filepath.FromSlash(dir))
+		}
+		dir = parentDir(dir)
+	}
+	return root
+}
+
+// goModuleLoadFailures are the go command's own refusals to load a package because no module
+// it may load holds it: "go: go.mod file not found" when no go.mod sits at or above the working
+// directory, and "main module (m) does not contain package p" when the package lies outside the
+// module found there. Only these two are classified, each by its leading words: a dependency
+// that "does not contain package" is a resolution failure, which stays a finding (goVetPins).
+var goModuleLoadFailures = []func(line string) bool{
+	func(line string) bool { return strings.HasPrefix(line, "go: go.mod file not found") },
+	func(line string) bool {
+		return strings.HasPrefix(line, "main module (") && strings.Contains(line, ") does not contain package ")
+	},
+}
+
+// goModuleLoadFailure returns the first line of vet's output that is one of the go command's
+// module-load refusals (goModuleLoadFailures), clipped, or "" when there is none — in which case
+// a non-zero exit is the package's own findings.
+func goModuleLoadFailure(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		for _, matches := range goModuleLoadFailures {
+			if matches(line) {
+				return clipLine(line)
+			}
+		}
+	}
+	return ""
 }
 
 // goToolchainEnvKeys is the allowlist of host environment variables the vet subprocess

@@ -44,11 +44,22 @@ func writeGoFile(t *testing.T, dir, name, content string) string {
 }
 
 // writeGoModule seeds dir with a minimal go.mod so `go vet` has a real module to
-// build and vet (a bare directory makes vet fail with a "go.mod not found" build
-// error rather than report findings — a normal workspace is always a module).
+// build and vet. A file with no go.mod at or above it reads as "go vet skipped", not
+// as findings; and a workspace need not be one module at its root — a nested go.mod
+// is vetted as its own module (writeNamedGoModule).
 func writeGoModule(t *testing.T, dir string) {
 	t.Helper()
-	writeGoFile(t, dir, "go.mod", "module diagtest\n\ngo 1.26\n")
+	writeNamedGoModule(t, dir, "diagtest")
+}
+
+// writeNamedGoModule seeds dir with a minimal go.mod declaring module, creating dir
+// first, so a test can lay out several modules with distinct paths in one workspace.
+func writeNamedGoModule(t *testing.T, dir, module string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	writeGoFile(t, dir, "go.mod", "module "+module+"\n\ngo 1.26\n")
 }
 
 func TestDiagnostics_Markers(t *testing.T) {
@@ -334,6 +345,167 @@ func TestDiagnostics_CleanGoFilePassesVet(t *testing.T) {
 	}
 	if !strings.Contains(res.Content, "looks clean") {
 		t.Errorf("result = %q, want it to confirm the file looks clean", res.Content)
+	}
+}
+
+// TestDiagnostics_VetRunsInTheFilesOwnModule pins that a clean file in a nested module is
+// vetted as that module: go resolves the main module from its working directory and GOWORK is
+// pinned off, so vetting from the workspace root refused the package ("main module does not
+// contain package", or "go.mod file not found" under a root with no go.mod) and that refusal
+// came back as findings. A real finding in a nested module is still a finding.
+func TestDiagnostics_VetRunsInTheFilesOwnModule(t *testing.T) {
+	realGo(t)
+	t.Parallel()
+	clean := "package proj\n\nfunc Add(a, b int) int { return a + b }\n"
+	finding := "package proj\n\nimport \"fmt\"\n\nfunc Bad() { fmt.Printf(\"%d\\n\", \"not a number\") }\n"
+	cases := []struct {
+		name        string
+		rootModule  bool
+		moduleDir   string
+		pkgSubdir   string
+		src         string
+		wantFinding bool
+	}{
+		{name: "nested under a root module", rootModule: true, moduleDir: filepath.Join("sub", "proj"), src: clean},
+		{name: "nested under a root with no go.mod", moduleDir: filepath.Join("checkouts", "x"), src: clean},
+		{name: "a package below the nested module's root", rootModule: true, moduleDir: filepath.Join("sub", "proj"), pkgSubdir: "inner", src: clean},
+		{name: "a real finding in a nested module", rootModule: true, moduleDir: filepath.Join("sub", "proj"), src: finding, wantFinding: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := tempRoot(t)
+			if tc.rootModule {
+				writeGoModule(t, root)
+			}
+			modDir := filepath.Join(root, tc.moduleDir)
+			writeNamedGoModule(t, modDir, "example.com/proj")
+			pkgDir := filepath.Join(modDir, tc.pkgSubdir)
+			if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", pkgDir, err)
+			}
+			abs := writeGoFile(t, pkgDir, "file.go", tc.src)
+			rel, err := filepath.Rel(root, abs)
+			if err != nil {
+				t.Fatalf("rel: %v", err)
+			}
+
+			res, err := NewDiagnostics(root).Execute(context.Background(), diagnosticsCall("c1", rel))
+
+			if err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if tc.wantFinding {
+				if !res.IsError || !strings.Contains(res.Content, "Printf") {
+					t.Errorf("a real vet finding in a nested module must be reported: %q", res.Content)
+				}
+				return
+			}
+			if res.IsError || !strings.Contains(res.Content, "looks clean") {
+				t.Errorf("a clean file in a nested module must vet clean: %q", res.Content)
+			}
+			if !strings.Contains(res.Content, "go vet checked") || strings.Contains(res.Content, "go vet skipped") {
+				t.Errorf("vet must really run in the nested module, not skip: %q", res.Content)
+			}
+		})
+	}
+}
+
+// TestDiagnostics_GoVetSpecRunsFromTheNearestModule pins goVetSpec's working directory: the
+// nearest go.mod between the file's directory and the workspace root, the root itself when
+// none sits in between, and the argv unchanged either way (the package directory).
+func TestDiagnostics_GoVetSpecRunsFromTheNearestModule(t *testing.T) {
+	t.Parallel()
+	root := tempRoot(t)
+	writeGoModule(t, root)
+	nested := filepath.Join(root, "sub", "proj")
+	writeNamedGoModule(t, nested, "example.com/proj")
+	plain := filepath.Join(root, "plain", "pkg")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	cases := []struct {
+		name    string
+		abs     string
+		wantDir string
+	}{
+		{name: "a file at the root", abs: filepath.Join(root, "main.go"), wantDir: root},
+		{name: "a package with no go.mod above it but the root's", abs: filepath.Join(plain, "f.go"), wantDir: root},
+		{name: "a file at a nested module's root", abs: filepath.Join(nested, "f.go"), wantDir: nested},
+		{name: "a package below a nested module's root", abs: filepath.Join(nested, "inner", "f.go"), wantDir: nested},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			spec := goVetSpec(defaultExecHost(), "/usr/bin/go", root, tc.abs)
+			if spec.Dir != tc.wantDir {
+				t.Errorf("vet dir = %q, want %q", spec.Dir, tc.wantDir)
+			}
+			if want := []string{"/usr/bin/go", "vet", filepath.Dir(tc.abs)}; !slices.Equal(spec.Argv, want) {
+				t.Errorf("vet argv = %q, want %q", spec.Argv, want)
+			}
+		})
+	}
+}
+
+// TestDiagnostics_GoVetModuleLoadFailureIsReportedAsSkipped pins that the go command's own
+// refusal to load the package's module reads as a skip on a clean syntax verdict, never as
+// findings; and that a dependency which "does not contain package" — a resolution failure —
+// stays a finding.
+func TestDiagnostics_GoVetModuleLoadFailureIsReportedAsSkipped(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		output   string
+		wantSkip bool
+	}{
+		{
+			name:     "no go.mod",
+			output:   "go: go.mod file not found in current directory or any parent directory; see 'go help modules'\n",
+			wantSkip: true,
+		},
+		{
+			name:     "outside the main module",
+			output:   "main module (diagtest) does not contain package diagtest/sub/proj\n",
+			wantSkip: true,
+		},
+		{
+			name:   "a dependency missing a package",
+			output: "go: module example.com/dep@latest found (v1.0.0), but does not contain package example.com/dep/x\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := tempRoot(t)
+			writeGoFile(t, root, "clean.go", "package main\n\nfunc main() {}\n")
+			h := defaultExecHost()
+			h.look = fakeLook(true, filepath.Join(t.TempDir(), "go"))
+			h.run = func(context.Context, subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+				return subprocess.SubprocessResult{ExitCode: 1, CombinedOutput: tc.output}, nil
+			}
+
+			res, err := newDiagnostics(root, h).Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
+
+			if err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if !tc.wantSkip {
+				if !res.IsError || !strings.Contains(res.Content, "does not contain package") {
+					t.Errorf("a dependency-resolution failure must stay a finding: %q", res.Content)
+				}
+				return
+			}
+			if res.IsError {
+				t.Errorf("a module-load refusal must leave an ok result: %q", res.Content)
+			}
+			if want := "go vet skipped: go could not load the file's module: " + strings.TrimSpace(tc.output); !strings.Contains(res.Content, want) {
+				t.Errorf("result = %q, want the skip note %q", res.Content, want)
+			}
+			if strings.Contains(res.Content, "go vet checked") || strings.Contains(res.Content, "exit code") {
+				t.Errorf("a module-load refusal must claim neither a check nor findings: %q", res.Content)
+			}
+		})
 	}
 }
 
