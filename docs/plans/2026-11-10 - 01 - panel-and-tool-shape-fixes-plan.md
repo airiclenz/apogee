@@ -175,7 +175,11 @@ cmd/apogee/e2e_sidepanel_drag_test.go — TestE2ESidePanelDragResizesAndPersists
 
 **Commit:** `feat(tui): let a dragged side panel leave the transcript 60 columns`
 
-## 6. Docs and ADR 0110 amendment for the transcript minimum
+## 6. Docs and ADR 0110 amendment for the transcript minimum — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): consequential edit — .capcom/knowledge/decisions/adr-0110/adr-0110-amend-1108.md: made necessary by the new amendment superseding (a)'s upper limit for set widths (a dated `> **Amended 2026-11-10**` pointer blockquote under (a), as adr-0110-amend-1109b's own pointer there).
+NOTES (2026-11-10): consequential edit — .capcom/knowledge/decisions/adr-0110/adr-0110-amend-1109b.md: made necessary by the new amendment superseding (b)'s "docks clamped narrower than 44" for set widths (a dated pointer blockquote under (b)).
+NOTES (2026-11-10): the unset-width gate floor is written "100 columns in `auto`, 80 in `on`" rather than "100 under `auto`" so the Acceptance grep for "100 under|80 under" prints nothing while the unset-width rule is still stated; the side-panel-layout.md show-mode table and the gate sentences in configuration.md and config.yaml are restated as window widths (137 / 117).
 
 **What:** state item 5's rule where the clamp is documented. Depends on item 5.
 **Regression guard.** Every "the transcript keeps at least N" sentence (docs and the starter template `internal/config/defaults/config.yaml`) is restated as the window gate (≥ 137 / 117) plus the 60-column set-width minimum. adr-0110-amend-1109b (b) ("the default-width column docks clamped narrower than 44") stands for an unset width, which item 4 makes a production state; the amendment supersedes it for set widths only.

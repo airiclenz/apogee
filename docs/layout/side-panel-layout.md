@@ -43,15 +43,21 @@ its detail — as does `⏎` on it in navigation mode, the keyboard's way into t
 
 *(Drawn from a frame rendered at 150 columns while a Turn runs, the column at its default 44. The
 column's 44 cells are copied as painted; the transcript and the full-width rows below the rule are
-narrowed to fit, and on screen the transcript keeps at least 100 columns. Left of the separator
-stand the transcript's scroll-bar track `│` and thumb `┃`.)*
+narrowed to fit; on screen the window clears the 137-column gate, and the unset width leaves the
+transcript 105 columns. Left of the separator stand the transcript's scroll-bar track `│` and
+thumb `┃`.)*
 
 - **Rows:** every row above the session-name rule, the same rows the transcript slot spans. The
   session-name rule, status line, prompt box and footer keep the full window width.
 - **Columns:** `ui.side-panel.width` painted columns, the separator `│` included, measured by the
   width authority (ADR 0030): 44 by default. The painted width is clamped to at least 24 and at most
-  the window less the transcript floor (100 under `auto`, 80 under `on`) less the scroll-bar column
-  ([adr-0110-amend-1108](../../.capcom/knowledge/decisions/adr-0110/adr-0110-amend-1108.md) (a)).
+  the window less the transcript minimum less the scroll-bar column. The minimum depends on who
+  chose the width: a width the user set — by a separator drag, `/panel width <n>`, `/settings` or
+  `ui.side-panel.width` in config — leaves the transcript 60 columns under `auto` and `on` alike, so
+  a drag stops 60 columns and the scroll bar short of the window's left edge; an unset width (the
+  default 44) leaves it the show mode's gate floor, 100 columns in `auto` and 80 in `on`
+  ([adr-0110-amend-1110](../../.capcom/knowledge/decisions/adr-0110/adr-0110-amend-1110.md),
+  amending [adr-0110-amend-1108](../../.capcom/knowledge/decisions/adr-0110/adr-0110-amend-1108.md) (a)).
   The clamp never rewrites the setting, so a window grown back paints the stored width again. The
   transcript's scroll bar stays on the transcript's own right edge, left of the separator. Inside
   the column come the separator, then a blank left gutter as wide as the transcript's body
@@ -71,15 +77,17 @@ stand the transcript's scroll-bar track `│` and thumb `┃`.)*
 
 | `ui.side-panel.show` | Shows when |
 |---|---|
-| `auto` (default) | the transcript keeps ≥ 100 columns beside it: window ≥ 137 |
-| `on` | the transcript keeps ≥ 80 columns beside it: window ≥ 117; never below that floor |
+| `auto` (default) | window ≥ 137: a 100-column transcript beside the 36-column gate width |
+| `on` | window ≥ 117: an 80-column transcript beside the 36-column gate width; never on a narrower window |
 | `off` | never |
 
 The thresholds always count the scroll-bar column, painted or not, so a bar appearing never moves
 the panel across a threshold (`layout.md`, "The scroll bar and the column it hangs in"). They are
 computed with a fixed gate width of 36 whatever `ui.side-panel.width` says, so a wider or narrower
 panel never moves the window it shows from. The gate width is not the default width: between 137
-and 145 columns under `auto` the default-width panel docks clamped narrower than 44.
+and 145 columns under `auto` the default-width panel docks clamped narrower than 44. Nor is the gate
+the clamp: once the column has docked, a width the user set may narrow the transcript to 60 columns
+("Columns", above), but it never docks the column on a window narrower than the gate.
 
 - The column appears or vanishes **only** when the window crosses that row's threshold, or when the
   setting changes (`/panel on|off|auto`, or `/settings`).

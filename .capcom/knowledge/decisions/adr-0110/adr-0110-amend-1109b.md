@@ -28,6 +28,10 @@ columns, not with the default width: the column still docks from 137 columns in 
 `on`, whatever width the user set. Between 137 and 145 columns in `auto` the default-width column
 docks clamped narrower than 44.
 
+> **Amended 2026-11-10 (`adr-0110-amend-1110`).** The upper limit of (a) and the clamped docking
+> of (b) hold for an unset width; a set width is held to at most the window less 60 columns less the
+> scroll-bar column.
+
 **(c) The column's chrome.** Right of the separator stands a blank gutter as wide as the
 transcript's body indent (two cells), then the content, then a right margin of the same two cells,
 so a header's fold indicator and a row's right-aligned facts sit in the status line's last cell's

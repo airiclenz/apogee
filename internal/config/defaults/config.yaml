@@ -1184,11 +1184,12 @@ update-check: true
 #
 # `side-panel.show` is when the side panel is drawn: a column right of the transcript showing the
 # sub-agents at work, the task list, the files changed this session and the usage. `auto` draws it
-# while the transcript keeps at least 100 columns beside it, `on` while it keeps at least 80, and
-# `off` never. Default `auto`. Switch live from /settings.
+# on a window of at least 137 columns, `on` on one of at least 117, and `off` never. Default
+# `auto`. Switch live from /settings.
 #
-# `side-panel.width` is the panel's width in columns: 24 or more, default 44. A window too narrow
-# for it draws the panel narrower without changing the setting. Drag the panel's separator to
+# `side-panel.width` is the panel's width in columns: 24 or more, default 44. A width you set may
+# leave the transcript as few as 60 columns; a window too narrow for it draws the panel narrower
+# without changing the setting. Drag the panel's separator to
 # resize it (written here on release; a double-click puts back 44), or change it live from
 # /settings or with `/panel width <n>|reset`.
 #
