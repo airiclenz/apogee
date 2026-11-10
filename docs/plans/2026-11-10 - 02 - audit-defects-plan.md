@@ -294,7 +294,10 @@ NOTES (2026-11-10): the file/dir distinction reaches the runners as a new `testT
 **Acceptance:** `go test -race -count=1 -run 'RunTests' ./internal/tools/`
 **Commit:** `fix(tools): run_tests maps a Go file path to its package`
 
-## 14. The syntax trailer stays silent on valid JSX, PHP, C# and Rust
+## 14. The syntax trailer stays silent on valid JSX, PHP, C# and Rust — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): beyond the plan's vectors, pinned three more: a valid JS backslash-newline string continuation (the "honour backslash-newline" rule: `escaped` now resets at each line start), and two new true positives — a `.jsx` `'oops` after `=` still reports an unclosed string (the apostrophe rule is word-internal only), and a regular C# `"C:\temp\"` still reports one (only `@"…"`/`$@"…"`/`@$"…"` are verbatim). Also a valid PHP multi-line `#[Route(…)]` attribute vector, pinning why `#[` stays code.
+NOTES (2026-11-10): the "write_file of each returns no trailer" test drives `NewWriteFile(...).Execute` from internal/tools/syntaxtrailer_test.go (TestSyntaxTrailerIsAbsentFromValidWritesOfOnceMisreadShapes), so it runs under the Acceptance `-run 'Syntax'`.
 
 **What:** Recast at the regression check (2026-11-10).
 **Goal:** `syntaxcheck.Check` reports valid for: JSX/TSX text with an apostrophe, a PHP `# don't` comment, a C# `@"C:\temp\"` literal, a Rust `'('` char literal; existing true-positive vectors still fire; the package comment no longer speaks of a correction Turn.

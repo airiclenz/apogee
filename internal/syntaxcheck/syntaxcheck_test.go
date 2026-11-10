@@ -6,8 +6,8 @@ import (
 )
 
 // The heuristic checker's contract is that it reports only unambiguous breakage: a false positive
-// fires a retry against correct code and costs a Turn, which is exactly the regression the
-// Bypass floor forbids. This is the negative table — valid code in every language the checker
+// reaches the model through the write tools' syntax trailer and tells it correct code is broken,
+// which is exactly the regression the Bypass floor forbids. This is the negative table — valid code in every language the checker
 // claims to understand, with the constructs that used to trip it: `//` where it is floor division
 // or a regex literal rather than a comment, JavaScript/TypeScript regex literals holding a quote,
 // a backtick or a bracket, brackets hidden in strings, docstrings and block comments, and quote
@@ -273,6 +273,117 @@ func TestCheckSyntaxAcceptsValidCode(t *testing.T) {
 				"}\n",
 		},
 		{
+			// JSX text is prose: the apostrophe in Don't used to open a string that swallowed the
+			// rest of the file, reporting an unclosed string, paren and brace.
+			name: "jsx text holding an apostrophe",
+			path: "Warn.jsx",
+			content: "export const Warn = () => (\n" +
+				"  <p>Don't do this</p>\n" +
+				");\n",
+		},
+		{
+			name: "tsx text holding an apostrophe",
+			path: "Note.tsx",
+			content: "export function Note(): JSX.Element {\n" +
+				"  return <span>It's fine</span>;\n" +
+				"}\n",
+		},
+		{
+			// Only a word-internal apostrophe is inert in .jsx/.tsx: a quote after `>`, `(` or
+			// `=>` still opens the string it really is, so its `//` and `)` stay inside it.
+			name: "tsx quotes after a comparison, an arrow body and a generic call",
+			path: "Links.tsx",
+			content: "function digits(ch: string) {\n" +
+				"  if (ch>'9') return;\n" +
+				"}\n" +
+				"const go = <button onClick={() => window.open('https://example.com')}>Go</button>;\n" +
+				"const user = fetchJson<User>('https://x');\n",
+		},
+		{
+			// `#` followed by whitespace is a PHP comment, so its apostrophe and paren are prose.
+			name: "php hash comment holding an apostrophe and a paren",
+			path: "note.php",
+			content: "<?php\n" +
+				"# don't touch the ( paren\n" +
+				"$x = 1;\n",
+		},
+		{
+			// `#` followed by anything else is code: an attribute's paren spans lines.
+			name: "php multi-line attribute",
+			path: "Route.php",
+			content: "<?php\n" +
+				"#[Route(\n" +
+				"    '/home'\n" +
+				")]\n" +
+				"function home() {}\n",
+		},
+		{
+			name:    "php inline style colour",
+			path:    "page.php",
+			content: "<style>.btn { color: #333; }</style>\n",
+		},
+		{
+			name: "php string spanning lines",
+			path: "query.php",
+			content: "<?php\n" +
+				"$sql = \"SELECT * FROM t WHERE id IN (\n" +
+				"    1, 2\n" +
+				")\";\n",
+		},
+		{
+			// `\` is an ordinary rune in a verbatim string, so the last quote closes it, and `""`
+			// is an escaped quote rather than an end and a new start.
+			name: "csharp verbatim strings ending in a backslash",
+			path: "Paths.cs",
+			content: "class Paths {\n" +
+				"    const string Temp = @\"C:\\temp\\\";\n" +
+				"    const string Quote = $@\"say \"\"hi\"\" from C:\\\";\n" +
+				"}\n",
+		},
+		{
+			// A char literal's bracket is a value; lifetimes on the same lines stay inert too.
+			name: "rust char literals of brackets and escapes",
+			path: "lex.rs",
+			content: "fn is_open<'a>(c: char, _s: &'a str) -> bool {\n" +
+				"    c == '(' || c == '{' || c == '['\n" +
+				"}\n" +
+				"fn is_quote(c: char) -> bool {\n" +
+				"    matches!(c, '\\'' | '\\\\' | '\\u{201C}')\n" +
+				"}\n",
+		},
+		{
+			name: "rust string spanning lines",
+			path: "text.rs",
+			content: "fn text() -> &'static str {\n" +
+				"    \"first line (\n" +
+				"    second line ]\"\n" +
+				"}\n",
+		},
+		{
+			name: "swift multi-line string",
+			path: "Text.swift",
+			content: "let text = \"\"\"\n" +
+				"    It's a ( note\n" +
+				"    \"\"\"\n" +
+				"print(text)\n",
+		},
+		{
+			name: "java text block",
+			path: "Query.java",
+			content: "class Query {\n" +
+				"    String sql = \"\"\"\n" +
+				"        SELECT ( 1\n" +
+				"        \"\"\";\n" +
+				"}\n",
+		},
+		{
+			// A backslash ending the line escapes the newline, not the next line's closing quote.
+			name: "javascript string continued with a backslash-newline",
+			path: "cont.js",
+			content: "const s = \"first \\\n" +
+				"\";\n",
+		},
+		{
 			name:    "go goes through the real parser",
 			path:    "main.go",
 			content: "package main\n\nfunc main() {}\n",
@@ -378,6 +489,22 @@ func TestCheckSyntaxReportsEachBrokenShape(t *testing.T) {
 			name:    "javascript unclosed string holding a slash",
 			path:    "a.js",
 			content: "const s = \"a / b;\n",
+			want:    "unclosed string literal (opened with \")",
+			line:    2,
+		},
+		{
+			// The .jsx apostrophe rule is word-internal only: a quote after `=` still opens a string.
+			name:    "jsx unclosed string after an equals sign",
+			path:    "a.jsx",
+			content: "const s = 'oops;\n",
+			want:    "unclosed string literal (opened with ')",
+			line:    2,
+		},
+		{
+			// Outside a verbatim string `\` still escapes, so this quote never closes.
+			name:    "csharp regular string whose backslash escapes its quote",
+			path:    "a.cs",
+			content: "const string P = \"C:\\temp\\\";\n",
 			want:    "unclosed string literal (opened with \")",
 			line:    2,
 		},

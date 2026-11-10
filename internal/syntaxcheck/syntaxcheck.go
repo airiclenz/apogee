@@ -21,8 +21,9 @@ import (
 // Lightweight syntax validation for LLM-written code, ported from apogee-sim's internal/syntax
 // package @pin (syntax.go, go_check.go, generic_check.go). Go is checked with the real parser;
 // every other detected language falls back to a bracket/string/truncation heuristic. The checker
-// is deliberately conservative — it reports only unambiguous breakage — because a false positive
-// would defer a needless correction and cost a Turn.
+// is deliberately conservative — it reports only unambiguous breakage — because its consumer, the
+// write tools' syntax trailer, hands every verdict to the model: a false positive tells the model
+// that correct code is broken, and a model that believes it churns or "fixes" what was right.
 
 // Result is the outcome of a syntax check: valid, the detected language, and any errors.
 type Result struct {
@@ -51,7 +52,7 @@ func Check(path, content string) Result {
 	case "go":
 		return CheckGo(content)
 	default:
-		return checkBrackets(content, lang)
+		return checkBrackets(content, lang, strings.ToLower(filepath.Ext(path)))
 	}
 }
 
@@ -93,7 +94,7 @@ func Language(path string) string {
 // The gate matters because `//` is not a comment everywhere: in Python it is floor division
 // (`n // 2`) and in Ruby an empty regex literal, so breaking out of the line scan there abandons a
 // valid line before its closing bracket and invents an "unclosed bracket" — a false positive that
-// fires a retry against correct code, which the Bypass floor forbids. The second false-positive
+// tells the model correct code is broken, which the Bypass floor forbids. The second false-positive
 // family the gate must not create is the JavaScript/TypeScript regex literal: where `//` really is
 // a comment, a lone `/` may still open a literal whose quotes and brackets are inert, so
 // checkBrackets applies the regexOpeners rule immediately after this gate.
@@ -106,17 +107,69 @@ func hasCStyleComments(lang string) bool {
 	}
 }
 
-// hasHashComments reports whether lang's line comment is `#`. Elsewhere `#` is code — a C
-// preprocessor directive, a JavaScript private field — so it must not end the line scan. PHP is
-// deliberately absent even though `#` comments there: `#[Attr(…)]` is an attribute, and ending the
-// scan at `#` would drop a multi-line attribute's opening paren while still seeing its closer.
-func hasHashComments(lang string) bool {
+// hasHashComments reports whether a `#` followed by rest (the line after the `#`) opens a line
+// comment in lang. Python and Ruby comment with every `#`. Elsewhere `#` is code — a C
+// preprocessor directive, a JavaScript private field — so it must not end the line scan. PHP sits
+// between the two: `# don't` is a comment, but `#[Attr(…)]` is an attribute and `#333` in an
+// inline `<style>` is a colour, and ending the scan there would drop an opening paren or brace
+// while still seeing its closer. So in PHP `#` comments only when whitespace or the end of the
+// line follows it.
+func hasHashComments(lang, rest string) bool {
 	switch lang {
 	case "python", "ruby":
 		return true
+	case "php":
+		next, _ := utf8.DecodeRuneInString(rest)
+		return rest == "" || unicode.IsSpace(next)
 	default:
 		return false
 	}
+}
+
+// isJSXFile reports whether ext names a file whose text may hold JSX, where an apostrophe in
+// element text (`<p>Don't do this</p>`) is prose, not a string delimiter. It keys on the extension
+// because Language maps .js and .jsx alike to "javascript" (and .ts and .tsx to "typescript"), and
+// in plain .ts a generic's `<T>` would make any "between tags" reading a guess.
+func isJSXFile(ext string) bool {
+	return ext == ".jsx" || ext == ".tsx"
+}
+
+// isWordInternalApostrophe reports whether the `'` at byte offset at in line sits between two
+// letters (Don't, it's): in JSX text that is an apostrophe, and no JavaScript string can open
+// there, because a quote directly after an identifier is not valid code.
+func isWordInternalApostrophe(line string, at int) bool {
+	before, _ := utf8.DecodeLastRuneInString(line[:at])
+	after, _ := utf8.DecodeRuneInString(line[at+1:])
+	return unicode.IsLetter(before) && unicode.IsLetter(after)
+}
+
+// rustCharLiteralLength returns the byte length of the Rust char literal whose opening `'` precedes
+// rest — `'('`, `'\n'`, `'\u{1F600}'` — or 0 when the `'` opens a lifetime (`'a`, `'static`)
+// instead. A char literal's bracket is a value, so it must never reach the bracket stack.
+func rustCharLiteralLength(rest string) int {
+	if strings.HasPrefix(rest, "\\") {
+		// An escape: `\` and the rune it escapes, then everything up to the closing quote.
+		if len(rest) < 2 {
+			return 0
+		}
+		if end := strings.IndexByte(rest[2:], '\''); end >= 0 {
+			return 2 + end + 1
+		}
+		return 0
+	}
+	r, size := utf8.DecodeRuneInString(rest)
+	if r == utf8.RuneError || r == '\'' || !strings.HasPrefix(rest[size:], "'") {
+		return 0
+	}
+	return size + 1
+}
+
+// opensCSharpVerbatimString reports whether the `"` at byte offset at in line opens a C# verbatim
+// string — `@"…"`, `$@"…"` or `@$"…"` — in which `\` is an ordinary rune (`@"C:\temp\"` ends at
+// its last quote) and `""` is an escaped quote.
+func opensCSharpVerbatimString(line string, at int) bool {
+	prefix := line[:at]
+	return strings.HasSuffix(prefix, "@") || strings.HasSuffix(prefix, "@$")
 }
 
 // CheckGo parses Go source with the standard parser and reports exact syntax errors, every
@@ -180,8 +233,12 @@ func isIdentifierRune(r rune) bool {
 }
 
 // checkBrackets validates bracket/paren/brace balance, unclosed strings, and common truncation
-// patterns for languages without a bundled parser.
-func checkBrackets(content, lang string) Result {
+// patterns for languages without a bundled parser. ext is the path's lower-cased extension, for the
+// rules that differ between files of one language (isJSXFile). A `'`, `"` or backtick string keeps
+// its state across line ends in every language, since each of them can span lines somewhere (PHP
+// and Rust `"…"`, Swift and Java `"""` blocks, JS/TS template literals); a backslash ending the
+// line escapes the newline, never the next line's first rune.
+func checkBrackets(content, lang, ext string) Result {
 	result := Result{Language: lang}
 
 	lines := strings.Split(content, "\n")
@@ -191,9 +248,11 @@ func checkBrackets(content, lang string) Result {
 	}
 	var stack []bracketInfo
 	inString := rune(0)
+	inVerbatimString := false
 	escaped := false
 	inBlockComment := false
 	hasRegexLiterals := lang == "javascript" || lang == "typescript"
+	hasJSXText := isJSXFile(ext)
 
 	for lineNum, line := range lines {
 		lineNo := lineNum + 1
@@ -202,6 +261,7 @@ func checkBrackets(content, lang string) Result {
 		// end of line inside a literal simply ends it — the checker under-reports an unterminated
 		// literal rather than inventing breakage.
 		inRegex, inCharClass, regexEscaped := false, false, false
+		escaped = false
 		lastRune := rune(0)
 		identFrom, identTo, identOpen := 0, 0, false
 		for i := 0; i < len(line); {
@@ -224,7 +284,7 @@ func checkBrackets(content, lang string) Result {
 			// Inside a regex literal only the closing unescaped `/` matters: `\` escapes the next
 			// rune, and within a `[ … ]` character class a `/` is an ordinary rune. Quotes,
 			// backticks, brackets and `//` in here are inert — reading them as code is the false
-			// positive that fires a retry against correct JS/TS.
+			// positive that reports correct JS/TS as broken.
 			if inRegex {
 				switch {
 				case regexEscaped:
@@ -249,20 +309,24 @@ func checkBrackets(content, lang string) Result {
 				escaped = false
 				continue
 			}
-			if r == '\\' && inString != 0 {
+			if r == '\\' && inString != 0 && !inVerbatimString {
 				escaped = true
 				continue
 			}
 			if inString != 0 {
+				if r == inString && inVerbatimString && strings.HasPrefix(line[i:], `"`) {
+					i++ // `""` is a verbatim string's escaped quote, not its end.
+					continue
+				}
 				if r == inString {
-					inString = 0
+					inString, inVerbatimString = 0, false
 					// A closing quote is a value, so the `/` in `"x" / 1` divides (regexOpeners).
 					lastRune, identFrom, identTo, identOpen = r, 0, 0, false
 				}
 				continue
 			}
 
-			if r == '#' && hasHashComments(lang) {
+			if r == '#' && hasHashComments(lang, line[i:]) {
 				break
 			}
 			if r == '/' && i < len(line) && hasCStyleComments(lang) {
@@ -299,10 +363,15 @@ func checkBrackets(content, lang string) Result {
 
 			switch r {
 			case '"', '\'', '`':
-				if r == '\'' && (lang == "go" || lang == "rust") {
+				if r == '\'' && lang == "rust" {
+					i += rustCharLiteralLength(line[i:])
+					continue
+				}
+				if r == '\'' && (lang == "go" || hasJSXText && isWordInternalApostrophe(line, start)) {
 					continue
 				}
 				inString = r
+				inVerbatimString = r == '"' && lang == "csharp" && opensCSharpVerbatimString(line, start)
 			case '(':
 				stack = append(stack, bracketInfo{'(', lineNo})
 			case '[':
@@ -407,7 +476,7 @@ func stripTrailingComment(s, lang string) string {
 			inStr = r
 			continue
 		}
-		if r == '#' && hasHashComments(lang) {
+		if r == '#' && hasHashComments(lang, s[i+1:]) {
 			return s[:i]
 		}
 		if r == '/' && i+1 < len(s) && s[i+1] == '/' && hasCStyleComments(lang) {
