@@ -272,6 +272,104 @@ func TestWorkflowCall_AChildsMenuDoesNotOfferFanOut(t *testing.T) {
 	}
 }
 
+// toolsFanOutArgsJSON is fanOutArgsJSON over one item, alpha, with `tools` set to roster as written.
+func toolsFanOutArgsJSON(roster any) string {
+	b, _ := json.Marshal(map[string]any{
+		"task": fanOutTask, "over": []string{"alpha"}, "returns": map[string]string{"count": "int"}, "tools": roster,
+	})
+	return string(b)
+}
+
+// TestWorkflowCall_ToolsTakesSubAgentsShapes pins that fan_out's `tools` is read as sub_agent's is
+// (tools.SubAgentRoster): the read-only keyword, bare or wrapped in an array, runs each item child
+// with the read-only set, and a string holding an array of names runs it with exactly those names.
+// The parent offers a writer beside its reader, so the read-only narrowing is observable.
+func TestWorkflowCall_ToolsTakesSubAgentsShapes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		roster   any
+		wantMenu []string
+	}{
+		{name: "no tools keeps the whole menu", roster: nil, wantMenu: []string{tools.FinishToolName, "read_thing", "write_thing"}},
+		{name: "the keyword in an array", roster: []string{tools.SubAgentToolsReadOnly}, wantMenu: []string{tools.FinishToolName, "read_thing"}},
+		{name: "the bare keyword", roster: tools.SubAgentToolsReadOnly, wantMenu: []string{tools.FinishToolName, "read_thing"}},
+		{name: "an array as a string", roster: `["write_thing"]`, wantMenu: []string{tools.FinishToolName, "write_thing"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := workflowConfig(t, sink, fakeTool{name: "write_thing", result: "written"})
+			up := (&workflowResponder{}).
+				route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, toolsFanOutArgsJSON(tc.roster))).
+				route("please fan out", nil, contentScript("all done")).
+				route("check alpha", nil, finishScript("f1", "alpha is fine"))
+
+			runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
+
+			if got := callResult(t, sink.events, "fo1"); got.IsError {
+				t.Fatalf("fan_out result is an error: %q", got.Content)
+			}
+			menu := slices.Clone(up.menus["check alpha"])
+			slices.Sort(menu)
+			if !slices.Equal(menu, tc.wantMenu) {
+				t.Errorf("item child's menu = %v, want %v", menu, tc.wantMenu)
+			}
+		})
+	}
+}
+
+// TestWorkflowCall_AnUnmeetableToolsRosterIsRefusedBeforeAnyChildRuns pins that a fan_out roster
+// naming an unknown tool, or mixing the read-only keyword with tool names, is refused as the whole
+// call's answer before any child runs or any workflow folder exists — and in the roster's own
+// words, never as arguments that are not valid JSON.
+func TestWorkflowCall_AnUnmeetableToolsRosterIsRefusedBeforeAnyChildRuns(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		roster any
+		want   string
+	}{
+		{
+			name:   "an unknown tool",
+			roster: []string{"frobnicate"},
+			want:   "fan_out was not run: sub_agent tools: unknown tool frobnicate",
+		},
+		{
+			name:   "the keyword beside a tool name",
+			roster: []string{tools.SubAgentToolsReadOnly, "read_file"},
+			want:   `fan_out was not run: tools: pass "read-only" alone as the whole value, not inside a list of tool names`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			cfg := workflowConfig(t, sink)
+			up := (&workflowResponder{}).
+				route("please fan out", nil, toolCallScript("fo1", tools.FanOutToolName, toolsFanOutArgsJSON(tc.roster))).
+				route("please fan out", nil, contentScript("I will fix it")).
+				route("check alpha", nil, finishScript("f1", "alpha is fine"))
+
+			runWorkflowParent(t, context.Background(), cfg, up, "please fan out")
+
+			got := callResult(t, sink.events, "fo1")
+			if !got.IsError || !strings.HasPrefix(got.Content, tc.want) {
+				t.Errorf("fan_out result = %+v, want an error starting %q", got, tc.want)
+			}
+			if asked := up.askedCount("check alpha"); asked != 0 {
+				t.Errorf("item child asked %d time(s), want none before the refusal", asked)
+			}
+			if folders := workflowFolders(t, cfg.ScratchDir); len(folders) != 0 {
+				t.Errorf("workflow folders = %v, want none for a call that did not run", folders)
+			}
+		})
+	}
+}
+
 // TestWorkflowCall_PlanItemChildrenInheritPlan pins that a Plan parent's fan_out (offered with its
 // scratch dir set, planOffersDelegation) spawns item children that run in Plan too, as a Plan
 // sub_agent's do (ADR 0013): a child's write_file aimed into the workspace is refused and writes

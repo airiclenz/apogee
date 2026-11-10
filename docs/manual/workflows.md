@@ -76,7 +76,7 @@ not offered, whatever the roster says. A delegate — a `sub_agent` child or a w
 | `out` | Where each helper writes its detail, with `{item}` in the path; unset, each item gets a file in the workflow folder |
 | `verify` | One adversarial check per item: a helper whose job is to *refute* the item's report. `when` picks which items (a [condition](#conditions--when) on the `returns` fields; unset checks every one), `task` says what to look at |
 | `merge` | One helper that reads every item's output and writes the combined report; `task` is its brief |
-| `tools` | Narrows the helpers' tools to these names — it can only remove tools from the agent's own menu, never add one |
+| `tools` | Narrows the helpers' tools to these names — it can only remove tools from the agent's own menu, never add one. As on `sub_agent`, `read-only` alone asks for the read-only set (a workflow file's stage `tools: [read-only]` too), and an unknown name refuses the call before any helper runs |
 | `recipe`, `inputs` | Run a [recipe](#recipes) by its id instead, with its inputs as `name: value`. Nothing else may be given beside `recipe` |
 | `background` | Start the workflow in the background and answer at once — offered only while `workflow` is on the roster |
 | `run_on` | Where the helpers run, as on `sub_agent` — offered only under [`sub-agents-choice: model`](configuration.md#letting-the-model-pick-the-seat) |

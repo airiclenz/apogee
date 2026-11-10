@@ -220,11 +220,9 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	if err != nil {
 		return workflow.Outcome{}, err
 	}
-	var narrowed []string
-	if len(spec.Stage.Tools) > 0 {
-		if narrowed, err = a.requestedChildTools(tools.SubAgentRoster{Names: spec.Stage.Tools}); err != nil {
-			return workflow.Outcome{}, err
-		}
+	narrowed, err := a.stageChildTools(spec.Stage)
+	if err != nil {
+		return workflow.Outcome{}, err
 	}
 	if ctx.Err() != nil {
 		return workflow.Outcome{Ending: workflow.EndStopped}, nil
@@ -294,6 +292,19 @@ func (s *workflowSpawner) Spawn(ctx context.Context, spec workflow.ItemSpec) (ou
 	outcome.Transcript = sub.conv.Messages()
 	ending = outcome.Ending
 	return outcome, nil
+}
+
+// stageChildTools is the narrowed tool list a stage's item children run with — nil for no
+// narrowing — or the error naming why its `tools` cannot be met. The list is read as sub_agent reads
+// its roster (tools.RosterFromNames): `[read-only]` alone is the read-only set, so a saved workflow
+// file and a fan_out call (stageToolNames) ask for it alike, and every other name is checked
+// against this Agent's own menu (requestedChildTools).
+func (a *Agent) stageChildTools(stage workflow.Stage) ([]string, error) {
+	roster, err := tools.RosterFromNames(stage.Tools)
+	if err != nil {
+		return nil, err
+	}
+	return a.requestedChildTools(roster)
 }
 
 // spawnSubAgent runs an item on the sub_agent path (workflow.Stage.SubAgent, ADR 0094): the stage's

@@ -89,7 +89,12 @@ NOTES (2026-11-10): the agent-level wrapped-keyword test compares the `["read-on
 
 **Commit:** `fix(tools): accept ["read-only"] and a string-encoded array for sub_agent tools`
 
-## 3. fan_out and workflow stages: same tools decoding
+## 3. fan_out and workflow stages: same tools decoding — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the up-front roster check in `workflowCallResult` runs after `ValidateModelPlan` (not straight after `parseFanOutPlan`), so a blank `tools` entry keeps its structured "blank entry" problem rather than being named as an unknown tool; it still runs before `startBackground` / `runBlocking`.
+NOTES (2026-11-10): one helper, `(*Agent).stageChildTools` (workflowspawn.go), reads a stage's `tools` through `tools.RosterFromNames` and `requestedChildTools`; both `Spawn` and the up-front check in `workflowCallResult` call it, so the two paths cannot disagree.
+NOTES (2026-11-10): an unknown fan_out tool's refusal reads `fan_out was not run: sub_agent tools: unknown tool <names> — …`: the inner text is `requestedChildTools`' own (item 2), which already named fan_out stage refusals "sub_agent tools" before this run; left as is, since rewording it would change item 2's pinned sub_agent text.
+NOTES (2026-11-10): docs updated — docs/manual/workflows.md fan_out argument table: `tools` row now says `read-only` alone (also in a workflow file's stage) asks for the read-only set and an unknown name refuses the call before any helper runs.
 
 **What:** fix: fan_out's `tools: ["read-only"]` is refused as an unknown tool and a string-encoded array fails the whole call. Depends on item 2.
 **Regression guard.** fan_out has no roster check before its children start (the `requestedChildTools(args.Tools)` check in `backgroundSubAgentResult` is sub_agent's path). Add `a.requestedChildTools(roster)` in `workflowCallResult` after `parseFanOutPlan`, before `startBackground` / `runBlocking`, for the non-recipe form. Decode `fanOutArgs.Tools` as `json.RawMessage` and unmarshal it into `tools.SubAgentRoster` separately, so a roster error is refused as `fan_out was not run: <err>`, never under `fanOutArgumentsFormat`'s "not valid JSON".

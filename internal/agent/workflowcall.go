@@ -78,6 +78,7 @@ const (
 	fanOutRecipeMixedFormat  = "fan_out was not run: recipe runs a recipe's own stages, so it cannot be combined with %s; call it again with only recipe and inputs, or without recipe to describe the fan-out yourself"
 	fanOutUnknownRecipe      = "fan_out was not run: %q is not a recipe; the recipes are: %s"
 	fanOutRecipeInputsFormat = "fan_out was not run: inputs must be an object of name: text pairs (%v)"
+	fanOutToolsFormat        = "fan_out was not run: %v"
 	fanOutRecipeFailed       = "fan_out could not run recipe %s: %v"
 	fanOutNoScratch          = "fan_out was not run: this session has no scratch directory to keep the workflow in"
 	fanOutNoWorkspace        = "fan_out was not run: this session has no workspace to read the items from"
@@ -203,7 +204,9 @@ func resumeCommand(launch workflowLaunch) string {
 
 // fanOutArgs is a fan_out call's arguments as the tool publishes them (tools.fanOutSchemaTemplate).
 // `run_on` is read by fanOutSeat, `recipe` and `inputs`, the recipe form, by parseFanOutRecipe, and
-// `background` by asksBackground.
+// `background` by asksBackground. `tools` is read as sub_agent's is (tools.SubAgentRoster), so it is
+// held raw: a roster the decoder refuses is refused in its own words, never as arguments that are
+// not JSON.
 type fanOutArgs struct {
 	Task    string               `json:"task"`
 	Over    json.RawMessage      `json:"over"`
@@ -213,7 +216,7 @@ type fanOutArgs struct {
 	Out     string               `json:"out"`
 	Verify  *fanOutVerifyArgs    `json:"verify"`
 	Merge   *fanOutMergeArgs     `json:"merge"`
-	Tools   []string             `json:"tools"`
+	Tools   json.RawMessage      `json:"tools"`
 }
 
 // fanOutPlanFields are the fan_out arguments that describe a fan-out, in schema order: none of
@@ -463,6 +466,13 @@ func (a *Agent) workflowCallResult(ctx context.Context, turn int, call domain.To
 	if problems := workflow.ValidateModelPlan(plan); len(problems) > 0 {
 		return errorToolResult(call.ID, fanOutProblemsText(problems))
 	}
+	// Checked here as well as by each child's Spawn: an unknown name is refused before any child
+	// runs or any workflow folder exists, as sub_agent refuses it, not met as every item's fault.
+	for _, stage := range plan.Stages {
+		if _, err := a.stageChildTools(stage); err != nil {
+			return errorToolResult(call.ID, fmt.Sprintf(fanOutToolsFormat, err))
+		}
+	}
 	launch := workflowLaunch{plan: plan, seat: seat, turn: turn, call: call}
 	if background {
 		id, err := a.startBackground(launch)
@@ -615,6 +625,12 @@ func parseFanOutPlan(raw json.RawMessage) (workflow.Plan, string) {
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return workflow.Plan{}, fmt.Sprintf(fanOutArgumentsFormat, err)
 	}
+	var roster tools.SubAgentRoster
+	if len(args.Tools) > 0 {
+		if err := json.Unmarshal(args.Tools, &roster); err != nil {
+			return workflow.Plan{}, fmt.Sprintf(fanOutToolsFormat, err)
+		}
+	}
 	source, err := parseFanOutSource(args.Over, args.Batch)
 	if err != nil {
 		return workflow.Plan{}, fmt.Sprintf(fanOutOverFormat, err)
@@ -628,7 +644,7 @@ func parseFanOutPlan(raw json.RawMessage) (workflow.Plan, string) {
 		Returns: args.Returns,
 		Out:     args.Out,
 		Context: args.Context,
-		Tools:   args.Tools,
+		Tools:   stageToolNames(roster),
 	}}
 	if args.Verify != nil {
 		stages = append(stages, workflow.Stage{
@@ -639,6 +655,17 @@ func parseFanOutPlan(raw json.RawMessage) (workflow.Plan, string) {
 		stages = append(stages, workflow.Stage{Name: mergeStageName, Kind: workflow.StageMerge, Task: args.Merge.Task})
 	}
 	return workflow.Plan{Name: sanitize.FirstLine(args.Task), Stages: stages}, ""
+}
+
+// stageToolNames is a decoded `tools` roster as a workflow.Stage carries it — the names, or the
+// read-only keyword as the stage's one entry, which stageChildTools reads back as the read-only set.
+// The Stage keeps a plain list so a saved workflow file and a fan_out call name a roster alike, and
+// internal/workflow never learns the sub_agent union.
+func stageToolNames(roster tools.SubAgentRoster) []string {
+	if roster.ReadOnly {
+		return []string{tools.SubAgentToolsReadOnly}
+	}
+	return roster.Names
 }
 
 // parseFanOutSource reads fan_out's `over` — an array of item strings, or an object naming one
