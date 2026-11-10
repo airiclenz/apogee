@@ -31,6 +31,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -369,11 +370,26 @@ func (e *externalEdit) layers() (global, project map[string]bool) {
 //
 // The projection is compared, never rendered: a `servers:` entry carries an api-key, and it stays as
 // far from a row as it has always been (maskedSettingValue).
+//
+// `ui.side-panel.width` is answered by its resolved width as well (sidePanelWidthMoved), because its
+// row reads the unset width and a stated default alike.
 func settingChanged(k config.Key, before, after fileProjection, i int) bool {
 	if !reflect.DeepEqual(k.StructureOf(before.opts, before.offer), k.StructureOf(after.opts, after.offer)) {
 		return true
 	}
+	if k.Path == domain.UIKeySidePanelWidth && sidePanelWidthMoved(before.opts, after.opts) {
+		return true
+	}
 	return before.rows[i].Value != after.rows[i].Value || before.rows[i].Text != after.rows[i].Text
+}
+
+// sidePanelWidthMoved reports whether a re-read moved `ui.side-panel.width` between the unset width
+// (0) and a stated one. Its row spells the unset width as the default it is drawn at, so a deleted
+// `width: 44` and a newly stated one read "44" on both sides of the diff — yet the layout clamps a set
+// width to the transcript minimum and an unset one to the show mode's gate floor, and a session left
+// holding the old one docks the column at the wrong width until a restart.
+func sidePanelWidthMoved(before, after config.Options) bool {
+	return before.UI.SidePanelWidth != after.UI.SidePanelWidth
 }
 
 // appliedValue is the value a changed row carries back: the prose itself for a text key, whose row

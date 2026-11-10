@@ -3179,6 +3179,53 @@ func TestSettingsPaneResetOfTheSidePanelWidthLandsTheUnsetWidth(t *testing.T) {
 	})
 }
 
+// A re-read that moved `ui.side-panel.width` between the unset width and a stated default lands the
+// move although the row reads the default on both sides: a deleted `width: 44` lands the unset width,
+// which a 140-column window under `auto` docks clamped to the gate floor, and a newly stated
+// `width: 44` lands the set width, which that window docks whole beside the transcript minimum.
+func TestSettingsPaneReReadMovesTheSidePanelWidthUnderAnUnmovedRow(t *testing.T) {
+	t.Parallel()
+	const window = 140
+	def := strconv.Itoa(domain.DefaultSidePanelWidth)
+	for _, tc := range []struct {
+		name           string
+		stored, landed int
+		reset, isSet   bool
+	}{
+		{"the stated default deleted", domain.DefaultSidePanelWidth, 0, true, false},
+		{"the default stated over the unset width", 0, domain.DefaultSidePanelWidth, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := SettingRow{
+				Path: domain.UIKeySidePanelWidth, Section: "Interface", Kind: SettingInt, Value: def,
+				Default: def, Source: SettingFromGlobal, Editable: true, Desc: "The side panel's width in columns.",
+			}
+			rows := []SettingRow{settingsStructuredRow(), row}
+			edit := &externalEditLog{applied: []AppliedSetting{{
+				Path: domain.UIKeySidePanelWidth, Value: def, Reset: tc.reset,
+			}}}
+			m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+			m.opts.UI.SidePanelShow = domain.SidePanelShowAuto
+			m.opts.UI.SidePanelWidth = tc.stored
+			m = step(t, m, tea.WindowSizeMsg{Width: window, Height: 30})
+			if m.clampPanelWidth(domain.DefaultSidePanelWidth, false) == m.clampPanelWidth(domain.DefaultSidePanelWidth, true) {
+				t.Fatalf("setup: a %d-column window clamps the set and unset default alike", window)
+			}
+
+			m = step(t, m, settingsEditedMsg{path: "servers"})
+
+			if m.opts.UI.SidePanelWidth != tc.landed {
+				t.Errorf("stored %d, want %d", m.opts.UI.SidePanelWidth, tc.landed)
+			}
+			want := m.clampPanelWidth(domain.DefaultSidePanelWidth, tc.isSet)
+			if got := m.panelWidth(); got != want {
+				t.Errorf("panelWidth() = %d, want %d — the width clamped as set=%t", got, want, tc.isSet)
+			}
+		})
+	}
+}
+
 // The two new steps are views of the SELECTED row and the rows are re-derived under them, so a key that
 // went away takes its buffer (or its armed reset) with it rather than letting a ⏎ land on whatever now
 // sits at that index — the enum sub-list's contract, on the same predicate.

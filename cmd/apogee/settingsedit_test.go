@@ -318,6 +318,50 @@ func TestExternalEditReloadReportsADeletedSidePanelWidthAsAReset(t *testing.T) {
 	}
 }
 
+// A `ui.side-panel.width` whose row reads the same on both sides is still a change when the re-read
+// moved it between the unset width and a stated one: a deleted `width: 44` reads "44" before and
+// after, as the default the unset width is drawn at, and a newly stated `width: 44` over an unset one
+// reads "44" too. The layout clamps the two differently (set to the transcript minimum, unset to the
+// show mode's gate floor), so the reload reports the key — a reset when the line went, a set width
+// when it came — and no other key.
+func TestExternalEditReloadReportsASidePanelWidthWhoseRowDidNotMove(t *testing.T) {
+	t.Parallel()
+	stated := "mode: ask-before\nui:\n  side-panel:\n    width: " + strconv.Itoa(domain.DefaultSidePanelWidth) + "\n"
+	unstated := "mode: ask-before\n"
+	value := strconv.Itoa(domain.DefaultSidePanelWidth)
+	for _, tc := range []struct {
+		name          string
+		before, after string
+		want          tui.AppliedSetting
+		resolved      int
+	}{
+		{"the stated default deleted", stated, unstated,
+			tui.AppliedSetting{Path: domain.UIKeySidePanelWidth, Value: value, Reset: true}, 0},
+		{"the default stated over the unset width", unstated, stated,
+			tui.AppliedSetting{Path: domain.UIKeySidePanelWidth, Value: value}, domain.DefaultSidePanelWidth},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			path := filepath.Join(home, "config.yaml")
+			writeSettingsFixture(t, path, tc.before)
+			e := newExternalEdit(config.Options{ConfigDir: home}, config.ProjectOffer{}, "", func(string) string { return "" })
+			writeSettingsFixture(t, path, tc.after)
+
+			reload, err := e.changed()
+			if err != nil {
+				t.Fatalf("changed: %v", err)
+			}
+			if want := []tui.AppliedSetting{tc.want}; !slices.Equal(reload.Applied, want) {
+				t.Errorf("reload reported %+v, want exactly %+v", reload.Applied, want)
+			}
+			if width := e.baseline.opts.UI.SidePanelWidth; width != tc.resolved {
+				t.Errorf("the re-read resolved ui.side-panel.width %d, want %d", width, tc.resolved)
+			}
+		})
+	}
+}
+
 // A structured block whose SUMMARY did not move is still a change. Repointing the single
 // `mcp-servers:` entry at another machine leaves the row reading "1 server" character for character,
 // and a diff over row summaries alone reports nothing — so nothing reconnects and the edit waits for
