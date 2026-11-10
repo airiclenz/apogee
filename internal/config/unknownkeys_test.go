@@ -121,6 +121,72 @@ func TestUnknownKeysWalksTheSchemaAsDeepAsItGoes(t *testing.T) {
 	}
 }
 
+// TestUnknownKeysLeavesDataKeyedEntriesAlone pins that the walk never descends into the entries of a
+// list or map whose element struct declares no yaml key — `ui.side-panel.sections`, written flow or
+// block, and `sessions.watch-homes` — while a misspelled key beside such a list is still reported.
+func TestUnknownKeysLeavesDataKeyedEntriesAlone(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		given string
+		want  []keyAt
+	}{
+		{
+			name: "the documented flow list of sections reports no key",
+			given: "ui:\n  side-panel:\n    sections: [ usage: pinned, sub-agents: auto, tasks: auto, " +
+				"changed-files: auto, mcp: auto ]\n",
+			want: nil,
+		},
+		{
+			name: "the same list in block style reports no key",
+			given: "ui:\n  side-panel:\n    sections:\n      - usage: pinned\n      - sub-agents: auto\n" +
+				"      - tasks: auto\n      - changed-files: auto\n      - mcp: auto\n",
+			want: nil,
+		},
+		{
+			name:  "a watch-homes label reports no key",
+			given: "sessions:\n  watch-homes:\n    alice: /home/alice/.apogee\n",
+			want:  nil,
+		},
+		{
+			name: "a misspelled key beside the sections list is still reported, at its line",
+			given: "ui:\n  side-panel:\n    widht: 80\n    sections: [usage: pinned, tasks: auto]\n" +
+				"    bogus: 1\n",
+			want: []keyAt{
+				{key: "ui.side-panel.widht", line: 3},
+				{key: "ui.side-panel.bogus", line: 5},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := unknownKeys([]byte(tt.given))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("unknownKeys(%q) = %+v, want %+v", tt.given, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestParseConfigFileAnnouncesAnUnknownKeyBesideTheSectionsList pins that the loader's notice for a
+// misspelled key beside `ui.side-panel.sections` is the one line it always was, and that the list's
+// own entries add none.
+func TestParseConfigFileAnnouncesAnUnknownKeyBesideTheSectionsList(t *testing.T) {
+	t.Parallel()
+	path := writeMigrationConfig(t,
+		"ui:\n  side-panel:\n    sections: [usage: pinned, tasks: auto]\n    bogus: 1\n")
+	var notices []string
+	notify := func(s string) { notices = append(notices, s) }
+	if _, err := parseConfigFile(path, os.ReadFile, notify, true); err != nil {
+		t.Fatalf("parseConfigFile refused a file whose only fault is one unknown key: %v", err)
+	}
+	want := []string{fmt.Sprintf(unknownKeyNotice, path, "ui.side-panel.bogus", 4)}
+	if !reflect.DeepEqual(notices, want) {
+		t.Errorf("notices = %q, want %q", notices, want)
+	}
+}
+
 // TestParseConfigFileAnnouncesUnknownKeysThroughNotify pins the one line the loader prints per
 // unknown key — path, dotted key, line — and that it is a notice: the file still loads.
 func TestParseConfigFileAnnouncesUnknownKeysThroughNotify(t *testing.T) {

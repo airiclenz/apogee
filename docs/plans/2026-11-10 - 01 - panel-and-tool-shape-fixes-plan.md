@@ -39,7 +39,10 @@
 - 4 (re-check): guard folded (`/settings` reset and deleted-key reload land 0, one test each; Tests bullet pointed at the `applyUIRows` rows, not `parseConfigFile`).
 - 5 (re-check): guard folded (`on`-mode twin of `separatorDragModel`; the Goal's unset-width clause relies on item 4).
 
-## 1. Unknown-key walk skips entry structs with no yaml keys
+## 1. Unknown-key walk skips entry structs with no yaml keys — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the "one parseConfigFile case" landed as its own test, TestParseConfigFileAnnouncesAnUnknownKeyBesideTheSectionsList (inside the TestParseConfigFile Acceptance pattern), not as a row of an existing test.
+NOTES (2026-11-10): the unknownKeys doc comment's list of where the walk does not descend now also names data-keyed entry lists, kept true beside the descendUnknownKeys doc comment the item names.
 
 **What:** fix: `ui.side-panel.sections` and `sessions.watch-homes` entries draw a false "unknown key" notice per entry.
 **Regression guard.** Only `ui.side-panel.sections` misfires today: `sessions.watch-homes` is a slice type whose file node is a mapping, so `descendUnknownKeys` already returns before walking it. Its test row is a guard row that passes at the base; the bite comes from the flow and block `sections` rows.

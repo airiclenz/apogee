@@ -43,7 +43,9 @@ const unknownKeyNotice = "apogee: config %s: unknown key %q at line %d is ignore
 // The walk descends only where the schema does: into a field whose Go type is a struct, a slice of
 // structs or a map of structs (`ui:`, `servers[]`, `model-profiles.<name>`, `reactions[]`, …), and
 // never into a field typed `any` (`reactions[].run` / `advise` / `gate` — a webhook mapping under
-// them is the reaction's own shape, not the schema's) or a scalar. A document without a root
+// them is the reaction's own shape, not the schema's), a scalar, or the entries of a list or map
+// whose element struct declares no yaml key (`ui.side-panel.sections`, `sessions.watch-homes` —
+// keys that are data, decoded by the type's own UnmarshalYAML). A document without a root
 // mapping — the zero-byte and the comment-only config.yaml, both of which parseConfigFile accepts —
 // walks to nil.
 func unknownKeys(data []byte) []keyAt {
@@ -121,6 +123,12 @@ func walkUnknownKeys(node *yaml.Node, typ reflect.Type, prefix string, found *[]
 // a struct, a slice of structs or a map of structs and the file's node has the matching shape. A
 // shape mismatch (a list where a block was expected) is the decoder's error to report, not a set
 // of unknown keys, so the walk stops there.
+//
+// The walk never descends into the entries of a slice or map whose element struct declares no yaml
+// key (declaresSchemaKeys): such an entry is decoded by its type's own UnmarshalYAML, and its keys
+// are data, not schema — `ui.side-panel.sections` spells each entry `section: mode`, and every
+// section name would otherwise read as an unknown key. A misspelled key beside such a list is still
+// reported, by the walk of the mapping that holds it.
 func descendUnknownKeys(node *yaml.Node, typ reflect.Type, path string, found *[]keyAt) {
 	typ = derefType(typ)
 	switch typ.Kind() {
@@ -130,7 +138,7 @@ func descendUnknownKeys(node *yaml.Node, typ reflect.Type, path string, found *[
 		}
 	case reflect.Slice:
 		elem := derefType(typ.Elem())
-		if elem.Kind() != reflect.Struct || node.Kind != yaml.SequenceNode {
+		if elem.Kind() != reflect.Struct || !declaresSchemaKeys(elem) || node.Kind != yaml.SequenceNode {
 			return
 		}
 		for i, item := range node.Content {
@@ -140,7 +148,7 @@ func descendUnknownKeys(node *yaml.Node, typ reflect.Type, path string, found *[
 		}
 	case reflect.Map:
 		elem := derefType(typ.Elem())
-		if elem.Kind() != reflect.Struct || node.Kind != yaml.MappingNode {
+		if elem.Kind() != reflect.Struct || !declaresSchemaKeys(elem) || node.Kind != yaml.MappingNode {
 			return
 		}
 		for i := 0; i+1 < len(node.Content); i += 2 {
@@ -149,6 +157,18 @@ func descendUnknownKeys(node *yaml.Node, typ reflect.Type, path string, found *[
 			}
 		}
 	}
+}
+
+// declaresSchemaKeys reports whether a config struct names at least one yaml key — whether the file
+// can spell any of its fields. An entry struct without one (domain.SidePanelEntry, watchHomeConfig)
+// is decoded by a custom UnmarshalYAML from keys that are data, so the walk leaves its entries alone.
+func declaresSchemaKeys(typ reflect.Type) bool {
+	for _, sk := range schemaKeys(typ) {
+		if sk.key != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // joinKeyPath spells a child key under its parent's dotted path.
