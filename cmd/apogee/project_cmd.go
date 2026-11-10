@@ -248,13 +248,14 @@ const projectQuestionPrompt = "adopt? [y]es / [n]ot now / [r]eject: "
 // its own.
 const projectQuestionIndent = "    "
 
-// printProjectQuestion asks about proposal on out. An Allow rule is one line, its kind and text; a
-// server or reaction is the adoption pane's title, its body printed whole under it
-// (tui.AdoptionQuestion), and the answers on a line of their own.
+// printProjectQuestion asks about proposal on out with the adoption pane's own question
+// (tui.AdoptionQuestion), whose title names the entry in the pane's escape-stripped, one-line
+// spelling. An Allow rule is that title and the answers on one line; a server or reaction is the
+// title, its body printed whole under it, and the answers on a line of their own.
 func printProjectQuestion(out io.Writer, proposal apogee.Proposal) {
 	title, body := tui.AdoptionQuestion(proposal)
 	if body == nil {
-		_, _ = fmt.Fprintf(out, "  %s `%s` — %s", proposal.Kind, proposal.Text, projectQuestionPrompt)
+		_, _ = fmt.Fprintf(out, "  %s — %s", title, projectQuestionPrompt)
 		return
 	}
 	_, _ = fmt.Fprintf(out, "  %s\n", title)
@@ -300,13 +301,15 @@ func answerProposal(target projectAdoptTarget, proposal apogee.Proposal, adopt b
 	return notHeld, err
 }
 
-// heldName names proposal in the refusal of a yes the file no longer holds: an Allow rule by its
-// text, a server or reaction as the pane names it, as it was offered.
+// heldName names proposal in the refusal of a yes the file no longer holds, as the pane names it
+// (tui.AdoptionEntryName) — escape-stripped and on one line, since the name is the file's text —
+// and a server or reaction, which the file may still hold changed, as it was offered.
 func heldName(proposal apogee.Proposal) string {
+	name := tui.AdoptionEntryName(proposal)
 	if proposal.Handle == "" {
-		return "`" + proposal.Text + "`"
+		return name
 	}
-	return tui.AdoptionEntryName(proposal) + " as it was offered"
+	return name + " as it was offered"
 }
 
 // projectAnswerTally counts what the answers did: entries adopted, entries rejected, and entries a

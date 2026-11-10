@@ -113,7 +113,7 @@ Depends on item 2.
 **Acceptance:** `go test -race -count=1 -run 'Secret' ./internal/agent/` then `go test -race -count=1 -run 'Secret' ./internal/security/`
 **Commit:** `fix(agent): scan the whole staged diff for secrets`
 
-## 4. `apogee project adopt` shows Allow rules through the sanitised name
+## 4. `apogee project adopt` shows Allow rules through the sanitised name — ✅ DONE (2026-11-10)
 
 **What:**
 **Goal:** the CLI adoption question and the "no longer holds" refusal write no C0, DEL or ESC byte from repo-supplied text, and name an Allow rule with the same spelling as the adoption pane.

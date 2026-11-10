@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // `apogee project adopt` (project_cmd.go, ADR 0096 §4): the terminal twin of the adoption pane,
@@ -174,6 +175,74 @@ func TestProjectCmdAdoptRefusesARuleTheFileNoLongerHolds(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Adopted 1, rejected 0, left 0 proposed, 1 no longer in the file.") {
 		t.Errorf("the closing line does not count the rule that was gone:\n%s", out.String())
+	}
+}
+
+// controlByte reports the first C0 control, DEL or ESC in s, so a line the command prints from a
+// repository file's text is proven free of what could move the cursor or rewrite the screen.
+func controlByte(s string) (byte, bool) {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == 0x7f {
+			return c, true
+		}
+	}
+	return 0, false
+}
+
+// An Allow rule's question and the refusal of a yes the file no longer holds print the rule from
+// the repository's own text, so both carry it in the adoption pane's escape-stripped spelling: a
+// carriage return and an escape sequence in the rule reach the terminal as neither, and the rule is
+// named exactly as the pane names it.
+func TestProjectCmdAdoptPrintsAllowRulesThroughThePaneSpelling(t *testing.T) {
+	t.Parallel()
+	const hostile = "go test\r\x1b[2K\x1b]0;owned\x07rm -rf ~\x7f"
+	cases := []struct {
+		name     string
+		proposal apogee.Proposal
+	}{
+		{"terminal rule", apogee.Proposal{Kind: apogee.ProposalKind(domain.AllowRuleTerminal), Text: hostile}},
+		{"mcp-servers rule", apogee.Proposal{Kind: apogee.ProposalKind(domain.AllowRuleMCPServer), Text: hostile}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			name := tui.AdoptionEntryName(tc.proposal)
+			var out bytes.Buffer
+			printProjectQuestion(&out, tc.proposal)
+			question := out.String()
+			if c, ok := controlByte(question); ok {
+				t.Errorf("the question writes control byte %#x: %q", c, question)
+			}
+			if !strings.Contains(question, name) {
+				t.Errorf("the question %q does not name the rule as the pane does, %q", question, name)
+			}
+			if !strings.HasSuffix(question, projectQuestionPrompt) {
+				t.Errorf("the question %q does not end with the answers it takes", question)
+			}
+			held := heldName(tc.proposal)
+			if c, ok := controlByte(held); ok {
+				t.Errorf("the refusal's name writes control byte %#x: %q", c, held)
+			}
+			if held != name {
+				t.Errorf("the refusal names the rule %q, want the pane's %q", held, name)
+			}
+		})
+	}
+}
+
+// A server or reaction refused because the file no longer holds it as offered is named as the pane
+// names it, escape-stripped, with the "as it was offered" the file's changed entry needs.
+func TestProjectCmdAdoptNamesARefusedServerThroughThePaneSpelling(t *testing.T) {
+	t.Parallel()
+	proposal := apogee.Proposal{Kind: domain.ProposalMCPServer, Handle: "docs\r\x1b[31mtrusted"}
+
+	held := heldName(proposal)
+
+	if c, ok := controlByte(held); ok {
+		t.Errorf("the refusal's name writes control byte %#x: %q", c, held)
+	}
+	if want := tui.AdoptionEntryName(proposal) + " as it was offered"; held != want {
+		t.Errorf("the refusal names the server %q, want %q", held, want)
 	}
 }
 
