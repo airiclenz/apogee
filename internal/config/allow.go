@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/adoption"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // The `allow:` key — Allow rules (ADR 0096 §2, §4; the glossary's "Allow rule", "Adoption")
@@ -117,7 +118,8 @@ func fileAllowRules(o *Options, fc fileConfig) error {
 // rules converts the block's entries into rules tagged with layer, terminal rules first, each list
 // in file order.
 //
-// Errors: an error naming the list and the entry for a rule that is empty or only whitespace.
+// Errors: an error naming the list and the entry for a rule that is empty or only whitespace, or
+// that holds a character [ruleControl] refuses.
 func (ac *allowConfig) rules(layer Source) ([]AllowRule, error) {
 	out := make([]AllowRule, 0, len(ac.Terminal)+len(ac.MCPServers))
 	for _, list := range []struct {
@@ -129,10 +131,32 @@ func (ac *allowConfig) rules(layer Source) ([]AllowRule, error) {
 				return nil, fmt.Errorf("apogee: allow.%s entry %d is empty — a rule names what it allows",
 					list.kind, i+1)
 			}
+			if r, class, ok := ruleControl(text); ok {
+				return nil, fmt.Errorf("apogee: allow.%s entry %d holds %s (%U) — a rule is plain text",
+					list.kind, i+1, class, r)
+			}
 			out = append(out, AllowRule{Kind: list.kind, Text: text, Layer: layer})
 		}
 	}
 	return out, nil
+}
+
+// ruleControl reports the first character of text no Allow rule may hold, with its class for the
+// refusal: a C0 control (the tab and the line breaks among them), DEL, or a Unicode bidi control
+// ([sanitize.BidiControl]). A rule is matched against what runs and shown wherever it is decided
+// on, so a control byte in it either drives the terminal that shows it or makes the row read as
+// something other than the rule it holds. Load and the rule writers (checkAllowRule) refuse this
+// one set.
+func ruleControl(text string) (r rune, class string, ok bool) {
+	for _, r := range text {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			return r, "a control character", true
+		case sanitize.BidiControl(r):
+			return r, "a Unicode bidi control", true
+		}
+	}
+	return 0, "", false
 }
 
 // projectAllowRules is a Project config's rules sorted by the user's recorded answers.

@@ -127,7 +127,9 @@ Depends on item 2.
 **Acceptance:** `go test -race -count=1 -run 'Project' ./cmd/apogee/`
 **Commit:** `fix(project): print adoption rules through the sanitised name`
 
-## 5. Config load refuses Allow rules holding control characters
+## 5. Config load refuses Allow rules holding control characters — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): consequential edit — docs/manual/configuration.md: made necessary by the new load refusal (the Allow-rules paragraph listed only the blank-rule refusal)
 
 **What:**
 **Goal:** loading any config layer whose Allow rule text holds a C0 control, DEL or a Unicode bidi control fails with an error naming the layer and the rule index; ordinary rules load as before.

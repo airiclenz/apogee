@@ -364,6 +364,8 @@ func TestAddProjectAllowRuleRefusals(t *testing.T) {
 		{"an unknown kind", "network", "x", ""},
 		{"a blank rule", AllowTerminal, "  ", ""},
 		{"a rule over two lines", AllowTerminal, "go\ntest", ""},
+		{"a bidi override", AllowTerminal, "go test \u202e", ""},
+		{"an escape sequence", AllowMCPServers, "docs\x1b[2J", ""},
 		{"a flow-style list", AllowTerminal, "go test", "allow:\n  terminal: [make]\n"},
 		{"a flow-style block", AllowTerminal, "go test", "allow: {terminal: [make]}\n"},
 		{"a scalar allow", AllowTerminal, "go test", "allow: yes\n"},

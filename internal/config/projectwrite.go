@@ -358,7 +358,8 @@ func allowRuleRemoval(kind AllowKind, text string) (editSplice, editVerify, erro
 }
 
 // checkAllowRule refuses what no rule can be before the file is opened: a kind the `allow:` key
-// does not have, a blank rule — which would match every command — and a rule that spans lines.
+// does not have, a blank rule — which would match every command — a rule that spans lines, and a
+// rule holding any other character load refuses ([ruleControl]).
 func checkAllowRule(kind AllowKind, text string) error {
 	switch {
 	case kind != AllowTerminal && kind != AllowMCPServers:
@@ -367,6 +368,9 @@ func checkAllowRule(kind AllowKind, text string) error {
 		return errors.New("apogee: an allow rule names what it allows; this one is empty")
 	case strings.ContainsAny(text, "\r\n"):
 		return errors.New("apogee: an allow rule is one line; this one spans several")
+	}
+	if r, class, ok := ruleControl(text); ok {
+		return fmt.Errorf("apogee: an allow rule is plain text; this one holds %s (%U)", class, r)
 	}
 	return nil
 }

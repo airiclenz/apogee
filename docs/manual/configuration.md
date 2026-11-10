@@ -3547,7 +3547,9 @@ wildcards, and no rule applies on Windows `cmd`. File edits get no rules — `al
 choice. A rule answers only the ordinary prompt — ask-before's, allow-edits', and auto's for a call
 it cannot confine — never a refusal, never the dangerous-action guard's forced prompt, and never a
 Reaction's `ask` or `deny`. An empty or blank rule refuses the start with an error naming it,
-because it would match everything. A line a rule answered runs without the inherited `CDPATH`,
+because it would match everything. So does a rule holding a control character (a tab, a line
+break, an escape, DEL) or a Unicode bidi control, which would drive or reorder the screen that
+shows it; in a project file either one skips the project layer instead. A line a rule answered runs without the inherited `CDPATH`,
 `BASH_ENV` and `ENV` variables and without exported bash functions, since each changes what the line
 does without appearing in it; a line you approved yourself keeps your full environment.
 

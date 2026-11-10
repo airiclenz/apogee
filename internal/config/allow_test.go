@@ -201,6 +201,65 @@ func TestAllowRulesRefuseABlankRule(t *testing.T) {
 	}
 }
 
+// A rule holding a C0 control, DEL or a Unicode bidi control would drive the terminal that shows it,
+// or read as another rule, so it refuses a global file naming its entry and skips a project layer.
+func TestAllowRulesRefuseAControlCharacter(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ rule, class string }{
+		"a carriage return":  {`go test\r`, "a control character (U+000D)"},
+		"an escape sequence": {`make \x1b[31mlint`, "a control character (U+001B)"},
+		"a tab":              {`go\ttest`, "a control character (U+0009)"},
+		"a DEL":              {`make\x7f`, "a control character (U+007F)"},
+		"a bidi override":    {`go test \u202E`, "a Unicode bidi control (U+202E)"},
+	} {
+		block := "allow:\n  terminal: [make, \"" + tc.rule + "\"]\n"
+		t.Run(name+" in the global file", func(t *testing.T) {
+			t.Parallel()
+			globalPath, projectRoot := layerFixture(t, block, "")
+
+			_, err := LoadLayeredConfig(globalPath, projectRoot, os.ReadFile, func(string) {})
+
+			if err == nil || !strings.Contains(err.Error(), "allow.terminal entry 2 holds "+tc.class) {
+				t.Errorf("LoadLayeredConfig error = %v; want a refusal naming allow.terminal entry 2 and %s",
+					err, tc.class)
+			}
+		})
+		t.Run(name+" in the project file", func(t *testing.T) {
+			t.Parallel()
+			globalPath, projectRoot := layerFixture(t, "workflow-retries: 2\n", "workflow-retries: 5\n"+block)
+
+			o, offer, notices := loadLayeredOffer(t, globalPath, projectRoot)
+
+			if o.WorkflowRetries != 2 || len(offer.Proposed) != 0 {
+				t.Errorf("workflow-retries = %d, proposed %+v; want the global 2 and no project rules",
+					o.WorkflowRetries, offer.Proposed)
+			}
+			if len(notices) != 1 || !strings.Contains(notices[0], "the project layer is skipped") ||
+				!strings.Contains(notices[0], "allow.terminal entry 2") {
+				t.Errorf("notices = %q; want one skipping the project layer over allow.terminal entry 2", notices)
+			}
+		})
+	}
+}
+
+// Ordinary rules — non-ASCII printable text among them — load as written.
+func TestAllowRulesAcceptPrintableText(t *testing.T) {
+	t.Parallel()
+	globalPath, projectRoot := layerFixture(t,
+		"allow:\n  terminal: [go test, npm run 构建]\n  mcp-servers: [dökümanlar]\n", "")
+
+	o, _ := loadLayered(t, globalPath, projectRoot)
+
+	want := []AllowRule{
+		{Kind: AllowTerminal, Text: "go test", Layer: SourceGlobal},
+		{Kind: AllowTerminal, Text: "npm run 构建", Layer: SourceGlobal},
+		{Kind: AllowMCPServers, Text: "dökümanlar", Layer: SourceGlobal},
+	}
+	if !reflect.DeepEqual(o.AllowRules.Rules, want) {
+		t.Errorf("AllowRules.Rules = %+v, want %+v", o.AllowRules.Rules, want)
+	}
+}
+
 // A project `allow:` entry never enters the merged document the one decode reads — adopted or
 // not, it reaches the run only through the adoption record — so the global file's block decodes
 // exactly as written.
