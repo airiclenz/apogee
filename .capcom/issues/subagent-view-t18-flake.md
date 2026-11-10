@@ -1,11 +1,13 @@
 ---
 title: TestE2ESubAgentView t18 golden fails under full-suite load
-status: open
+status: done
 type: bug
 priority: 2
 labels: [slow-box]
 plan: 2026-11-10 - 00 - open-bug-fixes-plan
 created: 2026-11-10T06:21:29Z
+closed: 2026-11-10T10:44:52Z
+reason: "Resolved by plan 2026-11-10 - 00 - open-bug-fixes-plan item 2 (archived at a2ddbfd8): scenes 3-5 of TestE2ESubAgentView now wait on the conditions their assertions read (scene 3 on the child's tool-result request, scenes 4-5 on the asserted rows), and the test passed 20x under -race pinned to one core (run with -timeout 30m)."
 ---
 
 `TestE2ESubAgentView` (`cmd/apogee/e2e_subagent_view_test.go`) failed once during `APOGEE_TEST_SLOW=1 GOMEMLIMIT=2GiB make check` on the Pi 5 (2026-11-09). The failure was in the collapsed-row checks (~L193) and the `t18-run-view-finished` golden (~L215). It then passed 4 of 4 times on its own. This is not the t17 case that `subagent-view-golden-early` fixed.
