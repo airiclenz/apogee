@@ -776,13 +776,25 @@ var repaintBudget = testtime.Fixed(40 * settled)
 // It leaves the block cursor afterwards, which is not tidiness: while the cursor is active every
 // repaint re-anchors the view on the line it stands on (followBlockCursor), so a ⇟ scrolls and is
 // yanked straight back. A test that then walked a tall block would read the same page forever.
+//
+// The ⏎ is known to have landed by what it changes, never by a quiet screen — which was quiet before
+// the press too (docs/design/test-drivers.md §Waiting). Opening a block either takes a collapsed ▶
+// off the frame or puts an expanded ▼ on it, so the wait holds once the frame's ▶ count drops below,
+// or its ▼ count rises above, the frame's own just before the ⏎. It is the two counts and not one
+// row's ▶→▼ swap because the row that opens need not keep its indicator where it was: a collapsed
+// row's `+N more lines` tail vanishes on expansion, and the body can push rows off the top.
 func expandLastBlock(drv *tuitest.Driver) {
 	painted := drv.Screen().BytesWritten()
 	drv.Press(tuitest.AltUp)
 	drv.WaitFor(func() bool { return drv.Screen().BytesWritten() > painted },
 		tuitest.Awaiting("the block cursor to highlight a block"))
+	before := drv.Frame().String()
+	collapsed, expanded := strings.Count(before, glyphCollapsed), strings.Count(before, glyphExpanded)
 	drv.Press(tuitest.Enter)
-	drv.WaitQuiet(settled)
+	drv.WaitFor(func() bool {
+		now := drv.Frame().String()
+		return strings.Count(now, glyphCollapsed) < collapsed || strings.Count(now, glyphExpanded) > expanded
+	}, tuitest.Awaiting("the block under the cursor to open"))
 	// The esc is anchored on its own repaint, exactly as the ⌥↑ above is, and for the reason the
 	// walk in [scrollTranscript] states: a quiet check taken straight after a keystroke passes on
 	// a screen that has not been painted YET — the screen was already quiet before the press — and
@@ -793,6 +805,14 @@ func expandLastBlock(drv *tuitest.Driver) {
 	awaitRepaint(drv, dropped)
 	drv.WaitQuiet(settled)
 }
+
+// glyphCollapsed and glyphExpanded are the default glyph set's block-state indicators
+// (internal/tui/theme.go: glyphs.collapsed and glyphExpanded): what [expandLastBlock] counts to know
+// the block it pressed ⏎ on opened.
+const (
+	glyphCollapsed = "▶"
+	glyphExpanded  = "▼"
+)
 
 // openLastRun opens the last DELEGATION in the transcript as its run view — the same ⌥↑ ⏎ reach, on
 // the one block kind that answers it with a view rather than with a body opened in place (ADR 0063).

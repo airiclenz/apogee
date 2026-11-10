@@ -91,7 +91,11 @@ cmd/apogee/e2e_hostile_test.go — rowsContain; cmd/apogee/e2e_livestate_test.go
 
 **Commit:** `fix(e2e): wait on the asserted rows in TestE2ESubAgentView scenes 4 and 5`
 
-## 3. expandLastBlock waits on the expansion, not on quiet
+## 3. expandLastBlock waits on the expansion, not on quiet — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the indicator glyphs are package-main constants `glyphCollapsed` ("▶") and `glyphExpanded` ("▼") in e2e_support_test.go. They mirror the default glyph set in internal/tui/theme.go. The e2e tests run on the default set, so the safe set's ► is not counted. Neither name collides with an existing package-main identifier.
+NOTES (2026-11-10): the pre-⏎ baseline is taken from the frame after the ⌥↑ repaint has landed, not before the ⌥↑. The block-cursor highlight changes styles only, never indicator glyphs. The esc + awaitRepaint(dropped) + WaitQuiet(settled) tail is unchanged.
+NOTES (2026-11-10): the Acceptance -race -count=3 runs were given `-timeout 30m` as a precaution on the Pi 5. Both passed: Outcome in 98.8 s, Firing in 7.0 s.
 
 **What:** Same defect class as item 2: `expandLastBlock` (`cmd/apogee/e2e_support_test.go`) presses Enter and then calls `WaitQuiet` as its only readiness signal — the form `docs/design/test-drivers.md` §Waiting forbids outright. Its three call sites — `TestE2EOutcomeSlotsCarryTheToolsVerdict` (two calls) and `TestE2EFiringMarksAnAbandonedFinalTurn` (not `t.Parallel`, fake schedule clock) — then read the frame.
 
