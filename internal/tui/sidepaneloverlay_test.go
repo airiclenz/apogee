@@ -88,7 +88,7 @@ func overlaidModel(t *testing.T) Model {
 
 // TestOverlayOpensOnRightAtNarrowWidth is ADR 0111 D7's way in: on a window under the column's gate,
 // → in navigation mode paints the panel over the transcript's right edge at its configured width
-// clamped to the window — the transcript floor the docked column keeps is no input — with the cursor
+// clamped to the window — the transcript the docked column's clamp leaves is no input — with the cursor
 // on a panel stop, and the slot and the docked width it reads stay the window's.
 func TestOverlayOpensOnRightAtNarrowWidth(t *testing.T) {
 	t.Parallel()

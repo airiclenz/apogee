@@ -27,15 +27,22 @@ const (
 	// says ([sidePanelLeastWindow]), so a wider or narrower panel never moves the window it shows
 	// from. It is its own value, not [domain.DefaultSidePanelWidth]: the gate keeps its 137 / 117
 	// columns while the default width grew to 44 (owner call 2026-11-09), and a window between
-	// those docks the column clamped narrower ([Model.clampPanelWidth]). The painted width is
+	// those docks an unset width clamped narrower ([Model.clampPanelWidth]). The painted width is
 	// [Model.panelWidth].
 	sidePanelGateWidth = 36
-	// sidePanelAutoFloor is the transcript width `ui.side-panel.show: auto` keeps beside the column,
-	// counting the scroll-bar column painted or not: the column shows from a 137-column window.
+	// sidePanelAutoFloor is the transcript width `ui.side-panel.show: auto` gates the column on,
+	// counting the scroll-bar column painted or not: the column shows from a 137-column window, and
+	// an unset width docks clamped to the room it leaves ([Model.clampPanelWidth]).
 	sidePanelAutoFloor = 100
-	// sidePanelOnFloor is the transcript width `ui.side-panel.show: on` never goes below, on the same
-	// count: the column shows from a 117-column window.
+	// sidePanelOnFloor is the transcript width `ui.side-panel.show: on` gates the column on, on the
+	// same count: the column shows from a 117-column window, and an unset width docks clamped to the
+	// room it leaves.
 	sidePanelOnFloor = 80
+	// sidePanelTranscriptLeast is the narrowest transcript a set width — dragged or configured —
+	// leaves beside the docked column, the scroll-bar column not counted, one value under `auto` and
+	// `on` ([Model.clampPanelWidth]). It is the drag's and the layout's minimum, never the show gate's:
+	// the column still shows only from the window [sidePanelLeastWindow] names.
+	sidePanelTranscriptLeast = 60
 	// sidePanelSeparator is the rule on the column's left edge, one cell in either width measure.
 	sidePanelSeparator = "│"
 	// sidePanelSeparatorWidth is the separator's cells.
@@ -166,24 +173,32 @@ func (m Model) configuredPanelWidth() int {
 
 // panelWidth is the column's painted width, its separator included, while it shows
 // ([Model.panelShown]); 0 while it does not, so the frame key and the slot read one value. The
-// configured width ([Model.configuredPanelWidth]) is clamped to the window: never narrower than
-// [domain.MinSidePanelWidth], never wider than leaves the show mode's transcript floor and the
-// scroll-bar column. The clamp is the layout's alone — it never writes the setting back, so a
-// window grown again paints the width the user chose.
+// configured width ([Model.configuredPanelWidth]) is clamped to the window
+// ([Model.clampPanelWidth]): a set `ui.side-panel.width` to the transcript minimum, an unset one to
+// the show mode's gate floor. The clamp is the layout's alone — it never writes the setting back,
+// so a window grown again paints the width the user chose.
 func (m Model) panelWidth() int {
 	if !m.panelShown() {
 		return 0
 	}
-	return m.clampPanelWidth(m.configuredPanelWidth())
+	isSet := m.opts.UI.SidePanelWidth != 0
+	return m.clampPanelWidth(m.configuredPanelWidth(), isSet)
 }
 
 // clampPanelWidth is width held to the column's limits in this window (adr-0110-amend-1108 (a)):
-// at least [domain.MinSidePanelWidth], at most the window less the show mode's transcript floor
-// and the scroll-bar column. The layout ([Model.panelWidth]) and a separator drag
-// ([Model.dragPanelSeparator]) clamp through it, so the drag stops exactly where the paint does.
-func (m Model) clampPanelWidth(width int) int {
-	floor, _ := sidePanelTranscriptFloor(m.opts.UI.SidePanelShow)
-	return min(max(width, domain.MinSidePanelWidth), m.width-floor-scrollbarWidth)
+// at least [domain.MinSidePanelWidth], at most the window less the transcript it leaves and the
+// scroll-bar column. A set width — one the user dragged or wrote — leaves the transcript
+// [sidePanelTranscriptLeast]; an unset one leaves the show mode's gate floor
+// ([sidePanelTranscriptFloor]), so the default width docks as it did before a width could be set
+// narrower than the gate. The layout ([Model.panelWidth]) and a separator drag
+// ([Model.dragPanelSeparator]), which always clamps as set, read it, so the drag stops exactly
+// where the paint does.
+func (m Model) clampPanelWidth(width int, isSet bool) int {
+	least := sidePanelTranscriptLeast
+	if !isSet {
+		least, _ = sidePanelTranscriptFloor(m.opts.UI.SidePanelShow)
+	}
+	return min(max(width, domain.MinSidePanelWidth), m.width-least-scrollbarWidth)
 }
 
 // panelOverlayable reports whether the column can open as the narrow-window overlay (ADR 0111 D7):
@@ -204,7 +219,7 @@ func (m Model) panelOverlaid() bool {
 
 // panelPaintWidth is the columns the column is painted across, its separator included: the docked
 // column's ([Model.panelWidth]) while it shows; while it is overlaid ([Model.panelOverlaid]) the
-// configured width clamped to the window alone — the overlay leaves no transcript floor beside it,
+// configured width clamped to the window alone — the overlay leaves no transcript beside it,
 // so [Model.clampPanelWidth] stays the docked column's and the drag's; 0 otherwise. It is the paint
 // geometry: the content's width, the cells a click or a notch lands on and where View hangs the
 // column read it. [Model.panelWidth] stays 0 under the overlay, so the slot, the layout and the
@@ -1098,12 +1113,12 @@ func (m Model) startPanelDrag(grab int, at time.Time) Model {
 }
 
 // dragPanelSeparator moves the separator of an active drag to the pointer's column x less the grab
-// offset, clamped ([Model.clampPanelWidth]). It changes the stored width only when the clamped width
-// differs from the one painted, so a pointer held past a limit leaves a stored width the window
-// clamps untouched; the repaint tail relayouts the frame for the one motion that moved it
-// ([Model.panelDragResized]).
+// offset, clamped as a set width ([Model.clampPanelWidth]) — a drag sets the width it lands. It
+// changes the stored width only when the clamped width differs from the one painted, so a pointer
+// held past a limit leaves a stored width the window clamps untouched; the repaint tail relayouts
+// the frame for the one motion that moved it ([Model.panelDragResized]).
 func (m Model) dragPanelSeparator(x int) Model {
-	width := m.clampPanelWidth(m.width - (x - m.panelDrag.grabOffset))
+	width := m.clampPanelWidth(m.width-(x-m.panelDrag.grabOffset), true)
 	if width != m.panelWidth() {
 		m.opts.UI.SidePanelWidth = width
 		m.panelDrag.moved = true
@@ -1379,8 +1394,8 @@ func withSectionMode(
 	return domain.SpellSidePanelSections(entries)
 }
 
-// sidePanelLeastWindow is the narrowest window show draws the column in: the floor the transcript
-// keeps beside it ([sidePanelTranscriptFloor]) plus the column at the gate's width ([sidePanelGateWidth]) and the
+// sidePanelLeastWindow is the narrowest window show draws the column in: the show mode's gate floor
+// ([sidePanelTranscriptFloor]) plus the column at the gate's width ([sidePanelGateWidth]) and the
 // scroll-bar column, counted painted or not ([Model.panelShown]). ok is false for a mode that never
 // draws it: `off`, and the zero UIPrefs' empty mode.
 func sidePanelLeastWindow(show domain.SidePanelShow) (least int, ok bool) {
@@ -1391,9 +1406,10 @@ func sidePanelLeastWindow(show domain.SidePanelShow) (least int, ok bool) {
 	return floor + sidePanelGateWidth + scrollbarWidth, true
 }
 
-// sidePanelTranscriptFloor is the transcript width show keeps beside the column, the scroll-bar
-// column not counted: sidePanelAutoFloor under `auto`, sidePanelOnFloor under `on`. ok is false
-// for a mode that never draws the column.
+// sidePanelTranscriptFloor is show's gate floor, the scroll-bar column not counted:
+// sidePanelAutoFloor under `auto`, sidePanelOnFloor under `on` — the transcript the gate counts
+// ([sidePanelLeastWindow]) and an unset width docks beside ([Model.clampPanelWidth]); a set width
+// may narrow it to [sidePanelTranscriptLeast]. ok is false for a mode that never draws the column.
 func sidePanelTranscriptFloor(show domain.SidePanelShow) (floor int, ok bool) {
 	switch show {
 	case domain.SidePanelShowAuto:

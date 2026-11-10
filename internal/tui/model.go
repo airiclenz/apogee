@@ -3154,14 +3154,14 @@ func (m Model) transcriptBudget() int {
 }
 
 // panelShown reports whether the side panel's column (ADR 0110) is on this frame: the show mode
-// names the floor the transcript must keep beside it — 100 columns under `auto`, 80 under `on` —
-// and the column shows while the window pays for that floor, the column at its default width and
-// the scroll-bar column. The bar's column is counted whether or not the bar is painted
-// (ui.show-scrollbar), so a bar switched on or off never carries the panel across a threshold;
-// the configured width is no input either, so a wider or narrower panel shows from the same
-// window ([Model.panelWidth] clamps it to what the window leaves); and nothing the panel SHOWS is
-// an input here, so the column appears or goes only on a resize across a threshold or a change of
-// `ui.side-panel.show` (layout.md, "The side panel").
+// names its gate floor — 100 transcript columns under `auto`, 80 under `on` — and the column shows
+// while the window pays for that floor, the column at the gate's width and the scroll-bar column.
+// The bar's column is counted whether or not the bar is painted (ui.show-scrollbar), so a bar
+// switched on or off never carries the panel across a threshold; the configured width is no input
+// either, so a wider or narrower panel shows from the same window ([Model.panelWidth] clamps it to
+// what the window leaves — a set width down to a 60-column transcript, an unset one to the gate
+// floor); and nothing the panel SHOWS is an input here, so the column appears or goes only on a
+// resize across a threshold or a change of `ui.side-panel.show` (layout.md, "The side panel").
 //
 // `off` never shows it, and neither does the zero UIPrefs' empty mode: the config resolves an
 // unset key to `auto` before it reaches the renderer (domain.DefaultUIPrefs), and the renderer

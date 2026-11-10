@@ -32,7 +32,7 @@ const (
 	sidePanelDefaultWidth = 44
 
 	// sidePanelDragColumns is how far left the drag moves the separator — well inside the limits a
-	// 160-column `auto` window allows (24 to 160 − 100 − 1 = 59 columns).
+	// 160-column window allows a dragged width (24 to 160 − 60 − 1 = 99 columns).
 	sidePanelDragColumns = 10
 )
 

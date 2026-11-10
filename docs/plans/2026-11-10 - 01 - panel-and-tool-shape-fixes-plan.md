@@ -147,7 +147,11 @@ internal/config/config_test.go — TestApplyConfigUISidePanelWidthLoadsFromTheGl
 
 **Commit:** `refactor(config): carry an unset side-panel width from config to renderer`
 
-## 5. Side panel: a 60-column transcript minimum for set widths
+## 5. Side panel: a 60-column transcript minimum for set widths — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): TestSidePanelPaintedWidth's "auto floor caps" / "on floor caps" rows (60@140, 60@130, now 60) are renamed "auto/on stated fits beside the transcript minimum", since their width no longer caps; the capped rows are "auto/on transcript minimum caps" (100@140 → 79, 100@130 → 69). The "set width wider than the window allows" Tests bullet is the row "a width wider than the window caps" (300@200 → 139), its no-rewrite check the table's shared one.
+NOTES (2026-11-10): the new frame test is TestSidePanelDockedAtTheTranscriptMinimumFitsTheFrame; the `on`-mode twin of separatorDragModel is separatorDragModelUnder(t, show, failure), which separatorDragModel now calls with `auto`.
+NOTES (2026-11-10): consequential edit — internal/tui/sidepaneloverlay_test.go: made necessary by the new clamp rule (TestOverlayOpensOnRightAtNarrowWidth's comment named "the transcript floor the docked column keeps").
 
 **What:** Recast at the regression check (2026-11-10). the separator drag stops 100 (80 under `on`) columns short of the window edge; lower it for set widths per the ratified calls. Depends on item 4.
 **Regression guard.** Item 4 makes an unset width (0) a production state, so the unset/set split reaches real users. Every comment naming the transcript floor as the clamp or as what a docked column leaves gets the new rule, found by `grep -rn "transcript floor\|transcript's floor\|keeps beside\|− 100 −" internal/tui cmd/apogee` (at the base this includes `cmd/apogee/e2e_sidepanel_drag_test.go`'s "160 − 100 − 1 = 59").
