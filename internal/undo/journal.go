@@ -194,6 +194,13 @@ type group struct {
 	preBlobs   map[string]string
 	postBlobs  map[string]string
 	touched    []string
+
+	// preFailed records that [Journal.MarkPre] already tried this group's pre-image and the
+	// capture failed under a live ctx, so the rest of the Exchange stays funnel-only rather
+	// than paying a doomed git run before every write-capable call. It is not persisted: a
+	// reloaded group belongs to an earlier exchange, and [Load] marks the boundary that makes
+	// the next MarkPre open a group of its own.
+	preFailed bool
 }
 
 // snapshotted reports whether both of this group's images were taken, which is what makes

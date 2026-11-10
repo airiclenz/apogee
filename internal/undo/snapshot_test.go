@@ -35,6 +35,7 @@ type fakeSnapshotter struct {
 	fail      error           // when set, every Capture refuses
 	failDiff  error           // when set, every Diff refuses
 	failBlobs error           // when set, every ListBlobs refuses
+	captures  int             // how many times Capture ran, refusals included
 }
 
 func newFakeSnapshotter(root string) *fakeSnapshotter {
@@ -46,6 +47,7 @@ func (f *fakeSnapshotter) Capture(_ context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	f.captures++
 	if f.fail != nil {
 		return "", f.fail
 	}
@@ -407,6 +409,68 @@ func TestClose_GroupWhoseCaptureFailed_IsKeptAsAFunnelOnlyStep(t *testing.T) {
 		t.Fatalf("Revert: %v", err)
 	}
 	assertContent(t, path, "before")
+}
+
+// captureCount reads the fake's capture counter under its lock.
+func (f *fakeSnapshotter) captureCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.captures
+}
+
+func TestMarkPre_AfterAFailedCapture_IsNotRetriedUntilTheNextExchange(t *testing.T) {
+	journal, snap, _ := snapshotJournal(t)
+	snap.fail = errors.New("git is wedged")
+
+	journal.BeginGroup()
+	if err := journal.MarkPre(context.Background()); err == nil {
+		t.Fatal("MarkPre reported no error although the capture refused")
+	}
+	if err := journal.MarkPre(context.Background()); err != nil {
+		t.Errorf("the second MarkPre of the Exchange = %v, want nil: the failure is reported once", err)
+	}
+	if got := snap.captureCount(); got != 1 {
+		t.Fatalf("captures in one Exchange = %d, want 1: a failed capture was retried", got)
+	}
+	if err := journal.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	journal.BeginGroup()
+	if err := journal.MarkPre(context.Background()); err == nil {
+		t.Error("the next Exchange's MarkPre reported no error although the capture still refuses")
+	}
+	if got := snap.captureCount(); got != 2 {
+		t.Errorf("captures after a new Exchange = %d, want 2: the next Exchange must try again", got)
+	}
+}
+
+func TestMarkPre_AfterACancelledCapture_CapturesOnTheNextLiveCall(t *testing.T) {
+	journal, snap, _ := snapshotJournal(t)
+	snap.fail = context.Canceled
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	journal.BeginGroup()
+	if err := journal.MarkPre(cancelled); err == nil {
+		t.Fatal("MarkPre reported no error although the capture refused")
+	}
+	snap.mu.Lock()
+	snap.fail = nil
+	snap.mu.Unlock()
+
+	if err := journal.MarkPre(context.Background()); err != nil {
+		t.Fatalf("MarkPre on a live ctx: %v", err)
+	}
+	if got := snap.captureCount(); got != 2 {
+		t.Fatalf("captures = %d, want 2: a cancelled capture left the Exchange funnel-only", got)
+	}
+	journal.mu.Lock()
+	pre := journal.groups[len(journal.groups)-1].pre
+	journal.mu.Unlock()
+	if pre == "" {
+		t.Error("the live MarkPre took no pre-image")
+	}
 }
 
 func TestRevert_DiffPathEditedAfterTheAgentWroteIt_IsSkippedWithTheReason(t *testing.T) {

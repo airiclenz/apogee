@@ -445,6 +445,44 @@ func TestACaptureFailureIsReportedAndNeverFailsTheExchange(t *testing.T) {
 	}
 }
 
+// TestAFailedCaptureIsReportedOncePerExchange: a pre image that fails is not re-run before every
+// later write-capable call of the same Exchange — a wedged git would otherwise cost each call
+// the store's own backstop — and so the human hears about it once, not once per write.
+func TestAFailedCaptureIsReportedOncePerExchange(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temp root: %v", err)
+	}
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.WorkspaceDir = root
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	snap := &failingSnapshotter{}
+	a.SetJournal(undo.New(undo.WithSnapshotter(snap), undo.WithWorkspace(root)), "")
+
+	a.turns.openExchange()
+	a.journal.BeginGroup()
+	executeFake(t, a, writeThrough(root, "first.txt", "one write\n"))
+	executeFake(t, a, writeThrough(root, "second.txt", "another write\n"))
+	a.turns.closeExchange()
+
+	if snap.took != 1 {
+		t.Errorf("captures = %d, want 1: the failed pre image was retried within the Exchange", snap.took)
+	}
+	var reported int
+	for _, event := range sink.events {
+		if e, ok := event.(domain.ErrorEvent); ok && e.Source == "undo" {
+			reported++
+		}
+	}
+	if reported != 1 {
+		t.Errorf("undo ErrorEvents = %d, want 1 for two write calls; events = %+v", reported, sink.events)
+	}
+}
+
 // handleRecordingSnapshotter is an image source that records, per capture, whether the
 // Confinement handle was visible on the ctx the capture ran under — the seam apogee-y72
 // broke: a snapshot taken inside the call's box cannot write the store's index. The first

@@ -225,7 +225,10 @@ NOTES (2026-11-10): already broken before this item — gitexec's timeout messag
 **Acceptance:** `go test -race -count=1 ./internal/snapshot/`
 **Commit:** `fix(snapshot): bound a wedged git, not a large workspace`
 
-## 10. A failed pre-image capture is not retried on every write call
+## 10. A failed pre-image capture is not retried on every write call — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): re-derived from the assumption that the per-Exchange failure could be recorded in snapshot.go alone — the group struct the failure belongs to lives in internal/undo/journal.go, so the new `preFailed` field is declared there.
+NOTES (2026-11-10): took the guard's first branch — a replayed MarkPre returns nil (documented on MarkPre), so internal/agent/dispatch.go is unchanged; the undo_group_test.go case (TestAFailedCaptureIsReportedOncePerExchange) still pins one `undo` ErrorEvent and one capture for two write calls.
 
 Depends on item 9.
 

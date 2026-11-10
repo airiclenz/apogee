@@ -78,6 +78,14 @@ func (j *Journal) snapshots() bool { return j.snap != nil && j.workspace != "" }
 // coverage ADR 0051 shipped. The caller's business with the error is to tell the human that
 // the wider coverage is not in force, never to abandon the exchange.
 //
+// That failure is reported ONCE per exchange. The group remembers it, and every later call
+// in the same exchange returns nil without running the snapshotter: a wedged or failing git
+// would otherwise be re-run — and re-reported — before every write-capable tool call, each
+// one waiting out the store's own backstop. The next exchange opens a group of its own and
+// tries again. A failure that arrives with ctx already ended is NOT remembered: it is the
+// caller's cancellation (a human stopping a delegated child mid-capture), not the store's
+// verdict, and the rest of the exchange's calls must still get their pre-image.
+//
 // Called while a revert or a redo walks, it waits for that walk to land before it opens a
 // group or captures anything, so a pre-image is never taken over a half-walked tree; it
 // returns ctx.Err(), having done nothing, when ctx ends first.
@@ -92,12 +100,13 @@ func (j *Journal) MarkPre(ctx context.Context) error {
 		return nil
 	}
 	current := j.openGroup()
-	if current.pre != "" {
+	if current.pre != "" || current.preFailed {
 		return nil
 	}
 
 	tree, err := j.snap.Capture(ctx)
 	if err != nil {
+		current.preFailed = ctx.Err() == nil
 		return fmt.Errorf("undo: capture the pre-image of %s: %w", j.workspace, err)
 	}
 	current.pre = tree
