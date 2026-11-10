@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review for apogee — 2026-11-10</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
+<style>
+  .seam { border-left: 2px dashed #64748b; }
+  .leak { color: #dc2626; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+  .lbl { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+  .diagram { min-height: 300px; }
+  pre.mermaid { background: transparent; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+<header class="space-y-4">
+  <p class="lbl text-slate-500">apogee · architecture review</p>
+  <h1 class="font-serif text-4xl">Deepening opportunities — 2026-11-10</h1>
+  <p class="text-sm text-slate-600">Scope: commits since the 2026-11-02 review (398 commits). The hot spots are the
+    TUI side panel and navigation (ADR 0110/0111), the life of a <code>ui.*</code> setting, and the MCP connection lifecycle
+    (ADR 0109). Three explorers read them; every load-bearing claim below was re-checked against the tree.</p>
+  <div class="flex flex-wrap gap-4 text-xs text-slate-600">
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 border border-slate-500 bg-white"></span>module</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-dashed border-slate-500"></span>seam</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-red-600"></span>leakage</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 deep"></span>deep module</span>
+  </div>
+  <nav class="text-sm grid sm:grid-cols-2 gap-x-8 gap-y-1 pt-2">
+    <a class="hover:underline" href="#c1">1 · The side panel's frame is one computed value</a>
+    <a class="hover:underline" href="#c2">2 · The config writer reaches any registry path</a>
+    <a class="hover:underline" href="#c3">3 · Applying a UI pref on screen is one module</a>
+    <a class="hover:underline" href="#c4">4 · A url-safety move is one call on the MCP holder</a>
+    <a class="hover:underline" href="#c5">5 · The panel's resume rebuild folds domain records</a>
+    <a class="hover:underline" href="#c6">6 · Navigation mode over two region adapters</a>
+    <a class="hover:underline" href="#c7">7 · Startup is the MCP holder's first request</a>
+    <a class="hover:underline" href="#c8">8 · A UI pref is declared once, in domain</a>
+    <a class="hover:underline" href="#c9">9 · One MCP state fold; "dials queued" is a fact</a>
+    <a class="hover:underline" href="#c10">10 · The theme is a function of its inputs</a>
+  </nav>
+</header>
+
+<section id="candidates" class="space-y-14">
+
+<!-- 1 -->
+<article id="c1" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">1 · The side panel's frame is one computed value</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/sidepanel.go · panelstops.go · blockcursor.go · mouse.go · pointershape.go · model.go</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-3">Before — 15 Model methods re-derive the column</p>
+      <div class="grid grid-cols-3 gap-1.5 text-[10px] font-mono">
+        <div class="border border-slate-300 p-1">panelWidth</div><div class="border border-slate-300 p-1">panelPaintWidth</div><div class="border border-slate-300 p-1">panelChrome</div>
+        <div class="border border-slate-300 p-1">panelLeftChrome</div><div class="border border-slate-300 p-1">panelContentWidth</div><div class="border border-slate-300 p-1">panelOverlayGapHung</div>
+        <div class="border border-slate-300 p-1">panelOverlayable</div><div class="border border-red-500 p-1 leak">panelOverlaid ← cursor</div><div class="border border-slate-300 p-1">panelCell</div>
+        <div class="border border-slate-300 p-1">panelPinX</div><div class="border border-slate-300 p-1">panelGripAt</div><div class="border border-slate-300 p-1">clampPanelWidth</div>
+        <div class="border border-slate-300 p-1">configuredPanelWidth</div><div class="border border-slate-300 p-1">sidePanelLeastWindow</div><div class="border border-slate-300 p-1">…TranscriptFloor</div>
+      </div>
+      <div class="mt-3 space-y-1 text-[11px]">
+        <div class="border border-slate-300 p-1.5"><b>panelStops</b> re-parses sections, repaints every row — called by click, cursor row, nav stops</div>
+        <div class="border border-red-500 p-1.5 leak">enterPanelRegion / openPanelOverlay mutate a <i>copy's</i> cursor to ask "what would the stops be?"</div>
+      </div>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 flex flex-col">
+      <p class="lbl text-slate-500 mb-3">After — one frame, built once per frame</p>
+      <div class="text-[11px] text-slate-500 mb-2">inputs: window width · show mode · width setting · overlay up · sections · rows</div>
+      <div class="deep rounded-lg p-4 flex-1 flex flex-col justify-between">
+        <div>
+          <p class="lbl text-slate-300">panelFrame</p>
+          <p class="text-sm mt-1">at(x, y) → cell · grip · pin · target</p>
+          <p class="text-sm">rows() · stops()</p>
+        </div>
+        <div class="grid grid-cols-3 gap-1 text-[9px] font-mono opacity-40 mt-4">
+          <span>width</span><span>chrome</span><span>overlay</span><span>clamp</span><span>gap</span><span>pin x</span><span>grip</span><span>floor</span><span>stops</span>
+        </div>
+      </div>
+      <div class="mt-3 grid grid-cols-4 gap-1 text-[10px] text-center">
+        <div class="border border-slate-300 p-1">paint</div><div class="border border-slate-300 p-1">click</div><div class="border border-slate-300 p-1">hover</div><div class="border border-slate-300 p-1">nav</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The panel's horizontal geometry is spread over ~15 shallow methods whose interface is as wide as their implementation. Geometry depends on navigation state (<code>panelOverlaid</code> reads <code>m.cursor.inPanel()</code>, <code>sidepanel.go:216</code>). 47 commits since 11-02 kept editing <code>sidepanel.go</code>, <code>panelstops.go</code> and <code>blockcursor.go</code> together.</p>
+  <p><b>Solution.</b> Build one <code>panelFrame</code> per frame and carry it on <code>pre</code>, as <code>withFrameSpans</code> already does for vertical geometry. <code>footerFit</code> → <code>footerLayout</code> is the precedent in the repo.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5">
+    <li>Locality: geometry bugs live in one constructor</li>
+    <li>Leverage: paint, click, hover and nav read one interface</li>
+    <li>Gate and clamp tables become pure table tests</li>
+    <li>No more speculative cursor copies</li>
+    <li>Folds the per-gesture hit-test (click, wheel, hover)</li>
+  </ul>
+  <p class="text-xs text-slate-500">Deletion test: the 15 helpers concentrate into one constructor. Keeps ADR 0110 D6 and ADR 0111 D4 by construction.</p>
+</article>
+
+<!-- 2 -->
+<article id="c2" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable (temp file)</span>
+  </div>
+  <h2 class="font-serif text-2xl">2 · The config writer reaches any registry path</h2>
+  <p class="font-mono text-sm text-slate-600">internal/config/configwrite_scalar.go · configwrite_sections.go · configwrite_scalarsplice.go · cmd/apogee/wire_options.go · internal/tui/tui.go · internal/tui/sidepanel.go</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">Before — depth limit leaks outward</p>
+      <pre class="mermaid">
+flowchart TB
+  G[TUI gesture] --> SH["SettingsHost<br/>Write · Reset · SaveTo · ResetIn<br/>+ WriteSidePanelSection<br/>+ WriteSidePanelFolded"]
+  SH -->|IsSidePanelKey branch x2| SP["configwrite_sections.go<br/>454 lines, 2nd splice engine"]
+  SH --> SC["scalar writer<br/>scalarPathDepth = 2"]
+  G -.recomputes folded list.-> SP
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#991b1b;
+  class SH,SP leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">After — one splice transaction, any depth</p>
+      <pre class="mermaid">
+flowchart TB
+  G[TUI gesture<br/>next canonical value from UIPrefs] --> SH["SettingsHost<br/>Write · Reset · SaveTo · ResetIn"]
+  SH --> W["config writer<br/>registry path of any depth<br/>creates absent parents · lists as whole values"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+  class W deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> <code>scalarPathDepth = 2</code> (<code>configwrite_scalar.go:41</code>) refuses three-segment paths. So the side-panel block has its own 454-line splice engine, <code>settingsHost.Write</code>/<code>Reset</code> branch on <code>config.IsSidePanelKey</code> (<code>wire_options.go:588, :633</code>), <code>SettingsHost</code> grew two panel-only methods (<code>tui.go:308, :319</code>), and the folded list is computed twice. The footer keys cannot be written from any surface. <code>SaveTo</code>/<code>ResetIn</code> work only because every side-panel key is global-only, which is a latent trap.</p>
+  <p><b>Solution.</b> Generalise the scalar splice to any registry path. Gestures pass the whole next value, and <code>SettingsHost</code> shrinks back to four methods.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5">
+    <li>Deletes the second splice engine</li>
+    <li>SettingsHost interface shrinks by two</li>
+    <li>One writer table over depth 1–3</li>
+    <li>Footer keys become writable</li>
+  </ul>
+  <p class="text-xs text-slate-500">Check during design: the sections write merges against the file ("a section the file does not name brings in the whole list"). Confirm that the session's canonical list always equals that merge. ADR 0035 D2's splice contract is unchanged.</p>
+</article>
+
+<!-- 3 -->
+<article id="c3" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">3 · Applying a UI pref on screen is one module</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/settingsapply.go · internal/tui/sidepanel.go · internal/domain/uiprefs.go · cmd/apogee/wire_settings_test.go</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-3">Before — mass: interface ≈ implementation</p>
+      <div class="flex items-end gap-6 h-52">
+        <div class="flex flex-col items-center gap-1 w-1/2">
+          <div class="w-full bg-amber-100 border border-amber-400" style="height:150px"></div>
+          <span class="text-[10px] text-center">19 arms in settingsApplyLocal<br/>(12 only call <code>UI.Set</code>)</span>
+        </div>
+        <div class="flex flex-col items-center gap-1 w-1/2">
+          <div class="w-full bg-slate-200 border border-slate-400" style="height:60px"></div>
+          <span class="text-[10px] text-center">work the arms do</span>
+        </div>
+      </div>
+      <ul class="text-[11px] mt-3 space-y-1">
+        <li class="leak">• cmd test hand-keeps 21 "renderer applies" keys</li>
+        <li class="leak">• sweep reads <code>UIKeys()</code>: 16 keys; <code>land</code> takes 20</li>
+        <li class="leak">• 7 gesture write-backs repeat apply → persist → "not saved:" → journal</li>
+      </ul>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-3">After — small interface, deep implementation</p>
+      <div class="flex items-end gap-6 h-52">
+        <div class="flex flex-col items-center gap-1 w-1/2">
+          <div class="w-full bg-emerald-100 border border-emerald-500" style="height:36px"></div>
+          <span class="text-[10px] text-center">apply(key) · persist(key) · Keys()</span>
+        </div>
+        <div class="flex flex-col items-center gap-1 w-1/2">
+          <div class="w-full deep" style="height:150px"></div>
+          <span class="text-[10px] text-center">Set by default + ~8 widget follow-ups</span>
+        </div>
+      </div>
+      <p class="text-[11px] mt-3">The module exports its key set. The binary's test reads it instead of keeping a copy.</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> Applying a <code>ui.*</code> key on screen is restated per key, per gesture and per test. <b>Latent defect:</b> <code>uiKeys</code> (<code>uiprefs.go:609</code>) leaves out the footer rows and colours and the side-panel sections and folded keys. A new structured key without an arm passes every sweep, then <code>applySettingFor</code> refuses it as <code>cannotApply</code> on the next file reload. The 09-30 review counted 10 such bare arms (#20); now there are 12.</p>
+  <p><b>Solution.</b> One TUI module for "UI prefs on this screen". By default a key lands through <code>UIPrefs.Set</code>; a small follow-up table covers the keys that must tell a widget. One <code>persist(key)</code> door serves every fold, pin and width gesture.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5">
+    <li>Locality: one gesture write door</li>
+    <li>Sweep covers every key <code>land</code> accepts</li>
+    <li>Deletes the mirrored test list</li>
+    <li>Pairs with #2 (the door's write half)</li>
+  </ul>
+</article>
+
+<!-- 4 -->
+<article id="c4" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable (fake mcpConnect)</span>
+  </div>
+  <h2 class="font-serif text-2xl">4 · A url-safety move is one call on the MCP holder</h2>
+  <p class="font-mono text-sm text-slate-600">cmd/apogee/wire_settings.go:1621-1800 · cmd/apogee/wire_mcp.go:558-720, :969</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">Before — caller sequences the holder's internals</p>
+      <pre class="mermaid">
+sequenceDiagram
+  participant A as settingsApplier
+  participant H as MCP holder
+  A->>A: denyMCP (2× mcp.Admit partition)
+  A->>H: retire(denied)
+  A->>H: dropDenied
+  A->>A: swap lists
+  A->>A: readmitMCP / sameServerNames
+  A->>H: request(admitted subset)
+  Note over H: denied server deleted here,<br/>kept isAdmitted=false on the<br/>mcp-servers path
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">After — one call, one representation</p>
+      <pre class="mermaid">
+sequenceDiagram
+  participant A as settingsApplier
+  participant H as MCP holder
+  A->>H: moveURLSafety(configured, lists)
+  Note over H: partition · retire · drop · re-dial<br/>denied stays isAdmitted=false
+  H-->>A: deny clauses per server
+  A->>A: word them around the swap
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> Six sites decide whether a server is admitted. A denied server has two representations, depending on which path denied it. The caller must keep the order retire → dropDenied → swap → request. Commits <code>5ff32123</code>, <code>90379b24</code> and <code>53ba5ea7</code> each edited both files; <code>df5e9257</code> fixed the same deny path again; ADR 0109 D7 was amended the same day.</p>
+  <p><b>Solution.</b> The holder takes the move whole and owns the partition. <code>settingsApplier</code> only words the clauses.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5">
+    <li>Deletes 5 applier helpers</li>
+    <li>One representation of "denied"</li>
+    <li>Deny/re-dial tests need only the holder</li>
+    <li>No <code>layeredConfig</code> read in those tests</li>
+  </ul>
+  <p class="text-xs text-slate-500">Fits ADR 0109 D5 and D7.</p>
+</article>
+
+<!-- 5 -->
+<article id="c5" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">5 · The panel's resume rebuild folds domain records, not painted cards</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/sidepanel.go:1636-1702 · internal/sidepanel/ · internal/tools/{write_file,file_edit,file_ops}.go</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4 space-y-2 text-xs">
+      <p class="lbl text-slate-500">Before — two producers of panel state</p>
+      <div class="border border-slate-400 p-2"><b>internal/sidepanel</b> · live Event fold → View</div>
+      <div class="border border-red-500 p-2 leak"><b>tui.rebuildSidePanel</b> (resume)<br/>
+        • <code>panelWriterTargetArgs</code> copies the tools' write-target rule<br/>
+        • <code>panelTaskItems</code> matches painted ✓/○ markers in card rows</div>
+      <div class="text-[11px] text-slate-500">headless/daemon resume: no rebuild · new writer tool silently missing from Changed files</div>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 space-y-2 text-xs">
+      <p class="lbl text-slate-500">After — one fold, two entry doors</p>
+      <div class="deep rounded p-3">
+        <p class="lbl text-slate-300">internal/sidepanel</p>
+        <p>Fold(Event) · FoldRecord(domain calls &amp; results)</p>
+      </div>
+      <div class="border border-slate-400 p-2"><b>internal/tools</b> exposes the write-target rule once</div>
+      <div class="text-[11px] text-slate-500">TUI only paints. Any Driver can rebuild.</div>
+    </div>
+  </div>
+  <p><b>Problem.</b> ADR 0110 D4 asks for a Driver-neutral fold, but the resume path lives in the TUI and reads its own painted output back.</p>
+  <p><b>Solution.</b> Give the <code>sidepanel</code> package a record door that takes domain tool calls, and have <code>tools</code> declare the write-target argument once.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5">
+    <li>Locality: one write-target rule</li>
+    <li>Rebuild testable without a transcript</li>
+    <li>Any Driver can rebuild the panel</li>
+  </ul>
+  <div class="rounded bg-amber-50 border border-amber-300 p-3 text-sm">Open question: <code>session.Record.Session</code> holds only the main run's messages. A child run's writes may live only in the opaque <code>Transcript</code> blob. Check this first; it decides whether the fold has the facts it needs. ADR 0083 part 1 (verdicts stay on the wire) is untouched, because this reads domain records and not the scrollback.</div>
+</article>
+
+<!-- 6 -->
+<article id="c6" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">6 · Navigation mode over two region adapters</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/blockcursor.go · runview.go:464-473 · sidepanel.go</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-3">Before — every verb written twice</p>
+      <table class="w-full text-[11px] font-mono">
+        <tr class="text-slate-500"><td>verb</td><td>transcript</td><td>panel</td></tr>
+        <tr><td>move</td><td>moveBlockCursor</td><td>movePanelCursor</td></tr>
+        <tr><td>activate</td><td>toggleAtBlockCursor</td><td>activatePanelCursor</td></tr>
+        <tr><td>run head</td><td>cursorRunHead</td><td>panelCursorRunHead</td></tr>
+        <tr><td>seat</td><td>seatBlockCursor</td><td class="leak">reseatPanelCursor ⚠</td></tr>
+      </table>
+      <p class="text-[11px] mt-3 leak">23 region branches. Callers must reseat before asking (<code>runview.go:467, :472</code>).</p>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 flex flex-col gap-3">
+      <p class="lbl text-slate-500">After — one walk, a real seam</p>
+      <div class="deep rounded p-3 text-sm">navigation mode<br/><span class="text-xs opacity-70">key → (model, cmd, claimed) · standingOn()</span></div>
+      <div class="seam pl-3 grid grid-cols-2 gap-2 text-xs">
+        <div class="border border-slate-400 p-2">transcript adapter<br/><span class="text-slate-500">lineTargets / pads</span></div>
+        <div class="border border-slate-400 p-2">panel adapter<br/><span class="text-slate-500">panelFrame stops (#1)</span></div>
+      </div>
+      <p class="text-[11px] text-slate-500">Each adapter: stops · nearest · activate · run head</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> The panel cursor holds a stale identity until it is reseated, so an ordering invariant leaks to callers.</p>
+  <p><b>Solution.</b> Resolve the cursor once per key behind a region seam. It has two real adapters; ADR 0111 D12 declines a third (the footer).</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5">
+    <li>Paired functions collapse into one walk</li>
+    <li>Cross-region tests drive a fake region</li>
+    <li>Best taken after #1</li>
+  </ul>
+</article>
+
+<!-- 7 -->
+<article id="c7" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">local-substitutable</span>
+  </div>
+  <h2 class="font-serif text-2xl">7 · Startup is the MCP holder's first request</h2>
+  <p class="font-mono text-sm text-slate-600">cmd/apogee/mcp_cmd.go:486-531 · wire_live.go:171-192 · wire_mcp.go:157-165, 520-527</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  C[connectMCPServers<br/>dials outside holder] --> S[skipped seed list]
+  C --> N["newLiveMCP(entries)"]
+  N --> E["emitThrough(sink, skipped)<br/>once, before any request"]
+  S -.own removal branch in request.-> H[holder]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#991b1b;
+  class S,E leak
+      </pre>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  N["holder constructor<br/>first request: sync, fatal, may offer login"] --> F[skipped = ordinary failed state]
+  N --> O[outbox born with holder]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+  class N deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> Callers must know a two-step ordering, and the holder carries a <code>skipped</code> list outside <code>servers</code>. Commit <code>f5a2b50a</code> touched 4 files for this one concept. A suspected divergence, unverified: a repo server whose pin moved at startup is unknown to the holder and gets re-dialled on any later request, unlike a server that failed mid-session (ADR 0109 D7).</p>
+  <p><b>Solution.</b> The constructor runs the startup connect as its first request. This keeps ADR 0109 D11 (startup stays all-or-nothing and fatal).</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5"><li>Deletes the <code>skipped</code> field and its branch</li><li>No ordering for callers to know</li><li>One failed-state shape</li></ul>
+</article>
+
+<!-- 8 -->
+<article id="c8" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">8 · A UI pref is declared once, in domain</h2>
+  <p class="font-mono text-sm text-slate-600">internal/domain/uiprefs.go · sidepanelprefs.go · internal/config/registry.go · keyfield.go · config.go · defaults/config.yaml</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4">
+      <p class="lbl text-slate-500 mb-3">Before — <code>ui.pointer-shapes</code> (8528ae81): 11 sites, 7 files</p>
+      <div class="space-y-1 text-[11px] font-mono">
+        <div class="border-l-4 border-slate-400 pl-2">UIPrefs field</div>
+        <div class="border-l-4 border-slate-400 pl-2">UIKey const · uiKeys order</div>
+        <div class="border-l-4 border-amber-500 pl-2">DefaultUIPrefs ← default #1</div>
+        <div class="border-l-4 border-slate-400 pl-2">land arm (parse)</div>
+        <div class="border-l-4 border-slate-400 pl-2">uiConfig yaml field</div>
+        <div class="border-l-4 border-amber-500 pl-2">registry row + uiBool pair ← default #2</div>
+        <div class="border-l-4 border-amber-500 pl-2">defaults/config.yaml ← default #3</div>
+        <div class="border-l-4 border-slate-400 pl-2">domain/doc.go key count</div>
+        <div class="border-l-4 border-slate-400 pl-2">settingsApplyLocal arm</div>
+        <div class="border-l-4 border-red-500 pl-2 leak">side-panel width: 0 = "unset" across 6 files</div>
+      </div>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 flex flex-col gap-3">
+      <p class="lbl text-slate-500">After — one per-key table</p>
+      <div class="deep rounded p-3 text-xs font-mono">uiKeyTable: path · parse/format · field · default · structured</div>
+      <div class="grid grid-cols-2 gap-2 text-[11px]">
+        <div class="border border-slate-300 p-1.5">land (derived)</div><div class="border border-slate-300 p-1.5">UIKeys (derived)</div>
+        <div class="border border-slate-300 p-1.5">DefaultUIPrefs (derived)</div><div class="border border-slate-300 p-1.5">Validate(key, text)</div>
+        <div class="border border-slate-300 p-1.5 col-span-2">registry <code>ui.*</code> rows = table + Desc/Kind</div>
+      </div>
+      <div class="border border-slate-400 p-2 text-[11px]"><b>SidePanelWidth</b> value: stated | unset · owns resolve and clamp</div>
+    </div>
+  </div>
+  <p><b>Problem.</b> Defaults are stated three times. The registry's enum validators rely on a hidden invariant: every other field's zero value must pass <code>Validate</code> (<code>registry.go:1850-1878</code>). The side-panel width's "0 = unset" is special-cased in <code>settingsapply.go</code> and <code>settingsedit.go</code>.</p>
+  <p><b>Solution.</b> One table in domain; everything else is derived from it. Respect keyfield.go's rule that the file pass lands an unvalidated typed copy, and that <code>tui</code> may not import <code>config</code>.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5"><li>One sweep replaces three per-key test tables</li><li>Hidden Validate invariant removed</li><li>New key: fewer sites to touch</li></ul>
+</article>
+
+<!-- 9 -->
+<article id="c9" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">9 · One MCP state fold; "dials queued" is a fact, not a note string</h2>
+  <p class="font-mono text-sm text-slate-600">cmd/apogee/wire_mcp.go:393-448 · internal/sidepanel/mcp.go:50-100 · internal/tui/mcpreconnect.go · settingsapply.go:370 · settingswatcher.go:222</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4 space-y-2 text-xs">
+      <p class="lbl text-slate-500">Before</p>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="border border-slate-400 p-2">mcpServerStates.fold<br/><span class="text-slate-500">cmd/apogee</span></div>
+        <div class="border border-slate-400 p-2">MCPServers.Fold<br/><span class="text-slate-500">internal/sidepanel</span></div>
+      </div>
+      <p class="text-[11px] text-slate-500">kept in step by a comment and a test</p>
+      <div class="border border-red-500 p-2 leak"><code>note == MCPReconnectingNote</code> arms and clears rows; a display word doubles as a control signal</div>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 space-y-2 text-xs">
+      <p class="lbl text-slate-500">After</p>
+      <div class="deep rounded p-3">one MCP state module: Fold · Events()</div>
+      <div class="border border-slate-400 p-2">MCPHost answers <code>dialsQueued bool</code>; the TUI words it</div>
+    </div>
+  </div>
+  <p><b>Problem.</b> Two folds of the same Events, and a display string carrying control flow. Rewording the busy indicator would break row arming.</p>
+  <p><b>Solution.</b> Use one fold for both the seed and the views, and make "dials queued" a typed fact across <code>tui.MCPHost</code>.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5"><li>Deletes the duplicate fold</li><li>Copy changes can't break control flow</li></ul>
+</article>
+
+<!-- 10 -->
+<article id="c10" class="bg-white rounded-xl border border-slate-200 p-8 space-y-5">
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="px-2 py-0.5 rounded text-xs font-semibold bg-slate-200 text-slate-700">Speculative</span>
+    <span class="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-700">in-process</span>
+  </div>
+  <h2 class="font-serif text-2xl">10 · The theme is a function of its inputs</h2>
+  <p class="font-mono text-sm text-slate-600">internal/tui/theme.go · settingsapply.go:545, :689-694 · model.go:765-768, :1241 · width.go:97</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="diagram rounded-lg border border-slate-200 p-4 text-xs space-y-2">
+      <p class="lbl text-slate-500">Before</p>
+      <div class="border border-slate-400 p-2">theme = scheme + <span class="leak">measure · padPrompts · glyphs</span> (written at 4 sites)</div>
+      <div class="border border-red-500 p-2 leak">applyColorScheme carries the 3 extras across a rebuild by hand</div>
+      <div class="border border-red-500 p-2 leak">glyph and scheme apply must both remember <code>paints.clear()</code></div>
+      <div class="border border-slate-400 p-2">scheme stored 3× (m.th · opts.ColorScheme · opts.UI.ColorScheme)</div>
+    </div>
+    <div class="diagram rounded-lg border border-slate-200 p-4 text-xs space-y-2">
+      <p class="lbl text-slate-500">After</p>
+      <div class="deep rounded p-3">theme(scheme, glyphs, terminal facts)</div>
+      <div class="border border-slate-400 p-2">theme generation in the paint-cache key: the cache clears itself</div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The carry list is maintained by hand and cache invalidation depends on discipline. No bug has been seen yet.</p>
+  <p><b>Solution.</b> Add one rebuild entry and put the theme in the cache key.</p>
+  <ul class="list-disc pl-6 text-sm space-y-0.5"><li>One test replaces the per-field guards</li><li>Cache invalidation by construction</li></ul>
+</article>
+
+</section>
+
+<section class="bg-white rounded-xl border border-slate-200 p-8 space-y-3 text-sm">
+  <h2 class="font-serif text-xl">Adjudicated earlier</h2>
+  <p>ADR 0083's standing denials were not raised. No denial's "Reopens on" evidence appeared. None of the candidates above touches the ten engine settings (part 2), the bound entry (part 4), host boot (part 5) or the wire codec (part 6). Candidate 5 reads domain records, not the scrollback blob (part 1).</p>
+  <ul class="list-disc pl-6 space-y-1">
+    <li>Hit-testing the panel separately in click (<code>mouse.go:456</code>), wheel (<code>:2164</code>) and hover (<code>pointershape.go:52</code>) recurs from the 10-14 "one pane table walk" item. Candidate 1 would fold it in.</li>
+    <li>Seat fallover (plan <code>2026-11-02 - 04</code>) has held: one single-file fix since 11-03, and <code>routed-fallover-unannounced</code> and <code>firing-namer-dead-primary</code> are closed. Residue (not a card): <code>FallbackAnswer.Target</code> is set only for the Sub-agents seat and <code>ParallelAgents</code> only for the session seat, and the latest landing is held twice (<code>seatResolver.latest</code>, <code>sessionFallback.landed</code>).</li>
+    <li>Already deep: <code>internal/sidepanel</code>'s Event fold, <code>footerFit</code>, the <code>keyClaimOrder</code> table, <code>internal/mcp.Client</code>, the MCP holder's core lifecycle, <code>newSeatResolver</code>, the <code>/settings</code> pane, and <code>keyfield.go</code>'s <code>scalarField</code>.</li>
+  </ul>
+</section>
+
+<section id="top-recommendation" class="deep rounded-xl p-8 space-y-3">
+  <p class="lbl text-slate-300">Top recommendation</p>
+  <h2 class="font-serif text-2xl"><a href="#c1" class="underline decoration-dotted">1 · The side panel's frame is one computed value</a></h2>
+  <p class="text-slate-200">It is the hottest code in the tree: 47 commits since 11-02, mostly co-editing the same three files. It is purely in-process, so its tests become pure tables, and it is the foundation for #6. Next take <a href="#c2" class="underline">#2</a> and then <a href="#c3" class="underline">#3</a> as a pair: #2 deletes a second splice engine and #3 closes the <code>UIKeys()</code> sweep gap.</p>
+</section>
+
+</main>
+</body>
+</html>
