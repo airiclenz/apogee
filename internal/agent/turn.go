@@ -2,6 +2,7 @@ package agent
 
 import (
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -16,9 +17,14 @@ import (
 type turnLifecycle struct {
 	conv *domain.Conversation
 
-	index         int  // 0-based index of the next Turn (was Agent.turnIndex)
+	index         int  // 0-based index of the next Turn (was Agent.turnIndex); written only through setIndex
 	inExchange    bool // true between Submit and the Step that completes the Exchange
 	exchangeStart int  // cached rollback boundary of the open Exchange (ADR 0017 §2's recorded fallback)
+
+	// publishedIndex mirrors index for the one reader on another goroutine: the Inspector's wire
+	// tap, whose observer runs on whichever goroutine streams over the client — a background
+	// workflow's child among them (wireTap). setIndex writes the two together; nothing else reads it.
+	publishedIndex atomic.Int64
 
 	// exchangeTurns counts the Turns COMPLETED in the open Exchange — the quantity the delegate
 	// step cap bounds (delegateLimits.steps). It is written by Run, the one place the cap is enforced,
@@ -247,7 +253,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		} else {
 			status = domain.StatusTurnComplete
 		}
-		l.index++
+		l.setIndex(l.index + 1)
 	case endAbandoned:
 		// A faulted Turn (an Upstream fault or a recovered reaction panic) produced no usable
 		// outcome. The Exchange ends (there is nothing to continue from) and the counter advances
@@ -255,7 +261,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		// A deferral is a decision about the SAME flow's next request — closeExchange expires it
 		// with the faulted Exchange (F6), so any correction drained this Turn dies here.
 		l.closeExchange()
-		l.index++
+		l.setIndex(l.index + 1)
 		// The Exchange closed with NOTHING to show for it, yet the status it closes on is the
 		// same StatusExchangeComplete a real final answer returns (a closed Exchange is a closed
 		// Exchange, and a resuming host must treat both the same). Mark the result faulted so a
@@ -329,7 +335,7 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		// the fill ladder's climb stand — and the Exchange stays OPEN exactly as endCancelled leaves
 		// it: the host closes it (SettleExchange, which marks the cut on the last result this Turn
 		// committed) or a Step-driven host re-Steps and the next Turn reads the results.
-		l.index++
+		l.setIndex(l.index + 1)
 		status = domain.StatusCancelled
 	}
 	return domain.StepResult{
@@ -644,6 +650,13 @@ func (l *turnLifecycle) snapshot() turnSnapshot {
 	}
 }
 
+// setIndex moves the Turn counter and publishes it to the wire tap (publishedIndex) in one step,
+// so the mirror never names a Turn the counter does not.
+func (l *turnLifecycle) setIndex(n int) {
+	l.index = n
+	l.publishedIndex.Store(int64(n))
+}
+
 // restore puts a snapshot's lifecycle state back whole (Agent.restoreState — Resume onto a fresh
 // Agent and RestoreSession onto a live one) and clears the latches that judged the conversation
 // the snapshot replaces: a fold that faulted or saturated against the outgoing history says
@@ -651,7 +664,7 @@ func (l *turnLifecycle) snapshot() turnSnapshot {
 // swapped out, not this one. RestoreSession left the two fold latches standing before this verb
 // owned the reset, so a session restored over a stood-down Agent stayed stood down.
 func (l *turnLifecycle) restore(s turnSnapshot) {
-	l.index = s.index
+	l.setIndex(s.index)
 	l.inExchange = s.inExchange
 	l.exchangeStart = s.exchangeStart
 	l.pendingInput = s.pendingInput

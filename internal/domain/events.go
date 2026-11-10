@@ -785,6 +785,12 @@ const (
 // the honest fact about a shared connection; a routed spawn builds its own client and is stamped
 // with its own.
 //
+// That includes a background workflow's unrouted children, which share the session's client while
+// the conversation goes on Stepping: their records carry the top-level Agent's Turn index as it
+// stands when each record is observed — the Turn the conversation is taking, or the next one when
+// it is idle — never the Turn the workflow was launched from. It orders the record against the
+// conversation; it does not name a Turn the child took.
+//
 // It crosses the engine seam as DATA, not as a control surface: ADR 0031's wire-silence invariant
 // forbids the engine growing a network-facing control surface, and a domain.Event delivered
 // in-process to whatever sink the Driver installed is exactly the benchable-all-the-way-up shape

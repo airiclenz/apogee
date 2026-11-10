@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/console"
@@ -585,11 +586,25 @@ func resumeAgent(cfg domain.Config, snap domain.Session, up provider.Responder) 
 // delegated call made over the parent's connection is stamped with the parent's identity, which is
 // the honest fact about a shared connection. A ROUTED spawn (ADR 0045) builds a client of its own
 // and therefore gets a tap of its own, stamped at the child's depth and spawning call id.
+//
+// observe runs on whichever goroutine streams over the client, and a background workflow's
+// unrouted children stream over the session's (backgroundHost) while the conversation Steps and
+// the idle-only mutators replace the bound Agent's Config whole. So observe reads no live Agent
+// state: bind snapshots what it needs (wireBinding) and publishes it atomically, and the one value
+// that moves after bind, the Turn, is read from the counter's atomic mirror
+// (turnLifecycle.publishedIndex). A background child's record therefore carries the Turn index the
+// conversation stands on when the record is observed (domain.WireEvent).
 type wireTap struct {
-	// a is the Agent whose base() stamps the events. Written once by bind, on the goroutine that
-	// constructs the Agent, before that Agent can take a Step — the same publication the
-	// constructed Agent's own fields rely on.
-	a *Agent
+	bound atomic.Pointer[wireBinding]
+}
+
+// wireBinding is what observe needs from the Agent a tap is bound to, captured by bind: the sink
+// and the Agent's identity are fixed for its life, so a copy of them is the live value, and turn
+// reads the Agent's published Turn index rather than the counter the loop writes.
+type wireBinding struct {
+	events domain.EventSink
+	base   domain.EventBase // the Agent's depth, spawning call id and run id; Turn is stamped per record
+	turn   func() int
 }
 
 // dialOptions composes the provider Options every dial in the engine crosses with: the wire the
@@ -640,24 +655,34 @@ func (t *wireTap) bind(a *Agent) {
 	if t == nil {
 		return
 	}
-	t.a = a
+	t.bound.Store(&wireBinding{events: a.cfg.Events, base: a.base(0), turn: a.publishedTurn})
+}
+
+// publishedTurn is the Agent's Turn index as the wire tap may read it from any goroutine: the
+// atomic mirror setIndex writes beside the counter. The a.turns pointer itself is written once,
+// at construction, before the Agent's client can carry a call.
+func (a *Agent) publishedTurn() int {
+	return int(a.turns.publishedIndex.Load())
 }
 
 // observe is the provider.WireRecord callback: one record becomes one WireEvent on the bound
-// Agent's sink, stamped with that Agent's current Turn, nesting depth and spawning call id — the
-// same EventBase every other Event it emits carries. The payload is carried as text; it is the
+// Agent's sink, stamped with that Agent's published Turn, nesting depth and spawning call id — the
+// same EventBase every other Event it emits carries, read from the binding and never from the Agent. The payload is carried as text; it is the
 // Client's own buffer, which the contract on provider.WireRecord permits keeping, and the string
 // conversion copies it anyway.
 //
-// An unbound tap captures nothing: that can only be the construction window described on wireTap,
-// where no call has been made yet, so there is nothing to report and no reason to fail.
+// An unbound tap captures nothing: bind publishes atomically, so a record observed before it lands
+// — the construction window described on wireTap, where no call has been made yet — has no Agent to
+// be stamped for, nothing to report and no reason to fail.
 func (t *wireTap) observe(rec provider.WireRecord) {
-	a := t.a
-	if a == nil {
+	b := t.bound.Load()
+	if b == nil {
 		return
 	}
-	a.cfg.Events.Emit(domain.WireEvent{
-		EventBase: a.base(a.turns.index),
+	base := b.base
+	base.Turn = b.turn()
+	b.events.Emit(domain.WireEvent{
+		EventBase: base,
 		Direction: string(rec.Direction),
 		Payload:   string(rec.Payload),
 	})

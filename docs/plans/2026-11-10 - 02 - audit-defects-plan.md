@@ -311,7 +311,11 @@ NOTES (2026-11-10): the "write_file of each returns no trailer" test drives `New
 **Acceptance:** `go test -race -count=1 ./internal/syntaxcheck/` then `go test -race -count=1 -run 'Syntax' ./internal/tools/` then `! grep -rn 'retry\|correction' internal/syntaxcheck/`
 **Commit:** `fix(syntaxcheck): stay silent on valid JSX, PHP, C# and Rust shapes`
 
-## 15. The wire tap reads no Agent state from background goroutines
+## 15. The wire tap reads no Agent state from background goroutines — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): created internal/agent/wiretap_test.go (new file, as the plan names) for TestWireTap_BackgroundChildrenReadNoAgentState; bite-checked: without the construct.go/turn.go change it reports DATA RACE (observe vs turn.go setIndex site and vs rebind.go `a.cfg = arrived`).
+NOTES (2026-11-10): the Turn source is a method value (Agent.publishedTurn) held in the binding rather than a pointer to turnLifecycle.publishedIndex taken at bind, because a routed child's tap is bound in delegation.seed, before newAgent assigns a.turns; a.turns is write-once at construction, so reading the pointer from the observer goroutine is race-free.
+NOTES (2026-11-10): internal/agent/rebind.go needed no change — its tap.bind sites now publish through the atomic binding, and its comments stay accurate.
 
 **What:**
 **Goal:** a single `-race` test with the Inspector on, a background workflow streaming over the session client, and the conversation Stepping and rebinding reports no race; `WireEvent` documents the Turn a background child's event carries.
