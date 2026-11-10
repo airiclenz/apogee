@@ -91,9 +91,10 @@ func runGitUnchecked(ctx context.Context, h execHost, gitPath, root string, time
 // check stays here so the sentence is this funnel's own.
 //
 // Every failure is ONE error and they are deliberately not distinguished: git absent, a fenced
-// binary, a refused repository, a non-zero exit, a timeout, a wedged drain and a cancelled ctx
-// all mean "no trustworthy answer", which is precisely what the caller acts on — the floor's
-// contract is that any failure skips the check silently for that call (ADR 0056 decision 4).
+// binary, a refused repository, a non-zero exit, a timeout, a wedged drain, a stdout past the
+// output cap and a cancelled ctx all mean "no trustworthy answer", which is precisely what the
+// caller acts on — the floor's contract is that any failure skips the check silently for that
+// call (ADR 0056 decision 4).
 //
 // It is NOT for tool results. A tool shows the model what git printed, exit code and stderr
 // included, so the git tools keep runGit's captured outcome; this returns stdout as DATA, with

@@ -361,12 +361,14 @@ func (h Host) runSpec(gitPath, root string, env []string, timeout time.Duration,
 // at apogee's own store is judged by that store's config rather than by the workspace's.
 //
 // Every failure is ONE error: git absent, a fenced binary, a refused repository, a non-zero exit,
-// a timeout, a wedged drain and a cancelled ctx all mean "no trustworthy answer", which is what
-// a snapshot acts on — the floor's contract is that any failure skips the check silently for that
-// call (ADR 0056 decision 4). One distinction survives for a caller that must tell "ask again"
-// from "the answer is no": a timeout, a wedged drain and an incomplete command-config check match
-// [ErrIncomplete], and a cancelled ctx shows on the caller's own ctx (the floor's work-tree probe,
-// ADR 0056 amendment 2026-11-03).
+// a timeout, a wedged drain, a stdout past the output cap and a cancelled ctx all mean "no
+// trustworthy answer", which is what a snapshot acts on — the floor's contract is that any failure
+// skips the check silently for that call (ADR 0056 decision 4). One distinction survives for a caller that must tell "no complete
+// answer" from "the answer is no": a timeout, a wedged drain, a stdout that overran the output cap
+// and an incomplete command-config check match [ErrIncomplete], and a cancelled ctx shows on the
+// caller's own ctx (the floor's work-tree probe, ADR 0056 amendment 2026-11-03). A capped stdout is
+// never returned as success: its kept prefix ends in the cap's truncation marker, not in git's
+// answer.
 //
 // It is NOT for tool results. A tool shows the model what git printed, exit code and stderr
 // included, so the git tools take Capture's captured outcome; this returns stdout as DATA, with
@@ -402,7 +404,8 @@ func (h Host) RunTo(ctx context.Context, dir string, env []string, timeout time.
 //
 // stderr is capped at subprocess.MaxSubprocessOutputBytes like every diagnostic stream: a longer
 // string was cut there and carries the cap's truncation marker, so a caller that reads it as a
-// complete list checks its length first.
+// complete list checks its length first. stdout is capped at the same size but never returned cut:
+// a stdout that overran the cap fails with an error matching [ErrIncomplete], stderr still beside it.
 func (h Host) RunDiagnosed(ctx context.Context, dir string, env []string, timeout time.Duration, args ...string) (stdout, stderr string, err error) {
 	gitPath, err := h.Resolve(ctx, dir)
 	if err != nil {
@@ -428,8 +431,10 @@ func (h Host) query(ctx context.Context, gitPath, dir string, env []string, time
 
 // queryDiagnosed is query that also returns the child's standard error, which the split or
 // streamed stdout leaves alone in the result's CombinedOutput. A run that timed out, wedged its
-// drain or was refused because its command-config check did not complete fails with an error
-// matching [ErrIncomplete]; every other failure is a plain error.
+// drain, overran the output cap or was refused because its command-config check did not complete
+// fails with an error matching [ErrIncomplete]; every other failure is a plain error. A capped
+// stdout is checked after the exit status: a non-zero exit is git's own answer whatever it
+// printed, while a zero exit over a cut stdout would hand the caller a prefix as the whole answer.
 func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, stdout io.Writer, args ...string) (string, string, error) {
 	if len(args) == 0 {
 		return "", "", errors.New("apogee: gitexec: no git subcommand")
@@ -462,6 +467,10 @@ func (h Host) queryDiagnosed(ctx context.Context, gitPath, dir string, env []str
 		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf("git %s: output drain wedged", args[0])}
 	case res.ExitCode != 0:
 		return "", res.CombinedOutput, fmt.Errorf("git %s: exit %d: %s", args[0], res.ExitCode, strings.TrimSpace(res.CombinedOutput))
+	case res.Truncated:
+		return "", res.CombinedOutput, incompleteError{text: fmt.Sprintf(
+			"git %s: output exceeded %d bytes", args[0], subprocess.MaxSubprocessOutputBytes,
+		)}
 	}
 	return res.Stdout, res.CombinedOutput, nil
 }
@@ -910,10 +919,13 @@ const incompleteRefusalLead = "git refused: the check of this repository's own c
 
 // ErrIncomplete is matched (errors.Is) by the error of a Run, RunTo, RunDiagnosed or Query whose
 // git gave no complete answer for a reason outside the repository: the run timed out, wedged its
-// output drain, or was refused because its command-config check did not complete
-// ([CommandConfigIncompleteRefusal]). The next call may well answer, so a caller that caches its
-// answer leaves such a failure uncached. The wrapping error's text is the run's own — the sentinel
-// adds nothing to the message.
+// output drain, overran the output cap (subprocess.MaxSubprocessOutputBytes on a capped stdout;
+// RunTo streams uncapped and never overruns), or was refused because its command-config check did
+// not complete ([CommandConfigIncompleteRefusal]). After a timeout, a wedged drain or an unfinished
+// check the next call may well answer, so a caller that caches its answer leaves such a failure
+// uncached; an overrun is the same on every retry — the answer is simply larger than the cap — so a
+// caller that needs the whole payload streams it through RunTo instead of asking again. The
+// wrapping error's text is the run's own — the sentinel adds nothing to the message.
 var ErrIncomplete = errors.New("apogee: gitexec: git gave no complete answer")
 
 // incompleteError is a failure that matches [ErrIncomplete] while keeping its own text.

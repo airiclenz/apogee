@@ -76,7 +76,11 @@ NOTES (2026-11-10): known limit: a referenced /Filter that resolves to a chain o
 **Acceptance:** `go test -race -count=1 -run 'PDF' ./internal/doctext/`
 **Commit:** `fix(doctext): refuse deeply nested PDFs before the parser recurses`
 
-## 2. A truncated git stdout is an incomplete answer
+## 2. A truncated git stdout is an incomplete answer — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): the truncation check sits after the exit-status check in queryDiagnosed: a non-zero exit stays the plain exit error (git's own answer) even over a cut stdout; pinned by TestHost_RunReportsANonZeroExitOverATruncatedStdout.
+NOTES (2026-11-10): consequential edit — internal/tools/git.go: made necessary by the truncation becoming a failure; RunGitQuery's comment listing every failure kind now names "a stdout past the output cap".
+NOTES (2026-11-10): caller audit — Run/Query/RunDiagnosed callers are snapshot store (init, write-tree, rm --cached, add -A: none print stdout near the cap), treesnapshot runProbe (rev-parse; a truncation counts as one transient miss) and secretsguard runShadowGit (any error is the incomplete-scan path, as the plan expects until item 3); none needed a code change.
 
 **What:**
 **Goal:** `gitexec.Host` `Query`, `Run` and `RunDiagnosed` never return a capped (truncated) stdout as success: they return an error matching `ErrIncomplete` naming the cap.

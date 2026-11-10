@@ -44,7 +44,9 @@
 // anything the hardening put there, and the probe behind the refusal runs under that same env.
 // [IsIncompleteRefusal] tells a probe that could not finish from a repository that is refused, and
 // a data entry point's error matches [ErrIncomplete] when git gave no complete answer (a timeout,
-// a wedged drain, that unfinished probe), so a caller can ask again rather than cache a "no".
+// a wedged drain, a stdout that overran the output cap, that unfinished probe), so a caller never
+// caches a "no" it was not given: it asks again after a timeout, a wedge or an unfinished probe,
+// and streams through [Host.RunTo] a payload that overran the cap, which is the same on every retry.
 //
 // Every entry point is a method of a [Host] value — the PATH lookup, the two subprocess
 // launchers and the per-OS environment rules one run goes through — and a caller runs git

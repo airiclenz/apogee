@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -593,6 +594,73 @@ func TestHost_RunReportsANonZeroExit(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "exit 128") {
 		t.Errorf("Run err = %v, want the exit status named", err)
+	}
+}
+
+// TestHost_DataEntryPointsReportATruncatedStdoutAsIncomplete pins that a stdout which overran the
+// output cap is never handed back as success: Run, Query and RunDiagnosed each fail with an error
+// matching ErrIncomplete that names the cap, return no stdout, and RunDiagnosed still returns the
+// run's stderr beside it.
+func TestHost_DataEntryPointsReportATruncatedStdoutAsIncomplete(t *testing.T) {
+	t.Parallel()
+	const warning = "warning: something git said"
+	cases := []struct {
+		name       string
+		call       func(h gitexec.Host, gitPath, root string) (stdout, stderr string, err error)
+		wantStderr string
+	}{
+		{name: "Run", call: func(h gitexec.Host, _, root string) (string, string, error) {
+			out, err := h.Run(context.Background(), root, nil, testTimeout, "diff")
+			return out, "", err
+		}},
+		{name: "Query", call: func(h gitexec.Host, gitPath, root string) (string, string, error) {
+			out, err := h.Query(context.Background(), gitPath, root, nil, testTimeout, "diff")
+			return out, "", err
+		}},
+		{name: "RunDiagnosed", call: func(h gitexec.Host, _, root string) (string, string, error) {
+			return h.RunDiagnosed(context.Background(), root, nil, testTimeout, "diff")
+		}, wantStderr: warning},
+	}
+	for _, tc := range cases {
+		name := tc.name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			gitPath := outsideGit(t)
+			host, _ := fakeHost(gitPath, cleanRepository(func(string) subprocess.SubprocessResult {
+				return subprocess.SubprocessResult{Truncated: true, Stdout: "diff --git a/x b/x\n+partial", CombinedOutput: warning}
+			}))
+
+			out, stderr, err := tc.call(host, gitPath, t.TempDir())
+
+			if !errors.Is(err, gitexec.ErrIncomplete) {
+				t.Fatalf("%s err = %v, want a failure matching ErrIncomplete", name, err)
+			}
+			if want := fmt.Sprintf("git diff: output exceeded %d bytes", subprocess.MaxSubprocessOutputBytes); err.Error() != want {
+				t.Errorf("%s err = %q, want %q", name, err, want)
+			}
+			if out != "" {
+				t.Errorf("%s stdout = %q, want nothing from a truncated run", name, out)
+			}
+			if stderr != tc.wantStderr {
+				t.Errorf("%s stderr = %q, want %q", name, stderr, tc.wantStderr)
+			}
+		})
+	}
+}
+
+// TestHost_RunReportsANonZeroExitOverATruncatedStdout pins the order of the two failures: a run
+// that exited non-zero is git's own answer whatever it printed, so a cut stdout beside it still
+// reports the exit status as the plain error, never as an incomplete one.
+func TestHost_RunReportsANonZeroExitOverATruncatedStdout(t *testing.T) {
+	t.Parallel()
+	host, _ := fakeHost(outsideGit(t), cleanRepository(func(string) subprocess.SubprocessResult {
+		return subprocess.SubprocessResult{ExitCode: 1, Truncated: true, CombinedOutput: "fatal: bad"}
+	}))
+
+	_, err := host.Run(context.Background(), t.TempDir(), nil, testTimeout, "diff")
+
+	if err == nil || errors.Is(err, gitexec.ErrIncomplete) || !strings.Contains(err.Error(), "exit 1") {
+		t.Errorf("Run err = %v, want the plain exit-status error", err)
 	}
 }
 
