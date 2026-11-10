@@ -1,6 +1,8 @@
 package security
 
 import (
+	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -224,5 +226,91 @@ func TestSecretsHintPinsTheWording(t *testing.T) {
 				t.Errorf("SecretsHint = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestSecretScannerMatchesSecretFindings proves the streaming scanner answers exactly what
+// SecretFindings does for the whole diff and path list — the same findings, path findings
+// first, each (path, class) pair once — whatever size the chunks it is fed arrive in, and
+// whichever stream is written first.
+func TestSecretScannerMatchesSecretFindings(t *testing.T) {
+	t.Parallel()
+
+	diff := addedLineDiff(".env", "AWS_ACCESS_KEY_ID="+fixtureAWSKey) +
+		addedLineDiff("ci.yml", "token: "+fixtureGitHubToken) +
+		addedLineDiff(".env", "AGAIN="+fixtureAWSKey) +
+		"diff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1,2 @@\n" +
+		"-" + fixtureSlackToken + "\n" +
+		"+++ " + fixturePrivateKey + "\n" +
+		"+" + fixtureJWT // the final line, unterminated
+	paths := []string{".env", "main.go", "certs/server.pem", ".env", "id_rsa.pub"}
+	want := []SecretFinding{
+		{Path: ".env", Class: "secret-bearing file name"},
+		{Path: "certs/server.pem", Class: "secret-bearing file name"},
+		{Path: ".env", Class: "AWS access key id"},
+		{Path: "ci.yml", Class: "GitHub token"},
+		{Path: "notes.txt", Class: "private key"},
+		{Path: "notes.txt", Class: "JWT"},
+	}
+	if got := SecretFindings(diff, paths); !reflect.DeepEqual(got, want) {
+		t.Fatalf("SecretFindings = %v, want %v", got, want)
+	}
+	listing := strings.Join(paths, "\x00") + "\x00"
+
+	for _, chunk := range []int{1, 2, 7, 64, len(diff) + len(listing)} {
+		for _, namesFirst := range []bool{false, true} {
+			t.Run(fmt.Sprintf("chunk=%d namesFirst=%v", chunk, namesFirst), func(t *testing.T) {
+				t.Parallel()
+
+				scanner := NewSecretScanner()
+				if namesFirst {
+					writeInChunks(t, scanner.NameListWriter(), listing, chunk)
+					writeInChunks(t, scanner, diff, chunk)
+				} else {
+					writeInChunks(t, scanner, diff, chunk)
+					writeInChunks(t, scanner.NameListWriter(), listing, chunk)
+				}
+
+				if got := scanner.Findings(); !reflect.DeepEqual(got, want) {
+					t.Errorf("Findings = %v, want %v", got, want)
+				}
+			})
+		}
+	}
+}
+
+// TestSecretScannerEndsAtFindings proves Findings ends both streams: the unterminated final
+// name is judged, a second call answers the same, and a later write fails rather than being
+// dropped unscanned.
+func TestSecretScannerEndsAtFindings(t *testing.T) {
+	t.Parallel()
+
+	scanner := NewSecretScanner()
+	writeInChunks(t, scanner.NameListWriter(), "main.go\x00server.key", 3)
+	want := []SecretFinding{{Path: "server.key", Class: "secret-bearing file name"}}
+
+	if got := scanner.Findings(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Findings = %v, want %v", got, want)
+	}
+	if got := scanner.Findings(); !reflect.DeepEqual(got, want) {
+		t.Errorf("second Findings = %v, want %v", got, want)
+	}
+	if _, err := scanner.Write([]byte(addedLineDiff("a.go", fixtureAWSKey))); err == nil {
+		t.Error("Write after Findings succeeded, want the ended scanner to refuse it")
+	}
+	if _, err := scanner.NameListWriter().Write([]byte(".env\x00")); err == nil {
+		t.Error("NameListWriter write after Findings succeeded, want the ended scanner to refuse it")
+	}
+}
+
+// writeInChunks writes text to w in pieces of at most chunk bytes, failing on any write error.
+func writeInChunks(t *testing.T, w io.Writer, text string, chunk int) {
+	t.Helper()
+	for len(text) > 0 {
+		n := min(chunk, len(text))
+		if _, err := io.WriteString(w, text[:n]); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		text = text[n:]
 	}
 }

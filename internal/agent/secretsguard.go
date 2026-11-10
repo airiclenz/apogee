@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,9 @@ import (
 )
 
 // The commit-secrets pre-check: before a git_commit resolves, dispatch stages what the call
-// would stage into a SHADOW index, diffs it, and hands the pure scanner (security.SecretFindings)
-// the staged diff and the staged paths. A finding tightens the guardrail verdict to a Tier-2
+// would stage into a SHADOW index, diffs it, and streams the staged diff and the staged paths
+// into the pure scanner (security.SecretScanner) as git prints them, uncapped — a secret staged
+// past any output cap is scanned like the first line. A finding tightens the guardrail verdict to a Tier-2
 // forced approval in every mode (ADR 0012's tighten-only rule; ADR 0080) — the human sees the
 // finding on the prompt's Fix row, a denied look answers the model with the same words, and
 // approval is the only way through. It is dispatch-side I/O precompute in the resolution.go D6
@@ -49,7 +51,10 @@ import (
 // apogee is built for is a loaded local machine where a cold git over a large index is slow
 // rather than broken, and a healthy repository answers in milliseconds and spends none of it. On
 // expiry the scan is incomplete, not clean, and the call is forced to the approval look (see the
-// robustness contract above). It is a package var so a test can lower it.
+// robustness contract above). The budget covers reading and scanning the WHOLE staged diff, which
+// is streamed uncapped: a diff too large to read within it is an incomplete scan too — an
+// accepted cost, since the worst it does is ask, where a clipped diff passed as clean would wave
+// the unread bytes through. It is a package var so a test can lower it.
 var commitSecretsTimeout = 30 * time.Second
 
 // shadowDirPattern names the per-call temp dir the shadow index and object directory live in.
@@ -157,10 +162,12 @@ func (a *Agent) commitSecretsCheck(ctx context.Context, call domain.ToolCall) (s
 // scan; any other error says the scan started against a resolved repository and could not
 // finish, which the caller turns into the forced look.
 //
-// Every git it runs — the resolution and the four shadow runs — goes through host's Resolve and
-// Query, so the runs carry the git tools' exec fence, hardening, environment allowlist and
-// command-config refusal; a test passes a fake host to script git's outcomes or count its
-// children (Plan mode must spawn none).
+// Every git it runs — the resolution and the four shadow runs — goes through host's Resolve,
+// Query and RunTo, so the runs carry the git tools' exec fence, hardening, environment allowlist
+// and command-config refusal; a test passes a fake host to script git's outcomes or count its
+// children (Plan mode must spawn none). The two runs whose output IS the scanned payload — the
+// diff and the name listing — stream it through RunTo into the scanner rather than returning a
+// capped string, so no staged byte goes unread and no whole-diff buffer is held.
 func scanStagedSecrets(ctx context.Context, host gitexec.Host, root string, pathspecs []string) ([]security.SecretFinding, error) {
 	gitPath, err := host.Resolve(ctx, root)
 	if err != nil {
@@ -177,31 +184,18 @@ func scanStagedSecrets(ctx context.Context, host gitexec.Host, root string, path
 			return nil, err
 		}
 	}
+	scanner := security.NewSecretScanner()
 	diffArgs := append([]string{"diff"}, gitexec.DiffHardeningArgs...)
-	diff, err := shadow.git(ctx, append(diffArgs, "--cached", "--diff-filter=ACMR", "--no-color")...)
-	if err != nil {
+	if err := shadow.stream(ctx, scanner, append(diffArgs, "--cached", "--diff-filter=ACMR", "--no-color")...); err != nil {
 		return nil, err
 	}
 	// -z lists each name raw and NUL-terminated: without it git C-quotes a non-ASCII or
 	// quote-bearing path (`"donn\303\251es/.env"`), and the quoted basename (`.env"`) would
 	// miss the name globs.
-	names, err := shadow.git(ctx, "diff", "--cached", "--diff-filter=ACMR", "--name-only", "-z")
-	if err != nil {
+	if err := shadow.stream(ctx, scanner.NameListWriter(), "diff", "--cached", "--diff-filter=ACMR", "--name-only", "-z"); err != nil {
 		return nil, err
 	}
-	return security.SecretFindings(diff, nulFields(names)), nil
-}
-
-// nulFields splits git's NUL-terminated `-z` output into its non-empty fields, each kept
-// exactly as git wrote it — a path may begin or end in whitespace.
-func nulFields(out string) []string {
-	var fields []string
-	for _, field := range strings.Split(out, "\x00") {
-		if field != "" {
-			fields = append(fields, field)
-		}
-	}
-	return fields
+	return scanner.Findings(), nil
 }
 
 // shadowIndex is one call's private staging area: a temp dir holding a copy of the repository's
@@ -275,20 +269,39 @@ func (s *shadowIndex) git(ctx context.Context, args ...string) (string, error) {
 	return runShadowGit(ctx, s.host, s.gitPath, s.root, s.env, args...)
 }
 
+// stream runs one git command in the workspace root against the shadow with its standard
+// output streamed, uncapped, into w — the scanner — under the same budget and classification as
+// git. It goes through host's RunTo, which resolves git through the same fence the scan's own
+// Resolve passed. Every error stops the scan as an incomplete one, a writer's refusal included.
+func (s *shadowIndex) stream(ctx context.Context, w io.Writer, args ...string) error {
+	err := s.host.RunTo(ctx, s.root, s.env, commitSecretsTimeout, w, args...)
+	return classifyShadowErr(ctx, err)
+}
+
 // runShadowGit runs one git command in root through host's Query — the shadow funnel. ctx
 // carries the check's single budget (commitSecretsTimeout, taken once in commitSecretsCheck), so
 // the four runs share one ceiling and a cancelled Turn stops the check; the same duration goes to
-// the funnel as the per-run timeout, which is what bounds a run whose ctx outlives it.
-//
-// The classification lives here: gitexec renders a run its own timeout killed as a plain
-// `git …: timed out after …` error and never wraps context.DeadlineExceeded, so the budget's
-// expiry is read from ctx AFTER the call and marked with errScanTimedOut.
+// the funnel as the per-run timeout, which is what bounds a run whose ctx outlives it. A stdout
+// past gitexec's output cap fails as gitexec.ErrIncomplete, never as a clipped answer; the runs
+// whose payload may be that large stream instead (shadowIndex.stream).
 func runShadowGit(ctx context.Context, host gitexec.Host, gitPath, root string, env []string, args ...string) (string, error) {
 	out, err := host.Query(ctx, gitPath, root, env, commitSecretsTimeout, args...)
-	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("%w: %v", errScanTimedOut, err)
+	if err = classifyShadowErr(ctx, err); err != nil {
+		return "", err
 	}
-	return out, err
+	return out, nil
+}
+
+// classifyShadowErr marks a shadow run's failure that the check's own budget caused with
+// errScanTimedOut, and returns every other error (or nil) as it is. The classification lives
+// here because gitexec renders a run its own timeout killed as a plain `git …: timed out after …`
+// error and never wraps context.DeadlineExceeded, so the budget's expiry is read from ctx AFTER
+// the call.
+func classifyShadowErr(ctx context.Context, err error) error {
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %v", errScanTimedOut, err)
+	}
+	return err
 }
 
 // remove deletes the shadow's temp dir — index, object directory and all — on every path.

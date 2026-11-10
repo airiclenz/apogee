@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -359,13 +361,22 @@ func TestCommitSecretsIncompleteScanForcesApproval(t *testing.T) {
 	t.Run("a git failure after the repository resolved", func(t *testing.T) {
 		root := newSecretsRepo(t)
 		stageSecrets(t, root)
-		// rev-parse resolves the repository; the diff that would read the staged bytes dies.
+		// rev-parse resolves the repository; the diff that would read the staged bytes dies. The
+		// diff streams through SpawnTo, so that is where it fails — a Spawn-only failure would let
+		// the streamed diff fall through to the real git and find the staged secrets instead.
+		diffFails := subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: unable to read the index"}
 		failingDiff := gitexec.Host{
 			Spawn: func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
 				if strings.HasPrefix(gitCommand(spec), "diff ") {
-					return subprocess.SubprocessResult{ExitCode: 128, CombinedOutput: "fatal: unable to read the index"}, nil
+					return diffFails, nil
 				}
 				return subprocess.RunSubprocess(ctx, spec)
+			},
+			SpawnTo: func(ctx context.Context, spec subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
+				if strings.HasPrefix(gitCommand(spec), "diff ") {
+					return diffFails, nil
+				}
+				return subprocess.RunSubprocessTo(ctx, spec, stdout)
 			},
 		}
 		sink := &recordingSink{}
@@ -376,6 +387,133 @@ func TestCommitSecretsIncompleteScanForcesApproval(t *testing.T) {
 
 		requireIncompleteScanLook(t, approver, sink)
 	})
+
+	t.Run("a diff the budget cannot finish reading", func(t *testing.T) {
+		// The budget bounds reading the WHOLE streamed diff (commitSecretsTimeout): a diff still
+		// arriving when it expires is an incomplete scan, never a clean one over the bytes read.
+		root := newSecretsRepo(t)
+		lowerCommitSecretsTimeout(t, 250*time.Millisecond)
+		host, _ := scriptedGit(filepath.Join(t.TempDir(), "git"), shadowAnswers(t, ""))
+		host.SpawnTo = func(ctx context.Context, _ subprocess.SubprocessSpec, stdout io.Writer) (subprocess.SubprocessResult, error) {
+			if _, err := io.WriteString(stdout, harmlessDiffPrefix("notes.txt", 64)); err != nil {
+				return subprocess.SubprocessResult{}, err
+			}
+			<-ctx.Done()
+			return subprocess.SubprocessResult{}, ctx.Err()
+		}
+		sink := &recordingSink{}
+		approver := &gateApprover{decision: domain.ApprovalDeny}
+
+		driveToolCallWith(t, secretsConfig(sink, root, approver), sink, withEngineGit(host),
+			"c1", "git_commit", `{"message":"add notes"}`)
+
+		requireIncompleteScanLook(t, approver, sink)
+	})
+}
+
+// TestCommitSecretsScansPastTheOutputCap proves the scan reads all of what the commit would
+// carry, not the first subprocess.MaxSubprocessOutputBytes of it: a key added after a staged
+// diff's cut is found by the real git, and a secret-bearing name listed after the name listing's
+// cut forces the look rather than passing as clean.
+func TestCommitSecretsScansPastTheOutputCap(t *testing.T) {
+	t.Run("a key past the cut of the staged diff", func(t *testing.T) {
+		t.Parallel()
+		const bigFile = "notes.txt"
+		root := newSecretsRepo(t)
+		var content strings.Builder
+		for line := 0; content.Len() <= subprocess.MaxSubprocessOutputBytes; line++ {
+			fmt.Fprintf(&content, "harmless line %06d of a long staged file\n", line)
+		}
+		content.WriteString(pemSecret)
+		writeRepoFile(t, root, bigFile, content.String())
+		mustGit(t, root, "add", bigFile)
+		sink := &recordingSink{}
+		approver := &gateApprover{decision: domain.ApprovalDeny}
+
+		driveToolCall(t, secretsConfig(sink, root, approver), sink, "c1", "git_commit", `{"message":"add notes"}`)
+
+		requireFindingLook(t, approver, []security.SecretFinding{{Path: bigFile, Class: "private key"}})
+	})
+
+	t.Run("a secret-bearing name past the cut of the listing", func(t *testing.T) {
+		t.Parallel()
+		const envPath = "config/.env"
+		var listing strings.Builder
+		for file := 0; listing.Len() <= subprocess.MaxSubprocessOutputBytes; file++ {
+			fmt.Fprintf(&listing, "pkg/generated/file%06d.go\x00", file)
+		}
+		listing.WriteString(envPath + "\x00")
+		root := newSecretsRepo(t)
+		host, _ := scriptedGit(filepath.Join(t.TempDir(), "git"), shadowAnswers(t, listing.String()))
+		sink := &recordingSink{}
+		approver := &gateApprover{decision: domain.ApprovalDeny}
+
+		driveToolCallWith(t, secretsConfig(sink, root, approver), sink, withEngineGit(cappedSpawn(host)),
+			"c1", "git_commit", `{"message":"add config"}`)
+
+		requireFindingLook(t, approver, []security.SecretFinding{{Path: envPath, Class: "secret-bearing file name"}})
+	})
+}
+
+// shadowAnswers scripts the shadow's git for scriptedGit: rev-parse names the index and object
+// directory, the staged diff is empty, and the `--name-only -z` listing is listing. Any other
+// command fails the test — the scan runs no git beyond these.
+func shadowAnswers(t *testing.T, listing string) func(command string) subprocess.SubprocessResult {
+	t.Helper()
+	return func(command string) subprocess.SubprocessResult {
+		switch {
+		case command == "rev-parse --git-path index --git-path objects":
+			return subprocess.SubprocessResult{Stdout: ".git/index\n.git/objects\n"}
+		case strings.HasPrefix(command, "diff ") && strings.HasSuffix(command, " --name-only -z"):
+			return subprocess.SubprocessResult{Stdout: listing}
+		case strings.HasPrefix(command, "diff "):
+			return subprocess.SubprocessResult{}
+		}
+		t.Errorf("unexpected shadow git command %q", command)
+		return subprocess.SubprocessResult{ExitCode: 1}
+	}
+}
+
+// cappedSpawn returns host with its captured launcher cut at subprocess.MaxSubprocessOutputBytes
+// as the real one cuts it — the kept prefix, Truncated set — so a listing read through it is
+// clipped, while the streaming launcher (SpawnTo) still hands over every byte.
+func cappedSpawn(host gitexec.Host) gitexec.Host {
+	spawn := host.Spawn
+	host.Spawn = func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		res, err := spawn(ctx, spec)
+		if len(res.Stdout) > subprocess.MaxSubprocessOutputBytes {
+			res.Stdout, res.Truncated = res.Stdout[:subprocess.MaxSubprocessOutputBytes], true
+		}
+		return res, err
+	}
+	return host
+}
+
+// harmlessDiffPrefix returns the opening of a staged diff adding lines harmless lines to path —
+// headers and added text no content class matches.
+func harmlessDiffPrefix(path string, lines int) string {
+	var diff strings.Builder
+	fmt.Fprintf(&diff, "diff --git a/%s b/%s\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n", path, path, path, lines)
+	for line := 0; line < lines; line++ {
+		fmt.Fprintf(&diff, "+harmless line %d\n", line)
+	}
+	return diff.String()
+}
+
+// requireFindingLook asserts the one forced look a finding warrants: the Tier-2 reason on the
+// prompt and the scanner's Hint for want as its Fix row.
+func requireFindingLook(t *testing.T, approver *gateApprover, want []security.SecretFinding) {
+	t.Helper()
+	if len(approver.requests) != 1 {
+		t.Fatalf("approver consulted %d times, want the one look a finding forces", len(approver.requests))
+	}
+	req := approver.requests[0]
+	if req.Reason != forceApprovalReason {
+		t.Errorf("Reason = %q, want %q", req.Reason, forceApprovalReason)
+	}
+	if wantRemedy := security.SecretsHint(want); req.Remedy != wantRemedy {
+		t.Errorf("Remedy = %q, want %q", req.Remedy, wantRemedy)
+	}
 }
 
 // requireIncompleteScanLook asserts the one forced look an incomplete scan warrants: the Tier-2

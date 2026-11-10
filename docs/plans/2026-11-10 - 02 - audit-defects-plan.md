@@ -93,7 +93,11 @@ NOTES (2026-11-10): caller audit — Run/Query/RunDiagnosed callers are snapshot
 **Acceptance:** `go test -race -count=1 ./internal/gitexec/`
 **Commit:** `fix(gitexec): report a truncated git stdout as incomplete`
 
-## 3. The commit secrets scan reads the whole staged diff
+## 3. The commit secrets scan reads the whole staged diff — ✅ DONE (2026-11-10)
+
+NOTES (2026-11-10): streaming scanner API is `security.NewSecretScanner()` → `*SecretScanner` (an io.Writer for the diff), `NameListWriter() io.Writer` for the `--name-only -z` listing, and `Findings()`, which ends both streams; a write after `Findings` fails. `SecretFindings(diff, paths)` now runs on that scanner, so its order (path findings first) and its one-finding-per-(path, class) dedup are shared code, not a copy. A clean scan still returns nil.
+NOTES (2026-11-10): budget guard: took the first option. `commitSecretsTimeout` stays one 30 s bound on the whole check. Its doc comment says that a diff too large to read within it gets the incomplete-scan approval prompt, and accepts that cost. `TestCommitSecretsIncompleteScanForcesApproval/a_diff_the_budget_cannot_finish_reading` pins it. ADR 0080 is not amended: no stall bound was added.
+NOTES (2026-11-10): the two streaming runs go through `Host.RunTo`, which resolves git again through the same fence. The old `nulFields` helper is deleted because nothing calls it now. The listing test wraps the scripted `Spawn` in `cappedSpawn`, which cuts output the way the real capped launcher does. Without that, the scripted listing passes on the old code too. Both new past-the-cap subtests were confirmed to fail on the old implementation.
 
 Depends on item 2.
 
