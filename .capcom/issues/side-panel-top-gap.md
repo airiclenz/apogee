@@ -1,11 +1,13 @@
 ---
 title: Side panel content starts on row 1, below a blank top row
-status: open
+status: done
 type: feature
 priority: 3
 labels: [tui]
 plan: 2026-11-10 - 01 - panel-and-tool-shape-fixes-plan
 created: 2026-11-10T10:30:32Z
+closed: 2026-11-10T12:51:54Z
+reason: "Resolved by plan '2026-11-10 - 01 - panel-and-tool-shape-fixes-plan' item 7 (archived at f53b8f0d): panel content starts on row 1 below a blank top row in the docked column, overlay and run view; stops and clicks move with it; sketches redrawn."
 ---
 
 The **Side panel**'s first section heading is painted on the window's top row (row 0), flush

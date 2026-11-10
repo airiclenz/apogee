@@ -1,10 +1,12 @@
 ---
 title: Unknown-key walk falsely flags every ui.side-panel.sections and sessions.watch-homes entry
-status: open
+status: done
 type: bug
 priority: 3
 plan: 2026-11-10 - 01 - panel-and-tool-shape-fixes-plan
 created: 2026-11-10T10:44:53Z
+closed: 2026-11-10T12:51:54Z
+reason: "Resolved by plan '2026-11-10 - 01 - panel-and-tool-shape-fixes-plan' item 1 (archived at f53b8f0d): the unknown-key walk no longer descends into entry structs that declare no yaml keys; misspelled keys beside the list are still reported."
 ---
 
 ## Symptom

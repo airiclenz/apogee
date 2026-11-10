@@ -1,11 +1,13 @@
 ---
 title: sub_agent tools argument shape refused on first call
-status: open
+status: done
 type: bug
 priority: 2
 labels: [tool-surface]
 plan: 2026-11-10 - 01 - panel-and-tool-shape-fixes-plan
 created: 2026-11-10T09:47:30Z
+closed: 2026-11-10T12:51:54Z
+reason: "Resolved by plan '2026-11-10 - 01 - panel-and-tool-shape-fixes-plan' items 2-3 (archived at f53b8f0d): sub_agent, fan_out and workflow stages decode [\"read-only\"] and a string-encoded array; unknown names/keywords still refused naming both shapes."
 ---
 
 The `sub_agent` `tools` argument is a union (`"type": ["string", "array"]`): the string

@@ -1,11 +1,13 @@
 ---
 title: "Side panel cannot be dragged wide: transcript minimum width too large"
-status: open
+status: done
 type: feature
 priority: 2
 labels: [tui]
 plan: 2026-11-10 - 01 - panel-and-tool-shape-fixes-plan
 created: 2026-11-10T10:18:08Z
+closed: 2026-11-10T12:51:54Z
+reason: "Resolved by plan '2026-11-10 - 01 - panel-and-tool-shape-fixes-plan' items 5-6 (archived at f53b8f0d): a set or dragged side-panel width may leave the transcript 60 columns; dock gate unchanged; ADR 0110 amended and layout docs updated."
 ---
 
 Dragging the **Side panel** separator stops long before the owner wants it to: the transcript
