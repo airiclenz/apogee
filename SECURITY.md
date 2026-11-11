@@ -20,6 +20,20 @@ documented posture says it cannot. The guarantees apogee makes, in the order the
   has no landlock; macOS seatbelt; a restricted Windows token). An escape
   from the fence, on any platform, is the highest-severity report there is. See
   [Auto mode's blast radius](docs/manual/configuration.md#auto-modes-blast-radius).
+  The fence does not cover a same-user service that runs code for whoever reaches it
+  ([ADR 0112](.capcom/knowledge/decisions/adr-0112.md)). bwrap, and landlock from ABI 9, close
+  the user runtime directory (the session bus, rootless docker and podman) and the system docker
+  and podman sockets, leaving only the ssh-agent and gpg-agent sockets reachable there — so
+  `docker`, `podman`, `gh` with a keyring token and libsecret or VS Code git credential helpers
+  fail inside Auto's box. Every other unix socket (tmux's, the system bus, X11's abstract one)
+  stays reachable on both Linux rungs, landlock below ABI 9 closes none of them, and seatbelt
+  leaves every socket and Mach service (`launchctl`, `osascript`) reachable; each of those
+  backends discloses this as `connect(2) AF_UNIX` (and `mach-lookup` on macOS) in `apogee probe`'s
+  `unfenced:` field and in Auto's startup notice. A same-user service on localhost TCP is
+  reachable on every backend, since the network is open in Auto (ADR 0012), and the Windows
+  token's reach to named pipes and COM servers is not yet established. Those named limits are the
+  documented posture; reaching a socket a backend says it closes, or a write the disclosure does
+  not name, is an escape.
 - **The dangerous-action guard** — the refused and prompted command shapes documented under
   [the dangerous-action guard](docs/manual/configuration.md#the-dangerous-action-guard). A
   spelling that slips past a Tier-1 refusal or a Tier-2 prompt is in scope.

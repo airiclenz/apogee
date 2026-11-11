@@ -3367,18 +3367,52 @@ kernel older than **6.2** (landlock ABI 1–2 —
 Ubuntu 22.04, Debian 12, RHEL 9) the kernel has no way to restrict *truncation*, so a confined
 command still cannot create or write a file outside the workspace but can empty one that is
 already there. Auto is still fenced and still eligible; Apogee names the gap rather than
-implying a fence it does not have — `apogee probe` and `/confine` show it as
-`unfenced: truncate(2)` on the backend line, and Auto says it once at startup. A kernel 6.2 or
+implying a fence it does not have — `apogee probe` and `/confine` name `truncate(2)` in the
+`unfenced:` field of the backend line, and Auto says it once at startup. A kernel 6.2 or
 newer closes that one; until then, treat Auto's fence as create-and-write only.
 
-Network **deny** carries gaps of its own, which the same `unfenced:` field lists. Where landlock
-can claim network deny at all it still lets UDP datagrams out and still lets a command reach a
-UNIX socket named by path, so it discloses `connect(2) UDP` and `connect(2) AF_UNIX`; the
-namespace (bwrap) backend discloses `connect(2) AF_UNIX` for the same reason — its network
-namespace closes IP, not a socket the command opens through the filesystem. No kernel closes
-either one, so unlike truncation they are not waiting on a newer box. They are **not**
-write-class, so they stay off the startup notice and live on the backend line, where the full
-list is comma-separated.
+**The fence does not cover a service that runs code for whoever asks**
+([ADR 0112](../../.capcom/knowledge/decisions/adr-0112.md)). A confined command can still
+connect to a unix socket it can see, and a same-user service listening on one — the user
+systemd bus (`systemd-run --user`), `dockerd`, a tmux server — then runs commands for it,
+outside the box, with your rights. So reaching such a socket is a write by another route, and
+apogee closes it where the backend can and discloses the rest as **write-class**:
+`connect(2) AF_UNIX` (and, on macOS, `mach-lookup`) sits in the `unfenced:` field and Auto names
+it at startup with its consequence, on every Linux and macOS host.
+
+- **bwrap**, and **landlock from ABI 9**, close one fixed set: your user runtime directory
+  (`/run/user/<uid>`, and `$XDG_RUNTIME_DIR` where it names another) — the session bus, the
+  `systemd --user` socket and rootless docker and podman sockets live there — and the system
+  docker and podman sockets (`/run/docker.sock`, `/run/podman/podman.sock`). Inside the runtime
+  directory only the ssh-agent and gpg-agent sockets stay reachable, so `git push` over ssh and
+  commit signing keep working. Both Linux rungs close the same set; they still disclose
+  `connect(2) AF_UNIX`, because every other pathname socket stays reachable (tmux's under `/tmp`,
+  postgres's, the system bus), and so does every abstract socket, X11's included — scoping
+  those would break `xclip`, `xdg-open` and headed browser tests.
+- **landlock below ABI 9** has no right for a unix-socket connect, so it closes nothing of this
+  and every pathname and abstract socket stays reachable. A host there stays on landlock rather
+  than moving to bwrap for the closed set; the disclosure covers the gap.
+- **seatbelt** (macOS) closes nothing of this either: it discloses `connect(2) AF_UNIX` and
+  `mach-lookup`, so `launchctl submit` and `osascript` stay reachable.
+- **The Windows token** backend's posture is not established yet — whether its low-integrity
+  token can reach a same-user named pipe or COM server that spawns processes is the open issue
+  `windows-token-spawner-posture`, and apogee claims nothing for it until that lands.
+
+Where the runtime directory and container sockets are closed, **`docker` and `podman` commands
+fail inside Auto's box**, and so does everything else that talks to a helper under the runtime
+directory: `gh` with a keyring-stored token, `git push` through `git-credential-libsecret` or
+VS Code's git askpass (`$VSCODE_GIT_IPC_HANDLE`), and native Wayland clients. Run those in
+another mode, or with `/confine off` on a disposable machine. One more route stays open by
+design: the network is open in Auto (ADR 0012), so a same-user service listening on
+**localhost TCP** is reachable from the box on every backend. That one is not a token in the
+`unfenced:` field; it is named here, in SECURITY.md and in ADR 0112.
+
+Network **deny** carries a gap of its own, which the same `unfenced:` field lists. Where landlock
+can claim network deny at all it still lets UDP datagrams out, so it discloses
+`connect(2) UDP`; the namespace (bwrap) backend's network namespace cuts datagrams with the rest
+of IP. No kernel closes UDP egress under landlock, so unlike truncation it is not waiting on a
+newer box. It is **not** write-class: it stays off Auto's startup notice and lives on the
+backend line, where the full list is comma-separated.
 
 **On Windows the fence is a token, and the box is a mark on your disk.** No Windows
 facility takes "these paths are writable" as an argument, so the command runs under a

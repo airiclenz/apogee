@@ -27,14 +27,20 @@ confinement (ADR 0012)
 ```
 
 The `backend:` line gains a third field where a fence is real but incomplete —
-`landlock (fs-write: available · network: unavailable · unfenced: truncate(2))` — naming each
-access the backend knows it cannot cover on this host, comma-separated when there is more than
-one. On Linux one of them is truncation on a kernel
+`landlock (fs-write: available · network: unavailable · unfenced: truncate(2), connect(2) AF_UNIX)`
+— naming each access the backend knows it cannot cover on this host, comma-separated when there
+is more than one. On Linux one of them is truncation on a kernel
 older than 6.2 (landlock ABI 1–2: Ubuntu 22.04, Debian 12, RHEL 9), where a confined command
 cannot create or write outside the workspace but can still *empty* a file that is already there.
-The others belong to network **deny**: a landlock backend that can claim it still discloses
-`connect(2) UDP` and `connect(2) AF_UNIX`, and the namespace (bwrap) backend discloses
-`connect(2) AF_UNIX` — egress no kernel closes, so it is named rather than implied away.
+Every Linux and macOS backend that fences writes names `connect(2) AF_UNIX`, and seatbelt
+`mach-lookup` beside it: a confined command can still reach a same-user service that runs
+commands for it outside the box, so both are write-class and Auto names them at startup
+([ADR 0112](../../.capcom/knowledge/decisions/adr-0112.md)). bwrap, and landlock from ABI 9,
+close the user runtime directory and the docker and podman sockets, but other unix sockets stay
+reachable, so the token stays; [Auto mode's blast radius](configuration.md#auto-modes-blast-radius)
+says what each backend closes. One more belongs to network **deny**: a landlock backend that
+can claim it still discloses `connect(2) UDP` — datagram egress no kernel closes, so it is named
+rather than implied away.
 Auto stays eligible; the field exists so the report never claims a fence it does not have.
 Where fs-write is `unavailable`, a backend that knows why appends a ` · why: <reason>` field
 instead — `namespace (fs-write: unavailable · network: unavailable · why: bwrap not found in /usr/bin, /bin, /usr/local/bin or /run/current-system/sw/bin)` —

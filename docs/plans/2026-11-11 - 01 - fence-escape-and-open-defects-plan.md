@@ -207,7 +207,12 @@ NOTES (2026-11-11): this box's kernel is ABI < 9, so the live RESOLVE_UNIX path 
 - `GOMEMLIMIT=2GiB go test -race -count=1 -run 'TestLandlock|TestAccessMask' ./internal/platform/`
 **Commit:** `feat(platform): close the user runtime dir and container sockets under landlock where the kernel can`
 
-## 10. Disclose the spawn-elsewhere residual in the manual and SECURITY.md
+## 10. Disclose the spawn-elsewhere residual in the manual and SECURITY.md — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): carried note resolved — docs/manual/probe.md's landlock ABI 1–2 example line now reads `unfenced: truncate(2), connect(2) AF_UNIX` (landlock discloses AF_UNIX at every ABI since item 6, d4623939).
+NOTES (2026-11-11): contract §5 also corrected beyond the two residual bullets the Read-first named: the macOS bullet gains seatbelt's `connect(2) AF_UNIX, mach-lookup` residuals, the ABI 1–2 sentence no longer says `Residuals = [truncate(2)]` alone, and the "Two classes" paragraph re-splits write-class (truncate, AF_UNIX, mach-lookup) from network-class (UDP only); all marked as dated ADR 0112 amendments inline. §6.2 row #13's note checked and left as is — it is still true (namespace discloses AF_UNIX only; UDP is network-class).
+NOTES (2026-11-11): no landlock ABI 9 kernel version is named anywhere — the tree states none (landlock_linux.go's ABI table leaves it blank), so the docs say "ABI 9" only.
+NOTES (2026-11-11): SECURITY.md gains one scoping sentence the plan did not dictate — the named limits are the documented posture, and reaching a socket a backend says it closes is an escape — reading "What counts" (anything the documented posture says cannot happen) against ADR 0112.
 
 **What:**
 **Goal:** `docs/manual/configuration.md` §Auto mode's blast radius, `docs/manual/probe.md`'s `backend:` paragraph, `SECURITY.md` and the contract's §5 state per backend what items 6–9 close and disclose, that docker fails inside Auto's box where masked, that localhost TCP services stay reachable (ADR 0012), and cite ADR 0112; no doc says no kernel closes AF_UNIX.

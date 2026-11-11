@@ -972,11 +972,17 @@ with no fs-confinement does not refuse Auto; it lands in the "subproc, caps insu
 never optimistic:
 
 - **Linux:** call `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` to read the
-  supported ABI. ABI ≥ 1 (kernel ≥ 5.13) ⇒ `FSWrite = true`. ABI ≥ 4 (kernel ≥ 6.7) ⇒ `NetworkEgress =
-  true` **with `Residuals` naming `connect(2) UDP` and `connect(2) AF_UNIX`** — the ABI's network
-  rights cover TCP `connect`/`bind` alone, so a deny box says which two egress classes it still
-  lets through *(amended 2026-09-22, item 6 of plan `2026-09-22 - 00`)*. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
-  `Residuals = [truncate(2)]`** (the ruleset cannot handle `LANDLOCK_ACCESS_FS_TRUNCATE` before
+  supported ABI. ABI ≥ 1 (kernel ≥ 5.13) ⇒ `FSWrite = true` **with `Residuals` naming
+  `connect(2) AF_UNIX`** at every ABI: below ABI 9 a pathname unix-socket connect is no right the
+  ruleset can handle, and from ABI 9 `LANDLOCK_ACCESS_FS_RESOLVE_UNIX` closes only the
+  same-user spawning set (§2.3's item-9 amendment) while every other pathname socket and every
+  abstract one stays reachable *(amended 2026-11-11,
+  [ADR 0112](../../.capcom/knowledge/decisions/adr-0112.md), items 6 and 9 of plan
+  `2026-11-11 - 01`; it was disclosed only where `NetworkEgress` is true)*. ABI ≥ 4 (kernel ≥ 6.7)
+  ⇒ `NetworkEgress = true` **with `Residuals` also naming `connect(2) UDP`** — the ABI's network
+  rights cover TCP `connect`/`bind` alone, so a deny box says it still lets datagrams through
+  *(amended 2026-09-22, item 6 of plan `2026-09-22 - 00`)*. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
+  `Residuals` also naming `truncate(2)`** (the ruleset cannot handle `LANDLOCK_ACCESS_FS_TRUNCATE` before
   ABI 3): the fence is real but a confined command can still *empty* an existing file outside the
   box, and a kernel ≥ 6.2 closes it. A kernel without landlock says why in `Unavailable`
   (`landlock unavailable (landlock_create_ruleset: <errno>)`).
@@ -992,14 +998,20 @@ never optimistic:
   deny-all, the same coarse tightening landlock ABI 4 enforces, and it cuts datagram egress with
   it), but a pathname AF_UNIX socket is reached through the path fence rather than the net one, so
   that one class stays open and is disclosed *(amended 2026-09-22, item 7 of plan
-  `2026-09-22 - 00`; ADR 0081 §4's "nothing is residual" is superseded)*. Any failure ⇒
+  `2026-09-22 - 00`; ADR 0081 §4's "nothing is residual" is superseded)*. The flag line masks the
+  same-user spawning set (§2.3's item-8 amendment); every socket outside it stays reachable, so the
+  token stays, now write-class *(amended 2026-11-11, ADR 0112)*. Any failure ⇒
   `{false, false}` with `Unavailable` = `bwrap not found in /usr/bin, /bin, /usr/local/bin or
   /run/current-system/sw/bin`, `bwrap at <path> is outside the trusted system directories`,
   `bwrap refused: <bwrap's last stderr line>` or `bwrap timed out`; when landlock could not fence either, the string carries **both**
   reasons, landlock's first. The probe has no disk side effect, so `NewReportConfiner()` is
   `NewConfiner()` verbatim on Linux.
 - **macOS:** probe for `/usr/bin/sandbox-exec` (present on stock macOS). Present ⇒ `{true, true}` (one
-  profile enforces both). Absent ⇒ `{false, false}`.
+  profile enforces both) **with `Residuals = [connect(2) AF_UNIX, mach-lookup]`**: the profile is
+  `(allow default)` minus `file-write*`, so a confined command still reaches every unix socket and,
+  through launchd, every Mach service — `launchctl submit` and `osascript` among them. The profile
+  is unchanged; seatbelt discloses only *(amended 2026-11-11, ADR 0112, item 6 of plan
+  `2026-11-11 - 01`)*. Absent ⇒ `{false, false}`.
 - **Windows** *(added 2026-07-22, §9 / ADR 0020)*: read the un-shimmed build number
   (`RtlGetNtVersionNumbers`) and mint the restricted Low-integrity token. At/above build **17763**
   with the token minted ⇒ `{FSWrite: true, NetworkEgress: false}` — **Auto-eligible**, since
@@ -1036,17 +1048,25 @@ appends `· unfenced: <a, b>` and `probe.ResidualNotice` states the consequence 
 beside (never instead of) `DegradedNotice`, which stays the `FSWrite = false` story headless runs
 and Firings are refused on.
 
-**Two classes ride in that one list** *(widened 2026-09-22, items 6–9 of plan `2026-09-22 - 00`)*.
-**Write-class** residuals are open while `FSWrite` is true — today only landlock's `truncate(2)`
-below ABI 3. **Network-egress-class** residuals are open inside a network-**deny** box while
-`NetworkEgress` is true: `connect(2) UDP` and `connect(2) AF_UNIX` (`domain.ResidualUDPEgress`,
-`domain.ResidualUnixEgress` — spelled once in `internal/domain` so the backends that disclose them
-and the probe surfaces that word them cannot drift apart). They are a standing fact about the
-backend, not a per-box answer, so they are disclosed wherever `NetworkEgress` is true — a deny box
-is only what makes them matter, and the caps are read before any box exists. The split has one
-visible consequence: `probe.CapabilityLine` words **every** token, while `probe.ResidualNotice` is
-write-class only and filters the network ones out, so no host gains a startup banner about egress
-a box it never asked to tighten leaves open. Row **#13** of the battery below is what keeps the
+**Two classes ride in that one list** *(widened 2026-09-22, items 6–9 of plan `2026-09-22 - 00`;
+re-split 2026-11-11, [ADR 0112](../../.capcom/knowledge/decisions/adr-0112.md))*.
+**Write-class** residuals are open while `FSWrite` is true: landlock's `truncate(2)` below ABI 3,
+and `connect(2) AF_UNIX` on every POSIX backend (landlock at every ABI, namespace, seatbelt) with
+seatbelt's `mach-lookup` beside it (`domain.ResidualUnixEgress`, `domain.ResidualMachLookup`). A
+same-user service listening on a socket the box still reaches — the user bus's `systemd-run`,
+`dockerd`, a tmux server, launchd — runs commands for whoever connects, so reaching it is a write
+outside the box by another route; what each Linux rung closes of that is §2.3's item-8 and item-9
+amendments, and a localhost TCP service, reachable under ADR 0012's open network, is disclosed in
+prose rather than as a token. The one **network-egress-class** residual is open inside a
+network-**deny** box while `NetworkEgress` is true: `connect(2) UDP` (`domain.ResidualUDPEgress`).
+The tokens are spelled once in `internal/domain` so the backends that disclose them and the probe
+surfaces that word them cannot drift apart. The UDP token is a standing fact about the backend,
+not a per-box answer, so it is disclosed wherever `NetworkEgress` is true — a deny box is only
+what makes it matter, and the caps are read before any box exists. The split has one visible
+consequence: `probe.CapabilityLine` words **every** token, while `probe.ResidualNotice` is
+write-class only and filters the UDP one out, so no host gains a startup banner about egress a box
+it never asked to tighten leaves open — and every Linux and macOS host running Auto confined gains
+one for `connect(2) AF_UNIX`. Row **#13** of the battery below is what keeps the
 network class from being a claim on paper: it drives a real datagram out of a deny box and asserts
 the outcome against the backend's own disclosure, the way row #12 does for `truncate(2)`.
 
