@@ -55,6 +55,23 @@ title: ADR 0112 decision
    `windows-token-spawner-posture` owns the answer. Until it lands this record claims nothing for
    that backend.
 
+   > **Amended 2026-11-11 (closeout of `windows-token-spawner-posture`).** Established. A child under
+   > the verbatim restricted Low-integrity primary token (`mintRestrictedLowToken`) cannot reach the
+   > mainstream same-user spawners: the Task Scheduler refuses it through its own COM interface
+   > (`Schedule.Service` → `GetFolder` fails `0x80070003`), WMI `Win32_Process.Create` is denied
+   > (`0x80041003`), and a direct write into the Medium-owned profile is denied (the fence holds).
+   > Of the same-user named pipes the child can open RW (lsass, srvsvc, wkssvc, Windows Search,
+   > crashpad), none is a process-spawning endpoint — opening the pipe handle is not a method that
+   > runs code. This rests on the OS default mandatory-integrity policy (no-write-up) and each
+   > service's own launch/access security; **the token backend closes nothing of this itself**, as
+   > on seatbelt. The residual is therefore the Windows analogue of decision 2's docker/podman
+   > sockets: a same-user service that *does* expose a Low-reachable endpoint which runs code at
+   > Medium — the **Docker Desktop / dockerd and WSL relay named pipes** (`\\.\pipe\docker_engine`
+   > and kin) — is reachable where installed and is a **write-class residual**, not closed. apogee
+   > does not close it and cannot through this token; it is disclosed in SECURITY.md and the manual
+   > alongside localhost TCP (decision 9). Evidence: owner-run probe on Windows 11 (ARM64), which
+   > carried no Docker or WSL, so the spawner-pipe vector is disclosed-by-analogy, not refused.
+
 9. **Localhost TCP stays open** under ADR 0012's open-network default, so a confined command can
    reach a same-user service listening on loopback. It is disclosed in prose — the manual,
    SECURITY.md and this record — not as a residual token.

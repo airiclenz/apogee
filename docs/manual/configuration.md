@@ -3394,9 +3394,14 @@ it at startup with its consequence, on every Linux and macOS host.
   than moving to bwrap for the closed set; the disclosure covers the gap.
 - **seatbelt** (macOS) closes nothing of this either: it discloses `connect(2) AF_UNIX` and
   `mach-lookup`, so `launchctl submit` and `osascript` stay reachable.
-- **The Windows token** backend's posture is not established yet — whether its low-integrity
-  token can reach a same-user named pipe or COM server that spawns processes is the open issue
-  `windows-token-spawner-posture`, and apogee claims nothing for it until that lands.
+- **The Windows token** backend closes nothing of this itself, like seatbelt. Its low-integrity
+  restricted token cannot reach the mainstream same-user spawners — the Task Scheduler (through its
+  own COM interface) and WMI `Win32_Process.Create` both refuse a Low-integrity caller, and the
+  named pipes it can open (lsass, srvsvc, the workstation service, search, crashpad) are not
+  process-spawners — so the OS default integrity policy holds the fence. Where a same-user service
+  does expose a Low-reachable spawning endpoint, it runs code outside the box: **Docker Desktop's
+  and WSL's named pipes** (`\\.\pipe\docker_engine` and kin) are the Windows analogue of the docker
+  socket closed on Linux, reachable where installed and disclosed as write-class, not closed.
 
 Where the runtime directory and container sockets are closed, **`docker` and `podman` commands
 fail inside Auto's box**, and so does everything else that talks to a helper under the runtime

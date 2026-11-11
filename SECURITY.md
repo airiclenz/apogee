@@ -30,10 +30,15 @@ documented posture says it cannot. The guarantees apogee makes, in the order the
   leaves every socket and Mach service (`launchctl`, `osascript`) reachable; each of those
   backends discloses this as `connect(2) AF_UNIX` (and `mach-lookup` on macOS) in `apogee probe`'s
   `unfenced:` field and in Auto's startup notice. A same-user service on localhost TCP is
-  reachable on every backend, since the network is open in Auto (ADR 0012), and the Windows
-  token's reach to named pipes and COM servers is not yet established. Those named limits are the
-  documented posture; reaching a socket a backend says it closes, or a write the disclosure does
-  not name, is an escape.
+  reachable on every backend, since the network is open in Auto (ADR 0012). On the **Windows
+  token** backend the Low-integrity restricted token cannot reach the mainstream same-user
+  spawners — the Task Scheduler and WMI `Win32_Process.Create` refuse it, and the named pipes it
+  can open are not process-spawners — so the OS default integrity policy holds the fence, but the
+  token closes nothing of this itself; a same-user service that does expose a Low-reachable
+  spawning endpoint (**Docker Desktop's and WSL's named pipes**, the analogue of the docker socket
+  above) runs code outside the box where installed and is a write-class residual, disclosed and not
+  closed. Those named limits are the documented posture; reaching a socket a backend says it
+  closes, or a write the disclosure does not name, is an escape.
 - **The dangerous-action guard** — the refused and prompted command shapes documented under
   [the dangerous-action guard](docs/manual/configuration.md#the-dangerous-action-guard). A
   spelling that slips past a Tier-1 refusal or a Tier-2 prompt is in scope.
