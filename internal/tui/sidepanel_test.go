@@ -2075,7 +2075,7 @@ func panelToolPair(base domain.EventBase, id, tool, args, target string) []domai
 	return []domain.Event{
 		domain.ToolCallEvent{EventBase: base, Call: domain.ToolCall{ID: id, Tool: tool, Arguments: []byte(args)}},
 		domain.ToolResultEvent{
-			EventBase: base, WriteTarget: target,
+			EventBase: base, Tool: tool, WriteTarget: target,
 			Result: domain.ToolResult{CallID: id, Content: "line one\nline two\nline three\nline four"},
 		},
 	}
@@ -4031,6 +4031,46 @@ func TestSidePanelResumeRebuildsThroughBothDoors(t *testing.T) {
 			t.Errorf("the outgoing session's task survived the restore:\n%s", column)
 		}
 	})
+}
+
+// TestSidePanelResumeDropsADeletedFile resumes a record that wrote two files and then deleted one:
+// the resumed panel lists the same rows the live one did — the surviving file alone. The workspace
+// is a real directory, so the deleted file keys through its nearest existing ancestor on both sides.
+func TestSidePanelResumeDropsADeletedFile(t *testing.T) {
+	t.Parallel()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temp workspace: %v", err)
+	}
+	deleted, kept := filepath.Join(root, "src", "a.go"), filepath.Join(root, "src", "b.go")
+	opts := testOpts
+	opts.Workspace = root
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	src := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	events := panelEvents(
+		panelToolPair(domain.EventBase{}, "w1", "write_file", `{"path":"src/a.go","content":"x\n"}`, deleted),
+		panelToolPair(domain.EventBase{}, "w2", "write_file", `{"path":"src/b.go","content":"x\n"}`, kept),
+		panelToolPair(domain.EventBase{}, "d1", deleteFileToolName, `{"path":"src/a.go"}`, deleted),
+	)
+	for _, e := range events {
+		src = src.foldEvent(e)
+	}
+	live := src.panel.ChangedFiles(sidepanel.RunKey{}).Rows
+	if len(live) != 1 || live[0].Path != filepath.Join("src", "b.go") {
+		t.Fatalf("live changed files = %+v, want src/b.go alone", live)
+	}
+	blob, err := encodeTranscript(&src.transcript)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	opts.Resumed = &ResumedSession{Transcript: blob, Title: "t"}
+
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+
+	if resumed := m.panel.ChangedFiles(sidepanel.RunKey{}).Rows; !slices.Equal(resumed, live) {
+		t.Errorf("resumed changed files = %+v, want the live session's %+v", resumed, live)
+	}
 }
 
 // symlinkedWorkspace makes a real workspace directory and a symlink to it, returning both spelled

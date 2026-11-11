@@ -89,7 +89,10 @@ A `Clone` independence case covers removals.
 - `go test -count=1 ./internal/sidepanel/`
 **Commit:** `fix(sidepanel): drop a changed-file row when delete_file removes the file`
 
-## 3. Replay delete_file as a removal on resume
+## 3. Replay delete_file as a removal on resume — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the new test `TestSidePanelResumeDropsADeletedFile` uses a real `t.TempDir()` workspace and `filepath.Join` paths instead of the `/w` fixture, so it runs on Windows too; `TestSidePanelResumeRebuildsThroughBothDoors` and `TestSidePanelPaintsEachSection` fail on this Windows box at HEAD as well (the `/w` workspace is not absolute there), unchanged by this item.
+NOTES (2026-11-11): a delete card with no earlier write in the record leaves the state nil (no `ensure()`), keeping `rebuildSidePanel`'s "nil where the record holds nothing the panel shows" contract.
 
 **What:** Depends on item 2. Part of `panel-deleted-file-entry`: `rebuildSidePanel` replays a `delete_file` card as a write (`panelWriterTargetArgs`).
 **Regression guard.** `panelToolPair` (internal/tui/sidepanel_test.go) sets `Tool: tool` on its `ToolResultEvent` — or a new `panelDelete` helper does — so the test's live half folds the delete; without it item 2's `e.Tool` check never fires and the live panel keeps the deleted row. No TUI code reads `ToolResultEvent.Tool` today, so no existing test moves.

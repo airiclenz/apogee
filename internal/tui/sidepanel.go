@@ -1633,6 +1633,10 @@ func (m Model) panelReportNote() string {
 // task lists are rebuilt from.
 const taskListToolName = "task_list"
 
+// deleteFileToolName is the writer tool whose landed card removes its target's changed-file row on
+// resume, as its live result does in sidepanel.State, rather than folding one more write.
+const deleteFileToolName = "delete_file"
+
 // panelWriterTargetArgs names, for each of apogee's workspace-scoped writer tools — the tools whose
 // landed results carry a write target (domain.ToolResultEvent.WriteTarget) — the argument naming
 // that target. A stored card keeps its call's arguments (toolView.argsWire) and not the engine's
@@ -1652,9 +1656,11 @@ var panelWriterTargetArgs = map[string]string{
 // Every card that came off counts and none that failed, was refused or was interrupted does — the
 // live fold's rule, which reads only a successful result: each run's task list is its LAST such
 // task_list card, keyed by the run that called it, so a child's card sets the child's list alone;
-// and each such writer card is a landed write, keyed as the live fold keys one
-// ([Model.panelWriteKey]). Sub-agents starts empty — the record keeps no phase to fold — and usage
-// is seeded by the caller once the record's accounting is restored ([Model.seedSidePanelUsage]).
+// each such writer card is a landed write, keyed as the live fold keys one
+// ([Model.panelWriteKey]); and each such delete_file card removes its path's row, so a file the
+// live session deleted is no more listed after resume than it was before. Sub-agents starts
+// empty — the record keeps no phase to fold — and usage is seeded by the caller once the record's
+// accounting is restored ([Model.seedSidePanelUsage]).
 //
 // The state is replaced whole, and left nil where the record holds nothing the panel shows: the
 // caller has already dropped the outgoing session's.
@@ -1675,9 +1681,18 @@ func (m *Model) rebuildSidePanel(entries []entry) {
 			ensure().SetTasks(run, panelTaskItems(e.tool.Details.all()))
 			continue
 		}
-		if path, ok := m.replayedWriteKey(e.tool); ok {
-			ensure().AddWrite(run, e.depth, e.callID, path, regionsStat(e.tool.Regions))
+		path, ok := m.replayedWriteKey(e.tool)
+		if !ok {
+			continue
 		}
+		if e.tool.name == deleteFileToolName {
+			// A delete with no write before it has no row to drop: the state stays nil.
+			if state != nil {
+				state.RemoveWrite(path)
+			}
+			continue
+		}
+		ensure().AddWrite(run, e.depth, e.callID, path, regionsStat(e.tool.Regions))
 	}
 	if state != nil {
 		m.panel = state
