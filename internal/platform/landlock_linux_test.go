@@ -853,6 +853,107 @@ func TestLandlockResolveUnixPlan(t *testing.T) {
 	}
 }
 
+// busyTmpEntries is how many entries the busy-/tmp fixture lists in /tmp, the closed runtime dir
+// among them.
+const busyTmpEntries = 10_000
+
+// busyTmpHost is a root filesystem whose /tmp holds busyTmpEntries entries, one of them the
+// closed runtime dir /tmp/rt. The rest cycle through a directory holding a socket, a socket, a
+// regular file and a symlink. It returns the host, the closure, the exact rule count the planner
+// must return, and how many entries the chain (`/`, then /tmp) lists.
+func busyTmpHost() (fsys fstest.MapFS, closure domain.UnixSocketClosure, wantRules, listed int) {
+	socket := &fstest.MapFile{Mode: fs.ModeSocket}
+	fsys = fstest.MapFS{
+		"bin":                        {Mode: fs.ModeSymlink, Data: []byte("usr/bin")},
+		"etc/passwd":                 {},
+		"home/u/proj/go.mod":         {},
+		"run/dbus/system_bus_socket": socket,
+		"swapfile":                   {},
+		"tmp/rt/bus":                 socket,
+		"tmp/rt/ssh.sock":            socket,
+	}
+	// `/` lists bin, etc, home, run, swapfile and tmp; etc, home and run are granted.
+	wantRules, listed = 3, 6
+
+	for i := range busyTmpEntries - 1 {
+		switch name := fmt.Sprintf("tmp/e%05d", i); i % 4 {
+		case 0:
+			fsys[name+"/inner.sock"] = socket
+			wantRules++
+		case 1:
+			fsys[name] = socket
+			wantRules++
+		case 2:
+			fsys[name] = &fstest.MapFile{}
+		default:
+			fsys[name] = &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte("/run")}
+		}
+	}
+	listed += busyTmpEntries
+
+	closure = domain.UnixSocketClosure{
+		Closed:   []string{"/tmp/rt"},
+		Reopened: []string{"/tmp/rt/ssh.sock", "/tmp/rt/gone.sock"},
+	}
+	wantRules++ // /tmp/rt/ssh.sock exists; /tmp/rt/gone.sock does not.
+	return fsys, closure, wantRules, listed
+}
+
+// TestLandlockResolveUnixPlanBusyTmp pins the RESOLVE_UNIX rule count when the closed runtime dir
+// lives under a busy /tmp: exactly one rule per directory or socket entry listed along the closed
+// path's chain plus each existing re-opened path — within the documented bound of entries listed
+// plus re-opened paths — and never a rule beneath a granted directory (landlock-unix-rule-count).
+func TestLandlockResolveUnixPlanBusyTmp(t *testing.T) {
+	t.Parallel()
+	fsys, closure, wantRules, listed := busyTmpHost()
+
+	got := planResolveUnixRules(closure, fsys)
+
+	if len(got) != wantRules {
+		t.Errorf("planResolveUnixRules returned %d rules, want %d (one per dir or socket listed + existing re-opened)", len(got), wantRules)
+	}
+	if bound := listed + len(closure.Reopened); len(got) > bound {
+		t.Errorf("planResolveUnixRules returned %d rules, above the documented bound of %d (entries listed + re-opened)", len(got), bound)
+	}
+	grantedDirs := make(map[string]bool, len(got))
+	for _, rule := range got {
+		if !rule.IsFile {
+			grantedDirs[rule.Path] = true
+		}
+	}
+	for _, rule := range got {
+		for dir := filepath.Dir(rule.Path); ; dir = filepath.Dir(dir) {
+			if grantedDirs[dir] {
+				t.Errorf("rule %q lies beneath granted directory %q", rule.Path, dir)
+			}
+			if dir == "/" {
+				break
+			}
+		}
+		if slices.Contains(closure.Reopened, rule.Path) {
+			continue
+		}
+		for _, closed := range closure.Closed {
+			if rule.Path == closed || isBeneath(rule.Path, closed) || isBeneath(closed, rule.Path) {
+				t.Errorf("rule %q re-opens closed path %q (the path, an ancestor, or beneath it)", rule.Path, closed)
+			}
+		}
+	}
+}
+
+// BenchmarkPlanResolveUnixRules measures the RESOLVE_UNIX planner on the busy-/tmp host of
+// TestLandlockResolveUnixPlanBusyTmp. fstest.MapFS scans every key per directory read, so this
+// over-states the planner's own cost against os.DirFS.
+func BenchmarkPlanResolveUnixRules(b *testing.B) {
+	fsys, closure, wantRules, _ := busyTmpHost()
+
+	for b.Loop() {
+		if got := planResolveUnixRules(closure, fsys); len(got) != wantRules {
+			b.Fatalf("planResolveUnixRules returned %d rules, want %d", len(got), wantRules)
+		}
+	}
+}
+
 // TestLandlockConfineCarriesUnixSocketClosure pins that the socket closure is planned in the parent
 // at Confine time and survives encodeBox/DecodeConfinedBox into the child, which must never re-read
 // it from its own environment (its TMPDIR is the scratch dir). Below ABI 9 nothing is planned.

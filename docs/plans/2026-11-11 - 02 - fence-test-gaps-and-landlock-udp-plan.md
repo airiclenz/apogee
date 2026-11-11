@@ -58,7 +58,9 @@ internal/platform/unixsockets_linux_test.go — fakeUnixSocketHost, noUnixSocket
 - `go test -race -count=1 -run 'TestUnixSocketPlan|TestLandlockResolveUnixPlan|TestLandlockConfineCarriesUnixSocketClosure' ./internal/platform/`
 **Commit:** `test(platform): drive bwrap's container-socket mask with a live connect`
 
-## 3. RESOLVE_UNIX planner rule count pinned on a busy /tmp
+## 3. RESOLVE_UNIX planner rule count pinned on a busy /tmp — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the busy-/tmp case is its own test function, `TestLandlockResolveUnixPlanBusyTmp`, next to `TestLandlockResolveUnixPlan`, not a row in its table, because a row compares exact `want` slices and this one would need 5 004 of them. The Acceptance pattern `-run 'TestLandlockResolveUnixPlan'` matches both. The fixture helper `busyTmpHost` is shared with `BenchmarkPlanResolveUnixRules`.
 
 **What:**
 **Goal:** A pure test shows that `planResolveUnixRules` on a busy /tmp (10 000 entries, the closed runtime dir under /tmp) returns exactly one rule per listed entry of each directory on the closed path's chain, plus the reopened paths. It never returns a rule beneath a granted directory. A benchmark measures the planner on the same tree. The function's doc comment states the bound and why it is harmless.

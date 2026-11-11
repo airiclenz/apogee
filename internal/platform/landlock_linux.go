@@ -562,6 +562,18 @@ func unixSocketClosure(host unixSocketHost, box domain.ConfinementBox) domain.Un
 // nothing. A directory fsys cannot list is left without rules beneath it: that only denies more.
 // The listing is taken when the child applies the rules, so an entry created later beside a closed
 // path's ancestor is denied too — again the fail-closed side.
+//
+// The plan is bounded by what it lists: rules ≤ entries listed along the closed paths' chains +
+// Reopened paths — one rule per directory or socket entry of `/` and of each descended ancestor,
+// none for a closed path, its ancestors, a regular file or a symlink, plus each Reopened path that
+// exists. A busy chain directory is reachable only when XDG_RUNTIME_DIR resolves outside /run/user
+// — under /tmp, $HOME or any other directory, whose entries the chain then lists — so a /tmp of
+// 10 000 entries means up to 10 000 rules (TestLandlockResolveUnixPlanBusyTmp pins the count,
+// BenchmarkPlanResolveUnixRules measures it). That is harmless: landlock sets no practical cap on
+// a ruleset's rules, which are charged to the caller's memory cgroup; a rule attaches to its
+// inode, so the confined child's later path lookups cost the same however many rules exist; and
+// the one-time cost at apply is one open(O_PATH) plus one landlock_add_rule per rule
+// (allowResolveUnix).
 func planResolveUnixRules(closure domain.UnixSocketClosure, fsys fs.FS) []landlockRule {
 	if len(closure.Closed) == 0 {
 		return []landlockRule{{Path: "/", Access: resolveUnixAccess}}
