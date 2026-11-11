@@ -86,7 +86,10 @@ NOTES (2026-11-11): added a second test, TestDocServerChoosesThePolicyFromTheMed
 - `capcom know show "ADR 0019" | grep -q amend-1111`; `capcom check`
 **Commit:** `fix(present): serve PDFs under a policy without the bare sandbox`
 
-## 4. Decide the fence's posture on same-user spawning services (ADR 0112)
+## 4. Decide the fence's posture on same-user spawning services (ADR 0112) — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): `.capcom/knowledge/decisions.md`'s record list ended at `adr-0109` (no `adr-0110`/`adr-0111` entries, pre-existing); `adr-0112` was appended after `adr-0109` and the missing two were left alone as out of scope.
+NOTES (2026-11-11): ADR 0112's consequences name, beside the plan's collateral (docker/podman, session bus, gh keyring token, git-credential-libsecret, VS Code askpass), a native Wayland client as another runtime-dir socket client the mask cuts; ADR 0081's 2026-09-22 blockquote itself is left as written, superseded by the amendment named on its Status line.
 
 **What:**
 **Goal:** ADR 0112 exists and states, per backend (landlock by ABI, bwrap, seatbelt, Windows token), which same-user spawning services Auto's fence closes and which it discloses; ADR 0081's 2026-09-22 AF_UNIX note carries a dated amendment reclassing it write-class; two follow-up issues exist.
