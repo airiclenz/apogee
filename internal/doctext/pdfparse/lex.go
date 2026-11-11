@@ -7,10 +7,24 @@
 package pdfparse
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
 )
+
+// MaxDepth is the deepest the parser recurses: the number of arrays, dictionaries and
+// `N G obj` definitions one object may nest inside one another, and separately the number of
+// object loads one resolution may chain through (an object in an object stream that is itself
+// in an object stream, a stream whose /Length or /DecodeParms lives in that same stream, and so
+// on). A Go stack overflow kills the process and no recover sees it, so the bound is checked
+// before each level is entered, never after.
+const MaxDepth = 256
+
+// ErrTooDeep is the panic value the parser raises when a document would make it recurse past
+// MaxDepth. Every recover inside this package re-panics it, so it always reaches the caller as a
+// failure of the whole document, never of one page.
+var ErrTooDeep = errors.New("pdfparse: objects nest more than MaxDepth levels deep")
 
 // A token is a PDF token in the input stream, one of the following Go types:
 //
@@ -45,6 +59,7 @@ type buffer struct {
 	key         []byte
 	useAES      bool
 	objptr      objptr
+	depth       int // arrays, dictionaries and obj definitions open around the read position
 }
 
 // newBuffer returns a new buffer reading from r at the given offset.
@@ -79,6 +94,21 @@ func (b *buffer) readByte() byte {
 
 func (b *buffer) errorf(format string, args ...interface{}) {
 	panic(fmt.Errorf(format, args...))
+}
+
+// descend enters one more level of nested syntax, or panics with ErrTooDeep — counting nothing —
+// when that level would lie past MaxDepth. Each entered level is paired with a deferred ascend, so
+// a panic unwinding through it restores the count.
+func (b *buffer) descend() {
+	if b.depth >= MaxDepth {
+		panic(ErrTooDeep)
+	}
+	b.depth++
+}
+
+// ascend leaves the level the matching descend entered.
+func (b *buffer) ascend() {
+	b.depth--
 }
 
 func (b *buffer) reload() bool {
@@ -442,6 +472,8 @@ func (b *buffer) readObject() object {
 			case keyword("R"):
 				return objptr{uint32(t1), uint16(t2)}
 			case keyword("obj"):
+				b.descend()
+				defer b.ascend()
 				old := b.objptr
 				b.objptr = objptr{uint32(t1), uint16(t2)}
 				obj := b.readObject()
@@ -463,6 +495,8 @@ func (b *buffer) readObject() object {
 }
 
 func (b *buffer) readArray() object {
+	b.descend()
+	defer b.ascend()
 	var x array
 	for {
 		tok := b.readToken()
@@ -476,6 +510,8 @@ func (b *buffer) readArray() object {
 }
 
 func (b *buffer) readDict() object {
+	b.descend()
+	defer b.ascend()
 	x := make(dict)
 	for {
 		tok := b.readToken()

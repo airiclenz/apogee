@@ -516,11 +516,21 @@ type gstate struct {
 	CTM   matrix
 }
 
+// rethrowTooDeep re-panics a recovered ErrTooDeep, so a page method's recover never turns a
+// document that nests past MaxDepth into the failure of one page.
+func rethrowTooDeep(recovered any) {
+	if err, ok := recovered.(error); ok && errors.Is(err, ErrTooDeep) {
+		panic(recovered)
+	}
+}
+
 // GetPlainText returns the page's all text without format.
 // fonts can be passed in (to improve parsing performance) or left nil
+// A page that nests past MaxDepth is not an error of this page: it panics with ErrTooDeep.
 func (p Page) GetPlainText(fonts map[string]*Font) (result string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			rethrowTooDeep(r)
 			result = ""
 			err = errors.New(fmt.Sprint(r))
 		}
@@ -623,6 +633,7 @@ func (p Page) GetTextByColumn() (Columns, error) {
 
 	defer func() {
 		if r := recover(); r != nil {
+			rethrowTooDeep(r)
 			result = Columns{}
 			err = errors.New(fmt.Sprint(r))
 		}
@@ -693,6 +704,7 @@ func (p Page) GetTextByRow() (Rows, error) {
 
 	defer func() {
 		if r := recover(); r != nil {
+			rethrowTooDeep(r)
 			result = Rows{}
 			err = errors.New(fmt.Sprint(r))
 		}

@@ -87,6 +87,7 @@ type Reader struct {
 	trailerptr objptr
 	key        []byte
 	useAES     bool
+	depth      int // object loads resolve is chained through; bounded by MaxDepth
 }
 
 type xref struct {
@@ -98,6 +99,21 @@ type xref struct {
 
 func (r *Reader) errorf(format string, args ...interface{}) {
 	panic(fmt.Errorf(format, args...))
+}
+
+// descend enters one more chained object load, or panics with ErrTooDeep — counting nothing — when
+// that load would lie past MaxDepth. Each entered load is paired with a deferred ascend, so a load
+// that panics — on one page, say — never leaves the count raised for the next.
+func (r *Reader) descend() {
+	if r.depth >= MaxDepth {
+		panic(ErrTooDeep)
+	}
+	r.depth++
+}
+
+// ascend leaves the load the matching descend entered.
+func (r *Reader) ascend() {
+	r.depth--
 }
 
 // Open opens a file for reading.
@@ -717,6 +733,8 @@ func (v Value) Len() int {
 
 func (r *Reader) resolve(parent objptr, x interface{}) Value {
 	if ptr, ok := x.(objptr); ok {
+		r.descend()
+		defer r.ascend()
 		if ptr.id >= uint32(len(r.xref)) {
 			return Value{}
 		}

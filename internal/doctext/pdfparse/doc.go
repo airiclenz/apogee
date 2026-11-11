@@ -20,5 +20,12 @@
 // Every change made to the copied files after the copy is listed here, one entry per patch, so
 // the distance from upstream is readable without a diff.
 //
-// None yet.
+//   - Recursion bound (lex.go, read.go, page.go): MaxDepth bounds both ways the parser recurses —
+//     buffer.readArray, buffer.readDict and readObject's `N G obj` definition each enter a level
+//     of a per-buffer count, and Reader.resolve enters a level of a per-Reader count for every
+//     object it loads — and a level past it panics with ErrTooDeep, both counts restored by
+//     defer. The three recovers in page.go (Page.GetPlainText, GetTextByColumn, GetTextByRow)
+//     re-panic ErrTooDeep instead of returning it as the page's error, so it fails the document,
+//     and Reader.GetPlainText panics with it where it returned a page error. The per-Reader count
+//     makes a Reader unsafe for concurrent use.
 package pdfparse

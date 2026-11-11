@@ -73,7 +73,11 @@ NOTES (2026-11-11): gofmt over the copy realigned the `nameToRune` map in name.g
 - `go test -race -count=1 ./internal/doctext/...`
 **Commit:** `refactor(doctext): bring the PDF parser in-tree as pdfparse`
 
-## 2. The parser refuses to recurse past a fixed depth
+## 2. The parser refuses to recurse past a fixed depth — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the bound is checked before a level is counted (`depth >= MaxDepth` panics, then `depth++`), so a refused level never raises the count and the deferred decrement pairs only with levels actually entered; the buffer counts arrays, dictionaries and `obj` definitions (not every readObject call), the Reader counts object loads in `resolve`, the two counted separately.
+NOTES (2026-11-11): the mapping lives in one helper, `parserNestingCause` in pdf.go, used by `budgetedReaderAt.failureFor` (ExtractPDF's recover, wrapped in pdfUnreadableFormat) and by `pageContentNesting`'s recover (returned unwrapped); the three page.go recovers re-panic through `rethrowTooDeep`; a `Reader` with its depth count is no longer safe for concurrent use (doctext uses one per goroutine), listed in pdfparse/doc.go.
+NOTES (2026-11-11): the object-stream rows need a cross-reference stream (a classic table cannot name a compressed object), so pdf_test.go gains `compressedFontPDF`, plus `forgeXrefOffset`, `predictedRows` and the `TestPDFMaxNesting_LiesBelowTheParserBound` pin; all seven new rows were confirmed to fail (not crash) with the bound disabled.
 
 Depends on item 1.
 

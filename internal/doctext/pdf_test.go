@@ -1608,16 +1608,109 @@ func pngUpRows(data []byte, columns int) []byte {
 	return encoded
 }
 
+// beyondParserDepth is how deep a fixture the preflight cannot see nests: a few hundred levels
+// past the parser's own bound, never millions, so a broken bound fails the assertion instead of
+// overflowing the stack.
+const beyondParserDepth = pdf.MaxDepth + 300
+
+// parserDeepArrays is beyondParserDepth balanced arrays, one inside the next.
+var parserDeepArrays = strings.Repeat("[", beyondParserDepth) + strings.Repeat("]", beyondParserDepth)
+
+// fontWithToUnicode is the page font of a nesting fixture whose /ToUnicode CMap is object 6.
+const fontWithToUnicode = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>"
+
+// predictedRows encodes data as PNG Up rows four bytes wide, padding it with spaces to a whole
+// row: the bytes a stream carries under /DecodeParms << /Predictor 12 /Columns 4 >>.
+func predictedRows(data string) string {
+	const columns = 4
+
+	padded := data + strings.Repeat(" ", (columns-len(data)%columns)%columns)
+	return string(pngUpRows([]byte(padded), columns))
+}
+
+// forgeXrefOffset points the cross-reference entry of object at the first byte of the stream body
+// that begins with body, the way a forged table sends the parser into the middle of a stream.
+func forgeXrefOffset(t *testing.T, data []byte, object int, body string) []byte {
+	t.Helper()
+
+	header := bytes.Index(data, fmt.Appendf(nil, "\n%d 0 obj\n", object))
+	target := bytes.Index(data, []byte("stream\n"+body))
+	if header < 0 || target < 0 {
+		t.Fatalf("object %d or the target body is missing from the document", object)
+	}
+	honest := fmt.Appendf(nil, "%010d 00000 n \n", header+1)
+	forged := fmt.Appendf(nil, "%010d 00000 n \n", target+len("stream\n"))
+	if !bytes.Contains(data, honest) {
+		t.Fatalf("no cross-reference entry %q", honest)
+	}
+	return bytes.Replace(data, honest, forged, 1)
+}
+
+// compressedFontPDF builds nestingPDF's one-page document with its font, object 3, compressed
+// into objectStream, which is object 6, and extras appended as objects 7 onward. The
+// cross-reference is a stream, the one form that can say an object lives in an object stream.
+func compressedFontPDF(t *testing.T, objectStream string, extras ...string) []byte {
+	t.Helper()
+
+	const compressedFont, fontStream = 3, 6
+	bodies := append([]string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+		"",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]" +
+			" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+		contentStream("Shallow page"),
+		objectStream,
+	}, extras...)
+
+	var document, rows bytes.Buffer
+	row := func(kind byte, field, index int) {
+		rows.WriteByte(kind)
+		rows.Write(binary.BigEndian.AppendUint32(nil, uint32(field)))
+		rows.Write(binary.BigEndian.AppendUint16(nil, uint16(index)))
+	}
+	document.WriteString("%PDF-1.5\n")
+	row(0, 0, 65535)
+	for index, body := range bodies {
+		if index+1 == compressedFont {
+			row(2, fontStream, 0)
+			continue
+		}
+		row(1, document.Len(), 0)
+		fmt.Fprintf(&document, "%d 0 obj\n%s\nendobj\n", index+1, body)
+	}
+	xref, xrefNumber := document.Len(), len(bodies)+1
+	row(1, xref, 0)
+	fmt.Fprintf(&document, "%d 0 obj\n<< /Type /XRef /Size %d /W [1 4 2] /Root 1 0 R /Length %d >>\nstream\n",
+		xrefNumber, xrefNumber+1, rows.Len())
+	document.Write(rows.Bytes())
+	fmt.Fprintf(&document, "\nendstream\nendobj\nstartxref\n%d\n%%%%EOF\n", xref)
+	return document.Bytes()
+}
+
+// TestPDFMaxNesting_LiesBelowTheParserBound pins the order of the two nesting bounds: every
+// document the preflight passes must still parse, so the parser's own bound lies above it.
+func TestPDFMaxNesting_LiesBelowTheParserBound(t *testing.T) {
+	t.Parallel()
+
+	if parserBound, preflightBound := pdf.MaxDepth, pdfMaxNesting; parserBound <= preflightBound {
+		t.Fatalf("pdf.MaxDepth = %d, want it above pdfMaxNesting = %d", parserBound, preflightBound)
+	}
+}
+
 // TestExtractPDF_RefusesDeepNestingBeforeTheParserRecurses pins the nesting bound on every kind
 // of syntax the parser recurses into: the object bytes it reads the trailer and every object
 // from, a page's content stream however it is filtered, an object stream, and a font's
-// /ToUnicode CMap wherever it is named. The parser's recursion has no bound of its own and a
-// stack overflow kills the process, so a case whose refusal broke would not fail — it would
-// take the test binary down with it.
+// /ToUnicode CMap wherever it is named. The preflight refuses most of them before the parser
+// runs; the rows from the forged offset on are the ones it cannot see — syntax reached through a
+// forged offset, a predictor named by reference, a chain of object definitions — and the parser's
+// own bound (pdf.MaxDepth) refuses them, for the whole document even when a later page is fine.
 func TestExtractPDF_RefusesDeepNestingBeforeTheParserRecurses(t *testing.T) {
 	t.Parallel()
 
 	deepArrays := strings.Repeat("[", 1<<20)
+	definitionChain := strings.Repeat("3 0 obj ", beyondParserDepth) + plainFont +
+		strings.Repeat(" endobj", beyondParserDepth)
 	cases := []struct {
 		name string
 		data func(t *testing.T) []byte
@@ -1676,6 +1769,46 @@ func TestExtractPDF_RefusesDeepNestingBeforeTheParserRecurses(t *testing.T) {
 			return nestingPDF(t, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>",
 				contentStream("Shallow page"),
 				deflatedStream(t, string(rows), "/DecodeParms << /Predictor 12 /Columns 4 >>"))
+		}},
+		{name: "a font offset forged into an untyped stream of arrays", data: func(t *testing.T) []byte {
+			data := nestingPDF(t, plainFont, contentStream("Shallow page"), plainStream(parserDeepArrays))
+			return forgeXrefOffset(t, data, 3, parserDeepArrays)
+		}},
+		{name: "a ToUnicode CMap whose /DecodeParms is a reference", data: func(t *testing.T) []byte {
+			return nestingPDF(t, fontWithToUnicode, contentStream("Shallow page"),
+				deflatedStream(t, predictedRows(parserDeepArrays), "/DecodeParms 7 0 R"),
+				"<< /Predictor 12 /Columns 4 >>")
+		}},
+		{name: "a ToUnicode CMap whose /Predictor is a reference", data: func(t *testing.T) []byte {
+			return nestingPDF(t, fontWithToUnicode, contentStream("Shallow page"),
+				deflatedStream(t, predictedRows(parserDeepArrays), "/DecodeParms << /Predictor 7 0 R /Columns 4 >>"),
+				"12")
+		}},
+		{name: "an object stream whose /DecodeParms is a reference", data: func(t *testing.T) []byte {
+			return compressedFontPDF(t,
+				deflatedStream(t, predictedRows("3 0 "+parserDeepArrays), "/Type /ObjStm /N 1 /First 4",
+					"/DecodeParms 7 0 R"),
+				"<< /Predictor 12 /Columns 4 >>")
+		}},
+		{name: "an object stream whose /Predictor is a reference", data: func(t *testing.T) []byte {
+			return compressedFontPDF(t,
+				deflatedStream(t, predictedRows("3 0 "+parserDeepArrays), "/Type /ObjStm /N 1 /First 4",
+					"/DecodeParms << /Predictor 7 0 R /Columns 4 >>"),
+				"12")
+		}},
+		{name: "a chain of object definitions", data: func(t *testing.T) []byte {
+			return nestingPDF(t, definitionChain, contentStream("Shallow page"))
+		}},
+		{name: "a too-deep page before a readable one", data: func(t *testing.T) []byte {
+			return hostilePDF(t,
+				"<< /Type /Catalog /Pages 2 0 R >>",
+				"<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>",
+				definitionChain,
+				"<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+				contentStream("Shallow page"),
+				"<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 7 0 R >> >> /Contents 8 0 R >>",
+				plainFont,
+				contentStream("Readable page"))
 		}},
 	}
 

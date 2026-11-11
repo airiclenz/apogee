@@ -188,13 +188,14 @@ func IsPDF(data []byte) bool {
 // wrapped or re-worded.
 //
 // A panic out of the parser is a failure like any other. A Go stack overflow is not a panic —
-// the runtime kills the process, and no recover sees it — and the parser recurses once per `[`
-// or `<<` with no limit of its own (lex.go readObject), so nesting is bounded BEFORE the parser
-// recurses: a document is refused, never parsed, when the syntax the parser reads nests deeper
-// than pdfMaxNesting (see refuseDeepNesting and pageContentNesting). What is guaranteed is that
-// bound as the preflight's lexer reads that syntax from the start of each span it scans; a
-// parser started mid-way through a string or comment by a forged offset reads a different
-// tokenisation, and is bounded by that span's own depth only. A page
+// the runtime kills the process, and no recover sees it — so nesting is bounded twice. The
+// preflight refuses, before the parser runs, a document whose syntax nests deeper than
+// pdfMaxNesting (see refuseDeepNesting and pageContentNesting), as its own lexer reads that
+// syntax from the start of each span it scans. Whatever the preflight cannot see — a parser
+// started mid-way through a stream body by a forged offset, a predictor reached through an
+// indirect reference, a chain of object definitions — meets the parser's own bound
+// (pdf.MaxDepth, above pdfMaxNesting): the parser panics with pdf.ErrTooDeep, and the whole
+// document is refused with the same nesting cause, never one page of it. A page
 // that fails on its own does NOT fail the document: its text becomes a
 // "[Page N: text extraction failed]" placeholder and the walk continues. A document that yields
 // no characters on any page it kept is the scanned-image case and fails with pdfNoTextMessage —
@@ -481,7 +482,21 @@ func (b *budgetedReaderAt) failureFor(reported any) string {
 	if failure := b.failure(); failure != "" {
 		return failure
 	}
+	if cause := parserNestingCause(reported); cause != "" {
+		reported = cause
+	}
 	return fmt.Sprintf(pdfUnreadableFormat, reported)
+}
+
+// parserNestingCause returns pdfNestingCause when what the parser reported is its own recursion
+// bound (pdf.ErrTooDeep), or "" for anything else. The cause quotes pdfMaxNesting, as the
+// preflight's refusal does: the parser's bound lies above it, so the sentence is true of any
+// document the parser refuses, and the model reads one wording whichever layer caught it.
+func parserNestingCause(reported any) string {
+	if err, ok := reported.(error); ok && errors.Is(err, pdf.ErrTooDeep) {
+		return fmt.Sprintf(pdfNestingCause, pdfMaxNesting)
+	}
+	return ""
 }
 
 // withoutStreamBodies returns the spans of data that lie outside every stream body, in order, in
@@ -709,10 +724,10 @@ const (
 
 	// pdfMaxNesting is the deepest the syntax the parser reads may nest arrays and dictionaries:
 	// a document nesting deeper is refused before the parser recurses into it (see
-	// refuseDeepNesting), because the parser's recursion has no bound of its own and a Go stack
-	// overflow cannot be recovered. The preflight's own dictionary reader gives up at the same
-	// depth, so a document cannot size the preflight's stack either. No real document nests more
-	// than a handful of levels.
+	// refuseDeepNesting). The parser's own recursion bound, pdf.MaxDepth, lies above it and
+	// catches what this scan cannot see, so every document the scan passes still parses. The
+	// preflight's own dictionary reader gives up at the same depth, so a document cannot size the
+	// preflight's stack either. No real document nests more than a handful of levels.
 	pdfMaxNesting = 64
 )
 
@@ -969,7 +984,8 @@ func pdfFilterReferenced(filter pdfValue) bool {
 // false — nothing to scan — for a /Columns outside 0…pdfMaxPredictorColumns: the parser cannot
 // allocate a negative row, and a wider one is refused (see preflightPDF). A /Predictor or
 // /DecodeParms given by reference is not followed, and a predictor other than PNG Up — which the
-// parser panics on — is not modelled: either way the stream reads as unpredicted.
+// parser panics on — is not modelled: either way the stream reads as unpredicted here, and any
+// nesting the predictor hides meets the parser's own bound (pdf.MaxDepth) instead.
 func readPDFPredictor(dictionary map[string]pdfValue) (pdfPredictor, bool) {
 	parameters := dictionary["DecodeParms"]
 	if filter := dictionary["Filter"]; filter.kind == pdfValueArray {
@@ -1828,11 +1844,13 @@ func readPDFSyntax(ctx context.Context, reader io.Reader) ([]byte, string) {
 // cannot. Each stream of a /Contents array is scanned on its own, as Interpret starts each anew.
 //
 // The parser panics on a page it cannot resolve or decode. Such a panic is recovered here and
-// the page let through: interpreting it meets the same panic, which fails that page alone.
+// the page let through: interpreting it meets the same panic, which fails that page alone. The
+// one exception is the parser's own recursion bound (pdf.ErrTooDeep), which refuses the document
+// with the nesting cause, as a too-deep stream does.
 func pageContentNesting(ctx context.Context, page pdf.Page) (cause string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			cause = ""
+			cause = parserNestingCause(recovered)
 		}
 	}()
 
