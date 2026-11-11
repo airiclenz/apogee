@@ -3,6 +3,7 @@ title: A non-directory writable root makes landlock_add_rule fail and takes down
 status: open
 type: bug
 priority: 3
+plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:37:31Z
 ---
 

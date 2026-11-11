@@ -3,6 +3,7 @@ title: The probe's candidate-token digest hashes rank order although it is docum
 status: open
 type: bug
 priority: 3
+plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:36:31Z
 ---
 

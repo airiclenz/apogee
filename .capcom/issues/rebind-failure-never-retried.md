@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 3
 labels: [tui]
+plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:36:31Z
 ---
 

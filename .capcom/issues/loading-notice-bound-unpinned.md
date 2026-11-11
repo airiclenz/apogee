@@ -3,6 +3,7 @@ title: Nothing ties the loading notice's "10m" to the provider's loadingBackstop
 status: open
 type: task
 priority: 3
+plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-11T05:56:07Z
 ---
 

@@ -3,6 +3,7 @@ title: "A git timeout names its first argument, so a snapshot add reads \"git -c
 status: open
 type: bug
 priority: 3
+plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-11T05:56:07Z
 ---
 

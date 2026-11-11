@@ -4,6 +4,7 @@ status: open
 type: bug
 priority: 3
 labels: [security]
+plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-10T19:34:27Z
 ---
 

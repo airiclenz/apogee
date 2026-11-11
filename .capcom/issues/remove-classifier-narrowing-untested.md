@@ -4,6 +4,7 @@ status: open
 type: task
 priority: 3
 labels: [windows]
+plan: 2026-11-11 - 00 - pdf-parser-fork-and-defects-plan
 created: 2026-11-09T15:42:01Z
 ---
 
