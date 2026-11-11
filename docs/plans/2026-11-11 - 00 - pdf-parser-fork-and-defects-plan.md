@@ -173,7 +173,11 @@ NOTES (2026-11-11): bite-checked — with modelfingerprint.go and battery.go rev
 **Closes:** candidate-digest-rank-order
 **Commit:** `fix(probe): hash the candidate tokens as a set, not in rank order`
 
-## 7. Landlock accepts a regular file as a writable root
+## 7. Landlock accepts a regular file as a writable root — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): the pure mask chooser is `ruleAccessMaskForABI(abi, isDir)`; `allowWriteBeneath` now takes the ABI instead of a mask and fstats its `O_PATH` fd, and `deviceAccessMaskForABI` keeps its name (now documented as the file-applicable mask for any non-directory rule).
+NOTES (2026-11-11): `TestLandlockFileRootIsWritableInPlace` adds a third subtest beyond the plan's two — `rm -f` of the file root is denied and the file survives — pinning the "rename-over and unlink stay denied" claim; checked failing with the old directory mask forced (write subtest exit 1).
+NOTES (2026-11-11): the contract's /dev/null paragraph carries the change as an inline "(amendment, 2026-11-11)" sentence, the form that section already uses; `accessMaskForABI`'s doc also gained "that is a directory", a sentence the item's grep hits.
 
 **What:**
 **Goal:** a box whose `WritablePaths` holds a regular file confines successfully on the landlock backend: a write to that file succeeds, a write to a sibling in the same directory is denied.

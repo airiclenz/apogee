@@ -334,9 +334,10 @@ func TestAccessMaskForABIRightsTrackTheKernel(t *testing.T) {
 func TestDeviceAccessMaskForABI(t *testing.T) {
 	t.Parallel()
 
-	// The mask carried by the /dev/null exemption rule. Its parent_fd is a file, so the mask is
-	// derived separately from the roots' directory mask — see the subset/file-applicability
-	// properties pinned in TestDeviceAccessMaskStaysRuleApplicable below.
+	// The file-applicable mask carried by a rule whose parent_fd is not a directory: the /dev/null
+	// exemption and any writable root that is a regular file. It is derived separately from a
+	// directory root's mask — see the subset/file-applicability properties pinned for both fd
+	// types in TestDeviceAccessMaskStaysRuleApplicable below.
 	tests := []struct {
 		name string
 		abi  int
@@ -372,15 +373,27 @@ const devNullAccessWithTruncate = uint64(unix.LANDLOCK_ACCESS_FS_WRITE_FILE | un
 func TestDeviceAccessMaskStaysRuleApplicable(t *testing.T) {
 	t.Parallel()
 
-	// The two properties the kernel enforces on the exemption rule. Breaking either one does not
-	// merely lose the exemption: landlock_add_rule answers EINVAL, applyLandlock fails, and every
-	// confined call on the host dies before exec.
+	// The two properties the kernel enforces on every path-beneath rule, checked on the mask
+	// allowWriteBeneath actually picks (ruleAccessMaskForABI) for both kinds of parent_fd.
+	// Breaking either one does not merely lose the rule: landlock_add_rule answers EINVAL,
+	// applyLandlock fails, and every confined call on the host dies before exec.
 	for abi := landlockABIFSWrite; abi <= 8; abi++ {
-		mask := deviceAccessMaskForABI(abi)
+		handled := accessMaskForABI(abi)
+
+		// A directory root takes the whole handled mask, so a confined child can create, remove
+		// and rename beneath it.
+		if dirMask := ruleAccessMaskForABI(abi, true); dirMask != handled {
+			t.Errorf("abi %d: directory rule mask %#x, want the full handled mask %#x", abi, dirMask, handled)
+		}
+
+		mask := ruleAccessMaskForABI(abi, false)
+		if want := deviceAccessMaskForABI(abi); mask != want {
+			t.Errorf("abi %d: file rule mask %#x, want the file-applicable mask %#x", abi, mask, want)
+		}
 
 		// A rule's allowed_access must be a subset of the ruleset's handled_access_fs.
-		if handled := accessMaskForABI(abi); mask&^handled != 0 {
-			t.Errorf("abi %d: device mask %#x is not a subset of the handled mask %#x (landlock_add_rule EINVAL)", abi, mask, handled)
+		if mask&^handled != 0 {
+			t.Errorf("abi %d: file rule mask %#x is not a subset of the handled mask %#x (landlock_add_rule EINVAL)", abi, mask, handled)
 		}
 		// A rule on a FILE parent_fd may carry only file-applicable rights.
 		for _, dirOnly := range []struct {
@@ -399,12 +412,12 @@ func TestDeviceAccessMaskStaysRuleApplicable(t *testing.T) {
 			{"LANDLOCK_ACCESS_FS_REFER", unix.LANDLOCK_ACCESS_FS_REFER},
 		} {
 			if mask&dirOnly.bit != 0 {
-				t.Errorf("abi %d: device mask %#x carries directory-only %s on a file parent_fd (landlock_add_rule EINVAL)", abi, mask, dirOnly.name)
+				t.Errorf("abi %d: file rule mask %#x carries directory-only %s on a file parent_fd (landlock_add_rule EINVAL)", abi, mask, dirOnly.name)
 			}
 		}
-		// And the exemption must still grant the write it exists for.
+		// And a file rule must still grant the write it exists for.
 		if mask&unix.LANDLOCK_ACCESS_FS_WRITE_FILE == 0 {
-			t.Errorf("abi %d: device mask %#x grants no WRITE_FILE; `2>/dev/null` stays denied inside the box", abi, mask)
+			t.Errorf("abi %d: file rule mask %#x grants no WRITE_FILE; `2>/dev/null` and a file root stay denied inside the box", abi, mask)
 		}
 	}
 }
@@ -438,6 +451,60 @@ func TestLandlockAllowsDevNullThroughTheFence(t *testing.T) {
 		}
 		if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("stat %q = %v, want not-exist: the out-of-box write was not blocked", target, err)
+		}
+	})
+}
+
+func TestLandlockFileRootIsWritableInPlace(t *testing.T) {
+	// Not parallel: the confined children are real subprocesses of this binary.
+	c := newTestConfiner(t)
+	if !c.Capabilities().FSWrite {
+		t.Skip("landlock unavailable on this host (FSWrite==false); skipping the live file-root probe")
+	}
+
+	ws := t.TempDir()
+	dir := t.TempDir()
+	fileRoot := filepath.Join(dir, "root.txt")
+	if err := os.WriteFile(fileRoot, []byte("before\n"), 0o600); err != nil {
+		t.Fatalf("seed file root: %v", err)
+	}
+	box := domain.ConfinementBox{WorkspaceRoot: ws, WritablePaths: []string{fileRoot}}
+	q := Current().Quote
+
+	t.Run("file_root_write_succeeds", func(t *testing.T) {
+		// A truncating `>` redirect: WRITE_FILE plus TRUNCATE on the file's own rule. Before the
+		// fix the rule carried directory-only rights and landlock_add_rule's EINVAL failed the
+		// whole confinement.
+		if err := runConfinedShellLine(t, c, box, "echo after > "+q(fileRoot)); err != nil {
+			t.Fatalf("confined write to the file root %q failed, want success: %v", fileRoot, err)
+		}
+		got, err := os.ReadFile(fileRoot)
+		if err != nil {
+			t.Fatalf("read file root: %v", err)
+		}
+		if string(got) != "after\n" {
+			t.Fatalf("file root holds %q, want %q", got, "after\n")
+		}
+	})
+
+	t.Run("sibling_write_denied", func(t *testing.T) {
+		// The rule covers the file alone, never its directory: a sibling stays outside the box.
+		sibling := filepath.Join(dir, "sibling.txt")
+		if err := runConfinedShellLine(t, c, box, "echo x > "+q(sibling)); err == nil {
+			t.Fatalf("confined write to sibling %q succeeded, want OS denial (a file root must not open its directory)", sibling)
+		}
+		if _, err := os.Stat(sibling); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stat %q = %v, want not-exist: the sibling write was not blocked", sibling, err)
+		}
+	})
+
+	t.Run("file_root_unlink_denied", func(t *testing.T) {
+		// Unlink is a right on the parent directory, which a file root does not grant.
+		if err := runConfinedShellLine(t, c, box, "rm -f "+q(fileRoot)); err == nil {
+			t.Fatalf("confined rm of the file root %q succeeded, want OS denial (a file root grants in-place write only)", fileRoot)
+		}
+		if _, err := os.Stat(fileRoot); err != nil {
+			t.Fatalf("stat %q = %v, want the file root still present", fileRoot, err)
 		}
 	})
 }

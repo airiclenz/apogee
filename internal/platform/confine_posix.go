@@ -91,7 +91,8 @@ func setConfinedPgid(cmd *exec.Cmd) {
 // symlinks into /private, so an unresolved /var/folders/... root would never match and every
 // in-box write would be denied), and a bwrap --bind of the canonical path mounts the same
 // directory the child's writes resolve to. A confinement-box root is a directory the child
-// writes into, so at confine time it exists and EvalSymlinks resolves it; if it cannot be
+// writes into, or a single file it writes in place, so at confine time it normally exists and
+// EvalSymlinks resolves it; if it cannot be
 // resolved (a not-yet-created root) the cleaned path is used as-is — the rule then simply
 // won't match a path that does not exist, which is the correct outcome. This is the same
 // resolution security.EvalRealPath performs for path-safety, kept dependency-free here so

@@ -251,9 +251,13 @@ reviewer of one — could ever observe. The obligation is backend-local:
 
 - **Linux.** `applyLandlock` adds one path-beneath rule for `/dev/null` after the writable-roots loop,
   carrying a *file-applicable* mask (`LANDLOCK_ACCESS_FS_WRITE_FILE`, plus `..._TRUNCATE` at ABI ≥ 3 —
-  `> /dev/null` opens with `O_TRUNC`). It must not reuse the roots' mask: `landlock_add_rule` returns
-  `EINVAL` when a rule carries directory-only rights on a non-directory `parent_fd`. A missing
-  `/dev/null` (`ENOENT`) skips the rule; any other open error fails the confinement closed.
+  `> /dev/null` opens with `O_TRUNC`). It must not carry a directory root's mask: `landlock_add_rule`
+  returns `EINVAL` when a rule carries directory-only rights on a non-directory `parent_fd`. The mask
+  is chosen per rule, not per call site: `allowWriteBeneath` fstats each rule's `parent_fd` and gives a
+  directory the full write-class mask and anything else — `/dev/null`, or a writable root that is a
+  regular file — the file-applicable one, so a file root is writable in place (write, truncate) while
+  unlink, rename-over and every sibling in its directory stay denied (amendment, 2026-11-11). A missing
+  `/dev/null` (`ENOENT`) skips the rule; any other open or `fstat` error fails the confinement closed.
 - **macOS.** `seatbeltProfile` emits `(allow file-write* (literal "/dev/null"))` after the
   `(deny file-write*)` line, unconditionally — including for a box with no writable roots at all. No
   canonicalization is needed: `/dev/null` is not a symlink on macOS.

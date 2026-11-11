@@ -167,7 +167,9 @@ type Config struct {
 	// ConfineWritablePaths and ConfineNetworkAllow extend the confinement box beyond the
 	// workspace root (confinement-execution-contract §7): the toolchain cache/temp dirs a
 	// confined `go build`/`pip` needs to write, and the optional network tightening list.
-	// No config key spells either; an embedder sets them on Config. The loop confines
+	// A ConfineWritablePaths entry is normally a directory; a regular file is accepted too,
+	// and on the landlock backend grants writes to that file in place only (no unlink or
+	// rename-over, and nothing else in its directory). No config key spells either; an embedder sets them on Config. The loop confines
 	// a subprocess to WorkspaceDir ∪ ConfineWritablePaths with ConfineNetworkAllow as the
 	// box's NetworkAllow. Empty NetworkAllow leaves the network open (the ADR 0012 default).
 	ConfineWritablePaths []string
