@@ -476,7 +476,7 @@ func watchRouteOf(msg tea.Msg) watchRoute {
 		saveDoneMsg, recordWriteDoneMsg, autoTitleMsg, manualTitleMsg, configChangedMsg,
 		workflowStoppedMsg, workflowSavedMsg, bgStartedMsg, workflowNoteLostMsg,
 		skillsReloadedMsg, skillsRescannedMsg, recallLoadedMsg, updateCheckedMsg,
-		beatMsg, actuationMsg, restoreMsg, heartbeatTickMsg, mcpDialDoneMsg, panelLingerMsg:
+		beatMsg, actuationMsg, restoreMsg, heartbeatTickMsg, mcpDialDoneMsg, panelLingerMsg, panelGoneMsg:
 		return watchRouteOwner
 	case gitActionDoneMsg:
 		if msg.listing && msg.err == nil {

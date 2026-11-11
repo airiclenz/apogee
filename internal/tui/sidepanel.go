@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -260,6 +264,7 @@ type panelSection struct {
 // Event's run's bound window, the fill's fallback where a reading names none. A landed write is
 // folded under its workspace-relative key ([Model.panelWriteKey]), the key a resumed record's write
 // is rebuilt under ([Model.rebuildSidePanel]), so a file rewritten after a resume stays one row.
+// A landed write also unhides its key from the disk re-check's gone set ([Model.notePanelWrite]).
 func (m Model) foldSidePanel(e domain.Event, window int) Model {
 	if !sidepanel.Reads(e) {
 		return m
@@ -267,6 +272,7 @@ func (m Model) foldSidePanel(e domain.Event, window int) Model {
 	if result, ok := e.(domain.ToolResultEvent); ok && result.WriteTarget != "" {
 		result.WriteTarget = m.panelWriteKey(result.WriteTarget)
 		e = result
+		m.notePanelWrite(result.WriteTarget)
 	}
 	next := m.panel.Clone()
 	if next == nil {
@@ -312,6 +318,141 @@ func (m Model) foldPanelLinger(msg panelLingerMsg) (Model, tea.Cmd) {
 	}
 	m.panelLingerUntil = time.Time{}
 	return m.armPanelLinger()
+}
+
+// panelDiskCheck is the changed-files section's re-check of the disk: a file the session wrote and
+// something else since removed — a terminal `rm`, a move_file source, /undo — lands no Event the
+// panel folds, so the TUI stats the listed paths off the Update goroutine ([Model.panelDiskCmd]) and
+// hides the ones gone ([Model.changedFileRows]). The check is single-flight, as the git status read
+// is ([Model.refreshGit]): a launch while one is in flight only marks it dirty, and its landing
+// issues the one follow-up. No deadline bounds it: a slow disk lands a late reply, never a failed one.
+type panelDiskCheck struct {
+	// gone is the listed paths the last landed check found missing, keyed as the panel keys a row
+	// ([Model.panelWriteKey]). It is replaced whole or cloned before a delete, never written in
+	// place, so a Model copy that shares it never sees it change (ADR 0011).
+	gone map[string]bool
+	// gen numbers the panel state the checks read: it moves only where that state is replaced
+	// ([Model.resetPanelDisk]), never per launch, and a reply stamped with any other is dropped.
+	gen int
+	// isInFlight reports that a check of the live generation has been issued and has not landed.
+	isInFlight bool
+	// isDirty reports that a check was asked for, or a write landed, while one was in flight: its
+	// landing issues one more at once.
+	isDirty bool
+}
+
+// panelGoneMsg carries one landed disk re-check into the Update loop: the generation that issued it
+// and the listed paths it found missing.
+type panelGoneMsg struct {
+	gen  int
+	gone map[string]bool
+}
+
+// changedFileRows is the changed-files section's answer for scope as the panel paints it: the
+// folded rows ([sidepanel.State.ChangedFiles]) minus the paths the last disk re-check found gone,
+// its summary counting and its live rule judging the rows that remain. The painted section, the
+// navigation mode's stops and the click targets all read the section this builds, so a hidden row
+// is hidden from all three alike. It reads the gone set only: no paint stats the disk.
+func (m Model) changedFileRows(scope sidepanel.RunKey) sidepanel.View[sidepanel.FileRow] {
+	view := m.panel.ChangedFiles(scope)
+	if len(m.panelDisk.gone) == 0 {
+		return view
+	}
+	rows := make([]sidepanel.FileRow, 0, len(view.Rows))
+	for _, row := range view.Rows {
+		if !m.panelDisk.gone[row.Path] {
+			rows = append(rows, row)
+		}
+	}
+	shown := sidepanel.View[sidepanel.FileRow]{Rows: rows}
+	if len(rows) > 0 {
+		shown.Summary, shown.IsLive = strconv.Itoa(len(rows)), true
+	}
+	return shown
+}
+
+// panelDiskCmd stats every top-level changed-files path off the Update goroutine and reports the
+// missing ones stamped with the CURRENT generation; nil while the panel lists no file. A
+// workspace-relative key is read against the workspace's real root, the root [Model.panelWriteKey]
+// made it relative to. Only a path the disk says does not exist counts as gone: a stat that fails
+// for any other reason keeps its row.
+func (m Model) panelDiskCmd() tea.Cmd {
+	rows := m.panel.ChangedFiles(sidepanel.RunKey{}).Rows
+	if len(rows) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(rows))
+	for _, row := range rows {
+		paths = append(paths, row.Path)
+	}
+	root, gen := m.transcript.ws.realRoot, m.panelDisk.gen
+	return func() tea.Msg {
+		gone := map[string]bool{}
+		for _, path := range paths {
+			onDisk := path
+			if root != "" && !filepath.IsAbs(path) {
+				onDisk = filepath.Join(root, path)
+			}
+			if _, err := os.Lstat(onDisk); errors.Is(err, fs.ErrNotExist) {
+				gone[path] = true
+			}
+		}
+		return panelGoneMsg{gen: gen, gone: gone}
+	}
+}
+
+// recheckPanelDisk asks for a disk re-check now — beside a git status read, at a Turn end and on
+// the status chain's cadence ([gitAfterTurn], [Model.foldGitStatusTick]). While one is in flight it
+// only marks the check dirty, so the landing issues the one follow-up.
+//
+// It takes a pointer because the in-flight mark must land on the Model the caller returns, as
+// [Model.refreshGit]'s does.
+func (m *Model) recheckPanelDisk() tea.Cmd {
+	if m.panelDisk.isInFlight {
+		m.panelDisk.isDirty = true
+		return nil
+	}
+	check := m.panelDiskCmd()
+	m.panelDisk.isInFlight = check != nil
+	return check
+}
+
+// foldPanelGone keeps a landed re-check's gone set, and issues the follow-up a launch or a write
+// asked for while it was in flight; a reply from a replaced panel state is dropped.
+func (m Model) foldPanelGone(msg panelGoneMsg) (Model, tea.Cmd) {
+	if msg.gen != m.panelDisk.gen {
+		return m, nil
+	}
+	m.panelDisk.isInFlight = false
+	m.panelDisk.gone = msg.gone
+	if !m.panelDisk.isDirty {
+		return m, nil
+	}
+	m.panelDisk.isDirty = false
+	check := m.panelDiskCmd()
+	m.panelDisk.isInFlight = check != nil
+	return m, check
+}
+
+// notePanelWrite unhides key, a write the panel just folded: the write put the file back on disk,
+// whatever the last re-check found. A check in flight may have stat'ed the path before the write
+// landed, so it is marked dirty, and its landing checks again.
+func (m *Model) notePanelWrite(key string) {
+	if m.panelDisk.gone[key] {
+		gone := maps.Clone(m.panelDisk.gone)
+		delete(gone, key)
+		m.panelDisk.gone = gone
+	}
+	if m.panelDisk.isInFlight {
+		m.panelDisk.isDirty = true
+	}
+}
+
+// resetPanelDisk drops the re-check's state with the panel state it read — at both session
+// boundaries and a rebuild from a resumed record — and opens a fresh generation, so a check still in
+// flight against the replaced state is dropped on landing.
+func (m *Model) resetPanelDisk() {
+	m.panelDisk = panelDiskCheck{gen: m.panelDisk.gen + 1}
 }
 
 // sidePanelColumn paints the column's rows rows, each exactly [Model.panelPaintWidth] columns in the
@@ -531,7 +672,7 @@ func (m Model) panelSection(section domain.SidePanelSection) (panelSection, bool
 		return panelSection{title: "Tasks", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelTaskRow)},
 			view.IsLive
 	case domain.SidePanelChangedFiles:
-		view := m.panel.ChangedFiles(scope)
+		view := m.changedFileRows(scope)
 		return panelSection{
 			title: "Changed files", summary: view.Summary, body: paintPanelRows(view.Rows, m.panelFileRow), files: view.Rows,
 		}, view.IsLive
@@ -1663,7 +1804,8 @@ var panelWriterTargetArgs = map[string]string{
 // accounting is restored ([Model.seedSidePanelUsage]).
 //
 // The state is replaced whole, and left nil where the record holds nothing the panel shows: the
-// caller has already dropped the outgoing session's.
+// caller has already dropped the outgoing session's. The disk re-check's state falls with it
+// ([Model.resetPanelDisk]): the rebuilt rows are judged afresh by the next re-check.
 func (m *Model) rebuildSidePanel(entries []entry) {
 	var state *sidepanel.State
 	ensure := func() *sidepanel.State {
@@ -1697,6 +1839,7 @@ func (m *Model) rebuildSidePanel(entries []entry) {
 	if state != nil {
 		m.panel = state
 	}
+	m.resetPanelDisk()
 }
 
 // panelTaskItems reads a task_list card's tasks back off the rows its body lays out — the rows

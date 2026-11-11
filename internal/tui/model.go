@@ -1713,6 +1713,11 @@ func (m Model) fold(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Msg is that repaint (sidepanel.go) — unless an Event has since moved the deadline.
 		return m.foldPanelLinger(msg)
 
+	case panelGoneMsg:
+		// A disk re-check of the changed files landed (sidepanel.go): keep the paths it found gone,
+		// which the section hides — unless the panel state it read has since been replaced.
+		return m.foldPanelGone(msg)
+
 	case flashClearMsg:
 		// The transient mouse-copy note has lingered long enough; clear it (mouse.go) — unless a
 		// fresher flash has replaced it since this tick was scheduled.

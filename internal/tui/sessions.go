@@ -960,6 +960,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// from — BEFORE the replay below, which rebuilds the resumed session's tasks and writes from
 	// its stored entries (replayScrollback).
 	m.panel = nil
+	m.resetPanelDisk()
 	// Repaint the stored scrollback and say what was reopened, through the one repaint a --resume
 	// start goes through too (replayScrollback): the facts are read off the record just loaded and
 	// off the live engine, the wording of all three notices is the shared function's.

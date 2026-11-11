@@ -4165,3 +4165,221 @@ func TestSidePanelResumeThenLiveWriteUnderSymlinkedRootIsOneRow(t *testing.T) {
 		t.Errorf("changed files = %+v, want one src/a.go row naming w9", files)
 	}
 }
+
+// panelDiskModel builds a ready model over a real workspace (opts.Workspace = a temp dir) whose
+// changed-files section lists names, each a file the session wrote there — call w<i> for the i-th —
+// and each on disk. The rows are workspace-relative, so the re-check reads them against the root.
+func panelDiskModel(t *testing.T, names ...string) (Model, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	opts := testOpts
+	opts.Workspace = root
+	opts.UI.SidePanelShow = domain.SidePanelShowAuto
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m = step(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
+	for i, name := range names {
+		writePanelDiskFile(t, root, name)
+		for _, e := range panelWrite(domain.EventBase{}, "w"+strconv.Itoa(i), name) {
+			m = m.foldEvent(e)
+		}
+	}
+	return m, root
+}
+
+// writePanelDiskFile puts name on disk under root.
+func writePanelDiskFile(t *testing.T, root, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, name), []byte("x\n"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+// removePanelDiskFile takes name off disk under root.
+func removePanelDiskFile(t *testing.T, root, name string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(root, name)); err != nil {
+		t.Fatalf("remove %s: %v", name, err)
+	}
+}
+
+// recheckPanelDiskNow launches the disk re-check, runs its Cmd and folds the reply it lands.
+func recheckPanelDiskNow(t *testing.T, m Model) Model {
+	t.Helper()
+	check := m.recheckPanelDisk()
+	if check == nil {
+		t.Fatal("the re-check issued no Cmd")
+	}
+	return step(t, m, check())
+}
+
+// assertPanelFiles fails unless the changed files the column paints, the navigation mode's stops
+// over them and the click targets on them are want — each named by its path and written by call
+// w<i>, i its index in all — and the section header counts len(want).
+func assertPanelFiles(t *testing.T, m Model, all, want []string) {
+	t.Helper()
+
+	column := panelText(t, m)
+	pre := m.withFrameSpans()
+	rows := pre.frameSpans().slotBottom
+	stops := pre.panelStops(rows)
+	clicked := map[int]bool{}
+	for y := range rows {
+		if target, _ := pre.panelTargetAt(panelBodyX(pre), y); target.kind == panelTargetBlock {
+			clicked[target.entry] = true
+		}
+	}
+	for i, name := range all {
+		isWanted := slices.Contains(want, name)
+		isPainted := slices.ContainsFunc(column, func(row string) bool { return strings.Contains(row, name) })
+		isStopped := slices.ContainsFunc(stops, func(stop panelStop) bool { return stop.id.path == name })
+		isClickable := clicked[entryAt(t, m, runRef{}, "w"+strconv.Itoa(i))]
+		if isPainted != isWanted || isStopped != isWanted || isClickable != isWanted {
+			t.Errorf("%s: painted %v, a nav stop %v, clickable %v; want all %v:\n%s",
+				name, isPainted, isStopped, isClickable, isWanted, strings.Join(column, "\n"))
+		}
+	}
+	if len(want) == 0 {
+		return
+	}
+	header := column[panelRowY(t, m, "Changed files")]
+	if !strings.HasSuffix(header, " ("+strconv.Itoa(len(want))+")") {
+		t.Errorf("the changed-files header reads %q, want it to count %d", header, len(want))
+	}
+}
+
+// TestSidePanelHidesAChangedFileGoneFromDisk pins the disk re-check (panel-deleted-file-entry): a
+// listed file removed by something the panel folds no Event for stays listed until a re-check lands,
+// then drops out of the painted rows, the nav stops and the click targets alike, and the header
+// counts the survivor; a file put back is listed again at the next re-check.
+func TestSidePanelHidesAChangedFileGoneFromDisk(t *testing.T) {
+	t.Parallel()
+	all := []string{"a.go", "b.go"}
+	m, root := panelDiskModel(t, all...)
+	assertPanelFiles(t, m, all, all)
+
+	removePanelDiskFile(t, root, "a.go")
+	assertPanelFiles(t, m, all, all)
+
+	m = recheckPanelDiskNow(t, m)
+	assertPanelFiles(t, m, all, []string{"b.go"})
+
+	writePanelDiskFile(t, root, "a.go")
+	m = recheckPanelDiskNow(t, m)
+	assertPanelFiles(t, m, all, all)
+}
+
+// TestSidePanelHidesEveryGoneFileAndTheSection pins the live rule over the filtered rows: with every
+// listed file gone, the auto changed-files section is not live and is not painted at all.
+func TestSidePanelHidesEveryGoneFileAndTheSection(t *testing.T) {
+	t.Parallel()
+	m, root := panelDiskModel(t, "a.go")
+	removePanelDiskFile(t, root, "a.go")
+	m = recheckPanelDiskNow(t, m)
+
+	if _, isLive := m.panelSection(domain.SidePanelChangedFiles); isLive {
+		t.Error("the changed-files section is live with every row hidden")
+	}
+	if column := strings.Join(panelText(t, m), "\n"); strings.Contains(column, "Changed files") {
+		t.Errorf("the column paints the changed-files section with every row hidden:\n%s", column)
+	}
+}
+
+// TestSidePanelDiskRecheckDropsAStaleReply pins the generation: a reply launched against a panel
+// state since replaced is dropped, and the replacement leaves no check in flight.
+func TestSidePanelDiskRecheckDropsAStaleReply(t *testing.T) {
+	t.Parallel()
+	m, root := panelDiskModel(t, "a.go", "b.go")
+	removePanelDiskFile(t, root, "a.go")
+	check := m.recheckPanelDisk()
+	if check == nil {
+		t.Fatal("the re-check issued no Cmd")
+	}
+	stale := check()
+
+	m.resetPanelDisk()
+	if m.panelDisk.isInFlight {
+		t.Error("a replaced panel state left its re-check in flight")
+	}
+	m = step(t, m, stale)
+	if len(m.panelDisk.gone) != 0 {
+		t.Errorf("a stale reply was kept: gone = %v", m.panelDisk.gone)
+	}
+}
+
+// TestSidePanelDiskRecheckIsSingleFlight pins the single-flight: a launch while a check is in flight
+// issues nothing and marks it dirty, and that check's landing issues exactly one follow-up.
+func TestSidePanelDiskRecheckIsSingleFlight(t *testing.T) {
+	t.Parallel()
+	m, _ := panelDiskModel(t, "a.go")
+	first := m.recheckPanelDisk()
+	if first == nil {
+		t.Fatal("the re-check issued no Cmd")
+	}
+	if again := m.recheckPanelDisk(); again != nil {
+		t.Error("a launch while a re-check is in flight issued a second one")
+	}
+	if !m.panelDisk.isDirty {
+		t.Error("a launch while a re-check is in flight did not mark it dirty")
+	}
+
+	m, followUp := stepCmd(t, m, first())
+	if followUp == nil {
+		t.Fatal("the dirty re-check's landing issued no follow-up")
+	}
+	if _, ok := followUp().(panelGoneMsg); !ok {
+		t.Error("the follow-up is not a disk re-check")
+	}
+	if !m.panelDisk.isInFlight || m.panelDisk.isDirty {
+		t.Errorf("after the landing: in flight %v, dirty %v; want the follow-up in flight and the mark spent",
+			m.panelDisk.isInFlight, m.panelDisk.isDirty)
+	}
+}
+
+// TestSidePanelDiskGoneSetFallsWithWritesAndBoundaries pins what clears a hidden path: a write the
+// panel folds afterwards unhides it at once, and both session boundaries — /clear's reset and an
+// in-TUI restore — drop the gone set with the panel state it was read from.
+func TestSidePanelDiskGoneSetFallsWithWritesAndBoundaries(t *testing.T) {
+	t.Parallel()
+	gone := func(t *testing.T) (Model, string) {
+		t.Helper()
+		m, root := panelDiskModel(t, "a.go", "b.go")
+		removePanelDiskFile(t, root, "a.go")
+		m = recheckPanelDiskNow(t, m)
+		if !m.panelDisk.gone["a.go"] {
+			t.Fatalf("the re-check did not find a.go gone: %v", m.panelDisk.gone)
+		}
+		return m, root
+	}
+
+	t.Run("a later write", func(t *testing.T) {
+		t.Parallel()
+		m, root := gone(t)
+		writePanelDiskFile(t, root, "a.go")
+		for _, e := range panelWrite(domain.EventBase{}, "w9", "a.go") {
+			m = m.foldEvent(e)
+		}
+		if m.panelDisk.gone["a.go"] {
+			t.Error("a write folded after the re-check left its path hidden")
+		}
+	})
+	t.Run("/clear", func(t *testing.T) {
+		t.Parallel()
+		m, _ := gone(t)
+		m.resetSessionView()
+		if len(m.panelDisk.gone) != 0 {
+			t.Errorf("/clear kept the gone set: %v", m.panelDisk.gone)
+		}
+	})
+	t.Run("/sessions restore", func(t *testing.T) {
+		t.Parallel()
+		m, _ := gone(t)
+		m = step(t, m, sessionLoadedMsg{rec: session.Record{
+			Meta:    session.Meta{ID: "sess-1", Title: "t"},
+			Session: domain.Session{Version: domain.SessionVersion},
+		}})
+		if len(m.panelDisk.gone) != 0 {
+			t.Errorf("a restore kept the gone set: %v", m.panelDisk.gone)
+		}
+	})
+}

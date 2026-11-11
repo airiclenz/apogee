@@ -107,7 +107,13 @@ internal/security/pathsafety.go — EvalRealPath (a missing file keys through it
 - `go test -count=1 -run 'TestSidePanelResume' ./internal/tui/`
 **Commit:** `fix(tui): replay delete_file as a changed-file removal on resume`
 
-## 4. Hide changed-file rows whose file is gone from disk
+## 4. Hide changed-file rows whose file is gone from disk — ✅ DONE (2026-11-11)
+
+NOTES (2026-11-11): consequential edit — internal/tui/model.go: made necessary by the new panelGoneMsg, which Model.fold must route to foldPanelGone
+NOTES (2026-11-11): consequential edit — internal/tui/watch.go: made necessary by the new panelGoneMsg, which TestWatchIsolatesRoutesEveryFoldedMsg requires watchRouteOf to route (owner route, beside panelLingerMsg)
+NOTES (2026-11-11): the whole re-check state (gone set, generation, in-flight, dirty) is one sessionView field `panelDisk`, not only the gone set: resetSessionView/resumeLoaded bump the generation, so TestSessionViewHoldsEveryFieldTheBoundariesReset needs it there, and a watch parks it with the owner's view so an owner reply finds the owner's generation. The cadence launch (foldGitStatusTick) is skipped while a watch is active, because the reply routes to the owner's parked view; the owner's Turn ends still re-check. A replacement (resetPanelDisk) also clears in-flight/dirty so the chain is never left waiting on a dropped reply.
+NOTES (2026-11-11): a write folded while a re-check is in flight marks it dirty (its stat may predate the write), so the landing re-checks once more; only an fs.ErrNotExist from os.Lstat counts as gone — any other stat error keeps the row.
+NOTES (2026-11-11): navmode_test.go was not touched: the nav-stop and click-target assertions live in the new sidepanel_test.go tests (assertPanelFiles). Pre-existing Windows-only failures in the acceptance set (TestSidePanelPaintsEachSection/changed_files, TestSidePanelResumeRebuildsThroughBothDoors — `/w` path separators) fail identically at 168ad6cd.
 
 **What:** Depends on item 2. Closes the rest of `panel-deleted-file-entry`: a file removed by a terminal `rm`, a `move_file` source or `/undo` stays listed.
 **Regression guard.** Single-flight the re-check as `refreshGit` is (in-flight + dirty, one follow-up on landing), and bump its generation only where panel state is replaced (`resetSessionView`, `resumeLoaded`, `rebuildSidePanel`), never per launch. `changedFileRows` recomputes `Summary` and `IsLive` from the filtered rows.

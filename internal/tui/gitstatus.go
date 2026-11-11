@@ -215,10 +215,14 @@ func (m *Model) retargetGit() tea.Cmd {
 // Only the session's own Turns count. A delegate's Turns end inside the parent's Exchange, whose
 // own Turn end re-reads after them, and a background workflow's Turns emit none of these Msgs —
 // their edits reach the footer on the next tick.
+//
+// The side panel's disk re-check of its changed files rides the same Turn end
+// ([Model.recheckPanelDisk]), wired or not: it reads no git state.
 func gitAfterTurn(next tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 	m := next.(Model)
 	refresh := m.refreshGit()
-	return m, tea.Batch(cmd, refresh)
+	recheck := m.recheckPanelDisk()
+	return m, tea.Batch(cmd, refresh, recheck)
 }
 
 // gitStatusWait is how long the chain waits after a read before the next: the interval, stretched
@@ -277,14 +281,21 @@ func (m Model) foldGitStatus(msg gitStatusMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(tick, fetch)
 }
 
-// foldGitStatusTick issues the live chain's next read; a tick from a retired chain is inert.
+// foldGitStatusTick issues the live chain's next read; a tick from a retired chain is inert. The
+// side panel's disk re-check runs on the same cadence ([Model.recheckPanelDisk]), except during a
+// watch: the view then holds the watched session's panel, while a re-check's reply folds into the
+// owner's (watchRouteOf), so the owner's Turn ends alone re-check until the watch ends.
 func (m Model) foldGitStatusTick(msg gitStatusTickMsg) (tea.Model, tea.Cmd) {
 	if !m.gitWired() || msg.gen != m.git.gen || m.git.inFlight {
 		return m, nil
 	}
 	read := m.gitStatusCmd()
 	m.git.inFlight = read != nil
-	return m, read
+	if m.watch.isActive {
+		return m, read
+	}
+	recheck := m.recheckPanelDisk()
+	return m, tea.Batch(read, recheck)
 }
 
 // keepGitSnapshot stores a landed read's snapshot in the slot of the root it was read at: the

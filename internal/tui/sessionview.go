@@ -120,6 +120,13 @@ type sessionView struct {
 	panelLingerUntil time.Time
 	panelLingerGen   int
 
+	// panelDisk is the changed-files section's re-check of the disk ([Model.recheckPanelDisk]): the
+	// listed paths the last landed check found gone, which the section hides
+	// ([Model.changedFileRows]), and the single-flight that numbers the checks. It lives beside panel
+	// because it answers panel's rows: both session boundaries drop it with panel, and a watch parks
+	// it with the owner's view, so the owner's reply finds the owner's generation.
+	panelDisk panelDiskCheck
+
 	// mcpServers is the process's MCP server state (ADR 0111 decisions 9 and 10; sidepanel.MCPServers),
 	// folded from every domain.MCPServerEvent the view hears — live, from a watched journal, and from
 	// the startup seed ([Model.seedMCP]) — by foldEventAgainst. It belongs to the PROCESS, not the conversation: a
