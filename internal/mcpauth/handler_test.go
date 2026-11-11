@@ -643,7 +643,7 @@ func TestNewHandlerRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
 			})
 
 			want := fmt.Sprintf("mcpauth: server %q: a client secret needs a configured issuer — "+
-				"set issuer: beside client-secret-env:", testServer)
+				"set issuer: beside the client-secret-env: key", testServer)
 			if err == nil || err.Error() != want {
 				t.Fatalf("NewHandler error = %v; want %q", err, want)
 			}

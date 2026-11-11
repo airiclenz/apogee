@@ -168,7 +168,7 @@ func (cfg LoginConfig) validate() error {
 func requireSecretIssuer(name, secret, issuer string) error {
 	if secret != "" && strings.TrimSpace(issuer) == "" {
 		return fmt.Errorf("mcpauth: server %q: a client secret needs a configured issuer — "+
-			"set issuer: beside client-secret-env:", name)
+			"set issuer: beside the client-secret-env: key", name)
 	}
 	return nil
 }

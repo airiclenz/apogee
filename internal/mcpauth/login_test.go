@@ -304,7 +304,7 @@ func TestLoginRefusesAClientSecretWithoutAnIssuer(t *testing.T) {
 			_, err := Login(context.Background(), fake.preregisteredLogin(NewStore(t.TempDir()), issuer))
 
 			want := fmt.Sprintf("mcpauth: server %q: a client secret needs a configured issuer — "+
-				"set issuer: beside client-secret-env:", testServer)
+				"set issuer: beside the client-secret-env: key", testServer)
 			if err == nil || err.Error() != want {
 				t.Fatalf("Login() error = %v, want %q", err, want)
 			}
