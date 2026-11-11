@@ -1473,9 +1473,11 @@ verbatim below the floor — no new wording, no new surface.
 5. `t.TempDir()` cleanup survives the labelling — the test process is Medium and writing *down* is
    permitted.
 6. **Row #15 skips** on the token backend (amended 2026-11-11, ADR 0112): it discloses no
-   `connect(2) AF_UNIX`, and whether its Low-integrity child can reach a same-user socket, named pipe
-   or COM server that spawns processes is open (issue `windows-token-spawner-posture`); the row's
-   Windows column turns into an assertion once that issue settles it.
+   `connect(2) AF_UNIX`. Its spawner posture is established by probe, not by this row (ADR 0112
+   decision 8, issue `windows-token-spawner-posture`): the token closes nothing itself, the OS
+   default integrity policy refuses the Low-integrity child the mainstream same-user spawners (Task
+   Scheduler, WMI `Win32_Process.Create`), and Docker Desktop's and WSL's spawner pipes are disclosed
+   as a write-class residual. The row's Windows column has no live assertion yet.
 
 ### 9.4 Acceptance checklist (the Windows counterpart of §6.3)
 

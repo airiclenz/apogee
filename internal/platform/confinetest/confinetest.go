@@ -289,8 +289,8 @@ func Probe(
 		// than under a subtest t.TempDir(), whose test-named path can outgrow macOS's 104-byte
 		// sun_path.
 		if runtime.GOOS == "windows" {
-			t.Skip("confinetest: the token backend's posture on same-user sockets, named pipes and COM " +
-				"servers is not yet established (issue windows-token-spawner-posture); unix-connect row is skipped")
+			t.Skip("confinetest: the token backend discloses no connect(2) AF_UNIX and its spawner posture " +
+				"is established by probe, not by this row (ADR 0112 decision 8); unix-connect row is skipped")
 		}
 		dir, err := os.MkdirTemp("", "ct")
 		if err != nil {
