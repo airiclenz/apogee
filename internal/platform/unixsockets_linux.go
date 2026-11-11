@@ -19,7 +19,8 @@ import (
 // ($XDG_RUNTIME_DIR, /run/user/<uid> — the session bus with its systemd-run, rootless podman,
 // the keyring) and the system container sockets (/run/docker.sock, /run/podman/podman.sock).
 // The agent sockets a confined `git push` or `git commit -S` needs — ssh-agent and gpg-agent —
-// are re-exposed beneath a masked runtime dir. Every other pathname socket (a tmux server under
+// are re-exposed beneath a masked runtime dir, and so is every symlink beneath it on the way from
+// the path the environment names to the socket, so that path still resolves. Every other pathname socket (a tmux server under
 // /tmp, say) stays reachable, so the backends keep disclosing connect(2) AF_UNIX.
 //
 // planUnixSockets is the one place that list is computed: the bwrap backend masks from it
@@ -42,15 +43,30 @@ type unixSocketHost struct {
 	// ownerMode returns the owning uid and the mode of the file at p (symlinks followed), and
 	// true when p can be stat'ed.
 	ownerMode func(p string) (int, fs.FileMode, bool)
+	// readlink returns the target of the symlink at p, unfollowed, and true when p is a symlink.
+	readlink func(p string) (string, bool)
 }
 
 // unixSocketPlan is what a backend closes and re-opens, every path canonical and existing at
 // planning time. RuntimeDirs are masked whole; ContainerSockets are covered one by one;
 // AgentSockets are the agent paths beneath a masked runtime dir, re-exposed after the mask.
+// AgentLinks are the symlinks beneath a masked runtime dir that an agent's environment-named
+// path resolves through — `$SSH_AUTH_SOCK=/run/user/1000/ssh` linking to `keyring/ssh`, say —
+// which a backend that hides the dir's entries (bwrap's tmpfs) recreates so the named path
+// resolves in the box. A backend that hides nothing (landlock) leaves the host's links in place
+// and needs only AgentSockets.
 type unixSocketPlan struct {
 	RuntimeDirs      []string
 	ContainerSockets []string
 	AgentSockets     []string
+	AgentLinks       []unixSocketLink
+}
+
+// unixSocketLink is one symlink to recreate: at Path, pointing at Target exactly as the host's
+// link reads (a relative target stays relative). Path's parent directory is canonical.
+type unixSocketLink struct {
+	Path   string
+	Target string
 }
 
 // currentUnixSocketHost reads this process's host state for planUnixSockets: its uid, its
@@ -67,7 +83,17 @@ func currentUnixSocketHost() unixSocketHost {
 		tempDir:   os.TempDir(),
 		resolve:   resolveExisting,
 		ownerMode: statOwnerMode,
+		readlink:  readSymlink,
 	}
+}
+
+// readSymlink returns the target of the symlink at p, and whether p is one.
+func readSymlink(p string) (string, bool) {
+	target, err := os.Readlink(p)
+	if err != nil {
+		return "", false
+	}
+	return target, true
 }
 
 // resolveExisting returns p with every symlink followed, and whether p exists at all.
@@ -101,8 +127,11 @@ func statOwnerMode(p string) (int, fs.FileMode, bool) {
 // stray `XDG_RUNTIME_DIR=/tmp` must never put an empty tmpfs over the temp dir, the home or
 // the workspace. The agent sockets are $SSH_AUTH_SOCK (when absolute), each masked runtime
 // dir's gnupg directory, and $GNUPGHOME or ~/.gnupg — each kept only when it exists and sits
-// strictly beneath a masked runtime dir, since elsewhere nothing hides it. A container socket
-// is kept only when it exists.
+// strictly beneath a masked runtime dir, since elsewhere nothing hides it. The symlinks an
+// existing agent path resolves through beneath a masked runtime dir are kept as AgentLinks, so
+// the path the environment names resolves in the box, not only its canonical form — except a
+// link inside a re-exposed agent directory, which that directory's own re-exposure carries. A
+// container socket is kept only when it exists.
 func planUnixSockets(host unixSocketHost, roots []string) unixSocketPlan {
 	protected := make([]string, 0, 2+len(roots))
 	for _, p := range append([]string{host.tempDir, host.home}, roots...) {
@@ -146,14 +175,67 @@ func planUnixSockets(host unixSocketHost, roots []string) unixSocketPlan {
 	} else if host.home != "" {
 		agents = append(agents, filepath.Join(host.home, ".gnupg"))
 	}
+	var links []unixSocketLink
 	for _, agent := range agents {
 		canonical, ok := host.resolve(agent)
-		if !ok || slices.Contains(plan.AgentSockets, canonical) || !beneathAny(plan.RuntimeDirs, canonical) {
+		if !ok {
+			continue
+		}
+		links = append(links, maskedLinks(host, agent, plan.RuntimeDirs)...)
+		if slices.Contains(plan.AgentSockets, canonical) || !beneathAny(plan.RuntimeDirs, canonical) {
 			continue
 		}
 		plan.AgentSockets = append(plan.AgentSockets, canonical)
 	}
+	for _, link := range links {
+		if slices.Contains(plan.AgentLinks, link) || beneathAny(plan.AgentSockets, link.Path) {
+			continue
+		}
+		plan.AgentLinks = append(plan.AgentLinks, link)
+	}
 	return plan
+}
+
+// maxLinkHops bounds the symlinks maskedLinks follows, as the kernel's own limit does a path
+// walk, so a link loop cannot spin it.
+const maxLinkHops = 40
+
+// maskedLinks walks the absolute path p as the kernel resolves it, one component at a time,
+// and returns every symlink it passes through that lies beneath one of masked. Each link's
+// location is its canonical parent plus its name, which is where a confined walk of p meets it,
+// since the walk up to there runs through real directories only.
+func maskedLinks(host unixSocketHost, p string, masked []string) []unixSocketLink {
+	var links []unixSocketLink
+	resolved := "/"
+	rest := strings.Split(filepath.Clean(p), "/")
+	for hops := 0; len(rest) > 0; {
+		name := rest[0]
+		rest = rest[1:]
+		switch name {
+		case "", ".":
+			continue
+		case "..":
+			resolved = filepath.Dir(resolved)
+			continue
+		}
+		next := filepath.Join(resolved, name)
+		target, isLink := host.readlink(next)
+		if !isLink {
+			resolved = next
+			continue
+		}
+		if hops++; hops > maxLinkHops {
+			return links
+		}
+		if beneathAny(masked, next) {
+			links = append(links, unixSocketLink{Path: next, Target: target})
+		}
+		if filepath.IsAbs(target) {
+			resolved = "/"
+		}
+		rest = append(strings.Split(target, "/"), rest...)
+	}
+	return links
 }
 
 // maskableRuntimeDir reports whether the canonical directory dir may be masked: owned by

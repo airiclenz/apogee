@@ -12,11 +12,13 @@ import (
 const fakeHostUID = 1000
 
 // fakePath is one path on a fake unix-socket host: where it resolves (itself when canonical is
-// empty) and the owner and mode stat reports for it.
+// empty), the owner and mode stat reports for it, and, when link is set, the target readlink
+// reads from it as a symlink.
 type fakePath struct {
 	canonical string
 	uid       int
 	mode      fs.FileMode
+	link      string
 }
 
 // runtimeDir is a fake path that is a directory owned by the fake uid with the XDG mode 0700.
@@ -46,6 +48,10 @@ func fakeUnixSocketHost(env map[string]string, home, tmp string, paths map[strin
 		ownerMode: func(p string) (int, fs.FileMode, bool) {
 			f, ok := paths[p]
 			return f.uid, f.mode, ok
+		},
+		readlink: func(p string) (string, bool) {
+			f, ok := paths[p]
+			return f.link, ok && f.link != ""
 		},
 	}
 }
@@ -226,6 +232,72 @@ func TestUnixSocketPlan(t *testing.T) {
 			want: unixSocketPlan{RuntimeDirs: []string{"/run/user/1000"}},
 		},
 		{
+			// The env-named path is a link beneath the mask: the tmpfs would hide it, so it is
+			// recreated beside the canonical socket's re-bind, its relative target kept as is.
+			name: "agent_link_beneath_the_masked_dir_is_recreated",
+			env:  map[string]string{"SSH_AUTH_SOCK": "/run/user/1000/ssh"},
+			paths: map[string]fakePath{
+				"/run/user/1000":             runtimeDir,
+				"/run/user/1000/ssh":         {canonical: "/run/user/1000/keyring/ssh", link: "keyring/ssh"},
+				"/run/user/1000/keyring/ssh": socketFile,
+			},
+			want: unixSocketPlan{
+				RuntimeDirs:  []string{"/run/user/1000"},
+				AgentSockets: []string{"/run/user/1000/keyring/ssh"},
+				AgentLinks:   []unixSocketLink{{Path: "/run/user/1000/ssh", Target: "keyring/ssh"}},
+			},
+		},
+		{
+			// A chain walks as the kernel walks it: /var/run's link lies outside the mask and
+			// stays the host's own; the linked directory and the `..` link beneath the mask are
+			// recreated at their canonical parents.
+			name: "agent_link_chain_keeps_only_the_links_beneath_the_mask",
+			env:  map[string]string{"SSH_AUTH_SOCK": "/var/run/user/1000/agent/ssh"},
+			paths: map[string]fakePath{
+				"/run/user/1000":               runtimeDir,
+				"/var/run":                     {canonical: "/run", link: "../run"},
+				"/run/user/1000/agent":         {canonical: "/run/user/1000/a2", link: "/run/user/1000/a2"},
+				"/run/user/1000/a2/ssh":        {canonical: "/run/user/1000/keyring/ssh", link: "../keyring/ssh"},
+				"/var/run/user/1000/agent/ssh": {canonical: "/run/user/1000/keyring/ssh"},
+			},
+			want: unixSocketPlan{
+				RuntimeDirs:  []string{"/run/user/1000"},
+				AgentSockets: []string{"/run/user/1000/keyring/ssh"},
+				AgentLinks: []unixSocketLink{
+					{Path: "/run/user/1000/agent", Target: "/run/user/1000/a2"},
+					{Path: "/run/user/1000/a2/ssh", Target: "../keyring/ssh"},
+				},
+			},
+		},
+		{
+			// A link beneath the mask to a socket outside it: the socket needs no re-bind, but
+			// the link the environment names is still recreated.
+			name: "agent_link_beneath_the_mask_to_a_socket_outside_is_recreated",
+			env:  map[string]string{"SSH_AUTH_SOCK": "/run/user/1000/ssh"},
+			paths: map[string]fakePath{
+				"/run/user/1000":     runtimeDir,
+				"/run/user/1000/ssh": {canonical: "/tmp/ssh-x/agent.1", link: "/tmp/ssh-x/agent.1"},
+			},
+			want: unixSocketPlan{
+				RuntimeDirs: []string{"/run/user/1000"},
+				AgentLinks:  []unixSocketLink{{Path: "/run/user/1000/ssh", Target: "/tmp/ssh-x/agent.1"}},
+			},
+		},
+		{
+			// A link inside a re-exposed agent directory arrives with that directory's bind.
+			name: "agent_link_inside_a_rebound_agent_dir_is_not_recreated",
+			env:  map[string]string{"GNUPGHOME": "/run/user/1000/gnupg/home"},
+			paths: map[string]fakePath{
+				"/run/user/1000":            runtimeDir,
+				"/run/user/1000/gnupg":      runtimeDir,
+				"/run/user/1000/gnupg/home": {canonical: "/run/user/1000/gnupg", link: "."},
+			},
+			want: unixSocketPlan{
+				RuntimeDirs:  []string{"/run/user/1000"},
+				AgentSockets: []string{"/run/user/1000/gnupg"},
+			},
+		},
+		{
 			name: "missing_and_relative_agent_sockets_are_skipped",
 			env:  map[string]string{"SSH_AUTH_SOCK": "/run/user/1000/gone", "GNUPGHOME": "rel/gnupg"},
 			paths: map[string]fakePath{
@@ -259,6 +331,9 @@ func TestUnixSocketPlan(t *testing.T) {
 			}
 			if !slices.Equal(got.AgentSockets, tt.want.AgentSockets) {
 				t.Errorf("AgentSockets = %q, want %q", got.AgentSockets, tt.want.AgentSockets)
+			}
+			if !slices.Equal(got.AgentLinks, tt.want.AgentLinks) {
+				t.Errorf("AgentLinks = %+v, want %+v", got.AgentLinks, tt.want.AgentLinks)
 			}
 		})
 	}

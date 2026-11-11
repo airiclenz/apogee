@@ -115,6 +115,24 @@ func TestNamespaceArgv(t *testing.T) {
 				"--ro-bind", "/run/user/1000/gnupg", "/run/user/1000/gnupg"),
 		},
 		{
+			// $SSH_AUTH_SOCK names a link beneath the mask: the canonical socket is bound back
+			// and the link recreated over the tmpfs, so the env-named path resolves in the box.
+			name:   "agent_link_beneath_the_mask_is_recreated",
+			box:    domain.ConfinementBox{WorkspaceRoot: "/ws"},
+			exists: existsIn("/ws"),
+			sockets: fakeUnixSocketHost(map[string]string{"SSH_AUTH_SOCK": "/run/user/1000/ssh"}, "/home/u", "/tmp",
+				map[string]fakePath{
+					"/run/user/1000":             runtimeDir,
+					"/run/user/1000/ssh":         {canonical: "/run/user/1000/keyring/ssh", link: "keyring/ssh"},
+					"/run/user/1000/keyring/ssh": socketFile,
+				}),
+			want: append(slices.Clone(namespaceBaseFlags),
+				"--bind", "/ws", "/ws",
+				"--tmpfs", "/run/user/1000",
+				"--ro-bind", "/run/user/1000/keyring/ssh", "/run/user/1000/keyring/ssh",
+				"--symlink", "keyring/ssh", "/run/user/1000/ssh"),
+		},
+		{
 			// A socket path that does not exist yields no flag: bwrap refuses to bind an absent
 			// source, and an absent socket needs no cover. Here podman, the agent socket and the
 			// gnupg dir are all missing; only the docker socket exists.
@@ -448,16 +466,7 @@ func TestNamespaceMasksRuntimeDirSockets(t *testing.T) {
 	// Not parallel: t.Setenv, and the confined clients are real subprocesses.
 	c := fencingNamespaceConfiner(t)
 
-	// os.MkdirTemp, not t.TempDir(): a test-named path can outgrow sun_path's 108 bytes.
-	runtimeDir, err := os.MkdirTemp("", "rt")
-	if err != nil {
-		t.Fatalf("runtime dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(runtimeDir) })
-	// The XDG spec's mode, which the mask requires; MkdirTemp's 0700 is narrowed by the umask.
-	if err := os.Chmod(runtimeDir, 0o700); err != nil {
-		t.Fatalf("chmod runtime dir: %v", err)
-	}
+	runtimeDir := maskableRuntimeDirForTest(t)
 	bus := filepath.Join(runtimeDir, "bus")
 	agent := filepath.Join(runtimeDir, "agent")
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
@@ -477,6 +486,52 @@ func TestNamespaceMasksRuntimeDirSockets(t *testing.T) {
 		t.Errorf("a confined connect reached %s under the masked $XDG_RUNTIME_DIR (client: %v, output:\n%s); "+
 			"the runtime dir must be masked", bus, runErr, output)
 	}
+}
+
+// TestNamespaceResolvesSymlinkedAgentSocket pins the runtime-dir mask's agent re-exposure for a
+// $SSH_AUTH_SOCK that names a symlink beneath the masked dir, as a keyring daemon sets it: the
+// path the environment names must resolve inside the box, not only its canonical target, or a
+// confined `git push` over ssh finds no agent. The listener is bound by this unconfined test.
+func TestNamespaceResolvesSymlinkedAgentSocket(t *testing.T) {
+	// Not parallel: t.Setenv, and the confined client is a real subprocess.
+	c := fencingNamespaceConfiner(t)
+
+	runtimeDir := maskableRuntimeDirForTest(t)
+	agent := filepath.Join(runtimeDir, "keyring", "ssh")
+	if err := os.Mkdir(filepath.Dir(agent), 0o700); err != nil {
+		t.Fatalf("agent dir: %v", err)
+	}
+	named := filepath.Join(runtimeDir, "ssh")
+	if err := os.Symlink("keyring/ssh", named); err != nil {
+		t.Fatalf("agent link: %v", err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	t.Setenv("SSH_AUTH_SOCK", named)
+	agentLn := listenUnix(t, agent)
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+
+	output, runErr := confinetest.UnixConnectFromBox(t, c, box, named)
+	if !acceptedWithin(t, agentLn) {
+		t.Errorf("no confined connect through $SSH_AUTH_SOCK=%s reached the agent (client: %v, output:\n%s); "+
+			"the path the environment names must resolve beneath the masked runtime dir", named, runErr, output)
+	}
+}
+
+// maskableRuntimeDirForTest returns a fresh directory the runtime-dir mask accepts — owned by
+// this uid, mode 0700, outside every box root — removed when t ends. os.MkdirTemp, not
+// t.TempDir(): a test-named path can outgrow sun_path's 108 bytes.
+func maskableRuntimeDirForTest(t *testing.T) string {
+	t.Helper()
+	runtimeDir, err := os.MkdirTemp("", "rt")
+	if err != nil {
+		t.Fatalf("runtime dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeDir) })
+	// The XDG spec's mode, which the mask requires; MkdirTemp's 0700 is narrowed by the umask.
+	if err := os.Chmod(runtimeDir, 0o700); err != nil {
+		t.Fatalf("chmod runtime dir: %v", err)
+	}
+	return runtimeDir
 }
 
 // hostPIDsWithArg returns the PIDs whose host /proc/<pid>/cmdline carries arg as one argument.

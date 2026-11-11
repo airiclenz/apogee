@@ -236,6 +236,7 @@ cmd.Args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "-
             "--tmpfs", <dir> (for each maskable user runtime dir),
             "--ro-bind", "/dev/null", <sock> (for each existing system container socket),
             "--ro-bind", <agent>, <agent> (for each agent socket beneath a masked runtime dir),
+            "--symlink", <target>, <link> (for each symlink beneath a masked runtime dir on an agent path),
             "--", <original cmd.Path>, <original cmd.Args[1:]...>]
 ```
 
@@ -268,9 +269,12 @@ never restricted; a backend whose construction probe failed (§5) answers every 
 > neither is nor contains `/`, the temp dir, the home dir or a box root (a stray
 > `XDG_RUNTIME_DIR=/tmp` masks nothing). `/dev/null` is bound read-only over `/run/docker.sock` and
 > `/run/podman/podman.sock` where they exist. The agent sockets beneath a masked dir —
-> `$SSH_AUTH_SOCK`, `<runtime dir>/gnupg`, `$GNUPGHOME` or `~/.gnupg` — are bound back read-only.
-> The masks follow the writable binds, so a writable root that contains a masked path cannot bind it
-> back, and the agent re-binds come last. The construction probe carries the same masks. A socket
+> `$SSH_AUTH_SOCK`, `<runtime dir>/gnupg`, `$GNUPGHOME` or `~/.gnupg` — are bound back read-only,
+> at their canonical paths; every symlink beneath a masked dir that the environment-named path
+> resolves through (a `$SSH_AUTH_SOCK` naming a link to `keyring/ssh`) is recreated with its host
+> target, so the path the environment names resolves in the box too (closeout follow-up FU1). The
+> masks follow the writable binds, so a writable root that contains a masked path cannot bind it
+> back, and the agent re-binds and links come last. The construction probe carries the same masks. A socket
 > anywhere else (a tmux server under `/tmp`) stays reachable, so the backend still discloses
 > `connect(2) AF_UNIX`.
 

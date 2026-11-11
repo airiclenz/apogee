@@ -361,12 +361,16 @@ func (c *namespaceConfiner) Confine(_ context.Context, box domain.ConfinementBox
 //   - `--ro-bind /dev/null <sock>` for each existing system container socket, so a connect
 //     to /run/docker.sock or /run/podman/podman.sock reaches no daemon;
 //   - `--ro-bind <p> <p>` for each agent socket beneath a masked runtime dir — ssh-agent's
-//     and gpg-agent's — so a confined `git push` or signed commit still reaches its agent.
+//     and gpg-agent's — so a confined `git push` or signed commit still reaches its agent;
+//   - `--symlink <target> <link>` for each symlink beneath a masked runtime dir that an agent's
+//     environment-named path resolves through, recreated with the host link's own target, so
+//     a $SSH_AUTH_SOCK that names a link to the socket still resolves in the box (bwrap makes
+//     the link's missing parent directories in the tmpfs).
 //
 // The masks come after the writable binds, so a writable root that contains a runtime dir or
 // a container socket cannot bind it back over its mask; planUnixSockets never masks a
 // runtime dir that is or contains a box root, so no writable root is hidden by one. The agent
-// re-binds come last, on top of the masks they punch through.
+// re-binds and links come last, on top of the masks they punch through.
 //
 // Never `--new-session` (see the file header for why).
 func namespaceArgv(box domain.ConfinementBox, exists func(string) bool, sockets unixSocketHost) []string {
@@ -404,6 +408,9 @@ func namespaceArgv(box domain.ConfinementBox, exists func(string) bool, sockets 
 	}
 	for _, agent := range plan.AgentSockets {
 		argv = append(argv, "--ro-bind", agent, agent)
+	}
+	for _, link := range plan.AgentLinks {
+		argv = append(argv, "--symlink", link.Target, link.Path)
 	}
 	return argv
 }
